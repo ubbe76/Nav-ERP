@@ -58,15 +58,20 @@ export function unguardFormulaInjection(value: string): string {
   return /^'[=+\-@\t\r]/.test(value) ? value.slice(1) : value;
 }
 
+// The "number" rendering on its own, for a cell that puts numbers in a text
+// (the lagerplatsregister's "35,5 kg · 120 st"): up to 4 decimals, trailing
+// zeros trimmed, decimal comma, no thousands separator.
+export function formatCsvNumber(raw: string | number): string {
+  return String(Number(Number(raw).toFixed(4))).replace(".", ",");
+}
+
 function formatValue(raw: string | number | null | undefined, format: CsvColumn<never>["format"]): string {
   if (raw === null || raw === undefined || raw === "") return "";
   switch (format) {
     case "money":
       return Number(raw).toFixed(2).replace(".", ",");
-    case "number": {
-      const trimmed = String(Number(Number(raw).toFixed(4)));
-      return trimmed.replace(".", ",");
-    }
+    case "number":
+      return formatCsvNumber(raw);
     case "datetime":
       // sv-SE formats as "YYYY-MM-DD HH:mm"; the char between date and time
       // is a regular space with this format set.

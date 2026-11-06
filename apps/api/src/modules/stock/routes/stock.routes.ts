@@ -11,6 +11,7 @@ import {
   listStockTransactionsQuerySchema,
   listStockBalancesQuerySchema,
   listStockCountsQuerySchema,
+  listStockLocationRegisterQuerySchema,
   listStockLocationsQuerySchema,
   postStockCountSchema,
   stockCountPdfQuerySchema,
@@ -27,6 +28,7 @@ import { errorBody } from "../../system/service/error-body.js";
 import {
   stockBalanceExportColumns,
   stockCountExportColumns,
+  stockLocationRegisterExportColumns,
   stockTransactionColumns,
 } from "../service/export-columns.js";
 import type { StockService } from "../service/stock.service.js";
@@ -78,6 +80,21 @@ export async function stockRoutes(
   app.get("/stock/locations", async (req) =>
     service.listLocations(listStockLocationsQuerySchema.parse(req.query))
   );
+
+  // Lagerplatsregistret (/lager/platser): the list pattern with search,
+  // filters and pages; the module's read rule (office). GET /stock/locations
+  // above stays an array — the place pickers and integrations read it.
+  app.get("/stock/locations/register", async (req) =>
+    service.listLocationRegister(listStockLocationRegisterQuerySchema.parse(req.query))
+  );
+
+  registerListCsvRoute(app, {
+    path: "/stock/locations/register/csv",
+    querySchema: listStockLocationRegisterQuerySchema,
+    filenameBase: "lagerplatser",
+    columns: stockLocationRegisterExportColumns,
+    fetch: (query) => service.listLocationRegister(query),
+  });
 
   // Etiketter (#4): lagerplats labels as a PDF. POST for the id list;
   // prints and writes nothing, so office may and Endast läsning may.

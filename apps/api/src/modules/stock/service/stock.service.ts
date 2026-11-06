@@ -8,6 +8,7 @@ import type {
   ListQuery,
   ListStockTransactionsQuery,
   ListStockBalancesQuery,
+  ListStockLocationRegisterQuery,
   ListStockLocationsQuery,
 } from "@navet/shared";
 import type {
@@ -134,6 +135,12 @@ export function createStockService(repo: StockRepository, audit: AuditWriter = {
 
     async listLocations(query?: ListStockLocationsQuery) {
       return repo.listLocations(query);
+    },
+
+    // Lagerplatsregistret — sök, filter och sidor, with each place's
+    // article count and balance per unit.
+    async listLocationRegister(query: ListStockLocationRegisterQuery) {
+      return repo.listLocationRegister(query);
     },
 
     async recordTransaction(input: CreateStockTransactionInput, userId?: string) {

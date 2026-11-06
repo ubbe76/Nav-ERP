@@ -1,6 +1,14 @@
 import { z } from "zod";
 import { listQuerySchema, statusListParam } from "./list.js";
 
+// Spärrade lagerplatser as a list filter: "true" = only blocked places,
+// "false" = without them, absent = all. NOT z.coerce.boolean() — that turns
+// "false" into true.
+const blockedFilterParam = z
+  .enum(["true", "false"])
+  .optional()
+  .transform((value) => (value === undefined ? undefined : value === "true"));
+
 // articleIds: the Utleverans page asks for the locations (with balances) of
 // every article on the order in ONE call — `?articleIds=<uuid>,<uuid>`.
 export const listStockBalancesQuerySchema = listQuerySchema.extend({
@@ -11,12 +19,7 @@ export const listStockBalancesQuerySchema = listQuerySchema.extend({
     .transform((raw) => (raw === undefined ? undefined : raw.split(",").map((p) => p.trim()).filter((p) => p !== "")))
     .pipe(z.array(z.string().uuid()).min(1).max(200).optional()),
   locationId: z.string().uuid().optional(),
-  // Spärrade lagerplatser: "true" = only blocked places, "false" = without
-  // them, absent = all. NOT z.coerce.boolean() — that turns "false" into true.
-  blocked: z
-    .enum(["true", "false"])
-    .optional()
-    .transform((value) => (value === undefined ? undefined : value === "true")),
+  blocked: blockedFilterParam,
 });
 export type ListStockBalancesQuery = z.infer<typeof listStockBalancesQuerySchema>;
 
@@ -113,6 +116,43 @@ export const listStockLocationsQuerySchema = z.object({
     .transform((value) => value === "true"),
 });
 export type ListStockLocationsQuery = z.infer<typeof listStockLocationsQuerySchema>;
+
+// Lagerplatsregistret (/lager/platser) — GET /stock/locations/register[/csv].
+// GET /stock/locations keeps its array form for the place pickers. search
+// matches the place's name, the warehouse's name and the etikettkod (LP0042
+// = label_number 42); status defaults to the active places.
+export const STOCK_LOCATION_REGISTER_STATUSES = ["active", "inactive", "all"] as const;
+export const listStockLocationRegisterQuerySchema = listQuerySchema.extend({
+  warehouseId: z.string().uuid().optional(),
+  status: z.enum(STOCK_LOCATION_REGISTER_STATUSES).default("active"),
+  blocked: blockedFilterParam,
+});
+export type ListStockLocationRegisterQuery = z.infer<typeof listStockLocationRegisterQuerySchema>;
+
+// A place's balance summed per unit (the articles' base unit) — a sum over
+// st and kg means nothing. Articles netting to 0 are left out; a negative
+// balance is included. quantity is numeric as text ("120.0000").
+export interface StockLocationUnitBalance {
+  unitCode: string;
+  quantity: string;
+}
+
+// One row of the register. articleCount = the articles whose balance on the
+// place is not 0 (the sum of the per-unit counts).
+export interface StockLocationRegisterRow {
+  id: string;
+  warehouseId: string;
+  warehouseName: string;
+  name: string;
+  labelCode: string;
+  active: boolean;
+  fixed: boolean;
+  blocked: boolean;
+  blockedAt: string | null;
+  blockedNote: string | null;
+  articleCount: number;
+  balances: StockLocationUnitBalance[];
+}
 
 // Spärrad lagerplats: the note on a blocked place (stock_locations.blocked_note,
 // varchar 200). Trimmed; blank = no note.

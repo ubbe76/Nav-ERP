@@ -32,10 +32,14 @@ import {
   type ListStockTransactionsQuery,
   type StockTransactionReference,
   type ListStockBalancesQuery,
+  type ListStockLocationRegisterQuery,
   type ListStockLocationsQuery,
+  type StockLocationRegisterRow,
+  type StockLocationUnitBalance,
   type UpdateStockLocationInput,
   type UpdateWarehouseInput,
   formatLocationLabelCode,
+  parseLocationLabelCode,
 } from "@navet/shared";
 import {
   ArticleNotFoundError,
@@ -248,6 +252,86 @@ export function createStockRepository(db: Db) {
         .where(query.includeInactive ? undefined : eq(stockLocations.active, true))
         .orderBy(asc(warehouses.name), asc(stockLocations.name));
       return rows.map(toLocationView);
+    },
+
+    // Lagerplatsregistret: the list pattern (where built once on
+    // stock_locations ⋈ warehouses, rows + count(*) in parallel), then ONE
+    // aggregation for the page's ids — the articles whose balance on the
+    // place is not 0, summed per base unit. The location filter sits on a
+    // grouping column of stock_balances, so Postgres pushes it into the view
+    // and idx_stock_transactions_location_article (0185) finds the rows;
+    // "<> 0" stays a HAVING on the view's sum. Physical, like Saldon: a
+    // blocked place shows what stands there.
+    async listLocationRegister(query: ListStockLocationRegisterQuery): Promise<{ rows: StockLocationRegisterRow[]; total: number }> {
+      const conditions: (SQL | undefined)[] = [];
+      if (query.search) {
+        const pattern = ilikePattern(query.search);
+        // "LP0042" — the etikettkod is LP + label_number, not stored text.
+        const labelNumber = parseLocationLabelCode(query.search);
+        conditions.push(
+          or(
+            ilike(stockLocations.name, pattern),
+            ilike(warehouses.name, pattern),
+            labelNumber === null ? undefined : eq(stockLocations.labelNumber, labelNumber)
+          )
+        );
+      }
+      if (query.warehouseId) conditions.push(eq(stockLocations.warehouseId, query.warehouseId));
+      if (query.status !== "all") conditions.push(eq(stockLocations.active, query.status === "active"));
+      if (query.blocked !== undefined) conditions.push(eq(stockLocations.blocked, query.blocked));
+      const where = and(...conditions);
+
+      const [places, totalRows] = await Promise.all([
+        db
+          .select(locationColumns)
+          .from(stockLocations)
+          .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
+          .where(where)
+          .orderBy(asc(warehouses.name), asc(stockLocations.name), asc(stockLocations.id))
+          .limit(query.limit)
+          .offset(query.offset),
+        db
+          .select({ total: count() })
+          .from(stockLocations)
+          .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
+          .where(where),
+      ]);
+
+      const ids = places.map((p) => p.id);
+      const sums =
+        ids.length === 0
+          ? []
+          : await db
+              .select({
+                locationId: stockBalances.locationId,
+                unitCode: units.code,
+                articleCount: sql<number>`count(*)::int`,
+                quantity: sql<string>`sum(${stockBalances.quantityOnHand})`,
+              })
+              .from(stockBalances)
+              .innerJoin(articles, eq(articles.id, stockBalances.articleId))
+              .innerJoin(units, eq(units.id, articles.unitId))
+              .where(and(inArray(stockBalances.locationId, ids), ne(stockBalances.quantityOnHand, "0")))
+              .groupBy(stockBalances.locationId, units.code)
+              .orderBy(asc(units.code));
+
+      const byLocation = new Map<string, { articleCount: number; balances: StockLocationUnitBalance[] }>();
+      for (const sum of sums) {
+        const entry = byLocation.get(sum.locationId) ?? { articleCount: 0, balances: [] };
+        entry.articleCount += sum.articleCount;
+        entry.balances.push({ unitCode: sum.unitCode, quantity: sum.quantity });
+        byLocation.set(sum.locationId, entry);
+      }
+
+      const rows = places.map((place) => {
+        const { blockedAt, ...view } = toLocationView(place);
+        return {
+          ...view,
+          blockedAt: blockedAt ? blockedAt.toISOString() : null,
+          ...(byLocation.get(place.id) ?? { articleCount: 0, balances: [] }),
+        };
+      });
+      return { rows, total: totalRows[0]!.total };
     },
 
     async createTransaction(input: CreateStockTransactionInput, createdBy?: string) {
