@@ -408,6 +408,31 @@ describe("Kalkylutfall — Avvikelseanalys", () => {
     expect(row).toMatchObject({ setupHours: 0.75, runHours: 1.25, unclassifiedHours: 0.3333, hours: 2.3333 });
   });
 
+  it("counts a half-typed operation's hours wholly as Ej uppdelad (h), so hours and kronor reconcile", () => {
+    // Op 1 split (0.75 + 1.25 h); op 2 has 1 h, of which 0.25 typed as ställ
+    // — its deviation is all Ej uppdelad, and so are its hours.
+    const posts = [
+      post({
+        analysis: analysis({
+          operationRows: [
+            timeRow({ setupHours: 0.75, runHours: 1.25, unclassifiedHours: 0, split: true, parts: { ...ZERO, setup: 150, run: 150 } }),
+            timeRow({ id: "op2", hours: 1, setupHours: 0.25, runHours: 0, unclassifiedHours: 1, split: false, parts: { ...ZERO, unclassified: 40 } }),
+          ],
+        }),
+      }),
+    ];
+    const [row] = analysisOutcome(posts, "workCenter").rows as AnalysisWorkCenterRow[];
+    // Verklig ställ/stycke only from the split operation; Ej uppdelad (h) all of op 2.
+    expect(row).toMatchObject({ setupHours: 0.75, runHours: 1.25, unclassifiedHours: 1, hours: 3 });
+    expect(row!.setupHours! + row!.runHours! + row!.unclassifiedHours!).toBe(row!.hours);
+    expect(row!.parts).toMatchObject({ setup: 150, run: 150, unclassified: 40 });
+
+    // Only half-typed operations in the group: no verklig ställ/stycke at all.
+    const halfOnly = [post({ analysis: analysis({ operationRows: [timeRow({ hours: 1, setupHours: 0.25, runHours: 0, unclassifiedHours: 1 })] }) })];
+    const [half] = analysisOutcome(halfOnly, "workCenter").rows as AnalysisWorkCenterRow[];
+    expect(half).toMatchObject({ setupHours: null, runHours: null, unclassifiedHours: 1, hours: 1 });
+  });
+
   it("handles no analysed orders", () => {
     const result = analysisOutcome([post()], "article");
     expect(result.rows).toEqual([]);

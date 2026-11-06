@@ -452,9 +452,14 @@ export function analysisOutcome(posts: OutcomePostCalculation[], groupBy: Calcul
       if (op.kind === "time") {
         group.baseSetup.push(op.baseSetupHours ?? 0);
         group.baseRun.push(op.baseRunHours ?? 0);
-        if (op.setupHours !== null || op.runHours !== null) group.split = true;
-        group.setup.push(op.setupHours ?? 0);
-        group.run.push(op.runHours ?? 0);
+        // Hours reconcile with the kronor: a split operation's hours are
+        // Verklig ställ/stycke, a half-typed (or untyped) one's are all Ej
+        // uppdelad (h) — its unclassifiedHours is H, as its deviation is all
+        // Ej uppdelad — so it adds nothing to Verklig ställ/stycke.
+        const split = op.split && (op.setupHours !== null || op.runHours !== null);
+        if (split) group.split = true;
+        group.setup.push(split ? (op.setupHours ?? 0) : 0);
+        group.run.push(split ? (op.runHours ?? 0) : 0);
         group.unclassified.push(op.unclassifiedHours);
         group.hours.push(op.hours);
       } else {

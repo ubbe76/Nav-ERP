@@ -1285,6 +1285,103 @@ describe("ställ och produktion (#14 etapp 3)", () => {
     expect((await timeReportService.updateTimeReport(report.id, { kind: null }, user.id)).kind).toBeNull();
   });
 
+  it("corrects only the kind in a locked payroll period — anything else is still refused", async () => {
+    const { user, operation, employee } = await linkedFixture();
+    const report = await timeReportService.createTimeReport(
+      { employeeId: employee.id, moOperationId: operation.id, date: "2026-07-07", hours: 1.5, note: "Svets" },
+      user.id
+    );
+    lockedDates.add("2026-07-07");
+
+    // The kind never reaches the payroll (it reads the attendance).
+    expect((await timeReportService.updateTimeReport(report.id, { kind: "setup" }, user.id)).kind).toBe("setup");
+    // Unchanged fields sent along with the kind are still only the kind.
+    const same = await timeReportService.updateTimeReport(report.id, { kind: "run", date: "2026-07-07", hours: 1.5, note: "Svets" }, user.id);
+    expect(same).toMatchObject({ kind: "run", hours: "1.50", date: "2026-07-07" });
+    expect((await timeReportService.updateTimeReport(report.id, { kind: null }, user.id)).kind).toBeNull();
+
+    for (const change of [{ hours: 2 }, { note: "Annan" }, { date: "2026-08-03" }, { kind: "setup" as const, hours: 2 }]) {
+      await expect(timeReportService.updateTimeReport(report.id, change, user.id)).rejects.toBeInstanceOf(PayrollPeriodLockedError);
+    }
+    // Moving INTO a locked period with only the date is refused as before.
+    lockedDates.clear();
+    lockedDates.add("2026-08-04");
+    await expect(timeReportService.updateTimeReport(report.id, { date: "2026-08-04" }, user.id)).rejects.toBeInstanceOf(
+      PayrollPeriodLockedError
+    );
+  });
+
+  // A paused stamp: started `startedHoursAgo` hours ago, gone home
+  // `pausedHoursAgo` hours ago (Gå hem pauses the work stamp).
+  async function pausedStamp(f: Awaited<ReturnType<typeof linkedFixture>>, kind: "setup" | "run" | null, startedHoursAgo: number, pausedHoursAgo: number) {
+    const attendance = await timeReportService.attendanceIn({ employeeId: f.employee.id }, f.user.id);
+    const stamp = await timeReportService.stampIn({ employeeId: f.employee.id, moOperationId: f.operation.id, kind }, f.user.id);
+    await timeReportService.attendanceOut(attendance.id, f.user.id);
+    const now = Date.now();
+    const pausedAt = new Date(now - pausedHoursAgo * 3_600_000);
+    await db.execute(
+      sql`UPDATE stamp_sessions SET started_at = ${new Date(now - startedHoursAgo * 3_600_000).toISOString()}::timestamptz, paused_at = ${pausedAt.toISOString()}::timestamptz WHERE id = ${stamp.id}`
+    );
+    return { stamp, pausedAt };
+  }
+
+  it("dates a paused stamp stamped out later on the day the pause began, like the automatic stamp-out", async () => {
+    const f = await linkedFixture();
+    // Worked 4 h, gone home 26 h ago: yesterday's (or the day before's) work.
+    const { stamp, pausedAt } = await pausedStamp(f, "run", 30, 26);
+
+    const { timeReport, session } = await timeReportService.stampOut(stamp.id, stampOutSchema.parse({}), f.user.id);
+
+    expect(timeReport).toMatchObject({ date: localDateOf(pausedAt), hours: "4.00", kind: "run" });
+    expect(timeReport.date).not.toBe(localDateOf(new Date()));
+    // Stopped when the pause began, as closeStampSessionsInTx does.
+    expect(session.stoppedAt!.getTime()).toBe(pausedAt.getTime());
+  });
+
+  it("dates it today when the pause's day lies in a locked payroll period", async () => {
+    const f = await linkedFixture();
+    const { stamp, pausedAt } = await pausedStamp(f, null, 30, 26);
+    lockedDates.add(localDateOf(pausedAt));
+
+    const { timeReport } = await timeReportService.stampOut(stamp.id, stampOutSchema.parse({}), f.user.id);
+
+    expect(timeReport).toMatchObject({ date: localDateOf(new Date()), hours: "4.00" });
+  });
+
+  it("keeps the kind through Gå hem and Kom (pause and resume)", async () => {
+    const f = await linkedFixture();
+    const attendance = await timeReportService.attendanceIn({ employeeId: f.employee.id }, f.user.id);
+    const stamp = await timeReportService.stampIn({ employeeId: f.employee.id, moOperationId: f.operation.id, kind: "setup" }, f.user.id);
+    await timeReportService.attendanceOut(attendance.id, f.user.id);
+    const [paused] = await timeReportService.listStampSessions(true, { employeeId: f.employee.id });
+    expect(paused).toMatchObject({ id: stamp.id, kind: "setup" });
+    expect(paused!.pausedAt).not.toBeNull();
+
+    await timeReportService.attendanceIn({ employeeId: f.employee.id }, f.user.id);
+    const [resumed] = await timeReportService.listStampSessions(true, { employeeId: f.employee.id });
+    expect(resumed).toMatchObject({ id: stamp.id, kind: "setup", pausedAt: null });
+
+    const { timeReport } = await timeReportService.stampOut(stamp.id, stampOutSchema.parse({}), f.user.id);
+    expect(timeReport.kind).toBe("setup");
+  });
+
+  it("Ställ klart on a paused stamp through the API: the setup lands on the pause's day, produktion starts now", async () => {
+    const f = await linkedFixture();
+    const { stamp, pausedAt } = await pausedStamp(f, "setup", 30, 26);
+
+    // The terminal hides Ställ klart on a paused stamp; the API takes it.
+    const out = await timeReportService.stampOut(stamp.id, stampOutSchema.parse({ quantityOk: 0, quantityScrapped: 0 }), f.user.id);
+    const run = await timeReportService.stampIn({ employeeId: f.employee.id, moOperationId: f.operation.id, kind: "run" }, f.user.id);
+
+    expect(out.timeReport).toMatchObject({ kind: "setup", hours: "4.00", date: localDateOf(pausedAt) });
+    expect(out.reportId).not.toBeNull();
+    // Gone home, so the stamp-in clocks the employee in again; nothing left paused.
+    expect(run).toMatchObject({ kind: "run", stoppedAt: null, pausedAt: null, attendanceStarted: true });
+    const [op] = await mfgService.listOperations(f.order.id);
+    expect([Number(op!.quantityCompleted ?? 0), Number(op!.quantityScrapped)]).toEqual([0, 0]);
+    expect(await consumed(f.order.id)).toEqual([0]);
+  });
+
   it("validates the kind at the schema boundary and never requires it", () => {
     const ids = { employeeId: crypto.randomUUID(), moOperationId: crypto.randomUUID() };
     expect(stampInSchema.safeParse({ ...ids, kind: "pause" }).success).toBe(false);

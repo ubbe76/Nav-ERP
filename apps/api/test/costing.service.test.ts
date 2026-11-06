@@ -1541,8 +1541,9 @@ describe("costing service — variance analysis", () => {
     // Op 10 is split: Ställ (0.75 − 0.5) × 600 = 150, Stycke 690 − 600 − 150 = −60.
     expect(op10Row).toMatchObject({ setupHours: 0.75, runHours: 0.4, unclassifiedHours: 0, split: true, base: 600, actual: 690 });
     expect(op10Row!.parts).toMatchObject({ setup: 150, run: -60, unclassified: 0, rate: 0 });
-    // Op 20 has 0.1 h ej uppdelad: the whole operation is Tid (ej uppdelad), 390 − 270.
-    expect(op20Row).toMatchObject({ setupHours: 0.25, runHours: 0.3, unclassifiedHours: 0.1, split: false, base: 270, actual: 390 });
+    // Op 20 has 0.1 h ej uppdelad: the whole operation is Tid (ej uppdelad), 390 − 270,
+    // and Ej uppdelad (h) is all its 0.65 h, so the hours match the kronor.
+    expect(op20Row).toMatchObject({ setupHours: 0.25, runHours: 0.3, unclassifiedHours: 0.65, split: false, base: 270, actual: 390 });
     expect(op20Row!.parts).toMatchObject({ setup: 0, run: 0, unclassified: 120 });
     // The order: material on plan, so Avvikelse = Ställ + Stycke + Ej uppdelad, exactly.
     expect(analysis).toMatchObject({ base: 970, actual: 1180, deviation: 210 });
@@ -1552,6 +1553,38 @@ describe("costing service — variance analysis", () => {
       operationRows: withoutIds(analysis!.operationRows),
       materialRows: withoutIds(analysis!.materialRows),
     });
+  });
+
+  // Typed time on a lego operation is ignored: a lego operation is bought,
+  // its cost is the IO (or the reserve), never hours — no Ställ or Stycke.
+  it("ignores typed time reported on a lego operation", async () => {
+    const lego = await mfgService.createWorkCenter({ code: "900", name: "Lack", type: "subcontract", active: true });
+    const f = await makeFixture({ quantity: 5 });
+    // The lego operation is added to the order's own rows (Ändra operationer would do the same).
+    await mfgService.createRoutingOperation(f.parent.id, { sequenceNo: 20, workCenterId: lego.id, setupTime: 0, runTimePerUnit: 0, setupPrice: 500, unitPrice: 100 });
+    const order = await mfgService.createManufacturingOrder({ articleId: f.parent.id, quantity: 5 }, f.user.id);
+    const ops = await mfgService.listOperations(order.id);
+    const op10 = ops.find((op) => op.sequenceNo === 10)!;
+    const legoOp = ops.find((op) => op.sequenceNo === 20)!;
+    const report = (moOperationId: string, hours: number, kind?: "setup" | "run") =>
+      timeReportService.createTimeReport({ employeeId: f.employee.id, moOperationId, date: "2026-07-07", hours, ...(kind ? { kind } : {}) }, f.user.id);
+    await report(op10.id, 1);
+    await report(legoOp.id, 0.5, "setup");
+    await report(legoOp.id, 2, "run");
+    await mfgService.complete(order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
+
+    const { calculation, analysis } = await costingService.postCalculate(order.id, true);
+
+    // No hours, no lön and no ställ/produktion on the lego row; the 1 h on op 10 is the only time.
+    expect(calculation.laborCost).toBe("600.0000");
+    const saved = (await costingService.getCostCalculation(calculation.id))!.operationRows;
+    expect(saved.find((r) => r.sequenceNo === 20)).toMatchObject({ hours: "0.0000", setupHours: null, runHours: null, laborAmount: "0.0000" });
+    const legoRow = analysis!.operationRows.find((r) => r.sequenceNo === 20)!;
+    expect(legoRow.kind).toBe("subcontract");
+    expect(legoRow.parts).toMatchObject({ rate: 0, setup: 0, run: 0, unclassified: 0 });
+    expect(analysis!.operationRows.filter((r) => r.kind === "time")).toHaveLength(1);
+    // Op 10 is untyped and on plan (0.5 + 0.5 h): the order has no time deviation.
+    expect(analysis!.parts).toMatchObject({ rate: 0, setup: 0, run: 0, unclassified: 0 });
   });
 
   it("refuses a row whose base group is only partly saved, and an operation row with both groups", async () => {

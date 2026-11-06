@@ -484,7 +484,8 @@ export interface CostVarianceTimeOperationRow {
   baseRunHours: number | null;
   baseHourlyRate: number | null;
   // H = all reported hours; Verklig ställ / Verklig stycke (null until the
-  // time is registered as ställ/produktion, etapp 3) and Ej uppdelad (h).
+  // time is registered as ställ/produktion, etapp 3) and Ej uppdelad (h) —
+  // all of H when the operation is not split (also half typed), else 0.
   hours: number;
   setupHours: number | null;
   runHours: number | null;

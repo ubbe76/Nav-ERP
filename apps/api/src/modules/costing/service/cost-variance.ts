@@ -283,7 +283,9 @@ export function materialVariance(row: VarianceMaterialInput): OreRow {
 //   U = 0: Ställ = (Hs − Bs) × R₀ rounded, Stycke = the rest;
 //   U > 0: Tid (ej uppdelad) = the rest, for the whole operation — a half
 //          classified operation is not split, or the rest would look like
-//          saved setup time.
+//          saved setup time. Ej uppdelad (h) is then all of H, so the hours
+//          and the kronor reconcile (unclassifiedHours = H, Hs/Hr only
+//          informative); split, it is 0.
 export function timeVariance(row: VarianceOperationInput): OreRow & { split: boolean; unclassifiedHours: number } {
   const parts = emptyParts();
   const actual = ore(row.laborAmount);
@@ -297,15 +299,14 @@ export function timeVariance(row: VarianceOperationInput): OreRow & { split: boo
   parts.rate = ore((row.hourlyRate - baseRate) * row.hours);
   const setupHours = row.setupHours ?? 0;
   const runHours = row.runHours ?? 0;
-  const unclassifiedHours = Math.max(0, hours4(row.hours - setupHours - runHours));
-  const split = unclassifiedHours === 0;
+  const split = Math.max(0, hours4(row.hours - setupHours - runHours)) === 0;
   if (split) {
     parts.setup = ore((setupHours - setupBase) * baseRate);
     parts.run = deviation - parts.rate - parts.setup;
   } else {
     parts.unclassified = deviation - parts.rate;
   }
-  return { base, actual, parts, baseAmount, split, unclassifiedHours };
+  return { base, actual, parts, baseAmount, split, unclassifiedHours: split ? 0 : row.hours };
 }
 
 // Lego operation l: A = the IO cost as the efterkalkyl took it, Qa what it

@@ -265,10 +265,12 @@ describe("cost-variance — operations with time", () => {
     expect([v.parts.setup, v.parts.run, v.parts.unclassified]).toEqual([30000, 0, 0]);
   });
 
-  it("does not split a half classified operation", () => {
+  it("does not split a half classified operation: Ej uppdelad (h) is all of H", () => {
+    // H 3 of which Hs 1: the whole deviation is Ej uppdelad, and so are all
+    // 3 hours — the hours reconcile with the kronor (not the 2 untyped).
     const v = timeVariance(timeOp({ setupHours: 1, runHours: null }));
     expect(v.split).toBe(false);
-    expect(v.unclassifiedHours).toBe(2);
+    expect(v.unclassifiedHours).toBe(3);
     expect([v.parts.setup, v.parts.run, v.parts.unclassified]).toEqual([0, 0, 30000]);
   });
 
