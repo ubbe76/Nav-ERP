@@ -15,7 +15,7 @@ import {
   type Db,
   type Tx,
 } from "@navet/db";
-import type { ValuationMethod } from "@navet/shared";
+import type { ValuationMethod, WipBasis } from "@navet/shared";
 import { OPENING_BALANCE_SERIES } from "../service/verification-poster.js";
 import { addDays } from "../service/year-end-calc.js";
 
@@ -248,6 +248,19 @@ export async function latestClosedInventoryMethod(executor: Executor, beforeStar
     .orderBy(desc(fiscalYears.endDate))
     .limit(1);
   return (row?.method as ValuationMethod | undefined) ?? null;
+}
+
+// The PIA underlag of the latest CLOSED closing before this year — the step's
+// default, the same konsekvensprincip as the inventory method.
+export async function latestClosedWipBasis(executor: Executor, beforeStartDate: string): Promise<WipBasis | null> {
+  const [row] = await executor
+    .select({ basis: yearEndClosings.wipBasis })
+    .from(yearEndClosings)
+    .innerJoin(fiscalYears, eq(fiscalYears.id, yearEndClosings.fiscalYearId))
+    .where(and(eq(yearEndClosings.status, "closed"), lt(fiscalYears.endDate, beforeStartDate), isNotNull(yearEndClosings.wipBasis)))
+    .orderBy(desc(fiscalYears.endDate))
+    .limit(1);
+  return (row?.basis as WipBasis | undefined) ?? null;
 }
 
 export type AccrualKind = (typeof yearEndAccruals.$inferSelect)["kind"];

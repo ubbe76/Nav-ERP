@@ -16,6 +16,8 @@ export type YearEndCheckCode =
   | "revenue-without-vat-box"
   | "inventory-stale"
   | "inventory-not-done"
+  | "wip-not-done"
+  | "wip-stale"
   | "depreciation-missing"
   | "accruals-not-done"
   | "fx-revaluation-not-done"
@@ -72,6 +74,17 @@ export interface CloseGateInput extends StepGateInput {
   // Valutaomvärdering: open invoices in another currency than SEK per the
   // closing date, and whether the step is done. Absent = no foreign items.
   fxRevaluation?: { openItems: number; done: boolean };
+  // Produkter i arbete: the PIA per the closing date, the PIA account's
+  // balance through it, and whether the step is done. Absent = nothing.
+  workInProgress?: { value: number; ledger: number; done: boolean };
+}
+
+// Produkter i arbete must be booked only when there is something: a PIA per
+// the closing date or a balance on the PIA account (Valutaomvärderingen's
+// pattern — a company without manufacturing never meets the step). The close
+// gate and the result transfer's order check both ask this.
+export function wipStepRequired(input: { value: number; ledger: number }): boolean {
+  return round2(input.value) !== 0 || round2(input.ledger) !== 0;
 }
 
 // Gate for steg 6 (spec 4.2/4.7). A locked closing month does not block:
@@ -90,6 +103,13 @@ export function evaluateCloseBlockers(input: CloseGateInput): YearEndCheck[] {
     });
   }
   if (!input.inventoryDone) blockers.push({ code: "inventory-not-done", message: "Steg 2 Lagerförändring är inte gjort" });
+  // Moves the result like steg 2, so it must stand before the transfer.
+  if (input.workInProgress && !input.workInProgress.done && wipStepRequired(input.workInProgress)) {
+    blockers.push({
+      code: "wip-not-done",
+      message: `Produkter i arbete är inte bokförda — PIA per bokslutsdagen ${formatNumber(input.workInProgress.value)}, saldo på PIA-kontot ${formatNumber(input.workInProgress.ledger)}`,
+    });
+  }
   if (input.missingDepreciationAssets > 0) {
     blockers.push({
       code: "depreciation-missing",
@@ -145,6 +165,10 @@ export interface WarningInput {
   // ("ledger"), or the valuation per the closing date no longer gives it
   // ("valuation" — #26: a backdated stock count, a standard cost set later).
   inventoryStale: { reason: "ledger" | "valuation"; ledger: number; value: number; currentValue: number } | null;
+  // Produkter i arbete booked but stale the same two ways as steg 2: the PIA
+  // account moved, or the PIA per the closing date with the booked underlag
+  // changed (time reported afterwards, a backdated draw, a price).
+  wipStale?: { reason: "ledger" | "valuation"; ledger: number; value: number; currentValue: number } | null;
   // The valutaomvärdering is booked but the open foreign items (or their
   // currencies) changed since — a re-run would book something else.
   fxRevaluationStale?: boolean;
@@ -207,6 +231,15 @@ export function evaluateWarnings(input: WarningInput): YearEndCheck[] {
         input.inventoryStale.reason === "valuation"
           ? `Lagervärdet per bokslutsdagen är nu ${formatNumber(input.inventoryStale.currentValue)}, men steg 2 bokförde ${formatNumber(input.inventoryStale.value)} — gör om steg 2`
           : `Lagerkontots saldo (${formatNumber(input.inventoryStale.ledger)}) stämmer inte med den bokförda lagervärderingen (${formatNumber(input.inventoryStale.value)}) — gör om steg 2`,
+    });
+  }
+  if (input.wipStale) {
+    warnings.push({
+      code: "wip-stale",
+      message:
+        input.wipStale.reason === "valuation"
+          ? `Produkter i arbete per bokslutsdagen är nu ${formatNumber(input.wipStale.currentValue)}, men steget bokförde ${formatNumber(input.wipStale.value)} — gör om Produkter i arbete`
+          : `PIA-kontots saldo (${formatNumber(input.wipStale.ledger)}) stämmer inte med de bokförda produkterna i arbete (${formatNumber(input.wipStale.value)}) — gör om Produkter i arbete`,
     });
   }
   if (input.fxRevaluationStale) {

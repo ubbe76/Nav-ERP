@@ -501,6 +501,9 @@ describe("system service — settings", () => {
     // Årsbokslut (steg 2).
     "posting_inventory",
     "posting_inventory_change",
+    // Årsbokslut, Produkter i arbete.
+    "posting_wip",
+    "posting_wip_change",
     // Valuta.
     "posting_fx_gain",
     "posting_fx_loss",
@@ -519,6 +522,8 @@ describe("system service — settings", () => {
     expect(settings.postingVatSettlement).toBe("2650");
     expect(settings.postingInventory).toBe("1460");
     expect(settings.postingInventoryChange).toBe("4990");
+    expect(settings.postingWip).toBe("1440");
+    expect(settings.postingWipChange).toBe("4940");
     // Valuta.
     expect(settings.postingFxGain).toBe("3960");
     expect(settings.postingFxLoss).toBe("7960");
@@ -534,6 +539,8 @@ describe("system service — settings", () => {
         postingVatSettlement: "2651",
         postingInventory: "1410",
         postingInventoryChange: "4991",
+        postingWip: "1441",
+        postingWipChange: "4941",
         postingFxGain: "3961",
         postingFxLoss: "7961",
         postingBankFees: "6571",
@@ -547,6 +554,8 @@ describe("system service — settings", () => {
       expect(updated.postingVatSettlement).toBe("2651");
       expect(updated.postingInventory).toBe("1410");
       expect(updated.postingInventoryChange).toBe("4991");
+      expect(updated.postingWip).toBe("1441");
+      expect(updated.postingWipChange).toBe("4941");
 
       const reread = await systemService.getSettings();
       expect(reread.postingAccountsPayable).toBe("2441");
@@ -569,6 +578,8 @@ describe("system service — settings", () => {
         postingVatSettlement: "",
         postingInventory: "",
         postingInventoryChange: "",
+        postingWip: "",
+        postingWipChange: "",
         postingFxGain: "",
         postingFxLoss: "",
         postingBankFees: "",

@@ -504,6 +504,12 @@ export const LAGER_SECTIONS: ModuleNavSection[] = [
         description: "Lagervärde per valfritt datum — standardpris, senaste inköp, vägt snitt eller FIFO.",
         roles: ["admin"],
       },
+      {
+        href: "/rapporter/produkter-i-arbete",
+        title: "Produkter i arbete",
+        description: "Upparbetat minus avräknat per öppen tillverkningsorder, per valfritt datum.",
+        roles: ["admin"],
+      },
     ],
   },
 ];
@@ -704,6 +710,12 @@ export const RAPPORTER_SECTIONS: ModuleNavSection[] = [
         href: "/lager/vardering",
         title: "Lagervärdering",
         description: "Lagervärde per valfritt datum — standardpris, senaste inköp, vägt snitt eller FIFO.",
+        roles: ["admin"],
+      },
+      {
+        href: "/rapporter/produkter-i-arbete",
+        title: "Produkter i arbete",
+        description: "Upparbetat minus avräknat per öppen tillverkningsorder, per valfritt datum.",
         roles: ["admin"],
       },
     ],

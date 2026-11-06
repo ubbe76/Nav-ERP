@@ -289,8 +289,13 @@ const MESSAGES: Record<string, MessageEntry> = {
   "invalid-accrual-account": "Kontot passar inte för den typen av periodisering — balanskontot ska ligga på rätt sida och resultatkontot i klass 3–8",
   "next-fiscal-year-missing": "Nästa räkenskapsår kunde inte skapas automatiskt — lägg upp det under Räkenskapsår",
   "fiscal-year-last-period-missing": "Räkenskapsåret saknar en period för sin sista dag — lägg upp perioderna under Räkenskapsår",
-  "year-end-step-order":
-    "Gör stegen Lagerförändring, Avskrivningar och Periodiseringar — och Valutaomvärdering när det finns öppna fakturor i annan valuta — före resultatöverföringen",
+  // The server names the step that is missing (body.step, its Swedish name).
+  "year-end-step-order": (err) => {
+    const step = (err.body as { step?: unknown } | undefined)?.step;
+    return typeof step === "string" && step !== ""
+      ? `Gör steget ${step} före resultatöverföringen`
+      : "Gör stegen Lagerförändring, Avskrivningar och Periodiseringar — och Produkter i arbete och Valutaomvärdering när de har något att bokföra — före resultatöverföringen";
+  },
   // The server names the currencies and the day: body.currencies (ISO codes),
   // body.date (the closing date).
   "fx-revaluation-rate-missing": (err) => {
@@ -792,6 +797,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "validation-failed": "Ogiltiga uppgifter — kontrollera fälten.",
   "invalid-request-body": "Ogiltig förfrågan.",
   "internal-server-error": "Ett oväntat fel inträffade.",
+  "work-in-progress-account-conflict":
+    "Kontot för produkter i arbete eller dess förändringskonto krockar med lagrets konton eller med varandra — välj olika konton under Ekonomi → Konteringsregler.",
   "bookkeeping-record-locked": "Bokförd räkenskapsinformation kan inte ändras eller raderas — rätta med en omföring.",
 };
 

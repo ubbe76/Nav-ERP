@@ -10,6 +10,7 @@ export * from "./budget.js";
 export * from "./error-codes.js";
 export * from "./fixed-asset.js";
 export * from "./year-end.js";
+export * from "./work-in-progress.js";
 export * from "./import.js";
 export * from "./list.js";
 export * from "./mail.js";

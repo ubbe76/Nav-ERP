@@ -104,6 +104,8 @@ export const BAS_STANDARD_ACCOUNTS: { number: string; name: string; vatBox?: Vat
   // Not in BAS 2026 — the import base's counter account (momskod IMP*).
   { number: "4549", name: "Motkonto beskattningsunderlag import", vatBox: "none" },
   { number: "4600", name: "Legoarbeten och underentreprenader" },
+  // Årsbokslut, Produkter i arbete (#25): posting_wip_change's default.
+  { number: "4940", name: "Förändring av produkter i arbete" },
   { number: "4990", name: "Förändring av lager" },
   { number: "5010", name: "Lokalhyra" },
   { number: "5020", name: "El för belysning" },

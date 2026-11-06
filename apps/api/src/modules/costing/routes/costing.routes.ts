@@ -1,8 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import type { ZodType } from "zod";
 import { articleCardWrite } from "../../auth/middleware/access-rules.js";
-import { postCalculateSchema, preCalculateSchema } from "@navet/shared";
+import { requireRole } from "../../auth/middleware/auth.middleware.js";
+import { postCalculateSchema, preCalculateSchema, workInProgressQuerySchema } from "@navet/shared";
 import type { CostingService } from "../service/costing.service.js";
+import type { WorkInProgressService } from "../service/work-in-progress.service.js";
+import { contentDisposition } from "../../system/service/content-disposition.js";
 import { errorBody } from "../../system/service/error-body.js";
 import {
   ArticleNotFoundError,
@@ -22,8 +25,11 @@ function isPreview(schema: ZodType<{ save?: boolean }>, body: unknown): boolean 
 
 // This module is registered inside app.ts's protected route scope, so
 // requireAuth has already run and req.user is guaranteed to be set.
-export async function costingRoutes(app: FastifyInstance, opts: { service: CostingService }) {
-  const { service } = opts;
+export async function costingRoutes(
+  app: FastifyInstance,
+  opts: { service: CostingService; workInProgress: WorkInProgressService }
+) {
+  const { service, workInProgress } = opts;
 
   // Without `save` this only computes and returns the numbers (200, id null);
   // with it the calculation is written and answered exactly as before (201).
@@ -140,5 +146,18 @@ export async function costingRoutes(app: FastifyInstance, opts: { service: Costi
   app.get<{ Params: { id: string } }>("/articles/:id/self-cost", async (req) => {
     const found = await service.latestPreCalculationSelfCost([req.params.id]);
     return found.get(req.params.id) ?? null;
+  });
+
+  // Produkter i arbete (#25): admin-only like /stock/valuation — the report
+  // is cost data per order, the same audience as Lagervärdering.
+  app.get("/costing/work-in-progress", { preHandler: requireRole("admin") }, async (req) =>
+    workInProgress.getWorkInProgress(workInProgressQuerySchema.parse(req.query))
+  );
+
+  app.get("/costing/work-in-progress/pdf", { preHandler: requireRole("admin") }, async (req, reply) => {
+    const { filename, content } = await workInProgress.getWorkInProgressPdf(workInProgressQuerySchema.parse(req.query));
+    reply.header("Content-Type", "application/pdf");
+    reply.header("Content-Disposition", contentDisposition(filename));
+    return reply.send(content);
   });
 }

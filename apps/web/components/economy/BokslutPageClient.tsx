@@ -14,7 +14,7 @@ import { YEAR_END_ROLE_LABELS, YEAR_END_STEP_LABELS } from "../../lib/yearEnd";
 import { AccrualsCard } from "./bokslut/AccrualsCard";
 import { ClosedYearPanel } from "./bokslut/ClosedYearPanel";
 import { FxRevaluationCard } from "./bokslut/FxRevaluationCard";
-import { ChecksCard, CloseCard, DepreciationCard, InventoryCard, ResultTransferCard, VerificationLink } from "./bokslut/StepCards";
+import { ChecksCard, CloseCard, DepreciationCard, InventoryCard, ResultTransferCard, VerificationLink, WorkInProgressCard } from "./bokslut/StepCards";
 import { useStepAction } from "./bokslut/useStepAction";
 
 export function BokslutPageClient({
@@ -64,6 +64,7 @@ export function BokslutPageClient({
           <ClosingDateCard closing={closing} />
           <ChecksCard closing={closing} />
           <InventoryCard closing={closing} />
+          <WorkInProgressCard closing={closing} />
           <DepreciationCard closing={closing} />
           <AccrualsCard
             key={closing.steps.accruals.verification?.id ?? `none-${closing.steps.accruals.bookedAt ?? "unbooked"}`}

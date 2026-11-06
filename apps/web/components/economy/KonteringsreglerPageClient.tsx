@@ -37,6 +37,8 @@ type PostingAccountFieldKey =
   | "postingVatSettlement"
   | "postingInventory"
   | "postingInventoryChange"
+  | "postingWip"
+  | "postingWipChange"
   | "postingFxGain"
   | "postingFxLoss"
   | "postingBankFees";
@@ -51,6 +53,8 @@ const POSTING_FIELDS: { key: PostingAccountFieldKey; label: string; defaultNumbe
   { key: "postingVatSettlement", label: "Redovisningskonto för moms", defaultNumber: "2650" },
   { key: "postingInventory", label: "Lager", defaultNumber: "1460" },
   { key: "postingInventoryChange", label: "Lagerförändring", defaultNumber: "4990" },
+  { key: "postingWip", label: "Produkter i arbete", defaultNumber: "1440" },
+  { key: "postingWipChange", label: "Förändring av produkter i arbete", defaultNumber: "4940" },
   { key: "postingFxGain", label: "Kursvinst", defaultNumber: "3960" },
   { key: "postingFxLoss", label: "Kursförlust", defaultNumber: "7960" },
   { key: "postingBankFees", label: "Bankkostnader", defaultNumber: "6570" },

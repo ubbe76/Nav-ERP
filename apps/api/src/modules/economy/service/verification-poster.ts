@@ -81,9 +81,9 @@ export const OPENING_BALANCE_SERIES = { code: "I", name: "Ingående balanser" } 
 const FIXED_ASSET_SERIES = { code: "AV", name: "Anläggningar" } as const;
 
 // Årsbokslut (delprojekt 3): every verification the closing guide books —
-// lagerförändring, periodiseringar and their reversal, valutaomvärdering and
-// its reversal, resultatöverföring, vinstdisposition and the guide's own
-// omföringar.
+// lagerförändring, produkter i arbete, periodiseringar and their reversal,
+// valutaomvärdering and its reversal, resultatöverföring, vinstdisposition and
+// the guide's own omföringar.
 const YEAR_END_SERIES = { code: "BS", name: "Bokslut" } as const;
 
 export type ClosingEntrySource =
@@ -93,7 +93,8 @@ export type ClosingEntrySource =
   | "year_end_result_transfer"
   | "year_end_profit_disposition"
   | "year_end_fx_revaluation"
-  | "year_end_fx_reversal";
+  | "year_end_fx_reversal"
+  | "year_end_wip";
 
 // verifications.description is varchar(255), and a customer/supplier name is
 // varchar(255) on its own — a long partner name would otherwise abort the
@@ -289,6 +290,9 @@ export interface PostingAccountNumbers {
   // Årsbokslut (steg 2): read by the year-end service, not by the poster.
   postingInventory: string;
   postingInventoryChange: string;
+  // Årsbokslut, Produkter i arbete: read by the year-end service too.
+  postingWip: string;
+  postingWipChange: string;
   // Valuta: kursvinst/kursförlust and bankkostnader on a supplier payment in
   // another currency than SEK (postSupplierPayment).
   postingFxGain: string;

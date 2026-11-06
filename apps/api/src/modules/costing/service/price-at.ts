@@ -1,7 +1,9 @@
+import { stockholmDateOf } from "../../system/service/delivery-days.js";
+
 // Prishistorik as of a moment — what a price WAS when the material was taken
-// out, for the efterkalkyl. Pure: the repository hands in the history rows
-// (ascending by validFrom) and gets the value back, so the rule is testable
-// without a database.
+// out, for the efterkalkyl and Produkter i arbete. Pure: the repository hands
+// in the history rows (ascending by validFrom) and gets the value back, so the
+// rule is testable without a database.
 //
 // One convention for every history, the one the stock valuation already uses
 // for the standard cost (D1): the latest row valid at the moment; before the
@@ -55,4 +57,45 @@ export function primarySupplierAt(rows: SupplierSnapshotRow[], at: Date): Suppli
     if (state && state.isPrimary && !state.removed) return state;
   }
   return null;
+}
+
+export interface PriceHistories {
+  standard: Map<string, StandardCostHistoryRow[]>;
+  supplier: Map<string, SupplierSnapshotRow[]>;
+}
+
+export interface WithdrawalPriceBasis {
+  componentArticleId: string;
+  standardCost: string | null;
+  supplierPrice: string | null;
+  supplierCurrency: string | null;
+  supplierPriceBreaks: { fromQuantity: number; price: number }[];
+}
+
+// Prissatt vid uttaget — THE rule the efterkalkyl and Produkter i arbete (#25)
+// share: each component is priced as of `drawnAt` (its latest withdrawal on
+// the order; for PIA the latest one on or before the report's day) — the
+// standard cost from its history, the primary supplier's catalog row from its
+// snapshots, and the Stockholm day of that moment as priceDate, which the
+// rate attacher looks the supplier currency up for. A component without a
+// withdrawal is priced as of `otherwise` (the efterkalkyl: now). No standard
+// history at all: the article's current value, as before.
+export function pricedAtWithdrawal<T extends WithdrawalPriceBasis>(
+  consumptions: T[],
+  drawnAt: Map<string, Date>,
+  histories: PriceHistories,
+  otherwise: Date
+): (T & { priceDate: string })[] {
+  return consumptions.map((c) => {
+    const at = drawnAt.get(c.componentArticleId) ?? otherwise;
+    const supplier = primarySupplierAt(histories.supplier.get(c.componentArticleId) ?? [], at);
+    return {
+      ...c,
+      standardCost: standardCostAt(histories.standard.get(c.componentArticleId) ?? [], at) ?? c.standardCost,
+      supplierPrice: supplier?.price ?? null,
+      supplierCurrency: supplier?.currency ?? null,
+      supplierPriceBreaks: supplier?.priceBreaks ?? [],
+      priceDate: stockholmDateOf(at),
+    };
+  });
 }

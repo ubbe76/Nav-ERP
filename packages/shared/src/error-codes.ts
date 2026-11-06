@@ -206,6 +206,9 @@ export const ERROR_CODES = {
   YEAR_END_CLOSING_VERIFICATION: "year-end-closing-verification",
   YEAR_END_BLOCKED: "year-end-blocked",
   INVENTORY_ACCOUNT_CONFLICT: "inventory-account-conflict",
+  // Produkter i arbete: the PIA account is also its change account or one of
+  // the inventory step's accounts, or its change account is the inventory account (409)
+  WORK_IN_PROGRESS_ACCOUNT_CONFLICT: "work-in-progress-account-conflict",
   INVALID_ACCRUAL_ACCOUNT: "invalid-accrual-account",
   NEXT_FISCAL_YEAR_MISSING: "next-fiscal-year-missing",
   // the year has no accounting period covering its last day (409)

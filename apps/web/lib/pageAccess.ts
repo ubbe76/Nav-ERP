@@ -24,6 +24,9 @@ const ENTRIES: readonly Entry[] = [
   // forsaljning) — the Räntefakturering routine sends its user there.
   { path: "/ekonomi/referensranta", rule: ["ekonomi", "forsaljning"] },
   { path: "/ekonomi", rule: ["ekonomi"] },
+  // Produkter i arbete is cost data per order: admin-only like Lagervärdering
+  // (the API route requires the admin role).
+  { path: "/rapporter/produkter-i-arbete", rule: ["admin"] },
   { path: "/rapporter", rule: ["rapporter"] },
   { path: "/artiklar", exact: true, rule: ["artiklar", "artikeloversikt"] },
   { path: "/artiklar/oversikt", rule: ["artikeloversikt"] },

@@ -3,6 +3,7 @@ import {
   bookAccrualsSchema,
   bookFxRevaluationSchema,
   bookInventorySchema,
+  bookWorkInProgressSchema,
   fxRevaluationPreviewQuerySchema,
   inventoryPreviewQuerySchema,
   listYearEndClosingsQuerySchema,
@@ -10,6 +11,7 @@ import {
   reopenYearEndClosingSchema,
   startYearEndClosingSchema,
   updateYearEndClosingSchema,
+  workInProgressPreviewQuerySchema,
 } from "@navet/shared";
 import { requirePermission } from "../../auth/middleware/permission.middleware.js";
 import { errorBody } from "../../system/service/error-body.js";
@@ -24,6 +26,7 @@ import {
   InvalidAgmDateError,
   InvalidClosingDateError,
   InventoryAccountConflictError,
+  WorkInProgressAccountConflictError,
   NextFiscalYearClosedError,
   NextFiscalYearMissingError,
   NothingToDisposeError,
@@ -62,6 +65,7 @@ const CONFLICT: ErrorClass[] = [
   MissingPostingAccountError,
   ZeroAmountPostingError,
   InventoryAccountConflictError,
+  WorkInProgressAccountConflictError,
   NextFiscalYearMissingError,
   YearEndStepOrderError,
   YearEndClosingNotClosedError,
@@ -78,6 +82,8 @@ function closingError(err: unknown, reply: Reply) {
   if (err instanceof FxRevaluationRateMissingError) {
     return reply.code(409).send({ ...errorBody(err), currencies: err.currencies, date: err.date });
   }
+  // Which step the result transfer waits for, by its Swedish name.
+  if (err instanceof YearEndStepOrderError) return reply.code(409).send({ ...errorBody(err), step: err.step });
   if (NOT_FOUND.some((type) => err instanceof type)) return reply.code(404).send(errorBody(err));
   if (BAD_REQUEST.some((type) => err instanceof type)) return reply.code(400).send(errorBody(err));
   if (CONFLICT.some((type) => err instanceof type)) return reply.code(409).send(errorBody(err));
@@ -132,6 +138,26 @@ export async function yearEndRoutes(app: FastifyInstance, opts: { service: YearE
     const input = bookInventorySchema.parse(req.body);
     try {
       return await service.bookInventory(req.params.id, input, req.user!.id);
+    } catch (err) {
+      return closingError(err, reply);
+    }
+  });
+
+  // Produkter i arbete: the preview at ?basis= (default: the previous closed
+  // year's underlag, else Tillverkningskostnad) and the booking.
+  app.get<{ Params: { id: string } }>("/year-end-closings/:id/work-in-progress-preview", ekonomi, async (req, reply) => {
+    const { basis } = workInProgressPreviewQuerySchema.parse(req.query);
+    try {
+      return await service.previewWorkInProgress(req.params.id, basis);
+    } catch (err) {
+      return closingError(err, reply);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/year-end-closings/:id/work-in-progress", ekonomi, async (req, reply) => {
+    const input = bookWorkInProgressSchema.parse(req.body);
+    try {
+      return await service.bookWorkInProgress(req.params.id, input, req.user!.id);
     } catch (err) {
       return closingError(err, reply);
     }

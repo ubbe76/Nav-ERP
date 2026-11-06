@@ -80,7 +80,7 @@ Varje fil har `paths:` i sin frontmatter och läses bara in när du läser en fi
 | `manufacturing.md` | frisläpp, rapportering, top-up, delinleverans, ångra, materialbrist, ändra TO, terminalens lista |
 | `scan.md` | skanning (EAN, lagerplatsens etikettkod, `GET /scan`), etiketter, skanningsfältet |
 | `planning.md` | behovsberäkningen och cachen, Skapa ordrar, avrundning, artikelöversikt, färdigdatumsförslag |
-| `costing.md` | kalkylens materialkällor (förkalkyl/efterkalkyl), efterkalkylen prissatt vid uttaget, pris vid tidpunkt |
+| `costing.md` | kalkylens materialkällor (förkalkyl/efterkalkyl), efterkalkylen prissatt vid uttaget, pris vid tidpunkt, produkter i arbete per datum |
 | `production-planning.md` | planerade veckor, kapacitet, Leveranstidskontroll och reservationen |
 | `delivery-days.md` | fasta leveransdagar, transport- och arbetsdagar, datumintervallet |
 | `configurator.md` | varianter, beställningsvara, konfigurerad TO, externt API |
@@ -88,7 +88,7 @@ Varje fil har `paths:` i sin frontmatter och läses bara in när du läser en fi
 | `economy.md` | automatkontering, manuell bokföring, återkommande verifikat, rapporter, SIE, räkenskapsinformation |
 | `vat.md` | momskoder, momsrapport och omföring, periodisk sammanställning, importmoms |
 | `currency.md` | valuta på dokument och betalningar, kurser, priskedjan |
-| `year-end.md` | anläggningsregister, avskrivningar, årsbokslut, valutaomvärdering |
+| `year-end.md` | anläggningsregister, avskrivningar, årsbokslut, produkter i arbete, valutaomvärdering |
 | `banking.md` | betalfiler (pain.001), camt.054, utlandsbetalningar, bankavstämning |
 | `shipping.md` | frakt via Sendify, bokning/avbokning, spårning, frakt på offert och faktura |
 | `einvoice.md` | e-faktura via Peppol (UBL, B2Brouter, sändningsloggen) |
