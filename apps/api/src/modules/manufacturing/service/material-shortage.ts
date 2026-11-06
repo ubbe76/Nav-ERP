@@ -102,12 +102,14 @@ export async function assertMaterialAvailable(
   // stock_transactions FK inserts already made above took FOR KEY SHARE on
   // these article rows, which FOR UPDATE conflicts with — two reports that
   // had both inserted would deadlock — while FOR NO KEY UPDATE does not.
-  // Known, accepted gap: a draw that empties a location has already updated
-  // (and so locked) every article whose default location it was
-  // (deactivateEmptyLocation) before this point, in no particular order. Two
-  // simultaneous reports that each empty a location the OTHER one's
-  // component defaults to can then deadlock (Postgres aborts one, 40P01).
-  // It needs crosswise default locations and two emptying draws at once.
+  // Known, accepted gap: a draw that EMPTIES a temporary location has
+  // already locked every article whose default location it was
+  // (deactivateEmptyLocation, a second sorted batch after the draw's own
+  // articles) before this point. Two simultaneous reports that each empty a
+  // location the OTHER one's component defaults to can then deadlock
+  // (Postgres aborts one, 40P01). It needs crosswise default locations and
+  // two emptying draws at once; a draw that leaves stock behind takes no
+  // such lock.
   const components = await tx
     .select({ id: articles.id, articleNumber: articles.articleNumber, name: articles.name, type: articles.type, unitId: articles.unitId })
     .from(articles)

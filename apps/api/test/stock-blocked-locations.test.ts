@@ -30,7 +30,8 @@ import { createScanService } from "../src/modules/scan/service/scan.service.js";
 import { onHandByArticle } from "../src/modules/stock/repository/on-hand.js";
 import { createStockCountRepository } from "../src/modules/stock/repository/stock-count.repository.js";
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
-import { allocateOutflowLocations } from "../src/modules/stock/service/outflow-locations.js";
+import { deactivateEmptyLocation } from "../src/modules/stock/service/location-lifecycle.js";
+import { allocateOutflowLocations, lockArticlesForOutflow, type BlockedChoice } from "../src/modules/stock/service/outflow-locations.js";
 import { createStockCountService } from "../src/modules/stock/service/stock-count.service.js";
 import {
   createStockService,
@@ -602,6 +603,29 @@ describe("readers", () => {
     expect((await onHandByArticle(db, [])).size).toBe(0);
   });
 
+  it("a minus on a blocked place is carried by the usable stock, never shown as blocked", async () => {
+    const a1 = await place("A1");
+    const k1 = await place("K1");
+    const k2 = await place("K2");
+    const x = await article("X-1", a1.id);
+    const y = await article("Y-1", a1.id);
+    // X: Automatiskt's remainder left K1 at −3 before it was blocked; K2 holds 4.
+    await stock(x.id, a1.id, 10);
+    await stock(x.id, k1.id, -3);
+    await stock(x.id, k2.id, 4);
+    // Y: a kassation of 8 from a blocked place that held 5.
+    await stock(y.id, a1.id, 10);
+    await stock(y.id, k1.id, 5);
+    await stockService.blockLocation(k1.id, null, user.id);
+    await stockService.blockLocation(k2.id, null, user.id);
+    await stock(y.id, k1.id, -8);
+
+    const onHand = await onHandByArticle(db, [x.id, y.id]);
+    // Physically 11 and 7; usable + blocked is still the physical balance.
+    expect(onHand.get(x.id)).toEqual({ usable: 7, blocked: 4 });
+    expect(onHand.get(y.id)).toEqual({ usable: 7, blocked: 0 });
+  });
+
   it("Saldon: each row says whether its place is blocked, and filters on it", async () => {
     const a1 = await place("A1");
     const k = await place("K1");
@@ -685,5 +709,196 @@ describe("readers", () => {
     expect(preview.rows[0]!.values).toMatchObject({ currentQuantity: 0, change: 10 });
     await imports.commit("stockBalances", input);
     expect([await balance(x.id, await fallbackId()), await balance(x.id, k.id)]).toEqual([10, 4]);
+  });
+});
+
+// Lock order on a TEMPORARY place (fixed = false), where a draw that empties
+// the place deactivates it and clears the Lagerplats of its articles. Every
+// draw locks the article before the place, and deactivateEmptyLocation takes
+// the Lagerplats articles and the place only when the place looks empty — so
+// none of these meet in a deadlock (40P01), and the end state is right.
+describe("lock order on a temporary place", () => {
+  function gate() {
+    let open!: () => void;
+    const promise = new Promise<void>((resolve) => (open = resolve));
+    return { promise, open };
+  }
+
+  // One draw as drawMaterial/deliverBatch book it, the place cleanup held
+  // back until `go` opens: the transaction keeps its locks meanwhile.
+  function heldDraw(
+    articleId: string,
+    quantity: number,
+    opts: { locationId?: string; blockedChoice?: BlockedChoice; lockFirst?: boolean } = {}
+  ) {
+    const drawn = gate();
+    const go = gate();
+    const done = db.transaction(async (tx) => {
+      if (opts.lockFirst) await lockArticlesForOutflow(tx, [articleId]);
+      const parts = await allocateOutflowLocations(tx, articleId, quantity, opts.locationId, { blockedChoice: opts.blockedChoice });
+      for (const part of parts) {
+        await tx.insert(stockTransactions).values({ articleId, locationId: part.locationId, quantityDelta: String(-part.quantity), transactionType: "mo_consumption" });
+      }
+      drawn.open();
+      await go.promise;
+      const deactivated: boolean[] = [];
+      for (const part of parts) deactivated.push(await deactivateEmptyLocation(tx, part.locationId));
+      return { parts, deactivated };
+    });
+    // A failure before `drawn` must not leave the test waiting for it.
+    done.catch(() => drawn.open());
+    return { drawn: drawn.promise, go: go.open, done };
+  }
+
+  // "ok", or the Postgres code behind a failed query (40P01 = deadlock).
+  function outcome(result: PromiseSettledResult<unknown>) {
+    if (result.status === "fulfilled") return "ok";
+    const reason = result.reason as { code?: string; cause?: { code?: string } };
+    return reason.cause?.code ?? reason.code ?? String(result.reason);
+  }
+
+  async function defaultOf(articleId: string) {
+    const [row] = await db.select({ defaultLocationId: articles.defaultLocationId }).from(articles).where(eq(articles.id, articleId));
+    return row!.defaultLocationId;
+  }
+
+  // P (5 st) with one operation and one unlinked component, 2 per unit.
+  async function orderFor(componentId: string, perUnit = 2) {
+    const p = await article(`P-${crypto.randomUUID().slice(0, 6)}`, undefined, "manufactured");
+    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    await mfgService.createRoutingOperation(p.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 1, runTimePerUnit: 1 });
+    await articleService.addBomComponent(p.id, { componentArticleId: componentId, quantity: perUnit });
+    const order = await mfgService.createManufacturingOrder({ articleId: p.id, quantity: 5 }, user.id);
+    const [material] = await mfgService.listMaterialConsumptions(order.id);
+    return { p, order, material: material! };
+  }
+
+  it("two draws of different articles from their shared Lagerplats do not deadlock; the last one out deactivates it", async () => {
+    const l = await place("L1", { fixed: false });
+    const x = await article("X-1", l.id);
+    const y = await article("Y-1", l.id);
+    await stock(x.id, l.id, 5);
+    await stock(y.id, l.id, 5);
+
+    // Each holds its own article; X's part of L1 is emptied, Y leaves 2.
+    const first = heldDraw(x.id, 5);
+    const second = heldDraw(y.id, 3);
+    await Promise.all([first.drawn, second.drawn]);
+    first.go();
+    second.go();
+    const results = await Promise.allSettled([first.done, second.done]);
+    expect(results.map(outcome)).toEqual(["ok", "ok"]);
+    // Something is left on L1, so neither cleanup took a lock or deactivated.
+    expect(results.map((r) => (r as PromiseFulfilledResult<{ deactivated: boolean[] }>).value.deactivated)).toEqual([[false], [false]]);
+    expect(await locationRow(l.id)).toMatchObject({ active: true });
+    expect([await defaultOf(x.id), await defaultOf(y.id)]).toEqual([l.id, l.id]);
+
+    // The last 2 of Y out: L1 is retired once and both lose it as Lagerplats.
+    const { order, row } = await salesOrder(y.id, 2);
+    await salesService.deliverBatch(order.id, { rows: [{ rowId: row.id, quantity: 2 }] }, user.id);
+    expect([await balance(x.id, l.id), await balance(y.id, l.id)]).toEqual([0, 0]);
+    expect(await locationRow(l.id)).toMatchObject({ active: false });
+    expect([await defaultOf(x.id), await defaultOf(y.id)]).toEqual([null, null]);
+  });
+
+  it("an emptying draw waits for the other article's draw to commit, then sees its minus and keeps the place", async () => {
+    const l = await place("L1", { fixed: false });
+    const m = await place("M1");
+    const x = await article("X-1", l.id);
+    const y = await article("Y-1", l.id);
+    await stock(x.id, l.id, 5);
+    await stock(y.id, m.id, 2);
+
+    // X empties L1; Y takes its 2 on M1 and the remaining 3 as a minus on L1.
+    const first = heldDraw(x.id, 5);
+    const second = heldDraw(y.id, 5);
+    await Promise.all([first.drawn, second.drawn]);
+    first.go();
+    second.go();
+    const results = await Promise.allSettled([first.done, second.done]);
+    expect(results.map(outcome)).toEqual(["ok", "ok"]);
+    expect([await balance(x.id, l.id), await balance(y.id, l.id), await balance(y.id, m.id)]).toEqual([0, -3, 0]);
+    // A place with a balance stays active, and nobody lost their Lagerplats.
+    expect(await locationRow(l.id)).toMatchObject({ active: true });
+    expect([await defaultOf(x.id), await defaultOf(y.id)]).toEqual([l.id, l.id]);
+  });
+
+  it("Förbruka from the place waits for a report's Automatiskt draw that empties it", async () => {
+    const l = await place("L1", { fixed: false });
+    const c = await article("C-1", l.id);
+    await stock(c.id, l.id, 10);
+    const { order, material } = await orderFor(c.id);
+
+    // The report: holds C, takes all 10 from L1.
+    const report = heldDraw(c.id, 10, { lockFirst: true });
+    await report.drawn;
+    const forbruka = mfgService.consumeMaterial(order.id, material.id, { locationId: l.id, quantity: 4 }, user.id);
+    await waitForLockWaiter().finally(report.go);
+    const results = await Promise.allSettled([report.done, forbruka]);
+    expect(results.map(outcome)).toEqual(["ok", "ok"]);
+
+    // The report retired L1 (once) and cleared C's Lagerplats; Förbruka then
+    // woke L1 again for its 4, which is now a minus there.
+    expect((results[0] as PromiseFulfilledResult<{ deactivated: boolean[] }>).value.deactivated).toEqual([true]);
+    expect(await balance(c.id, l.id)).toBe(-4);
+    expect(await locationRow(l.id)).toMatchObject({ active: true });
+    expect(await defaultOf(c.id)).toBeNull();
+    const [after] = await mfgService.listMaterialConsumptions(order.id);
+    expect(Number(after!.quantityConsumed)).toBe(4);
+  });
+
+  it("two Förbruka from the place, each of its full balance, run one after the other", async () => {
+    const l = await place("L1", { fixed: false });
+    const c = await article("C-1", l.id);
+    await stock(c.id, l.id, 5);
+    const { order, material } = await orderFor(c.id);
+
+    const first = heldDraw(c.id, 5, { locationId: l.id, blockedChoice: "refuse" });
+    await first.drawn;
+    const second = mfgService.consumeMaterial(order.id, material.id, { locationId: l.id, quantity: 5 }, user.id);
+    await waitForLockWaiter().finally(first.go);
+    const results = await Promise.allSettled([first.done, second]);
+    expect(results.map(outcome)).toEqual(["ok", "ok"]);
+
+    expect((results[0] as PromiseFulfilledResult<{ deactivated: boolean[] }>).value.deactivated).toEqual([true]);
+    expect(await balance(c.id, l.id)).toBe(-5);
+    expect(await locationRow(l.id)).toMatchObject({ active: true });
+    expect(await defaultOf(c.id)).toBeNull();
+  });
+
+  it("Slutför order locks its components before its receipt wakes the chosen place", async () => {
+    const a1 = await place("A1");
+    const l = await place("L1", { fixed: false });
+    const u = await article("U-1", a1.id);
+    // L1 was used and emptied — retired.
+    await stock(u.id, l.id, 1);
+    await stock(u.id, l.id, -1);
+    expect(await locationRow(l.id)).toMatchObject({ active: false });
+    const { p, order } = await orderFor(u.id, 1);
+
+    // A Förbruka of U from L1 that holds U before it wakes L1.
+    const held = gate();
+    const go = gate();
+    const draw = db.transaction(async (tx) => {
+      await lockArticlesForOutflow(tx, [u.id]);
+      held.open();
+      await go.promise;
+      const parts = await allocateOutflowLocations(tx, u.id, 1, l.id, { blockedChoice: "refuse" });
+      for (const part of parts) {
+        await tx.insert(stockTransactions).values({ articleId: u.id, locationId: part.locationId, quantityDelta: String(-part.quantity), transactionType: "mo_consumption" });
+        await deactivateEmptyLocation(tx, part.locationId);
+      }
+    });
+    draw.catch(() => held.open());
+    await held.promise;
+    // Slutför onto L1 waits for U before its receipt wakes L1 — the other
+    // way round it would hold L1 and wait for U while the draw waits for L1.
+    const slutfor = mfgService.complete(order.id, { locationId: l.id, quantity: 5 }, user.id);
+    await waitForLockWaiter().finally(go.open);
+    const results = await Promise.allSettled([draw, slutfor]);
+    expect(results.map(outcome)).toEqual(["ok", "ok"]);
+    // The goods on L1, the unlinked material (5) drawn there after the 1.
+    expect([await balance(p.id, l.id), await balance(u.id, l.id)]).toEqual([5, -6]);
+    expect(await locationRow(l.id)).toMatchObject({ active: true });
   });
 });

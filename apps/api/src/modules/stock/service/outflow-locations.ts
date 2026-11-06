@@ -37,6 +37,14 @@ export type BlockedChoice = "refuse" | "automatic";
 // blocked when it commits. FOR SHARE does not clash with the FK inserts' FOR
 // KEY SHARE, so inflows never wait.
 //
+// Lock order, on BOTH paths: the article first, then the place(s). A chosen
+// place without the article lock let two draws of one article from it each
+// hold the place FOR SHARE and then wait on each other in
+// deactivateEmptyLocation (the article, or the upgrade of the place) — and
+// an Automatiskt draw holding the article could wait on such a draw's share
+// lock crosswise. A writer that holds a place lock before it draws (Slutför's
+// receipt revives its place) locks its articles before that.
+//
 // Each part is one stock_transactions row; the caller still runs
 // assertLocationNotUnderCount and deactivateEmptyLocation per part.
 export async function allocateOutflowLocations(
@@ -46,6 +54,7 @@ export async function allocateOutflowLocations(
   locationId?: string | null,
   opts: { blockedChoice?: BlockedChoice } = {}
 ): Promise<OutflowPart[]> {
+  await lockArticlesForOutflow(db, [articleId]);
   if (locationId) {
     // Revive first (resolveStockLocation's UPDATE of an inactive place takes
     // the row lock itself), then FOR SHARE: taking the share lock first and
@@ -68,7 +77,6 @@ export async function allocateOutflowLocations(
     // "automatic": fall through to the split below.
   }
 
-  await lockArticlesForOutflow(db, [articleId]);
   const candidateIds = await lockOutflowCandidates(db, articleId);
   const { parts, remainder } = allocateOutflow(quantity, candidateIds.length > 0 ? await readCandidates(db, articleId, candidateIds) : []);
   if (remainder <= 0) return parts;

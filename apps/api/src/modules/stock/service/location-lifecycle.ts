@@ -20,18 +20,28 @@ export async function deactivateEmptyLocation(db: Db | Tx, locationId: string): 
     .where(eq(stockLocations.id, locationId));
   if (!location || !location.active || location.fixed || location.name === FALLBACK_LOCATION_NAME) return false;
 
-  // The articles whose Lagerplats this is are locked (sorted) BEFORE the
-  // place row is updated: an Automatiskt draw of such an article holds the
-  // article and then asks for the place FOR SHARE (outflow-locations.ts), so
-  // updating the place first and the article after could wait crosswise with
-  // it. Taken before the emptiness check, so a draw that waited is seen.
+  // The usual case — something is left on the place — is answered WITHOUT a
+  // lock. Locking first made every decrement on a temporary place ask for all
+  // of the place's articles, so two draws of different articles from it
+  // (each already holding its own article) deadlocked.
+  if (await locationHoldsStock(db, locationId)) return false;
+
+  // It looks empty. Lock order article → place, as in every draw: the
+  // articles whose Lagerplats this is (sorted), then the place row itself.
+  // An Automatiskt draw of such an article holds the article and then asks
+  // for the place FOR SHARE (outflow-locations.ts), so taking the place first
+  // and the article after could wait crosswise with it. The place lock waits
+  // out every draw that holds the place FOR SHARE. Then the emptiness is
+  // tried again: a draw that held one of those locks has committed and is
+  // seen. (Two transactions can only both see the place empty when they
+  // drew the same article, and the draws serialise on the article first.)
   await db
     .select({ id: articles.id })
     .from(articles)
     .where(eq(articles.defaultLocationId, locationId))
     .orderBy(asc(articles.id))
     .for("no key update");
-
+  await db.select({ id: stockLocations.id }).from(stockLocations).where(eq(stockLocations.id, locationId)).for("no key update");
   if (await locationHoldsStock(db, locationId)) return false;
 
   // A Spärrad lagerplats keeps its spärr (0185) — a revived one is still blocked.

@@ -84,7 +84,7 @@ Längst upp på kortet finns ett artikelhuvud som ligger kvar oavsett vilken fli
 - **Artikelnummer** är en sökbar väljare — skriv artikelnummer eller benämning och välj en träff för att hoppa direkt till den artikelns kort, utan att gå tillbaka till registret.
 - **Benämning** — artikelns benämning.
 - **Artikeltyp** — Tillverkad, Köpt eller Tjänst, alltså typen som avgör vilka flikar kortet har. Är artikeln en fantomartikel eller inaktiv visas det som en märkning här.
-- **Lagersaldo** visar artikelns totala saldo (summan av alla lagerplatser, i grundenheten). Står en del av saldot på [spärrade lagerplatser](/hjalp/lager#sparrade-lagerplatser) visas **varav spärrat** under siffran. Uppdelningen per lagerplats finns på fliken [Lager](#lager), där en spärrad plats är märkt **Spärrad**.
+- **Lagersaldo** visar artikelns totala saldo (summan av alla lagerplatser, i grundenheten). Står en del av saldot på [spärrade lagerplatser](/hjalp/lager#sparrade-lagerplatser) visas **varav spärrat** under siffran (bara plussaldon där; ett minus på en spärrad plats räknas som brist). Uppdelningen per lagerplats finns på fliken [Lager](#lager), där en spärrad plats är märkt **Spärrad**.
 
 Benämning, artikeltyp och fantom-/aktivflaggan ändras på fliken [Allmänt](#allmant), inte i huvudet.
 

@@ -16,11 +16,19 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { stockBalances, stockLocations, type Db, type Tx } from "@navet/db";
 
 export interface ArticleOnHand {
-  // On places that are not blocked — may be negative.
+  // On places that are not blocked, plus every MINUS on a blocked place —
+  // may be negative.
   usable: number;
-  // On blocked places — shown, never counted.
+  // The plus on blocked places — shown, never counted. Never negative.
   blocked: number;
 }
+
+// The split, per place balance: a minus is never goods on hold. It is a
+// debt — Automatiskt's remainder went negative on the Lagerplats before it
+// was blocked, or a kassation took more than the blocked place held — and the
+// goods really came from a usable place. Counted as blocked it would leave
+// the usable part too high (−3 blocked, +10 open: 7 physically, not 10).
+// usable + blocked is still the physical balance.
 
 // Without articleIds: every article with a stock row (the behovsberäkning).
 // An article without rows is absent — read it as 0.
@@ -30,8 +38,8 @@ export async function onHandByArticle(dbc: Db | Tx, articleIds?: readonly string
   const rows = await dbc
     .select({
       articleId: stockBalances.articleId,
-      usable: sql<string>`coalesce(sum(${stockBalances.quantityOnHand}) filter (where not ${stockLocations.blocked}), 0)`,
-      blocked: sql<string>`coalesce(sum(${stockBalances.quantityOnHand}) filter (where ${stockLocations.blocked}), 0)`,
+      usable: sql<string>`coalesce(sum(${stockBalances.quantityOnHand}) filter (where not ${stockLocations.blocked} or ${stockBalances.quantityOnHand} < 0), 0)`,
+      blocked: sql<string>`coalesce(sum(${stockBalances.quantityOnHand}) filter (where ${stockLocations.blocked} and ${stockBalances.quantityOnHand} > 0), 0)`,
     })
     .from(stockBalances)
     .innerJoin(stockLocations, eq(stockLocations.id, stockBalances.locationId))

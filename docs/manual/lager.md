@@ -93,6 +93,7 @@ En lagerplats kan **spärras**, till exempel för en **Karantän** eller en **Re
 - Det **räknas inte** i behovsberäkningen, artikelöversiktens **Lagersaldo idag (utan spärrat)**, Materialbrist vid rapportering, frisläppets bristvarning, Leveranstidskontrollen och färdigdatumsförslaget.
 - Det **tas aldrig med Automatiskt** (se [Uttag med Automatiskt](#uttag-med-automatiskt)).
 - En inleverans eller ett nytt saldo utan vald plats hoppar över en spärrad **Lagerplats** och går till nästa plats i ordningen, till sist reservplatsen `***`. Reservplatsen kan inte spärras.
+- Ett **minussaldo** på en spärrad plats räknas däremot med, som en brist. Det uppstår till exempel när en kassation tar mer än platsen hade, eller när platsen stod på minus innan den spärrades, och varorna har då i själva verket tagits från lagret du kan använda. På artikelkortet och i artikelöversikten visar **varav spärrat** bara plussaldon.
 
 Så här spärrar och släpper du, med behörigheten Lager:
 

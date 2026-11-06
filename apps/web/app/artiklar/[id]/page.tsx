@@ -26,8 +26,10 @@ export default async function ArticleDetailPage(props: { params: Promise<{ id: s
   // Running stock balance shown in the persistent header: the sum of on-hand
   // across every location, in the article's base unit.
   const totalOnHand = balances.reduce((sum, b) => sum + Number(b.quantityOnHand), 0);
-  // Of which stock on spärrade lagerplatser (not counted by planning).
-  const blockedOnHand = balances.reduce((sum, b) => sum + (b.locationBlocked ? Number(b.quantityOnHand) : 0), 0);
+  // Of which stock on spärrade lagerplatser (not counted by planning) — only
+  // a plus there: a minus on a blocked place is a debt the usable stock
+  // carries (the API's onHandByArticle splits the same way).
+  const blockedOnHand = balances.reduce((sum, b) => sum + (b.locationBlocked && Number(b.quantityOnHand) > 0 ? Number(b.quantityOnHand) : 0), 0);
 
   return (
     <AppShell active="Artiklar">

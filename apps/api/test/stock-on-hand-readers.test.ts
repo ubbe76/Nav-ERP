@@ -17,10 +17,13 @@ import { describe, expect, it } from "vitest";
 const SRC = fileURLToPath(new URL("../src", import.meta.url));
 
 const READS = [
-  // The view, read or joined.
-  /\.(?:from|innerJoin|leftJoin|rightJoin|fullJoin)\(\s*stockBalances\s*\)/g,
+  // The view as an argument — read or joined: .from(stockBalances),
+  // .leftJoin(stockBalances, eq(…)), across lines too.
+  /\(\s*stockBalances\s*[,)]/g,
+  // The view interpolated into raw SQL.
+  /\$\{\s*stockBalances\s*\}/g,
   // A balance summed straight from the log.
-  /sum\(\$\{stockTransactions\.quantityDelta\}/g,
+  /sum\(\s*\$\{stockTransactions\.quantityDelta\}/g,
   // The same in raw SQL.
   /\b(?:from|join)\s+"?stock_balances"?/gi,
   /sum\(\s*(?:\w+\.)?"?quantity_delta"?\s*\)/gi,
@@ -103,6 +106,12 @@ describe("stock balance readers", () => {
     expect(readsIn("sql`sum(${stockTransactions.quantityDelta})`")).toBe(1);
     expect(readsIn("sql`select sum(t.quantity_delta) from stock_transactions t`")).toBe(1);
     expect(readsIn("sql`select * from stock_balances`")).toBe(1);
+    // A join with its condition, on one line and spread over several.
+    expect(readsIn("db.select().from(articles).leftJoin(stockBalances, eq(stockBalances.articleId, articles.id))")).toBe(1);
+    expect(readsIn("db.select().from(articles)\n  .innerJoin(\n    stockBalances,\n    eq(stockBalances.articleId, articles.id)\n  )")).toBe(1);
+    expect(readsIn("sql`select sum(b.quantity_on_hand) from ${stockBalances} b`")).toBe(1);
+    // A column of the view is no read of its own (the from/join is).
+    expect(readsIn("eq(stockBalances.articleId, articles.id)")).toBe(0);
     expect(readsIn("// derived from stock_balances")).toBe(0);
   });
 });

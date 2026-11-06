@@ -202,19 +202,7 @@ async function consumeLinkedMaterial(
     .from(moMaterialConsumptions)
     .where(and(eq(moMaterialConsumptions.manufacturingOrderId, opts.moId), opts.operationFilter))
     .for("update");
-  // The automatic allocation locks each component before reading its
-  // balances. Lock EVERY component of the order here, sorted, in one batch —
-  // not just the rows this call draws: one report can call this twice (the
-  // operation's linked rows, then receiveFinishedGoods's unlinked rows), and
-  // two separately sorted batches would let two reports wait on each other
-  // crosswise (MO1 linked A + unlinked B against MO2 linked B + unlinked A).
-  // The second call then finds every lock already held, as does
-  // assertMaterialAvailable afterwards (same sort order).
-  const components = await tx
-    .selectDistinct({ articleId: moMaterialConsumptions.componentArticleId })
-    .from(moMaterialConsumptions)
-    .where(eq(moMaterialConsumptions.manufacturingOrderId, opts.moId));
-  await lockArticlesForOutflow(tx, components.map((c) => c.articleId));
+  await lockOrderComponents(tx, opts.moId);
 
   const consumed: ConsumedMaterialLine[] = [];
   for (const row of rows) {
@@ -234,6 +222,24 @@ async function consumeLinkedMaterial(
     consumed.push(...(await drawMaterial(tx, row, delta, opts.locationId, opts.moId, opts.createdBy, "automatic")));
   }
   return consumed;
+}
+
+// The automatic allocation locks each component before reading its
+// balances. Lock EVERY component of the order, sorted, in one batch — not
+// just the rows one call draws: one report can draw twice (the operation's
+// linked rows, then receiveFinishedGoods's unlinked rows), and two separately
+// sorted batches would let two reports wait on each other crosswise (MO1
+// linked A + unlinked B against MO2 linked B + unlinked A). The second call
+// then finds every lock already held, as does assertMaterialAvailable
+// afterwards (same sort order). receiveFinishedGoods takes it before its
+// receipt too: the receipt may revive the chosen place (a row lock on the
+// place), and the lock order is article → place (outflow-locations.ts).
+async function lockOrderComponents(tx: Tx, moId: string): Promise<void> {
+  const components = await tx
+    .selectDistinct({ articleId: moMaterialConsumptions.componentArticleId })
+    .from(moMaterialConsumptions)
+    .where(eq(moMaterialConsumptions.manufacturingOrderId, moId));
+  await lockArticlesForOutflow(tx, components.map((c) => c.articleId));
 }
 
 // One material row's draw booked where the stock is: an explicit location
@@ -459,6 +465,10 @@ async function receiveFinishedGoods(
     .from(articles)
     .where(eq(articles.id, order.articleId));
 
+  // Article → place: the components the unlinked draw below takes are locked
+  // before the receipt may revive the chosen place (Slutför order comes here
+  // first; a report has already locked them).
+  await lockOrderComponents(tx, order.id);
   const receiptLocationId = await resolveStockLocation(tx, order.articleId, opts.locationId);
   await assertLocationNotUnderCount(tx, receiptLocationId);
 
