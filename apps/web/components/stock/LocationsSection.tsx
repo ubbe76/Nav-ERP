@@ -118,7 +118,7 @@ export function LocationsSection({
       }
       if (res.defaultForArticles > 0) {
         parts.push(
-          `${res.defaultForArticles} ${res.defaultForArticles === 1 ? "artikel har" : "artiklar har"} platsen som Lagerplats. Deras inleveranser går till nästa plats tills spärren släpps.`
+          `${res.defaultForArticles} ${res.defaultForArticles === 1 ? "artikel har" : "artiklar har"} platsen som huvudplats. Deras inleveranser går till nästa plats tills spärren släpps.`
         );
       }
       setNotice(parts.join(" "));

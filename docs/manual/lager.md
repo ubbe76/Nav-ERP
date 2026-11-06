@@ -110,7 +110,7 @@ En lagerplats kan **spärras**, till exempel för en **Karantän** eller en **Re
 
 Så här spärrar och släpper du, med behörigheten Lager:
 
-1. Klicka **Spärra…** på lagerplatsens rad, skriv gärna en **Anteckning** (t.ex. *Karantän, väntar på kontroll*) och klicka **Spärra**. Nav säger sedan hur många artiklar som har saldo på platsen och hur många som har den som huvudplats eller alternativ plats; deras inleveranser går till nästa plats tills spärren släpps. Du kan också skapa platsen spärrad direkt med kryssrutan **Spärrad lagerplats** i **Ny lagerplats**.
+1. Klicka **Spärra…** på lagerplatsens rad, skriv gärna en **Anteckning** (t.ex. *Karantän, väntar på kontroll*) och klicka **Spärra**. Nav säger sedan hur många artiklar som har saldo på platsen och hur många som har den som huvudplats; deras inleveranser går till nästa plats tills spärren släpps. En spärrad alternativ plats hoppas också över, både vid inleverans och av Automatiskt. Du kan också skapa platsen spärrad direkt med kryssrutan **Spärrad lagerplats** i **Ny lagerplats**.
 2. Kolumnen **Spärrad** visar **Spärrad** med anteckningen och *sedan* vilket datum. I **Saldon**, på artikelkortet och i Skanna märks saldot på platsen med **Spärrad**.
 3. **Släpp spärr** tar bort spärren efter en bekräftelse. Saldot räknas då igen.
 
