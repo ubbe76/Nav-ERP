@@ -763,6 +763,49 @@
   cursor: default;
 }
 
+/* Dela tid i ställ och produktion: Starta ställ / Starta produktion side by
+   side (stacked on a phone), and Ställ klart under the stamp it belongs to. */
+.actionPair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.secondaryAction {
+  min-height: 64px;
+  padding: 0 16px;
+  font-family: var(--font-body);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 2px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.secondaryAction:hover {
+  background: var(--color-bg);
+}
+.secondaryAction:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.secondaryAction:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.sessionGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kindTag {
+  margin-left: 10px;
+  vertical-align: middle;
+}
+
 .backButton {
   min-height: 52px;
   font-family: var(--font-body);
@@ -784,6 +827,10 @@
 }
 
 @media (max-width: 640px) {
+  .actionPair {
+    grid-template-columns: 1fr;
+  }
+
   .filterBar > .filterGroup {
     flex-basis: 100%;
   }

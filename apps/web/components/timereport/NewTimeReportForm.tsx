@@ -7,7 +7,7 @@ import { Field, Input, Select } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
 import { apiFetch } from "../../lib/api";
 import { stockholmToday } from "../../lib/date";
-import type { EmployeeDirectoryEntry, ManufacturingOrder, MOOperation } from "../../lib/types";
+import type { TimeKind, EmployeeDirectoryEntry, ManufacturingOrder, MOOperation } from "../../lib/types";
 import { Form, FormActions, FormError, FormRow } from "../ui/Form";
 import { useCanOpenPersonal } from "../PermissionsProvider";
 
@@ -21,9 +21,11 @@ const REPORTABLE_MO_STATUSES = "released,in_progress,done,closed";
 
 export function NewTimeReportForm({
   employees,
+  timeKindSplit = false,
   onSuccess,
 }: {
   employees: EmployeeDirectoryEntry[];
+  timeKindSplit?: boolean;
   onSuccess: () => void;
 }) {
   const [employeeId, setEmployeeId] = useState(employees[0]?.id ?? "");
@@ -33,6 +35,7 @@ export function NewTimeReportForm({
   const [operationsLoading, setOperationsLoading] = useState(false);
   const [date, setDate] = useState(today());
   const [hours, setHours] = useState("1");
+  const [kind, setKind] = useState<TimeKind | "">("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -90,6 +93,7 @@ export function NewTimeReportForm({
           date,
           hours: Number(hours),
           note: note || undefined,
+          ...(timeKindSplit && kind ? { kind } : {}),
         }),
       });
       onSuccess();
@@ -147,6 +151,16 @@ export function NewTimeReportForm({
           <Input id="hours" type="number" min="0.01" step="0.01" required size="sm" value={hours} onChange={(e) => setHours(e.target.value)} />
         </Field>
       </FormRow>
+
+      {timeKindSplit && (
+        <Field label="Typ" htmlFor="kind">
+          <Select id="kind" value={kind} onChange={(e) => setKind(e.target.value as TimeKind | "")}>
+            <option value="">Ej uppdelad</option>
+            <option value="setup">Ställ</option>
+            <option value="run">Produktion</option>
+          </Select>
+        </Field>
+      )}
 
       <Field label="Anteckning (valfritt)" htmlFor="note">
         <Input id="note" value={note} onChange={(e) => setNote(e.target.value)} />

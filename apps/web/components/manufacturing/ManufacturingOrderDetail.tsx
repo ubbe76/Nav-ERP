@@ -45,6 +45,7 @@ import {
   type ScrapEntry,
   type StockLocation,
   type TimeReport,
+  TIME_KIND_LABELS,
 } from "../../lib/types";
 import { Card } from "../ui/Card";
 import { ConfigurationLineList } from "../configurator/ConfigurationLines";
@@ -75,6 +76,8 @@ interface ManufacturingOrderDetailProps {
   legoPurchases: LegoPurchaseOperation[];
   // Ångra rapportering — admin/arbetsledare with Tillverkning.
   canUndoReports: boolean;
+  // Dela tid i ställ och produktion (System → Inställningar).
+  timeKindSplit?: boolean;
 }
 
 export function ManufacturingOrderDetail({
@@ -89,6 +92,7 @@ export function ManufacturingOrderDetail({
   reports,
   legoPurchases,
   canUndoReports,
+  timeKindSplit = false,
 }: ManufacturingOrderDetailProps) {
   const router = useRouter();
   const can = useCan();
@@ -556,6 +560,7 @@ export function ManufacturingOrderDetail({
               { key: "operationSequenceNo", label: "Operation", width: "160px" },
               { key: "date", label: "Datum", width: "120px" },
               { key: "hours", label: "Timmar", width: "100px", align: "right" },
+              ...(timeReports.some((r) => r.kind) ? [{ key: "kind", label: "Typ", width: "110px" }] : []),
               { key: "note", label: "Anteckning", width: "1fr" },
             ]}
             rows={timeReports}
@@ -565,6 +570,8 @@ export function ManufacturingOrderDetail({
                   return `${row.operationSequenceNo} — ${row.workCenterName}`;
                 case "hours":
                   return formatQuantity(row.hours);
+                case "kind":
+                  return row.kind ? TIME_KIND_LABELS[row.kind] : "–";
                 case "note":
                   return row.note ?? "–";
                 default:
@@ -704,6 +711,7 @@ export function ManufacturingOrderDetail({
             locations={locations}
             employees={employees}
             timeReports={timeReports}
+            timeKindSplit={timeKindSplit}
             onDone={() => router.refresh()}
           />
         </>

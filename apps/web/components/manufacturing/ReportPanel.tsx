@@ -20,6 +20,7 @@ import type {
   MOMaterialConsumption,
   MOOperation,
   StockLocation,
+  TimeKind,
   TimeReport,
 } from "../../lib/types";
 import styles from "./ReportPanel.module.css";
@@ -40,6 +41,8 @@ interface ReportPanelProps {
   locations: StockLocation[];
   employees: EmployeeDirectoryEntry[];
   timeReports: TimeReport[];
+  // Dela tid i ställ och produktion: Rapportera tid gets a Typ field.
+  timeKindSplit?: boolean;
   onDone: () => void;
 }
 
@@ -85,6 +88,7 @@ export function ReportPanel({
   locations,
   employees,
   timeReports,
+  timeKindSplit = false,
   onDone,
 }: ReportPanelProps) {
   const orderDone = orderStatus === "done";
@@ -158,7 +162,14 @@ export function ReportPanel({
           </div>
         )}
 
-        <ReportTimeRow employees={employees} operations={operations} orderQuantity={orderQuantity} timeReports={timeReports} onDone={onDone} />
+        <ReportTimeRow
+          employees={employees}
+          operations={operations}
+          orderQuantity={orderQuantity}
+          timeReports={timeReports}
+          timeKindSplit={timeKindSplit}
+          onDone={onDone}
+        />
 
         {(orderStatus === "released" || orderStatus === "in_progress") && (
           // No Starta: Slutför order works straight on a released order.
@@ -443,12 +454,14 @@ function ReportTimeRow({
   operations,
   orderQuantity,
   timeReports,
+  timeKindSplit,
   onDone,
 }: {
   employees: EmployeeDirectoryEntry[];
   operations: MOOperation[];
   orderQuantity: string;
   timeReports: TimeReport[];
+  timeKindSplit: boolean;
   onDone: () => void;
 }) {
   const [employeeId, setEmployeeId] = useState(employees[0]?.id ?? "");
@@ -457,9 +470,13 @@ function ReportTimeRow({
   // Timmar is prefilled with the operation's theoretical time less what is
   // already reported on it; a typed value wins until another operation is
   // picked or the report is saved.
+  // Typ (Dela tid i ställ och produktion): "" = ej uppdelad. The suggestion
+  // follows it, but switching Typ never overwrites a typed value.
+  const [kind, setKind] = useState<TimeKind | "">("");
   const [typedHours, setTypedHours] = useState<string | null>(null);
   const hours =
-    typedHours ?? suggestedReportHours(operations.find((op) => op.id === operationId), orderQuantity, timeReports);
+    typedHours ??
+    suggestedReportHours(operations.find((op) => op.id === operationId), orderQuantity, timeReports, timeKindSplit ? kind : "");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -473,7 +490,14 @@ function ReportTimeRow({
     try {
       await apiFetch("/api/v1/time-reports", {
         method: "POST",
-        body: JSON.stringify({ employeeId, moOperationId: operationId, date, hours: Number(hours), note: note || undefined }),
+        body: JSON.stringify({
+          employeeId,
+          moOperationId: operationId,
+          date,
+          hours: Number(hours),
+          note: note || undefined,
+          ...(timeKindSplit && kind ? { kind } : {}),
+        }),
       });
       setNote("");
       setTypedHours(null);
@@ -515,6 +539,15 @@ function ReportTimeRow({
             ))}
           </Select>
         </Cell>
+        {timeKindSplit && (
+          <Cell label="Typ" className={styles.date}>
+            <Select id="reportKind" aria-label="Typ" value={kind} onChange={(e) => setKind(e.target.value as TimeKind | "")}>
+              <option value="">Ej uppdelad</option>
+              <option value="setup">Ställ</option>
+              <option value="run">Produktion</option>
+            </Select>
+          </Cell>
+        )}
         <Cell label="Datum" className={styles.date}>
           <Input id="reportDate" aria-label="Datum" type="date" required size="sm" value={date} onChange={(e) => setDate(e.target.value)} />
         </Cell>

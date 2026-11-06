@@ -19,7 +19,7 @@ import { ScrapReasonFields } from "../quality/ScrapReasonFields";
 import { useScrapReasons } from "../../lib/useScrapReasons";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import { formatElapsed, formatQuantity, operationProgress } from "../../lib/stampSessions";
-import type { AttendanceSession, StampSession } from "../../lib/types";
+import { TIME_KIND_LABELS, type AttendanceSession, type StampSession } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
 import styles from "./InProgressPageClient.module.css";
 
@@ -115,7 +115,12 @@ export function InProgressPageClient({
             case "order":
               return <Link href={`/tillverkning/ordrar/${s.manufacturingOrderId}`}>{s.manufacturingOrderNumber}</Link>;
             case "operation":
-              return `${s.operationSequenceNo} · ${s.workCenterName}`;
+              return (
+                <span className={styles.elapsed}>
+                  <span>{`${s.operationSequenceNo} · ${s.workCenterName}`}</span>
+                  {s.kind && <StatusPill status={s.kind === "setup" ? "draft" : "running"} label={TIME_KIND_LABELS[s.kind]} compact />}
+                </span>
+              );
             case "article":
               return s.articleName;
             case "since":

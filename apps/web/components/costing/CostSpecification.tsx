@@ -45,7 +45,9 @@ function percent(value: string) {
 
 // The setup cost's share of an operation, spread across the calculated
 // quantity: ställtid × timkostnad ÷ antal. "—" when there's no setup time to
-// spread (null, e.g. an efterkalkyl) or nothing to spread it over.
+// spread (null: an efterkalkyl whose time carries no Ställ/Produktion type, or
+// rows saved before the column existed) or nothing to spread it over. On an
+// efterkalkyl the divisor is N, the delivered quantity from the analysis.
 function setupPerUnit(row: CostCalculationOperationRow, quantity: string) {
   const qty = Number(quantity);
   if (row.setupHours === null || !qty) return "—";
@@ -207,14 +209,17 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
                       // are exact — only the hours are a rounded display.
                       return Number(row.hours).toLocaleString("sv-SE", { maximumFractionDigits: 4 });
                     case "setupHours":
-                      // Null for post-calculations and for rows saved before
+                      // Null for an efterkalkyl without typed time and for rows saved before
                       // the column existed — same rounded-display convention
                       // as Timmar above.
                       return row.setupHours === null
                         ? "—"
                         : Number(row.setupHours).toLocaleString("sv-SE", { maximumFractionDigits: 4 });
                     case "setupPerUnit":
-                      return setupPerUnit(row, detail.quantity);
+                      return setupPerUnit(
+                        row,
+                        detail.type === "post" && detail.analysis ? String(detail.analysis.outputQuantity) : detail.quantity
+                      );
                     case "overheadPercent":
                       return percent(row.overheadPercent);
                     case "hourlyRate":

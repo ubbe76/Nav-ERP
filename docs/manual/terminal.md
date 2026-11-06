@@ -54,6 +54,17 @@ Välj en av anledningarna (stora knappar) och skriv vid behov en **Kommentar (va
 
    Blev en utstämpling fel — fel antal, fel operation eller fel order — ångrar arbetsledaren den med **Ångra** under **Rapporteringar** på tillverkningsorderns detaljsida; antalen, materialet, inleveransen och stämplingens tid backas då i ett svep (se [Tillverkning](/hjalp/tillverkning#rapporteringar-och-angra)).
 
+### Ställ och produktion
+
+Är inställningen **Dela tid i ställ och produktion** på (System → Inställningar, se [Inställningar](/hjalp/system#installningar)) frågar terminalen om tiden är ställ eller produktion, utan något extra tryck:
+
+- I stället för **Starta valda** står två knappar i operationslistan, **Starta ställ** och **Starta produktion**. Knappen du trycker på gäller alla markerade operationer, så välj den typ som passar hela satsen — vill du starta ställ på en operation och produktion på en annan gör du två omgångar.
+- Pågående stämplingar märks **Ställ** eller **Produktion**, i hemvyn och i **Stämpla ut**.
+- En pågående ställstämpling har en knapp **Ställ klart**, både i hemvyn och i vyn **Stämpla ut**. Den stämplar ut ställtiden och stämplar direkt in dig på produktion på samma operation. Ingen mängd rapporteras och inget material dras, och ordern påverkas inte; bara ställtiden blir en tidrapport. Misslyckas instämplingen på produktion står du utstämplad och felet visas — välj operationen igen och tryck **Starta produktion**.
+- När du stämplar ut får tidrapporten samma typ som stämplingen (**Ställ** eller **Produktion**). Det gäller också när arbetsledaren stämplar ut dig från **Pågående arbete** och när systemet stämplar ut dig automatiskt.
+
+Typen används bara för analysen: efterkalkylen och [Kalkylutfall](/hjalp/rapporter#kalkylutfall) kan visa verklig ställtid och stycktid var för sig. Terminalen kräver aldrig någon typ, och lönen läses ur närvaron, så den påverkas inte. Är inställningen av fungerar allt som förut, och tid som registrerats tidigare förblir **Ej uppdelad**.
+
 Att stämpla in på en operation du redan har en öppen stämpling på avvisas — den visas som misslyckad vid **Starta valda** tills du stämplat ut den först. Inställningen **Tillåt flera samtidiga stämplingar** (System → Inställningar) styr bara om knappen **Stämpla in på arbete** visas i hemvyn när du redan har öppna stämplingar sedan tidigare — är den avslagen måste du stämpla ut något innan du kan välja fler operationer.
 
 ## Ta ut ATF

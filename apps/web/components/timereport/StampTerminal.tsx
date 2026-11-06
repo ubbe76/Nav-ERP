@@ -19,10 +19,12 @@ import type {
   EmployeeDirectoryEntry,
   ResolvedCalendarDay,
   StampSession,
+  TimeKind,
   TerminalMaterial,
   TerminalOperation,
   TerminalStation,
 } from "../../lib/types";
+import { TIME_KIND_LABELS } from "../../lib/types";
 import { StatusPill, type Status } from "../ui/StatusPill";
 import { SegmentedToggle } from "../ui/SegmentedToggle";
 import {
@@ -64,7 +66,7 @@ type PendingAttendanceAction =
   | { kind: "attendanceIn"; forgottenStoppedAt?: string }
   // earlierFailed: operations of the same batch that already failed for
   // another reason before the question came — they stay checked afterwards.
-  | { kind: "stampIn"; operations: TerminalOperation[]; earlierFailed: TerminalOperation[] }
+  | { kind: "stampIn"; operations: TerminalOperation[]; earlierFailed: TerminalOperation[]; timeKind?: TimeKind }
   | { kind: "goHome"; attendanceId: string }
   | { kind: "atf"; attendanceId: string; atfTransactionId: string; hours: number };
 
@@ -106,12 +108,15 @@ export function StampTerminal({
   initialOpenAttendance,
   stations,
   allowMultipleStamps,
+  timeKindSplit = false,
 }: {
   employees: EmployeeDirectoryEntry[];
   initialOpenSessions: StampSession[];
   initialOpenAttendance: AttendanceSession[];
   stations: TerminalStation[];
   allowMultipleStamps: boolean;
+  // Dela tid i ställ och produktion: Starta ställ / Starta produktion, Ställ klart.
+  timeKindSplit?: boolean;
 }) {
   const [step, setStep] = useState<Step>({ name: "keypad" });
   const [entry, setEntry] = useState("");
@@ -434,7 +439,7 @@ export function StampTerminal({
       return attendanceIn(employee, { reason, forgottenStoppedAt: pending.forgottenStoppedAt });
     }
     if (pending.kind === "stampIn") {
-      return startSelectedOperations(employee, pending.operations, reason, pending.earlierFailed);
+      return startSelectedOperations(employee, pending.operations, reason, pending.earlierFailed, pending.timeKind);
     }
     if (pending.kind === "goHome") {
       return goHome(employee, pending.attendanceId, { reason, overtimeDisposition });
@@ -451,7 +456,8 @@ export function StampTerminal({
     employee: EmployeeDirectoryEntry,
     operations: TerminalOperation[],
     attendanceReason?: AttendanceReasonInput,
-    earlierFailed: TerminalOperation[] = []
+    earlierFailed: TerminalOperation[] = [],
+    timeKind?: TimeKind
   ) {
     if (operations.length === 0) return;
     setBusy(true);
@@ -467,6 +473,7 @@ export function StampTerminal({
             body: JSON.stringify({
               employeeId: employee.id,
               moOperationId: operation.operationId,
+              ...(timeKind ? { kind: timeKind } : {}),
               ...(reasonPending ? { attendanceReason: reasonPending } : {}),
             }),
           });
@@ -481,7 +488,7 @@ export function StampTerminal({
             return void (await openDeviation(
               employee,
               required,
-              { kind: "stampIn", operations: operations.slice(i), earlierFailed: failed },
+              { kind: "stampIn", operations: operations.slice(i), earlierFailed: failed, timeKind },
               { reason: reasonPending }
             ));
           }
@@ -492,7 +499,7 @@ export function StampTerminal({
             return void (await openDeviation(
               employee,
               step.body,
-              { kind: "stampIn", operations: operations.slice(i), earlierFailed: failed },
+              { kind: "stampIn", operations: operations.slice(i), earlierFailed: failed, timeKind },
               {},
               apiErrorMessage(err, "Anledningen finns inte längre — välj en annan.")
             ));
@@ -741,6 +748,48 @@ export function StampTerminal({
     };
   });
 
+  // Ställ klart: stamp out the setup with 0/0 (only the time row, no quantity,
+  // no material) and straight on to Produktion on the same operation. If the
+  // second call fails the person stands stamped out, with the error shown.
+  async function setupDone(employee: EmployeeDirectoryEntry, session: StampSession) {
+    setBusy(true);
+    try {
+      try {
+        await apiFetch(`/api/v1/stamp-sessions/${session.id}/stop`, {
+          method: "POST",
+          body: JSON.stringify({ quantityOk: 0, quantityScrapped: 0 }),
+        });
+      } catch (err) {
+        try {
+          await refresh();
+        } catch {
+          // keep the cached lists
+        }
+        setStep({ name: "home", employee });
+        setError(apiErrorMessage(err, "Ställ klart misslyckades."));
+        return;
+      }
+      try {
+        await apiFetch("/api/v1/stamp-sessions", {
+          method: "POST",
+          body: JSON.stringify({ employeeId: employee.id, moOperationId: session.moOperationId, kind: "run" }),
+        });
+        setError(null);
+        setNotice("Ställ klart — produktionen är instämplad.");
+      } catch (err) {
+        setError(apiErrorMessage(err, "Ställtiden sparades men instämplingen på produktion misslyckades."));
+      }
+      try {
+        await refresh();
+      } catch {
+        // keep the cached lists
+      }
+      setStep({ name: "home", employee });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function stampOut(employee: EmployeeDirectoryEntry, session: StampSession) {
     if (Number(quantityScrapped) > 0 && scrapReasonRegister && scrapReasonId === "") {
       setError("Välj en orsak när kasserat antal är större än 0.");
@@ -884,6 +933,8 @@ export function StampTerminal({
             now={now}
             allowMultipleStamps={allowMultipleStamps}
             busy={busy}
+            timeKindSplit={timeKindSplit}
+            onSetupDone={(session) => setupDone(step.employee, session)}
             onStampOut={(session) => setStep({ name: "stampOut", employee: step.employee, session })}
             onNewStamp={() => openOperationList(step.employee)}
             onAttendanceIn={() => attendanceIn(step.employee)}
@@ -1024,7 +1075,8 @@ export function StampTerminal({
             onToggle={toggleOperationSelected}
             busy={busy}
             error={error}
-            onStart={() => startSelectedOperations(step.employee, selection.start)}
+            timeKindSplit={timeKindSplit}
+            onStart={(timeKind) => startSelectedOperations(step.employee, selection.start, undefined, [], timeKind)}
             onBack={() => setStep({ name: "home", employee: step.employee })}
           />
         )}
@@ -1039,6 +1091,7 @@ export function StampTerminal({
               <div className={styles.summarySecondary}>
                 Op <span className="num">{step.session.operationSequenceNo}</span> · {step.session.workCenterName} —{" "}
                 <span className="num">{formatElapsed(step.session, now)}</span>
+                {step.session.kind && <KindTag kind={step.session.kind} />}
               </div>
               {step.session.packingInstructions && (
                 <div className={styles.packingNote}>📦 {step.session.packingInstructions}</div>
@@ -1127,6 +1180,16 @@ export function StampTerminal({
               <span className={styles.toggleBox} aria-hidden="true" />
               Operationen är klar
             </button>
+            {timeKindSplit && step.session.kind === "setup" && !step.session.pausedAt && (
+              <button
+                type="button"
+                className={styles.secondaryAction}
+                disabled={busy}
+                onClick={() => setupDone(step.employee, step.session)}
+              >
+                Ställ klart
+              </button>
+            )}
             <button
               type="button"
               className={styles.bigAction}
@@ -1188,7 +1251,9 @@ function HomeStep({
   attendance,
   now,
   allowMultipleStamps,
+  timeKindSplit,
   busy,
+  onSetupDone,
   onStampOut,
   onNewStamp,
   onAttendanceIn,
@@ -1201,7 +1266,9 @@ function HomeStep({
   attendance: AttendanceSession | undefined;
   now: number;
   allowMultipleStamps: boolean;
+  timeKindSplit: boolean;
   busy: boolean;
+  onSetupDone: (session: StampSession) => void;
   onStampOut: (session: StampSession) => void;
   onNewStamp: () => void;
   onAttendanceIn: () => void;
@@ -1250,22 +1317,29 @@ function HomeStep({
       ) : (
         <div className={styles.choiceList}>
           {sessions.map((session) => (
-            <button
-              key={session.id}
-              type="button"
-              className={`${styles.choice} ${styles.choiceOpen}`}
-              disabled={busy}
-              onClick={() => onStampOut(session)}
-            >
-              <span className={styles.choicePrimary}>
-                <span className="num">{session.manufacturingOrderNumber}</span> · {session.articleName}
-              </span>
-              <span className={styles.choiceSecondary}>
-                Op <span className="num">{session.operationSequenceNo}</span> · {session.workCenterName} —{" "}
-                <span className="num">{formatElapsed(session, now)}</span>
-                {session.pausedAt ? " · Pausad" : ""} · Tryck för att stämpla ut
-              </span>
-            </button>
+            <div key={session.id} className={styles.sessionGroup}>
+              <button
+                type="button"
+                className={`${styles.choice} ${styles.choiceOpen}`}
+                disabled={busy}
+                onClick={() => onStampOut(session)}
+              >
+                <span className={styles.choicePrimary}>
+                  <span className="num">{session.manufacturingOrderNumber}</span> · {session.articleName}
+                  {session.kind && <KindTag kind={session.kind} />}
+                </span>
+                <span className={styles.choiceSecondary}>
+                  Op <span className="num">{session.operationSequenceNo}</span> · {session.workCenterName} —{" "}
+                  <span className="num">{formatElapsed(session, now)}</span>
+                  {session.pausedAt ? " · Pausad" : ""} · Tryck för att stämpla ut
+                </span>
+              </button>
+              {timeKindSplit && session.kind === "setup" && !session.pausedAt && (
+                <button type="button" className={styles.secondaryAction} disabled={busy} onClick={() => onSetupDone(session)}>
+                  Ställ klart
+                </button>
+              )}
+            </div>
           ))}
         </div>
       )}
@@ -1552,6 +1626,15 @@ function StationPicker({
   );
 }
 
+// The type of a running stamp, next to the operation it belongs to.
+function KindTag({ kind }: { kind: TimeKind }) {
+  return (
+    <span className={styles.kindTag}>
+      <StatusPill status={kind === "setup" ? "draft" : "running"} label={TIME_KIND_LABELS[kind]} compact />
+    </span>
+  );
+}
+
 function OperationListView({
   employee,
   stations,
@@ -1578,6 +1661,7 @@ function OperationListView({
   onToggle,
   busy,
   error,
+  timeKindSplit,
   onStart,
   onBack,
 }: {
@@ -1607,7 +1691,8 @@ function OperationListView({
   onToggle: (operationId: string) => void;
   busy: boolean;
   error: string | null;
-  onStart: () => void;
+  timeKindSplit: boolean;
+  onStart: (timeKind?: TimeKind) => void;
   onBack: () => void;
 }) {
   const today = stockholmToday();
@@ -1748,9 +1833,31 @@ function OperationListView({
             filtret och startas inte.
           </p>
         )}
-        <button type="button" className={styles.bigAction} disabled={busy || startCount === 0} onClick={onStart}>
-          Starta valda{startCount > 0 ? ` (${startCount})` : ""}
-        </button>
+        {timeKindSplit ? (
+          // One choice for the whole batch: the button pressed is the type.
+          <div className={styles.actionPair}>
+            <button
+              type="button"
+              className={styles.secondaryAction}
+              disabled={busy || startCount === 0}
+              onClick={() => onStart("setup")}
+            >
+              Starta ställ{startCount > 0 ? ` (${startCount})` : ""}
+            </button>
+            <button
+              type="button"
+              className={styles.bigAction}
+              disabled={busy || startCount === 0}
+              onClick={() => onStart("run")}
+            >
+              Starta produktion{startCount > 0 ? ` (${startCount})` : ""}
+            </button>
+          </div>
+        ) : (
+          <button type="button" className={styles.bigAction} disabled={busy || startCount === 0} onClick={() => onStart()}>
+            Starta valda{startCount > 0 ? ` (${startCount})` : ""}
+          </button>
+        )}
         <BackRow onBack={onBack} />
       </div>
     </section>

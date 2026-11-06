@@ -45,3 +45,36 @@ describe("suggestedReportHours", () => {
     expect(suggestedReportHours({ id: "op1", setupTime: "0.2", runTimePerUnit: "0" }, "1", [])).toBe("");
   });
 });
+
+// Dela tid i ställ och produktion: the suggestion is per type, from the TO's
+// time reports that carry kind.
+describe("suggestedReportHours per type", () => {
+  const op = { id: "op1", setupTime: "30", runTimePerUnit: "1.5" };
+  const reports = [
+    { moOperationId: "op1", hours: "0.25", kind: "setup" as const },
+    { moOperationId: "op1", hours: "0.5", kind: "run" as const },
+    { moOperationId: "op1", hours: "0.1", kind: null },
+    { moOperationId: "op2", hours: "9", kind: "setup" as const },
+  ];
+
+  it("setup = planned setup time less the setup hours reported", () => {
+    expect(suggestedReportHours(op, "20", [], "setup")).toBe("0.5");
+    expect(suggestedReportHours(op, "20", reports, "setup")).toBe("0.25");
+  });
+
+  it("run = run time × quantity less the run hours reported", () => {
+    // 1.5 × 20 = 30 min = 0.5 h
+    expect(suggestedReportHours(op, "20", [], "run")).toBe("0.5");
+    expect(suggestedReportHours(op, "20", reports, "run")).toBe("");
+    expect(suggestedReportHours(op, "60", reports, "run")).toBe("1");
+  });
+
+  it("without a type it is the whole operation, as before", () => {
+    expect(suggestedReportHours(op, "20", reports)).toBe("0.15");
+    expect(suggestedReportHours(op, "20", reports, "")).toBe("0.15");
+  });
+
+  it("is empty when a type has nothing planned", () => {
+    expect(suggestedReportHours({ id: "op1", setupTime: "0", runTimePerUnit: "1" }, "10", [], "setup")).toBe("");
+  });
+});

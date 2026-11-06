@@ -34,7 +34,7 @@ export default async function ManufacturingOrderDetailPage(props: { params: Prom
   // deleting a time report (the API enforces it; this only hides the button).
   const canUndoReports = canEdit && (user?.role === "admin" || user?.role === "supervisor");
 
-  const [materials, operations, locations, timeReports, employees, costCalculations, scrap, reports, legoPurchases] = await Promise.all([
+  const [materials, operations, locations, timeReports, employees, costCalculations, scrap, reports, legoPurchases, timeSettings] = await Promise.all([
     apiGet<MOMaterialConsumption[]>(`/api/v1/manufacturing-orders/${params.id}/materials`, cookieHeader),
     apiGet<MOOperation[]>(`/api/v1/manufacturing-orders/${params.id}/operations`, cookieHeader),
     canEdit ? apiGet<StockLocation[]>("/api/v1/stock/locations", cookieHeader) : Promise.resolve([] as StockLocation[]),
@@ -50,6 +50,8 @@ export default async function ManufacturingOrderDetailPage(props: { params: Prom
     apiGet<LegoPurchaseOperation[]>(`/api/v1/manufacturing-orders/${params.id}/lego-purchases`, cookieHeader).catch(
       () => [] as LegoPurchaseOperation[]
     ),
+    // Typ on Rapportera tid; never fails the card.
+    apiGet<{ timeKindSplit?: boolean }>("/api/v1/settings/terminal", cookieHeader).catch(() => ({ timeKindSplit: false })),
   ]);
 
   return (
@@ -76,6 +78,7 @@ export default async function ManufacturingOrderDetailPage(props: { params: Prom
         reports={reports}
         legoPurchases={legoPurchases}
         canUndoReports={canUndoReports}
+        timeKindSplit={timeSettings.timeKindSplit === true}
       />
 
       <DeviationsSection

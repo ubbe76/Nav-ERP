@@ -2952,6 +2952,9 @@ export interface AttendanceOutInput {
   atfTransactionId?: string;
 }
 
+export type TimeKind = "setup" | "run";
+export const TIME_KIND_LABELS: Record<TimeKind, string> = { setup: "Ställ", run: "Produktion" };
+
 export interface TimeReport {
   id: string;
   employeeId: string;
@@ -2963,6 +2966,9 @@ export interface TimeReport {
   workCenterName: string;
   date: string;
   hours: string;
+  // Ställ / Produktion; null = ej uppdelad (inställningen Dela tid i ställ
+  // och produktion var av, or a historical report).
+  kind: TimeKind | null;
   note: string | null;
   createdAt: string;
   // terminal = materialized by a stamp-out at the terminal, manual = entered by hand
@@ -2983,6 +2989,8 @@ export interface StampSession {
   articleName: string;
   startedAt: string;
   stoppedAt: string | null;
+  // Ställ / Produktion; null = ej uppdelad. Follows the stamp to its time report.
+  kind: TimeKind | null;
   // Going home pauses open work: pausedAt set while away, pausedSeconds
   // accumulates over pauses. Paused time is excluded from reported hours.
   pausedAt: string | null;
@@ -3025,6 +3033,9 @@ export interface SystemSettings {
   defaultTheme: string;
   themeChoiceLocked: boolean;
   allowMultipleStamps: boolean;
+  // Dela tid i ställ och produktion: the terminal and the time report forms
+  // offer Ställ / Produktion (off = exactly as before).
+  timeKindSplit: boolean;
   // Print active article/drawing revisions per row on external documents.
   showRevisionsOnDocuments: boolean;
   // Documents that print the article's Extra benämning under the name, in

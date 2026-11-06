@@ -9,7 +9,7 @@ import { Button } from "../ui/Button";
 import { ListExportLink, ListToolbar, Pagination } from "../ui/ListControls";
 import buttonStyles from "../ui/Button.module.css";
 import { NewTimeReportForm } from "./NewTimeReportForm";
-import type { EmployeeDirectoryEntry, Paged, TimeReport } from "../../lib/types";
+import { TIME_KIND_LABELS, type EmployeeDirectoryEntry, type Paged, type TimeReport } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import styles from "../../app/tillverkning/tidrapporter/page.module.css";
 import { HelpLink } from "../ui/HelpLink";
@@ -20,10 +20,12 @@ export function TimeReportsPageClient({
   reports,
   employees,
   pageSize,
+  timeKindSplit,
 }: {
   reports: Paged<TimeReport>;
   employees: EmployeeDirectoryEntry[];
   pageSize: number;
+  timeKindSplit: boolean;
 }) {
   const router = useRouter();
   const canOpenPersonal = useCanOpenPersonal();
@@ -60,6 +62,7 @@ export function TimeReportsPageClient({
           { key: "operationSequenceNo", label: "Operation", width: "160px" },
           { key: "date", label: "Datum", width: "120px" },
           { key: "hours", label: "Timmar", width: "100px", align: "right" },
+          { key: "kind", label: "Typ", width: "110px" },
           { key: "source", label: "Källa", width: "110px" },
           { key: "note", label: "Anteckning", width: "1fr" },
         ]}
@@ -77,6 +80,8 @@ export function TimeReportsPageClient({
               return `${row.operationSequenceNo} — ${row.workCenterName}`;
             case "hours":
               return formatQuantity(row.hours);
+            case "kind":
+              return row.kind ? TIME_KIND_LABELS[row.kind] : "–";
             case "source":
               return row.source === "terminal" ? "Stämpling" : "Manuell";
             case "note":
@@ -92,6 +97,7 @@ export function TimeReportsPageClient({
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Ny tidrapport">
         <NewTimeReportForm
           employees={employees}
+          timeKindSplit={timeKindSplit}
           onSuccess={() => {
             setModalOpen(false);
             router.refresh();
