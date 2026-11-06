@@ -185,14 +185,14 @@ export function LagerTab({ article, balances }: { article: Article; balances: St
             // Stock can be tracked without locations — those rows show "—".
             if (key === "locationName") {
               return (
-                <>
+                <span>
                   {row.locationName ?? "—"}
                   {row.locationBlocked && (
                     <span style={{ marginLeft: 8 }}>
                       <StatusPill status="stopped" label="Spärrad" compact />
                     </span>
                   )}
-                </>
+                </span>
               );
             }
             if (key === "warehouseName") return row[key as keyof RowWithId] ?? "—";

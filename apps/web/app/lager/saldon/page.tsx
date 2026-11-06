@@ -93,14 +93,14 @@ export default async function StockPage(props: { searchParams: Promise<PageSearc
             // Stock can be tracked without locations — those rows show "—".
             case "locationName":
               return (
-                <>
+                <span>
                   {row.locationName ?? "—"}
                   {row.locationBlocked && (
                     <span style={{ marginLeft: 8 }}>
                       <StatusPill status="stopped" label="Spärrad" compact />
                     </span>
                   )}
-                </>
+                </span>
               );
             case "warehouseName":
               return row[key as keyof RowWithId] ?? "—";
