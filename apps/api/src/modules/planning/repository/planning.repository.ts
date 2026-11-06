@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, isNotNull, isNull, lte, ne, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, isNull, lte, ne, sql, type SQL } from "drizzle-orm";
 import { legoOneOffSql, legoOrderedQuantitySql } from "../../manufacturing/repository/lego-one-off.js";
 import {
   articles,
@@ -24,6 +24,7 @@ import {
   salesOrders,
   stampSessions,
   suppliers,
+  timeReports,
   units,
   weekScheduleDays,
   workCenters,
@@ -56,6 +57,27 @@ import { loadDeliveryContext } from "../../system/repository/delivery-context.js
 import { loadLeadTimeDefaults, loadLongOperationWeeks } from "../../system/repository/plan-settings.js";
 import { purchaseRowArrivalDate, salesRowDeliveryDate } from "./effective-dates.js";
 import { onHandByArticle } from "../../stock/repository/on-hand.js";
+
+// Reported time per operation of the orders `orderFilter` selects, split by
+// resource (#15, time_reports.work_center_id; a report without one counts on
+// the operation's current resource) — what remainingOperationMinutes' setup
+// rule (setupDoneOnCurrentResource, capacity-calc.ts) reads. ONE grouped
+// query next to the operations, never per operation.
+async function operationTimeOnResources(dbc: Db | Tx, orderFilter: SQL | undefined) {
+  const rows = await dbc
+    .select({
+      moOperationId: timeReports.moOperationId,
+      onCurrent: sql<boolean>`coalesce(bool_or(${timeReports.workCenterId} is null or ${timeReports.workCenterId} = ${moOperations.workCenterId}), false)`,
+      onOther: sql<boolean>`coalesce(bool_or(${timeReports.workCenterId} <> ${moOperations.workCenterId}), false)`,
+    })
+    .from(timeReports)
+    .innerJoin(moOperations, eq(moOperations.id, timeReports.moOperationId))
+    .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+    .where(orderFilter)
+    .groupBy(timeReports.moOperationId);
+  return new Map(rows.map((row) => [row.moOperationId, { timeOnCurrentResource: row.onCurrent, timeOnOtherResource: row.onOther }]));
+}
+const NO_TIME = { timeOnCurrentResource: false, timeOnOtherResource: false };
 
 export interface PlanningArticleInfo {
   articleId: string;
@@ -281,7 +303,7 @@ export function createPlanningRepository(db: Db) {
     if (filter.articleIds) articleConditions.push(inArray(articles.id, filter.articleIds));
     const noOrders = filter.orderIds !== undefined && filter.orderIds.length === 0;
     const noArticles = filter.articleIds !== undefined && filter.articleIds.length === 0;
-    const [operationRows, routingRows, workCenterRows, articleRows, orderRows, defaults] = await Promise.all([
+    const [operationRows, routingRows, workCenterRows, articleRows, orderRows, defaults, timeOnResources] = await Promise.all([
       noOrders
         ? Promise.resolve([])
         : dbc
@@ -336,6 +358,7 @@ export function createPlanningRepository(db: Db) {
             .from(manufacturingOrders)
             .where(inArray(manufacturingOrders.id, filter.orderIds)),
       loadLeadTimeDefaults(dbc),
+      noOrders ? Promise.resolve(new Map<string, typeof NO_TIME>()) : operationTimeOnResources(dbc, and(...orderConditions)),
     ]);
     const num = (v: string | null) => (v === null ? null : Number(v));
     return {
@@ -346,6 +369,7 @@ export function createPlanningRepository(db: Db) {
         orderQuantity: Number(r.orderQuantity),
         quantityCompleted: num(r.quantityCompleted),
         quantityScrapped: Number(r.quantityScrapped),
+        ...(timeOnResources.get(r.moOperationId) ?? NO_TIME),
       })),
       routings: routingRows.map((r) => ({ ...r, setupTime: Number(r.setupTime), runTimePerUnit: Number(r.runTimePerUnit) })),
       workCenters: workCenterRows.map((r) => ({
@@ -895,7 +919,7 @@ export function createPlanningRepository(db: Db) {
     ): Promise<CapacityInput> {
       const openOrders = inArray(manufacturingOrders.status, ["released", "in_progress"]);
       const orderFilter = opts.orderIds ? and(openOrders, inArray(manufacturingOrders.id, opts.orderIds)) : openOrders;
-      const [workCenterRows, groupRows, operationRows, weekDayRows, dayRows, breakRows, holidayRows, planRows] =
+      const [workCenterRows, groupRows, operationRows, weekDayRows, dayRows, breakRows, holidayRows, planRows, timeOnResources] =
         await Promise.all([
           dbc
             .select({
@@ -972,6 +996,7 @@ export function createPlanningRepository(db: Db) {
             .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
             .where(orderFilter)
             .orderBy(moOperationPlanWeeks.weekMonday),
+          operationTimeOnResources(dbc, orderFilter),
         ]);
 
       const plansByOperation = new Map<string, PlannedWeek[]>();
@@ -1003,6 +1028,7 @@ export function createPlanningRepository(db: Db) {
           runTimePerUnit: Number(r.runTimePerUnit),
           quantityCompleted: r.quantityCompleted === null ? null : Number(r.quantityCompleted),
           quantityScrapped: Number(r.quantityScrapped),
+          ...(timeOnResources.get(r.moOperationId) ?? NO_TIME),
           plannedWeeks: plansByOperation.get(r.moOperationId) ?? null,
           plannedAt: r.plannedAt === null ? null : r.plannedAt.toISOString(),
         })),

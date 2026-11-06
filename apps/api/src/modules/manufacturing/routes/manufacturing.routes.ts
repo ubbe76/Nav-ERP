@@ -73,6 +73,7 @@ import {
   ProductionGroupNotFoundError,
   RoutingAlternativeInvalidError,
   RoutingOperationHasAlternativesError,
+  WorkCenterInAlternativesError,
   RoutingOperationNotFoundError,
   WeekScheduleNotFoundError,
   WorkCenterNotFoundError,
@@ -143,6 +144,7 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
         return reply.code(404).send(errorBody(err));
       }
       if (err instanceof DuplicateWorkCenterCodeError) return reply.code(409).send(errorBody(err));
+      if (err instanceof WorkCenterInAlternativesError) return reply.code(409).send(errorBody(err));
       if (err instanceof WeekScheduleNotFoundError) return reply.code(400).send(errorBody(err));
       if (err instanceof WorkCenterSupplierNotFoundError) return reply.code(400).send(errorBody(err));
       throw err;

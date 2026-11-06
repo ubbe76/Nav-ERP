@@ -383,7 +383,7 @@ function VarianceSection({ analysis }: { analysis: CostVarianceAnalysis | null }
               { key: "run", label: "Verklig stycke (h)", width: "110px", align: "right" },
               { key: "unclassified", label: "Ej uppdelad (h)", width: "110px", align: "right" },
             ]}
-            rows={timeRows.map((r) => ({ ...r, id: r.id ?? `op-${r.sequenceNo}` }))}
+            rows={timeRows.map((r) => ({ ...r, id: r.id ?? `op-${r.sequenceNo}-${r.workCenterId}` }))}
             renderCell={(row, key) => {
               if (row.kind !== "time") return null;
               switch (key) {
@@ -429,7 +429,7 @@ function VarianceSection({ analysis }: { analysis: CostVarianceAnalysis | null }
               { key: "price", label: "Pris", width: "110px", align: "right" },
               { key: "quantity", label: "Mängd", width: "110px", align: "right" },
             ]}
-            rows={subcontractRows.map((r) => ({ ...r, id: r.id ?? `op-${r.sequenceNo}` }))}
+            rows={subcontractRows.map((r) => ({ ...r, id: r.id ?? `op-${r.sequenceNo}-${r.workCenterId}` }))}
             renderCell={(row, key) => {
               switch (key) {
                 case "operation":

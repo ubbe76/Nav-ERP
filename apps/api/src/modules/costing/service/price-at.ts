@@ -145,12 +145,16 @@ function hundredths(hours: number | string): number {
 }
 
 // One group of an operation's time reports — the repositories group on
-// (operation, work day[, kind]) and nothing else.
+// (operation, resource, work day[, kind]) and nothing else.
 export interface ReportedTimeRow {
   date: string;
   // Ställ/produktion (time_reports.kind, #14 etapp 3); null = ej uppdelad.
   // Left out by a reader that does not group on it (PIA).
   kind?: "setup" | "run" | null;
+  // The resource the time was worked on (time_reports.work_center_id, #15);
+  // null or left out = a report from before 0192, counted on the
+  // operation's current resource (reportedTimeByResource).
+  workCenterId?: string | null;
   hours: number | string;
 }
 
@@ -189,6 +193,30 @@ export function reportedTime(rows: ReportedTimeRow[]): ReportedTime {
     runHours: typed ? run / 100 : null,
     days: [...byDay.keys()].sort().map((date) => ({ date, hours: byDay.get(date)! / 100 })),
   };
+}
+
+export interface ResourceTime extends ReportedTime {
+  workCenterId: string;
+}
+
+// An operation's reported time per resource it was worked on (#15) — THE
+// grouping the efterkalkyl and Produkter i arbete share, so each resource's
+// hours are priced at that resource's hourly rate of each work day
+// (laborAtWorkDays) and a Byt resurs never reprices time already reported.
+// A report without a resource (before 0192) counts on `currentWorkCenterId`,
+// the operation's resource now — as all time did before. The current
+// resource always comes first, also without hours (it carries the
+// avvikelseanalys's base); the others follow in id order, each with hours.
+export function reportedTimeByResource(rows: ReportedTimeRow[], currentWorkCenterId: string): ResourceTime[] {
+  const byResource = new Map<string, ReportedTimeRow[]>([[currentWorkCenterId, []]]);
+  for (const row of rows) {
+    const id = row.workCenterId ?? currentWorkCenterId;
+    const list = byResource.get(id);
+    if (list) list.push(row);
+    else byResource.set(id, [row]);
+  }
+  const others = [...byResource.keys()].filter((id) => id !== currentWorkCenterId).sort();
+  return [currentWorkCenterId, ...others].map((id) => ({ workCenterId: id, ...reportedTime(byResource.get(id)!) }));
 }
 
 // Lön per arbetsdag — THE rule the efterkalkyl and Produkter i arbete share:

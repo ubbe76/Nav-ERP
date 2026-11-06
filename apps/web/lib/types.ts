@@ -2997,6 +2997,10 @@ export interface TimeReport {
   manufacturingOrderId: string;
   manufacturingOrderNumber: string;
   operationSequenceNo: number;
+  // The resource the time was worked on (#15); workCenterName is its name.
+  // null = a report from before it was recorded: the name is then the
+  // operation's current resource.
+  workCenterId: string | null;
   workCenterName: string;
   date: string;
   hours: string;
@@ -3025,6 +3029,9 @@ export interface StampSession {
   stoppedAt: string | null;
   // Ställ / Produktion; null = ej uppdelad. Follows the stamp to its time report.
   kind: TimeKind | null;
+  // The resource stamped in on (#15), carried to the time report; null = a
+  // stamp opened before it was recorded.
+  workCenterId: string | null;
   // Going home pauses open work: pausedAt set while away, pausedSeconds
   // accumulates over pauses. Paused time is excluded from reported hours.
   pausedAt: string | null;

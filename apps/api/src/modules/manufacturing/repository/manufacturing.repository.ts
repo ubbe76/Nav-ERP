@@ -74,7 +74,7 @@ import {
   type MaterialShortageCheck,
 } from "../service/material-shortage.js";
 import { shortageWarnings } from "./shortage-warnings.js";
-import { snapshotOperationResourcesInTx } from "./operation-resources.js";
+import { snapshotOperationResourcesInTx, workCenterInAlternativesInTx } from "./operation-resources.js";
 import { replaceRoutingAlternatives } from "./routing-write.js";
 // Ändra material och operationer: the edit transactions and the row
 // selects they share with the list endpoints.
@@ -1025,28 +1025,45 @@ export function createManufacturingRepository(db: Db) {
       return row ?? null;
     },
 
+    // "in_alternatives": the edit makes the resource a legoresurs while it
+    // takes part in alternatives (workCenterInAlternativesInTx) — refused,
+    // nothing written. Asked on the resource's row locked FOR NO KEY UPDATE
+    // (the UPDATE's own lock mode, so no FK insert waits on it), in the
+    // UPDATE's transaction: two type changes of one resource run one after
+    // the other.
     async updateWorkCenter(id: string, input: UpdateWorkCenterInput) {
-      const [row] = await db
-        .update(workCenters)
-        .set({
-          ...input,
-          hourlyRate: input.hourlyRate === undefined ? undefined : String(input.hourlyRate),
-          overheadPercent: input.overheadPercent === undefined ? undefined : String(input.overheadPercent),
-          capacityFactor: input.capacityFactor === undefined ? undefined : String(input.capacityFactor),
-          // Nullable numerics: undefined = untouched, null = cleared.
-          hoursPerDay: numericPatch(input.hoursPerDay),
-          defaultSetupTime: numericPatch(input.defaultSetupTime),
-          calcRate1: numericPatch(input.calcRate1),
-          calcRate2: numericPatch(input.calcRate2),
-          leadTimeDays: numericPatch(input.leadTimeDays),
-          queueTimeDays: numericPatch(input.queueTimeDays),
-          orderLeadTimeDays: numericPatch(input.orderLeadTimeDays),
-          defaultOperationName:
-            input.defaultOperationName === undefined ? undefined : blankToNull(input.defaultOperationName),
-        })
-        .where(eq(workCenters.id, id))
-        .returning();
-      return row ?? null;
+      return db.transaction(async (tx) => {
+        if (input.type === "subcontract") {
+          const [current] = await tx
+            .select({ type: workCenters.type })
+            .from(workCenters)
+            .where(eq(workCenters.id, id))
+            .for("no key update");
+          if (!current) return null;
+          if (current.type !== "subcontract" && (await workCenterInAlternativesInTx(tx, id))) return "in_alternatives" as const;
+        }
+        const [row] = await tx
+          .update(workCenters)
+          .set({
+            ...input,
+            hourlyRate: input.hourlyRate === undefined ? undefined : String(input.hourlyRate),
+            overheadPercent: input.overheadPercent === undefined ? undefined : String(input.overheadPercent),
+            capacityFactor: input.capacityFactor === undefined ? undefined : String(input.capacityFactor),
+            // Nullable numerics: undefined = untouched, null = cleared.
+            hoursPerDay: numericPatch(input.hoursPerDay),
+            defaultSetupTime: numericPatch(input.defaultSetupTime),
+            calcRate1: numericPatch(input.calcRate1),
+            calcRate2: numericPatch(input.calcRate2),
+            leadTimeDays: numericPatch(input.leadTimeDays),
+            queueTimeDays: numericPatch(input.queueTimeDays),
+            orderLeadTimeDays: numericPatch(input.orderLeadTimeDays),
+            defaultOperationName:
+              input.defaultOperationName === undefined ? undefined : blankToNull(input.defaultOperationName),
+          })
+          .where(eq(workCenters.id, id))
+          .returning();
+        return row ?? null;
+      });
     },
 
     // Terminal: every stampable operation (released/in-progress order,
@@ -1234,18 +1251,27 @@ export function createManufacturingRepository(db: Db) {
     },
 
     // Scoped to the article so a row id from another article's routing 404s
-    // (null). One transaction: the operation FOR UPDATE, its current
+    // (null). One transaction: the operation FOR NO KEY UPDATE, its current
     // alternatives, then `prepare` — the service's rules on the locked state
     // (it throws to refuse, or returns the patch to write) — then the UPDATE
     // and, when the patch carries `alternatives`, the set replaced. Two edits
     // of one operation run one after the other, so the alternative rules
     // never judge a state another edit is changing.
+    // - NO KEY UPDATE, the UPDATE's own lock mode, not FOR UPDATE: a TO
+    //   created meanwhile takes FOR KEY SHARE on the routing row through
+    //   mo_operations.routing_operation_id, and must not wait for the edit.
+    // - `workCenter` reads through the transaction (never another pool
+    //   connection while the lock is held) and FOR SHARE: a type change of
+    //   that resource (updateWorkCenter, FOR NO KEY UPDATE) waits for this
+    //   edit or this edit for it, so the rules never judge a resource that
+    //   is just becoming a legoresurs.
     async updateRoutingOperation(
       articleId: string,
       operationId: string,
       prepare: (
         current: typeof routingOperations.$inferSelect,
-        alternatives: (typeof routingOperationAlternatives.$inferSelect)[]
+        alternatives: (typeof routingOperationAlternatives.$inferSelect)[],
+        workCenter: (id: string) => Promise<typeof workCenters.$inferSelect | null>
       ) => Promise<UpdateRoutingOperationInput>
     ) {
       return db.transaction(async (tx) => {
@@ -1253,14 +1279,25 @@ export function createManufacturingRepository(db: Db) {
           .select()
           .from(routingOperations)
           .where(and(eq(routingOperations.id, operationId), eq(routingOperations.articleId, articleId)))
-          .for("update");
+          .for("no key update");
         if (!current) return null;
         const currentAlternatives = await tx
           .select()
           .from(routingOperationAlternatives)
           .where(eq(routingOperationAlternatives.routingOperationId, operationId))
           .orderBy(asc(routingOperationAlternatives.rank));
-        const { alternatives, ...input } = await prepare(current, currentAlternatives);
+        const workCenter = async (id: string) => {
+          const [row] = await tx.select().from(workCenters).where(eq(workCenters.id, id)).for("share");
+          return row ?? null;
+        };
+        const { alternatives, ...input } = await prepare(current, currentAlternatives, workCenter);
+        // Only the alternatives (e.g. [] on a lego operation, whose patch
+        // keeps no cleared lego fields): no column to set — drizzle refuses
+        // an empty SET.
+        if (!Object.values(input).some((value) => value !== undefined)) {
+          if (alternatives !== undefined) await replaceRoutingAlternatives(tx, operationId, alternatives);
+          return current;
+        }
         const [row] = await tx
           .update(routingOperations)
           .set({

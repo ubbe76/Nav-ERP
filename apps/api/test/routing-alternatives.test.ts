@@ -204,6 +204,16 @@ describe("the beredning", () => {
     ).rejects.toBeInstanceOf(WorkCenterNotFoundError);
     // Nothing was written by the refusals.
     expect(await db.select().from(routingOperations)).toEqual([]);
+
+    // An edit resolves the resources inside its transaction: an unknown one
+    // is a 404 there too, and rolls the edit back.
+    const lego = await mfgService.createRoutingOperation(parent.id, { ...base, workCenterId: r.lego.id, setupTime: 0, runTimePerUnit: 0 });
+    await expect(
+      mfgService.updateRoutingOperation(parent.id, lego.id, { description: "Lack", alternatives: [{ workCenterId: crypto.randomUUID() }] })
+    ).rejects.toBeInstanceOf(WorkCenterNotFoundError);
+    // [] alone on a lego operation (no other column to set) is fine.
+    const cleared = await mfgService.updateRoutingOperation(parent.id, lego.id, { alternatives: [] });
+    expect([cleared.id, cleared.description, cleared.alternatives]).toEqual([lego.id, null, []]);
   });
 
   it("keeps an alternative that went inactive after it was chosen, but refuses it as new", async () => {

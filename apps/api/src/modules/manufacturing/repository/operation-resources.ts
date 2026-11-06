@@ -134,3 +134,27 @@ export function operationResourcesJson(): SQL<OperationResourceView[]> {
     FROM mo_operation_resources r JOIN work_centers w ON w.id = r.work_center_id
     WHERE r.mo_operation_id = "mo_operations"."id"), '[]'::jsonb)`;
 }
+
+// Does the resource take part in alternatives anywhere it still matters — as
+// a beredning's alternative, as the ordinarie of a routing operation that has
+// alternatives, or among an open TO's possible resources (any rank)? Such a
+// resource must stay an own resource: alternatives are never lego (spec,
+// Datamodellen). A done, closed or cancelled TO's rows are history and can
+// never be switched again, so they do not count. updateWorkCenter asks it
+// on the resource's locked row before turning it into a legoresurs.
+export async function workCenterInAlternativesInTx(tx: Tx, workCenterId: string): Promise<boolean> {
+  const rows = await tx.execute(sql`
+    SELECT 1 FROM routing_operation_alternatives WHERE work_center_id = ${workCenterId}
+    UNION ALL
+    SELECT 1 FROM routing_operations ro
+    WHERE ro.work_center_id = ${workCenterId}
+      AND EXISTS (SELECT 1 FROM routing_operation_alternatives a WHERE a.routing_operation_id = ro.id)
+    UNION ALL
+    SELECT 1 FROM mo_operation_resources r
+    JOIN mo_operations mo ON mo.id = r.mo_operation_id
+    JOIN manufacturing_orders o ON o.id = mo.manufacturing_order_id
+    WHERE r.work_center_id = ${workCenterId} AND o.status NOT IN ('done', 'closed', 'cancelled')
+    LIMIT 1
+  `);
+  return rows.length > 0;
+}

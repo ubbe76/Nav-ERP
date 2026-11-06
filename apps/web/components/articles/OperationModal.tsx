@@ -470,7 +470,10 @@ function OperationForm({
         </FormNotice>
       )}
       {moMode && resourceChanged && reportedTime && (
-        <FormNotice>Rapporterad tid räknas med den nya resursens timkostnad.</FormNotice>
+        <FormNotice>
+          Tid som redan är rapporterad står kvar på resursen den gjordes på och räknas med dess timkostnad. Ny tid hamnar
+          på den nya resursen.
+        </FormNotice>
       )}
       {moMode && moResources.length > 0 && onResourceRow && (
         <>

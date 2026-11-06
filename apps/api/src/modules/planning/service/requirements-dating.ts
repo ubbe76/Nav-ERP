@@ -49,6 +49,9 @@ export interface DatingMoOperation {
   orderQuantity: number;
   quantityCompleted: number | null;
   quantityScrapped: number;
+  // Reported time per resource (#15) — remainingOperationMinutes' setup rule.
+  timeOnCurrentResource?: boolean;
+  timeOnOtherResource?: boolean;
   plannedStartWeek: string | null;
   planLocked: boolean;
 }

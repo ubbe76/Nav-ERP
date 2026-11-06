@@ -303,3 +303,65 @@ describe("ställ och produktion — rutterna (#14 etapp 3)", () => {
     expect(shop.statusCode).toBe(403);
   });
 });
+
+// Alternativa resurser (#15), granskningen av etapp 1: the stamp and the
+// time report keep their resource. Over HTTP: the terminal's workCenterId on
+// POST /stamp-sessions (409 when the operation was switched since the list
+// was loaded), the resource on the stamp, the stop and a manual report, and
+// a PATCH that can never set one.
+describe("tidrapportens resurs — rutterna (#15)", () => {
+  const app = buildApp();
+  const authService = createAuthService(createAuthRepository(db), "unused", createAuditRepository(db));
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  async function login(role: "user" | "supervisor" | "admin", permissions: string[]) {
+    const [group] = await db
+      .insert(permissionGroups)
+      .values({ code: `STOP${crypto.randomUUID().slice(0, 8)}`, name: "Resurs", permissions })
+      .returning();
+    const email = `w-${crypto.randomUUID()}@example.com`;
+    await authService.createUser({ email, password: "correcthorse", name: "W", role, permissionGroupId: group!.id });
+    const res = await app.inject({ method: "POST", url: "/api/v1/auth/login", payload: { email, password: "correcthorse" } });
+    return `session=${res.cookies.find((c) => c.name === "session")!.value}`;
+  }
+
+  it("refuses a stamp on the station the list showed after a switch (409), keeps the resource on stamp, stop and manual report, and never takes one from a PATCH", async () => {
+    const user = await authRepo.create({ email: `w-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "Ledare", role: "supervisor" });
+    const parent = await articleService.createArticle({ articleNumber: `P-${crypto.randomUUID()}`, name: "Produkt", type: "manufactured", unit: "st", active: true });
+    const r100 = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const r200 = await mfgService.createWorkCenter({ code: "200", name: "Svets 2", active: true });
+    await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: r100.id, setupTime: 10, runTimePerUnit: 2 });
+    const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);
+    const [operation] = await mfgService.listOperations(order.id);
+    const employee = await timeReportService.createEmployee({ employeeNumber: "307", name: "Vera", active: true });
+    const terminal = await login("user", ["terminal"]);
+    const office = await login("supervisor", ["tillverkning"]);
+    const call = (cookie: string, method: "POST" | "PATCH", url: string, payload: object) =>
+      app.inject({ method, url: `/api/v1${url}`, headers: { cookie }, payload });
+
+    // The listed station matches: the stamp records it, and so does the stop.
+    const stamp = await call(terminal, "POST", "/stamp-sessions", { employeeId: employee.id, moOperationId: operation!.id, workCenterId: r100.id });
+    expect([stamp.statusCode, stamp.json().workCenterId]).toEqual([201, r100.id]);
+    const out = await call(terminal, "POST", `/stamp-sessions/${stamp.json().id}/stop`, { quantityOk: 0, quantityScrapped: 0 });
+    expect([out.statusCode, out.json().timeReport.workCenterId]).toEqual([200, r100.id]);
+
+    // The planner moves the operation; the terminal's older list still says 100.
+    await mfgService.updateOperation(order.id, operation!.id, { workCenterId: r200.id }, user.id);
+    const stale = await call(terminal, "POST", "/stamp-sessions", { employeeId: employee.id, moOperationId: operation!.id, workCenterId: r100.id });
+    expect([stale.statusCode, stale.json().code]).toEqual([409, "stamp-work-center-changed"]);
+    const malformed = await call(terminal, "POST", "/stamp-sessions", { employeeId: employee.id, moOperationId: operation!.id, workCenterId: "100" });
+    expect(malformed.statusCode).toBe(400);
+
+    // A manual report takes the operation's resource now; a PATCH cannot set one.
+    const manual = await call(office, "POST", "/time-reports", { employeeId: employee.id, moOperationId: operation!.id, date: "2026-07-07", hours: 1, workCenterId: r100.id });
+    expect([manual.statusCode, manual.json().workCenterId]).toEqual([201, r200.id]);
+    const patched = await call(office, "PATCH", `/time-reports/${out.json().timeReport.id}`, { hours: 2, workCenterId: r200.id });
+    expect([patched.statusCode, patched.json().hours, patched.json().workCenterId]).toEqual([200, "2.00", r100.id]);
+    // The list shows the resource the time was worked on.
+    const onCard = await app.inject({ method: "GET", url: `/api/v1/manufacturing-orders/${order.id}/time-reports`, headers: { cookie: office } });
+    expect(onCard.json().map((r: { workCenterName: string }) => r.workCenterName).sort()).toEqual(["Svets", "Svets 2"]);
+  });
+});

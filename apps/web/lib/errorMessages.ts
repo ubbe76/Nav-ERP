@@ -81,6 +81,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "period-not-locked": "Perioden är inte låst.",
   "invalid-attendance-interval": "Sluttiden måste vara efter starttiden",
   "already-present": "Medarbetaren är redan instämplad",
+  "stamp-work-center-changed":
+    "Operationen har flyttats till en annan resurs sedan listan hämtades — välj den i den uppdaterade listan.",
   "attendance-open-from-earlier-day": "Närvaron har stått öppen sedan en tidigare dag — ange när du gick hem.",
   "attendance-input-required": "Ange anledning eller hur övertiden ska ersättas innan stämplingen sparas.",
   "attendance-reason-invalid": "Anledningen finns inte eller är inaktiv — välj en annan.",
@@ -562,6 +564,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "routing-alternative-invalid": (err) => err.message || "Alternativen är inte giltiga.",
   "routing-operation-has-alternatives": (err) =>
     err.message || "Operationen har alternativa resurser — ta bort dem först.",
+  "work-center-in-alternatives":
+    "Resursen ingår i alternativa resurser — i en beredning eller på en öppen tillverkningsorder — och kan inte bli en legoresurs. Ta bort den som alternativ först.",
   // Ångra rapportering / Makulera order (TO)
   "mo-report-not-found": "Rapporteringen finns inte — ladda om sidan.",
   "report-has-no-pallet-card": "Rapporten har inget pallkort — bara en operationsrapport som inte är ångrad kan skrivas ut.",

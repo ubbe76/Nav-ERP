@@ -65,7 +65,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Kopiera från befintlig artikel:** ritningsrevisioner kopieras inte.
 - [ ] **Bankfiler:** kontovarningen kunde tipsa om att lägga in IBAN.
 - [ ] **Favoriter:** förvalda favoriter per behörighetsgrupp; åtgärdsgenvägar som **+ Ny kundorder** (kräver `?ny=1`-stöd på sidorna).
-- [ ] **Timkostnad per datum:** ingen rättelse av historiken i efterhand (en resurs som skapats med fel timkostnad behåller den för dagarna före rättelsen); tidrapporterna sparar inte resursen, så Ändra operationer som byter resurs prissätter om all tid.
+- [ ] **Timkostnad per datum:** ingen rättelse av historiken i efterhand (en resurs som skapats med fel timkostnad behåller den för dagarna före rättelsen). Tidrapporterna sparar resursen sedan 0192, men tid rapporterad före 0192 saknar den och prissätts fortfarande om när operationen byter resurs, och en manuell tidrapport för en dag före ett byte får operationens nuvarande resurs (ingen rättelse av resursen i efterhand).
 - [ ] **Manualen, årsbokslutet:** nämn att värderingen faller tillbaka på standardpris (kommentaren "deterministisk" är för stark), att identisk periodisering med sedan inaktiverat konto ger 400 och att Omför-rådet för IB-spärren kan landa i år N+2 vid sent bokslut.
 
 ### Kodkvalitet

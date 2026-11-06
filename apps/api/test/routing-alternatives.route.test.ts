@@ -5,6 +5,7 @@ import { manufacturingRoutes } from "../src/modules/manufacturing/routes/manufac
 import {
   RoutingAlternativeInvalidError,
   RoutingOperationHasAlternativesError,
+  WorkCenterInAlternativesError,
   type ManufacturingService,
 } from "../src/modules/manufacturing/service/manufacturing.service.js";
 
@@ -119,5 +120,17 @@ describe("Ändra operationer — resourceLocked", () => {
     expect((await app.inject({ method: "PATCH", url, payload: { resourceLocked: false } })).statusCode).toBe(200);
     expect(calls).toEqual([{ workCenterId: wc }, { resourceLocked: false }]);
     expect((await app.inject({ method: "PATCH", url, payload: { resourceLocked: "ja" } })).statusCode).toBe(400);
+  });
+});
+
+describe("PATCH /work-centers/:id — a resource in alternatives", () => {
+  it("answers 409 work-center-in-alternatives when it would become a legoresurs", async () => {
+    const err = new WorkCenterInAlternativesError();
+    const res = await appWith({ updateWorkCenter: throwing(err) }).inject({
+      method: "PATCH",
+      url: `/work-centers/${id()}`,
+      payload: { type: "subcontract" },
+    });
+    expect([res.statusCode, res.json()]).toEqual([409, { error: err.message, code: "work-center-in-alternatives" }]);
   });
 });

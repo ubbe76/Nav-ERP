@@ -65,6 +65,12 @@ export interface CapacityOperationRow {
   // reportOperationQuantities writes quantityCompleted "0" on scrap-only
   // reports, but the setup is consumed either way once work has started.
   quantityScrapped: number;
+  // Reported time on the operation (#15, time_reports.work_center_id): on
+  // the operation's current resource (a report without a resource counts
+  // there), and on another resource — worked before a Byt resurs. Optional:
+  // left out (fixtures) = no time, the quantity rule alone, as before.
+  timeOnCurrentResource?: boolean;
+  timeOnOtherResource?: boolean;
   // The operation's plan (planerad vecka). Optional on purpose: rows without
   // one — older orders, data loaded before the plan existed — count exactly
   // as before, in the due date's week. Empty = unplanned too.
@@ -166,22 +172,43 @@ export interface CapacityResult {
   summary: CapacitySummary;
 }
 
-// Remaining work in MINUTES for one operation. Setup is a one-off: it is
-// consumed as soon as ANY quantity has been reported — OK or scrapped (a
-// scrap-only report leaves quantityCompleted at "0" but the machine is
-// already set up). Untouched operations keep the full setup.
+// Remaining work in MINUTES for one operation. Setup is a one-off on the
+// operation's CURRENT resource (setupDoneOnCurrentResource): consumed once
+// that resource has worked it. Untouched operations keep the full setup.
 // Narrowed to the fields it reads so the lead-time dating (requirements-
 // dating.ts) can hand in a TO operation without the capacity row's labels.
 export type RemainingMinutesOperation = Pick<
   CapacityOperationRow,
-  "operationStatus" | "orderQuantity" | "quantityCompleted" | "quantityScrapped" | "runTimePerUnit" | "setupTime"
+  | "operationStatus"
+  | "orderQuantity"
+  | "quantityCompleted"
+  | "quantityScrapped"
+  | "runTimePerUnit"
+  | "setupTime"
+  | "timeOnCurrentResource"
+  | "timeOnOtherResource"
 >;
+
+// Has the operation's current resource been set up — the avvikelseanalys's
+// ställregel (operationWorked in cost-variance.ts: time, OK or scrapped
+// counts as worked) applied to the resource the operation is on now (#15):
+// - time reported on the current resource ⇒ set up (e.g. Ställ klart, 0/0);
+// - a reported quantity (OK or scrapped — a scrap-only report leaves
+//   quantityCompleted at "0" but the machine is set up) ⇒ set up, unless the
+//   time shows the work was done on another resource before a Byt resurs:
+//   then the new resource's setup is still to come. The avvikelseanalys's
+//   base also counts it once on the current resource (a switch is a new
+//   plan), so the plan and the base expect the same setup.
+export function setupDoneOnCurrentResource(op: RemainingMinutesOperation): boolean {
+  if (op.timeOnCurrentResource) return true;
+  const quantityReported = (op.quantityCompleted ?? 0) > 0 || op.quantityScrapped > 0;
+  return quantityReported && !op.timeOnOtherResource;
+}
 
 export function remainingOperationMinutes(op: RemainingMinutesOperation): number {
   if (op.operationStatus === "done") return 0;
   const remainingQty = Math.max(op.orderQuantity - (op.quantityCompleted ?? 0), 0);
-  const workStarted = (op.quantityCompleted ?? 0) > 0 || op.quantityScrapped > 0;
-  return op.runTimePerUnit * remainingQty + (workStarted ? 0 : op.setupTime);
+  return op.runTimePerUnit * remainingQty + (setupDoneOnCurrentResource(op) ? 0 : op.setupTime);
 }
 
 // The work in MINUTES a routing operation takes for a quantity that has not

@@ -235,6 +235,17 @@ export class RoutingOperationHasAlternativesError extends Error {
   }
 }
 
+// A resource that takes part in alternatives — a beredning's alternative,
+// the ordinarie of a routing operation with alternatives, or among an open
+// TO's possible resources — cannot be made a legoresurs (409): alternatives
+// are always own resources that are worked, never bought.
+export class WorkCenterInAlternativesError extends Error {
+  constructor() {
+    super("The resource takes part in alternatives and cannot be made a legoresurs");
+    this.name = "WorkCenterInAlternativesError";
+  }
+}
+
 export class RoutingOperationNotFoundError extends Error {
   constructor(id: string) {
     super(`Routing operation ${id} not found`);
@@ -1002,10 +1013,15 @@ export function createManufacturingService(
 
   // Alternativa resurser: the resources of a sent set, in its order — an
   // unknown one is a 404 like an unknown ordinarie.
-  async function alternativeResources(alternatives: { workCenterId: string }[]): Promise<AlternativeResource[]> {
+  // `find` is the reader to resolve them with: committed data on a new
+  // operation, the edit's own transaction (FOR SHARE) on an existing one.
+  async function alternativeResources(
+    alternatives: { workCenterId: string }[],
+    find: (id: string) => Promise<AlternativeResource | null> = repo.findWorkCenterById
+  ): Promise<AlternativeResource[]> {
     const resources: AlternativeResource[] = [];
     for (const { workCenterId } of alternatives) {
-      const workCenter = await repo.findWorkCenterById(workCenterId);
+      const workCenter = await find(workCenterId);
       if (!workCenter) throw new WorkCenterNotFoundError(workCenterId);
       resources.push(workCenter);
     }
@@ -1255,6 +1271,7 @@ export function createManufacturingService(
         throw err;
       }
       if (!row) throw new WorkCenterNotFoundError(id);
+      if (row === "in_alternatives") throw new WorkCenterInAlternativesError();
       return row;
     },
 
@@ -1364,23 +1381,22 @@ export function createManufacturingService(
       if (input.costingOnly === true && (await repo.countBomComponentsForOperation(operationId)) > 0) {
         throw new OperationHasLinkedMaterialError();
       }
-      // The sent alternatives' resources, resolved on committed data before
-      // the transaction (an unknown one is a 404 like an unknown ordinarie).
-      const sentResources = input.alternatives ? await alternativeResources(input.alternatives) : undefined;
-
       try {
         // The rules run on the operation as locked in the transaction
         // (repo.updateRoutingOperation): the effective ordinarie and Kalkyl
-        // flag, and the alternatives it has now.
-        const row = await repo.updateRoutingOperation(articleId, operationId, async (existing, currentAlternatives) => {
+        // flag, and the alternatives it has now. Every resource is read
+        // through that transaction (`findWorkCenter`, FOR SHARE) — an
+        // unknown one is a 404 and rolls the edit back.
+        const row = await repo.updateRoutingOperation(articleId, operationId, async (existing, currentAlternatives, findWorkCenter) => {
           // Lego guard — the effective resource decides whether lego fields
           // are legal. Switching to a non-lego resource clears them (and any
           // incoming non-null lego value alongside such a switch is refused).
           const workCenterId = input.workCenterId ?? existing.workCenterId;
-          const workCenter = await repo.findWorkCenterById(workCenterId);
+          const workCenter = await findWorkCenter(workCenterId);
           if (!workCenter) throw new WorkCenterNotFoundError(workCenterId);
           assertLegoFieldsForResource(workCenter, input, "update");
           const costingOnly = input.costingOnly ?? existing.costingOnly;
+          const sentResources = input.alternatives ? await alternativeResources(input.alternatives, findWorkCenter) : undefined;
           if (sentResources) {
             const before = new Set(currentAlternatives.map((a) => a.workCenterId));
             const problem = routingAlternativesProblem({

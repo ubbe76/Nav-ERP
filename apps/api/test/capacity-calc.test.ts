@@ -7,6 +7,7 @@ import {
   remainingByPlannedWeeks,
   remainingOperationMinutes,
   resourceDayMinutes,
+  setupDoneOnCurrentResource,
   resolveResourceWeekHours,
   routingOperationMinutes,
   type CapacityInput,
@@ -109,6 +110,26 @@ describe("remainingOperationMinutes", () => {
         op({ setupTime: 60, runTimePerUnit: 5, orderQuantity: 10, quantityCompleted: 0, quantityScrapped: 3 })
       )
     ).toBe(50); // 5 × 10 remaining, no setup
+  });
+
+  // Alternativa resurser (#15): the setup belongs to the resource the
+  // operation is on now — the avvikelseanalys's ställregel (time, OK or
+  // scrapped = worked) on the current resource.
+  it("drops setup once the current resource has reported time, even without a quantity (Ställ klart)", () => {
+    expect(
+      remainingOperationMinutes(op({ setupTime: 30, runTimePerUnit: 6, orderQuantity: 10, quantityCompleted: 0, timeOnCurrentResource: true }))
+    ).toBe(60);
+  });
+
+  it("plans the new resource's setup after a Byt resurs: the quantity was worked on another resource", () => {
+    const switched = op({ setupTime: 30, runTimePerUnit: 6, orderQuantity: 10, quantityCompleted: 4, timeOnOtherResource: true });
+    expect(setupDoneOnCurrentResource(switched)).toBe(false);
+    expect(remainingOperationMinutes(switched)).toBe(6 * 6 + 30);
+    // Once the new resource has reported time its setup is done.
+    expect(remainingOperationMinutes({ ...switched, timeOnCurrentResource: true })).toBe(36);
+    // Without any time the quantity decides, as before (left out = no time).
+    expect(setupDoneOnCurrentResource(op({ quantityCompleted: 4 }))).toBe(true);
+    expect(setupDoneOnCurrentResource(op({ quantityCompleted: 0, timeOnCurrentResource: false, timeOnOtherResource: false }))).toBe(false);
   });
 
   it("clamps an over-reported operation to zero", () => {

@@ -172,6 +172,16 @@ export class StopTimeNotAllowedError extends Error {
   }
 }
 
+// Terminalens gamla lista (#15): the instämpling named the station the
+// terminal listed the operation on, and the operation has since been
+// switched to another resource (Byt resurs). 409; the web asks to reload.
+export class StampWorkCenterChangedError extends Error {
+  constructor() {
+    super("The operation has been moved to another resource since the list was loaded");
+    this.name = "StampWorkCenterChangedError";
+  }
+}
+
 export class TimeReportNotFoundError extends Error {
   constructor(id: string) {
     super(`Time report ${id} not found`);
@@ -399,8 +409,11 @@ export function createTimeReportService(
     // Dated on the stop time's local day (localDateOf, shared with the
     // automatic stamp-out) — a stint stopped just before midnight lands on
     // the day the work was done.
-    // The stamp's kind (ställ/produktion, null = ej uppdelad) follows it —
-    // the terminal's stamp-out and a supervisor's Sluttid alike.
+    // The stamp's kind (ställ/produktion, null = ej uppdelad) and resource
+    // follow it — the terminal's stamp-out and a supervisor's Sluttid alike.
+    // A stamp opened before 0192 has no resource: the report takes the
+    // operation's, unchanged since the instämpling (Byt resurs is refused
+    // while a stamp is open).
     const report = await repo.createTimeReport(
       {
         employeeId: session.employeeId,
@@ -410,7 +423,8 @@ export function createTimeReportService(
         note: input.note,
         kind: session.kind,
       },
-      createdBy
+      createdBy,
+      session.workCenterId
     );
     const closed = await repo.closeStampSession(sessionId, stoppedAt, report.id);
     if (!closed) {
@@ -533,6 +547,14 @@ export function createTimeReportService(
           "Stamping is only possible while the order is released or in progress"
         );
       }
+      // Terminalens gamla lista: the station the terminal showed is no longer
+      // the operation's. Asked here, before the order is started or the
+      // attendance opened; createStampSession asks again on the locked row,
+      // so a switch committing in between is refused too.
+      const expectWorkCenter = (workCenterId: string) => {
+        if (input.workCenterId !== undefined && workCenterId !== input.workCenterId) throw new StampWorkCenterChangedError();
+      };
+      expectWorkCenter(operation.workCenterId);
 
       if (await repo.hasOpenStampSessionForOperation(input.employeeId, input.moOperationId)) {
         throw new AlreadyStampedInError();
@@ -572,7 +594,7 @@ export function createTimeReportService(
       let session;
       try {
         // Ställ/produktion when the terminal sent it — never required.
-        session = await repo.createStampSession(input.employeeId, input.moOperationId, createdBy, input.kind ?? null);
+        session = await repo.createStampSession(input.employeeId, input.moOperationId, createdBy, input.kind ?? null, expectWorkCenter);
       } catch (err) {
         if (isUniqueViolation(err, ONE_OPEN_STAMP)) throw new AlreadyStampedInError();
         throw err;

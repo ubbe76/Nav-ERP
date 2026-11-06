@@ -301,6 +301,14 @@ export const timeReports = pgTable("time_reports", {
   hours: numeric("hours", { precision: 10, scale: 2 }).notNull(),
   // Ställ/produktion; null = ej uppdelad (see timeKindEnum).
   kind: timeKindEnum("kind"),
+  // The resource the time was worked on (#15, migration 0192): the stamp's
+  // (stamp_sessions.work_center_id) when a stamp-out materializes it,
+  // otherwise the operation's resource when the report is written. The
+  // efterkalkyl and Produkter i arbete price the hours at THIS resource's
+  // hourly rate of the work day, so a later Byt resurs never reprices them.
+  // Null = a report from before the column: counted on the operation's
+  // current resource, as before. Restrict: a resource with time on it stays.
+  workCenterId: uuid("work_center_id").references(() => workCenters.id, { onDelete: "restrict" }),
   note: text("note"),
   // Who entered this report in the system — distinct from employeeId (who did the work).
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
@@ -334,6 +342,13 @@ export const stampSessions = pgTable(
     // materializes (every stop: the terminal, Sluttid, the automatic
     // stamp-out). Null = ej uppdelad.
     kind: timeKindEnum("kind"),
+    // The operation's resource at the instämpling (#15, migration 0192),
+    // read under the operation's FOR KEY SHARE in the INSERT's transaction,
+    // and carried to the time report every stop materializes. Byt resurs is
+    // refused while a stamp is open, so it is the resource the whole stint
+    // was worked on. Null = a stamp opened before the column (the stop then
+    // takes the operation's resource).
+    workCenterId: uuid("work_center_id").references(() => workCenters.id, { onDelete: "restrict" }),
     timeReportId: uuid("time_report_id").references(() => timeReports.id, { onDelete: "set null" }),
     // The terminal's logged-in session user — not who did the work.
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),

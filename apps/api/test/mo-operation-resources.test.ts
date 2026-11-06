@@ -308,7 +308,7 @@ describe("Byt resurs — Ändra operationer", () => {
     expect((await mfgService.updateOperation(w.order.id, w.op10.id, { resourceLocked: true }, w.user.id)).operation.resourceLocked).toBe(false);
   });
 
-  it("refuses the switch while someone is stamped in; after the stamp-out (reported time) it is allowed", async () => {
+  it("refuses the switch while someone is stamped in; after the stamp-out (reported time) it is allowed, and the time stays priced on 110", async () => {
     const w = await seedWorld();
     const worker = await employee();
     const session = await timeReportService.stampIn({ employeeId: worker.id, moOperationId: w.op10.id }, w.user.id);
@@ -316,10 +316,26 @@ describe("Byt resurs — Ändra operationer", () => {
       MoOperationStampedError
     );
     expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r110.id, resourceLocked: false });
-    await timeReportService.stampOut(session.id, {}, w.user.id);
-    // Reported time stays on the operation and is priced with the new resource.
+    // Two hours stamped on 110.
+    await db.update(stampSessions).set({ startedAt: new Date(Date.now() - 2 * 3_600_000) }).where(eq(stampSessions.id, session.id));
+    const out = await timeReportService.stampOut(session.id, {}, w.user.id);
+    expect(out.timeReport).toMatchObject({ hours: "2.00", workCenterId: w.r110.id });
     const moved = await mfgService.updateOperation(w.order.id, w.op10.id, { workCenterId: w.r120.id }, w.user.id);
     expect(moved.operation).toMatchObject({ workCenterCode: "120", resourceLocked: true });
+
+    // The reported time keeps its resource (time_reports.work_center_id): the
+    // efterkalkyl prices it at 110's 600 kr/h, not 120's 300, and new time at 120's.
+    await timeReportService.createTimeReport({ employeeId: worker.id, moOperationId: w.op10.id, date: "2026-11-02", hours: 1 }, w.user.id);
+    await mfgService.complete(w.order.id, { quantity: 10 }, w.user.id);
+    const { calculation, analysis } = await costingService.postCalculate(w.order.id, true);
+    expect(calculation.laborCost).toBe("1500.0000");
+    const rows = analysis!.operationRows.filter((r) => r.sequenceNo === 10);
+    expect(rows.map((r) => [r.workCenterCode, r.actual, r.kind === "time" && r.baseHourlyRate])).toEqual([
+      ["110", 1200, 300],
+      ["120", 300, 300],
+    ]);
+    // 110's rate difference over the 2 h is Timpris, on the 110 row.
+    expect(rows.map((r) => r.parts.rate)).toEqual([600, 0]);
   });
 });
 
@@ -394,7 +410,9 @@ describe("Byt resurs — against a concurrent instämpling", () => {
     expect(results.map(outcome)).toEqual(["ok", "ok"]);
     expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r120.id, resourceLocked: true });
     const [session] = await db.select().from(stampSessions).where(eq(stampSessions.moOperationId, w.op10.id));
-    expect(session).toBeDefined();
+    // The stamp's locked read waited for the switch: it records 120, and so
+    // will its time report.
+    expect(session).toMatchObject({ workCenterId: w.r120.id });
     expect(await terminalOpIds(w.r120.id)).toContain(w.op10.id);
   });
 });

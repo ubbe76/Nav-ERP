@@ -29,6 +29,7 @@ import { stockholmDateOf, stockholmToday } from "../../system/service/delivery-d
 import {
   hourlyRateAt,
   laborAtWorkDays,
+  reportedTimeByResource,
   pricedAtWithdrawal,
   reportedTime,
   type PriceHistories,
@@ -589,16 +590,21 @@ export function createCostingService(
     // The reported time is ONE read (getReportedTime): H, Hs, Hr and the work
     // days all come from its rows (reportedTime), never from two queries a
     // time report's commit could fall between.
-    const [operations, actualSubcontractCosts, timeByOperation] = await Promise.all([
+    const [operations, actualSubcontractCosts, reported] = await Promise.all([
       repo.getPostCalculationOperations(manufacturingOrderId),
       repo.getSubcontractActualCosts(manufacturingOrderId),
       repo.getReportedTime(manufacturingOrderId),
     ]);
+    const timeByOperation = reported.byOperation;
     // Timkostnad per datum (#14 etapp 4): one load of the resources' rate
     // histories prices each work day's hours at that day's rate and the
-    // base at T₀'s.
+    // base at T₀'s — the operations' resources and every resource time was
+    // reported on (#15).
     const rateHistories = await repo.getWorkCenterRateHistories([
-      ...new Set(operations.filter((op) => op.workCenterType !== "subcontract").map((op) => op.workCenterId)),
+      ...new Set([
+        ...operations.filter((op) => op.workCenterType !== "subcontract").map((op) => op.workCenterId),
+        ...reported.resources.keys(),
+      ]),
     ]);
     const basePricedAt = order.createdAt;
 
@@ -606,11 +612,14 @@ export function createCostingService(
     const output: OutputContext = { preliminary: isPreliminaryStatus(order.status), received: Number(order.quantityReceived) };
 
     const operationRows: OperationRowWrite[] = [];
+    // Index-aligned with operationRows: an operation worked on several
+    // resources has a row per resource (#15).
+    const operationLabels: VarianceLabels["operations"] = [];
     for (const op of operations) {
       const completed = Number(op.quantityCompleted ?? 0);
       const scrapped = Number(op.quantityScrapped);
-      const time = reportedTime(timeByOperation.get(op.operationId) ?? []);
-      const hours = time.hours;
+      const timeRows = timeByOperation.get(op.operationId) ?? [];
+      const hours = reportedTime(timeRows).hours;
       if (op.workCenterType === "subcontract") {
         // Actual cost from the linked lego IO rows (received quantity ×
         // à-pris + ställpris, in SEK) when any receipt exists; otherwise the
@@ -640,32 +649,58 @@ export function createCostingService(
           baseUnitPrice: Number(op.unitPrice ?? 0),
           baseOneOff: oneOff,
         });
+        operationLabels.push({ workCenterCode: op.workCenterCode, workCenterName: op.workCenterName });
         continue;
       }
       if (hours === 0) warnings.push(`Operation ${op.sequenceNo} (${op.workCenterName}): ingen rapporterad tid`);
-      // Lön per arbetsdag: each work day's hours at that day's hourly rate
-      // (the row shows their average); no history ⇒ the current rate.
-      // Base: setup (minutes, once it counts) + run time per unit × N at the
-      // rate as of T₀ (R₀), so Timpris = Lön − R₀ × H. The actual side: of H,
-      // Hs reported as ställ (setup_hours) and Hr as produktion (run_hours) —
-      // both null while no report on the operation has a type, so the whole
-      // of H is then Ej uppdelad (cost-variance.ts).
-      const history = rateHistories.get(op.workCenterId) ?? [];
-      const labor = laborAtWorkDays(time.days, history, Number(op.hourlyRate));
+      // A row per resource the time was worked on (#15, time_reports.
+      // work_center_id; a report without one counts on the operation's
+      // current resource): Lön per arbetsdag — each work day's hours at THAT
+      // resource's hourly rate that day (the row shows their average; no
+      // history ⇒ its current rate) — and TO at that resource's percentage,
+      // so a Byt resurs never reprices time already reported. The base
+      // stays the operation's: setup (minutes, once it counts) + run time per
+      // unit × N, on the current resource's row, at the current resource's
+      // rate as of T₀ (R₀) — the switch is a new plan. Every row of the
+      // operation is valued at that R₀, so Timpris = Lön − R₀ × H also
+      // carries the rate difference of time worked on another resource, and
+      // the rows' parts sum to the operation's exactly. The actual side: of
+      // the row's H, Hs reported as ställ (setup_hours) and Hr as produktion
+      // (run_hours) — null while no report on the row has a type, so its
+      // whole H is then Ej uppdelad (cost-variance.ts).
+      const currentHistory = rateHistories.get(op.workCenterId) ?? [];
+      const baseHourlyRate = Number(hourlyRateAt(currentHistory, basePricedAt) ?? op.hourlyRate);
       const worked = operationWorked({ hours, completed, scrapped });
-      operationRows.push({
-        ...buildOperationRow({
-          ...op,
-          hours,
-          setupHours: time.setupHours,
-          hourlyRate: String(labor.hourlyRate),
-          laborAmount: labor.laborAmount,
-        }),
-        baseSetupHours: oneOffCounts(output, worked) ? Number(op.setupTime) / 60 : 0,
-        baseRunHours: (Number(op.runTimePerUnit) / 60) * operationOutput(output, completed),
-        runHours: time.runHours,
-        baseHourlyRate: Number(hourlyRateAt(history, basePricedAt) ?? op.hourlyRate),
+      const resourceOf = (workCenterId: string) =>
+        workCenterId === op.workCenterId ? op : reported.resources.get(workCenterId)!;
+      // Byte order on the code — the order the saved rows are read in
+      // (listOperationRows, COLLATE "C"), so a preview lists them as the
+      // saved calculation does.
+      const parts = reportedTimeByResource(timeRows, op.workCenterId).sort((a, b) => {
+        const [x, y] = [resourceOf(a.workCenterId).workCenterCode, resourceOf(b.workCenterId).workCenterCode];
+        return x < y ? -1 : x > y ? 1 : 0;
       });
+      for (const part of parts) {
+        const current = part.workCenterId === op.workCenterId;
+        const resource = resourceOf(part.workCenterId);
+        const labor = laborAtWorkDays(part.days, rateHistories.get(part.workCenterId) ?? [], Number(resource.hourlyRate));
+        operationRows.push({
+          ...buildOperationRow({
+            sequenceNo: op.sequenceNo,
+            workCenterId: part.workCenterId,
+            overheadPercent: resource.overheadPercent,
+            hours: part.hours,
+            setupHours: part.setupHours,
+            hourlyRate: String(labor.hourlyRate),
+            laborAmount: labor.laborAmount,
+          }),
+          baseSetupHours: current && oneOffCounts(output, worked) ? Number(op.setupTime) / 60 : 0,
+          baseRunHours: current ? (Number(op.runTimePerUnit) / 60) * operationOutput(output, completed) : 0,
+          runHours: part.runHours,
+          baseHourlyRate,
+        });
+        operationLabels.push({ workCenterCode: resource.workCenterCode, workCenterName: resource.workCenterName });
+      }
     }
 
     // The base's material: the förkalkyl's source (never "actual") as of T₀
@@ -718,7 +753,7 @@ export function createCostingService(
     );
     const labels: VarianceLabels = {
       material: rawConsumptions.map((c) => ({ articleNumber: c.articleNumber, articleName: c.name })),
-      operations: operations.map((op) => ({ workCenterCode: op.workCenterCode, workCenterName: op.workCenterName })),
+      operations: operationLabels,
     };
     return { header, materialRows, operationRows, warnings, labels };
   }
