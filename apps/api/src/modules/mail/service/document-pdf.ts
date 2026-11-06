@@ -483,6 +483,9 @@ export interface FinancialStatementPdfInput {
   // `amounts` (one per column, right-aligned) and `amount` is ignored. More
   // than four columns go landscape.
   columns?: string[];
+  // Landscape whatever the column count (Produkter i arbete: three columns
+  // and a long TO + article label).
+  landscape?: boolean;
   rows: {
     kind: "group" | "line" | "account" | "subtotal" | "total";
     label: string;
@@ -2660,7 +2663,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
   async function renderFinancialStatement(input: FinancialStatementPdfInput): Promise<Buffer> {
     const columns = input.columns ?? [];
     const multi = columns.length > 0;
-    const { doc, finished } = await startDocument({ landscape: columns.length > 4 });
+    const { doc, finished } = await startDocument({ landscape: columns.length > 4 || input.landscape === true });
     const left = PAGE_MARGIN;
     const right = doc.page.width - PAGE_MARGIN;
     const bottom = doc.page.height - 62;

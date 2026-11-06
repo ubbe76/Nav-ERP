@@ -43,6 +43,9 @@ export const DEFAULT_POSTING_SETTINGS = {
   // Årsbokslut (steg 2).
   postingInventory: "1460",
   postingInventoryChange: "4990",
+  // Årsbokslut, Produkter i arbete.
+  postingWip: "1440",
+  postingWipChange: "4940",
   // Valuta.
   postingFxGain: "3960",
   postingFxLoss: "7960",

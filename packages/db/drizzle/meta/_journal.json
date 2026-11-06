@@ -1289,6 +1289,13 @@
       "when": 1793880394571,
       "tag": "0183_e_faktura_mottagning",
       "breakpoints": true
+    },
+    {
+      "idx": 184,
+      "version": "7",
+      "when": 1793943717586,
+      "tag": "0184_produkter_i_arbete",
+      "breakpoints": true
     }
   ]
 }

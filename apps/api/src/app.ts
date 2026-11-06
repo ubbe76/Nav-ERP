@@ -29,6 +29,7 @@ import {
 } from "./modules/auth/middleware/permission.middleware.js";
 import { createCostingRepository } from "./modules/costing/repository/costing.repository.js";
 import { createCostingService } from "./modules/costing/service/costing.service.js";
+import { createWorkInProgressService } from "./modules/costing/service/work-in-progress.service.js";
 import { costingRoutes } from "./modules/costing/routes/costing.routes.js";
 import { createImportRepository, runImportDryRun } from "./modules/import/repository/import.repository.js";
 import { createImportService } from "./modules/import/service/import.service.js";
@@ -506,12 +507,16 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   // försäljningspris" on a saved calculation — injected so the standard cost
   // travels the same path the article card uses and gets its history row.
   // exchangeRateService converts a supplier price in another currency to SEK.
-  const costingService = createCostingService(
-    createCostingRepository(database),
-    systemService,
-    articleService,
-    exchangeRateService
-  );
+  const costingService = createCostingService(createCostingRepository(database), systemService, articleService, exchangeRateService);
+  // Produkter i arbete (#25): the efterkalkyl per a day for the open TOs —
+  // the report (admin) and the year-end step's value, read before its
+  // transaction since the supplier source may look rates up.
+  const workInProgressService = createWorkInProgressService({
+    db: database,
+    settings: systemService,
+    rates: exchangeRateService,
+    pdf: documentPdfService,
+  });
   // stockService also feeds the pick list (where each article can be
   // picked); manufacturingService feeds listRows' per-row "I tillverkning"
   // coverage + linked TO list (E3); costingService feeds each row's self cost
@@ -941,6 +946,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     exchangeRates: exchangeRateService,
     fixedAssets: fixedAssetService,
     inventory: valuationService,
+    workInProgress: workInProgressService,
     fiscalYears: economyService,
     log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });
@@ -1075,7 +1081,12 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
         await registerModule(protectedRoutes, budgetRoutes, { service: budgetService }, { read: ["ekonomi"], write: ["ekonomi"] });
         await registerModule(protectedRoutes, fixedAssetRoutes, { service: fixedAssetService }, { read: ["ekonomi"], write: ["ekonomi"] });
         await registerModule(protectedRoutes, yearEndRoutes, { service: yearEndClosingService }, { read: ["ekonomi"], write: ["ekonomi"] });
-        await registerModule(protectedRoutes, costingRoutes, { service: costingService }, { read: office, write: ["tillverkning"] });
+        await registerModule(
+          protectedRoutes,
+          costingRoutes,
+          { service: costingService, workInProgress: workInProgressService },
+          { read: office, write: ["tillverkning"] }
+        );
         await registerModule(protectedRoutes, apiClientRoutes, { service: oauthService }, adminOnly);
         await registerModule(protectedRoutes, systemRoutes, { service: systemService }, { read: office, write: ["admin"] });
         await registerModule(protectedRoutes, exchangeRateRoutes, { service: exchangeRateService }, { read: office, write: ["ekonomi"] });

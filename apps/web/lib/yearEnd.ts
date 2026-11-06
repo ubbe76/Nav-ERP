@@ -3,7 +3,7 @@
 // sync by apps/api/test/year-end.shared.test.ts. No imports: vitest loads it.
 
 export type YearEndAccrualKind = "prepaid_expense" | "accrued_income" | "accrued_expense" | "prepaid_income";
-export type YearEndStep = "inventory" | "accruals" | "result_transfer" | "profit_disposition" | "fx_revaluation";
+export type YearEndStep = "inventory" | "accruals" | "result_transfer" | "profit_disposition" | "fx_revaluation" | "work_in_progress";
 export type YearEndRole = "booking" | "accrual_reversal" | "cancellation" | "fx_reversal";
 export type PillStatus = "done" | "delayed" | "draft" | "stopped";
 
@@ -27,6 +27,7 @@ export const YEAR_END_STEP_LABELS: Record<YearEndStep, string> = {
   result_transfer: "Resultatöverföring",
   profit_disposition: "Vinstdisposition",
   fx_revaluation: "Valutaomvärdering",
+  work_in_progress: "Produkter i arbete",
 };
 
 export const YEAR_END_ROLE_LABELS: Record<YearEndRole, string> = {

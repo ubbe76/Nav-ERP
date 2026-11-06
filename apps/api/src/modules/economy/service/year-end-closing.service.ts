@@ -5,14 +5,17 @@ import { auditLog, type Db, type Tx } from "@navet/db";
 import {
   ACCRUAL_KIND_BALANCE_SIDE,
   round2,
+  WIP_BASIS_LABELS,
   type BookAccrualsInput,
   type BookFxRevaluationInput,
   type BookInventoryInput,
+  type BookWorkInProgressInput,
   type CreateFiscalYearInput,
   type ListYearEndClosingsQuery,
   type ProfitDispositionInput,
   type StartYearEndClosingInput,
   type ValuationMethod,
+  type WipBasis,
 } from "@navet/shared";
 import { formatNumber } from "../../mail/service/document-pdf.js";
 import { METHOD_LABELS } from "../../stock/service/valuation.service.js";
@@ -69,6 +72,7 @@ import {
   evaluateCloseBlockers,
   evaluateStepBlockers,
   evaluateWarnings,
+  wipStepRequired,
   type LedgerComparison,
   type StepGateInput,
   type YearEndCheck,
@@ -124,6 +128,19 @@ export class InventoryAccountConflictError extends Error {
   }
 }
 
+// Produkter i arbete: the PIA account is reconciled per the closing date like
+// the inventory account, so it may be neither its own change account nor
+// one of the inventory step's accounts, and its change account may not be
+// the inventory account — two steps reconciling or writing the same account
+// would overwrite each other. The change account may equal the inventory
+// change account (e.g. 4990 for both).
+export class WorkInProgressAccountConflictError extends Error {
+  constructor(number: string) {
+    super(`The work-in-progress posting accounts conflict on account ${number}`);
+    this.name = "WorkInProgressAccountConflictError";
+  }
+}
+
 export class InvalidAccrualAccountError extends Error {
   constructor(accountNumber: string, kind: string) {
     super(`Account ${accountNumber} cannot be used for an accrual of kind ${kind}`);
@@ -147,8 +164,9 @@ export class FiscalYearLastPeriodMissingError extends Error {
   }
 }
 
+// `step` is the missing step's Swedish name — the 409 body carries it.
 export class YearEndStepOrderError extends Error {
-  constructor(step: string) {
+  constructor(public step: string) {
     super(`Do step "${step}" before the result transfer`);
     this.name = "YearEndStepOrderError";
   }
@@ -262,6 +280,25 @@ export interface InventoryValuationReader {
   getValuation(query: { asOf: string; method: ValuationMethod }): Promise<InventoryValuation>;
 }
 
+export interface WorkInProgressValuation {
+  totalValue: number;
+  unvaluedCount: number;
+  cappedCount: number;
+  rows: { orderNumber: string; articleNumber: string; articleName: string; value: number | null }[];
+}
+
+// Produkter i arbete (#25): the costing module's report satisfies this
+// (app.ts passes it). It may look rates up (getRate), so it is only ever
+// called outside a transaction.
+export interface WorkInProgressReader {
+  getWorkInProgress(query: { asOf: string; basis: WipBasis }): Promise<WorkInProgressValuation>;
+}
+
+// The PIA per the closing date with the basis that matters — the booked one,
+// else the default — read before any transaction. null for a closed closing,
+// which is never re-valued.
+type WipCurrent = { basis: WipBasis; value: number } | null;
+
 export interface YearEndClosingServiceDeps {
   db: Db;
   poster: VerificationPoster;
@@ -277,6 +314,7 @@ export interface YearEndClosingServiceDeps {
     missingDepreciation(executor: Db | Tx, throughMonth: string): Promise<{ assets: number; total: number }>;
   };
   inventory: InventoryValuationReader;
+  workInProgress: WorkInProgressReader;
   // economyService satisfies this (app.ts passes it): steg 4 creates the
   // next fiscal year through the ordinary path, before its transaction.
   fiscalYears: { createFiscalYear(input: CreateFiscalYearInput): Promise<{ id: string }> };
@@ -315,10 +353,18 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
     }
   }
 
-  // The date locks after the first booked step (2–5 and the valutaomvärdering),
-  // steg 3's AV run included.
+  // The date locks after the first booked step (2–5, produkter i arbete and
+  // the valutaomvärdering), steg 3's AV run included.
   async function closingDateLocked(executor: Db | Tx, closing: repo.ClosingRow): Promise<boolean> {
-    if (closing.inventoryBookedAt || closing.accrualsBookedAt || closing.fxBookedAt || closing.resultTransferVerificationId) return true;
+    if (
+      closing.inventoryBookedAt ||
+      closing.wipBookedAt ||
+      closing.accrualsBookedAt ||
+      closing.fxBookedAt ||
+      closing.resultTransferVerificationId
+    ) {
+      return true;
+    }
     return repo.hasDepreciationRunOn(executor, closing.closingDate);
   }
 
@@ -362,7 +408,9 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
     executor: Db | Tx,
     closing: repo.ClosingRow,
     year: repo.FiscalYearRow,
-    opts: { tolerant?: boolean } = {}
+    // wip: the PIA per the closing date, read by the caller outside any
+    // transaction (the reader may look rates up).
+    opts: { tolerant?: boolean; wip: WipCurrent }
   ): Promise<YearEndCheck[]> {
     const failed: YearEndCheck[] = [];
     let serial: Promise<unknown> = Promise.resolve();
@@ -399,8 +447,17 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
         revaluation: await fxBookedOnAccount(executor, closing, accountNumber, sign),
       };
     };
-    const [unsettledVatMonths, receivables, payables, fixedAssetMismatches, revenueWithoutVatBox, inventoryStale, fxRevaluationStale, unreconciledBankAccounts] =
-      await Promise.all([
+    const [
+      unsettledVatMonths,
+      receivables,
+      payables,
+      fixedAssetMismatches,
+      revenueWithoutVatBox,
+      inventoryStale,
+      wipStale,
+      fxRevaluationStale,
+      unreconciledBankAccounts,
+    ] = await Promise.all([
         attempt(
           "Momsomföringen",
           async () => {
@@ -452,6 +509,16 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
           },
           null
         ),
+        attempt(
+          "Produkter i arbete",
+          async (): Promise<{ reason: "ledger" | "valuation"; ledger: number; value: number; currentValue: number } | null> => {
+            const wipStep = await wipStepView(executor, closing, opts.wip);
+            return wipStep.status === "stale"
+              ? { reason: wipStep.staleReason!, ledger: wipStep.ledger ?? 0, value: wipStep.value ?? 0, currentValue: wipStep.currentValue ?? 0 }
+              : null;
+          },
+          null
+        ),
         attempt("Valutaomvärderingen", async () => (await fxStepState(executor, closing)).status === "stale", false),
         // Bankavstämning: a bank account not reconciled through the closing
         // date is a warning, never a blocker (spec etapp 4 §4).
@@ -465,6 +532,7 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
         fixedAssetMismatches,
         revenueWithoutVatBox,
         inventoryStale,
+        wipStale,
         fxRevaluationStale,
         unreconciledBankAccounts,
       }),
@@ -597,6 +665,114 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
       value,
       verification: closing.inventoryVerificationId ? await repo.verificationRef(executor, closing.inventoryVerificationId) : null,
       bookedAt: closing.inventoryBookedAt,
+      ledger,
+    };
+  }
+
+  // --- Produkter i arbete (#25) ---
+  // Steg 2's twin for the PIA account: the value per the closing date with
+  // the chosen underlag against the PIA account's balance without the step's
+  // live booking. The value is read BEFORE any transaction (the reader may
+  // look rates up); inside, the closing row is locked and the balance and
+  // the live verification are read. A PIA that changes between the two
+  // shows as Inaktuell.
+
+  async function defaultWipBasis(executor: Db | Tx, year: repo.FiscalYearRow): Promise<WipBasis> {
+    return (await repo.latestClosedWipBasis(executor, year.startDate)) ?? "manufacturing_cost";
+  }
+
+  async function readWipValue(asOf: string, basis: WipBasis) {
+    const valuation = await deps.workInProgress.getWorkInProgress({ asOf, basis });
+    return { valuation, value: round2(valuation.totalValue) };
+  }
+
+  // Never inside a transaction. The booked basis when the step is done (what
+  // a stale check compares with), else the default.
+  async function currentWip(closing: repo.ClosingRow, year: repo.FiscalYearRow): Promise<WipCurrent> {
+    if (closing.status === "closed") return null;
+    const basis = (closing.wipBasis as WipBasis | null) ?? (await defaultWipBasis(db, year));
+    return { basis, value: (await readWipValue(closing.closingDate, basis)).value };
+  }
+
+  // The PIA account's balance through the closing date; null when the
+  // account is not in the chart.
+  async function wipLedger(executor: Db | Tx, closing: repo.ClosingRow): Promise<number | null> {
+    const settings = await deps.settings.read(executor);
+    const account = await repo.findAccountByNumber(executor, settings.postingWip);
+    return account ? repo.accountBalance(executor, account.id, closing.closingDate) : null;
+  }
+
+  // Compared on the numbers (unique in the chart), so a misconfiguration is
+  // reported whatever the value — the same as steg 2's conflict.
+  function assertWipAccountsDistinct(settings: Awaited<ReturnType<PostingSettingsReader["read"]>>): void {
+    const { postingWip: wip, postingWipChange: change } = settings;
+    if (wip === change || wip === settings.postingInventory || wip === settings.postingInventoryChange) {
+      throw new WorkInProgressAccountConflictError(wip);
+    }
+    if (change === settings.postingInventory) throw new WorkInProgressAccountConflictError(change);
+  }
+
+  async function computeWip(executor: Db | Tx, closing: repo.ClosingRow, basis: WipBasis, value: number) {
+    const settings = await deps.settings.read(executor);
+    assertWipAccountsDistinct(settings);
+    // A company without manufacturing: nothing in progress, nothing on the
+    // PIA account and no live booking — the step completes with nothing to
+    // book, without requiring either account.
+    if (value === 0 && !closing.wipVerificationId) {
+      const account = await repo.findAccountByNumber(executor, settings.postingWip);
+      const ledger = account ? await repo.accountBalance(executor, account.id, closing.closingDate) : 0;
+      if (ledger === 0) {
+        const unchanged = closing.wipBookedAt !== null && closing.wipBasis === basis && Number(closing.wipValue) === 0;
+        return { ledger, ledgerExcludingStep: 0, difference: 0, amounts: [] as SignedAmount[], unchanged };
+      }
+    }
+    const wip = await requireAccountByNumber(executor, settings.postingWip, "work in progress");
+    const change = await requireAccountByNumber(executor, settings.postingWipChange, "work in progress change");
+    const ledger = await repo.accountBalance(executor, wip.id, closing.closingDate);
+    const live = closing.wipVerificationId ? await repo.verificationAmountOnAccount(executor, closing.wipVerificationId, wip.id) : 0;
+    const ledgerExcludingStep = round2(ledger - live);
+    // Value − ledger onto the PIA account against its change account: steg
+    // 2's arithmetic, account for account.
+    const { difference, amounts } = inventoryAmounts({
+      inventoryAccountId: wip.id,
+      changeAccountId: change.id,
+      value,
+      ledgerBalance: ledgerExcludingStep,
+    });
+    const unchanged =
+      closing.wipBookedAt !== null && closing.wipBasis === basis && Number(closing.wipValue) === value && ledger === value;
+    return { ledger, ledgerExcludingStep, difference, amounts, unchanged };
+  }
+
+  // Stale like steg 2: the PIA account no longer equals the booked value
+  // ("ledger"), or the PIA per the closing date with the booked basis no
+  // longer gives it ("valuation" — time reported afterwards for an earlier
+  // day, an undone report, a standard cost set later). `current` was read
+  // outside the caller's transaction; a closed closing is never re-valued.
+  async function wipStepView(executor: Db | Tx, closing: repo.ClosingRow, current: WipCurrent) {
+    const ledger = await wipLedger(executor, closing);
+    const value = closing.wipValue === null ? null : Number(closing.wipValue);
+    const basis = closing.wipBasis as WipBasis | null;
+    const currentValue = closing.wipBookedAt !== null && current !== null && current.basis === basis ? current.value : null;
+    const staleReason: "ledger" | "valuation" | null =
+      closing.wipBookedAt === null
+        ? null
+        : ledger !== null && ledger !== value
+          ? "ledger"
+          : currentValue !== null && currentValue !== value
+            ? "valuation"
+            : null;
+    const status: "not_done" | "done" | "stale" = closing.wipBookedAt === null ? "not_done" : staleReason !== null ? "stale" : "done";
+    return {
+      status,
+      staleReason,
+      currentValue,
+      // Whether the close gate asks for the step (wipStepRequired).
+      required: wipStepRequired({ value: current?.value ?? 0, ledger: ledger ?? 0 }),
+      basis,
+      value,
+      verification: closing.wipVerificationId ? await repo.verificationRef(executor, closing.wipVerificationId) : null,
+      bookedAt: closing.wipBookedAt,
       ledger,
     };
   }
@@ -923,7 +1099,7 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
 
   // The steg 6 gate. Depreciation uses the same live register check as the
   // step view and steg 5's order check, so they can never disagree.
-  async function loadCloseBlockers(executor: Db | Tx, closing: repo.ClosingRow, year: repo.FiscalYearRow) {
+  async function loadCloseBlockers(executor: Db | Tx, closing: repo.ClosingRow, year: repo.FiscalYearRow, wip: WipCurrent) {
     const gate = await loadStepGate(executor, closing, year);
     const depreciation = await depreciationStepView(executor, closing);
     const ib = await ibCheck(executor, year);
@@ -934,6 +1110,11 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
         ...gate,
         yearEndDate: year.endDate,
         inventoryDone: closing.inventoryBookedAt !== null,
+        workInProgress: {
+          value: wip?.value ?? 0,
+          ledger: (await wipLedger(executor, closing)) ?? 0,
+          done: closing.wipBookedAt !== null,
+        },
         missingDepreciationAssets: depreciation.missingAssets,
         accrualsDone: closing.accrualsBookedAt !== null,
         fxRevaluation: {
@@ -1029,12 +1210,16 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
 
   // Detail sections that grow with each step.
   async function views(executor: Db | Tx, closing: repo.ClosingRow, year: repo.FiscalYearRow) {
-    const close = await loadCloseBlockers(executor, closing, year);
+    // views() only ever runs for a GET (detail(db)), so the PIA is read here.
+    const wip = await currentWip(closing, year);
+    const close = await loadCloseBlockers(executor, closing, year, wip);
     return {
       history: await repo.listHistory(executor, closing.id),
       defaultInventoryMethod: await defaultInventoryMethod(executor, year),
+      defaultWipBasis: await defaultWipBasis(executor, year),
       steps: {
         inventory: await inventoryStepView(executor, closing),
+        workInProgress: await wipStepView(executor, closing, wip),
         depreciation: await depreciationStepView(executor, closing),
         accruals: await accrualsStepView(executor, closing),
         // The preview looks rates up (maybe Riksbanken): on the service's
@@ -1045,7 +1230,7 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
       checks: {
         stepBlockers: evaluateStepBlockers(close.gate),
         closeBlockers: close.blockers,
-        warnings: await loadWarnings(executor, closing, year, { tolerant: true }),
+        warnings: await loadWarnings(executor, closing, year, { tolerant: true, wip }),
         draftVerifications: await repo.listDrafts(executor, year.id, DRAFT_LIST_LIMIT),
         // The blocker's count: the list above is capped, this is not.
         draftVerificationCount: close.gate.draftCount,
@@ -1162,6 +1347,111 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
             }
           : null,
       };
+    },
+
+    // Produkter i arbete: what the step would book with the basis (default:
+    // the previous closed year's, else Tillverkningskostnad).
+    async previewWorkInProgress(id: string, requestedBasis?: WipBasis) {
+      const closing = await requireClosing(db, id);
+      const year = await requireYear(db, closing.fiscalYearId);
+      const basis = requestedBasis ?? (await defaultWipBasis(db, year));
+      const { valuation, value } = await readWipValue(closing.closingDate, basis);
+      const calc = await computeWip(db, closing, basis, value);
+      return {
+        asOf: closing.closingDate,
+        basis,
+        value,
+        unvaluedCount: valuation.unvaluedCount,
+        cappedCount: valuation.cappedCount,
+        unvaluedOrders: valuation.rows
+          .filter((row) => row.value === null)
+          .slice(0, 20)
+          .map((row) => ({ orderNumber: row.orderNumber, articleNumber: row.articleNumber, articleName: row.articleName })),
+        ledgerBalance: calc.ledger,
+        ledgerExcludingStep: calc.ledgerExcludingStep,
+        difference: calc.difference,
+        rows: await accountRows(db, calc.amounts),
+        unchanged: calc.unchanged,
+        live: closing.wipBookedAt
+          ? {
+              value: Number(closing.wipValue),
+              basis: closing.wipBasis as WipBasis,
+              verification: closing.wipVerificationId ? await repo.verificationRef(db, closing.wipVerificationId) : null,
+            }
+          : null,
+      };
+    },
+
+    // Produkter i arbete: like steg 2 — the difference between the value and
+    // the PIA account (without the live booking) in series BS, a re-run
+    // cancels the live verification and books a new one, or is unchanged.
+    // The value is read FIRST, outside the transaction.
+    async bookWorkInProgress(id: string, input: BookWorkInProgressInput, userId: string) {
+      const pre = await requireClosing(db, id);
+      const preYear = await requireYear(db, pre.fiscalYearId);
+      // Checked again under the row lock; here so a closed closing is not valued.
+      if (pre.status !== "in_progress") throw new YearEndClosingClosedError(preYear.label);
+      const { value } = await readWipValue(pre.closingDate, input.basis);
+
+      return db.transaction(async (tx) => {
+        const { closing, year } = await lockOpenClosing(tx, id);
+        // The value was read for the closing date read before the lock; a
+        // date moved in between (possible until the first booked step) needs
+        // a new valuation — outside a transaction, so: try again.
+        if (closing.closingDate !== pre.closingDate) {
+          throw new YearEndBlockedError(["Bokslutsdagen ändrades under värderingen av produkter i arbete — försök igen"]);
+        }
+        const calc = await computeWip(tx, closing, input.basis, value);
+        if (calc.unchanged) {
+          return {
+            unchanged: true,
+            verification: closing.wipVerificationId ? await repo.verificationRef(tx, closing.wipVerificationId) : null,
+            cancelled: null,
+            value,
+            difference: 0,
+          };
+        }
+        const cancelled = closing.wipVerificationId
+          ? await cancelGuideVerification(tx, closing.id, closing.wipVerificationId, "work_in_progress", userId)
+          : null;
+        let verification: repo.VerificationRef | null = null;
+        if (calc.amounts.length > 0) {
+          const posted = await deps.poster.postClosingEntry(
+            tx,
+            {
+              date: closing.closingDate,
+              description: `Förändring av produkter i arbete bokslut ${year.label} (${WIP_BASIS_LABELS[input.basis]})`,
+              amounts: calc.amounts,
+              source: "year_end_wip",
+              document: `Bokslut ${year.label}`,
+            },
+            userId
+          );
+          await repo.insertOwnership(tx, { verificationId: posted.verificationId, closingId: closing.id, step: "work_in_progress", role: "booking" });
+          verification = await repo.verificationRef(tx, posted.verificationId);
+        }
+        await repo.updateClosing(tx, closing.id, {
+          wipBasis: input.basis,
+          wipValue: String(value),
+          wipVerificationId: verification?.id ?? null,
+          wipBookedAt: new Date(),
+        });
+        await writeAudit(
+          tx,
+          year.label,
+          "wip_booked",
+          {
+            basis: input.basis,
+            value,
+            ledgerBefore: calc.ledgerExcludingStep,
+            difference: calc.difference,
+            verification: verification?.displayNumber ?? null,
+            cancelled: cancelled?.displayNumber ?? null,
+          },
+          userId
+        );
+        return { unchanged: false, verification, cancelled, value, difference: calc.difference };
+      });
     },
 
     // Steg 3: the register's own run, inside this transaction, dated on the
@@ -1435,9 +1725,16 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
     // Steg 5: one verification 8999/2099 for the year's net. Re-run after a
     // change = omföring of the live transfer + a new one.
     async bookResultTransfer(id: string, userId: string) {
+      // The PIA moves the result too; read before the transaction (rates),
+      // and only while the step is not booked (a booking is never undone).
+      const pre = await requireClosing(db, id);
+      const wip = pre.wipBookedAt ? null : await currentWip(pre, await requireYear(db, pre.fiscalYearId));
       return db.transaction(async (tx) => {
         const { closing, year } = await lockOpenClosing(tx, id);
         if (!closing.inventoryBookedAt) throw new YearEndStepOrderError("Lagerförändring");
+        if (!closing.wipBookedAt && wipStepRequired({ value: wip?.value ?? 0, ledger: (await wipLedger(tx, closing)) ?? 0 })) {
+          throw new YearEndStepOrderError("Produkter i arbete");
+        }
         if ((await depreciationStepView(tx, closing)).missingAssets > 0) throw new YearEndStepOrderError("Avskrivningar");
         if (!closing.accrualsBookedAt) throw new YearEndStepOrderError("Periodiseringar");
         if (!closing.fxBookedAt && (await loadFxItems(tx, closing.closingDate)).length > 0) {
@@ -1494,6 +1791,10 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
     // finishes first and the checks below see it. Any blocker rolls the
     // status back with everything else.
     async closeYear(id: string, userId: string) {
+      // The PIA for the gate, read before the transaction (the reader may
+      // look rates up). A closed closing fails under the lock below anyway.
+      const pre = await requireClosing(db, id);
+      const wip = await currentWip(pre, await requireYear(db, pre.fiscalYearId));
       await db.transaction(async (tx) => {
         const closing = await repo.lockClosing(tx, id);
         if (!closing) throw new YearEndClosingNotFoundError(id);
@@ -1506,12 +1807,12 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
         // year (which holds this row FOR UPDATE): previous-year-open then
         // reads the reopened year.
 
-        const close = await loadCloseBlockers(tx, closing, year);
+        const close = await loadCloseBlockers(tx, closing, year, wip);
         if (close.blockers.length > 0) throw new YearEndBlockedError(close.blockers.map((check) => check.message));
 
         const periodsLocked = await repo.lockAllPeriods(tx, year.id, userId);
         await repo.updateClosing(tx, closing.id, { status: "closed" });
-        const warnings = await loadWarnings(tx, closing, year);
+        const warnings = await loadWarnings(tx, closing, year, { wip });
         const ref = async (verificationId: string | null) =>
           verificationId ? ((await repo.verificationRef(tx, verificationId))?.displayNumber ?? null) : null;
         await writeAudit(
@@ -1526,6 +1827,7 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
               : null,
             verifications: {
               inventory: await ref(closing.inventoryVerificationId),
+              workInProgress: await ref(closing.wipVerificationId),
               accruals: await ref(closing.accrualsVerificationId),
               accrualReversal: await ref(closing.accrualsReversalVerificationId),
               fxRevaluation: await ref(closing.fxVerificationId),

@@ -12,7 +12,15 @@ export const yearEndClosingStatusEnum = pgEnum("year_end_closing_status", ["in_p
 // Valuta steg 4 (migration 0146): the step fx_revaluation and the role
 // fx_reversal (its automatic reversal on the next year's first day) are
 // appended — enum order carries no meaning.
-export const yearEndStepEnum = pgEnum("year_end_step", ["inventory", "accruals", "result_transfer", "profit_disposition", "fx_revaluation"]);
+// Produkter i arbete (#25, migration 0184): the step work_in_progress, also appended.
+export const yearEndStepEnum = pgEnum("year_end_step", [
+  "inventory",
+  "accruals",
+  "result_transfer",
+  "profit_disposition",
+  "fx_revaluation",
+  "work_in_progress",
+]);
 export const yearEndVerificationRoleEnum = pgEnum("year_end_verification_role", ["booking", "accrual_reversal", "cancellation", "fx_reversal"]);
 
 // The rate the valutaomvärdering used for one currency: SEK per 1 unit, the
@@ -66,6 +74,16 @@ export const yearEndClosings = pgTable(
       .references(() => verifications.id, { onDelete: "restrict" }),
     fxBookedAt: timestamp("fx_booked_at", { withTimezone: true }),
     fxRates: jsonb("fx_rates").$type<YearEndFxRate[]>(),
+    // Produkter i arbete (#25, migration 0184): steg 2's twin for the PIA
+    // account — the value per the closing date with the chosen underlag
+    // (manufacturing_cost | direct), the live BS verification (null when
+    // there was nothing to book) and when the step was done.
+    wipBasis: varchar("wip_basis", { length: 20 }),
+    wipValue: numeric("wip_value", { precision: 14, scale: 2 }),
+    wipVerificationId: uuid("wip_verification_id")
+      .unique()
+      .references(() => verifications.id, { onDelete: "restrict" }),
+    wipBookedAt: timestamp("wip_booked_at", { withTimezone: true }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -85,6 +103,11 @@ export const yearEndClosings = pgTable(
       sql`(${table.fxVerificationId} IS NULL) = (${table.fxReversalVerificationId} IS NULL) AND (${table.fxVerificationId} IS NULL OR ${table.fxBookedAt} IS NOT NULL)`
     ),
     check("year_end_fx_rates_booked", sql`(${table.fxBookedAt} IS NULL) = (${table.fxRates} IS NULL)`),
+    check("year_end_wip_basis_valid", sql`${table.wipBasis} IN ('manufacturing_cost', 'direct')`),
+    check(
+      "year_end_wip_consistent",
+      sql`(${table.wipBookedAt} IS NULL) = (${table.wipBasis} IS NULL) AND (${table.wipBookedAt} IS NULL) = (${table.wipValue} IS NULL) AND (${table.wipVerificationId} IS NULL OR ${table.wipBookedAt} IS NOT NULL)`
+    ),
   ]
 );
 

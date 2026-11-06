@@ -95,6 +95,22 @@ För en beställningsvara räknas TB mot konfigurationens förkalkyl från kundo
 
 Kolumnerna är **Nettoomsättning**, **Självkostnad**, **TB** (täckningsbidrag), **TG** (täckningsgrad i procent, mot den omsättning som har en kalkyl) och **Utan kalkyl**. Negativ täckningsgrad tonas rött. Rapporten kan exporteras som CSV, där totalraden ingår.
 
+## Produkter i arbete
+
+**Rapporter → Produkter i arbete** visar värdet av de tillverkningsordrar (TO) som är öppna ett visst datum — det som bokslutet bokför som produkter i arbete (PIA). Välj **Datum** (förval i dag) och **Underlag** och klicka **Visa**; **Skriv ut** ger samma rapport som PDF. Valen ligger i adressen (`?asOf=&basis=`), så vyn går att spara som bokmärke. Rapporten kräver administratörsrollen.
+
+Varje rad är en TO med kolumnerna **TO** (länk till orderkortet), **Artikel**, **Inlevererat** (till exempel *0 av 10*), **Upparbetat**, **Avräknat** och **PIA**. Kryssrutan **Visa kostnadsslag** lägger till **Material**, **Lön**, **Lego** och **Påslag** (Påslag bara med Tillverkningskostnad) före **Upparbetat**; valet ligger i adressen som `?kostnadsslag=1`. **Upparbetat** är det som lagts ner på ordern per datumet; **Avräknat** är det som ordern redan har tagit in i lager; **PIA** är skillnaden. Sist står en summarad.
+
+- **Vad som räknas.** En TO räknas om den är öppen per datumet och har upparbetat något eller tagit in något i lager. En TO som var **klar** per datumet ingår inte; dess skillnad är en avvikelse i resultatet, inte en tillgång. Klar betyder att ordern hade avslutats med **Slutför** (och det inte var ångrat då) eller att allt orderantal var inlevererat per datumet. Ångras en inleverans senare så att ordern öppnas igen, räknas den från dagen för ångrandet. En stängd TO som avslutades med ett mindre antal innan rapporteringsloggen fanns räknas aldrig. Material räknas per uttagsdatum, lön på **arbetsdagen** tiden gäller (inte dagen den registrerades) och lego på inleveransen från legoleverantören.
+- **Makulerad TO.** En makulerad TO räknas som andra ordrar för datum före makuleringen. Från makuleringsdagen räknas den inte: uttag och inleveranser måste ha ångrats för att ordern ska kunna makuleras, och tid som rapporterats på den är en kostnad, inte en tillgång.
+- **Underlag.** **Tillverkningskostnad** tar med **Påslag** (material- och legopåslag, samma uppbyggnad som ett standardpris); **Direkta kostnader** är bara material, lön och lego, och kolumnen **Påslag** (under **Visa kostnadsslag**) döljs. TO-påslaget (resursens omkostnad) ingår aldrig. Med **Direkta kostnader** avräknas de inlevererade varorna ändå till lagerpriset, så sätt då standardpriserna på samma sätt — annars blir skillnaden mellan upparbetat och avräknat missvisande.
+- **Avräknat** är det pris varorna hade när de kom in i lager, så en senare ändring av standardpriset flyttar inte det som redan är avräknat. En inleverans som har ångrats räknas bara för datum före ångrandet.
+- **PIA blir aldrig negativ per TO.** Överstiger avräknat upparbetat — oftast för att tid inte är rapporterad än — räknas PIA som 0, raden märks ▼ och rapporten visar notisen *Avräknat överstiger upparbetat — PIA räknas som 0*.
+- **Inlevererat utan pris.** Saknar en inleverans pris vet rapporten inte vad som är avräknat: raden visar **ovärderad**, ingår inte i summan och notisen *N ordrar har inlevererat utan pris och räknas inte* visas. Pristexter från efterkalkylen (till exempel saknade priser) visas under notiserna.
+- **Ångrad rapportering försvinner även bakåt.** Ångras en tidrapportering som gällde ett tidigare datum försvinner den också ur rapporten för det datumet, eftersom ångrad tid raderas. Uttag, inleveranser och legoinleveranser som ångrats räknas däremot kvar för datum före ångrandet. Timkostnaden är dagens, eftersom resursens timkostnad inte har någon historik.
+
+Pågående tillverkning bokförs i årsbokslutet av steget [Produkter i arbete](/hjalp/ekonomi#produkter-i-arbete-i-bokslutet).
+
 ## Projektrapport
 
 **Rapporter → Projektrapport** visar **intäkter**, **kostnader** och **resultat** för ett projekt ur bokföringen. Välj **Projekt** (öppna och stängda), och ange vid behov **Från** och **Till** — lämnas de tomma gäller hela projektets bokföring, och texten under nyckeltalen visar då det första och sista bokförda datumet (eller *alla datum* om projektet inte har några bokförda rader än). Filtren ligger i adressen, så vyn går att spara som bokmärke.

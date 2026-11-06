@@ -34,6 +34,10 @@ export const POSTING_VAT_SETTLEMENT_KEY = "posting_vat_settlement";
 // its counter account. One account by design (spec 4.3).
 export const POSTING_INVENTORY_KEY = "posting_inventory";
 export const POSTING_INVENTORY_CHANGE_KEY = "posting_inventory_change";
+// Årsbokslut, Produkter i arbete (#25): the PIA account the step reconciles
+// and its counter account.
+export const POSTING_WIP_KEY = "posting_wip";
+export const POSTING_WIP_CHANGE_KEY = "posting_wip_change";
 // Valuta: kursvinst/kursförlust on payments in another currency than SEK,
 // and the bank's fee for such a payment.
 export const POSTING_FX_GAIN_KEY = "posting_fx_gain";
@@ -65,6 +69,8 @@ export const POSTING_SETTINGS_KEYS = [
   POSTING_VAT_SETTLEMENT_KEY,
   POSTING_INVENTORY_KEY,
   POSTING_INVENTORY_CHANGE_KEY,
+  POSTING_WIP_KEY,
+  POSTING_WIP_CHANGE_KEY,
   POSTING_FX_GAIN_KEY,
   POSTING_FX_LOSS_KEY,
   POSTING_BANK_FEES_KEY,
@@ -88,6 +94,8 @@ export interface PostingSettings {
   postingVatSettlement: string;
   postingInventory: string;
   postingInventoryChange: string;
+  postingWip: string;
+  postingWipChange: string;
   postingFxGain: string;
   postingFxLoss: string;
   postingBankFees: string;
@@ -139,6 +147,9 @@ export function decodePostingSettings(get: (key: string) => string | null): Post
     postingVatSettlement: codeSetting(get(POSTING_VAT_SETTLEMENT_KEY), "2650"),
     postingInventory: codeSetting(get(POSTING_INVENTORY_KEY), "1460"),
     postingInventoryChange: codeSetting(get(POSTING_INVENTORY_CHANGE_KEY), "4990"),
+    // 1440 Produkter i arbete, 4940 Förändring av produkter i arbete.
+    postingWip: codeSetting(get(POSTING_WIP_KEY), "1440"),
+    postingWipChange: codeSetting(get(POSTING_WIP_CHANGE_KEY), "4940"),
     postingFxGain: codeSetting(get(POSTING_FX_GAIN_KEY), "3960"),
     postingFxLoss: codeSetting(get(POSTING_FX_LOSS_KEY), "7960"),
     postingBankFees: codeSetting(get(POSTING_BANK_FEES_KEY), "6570"),

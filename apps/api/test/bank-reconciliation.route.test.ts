@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { costCenters, db } from "@navet/db";
+import { companyInfo, costCenters, db } from "@navet/db";
 import { bankReconciliationRoutes } from "../src/modules/banking/routes/bank-reconciliation.routes.js";
 import { testEconomyRepository, testEconomyService } from "./helpers/services.js";
 import {
@@ -33,6 +33,9 @@ beforeEach(async () => {
   await resetBankSettings();
   // Kostnadsställen are not in the banking truncate (other registers hang off them).
   await db.delete(costCenters);
+  // Another file in the same worker database can leave Företagsuppgifternas
+  // IBAN set — the first GET /bank-accounts would then create Företagskonto.
+  await db.update(companyInfo).set({ iban: null });
   userId = (await setupBanking()).user.id;
 });
 afterAll(async () => {

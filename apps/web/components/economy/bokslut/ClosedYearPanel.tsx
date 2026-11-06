@@ -31,7 +31,15 @@ export function ClosedYearPanel({ closing }: { closing: YearEndClosingDetail }) 
         </p>
         <p>
           Lagerförändring: <VerificationLink verification={steps.inventory.verification} />
-          {!steps.inventory.verification && "inget verifikat"} · Periodiseringar: <VerificationLink verification={steps.accruals.verification} />
+          {!steps.inventory.verification && "inget verifikat"}
+          {steps.workInProgress.bookedAt && (
+            <>
+              {" "}
+              · Produkter i arbete: <VerificationLink verification={steps.workInProgress.verification} />
+              {!steps.workInProgress.verification && "inget verifikat"}
+            </>
+          )}{" "}
+          · Periodiseringar: <VerificationLink verification={steps.accruals.verification} />
           {!steps.accruals.verification && "inga"}
           {steps.fxRevaluation.bookedAt && (
             <>

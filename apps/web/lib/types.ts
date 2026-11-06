@@ -2948,6 +2948,9 @@ export interface SystemSettings {
   // Årsbokslut (steg 2): lager och lagerförändring.
   postingInventory: string;
   postingInventoryChange: string;
+  // Årsbokslut, Produkter i arbete: PIA and its change account.
+  postingWip: string;
+  postingWipChange: string;
   // Valuta: kursvinst, kursförlust and bankkostnader — where a payment in
   // another currency books its exchange difference and the bank's fee.
   postingFxGain: string;
@@ -5136,6 +5139,8 @@ export interface YearEndClosingDetail {
   } | null;
   history: { verification: YearEndVerificationRef; step: YearEndStep; role: YearEndRole }[];
   defaultInventoryMethod: ValuationMethod;
+  // Produkter i arbete: the previous closed year's basis, else Tillverkningskostnad.
+  defaultWipBasis: WipBasis;
   steps: {
     inventory: {
       status: "not_done" | "done" | "stale";
@@ -5145,6 +5150,20 @@ export interface YearEndClosingDetail {
       staleReason: "ledger" | "valuation" | null;
       currentValue: number | null;
       method: ValuationMethod | null;
+      value: number | null;
+      verification: YearEndVerificationRef | null;
+      bookedAt: string | null;
+      ledger: number | null;
+    };
+    // Produkter i arbete (#25), an unnumbered step. `required` = the close and
+    // the result transfer wait for it (something in progress or on the
+    // account); false + not_done = nothing to book, nothing blocked.
+    workInProgress: {
+      status: "not_done" | "done" | "stale";
+      staleReason: "ledger" | "valuation" | null;
+      currentValue: number | null;
+      required: boolean;
+      basis: WipBasis | null;
       value: number | null;
       verification: YearEndVerificationRef | null;
       bookedAt: string | null;
@@ -5208,6 +5227,21 @@ export interface InventoryPreview {
   value: number;
   unvaluedCount: number;
   unvaluedArticles: { articleNumber: string; articleName: string; quantity: number; unit: string }[];
+  ledgerBalance: number;
+  ledgerExcludingStep: number;
+  difference: number;
+  rows: YearEndPostingRow[];
+  unchanged: boolean;
+}
+
+export interface WorkInProgressPreview {
+  asOf: string;
+  basis: WipBasis;
+  value: number;
+  unvaluedCount: number;
+  cappedCount: number;
+  // The first unvalued orders (at most 20).
+  unvaluedOrders: { orderNumber: string; articleNumber: string; articleName: string }[];
   ledgerBalance: number;
   ledgerExcludingStep: number;
   difference: number;
@@ -6101,4 +6135,44 @@ export interface StorageUsage {
   databaseBytes: number;
   filesBytes: number;
   kinds: { key: string; label: string; count: number; bytes: number }[];
+}
+
+// Produkter i arbete (PIA) per datum (#25) — mirror of @navet/shared's
+// work-in-progress.ts and the costing module's report shape.
+export type WipBasis = "manufacturing_cost" | "direct";
+
+export const WIP_BASIS_LABELS: Record<WipBasis, string> = {
+  manufacturing_cost: "Tillverkningskostnad",
+  direct: "Direkta kostnader",
+};
+
+export interface WorkInProgressRow {
+  manufacturingOrderId: string;
+  orderNumber: string;
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  quantity: number;
+  receivedQuantity: number;
+  material: number;
+  labor: number;
+  subcontract: number;
+  // MO + LO; 0 with Direkta kostnader.
+  overhead: number;
+  accumulated: number;
+  // null = unknown (received without a price).
+  relieved: number | null;
+  value: number | null;
+  capped: boolean;
+}
+
+export interface WorkInProgressReport {
+  asOf: string;
+  basis: WipBasis;
+  rows: WorkInProgressRow[];
+  totals: { material: number; labor: number; subcontract: number; overhead: number; accumulated: number; relieved: number };
+  totalValue: number;
+  unvaluedCount: number;
+  cappedCount: number;
+  warnings: string[];
 }

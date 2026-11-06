@@ -193,6 +193,9 @@ const systemSettingsFieldsSchema = z.object({
     // Årsbokslut (steg 2): lager och lagerförändring. Same 4-digit/"" convention.
     postingInventory: z.union([z.literal(""), z.string().regex(/^[0-9]{4}$/)]).optional(),
     postingInventoryChange: z.union([z.literal(""), z.string().regex(/^[0-9]{4}$/)]).optional(),
+    // Årsbokslut, Produkter i arbete: PIA and its change account. Same 4-digit/"" convention.
+    postingWip: z.union([z.literal(""), z.string().regex(/^[0-9]{4}$/)]).optional(),
+    postingWipChange: z.union([z.literal(""), z.string().regex(/^[0-9]{4}$/)]).optional(),
     // Valuta: kursvinst, kursförlust and bankkostnader — the accounts a
     // payment in another currency books its exchange difference and the
     // bank's fee on. Same 4-digit/"" convention.
@@ -269,6 +272,8 @@ export const POSTING_SETTINGS_KEYS = [
   "postingVatSettlement",
   "postingInventory",
   "postingInventoryChange",
+  "postingWip",
+  "postingWipChange",
   "postingFxGain",
   "postingFxLoss",
   "postingBankFees",

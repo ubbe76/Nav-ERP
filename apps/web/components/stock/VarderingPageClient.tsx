@@ -7,6 +7,7 @@ import { Field, Input, Select } from "../ui/Field";
 import { FormError, FormHint, FormRow, FormStack } from "../ui/Form";
 import { Table } from "../ui/Table";
 import { API_URL, apiFetch } from "../../lib/api";
+import { stockholmToday } from "../../lib/date";
 import { formatMoney } from "../../lib/format";
 import buttonStyles from "../ui/Button.module.css";
 import {
@@ -81,7 +82,7 @@ export function VarderingPageClient({
   const router = useRouter();
   const pathname = usePathname();
 
-  const initialAsOf = useMemo(() => defaultAsOf ?? new Date().toLocaleDateString("sv-SE"), [defaultAsOf]);
+  const initialAsOf = useMemo(() => defaultAsOf ?? stockholmToday(), [defaultAsOf]);
   const [asOf, setAsOf] = useState(initialAsOf);
   const [method, setMethod] = useState<ValuationMethod>(
     isValuationMethod(defaultMethod) ? defaultMethod : "standard"

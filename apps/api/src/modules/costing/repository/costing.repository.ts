@@ -21,6 +21,7 @@ import {
   units,
   workCenters,
   type Db,
+  type Tx,
 } from "@navet/db";
 import type { CostCalculationType, CostingMaterialSource, CostMaterialRowKind, CostPriceSource } from "@navet/shared";
 import { explodeBom } from "../../article/service/bom-explosion.js";
@@ -104,7 +105,7 @@ export interface CostCalculationWrite {
   type: CostCalculationType;
 }
 
-export function createCostingRepository(db: Db) {
+export function createCostingRepository(db: Db | Tx) {
   return {
     async findArticleById(id: string) {
       const [row] = await db.select().from(articles).where(eq(articles.id, id));

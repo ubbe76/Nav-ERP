@@ -32,6 +32,8 @@ import {
   POSTING_VAT_SETTLEMENT_KEY,
   POSTING_INVENTORY_KEY,
   POSTING_INVENTORY_CHANGE_KEY,
+  POSTING_WIP_KEY,
+  POSTING_WIP_CHANGE_KEY,
   POSTING_FX_GAIN_KEY,
   POSTING_FX_LOSS_KEY,
   POSTING_BANK_FEES_KEY,
@@ -767,6 +769,9 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       // Årsbokslut (steg 2).
       if (input.postingInventory !== undefined) await set(POSTING_INVENTORY_KEY, input.postingInventory);
       if (input.postingInventoryChange !== undefined) await set(POSTING_INVENTORY_CHANGE_KEY, input.postingInventoryChange);
+      // Årsbokslut, Produkter i arbete.
+      if (input.postingWip !== undefined) await set(POSTING_WIP_KEY, input.postingWip);
+      if (input.postingWipChange !== undefined) await set(POSTING_WIP_CHANGE_KEY, input.postingWipChange);
       // Valuta.
       if (input.postingFxGain !== undefined) await set(POSTING_FX_GAIN_KEY, input.postingFxGain);
       if (input.postingFxLoss !== undefined) await set(POSTING_FX_LOSS_KEY, input.postingFxLoss);

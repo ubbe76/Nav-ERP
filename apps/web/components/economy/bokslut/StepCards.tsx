@@ -8,6 +8,7 @@ import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Checkbox, Field, Select } from "../../ui/Field";
 import { FormActions, FormError, FormHint, FormNotice } from "../../ui/Form";
+import { GatedLink } from "../../ui/GatedLink";
 import { Modal } from "../../ui/Modal";
 import { SectionHeading } from "../../ui/SectionHeading";
 import { StatusPill } from "../../ui/StatusPill";
@@ -17,10 +18,13 @@ import { monthLabel } from "../../../lib/fixedAssets";
 import { formatMoney } from "../../../lib/format";
 import {
   VALUATION_METHOD_LABELS,
+  WIP_BASIS_LABELS,
   type DepreciationPreview,
   type InventoryPreview,
   type ResultTransferPreview,
   type ValuationMethod,
+  type WipBasis,
+  type WorkInProgressPreview,
   type YearEndBookResult,
   type YearEndClosingDetail,
   type YearEndPostingRow,
@@ -223,6 +227,113 @@ export function InventoryCard({ closing }: { closing: YearEndClosingDetail }) {
   );
 }
 
+// Produkter i arbete (#25): an unnumbered step (like Valutaomvärdering) that
+// books the PIA per the closing date against its change account. The twin of
+// InventoryCard; the close and the result transfer wait for it only when
+// something is in progress or on the account (`required`).
+export function WorkInProgressCard({ closing }: { closing: YearEndClosingDetail }) {
+  const step = closing.steps.workInProgress;
+  const blocked = closing.checks.stepBlockers.length > 0;
+  const [basis, setBasis] = useState<WipBasis>(step.basis ?? closing.defaultWipBasis);
+  const [preview, setPreview] = useState<WorkInProgressPreview | null>(null);
+  const action = useStepAction();
+  const base = `/api/v1/year-end-closings/${closing.id}`;
+
+  return (
+    <Card maxWidth="none">
+      <StepHeader title="Produkter i arbete" status={stepState(closing, step.status)} />
+      {step.status !== "not_done" && (
+        <p>
+          Bokfört värde {formatMoney(step.value ?? 0)} ({step.basis ? WIP_BASIS_LABELS[step.basis] : ""}){" "}
+          {step.verification ? <VerificationLink verification={step.verification} /> : "— ingen skillnad att bokföra"}
+        </p>
+      )}
+      {step.status === "not_done" && !step.required && <p>Inga produkter i arbete att bokföra — steget spärrar inte bokslutet.</p>}
+      {step.status === "stale" && (
+        <FormNotice>
+          {step.staleReason === "valuation"
+            ? `Produkter i arbete per bokslutsdagen har ändrats efter bokningen och är nu ${formatMoney(step.currentValue ?? 0)} — gör om steget.`
+            : "Kontot för produkter i arbete har ändrats efter bokningen — gör om steget."}
+        </FormNotice>
+      )}
+      <Field label="Underlag" htmlFor="wipBasis">
+        <Select
+          id="wipBasis"
+          value={basis}
+          onChange={(e) => {
+            setBasis(e.target.value as WipBasis);
+            setPreview(null);
+          }}
+        >
+          {(Object.keys(WIP_BASIS_LABELS) as WipBasis[]).map((key) => (
+            <option key={key} value={key}>
+              {WIP_BASIS_LABELS[key]}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      {preview && (
+        <>
+          <p>
+            Produkter i arbete per {preview.asOf}: {formatMoney(preview.value)} · Saldo på kontot: {formatMoney(preview.ledgerExcludingStep)} · Skillnad:{" "}
+            {formatMoney(preview.difference)}
+          </p>
+          {preview.unvaluedCount > 0 && (
+            <FormNotice>
+              {preview.unvaluedCount} {preview.unvaluedCount === 1 ? "order har" : "ordrar har"} inlevererat utan pris och räknas inte
+              {preview.unvaluedOrders.length > 0 &&
+                `: ${preview.unvaluedOrders.map((o) => o.orderNumber).join(", ")}${preview.unvaluedCount > preview.unvaluedOrders.length ? " …" : ""}`}
+              .
+            </FormNotice>
+          )}
+          {preview.cappedCount > 0 && (
+            <FormNotice>
+              {preview.cappedCount} {preview.cappedCount === 1 ? "order:" : "ordrar:"} Avräknat överstiger upparbetat — PIA räknas som 0.
+            </FormNotice>
+          )}
+          {preview.unchanged && <FormHint>Samma som redan bokfört.</FormHint>}
+          <PostingTable rows={preview.rows} empty="Ingen skillnad att bokföra." />
+          <p>
+            <GatedLink href={{ pathname: "/rapporter/produkter-i-arbete", query: { asOf: preview.asOf, basis: preview.basis } }}>
+              Visa rapporten per {preview.asOf}
+            </GatedLink>
+          </p>
+        </>
+      )}
+      <FormError>{action.error}</FormError>
+      {action.notice && <FormHint>{action.notice}</FormHint>}
+      <FormActions className={styles.actions}>
+        <Button
+          type="button"
+          variant="ghost"
+          disabled={action.pending}
+          onClick={() =>
+            action.run(async () => {
+              setPreview(await apiFetch<WorkInProgressPreview>(`${base}/work-in-progress-preview?basis=${basis}`));
+              return null;
+            }, false)
+          }
+        >
+          Visa produkter i arbete
+        </Button>
+        <Button
+          type="button"
+          disabled={action.pending || blocked}
+          onClick={() =>
+            action.run(async () => {
+              const result = await apiFetch<YearEndBookResult>(`${base}/work-in-progress`, { method: "POST", body: JSON.stringify({ basis }) });
+              setPreview(null);
+              return bookedNotice("Produkter i arbete", result);
+            })
+          }
+        >
+          Bokför förändring av produkter i arbete
+        </Button>
+      </FormActions>
+    </Card>
+  );
+}
+
 export function DepreciationCard({ closing }: { closing: YearEndClosingDetail }) {
   const step = closing.steps.depreciation;
   const blocked = closing.checks.stepBlockers.length > 0;
@@ -310,11 +421,20 @@ export function ResultTransferCard({
   // Valutaomvärdering must be done first only when there are foreign open
   // invoices (the API's year-end-step-order says the same).
   const fxPending = fx.required && fx.status === "not_done";
+  // Produkter i arbete likewise, only when there is something (PIA or a
+  // balance on the PIA account — the API's wipStepRequired).
+  const wip = closing.steps.workInProgress;
+  const wipPending = wip.required && wip.status === "not_done";
   const earlierDone =
     closing.steps.inventory.status !== "not_done" &&
+    !wipPending &&
     closing.steps.depreciation.status === "done" &&
     closing.steps.accruals.status === "done" &&
     !fxPending;
+  // "stegen 2–4, Produkter i arbete och Valutaomvärdering" — the two
+  // unnumbered steps only when they have something to book.
+  const firstSteps = ["stegen 2–4", ...(wip.required ? ["Produkter i arbete"] : []), ...(fx.required ? ["Valutaomvärdering"] : [])];
+  const firstStepsText = firstSteps.length > 1 ? `${firstSteps.slice(0, -1).join(", ")} och ${firstSteps.at(-1)}` : firstSteps[0];
   const action = useStepAction();
   return (
     <Card maxWidth="none">
@@ -331,7 +451,7 @@ export function ResultTransferCard({
       ) : (
         <PostingTable rows={preview?.rows ?? []} empty="Resultatet är 0,00 — inget att överföra." />
       )}
-      {!earlierDone && <FormHint>{fx.required ? "Gör stegen 2–4 och Valutaomvärdering först." : "Gör stegen 2–4 först."}</FormHint>}
+      {!earlierDone && <FormHint>Gör {firstStepsText} först.</FormHint>}
       <FormError>{action.error}</FormError>
       {action.notice && <FormHint>{action.notice}</FormHint>}
       <FormActions className={styles.actions}>

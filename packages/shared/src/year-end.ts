@@ -30,6 +30,7 @@ export const YEAR_END_STEP_LABELS = {
   result_transfer: "Resultatöverföring",
   profit_disposition: "Vinstdisposition",
   fx_revaluation: "Valutaomvärdering",
+  work_in_progress: "Produkter i arbete",
 } as const;
 
 export const YEAR_END_ROLE_LABELS = {

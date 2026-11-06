@@ -102,6 +102,8 @@ export function buildYearEndService(overrides: Partial<YearEndClosingServiceDeps
     fiscalYears: testEconomyService,
     // Steg 2's default: nothing in stock. Suites that test the step pass a fake.
     inventory: { getValuation: async () => ({ totalValue: 0, unvaluedCount: 0, groups: [] }) },
+    // Produkter i arbete's default: no manufacturing. year-end-wip.test.ts passes a fake.
+    workInProgress: { getWorkInProgress: async () => ({ totalValue: 0, unvaluedCount: 0, cappedCount: 0, rows: [] }) },
     ...overrides,
   });
 }
