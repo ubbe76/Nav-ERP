@@ -385,8 +385,17 @@ export function createTimeReportService(
     // Dated on the stop time's local day (localDateOf, shared with the
     // automatic stamp-out) — a stint stopped just before midnight lands on
     // the day the work was done.
+    // The stamp's kind (ställ/produktion, null = ej uppdelad) follows it —
+    // the terminal's stamp-out and a supervisor's Sluttid alike.
     const report = await repo.createTimeReport(
-      { employeeId: session.employeeId, moOperationId: session.moOperationId, date: localDateOf(stoppedAt), hours, note: input.note },
+      {
+        employeeId: session.employeeId,
+        moOperationId: session.moOperationId,
+        date: localDateOf(stoppedAt),
+        hours,
+        note: input.note,
+        kind: session.kind,
+      },
       createdBy
     );
     const closed = await repo.closeStampSession(sessionId, stoppedAt, report.id);
@@ -547,7 +556,8 @@ export function createTimeReportService(
       }
       let session;
       try {
-        session = await repo.createStampSession(input.employeeId, input.moOperationId, createdBy);
+        // Ställ/produktion when the terminal sent it — never required.
+        session = await repo.createStampSession(input.employeeId, input.moOperationId, createdBy, input.kind ?? null);
       } catch (err) {
         if (isUniqueViolation(err, ONE_OPEN_STAMP)) throw new AlreadyStampedInError();
         throw err;
@@ -919,10 +929,12 @@ export function createTimeReportService(
       const newDate = input.date ?? existing.date;
       const newHours = input.hours ?? Number(existing.hours);
       const newNote = input.note === undefined ? existing.note : input.note;
+      // Rättning av typen: null = ej uppdelad, undefined keeps it.
+      const newKind = input.kind === undefined ? existing.kind : input.kind;
 
       if (await periodLocks.isDateLocked(newDate)) throw new PayrollPeriodLockedError(newDate);
 
-      const updated = await repo.updateTimeReport(id, { date: newDate, hours: newHours, note: newNote });
+      const updated = await repo.updateTimeReport(id, { date: newDate, hours: newHours, note: newNote, kind: newKind });
 
       await audit.log({
         entityType: "time_report",
@@ -930,8 +942,8 @@ export function createTimeReportService(
         action: "updated",
         detail: {
           employeeId: existing.employeeId,
-          before: { date: existing.date, hours: existing.hours, note: existing.note },
-          after: { date: newDate, hours: newHours, note: newNote },
+          before: { date: existing.date, hours: existing.hours, note: existing.note, kind: existing.kind },
+          after: { date: newDate, hours: newHours, note: newNote, kind: newKind },
         },
         userId,
       });

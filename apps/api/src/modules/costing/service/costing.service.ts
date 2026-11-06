@@ -625,13 +625,15 @@ export function createCostingService(
       if (hours === 0) warnings.push(`Operation ${op.sequenceNo} (${op.workCenterName}): ingen rapporterad tid`);
       // Base: setup (minutes, once it counts) + run time per unit × N, at the
       // efterkalkyl's own rate (R₀ = R until the rate has a history). The
-      // reported time has no ställ/produktion split yet: runHours null.
+      // actual side: of H, Hs reported as ställ (setup_hours) and Hr as
+      // produktion (run_hours) — both null while no report on the operation
+      // has a type, so the whole of H is then Ej uppdelad (cost-variance.ts).
       const worked = operationWorked({ hours, completed, scrapped });
       operationRows.push({
-        ...buildOperationRow({ ...op, hours, setupHours: null }),
+        ...buildOperationRow({ ...op, hours, setupHours: op.setupHours === null ? null : Number(op.setupHours) }),
         baseSetupHours: oneOffCounts(output, worked) ? Number(op.setupTime) / 60 : 0,
         baseRunHours: (Number(op.runTimePerUnit) / 60) * operationOutput(output, completed),
-        runHours: null,
+        runHours: op.runHours === null ? null : Number(op.runHours),
         baseHourlyRate: Number(op.hourlyRate),
       });
     }

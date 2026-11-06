@@ -60,8 +60,8 @@ export async function systemRoutes(app: FastifyInstance, opts: { service: System
   });
 
   // The settings the stamp terminal reads (multiple stamps, attendance reason
-  // and overtime-choice behaviour) — so the workshop profile never needs the
-  // full settings payload.
+  // and overtime-choice behaviour, Dela tid i ställ och produktion) — so the
+  // workshop profile never needs the full settings payload.
   app.get("/settings/terminal", { config: { access: TERMINAL_READ } }, async () => {
     const settings = await service.getSettings();
     return {
@@ -69,6 +69,7 @@ export async function systemRoutes(app: FastifyInstance, opts: { service: System
       attendanceReasonRequired: settings.attendanceReasonRequired,
       attendanceReasonToleranceMinutes: settings.attendanceReasonToleranceMinutes,
       terminalOvertimeChoice: settings.terminalOvertimeChoice,
+      timeKindSplit: settings.timeKindSplit,
     };
   });
 

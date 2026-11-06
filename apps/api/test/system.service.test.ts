@@ -468,6 +468,18 @@ describe("system service — settings", () => {
     }
   });
 
+  it("defaults Dela tid i ställ och produktion to off and round-trips it (#14 etapp 3)", async () => {
+    await db.delete(systemSettings).where(eq(systemSettings.key, "time_kind_split"));
+    try {
+      expect((await systemService.getSettings()).timeKindSplit).toBe(false);
+      expect((await systemService.updateSettings({ timeKindSplit: true })).timeKindSplit).toBe(true);
+      expect((await systemService.getSettings()).timeKindSplit).toBe(true);
+      expect((await systemService.updateSettings({ timeKindSplit: false })).timeKindSplit).toBe(false);
+    } finally {
+      await db.delete(systemSettings).where(eq(systemSettings.key, "time_kind_split"));
+    }
+  });
+
   it("defaults the comp-time overtime codes and round-trips updates", async () => {
     try {
       const defaults = await systemService.getSettings();

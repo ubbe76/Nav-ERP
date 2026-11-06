@@ -98,8 +98,8 @@ export function buildSemiFinishedRow(
 
 // `setupHours` is the setup share of `hours`, snapshotted so the
 // specification can show the amortised setup cost per unit after the routing
-// changes; null when the split does not exist (post-calculation's reported
-// time).
+// changes. On a post-calculation it is the time reported as ställ, null when
+// the split does not exist (no report on the operation has a type).
 export function buildOperationRow(op: {
   sequenceNo: number;
   workCenterId: string;

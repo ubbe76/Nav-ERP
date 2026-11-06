@@ -281,6 +281,14 @@ export const attendanceSessions = pgTable(
   ]
 );
 
+// Ställ eller produktion (#14 etapp 3): what the reported time was spent on,
+// for the efterkalkyl's avvikelseanalys. Null = not split — every report from
+// before the type, and every one made without the setting time_kind_split
+// (Dela tid i ställ och produktion). The server never requires it: a stamp
+// must never fail on data only the analysis uses. Payroll reads attendance,
+// never time_reports, so PAXml is unaffected.
+export const timeKindEnum = pgEnum("time_kind", ["setup", "run"]);
+
 export const timeReports = pgTable("time_reports", {
   id: uuid("id").primaryKey().defaultRandom(),
   employeeId: uuid("employee_id")
@@ -291,6 +299,8 @@ export const timeReports = pgTable("time_reports", {
     .references(() => moOperations.id, { onDelete: "restrict" }),
   date: date("date").notNull(),
   hours: numeric("hours", { precision: 10, scale: 2 }).notNull(),
+  // Ställ/produktion; null = ej uppdelad (see timeKindEnum).
+  kind: timeKindEnum("kind"),
   note: text("note"),
   // Who entered this report in the system — distinct from employeeId (who did the work).
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
@@ -320,6 +330,10 @@ export const stampSessions = pgTable(
     // the next attendance-in. Paused time is excluded from reported hours.
     pausedAt: timestamp("paused_at", { withTimezone: true }),
     pausedSeconds: numeric("paused_seconds", { precision: 12, scale: 2 }).notNull().default("0"),
+    // Ställ/produktion as stamped in; carried to the time report the stamp
+    // materializes (every stop: the terminal, Sluttid, the automatic
+    // stamp-out). Null = ej uppdelad.
+    kind: timeKindEnum("kind"),
     timeReportId: uuid("time_report_id").references(() => timeReports.id, { onDelete: "set null" }),
     // The terminal's logged-in session user — not who did the work.
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),

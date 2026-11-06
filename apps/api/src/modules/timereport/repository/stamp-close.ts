@@ -49,7 +49,8 @@ export type AutoClosedStamp = { sessionId: string; moOperationId: string; employ
 
 // Regel 10: stamps out every open (or paused) stamp on the given operations
 // or on every operation of the order — 0/0, no quantities, the time up to
-// the pause start (paused) or `at`. The time report is dated on the stop
+// the pause start (paused) or `at`, with the stamp's kind (ställ/
+// produktion). The time report is dated on the stop
 // time's day, or today when that day lies in a locked payroll period: an old
 // paused stamp must never block an operation from turning done. The caller
 // writes the matching mo_reports rows (the manufacturing repository owns
@@ -86,6 +87,8 @@ export async function closeStampSessionsInTx(
         moOperationId: session.moOperationId,
         date,
         hours: String(hours),
+        // Ställ/produktion as stamped in (null = ej uppdelad).
+        kind: session.kind,
         note: opts.note,
         createdBy: opts.createdBy,
       })

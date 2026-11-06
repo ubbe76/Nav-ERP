@@ -36,6 +36,17 @@ Behörigheterna för Personal & lön: `permissions.md`. TO-rapporteringen som st
 - Terminalens glömd-utstämpling-vy visar **Gå hem nu** bara när närvaron började Stockholmsdagen före i dag (`forgottenStopNowAllowed` i `lib/terminalOperations.ts`); äldre kräver en tid. Arbetsledarens **Sluttid** på Pågående (`StampOutForm`) skickas bara när fältet rörts — orört skickas pausens exakta `pausedAt` eller inget alls (servern stämplar nu), aldrig förifyllnadens nedrundade minut.
 - **Dagarna är Stockholmsdagar** (`localDateOf`); `docker-compose.yml` sätter `TZ: Europe/Stockholm` eftersom lönemotorn (`clockToMs`/`dayBounds`) gör om schemaklockslag med serverns lokala tid.
 
+## Ställ och produktion (#14 etapp 3, migration 0188)
+
+Spec `private/superpowers/specs/2026-11-06-avvikelseanalys-efterkalkyl-design.md` (alternativ (a)); efterkalkylen som läser typen: `costing.md`.
+
+- **`time_kind`** (`setup`|`run`) på `stamp_sessions.kind` och `time_reports.kind`, båda nullable: **null = ej uppdelad** (all tid före 0188, och all tid utan inställningen). Ingen backfill. Inställningen `time_kind_split` (**Dela tid i ställ och produktion**, av som förval, ingen rad i migrationen) är `timeKindSplit` i `GET /settings/terminal` och `GET`/`PATCH /settings` (admin). **Servern kräver aldrig typen och prövar den inte mot inställningen** — den styr bara vad webben erbjuder; en stämpling får aldrig fällas av data som bara analysen använder.
+- **Typen följer med:** `stampIn` sparar `kind` (valfri i `stampInSchema`) på stämplingen, och **varje väg som materialiserar en tidrapport ur en stämpling tar `session.kind`**: `doStampOut` (terminalen och arbetsledarens **Sluttid** på Pågående arbete) och `closeStampSessionsInTx` (den automatiska utstämplingen, regel 10). En ny sådan väg ska göra detsamma.
+- **Ställ klart** = två befintliga anrop, ingen ny rutt: `POST /stamp-sessions/:id/stop` 0/0 (bara `logTimeOnlyReport` — inget antal, inget material) och `POST /stamp-sessions` med `kind: "run"`. Misslyckas instämplingen står personen utstämplad med felet, som vid Starta valda.
+- **Manuella och rättning:** `kind` (nullable, valfri) i `createTimeReportSchema` och `updateTimeReportSchema`; PATCH: utelämnad behåller, `null` rensar, händelseloggen får `kind` i before/after. `GET /time-reports`, `GET /manufacturing-orders/:id/time-reports` och `GET /stamp-sessions` bär `kind` (tabellens kolumner); CSV:n har **Typ** (Ställ/Produktion/tom) efter Timmar (`export-columns.ts`).
+- **Lönen påverkas inte:** payroll läser närvaron, aldrig `time_reports`, så PAXml och löneunderlaget är oförändrade; PIA summerar alla timmar som förut.
+- Tester: `timereport.service.test.ts` (*ställ och produktion*: utstämpling och Sluttid, Ställ klart utan antal och material, utan typ som förut, manuell med/utan typ och rättningen, schemat), `stamp-auto-close.test.ts` (den automatiska utstämplingen behåller typen), `stamp-routes.test.ts` (rutterna, listan, CSV:n och inställningen), `system.service.test.ts`, `payroll-export.test.ts` (PAXml oförändrad).
+
 ## Radera eller anonymisera en anställd (GDPR, #2, migration 0170)
 
 Spec `private/superpowers/specs/2026-10-29-radera-anonymisera-anstalld-design.md`.

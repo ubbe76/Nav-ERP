@@ -191,9 +191,10 @@ export const costCalculationMaterialRows = pgTable(
 // stores (setupTime + runTimePerUnit x quantity) / 60, the post-calculation
 // the hours actually reported. `setup_hours` is the setup share of `hours`,
 // snapshotted by the pre-calculation (the routing can change afterwards) so
-// the specification can show the amortised setup cost per unit; null on
-// post-calculations (reported time has no setup/run split) and on rows saved
-// before the column existed.
+// the specification can show the amortised setup cost per unit. On a
+// post-calculation it is the hours reported as ställ (time_reports.kind,
+// #14 etapp 3) — null while no report on the operation has a type — and it
+// is null on rows saved before the column existed.
 export const costCalculationOperationRows = pgTable(
   "cost_calculation_operation_rows",
   {
@@ -222,9 +223,9 @@ export const costCalculationOperationRows = pgTable(
     // base_hourly_rate = R₀ (= hourly_rate until the rate has a history).
     // Bs and Br are minutes ÷ 60 — eight decimals, because at four 4 min
     // (0.0667 h) at 300 kr/h would be calculated at 20.01.
-    // run_hours = the reported run time; with setup_hours (on an efterkalkyl
-    // the reported setup time) it is null while reported time has no
-    // ställ/produktion split — hours not in either are "ej uppdelad".
+    // run_hours = the hours reported as produktion; with setup_hours (on an
+    // efterkalkyl the hours reported as ställ) it is null while no report on
+    // the operation has a type — hours not in either are "ej uppdelad".
     // A lego row: base_quantity = N for the operation, subcontract_quantity =
     // the quantity the cost was taken for (Σ received on the IO rows, else
     // the OK quantity), base_unit_price = P₀ and base_one_off = F₀ (ställpris

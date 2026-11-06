@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { costCalculationMaterialRows, costCalculationOperationRows, costCalculations, db } from "@navet/db";
+import type { CostVarianceOperationRow } from "@navet/shared";
 import { testArticleService, testDocumentPdfService, testSystemService } from "./helpers/services.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -1508,6 +1509,49 @@ describe("costing service — variance analysis", () => {
     expect(analysis!.materialRows.map((r) => [r.base, r.actual])).toEqual([[10, 10], [10, 10]]);
     expect([analysis!.base, analysis!.actual, analysis!.deviation]).toEqual([622.01, 622.01, 0]);
     expect(Object.values(analysis!.parts).every((p) => p === 0)).toBe(true);
+  });
+
+  // #14 etapp 3: time reported as ställ/produktion (time_reports.kind) is
+  // the efterkalkyl's setup_hours/run_hours, and the analysis splits the
+  // deviation in Ställ and Stycke; an operation with any ej uppdelad time is
+  // Tid (ej uppdelad) as a whole. Op 10 plans 0.5 + 0.5 h, op 20 0.2 + 0.25 h
+  // (12 min, 3 min × 5), both at 600 kr/h.
+  it("reads ställ and produktion from the time reports: split, half split and the parts adding up exactly", async () => {
+    const f = await makeFixture({ quantity: 5, secondOperation: true });
+    const op20 = (await mfgService.listOperations(f.order.id)).find((op) => op.sequenceNo === 20)!;
+    const report = (moOperationId: string, hours: number, kind?: "setup" | "run") =>
+      timeReportService.createTimeReport({ employeeId: f.employee.id, moOperationId, date: "2026-07-07", hours, ...(kind ? { kind } : {}) }, f.user.id);
+    await report(f.operation.id, 0.5, "setup");
+    await report(f.operation.id, 0.25, "setup");
+    await report(f.operation.id, 0.4, "run");
+    await report(op20.id, 0.25, "setup");
+    await report(op20.id, 0.3, "run");
+    await report(op20.id, 0.1);
+    await mfgService.complete(f.order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
+
+    const preview = await costingService.postCalculate(f.order.id);
+    const { calculation, analysis } = await costingService.postCalculate(f.order.id, true);
+
+    const saved = (await costingService.getCostCalculation(calculation.id))!.operationRows;
+    expect(saved.map((r) => [r.sequenceNo, r.hours, r.setupHours, r.runHours])).toEqual([
+      [10, "1.1500", "0.7500", "0.4000"],
+      [20, "0.6500", "0.2500", "0.3000"],
+    ]);
+    const [op10Row, op20Row] = analysis!.operationRows as Extract<CostVarianceOperationRow, { kind: "time" }>[];
+    // Op 10 is split: Ställ (0.75 − 0.5) × 600 = 150, Stycke 690 − 600 − 150 = −60.
+    expect(op10Row).toMatchObject({ setupHours: 0.75, runHours: 0.4, unclassifiedHours: 0, split: true, base: 600, actual: 690 });
+    expect(op10Row!.parts).toMatchObject({ setup: 150, run: -60, unclassified: 0, rate: 0 });
+    // Op 20 has 0.1 h ej uppdelad: the whole operation is Tid (ej uppdelad), 390 − 270.
+    expect(op20Row).toMatchObject({ setupHours: 0.25, runHours: 0.3, unclassifiedHours: 0.1, split: false, base: 270, actual: 390 });
+    expect(op20Row!.parts).toMatchObject({ setup: 0, run: 0, unclassified: 120 });
+    // The order: material on plan, so Avvikelse = Ställ + Stycke + Ej uppdelad, exactly.
+    expect(analysis).toMatchObject({ base: 970, actual: 1180, deviation: 210 });
+    expect(analysis!.parts).toMatchObject({ price: 0, quantity: 0, setup: 150, run: -60, unclassified: 120, markups: 0 });
+    expect({ ...preview.analysis!, operationRows: withoutIds(preview.analysis!.operationRows), materialRows: withoutIds(preview.analysis!.materialRows) }).toEqual({
+      ...analysis!,
+      operationRows: withoutIds(analysis!.operationRows),
+      materialRows: withoutIds(analysis!.materialRows),
+    });
   });
 
   it("refuses a row whose base group is only partly saved, and an operation row with both groups", async () => {

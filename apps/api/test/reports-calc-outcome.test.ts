@@ -418,6 +418,50 @@ describe("Kalkylutfall — Avvikelseanalys", () => {
   });
 });
 
+// #14 etapp 3: time reported as ställ/produktion reaches Resurs as Verklig
+// ställ and stycke. Order X (5): 0.75 h ställ + 0.4 h produktion against
+// 0.5 + 0.5 planned; order Y (5): 1.5 h without a type, ej uppdelad.
+describe("Kalkylutfall — verklig ställ och stycke", () => {
+  it("sums the split time per resource next to the ej uppdelad, and the parts add up", async () => {
+    const p = await makeProduct();
+    const x = await makeOrder(p, { quantity: 5, drawn: 10 });
+    const [xOperation] = await mfgService.listOperations(x.id);
+    for (const [hours, kind] of [[0.75, "setup"], [0.4, "run"]] as const) {
+      await timeReportService.createTimeReport({ employeeId: p.employee.id, moOperationId: xOperation!.id, date: "2026-07-07", hours, kind }, p.user.id);
+    }
+    await mfgService.complete(x.id, { quantity: 5, locationId: p.location.id }, p.user.id);
+    const y = await makeOrder(p, { quantity: 5, drawn: 10, hours: 1.5, received: 5 });
+    await costingService.postCalculate(x.id, true);
+    await costingService.postCalculate(y.id, true);
+
+    const byResource = await reportsService.getCalculationOutcome({ view: "analysis", groupBy: "workCenter" });
+    if (byResource.view !== "analysis") throw new Error("view");
+    expect(byResource.rows as AnalysisWorkCenterRow[]).toEqual([
+      expect.objectContaining({
+        kind: "time",
+        operationCount: 2,
+        baseSetupHours: 1,
+        baseRunHours: 1,
+        setupHours: 0.75,
+        runHours: 0.4,
+        unclassifiedHours: 1.5,
+        hours: 2.65,
+        // X: Ställ 150, Stycke −60; Y: Ej uppdelad 300.
+        timeDeviation: 390,
+        base: 1200,
+        actual: 1590,
+      }),
+    ]);
+    expect((byResource.rows[0] as AnalysisWorkCenterRow).parts).toMatchObject({ setup: 150, run: -60, unclassified: 300, rate: 0 });
+    expect(byResource.kpis).toMatchObject({ deviation: 390, time: 390 });
+
+    const byOrder = await reportsService.getCalculationOutcome({ view: "analysis", groupBy: "order" });
+    if (byOrder.view !== "analysis") throw new Error("view");
+    const xRow = (byOrder.rows as AnalysisOrderRow[]).find((r) => r.manufacturingOrderId === x.id)!;
+    expect(xRow.parts).toMatchObject({ setup: 150, run: -60, unclassified: 0 });
+  });
+});
+
 // MO and LO on both sides, and a lego operation bought on an IO: the
 // report's sums and its Resurs grouping read the saved analysis exactly as
 // GET /cost-calculations/:id derives it.
