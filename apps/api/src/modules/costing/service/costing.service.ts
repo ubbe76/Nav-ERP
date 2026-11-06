@@ -26,7 +26,14 @@ import { explodeDerivedMaterials } from "../../configurator/service/configurator
 import { manufacturingCost, perUnit, selfCost } from "./cost-figures.js";
 import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
 import { stockholmDateOf, stockholmToday } from "../../system/service/delivery-days.js";
-import { hourlyRateAt, laborAtWorkDays, pricedAtWithdrawal, type PriceHistories, type WithdrawalPriceBasis } from "./price-at.js";
+import {
+  hourlyRateAt,
+  laborAtWorkDays,
+  pricedAtWithdrawal,
+  reportedTime,
+  type PriceHistories,
+  type WithdrawalPriceBasis,
+} from "./price-at.js";
 import {
   costVarianceAnalysis,
   isPreliminaryStatus,
@@ -579,10 +586,13 @@ export function createCostingService(
       materialRows.push(row);
     }
 
-    const [operations, actualSubcontractCosts, hoursByDay] = await Promise.all([
-      repo.getOperationsWithReportedHours(manufacturingOrderId),
+    // The reported time is ONE read (getReportedTime): H, Hs, Hr and the work
+    // days all come from its rows (reportedTime), never from two queries a
+    // time report's commit could fall between.
+    const [operations, actualSubcontractCosts, timeByOperation] = await Promise.all([
+      repo.getPostCalculationOperations(manufacturingOrderId),
       repo.getSubcontractActualCosts(manufacturingOrderId),
-      repo.getReportedHoursByDay(manufacturingOrderId),
+      repo.getReportedTime(manufacturingOrderId),
     ]);
     // Timkostnad per datum (#14 etapp 4): one load of the resources' rate
     // histories prices each work day's hours at that day's rate and the
@@ -599,7 +609,8 @@ export function createCostingService(
     for (const op of operations) {
       const completed = Number(op.quantityCompleted ?? 0);
       const scrapped = Number(op.quantityScrapped);
-      const hours = Number(op.reportedHours);
+      const time = reportedTime(timeByOperation.get(op.operationId) ?? []);
+      const hours = time.hours;
       if (op.workCenterType === "subcontract") {
         // Actual cost from the linked lego IO rows (received quantity ×
         // à-pris + ställpris, in SEK) when any receipt exists; otherwise the
@@ -640,19 +651,19 @@ export function createCostingService(
       // both null while no report on the operation has a type, so the whole
       // of H is then Ej uppdelad (cost-variance.ts).
       const history = rateHistories.get(op.workCenterId) ?? [];
-      const labor = laborAtWorkDays(hoursByDay.get(op.operationId) ?? [], history, Number(op.hourlyRate));
+      const labor = laborAtWorkDays(time.days, history, Number(op.hourlyRate));
       const worked = operationWorked({ hours, completed, scrapped });
       operationRows.push({
         ...buildOperationRow({
           ...op,
           hours,
-          setupHours: op.setupHours === null ? null : Number(op.setupHours),
+          setupHours: time.setupHours,
           hourlyRate: String(labor.hourlyRate),
           laborAmount: labor.laborAmount,
         }),
         baseSetupHours: oneOffCounts(output, worked) ? Number(op.setupTime) / 60 : 0,
         baseRunHours: (Number(op.runTimePerUnit) / 60) * operationOutput(output, completed),
-        runHours: op.runHours === null ? null : Number(op.runHours),
+        runHours: time.runHours,
         baseHourlyRate: Number(hourlyRateAt(history, basePricedAt) ?? op.hourlyRate),
       });
     }

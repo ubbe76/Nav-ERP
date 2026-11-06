@@ -137,26 +137,82 @@ export interface WorkDayHours {
   hours: number;
 }
 
+// Hundredths of an hour: time_reports.hours is numeric(10,2), so every sum
+// of it is exact in integers — H is then the same number the SQL sum gave
+// (a float sum would make 0.1 + 0.2 + 0.3 + 1 = 1.6000000000000003).
+function hundredths(hours: number | string): number {
+  return Math.round(Number(hours) * 100);
+}
+
+// One group of an operation's time reports — the repositories group on
+// (operation, work day[, kind]) and nothing else.
+export interface ReportedTimeRow {
+  date: string;
+  // Ställ/produktion (time_reports.kind, #14 etapp 3); null = ej uppdelad.
+  // Left out by a reader that does not group on it (PIA).
+  kind?: "setup" | "run" | null;
+  hours: number | string;
+}
+
+export interface ReportedTime {
+  // H: all reported hours on the operation.
+  hours: number;
+  // Hs/Hr: of H, reported as ställ/produktion — null while no row has a kind
+  // (all of H is then ej uppdelad).
+  setupHours: number | null;
+  runHours: number | null;
+  // H per work day, ascending — what laborAtWorkDays prices.
+  days: WorkDayHours[];
+}
+
+// An operation's reported time, every figure from the SAME rows: H, Hs, Hr
+// and the work days Lön is priced on. Read in separate queries a time report
+// committed in between made H ≠ Σ H_d, and its whole cost became Timpris in
+// a saved analysis for good.
+export function reportedTime(rows: ReportedTimeRow[]): ReportedTime {
+  let total = 0;
+  let setup = 0;
+  let run = 0;
+  let typed = false;
+  const byDay = new Map<string, number>();
+  for (const row of rows) {
+    const h = hundredths(row.hours);
+    total += h;
+    byDay.set(row.date, (byDay.get(row.date) ?? 0) + h);
+    if (row.kind === "setup") setup += h;
+    if (row.kind === "run") run += h;
+    if (row.kind) typed = true;
+  }
+  return {
+    hours: total / 100,
+    setupHours: typed ? setup / 100 : null,
+    runHours: typed ? run / 100 : null,
+    days: [...byDay.keys()].sort().map((date) => ({ date, hours: byDay.get(date)! / 100 })),
+  };
+}
+
 // Lön per arbetsdag — THE rule the efterkalkyl and Produkter i arbete share:
 // each work day's hours at that day's hourly rate (hourlyRateAt), summed.
 // `hourlyRate` is what the specification row shows: the one rate when every
 // day had the same, otherwise the hours-weighted average at the column's two
 // decimals (Lön stays the exact sum; the avvikelseanalys's Timpris is Lön −
-// R₀ × H, never the average). No hours: the current rate.
+// R₀ × H, never the average). No hours: the current rate. `hours` is summed
+// in hundredths, so it equals reportedTime's H over the same days.
 export function laborAtWorkDays(
   days: WorkDayHours[],
   history: HourlyRateHistoryRow[],
   currentRate: number
 ): { hours: number; laborAmount: number; hourlyRate: number } {
-  let hours = 0;
+  let totalHundredths = 0;
   let laborAmount = 0;
   const rates = new Set<number>();
   for (const day of days) {
     const rate = Number(hourlyRateAt(history, day.date) ?? currentRate);
     rates.add(rate);
-    hours += day.hours;
+    totalHundredths += hundredths(day.hours);
     laborAmount += day.hours * rate;
   }
+  const hours = totalHundredths / 100;
   if (rates.size === 0) return { hours: 0, laborAmount: 0, hourlyRate: currentRate };
   const hourlyRate = rates.size === 1 ? [...rates][0]! : hours !== 0 ? Math.round((laborAmount / hours) * 100) / 100 : currentRate;
   return { hours, laborAmount, hourlyRate };

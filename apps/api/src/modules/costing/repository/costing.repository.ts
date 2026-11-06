@@ -29,7 +29,7 @@ import { explodeBom } from "../../article/service/bom-explosion.js";
 import { weightedActualCosts } from "../service/actual-cost.js";
 import { stockValuedAt } from "../../stock/repository/valued-at.js";
 import { loadPriceBreaks } from "../../purchase/repository/price-breaks.js";
-import type { HourlyRateHistoryRow, StandardCostHistoryRow, SupplierSnapshotRow } from "../service/price-at.js";
+import type { HourlyRateHistoryRow, ReportedTimeRow, StandardCostHistoryRow, SupplierSnapshotRow } from "../service/price-at.js";
 
 // At most one row per article thanks to the article_suppliers_one_primary
 // partial unique index, so this join never fans out.
@@ -396,14 +396,11 @@ export function createCostingRepository(db: Db | Tx) {
       return weightedActualCosts(draws, history);
     },
 
-    // One row per operation with its total reported hours (0 if none reported
-    // yet), and of them the hours reported as ställ and as produktion (#14
-    // etapp 3, time_reports.kind; null kind = ej uppdelad, in neither). The
-    // per-kind sums are null while no report on the operation has a kind, so
-    // an operation reported only before the type (or without the setting)
-    // stays ej uppdelad. setupTime/runTimePerUnit (minutes) are the
-    // avvikelseanalys's planned time.
-    async getOperationsWithReportedHours(manufacturingOrderId: string) {
+    // One row per operation of the order, with its resource and the
+    // avvikelseanalys's planned time (setupTime/runTimePerUnit, minutes). The
+    // reported time is NOT here: getReportedTime is the one read of it, so H,
+    // Hs, Hr and the work days all come from the same rows.
+    async getPostCalculationOperations(manufacturingOrderId: string) {
       return db
         .select({
           operationId: moOperations.id,
@@ -414,9 +411,6 @@ export function createCostingRepository(db: Db | Tx) {
           workCenterType: workCenters.type,
           hourlyRate: workCenters.hourlyRate,
           overheadPercent: workCenters.overheadPercent,
-          reportedHours: sql<string>`coalesce(sum(${timeReports.hours}), 0)`,
-          setupHours: sql<string | null>`case when count(${timeReports.kind}) > 0 then coalesce(sum(${timeReports.hours}) filter (where ${timeReports.kind} = 'setup'), 0) end`,
-          runHours: sql<string | null>`case when count(${timeReports.kind}) > 0 then coalesce(sum(${timeReports.hours}) filter (where ${timeReports.kind} = 'run'), 0) end`,
           setupTime: moOperations.setupTime,
           runTimePerUnit: moOperations.runTimePerUnit,
           // Lego snapshot (post-calculation fallback when no IO is linked).
@@ -427,9 +421,7 @@ export function createCostingRepository(db: Db | Tx) {
         })
         .from(moOperations)
         .innerJoin(workCenters, eq(workCenters.id, moOperations.workCenterId))
-        .leftJoin(timeReports, eq(timeReports.moOperationId, moOperations.id))
         .where(eq(moOperations.manufacturingOrderId, manufacturingOrderId))
-        .groupBy(moOperations.id, workCenters.id)
         .orderBy(asc(moOperations.sequenceNo));
     },
 
@@ -456,26 +448,28 @@ export function createCostingRepository(db: Db | Tx) {
       return histories;
     },
 
-    // The order's reported hours per operation and work day (time_reports.
-    // date) — the efterkalkyl prices each day at that day's hourly rate
-    // (laborAtWorkDays in price-at.ts). Per operation, Σ over the days is
-    // getOperationsWithReportedHours' reportedHours.
-    async getReportedHoursByDay(manufacturingOrderId: string) {
+    // The order's reported time — ONE grouped query on (operation, work day,
+    // kind), per operation. reportedTime (price-at.ts) derives H, Hs (ställ),
+    // Hr (produktion) and the work days Lön is priced on (each day at that
+    // day's hourly rate, #14 etapp 4) from these same rows: two reads could
+    // straddle a time report's commit and give H ≠ Σ H_d.
+    async getReportedTime(manufacturingOrderId: string) {
       const rows = await db
         .select({
           operationId: timeReports.moOperationId,
           date: timeReports.date,
+          kind: timeReports.kind,
           hours: sql<string>`sum(${timeReports.hours})`,
         })
         .from(timeReports)
         .innerJoin(moOperations, eq(moOperations.id, timeReports.moOperationId))
         .where(eq(moOperations.manufacturingOrderId, manufacturingOrderId))
-        .groupBy(timeReports.moOperationId, timeReports.date);
-      const byOperation = new Map<string, { date: string; hours: number }[]>();
-      for (const row of rows) {
-        const list = byOperation.get(row.operationId) ?? [];
-        list.push({ date: row.date, hours: Number(row.hours) });
-        byOperation.set(row.operationId, list);
+        .groupBy(timeReports.moOperationId, timeReports.date, timeReports.kind);
+      const byOperation = new Map<string, ReportedTimeRow[]>();
+      for (const { operationId, ...row } of rows) {
+        const list = byOperation.get(operationId);
+        if (list) list.push(row);
+        else byOperation.set(operationId, [row]);
       }
       return byOperation;
     },

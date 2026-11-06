@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { eq, sql } from "drizzle-orm";
-import { articles, db } from "@navet/db";
+import { asc, eq, sql } from "drizzle-orm";
+import { articleSupplierPriceHistory, articleSuppliers, articles, db } from "@navet/db";
 import { testDocumentPdfService, testSystemService } from "./helpers/services.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -10,6 +10,7 @@ import { createPurchaseRepository } from "../src/modules/purchase/repository/pur
 import { createPurchaseService } from "../src/modules/purchase/service/purchase.service.js";
 import { createRegisterRepository } from "../src/modules/register/repository/register.repository.js";
 import { createRegisterService } from "../src/modules/register/service/register.service.js";
+import { overlappingTransactions } from "./helpers/overlapping-transactions.js";
 
 // Prishistorik (migration 0169): the försäljningspris and the supplier catalog
 // get their history from triggers, so every writer records it — the services
@@ -91,6 +92,20 @@ describe("prishistorik — försäljningspris", () => {
     expect(salesPrice.map((r) => r.value)).toEqual(["60.0000"]);
   });
 
+  // Migration 0190: a transaction that began before another one changed and
+  // committed the price records its own later change as the later row.
+  it("orders overlapping transactions by when they changed the price, not when they began", async () => {
+    const article = await makeArticle(100);
+    await overlappingTransactions(
+      async (tx) => {
+        await tx.update(articles).set({ salesPrice: "120" }).where(eq(articles.id, article.id));
+      },
+      () => articleService.updateSalesPrice(article.id, 130).then(() => undefined)
+    );
+    const { salesPrice } = await articleService.listPriceHistory(article.id);
+    expect(salesPrice.map((r) => r.value)).toEqual(["120.0000", "130.0000", "100.0000"]);
+  });
+
   it("lists the standard cost history next to it", async () => {
     const article = await makeArticle();
     await articleService.updateStandardCost(article.id, 10);
@@ -101,6 +116,26 @@ describe("prishistorik — försäljningspris", () => {
 });
 
 describe("prishistorik — leverantörskatalogen", () => {
+  // Migration 0190: the snapshot at COMMIT follows the latest row even when
+  // the transaction began before another one changed the row and committed.
+  it("orders overlapping transactions by when they changed the row, not when they began", async () => {
+    const article = await makeArticle();
+    const supplier = await makeSupplier();
+    const row = await purchaseService.addArticleSupplier(article.id, { supplierId: supplier.id, price: 10, currency: "SEK", isPrimary: true });
+    await overlappingTransactions(
+      async (tx) => {
+        await tx.update(articleSuppliers).set({ price: "11" }).where(eq(articleSuppliers.id, row.id));
+      },
+      () => purchaseService.updateArticleSupplier(article.id, row.id, { price: 12 }).then(() => undefined)
+    );
+    const history = await db
+      .select({ price: articleSupplierPriceHistory.price, validFrom: articleSupplierPriceHistory.validFrom })
+      .from(articleSupplierPriceHistory)
+      .where(eq(articleSupplierPriceHistory.articleId, article.id))
+      .orderBy(asc(articleSupplierPriceHistory.validFrom), asc(articleSupplierPriceHistory.id));
+    expect(history.map((h) => h.price)).toEqual(["10.0000", "12.0000", "11.0000"]);
+  });
+
   it("snapshots price, currency and staffel together when the row is added", async () => {
     const article = await makeArticle();
     const supplier = await makeSupplier();

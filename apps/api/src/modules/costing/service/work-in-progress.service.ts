@@ -29,7 +29,7 @@ import { weightedActualCosts, type HistoryRow } from "./actual-cost.js";
 import { createRateAttacher, loadCostingConfig, type CostingSettingsReader } from "./costing.service.js";
 import { buildMaterialRow, buildOperationRow, buildSubcontractOperationRow, directCosts } from "./level-costing.js";
 import { applyMarkups } from "./markup.js";
-import { laborAtWorkDays, pricedAtWithdrawal, type PriceHistories } from "./price-at.js";
+import { laborAtWorkDays, pricedAtWithdrawal, reportedTime, type PriceHistories } from "./price-at.js";
 import {
   isDoneAt,
   isEmptyWipRow,
@@ -211,17 +211,16 @@ export function createWorkInProgressService(deps: WorkInProgressServiceDeps) {
       if (list) list.push(row);
       else result.set(orderId, [row]);
     };
+    // H and the work days from the same rows (one query in the snapshot,
+    // reportedTime as in the efterkalkyl); PIA does not split ställ/stycke.
     for (const [, days] of groupBy(sources.hours, (row) => row.operationId)) {
       const op = days[0]!;
       if (!orderIds.has(op.manufacturingOrderId) || op.workCenterType === "subcontract") continue;
-      const labor = laborAtWorkDays(
-        days.map((day) => ({ date: day.date, hours: Number(day.hours) })),
-        sources.rateHistories.get(op.workCenterId) ?? [],
-        Number(op.hourlyRate)
-      );
+      const time = reportedTime(days);
+      const labor = laborAtWorkDays(time.days, sources.rateHistories.get(op.workCenterId) ?? [], Number(op.hourlyRate));
       push(
         op.manufacturingOrderId,
-        buildOperationRow({ ...op, hours: labor.hours, setupHours: null, hourlyRate: String(labor.hourlyRate), laborAmount: labor.laborAmount })
+        buildOperationRow({ ...op, hours: time.hours, setupHours: null, hourlyRate: String(labor.hourlyRate), laborAmount: labor.laborAmount })
       );
     }
     const legoByOperation = new Map<string, { orderId: string; sequenceNo: number; workCenterId: string; amount: number }>();

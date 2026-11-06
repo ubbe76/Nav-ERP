@@ -352,11 +352,17 @@ export function createTimeReportService(
     // yesterday's work stamped out today lands on yesterday (PIA and the
     // efterkalkyl price the time per work day). Like the automatic stamp-out,
     // a pause day inside a locked payroll period dates the report today: an
-    // old paused stamp must never be impossible to stamp out.
+    // old paused stamp must never be impossible to stamp out. A stop time
+    // equal to the pause's start is that same default, not a time of the
+    // supervisor's own (an older Pågående arbete sent the untouched Sluttid
+    // as pausedAt): it takes the same road, today's reserve included.
     const now = new Date();
-    const stoppedAt = input.stoppedAt ? new Date(input.stoppedAt) : effectiveStopTime(session, now);
+    const ownStop =
+      input.stoppedAt !== undefined &&
+      !(session.pausedAt && new Date(input.stoppedAt).getTime() === session.pausedAt.getTime());
+    const stoppedAt = ownStop ? new Date(input.stoppedAt!) : effectiveStopTime(session, now);
     let reportDate = localDateOf(stoppedAt);
-    if (input.stoppedAt) {
+    if (ownStop) {
       // One minute of slack for clock skew between browser and server.
       if (stoppedAt <= session.startedAt || stoppedAt.getTime() > now.getTime() + 60_000) {
         throw new InvalidStopTimeError();

@@ -6,6 +6,7 @@ import { createManufacturingRepository } from "../src/modules/manufacturing/repo
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { createImportRepository } from "../src/modules/import/repository/import.repository.js";
 import { planWorkCenterImport } from "../src/modules/import/service/work-centers.js";
+import { overlappingTransactions } from "./helpers/overlapping-transactions.js";
 
 // Timkostnad per datum (#14 etapp 4, migration 0189): the resource's hourly
 // rate gets its history from a trigger, so every writer records it — the
@@ -31,7 +32,7 @@ async function history(workCenterId: string) {
     .select({ hourlyRate: workCenterRateHistory.hourlyRate, validFrom: workCenterRateHistory.validFrom })
     .from(workCenterRateHistory)
     .where(eq(workCenterRateHistory.workCenterId, workCenterId))
-    .orderBy(asc(workCenterRateHistory.validFrom));
+    .orderBy(asc(workCenterRateHistory.validFrom), asc(workCenterRateHistory.id));
 }
 
 describe("work_center_rate_history — the trigger", () => {
@@ -63,6 +64,42 @@ describe("work_center_rate_history — the trigger", () => {
       await tx.update(workCenters).set({ hourlyRate: "575" }).where(eq(workCenters.id, wc.id));
     });
     expect((await history(wc.id)).map((r) => r.hourlyRate)).toEqual(["500.00", "575.00"]);
+  });
+
+  // Migration 0190: valid_from = now() is the transaction's start. T1 begins,
+  // T2 begins later, sets 700 and commits, then T1 sets 600 — the latest row
+  // must be 600, as on the resource, not T2's 700.
+  it("orders overlapping transactions by when they changed the rate, not when they began", async () => {
+    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, active: true });
+    await overlappingTransactions(
+      async (tx) => {
+        await tx.update(workCenters).set({ hourlyRate: "600" }).where(eq(workCenters.id, wc.id));
+      },
+      () => mfgService.updateWorkCenter(wc.id, { hourlyRate: 700 }).then(() => undefined)
+    );
+
+    const rows = await history(wc.id);
+    expect(rows.map((r) => r.hourlyRate)).toEqual(["500.00", "700.00", "600.00"]);
+    // Distinct instants (JS dates drop the microsecond), so the order is valid_from's alone.
+    const [{ instants }] = (await db.execute(
+      sql`select count(distinct valid_from)::int as instants from work_center_rate_history where work_center_id = ${wc.id}`
+    )) as unknown as [{ instants: number }];
+    expect(instants).toBe(3);
+    const [current] = await db.select({ hourlyRate: workCenters.hourlyRate }).from(workCenters).where(eq(workCenters.id, wc.id));
+    expect(current!.hourlyRate).toBe("600.00");
+  });
+
+  it("still replaces its own row on a second change after an overlapping commit", async () => {
+    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, active: true });
+    await overlappingTransactions(
+      async (tx) => {
+        // Both after T2's row: the own row lies after now() and is still found.
+        await tx.update(workCenters).set({ hourlyRate: "600" }).where(eq(workCenters.id, wc.id));
+        await tx.update(workCenters).set({ hourlyRate: "650" }).where(eq(workCenters.id, wc.id));
+      },
+      () => mfgService.updateWorkCenter(wc.id, { hourlyRate: 700 }).then(() => undefined)
+    );
+    expect((await history(wc.id)).map((r) => r.hourlyRate)).toEqual(["500.00", "700.00", "650.00"]);
   });
 
   it("goes with a deleted resource", async () => {

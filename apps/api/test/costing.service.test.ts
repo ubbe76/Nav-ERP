@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { costCalculationMaterialRows, costCalculationOperationRows, costCalculations, db } from "@navet/db";
-import type { CostVarianceOperationRow } from "@navet/shared";
+import { stampOutSchema, type CostVarianceOperationRow } from "@navet/shared";
 import { testArticleService, testDocumentPdfService, testSystemService } from "./helpers/services.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -1629,12 +1629,38 @@ describe("costing service — variance analysis", () => {
     });
 
     // A later rate change (today) moves neither the saved efterkalkyl nor a
-    // new run: the May days keep their rates.
+    // new run: the May days keep their rates. The saved one never changes
+    // anyway, so the new runs carry the proof — a preview and a second saved
+    // efterkalkyl, read back, equal the first in every figure: the header's
+    // costs, each specification row and the whole analysis.
     await mfgService.updateWorkCenter(f.workCenter.id, { hourlyRate: 900 });
     expect((await costingService.getCostCalculation(calculation.id))!.analysis).toEqual(analysis);
-    const again = await costingService.postCalculate(f.order.id);
-    expect(again.calculation.laborCost).toBe("960.0000");
-    expect(again.analysis!.operationRows[0]).toMatchObject({ baseHourlyRate: 600, hourlyRate: 640 });
+    const costs = (c: Record<string, unknown>) => {
+      const { id: _id, calculatedAt: _calculatedAt, ...rest } = c;
+      return rest;
+    };
+    const rowFigures = (rows: Record<string, unknown>[]) =>
+      rows.map(({ id: _id, costCalculationId: _calculationId, createdAt: _createdAt, ...rest }) => rest);
+    const first = (await costingService.getCostCalculation(calculation.id))!;
+    const againPreview = await costingService.postCalculate(f.order.id);
+    const againSaved = await costingService.postCalculate(f.order.id, true);
+    const second = (await costingService.getCostCalculation(againSaved.calculation.id))!;
+    expect(againSaved.calculation.id).not.toBe(calculation.id);
+    expect(costs(againSaved.calculation as unknown as Record<string, unknown>)).toEqual(costs(calculation as unknown as Record<string, unknown>));
+    expect(rowFigures(second.operationRows as unknown as Record<string, unknown>[])).toEqual(
+      rowFigures(first.operationRows as unknown as Record<string, unknown>[])
+    );
+    expect(rowFigures(second.materialRows as unknown as Record<string, unknown>[])).toEqual(
+      rowFigures(first.materialRows as unknown as Record<string, unknown>[])
+    );
+    for (const run of [againPreview.analysis!, second.analysis!]) {
+      expect({ ...run, materialRows: withoutIds(run.materialRows), operationRows: withoutIds(run.operationRows) }).toEqual({
+        ...analysis!,
+        materialRows: withoutIds(analysis!.materialRows),
+        operationRows: withoutIds(analysis!.operationRows),
+      });
+    }
+    expect(againPreview.calculation.laborCost).toBe("960.0000");
   });
 
   it("takes R₀ at T₀: an order created after the change has the new rate on both sides", async () => {
@@ -1648,6 +1674,46 @@ describe("costing service — variance analysis", () => {
 
     expect(analysis!.operationRows[0]).toMatchObject({ baseHourlyRate: 720, hourlyRate: 720, base: 720, actual: 720 });
     expect(analysis!.parts.rate).toBe(0);
+  });
+
+  // The Stockholm day, not the UTC day: the change at 22:30 UTC on 10 May is
+  // 00:30 on 11 May in Stockholm (CEST). Two stints stamped out on either
+  // side of Stockholm's midnight — at 23:50 on 10 May and 00:50 on 11 May,
+  // both on 10 May in UTC — are dated by the stamp-out on their Stockholm
+  // days (localDateOf), and the rate applies per Stockholm day (hourlyRateAt).
+  // UTC days for the change would give 900 (both at 720), for the reports 750.
+  it("prices time around Stockholm's midnight by Stockholm days, not UTC days", async () => {
+    const f = await makeFixture();
+    await db.execute(sql`update work_center_rate_history set valid_from = '2026-02-01T09:00:00Z' where work_center_id = ${f.workCenter.id}`);
+    await mfgService.updateWorkCenter(f.workCenter.id, { hourlyRate: 720 });
+    await db.execute(
+      sql`update work_center_rate_history set valid_from = '2026-05-10T22:30:00Z' where work_center_id = ${f.workCenter.id} and hourly_rate = 720`
+    );
+    await db.execute(sql`update manufacturing_orders set created_at = '2026-03-01T09:00:00Z' where id = ${f.order.id}`);
+    // Gone home and never back: stamped out later, a paused stint stops when
+    // the pause began and is dated on that Stockholm day.
+    const stint = async (startedAt: string, pausedAt: string) => {
+      const attendance = await timeReportService.attendanceIn({ employeeId: f.employee.id }, f.user.id);
+      const stamp = await timeReportService.stampIn({ employeeId: f.employee.id, moOperationId: f.operation.id }, f.user.id);
+      await timeReportService.attendanceOut(attendance.id, f.user.id);
+      await db.execute(
+        sql`update stamp_sessions set started_at = ${startedAt}::timestamptz, paused_at = ${pausedAt}::timestamptz, paused_seconds = 0 where id = ${stamp.id}`
+      );
+      return (await timeReportService.stampOut(stamp.id, stampOutSchema.parse({}), f.user.id)).timeReport;
+    };
+    const beforeMidnight = await stint("2026-05-10T20:50:00Z", "2026-05-10T21:50:00Z"); // 22:50–23:50, 10 May
+    const afterMidnight = await stint("2026-05-10T22:35:00Z", "2026-05-10T22:50:00Z"); // 00:35–00:50, 11 May
+    expect(beforeMidnight).toMatchObject({ date: "2026-05-10", hours: "1.00" });
+    expect(afterMidnight).toMatchObject({ date: "2026-05-11", hours: "0.25" });
+    await mfgService.complete(f.order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
+
+    const { calculation, analysis } = await costingService.postCalculate(f.order.id, true);
+
+    // 1 h × 600 (10 May, before the change) + 0.25 h × 720 (11 May) = 780.
+    expect(calculation.laborCost).toBe("780.0000");
+    // Timpris 780 − 600 × 1.25 = 30; the row's rate the average 624.
+    expect(analysis!.operationRows[0]).toMatchObject({ baseHourlyRate: 600, hourlyRate: 624 });
+    expect(analysis!.operationRows[0]!.parts.rate).toBe(30);
   });
 
   it("refuses a row whose base group is only partly saved, and an operation row with both groups", async () => {

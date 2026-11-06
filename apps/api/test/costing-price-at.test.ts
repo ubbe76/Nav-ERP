@@ -4,6 +4,7 @@ import {
   laborAtWorkDays,
   pricedAtWithdrawal,
   primarySupplierAt,
+  reportedTime,
   standardCostAt,
   type SupplierSnapshotRow,
 } from "../src/modules/costing/service/price-at.js";
@@ -152,5 +153,51 @@ describe("laborAtWorkDays", () => {
   it("uses the current rate without history and for an operation without hours", () => {
     expect(laborAtWorkDays([{ date: "2026-05-10", hours: 2 }], [], 500)).toEqual({ hours: 2, laborAmount: 1000, hourlyRate: 500 });
     expect(laborAtWorkDays([], rows, 720)).toEqual({ hours: 0, laborAmount: 0, hourlyRate: 720 });
+  });
+});
+
+// H, Hs, Hr and the work days from the same rows (#14 etapp 4, granskningen):
+// the efterkalkyl's one grouped read on (operation, day, kind) and PIA's on
+// (operation, day) both go through here.
+describe("reportedTime", () => {
+  it("derives H, Hs, Hr and the work days from one set of rows, exactly", () => {
+    const time = reportedTime([
+      { date: "2026-05-10", kind: "run", hours: "0.20" },
+      { date: "2026-05-09", kind: "setup", hours: "0.10" },
+      { date: "2026-05-10", kind: null, hours: "0.30" },
+      { date: "2026-05-09", kind: "run", hours: "1.00" },
+    ]);
+    // In floats 0.1 + 0.2 + 0.3 + 1 is 1.6000000000000003.
+    expect(time).toEqual({
+      hours: 1.6,
+      setupHours: 0.1,
+      runHours: 1.2,
+      days: [
+        { date: "2026-05-09", hours: 1.1 },
+        { date: "2026-05-10", hours: 0.5 },
+      ],
+    });
+    expect(time.days.reduce((sum, day) => sum + day.hours * 100, 0) / 100).toBe(time.hours);
+  });
+
+  it("keeps Hs and Hr null while no row has a kind, and is empty without rows", () => {
+    expect(reportedTime([{ date: "2026-05-09", kind: null, hours: "2.00" }, { date: "2026-05-10", hours: 1 }])).toEqual({
+      hours: 3,
+      setupHours: null,
+      runHours: null,
+      days: [
+        { date: "2026-05-09", hours: 2 },
+        { date: "2026-05-10", hours: 1 },
+      ],
+    });
+    expect(reportedTime([])).toEqual({ hours: 0, setupHours: null, runHours: null, days: [] });
+  });
+
+  it("gives laborAtWorkDays' hours on its days", () => {
+    const time = reportedTime([
+      { date: "2026-05-09", hours: "0.10" },
+      { date: "2026-05-10", hours: "0.20" },
+    ]);
+    expect(laborAtWorkDays(time.days, [], 500).hours).toBe(time.hours);
   });
 });

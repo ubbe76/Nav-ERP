@@ -391,12 +391,15 @@ function VarianceSection({ analysis }: { analysis: CostVarianceAnalysis | null }
                   return `${row.sequenceNo} · ${row.workCenterCode} · ${row.workCenterName}`;
                 case "baseSetup":
                   return hoursText(row.baseSetupHours);
+                // Verklig ställ/stycke only on a split operation, as the kronor
+                // cells: on a partly typed one all of H is Ej uppdelad (h), and
+                // the typed part shown beside it would count those hours twice.
                 case "setup":
-                  return hoursText(row.setupHours);
+                  return row.split ? hoursText(row.setupHours) : "—";
                 case "baseRun":
                   return hoursText(row.baseRunHours);
                 case "run":
-                  return hoursText(row.runHours);
+                  return row.split ? hoursText(row.runHours) : "—";
                 case "unclassified":
                   return hoursText(row.unclassifiedHours);
                 case "ratePart":

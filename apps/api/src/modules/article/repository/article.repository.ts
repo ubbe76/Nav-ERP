@@ -57,6 +57,13 @@ import { articleVatRateSql } from "./article-vat-rate.js";
 // this repository's own transactions and the import repository's. Exported
 // for the import repository to reuse (import -> article is the existing
 // dependency direction; the article module never imports from import).
+//
+// valid_from is never earlier than the article's latest row (migration 0190's
+// rule for the trigger-written histories): now() is the transaction's START,
+// so a transaction that began before another one changed and committed the
+// cost would otherwise record its later change as the earlier one, and the
+// history's latest value would not be the article's. The writers call this
+// after their UPDATE of the article, whose row lock orders them.
 export async function recordStandardCostHistory(
   db: Db | Tx,
   rows: { articleId: string; cost: number | string; createdBy?: string | null }[]
@@ -69,6 +76,7 @@ export async function recordStandardCostHistory(
       // passed through as-is to avoid a number round-trip losing precision.
       cost: typeof row.cost === "string" ? row.cost : String(row.cost),
       createdBy: row.createdBy ?? null,
+      validFrom: sql`greatest(now(), (select max(h.valid_from) from article_standard_cost_history h where h.article_id = ${row.articleId}) + interval '1 microsecond')`,
     }))
   );
 }

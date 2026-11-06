@@ -1348,6 +1348,38 @@ describe("ställ och produktion (#14 etapp 3)", () => {
     expect(timeReport).toMatchObject({ date: localDateOf(new Date()), hours: "4.00" });
   });
 
+  // Pågående arbete sent an untouched Sluttid as the session's pausedAt; that
+  // is the default stop, not the supervisor's own time, so a locked pause day
+  // takes today's reserve instead of a 409 — only a real Sluttid is refused.
+  it("takes stoppedAt = pausedAt as no stop time: a locked pause day dates the report today", async () => {
+    const f = await linkedFixture();
+    const { stamp, pausedAt } = await pausedStamp(f, "setup", 30, 26);
+    lockedDates.add(localDateOf(pausedAt));
+
+    const { timeReport, session } = await timeReportService.stampOut(
+      stamp.id,
+      stampOutSchema.parse({ stoppedAt: pausedAt.toISOString() }),
+      f.user.id
+    );
+
+    expect(timeReport).toMatchObject({ date: localDateOf(new Date()), hours: "4.00", kind: "setup" });
+    expect(session.stoppedAt!.getTime()).toBe(pausedAt.getTime());
+  });
+
+  it("still refuses a Sluttid of the supervisor's own on a locked day", async () => {
+    const f = await linkedFixture();
+    const { stamp, pausedAt } = await pausedStamp(f, null, 30, 26);
+    const ownStop = new Date(pausedAt.getTime() - 60_000).toISOString();
+    lockedDates.add(localDateOf(pausedAt));
+    lockedDates.add(localDateOf(new Date(ownStop)));
+
+    await expect(
+      timeReportService.stampOut(stamp.id, stampOutSchema.parse({ stoppedAt: ownStop }), f.user.id)
+    ).rejects.toBeInstanceOf(PayrollPeriodLockedError);
+    const [still] = await timeReportService.listStampSessions(true, { employeeId: f.employee.id });
+    expect(still).toMatchObject({ id: stamp.id, stoppedAt: null });
+  });
+
   it("keeps the kind through Gå hem and Kom (pause and resume)", async () => {
     const f = await linkedFixture();
     const attendance = await timeReportService.attendanceIn({ employeeId: f.employee.id }, f.user.id);

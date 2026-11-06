@@ -1331,6 +1331,13 @@
       "when": 1793991546514,
       "tag": "0189_timkostnad_per_datum",
       "breakpoints": true
+    },
+    {
+      "idx": 190,
+      "version": "7",
+      "when": 1793994181097,
+      "tag": "0190_prishistorikens_ordning",
+      "breakpoints": true
     }
   ]
 }
