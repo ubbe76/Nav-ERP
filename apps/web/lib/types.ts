@@ -524,7 +524,7 @@ export type CostVarianceOperationRow = CostVarianceTimeOperationRow | CostVarian
 export interface CostVarianceAnalysis {
   // N: the order's received quantity (Inlevererat).
   outputQuantity: number;
-  // The order was not Klar/Stängd: each operation (its time, its lego and its
+  // The order was not Klar/Stängd/Makulerad: each operation (its time, its lego and its
   // linked material) is based on the operation's OK quantity and unlinked
   // material on the received quantity, so work in progress is not a
   // deviation. Kalkylutfall leaves preliminary analyses out of its sums.
@@ -532,8 +532,8 @@ export interface CostVarianceAnalysis {
   // T₀ (ISO) and the förkalkyl's material source the base was priced with.
   basePricedAt: string;
   baseMaterialSource: Exclude<CostingMaterialSource, "actual">;
-  // Kalkylerat, Utfall, Avvikelse for the order (TVK without TO). Utfall can
-  // differ by a few öre from the efterkalkyl's TVK: rows are rounded first.
+  // Kalkylerat, Utfall, Avvikelse for the order (TVK without TO). Utfall is
+  // exactly the efterkalkyl's TVK; the rows' rounding rest is in parts.markups.
   base: number;
   actual: number;
   deviation: number;

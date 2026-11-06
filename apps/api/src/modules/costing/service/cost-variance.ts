@@ -11,9 +11,10 @@
 //   in etapp 2, Kalkylutfall). Nothing derived is stored.
 //
 // Kalkylerat (base) = the order's own rows for N, priced with the förkalkyl's
-// rules as of T₀; Utfall (actual) = the efterkalkyl's rows. Per row and for
-// the order: Utfall − Kalkylerat = Σ parts, exactly — every amount is whole
-// öre and the sums are integer arithmetic.
+// rules as of T₀; Utfall (actual) = the efterkalkyl's rows, and for the order
+// the efterkalkyl's TVK. Per row and for the order: Utfall − Kalkylerat =
+// Σ parts, exactly — every amount is whole öre and the sums are integer
+// arithmetic.
 import {
   round2,
   type CostingMaterialSource,
@@ -24,6 +25,7 @@ import {
   type CostVarianceOperationRow,
   type CostVarianceParts,
 } from "@navet/shared";
+import { manufacturingCost, type CostBuckets } from "./cost-figures.js";
 
 // ---------------------------------------------------------------------------
 // The base rules
@@ -36,10 +38,14 @@ export interface OutputContext {
   received: number;
 }
 
-// Klar or Stängd is final; everything else (Frisläppt, Pågår, an older
-// Planerad, Makulerad) is a preliminary analysis.
+// Klar, Stängd and Makulerad are final; Frisläppt, Pågår and an older
+// Planerad give a preliminary analysis. Makulerad is final with N = the
+// received quantity (normally 0): its time reports outlive the cancellation,
+// so what was spent on it shows as a deviation instead of the order staying
+// out of Kalkylutfall for good.
+const FINAL_STATUSES = new Set(["done", "closed", "cancelled"]);
 export function isPreliminaryStatus(status: string): boolean {
-  return status !== "done" && status !== "closed";
+  return !FINAL_STATUSES.has(status);
 }
 
 // N for an operation's time, its lego and the material linked to it: the
@@ -140,6 +146,10 @@ export interface VarianceHeader {
   // The efterkalkyl's MO and LO — the same on both sides.
   moPercent: number;
   loPercent: number;
+  // The efterkalkyl's TVK (cost-figures.ts's manufacturingCost of the header,
+  // whose columns have four decimals). The order's Utfall IS this figure in
+  // whole öre, so the analysis and the chain never disagree.
+  manufacturingCost: number;
 }
 
 export interface VarianceMaterialInput {
@@ -191,6 +201,23 @@ function kronor(oreAmount: number): number {
   return oreAmount / 100;
 }
 
+// A sum of four-decimal columns (the header's TVK) → whole öre, exactly:
+// first to integer ten-thousandths (a float sum of such values is off by far
+// less than half of one), then half away from zero to öre.
+function oreOfFourDecimals(kronor: number): number {
+  const tenThousandths = Math.round(kronor * 10000);
+  return Math.sign(tenThousandths) * Math.round(Math.abs(tenThousandths) / 100);
+}
+
+// The base product as the actual side's amount is stored: the efterkalkyl's
+// amount columns have four decimals and are then rounded to öre, so the base
+// is rounded the same two steps. Rounding it once (ore of the raw product)
+// gave a false öre: AQ = SQ = 1.5 and AP = SP = 1.0033 is 1.50495 — 1.50 as
+// the base, 1.5050 → 1.51 as the outcome.
+function oreAsStored(kronor: number): number {
+  return ore(roundAsNumeric(kronor, 4));
+}
+
 function hours4(value: number): number {
   return Math.round(value * 10000) / 10000;
 }
@@ -232,7 +259,7 @@ export function materialVariance(row: VarianceMaterialInput): OreRow {
     parts.quantity = actual;
     return { base: 0, actual, parts };
   }
-  const base = ore(row.baseQuantity * row.baseUnitCost);
+  const base = oreAsStored(row.baseQuantity * row.baseUnitCost);
   parts.price = ore((row.unitCost - row.baseUnitCost) * row.quantity);
   parts.quantity = actual - base - parts.price;
   parts.scrap = ore(row.baseUnitCost * (row.scrapQuantity ?? 0));
@@ -253,7 +280,7 @@ export function timeVariance(row: VarianceOperationInput): OreRow & { split: boo
   const setupBase = row.baseSetupHours ?? 0;
   const runBase = row.baseRunHours ?? 0;
   const baseRate = hasBase ? row.baseHourlyRate! : row.hourlyRate;
-  const base = hasBase ? ore(baseRate * (setupBase + runBase)) : 0;
+  const base = hasBase ? oreAsStored(baseRate * (setupBase + runBase)) : 0;
   const deviation = actual - base;
   parts.rate = ore((row.hourlyRate - baseRate) * row.hours);
   const setupHours = row.setupHours ?? 0;
@@ -282,7 +309,7 @@ export function subcontractVariance(row: VarianceOperationInput): OreRow {
     parts.quantity = actual;
     return { base: 0, actual, parts };
   }
-  const base = ore(row.baseOneOff + row.baseUnitPrice * row.baseQuantity);
+  const base = oreAsStored(row.baseOneOff + row.baseUnitPrice * row.baseQuantity);
   parts.price = ore(amount - row.baseOneOff - row.baseUnitPrice * (row.subcontractQuantity ?? 0));
   parts.quantity = actual - base - parts.price;
   return { base, actual, parts };
@@ -312,21 +339,17 @@ export function costVarianceAnalysis(
   const total = emptyParts();
   let base = 0;
   let actual = 0;
-  // The markup bases per side: MO on material, LO on lego (tjänster in the
+  // The base's markup bases: MO on material, LO on lego (tjänster in the
   // structure and lego operations). A halvfabrikat carries no markup.
-  const materialSum = { base: 0, actual: 0 };
-  const legoSum = { base: 0, actual: 0 };
+  const markupBase = { material: 0, lego: 0 };
 
   const material: CostVarianceMaterialRow[] = materialRows.map((row) => {
     const v = materialVariance(row);
     base += v.base;
     actual += v.actual;
     addParts(total, v.parts);
-    const markupSum = row.kind === "material" ? materialSum : row.kind === "subcontract" ? legoSum : null;
-    if (markupSum) {
-      markupSum.base += v.base;
-      markupSum.actual += v.actual;
-    }
+    if (row.kind === "material") markupBase.material += v.base;
+    else if (row.kind === "subcontract") markupBase.lego += v.base;
     const hasBase = row.baseQuantity !== null && row.baseUnitCost !== null;
     return {
       id: row.id,
@@ -360,8 +383,7 @@ export function costVarianceAnalysis(
       base += v.base;
       actual += v.actual;
       addParts(total, v.parts);
-      legoSum.base += v.base;
-      legoSum.actual += v.actual;
+      markupBase.lego += v.base;
       const hasBase = row.baseQuantity !== null && row.baseUnitPrice !== null && row.baseOneOff !== null;
       return {
         kind: "subcontract",
@@ -400,15 +422,21 @@ export function costVarianceAnalysis(
     };
   });
 
-  // Påslag (följer av material och lego): the same MO/LO on both sides, each
-  // side's markup rounded once on the order's sums. Not split per cause.
-  const markupOf = (side: "base" | "actual") =>
-    ore(kronor(materialSum[side]) * (header.moPercent / 100) + kronor(legoSum[side]) * (header.loPercent / 100));
-  const baseMarkup = markupOf("base");
-  const actualMarkup = markupOf("actual");
+  // Påslag (följer av material och lego): the same MO/LO on both sides. Not
+  // split per cause.
+  // - Kalkylerat: MO/LO on the base rows' sums, rounded once.
+  // - Utfall: the efterkalkyl's TVK in öre, so the order's Utfall is exactly
+  //   the chain's TVK. Its markup part is TVK − Σ rounded rows: the
+  //   efterkalkyl's own MO/LO plus the rows' rounding rest (up to half an öre
+  //   per row × (1 + MO %)), which would otherwise make Utfall differ from TVK.
+  const baseMarkup = ore(
+    kronor(markupBase.material) * (header.moPercent / 100) + kronor(markupBase.lego) * (header.loPercent / 100)
+  );
+  const tvk = oreOfFourDecimals(header.manufacturingCost);
+  const actualMarkup = tvk - actual;
   total.markups = actualMarkup - baseMarkup;
   base += baseMarkup;
-  actual += actualMarkup;
+  actual = tvk;
 
   return {
     outputQuantity: header.outputQuantity,
@@ -422,4 +450,112 @@ export function costVarianceAnalysis(
     materialRows: material,
     operationRows: operations,
   };
+}
+
+// ---------------------------------------------------------------------------
+// A saved calculation, as its columns read back
+// ---------------------------------------------------------------------------
+
+// Drizzle hands numeric columns back as strings ("100.0000"). The one mapping
+// from a saved efterkalkyl's header and rows to the analysis — GET
+// /cost-calculations/:id, the save's answer and Kalkylutfall all read it.
+type Numeric = string | number;
+
+export interface StoredVarianceCalculation extends CostBuckets {
+  outputQuantity: Numeric | null;
+  preliminary: boolean | null;
+  basePricedAt: Date | string | null;
+  baseMaterialSource: CostingMaterialSource | null;
+  moPercent: Numeric;
+  loPercent: Numeric;
+}
+
+export interface StoredVarianceMaterialRow {
+  id: string;
+  componentArticleId: string;
+  articleNumber: string;
+  articleName: string;
+  kind: CostMaterialRowKind;
+  quantity: Numeric;
+  unitCost: Numeric;
+  amount: Numeric;
+  baseQuantity: Numeric | null;
+  baseUnitCost: Numeric | null;
+  basePriceSource: CostPriceSource | null;
+  scrapQuantity: Numeric | null;
+}
+
+export interface StoredVarianceOperationRow {
+  id: string;
+  sequenceNo: number;
+  workCenterId: string;
+  workCenterCode: string;
+  workCenterName: string;
+  hours: Numeric;
+  setupHours: Numeric | null;
+  runHours: Numeric | null;
+  hourlyRate: Numeric;
+  laborAmount: Numeric;
+  subcontractAmount: Numeric | null;
+  baseSetupHours: Numeric | null;
+  baseRunHours: Numeric | null;
+  baseHourlyRate: Numeric | null;
+  baseQuantity: Numeric | null;
+  subcontractQuantity: Numeric | null;
+  baseUnitPrice: Numeric | null;
+  baseOneOff: Numeric | null;
+}
+
+const numberOrNull = (value: Numeric | null) => (value === null ? null : Number(value));
+
+export function storedVarianceAnalysis(
+  calculation: StoredVarianceCalculation,
+  materialRows: StoredVarianceMaterialRow[],
+  operationRows: StoredVarianceOperationRow[]
+): CostVarianceAnalysis | null {
+  return costVarianceAnalysis(
+    {
+      outputQuantity: numberOrNull(calculation.outputQuantity),
+      preliminary: calculation.preliminary,
+      basePricedAt: calculation.basePricedAt,
+      baseMaterialSource: calculation.baseMaterialSource,
+      moPercent: Number(calculation.moPercent),
+      loPercent: Number(calculation.loPercent),
+      manufacturingCost: manufacturingCost(calculation),
+    },
+    materialRows.map((r) => ({
+      id: r.id,
+      componentArticleId: r.componentArticleId,
+      articleNumber: r.articleNumber,
+      articleName: r.articleName,
+      kind: r.kind,
+      quantity: Number(r.quantity),
+      unitCost: Number(r.unitCost),
+      amount: Number(r.amount),
+      baseQuantity: numberOrNull(r.baseQuantity),
+      baseUnitCost: numberOrNull(r.baseUnitCost),
+      basePriceSource: r.basePriceSource,
+      scrapQuantity: numberOrNull(r.scrapQuantity),
+    })),
+    operationRows.map((r) => ({
+      id: r.id,
+      sequenceNo: r.sequenceNo,
+      workCenterId: r.workCenterId,
+      workCenterCode: r.workCenterCode,
+      workCenterName: r.workCenterName,
+      hours: Number(r.hours),
+      setupHours: numberOrNull(r.setupHours),
+      runHours: numberOrNull(r.runHours),
+      hourlyRate: Number(r.hourlyRate),
+      laborAmount: Number(r.laborAmount),
+      subcontractAmount: numberOrNull(r.subcontractAmount),
+      baseSetupHours: numberOrNull(r.baseSetupHours),
+      baseRunHours: numberOrNull(r.baseRunHours),
+      baseHourlyRate: numberOrNull(r.baseHourlyRate),
+      baseQuantity: numberOrNull(r.baseQuantity),
+      subcontractQuantity: numberOrNull(r.subcontractQuantity),
+      baseUnitPrice: numberOrNull(r.baseUnitPrice),
+      baseOneOff: numberOrNull(r.baseOneOff),
+    }))
+  );
 }

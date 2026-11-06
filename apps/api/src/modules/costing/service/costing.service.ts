@@ -37,6 +37,7 @@ import {
   operationWorked,
   plannedShare,
   roundAsNumeric,
+  storedVarianceAnalysis,
   type OutputContext,
   type VarianceMaterialInput,
   type VarianceOperationInput,
@@ -387,61 +388,18 @@ function draftVarianceAnalysis(
     baseUnitPrice: n(r.baseUnitPrice, 4),
     baseOneOff: n(r.baseOneOff, 2),
   }));
-  return costVarianceAnalysis(header, material, operations);
+  return costVarianceAnalysis({ ...header, manufacturingCost: manufacturingCost(header) }, material, operations);
 }
 
 // The avvikelseanalys of a saved calculation, from its stored inputs — null
-// on a förkalkyl and on an efterkalkyl saved before the analysis.
+// on a förkalkyl and on an efterkalkyl saved before the analysis. The mapping
+// is cost-variance.ts's, shared with Kalkylutfall.
 function savedVarianceAnalysis(
   calculation: SavedCostCalculation,
   materialRows: Awaited<ReturnType<CostingRepository["listMaterialRows"]>>,
   operationRows: Awaited<ReturnType<CostingRepository["listOperationRows"]>>
 ): CostVarianceAnalysis | null {
-  const n = (value: string | null) => (value === null ? null : Number(value));
-  return costVarianceAnalysis(
-    {
-      outputQuantity: n(calculation.outputQuantity),
-      preliminary: calculation.preliminary,
-      basePricedAt: calculation.basePricedAt,
-      baseMaterialSource: calculation.baseMaterialSource,
-      moPercent: Number(calculation.moPercent),
-      loPercent: Number(calculation.loPercent),
-    },
-    materialRows.map((r) => ({
-      id: r.id,
-      componentArticleId: r.componentArticleId,
-      articleNumber: r.articleNumber,
-      articleName: r.articleName,
-      kind: r.kind,
-      quantity: Number(r.quantity),
-      unitCost: Number(r.unitCost),
-      amount: Number(r.amount),
-      baseQuantity: n(r.baseQuantity),
-      baseUnitCost: n(r.baseUnitCost),
-      basePriceSource: r.basePriceSource,
-      scrapQuantity: n(r.scrapQuantity),
-    })),
-    operationRows.map((r) => ({
-      id: r.id,
-      sequenceNo: r.sequenceNo,
-      workCenterId: r.workCenterId,
-      workCenterCode: r.workCenterCode,
-      workCenterName: r.workCenterName,
-      hours: Number(r.hours),
-      setupHours: n(r.setupHours),
-      runHours: n(r.runHours),
-      hourlyRate: Number(r.hourlyRate),
-      laborAmount: Number(r.laborAmount),
-      subcontractAmount: n(r.subcontractAmount),
-      baseSetupHours: n(r.baseSetupHours),
-      baseRunHours: n(r.baseRunHours),
-      baseHourlyRate: n(r.baseHourlyRate),
-      baseQuantity: n(r.baseQuantity),
-      subcontractQuantity: n(r.subcontractQuantity),
-      baseUnitPrice: n(r.baseUnitPrice),
-      baseOneOff: n(r.baseOneOff),
-    }))
-  );
+  return storedVarianceAnalysis(calculation, materialRows, operationRows);
 }
 
 // A pre-calculation has no consumptions, so there is no actual cost to read —
@@ -650,13 +608,17 @@ export function createCostingService(
           row = buildSubcontractOperationRow(op, fallback);
         }
         // Base: F₀ + P₀ × N, the one-off once it counts; Qa = what A was taken for.
+        // Without an IO receipt the reserve above takes the one-off even at OK 0,
+        // so F₀ follows what it took: the one-off is then neither Pris nor
+        // Mängd on an unworked operation (preliminary, or closed at N = 0).
         const worked = operationWorked({ hours, completed, scrapped, received: actual !== undefined });
+        const oneOff = Number(op.setupPrice ?? 0);
         operationRows.push({
           ...row,
           baseQuantity: operationOutput(output, completed),
           subcontractQuantity: actual?.quantity ?? completed,
           baseUnitPrice: Number(op.unitPrice ?? 0),
-          baseOneOff: oneOffCounts(output, worked) ? Number(op.setupPrice ?? 0) : 0,
+          baseOneOff: actual === undefined || oneOffCounts(output, worked) ? oneOff : 0,
         });
         continue;
       }

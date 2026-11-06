@@ -440,7 +440,7 @@ function VarianceSection({ analysis }: { analysis: CostVarianceAnalysis | null }
       <h4 className={styles.subheading}>Summering</h4>
       <VarianceSummary analysis={analysis} bare />
       <FormHint>
-        Utfall kan skilja några öre från tillverkningskostnaden i kedjan ovan, eftersom varje rad avrundas för sig.
+        Utfall är tillverkningskostnaden i kedjan ovan. Varje rad avrundas för sig, och öresresten står under Påslag.
       </FormHint>
     </section>
   );

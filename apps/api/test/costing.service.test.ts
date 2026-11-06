@@ -1137,7 +1137,9 @@ describe("costing service — variance analysis", () => {
   // A parent of `quantity` with one component (2 per unit, standard cost 10)
   // and operation 10 (setup 30 min, run 6 min/st, 600 kr/h), optionally an
   // operation 20 (setup 12, run 3) and the component drawn at operation 10.
-  async function makeFixture(opts: { quantity?: number; linked?: boolean; secondOperation?: boolean } = {}) {
+  async function makeFixture(
+    opts: { quantity?: number; linked?: boolean; secondOperation?: boolean; service?: { standardCost: number; quantity: number } } = {}
+  ) {
     const user = await makeUser();
     const parent = await articleService.createArticle({
       articleNumber: `PARENT-${crypto.randomUUID()}`, name: "Parent", type: "manufactured", unit: "st", active: true,
@@ -1155,6 +1157,8 @@ describe("costing service — variance analysis", () => {
       quantity: 2,
       ...(opts.linked ? { routingOperationId: routingOp.id } : {}),
     });
+    // A tjänst in the structure (lego under LO), unlinked.
+    const service = opts.service ? await addServiceComponent(parent.id, opts.service.standardCost, opts.service.quantity) : null;
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
     const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
     await stockService.recordTransaction({ articleId: component.id, locationId: location.id, quantityDelta: 100, transactionType: "inventory_adjustment" });
@@ -1163,7 +1167,7 @@ describe("costing service — variance analysis", () => {
     const [operation] = await mfgService.listOperations(order.id);
     const [materialRow] = await mfgService.listMaterialConsumptions(order.id);
     const employee = await timeReportService.createEmployee({ employeeNumber: "E-1", name: "Kalle", active: true });
-    return { user, parent, component, location, order, operation: operation!, materialRow: materialRow!, employee };
+    return { user, parent, component, service, location, order, operation: operation!, materialRow: materialRow!, employee };
   }
   type Fixture = Awaited<ReturnType<typeof makeFixture>>;
 
@@ -1361,5 +1365,148 @@ describe("costing service — variance analysis", () => {
     await expect(
       db.execute(sql`update cost_calculations set output_quantity = 5, preliminary = false, base_priced_at = now(), base_material_source = 'standard' where id = ${pre.id}`)
     ).rejects.toThrow();
+  });
+
+  it("is final on a Makulerad order: N = 0, so the time spent on it is a deviation", async () => {
+    const f = await makeFixture();
+    // A manual time report outlives the cancellation.
+    await reportHours(f, 2);
+    await mfgService.cancel(f.order.id, f.user.id);
+
+    const { analysis } = await costingService.postCalculate(f.order.id, true);
+
+    expect(analysis).toMatchObject({ preliminary: false, outputQuantity: 0 });
+    // Worked ⇒ the setup counts (0.5 h), no run time for N = 0: 300 against 2 h × 600.
+    expect(analysis!.operationRows[0]).toMatchObject({ baseSetupHours: 0.5, baseRunHours: 0, base: 300, actual: 1200 });
+    expect(analysis!.materialRows[0]).toMatchObject({ baseQuantity: 0, quantity: 0, deviation: 0 });
+    expect(analysis).toMatchObject({ base: 300, actual: 1200, deviation: 900 });
+  });
+
+  it("matches the base's staffel on the row's planned quantity", async () => {
+    const f = await makeFixture({ quantity: 5 });
+    // 10 at 8 from the step at 10, else 10.
+    await setPrimarySupplierPrice(f.component.id, 10, [{ fromQuantity: 10, price: 8 }]);
+    Object.assign(costingSettings, { costingMaterialSource: "supplier", costingSupplierPriceTier: "tiered" });
+    // Kortstängd at 4 of 5: the unlinked material is drawn up to 2 × 4 = 8.
+    await mfgService.complete(f.order.id, { quantity: 4, locationId: f.location.id }, f.user.id);
+
+    const { analysis } = await costingService.postCalculate(f.order.id, true);
+
+    // The efterkalkyl prices the 8 drawn below the step (10); the base prices
+    // SQ = 8 at the step its PLANNED 10 reaches (8).
+    expect(analysis!.materialRows[0]).toMatchObject({ quantity: 8, unitCost: 10, baseQuantity: 8, baseUnitCost: 8, basePriceSource: "supplier" });
+    expect(analysis!.materialRows[0]!.parts).toMatchObject({ price: 16, quantity: 0 });
+  });
+
+  it("prices the efterkalkyl with its own source (actual) and the base with the förkalkyl's (standard)", async () => {
+    const f = await makeFixture();
+    await db.execute(sql`update stock_transactions set unit_cost = 14 where article_id = ${f.component.id} and transaction_type = 'inventory_adjustment'`);
+    await mfgService.consumeMaterial(f.order.id, f.materialRow.id, { locationId: f.location.id, quantity: 10 }, f.user.id);
+    await mfgService.complete(f.order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
+    Object.assign(costingSettings, { costingPostMaterialSource: "actual" });
+    try {
+      const { calculation, analysis } = await costingService.postCalculate(f.order.id, true);
+
+      expect(calculation.materialSource).toBe("actual");
+      expect(analysis!.baseMaterialSource).toBe("standard");
+      // AP = the moving average 14, SP = the standard cost 10 at T₀.
+      expect(analysis!.materialRows[0]).toMatchObject({ quantity: 10, unitCost: 14, baseQuantity: 10, baseUnitCost: 10, basePriceSource: "standard" });
+      expect(analysis!.materialRows[0]!.parts).toMatchObject({ price: 40, quantity: 0 });
+    } finally {
+      delete (costingSettings as { costingPostMaterialSource?: string }).costingPostMaterialSource;
+    }
+  });
+
+  it("calculates a delinleverans on an open order: unlinked material on the received quantity", async () => {
+    const f = await makeFixture({ quantity: 10 });
+    // 4 OK on the only (last) operation: 4 received, the unlinked material drawn for them (2 × 4).
+    await mfgService.reportOperationQuantities(f.operation.id, { quantityOk: 4, quantityScrapped: 0, markDone: false, locationId: f.location.id, createdBy: f.user.id });
+    await reportHours(f, 1);
+
+    const { analysis } = await costingService.postCalculate(f.order.id, true);
+
+    expect(analysis).toMatchObject({ preliminary: true, outputQuantity: 4 });
+    expect(analysis!.materialRows[0]).toMatchObject({ baseQuantity: 8, quantity: 8, deviation: 0 });
+    // (30 + 6 × 4) / 60 h × 600 = 540 against 1 h.
+    expect(analysis!.operationRows[0]).toMatchObject({ baseSetupHours: 0.5, baseRunHours: 0.4, base: 540, actual: 600 });
+    expect(analysis!.deviation).toBe(60);
+  });
+
+  it("counts material returned through Ångra as never drawn: AQ is the net", async () => {
+    const f = await makeFixture({ quantity: 5, linked: true });
+    await mfgService.reportOperationQuantities(f.operation.id, { quantityOk: 3, quantityScrapped: 0, markDone: false, locationId: f.location.id, createdBy: f.user.id });
+    await mfgService.reportOperationQuantities(f.operation.id, { quantityOk: 2, quantityScrapped: 0, markDone: false, locationId: f.location.id, createdBy: f.user.id });
+    expect((await mfgService.getManufacturingOrder(f.order.id)).status).toBe("done");
+    // Ångra the second report: 4 back to stock, 2 out again, the order open.
+    const second = (await mfgService.listReports(f.order.id)).find((r) => r.undoneAt === null && Number(r.quantityOk) === 2)!;
+    await mfgService.undoReport(f.order.id, second.id, f.user.id);
+    // Kortstängd at the 3 received.
+    await mfgService.complete(f.order.id, { quantity: 0, locationId: f.location.id }, f.user.id);
+
+    const { calculation, analysis } = await costingService.postCalculate(f.order.id, true);
+
+    // 10 drawn, 4 returned: 6 × 10, and N = 3 calculates 2 × 3 = 6.
+    expect(calculation.materialCost).toBe("60.0000");
+    expect(analysis).toMatchObject({ preliminary: false, outputQuantity: 3 });
+    expect(analysis!.materialRows[0]).toMatchObject({ baseQuantity: 6, quantity: 6, deviation: 0 });
+  });
+
+  it("makes Utfall the efterkalkyl's TVK with MO and LO, and the preview the saved analysis, on uneven figures", async () => {
+    Object.assign(costingSettings, { costingMoPercent: 12.5, costingLoPercent: 7.5 });
+    const f = await makeFixture({ quantity: 5, service: { standardCost: 7.7777, quantity: 1 } });
+    await articleService.updateStandardCost(f.component.id, 3.3337);
+    await mfgService.consumeMaterial(f.order.id, f.materialRow.id, { locationId: f.location.id, quantity: 10 }, f.user.id);
+    await reportHours(f, 1.2345);
+    await mfgService.complete(f.order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
+
+    const preview = await costingService.postCalculate(f.order.id);
+    const { calculation, analysis } = await costingService.postCalculate(f.order.id, true);
+
+    const tvk =
+      Number(calculation.materialCost) +
+      Number(calculation.materialOverhead) +
+      Number(calculation.laborCost) +
+      Number(calculation.subcontractCost) +
+      Number(calculation.subcontractOverhead) +
+      Number(calculation.semiFinishedCost);
+    expect(Number(calculation.materialOverhead)).toBeGreaterThan(0);
+    expect(Number(calculation.subcontractOverhead)).toBeGreaterThan(0);
+    // Utfall is the chain's TVK to the öre; the parts add up to the deviation.
+    expect(Math.round(analysis!.actual * 100)).toBe(Math.round(Math.round(tvk * 10000) / 100));
+    const ore = (value: number) => Math.round(value * 100);
+    const { price, quantity, rate, setup, run, unclassified, markups } = analysis!.parts;
+    expect([price, quantity, rate, setup, run, unclassified, markups].reduce((t, p) => t + ore(p), 0)).toBe(ore(analysis!.deviation));
+    expect(ore(analysis!.actual) - ore(analysis!.base)).toBe(ore(analysis!.deviation));
+    expect(markups).not.toBe(0);
+    // The preview reads exactly what the saved calculation reads back.
+    expect({
+      ...preview.analysis!,
+      materialRows: withoutIds(preview.analysis!.materialRows),
+      operationRows: withoutIds(preview.analysis!.operationRows),
+    }).toEqual({ ...analysis!, materialRows: withoutIds(analysis!.materialRows), operationRows: withoutIds(analysis!.operationRows) });
+    expect((await costingService.getCostCalculation(calculation.id))!.analysis).toEqual(analysis);
+  });
+
+  it("refuses a row whose base group is only partly saved, and an operation row with both groups", async () => {
+    const f = await makeFixture();
+    const { calculation } = await costingService.postCalculate(f.order.id, true);
+    const id = calculation.id;
+
+    await expect(db.execute(sql`update cost_calculation_material_rows set base_quantity = null where cost_calculation_id = ${id}`)).rejects.toThrow();
+    await expect(db.execute(sql`update cost_calculation_material_rows set scrap_quantity = null where cost_calculation_id = ${id}`)).rejects.toThrow();
+    await expect(db.execute(sql`update cost_calculation_operation_rows set base_hourly_rate = null where cost_calculation_id = ${id}`)).rejects.toThrow();
+    await expect(
+      db.execute(sql`update cost_calculation_operation_rows set base_quantity = 1, subcontract_quantity = 1, base_unit_price = 1 where cost_calculation_id = ${id}`)
+    ).rejects.toThrow();
+    // Both groups complete on one row: still refused.
+    await expect(
+      db.execute(
+        sql`update cost_calculation_operation_rows set base_quantity = 1, subcontract_quantity = 1, base_unit_price = 1, base_one_off = 1 where cost_calculation_id = ${id}`
+      )
+    ).rejects.toThrow();
+    // Swapping to the lego group alone is allowed: the CHECK is the shape, not the kind.
+    await db.execute(
+      sql`update cost_calculation_operation_rows set base_setup_hours = null, base_run_hours = null, base_hourly_rate = null, base_quantity = 1, subcontract_quantity = 1, base_unit_price = 1, base_one_off = 1 where cost_calculation_id = ${id}`
+    );
   });
 });

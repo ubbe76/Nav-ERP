@@ -436,7 +436,7 @@ Klicka på **Förkalkyl** eller **Efterkalkyl** i typkolumnen för att öppna **
 - **Avvikelseanalys** (bara på en efterkalkyl) — orderns avvikelse mot kalkylerat, i egna tabeller så att tabellerna ovan inte blir bredare. Överst står vilken materialkälla kalkylerat prissattes med och när (T₀, då ordern skapades). Beskrivningen av vad Kalkylerat, Utfall, Pris, Mängd och Påslag betyder står under [Avvikelseanalys](/hjalp/tillverkning#avvikelseanalys) i Tillverkning.
   - **Material och lego** — **Kalkylerat antal**, **Kalkylerat à-pris**, **Antal**, **À-pris**, **Pris**, **Mängd** och **varav kassation** (kolumnen visas när något är kasserat). Ett negativt belopp är billigare än kalkylerat.
   - **Operationer** — **Planerad ställ (h)**, **Verklig ställ (h)**, **Planerad stycke (h)**, **Verklig stycke (h)**, **Ej uppdelad (h)** och beloppen **Ställ**, **Stycke** och **Ej uppdelad**. Tiden är ännu inte registrerad som ställ eller stycke, så verklig ställ och stycke visar **—** och hela tidsavvikelsen står under **Ej uppdelad**. Legooperationer har en egen tabell med **Kalkylerat**, **Utfall**, **Pris** och **Mängd**.
-  - **Summering** — Kalkylerat, Utfall och Avvikelse med delarna. Utfall kan skilja några öre från tillverkningskostnaden i kedjan.
+  - **Summering** — Kalkylerat, Utfall och Avvikelse med delarna. Utfall är tillverkningskostnaden i kedjan; öresresten från radernas avrundning står under Påslag.
   - En efterkalkyl som sparats före avvikelseanalysen visar *Sparad före avvikelseanalysen — efterkalkylera och spara igen för att få den.*
 
 Kalkyler gjorda innan specifikationen infördes saknar rader och visar **Inga rader sparade för den här kalkylen**; summeringen finns kvar.

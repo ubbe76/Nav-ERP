@@ -27,6 +27,7 @@ const header = (over: Partial<VarianceHeader> = {}): VarianceHeader => ({
   baseMaterialSource: "standard",
   moPercent: 0,
   loPercent: 0,
+  manufacturingCost: 0,
   ...over,
 });
 
@@ -88,6 +89,28 @@ const legoOp = (over: Partial<VarianceOperationInput> = {}): VarianceOperationIn
   ...over,
 });
 
+// The efterkalkyl's TVK for these rows as computePostCalculation stores it:
+// directCosts + MO/LO (markup.ts), each header bucket at four decimals.
+function tvkOf(materials: VarianceMaterialInput[], operations: VarianceOperationInput[], moPercent = 0, loPercent = 0) {
+  const r4 = (value: number) => Math.round(value * 10000) / 10000;
+  const material = materials.filter((m) => m.kind === "material").reduce((t, m) => t + m.amount, 0);
+  const lego =
+    materials.filter((m) => m.kind === "subcontract").reduce((t, m) => t + m.amount, 0) +
+    operations.reduce((t, o) => t + (o.subcontractAmount ?? 0), 0);
+  const labor = operations.reduce((t, o) => t + o.laborAmount, 0);
+  return r4(material) + r4((material * moPercent) / 100) + r4(labor) + r4(lego) + r4((lego * loPercent) / 100);
+}
+
+// The whole analysis with the header's TVK computed from the same rows.
+function analyse(over: Partial<VarianceHeader>, materials: VarianceMaterialInput[], operations: VarianceOperationInput[]) {
+  const h = header(over);
+  return costVarianceAnalysis(
+    { ...h, manufacturingCost: tvkOf(materials, operations, h.moPercent, h.loPercent) },
+    materials,
+    operations
+  );
+}
+
 // Σ parts (scrap is "varav" and not added) in öre.
 function partsSum(parts: { price: number; quantity: number; rate: number; setup: number; run: number; unclassified: number; markups: number }) {
   return Math.round(
@@ -100,7 +123,13 @@ describe("cost-variance — N and the setup rule", () => {
   it("is final on Klar and Stängd, preliminary otherwise", () => {
     expect(isPreliminaryStatus("done")).toBe(false);
     expect(isPreliminaryStatus("closed")).toBe(false);
-    for (const status of ["planned", "released", "in_progress", "cancelled"]) expect(isPreliminaryStatus(status)).toBe(true);
+    for (const status of ["planned", "released", "in_progress"]) expect(isPreliminaryStatus(status)).toBe(true);
+  });
+
+  it("is final on Makulerad, so what was spent on a cancelled order is a deviation", () => {
+    expect(isPreliminaryStatus("cancelled")).toBe(false);
+    // N = the received quantity, normally 0: nothing is calculated for it.
+    expect(operationOutput({ preliminary: false, received: 0 }, 0)).toBe(0);
   });
 
   it("uses the received quantity on a final order, whatever the operation reported", () => {
@@ -187,6 +216,15 @@ describe("cost-variance — material rows", () => {
     }
   });
 
+  it("rounds the base product as the outcome is stored, so an exact outcome has no false öre", () => {
+    // 1.5 × 1.0033 = 1.50495: the efterkalkyl stores 1.5050 (→ 1.51), the
+    // base rounded once was 1.50 — a Mängd of +0.01 on an exact outcome.
+    const v = materialVariance(
+      material({ baseQuantity: 1.5, baseUnitCost: 1.0033, quantity: 1.5, unitCost: 1.0033, amount: roundAsNumeric(1.5 * 1.0033, 4) })
+    );
+    expect([v.base, v.actual, v.parts.price, v.parts.quantity]).toEqual([151, 151, 0, 0]);
+  });
+
   it("gives material that was planned but never drawn a negative quantity", () => {
     const v = materialVariance(material({ quantity: 0, unitCost: 10, amount: 0 }));
     expect(v.parts.quantity).toBe(-20000);
@@ -247,6 +285,14 @@ describe("cost-variance — operations with time", () => {
     expect([v.parts.rate, v.parts.unclassified]).toEqual([15000, 30000]);
   });
 
+  it("rounds the base time cost as the outcome is stored, so an exact outcome has no false öre", () => {
+    // 0.015 h × 100.33 = 1.50495, stored as 1.5050.
+    const v = timeVariance(
+      timeOp({ hours: 0.015, hourlyRate: 100.33, laborAmount: roundAsNumeric(0.015 * 100.33, 4), baseSetupHours: 0, baseRunHours: 0.015, baseHourlyRate: 100.33 })
+    );
+    expect([v.base, v.actual, v.parts.unclassified]).toEqual([151, 151, 0]);
+  });
+
   it("counts an operation without a base wholly as unsplit time", () => {
     const v = timeVariance(timeOp({ baseSetupHours: null, baseRunHours: null, baseHourlyRate: null }));
     expect([v.base, v.parts.rate, v.parts.unclassified]).toEqual([0, 0, 180000]);
@@ -274,6 +320,13 @@ describe("cost-variance — lego operations", () => {
     expect(v.parts.price + v.parts.quantity).toBe(v.actual - v.base);
   });
 
+  it("rounds the base F₀ + P₀ × N as the outcome is stored, so an exact outcome has no false öre", () => {
+    const v = subcontractVariance(
+      legoOp({ baseOneOff: 0, baseUnitPrice: 1.0033, baseQuantity: 1.5, subcontractQuantity: 1.5, subcontractAmount: roundAsNumeric(1.5 * 1.0033, 4) })
+    );
+    expect([v.base, v.actual, v.parts.price, v.parts.quantity]).toEqual([151, 151, 0, 0]);
+  });
+
   it("counts the one-off only through the stored F₀ — 0 while it does not count", () => {
     const v = subcontractVariance(legoOp({ baseOneOff: 0, baseQuantity: 0, subcontractQuantity: 0, subcontractAmount: 500 }));
     expect([v.base, v.parts.price, v.parts.quantity]).toEqual([0, 50000, 0]);
@@ -287,8 +340,8 @@ describe("cost-variance — the whole analysis", () => {
   });
 
   it("adds the rows and the markups up exactly: Utfall − Kalkylerat = Σ delar + Påslag", () => {
-    const analysis = costVarianceAnalysis(
-      header({ moPercent: 12.5, loPercent: 7 }),
+    const analysis = analyse(
+      { moPercent: 12.5, loPercent: 7 },
       [
         material({ baseQuantity: 16.6667, baseUnitCost: 3.3333, quantity: 18, unitCost: 3.4567, amount: 62.2206, scrapQuantity: 1.6667 }),
         material({ componentArticleId: "s1", kind: "subcontract", baseQuantity: 10, baseUnitCost: 12.345, quantity: 10, unitCost: 13, amount: 130 }),
@@ -307,6 +360,18 @@ describe("cost-variance — the whole analysis", () => {
     const baseMarkup = Math.round((materialBase * 0.125 + legoBase * 0.07) * 100);
     expect(ore(analysis.base)).toBe(rowBase + baseMarkup);
     expect(ore(analysis.actual) - rowActual - (ore(analysis.base) - rowBase)).toBe(ore(analysis.parts.markups));
+    // Utfall is the efterkalkyl's TVK in öre, exactly.
+    expect(ore(analysis.actual)).toBe(
+      Math.round(tvkOf(
+        [
+          material({ baseQuantity: 16.6667, baseUnitCost: 3.3333, quantity: 18, unitCost: 3.4567, amount: 62.2206, scrapQuantity: 1.6667 }),
+          material({ componentArticleId: "s1", kind: "subcontract", baseQuantity: 10, baseUnitCost: 12.345, quantity: 10, unitCost: 13, amount: 130 }),
+        ],
+        [timeOp({ hours: 2.3333, laborAmount: 1399.98, baseRunHours: 1.6667 }), legoOp({ subcontractAmount: 833.3333, subcontractQuantity: 4.5 })],
+        12.5,
+        7
+      ) * 100)
+    );
     // Rows carry no markup; scrap is informational, not part of the sum.
     expect(rows.every((r) => r.parts.markups === 0)).toBe(true);
     expect(analysis.parts.scrap).toBe(analysis.materialRows[0]!.parts.scrap);
@@ -314,7 +379,7 @@ describe("cost-variance — the whole analysis", () => {
   });
 
   it("puts the markup only on material and lego, and none on the time", () => {
-    const analysis = costVarianceAnalysis(header({ moPercent: 10, loPercent: 20 }), [material({ quantity: 22, amount: 220 })], [
+    const analysis = analyse({ moPercent: 10, loPercent: 20 }, [material({ quantity: 22, amount: 220 })], [
       timeOp({ hours: 4, laborAmount: 2400 }),
       legoOp({ subcontractAmount: 950, subcontractQuantity: 4 }),
     ])!;
@@ -326,8 +391,29 @@ describe("cost-variance — the whole analysis", () => {
     expect(analysis.deviation).toBe(982);
   });
 
+  it("makes Utfall the efterkalkyl's TVK and puts the rows' rounding rest in Påslag", () => {
+    // Three rows of 0.3333: each is 0.33 in öre, Σ 0.99, but the TVK is
+    // 0.9999 → 1.00. Without MO the whole öre is the rows' rounding rest.
+    const rows = [1, 2, 3].map((i) =>
+      material({ componentArticleId: `c${i}`, baseQuantity: 1, baseUnitCost: 0.3333, quantity: 1, unitCost: 0.3333, amount: 0.3333 })
+    );
+    const analysis = analyse({}, rows, [])!;
+    expect(analysis.materialRows.map((r) => r.actual)).toEqual([0.33, 0.33, 0.33]);
+    expect([analysis.base, analysis.actual, analysis.deviation, analysis.parts.markups]).toEqual([0.99, 1, 0.01, 0.01]);
+    // The same with 200 rows and MO 25 %: Utfall still the TVK to the öre.
+    const many = Array.from({ length: 200 }, (_, i) =>
+      material({ componentArticleId: `m${i}`, baseQuantity: 1, baseUnitCost: 0.3333, quantity: 1, unitCost: 0.3333, amount: 0.3333 })
+    );
+    const big = analyse({ moPercent: 25 }, many, [])!;
+    // TVK 66.66 + 16.665 = 83.3250 → 83.33 (half away from zero on the
+    // decimal value, not on the binary 8332.4999…); the rows Σ 66.00.
+    expect(tvkOf(many, [], 25)).toBeCloseTo(83.325, 10);
+    expect(big.actual).toBe(83.33);
+    expect(partsSum(big.parts)).toBe(ore(big.deviation));
+  });
+
   it("is all zero when the outcome is the calculation", () => {
-    const analysis = costVarianceAnalysis(header({ moPercent: 10 }), [material()], [
+    const analysis = analyse({ moPercent: 10 }, [material()], [
       timeOp({ hours: 2.5, laborAmount: 1500 }),
       legoOp({ subcontractAmount: 900 }),
     ])!;
@@ -336,7 +422,7 @@ describe("cost-variance — the whole analysis", () => {
   });
 
   it("carries the header and the rows' facts", () => {
-    const analysis = costVarianceAnalysis(header({ preliminary: true, outputQuantity: 3 }), [material({ scrapQuantity: 2 })], [
+    const analysis = analyse({ preliminary: true, outputQuantity: 3 }, [material({ scrapQuantity: 2 })], [
       timeOp(),
       legoOp(),
     ])!;

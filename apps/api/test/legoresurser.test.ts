@@ -532,9 +532,11 @@ describe("pre- and post-calculation with a lego operation", () => {
     const legoRow = (r: Awaited<ReturnType<typeof costingService.postCalculate>>) =>
       r.analysis!.operationRows.find((row) => row.kind === "subcontract")!;
 
-    // Not worked yet: the one-off does not count on an open order.
+    // Not worked yet and no IO: the reserve takes the one-off 550 even at OK 0,
+    // and F₀ follows what it took — no Pris on an unworked operation.
     let result = await costingService.postCalculate(order.id);
-    expect(legoRow(result)).toMatchObject({ baseQuantity: 0, baseOneOff: 0, baseUnitPrice: 100 });
+    expect(legoRow(result)).toMatchObject({ baseQuantity: 0, baseOneOff: 550, baseUnitPrice: 100, base: 550, actual: 550, deviation: 0 });
+    expect(legoRow(result).parts).toMatchObject({ price: 0, quantity: 0 });
 
     // Reported without an IO: the fallback A = 550 + 100 × 2 is exactly the base for 2 OK.
     await mfgService.reportOperationQuantities(legoOp.id, { quantityOk: 2, quantityScrapped: 0, markDone: false, createdBy: fixture.user.id });
@@ -560,6 +562,20 @@ describe("pre- and post-calculation with a lego operation", () => {
     expect(legoRow(result)).toMatchObject({ baseQuantity: 4, baseOneOff: 550, subcontractQuantity: 4, base: 950, actual: 830 });
     expect(legoRow(result).parts).toMatchObject({ price: -120, quantity: 0 });
     expect(result.analysis!.parts.price).toBe(-120);
+  });
+
+  it("gives an unworked lego operation on an order closed at 0 no deviation (the reserve's one-off is the base's)", async () => {
+    const fixture = await makeLegoRouting({ setupPrice: 500, unitPrice: 100, transportPrice: 50 });
+    const order = await mfgService.createManufacturingOrder({ articleId: fixture.parent.id, quantity: 4 }, fixture.user.id);
+    await mfgService.complete(order.id, { quantity: 0 }, fixture.user.id);
+
+    const result = await costingService.postCalculate(order.id, true);
+
+    expect(result.analysis).toMatchObject({ preliminary: false, outputQuantity: 0 });
+    const lego = result.analysis!.operationRows.find((row) => row.kind === "subcontract")!;
+    // Utfall = the reserve 550 + 100 × 0; Kalkylerat = F₀ 550 + 100 × N 0.
+    expect(lego).toMatchObject({ baseQuantity: 0, baseOneOff: 550, subcontractQuantity: 0, base: 550, actual: 550, deviation: 0 });
+    expect(lego.parts).toMatchObject({ price: 0, quantity: 0 });
   });
 });
 
