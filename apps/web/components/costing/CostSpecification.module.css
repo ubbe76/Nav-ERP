@@ -23,3 +23,11 @@
   font-size: 12px;
   color: var(--color-text-secondary);
 }
+
+/* Sub-heading inside the Avvikelseanalys section, above each of its tables. */
+.subheading {
+  margin: 16px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}

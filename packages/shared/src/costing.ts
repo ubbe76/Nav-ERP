@@ -55,3 +55,135 @@ export const postCalculateSchema = z.object({
   save: z.boolean().optional(),
 });
 export type PostCalculateInput = z.infer<typeof postCalculateSchema>;
+
+// Avvikelseanalys i efterkalkylen (#14) — the `analysis` field on
+// POST …/post-calculate (preview and save) and GET /cost-calculations/:id.
+// null on a förkalkyl and on an efterkalkyl saved before the analysis. The
+// server computes everything (cost-variance.ts); the web only shows it, so
+// there is no mirror. Amounts are kronor rounded to öre, quantities are in
+// the component's base unit, hours are hours.
+//
+// Kalkylerat (`base`) = the order's own rows for the produced quantity N,
+// material priced with the förkalkyl's rules as of T₀ (the order's
+// created_at); Utfall (`actual`) = the efterkalkyl's rows. On every row and
+// on the order: actual − base = deviation = the sum of the parts (`scrap` is
+// "varav" of `quantity` and NOT added). The order's markups (MO + LO, the
+// efterkalkyl's percentages on both sides) are one part of their own; TO is
+// outside TVK and not in the analysis.
+export interface CostVarianceParts {
+  // Pris: material/lego à-pris, ställ-/transportpris and rate on lego.
+  price: number;
+  // Mängd: material/lego quantity, scrap included.
+  quantity: number;
+  // Varav kassation — the part of `quantity` the scrapped units drew. Not summed.
+  scrap: number;
+  // Timpris: Lön − R₀ × H = Σ (R_d − R₀) × H_d — each work day's hours at
+  // that day's hourly rate against the rate at T₀ (etapp 4, 0189).
+  rate: number;
+  // Ställ and Stycke: time deviation on an operation whose time is fully
+  // split into ställ/produktion (in etapp 1 only an operation without time).
+  setup: number;
+  run: number;
+  // Tid (ej uppdelad): the time deviation of an operation with time that is
+  // not split into ställ/produktion (all reported time before etapp 3).
+  unclassified: number;
+  // Påslag (följer av material och lego): MO + LO, on the order only (0 on rows).
+  markups: number;
+}
+
+export interface CostVarianceMaterialRow {
+  // The saved cost_calculation_material_rows id; null in a preview.
+  id: string | null;
+  componentArticleId: string;
+  articleNumber: string;
+  articleName: string;
+  // "subcontract" = a service article (shown under Lego).
+  kind: CostMaterialRowKind;
+  // Kalkylerat antal (SQ) and à-pris (SP), and the price source SP came from;
+  // all null on a row without a base (counted as 0, the whole row is Mängd).
+  baseQuantity: number | null;
+  baseUnitCost: number | null;
+  basePriceSource: CostPriceSource | null;
+  // Antal (AQ, consumed net) and À-pris (AP) as on the efterkalkyl's row.
+  quantity: number;
+  unitCost: number;
+  // The planned share of the scrapped units — what "varav kassation" prices.
+  scrapQuantity: number;
+  base: number;
+  actual: number;
+  deviation: number;
+  parts: CostVarianceParts;
+}
+
+export interface CostVarianceTimeOperationRow {
+  kind: "time";
+  // The saved cost_calculation_operation_rows id; null in a preview.
+  id: string | null;
+  sequenceNo: number;
+  workCenterId: string;
+  workCenterCode: string;
+  workCenterName: string;
+  // Planerad ställ (Bs — 0 while the setup does not count yet) and Planerad
+  // stycke (Br = run time × N); null on a row without a base.
+  baseSetupHours: number | null;
+  baseRunHours: number | null;
+  baseHourlyRate: number | null;
+  // H = all reported hours; Verklig ställ / Verklig stycke (null until the
+  // time is registered as ställ/produktion, etapp 3) and Ej uppdelad (h) —
+  // all of H when the operation is not split (also half typed), else 0.
+  hours: number;
+  setupHours: number | null;
+  runHours: number | null;
+  unclassifiedHours: number;
+  hourlyRate: number;
+  // true ⇒ the time deviation is in parts.setup/run; false ⇒ in
+  // parts.unclassified (some reported time is not split).
+  split: boolean;
+  base: number;
+  actual: number;
+  deviation: number;
+  parts: CostVarianceParts;
+}
+
+export interface CostVarianceSubcontractOperationRow {
+  kind: "subcontract";
+  id: string | null;
+  sequenceNo: number;
+  workCenterId: string;
+  workCenterCode: string;
+  workCenterName: string;
+  // N for the operation, P₀ and F₀ (0 while the one-off does not count yet);
+  // null on a row without a base.
+  baseQuantity: number | null;
+  baseUnitPrice: number | null;
+  baseOneOff: number | null;
+  // Qa: what the cost was taken for (Σ received on the IO rows, else OK).
+  subcontractQuantity: number | null;
+  base: number;
+  actual: number;
+  deviation: number;
+  parts: CostVarianceParts;
+}
+
+export type CostVarianceOperationRow = CostVarianceTimeOperationRow | CostVarianceSubcontractOperationRow;
+
+export interface CostVarianceAnalysis {
+  // N: the order's received quantity (Inlevererat).
+  outputQuantity: number;
+  // The order was not Klar/Stängd/Makulerad: each operation (its time, its lego and its
+  // linked material) is based on the operation's OK quantity and unlinked
+  // material on the received quantity, so work in progress is not a
+  // deviation. Kalkylutfall leaves preliminary analyses out of its sums.
+  preliminary: boolean;
+  // T₀ (ISO) and the förkalkyl's material source the base was priced with.
+  basePricedAt: string;
+  baseMaterialSource: CostingPreMaterialSource;
+  // Kalkylerat, Utfall, Avvikelse for the order (TVK without TO). Utfall is
+  // exactly the efterkalkyl's TVK; the rows' rounding rest is in parts.markups.
+  base: number;
+  actual: number;
+  deviation: number;
+  parts: CostVarianceParts;
+  materialRows: CostVarianceMaterialRow[];
+  operationRows: CostVarianceOperationRow[];
+}

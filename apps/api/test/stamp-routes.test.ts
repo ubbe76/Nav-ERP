@@ -195,3 +195,111 @@ describe("POST /stamp-sessions/:id/stop with a stop time", () => {
     expect(bad.statusCode).toBe(400);
   });
 });
+
+// Ställ och produktion (#14 etapp 3) at the routes: the kind on the
+// terminal's stamps (Ställ klart = stamp out 0/0, stamp in as produktion),
+// on manual time reports and their correction, in the list and the CSV,
+// and the setting the terminal reads. Behörigheterna are unchanged.
+describe("ställ och produktion — rutterna (#14 etapp 3)", () => {
+  const app = buildApp();
+  const authService = createAuthService(createAuthRepository(db), "unused", createAuditRepository(db));
+
+  afterAll(async () => {
+    await app.close();
+    await db.execute(sql`DELETE FROM system_settings WHERE key = 'time_kind_split'`);
+  });
+
+  async function login(role: "user" | "supervisor" | "admin", permissions: string[]) {
+    const [group] = await db
+      .insert(permissionGroups)
+      .values({ code: `STOP${crypto.randomUUID().slice(0, 8)}`, name: "Ställ", permissions })
+      .returning();
+    const email = `k-${crypto.randomUUID()}@example.com`;
+    await authService.createUser({ email, password: "correcthorse", name: "K", role, permissionGroupId: group!.id });
+    const res = await app.inject({ method: "POST", url: "/api/v1/auth/login", payload: { email, password: "correcthorse" } });
+    return `session=${res.cookies.find((c) => c.name === "session")!.value}`;
+  }
+
+  async function released() {
+    const user = await authRepo.create({ email: `k-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "Ledare", role: "supervisor" });
+    const parent = await articleService.createArticle({ articleNumber: `P-${crypto.randomUUID()}`, name: "Produkt", type: "manufactured", unit: "st", active: true });
+    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
+    const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);
+    const [operation] = await mfgService.listOperations(order.id);
+    const employee = await timeReportService.createEmployee({ employeeNumber: "207", name: "Signe", active: true });
+    return { order, operation: operation!, employee };
+  }
+
+  it("stamps in as Ställ, Ställ klart with two calls, and refuses an unknown kind", async () => {
+    const { operation, employee } = await released();
+    const terminal = await login("user", ["terminal"]);
+    const post = (url: string, payload: object) => app.inject({ method: "POST", url: `/api/v1${url}`, headers: { cookie: terminal }, payload });
+
+    const setup = await post("/stamp-sessions", { employeeId: employee.id, moOperationId: operation.id, kind: "setup" });
+    expect([setup.statusCode, setup.json().kind]).toEqual([201, "setup"]);
+    const listed = await app.inject({ method: "GET", url: "/api/v1/stamp-sessions?open=true", headers: { cookie: terminal } });
+    expect(listed.json().map((s: { kind: string | null }) => s.kind)).toEqual(["setup"]);
+
+    const out = await post(`/stamp-sessions/${setup.json().id}/stop`, { quantityOk: 0, quantityScrapped: 0 });
+    expect([out.statusCode, out.json().timeReport.kind]).toEqual([200, "setup"]);
+    const run = await post("/stamp-sessions", { employeeId: employee.id, moOperationId: operation.id, kind: "run" });
+    expect([run.statusCode, run.json().kind]).toEqual([201, "run"]);
+
+    const bad = await post("/stamp-sessions", { employeeId: employee.id, moOperationId: operation.id, kind: "pause" });
+    expect(bad.statusCode).toBe(400);
+  });
+
+  it("takes and corrects a manual report's Typ, and lists and exports it", async () => {
+    const { order, operation, employee } = await released();
+    const office = await login("supervisor", ["tillverkning"]);
+    const call = (method: "POST" | "PATCH" | "GET", url: string, payload?: object) =>
+      app.inject({ method, url: `/api/v1${url}`, headers: { cookie: office }, ...(payload ? { payload } : {}) });
+
+    const created = await call("POST", "/time-reports", { employeeId: employee.id, moOperationId: operation.id, date: "2026-07-07", hours: 1.25, kind: "run" });
+    expect([created.statusCode, created.json().kind]).toEqual([201, "run"]);
+    const plain = await call("POST", "/time-reports", { employeeId: employee.id, moOperationId: operation.id, date: "2026-07-08", hours: 0.5 });
+    expect(plain.json().kind).toBeNull();
+    const setup = await call("POST", "/time-reports", { employeeId: employee.id, moOperationId: operation.id, date: "2026-07-06", hours: 0.75, kind: "setup" });
+    expect((await call("POST", "/time-reports", { employeeId: employee.id, moOperationId: operation.id, date: "2026-07-06", hours: 1, kind: "x" })).statusCode).toBe(400);
+
+    const cleared = await call("PATCH", `/time-reports/${setup.json().id}`, { kind: null });
+    expect([cleared.statusCode, cleared.json().kind]).toEqual([200, null]);
+    const back = await call("PATCH", `/time-reports/${setup.json().id}`, { kind: "setup" });
+    expect(back.json().kind).toBe("setup");
+
+    const list = await call("GET", "/time-reports");
+    expect(new Map(list.json().rows.map((r: { date: string; kind: string | null }) => [r.date, r.kind]))).toEqual(
+      new Map([["2026-07-08", null], ["2026-07-07", "run"], ["2026-07-06", "setup"]])
+    );
+    const onCard = await call("GET", `/manufacturing-orders/${order.id}/time-reports`);
+    expect(onCard.json().map((r: { kind: string | null }) => r.kind).sort()).toEqual(["run", "setup", null].sort());
+
+    const csv = await call("GET", "/time-reports/csv");
+    expect(csv.statusCode).toBe(200);
+    const lines = csv.body.replace(/^﻿/, "").trim().split("\r\n");
+    expect(lines[0]).toBe("Anställd;Tillverkningsorder;Operation;Datum;Timmar;Typ;Källa;Anteckning");
+    // Newest date first: ej uppdelad, Produktion, Ställ.
+    expect(lines.slice(1).map((l) => l.split(";").slice(4, 7))).toEqual([
+      ["0,5", "", "Manuell"],
+      ["1,25", "Produktion", "Manuell"],
+      ["0,75", "Ställ", "Manuell"],
+    ]);
+  });
+
+  it("serves Dela tid i ställ och produktion to the terminal, off by default and saved by an admin", async () => {
+    await db.execute(sql`DELETE FROM system_settings WHERE key = 'time_kind_split'`);
+    const terminal = await login("user", ["terminal"]);
+    const admin = await login("admin", []);
+    const read = async () =>
+      (await app.inject({ method: "GET", url: "/api/v1/settings/terminal", headers: { cookie: terminal } })).json();
+
+    expect((await read()).timeKindSplit).toBe(false);
+    const saved = await app.inject({ method: "PATCH", url: "/api/v1/settings", headers: { cookie: admin }, payload: { timeKindSplit: true } });
+    expect([saved.statusCode, saved.json().timeKindSplit]).toEqual([200, true]);
+    expect((await read()).timeKindSplit).toBe(true);
+    // Writing stays admin-only.
+    const shop = await app.inject({ method: "PATCH", url: "/api/v1/settings", headers: { cookie: terminal }, payload: { timeKindSplit: false } });
+    expect(shop.statusCode).toBe(403);
+  });
+});

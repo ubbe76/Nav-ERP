@@ -10,14 +10,15 @@ export default async function TimeReportsPage(props: { searchParams: Promise<Pag
   const searchParams = await props.searchParams;
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const pageSize = await getListPageSize();
-  const [reports, employees] = await Promise.all([
+  const [reports, employees, timeSettings] = await Promise.all([
     apiGet<Paged<TimeReport>>(`/api/v1/time-reports${listApiQuery(searchParams, [], pageSize)}`, cookieHeader),
     apiGet<EmployeeDirectoryEntry[]>("/api/v1/employees/directory", cookieHeader),
+    apiGet<{ timeKindSplit?: boolean }>("/api/v1/settings/terminal", cookieHeader).catch(() => ({ timeKindSplit: false })),
   ]);
 
   return (
     <AppShell active="Tillverkning">
-      <TimeReportsPageClient reports={reports} employees={employees} pageSize={pageSize} />
+      <TimeReportsPageClient reports={reports} employees={employees} pageSize={pageSize} timeKindSplit={timeSettings.timeKindSplit === true} />
     </AppShell>
   );
 }

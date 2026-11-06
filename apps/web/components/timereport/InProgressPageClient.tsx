@@ -19,7 +19,7 @@ import { ScrapReasonFields } from "../quality/ScrapReasonFields";
 import { useScrapReasons } from "../../lib/useScrapReasons";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import { formatElapsed, formatQuantity, operationProgress } from "../../lib/stampSessions";
-import type { AttendanceSession, StampSession } from "../../lib/types";
+import { TIME_KIND_LABELS, type AttendanceSession, type StampSession } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
 import styles from "./InProgressPageClient.module.css";
 
@@ -115,7 +115,12 @@ export function InProgressPageClient({
             case "order":
               return <Link href={`/tillverkning/ordrar/${s.manufacturingOrderId}`}>{s.manufacturingOrderNumber}</Link>;
             case "operation":
-              return `${s.operationSequenceNo} · ${s.workCenterName}`;
+              return (
+                <span className={styles.elapsed}>
+                  <span>{`${s.operationSequenceNo} · ${s.workCenterName}`}</span>
+                  {s.kind && <StatusPill status={s.kind === "setup" ? "draft" : "running"} label={TIME_KIND_LABELS[s.kind]} compact />}
+                </span>
+              );
             case "article":
               return s.articleName;
             case "since":
@@ -206,9 +211,10 @@ function StampOutForm({
   const [stopAt, setStopAt] = useState(() =>
     toDateTimeLocalValue(session.pausedAt ?? new Date().toISOString())
   );
-  // Sluttid is prefilled to the minute. Untouched, the exact instant is sent
-  // instead: the pause start for a paused session, otherwise nothing (the
-  // server stamps "now") — never the prefill's rounded-down minute.
+  // Sluttid is prefilled to the minute. Untouched, nothing is sent — never
+  // the prefill's rounded-down minute: the server stops a paused session at
+  // the pause's exact start (dated today when that day is payroll-locked,
+  // the automatic stamp-out's reserve) and any other session "now".
   const [stopTouched, setStopTouched] = useState(false);
   const stopMs = Date.parse(stopAt);
   const [quantityOk, setQuantityOk] = useState("");
@@ -246,11 +252,7 @@ function StampOutForm({
         apiFetch(`/api/v1/stamp-sessions/${session.id}/stop`, {
           method: "POST",
           body: JSON.stringify({
-            ...(stopTouched
-              ? { stoppedAt: new Date(stopAt).toISOString() }
-              : session.pausedAt
-                ? { stoppedAt: session.pausedAt }
-                : {}),
+            ...(stopTouched ? { stoppedAt: new Date(stopAt).toISOString() } : {}),
             quantityOk: Number(quantityOk) || 0,
             quantityScrapped: scrapped,
             ...(scrapped > 0 && reasonRegister ? { scrapReasonId } : {}),

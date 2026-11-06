@@ -1,4 +1,11 @@
-import { SEK, type CostCalculationType, type CostingMaterialSource, type CostingSupplierPriceTier, type DerivedCosting } from "@navet/shared";
+import {
+  SEK,
+  type CostCalculationType,
+  type CostingMaterialSource,
+  type CostingSupplierPriceTier,
+  type CostVarianceAnalysis,
+  type DerivedCosting,
+} from "@navet/shared";
 import type {
   CostCalculationWrite,
   CostingRepository,
@@ -18,8 +25,30 @@ import { costMultiLevel, type SubAssemblyPort } from "./sub-assembly.js";
 import { explodeDerivedMaterials } from "../../configurator/service/configurator-explode.js";
 import { manufacturingCost, perUnit, selfCost } from "./cost-figures.js";
 import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
-import { stockholmToday } from "../../system/service/delivery-days.js";
-import { pricedAtWithdrawal, type WithdrawalPriceBasis } from "./price-at.js";
+import { stockholmDateOf, stockholmToday } from "../../system/service/delivery-days.js";
+import {
+  hourlyRateAt,
+  laborAtWorkDays,
+  pricedAtWithdrawal,
+  reportedTime,
+  type PriceHistories,
+  type WithdrawalPriceBasis,
+} from "./price-at.js";
+import {
+  costVarianceAnalysis,
+  isPreliminaryStatus,
+  materialOutput,
+  materialScrap,
+  oneOffCounts,
+  operationOutput,
+  operationWorked,
+  plannedShare,
+  roundAsNumeric,
+  storedVarianceAnalysis,
+  type OutputContext,
+  type VarianceMaterialInput,
+  type VarianceOperationInput,
+} from "./cost-variance.js";
 
 export class ArticleNotFoundError extends Error {
   constructor(id: string) {
@@ -195,6 +224,11 @@ export interface CostCalculationDraft {
   materialMarkupPercent: string;
   type: CostCalculationType;
   calculatedAt: null;
+  // Avvikelseanalys (#14) — null on a förkalkyl.
+  outputQuantity: string | null;
+  preliminary: boolean | null;
+  basePricedAt: Date | null;
+  baseMaterialSource: CostingMaterialSource | null;
 }
 
 // The saved header exactly as the repository returns it. Named so the
@@ -242,7 +276,9 @@ function toHeader(
   },
   costs: MarkedUpCosts,
   source: CostingMaterialSource,
-  markups: CostingMarkups
+  markups: CostingMarkups,
+  // The avvikelseanalys's header inputs — efterkalkyl only.
+  variance: { outputQuantity: number; preliminary: boolean; basePricedAt: Date; baseMaterialSource: CostingMaterialSource } | null = null
 ): CostCalculationWrite {
   return {
     articleId: identity.articleId,
@@ -267,6 +303,10 @@ function toHeader(
     affoPercent: round(markups.affoPercent, 2),
     generalMarkupPercent: round(markups.generalMarkupPercent, 2),
     materialMarkupPercent: round(markups.materialMarkupPercent, 2),
+    outputQuantity: variance ? round(variance.outputQuantity, 4) : null,
+    preliminary: variance?.preliminary ?? null,
+    basePricedAt: variance?.basePricedAt ?? null,
+    baseMaterialSource: variance?.baseMaterialSource ?? null,
   };
 }
 
@@ -296,7 +336,77 @@ function toDraft(header: CostCalculationWrite): CostCalculationDraft {
     materialMarkupPercent: percent(header.materialMarkupPercent),
     type: header.type,
     calculatedAt: null,
+    outputQuantity: header.outputQuantity === null ? null : money(header.outputQuantity),
+    preliminary: header.preliminary,
+    basePricedAt: header.basePricedAt,
+    baseMaterialSource: header.baseMaterialSource,
   };
+}
+
+// Labels for the analysis's rows in a preview — index-aligned with the
+// computed specification rows (a saved calculation reads them from its rows).
+interface VarianceLabels {
+  material: { articleNumber: string; articleName: string }[];
+  operations: { workCenterCode: string; workCenterName: string }[];
+}
+
+// The avvikelseanalys of a computed, unsaved efterkalkyl: the in-memory rows
+// at their columns' scale (roundAsNumeric), so a preview reads exactly what
+// the saved calculation will read back.
+function draftVarianceAnalysis(
+  header: CostCalculationWrite,
+  materialRows: MaterialRowWrite[],
+  operationRows: OperationRowWrite[],
+  labels: VarianceLabels
+): CostVarianceAnalysis | null {
+  const n = (value: number | null | undefined, scale: number) =>
+    value === null || value === undefined ? null : roundAsNumeric(value, scale);
+  const material: VarianceMaterialInput[] = materialRows.map((r, i) => ({
+    id: null,
+    componentArticleId: r.componentArticleId,
+    articleNumber: labels.material[i]?.articleNumber ?? "?",
+    articleName: labels.material[i]?.articleName ?? "?",
+    kind: r.kind,
+    quantity: roundAsNumeric(r.quantity, 4),
+    unitCost: roundAsNumeric(r.unitCost, 4),
+    amount: roundAsNumeric(r.amount, 4),
+    baseQuantity: n(r.baseQuantity, 4),
+    baseUnitCost: n(r.baseUnitCost, 4),
+    basePriceSource: r.basePriceSource ?? null,
+    scrapQuantity: n(r.scrapQuantity, 4),
+  }));
+  const operations: VarianceOperationInput[] = operationRows.map((r, i) => ({
+    id: null,
+    sequenceNo: r.sequenceNo,
+    workCenterId: r.workCenterId,
+    workCenterCode: labels.operations[i]?.workCenterCode ?? "?",
+    workCenterName: labels.operations[i]?.workCenterName ?? "?",
+    hours: roundAsNumeric(r.hours, 4),
+    setupHours: n(r.setupHours, 4),
+    runHours: n(r.runHours, 4),
+    hourlyRate: roundAsNumeric(r.hourlyRate, 2),
+    laborAmount: roundAsNumeric(r.laborAmount, 4),
+    subcontractAmount: n(r.subcontractAmount, 4),
+    baseSetupHours: n(r.baseSetupHours, 8),
+    baseRunHours: n(r.baseRunHours, 8),
+    baseHourlyRate: n(r.baseHourlyRate, 2),
+    baseQuantity: n(r.baseQuantity, 4),
+    subcontractQuantity: n(r.subcontractQuantity, 4),
+    baseUnitPrice: n(r.baseUnitPrice, 4),
+    baseOneOff: n(r.baseOneOff, 2),
+  }));
+  return costVarianceAnalysis({ ...header, manufacturingCost: manufacturingCost(header) }, material, operations);
+}
+
+// The avvikelseanalys of a saved calculation, from its stored inputs — null
+// on a förkalkyl and on an efterkalkyl saved before the analysis. The mapping
+// is cost-variance.ts's, shared with Kalkylutfall.
+function savedVarianceAnalysis(
+  calculation: SavedCostCalculation,
+  materialRows: Awaited<ReturnType<CostingRepository["listMaterialRows"]>>,
+  operationRows: Awaited<ReturnType<CostingRepository["listOperationRows"]>>
+): CostVarianceAnalysis | null {
+  return storedVarianceAnalysis(calculation, materialRows, operationRows);
 }
 
 // A pre-calculation has no consumptions, so there is no actual cost to read —
@@ -427,28 +537,37 @@ export function createCostingService(
   async function withdrawalPrices<T extends WithdrawalPriceBasis>(
     manufacturingOrderId: string,
     consumptions: T[],
-    source: CostingMaterialSource
+    source: CostingMaterialSource,
+    histories: PriceHistories
   ): Promise<(T & { priceDate: string | null })[]> {
     if (source === "actual" || consumptions.length === 0) return consumptions.map((c) => ({ ...c, priceDate: null }));
-    const [drawnAt, histories] = await Promise.all([
-      repo.getLatestConsumptionTimes(manufacturingOrderId),
-      repo.getPriceHistories([...new Set(consumptions.map((c) => c.componentArticleId))]),
-    ]);
-    return pricedAtWithdrawal(consumptions, drawnAt, histories, new Date());
+    return pricedAtWithdrawal(consumptions, await repo.getLatestConsumptionTimes(manufacturingOrderId), histories, new Date());
   }
 
   // Requires an existing MO — actual material consumption x unit cost, actual
-  // reported hours per operation x work center hourly rate, then the same
-  // markups as the pre-calculation. Read and arithmetic only, as above.
+  // reported hours per operation x the work center's hourly rate of each work
+  // day (timkostnad per datum, #14 etapp 4), then the same markups as the
+  // pre-calculation. Read and arithmetic only, as above.
+  //
+  // Avvikelseanalys (#14): alongside, the base every row is compared with —
+  // the order's OWN rows (an Ändrad TO is the new plan, a konfigurerad TO's
+  // rows are its configuration) for the produced quantity N, material priced
+  // with the förkalkyl's rules as of T₀ = the order's created_at. The rules
+  // are cost-variance.ts's; the base rides on the specification rows and is
+  // saved with them. Nothing here changes the efterkalkyl's own figures.
   async function computePostCalculation(manufacturingOrderId: string) {
     const order = await repo.findManufacturingOrderById(manufacturingOrderId);
     if (!order) throw new ManufacturingOrderNotFoundError(manufacturingOrderId);
 
     const warnings: string[] = [];
-    const { postSource: source, supplierPriceTier, markups } = await loadCostingConfig(settings);
+    const { source: preSource, postSource: source, supplierPriceTier, markups } = await loadCostingConfig(settings);
 
+    const rawConsumptions = await repo.getMaterialConsumptionsWithCost(manufacturingOrderId);
+    // One load of the price histories serves both sides: the efterkalkyl's
+    // prices at the withdrawal and the base's at T₀.
+    const histories = await repo.getPriceHistories([...new Set(rawConsumptions.map((c) => c.componentArticleId))]);
     const consumptions = await createRateAttacher(rates, source, today())(
-      await withdrawalPrices(manufacturingOrderId, await repo.getMaterialConsumptionsWithCost(manufacturingOrderId), source)
+      await withdrawalPrices(manufacturingOrderId, rawConsumptions, source, histories)
     );
     // Only asked for when the configured source needs it — deriving the moving
     // average costs two queries and a replay, and the other two sources have
@@ -467,33 +586,124 @@ export function createCostingService(
       materialRows.push(row);
     }
 
-    const [operations, actualSubcontractCosts] = await Promise.all([
-      repo.getOperationsWithReportedHours(manufacturingOrderId),
+    // The reported time is ONE read (getReportedTime): H, Hs, Hr and the work
+    // days all come from its rows (reportedTime), never from two queries a
+    // time report's commit could fall between.
+    const [operations, actualSubcontractCosts, timeByOperation] = await Promise.all([
+      repo.getPostCalculationOperations(manufacturingOrderId),
       repo.getSubcontractActualCosts(manufacturingOrderId),
+      repo.getReportedTime(manufacturingOrderId),
     ]);
+    // Timkostnad per datum (#14 etapp 4): one load of the resources' rate
+    // histories prices each work day's hours at that day's rate and the
+    // base at T₀'s.
+    const rateHistories = await repo.getWorkCenterRateHistories([
+      ...new Set(operations.filter((op) => op.workCenterType !== "subcontract").map((op) => op.workCenterId)),
+    ]);
+    const basePricedAt = order.createdAt;
+
+    // N: the received quantity on a Klar/Stängd order; otherwise preliminary.
+    const output: OutputContext = { preliminary: isPreliminaryStatus(order.status), received: Number(order.quantityReceived) };
+
     const operationRows: OperationRowWrite[] = [];
     for (const op of operations) {
+      const completed = Number(op.quantityCompleted ?? 0);
+      const scrapped = Number(op.quantityScrapped);
+      const time = reportedTime(timeByOperation.get(op.operationId) ?? []);
+      const hours = time.hours;
       if (op.workCenterType === "subcontract") {
         // Actual cost from the linked lego IO rows (received quantity ×
         // à-pris + ställpris, in SEK) when any receipt exists; otherwise the
         // release snapshot's prices × reported OK quantity — the same
-        // standard the pre-calculation used.
+        // standard the pre-calculation used. The reserve takes the one-off
+        // F (ställpris + transport) only once it counts by the ställregel
+        // (worked, or a final order with N > 0): an unworked operation on a
+        // Makulerad or nollstängd order never cost it.
         const actual = actualSubcontractCosts.get(op.operationId);
+        const worked = operationWorked({ hours, completed, scrapped, received: actual !== undefined });
+        const oneOff = oneOffCounts(output, worked) ? Number(op.setupPrice ?? 0) : 0;
+        let row: OperationRowWrite;
         if (actual !== undefined) {
-          operationRows.push(buildSubcontractOperationRow(op, actual));
+          row = buildSubcontractOperationRow(op, actual.amount);
         } else {
-          if (Number(op.quantityCompleted ?? 0) === 0) {
+          if (completed === 0) {
             warnings.push(`Operation ${op.sequenceNo} (${op.workCenterName}): ingen inlevererad legoorder`);
           }
-          const fallback = Number(op.setupPrice ?? 0) + Number(op.unitPrice ?? 0) * Number(op.quantityCompleted ?? 0);
-          operationRows.push(buildSubcontractOperationRow(op, fallback));
+          row = buildSubcontractOperationRow(op, oneOff + Number(op.unitPrice ?? 0) * completed);
         }
+        // Base: F₀ + P₀ × N, the one-off by the same rule — the reserve's F
+        // is therefore never a deviation. Qa = what A was taken for.
+        operationRows.push({
+          ...row,
+          baseQuantity: operationOutput(output, completed),
+          subcontractQuantity: actual?.quantity ?? completed,
+          baseUnitPrice: Number(op.unitPrice ?? 0),
+          baseOneOff: oneOff,
+        });
         continue;
       }
-      const hours = Number(op.reportedHours);
       if (hours === 0) warnings.push(`Operation ${op.sequenceNo} (${op.workCenterName}): ingen rapporterad tid`);
-      operationRows.push(buildOperationRow({ ...op, hours, setupHours: null }));
+      // Lön per arbetsdag: each work day's hours at that day's hourly rate
+      // (the row shows their average); no history ⇒ the current rate.
+      // Base: setup (minutes, once it counts) + run time per unit × N at the
+      // rate as of T₀ (R₀), so Timpris = Lön − R₀ × H. The actual side: of H,
+      // Hs reported as ställ (setup_hours) and Hr as produktion (run_hours) —
+      // both null while no report on the operation has a type, so the whole
+      // of H is then Ej uppdelad (cost-variance.ts).
+      const history = rateHistories.get(op.workCenterId) ?? [];
+      const labor = laborAtWorkDays(time.days, history, Number(op.hourlyRate));
+      const worked = operationWorked({ hours, completed, scrapped });
+      operationRows.push({
+        ...buildOperationRow({
+          ...op,
+          hours,
+          setupHours: time.setupHours,
+          hourlyRate: String(labor.hourlyRate),
+          laborAmount: labor.laborAmount,
+        }),
+        baseSetupHours: oneOffCounts(output, worked) ? Number(op.setupTime) / 60 : 0,
+        baseRunHours: (Number(op.runTimePerUnit) / 60) * operationOutput(output, completed),
+        runHours: time.runHours,
+        baseHourlyRate: Number(hourlyRateAt(history, basePricedAt) ?? op.hourlyRate),
+      });
     }
+
+    // The base's material: the förkalkyl's source (never "actual") as of T₀
+    // — an empty withdrawal map puts every row at T₀ — the rate of T₀'s
+    // Stockholm day, and the staffel matched on the row's PLANNED quantity.
+    // Rates are looked up before any arithmetic, as everywhere.
+    const baseWarnings: string[] = [];
+    const baseSource = preCalculationSource(preSource, baseWarnings);
+    const basePriced = await createRateAttacher(rates, baseSource, stockholmDateOf(basePricedAt))(
+      pricedAtWithdrawal(rawConsumptions, new Map(), histories, basePricedAt)
+    );
+    const orderQuantity = Number(order.quantity);
+    const operationQuantities = new Map(
+      operations.map((op) => [
+        op.operationId,
+        { sequenceNo: op.sequenceNo, completed: Number(op.quantityCompleted ?? 0), scrapped: Number(op.quantityScrapped) },
+      ])
+    );
+    const allOperations = [...operationQuantities.values()];
+    basePriced.forEach((c, i) => {
+      const planned = Number(c.quantityPlanned);
+      const { row: baseRow, warning } = buildMaterialRow(
+        { componentArticleId: c.componentArticleId, quantity: planned, unitId: c.unitId, unitFactor: c.unitFactor },
+        c,
+        baseSource,
+        supplierPriceTier
+      );
+      if (warning) baseWarnings.push(`${c.name}: ${warning}`);
+      const linked = c.moOperationId ? (operationQuantities.get(c.moOperationId) ?? null) : null;
+      materialRows[i] = {
+        ...materialRows[i]!,
+        baseQuantity: plannedShare(planned, orderQuantity, materialOutput(output, linked)),
+        baseUnitCost: baseRow.unitCost,
+        basePriceSource: baseRow.priceSource,
+        scrapQuantity: plannedShare(planned, orderQuantity, materialScrap(output, linked, allOperations)),
+      };
+    });
+    warnings.push(...baseWarnings.map((w) => `Kalkylerat: ${w}`));
 
     const costs = applyMarkups(directCosts(materialRows, operationRows), markups);
     const header = toHeader(
@@ -503,9 +713,14 @@ export function createCostingService(
       { articleId: order.articleId, manufacturingOrderId, quantity: Number(order.quantity), type: "post", multiLevel: false },
       costs,
       source,
-      markups
+      markups,
+      { outputQuantity: output.received, preliminary: output.preliminary, basePricedAt, baseMaterialSource: baseSource }
     );
-    return { header, materialRows, operationRows, warnings };
+    const labels: VarianceLabels = {
+      material: rawConsumptions.map((c) => ({ articleNumber: c.articleNumber, articleName: c.name })),
+      operations: operations.map((op) => ({ workCenterCode: op.workCenterCode, workCenterName: op.workCenterName })),
+    };
+    return { header, materialRows, operationRows, warnings, labels };
   }
 
   // `save` decides whether the computed calculation is written. Default is a
@@ -532,18 +747,39 @@ export function createCostingService(
     return { calculation, warnings: distinct(warnings) };
   }
 
+  // `analysis` (avvikelseanalysen) comes along either way: a preview derives
+  // it from the computed rows, a save from the rows as stored — the same
+  // answer GET /cost-calculations/:id gives.
   async function postCalculate(
     manufacturingOrderId: string,
     save: true
-  ): Promise<{ calculation: SavedCostCalculation; warnings: string[] }>;
+  ): Promise<{ calculation: SavedCostCalculation; warnings: string[]; analysis: CostVarianceAnalysis | null }>;
   async function postCalculate(
     manufacturingOrderId: string,
     save?: false
-  ): Promise<{ calculation: CostCalculationDraft; warnings: string[] }>;
+  ): Promise<{ calculation: CostCalculationDraft; warnings: string[]; analysis: CostVarianceAnalysis | null }>;
   async function postCalculate(manufacturingOrderId: string, save = false) {
-    const { header, materialRows, operationRows, warnings } = await computePostCalculation(manufacturingOrderId);
-    const calculation = save ? await repo.createCostCalculation(header, materialRows, operationRows) : toDraft(header);
-    return { calculation, warnings: distinct(warnings) };
+    const { header, materialRows, operationRows, warnings, labels } = await computePostCalculation(manufacturingOrderId);
+    if (save) {
+      const calculation = await repo.createCostCalculation(header, materialRows, operationRows);
+      return { calculation, warnings: distinct(warnings), analysis: (await getCostCalculation(calculation.id))!.analysis };
+    }
+    return {
+      calculation: toDraft(header),
+      warnings: distinct(warnings),
+      analysis: draftVarianceAnalysis(header, materialRows, operationRows, labels),
+    };
+  }
+
+  // Header plus its specification rows, the shape the detail view needs, and
+  // the avvikelseanalys derived from the stored rows (null on a förkalkyl and
+  // on an efterkalkyl saved before it). Calculations saved before the row
+  // tables existed simply have no rows.
+  async function getCostCalculation(id: string) {
+    const calculation = await repo.findCostCalculationById(id);
+    if (!calculation) return null;
+    const [materialRows, operationRows] = await Promise.all([repo.listMaterialRows(id), repo.listOperationRows(id)]);
+    return { ...calculation, materialRows, operationRows, analysis: savedVarianceAnalysis(calculation, materialRows, operationRows) };
   }
 
   // Förkalkyl for a derived structure (configurator): the SAME multi-level
@@ -640,14 +876,7 @@ export function createCostingService(
     postCalculate,
     previewStructure,
 
-    // Header plus its specification rows, the shape the detail view needs.
-    // Calculations saved before the row tables existed simply have none.
-    async getCostCalculation(id: string) {
-      const calculation = await repo.findCostCalculationById(id);
-      if (!calculation) return null;
-      const [materialRows, operationRows] = await Promise.all([repo.listMaterialRows(id), repo.listOperationRows(id)]);
-      return { ...calculation, materialRows, operationRows };
-    },
+    getCostCalculation,
 
     // The specification rows go with it (cascade). No role gate: calculations
     // are decision support, not bookkeeping — same as revisions and structure

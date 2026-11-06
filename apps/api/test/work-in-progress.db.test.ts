@@ -120,7 +120,7 @@ async function makeProduct(parentCost: number | null) {
   const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
   await stockService.recordTransaction({ articleId: component.id, locationId: location.id, quantityDelta: 100, transactionType: "inventory_adjustment" });
   const employee = await timeReportService.createEmployee({ employeeNumber: `E-${seq}`, name: "Kalle", active: true });
-  return { parent, component, location, employee };
+  return { parent, component, location, employee, workCenter };
 }
 
 async function makeOrder(product: Awaited<ReturnType<typeof makeProduct>>, quantity: number, userId: string) {
@@ -278,6 +278,39 @@ describe("Produkter i arbete per datum — the sources", () => {
     expect(atD.rows[0]).toMatchObject({ subcontract: 600, overhead: 60, accumulated: 660, receivedQuantity: 1, relieved: 200, value: 460 });
     // Today the receipt is undone: nothing accumulated, nothing relieved.
     expect((await report()).rows).toEqual([]);
+  });
+});
+
+// Timkostnad per datum (#14 etapp 4): lön per work day at that day's hourly
+// rate, the efterkalkyl's rule — PIA no longer uses today's rate.
+describe("Produkter i arbete per datum — lön per arbetsdag", () => {
+  it("prices each work day at its rate, and a rate changed after D never moves PIA per D", async () => {
+    const user = await makeUser();
+    const product = await makeProduct(50);
+    const { operation } = await makeOrder(product, 5, user.id);
+    // 100 kr/h from the start of the year, 150 from 20 June (Stockholm).
+    await db.execute(sql`UPDATE work_center_rate_history SET valid_from = '2025-01-01T08:00:00Z' WHERE work_center_id = ${product.workCenter.id}`);
+    await mfgService.updateWorkCenter(product.workCenter.id, { hourlyRate: 150 });
+    await db.execute(
+      sql`UPDATE work_center_rate_history SET valid_from = '2025-06-20T08:00:00Z' WHERE work_center_id = ${product.workCenter.id} AND hourly_rate = 150`
+    );
+    const hours = (date: string, h: number) =>
+      timeReportService.createTimeReport({ employeeId: product.employee.id, moOperationId: operation.id, date, hours: h }, user.id);
+    await hours("2025-06-10", 3);
+    await hours("2025-06-25", 2);
+
+    expect((await report("2025-06-15", "direct")).rows[0]).toMatchObject({ labor: 300 });
+    // 3 × 100 + 2 × 150 — not 5 × today's rate.
+    expect((await report(D, "direct")).rows[0]).toMatchObject({ labor: 600, accumulated: 600, value: 600 });
+
+    // Raised again today: PIA per D (a booked year-end step) stays as it was.
+    await mfgService.updateWorkCenter(product.workCenter.id, { hourlyRate: 300 });
+    expect((await report(D, "direct")).rows[0]).toMatchObject({ labor: 600 });
+    // Time reported afterwards for a day before D changes it (Inaktuell in the bokslut).
+    await hours("2025-06-28", 1);
+    expect((await report(D, "direct")).rows[0]).toMatchObject({ labor: 750 });
+    // Today's PIA has the same days at the same rates.
+    expect((await report(undefined, "direct")).rows[0]).toMatchObject({ labor: 750 });
   });
 });
 

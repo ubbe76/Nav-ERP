@@ -39,6 +39,8 @@ export default async function KalkylutfallPage(props: { searchParams: Promise<Pa
       <KalkylutfallPageClient
         defaultFrom={singleParam(searchParams.from)}
         defaultTo={singleParam(searchParams.to)}
+        defaultView={singleParam(searchParams.view)}
+        defaultGroupBy={singleParam(searchParams.groupBy)}
       />
     </AppShell>
   );

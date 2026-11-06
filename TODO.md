@@ -40,7 +40,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
-- [ ] **Avvikelseanalys i efterkalkylen** — pris, mängd och tid; ställtid och stycktid → [#14](https://github.com/ubbe76/Nav-ERP/issues/14) *(hemsidan)*
 - [ ] **Alternativa resurser i planeringen och Leveranstidskontrollen** → [#15](https://github.com/ubbe76/Nav-ERP/issues/15) *(hemsidan)*
 - [ ] **Påslag per artikelgrupp, kund eller order** → [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*
 - [ ] **Löneperioden:** upplåsning nollar snapshotten utan spår av vad som exporterats — spara den i upplåsningens audit-rad.
@@ -66,6 +65,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Kopiera från befintlig artikel:** ritningsrevisioner kopieras inte.
 - [ ] **Bankfiler:** kontovarningen kunde tipsa om att lägga in IBAN.
 - [ ] **Favoriter:** förvalda favoriter per behörighetsgrupp; åtgärdsgenvägar som **+ Ny kundorder** (kräver `?ny=1`-stöd på sidorna).
+- [ ] **Timkostnad per datum:** ingen rättelse av historiken i efterhand (en resurs som skapats med fel timkostnad behåller den för dagarna före rättelsen); tidrapporterna sparar inte resursen, så Ändra operationer som byter resurs prissätter om all tid.
 - [ ] **Manualen, årsbokslutet:** nämn att värderingen faller tillbaka på standardpris (kommentaren "deterministisk" är för stark), att identisk periodisering med sedan inaktiverat konto ger 400 och att Omför-rådet för IB-spärren kan landa i år N+2 vid sent bokslut.
 
 ### Kodkvalitet
@@ -99,7 +99,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 - [ ] **0-kronorsfaktura** ger 409 `ZeroAmountPostingError` — om garanti-/ersättningsfakturor dyker upp: utfärda utan verifikat eller symboliskt belopp?
 - [ ] **Konfigurerad rad:** TB räknas om från *aktuell* mall vid antalsändring medan en befintlig TO behåller sin frysta struktur — TB kan glida från det som byggs.
-- [ ] **Konfigurerad TO:** kalkylutfallet jämför efterkalkylen mot mallens senaste förkalkyl, inte mot TO:ns egen `configuration.cost`.
 - [ ] **`paidAt`** är NULL för leverantörsfakturor betalda före leverantörsreskontran — beslut behövs om något ska sortera eller filtrera på det.
 
 ### Medvetna val — ompröva bara vid behov

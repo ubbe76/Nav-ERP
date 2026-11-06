@@ -198,6 +198,29 @@ describe("regel 10: a done operation stamps out everyone else", () => {
     expect(await timeReportCount(colleague.id)).toBe(0);
   });
 
+  // #14 etapp 3: the automatic stamp-out materializes the time report with
+  // the stamp's kind (ställ/produktion), and a stamp without one stays ej
+  // uppdelad.
+  it("keeps the stamp's kind (ställ/produktion) on the automatically stamped-out time report", async () => {
+    const { user, order, operation, employee } = await setup();
+    const setter = await trRepo.createEmployee({ employeeNumber: "E-STL", name: "Ställare", active: true });
+    const plain = await trRepo.createEmployee({ employeeNumber: "E-EJ", name: "Ej uppdelad", active: true });
+    await trService.stampIn({ employeeId: setter.id, moOperationId: operation.id, kind: "setup" }, user.id);
+    await trService.stampIn({ employeeId: plain.id, moOperationId: operation.id }, user.id);
+    const own = await trService.stampIn({ employeeId: employee.id, moOperationId: operation.id, kind: "run" }, user.id);
+
+    await trService.stampOut(own.id, stampOutSchema.parse({ quantityOk: 5, quantityScrapped: 0, markOperationDone: true }), user.id);
+
+    expect(await openStamps(order.id)).toHaveLength(0);
+    const kinds = [
+      ...(await db.execute(sql`SELECT employee_id, kind FROM time_reports WHERE mo_operation_id = ${operation.id}`)),
+    ] as { employee_id: string; kind: string | null }[];
+    expect(new Map(kinds.map((r) => [r.employee_id, r.kind]))).toEqual(
+      new Map([[setter.id, "setup"], [plain.id, null], [employee.id, "run"]])
+    );
+    expect((await reportRows(order.id)).filter((r) => r.source === "auto_close")).toHaveLength(2);
+  });
+
   it("the material dry run closes nothing", async () => {
     const { user, order, operation, employee } = await setup();
     const colleague = await trRepo.createEmployee({ employeeNumber: "E-COL4", name: "Dan", active: true });

@@ -576,6 +576,37 @@ describe("getPaxmlExport", () => {
     ]);
   });
 
+  // #14 etapp 3: time reports on TO operations — with ställ/produktion or
+  // without — are costing data. Payroll reads attendance only, so the
+  // export is exactly the one above.
+  it("leaves the export unchanged by time reports with ställ/produktion", async () => {
+    const seeded = await seedPeriod();
+    const article = await testArticleService.createArticle({
+      articleNumber: `PAX-${crypto.randomUUID().slice(0, 8)}`, name: "Bänk", type: "manufactured", unit: "st", active: true,
+    } as never);
+    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 0, active: true });
+    await mfgService.createRoutingOperation(article.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
+    const order = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 5 }, seeded.user.id);
+    const [operation] = await mfgService.listOperations(order.id);
+    for (const [date, hours, kind] of [["2026-05-04", 3, "setup"], ["2026-05-04", 5, "run"], ["2026-05-07", 9, null]] as const) {
+      await timeReportRepository.createTimeReport({ employeeId: seeded.hourly.id, moOperationId: operation!.id, date, hours, kind }, seeded.user.id);
+    }
+    await service.attest(YEAR, MONTH, seeded.hourly.id, seeded.user.id);
+    await service.attest(YEAR, MONTH, seeded.monthly.id, seeded.user.id);
+    await service.lockPeriod(YEAR, MONTH, seeded.user.id);
+
+    const { content } = await service.getPaxmlExport(YEAR, MONTH, seeded.user.id);
+    expect(postsFor(content.toString("utf8"), seeded.hourly.employeeNumber)).toEqual([
+      "ATF 2026-05-06 1.00",
+      "OB1 2026-05-07 1.00",
+      "SJK 2026-05-05 2.00",
+      "TID 2026-05-04 8.00",
+      "TID 2026-05-07 8.00",
+      "ÖT1 2026-05-07 1.00",
+      "ÖT2 2026-05-09 8.00",
+    ]);
+  });
+
   it("exports the same deviations for a monthly employee, minus the worked time", async () => {
     const seeded = await lockedMay();
     const { content } = await service.getPaxmlExport(YEAR, MONTH, seeded.user.id);

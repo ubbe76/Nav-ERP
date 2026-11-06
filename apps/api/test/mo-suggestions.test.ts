@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { suggestedConsumeQuantity, suggestedReportHours } from "../../web/lib/moSuggestions";
+import { defaultReportKind, suggestedConsumeQuantity, suggestedReportHours } from "../../web/lib/moSuggestions";
 
 // The TO card's Förbruka material and Rapportera tid forms are prefilled with
 // what theoretically remains — the user can always overwrite the suggestion.
@@ -43,5 +43,55 @@ describe("suggestedReportHours", () => {
 
   it("is empty when what remains rounds to under a hundredth", () => {
     expect(suggestedReportHours({ id: "op1", setupTime: "0.2", runTimePerUnit: "0" }, "1", [])).toBe("");
+  });
+});
+
+// Dela tid i ställ och produktion: the suggestion is per type, from the TO's
+// time reports that carry kind.
+describe("suggestedReportHours per type", () => {
+  const op = { id: "op1", setupTime: "30", runTimePerUnit: "1.5" };
+  const reports = [
+    { moOperationId: "op1", hours: "0.25", kind: "setup" as const },
+    { moOperationId: "op1", hours: "0.5", kind: "run" as const },
+    { moOperationId: "op1", hours: "0.1", kind: null },
+    { moOperationId: "op2", hours: "9", kind: "setup" as const },
+  ];
+
+  it("setup = planned setup time less the setup hours reported", () => {
+    expect(suggestedReportHours(op, "20", [], "setup")).toBe("0.5");
+    expect(suggestedReportHours(op, "20", reports, "setup")).toBe("0.25");
+  });
+
+  it("run = run time × quantity less the run hours reported", () => {
+    // 1.5 × 20 = 30 min = 0.5 h
+    expect(suggestedReportHours(op, "20", [], "run")).toBe("0.5");
+    expect(suggestedReportHours(op, "20", reports, "run")).toBe("");
+    expect(suggestedReportHours(op, "60", reports, "run")).toBe("1");
+  });
+
+  it("without a type it is the whole operation, as before", () => {
+    expect(suggestedReportHours(op, "20", reports)).toBe("0.15");
+    expect(suggestedReportHours(op, "20", reports, "")).toBe("0.15");
+  });
+
+  it("is empty when a type has nothing planned", () => {
+    expect(suggestedReportHours({ id: "op1", setupTime: "0", runTimePerUnit: "1" }, "10", [], "setup")).toBe("");
+  });
+});
+
+// Typ's förval (#14 etapp 4): Produktion when the time is split, so the
+// suggestion is the run time's; Ej uppdelad without the setting.
+describe("defaultReportKind", () => {
+  it("is Produktion with Dela tid i ställ och produktion on, else Ej uppdelad", () => {
+    expect(defaultReportKind(true)).toBe("run");
+    expect(defaultReportKind(false)).toBe("");
+  });
+
+  it("makes the förvalt suggestion the run time less the run hours reported", () => {
+    const op = { id: "op1", setupTime: "30", runTimePerUnit: "1.5" };
+    const reports = [{ moOperationId: "op1", hours: "0.25", kind: "run" as const }];
+    // 1.5 × 40 = 60 min = 1 h, 0.25 reported as produktion — the 30 min setup not included.
+    expect(suggestedReportHours(op, "40", reports, defaultReportKind(true))).toBe("0.75");
+    expect(suggestedReportHours(op, "40", reports, defaultReportKind(false))).toBe("1.25");
   });
 });

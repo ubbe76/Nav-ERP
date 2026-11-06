@@ -93,7 +93,25 @@ export const costCalculations = pgTable("cost_calculations", {
   materialMarkupPercent: numeric("material_markup_percent", { precision: 6, scale: 2 }).notNull().default("0"),
   type: costCalculationTypeEnum("type").notNull(),
   calculatedAt: timestamp("calculated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+  // Avvikelseanalys (#14, migration 0187): what the efterkalkyl's base — the
+  // order's own rows priced with the förkalkyl's rules at T₀ — was computed
+  // for. output_quantity = N, the received quantity; preliminary = the order
+  // was not Klar/Stängd (each operation's base then runs on its OK quantity);
+  // base_priced_at = T₀ (the order's created_at); base_material_source = the
+  // förkalkyl's source that applied. All four or none (CHECK), and only on a
+  // post-calculation: null = a förkalkyl or an efterkalkyl saved before the
+  // analysis, which then reads `analysis: null` — its base cannot be rebuilt
+  // as it was when it was saved.
+  outputQuantity: numeric("output_quantity", { precision: 14, scale: 4 }),
+  preliminary: boolean("preliminary"),
+  basePricedAt: timestamp("base_priced_at", { withTimezone: true }),
+  baseMaterialSource: costingMaterialSourceEnum("base_material_source"),
+}, (table) => [
+  check(
+    "cost_calculations_variance_base",
+    sql`(${table.outputQuantity} is null and ${table.preliminary} is null and ${table.basePricedAt} is null and ${table.baseMaterialSource} is null) or (${table.outputQuantity} is not null and ${table.preliminary} is not null and ${table.basePricedAt} is not null and ${table.baseMaterialSource} is not null and ${table.baseMaterialSource} <> 'actual' and ${table.type} = 'post')`
+  ),
+]);
 
 // One row per costed component — the specification behind materialCost and
 // subcontractCost. Calculations saved before this table existed simply have
@@ -141,6 +159,17 @@ export const costCalculationMaterialRows = pgTable(
     // pre-calculations, on Verklig kostnad (weighted per withdrawal) and on
     // rows saved before the column existed (those used the current price).
     priceDate: date("price_date"),
+    // Avvikelseanalys (#14): the row's base on an efterkalkyl with an
+    // analysis — base_quantity = SQ (planned ÷ order quantity × N for the
+    // row), base_unit_cost = SP (the förkalkyl's rules at T₀, staffel on the
+    // planned quantity) and the price source that gave it; scrap_quantity =
+    // the planned share of the scrapped units (planned ÷ order quantity × K),
+    // the basis of "varav kassation". All four or none (CHECK); null on
+    // förkalkyler and on rows saved before the analysis.
+    baseQuantity: numeric("base_quantity", { precision: 14, scale: 4 }),
+    baseUnitCost: numeric("base_unit_cost", { precision: 14, scale: 4 }),
+    basePriceSource: costPriceSourceEnum("base_price_source"),
+    scrapQuantity: numeric("scrap_quantity", { precision: 14, scale: 4 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -150,6 +179,10 @@ export const costCalculationMaterialRows = pgTable(
       "cost_calculation_material_rows_foreign_price",
       sql`(${table.supplierCurrency} is null) = (${table.supplierUnitPrice} is null) and (${table.supplierCurrency} is null) = (${table.exchangeRate} is null)`
     ),
+    check(
+      "cost_calculation_material_rows_variance_base",
+      sql`(${table.baseQuantity} is null) = (${table.baseUnitCost} is null) and (${table.baseQuantity} is null) = (${table.basePriceSource} is null) and (${table.baseQuantity} is null) = (${table.scrapQuantity} is null)`
+    ),
   ]
 );
 
@@ -158,9 +191,10 @@ export const costCalculationMaterialRows = pgTable(
 // stores (setupTime + runTimePerUnit x quantity) / 60, the post-calculation
 // the hours actually reported. `setup_hours` is the setup share of `hours`,
 // snapshotted by the pre-calculation (the routing can change afterwards) so
-// the specification can show the amortised setup cost per unit; null on
-// post-calculations (reported time has no setup/run split) and on rows saved
-// before the column existed.
+// the specification can show the amortised setup cost per unit. On a
+// post-calculation it is the hours reported as ställ (time_reports.kind,
+// #14 etapp 3) — null while no report on the operation has a type — and it
+// is null on rows saved before the column existed.
 export const costCalculationOperationRows = pgTable(
   "cost_calculation_operation_rows",
   {
@@ -183,7 +217,35 @@ export const costCalculationOperationRows = pgTable(
     // laborCost — hours/rate/labor/overhead are 0 on such rows. Null on
     // time-priced rows and on rows saved before the column existed.
     subcontractAmount: numeric("subcontract_amount", { precision: 14, scale: 4 }),
+    // Avvikelseanalys (#14) on an efterkalkyl with an analysis. A time row:
+    // base_setup_hours = Bs (the planned setup, once, when it counts),
+    // base_run_hours = Br (run time × N for the operation) and
+    // base_hourly_rate = R₀ (= hourly_rate until the rate has a history).
+    // Bs and Br are minutes ÷ 60 — eight decimals, because at four 4 min
+    // (0.0667 h) at 300 kr/h would be calculated at 20.01.
+    // run_hours = the hours reported as produktion; with setup_hours (on an
+    // efterkalkyl the hours reported as ställ) it is null while no report on
+    // the operation has a type — hours not in either are "ej uppdelad".
+    // A lego row: base_quantity = N for the operation, subcontract_quantity =
+    // the quantity the cost was taken for (Σ received on the IO rows, else
+    // the OK quantity), base_unit_price = P₀ and base_one_off = F₀ (ställpris
+    // + transport when it counts, else 0). Each group all or none, never both
+    // (CHECK); null on förkalkyler and on rows saved before the analysis.
+    baseSetupHours: numeric("base_setup_hours", { precision: 16, scale: 8 }),
+    baseRunHours: numeric("base_run_hours", { precision: 16, scale: 8 }),
+    runHours: numeric("run_hours", { precision: 12, scale: 4 }),
+    baseHourlyRate: numeric("base_hourly_rate", { precision: 10, scale: 2 }),
+    baseQuantity: numeric("base_quantity", { precision: 14, scale: 4 }),
+    subcontractQuantity: numeric("subcontract_quantity", { precision: 14, scale: 4 }),
+    baseUnitPrice: numeric("base_unit_price", { precision: 12, scale: 4 }),
+    baseOneOff: numeric("base_one_off", { precision: 12, scale: 2 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("idx_cost_calculation_operation_rows_calculation").on(table.costCalculationId)]
+  (table) => [
+    index("idx_cost_calculation_operation_rows_calculation").on(table.costCalculationId),
+    check(
+      "cost_calculation_operation_rows_variance_base",
+      sql`(${table.baseSetupHours} is null) = (${table.baseRunHours} is null) and (${table.baseSetupHours} is null) = (${table.baseHourlyRate} is null) and (${table.baseQuantity} is null) = (${table.subcontractQuantity} is null) and (${table.baseQuantity} is null) = (${table.baseUnitPrice} is null) and (${table.baseQuantity} is null) = (${table.baseOneOff} is null) and (${table.baseSetupHours} is null or ${table.baseQuantity} is null)`
+    ),
+  ]
 );

@@ -405,7 +405,145 @@ export interface CostCalculationOperationRow {
 export type CostCalculationDetail = CostCalculation & {
   materialRows: CostCalculationMaterialRow[];
   operationRows: CostCalculationOperationRow[];
+  // Avvikelseanalys (#14); null on a förkalkyl and on an efterkalkyl saved
+  // before the analysis existed.
+  analysis: CostVarianceAnalysis | null;
 };
+
+type CostVarianceMaterialKind = CostCalculationMaterialRow["kind"];
+
+// Avvikelseanalys i efterkalkylen (#14) — the `analysis` field on
+// POST …/post-calculate (preview and save) and GET /cost-calculations/:id.
+// null on a förkalkyl and on an efterkalkyl saved before the analysis. The
+// server computes everything (cost-variance.ts); the web only shows it.
+// Copied from packages/shared/src/costing.ts (the web cannot import @navet/shared). Amounts are kronor rounded to öre, quantities are in
+// the component's base unit, hours are hours.
+//
+// Kalkylerat (`base`) = the order's own rows for the produced quantity N,
+// material priced with the förkalkyl's rules as of T₀ (the order's
+// created_at); Utfall (`actual`) = the efterkalkyl's rows. On every row and
+// on the order: actual − base = deviation = the sum of the parts (`scrap` is
+// "varav" of `quantity` and NOT added). The order's markups (MO + LO, the
+// efterkalkyl's percentages on both sides) are one part of their own; TO is
+// outside TVK and not in the analysis.
+export interface CostVarianceParts {
+  // Pris: material/lego à-pris, ställ-/transportpris and rate on lego.
+  price: number;
+  // Mängd: material/lego quantity, scrap included.
+  quantity: number;
+  // Varav kassation — the part of `quantity` the scrapped units drew. Not summed.
+  scrap: number;
+  // Timpris: Lön − R₀ × H = Σ (R_d − R₀) × H_d — each work day's hours at
+  // that day's hourly rate against the rate at T₀ (etapp 4, 0189).
+  rate: number;
+  // Ställ and Stycke: time deviation on an operation whose time is fully
+  // split into ställ/produktion (in etapp 1 only an operation without time).
+  setup: number;
+  run: number;
+  // Tid (ej uppdelad): the time deviation of an operation with time that is
+  // not split into ställ/produktion (all reported time before etapp 3).
+  unclassified: number;
+  // Påslag (följer av material och lego): MO + LO, on the order only (0 on rows).
+  markups: number;
+}
+
+export interface CostVarianceMaterialRow {
+  // The saved cost_calculation_material_rows id; null in a preview.
+  id: string | null;
+  componentArticleId: string;
+  articleNumber: string;
+  articleName: string;
+  // "subcontract" = a service article (shown under Lego).
+  kind: CostVarianceMaterialKind;
+  // Kalkylerat antal (SQ) and à-pris (SP), and the price source SP came from;
+  // all null on a row without a base (counted as 0, the whole row is Mängd).
+  baseQuantity: number | null;
+  baseUnitCost: number | null;
+  basePriceSource: CostPriceSource | null;
+  // Antal (AQ, consumed net) and À-pris (AP) as on the efterkalkyl's row.
+  quantity: number;
+  unitCost: number;
+  // The planned share of the scrapped units — what "varav kassation" prices.
+  scrapQuantity: number;
+  base: number;
+  actual: number;
+  deviation: number;
+  parts: CostVarianceParts;
+}
+
+export interface CostVarianceTimeOperationRow {
+  kind: "time";
+  // The saved cost_calculation_operation_rows id; null in a preview.
+  id: string | null;
+  sequenceNo: number;
+  workCenterId: string;
+  workCenterCode: string;
+  workCenterName: string;
+  // Planerad ställ (Bs — 0 while the setup does not count yet) and Planerad
+  // stycke (Br = run time × N); null on a row without a base.
+  baseSetupHours: number | null;
+  baseRunHours: number | null;
+  baseHourlyRate: number | null;
+  // H = all reported hours; Verklig ställ / Verklig stycke (null until the
+  // time is registered as ställ/produktion, etapp 3) and Ej uppdelad (h) —
+  // all of H when the operation is not split (also half typed), else 0.
+  hours: number;
+  setupHours: number | null;
+  runHours: number | null;
+  unclassifiedHours: number;
+  hourlyRate: number;
+  // true ⇒ the time deviation is in parts.setup/run; false ⇒ in
+  // parts.unclassified (some reported time is not split).
+  split: boolean;
+  base: number;
+  actual: number;
+  deviation: number;
+  parts: CostVarianceParts;
+}
+
+export interface CostVarianceSubcontractOperationRow {
+  kind: "subcontract";
+  id: string | null;
+  sequenceNo: number;
+  workCenterId: string;
+  workCenterCode: string;
+  workCenterName: string;
+  // N for the operation, P₀ and F₀ (0 while the one-off does not count yet);
+  // null on a row without a base.
+  baseQuantity: number | null;
+  baseUnitPrice: number | null;
+  baseOneOff: number | null;
+  // Qa: what the cost was taken for (Σ received on the IO rows, else OK).
+  subcontractQuantity: number | null;
+  base: number;
+  actual: number;
+  deviation: number;
+  parts: CostVarianceParts;
+}
+
+export type CostVarianceOperationRow = CostVarianceTimeOperationRow | CostVarianceSubcontractOperationRow;
+
+export interface CostVarianceAnalysis {
+  // N: the order's received quantity (Inlevererat).
+  outputQuantity: number;
+  // The order was not Klar/Stängd/Makulerad: each operation (its time, its lego and its
+  // linked material) is based on the operation's OK quantity and unlinked
+  // material on the received quantity, so work in progress is not a
+  // deviation. Kalkylutfall leaves preliminary analyses out of its sums.
+  preliminary: boolean;
+  // T₀ (ISO) and the förkalkyl's material source the base was priced with.
+  basePricedAt: string;
+  baseMaterialSource: Exclude<CostingMaterialSource, "actual">;
+  // Kalkylerat, Utfall, Avvikelse for the order (TVK without TO). Utfall is
+  // exactly the efterkalkyl's TVK; the rows' rounding rest is in parts.markups.
+  base: number;
+  actual: number;
+  deviation: number;
+  parts: CostVarianceParts;
+  materialRows: CostVarianceMaterialRow[];
+  operationRows: CostVarianceOperationRow[];
+}
+
 
 // POST …/pre-calculate or …/post-calculate WITHOUT `save`: the calculation as
 // it would have been saved. id and calculatedAt are null because nothing was
@@ -2816,6 +2954,9 @@ export interface AttendanceOutInput {
   atfTransactionId?: string;
 }
 
+export type TimeKind = "setup" | "run";
+export const TIME_KIND_LABELS: Record<TimeKind, string> = { setup: "Ställ", run: "Produktion" };
+
 export interface TimeReport {
   id: string;
   employeeId: string;
@@ -2827,6 +2968,9 @@ export interface TimeReport {
   workCenterName: string;
   date: string;
   hours: string;
+  // Ställ / Produktion; null = ej uppdelad (inställningen Dela tid i ställ
+  // och produktion var av, or a historical report).
+  kind: TimeKind | null;
   note: string | null;
   createdAt: string;
   // terminal = materialized by a stamp-out at the terminal, manual = entered by hand
@@ -2847,6 +2991,8 @@ export interface StampSession {
   articleName: string;
   startedAt: string;
   stoppedAt: string | null;
+  // Ställ / Produktion; null = ej uppdelad. Follows the stamp to its time report.
+  kind: TimeKind | null;
   // Going home pauses open work: pausedAt set while away, pausedSeconds
   // accumulates over pauses. Paused time is excluded from reported hours.
   pausedAt: string | null;
@@ -2889,6 +3035,9 @@ export interface SystemSettings {
   defaultTheme: string;
   themeChoiceLocked: boolean;
   allowMultipleStamps: boolean;
+  // Dela tid i ställ och produktion: the terminal and the time report forms
+  // offer Ställ / Produktion (off = exactly as before).
+  timeKindSplit: boolean;
   // Print active article/drawing revisions per row on external documents.
   showRevisionsOnDocuments: boolean;
   // Documents that print the article's Extra benämning under the name, in
@@ -4752,14 +4901,30 @@ export interface ScrapStatisticsResponse {
   totalScrapped: number;
 }
 
-// GET /reports/calculation-outcome?from&to — pre- vs post-kalkyl TVK per unit.
+// GET /reports/calculation-outcome?from&to&view&groupBy. view=pre (Mot
+// förkalkyl, the default) compares TVK/st; view=analysis (Avvikelseanalys)
+// sums the saved variance analyses per order, article or resource.
+export type CalculationOutcomeView = "pre" | "analysis";
+export type CalculationOutcomeGrouping = "order" | "article" | "workCenter";
+
 export interface OutcomeRow {
+  calculationId: string;
   manufacturingOrderId: string;
   orderNumber: string;
   articleNumber: string;
   articleName: string;
   quantity: number;
+  // N = Inlevererat from the analysis; null on an efterkalkyl saved before it.
+  outputQuantity: number | null;
+  // true = Ej klar; null = saved without an analysis.
+  preliminary: boolean | null;
+  // What Efterkalkyl TVK/st was divided by: N ("output") or the quantity.
+  perUnitBasis: "output" | "quantity";
+  // "configuration" = a beställningsvara's TO against its configuration cost.
+  preSource: "article" | "configuration";
   preTvkPerUnit: number;
+  // Kalkylerat ÷ N on a final analysis, otherwise null.
+  calculatedTvkPerUnit: number | null;
   postTvkPerUnit: number;
   deltaPerUnit: number;
   deltaPct: number | null;
@@ -4775,11 +4940,82 @@ export interface OutcomeRow {
 export interface CalculationOutcomeResponse {
   from: string;
   to: string;
+  view: "pre";
   rows: OutcomeRow[];
   summary: { count: number; avgDeviationPct: number | null };
-  // onlyPost: orders whose latest efterkalkyl has no comparable förkalkyl (none
-  // saved on the article at or before it, or a beställningsvara's TO).
-  notComparable: { onlyPost: number; invalidQuantity: number };
+  // onlyPost: no comparable förkalkyl; invalidQuantity: quantity 0;
+  // noOutput: a final analysis with nothing delivered (closed at 0, Makulerad).
+  notComparable: { onlyPost: number; invalidQuantity: number; noOutput: number };
+}
+
+export interface OutcomeAmounts {
+  base: number;
+  actual: number;
+  deviation: number;
+  deviationPct: number | null;
+  parts: CostVarianceParts;
+}
+
+export interface OutcomeOrderRow extends OutcomeAmounts {
+  calculationId: string;
+  manufacturingOrderId: string;
+  orderNumber: string;
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  calculatedAt: string;
+  outputQuantity: number;
+}
+
+export interface OutcomeArticleRow extends OutcomeAmounts {
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  orderCount: number;
+  outputQuantity: number;
+}
+
+export interface OutcomeWorkCenterRow extends OutcomeAmounts {
+  key: string;
+  workCenterId: string;
+  workCenterCode: string;
+  workCenterName: string;
+  kind: "time" | "subcontract";
+  operationCount: number;
+  orderCount: number;
+  baseSetupHours: number | null;
+  baseRunHours: number | null;
+  // Null until the time is registered as ställ/produktion.
+  setupHours: number | null;
+  runHours: number | null;
+  unclassifiedHours: number | null;
+  hours: number | null;
+  timeDeviation: number | null;
+  baseQuantity: number | null;
+  subcontractQuantity: number | null;
+}
+
+export interface CalculationAnalysisKpis {
+  base: number;
+  actual: number;
+  deviation: number;
+  deviationPct: number | null;
+  price: number;
+  quantity: number;
+  scrap: number;
+  time: number;
+  markups: number;
+}
+
+export interface CalculationAnalysisResponse {
+  from: string;
+  to: string;
+  view: "analysis";
+  groupBy: CalculationOutcomeGrouping;
+  rows: Array<OutcomeOrderRow | OutcomeArticleRow | OutcomeWorkCenterRow>;
+  totals: OutcomeAmounts;
+  kpis: CalculationAnalysisKpis;
+  counts: { analysed: number; preliminary: number; withoutAnalysis: number };
 }
 
 // --- Händelselogg (G1): read side of the append-only audit_log ---

@@ -29,7 +29,7 @@ import { weightedActualCosts, type HistoryRow } from "./actual-cost.js";
 import { createRateAttacher, loadCostingConfig, type CostingSettingsReader } from "./costing.service.js";
 import { buildMaterialRow, buildOperationRow, buildSubcontractOperationRow, directCosts } from "./level-costing.js";
 import { applyMarkups } from "./markup.js";
-import { pricedAtWithdrawal, type PriceHistories } from "./price-at.js";
+import { laborAtWorkDays, pricedAtWithdrawal, reportedTime, type PriceHistories } from "./price-at.js";
 import {
   isDoneAt,
   isEmptyWipRow,
@@ -112,7 +112,11 @@ async function readSources(ex: Db | Tx, asOf: string, source: CostingMaterialSou
   const bases = await costing.getComponentCostBasis(articleIds);
   const labels = await costing.getArticleLabels(articleIds);
   const histories: PriceHistories | null = source === "actual" ? null : await costing.getPriceHistories(articleIds);
-  return { orders, completed, receipts, materialNet, actual, hours, lego, bases, labels, histories };
+  // Timkostnad per datum: one load for every resource with hours by D.
+  const rateHistories = await costing.getWorkCenterRateHistories([
+    ...new Set(hours.filter((row) => row.workCenterType !== "subcontract").map((row) => row.workCenterId)),
+  ]);
+  return { orders, completed, receipts, materialNet, actual, hours, lego, bases, labels, histories, rateHistories };
 }
 
 type Sources = Awaited<ReturnType<typeof readSources>>;
@@ -198,6 +202,8 @@ export function createWorkInProgressService(deps: WorkInProgressServiceDeps) {
   // Lön (time-priced operations) and lego (subcontract operations) per
   // order. As in the efterkalkyl, a subcontract operation's cost is its IO
   // receipts and a time-priced operation's its hours — never the other way.
+  // Lön is priced per work day at that day's hourly rate (laborAtWorkDays,
+  // the efterkalkyl's rule), so a rate changed after D never moves PIA per D.
   function operationRowsByOrder(sources: Sources, orderIds: Set<string>): Map<string, OperationRowWrite[]> {
     const result = new Map<string, OperationRowWrite[]>();
     const push = (orderId: string, row: OperationRowWrite) => {
@@ -205,9 +211,17 @@ export function createWorkInProgressService(deps: WorkInProgressServiceDeps) {
       if (list) list.push(row);
       else result.set(orderId, [row]);
     };
-    for (const op of sources.hours) {
+    // H and the work days from the same rows (one query in the snapshot,
+    // reportedTime as in the efterkalkyl); PIA does not split ställ/stycke.
+    for (const [, days] of groupBy(sources.hours, (row) => row.operationId)) {
+      const op = days[0]!;
       if (!orderIds.has(op.manufacturingOrderId) || op.workCenterType === "subcontract") continue;
-      push(op.manufacturingOrderId, buildOperationRow({ ...op, hours: Number(op.hours), setupHours: null }));
+      const time = reportedTime(days);
+      const labor = laborAtWorkDays(time.days, sources.rateHistories.get(op.workCenterId) ?? [], Number(op.hourlyRate));
+      push(
+        op.manufacturingOrderId,
+        buildOperationRow({ ...op, hours: time.hours, setupHours: null, hourlyRate: String(labor.hourlyRate), laborAmount: labor.laborAmount })
+      );
     }
     const legoByOperation = new Map<string, { orderId: string; sequenceNo: number; workCenterId: string; amount: number }>();
     for (const row of sources.lego) {

@@ -25,8 +25,11 @@ export interface CostBuckets {
   businessOverhead: number | string;
 }
 
+// The buckets TVK reads — TO and Affo are outside it.
+export type ManufacturingCostBuckets = Omit<CostBuckets, "overhead" | "businessOverhead">;
+
 /** TVK — tillverkningskostnad. Without TO (see the file header). */
-export function manufacturingCost(c: CostBuckets): number {
+export function manufacturingCost(c: ManufacturingCostBuckets): number {
   return (
     Number(c.materialCost) +
     Number(c.materialOverhead) +

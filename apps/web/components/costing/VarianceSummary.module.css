@@ -1,0 +1,85 @@
+.block {
+  position: relative;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+
+.bare {
+  position: relative;
+  max-width: 420px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+
+.title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.notice {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+/* Label column takes the spare width, the amount column is as wide as its
+   widest amount — nothing is floored by a fixed px track. */
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  column-gap: 14px;
+  row-gap: 3px;
+}
+
+.amount {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.total {
+  margin-top: 3px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-border);
+  font-weight: 600;
+}
+
+.part {
+  padding-left: 12px;
+}
+
+.sub {
+  padding-left: 24px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+/* Dearer than kalkylerat reads as a cost overrun, cheaper as a saving. The
+   sign and the hidden words say the same, so colour is never the only cue. */
+.deviation[data-tone="dearer"] {
+  color: var(--status-stopped-text);
+}
+.deviation[data-tone="cheaper"] {
+  color: var(--status-running-text);
+}
+
+.deviation {
+  position: relative;
+}
+
+.srOnly {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

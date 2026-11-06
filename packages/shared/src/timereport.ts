@@ -249,12 +249,22 @@ export const attendanceOutSchema = z.object({
 });
 export type AttendanceOutInput = z.infer<typeof attendanceOutSchema>;
 
+// Ställ eller produktion (#14 etapp 3): what reported time was spent on, for
+// the efterkalkyl's avvikelseanalys. Optional everywhere and never required by
+// the server — null/absent = ej uppdelad. The terminal offers it with the
+// setting timeKindSplit (Dela tid i ställ och produktion).
+export const timeKinds = ["setup", "run"] as const;
+export type TimeKind = (typeof timeKinds)[number];
+export const timeKindSchema = z.enum(timeKinds);
+
 export const createTimeReportSchema = z.object({
   employeeId: z.string().uuid(),
   moOperationId: z.string().uuid(),
   date: z.string().date(),
   hours: z.coerce.number().positive(),
   note: z.string().max(2000).optional(),
+  // Ställ/Produktion; null or absent = ej uppdelad.
+  kind: timeKindSchema.nullable().optional(),
 });
 export type CreateTimeReportInput = z.infer<typeof createTimeReportSchema>;
 
@@ -280,6 +290,8 @@ export const updateTimeReportSchema = z
     date: z.string().date().optional(),
     hours: z.coerce.number().positive().optional(),
     note: z.string().max(2000).nullable().optional(),
+    // Rättning av typen: null = ej uppdelad, undefined keeps it.
+    kind: timeKindSchema.nullable().optional(),
   })
   .refine((d) => Object.keys(d).length > 0, "At least one field must be provided");
 export type UpdateTimeReportInput = z.infer<typeof updateTimeReportSchema>;
@@ -291,6 +303,10 @@ export const stampInSchema = z.object({
   // Regel 5: a stamp-in without attendance clocks the employee in, so it can
   // need the same sen ankomst reason as Stämpla in närvaro.
   attendanceReason: attendanceReasonSchema.optional(),
+  // Ställ/Produktion (the terminal's two buttons with timeKindSplit on);
+  // follows the stamp to its time report. Null or absent = ej uppdelad.
+  // Ställ klart = stamp out 0/0, then stamp in again with kind "run".
+  kind: timeKindSchema.nullable().optional(),
 });
 export type StampInInput = z.infer<typeof stampInSchema>;
 

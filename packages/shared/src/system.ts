@@ -96,6 +96,10 @@ const systemSettingsFieldsSchema = z.object({
     attendanceReasonRequired: z.boolean().optional(),
     attendanceReasonToleranceMinutes: z.number().int().min(0).max(120).optional(),
     terminalOvertimeChoice: z.boolean().optional(),
+    // Dela tid i ställ och produktion (#14 etapp 3): the terminal stamps in as
+    // Ställ or Produktion and the manual reports get Typ. Off = no type is
+    // offered; the server never requires one either way.
+    timeKindSplit: z.boolean().optional(),
     // PAXml löneart codes used by the payroll export — must match the
     // payroll system's own löneartstabell. An empty string is accepted (it
     // means "clear the override") and getSettings() decodes it back to the

@@ -1,0 +1,498 @@
+import { describe, expect, it } from "vitest";
+import {
+  costVarianceAnalysis,
+  isPreliminaryStatus,
+  materialOutput,
+  materialScrap,
+  materialVariance,
+  oneOffCounts,
+  operationOutput,
+  operationWorked,
+  plannedShare,
+  roundAsNumeric,
+  subcontractVariance,
+  timeVariance,
+  type VarianceHeader,
+  type VarianceMaterialInput,
+  type VarianceOperationInput,
+} from "../src/modules/costing/service/cost-variance.js";
+
+// Avvikelseanalys i efterkalkylen (#14) — the pure rules and formulas of
+// cost-variance.ts. Amounts in öre inside the file, kronor out.
+
+const header = (over: Partial<VarianceHeader> = {}): VarianceHeader => ({
+  outputQuantity: 10,
+  preliminary: false,
+  basePricedAt: new Date("2026-03-01T09:00:00Z"),
+  baseMaterialSource: "standard",
+  moPercent: 0,
+  loPercent: 0,
+  manufacturingCost: 0,
+  ...over,
+});
+
+const material = (over: Partial<VarianceMaterialInput> = {}): VarianceMaterialInput => ({
+  id: null,
+  componentArticleId: "c1",
+  articleNumber: "K-1",
+  articleName: "Komponent",
+  kind: "material",
+  quantity: 20,
+  unitCost: 10,
+  amount: 200,
+  baseQuantity: 20,
+  baseUnitCost: 10,
+  basePriceSource: "standard",
+  scrapQuantity: 0,
+  ...over,
+});
+
+const timeOp = (over: Partial<VarianceOperationInput> = {}): VarianceOperationInput => ({
+  id: null,
+  sequenceNo: 10,
+  workCenterId: "w1",
+  workCenterCode: "100",
+  workCenterName: "Svets",
+  hours: 3,
+  setupHours: null,
+  runHours: null,
+  hourlyRate: 600,
+  laborAmount: 1800,
+  subcontractAmount: null,
+  baseSetupHours: 0.5,
+  baseRunHours: 2,
+  baseHourlyRate: 600,
+  baseQuantity: null,
+  subcontractQuantity: null,
+  baseUnitPrice: null,
+  baseOneOff: null,
+  ...over,
+});
+
+const legoOp = (over: Partial<VarianceOperationInput> = {}): VarianceOperationInput => ({
+  ...timeOp(),
+  sequenceNo: 20,
+  workCenterId: "w2",
+  workCenterCode: "900",
+  workCenterName: "Ytbehandling",
+  hours: 0,
+  hourlyRate: 0,
+  laborAmount: 0,
+  subcontractAmount: 810,
+  baseSetupHours: null,
+  baseRunHours: null,
+  baseHourlyRate: null,
+  baseQuantity: 4,
+  subcontractQuantity: 4,
+  baseUnitPrice: 100,
+  baseOneOff: 500,
+  ...over,
+});
+
+// The efterkalkyl's TVK for these rows as computePostCalculation stores it:
+// directCosts + MO/LO (markup.ts), each header bucket at four decimals.
+function tvkOf(materials: VarianceMaterialInput[], operations: VarianceOperationInput[], moPercent = 0, loPercent = 0) {
+  const r4 = (value: number) => Math.round(value * 10000) / 10000;
+  const material = materials.filter((m) => m.kind === "material").reduce((t, m) => t + m.amount, 0);
+  const lego =
+    materials.filter((m) => m.kind === "subcontract").reduce((t, m) => t + m.amount, 0) +
+    operations.reduce((t, o) => t + (o.subcontractAmount ?? 0), 0);
+  const labor = operations.reduce((t, o) => t + o.laborAmount, 0);
+  return r4(material) + r4((material * moPercent) / 100) + r4(labor) + r4(lego) + r4((lego * loPercent) / 100);
+}
+
+// The whole analysis with the header's TVK computed from the same rows.
+function analyse(over: Partial<VarianceHeader>, materials: VarianceMaterialInput[], operations: VarianceOperationInput[]) {
+  const h = header(over);
+  return costVarianceAnalysis(
+    { ...h, manufacturingCost: tvkOf(materials, operations, h.moPercent, h.loPercent) },
+    materials,
+    operations
+  );
+}
+
+// Σ parts (scrap is "varav" and not added) in öre.
+function partsSum(parts: { price: number; quantity: number; rate: number; setup: number; run: number; unclassified: number; markups: number }) {
+  return Math.round(
+    (parts.price + parts.quantity + parts.rate + parts.setup + parts.run + parts.unclassified + parts.markups) * 100
+  );
+}
+const ore = (kronor: number) => Math.round(kronor * 100);
+
+describe("cost-variance — N and the setup rule", () => {
+  it("is final on Klar and Stängd, preliminary otherwise", () => {
+    expect(isPreliminaryStatus("done")).toBe(false);
+    expect(isPreliminaryStatus("closed")).toBe(false);
+    for (const status of ["planned", "released", "in_progress"]) expect(isPreliminaryStatus(status)).toBe(true);
+  });
+
+  it("is final on Makulerad, so what was spent on a cancelled order is a deviation", () => {
+    expect(isPreliminaryStatus("cancelled")).toBe(false);
+    // N = the received quantity, normally 0: nothing is calculated for it.
+    expect(operationOutput({ preliminary: false, received: 0 }, 0)).toBe(0);
+  });
+
+  it("uses the received quantity on a final order, whatever the operation reported", () => {
+    const done = { preliminary: false, received: 8 };
+    // Kortstängd: 8 of 10 received, the operation reported 9 OK.
+    expect(operationOutput(done, 9)).toBe(8);
+    expect(materialOutput(done, { completed: 9 })).toBe(8);
+    expect(materialOutput(done, null)).toBe(8);
+  });
+
+  it("uses each operation's OK on a preliminary order, and the received quantity for unlinked material", () => {
+    const open = { preliminary: true, received: 2 };
+    expect(operationOutput(open, 5)).toBe(5);
+    expect(materialOutput(open, { completed: 5 })).toBe(5);
+    expect(materialOutput(open, null)).toBe(2);
+  });
+
+  it("gives N 0 on an order closed short at 0, and keeps the order's N when an operation over-reported", () => {
+    expect(operationOutput({ preliminary: false, received: 0 }, 3)).toBe(0);
+    // Överrapporterad: 12 OK on an order of 10 that received 10 — the 2 are a deviation.
+    expect(operationOutput({ preliminary: false, received: 10 }, 12)).toBe(10);
+    // Preliminary, the over-report is still work in progress.
+    expect(operationOutput({ preliminary: true, received: 0 }, 12)).toBe(12);
+  });
+
+  it("counts the setup and the lego one-off once the operation is worked, or on a final order with N > 0", () => {
+    expect(operationWorked({ hours: 0, completed: 0, scrapped: 0 })).toBe(false);
+    expect(operationWorked({ hours: 0.5, completed: 0, scrapped: 0 })).toBe(true);
+    expect(operationWorked({ hours: 0, completed: 1, scrapped: 0 })).toBe(true);
+    expect(operationWorked({ hours: 0, completed: 0, scrapped: 1 })).toBe(true);
+    expect(operationWorked({ hours: 0, completed: 0, scrapped: 0, received: true })).toBe(true);
+
+    expect(oneOffCounts({ preliminary: true, received: 0 }, false)).toBe(false);
+    expect(oneOffCounts({ preliminary: true, received: 0 }, true)).toBe(true);
+    expect(oneOffCounts({ preliminary: false, received: 4 }, false)).toBe(true);
+    expect(oneOffCounts({ preliminary: false, received: 0 }, false)).toBe(false);
+    expect(oneOffCounts({ preliminary: false, received: 0 }, true)).toBe(true);
+  });
+
+  it("takes the planned share of a quantity, and 0 on an order quantity of 0", () => {
+    expect(plannedShare(20, 10, 8)).toBe(16);
+    expect(plannedShare(1, 3, 3)).toBe(1);
+    expect(plannedShare(20, 0, 8)).toBe(0);
+  });
+
+  it("counts the scrap of the row's own operation, and of later operations only on a final order", () => {
+    const ops = [
+      { sequenceNo: 5, scrapped: 4 },
+      { sequenceNo: 10, scrapped: 1 },
+      { sequenceNo: 20, scrapped: 2 },
+    ];
+    const linked = ops[1]!;
+    expect(materialScrap({ preliminary: false, received: 7 }, linked, ops)).toBe(3);
+    expect(materialScrap({ preliminary: true, received: 0 }, linked, ops)).toBe(1);
+    // Unlinked material is drawn at the receipt: never scrap.
+    expect(materialScrap({ preliminary: false, received: 7 }, null, ops)).toBe(0);
+  });
+});
+
+describe("cost-variance — material rows", () => {
+  it("splits into price on the actual quantity and the rest as quantity", () => {
+    // SQ 16 × SP 10 = 160; AQ 18 × AP 12 = 216.
+    const v = materialVariance(material({ baseQuantity: 16, baseUnitCost: 10, quantity: 18, unitCost: 12, amount: 216, scrapQuantity: 2 }));
+    expect(v.base).toBe(16000);
+    expect(v.actual).toBe(21600);
+    expect(v.parts.price).toBe(3600); // (12 − 10) × 18
+    expect(v.parts.quantity).toBe(2000); // (18 − 16) × 10
+    expect(v.parts.scrap).toBe(2000); // 10 × 2, varav kassation
+    expect(v.parts.price + v.parts.quantity).toBe(v.actual - v.base);
+  });
+
+  it("rounds the price part with round2 and puts the rest on quantity, so the row sums exactly", () => {
+    // base round2(3 × 3.3333) = 10.00, actual round2(7 × 3.3337) = 23.34,
+    // price round2(0.0004 × 7) = 0.00 ⇒ quantity 13.34 (13.3332 unrounded).
+    const v = materialVariance(material({ baseQuantity: 3, baseUnitCost: 3.3333, quantity: 7, unitCost: 3.3337, amount: 23.3359 }));
+    expect([v.base, v.actual, v.parts.price, v.parts.quantity]).toEqual([1000, 2334, 0, 1334]);
+    for (const row of [
+      material({ baseQuantity: 1.2345, baseUnitCost: 7.7777, quantity: 1.3, unitCost: 8.1234, amount: 10.56042 }),
+      material({ baseQuantity: 0.3333, baseUnitCost: 0.015, quantity: 0.5, unitCost: 0.005, amount: 0.0025 }),
+      material({ baseQuantity: 99.9999, baseUnitCost: 1234.5678, quantity: 100.0001, unitCost: 1234.5679, amount: 123456.9135 }),
+    ]) {
+      const r = materialVariance(row);
+      expect(r.parts.price + r.parts.quantity).toBe(r.actual - r.base);
+    }
+  });
+
+  it("rounds the base product as the outcome is stored, so an exact outcome has no false öre", () => {
+    // 1.5 × 1.0033 = 1.50495: the efterkalkyl stores 1.5050 (→ 1.51), the
+    // base rounded once was 1.50 — a Mängd of +0.01 on an exact outcome.
+    const v = materialVariance(
+      material({ baseQuantity: 1.5, baseUnitCost: 1.0033, quantity: 1.5, unitCost: 1.0033, amount: roundAsNumeric(1.5 * 1.0033, 4) })
+    );
+    expect([v.base, v.actual, v.parts.price, v.parts.quantity]).toEqual([151, 151, 0, 0]);
+  });
+
+  it("gives material that was planned but never drawn a negative quantity", () => {
+    const v = materialVariance(material({ quantity: 0, unitCost: 10, amount: 0 }));
+    expect(v.parts.quantity).toBe(-20000);
+    expect(v.parts.price).toBe(0);
+  });
+
+  it("gives a cheaper price a negative price part, and returned material less quantity", () => {
+    // Drew 20, returned 5 through Ångra: AQ is the net 15, at 8.
+    const v = materialVariance(material({ quantity: 15, unitCost: 8, amount: 120 }));
+    expect(v.parts.price).toBe(-3000); // (8 − 10) × 15
+    expect(v.parts.quantity).toBe(-5000); // (15 − 20) × 10
+  });
+
+  it("is all zero when nothing was planned and nothing drawn", () => {
+    const v = materialVariance(material({ baseQuantity: 0, quantity: 0, amount: 0 }));
+    expect([v.base, v.actual, v.parts.price, v.parts.quantity, v.parts.scrap]).toEqual([0, 0, 0, 0, 0]);
+  });
+
+  it("counts a row without a base wholly as quantity", () => {
+    const v = materialVariance(material({ baseQuantity: null, baseUnitCost: null, basePriceSource: null, scrapQuantity: null }));
+    expect([v.base, v.actual, v.parts.price, v.parts.quantity, v.parts.scrap]).toEqual([0, 20000, 0, 20000, 0]);
+  });
+});
+
+describe("cost-variance — operations with time", () => {
+  it("puts the whole time deviation in Tid (ej uppdelad) when the time is not split", () => {
+    // Base (0.5 + 2) × 600 = 1500, actual 3 × 600 = 1800.
+    const v = timeVariance(timeOp());
+    expect(v.split).toBe(false);
+    expect(v.unclassifiedHours).toBe(3);
+    expect([v.base, v.actual, v.parts.unclassified, v.parts.setup, v.parts.run, v.parts.rate]).toEqual([150000, 180000, 30000, 0, 0, 0]);
+  });
+
+  it("splits into ställ and stycke when every hour is registered as one or the other", () => {
+    // Hs 1 (planned 0.5), Hr 2 (planned 2).
+    const v = timeVariance(timeOp({ setupHours: 1, runHours: 2 }));
+    expect(v.split).toBe(true);
+    expect([v.parts.setup, v.parts.run, v.parts.unclassified]).toEqual([30000, 0, 0]);
+  });
+
+  it("does not split a half classified operation: Ej uppdelad (h) is all of H", () => {
+    // H 3 of which Hs 1: the whole deviation is Ej uppdelad, and so are all
+    // 3 hours — the hours reconcile with the kronor (not the 2 untyped).
+    const v = timeVariance(timeOp({ setupHours: 1, runHours: null }));
+    expect(v.split).toBe(false);
+    expect(v.unclassifiedHours).toBe(3);
+    expect([v.parts.setup, v.parts.run, v.parts.unclassified]).toEqual([0, 0, 30000]);
+  });
+
+  // Timkostnad per datum (#14 etapp 4): Lön is priced per work day, so the
+  // row's R is an average; Timpris = Lön − R₀ × H exactly, the rest is time.
+  it("puts the rate deviation in Timpris: Lön − R₀ × H, the time at R₀ in the rest", () => {
+    // 2 h at 600 and 1 h at 720 = 1920 (average 640), R₀ = 600 at T₀.
+    const v = timeVariance(timeOp({ hourlyRate: 640, laborAmount: 1920 }));
+    // Timpris 1920 − 1800 = 120; Ej uppdelad (3 − 2.5) × 600 = 300.
+    expect([v.base, v.actual, v.parts.rate, v.parts.unclassified]).toEqual([150000, 192000, 12000, 30000]);
+    // Split: Ställ (1 − 0.5) × 600, Stycke the rest (2 − 2) × 600.
+    const split = timeVariance(timeOp({ hourlyRate: 640, laborAmount: 1920, setupHours: 1, runHours: 2 }));
+    expect([split.parts.rate, split.parts.setup, split.parts.run]).toEqual([12000, 30000, 0]);
+    // A rate that went down since T₀ is a negative Timpris.
+    expect(timeVariance(timeOp({ hourlyRate: 550, laborAmount: 1650 })).parts.rate).toBe(-15000);
+  });
+
+  it("gives Timpris 0, never −0, while every day had R₀", () => {
+    // 1.2345 h × 600 is 740.6999… in binary; the stored Lön is 740.7.
+    const v = timeVariance(timeOp({ hours: 1.2345, laborAmount: 740.7 }));
+    expect(Object.is(v.parts.rate, 0)).toBe(true);
+  });
+
+  it("splits an operation without time into missing setup and run time", () => {
+    const v = timeVariance(timeOp({ hours: 0, laborAmount: 0 }));
+    expect(v.split).toBe(true);
+    expect([v.parts.setup, v.parts.run, v.parts.unclassified]).toEqual([-30000, -120000, 0]);
+  });
+
+  it("has a timpris of 0 while R₀ = R, and (R − R₀) × H otherwise, with the rest on the time part", () => {
+    expect(timeVariance(timeOp()).parts.rate).toBe(0);
+    // R 650, R₀ 600, H 3: rate 150; actual 1950 − base 1500 = 450 ⇒ ej uppdelad 300.
+    const v = timeVariance(timeOp({ hourlyRate: 650, laborAmount: 1950 }));
+    expect([v.parts.rate, v.parts.unclassified]).toEqual([15000, 30000]);
+  });
+
+  it("rounds the base time cost as the outcome is stored, so an exact outcome has no false öre", () => {
+    // 0.015 h × 100.33 = 1.50495, stored as 1.5050.
+    const v = timeVariance(
+      timeOp({ hours: 0.015, hourlyRate: 100.33, laborAmount: roundAsNumeric(0.015 * 100.33, 4), baseSetupHours: 0, baseRunHours: 0.015, baseHourlyRate: 100.33 })
+    );
+    expect([v.base, v.actual, v.parts.unclassified]).toEqual([151, 151, 0]);
+  });
+
+  it("counts an operation without a base wholly as unsplit time", () => {
+    const v = timeVariance(timeOp({ baseSetupHours: null, baseRunHours: null, baseHourlyRate: null }));
+    expect([v.base, v.parts.rate, v.parts.unclassified]).toEqual([0, 0, 180000]);
+  });
+});
+
+describe("cost-variance — lego operations", () => {
+  it("prices a receipt: à-pris and ställpris in Pris, the quantity in Mängd", () => {
+    // Kalkylerat 500 + 100 × 4 = 900; IO 450 + 90 × 4 = 810.
+    const v = subcontractVariance(legoOp());
+    expect([v.base, v.actual, v.parts.price, v.parts.quantity]).toEqual([90000, 81000, -9000, 0]);
+  });
+
+  it("gives the fallback (no IO, OK × snapshot price) no price deviation", () => {
+    // Preliminary, 2 OK: A = 500 + 100 × 2, Qa = N = 2.
+    const v = subcontractVariance(legoOp({ subcontractAmount: 700, subcontractQuantity: 2, baseQuantity: 2 }));
+    expect([v.base, v.actual, v.parts.price, v.parts.quantity]).toEqual([70000, 70000, 0, 0]);
+  });
+
+  it("sums two IO rows and prices the extra quantity at P₀", () => {
+    // Two IO rows: 450 + 90 × 3 and 0 + 110 × 2 ⇒ A 940, Qa 5; N 4.
+    const v = subcontractVariance(legoOp({ subcontractAmount: 940, subcontractQuantity: 5 }));
+    expect(v.parts.quantity).toBe(10000); // (5 − 4) × 100
+    expect(v.parts.price).toBe(-6000); // 940 − 500 − 100 × 5
+    expect(v.parts.price + v.parts.quantity).toBe(v.actual - v.base);
+  });
+
+  it("rounds the base F₀ + P₀ × N as the outcome is stored, so an exact outcome has no false öre", () => {
+    const v = subcontractVariance(
+      legoOp({ baseOneOff: 0, baseUnitPrice: 1.0033, baseQuantity: 1.5, subcontractQuantity: 1.5, subcontractAmount: roundAsNumeric(1.5 * 1.0033, 4) })
+    );
+    expect([v.base, v.actual, v.parts.price, v.parts.quantity]).toEqual([151, 151, 0, 0]);
+  });
+
+  it("counts the one-off only through the stored F₀ — 0 while it does not count", () => {
+    const v = subcontractVariance(legoOp({ baseOneOff: 0, baseQuantity: 0, subcontractQuantity: 0, subcontractAmount: 500 }));
+    expect([v.base, v.parts.price, v.parts.quantity]).toEqual([0, 50000, 0]);
+  });
+});
+
+describe("cost-variance — the whole analysis", () => {
+  it("is null without a base (a förkalkyl or an efterkalkyl saved before the analysis)", () => {
+    expect(costVarianceAnalysis(header({ outputQuantity: null, preliminary: null, basePricedAt: null, baseMaterialSource: null }), [material()], [])).toBeNull();
+    expect(costVarianceAnalysis(header({ baseMaterialSource: "actual" }), [material()], [])).toBeNull();
+  });
+
+  it("adds the rows and the markups up exactly: Utfall − Kalkylerat = Σ delar + Påslag", () => {
+    const analysis = analyse(
+      { moPercent: 12.5, loPercent: 7 },
+      [
+        material({ baseQuantity: 16.6667, baseUnitCost: 3.3333, quantity: 18, unitCost: 3.4567, amount: 62.2206, scrapQuantity: 1.6667 }),
+        material({ componentArticleId: "s1", kind: "subcontract", baseQuantity: 10, baseUnitCost: 12.345, quantity: 10, unitCost: 13, amount: 130 }),
+      ],
+      [timeOp({ hours: 2.3333, laborAmount: 1399.98, baseRunHours: 1.6667 }), legoOp({ subcontractAmount: 833.3333, subcontractQuantity: 4.5 })]
+    )!;
+    const rows = [...analysis.materialRows, ...analysis.operationRows];
+    expect(ore(analysis.actual) - ore(analysis.base)).toBe(ore(analysis.deviation));
+    expect(partsSum(analysis.parts)).toBe(ore(analysis.deviation));
+    for (const row of rows) expect(partsSum(row.parts)).toBe(ore(row.deviation));
+    // The order's sides are the rows' sums plus each side's markup; Kalkylerat
+    // is the base's TVK, summed like the header's from the unrounded base
+    // amounts (SQ × SP, R₀ × (Bs + Br), F₀ + P₀ × N).
+    const rowBase = rows.reduce((t, r) => t + ore(r.base), 0);
+    const rowActual = rows.reduce((t, r) => t + ore(r.actual), 0);
+    const baseTvk = tvkOf(
+      [
+        material({ amount: 16.6667 * 3.3333 }),
+        material({ componentArticleId: "s1", kind: "subcontract", amount: 10 * 12.345 }),
+      ],
+      [timeOp({ laborAmount: 600 * (0.5 + 1.6667) }), legoOp({ subcontractAmount: 500 + 100 * 4 })],
+      12.5,
+      7
+    );
+    expect(ore(analysis.base)).toBe(Math.round(baseTvk * 100));
+    expect(ore(analysis.actual) - rowActual - (ore(analysis.base) - rowBase)).toBe(ore(analysis.parts.markups));
+    // Utfall is the efterkalkyl's TVK in öre, exactly.
+    expect(ore(analysis.actual)).toBe(
+      Math.round(tvkOf(
+        [
+          material({ baseQuantity: 16.6667, baseUnitCost: 3.3333, quantity: 18, unitCost: 3.4567, amount: 62.2206, scrapQuantity: 1.6667 }),
+          material({ componentArticleId: "s1", kind: "subcontract", baseQuantity: 10, baseUnitCost: 12.345, quantity: 10, unitCost: 13, amount: 130 }),
+        ],
+        [timeOp({ hours: 2.3333, laborAmount: 1399.98, baseRunHours: 1.6667 }), legoOp({ subcontractAmount: 833.3333, subcontractQuantity: 4.5 })],
+        12.5,
+        7
+      ) * 100)
+    );
+    // Rows carry no markup; scrap is informational, not part of the sum.
+    expect(rows.every((r) => r.parts.markups === 0)).toBe(true);
+    expect(analysis.parts.scrap).toBe(analysis.materialRows[0]!.parts.scrap);
+    expect(analysis.parts.scrap).toBeGreaterThan(0);
+  });
+
+  it("puts the markup only on material and lego, and none on the time", () => {
+    const analysis = analyse({ moPercent: 10, loPercent: 20 }, [material({ quantity: 22, amount: 220 })], [
+      timeOp({ hours: 4, laborAmount: 2400 }),
+      legoOp({ subcontractAmount: 950, subcontractQuantity: 4 }),
+    ])!;
+    // ΔMO = 10 % × 20, ΔLO = 20 % × 50.
+    expect(analysis.parts.markups).toBe(12);
+    expect(analysis.parts.quantity).toBe(20);
+    expect(analysis.parts.price).toBe(50);
+    expect(analysis.parts.unclassified).toBe(900);
+    expect(analysis.deviation).toBe(982);
+  });
+
+  it("makes Utfall the efterkalkyl's TVK and Kalkylerat the base's, so the rows' rounding rest is no deviation", () => {
+    // Three rows of 0.3333: each is 0.33 in öre, Σ 0.99, but the TVK is
+    // 0.9999 → 1.00. The base's TVK is summed the same way, so an outcome
+    // exactly as calculated has Påslag 0 — the rest is on both sides.
+    const rows = [1, 2, 3].map((i) =>
+      material({ componentArticleId: `c${i}`, baseQuantity: 1, baseUnitCost: 0.3333, quantity: 1, unitCost: 0.3333, amount: 0.3333 })
+    );
+    const analysis = analyse({}, rows, [])!;
+    expect(analysis.materialRows.map((r) => [r.base, r.actual])).toEqual([[0.33, 0.33], [0.33, 0.33], [0.33, 0.33]]);
+    expect([analysis.base, analysis.actual, analysis.deviation, analysis.parts.markups]).toEqual([1, 1, 0, 0]);
+    // The same with 200 rows and MO 25 %: both sides the TVK to the öre.
+    const many = Array.from({ length: 200 }, (_, i) =>
+      material({ componentArticleId: `m${i}`, baseQuantity: 1, baseUnitCost: 0.3333, quantity: 1, unitCost: 0.3333, amount: 0.3333 })
+    );
+    const big = analyse({ moPercent: 25 }, many, [])!;
+    // TVK 66.66 + 16.665 = 83.3250 → 83.33 (half away from zero on the
+    // decimal value, not on the binary 8332.4999…); the rows Σ 66.00.
+    expect(tvkOf(many, [], 25)).toBeCloseTo(83.325, 10);
+    expect([big.base, big.actual, big.deviation, big.parts.markups]).toEqual([83.33, 83.33, 0, 0]);
+    // One öre over plan on one row: the deviation is that row's, not Påslag's.
+    const over = analyse({}, [...rows.slice(0, 2), material({ componentArticleId: "c3", baseQuantity: 1, baseUnitCost: 0.3333, quantity: 1, unitCost: 0.3433, amount: 0.3433 })], [])!;
+    expect([over.base, over.actual, over.deviation]).toEqual([1, 1.01, 0.01]);
+    expect(over.parts).toMatchObject({ price: 0.01, quantity: 0, markups: 0 });
+    expect(partsSum(over.parts)).toBe(ore(over.deviation));
+  });
+
+  it("is all zero when the outcome is the calculation", () => {
+    const analysis = analyse({ moPercent: 10 }, [material()], [
+      timeOp({ hours: 2.5, laborAmount: 1500 }),
+      legoOp({ subcontractAmount: 900 }),
+    ])!;
+    expect([analysis.base, analysis.actual, analysis.deviation]).toEqual([2620, 2620, 0]);
+    expect(Object.values(analysis.parts).every((p) => p === 0)).toBe(true);
+  });
+
+  it("carries the header and the rows' facts", () => {
+    const analysis = analyse({ preliminary: true, outputQuantity: 3 }, [material({ scrapQuantity: 2 })], [
+      timeOp(),
+      legoOp(),
+    ])!;
+    expect(analysis).toMatchObject({
+      outputQuantity: 3,
+      preliminary: true,
+      basePricedAt: "2026-03-01T09:00:00.000Z",
+      baseMaterialSource: "standard",
+    });
+    expect(analysis.materialRows[0]).toMatchObject({ baseQuantity: 20, baseUnitCost: 10, quantity: 20, unitCost: 10, scrapQuantity: 2 });
+    expect(analysis.materialRows[0]!.parts.scrap).toBe(20);
+    expect(analysis.operationRows.map((r) => r.kind)).toEqual(["time", "subcontract"]);
+    expect(analysis.operationRows[0]).toMatchObject({ baseSetupHours: 0.5, baseRunHours: 2, hours: 3, unclassifiedHours: 3, split: false });
+    expect(analysis.operationRows[1]).toMatchObject({ baseQuantity: 4, baseUnitPrice: 100, baseOneOff: 500, subcontractQuantity: 4 });
+  });
+});
+
+describe("cost-variance — roundAsNumeric", () => {
+  it("rounds the decimal text half away from zero, as a numeric column stores String(value)", () => {
+    // 12.34565 is 12.3456499… in binary: Math.round gives 12.3456, Postgres
+    // (reading the text "12.34565") stores 12.3457.
+    expect(Math.round(12.34565 * 10000) / 10000).toBe(12.3456);
+    expect(roundAsNumeric(12.34565, 4)).toBe(12.3457);
+    expect(roundAsNumeric(-12.34565, 4)).toBe(-12.3457);
+    expect(roundAsNumeric(0.00015, 4)).toBe(0.0002);
+    expect(roundAsNumeric(12.34496, 4)).toBe(12.345);
+    expect(roundAsNumeric(12.344, 4)).toBe(12.344);
+    expect(roundAsNumeric(0.125, 2)).toBe(0.13);
+    expect(roundAsNumeric(8, 4)).toBe(8);
+    expect(roundAsNumeric(0, 4)).toBe(0);
+    // String() writes these with an exponent; Postgres reads the same value.
+    expect(roundAsNumeric(1e-7, 4)).toBe(0);
+    expect(roundAsNumeric(5e-7, 6)).toBe(0.000001);
+    expect(roundAsNumeric(1.25e-7, 8)).toBe(0.00000013);
+    expect(roundAsNumeric(4 / 60, 8)).toBe(0.06666667);
+    expect(roundAsNumeric(1e21, 4)).toBe(1e21);
+  });
+});

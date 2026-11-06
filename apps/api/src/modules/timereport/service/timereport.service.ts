@@ -15,7 +15,7 @@ import type {
 import type { Tx } from "@navet/db";
 import type { StampReason, TimeReportRepository } from "../repository/timereport.repository.js";
 import { ONE_OPEN_ATTENDANCE, ONE_OPEN_STAMP } from "../repository/timereport.repository.js";
-import { localDateOf, stampedHours } from "../repository/stamp-close.js";
+import { effectiveStopTime, localDateOf, stampedHours } from "../repository/stamp-close.js";
 import type { ManufacturingService } from "../../manufacturing/service/manufacturing.service.js";
 import {
   InvalidStatusTransitionError,
@@ -347,15 +347,29 @@ export function createTimeReportService(
     if (session.stoppedAt) throw new StampSessionAlreadyStoppedError();
 
     // Regel 6: a supervisor can say when the stint actually ended. Without
-    // one the stint ends now and the report lands on today, as before.
+    // one the stint ends now — or, paused (gone home and never back), when
+    // the pause began: effectiveStopTime, the automatic stamp-out's rule, so
+    // yesterday's work stamped out today lands on yesterday (PIA and the
+    // efterkalkyl price the time per work day). Like the automatic stamp-out,
+    // a pause day inside a locked payroll period dates the report today: an
+    // old paused stamp must never be impossible to stamp out. A stop time
+    // equal to the pause's start is that same default, not a time of the
+    // supervisor's own (an older Pågående arbete sent the untouched Sluttid
+    // as pausedAt): it takes the same road, today's reserve included.
     const now = new Date();
-    const stoppedAt = input.stoppedAt ? new Date(input.stoppedAt) : now;
-    if (input.stoppedAt) {
+    const ownStop =
+      input.stoppedAt !== undefined &&
+      !(session.pausedAt && new Date(input.stoppedAt).getTime() === session.pausedAt.getTime());
+    const stoppedAt = ownStop ? new Date(input.stoppedAt!) : effectiveStopTime(session, now);
+    let reportDate = localDateOf(stoppedAt);
+    if (ownStop) {
       // One minute of slack for clock skew between browser and server.
       if (stoppedAt <= session.startedAt || stoppedAt.getTime() > now.getTime() + 60_000) {
         throw new InvalidStopTimeError();
       }
-      if (await periodLocks.isDateLocked(localDateOf(stoppedAt))) throw new PayrollPeriodLockedError(localDateOf(stoppedAt));
+      if (await periodLocks.isDateLocked(reportDate)) throw new PayrollPeriodLockedError(reportDate);
+    } else if (session.pausedAt && (await periodLocks.isDateLocked(reportDate))) {
+      reportDate = localDateOf(now);
     }
 
     // Every stamp-out reports the stint's quantities (OK + scrapped, both
@@ -385,8 +399,17 @@ export function createTimeReportService(
     // Dated on the stop time's local day (localDateOf, shared with the
     // automatic stamp-out) — a stint stopped just before midnight lands on
     // the day the work was done.
+    // The stamp's kind (ställ/produktion, null = ej uppdelad) follows it —
+    // the terminal's stamp-out and a supervisor's Sluttid alike.
     const report = await repo.createTimeReport(
-      { employeeId: session.employeeId, moOperationId: session.moOperationId, date: localDateOf(stoppedAt), hours, note: input.note },
+      {
+        employeeId: session.employeeId,
+        moOperationId: session.moOperationId,
+        date: reportDate,
+        hours,
+        note: input.note,
+        kind: session.kind,
+      },
       createdBy
     );
     const closed = await repo.closeStampSession(sessionId, stoppedAt, report.id);
@@ -462,7 +485,8 @@ export function createTimeReportService(
     // Manually entered time report. Stamp-outs go through doStampOut instead
     // and land on the stop time's day: today (which can never sit inside a
     // locked period — a period is only lockable once its last day has
-    // passed) or a supervisor's stop time, checked there.
+    // passed), a paused stamp's pause start (today when that day is locked)
+    // or a supervisor's stop time, checked there.
     async createTimeReport(input: CreateTimeReportInput, createdBy: string) {
       if (await periodLocks.isDateLocked(input.date)) throw new PayrollPeriodLockedError(input.date);
       return repo.createTimeReport(input, createdBy);
@@ -547,7 +571,8 @@ export function createTimeReportService(
       }
       let session;
       try {
-        session = await repo.createStampSession(input.employeeId, input.moOperationId, createdBy);
+        // Ställ/produktion when the terminal sent it — never required.
+        session = await repo.createStampSession(input.employeeId, input.moOperationId, createdBy, input.kind ?? null);
       } catch (err) {
         if (isUniqueViolation(err, ONE_OPEN_STAMP)) throw new AlreadyStampedInError();
         throw err;
@@ -914,15 +939,23 @@ export function createTimeReportService(
       const existing = await repo.findTimeReportById(id);
       if (!existing) throw new TimeReportNotFoundError(id);
 
-      if (await periodLocks.isDateLocked(existing.date)) throw new PayrollPeriodLockedError(existing.date);
-
       const newDate = input.date ?? existing.date;
       const newHours = input.hours ?? Number(existing.hours);
       const newNote = input.note === undefined ? existing.note : input.note;
+      // Rättning av typen: null = ej uppdelad, undefined keeps it.
+      const newKind = input.kind === undefined ? existing.kind : input.kind;
 
-      if (await periodLocks.isDateLocked(newDate)) throw new PayrollPeriodLockedError(newDate);
+      // The kind (ställ/produktion) never reaches the payroll — payroll reads
+      // the attendance, not time_reports — so a correction of ONLY the kind
+      // is allowed in a locked payroll period. Anything else (date, hours,
+      // note) is guarded on both the old and the new date.
+      const onlyKind = newDate === existing.date && newHours === Number(existing.hours) && newNote === existing.note;
+      if (!onlyKind) {
+        if (await periodLocks.isDateLocked(existing.date)) throw new PayrollPeriodLockedError(existing.date);
+        if (await periodLocks.isDateLocked(newDate)) throw new PayrollPeriodLockedError(newDate);
+      }
 
-      const updated = await repo.updateTimeReport(id, { date: newDate, hours: newHours, note: newNote });
+      const updated = await repo.updateTimeReport(id, { date: newDate, hours: newHours, note: newNote, kind: newKind });
 
       await audit.log({
         entityType: "time_report",
@@ -930,8 +963,8 @@ export function createTimeReportService(
         action: "updated",
         detail: {
           employeeId: existing.employeeId,
-          before: { date: existing.date, hours: existing.hours, note: existing.note },
-          after: { date: newDate, hours: newHours, note: newNote },
+          before: { date: existing.date, hours: existing.hours, note: existing.note, kind: existing.kind },
+          after: { date: newDate, hours: newHours, note: newNote, kind: newKind },
         },
         userId,
       });

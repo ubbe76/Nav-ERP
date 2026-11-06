@@ -1,10 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { asc, eq, sql } from "drizzle-orm";
-import { articleStandardCostHistory, db } from "@navet/db";
-import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
+import { articleStandardCostHistory, articles, db } from "@navet/db";
+import { createArticleRepository, recordStandardCostHistory } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createImportRepository } from "../src/modules/import/repository/import.repository.js";
 import { createImportService } from "../src/modules/import/service/import.service.js";
+import { overlappingTransactions } from "./helpers/overlapping-transactions.js";
 
 // Repository-level coverage for article_standard_cost_history (D1): the
 // table is written by exactly three call sites — article create,
@@ -43,7 +44,7 @@ async function historyFor(articleId: string) {
     .select()
     .from(articleStandardCostHistory)
     .where(eq(articleStandardCostHistory.articleId, articleId))
-    .orderBy(asc(articleStandardCostHistory.validFrom));
+    .orderBy(asc(articleStandardCostHistory.validFrom), asc(articleStandardCostHistory.id));
 }
 
 describe("createArticle — article_standard_cost_history", () => {
@@ -177,3 +178,26 @@ describe("CSV import — article_standard_cost_history", () => {
 // assert at the vitest level beyond that — confirmed by inspection of the
 // call sites (grep for articleStandardCostHistory / recordStandardCostHistory
 // across apps/api/src turns up only the three writer sites and this file).
+
+// valid_from = now() is the transaction's start: a writer that began before
+// another one changed the cost and committed must still record its own later
+// change as the later row (migration 0190's rule, in the application here).
+describe("recordStandardCostHistory — ordering", () => {
+  it("orders overlapping transactions by when they changed the cost, not when they began", async () => {
+    const article = await makeArticle("STD-ORDER", 10);
+    await overlappingTransactions(
+      async (tx) => {
+        await tx.update(articles).set({ standardCost: "11" }).where(eq(articles.id, article!.id));
+        await recordStandardCostHistory(tx, [{ articleId: article!.id, cost: 11 }]);
+      },
+      () => articleService.updateStandardCost(article!.id, 12).then(() => undefined)
+    );
+    const rows = await historyFor(article!.id);
+    expect(rows.map((r) => r.cost)).toEqual(["10.0000", "12.0000", "11.0000"]);
+    // Distinct instants (JS dates drop the microsecond), so the order is valid_from's alone.
+    const [{ instants }] = (await db.execute(
+      sql`select count(distinct valid_from)::int as instants from article_standard_cost_history where article_id = ${article!.id}`
+    )) as unknown as [{ instants: number }];
+    expect(instants).toBe(3);
+  });
+});

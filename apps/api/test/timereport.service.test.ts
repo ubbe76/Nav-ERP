@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { attendanceSessions, db } from "@navet/db";
-import { stampOutSchema } from "@navet/shared";
+import { createTimeReportSchema, stampInSchema, stampOutSchema, updateTimeReportSchema } from "@navet/shared";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -1179,5 +1179,247 @@ describe("samtidiga stämplingar", () => {
     )[0]!.n;
     expect(stamps).toBe(1);
     expect(await openAttendances(employee.id)).toBe(1);
+  });
+});
+
+// Ställ och produktion (#14 etapp 3): a stamp may say whether the time is
+// ställ or produktion, and the kind follows it to the time report every stop
+// materializes. Null = ej uppdelad, as everything before the type; the
+// server never requires it.
+describe("ställ och produktion (#14 etapp 3)", () => {
+  // A released TO of 5 with one operation and a component (2 per unit)
+  // drawn at that operation — so a stamp-out with quantities draws it and
+  // one without must not.
+  async function linkedFixture() {
+    const user = await makeUser();
+    const parent = await articleService.createArticle({
+      articleNumber: `PARENT-${crypto.randomUUID()}`, name: "Parent", type: "manufactured", unit: "st", active: true,
+    });
+    const component = await articleService.createArticle({
+      articleNumber: `COMP-${crypto.randomUUID()}`, name: "Komponent", type: "purchased", unit: "st", active: true,
+    });
+    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 0, active: true });
+    const routingOp = await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
+    await articleService.addBomComponent(parent.id, { componentArticleId: component.id, quantity: 2, routingOperationId: routingOp.id });
+    const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);
+    const [operation] = await mfgService.listOperations(order.id);
+    const employee = await timeReportService.createEmployee({ employeeNumber: `E-${crypto.randomUUID().slice(0, 6)}`, name: "Stina", active: true });
+    return { user, order, operation: operation!, employee };
+  }
+
+  const consumed = async (orderId: string) =>
+    (await mfgService.listMaterialConsumptions(orderId)).map((m) => Number(m.quantityConsumed));
+
+  it("carries the stamp's kind to the time report — the terminal's stamp-out and a supervisor's Sluttid", async () => {
+    const { user, operation, employee } = await linkedFixture();
+    const setup = await timeReportService.stampIn({ employeeId: employee.id, moOperationId: operation.id, kind: "setup" }, user.id);
+    expect(setup.kind).toBe("setup");
+    const { timeReport } = await timeReportService.stampOut(setup.id, stampOutSchema.parse({}), user.id);
+    expect(timeReport.kind).toBe("setup");
+
+    const run = await timeReportService.stampIn({ employeeId: employee.id, moOperationId: operation.id, kind: "run" }, user.id);
+    const start = new Date(Date.now() - 3 * 3_600_000);
+    await db.execute(sql`UPDATE stamp_sessions SET started_at = ${start.toISOString()}::timestamptz WHERE id = ${run.id}`);
+    // Sluttid on Pågående arbete: the same stop with a supervisor's time.
+    const stopped = await timeReportService.stampOut(
+      run.id,
+      stampOutSchema.parse({ stoppedAt: new Date(start.getTime() + 2 * 3_600_000).toISOString() }),
+      user.id
+    );
+    expect(stopped.timeReport).toMatchObject({ kind: "run", hours: "2.00" });
+    // Shown in the lists (GET /time-reports and the TO card's).
+    const listed = await timeReportService.listTimeReports({ limit: 50, offset: 0 });
+    expect(listed.rows.map((r) => r.kind).sort()).toEqual(["run", "setup"]);
+    expect(listed.rows.every((r) => r.source === "terminal")).toBe(true);
+    const open = await timeReportService.listStampSessions(false, { employeeId: employee.id });
+    expect(open.map((s) => s.kind).sort()).toEqual(["run", "setup"]);
+  });
+
+  it("Ställ klart: stamp out 0/0 and in again as produktion — no quantity, no material, two reports", async () => {
+    const { user, order, operation, employee } = await linkedFixture();
+    const setup = await timeReportService.stampIn({ employeeId: employee.id, moOperationId: operation.id, kind: "setup" }, user.id);
+
+    // Ställ klart = the two existing calls.
+    const out = await timeReportService.stampOut(setup.id, stampOutSchema.parse({ quantityOk: 0, quantityScrapped: 0 }), user.id);
+    const run = await timeReportService.stampIn({ employeeId: employee.id, moOperationId: operation.id, kind: "run" }, user.id);
+
+    expect(out.timeReport.kind).toBe("setup");
+    expect(out.reportId).not.toBeNull(); // the time-only row on the TO card
+    expect(run).toMatchObject({ kind: "run", stoppedAt: null, attendanceStarted: false });
+    const [op] = await mfgService.listOperations(order.id);
+    expect([Number(op!.quantityCompleted ?? 0), Number(op!.quantityScrapped), op!.status]).toEqual([0, 0, "pending"]);
+    expect(await consumed(order.id)).toEqual([0]);
+    expect((await mfgService.getManufacturingOrder(order.id))!.status).toBe("in_progress");
+
+    // The production stint reports the quantities and draws the material.
+    const done = await timeReportService.stampOut(run.id, stampOutSchema.parse({ quantityOk: 5 }), user.id);
+    expect(done.timeReport.kind).toBe("run");
+    expect(await consumed(order.id)).toEqual([10]);
+    const reports = await timeReportService.listTimeReportsByManufacturingOrder(order.id);
+    expect(reports.map((r) => r.kind).sort()).toEqual(["run", "setup"]);
+  });
+
+  it("without a kind (the setting off) the stamp and the report are ej uppdelad, as before", async () => {
+    const { user, operation, employee } = await linkedFixture();
+    const stamp = await timeReportService.stampIn({ employeeId: employee.id, moOperationId: operation.id }, user.id);
+    expect(stamp.kind).toBeNull();
+    const { timeReport } = await timeReportService.stampOut(stamp.id, stampOutSchema.parse({}), user.id);
+    expect(timeReport.kind).toBeNull();
+    const nulled = await timeReportService.stampIn({ employeeId: employee.id, moOperationId: operation.id, kind: null }, user.id);
+    expect(nulled.kind).toBeNull();
+    const manual = await timeReportService.createTimeReport({ employeeId: employee.id, moOperationId: operation.id, date: "2026-07-07", hours: 1 }, user.id);
+    expect(manual.kind).toBeNull();
+  });
+
+  it("takes a manual report's kind and corrects it: set, kept when left out, cleared with null", async () => {
+    const { user, operation, employee } = await linkedFixture();
+    const report = await timeReportService.createTimeReport(
+      { employeeId: employee.id, moOperationId: operation.id, date: "2026-07-07", hours: 1.5, kind: "run" },
+      user.id
+    );
+    expect(report.kind).toBe("run");
+
+    expect((await timeReportService.updateTimeReport(report.id, { kind: "setup" }, user.id)).kind).toBe("setup");
+    const hoursOnly = await timeReportService.updateTimeReport(report.id, { hours: 2 }, user.id);
+    expect(hoursOnly).toMatchObject({ kind: "setup", hours: "2.00" });
+    expect((await timeReportService.updateTimeReport(report.id, { kind: null }, user.id)).kind).toBeNull();
+  });
+
+  it("corrects only the kind in a locked payroll period — anything else is still refused", async () => {
+    const { user, operation, employee } = await linkedFixture();
+    const report = await timeReportService.createTimeReport(
+      { employeeId: employee.id, moOperationId: operation.id, date: "2026-07-07", hours: 1.5, note: "Svets" },
+      user.id
+    );
+    lockedDates.add("2026-07-07");
+
+    // The kind never reaches the payroll (it reads the attendance).
+    expect((await timeReportService.updateTimeReport(report.id, { kind: "setup" }, user.id)).kind).toBe("setup");
+    // Unchanged fields sent along with the kind are still only the kind.
+    const same = await timeReportService.updateTimeReport(report.id, { kind: "run", date: "2026-07-07", hours: 1.5, note: "Svets" }, user.id);
+    expect(same).toMatchObject({ kind: "run", hours: "1.50", date: "2026-07-07" });
+    expect((await timeReportService.updateTimeReport(report.id, { kind: null }, user.id)).kind).toBeNull();
+
+    for (const change of [{ hours: 2 }, { note: "Annan" }, { date: "2026-08-03" }, { kind: "setup" as const, hours: 2 }]) {
+      await expect(timeReportService.updateTimeReport(report.id, change, user.id)).rejects.toBeInstanceOf(PayrollPeriodLockedError);
+    }
+    // Moving INTO a locked period with only the date is refused as before.
+    lockedDates.clear();
+    lockedDates.add("2026-08-04");
+    await expect(timeReportService.updateTimeReport(report.id, { date: "2026-08-04" }, user.id)).rejects.toBeInstanceOf(
+      PayrollPeriodLockedError
+    );
+  });
+
+  // A paused stamp: started `startedHoursAgo` hours ago, gone home
+  // `pausedHoursAgo` hours ago (Gå hem pauses the work stamp).
+  async function pausedStamp(f: Awaited<ReturnType<typeof linkedFixture>>, kind: "setup" | "run" | null, startedHoursAgo: number, pausedHoursAgo: number) {
+    const attendance = await timeReportService.attendanceIn({ employeeId: f.employee.id }, f.user.id);
+    const stamp = await timeReportService.stampIn({ employeeId: f.employee.id, moOperationId: f.operation.id, kind }, f.user.id);
+    await timeReportService.attendanceOut(attendance.id, f.user.id);
+    const now = Date.now();
+    const pausedAt = new Date(now - pausedHoursAgo * 3_600_000);
+    await db.execute(
+      sql`UPDATE stamp_sessions SET started_at = ${new Date(now - startedHoursAgo * 3_600_000).toISOString()}::timestamptz, paused_at = ${pausedAt.toISOString()}::timestamptz WHERE id = ${stamp.id}`
+    );
+    return { stamp, pausedAt };
+  }
+
+  it("dates a paused stamp stamped out later on the day the pause began, like the automatic stamp-out", async () => {
+    const f = await linkedFixture();
+    // Worked 4 h, gone home 26 h ago: yesterday's (or the day before's) work.
+    const { stamp, pausedAt } = await pausedStamp(f, "run", 30, 26);
+
+    const { timeReport, session } = await timeReportService.stampOut(stamp.id, stampOutSchema.parse({}), f.user.id);
+
+    expect(timeReport).toMatchObject({ date: localDateOf(pausedAt), hours: "4.00", kind: "run" });
+    expect(timeReport.date).not.toBe(localDateOf(new Date()));
+    // Stopped when the pause began, as closeStampSessionsInTx does.
+    expect(session.stoppedAt!.getTime()).toBe(pausedAt.getTime());
+  });
+
+  it("dates it today when the pause's day lies in a locked payroll period", async () => {
+    const f = await linkedFixture();
+    const { stamp, pausedAt } = await pausedStamp(f, null, 30, 26);
+    lockedDates.add(localDateOf(pausedAt));
+
+    const { timeReport } = await timeReportService.stampOut(stamp.id, stampOutSchema.parse({}), f.user.id);
+
+    expect(timeReport).toMatchObject({ date: localDateOf(new Date()), hours: "4.00" });
+  });
+
+  // Pågående arbete sent an untouched Sluttid as the session's pausedAt; that
+  // is the default stop, not the supervisor's own time, so a locked pause day
+  // takes today's reserve instead of a 409 — only a real Sluttid is refused.
+  it("takes stoppedAt = pausedAt as no stop time: a locked pause day dates the report today", async () => {
+    const f = await linkedFixture();
+    const { stamp, pausedAt } = await pausedStamp(f, "setup", 30, 26);
+    lockedDates.add(localDateOf(pausedAt));
+
+    const { timeReport, session } = await timeReportService.stampOut(
+      stamp.id,
+      stampOutSchema.parse({ stoppedAt: pausedAt.toISOString() }),
+      f.user.id
+    );
+
+    expect(timeReport).toMatchObject({ date: localDateOf(new Date()), hours: "4.00", kind: "setup" });
+    expect(session.stoppedAt!.getTime()).toBe(pausedAt.getTime());
+  });
+
+  it("still refuses a Sluttid of the supervisor's own on a locked day", async () => {
+    const f = await linkedFixture();
+    const { stamp, pausedAt } = await pausedStamp(f, null, 30, 26);
+    const ownStop = new Date(pausedAt.getTime() - 60_000).toISOString();
+    lockedDates.add(localDateOf(pausedAt));
+    lockedDates.add(localDateOf(new Date(ownStop)));
+
+    await expect(
+      timeReportService.stampOut(stamp.id, stampOutSchema.parse({ stoppedAt: ownStop }), f.user.id)
+    ).rejects.toBeInstanceOf(PayrollPeriodLockedError);
+    const [still] = await timeReportService.listStampSessions(true, { employeeId: f.employee.id });
+    expect(still).toMatchObject({ id: stamp.id, stoppedAt: null });
+  });
+
+  it("keeps the kind through Gå hem and Kom (pause and resume)", async () => {
+    const f = await linkedFixture();
+    const attendance = await timeReportService.attendanceIn({ employeeId: f.employee.id }, f.user.id);
+    const stamp = await timeReportService.stampIn({ employeeId: f.employee.id, moOperationId: f.operation.id, kind: "setup" }, f.user.id);
+    await timeReportService.attendanceOut(attendance.id, f.user.id);
+    const [paused] = await timeReportService.listStampSessions(true, { employeeId: f.employee.id });
+    expect(paused).toMatchObject({ id: stamp.id, kind: "setup" });
+    expect(paused!.pausedAt).not.toBeNull();
+
+    await timeReportService.attendanceIn({ employeeId: f.employee.id }, f.user.id);
+    const [resumed] = await timeReportService.listStampSessions(true, { employeeId: f.employee.id });
+    expect(resumed).toMatchObject({ id: stamp.id, kind: "setup", pausedAt: null });
+
+    const { timeReport } = await timeReportService.stampOut(stamp.id, stampOutSchema.parse({}), f.user.id);
+    expect(timeReport.kind).toBe("setup");
+  });
+
+  it("Ställ klart on a paused stamp through the API: the setup lands on the pause's day, produktion starts now", async () => {
+    const f = await linkedFixture();
+    const { stamp, pausedAt } = await pausedStamp(f, "setup", 30, 26);
+
+    // The terminal hides Ställ klart on a paused stamp; the API takes it.
+    const out = await timeReportService.stampOut(stamp.id, stampOutSchema.parse({ quantityOk: 0, quantityScrapped: 0 }), f.user.id);
+    const run = await timeReportService.stampIn({ employeeId: f.employee.id, moOperationId: f.operation.id, kind: "run" }, f.user.id);
+
+    expect(out.timeReport).toMatchObject({ kind: "setup", hours: "4.00", date: localDateOf(pausedAt) });
+    expect(out.reportId).not.toBeNull();
+    // Gone home, so the stamp-in clocks the employee in again; nothing left paused.
+    expect(run).toMatchObject({ kind: "run", stoppedAt: null, pausedAt: null, attendanceStarted: true });
+    const [op] = await mfgService.listOperations(f.order.id);
+    expect([Number(op!.quantityCompleted ?? 0), Number(op!.quantityScrapped)]).toEqual([0, 0]);
+    expect(await consumed(f.order.id)).toEqual([0]);
+  });
+
+  it("validates the kind at the schema boundary and never requires it", () => {
+    const ids = { employeeId: crypto.randomUUID(), moOperationId: crypto.randomUUID() };
+    expect(stampInSchema.safeParse({ ...ids, kind: "pause" }).success).toBe(false);
+    expect(stampInSchema.parse(ids).kind).toBeUndefined();
+    expect(createTimeReportSchema.parse({ ...ids, date: "2026-07-07", hours: 1, kind: null }).kind).toBeNull();
+    expect(updateTimeReportSchema.safeParse({ kind: null }).success).toBe(true);
+    expect(updateTimeReportSchema.safeParse({ kind: "stycke" }).success).toBe(false);
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  calculationOutcomeQuerySchema,
   deliveryPrecisionCsvQuerySchema,
   reportRangeSchema,
   salesStatisticsQuerySchema,
@@ -20,6 +21,18 @@ describe("report query schemas", () => {
   it("rejects from after to", () => {
     expect(() => reportRangeSchema.parse({ from: "2026-05", to: "2026-04" })).toThrow();
     expect(reportRangeSchema.parse({ from: "2026-04", to: "2026-04" })).toBeTruthy(); // same month ok
+  });
+
+  it("defaults Kalkylutfall to Mot förkalkyl per order and rejects unknown views and groupings", () => {
+    expect(calculationOutcomeQuerySchema.parse({})).toEqual({ view: "pre", groupBy: "order" });
+    expect(calculationOutcomeQuerySchema.parse({ view: "analysis", groupBy: "workCenter", from: "2026-01" })).toEqual({
+      view: "analysis",
+      groupBy: "workCenter",
+      from: "2026-01",
+    });
+    expect(() => calculationOutcomeQuerySchema.parse({ view: "post" })).toThrow();
+    expect(() => calculationOutcomeQuerySchema.parse({ groupBy: "month" })).toThrow();
+    expect(() => calculationOutcomeQuerySchema.parse({ from: "2026-05", to: "2026-04" })).toThrow();
   });
 
   it("allows open-ended ranges", () => {

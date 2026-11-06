@@ -27,7 +27,7 @@ export default async function StampTerminalPage() {
     apiGet<StampSession[]>("/api/v1/stamp-sessions?open=true", cookieHeader),
     apiGet<AttendanceSession[]>("/api/v1/attendance-sessions?open=true", cookieHeader),
     apiGet<TerminalStation[]>("/api/v1/terminal/stations", cookieHeader),
-    apiGet<{ allowMultipleStamps: boolean }>("/api/v1/settings/terminal", cookieHeader),
+    apiGet<{ allowMultipleStamps: boolean; timeKindSplit?: boolean }>("/api/v1/settings/terminal", cookieHeader),
   ]);
 
   // The terminal has no AppShell, so it mounts the app's confirmation dialog
@@ -43,6 +43,7 @@ export default async function StampTerminalPage() {
         initialOpenAttendance={openAttendance}
         stations={stations}
         allowMultipleStamps={settings.allowMultipleStamps}
+        timeKindSplit={settings.timeKindSplit === true}
       />
       <ConfirmDialogHost />
     </>

@@ -24,8 +24,11 @@ import {
   resetCostingSettings,
 } from "./helpers/configured-manufacturing.js";
 import { configurator, makeLocation, makeUser, resetConfiguredRows, salesRepository, salesService } from "./helpers/configured-rows.js";
+import { testCostingService } from "./helpers/configurator.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { pdfText } from "./helpers/pdf.js";
+import { createReportsRepository } from "../src/modules/reports/repository/reports.repository.js";
+import { createReportsService } from "../src/modules/reports/service/reports.service.js";
 import { failure, waitForLockWaiter } from "./helpers/year-end.js";
 
 // Konfigurator 4c: a beställningsvara's TO carries its derived structure from
@@ -267,5 +270,67 @@ describe("configured TO — Kalkyl structure rows", () => {
     const mats = await matOf(mo.id);
     expect(mats.some((m) => m.componentArticleId === s.parts.skruv.id)).toBe(false);
     expect(mats.some((m) => m.componentArticleId === s.parts.plat.id)).toBe(true);
+  });
+});
+
+// Avvikelseanalys (#14): a configured TO's base is its OWN derived rows,
+// single level like the efterkalkyl — not configuration.cost's TVK/st, which
+// is one multi-level figure (and counts the template's Kalkyl operation 30).
+describe("configured TO — avvikelseanalys", () => {
+  it("calculates the base from the TO's derived rows, not from the configuration's TVK/st", async () => {
+    const s = await buildToOrderWithStructure();
+    const loc = await makeLocation();
+    const user = await makeUser();
+    const mo = await mfg.createManufacturingOrder({ articleId: s.article.id, quantity: 1, configuration: { selection: FULL } }, null);
+    await mfg.start(mo.id);
+    await mfg.complete(mo.id, { quantity: 1, locationId: loc.id }, user.id);
+
+    const { analysis } = await testCostingService.postCalculate(mo.id, true);
+
+    expect((mo.configuration as ManufacturingOrderConfiguration).cost.manufacturingCostPerUnit).toBe(198);
+    // Material 16 + 12 + 40 + 6 + 4 = 78, op 10 (6 + 3) / 60 × 600 = 90, op 20 4 / 60 × 300 = 20.
+    expect(analysis).toMatchObject({ preliminary: false, outputQuantity: 1, base: 188 });
+    const { skruv, plat, avl, f1, f2 } = s.parts;
+    expect(new Map(analysis!.materialRows.map((r) => [r.componentArticleId, r.base]))).toEqual(
+      new Map([[skruv.id, 16], [plat.id, 12], [avl.id, 40], [f1.id, 6], [f2.id, 4]])
+    );
+    expect(analysis!.operationRows.map((r) => [r.sequenceNo, r.base])).toEqual([[10, 90], [20, 20]]);
+  });
+
+  // Kalkylutfall on a TO created the real way (Ny tillverkningsorder on the
+  // template with its choices), not a configuration written by UPDATE: Mot
+  // förkalkyl compares with configuration.cost's TVK/st (198, multi-level,
+  // with the Kalkyl operation 30) and Kalkylerat is the TO's own rows (188).
+  it("is measured in Kalkylutfall against configuration.cost, with Kalkylerat from its own rows", async () => {
+    const s = await buildToOrderWithStructure();
+    const loc = await makeLocation();
+    const user = await makeUser();
+    const mo = await mfg.createManufacturingOrder({ articleId: s.article.id, quantity: 1, configuration: { selection: FULL } }, null);
+    await mfg.start(mo.id);
+    await mfg.complete(mo.id, { quantity: 1, locationId: loc.id }, user.id);
+    const { calculation, analysis } = await testCostingService.postCalculate(mo.id, true);
+    const reports = createReportsService(createReportsRepository(db), testCostingService);
+
+    const pre = await reports.getCalculationOutcome({ view: "pre" });
+    if (pre.view !== "pre") throw new Error("view");
+    expect(pre.rows).toEqual([
+      expect.objectContaining({
+        calculationId: calculation.id,
+        manufacturingOrderId: mo.id,
+        preSource: "configuration",
+        preMultiLevel: true,
+        preTvkPerUnit: 198,
+        calculatedTvkPerUnit: 188,
+        postTvkPerUnit: analysis!.actual,
+        outputQuantity: 1,
+        perUnitBasis: "output",
+      }),
+    ]);
+    expect(pre.notComparable).toEqual({ onlyPost: 0, invalidQuantity: 0, noOutput: 0 });
+
+    const byOrder = await reports.getCalculationOutcome({ view: "analysis", groupBy: "order" });
+    if (byOrder.view !== "analysis") throw new Error("view");
+    expect(byOrder.counts).toEqual({ analysed: 1, preliminary: 0, withoutAnalysis: 0 });
+    expect(byOrder.rows).toEqual([expect.objectContaining({ calculationId: calculation.id, base: 188, actual: analysis!.actual, deviation: analysis!.deviation })]);
   });
 });

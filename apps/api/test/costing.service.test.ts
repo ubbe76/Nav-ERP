@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { costCalculationMaterialRows, costCalculationOperationRows, costCalculations, db } from "@navet/db";
+import { stampOutSchema, type CostVarianceOperationRow } from "@navet/shared";
 import { testArticleService, testDocumentPdfService, testSystemService } from "./helpers/services.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -24,6 +25,7 @@ import { createStockService } from "../src/modules/stock/service/stock.service.j
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
 import { ExchangeRateUnavailableError } from "../src/modules/system/service/exchange-rates.js";
+import { stockholmDateOf } from "../src/modules/system/service/delivery-days.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -1044,7 +1046,12 @@ describe("costing service — post-calculation priced at the withdrawal", () => 
 
     // 8 × (2 EUR × 11, the rate of 3 March) — not today's price 3 or rate 12.
     expect(calculation.materialCost).toBe("176.0000");
-    expect(lookups).toEqual([{ currency: "EUR", date: "2026-03-03" }]);
+    // The efterkalkyl looks the rate up for 3 March; the avvikelseanalys's
+    // base (#14) then looks up its own, for T₀ = the order's created_at.
+    expect(lookups).toEqual([
+      { currency: "EUR", date: "2026-03-03" },
+      { currency: "EUR", date: stockholmDateOf(order.createdAt) },
+    ]);
     const [row] = await db.select().from(costCalculationMaterialRows).where(eq(costCalculationMaterialRows.costCalculationId, calculation.id));
     expect(row).toMatchObject({ supplierUnitPrice: "2.0000", exchangeRate: "11.000000", priceDate: "2026-03-03" });
   });
@@ -1102,5 +1109,633 @@ describe("costing service — Kalkyl structure rows", () => {
     const { calculation: post } = await costingService.postCalculate(order.id, true);
     const postDetail = await costingService.getCostCalculation(post.id);
     expect(postDetail!.materialRows.map((r) => r.componentArticleId)).toEqual([component.id]);
+  });
+});
+
+// Avvikelseanalys (#14): the efterkalkyl's base — the order's own rows for
+// N, material priced with the förkalkyl's rules as of T₀ = the order's
+// created_at — saved on the specification rows, and the parts derived on
+// read (cost-variance.ts, tested on its own in costing-variance.test.ts).
+describe("costing service — variance analysis", () => {
+  const lookups: { currency: string; date: string }[] = [];
+  const ratedService = createCostingService(
+    createCostingRepository(db),
+    { getSettings: async () => costingSettings },
+    undefined,
+    {
+      getRate: async (currency, date) => {
+        lookups.push({ currency, date });
+        return { currency, requestedDate: date, date, rate: date === "2026-03-03" ? 11 : 12, source: "riksbank" };
+      },
+    },
+    () => "2026-10-29"
+  );
+
+  beforeEach(() => {
+    lookups.length = 0;
+  });
+
+  // A parent of `quantity` with one component (2 per unit, standard cost 10)
+  // and operation 10 (setup 30 min, run 6 min/st, 600 kr/h), optionally an
+  // operation 20 (setup 12, run 3) and the component drawn at operation 10.
+  async function makeFixture(
+    opts: { quantity?: number; linked?: boolean; secondOperation?: boolean; service?: { standardCost: number; quantity: number } } = {}
+  ) {
+    const user = await makeUser();
+    const parent = await articleService.createArticle({
+      articleNumber: `PARENT-${crypto.randomUUID()}`, name: "Parent", type: "manufactured", unit: "st", active: true,
+    });
+    const component = await articleService.createArticle({
+      articleNumber: `COMP-${crypto.randomUUID()}`, name: "Component", type: "purchased", unit: "st", standardCost: 10, active: true,
+    });
+    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 600, overheadPercent: 0, active: true });
+    const routingOp = await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
+    if (opts.secondOperation) {
+      await mfgService.createRoutingOperation(parent.id, { sequenceNo: 20, workCenterId: workCenter.id, setupTime: 12, runTimePerUnit: 3 });
+    }
+    await articleService.addBomComponent(parent.id, {
+      componentArticleId: component.id,
+      quantity: 2,
+      ...(opts.linked ? { routingOperationId: routingOp.id } : {}),
+    });
+    // A tjänst in the structure (lego under LO), unlinked.
+    const service = opts.service ? await addServiceComponent(parent.id, opts.service.standardCost, opts.service.quantity) : null;
+    const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
+    const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    await stockService.recordTransaction({ articleId: component.id, locationId: location.id, quantityDelta: 100, transactionType: "inventory_adjustment" });
+
+    const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: opts.quantity ?? 5 }, user.id);
+    const [operation] = await mfgService.listOperations(order.id);
+    const [materialRow] = await mfgService.listMaterialConsumptions(order.id);
+    const employee = await timeReportService.createEmployee({ employeeNumber: "E-1", name: "Kalle", active: true });
+    return { user, parent, component, service, location, order, operation: operation!, materialRow: materialRow!, employee, workCenter };
+  }
+  type Fixture = Awaited<ReturnType<typeof makeFixture>>;
+
+  async function reportHours(f: Fixture, hours: number) {
+    await timeReportService.createTimeReport({ employeeId: f.employee.id, moOperationId: f.operation.id, date: "2026-07-07", hours }, f.user.id);
+  }
+
+  // T₀ and the component's first recorded prices on fixed days, so "as of
+  // T₀" can be told apart from "at the withdrawal" (now).
+  async function backdate(f: Fixture, createdAt: string, firstPriceAt: string) {
+    await db.execute(sql`update manufacturing_orders set created_at = ${createdAt}::timestamptz where id = ${f.order.id}`);
+    await db.execute(sql`update article_standard_cost_history set valid_from = ${firstPriceAt}::timestamptz where article_id = ${f.component.id}`);
+    await db.execute(sql`update article_supplier_price_history set valid_from = ${firstPriceAt}::timestamptz where article_id = ${f.component.id}`);
+  }
+
+  const withoutIds = <T extends { id: string | null }>(rows: T[]) => rows.map((r) => ({ ...r, id: null }));
+
+  it("prices the base at T₀: a price change after T₀ is a price deviation, the efterkalkyl is unchanged", async () => {
+    const f = await makeFixture();
+    await backdate(f, "2026-03-01T09:00:00Z", "2026-02-01T09:00:00Z");
+    await articleService.updateStandardCost(f.component.id, 12);
+    await mfgService.consumeMaterial(f.order.id, f.materialRow.id, { locationId: f.location.id, quantity: 10 }, f.user.id);
+    await reportHours(f, 1.5);
+    await mfgService.complete(f.order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
+
+    const preview = await costingService.postCalculate(f.order.id);
+    const { calculation, analysis } = await costingService.postCalculate(f.order.id, true);
+
+    // The efterkalkyl as before: 10 drawn × 12 (the price at the withdrawal), 1.5 h × 600.
+    expect(calculation.materialCost).toBe("120.0000");
+    expect(calculation.laborCost).toBe("900.0000");
+    expect(calculation).toMatchObject({ outputQuantity: "5.0000", preliminary: false, baseMaterialSource: "standard" });
+    expect(analysis).toMatchObject({
+      outputQuantity: 5,
+      preliminary: false,
+      basePricedAt: "2026-03-01T09:00:00.000Z",
+      baseMaterialSource: "standard",
+      // Kalkylerat: 10 × 10 + (30 + 6 × 5) / 60 h × 600 = 700; utfall 120 + 900.
+      base: 700,
+      actual: 1020,
+      deviation: 320,
+    });
+    expect(analysis!.materialRows[0]).toMatchObject({
+      componentArticleId: f.component.id,
+      baseQuantity: 10,
+      baseUnitCost: 10,
+      basePriceSource: "standard",
+      quantity: 10,
+      unitCost: 12,
+      base: 100,
+      actual: 120,
+    });
+    expect(analysis!.materialRows[0]!.parts).toMatchObject({ price: 20, quantity: 0, scrap: 0 });
+    expect(analysis!.operationRows[0]).toMatchObject({
+      kind: "time",
+      baseSetupHours: 0.5,
+      baseRunHours: 0.5,
+      baseHourlyRate: 600,
+      hours: 1.5,
+      setupHours: null,
+      runHours: null,
+      split: false,
+      base: 600,
+      actual: 900,
+    });
+    expect(analysis!.parts).toEqual({ price: 20, quantity: 0, scrap: 0, rate: 0, setup: 0, run: 0, unclassified: 300, markups: 0 });
+
+    // The preview and the saved calculation give the same analysis; GET derives it from the stored rows.
+    const detail = await costingService.getCostCalculation(calculation.id);
+    expect(detail!.analysis).toEqual(analysis);
+    expect(detail!.analysis!.materialRows[0]!.id).toBe(detail!.materialRows[0]!.id);
+    expect({
+      ...preview.analysis!,
+      materialRows: withoutIds(preview.analysis!.materialRows),
+      operationRows: withoutIds(preview.analysis!.operationRows),
+    }).toEqual({ ...analysis!, materialRows: withoutIds(analysis!.materialRows), operationRows: withoutIds(analysis!.operationRows) });
+  });
+
+  it("prices a supplier price in another currency at T₀ with the rate of T₀'s day", async () => {
+    const f = await makeFixture();
+    await setPrimarySupplierPrice(f.component.id, 2, undefined, "EUR");
+    await backdate(f, "2026-03-03T09:00:00Z", "2026-02-01T09:00:00Z");
+    const [catalogRow] = await purchaseService.listArticleSuppliers(f.component.id);
+    await purchaseService.updateArticleSupplier(f.component.id, catalogRow!.id, { price: 3 });
+    await mfgService.consumeMaterial(f.order.id, f.materialRow.id, { locationId: f.location.id, quantity: 10 }, f.user.id);
+    costingSettings.costingMaterialSource = "supplier";
+
+    const { calculation, analysis } = await ratedService.postCalculate(f.order.id);
+
+    // Efterkalkyl: 10 × (3 EUR × 12, the withdrawal's day). Base: 2 EUR × 11, the rate of 3 March.
+    expect(calculation.materialCost).toBe("360.0000");
+    expect(analysis!.baseMaterialSource).toBe("supplier");
+    expect(analysis!.materialRows[0]).toMatchObject({ baseUnitCost: 22, basePriceSource: "supplier", unitCost: 36 });
+    expect(analysis!.materialRows[0]!.parts.price).toBe(140); // (36 − 22) × 10
+    expect(lookups).toContainEqual({ currency: "EUR", date: "2026-03-03" });
+  });
+
+  it("calculates a kortstängd order for the received quantity, scrap as varav kassation", async () => {
+    // A scrap reason of its own: the requirement depends on whether any active one exists.
+    const [reason] = (await db.execute(
+      sql`insert into deviation_reasons (code, name, applies_scrap) values ('VARIANS', 'Avvikelseanalys', true) returning id`
+    )) as unknown as { id: string }[];
+    try {
+      const f = await makeFixture({ quantity: 10, linked: true });
+      // 8 OK + 1 kasserat on the last operation: top-up draws 2 × 9 = 18, 8 are received.
+      await mfgService.reportOperationQuantities(f.operation.id, {
+        quantityOk: 8,
+        quantityScrapped: 1,
+        scrapReasonId: reason!.id,
+        markDone: true,
+        locationId: f.location.id,
+        createdBy: f.user.id,
+      });
+      await reportHours(f, 2);
+      await mfgService.complete(f.order.id, { quantity: 0, locationId: f.location.id }, f.user.id);
+      await mfgService.close(f.order.id, f.user.id);
+
+      const { calculation, analysis } = await costingService.postCalculate(f.order.id, true);
+
+      // The efterkalkyl keeps the order quantity; the analysis runs on N = 8.
+      expect(calculation.quantity).toBe("10.0000");
+      expect(calculation.materialCost).toBe("180.0000");
+      expect(analysis).toMatchObject({ outputQuantity: 8, preliminary: false });
+      // SQ = 20 / 10 × 8 = 16 against AQ 18; the 1 scrapped unit drew 2 × 10 of it.
+      expect(analysis!.materialRows[0]).toMatchObject({ baseQuantity: 16, quantity: 18, scrapQuantity: 2, base: 160, actual: 180 });
+      expect(analysis!.materialRows[0]!.parts).toMatchObject({ price: 0, quantity: 20, scrap: 20 });
+      // (30 + 6 × 8) / 60 = 1.3 h at 600 = 780 against 2 h = 1200.
+      expect(analysis!.operationRows[0]).toMatchObject({ baseSetupHours: 0.5, baseRunHours: 0.8, base: 780, actual: 1200 });
+      expect(analysis).toMatchObject({ base: 940, actual: 1380, deviation: 440 });
+      expect(analysis!.parts).toMatchObject({ quantity: 20, scrap: 20, unclassified: 420 });
+    } finally {
+      await db.execute(sql`delete from mo_operation_scrap where reason_id = ${reason!.id}`);
+      await db.execute(sql`delete from deviation_reasons where id = ${reason!.id}`);
+    }
+  });
+
+  it("gives an open order a preliminary analysis on each operation's OK, an added row as the new plan", async () => {
+    const f = await makeFixture({ quantity: 10, linked: true, secondOperation: true });
+    // Ändrad TO: material added after release is part of the plan (1 per unit, unlinked).
+    const extra = await articleService.createArticle({
+      articleNumber: `EXTRA-${crypto.randomUUID()}`, name: "Tillägg", type: "purchased", unit: "st", standardCost: 5, active: true,
+    });
+    await mfgService.addMaterial(f.order.id, { componentArticleId: extra.id, quantity: 10 }, f.user.id);
+    await mfgService.reportOperationQuantities(f.operation.id, { quantityOk: 4, quantityScrapped: 0, markDone: false, createdBy: f.user.id });
+    await reportHours(f, 1);
+
+    const { analysis } = await costingService.postCalculate(f.order.id);
+
+    expect(analysis).toMatchObject({ preliminary: true, outputQuantity: 0 });
+    const byArticle = new Map(analysis!.materialRows.map((r) => [r.componentArticleId, r]));
+    // Linked: 2 × 4 OK drawn and calculated — work in progress is no deviation.
+    expect(byArticle.get(f.component.id)).toMatchObject({ baseQuantity: 8, quantity: 8, deviation: 0 });
+    // Unlinked: on the received quantity (0), but priced in the base.
+    expect(byArticle.get(extra.id)).toMatchObject({ baseQuantity: 0, baseUnitCost: 5, quantity: 0, deviation: 0 });
+    // Op 10 worked: setup 0.5 h + 0.1 h × 4 at 600 = 540 against 1 h. Op 20 untouched: no setup yet, nothing planned.
+    const [op10, op20] = analysis!.operationRows;
+    expect(op10).toMatchObject({ baseSetupHours: 0.5, baseRunHours: 0.4, base: 540, actual: 600 });
+    expect(op20).toMatchObject({ baseSetupHours: 0, baseRunHours: 0, base: 0, actual: 0, deviation: 0 });
+    expect(analysis!.deviation).toBe(60);
+  });
+
+  it("keeps a saved analysis when prices and time change after the save", async () => {
+    const f = await makeFixture();
+    await mfgService.consumeMaterial(f.order.id, f.materialRow.id, { locationId: f.location.id, quantity: 10 }, f.user.id);
+    await reportHours(f, 1);
+    await mfgService.complete(f.order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
+    const { calculation, analysis } = await costingService.postCalculate(f.order.id, true);
+
+    await articleService.updateStandardCost(f.component.id, 99);
+    await reportHours(f, 3); // efterrapportering on the Klar order
+
+    expect((await costingService.getCostCalculation(calculation.id))!.analysis).toEqual(analysis);
+    // A new run sees the new time; its base is still priced at T₀.
+    const { analysis: again } = await costingService.postCalculate(f.order.id);
+    expect(again!.operationRows[0]).toMatchObject({ hours: 4 });
+    expect(again!.materialRows[0]).toMatchObject({ baseUnitCost: 10, unitCost: 10 });
+  });
+
+  it("has no analysis on a förkalkyl or on an efterkalkyl saved before it, and the base is all or nothing", async () => {
+    const f = await makeFixture();
+    const { calculation } = await costingService.postCalculate(f.order.id, true);
+    expect((await costingService.getCostCalculation(calculation.id))!.analysis).not.toBeNull();
+
+    // An efterkalkyl saved before migration 0187 has none of the columns.
+    await db.execute(sql`update cost_calculations set output_quantity = null, preliminary = null, base_priced_at = null, base_material_source = null where id = ${calculation.id}`);
+    await db.execute(sql`update cost_calculation_material_rows set base_quantity = null, base_unit_cost = null, base_price_source = null, scrap_quantity = null where cost_calculation_id = ${calculation.id}`);
+    await db.execute(sql`update cost_calculation_operation_rows set base_setup_hours = null, base_run_hours = null, base_hourly_rate = null where cost_calculation_id = ${calculation.id}`);
+    expect((await costingService.getCostCalculation(calculation.id))!.analysis).toBeNull();
+
+    const { calculation: pre } = await costingService.preCalculate(f.parent.id, 5, true);
+    expect(pre).toMatchObject({ outputQuantity: null, preliminary: null, basePricedAt: null, baseMaterialSource: null });
+    expect((await costingService.getCostCalculation(pre.id))!.analysis).toBeNull();
+
+    await expect(db.execute(sql`update cost_calculations set output_quantity = 5 where id = ${calculation.id}`)).rejects.toThrow();
+    await expect(
+      db.execute(sql`update cost_calculations set output_quantity = 5, preliminary = false, base_priced_at = now(), base_material_source = 'standard' where id = ${pre.id}`)
+    ).rejects.toThrow();
+  });
+
+  it("is final on a Makulerad order: N = 0, so the time spent on it is a deviation", async () => {
+    const f = await makeFixture();
+    // A manual time report outlives the cancellation.
+    await reportHours(f, 2);
+    await mfgService.cancel(f.order.id, f.user.id);
+
+    const { analysis } = await costingService.postCalculate(f.order.id, true);
+
+    expect(analysis).toMatchObject({ preliminary: false, outputQuantity: 0 });
+    // Worked ⇒ the setup counts (0.5 h), no run time for N = 0: 300 against 2 h × 600.
+    expect(analysis!.operationRows[0]).toMatchObject({ baseSetupHours: 0.5, baseRunHours: 0, base: 300, actual: 1200 });
+    expect(analysis!.materialRows[0]).toMatchObject({ baseQuantity: 0, quantity: 0, deviation: 0 });
+    expect(analysis).toMatchObject({ base: 300, actual: 1200, deviation: 900 });
+  });
+
+  it("matches the base's staffel on the row's planned quantity", async () => {
+    const f = await makeFixture({ quantity: 5 });
+    // 10 at 8 from the step at 10, else 10.
+    await setPrimarySupplierPrice(f.component.id, 10, [{ fromQuantity: 10, price: 8 }]);
+    Object.assign(costingSettings, { costingMaterialSource: "supplier", costingSupplierPriceTier: "tiered" });
+    // Kortstängd at 4 of 5: the unlinked material is drawn up to 2 × 4 = 8.
+    await mfgService.complete(f.order.id, { quantity: 4, locationId: f.location.id }, f.user.id);
+
+    const { analysis } = await costingService.postCalculate(f.order.id, true);
+
+    // The efterkalkyl prices the 8 drawn below the step (10); the base prices
+    // SQ = 8 at the step its PLANNED 10 reaches (8).
+    expect(analysis!.materialRows[0]).toMatchObject({ quantity: 8, unitCost: 10, baseQuantity: 8, baseUnitCost: 8, basePriceSource: "supplier" });
+    expect(analysis!.materialRows[0]!.parts).toMatchObject({ price: 16, quantity: 0 });
+  });
+
+  it("prices the efterkalkyl with its own source (actual) and the base with the förkalkyl's (standard)", async () => {
+    const f = await makeFixture();
+    await db.execute(sql`update stock_transactions set unit_cost = 14 where article_id = ${f.component.id} and transaction_type = 'inventory_adjustment'`);
+    await mfgService.consumeMaterial(f.order.id, f.materialRow.id, { locationId: f.location.id, quantity: 10 }, f.user.id);
+    await mfgService.complete(f.order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
+    Object.assign(costingSettings, { costingPostMaterialSource: "actual" });
+    try {
+      const { calculation, analysis } = await costingService.postCalculate(f.order.id, true);
+
+      expect(calculation.materialSource).toBe("actual");
+      expect(analysis!.baseMaterialSource).toBe("standard");
+      // AP = the moving average 14, SP = the standard cost 10 at T₀.
+      expect(analysis!.materialRows[0]).toMatchObject({ quantity: 10, unitCost: 14, baseQuantity: 10, baseUnitCost: 10, basePriceSource: "standard" });
+      expect(analysis!.materialRows[0]!.parts).toMatchObject({ price: 40, quantity: 0 });
+    } finally {
+      delete (costingSettings as { costingPostMaterialSource?: string }).costingPostMaterialSource;
+    }
+  });
+
+  it("calculates a delinleverans on an open order: unlinked material on the received quantity", async () => {
+    const f = await makeFixture({ quantity: 10 });
+    // 4 OK on the only (last) operation: 4 received, the unlinked material drawn for them (2 × 4).
+    await mfgService.reportOperationQuantities(f.operation.id, { quantityOk: 4, quantityScrapped: 0, markDone: false, locationId: f.location.id, createdBy: f.user.id });
+    await reportHours(f, 1);
+
+    const { analysis } = await costingService.postCalculate(f.order.id, true);
+
+    expect(analysis).toMatchObject({ preliminary: true, outputQuantity: 4 });
+    expect(analysis!.materialRows[0]).toMatchObject({ baseQuantity: 8, quantity: 8, deviation: 0 });
+    // (30 + 6 × 4) / 60 h × 600 = 540 against 1 h.
+    expect(analysis!.operationRows[0]).toMatchObject({ baseSetupHours: 0.5, baseRunHours: 0.4, base: 540, actual: 600 });
+    expect(analysis!.deviation).toBe(60);
+  });
+
+  it("counts material returned through Ångra as never drawn: AQ is the net", async () => {
+    const f = await makeFixture({ quantity: 5, linked: true });
+    await mfgService.reportOperationQuantities(f.operation.id, { quantityOk: 3, quantityScrapped: 0, markDone: false, locationId: f.location.id, createdBy: f.user.id });
+    await mfgService.reportOperationQuantities(f.operation.id, { quantityOk: 2, quantityScrapped: 0, markDone: false, locationId: f.location.id, createdBy: f.user.id });
+    expect((await mfgService.getManufacturingOrder(f.order.id)).status).toBe("done");
+    // Ångra the second report: 4 back to stock, 2 out again, the order open.
+    const second = (await mfgService.listReports(f.order.id)).find((r) => r.undoneAt === null && Number(r.quantityOk) === 2)!;
+    await mfgService.undoReport(f.order.id, second.id, f.user.id);
+    // Kortstängd at the 3 received.
+    await mfgService.complete(f.order.id, { quantity: 0, locationId: f.location.id }, f.user.id);
+
+    const { calculation, analysis } = await costingService.postCalculate(f.order.id, true);
+
+    // 10 drawn, 4 returned: 6 × 10, and N = 3 calculates 2 × 3 = 6.
+    expect(calculation.materialCost).toBe("60.0000");
+    expect(analysis).toMatchObject({ preliminary: false, outputQuantity: 3 });
+    expect(analysis!.materialRows[0]).toMatchObject({ baseQuantity: 6, quantity: 6, deviation: 0 });
+  });
+
+  it("makes Utfall the efterkalkyl's TVK with MO and LO, and the preview the saved analysis, on uneven figures", async () => {
+    Object.assign(costingSettings, { costingMoPercent: 12.5, costingLoPercent: 7.5 });
+    const f = await makeFixture({ quantity: 5, service: { standardCost: 7.7777, quantity: 1 } });
+    await articleService.updateStandardCost(f.component.id, 3.3337);
+    await mfgService.consumeMaterial(f.order.id, f.materialRow.id, { locationId: f.location.id, quantity: 10 }, f.user.id);
+    await reportHours(f, 1.2345);
+    await mfgService.complete(f.order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
+
+    const preview = await costingService.postCalculate(f.order.id);
+    const { calculation, analysis } = await costingService.postCalculate(f.order.id, true);
+
+    const tvk =
+      Number(calculation.materialCost) +
+      Number(calculation.materialOverhead) +
+      Number(calculation.laborCost) +
+      Number(calculation.subcontractCost) +
+      Number(calculation.subcontractOverhead) +
+      Number(calculation.semiFinishedCost);
+    expect(Number(calculation.materialOverhead)).toBeGreaterThan(0);
+    expect(Number(calculation.subcontractOverhead)).toBeGreaterThan(0);
+    // Utfall is the chain's TVK to the öre; the parts add up to the deviation.
+    expect(Math.round(analysis!.actual * 100)).toBe(Math.round(Math.round(tvk * 10000) / 100));
+    const ore = (value: number) => Math.round(value * 100);
+    const { price, quantity, rate, setup, run, unclassified, markups } = analysis!.parts;
+    expect([price, quantity, rate, setup, run, unclassified, markups].reduce((t, p) => t + ore(p), 0)).toBe(ore(analysis!.deviation));
+    expect(ore(analysis!.actual) - ore(analysis!.base)).toBe(ore(analysis!.deviation));
+    expect(markups).not.toBe(0);
+    // The preview reads exactly what the saved calculation reads back.
+    expect({
+      ...preview.analysis!,
+      materialRows: withoutIds(preview.analysis!.materialRows),
+      operationRows: withoutIds(preview.analysis!.operationRows),
+    }).toEqual({ ...analysis!, materialRows: withoutIds(analysis!.materialRows), operationRows: withoutIds(analysis!.operationRows) });
+    expect((await costingService.getCostCalculation(calculation.id))!.analysis).toEqual(analysis);
+  });
+
+  // Kalkylerat is the base's TVK, summed like the header's: an outcome
+  // exactly as calculated has Påslag 0, also when the rows' öre rounding
+  // leaves a rest (10.004 → 10.00 twice, TVK 622.0091 → 622.01). A markup
+  // on the rounded base rows gave 1 öre here.
+  it("gives Påslag 0 when the outcome is exactly the calculation, with MO, LO and a rounding rest", async () => {
+    Object.assign(costingSettings, { costingMoPercent: 12.5, costingLoPercent: 7.5 });
+    const f = await makeFixture({ quantity: 5, service: { standardCost: 1.0004, quantity: 2 } });
+    await articleService.updateStandardCost(f.component.id, 1.0004);
+    // T₀ after the price change, so both sides price the component at 1.0004.
+    await db.execute(sql`update manufacturing_orders set created_at = now() where id = ${f.order.id}`);
+    await mfgService.consumeMaterial(f.order.id, f.materialRow.id, { locationId: f.location.id, quantity: 10 }, f.user.id);
+    await reportHours(f, 1); // (30 + 6 × 5) / 60
+    await mfgService.complete(f.order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
+
+    const { calculation, analysis } = await costingService.postCalculate(f.order.id, true);
+
+    expect(calculation.materialCost).toBe("10.0040");
+    expect(calculation.subcontractCost).toBe("10.0040");
+    expect(analysis!.materialRows.map((r) => [r.base, r.actual])).toEqual([[10, 10], [10, 10]]);
+    expect([analysis!.base, analysis!.actual, analysis!.deviation]).toEqual([622.01, 622.01, 0]);
+    expect(Object.values(analysis!.parts).every((p) => p === 0)).toBe(true);
+  });
+
+  // #14 etapp 3: time reported as ställ/produktion (time_reports.kind) is
+  // the efterkalkyl's setup_hours/run_hours, and the analysis splits the
+  // deviation in Ställ and Stycke; an operation with any ej uppdelad time is
+  // Tid (ej uppdelad) as a whole. Op 10 plans 0.5 + 0.5 h, op 20 0.2 + 0.25 h
+  // (12 min, 3 min × 5), both at 600 kr/h.
+  it("reads ställ and produktion from the time reports: split, half split and the parts adding up exactly", async () => {
+    const f = await makeFixture({ quantity: 5, secondOperation: true });
+    const op20 = (await mfgService.listOperations(f.order.id)).find((op) => op.sequenceNo === 20)!;
+    const report = (moOperationId: string, hours: number, kind?: "setup" | "run") =>
+      timeReportService.createTimeReport({ employeeId: f.employee.id, moOperationId, date: "2026-07-07", hours, ...(kind ? { kind } : {}) }, f.user.id);
+    await report(f.operation.id, 0.5, "setup");
+    await report(f.operation.id, 0.25, "setup");
+    await report(f.operation.id, 0.4, "run");
+    await report(op20.id, 0.25, "setup");
+    await report(op20.id, 0.3, "run");
+    await report(op20.id, 0.1);
+    await mfgService.complete(f.order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
+
+    const preview = await costingService.postCalculate(f.order.id);
+    const { calculation, analysis } = await costingService.postCalculate(f.order.id, true);
+
+    const saved = (await costingService.getCostCalculation(calculation.id))!.operationRows;
+    expect(saved.map((r) => [r.sequenceNo, r.hours, r.setupHours, r.runHours])).toEqual([
+      [10, "1.1500", "0.7500", "0.4000"],
+      [20, "0.6500", "0.2500", "0.3000"],
+    ]);
+    const [op10Row, op20Row] = analysis!.operationRows as Extract<CostVarianceOperationRow, { kind: "time" }>[];
+    // Op 10 is split: Ställ (0.75 − 0.5) × 600 = 150, Stycke 690 − 600 − 150 = −60.
+    expect(op10Row).toMatchObject({ setupHours: 0.75, runHours: 0.4, unclassifiedHours: 0, split: true, base: 600, actual: 690 });
+    expect(op10Row!.parts).toMatchObject({ setup: 150, run: -60, unclassified: 0, rate: 0 });
+    // Op 20 has 0.1 h ej uppdelad: the whole operation is Tid (ej uppdelad), 390 − 270,
+    // and Ej uppdelad (h) is all its 0.65 h, so the hours match the kronor.
+    expect(op20Row).toMatchObject({ setupHours: 0.25, runHours: 0.3, unclassifiedHours: 0.65, split: false, base: 270, actual: 390 });
+    expect(op20Row!.parts).toMatchObject({ setup: 0, run: 0, unclassified: 120 });
+    // The order: material on plan, so Avvikelse = Ställ + Stycke + Ej uppdelad, exactly.
+    expect(analysis).toMatchObject({ base: 970, actual: 1180, deviation: 210 });
+    expect(analysis!.parts).toMatchObject({ price: 0, quantity: 0, setup: 150, run: -60, unclassified: 120, markups: 0 });
+    expect({ ...preview.analysis!, operationRows: withoutIds(preview.analysis!.operationRows), materialRows: withoutIds(preview.analysis!.materialRows) }).toEqual({
+      ...analysis!,
+      operationRows: withoutIds(analysis!.operationRows),
+      materialRows: withoutIds(analysis!.materialRows),
+    });
+  });
+
+  // Typed time on a lego operation is ignored: a lego operation is bought,
+  // its cost is the IO (or the reserve), never hours — no Ställ or Stycke.
+  it("ignores typed time reported on a lego operation", async () => {
+    const lego = await mfgService.createWorkCenter({ code: "900", name: "Lack", type: "subcontract", active: true });
+    const f = await makeFixture({ quantity: 5 });
+    // The lego operation is added to the order's own rows (Ändra operationer would do the same).
+    await mfgService.createRoutingOperation(f.parent.id, { sequenceNo: 20, workCenterId: lego.id, setupTime: 0, runTimePerUnit: 0, setupPrice: 500, unitPrice: 100 });
+    const order = await mfgService.createManufacturingOrder({ articleId: f.parent.id, quantity: 5 }, f.user.id);
+    const ops = await mfgService.listOperations(order.id);
+    const op10 = ops.find((op) => op.sequenceNo === 10)!;
+    const legoOp = ops.find((op) => op.sequenceNo === 20)!;
+    const report = (moOperationId: string, hours: number, kind?: "setup" | "run") =>
+      timeReportService.createTimeReport({ employeeId: f.employee.id, moOperationId, date: "2026-07-07", hours, ...(kind ? { kind } : {}) }, f.user.id);
+    await report(op10.id, 1);
+    await report(legoOp.id, 0.5, "setup");
+    await report(legoOp.id, 2, "run");
+    await mfgService.complete(order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
+
+    const { calculation, analysis } = await costingService.postCalculate(order.id, true);
+
+    // No hours, no lön and no ställ/produktion on the lego row; the 1 h on op 10 is the only time.
+    expect(calculation.laborCost).toBe("600.0000");
+    const saved = (await costingService.getCostCalculation(calculation.id))!.operationRows;
+    expect(saved.find((r) => r.sequenceNo === 20)).toMatchObject({ hours: "0.0000", setupHours: null, runHours: null, laborAmount: "0.0000" });
+    const legoRow = analysis!.operationRows.find((r) => r.sequenceNo === 20)!;
+    expect(legoRow.kind).toBe("subcontract");
+    expect(legoRow.parts).toMatchObject({ rate: 0, setup: 0, run: 0, unclassified: 0 });
+    expect(analysis!.operationRows.filter((r) => r.kind === "time")).toHaveLength(1);
+    // Op 10 is untyped and on plan (0.5 + 0.5 h): the order has no time deviation.
+    expect(analysis!.parts).toMatchObject({ rate: 0, setup: 0, run: 0, unclassified: 0 });
+  });
+
+  // Timkostnad per datum (#14 etapp 4, migration 0189): the efterkalkyl
+  // prices each work day's hours at that day's hourly rate, the base at the
+  // rate as of T₀, and the difference is Timpris. 600 kr/h until 10 May
+  // 14:00 (Stockholm), 720 from then; the order created on 1 March.
+  async function raiseRateOn10May(f: Fixture) {
+    await db.execute(sql`update work_center_rate_history set valid_from = '2026-02-01T09:00:00Z' where work_center_id = ${f.workCenter.id}`);
+    await mfgService.updateWorkCenter(f.workCenter.id, { hourlyRate: 720 });
+    await db.execute(
+      sql`update work_center_rate_history set valid_from = '2026-05-10T12:00:00Z' where work_center_id = ${f.workCenter.id} and hourly_rate = 720`
+    );
+    await db.execute(sql`update manufacturing_orders set created_at = '2026-03-01T09:00:00Z' where id = ${f.order.id}`);
+  }
+
+  it("prices the time per work day around a changed hourly rate, the base at T₀: Timpris", async () => {
+    const f = await makeFixture();
+    await raiseRateOn10May(f);
+    const report = (date: string, hours: number) =>
+      timeReportService.createTimeReport({ employeeId: f.employee.id, moOperationId: f.operation.id, date, hours }, f.user.id);
+    await report("2026-05-09", 1); // 600
+    await report("2026-05-10", 0.5); // the change applies to the whole day: 720
+    await mfgService.consumeMaterial(f.order.id, f.materialRow.id, { locationId: f.location.id, quantity: 10 }, f.user.id);
+    await mfgService.complete(f.order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
+
+    const preview = await costingService.postCalculate(f.order.id);
+    const { calculation, analysis } = await costingService.postCalculate(f.order.id, true);
+
+    // Lön 1 × 600 + 0.5 × 720 = 960; the row shows the average 640 kr/h.
+    expect(calculation.laborCost).toBe("960.0000");
+    const [savedRow] = (await costingService.getCostCalculation(calculation.id))!.operationRows;
+    expect(savedRow).toMatchObject({ hours: "1.5000", hourlyRate: "640.00", laborAmount: "960.0000" });
+    // Kalkylerat (0.5 + 0.5) h at R₀ = 600 (T₀ = 1 March); Timpris 960 − 600 × 1.5 = 60;
+    // Ej uppdelad (1.5 − 1) × 600 = 300.
+    expect(analysis!.operationRows[0]).toMatchObject({ baseHourlyRate: 600, hourlyRate: 640, base: 600, actual: 960, deviation: 360 });
+    expect(analysis!.operationRows[0]!.parts).toMatchObject({ rate: 60, unclassified: 300 });
+    expect(analysis!.parts).toMatchObject({ price: 0, quantity: 0, rate: 60, unclassified: 300, markups: 0 });
+    expect({ ...preview.analysis!, materialRows: withoutIds(preview.analysis!.materialRows), operationRows: withoutIds(preview.analysis!.operationRows) }).toEqual({
+      ...analysis!,
+      materialRows: withoutIds(analysis!.materialRows),
+      operationRows: withoutIds(analysis!.operationRows),
+    });
+
+    // A later rate change (today) moves neither the saved efterkalkyl nor a
+    // new run: the May days keep their rates. The saved one never changes
+    // anyway, so the new runs carry the proof — a preview and a second saved
+    // efterkalkyl, read back, equal the first in every figure: the header's
+    // costs, each specification row and the whole analysis.
+    await mfgService.updateWorkCenter(f.workCenter.id, { hourlyRate: 900 });
+    expect((await costingService.getCostCalculation(calculation.id))!.analysis).toEqual(analysis);
+    const costs = (c: Record<string, unknown>) => {
+      const { id: _id, calculatedAt: _calculatedAt, ...rest } = c;
+      return rest;
+    };
+    const rowFigures = (rows: Record<string, unknown>[]) =>
+      rows.map(({ id: _id, costCalculationId: _calculationId, createdAt: _createdAt, ...rest }) => rest);
+    const first = (await costingService.getCostCalculation(calculation.id))!;
+    const againPreview = await costingService.postCalculate(f.order.id);
+    const againSaved = await costingService.postCalculate(f.order.id, true);
+    const second = (await costingService.getCostCalculation(againSaved.calculation.id))!;
+    expect(againSaved.calculation.id).not.toBe(calculation.id);
+    expect(costs(againSaved.calculation as unknown as Record<string, unknown>)).toEqual(costs(calculation as unknown as Record<string, unknown>));
+    expect(rowFigures(second.operationRows as unknown as Record<string, unknown>[])).toEqual(
+      rowFigures(first.operationRows as unknown as Record<string, unknown>[])
+    );
+    expect(rowFigures(second.materialRows as unknown as Record<string, unknown>[])).toEqual(
+      rowFigures(first.materialRows as unknown as Record<string, unknown>[])
+    );
+    for (const run of [againPreview.analysis!, second.analysis!]) {
+      expect({ ...run, materialRows: withoutIds(run.materialRows), operationRows: withoutIds(run.operationRows) }).toEqual({
+        ...analysis!,
+        materialRows: withoutIds(analysis!.materialRows),
+        operationRows: withoutIds(analysis!.operationRows),
+      });
+    }
+    expect(againPreview.calculation.laborCost).toBe("960.0000");
+  });
+
+  it("takes R₀ at T₀: an order created after the change has the new rate on both sides", async () => {
+    const f = await makeFixture();
+    await raiseRateOn10May(f);
+    await db.execute(sql`update manufacturing_orders set created_at = '2026-05-20T09:00:00Z' where id = ${f.order.id}`);
+    await timeReportService.createTimeReport({ employeeId: f.employee.id, moOperationId: f.operation.id, date: "2026-06-01", hours: 1 }, f.user.id);
+    await mfgService.complete(f.order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
+
+    const { analysis } = await costingService.postCalculate(f.order.id, true);
+
+    expect(analysis!.operationRows[0]).toMatchObject({ baseHourlyRate: 720, hourlyRate: 720, base: 720, actual: 720 });
+    expect(analysis!.parts.rate).toBe(0);
+  });
+
+  // The Stockholm day, not the UTC day: the change at 22:30 UTC on 10 May is
+  // 00:30 on 11 May in Stockholm (CEST). Two stints stamped out on either
+  // side of Stockholm's midnight — at 23:50 on 10 May and 00:50 on 11 May,
+  // both on 10 May in UTC — are dated by the stamp-out on their Stockholm
+  // days (localDateOf), and the rate applies per Stockholm day (hourlyRateAt).
+  // UTC days for the change would give 900 (both at 720), for the reports 750.
+  it("prices time around Stockholm's midnight by Stockholm days, not UTC days", async () => {
+    const f = await makeFixture();
+    await db.execute(sql`update work_center_rate_history set valid_from = '2026-02-01T09:00:00Z' where work_center_id = ${f.workCenter.id}`);
+    await mfgService.updateWorkCenter(f.workCenter.id, { hourlyRate: 720 });
+    await db.execute(
+      sql`update work_center_rate_history set valid_from = '2026-05-10T22:30:00Z' where work_center_id = ${f.workCenter.id} and hourly_rate = 720`
+    );
+    await db.execute(sql`update manufacturing_orders set created_at = '2026-03-01T09:00:00Z' where id = ${f.order.id}`);
+    // Gone home and never back: stamped out later, a paused stint stops when
+    // the pause began and is dated on that Stockholm day.
+    const stint = async (startedAt: string, pausedAt: string) => {
+      const attendance = await timeReportService.attendanceIn({ employeeId: f.employee.id }, f.user.id);
+      const stamp = await timeReportService.stampIn({ employeeId: f.employee.id, moOperationId: f.operation.id }, f.user.id);
+      await timeReportService.attendanceOut(attendance.id, f.user.id);
+      await db.execute(
+        sql`update stamp_sessions set started_at = ${startedAt}::timestamptz, paused_at = ${pausedAt}::timestamptz, paused_seconds = 0 where id = ${stamp.id}`
+      );
+      return (await timeReportService.stampOut(stamp.id, stampOutSchema.parse({}), f.user.id)).timeReport;
+    };
+    const beforeMidnight = await stint("2026-05-10T20:50:00Z", "2026-05-10T21:50:00Z"); // 22:50–23:50, 10 May
+    const afterMidnight = await stint("2026-05-10T22:35:00Z", "2026-05-10T22:50:00Z"); // 00:35–00:50, 11 May
+    expect(beforeMidnight).toMatchObject({ date: "2026-05-10", hours: "1.00" });
+    expect(afterMidnight).toMatchObject({ date: "2026-05-11", hours: "0.25" });
+    await mfgService.complete(f.order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
+
+    const { calculation, analysis } = await costingService.postCalculate(f.order.id, true);
+
+    // 1 h × 600 (10 May, before the change) + 0.25 h × 720 (11 May) = 780.
+    expect(calculation.laborCost).toBe("780.0000");
+    // Timpris 780 − 600 × 1.25 = 30; the row's rate the average 624.
+    expect(analysis!.operationRows[0]).toMatchObject({ baseHourlyRate: 600, hourlyRate: 624 });
+    expect(analysis!.operationRows[0]!.parts.rate).toBe(30);
+  });
+
+  it("refuses a row whose base group is only partly saved, and an operation row with both groups", async () => {
+    const f = await makeFixture();
+    const { calculation } = await costingService.postCalculate(f.order.id, true);
+    const id = calculation.id;
+
+    await expect(db.execute(sql`update cost_calculation_material_rows set base_quantity = null where cost_calculation_id = ${id}`)).rejects.toThrow();
+    await expect(db.execute(sql`update cost_calculation_material_rows set scrap_quantity = null where cost_calculation_id = ${id}`)).rejects.toThrow();
+    await expect(db.execute(sql`update cost_calculation_operation_rows set base_hourly_rate = null where cost_calculation_id = ${id}`)).rejects.toThrow();
+    await expect(
+      db.execute(sql`update cost_calculation_operation_rows set base_quantity = 1, subcontract_quantity = 1, base_unit_price = 1 where cost_calculation_id = ${id}`)
+    ).rejects.toThrow();
+    // Both groups complete on one row: still refused.
+    await expect(
+      db.execute(
+        sql`update cost_calculation_operation_rows set base_quantity = 1, subcontract_quantity = 1, base_unit_price = 1, base_one_off = 1 where cost_calculation_id = ${id}`
+      )
+    ).rejects.toThrow();
+    // Swapping to the lego group alone is allowed: the CHECK is the shape, not the kind.
+    await db.execute(
+      sql`update cost_calculation_operation_rows set base_setup_hours = null, base_run_hours = null, base_hourly_rate = null, base_quantity = 1, subcontract_quantity = 1, base_unit_price = 1, base_one_off = 1 where cost_calculation_id = ${id}`
+    );
   });
 });

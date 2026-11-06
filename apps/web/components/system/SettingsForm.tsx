@@ -23,6 +23,7 @@ export function SettingsForm({
   setupChargeArticle: ArticlePickerValue | null;
 }) {
   const [allowMultipleStamps, setAllowMultipleStamps] = useState(settings.allowMultipleStamps);
+  const [timeKindSplit, setTimeKindSplit] = useState(settings.timeKindSplit ?? false);
   const [showRevisionsOnDocuments, setShowRevisionsOnDocuments] = useState(settings.showRevisionsOnDocuments);
   const [scheduleBalancing, setScheduleBalancing] = useState(settings.scheduleBalancing);
   const [showOrderRevisionOnDocuments, setShowOrderRevisionOnDocuments] = useState(
@@ -84,6 +85,11 @@ export function SettingsForm({
   async function toggle() {
     const updated = await save({ allowMultipleStamps: !allowMultipleStamps });
     if (updated) setAllowMultipleStamps(updated.allowMultipleStamps);
+  }
+
+  async function toggleTimeKindSplit() {
+    const updated = await save({ timeKindSplit: !timeKindSplit });
+    if (updated) setTimeKindSplit(updated.timeKindSplit);
   }
 
   async function toggleShowRevisions() {
@@ -297,6 +303,29 @@ export function SettingsForm({
           data-on={allowMultipleStamps}
           disabled={pending}
           onClick={toggle}
+        >
+          <span className={styles.knob} aria-hidden="true" />
+        </button>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Dela tid i ställ och produktion</div>
+          <div className={styles.description}>
+            På: stämpelterminalen frågar om tiden är Ställ eller Produktion när man stämplar in på en operation,
+            och Rapportera tid och Tidrapporter får fältet Typ. Efterkalkylen och Kalkylutfall kan då visa
+            verklig ställtid och stycktid var för sig. Av: all tid på en operation räknas som Ej uppdelad, precis
+            som förut. Redan registrerad tid förblir Ej uppdelad.
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={timeKindSplit}
+          aria-label="Dela tid i ställ och produktion"
+          className={styles.switch}
+          data-on={timeKindSplit}
+          disabled={pending}
+          onClick={toggleTimeKindSplit}
         >
           <span className={styles.knob} aria-hidden="true" />
         </button>

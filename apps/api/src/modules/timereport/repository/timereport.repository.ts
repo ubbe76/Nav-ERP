@@ -21,6 +21,7 @@ import {
   type CreateEmployeeInput,
   type CreateTimeReportInput,
   type ListQuery,
+  type TimeKind,
   type UpdateEmployeeInput,
 } from "@navet/shared";
 import {
@@ -181,6 +182,8 @@ export function createTimeReportRepository(db: Db) {
           moOperationId: input.moOperationId,
           date: input.date,
           hours: String(input.hours),
+          // Ställ/produktion; absent = ej uppdelad.
+          kind: input.kind ?? null,
           note: input.note,
           createdBy,
         })
@@ -230,8 +233,10 @@ export function createTimeReportRepository(db: Db) {
         .where(eq(moOperations.manufacturingOrderId, manufacturingOrderId));
     },
 
-    async createStampSession(employeeId: string, moOperationId: string, createdBy: string) {
-      const [row] = await db.insert(stampSessions).values({ employeeId, moOperationId, createdBy }).returning();
+    // `kind` (ställ/produktion, null = ej uppdelad) follows the stamp to the
+    // time report every stop materializes.
+    async createStampSession(employeeId: string, moOperationId: string, createdBy: string, kind: TimeKind | null = null) {
+      const [row] = await db.insert(stampSessions).values({ employeeId, moOperationId, createdBy, kind }).returning();
       return row!;
     },
 
@@ -325,11 +330,11 @@ export function createTimeReportRepository(db: Db) {
     },
 
     // Called with the already-merged final values — the service computes
-    // date/hours/note before calling in, so this is a plain overwrite.
-    async updateTimeReport(id: string, patch: { date: string; hours: number; note: string | null }) {
+    // date/hours/note/kind before calling in, so this is a plain overwrite.
+    async updateTimeReport(id: string, patch: { date: string; hours: number; note: string | null; kind: TimeKind | null }) {
       const [row] = await db
         .update(timeReports)
-        .set({ date: patch.date, hours: String(patch.hours), note: patch.note })
+        .set({ date: patch.date, hours: String(patch.hours), note: patch.note, kind: patch.kind })
         .where(eq(timeReports.id, id))
         .returning();
       return row ?? null;
