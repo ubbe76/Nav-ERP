@@ -99,7 +99,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 - [ ] **0-kronorsfaktura** ger 409 `ZeroAmountPostingError` — om garanti-/ersättningsfakturor dyker upp: utfärda utan verifikat eller symboliskt belopp?
 - [ ] **Konfigurerad rad:** TB räknas om från *aktuell* mall vid antalsändring medan en befintlig TO behåller sin frysta struktur — TB kan glida från det som byggs.
-- [ ] **Konfigurerad TO:** kalkylutfallet jämför efterkalkylen mot mallens senaste förkalkyl, inte mot TO:ns egen `configuration.cost`.
 - [ ] **`paidAt`** är NULL för leverantörsfakturor betalda före leverantörsreskontran — beslut behövs om något ska sortera eller filtrera på det.
 
 ### Medvetna val — ompröva bara vid behov

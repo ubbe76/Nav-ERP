@@ -25,7 +25,7 @@ import {
   type CostVarianceOperationRow,
   type CostVarianceParts,
 } from "@navet/shared";
-import { manufacturingCost, type CostBuckets } from "./cost-figures.js";
+import { manufacturingCost, type ManufacturingCostBuckets } from "./cost-figures.js";
 
 // ---------------------------------------------------------------------------
 // The base rules
@@ -461,7 +461,7 @@ export function costVarianceAnalysis(
 // /cost-calculations/:id, the save's answer and Kalkylutfall all read it.
 type Numeric = string | number;
 
-export interface StoredVarianceCalculation extends CostBuckets {
+export interface StoredVarianceCalculation extends ManufacturingCostBuckets {
   outputQuantity: Numeric | null;
   preliminary: boolean | null;
   basePricedAt: Date | string | null;

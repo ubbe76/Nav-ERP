@@ -16,6 +16,25 @@ export const reportRangeSchema = z
   .refine((q) => !q.from || !q.to || q.from <= q.to, { message: "from måste vara före to" });
 export type ReportRangeQuery = z.infer<typeof reportRangeSchema>;
 
+// Kalkylutfall (#14, etapp 2): Mot förkalkyl (`pre`, the default — the
+// efterkalkyl per TO against the article's förkalkyl or the configuration's
+// cost) or Avvikelseanalys (`analysis`, the saved analyses grouped by order,
+// article or resource). `groupBy` only applies to `analysis`.
+export const CALCULATION_OUTCOME_VIEWS = ["pre", "analysis"] as const;
+export type CalculationOutcomeView = (typeof CALCULATION_OUTCOME_VIEWS)[number];
+export const CALCULATION_OUTCOME_GROUPINGS = ["order", "article", "workCenter"] as const;
+export type CalculationOutcomeGrouping = (typeof CALCULATION_OUTCOME_GROUPINGS)[number];
+
+export const calculationOutcomeQuerySchema = z
+  .object({
+    from: monthParam.optional(),
+    to: monthParam.optional(),
+    view: z.enum(CALCULATION_OUTCOME_VIEWS).default("pre"),
+    groupBy: z.enum(CALCULATION_OUTCOME_GROUPINGS).default("order"),
+  })
+  .refine((q) => !q.from || !q.to || q.from <= q.to, { message: "from måste vara före to" });
+export type CalculationOutcomeQuery = z.infer<typeof calculationOutcomeQuerySchema>;
+
 export const salesStatisticsQuerySchema = z
   .object({
     from: monthParam.optional(),

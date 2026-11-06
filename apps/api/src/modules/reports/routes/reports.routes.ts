@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import {
-  reportRangeSchema,
+  calculationOutcomeQuerySchema,
   orderMarginQuerySchema,
   salesStatisticsQuerySchema,
   purchaseStatisticsQuerySchema,
@@ -25,6 +25,7 @@ import {
 import { QuoteFollowupTooLargeError, type QuoteFollowupService } from "../service/quote-followup.service.js";
 import { ProjectNotFoundError, type ProjectReportService } from "../service/project-report.service.js";
 import {
+  buildCalculationOutcomeAnalysisCsv,
   buildCalculationOutcomeCsv,
   buildDeliveryPrecisionCsv,
   buildCounterpartyPrecisionCsv,
@@ -70,14 +71,20 @@ export async function reportsRoutes(
     return sendCsv(reply, filename, buildDeliveryPrecisionCsv(result.section.months));
   });
 
+  // Kalkylutfall: ?view=pre (Mot förkalkyl, default) | analysis
+  // (Avvikelseanalys, &groupBy=order|article|workCenter).
   app.get("/reports/calculation-outcome", async (req) => {
-    const query = reportRangeSchema.parse(req.query);
+    const query = calculationOutcomeQuerySchema.parse(req.query);
     return service.getCalculationOutcome(query);
   });
 
   app.get("/reports/calculation-outcome/csv", async (req, reply) => {
-    const query = reportRangeSchema.parse(req.query);
+    const query = calculationOutcomeQuerySchema.parse(req.query);
     const result = await service.getCalculationOutcome(query);
+    if (result.view === "analysis") {
+      const filename = `kalkylutfall-avvikelseanalys-${result.groupBy}-${result.from}-${result.to}.csv`;
+      return sendCsv(reply, filename, buildCalculationOutcomeAnalysisCsv(result));
+    }
     const filename = `kalkylutfall-${result.from}-${result.to}.csv`;
     return sendCsv(reply, filename, buildCalculationOutcomeCsv(result.rows));
   });

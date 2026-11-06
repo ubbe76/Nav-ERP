@@ -1,5 +1,7 @@
 import type {
+  CalculationOutcomeQuery,
   DeliveryPrecisionQuery,
+  ManufacturingOrderConfiguration,
   OrderMarginQuery,
   ReportRangeQuery,
   SalesStatisticsQuery,
@@ -16,7 +18,14 @@ import {
   type CounterpartyPrecisionTotals,
   type QualityDeviationInput,
 } from "./delivery-quality-calc.js";
-import { pairCalculationOutcomes, type OutcomeResult } from "./calc-outcome-calc.js";
+import {
+  analysisOutcome,
+  preCalculationOutcome,
+  type AnalysisOutcomeResult,
+  type OutcomePostCalculation,
+  type PreOutcomeResult,
+} from "./calc-outcome-calc.js";
+import { storedVarianceAnalysis } from "../../costing/service/cost-variance.js";
 import { groupOrderMargin } from "./order-margin-calc.js";
 
 // Gruppera: Motpart adds the per-counterparty rows to each side; the month
@@ -44,10 +53,8 @@ export interface PrecisionQualityReader {
   ): Promise<{ deviations: QualityDeviationInput[]; ordersWithDeviation: ReadonlySet<string> }>;
 }
 
-export interface CalculationOutcomeResponse extends OutcomeResult {
-  from: string;
-  to: string;
-}
+// GET /reports/calculation-outcome — the shape follows `view`.
+export type CalculationOutcomeResponse = { from: string; to: string } & (PreOutcomeResult | AnalysisOutcomeResult);
 
 export interface StatisticsRowResponse {
   key: string;
@@ -194,10 +201,65 @@ export function createReportsService(repo: ReportsRepository, selfCosts: Article
       return { ...range, section: await precisionSide(kind, orders, range, query.groupBy ?? "month", opts.seePrices) };
     },
 
-    async getCalculationOutcome(query: ReportRangeQuery): Promise<CalculationOutcomeResponse> {
+    // Kalkylutfall: Mot förkalkyl (view pre) or Avvikelseanalys (view
+    // analysis, grouped). The analysis of each efterkalkyl is derived from
+    // its saved rows by the costing module's one mapping, exactly as GET
+    // /cost-calculations/:id derives it.
+    async getCalculationOutcome(query: Partial<CalculationOutcomeQuery>): Promise<CalculationOutcomeResponse> {
       const range = resolveReportRange(query, stockholmToday());
-      const calcs = await repo.loadCalculationRows();
-      return { ...range, ...pairCalculationOutcomes(calcs, range) };
+      const view = query.view ?? "pre";
+      const loaded = await repo.loadCalculationOutcome(range, { withPre: view === "pre" });
+      const byCalculation = <T extends { costCalculationId: string }>(rows: T[]) => {
+        const map = new Map<string, T[]>();
+        for (const row of rows) {
+          const list = map.get(row.costCalculationId) ?? [];
+          list.push(row);
+          map.set(row.costCalculationId, list);
+        }
+        return map;
+      };
+      const materialRows = byCalculation(loaded.materialRows);
+      const operationRows = byCalculation(loaded.operationRows);
+      const posts: OutcomePostCalculation[] = loaded.headers.map((h) => {
+        const configuration = h.configuration as ManufacturingOrderConfiguration | null;
+        return {
+          calculationId: h.id,
+          manufacturingOrderId: h.manufacturingOrderId!,
+          orderNumber: h.orderNumber,
+          articleId: h.articleId,
+          articleNumber: h.articleNumber,
+          articleName: h.articleName,
+          quantity: Number(h.quantity),
+          calculatedAt: new Date(h.calculatedAt).toISOString(),
+          materialCost: Number(h.materialCost),
+          materialOverhead: Number(h.materialOverhead),
+          laborCost: Number(h.laborCost),
+          subcontractCost: Number(h.subcontractCost),
+          subcontractOverhead: Number(h.subcontractOverhead),
+          semiFinishedCost: Number(h.semiFinishedCost),
+          configurationCost: configuration
+            ? {
+                manufacturingCostPerUnit: configuration.cost?.manufacturingCostPerUnit ?? null,
+                calculatedAt: configuration.cost?.calculatedAt ?? new Date(h.calculatedAt).toISOString(),
+              }
+            : null,
+          analysis: storedVarianceAnalysis(h, materialRows.get(h.id) ?? [], operationRows.get(h.id) ?? []),
+        };
+      });
+      if (view === "analysis") return { ...range, ...analysisOutcome(posts, query.groupBy ?? "order") };
+      const pres = loaded.preCalculations.map((p) => ({
+        articleId: p.articleId,
+        quantity: Number(p.quantity),
+        calculatedAt: new Date(p.calculatedAt).toISOString(),
+        materialCost: Number(p.materialCost),
+        materialOverhead: Number(p.materialOverhead),
+        laborCost: Number(p.laborCost),
+        subcontractCost: Number(p.subcontractCost),
+        subcontractOverhead: Number(p.subcontractOverhead),
+        semiFinishedCost: Number(p.semiFinishedCost),
+        multiLevel: p.multiLevel,
+      }));
+      return { ...range, ...preCalculationOutcome(posts, pres) };
     },
 
     async getSalesStatistics(query: SalesStatisticsQuery): Promise<SalesStatisticsResponse> {
