@@ -8,6 +8,8 @@ import {
   pgEnum,
   pgTable,
   pgView,
+  primaryKey,
+  smallint,
   text,
   timestamp,
   unique,
@@ -77,6 +79,37 @@ export const stockLocations = pgTable(
     // a blocked "***" would put minus on a place that is not counted and so
     // overstate the usable balance.
     check("stock_locations_fallback_not_blocked", sql`NOT (${table.blocked} AND ${table.name} = '***')`),
+  ]
+);
+
+// Alternativa lagerplatser (migration 0186): the article's places after its
+// huvudplats (articles.default_location_id), in sort_order 1..20. The order
+// huvudplats → alternatives is derived when read, never stored as a list.
+// An inflow without a chosen place lands on the first active, open one of
+// them (usableArticleLocations), and Automatiskt draws from them in that
+// order before every other place (outflow-allocation.ts). Written only by
+// PUT /articles/:id/locations (the whole set, under the article's row lock)
+// and pruned by deactivateEmptyLocation when a temporary place is retired.
+// Both FKs cascade: the row is only an assignment (places are never deleted
+// anyway). The FK to articles is declared here, like default_location_id's,
+// so the schema modules do not import each other in a circle.
+export const articleAlternativeLocations = pgTable(
+  "article_alternative_locations",
+  {
+    articleId: uuid("article_id")
+      .notNull()
+      .references(() => articles.id, { onDelete: "cascade" }),
+    locationId: uuid("location_id")
+      .notNull()
+      .references(() => stockLocations.id, { onDelete: "cascade" }),
+    sortOrder: smallint("sort_order").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.articleId, table.locationId] }),
+    unique("article_alternative_locations_article_sort_order_unique").on(table.articleId, table.sortOrder),
+    // deactivateEmptyLocation deletes a retired place's assignments.
+    index("idx_article_alternative_locations_location").on(table.locationId),
+    check("article_alternative_locations_sort_order_range", sql`${table.sortOrder} BETWEEN 1 AND 20`),
   ]
 );
 

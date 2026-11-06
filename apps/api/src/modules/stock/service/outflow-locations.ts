@@ -1,5 +1,14 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { articles, stockCountSessions, stockLocations, stockTransactions, warehouses, type Db, type Tx } from "@navet/db";
+import {
+  articleAlternativeLocations,
+  articles,
+  stockCountSessions,
+  stockLocations,
+  stockTransactions,
+  warehouses,
+  type Db,
+  type Tx,
+} from "@navet/db";
 import { resolveStockLocation } from "./location-resolver.js";
 import { allocateOutflow, withRemainder, type OutflowCandidate, type OutflowPart } from "./outflow-allocation.js";
 import { StockLocationBlockedError } from "./stock.errors.js";
@@ -25,9 +34,12 @@ export type BlockedChoice = "refuse" | "automatic";
 // — the same lock material-shortage.ts takes; FOR UPDATE would clash with
 // the FK inserts' FOR KEY SHARE), so two simultaneous draws of one article
 // never allocate the same balance twice: the second waits and then sees the
-// first one's rows. A writer drawing SEVERAL articles in one transaction
-// should take lockArticlesForOutflow first, sorted, so two such writers
-// never wait on each other crosswise.
+// first one's rows. The same lock keeps the article's order of places
+// steady: PUT /articles/:id/locations takes it before it replaces the
+// huvudplats and the alternatives, so a draw reads either the whole old
+// order or the whole new one. A writer drawing SEVERAL articles in one
+// transaction should take lockArticlesForOutflow first, sorted, so two such
+// writers never wait on each other crosswise.
 //
 // Spärra vs. a draw: the candidate places are locked FOR SHARE (sorted on
 // id) before their blocked flags are read, and Spärra/Släpp spärr is a
@@ -81,8 +93,9 @@ export async function allocateOutflowLocations(
   const { parts, remainder } = allocateOutflow(quantity, candidateIds.length > 0 ? await readCandidates(db, articleId, candidateIds) : []);
   if (remainder <= 0) return parts;
   // The shortfall goes negative where every outflow went before the split —
-  // the article's own place unless it is inactive or blocked, else "***"
-  // (which can never be blocked). The own place is among the locked ones.
+  // the huvudplats unless it is inactive or blocked, else the first usable
+  // alternative place, else "***" (which can never be blocked). Every one of
+  // the article's places is among the locked ones.
   return withRemainder(parts, remainder, await resolveStockLocation(db, articleId));
 }
 
@@ -101,7 +114,9 @@ async function readCandidates(db: Db | Tx, articleId: string, candidateIds: stri
       warehouseName: warehouses.name,
       locationName: stockLocations.name,
       quantityOnHand: sql<string>`sum(${stockTransactions.quantityDelta})`,
-      isDefault: sql<boolean>`bool_or(${articles.defaultLocationId} = ${stockLocations.id})`,
+      // 0 huvudplats, 1–20 alternative, null other (the huvudplats wins
+      // when a place is both).
+      preference: sql<number | null>`min(case when ${articles.defaultLocationId} = ${stockLocations.id} then 0 else ${articleAlternativeLocations.sortOrder} end)`,
       active: stockLocations.active,
       placeBlocked: stockLocations.blocked,
       countBlocked: sql<boolean>`bool_or(${blockingCount.locationId} is not null)`,
@@ -111,6 +126,10 @@ async function readCandidates(db: Db | Tx, articleId: string, candidateIds: stri
     .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
     .innerJoin(articles, eq(articles.id, stockTransactions.articleId))
     .leftJoin(blockingCount, eq(blockingCount.locationId, stockLocations.id))
+    .leftJoin(
+      articleAlternativeLocations,
+      and(eq(articleAlternativeLocations.articleId, stockTransactions.articleId), eq(articleAlternativeLocations.locationId, stockLocations.id))
+    )
     .where(and(eq(stockTransactions.articleId, articleId), inArray(stockTransactions.locationId, candidateIds)))
     .groupBy(stockLocations.id, warehouses.name, stockLocations.name, stockLocations.active, stockLocations.blocked)
     .orderBy(asc(warehouses.name), asc(stockLocations.name));
@@ -120,7 +139,7 @@ async function readCandidates(db: Db | Tx, articleId: string, candidateIds: stri
     warehouseName: r.warehouseName,
     locationName: r.locationName,
     quantityOnHand: Number(r.quantityOnHand),
-    isDefault: r.isDefault === true,
+    preference: r.preference === null ? null : Number(r.preference),
     active: r.active,
     // A blocking stock count OR a Spärrad lagerplats — skipped alike.
     blocked: r.countBlocked === true || r.placeBlocked,
@@ -128,12 +147,15 @@ async function readCandidates(db: Db | Tx, articleId: string, candidateIds: stri
 }
 
 // The places an automatic draw of the article may touch — those holding a
-// positive balance plus the article's own Lagerplats (the remainder may land
-// there) — locked FOR SHARE, sorted on id. The article row is already locked,
-// so its Lagerplats cannot change meanwhile. "***" is locked too when it is
-// one of them; harmless, it is never blocked or updated by a draw.
+// positive balance plus the article's huvudplats and every alternative place
+// (the remainder lands on the first usable one of them) — locked FOR SHARE,
+// sorted on id. The article row is already locked, so its places cannot
+// change meanwhile. "***" is locked too when it is one of them; harmless, it
+// is never blocked or updated by a draw. Holding an empty alternative place
+// FOR SHARE also makes deactivateEmptyLocation's place lock wait the draw
+// out before it deletes the place's assignments (location-lifecycle.ts).
 async function lockOutflowCandidates(db: Db | Tx, articleId: string): Promise<string[]> {
-  const [withStock, [article]] = await Promise.all([
+  const [withStock, [article], alternatives] = await Promise.all([
     db
       .select({ locationId: stockTransactions.locationId })
       .from(stockTransactions)
@@ -141,9 +163,14 @@ async function lockOutflowCandidates(db: Db | Tx, articleId: string): Promise<st
       .groupBy(stockTransactions.locationId)
       .having(sql`sum(${stockTransactions.quantityDelta}) > 0`),
     db.select({ defaultLocationId: articles.defaultLocationId }).from(articles).where(eq(articles.id, articleId)),
+    db
+      .select({ locationId: articleAlternativeLocations.locationId })
+      .from(articleAlternativeLocations)
+      .where(eq(articleAlternativeLocations.articleId, articleId)),
   ]);
   const ids = new Set(withStock.map((r) => r.locationId));
   if (article?.defaultLocationId) ids.add(article.defaultLocationId);
+  for (const r of alternatives) ids.add(r.locationId);
   if (ids.size === 0) return [];
   const locked = await db
     .select({ id: stockLocations.id })

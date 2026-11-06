@@ -1,6 +1,7 @@
 import { renderLabelsPdf, type LabelInput } from "../../mail/service/label-pdf.js";
 import { formatLocationLabelCode, type LocationLabelsInput } from "@navet/shared";
 import type {
+  ArticleLocationsInput,
   CreateStockLocationInput,
   CreateStockTransactionInput,
   CreateStockTransferInput,
@@ -17,11 +18,13 @@ import type {
 } from "@navet/shared";
 import type { StockRepository } from "../repository/stock.repository.js";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
-import { StockLocationNotFoundError, WarehouseNotFoundError } from "./stock.errors.js";
+import { ArticleLocationInvalidError, ArticleNotFoundError, StockLocationNotFoundError, WarehouseNotFoundError } from "./stock.errors.js";
+import { articleLocationInputProblem } from "./article-locations.js";
 
 // Re-exported so route handlers keep importing their error types from the
 // service they call.
 export {
+  ArticleLocationInvalidError,
   ArticleNotFoundError,
   DuplicateStockCountRowError,
   FallbackLocationNotBlockableError,
@@ -164,6 +167,23 @@ export function createStockService(repo: StockRepository, audit: AuditWriter = {
 
     async listTransactions(query: ListStockTransactionsQuery) {
       return repo.listTransactions(query);
+    },
+
+    // Flera lagerplatser per artikel (0186) — GET/PUT /articles/:id/locations.
+    async getArticleLocations(articleId: string) {
+      const view = await repo.articleLocations(articleId);
+      if (!view) throw new ArticleNotFoundError(articleId);
+      return view;
+    },
+
+    // Replaces the huvudplats and the alternative places as one set. The
+    // request's own rules first; the places are judged under the locks in
+    // the repository (article-locations.ts). No audit: article changes are
+    // not logged.
+    async setArticleLocations(articleId: string, input: ArticleLocationsInput) {
+      const problem = articleLocationInputProblem(input);
+      if (problem) throw new ArticleLocationInvalidError(problem);
+      return repo.replaceArticleLocations(articleId, input);
     },
   };
 }

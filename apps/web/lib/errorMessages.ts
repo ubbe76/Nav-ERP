@@ -261,6 +261,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   // The server names the place (Swedish).
   "stock-location-blocked": serverMessage("Lagerplatsen är spärrad — välj en annan plats eller Automatiskt."),
   "default-location-blocked": "Lagerplatsen är spärrad och kan inte väljas som artikelns lagerplats — välj en annan.",
+  // Lager-flikens Lagerplatser: the server names the place and the rule (Swedish).
+  "article-location-invalid": serverMessage("Lagerplatserna kunde inte sparas — kontrollera huvudplatsen och de alternativa platserna."),
   // The server names what went wrong with the key / the mailbox.
   "invoice-scan-ai-test-failed": serverMessage("AI-tjänsten svarade inte med den här nyckeln och modellen."),
   "invoice-scan-mail-test-failed": serverMessage("Kunde inte ansluta till e-postlådan."),

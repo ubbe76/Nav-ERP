@@ -179,4 +179,24 @@ describe("Importera lagersaldon", () => {
     const preview = await imports.preview("stockBalances", input([["PL-8", "Huvudlager", "A1", "1", ""]]));
     expect(preview.rows[0]!.errors).toEqual(["Lagerplatsen inventeras just nu och är spärrad för lagerhändelser"]);
   });
+
+  // Flera lagerplatser per artikel (0186): without Lager/Lagerplats the
+  // preview asks usableArticleLocations, the resolver's own rule, so it
+  // names the balance the commit then writes on.
+  it("previews what the commit books when the huvudplats is blocked and there is an alternative place", async () => {
+    const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
+    const main = await stockService.createLocation({ warehouseId: warehouse.id, name: "K1", active: true });
+    const alt = await stockService.createLocation({ warehouseId: warehouse.id, name: "B1", active: true });
+    const article = await makeArticle("PL-9", { standardCost: 1, defaultLocationId: main.id });
+    await stockService.setArticleLocations(article.id, { primaryLocationId: main.id, alternativeLocationIds: [alt.id] });
+    await stockService.recordTransaction({ articleId: article.id, locationId: main.id, quantityDelta: 4, transactionType: "inventory_adjustment" });
+    await stockService.recordTransaction({ articleId: article.id, locationId: alt.id, quantityDelta: 3, transactionType: "inventory_adjustment" });
+    await stockService.blockLocation(main.id, null);
+    const rows = [["PL-9", "", "", "10", ""]];
+
+    const preview = await imports.preview("stockBalances", input(rows));
+    expect(preview.rows[0]).toMatchObject({ action: "update", values: { currentQuantity: 3, change: 7 } });
+    await imports.commit("stockBalances", input(rows));
+    expect([await balance(article.id, alt.id), await balance(article.id, main.id)]).toEqual([10, 4]);
+  });
 });

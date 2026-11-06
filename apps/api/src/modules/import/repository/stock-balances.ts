@@ -1,6 +1,6 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { articles, stockCountSessions, stockLocations, stockTransactions, warehouses, type Db, type Tx } from "@navet/db";
-import { FALLBACK_LOCATION_NAME, resolveStockLocation } from "../../stock/service/location-resolver.js";
+import { stockCountSessions, stockLocations, stockTransactions, warehouses, type Db, type Tx } from "@navet/db";
+import { FALLBACK_LOCATION_NAME, resolveStockLocation, usableArticleLocations } from "../../stock/service/location-resolver.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { STOCK_IMPORT_NOTE, type StockBalanceImportPlan } from "../service/stock-balances.js";
@@ -25,24 +25,12 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
       return { warehouses: warehouseRows, locations: locationRows };
     },
 
-    // Only an ACTIVE, open default counts — resolveStockLocation skips a
-    // retired one and a Spärrad lagerplats (0185), so the preview must too or
-    // it would say "the article's place" where the commit writes "***".
-    async articleDefaultLocations(articleIds: string[]) {
-      const map = new Map<string, string>();
-      for (const part of chunks([...new Set(articleIds)])) {
-        if (part.length === 0) continue;
-        const rows = await db
-          .select({ articleId: articles.id, locationId: stockLocations.id })
-          .from(articles)
-          .innerJoin(
-            stockLocations,
-            and(eq(stockLocations.id, articles.defaultLocationId), eq(stockLocations.active, true), eq(stockLocations.blocked, false))
-          )
-          .where(inArray(articles.id, part));
-        for (const row of rows) map.set(row.articleId, row.locationId);
-      }
-      return map;
+    // The resolver's own rule (0186): the huvudplats when it is active and
+    // not blocked, else the first such alternative place — the same function
+    // resolveStockLocation calls, so the preview never says one place where
+    // the commit writes another.
+    async usableArticleLocations(articleIds: string[]) {
+      return usableArticleLocations(db, articleIds);
     },
 
     async fallbackLocationId() {

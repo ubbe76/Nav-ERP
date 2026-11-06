@@ -10,8 +10,9 @@
 // a manual positive adjustment); a decrease is an outflow without a price.
 //
 // The location: Lager + Lagerplats name one (missing ones are created), a
-// Lagerplats alone must be unambiguous, and neither means the article's own
-// location or "***" — what resolveStockLocation does for every writer.
+// Lagerplats alone must be unambiguous, and neither means the article's
+// huvudplats, else its first usable alternative place, else "***" — what
+// resolveStockLocation does for every writer.
 import type { ImportCommitInput } from "@navet/shared";
 import { normalizeDecimal } from "./csv.js";
 import type { ExistingArticle } from "./articles.js";
@@ -74,8 +75,8 @@ export interface ImportWarehouse {
 export interface StockBalanceImportDeps {
   articlesByNumber(numbers: string[]): Promise<Map<string, ExistingArticle>>;
   stockPlaces(): Promise<{ warehouses: ImportWarehouse[]; locations: ImportStockLocation[] }>;
-  /** articleId -> its own active default location, when it has one. */
-  articleDefaultLocations(articleIds: string[]): Promise<Map<string, string>>;
+  /** articleId -> where an inflow without a place lands (usableArticleLocations), when not "***". */
+  usableArticleLocations(articleIds: string[]): Promise<Map<string, string>>;
   /** The "***" location, when it exists yet. */
   fallbackLocationId(): Promise<string | null>;
   /** "<articleId>|<locationId>" -> today's balance. */
@@ -145,7 +146,7 @@ export async function planStockBalanceImport(
   const articleIds = [...articlesByNumber.values()].map((a) => a.id);
   const [places, defaults, fallbackId, balances, underCount] = await Promise.all([
     deps.stockPlaces(),
-    deps.articleDefaultLocations(articleIds),
+    deps.usableArticleLocations(articleIds),
     deps.fallbackLocationId(),
     deps.stockBalances(articleIds),
     deps.locationsUnderCount(),
@@ -248,8 +249,9 @@ export async function planStockBalanceImport(
       }
     } else if (article) {
       target = { kind: "default" };
-      // Where resolveStockLocation will put it: the article's own location,
-      // else "***" (created on first use — then there is no balance yet).
+      // Where resolveStockLocation will put it: the article's huvudplats or
+      // first usable alternative place, else "***" (created on first use —
+      // then there is no balance yet).
       locationKey = defaults.get(article.id) ?? fallbackId ?? "new:***";
     }
 

@@ -556,6 +556,11 @@ export const ERROR_CODES = {
   STOCK_LOCATION_BLOCKED: "stock-location-blocked",
   // The article's Lagerplats CHANGED to a blocked place (POST/PATCH /articles, 400)
   DEFAULT_LOCATION_BLOCKED: "default-location-blocked",
+  // PUT /articles/:id/locations refused (400, Swedish message): more than 20
+  // alternatives, a duplicate, the huvudplats among them, an unknown place,
+  // "***" as an alternative, or an inactive or blocked place that is new
+  // in its role
+  ARTICLE_LOCATION_INVALID: "article-location-invalid",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
