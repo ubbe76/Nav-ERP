@@ -23,6 +23,13 @@ import {
 import { toBaseQuantity, type CreateMoOperationInput, type UpdateMoOperationInput } from "@navet/shared";
 // Produktionsplanering: a leaf with only the lock SQL — no module cycle.
 import { lockProductionPlan } from "../../planning/repository/plan-lock.js";
+import {
+  clearOperationResourcesInTx,
+  operationResourceRows,
+  operationResourcesJson,
+  switchOperationResourcesInTx,
+  syncCurrentResourceTimesInTx,
+} from "./operation-resources.js";
 import { shortageWarnings } from "./shortage-warnings.js";
 
 // Ändra material och operationer på en skapad tillverkningsorder — the
@@ -65,6 +72,9 @@ export type MaterialRow = Awaited<ReturnType<ReturnType<typeof selectMaterialRow
 
 // The same shape as GET /manufacturing-orders/:id/operations rows (the
 // planned weeks are mirror columns on mo_operations and ride along).
+// `resources` = the operation's possible resources (alternativa resurser,
+// operation-resources.ts), [] without alternatives; resourceLocked ("Vald
+// för hand") is a column.
 export function selectOperationRows(dbc: Db | Tx) {
   return dbc
     .select({
@@ -73,6 +83,7 @@ export function selectOperationRows(dbc: Db | Tx) {
       workCenterCode: workCenters.code,
       workCenterType: workCenters.type,
       subcontractSupplierName: suppliers.name,
+      resources: operationResourcesJson(),
     })
     .from(moOperations)
     .innerJoin(workCenters, eq(workCenters.id, moOperations.workCenterId))
@@ -405,7 +416,22 @@ export async function updateOperationInTx(
     (input.runTimePerUnit !== undefined && input.runTimePerUnit !== Number(op.runTimePerUnit));
   const replanNeeded = timeChanged || workCenterChanged || sequenceChanged;
 
+  // Alternativa resurser: a switch to one of the operation's resources goes
+  // through the one switch writer (the row's times unless the edit gives
+  // its own, Vald för hand unless resourceLocked: false); a switch outside
+  // them leaves the operation without alternatives. resource_locked is only
+  // ever true while the operation has rows.
+  const resources = await operationResourceRows(tx, opId);
+  const target = workCenterChanged ? resources.find((r) => r.workCenterId === input.workCenterId) : undefined;
+  const keepsResources = resources.length > 0 && (!workCenterChanged || target !== undefined);
+  const resourceLocked = !keepsResources ? false : workCenterChanged ? (input.resourceLocked ?? true) : input.resourceLocked;
+
   const before = await operationRow(tx, opId);
+  if (target) {
+    await switchOperationResourcesInTx(tx, [
+      { moOperationId: opId, fromWorkCenterId: op.workCenterId, toWorkCenterId: target.workCenterId, resourceLocked: resourceLocked! },
+    ]);
+  }
   await tx
     .update(moOperations)
     .set({
@@ -427,8 +453,11 @@ export async function updateOperationInTx(
       // The weeks were booked on the old resource: a locked operation that
       // changes resource loses its lock and is replanned like any other.
       planLocked: workCenterChanged && op.planLocked ? false : undefined,
+      resourceLocked,
     })
     .where(eq(moOperations.id, opId));
+  if (keepsResources) await syncCurrentResourceTimesInTx(tx, opId);
+  else if (resources.length > 0) await clearOperationResourcesInTx(tx, opId);
   const warnings = replanNeeded && replan ? await replan(tx, moId) : [];
   return { ok: true, order: locked.order, before, operation: await operationRow(tx, opId), warnings, replanned: replanNeeded && !!replan };
 }

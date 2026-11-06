@@ -410,6 +410,13 @@ export async function runImportDryRun<T>(db: Db, fn: (repo: ImportRepository) =>
   return (result as { value: T }).value;
 }
 
+export interface ExistingRoutingOperation {
+  id: string;
+  costingOnly: boolean;
+  hasLegoFields: boolean;
+  alternativeWorkCenterIds: string[];
+}
+
 export function createImportRepository(db: Db | Tx) {
   return {
     // Lagersaldon (#3): the planner's lookups and executeStockBalancePlan.
@@ -1062,10 +1069,13 @@ export function createImportRepository(db: Db | Tx) {
     // routing import checks for duplicates (and whether an updated operation
     // carries lego fields to clear), the BOM import resolves the Operation
     // column (and rejects Kalkyl operations).
+    // alternativeWorkCenterIds: the operation's alternativa resurser (#15) —
+    // the routing import refuses an update that would break them (same
+    // texts as the beredning); the import never writes the alternatives.
     async routingOperationsByArticle(
       articleIds: string[]
-    ): Promise<Map<string, Map<number, { id: string; costingOnly: boolean; hasLegoFields: boolean }>>> {
-      const map = new Map<string, Map<number, { id: string; costingOnly: boolean; hasLegoFields: boolean }>>();
+    ): Promise<Map<string, Map<number, ExistingRoutingOperation>>> {
+      const map = new Map<string, Map<number, ExistingRoutingOperation>>();
       for (const part of chunk([...new Set(articleIds)])) {
         if (part.length === 0) continue;
         const rows = await db
@@ -1075,13 +1085,21 @@ export function createImportRepository(db: Db | Tx) {
             sequenceNo: routingOperations.sequenceNo,
             costingOnly: routingOperations.costingOnly,
             hasLegoFields: sql<boolean>`(${routingOperations.subcontractSupplierId} is not null or ${routingOperations.setupPrice} is not null or ${routingOperations.unitPrice} is not null or ${routingOperations.transportPrice} is not null or ${routingOperations.showNetWeight})`,
+            // The outer column spelled out: drizzle leaves a column of a
+            // join-less select unqualified, and inside the subquery "id"
+            // would be the alternative's own.
+            alternativeWorkCenterIds: sql<string[]>`coalesce((select array_agg(a.work_center_id::text order by a.rank) from routing_operation_alternatives a where a.routing_operation_id = "routing_operations"."id"), '{}')`,
           })
           .from(routingOperations)
           .where(inArray(routingOperations.articleId, part));
         for (const row of rows) {
-          const perArticle =
-            map.get(row.articleId) ?? new Map<number, { id: string; costingOnly: boolean; hasLegoFields: boolean }>();
-          perArticle.set(row.sequenceNo, { id: row.id, costingOnly: row.costingOnly, hasLegoFields: row.hasLegoFields });
+          const perArticle = map.get(row.articleId) ?? new Map<number, ExistingRoutingOperation>();
+          perArticle.set(row.sequenceNo, {
+            id: row.id,
+            costingOnly: row.costingOnly,
+            hasLegoFields: row.hasLegoFields,
+            alternativeWorkCenterIds: row.alternativeWorkCenterIds,
+          });
           map.set(row.articleId, perArticle);
         }
       }

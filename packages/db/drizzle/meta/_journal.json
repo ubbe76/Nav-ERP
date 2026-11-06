@@ -1338,6 +1338,13 @@
       "when": 1793994181097,
       "tag": "0190_prishistorikens_ordning",
       "breakpoints": true
+    },
+    {
+      "idx": 191,
+      "version": "7",
+      "when": 1794000103611,
+      "tag": "0191_alternativa_resurser",
+      "breakpoints": true
     }
   ]
 }

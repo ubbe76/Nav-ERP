@@ -5,6 +5,7 @@ import {
   db,
   manufacturingOrders,
   moOperations,
+  routingOperationAlternatives,
   routingOperations,
   suppliers,
   units,
@@ -652,6 +653,59 @@ describe("planRoutingImport", () => {
       expect(plan.creates[0]).toMatchObject({ sequenceNo: 20, comment: "Se ritning", printOnWorkCard: true });
     });
 
+    // Alternativa resurser (#15): the file has no column for them, but an
+    // update must not break them — the beredning's 409 texts as row errors.
+    it("refuses an update that leaves an operation's alternativa resurser broken, with the beredning's texts", async () => {
+      const withAlternatives = { costingOnly: false, alternativeWorkCenterIds: ["wc-120"] };
+      const deps: RoutingImportDeps = {
+        ...fakeDeps([article("A-1", "id-1")]),
+        async workCentersByCode() {
+          return new Map([
+            ["110", { id: "wc-110", code: "110", type: "machine" }],
+            ["120", { id: "wc-120", code: "120", type: "machine" }],
+            ["900", { id: "wc-900", code: "900", type: "subcontract", supplierId: null }],
+          ]);
+        },
+        async routingOperationsByArticle() {
+          return new Map([
+            [
+              "id-1",
+              new Map([
+                [10, { id: "op-10", ...withAlternatives }],
+                [20, { id: "op-20", ...withAlternatives }],
+                [30, { id: "op-30", ...withAlternatives }],
+                [40, { id: "op-40", ...withAlternatives }],
+                [50, { id: "op-50", costingOnly: false, alternativeWorkCenterIds: [] }],
+              ]),
+            ],
+          ]);
+        },
+      };
+      const plan = await planRoutingImport(
+        {
+          mapping: MAPPING,
+          rows: [
+            ["A-1", "10", "120", "1", "1", "Nej"],
+            ["A-1", "20", "900", "", "", "Nej"],
+            ["A-1", "30", "110", "1", "1", "Ja"],
+            ["A-1", "40", "110", "2", "2", "Nej"],
+            ["A-1", "50", "900", "", "", "Nej"],
+          ],
+          updateExisting: true,
+        },
+        deps
+      );
+      expect(plan.rows.map((row) => row.errors)).toEqual([
+        ["Resurs 120 är redan alternativ på operationen — ta bort den ur alternativen först"],
+        ["Operationen har alternativa resurser — ta bort dem innan den läggs på en legoresurs"],
+        ["Operationen har alternativa resurser — ta bort dem innan den görs till Kalkyl"],
+        [],
+        [],
+      ]);
+      // A new operation never has any — the check is only for updates.
+      expect(plan.updates.map((u) => u.id)).toEqual(["op-40", "op-50"]);
+    });
+
     it("sets the print flag on an updated operation only when the row carries a comment", async () => {
       const plan = await planRoutingImport(
         {
@@ -927,6 +981,28 @@ describe("routing import — repository", () => {
     const map = await repo.routingOperationsByArticle([articleId]);
     expect(map.get(articleId)!.get(10)!.costingOnly).toBe(false);
     expect(map.get(articleId)!.get(20)!.costingOnly).toBe(true);
+  });
+
+  it("carries each existing operation's alternativa resurser in rank order", async () => {
+    const articleId = await seedArticle("A-1");
+    const w110 = await seedWorkCenter("110");
+    const w120 = await seedWorkCenter("120");
+    const w130 = await seedWorkCenter("130");
+    const [op10, op20] = await db
+      .insert(routingOperations)
+      .values([
+        { articleId, sequenceNo: 10, workCenterId: w110, setupTime: "1", runTimePerUnit: "1" },
+        { articleId, sequenceNo: 20, workCenterId: w110, setupTime: "1", runTimePerUnit: "1" },
+      ])
+      .returning();
+    await db.insert(routingOperationAlternatives).values([
+      { routingOperationId: op10!.id, workCenterId: w130, rank: 1 },
+      { routingOperationId: op10!.id, workCenterId: w120, rank: 2 },
+    ]);
+    const map = await repo.routingOperationsByArticle([articleId]);
+    expect(map.get(articleId)!.get(10)!.alternativeWorkCenterIds).toEqual([w130, w120]);
+    expect(map.get(articleId)!.get(20)!.alternativeWorkCenterIds).toEqual([]);
+    expect(op20).toBeDefined();
   });
 
   it("writes the operations, minutes and Kalkyl flag included", async () => {

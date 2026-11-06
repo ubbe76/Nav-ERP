@@ -39,6 +39,11 @@ import type { ManufacturingPlanReader } from "../../planning/service/planning.se
 import type { PlannedWeek } from "../../planning/service/capacity-calc.js";
 export { MaterialShortageError, type MaterialShortage } from "./material-shortage.js";
 import type { PeriodLockChecker } from "../../payroll/service/period-lock.js";
+import {
+  routingAlternativesProblem,
+  routingOperationHasAlternativesProblem,
+  type AlternativeResource,
+} from "./routing-alternatives.js";
 import type { DocumentPdfService, PalletCardPdfInput } from "../../mail/service/document-pdf.js";
 import { documentLanguageOf, localized } from "@navet/shared";
 import { documentTexts } from "../../mail/service/document-texts.js";
@@ -206,6 +211,27 @@ export class OperationHasLinkedMaterialError extends Error {
   constructor() {
     super("The operation has BOM rows linked to it and cannot be marked as a Kalkyl operation");
     this.name = "OperationHasLinkedMaterialError";
+  }
+}
+
+// Alternativa resurser (#15): the set sent with a routing operation breaks a
+// rule — the ordinarie or a legoresurs as alternative, a duplicate, too
+// many, an inactive resource added, or alternatives on a lego or Kalkyl
+// operation (400; Swedish text from routing-alternatives.ts).
+export class RoutingAlternativeInvalidError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RoutingAlternativeInvalidError";
+  }
+}
+
+// The operation keeps its alternatives (no set sent) but is moved to a
+// legoresurs, made Kalkyl, or given one of its alternatives as ordinarie
+// (409; Swedish text). The web sends the set along when it swaps them.
+export class RoutingOperationHasAlternativesError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RoutingOperationHasAlternativesError";
   }
 }
 
@@ -974,6 +1000,18 @@ export function createManufacturingService(
     }
   }
 
+  // Alternativa resurser: the resources of a sent set, in its order — an
+  // unknown one is a 404 like an unknown ordinarie.
+  async function alternativeResources(alternatives: { workCenterId: string }[]): Promise<AlternativeResource[]> {
+    const resources: AlternativeResource[] = [];
+    for (const { workCenterId } of alternatives) {
+      const workCenter = await repo.findWorkCenterById(workCenterId);
+      if (!workCenter) throw new WorkCenterNotFoundError(workCenterId);
+      resources.push(workCenter);
+    }
+    return resources;
+  }
+
   // The order's operations are replanned inside the edit's transaction by
   // the planning service; without a plan reader (fixtures) nothing is.
   const replanner = () => (planning ? (tx: Tx, id: string) => planning.replanOrderInTx(tx, id) : undefined);
@@ -1008,6 +1046,9 @@ export function createManufacturingService(
       setupPrice: op.setupPrice === null ? null : Number(op.setupPrice),
       unitPrice: op.unitPrice === null ? null : Number(op.unitPrice),
       showNetWeight: op.showNetWeight,
+      // Alternativa resurser: Vald för hand, so a switch shows the resource
+      // (workCenterCode above) and the flag before and after.
+      resourceLocked: op.resourceLocked,
     };
   }
   function changedFields<T extends Record<string, unknown>>(before: T, after: T): { before: Partial<T>; after: Partial<T> } {
@@ -1262,8 +1303,19 @@ export function createManufacturingService(
       if (!workCenter) throw new WorkCenterNotFoundError(input.workCenterId);
       // Default the operation's supplier from the resource when not given.
       const withDefaults = assertLegoFieldsForResource(workCenter, input, "create");
+      // Alternativa resurser: every one is new on a new operation.
+      if (input.alternatives && input.alternatives.length > 0) {
+        const resources = await alternativeResources(input.alternatives);
+        const problem = routingAlternativesProblem({
+          ordinary: workCenter,
+          costingOnly: input.costingOnly ?? false,
+          alternatives: resources.map((workCenter) => ({ workCenter, isNew: true })),
+        });
+        if (problem) throw new RoutingAlternativeInvalidError(problem);
+      }
       try {
-        return await repo.createRoutingOperation(articleId, withDefaults);
+        const row = await repo.createRoutingOperation(articleId, withDefaults);
+        return { ...row, alternatives: (await repo.listRoutingAlternatives([row.id])).get(row.id) ?? [] };
       } catch (err) {
         if (isUniqueViolation(err)) throw new DuplicateSequenceNoError();
         if (isForeignKeyViolation(err, "routing_operations_subcontract_supplier_id_suppliers_id_fk")) {
@@ -1312,25 +1364,43 @@ export function createManufacturingService(
       if (input.costingOnly === true && (await repo.countBomComponentsForOperation(operationId)) > 0) {
         throw new OperationHasLinkedMaterialError();
       }
-
-      // Lego guard — the effective resource decides whether lego fields are
-      // legal. Switching to a non-lego resource clears them (and any
-      // incoming non-null lego value alongside such a switch is refused).
-      let patch = input;
-      const existing = await repo.findRoutingOperation(articleId, operationId);
-      if (!existing) throw new RoutingOperationNotFoundError(operationId);
-      const workCenterId = input.workCenterId ?? existing.workCenterId;
-      const workCenter = await repo.findWorkCenterById(workCenterId);
-      if (!workCenter) throw new WorkCenterNotFoundError(workCenterId);
-      assertLegoFieldsForResource(workCenter, input, "update");
-      if (workCenter.type !== "subcontract") {
-        patch = { ...input, ...CLEARED_LEGO_FIELDS, useArticleDrawing: true };
-      }
+      // The sent alternatives' resources, resolved on committed data before
+      // the transaction (an unknown one is a 404 like an unknown ordinarie).
+      const sentResources = input.alternatives ? await alternativeResources(input.alternatives) : undefined;
 
       try {
-        const row = await repo.updateRoutingOperation(articleId, operationId, patch);
+        // The rules run on the operation as locked in the transaction
+        // (repo.updateRoutingOperation): the effective ordinarie and Kalkyl
+        // flag, and the alternatives it has now.
+        const row = await repo.updateRoutingOperation(articleId, operationId, async (existing, currentAlternatives) => {
+          // Lego guard — the effective resource decides whether lego fields
+          // are legal. Switching to a non-lego resource clears them (and any
+          // incoming non-null lego value alongside such a switch is refused).
+          const workCenterId = input.workCenterId ?? existing.workCenterId;
+          const workCenter = await repo.findWorkCenterById(workCenterId);
+          if (!workCenter) throw new WorkCenterNotFoundError(workCenterId);
+          assertLegoFieldsForResource(workCenter, input, "update");
+          const costingOnly = input.costingOnly ?? existing.costingOnly;
+          if (sentResources) {
+            const before = new Set(currentAlternatives.map((a) => a.workCenterId));
+            const problem = routingAlternativesProblem({
+              ordinary: workCenter,
+              costingOnly,
+              alternatives: sentResources.map((r) => ({ workCenter: r, isNew: !before.has(r.id) })),
+            });
+            if (problem) throw new RoutingAlternativeInvalidError(problem);
+          } else {
+            const problem = routingOperationHasAlternativesProblem({
+              alternativeWorkCenterIds: currentAlternatives.map((a) => a.workCenterId),
+              ordinary: workCenter,
+              costingOnly,
+            });
+            if (problem) throw new RoutingOperationHasAlternativesError(problem);
+          }
+          return workCenter.type !== "subcontract" ? { ...input, ...CLEARED_LEGO_FIELDS, useArticleDrawing: true } : input;
+        });
         if (!row) throw new RoutingOperationNotFoundError(operationId);
-        return row;
+        return { ...row, alternatives: (await repo.listRoutingAlternatives([row.id])).get(row.id) ?? [] };
       } catch (err) {
         if (isUniqueViolation(err)) throw new DuplicateSequenceNoError();
         if (isForeignKeyViolation(err, "routing_operations_subcontract_supplier_id_suppliers_id_fk")) {

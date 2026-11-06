@@ -71,6 +71,8 @@ import {
   ScrapReasonInvalidError,
   ScrapReasonRequiredError,
   ProductionGroupNotFoundError,
+  RoutingAlternativeInvalidError,
+  RoutingOperationHasAlternativesError,
   RoutingOperationNotFoundError,
   WeekScheduleNotFoundError,
   WorkCenterNotFoundError,
@@ -215,6 +217,7 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
         if (err instanceof WorkCenterNotFoundError) return reply.code(404).send(errorBody(err));
         if (err instanceof NotSubcontractOperationError) return reply.code(400).send(errorBody(err));
         if (err instanceof WorkCenterSupplierNotFoundError) return reply.code(400).send(errorBody(err));
+        if (err instanceof RoutingAlternativeInvalidError) return reply.code(400).send(errorBody(err));
         throw err;
       }
     }
@@ -234,6 +237,8 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
         if (err instanceof OperationHasLinkedMaterialError) return reply.code(409).send(errorBody(err));
         if (err instanceof NotSubcontractOperationError) return reply.code(400).send(errorBody(err));
         if (err instanceof WorkCenterSupplierNotFoundError) return reply.code(400).send(errorBody(err));
+        if (err instanceof RoutingAlternativeInvalidError) return reply.code(400).send(errorBody(err));
+        if (err instanceof RoutingOperationHasAlternativesError) return reply.code(409).send(errorBody(err));
         throw err;
       }
     }

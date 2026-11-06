@@ -8,7 +8,7 @@ import {
 } from "../../src/modules/configurator/service/configurator.service.js";
 import { createCostingRepository } from "../../src/modules/costing/repository/costing.repository.js";
 import { createCostingService } from "../../src/modules/costing/service/costing.service.js";
-import { insertRoutingOperations } from "../../src/modules/manufacturing/repository/routing-write.js";
+import { copyRoutingAlternatives, insertRoutingOperations } from "../../src/modules/manufacturing/repository/routing-write.js";
 import { testArticleService } from "./services.js";
 import type { ExchangeRateReader } from "../../src/modules/system/service/exchange-rates.js";
 
@@ -24,7 +24,7 @@ export const testCostingService = createCostingService(createCostingRepository(d
 
 // The owning modules' real Tx writers, as app.ts wires them. Tests that need
 // a failing writer spread these and override one.
-export const variantWriters: VariantWriters = { insertArticle, insertBomRows, insertRoutingOperations };
+export const variantWriters: VariantWriters = { insertArticle, insertBomRows, insertRoutingOperations, copyRoutingAlternatives };
 // No stock in the configurator tests: every variant shows 0 on hand.
 export const emptyStockReader: VariantStockReader = { balancesForArticles: async () => [] };
 // Spread into createConfiguratorService({...}) by the suites that build the service themselves.

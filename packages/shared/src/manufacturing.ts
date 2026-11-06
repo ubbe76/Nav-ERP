@@ -165,6 +165,26 @@ const routingDescriptionSchema = optionalRoutingText(255);
 export const operationTimeUnits = ["minutes_per_unit", "units_per_hour", "seconds_per_unit"] as const;
 export type OperationTimeUnit = (typeof operationTimeUnits)[number];
 
+// Alternativa resurser (#15): one alternative resource of an own routing
+// operation. The times are minutes like the operation's; null/omitted = som
+// ordinarie (the operation's own time, read at every use).
+export const routingAlternativeSchema = z.object({
+  workCenterId: z.string().uuid(),
+  setupTime: z.coerce.number().nonnegative().nullable().optional(),
+  runTimePerUnit: z.coerce.number().nonnegative().nullable().optional(),
+});
+export type RoutingAlternativeInput = z.infer<typeof routingAlternativeSchema>;
+export const MAX_ROUTING_ALTERNATIVES = 5;
+// The whole set in rank order (the list's order is the rank). Sent, it
+// replaces the operation's alternatives in the same transaction as the
+// operation; omitted, they are left as they are. The service holds the
+// rules that need the resources (not the ordinarie, no legoresurs, not on a
+// lego or Kalkyl operation, a new one active).
+const routingAlternativesSchema = z
+  .array(routingAlternativeSchema)
+  .max(MAX_ROUTING_ALTERNATIVES)
+  .refine((rows) => new Set(rows.map((r) => r.workCenterId)).size === rows.length, "En resurs kan bara vara alternativ en gång");
+
 // articleId comes from the URL (/articles/:id/routing), matching createBomComponentSchema.
 export const createRoutingOperationSchema = z.object({
   sequenceNo: z.coerce.number().int().positive(),
@@ -194,6 +214,8 @@ export const createRoutingOperationSchema = z.object({
   unitPrice: z.coerce.number().nonnegative().nullable().optional(),
   showNetWeight: z.boolean().optional(),
   useArticleDrawing: z.boolean().optional(),
+  // Alternativa resurser — see routingAlternativesSchema.
+  alternatives: routingAlternativesSchema.optional(),
 });
 export type CreateRoutingOperationInput = z.infer<typeof createRoutingOperationSchema>;
 
@@ -221,6 +243,8 @@ export const updateRoutingOperationSchema = z
     unitPrice: z.coerce.number().nonnegative().nullable().optional(),
     showNetWeight: z.boolean().optional(),
     useArticleDrawing: z.boolean().optional(),
+    // Alternativa resurser — sent = the whole new set, omitted = unchanged.
+    alternatives: routingAlternativesSchema.optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateRoutingOperationInput = z.infer<typeof updateRoutingOperationSchema>;
@@ -291,6 +315,11 @@ export const updateMoOperationSchema = z
     transportPrice: z.coerce.number().nonnegative().nullable().optional(),
     unitPrice: z.coerce.number().nonnegative().nullable().optional(),
     showNetWeight: z.boolean().optional(),
+    // "Vald för hand" (alternativa resurser). A switch to one of the
+    // operation's resources sets it unless false is sent; false alone gives
+    // the operation suggestions again. Ignored on an operation without
+    // resource rows (it is always false there).
+    resourceLocked: z.boolean().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateMoOperationInput = z.infer<typeof updateMoOperationSchema>;

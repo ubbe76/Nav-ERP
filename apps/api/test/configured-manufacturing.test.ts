@@ -334,3 +334,21 @@ describe("configured TO — avvikelseanalys", () => {
     expect(byOrder.rows).toEqual([expect.objectContaining({ calculationId: calculation.id, base: 188, actual: analysis!.actual, deviation: analysis!.deviation })]);
   });
 });
+
+// Alternativa resurser (#15): a configured TO's base operations carry the
+// template's routing row, so the release snapshots its alternatives exactly
+// like a plain TO's; a conditional operation has no routing row and none.
+describe("configured TO — alternativa resurser", () => {
+  it("snapshots the template route's alternatives onto the base operation, none onto the conditional one", async () => {
+    const { s, row } = await confirmedRow(2);
+    const alt = await mfg.createWorkCenter({ code: "611", name: "Resurs 611", type: "machine", hourlyRate: 500, overheadPercent: 0, capacityFactor: 1, active: true });
+    await mfg.updateRoutingOperation(s.article.id, s.op10.id, { alternatives: [{ workCenterId: alt.id, runTimePerUnit: 2 }] });
+    const mo = await mfg.createFromSalesOrderRow(row.id, {}, null);
+    const ops = await mfg.listOperations(mo.id);
+    expect(ops.find((o) => o.sequenceNo === 10)!.resources).toEqual([
+      { workCenterId: s.wc10.id, code: "610", name: "Resurs 610", rank: 0, setupTime: "6.00", runTimePerUnit: "3.0000" },
+      { workCenterId: alt.id, code: "611", name: "Resurs 611", rank: 1, setupTime: "6.00", runTimePerUnit: "2.0000" },
+    ]);
+    expect(ops.find((o) => o.sequenceNo === 20)!.resources).toEqual([]);
+  });
+});

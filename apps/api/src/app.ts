@@ -66,7 +66,7 @@ import { createMailService } from "./modules/mail/service/mail.service.js";
 import { createDocumentPdfService } from "./modules/mail/service/document-pdf.js";
 import { mailRoutes } from "./modules/mail/routes/mail.routes.js";
 import { createManufacturingRepository } from "./modules/manufacturing/repository/manufacturing.repository.js";
-import { insertRoutingOperations } from "./modules/manufacturing/repository/routing-write.js";
+import { copyRoutingAlternatives, insertRoutingOperations } from "./modules/manufacturing/repository/routing-write.js";
 import { createManufacturingService } from "./modules/manufacturing/service/manufacturing.service.js";
 import { manufacturingRoutes } from "./modules/manufacturing/routes/manufacturing.routes.js";
 import { createOAuthRepository } from "./modules/oauth/repository/oauth.repository.js";
@@ -715,7 +715,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
       find: (id) => articleService.getArticle(id),
     },
     costing: costingService,
-    writers: { insertArticle, insertBomRows, insertRoutingOperations },
+    writers: { insertArticle, insertBomRows, insertRoutingOperations, copyRoutingAlternatives },
     stock: { balancesForArticles: (ids) => stockService.balancesForArticles(ids) },
     // Valuta: evaluate/derive default to the customer's currency at today's rate.
     customerCurrency: async (id) =>
