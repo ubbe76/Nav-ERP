@@ -94,6 +94,8 @@ export interface Article {
   // here (null = the auto-created "***" location). Names only on GET :id.
   defaultLocationId: string | null;
   defaultLocationName?: string | null;
+  // Only on GET :id: the current Lagerplats has been spärrad since it was set.
+  defaultLocationBlocked?: boolean;
   defaultWarehouseName?: string | null;
   // Behovsberäkning (MRP light, E1): compared against projected stock and
   // used to round proposal quantities up to the nearest multiple.
@@ -195,6 +197,8 @@ export interface StockBalance {
   quantityOnHand: string;
   locationName: string | null;
   warehouseName: string | null;
+  // The location is spärrad (null location: false).
+  locationBlocked: boolean;
 }
 
 export type StockTransactionType =
@@ -428,12 +432,24 @@ export interface StockLocation {
   fixed: boolean;
   // Etikettkod (LP0042) — stable across renames, what the label's barcode holds.
   labelCode: string;
+  // Spärrad: still the company's stock (valued as usual) but not counted in
+  // planning/Materialbrist and never drawn from.
+  blocked: boolean;
+  blockedAt: string | null;
+  blockedNote: string | null;
+}
+
+// POST /stock/locations/:id/block
+export interface BlockLocationResult {
+  location: StockLocation;
+  articlesWithStock: number;
+  defaultForArticles: number;
 }
 
 // GET /scan?code= — every kind of thing the code can name (mirrors
 // packages/shared/src/scan.ts; the web cannot import @navet/shared).
 export type ScanMatch =
-  | { kind: "location"; id: string; labelCode: string; name: string; warehouseName: string; active: boolean }
+  | { kind: "location"; id: string; labelCode: string; name: string; warehouseName: string; active: boolean; blocked: boolean }
   | {
       kind: "article";
       id: string;
@@ -1668,6 +1684,7 @@ export interface ArticleLocationBalance {
   articleName: string;
   // The article's base unit code.
   unitCode: string;
+  locationBlocked: boolean;
 }
 
 // --- Kundfaktura (customer invoice) — C1 ---
@@ -4542,7 +4559,9 @@ export interface ArticleOverview {
     rounding: number | null;
   };
   primarySupplier: { supplierId: string; supplierName: string; leadTimeDays: number | null } | null;
+  // Usable stock (without spärrade lagerplatser); the physical stock is onHand + blockedOnHand.
   onHand: number;
+  blockedOnHand: number;
   rows: ArticleOverviewRow[];
   closingBalance: number;
 }

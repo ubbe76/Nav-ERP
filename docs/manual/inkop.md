@@ -298,7 +298,7 @@ Sektionen **Historik** längst ner på orderkortet visar orderns egna händelser
 **Inköp → Inleverans** är rutinen för att rapportera mottagning av hela inköpsorder på en gång:
 
 1. Välj order i fältet **Inköpsorder** — sök på ordernummer, leverantör, artikelnummer eller benämning (till nytta när följesedeln bara visar leverantörens artiklar, inte vårt IO-nummer); varje träffrad visar datum, status och antal restrader. Så länge ingen order är vald visas i stället tabellen **Mottagbara ordrar** under sökfältet — samtliga ordrar i status **Bekräftad** eller **Delvis mottagen**, nyast först, klicka på ordernumret för att välja ("Inga ordrar väntar på inleverans." om listan är tom). Från inköpsorderkortet når du rutinen med ordern förvald via knappen **Inleveransrutinen**.
-2. Välj **Lagerplats** (gäller hela rapporteringen).
+2. Välj **Lagerplats** (gäller hela rapporteringen). Väljer du en [spärrad lagerplats](/hjalp/lager#sparrade-lagerplatser) (märkt *(spärrad)*) hamnar godset i karantän och räknas inte förrän spärren släpps eller godset flyttats.
 3. Radtabellen visar **Beställt** (totalt antal på raden), Enhet, **Mottaget** och **Rest** (beställt minus mottaget, det som återstår att leverera in) per rad — allt i radens enhet — och fältet **Ta emot nu** är förifyllt med restantalet. Justera antalen — rader som sätts till 0 hoppas över. Antalet räknas om till grundenheten när saldot bokförs.
 4. Klicka **Rapportera inleverans**. Varje rad bokförs som ett inleveranssaldo i lagret och orderstatusen uppdateras (**Delvis mottagen** tills allt är mottaget, därefter **Mottagen**). Eventuella fel visas per rad.
 

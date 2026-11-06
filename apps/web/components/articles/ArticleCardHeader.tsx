@@ -18,7 +18,7 @@ import styles from "./ArticleCardHeader.module.css";
 // like the order/invoice cards' document header. It lives outside ArticleTabs,
 // so it stays put across tab changes; the number field doubles as the article
 // switcher.
-export function ArticleCardHeader({ article, totalOnHand }: { article: Article; totalOnHand: number }) {
+export function ArticleCardHeader({ article, totalOnHand, blockedOnHand = 0 }: { article: Article; totalOnHand: number; blockedOnHand?: number }) {
   const router = useRouter();
   const variantOf = useVariantOf(article.id);
   const [labelOpen, setLabelOpen] = useState(false);
@@ -65,6 +65,11 @@ export function ArticleCardHeader({ article, totalOnHand }: { article: Article; 
             {totalOnHand.toLocaleString("sv-SE", { maximumFractionDigits: 3 })}{" "}
             <span className={styles.unit}>{article.unit}</span>
           </div>
+          {blockedOnHand > 0 && (
+            <div className={styles.blockedNote}>
+              varav spärrat {blockedOnHand.toLocaleString("sv-SE", { maximumFractionDigits: 3 })} {article.unit}
+            </div>
+          )}
         </div>
       </div>
       {variantOf && (

@@ -6,6 +6,7 @@ import { GatedLink } from "../ui/GatedLink";
 import { Field, Input } from "../ui/Field";
 import { Table } from "../ui/Table";
 import { useCan } from "../PermissionsProvider";
+import { locationOptionLabel } from "../../lib/stockLocations";
 import {
   STOCK_TRANSACTION_TYPE_LABELS,
   type Paged,
@@ -89,7 +90,7 @@ export function StockTransactionsView({ transactions, locations, article, pageSi
           param="location"
           allLabel="Alla lagerplatser"
           ariaLabel="Filtrera på lagerplats"
-          options={locations.map((l) => ({ value: l.id, label: `${l.warehouseName} — ${l.name}${l.active ? "" : " (inaktiv)"}` }))}
+          options={locations.map((l) => ({ value: l.id, label: locationOptionLabel(l, { inactive: true }) }))}
         />
         <ListFilterSelect
           param="type"

@@ -6,6 +6,7 @@ import { GatedLink } from "../ui/GatedLink";
 import { Table } from "../ui/Table";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
+import { StatusPill } from "../ui/StatusPill";
 import { SectionHeading } from "../ui/SectionHeading";
 import { Field, Input, Select } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../ui/Form";
@@ -182,7 +183,19 @@ export function LagerTab({ article, balances }: { article: Article; balances: St
           renderCell={(row, key) => {
             if (key === "quantityOnHand") return formatQuantity(row.quantityOnHand);
             // Stock can be tracked without locations — those rows show "—".
-            if (key === "warehouseName" || key === "locationName") return row[key as keyof RowWithId] ?? "—";
+            if (key === "locationName") {
+              return (
+                <>
+                  {row.locationName ?? "—"}
+                  {row.locationBlocked && (
+                    <span style={{ marginLeft: 8 }}>
+                      <StatusPill status="stopped" label="Spärrad" compact />
+                    </span>
+                  )}
+                </>
+              );
+            }
+            if (key === "warehouseName") return row[key as keyof RowWithId] ?? "—";
             return row[key as keyof RowWithId];
           }}
         />

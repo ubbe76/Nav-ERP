@@ -6,16 +6,34 @@ import { Table } from "../ui/Table";
 import { Button } from "../ui/Button";
 import { StatusPill } from "../ui/StatusPill";
 import { Checkbox, Field, Input, Select, Toggle } from "../ui/Field";
+import { Modal } from "../ui/Modal";
+import { HelpLink } from "../ui/HelpLink";
 import { apiFetch } from "../../lib/api";
-import type { StockLocation, Warehouse } from "../../lib/types";
-import { Form, FormActions, FormError, FormHint } from "../ui/Form";
+import { confirmDialog } from "../../lib/confirm";
+import { apiErrorMessage } from "../../lib/errorMessages";
+import { useCan } from "../PermissionsProvider";
+import type { BlockLocationResult, StockLocation, Warehouse } from "../../lib/types";
+import { Form, FormActions, FormError, FormHint, FormNotice } from "../ui/Form";
 import { Card } from "../ui/Card";
 import { SectionHeading } from "../ui/SectionHeading";
 import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
 import { LabelPrintDialog } from "./LabelPrintDialog";
 
+// Date of the block in Stockholm time (the container may run UTC).
+function blockedSince(iso: string): string {
+  return new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Europe/Stockholm" });
+}
+
 export function LocationsSection({ locations, warehouses }: { locations: StockLocation[]; warehouses: Warehouse[] }) {
   const router = useRouter();
+  const canWrite = useCan()(["lager"]);
+  // Spärra…: the location whose dialog is open, and its note draft.
+  const [blocking, setBlocking] = useState<StockLocation | null>(null);
+  const [blockNote, setBlockNote] = useState("");
+  // The outcome of the last block/release, shown above the table.
+  const [notice, setNotice] = useState<string | null>(null);
+  const [newBlocked, setNewBlocked] = useState(false);
+  const [newBlockedNote, setNewBlockedNote] = useState("");
   const [warehouseId, setWarehouseId] = useState(warehouses[0]?.id ?? "");
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +82,58 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
     }
   }
 
+  async function submitBlock(e: FormEvent) {
+    e.preventDefault();
+    if (!blocking) return;
+    setError(null);
+    setNotice(null);
+    setPending(true);
+    try {
+      // A JSON body is required (apiFetch only sets the content type with one).
+      const res = await apiFetch<BlockLocationResult>(`/api/v1/stock/locations/${blocking.id}/block`, {
+        method: "POST",
+        body: JSON.stringify({ note: blockNote.trim() || undefined }),
+      });
+      const parts = [`${res.location.warehouseName} — ${res.location.name} är spärrad.`];
+      if (res.articlesWithStock > 0) {
+        parts.push(`${res.articlesWithStock} ${res.articlesWithStock === 1 ? "artikel" : "artiklar"} har saldo där, som inte längre räknas.`);
+      }
+      if (res.defaultForArticles > 0) {
+        parts.push(
+          `${res.defaultForArticles} ${res.defaultForArticles === 1 ? "artikel har" : "artiklar har"} platsen som Lagerplats. Deras inleveranser går till nästa plats tills spärren släpps.`
+        );
+      }
+      setNotice(parts.join(" "));
+      setBlocking(null);
+      router.refresh();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Kunde inte spärra lagerplatsen"));
+      setBlocking(null);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function release(row: StockLocation) {
+    const ok = await confirmDialog(
+      `Släppa spärren på ${row.warehouseName} — ${row.name}? Saldot räknas igen i behovsberäkningen och kan tas med Automatiskt.`,
+      { confirmLabel: "Släpp spärr" }
+    );
+    if (!ok) return;
+    setError(null);
+    setNotice(null);
+    setPending(true);
+    try {
+      await apiFetch(`/api/v1/stock/locations/${row.id}/unblock`, { method: "POST", body: "{}" });
+      setNotice(`Spärren på ${row.warehouseName} — ${row.name} är släppt.`);
+      router.refresh();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Kunde inte släppa spärren"));
+    } finally {
+      setPending(false);
+    }
+  }
+
   return (
     <div>
       <SectionHeading
@@ -86,6 +156,7 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
         Lagerplatser
       </SectionHeading>
       <FormError>{error}</FormError>
+      {notice && <FormNotice>{notice}</FormNotice>}
       {visibleLocations.length > 0 ? (
         <Table<StockLocation>
           columns={[
@@ -107,7 +178,8 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
             { key: "labelCode", label: "Etikettkod", width: "110px" },
             { key: "fixed", label: "Fast", width: "80px" },
             { key: "active", label: "Status", width: "140px" },
-            { key: "id", label: "", width: "170px", align: "right" },
+            { key: "blocked", label: "Spärrad", width: "170px" },
+            { key: "id", label: "", width: "240px", align: "right" },
           ]}
           rows={visibleLocations}
           renderCell={(row, key) => {
@@ -154,6 +226,20 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
                 ) : (
                   <StatusPill status="draft" label="Inaktiv" compact />
                 );
+              case "blocked":
+                return row.blocked ? (
+                  <span style={{ display: "inline-flex", flexDirection: "column", gap: 2 }}>
+                    <span>
+                      <StatusPill status="stopped" label="Spärrad" compact />
+                      {row.blockedNote ? ` ${row.blockedNote}` : ""}
+                    </span>
+                    {row.blockedAt && (
+                      <span style={{ color: "var(--color-text-muted)", fontSize: 12 }}>sedan {blockedSince(row.blockedAt)}</span>
+                    )}
+                  </span>
+                ) : (
+                  "—"
+                );
               case "id":
                 return editingId === row.id ? (
                   <span style={{ display: "inline-flex", gap: 8 }}>
@@ -165,20 +251,40 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
                     </Button>
                   </span>
                 ) : (
-                  <Button
-                    type="button"
-                    size="small"
-                    variant="ghost"
-                    onClick={() => {
-                      setEditingId(row.id);
-                      setEditName(row.name);
-                      setEditWarehouseId(row.warehouseId);
-                      setEditActive(row.active);
-                      setEditFixed(row.fixed);
-                    }}
-                  >
-                    Ändra
-                  </Button>
+                  <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <Button
+                      type="button"
+                      size="small"
+                      variant="ghost"
+                      onClick={() => {
+                        setEditingId(row.id);
+                        setEditName(row.name);
+                        setEditWarehouseId(row.warehouseId);
+                        setEditActive(row.active);
+                        setEditFixed(row.fixed);
+                      }}
+                    >
+                      Ändra
+                    </Button>
+                    {canWrite && row.blocked && (
+                      <Button type="button" size="small" variant="ghost" disabled={pending} onClick={() => release(row)}>
+                        Släpp spärr
+                      </Button>
+                    )}
+                    {canWrite && !row.blocked && row.name !== "***" && (
+                      <Button
+                        type="button"
+                        size="small"
+                        variant="ghost"
+                        onClick={() => {
+                          setBlocking(row);
+                          setBlockNote("");
+                        }}
+                      >
+                        Spärra…
+                      </Button>
+                    )}
+                  </span>
                 );
               default:
                 return row[key as keyof StockLocation];
@@ -188,6 +294,37 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
       ) : (
         <p>Inga lagerplatser tillagda än.</p>
       )}
+
+      <Modal open={blocking !== null} onClose={() => setBlocking(null)} title="Spärra lagerplats" compact>
+        <Form onSubmit={submitBlock}>
+          <p>
+            {blocking ? `${blocking.warehouseName} — ${blocking.name}` : ""}
+          </p>
+          <Field label="Anteckning" htmlFor="blockNote">
+            <Input
+              id="blockNote"
+              value={blockNote}
+              maxLength={200}
+              onChange={(e) => setBlockNote(e.target.value)}
+              placeholder="T.ex. Karantän, väntar på kontroll"
+              autoFocus
+            />
+          </Field>
+          <FormHint>
+            Saldo på en spärrad lagerplats räknas inte i behovsberäkningen, Materialbrist och Leveranstidskontrollen och
+            tas aldrig med Automatiskt. Det värderas som vanligt.{" "}
+            <HelpLink chapter="lager" anchor="sparrade-lagerplatser" label="Hjälp om spärrade lagerplatser" />
+          </FormHint>
+          <FormActions>
+            <Button type="submit" variant="primary" disabled={pending}>
+              Spärra
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setBlocking(null)}>
+              Avbryt
+            </Button>
+          </FormActions>
+        </Form>
+      </Modal>
 
       <LabelPrintDialog
         open={labelsOpen}
@@ -209,10 +346,17 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
               try {
                 await apiFetch("/api/v1/stock/locations", {
                   method: "POST",
-                  body: JSON.stringify({ warehouseId, name, fixed }),
+                  body: JSON.stringify({
+                    warehouseId,
+                    name,
+                    fixed,
+                    ...(newBlocked ? { blocked: true, blockedNote: newBlockedNote.trim() || undefined } : {}),
+                  }),
                 });
                 setName("");
                 setFixed(true);
+                setNewBlocked(false);
+                setNewBlockedNote("");
                 router.refresh();
               } catch (err) {
                 setError(err instanceof Error ? err.message : "Kunde inte skapa lagerplatsen");
@@ -241,6 +385,25 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
               Fast lagerplats
             </label>
             <FormHint>En fast lagerplats ligger kvar när den blir tom. En tillfällig inaktiveras automatiskt.</FormHint>
+
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontFamily: "var(--font-body)", fontSize: 14 }}>
+              <Checkbox id="locationBlocked" checked={newBlocked} onChange={(e) => setNewBlocked(e.target.checked)} />
+              Spärrad lagerplats
+            </label>
+            {newBlocked && (
+              <Field label="Anteckning" htmlFor="locationBlockedNote">
+                <Input
+                  id="locationBlockedNote"
+                  value={newBlockedNote}
+                  maxLength={200}
+                  onChange={(e) => setNewBlockedNote(e.target.value)}
+                />
+              </Field>
+            )}
+            <FormHint>
+              Saldo på en spärrad lagerplats räknas inte i behovsberäkningen, Materialbrist och Leveranstidskontrollen och
+              tas aldrig med Automatiskt. Det värderas som vanligt.
+            </FormHint>
 
             <FormActions>
               <Button type="submit" variant="secondary" disabled={pending}>

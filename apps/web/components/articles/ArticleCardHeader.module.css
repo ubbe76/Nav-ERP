@@ -79,6 +79,12 @@
   font-weight: 600;
 }
 
+.blockedNote {
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
 .unit {
   font-size: 13px;
   color: var(--color-text-secondary);

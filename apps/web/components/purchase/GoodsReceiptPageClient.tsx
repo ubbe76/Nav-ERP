@@ -12,6 +12,7 @@ import { SearchPicker } from "../ui/SearchPicker";
 import { ScanPanel } from "../ui/ScanInput";
 import { useCountState, useScanFeedback, useScanQueue } from "../ui/useOrderScan";
 import { apiFetch } from "../../lib/api";
+import { locationOptionLabel } from "../../lib/stockLocations";
 import { confirmDialog } from "../../lib/confirm";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
@@ -374,7 +375,7 @@ export function GoodsReceiptPageClient({
               <option value="">Artikelns lagerplats</option>
               {locationOptions.map((l) => (
                 <option key={l.id} value={l.id}>
-                  {l.warehouseName} — {l.name}
+                  {locationOptionLabel(l)}
                 </option>
               ))}
             </Select>

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
 import { Checkbox, Field, Input, Select, Textarea, Toggle } from "../ui/Field";
 import { freightModeText } from "../../lib/shipping";
+import { locationOptionLabel, withCurrentLocation } from "../../lib/stockLocations";
 import { apiFetch } from "../../lib/api";
 import {
   ARTICLE_TYPE_LABELS,
@@ -367,9 +368,9 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
                 {defaultLocationId && !locations.some((l) => l.id === defaultLocationId) && (
                   <option value={defaultLocationId}>{article.defaultLocationName ?? "Okänd"} (inaktiv)</option>
                 )}
-                {locations.map((l) => (
+                {withCurrentLocation(locations, article.defaultLocationId).map((l) => (
                   <option key={l.id} value={l.id}>
-                    {l.warehouseName} — {l.name}
+                    {locationOptionLabel(l)}
                   </option>
                 ))}
               </Select>

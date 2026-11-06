@@ -94,7 +94,10 @@ function MatchCard({ match }: { match: ScanMatch }) {
         <Card maxWidth="none">
           <div className={styles.cardHead}>
             <div>
-              <div className={styles.kind}>Lagerplats{match.active ? "" : " · Inaktiv"}</div>
+              <div className={styles.kind}>
+                Lagerplats{match.active ? "" : " · Inaktiv"}
+                {match.blocked && " · Spärrad"}
+              </div>
               <div className={styles.title}>
                 {match.labelCode} · {match.warehouseName} / {match.name}
               </div>
@@ -194,7 +197,20 @@ function Balances({ query, mode, unit }: { query: string; mode: "article" | "loc
         rows={state.rows}
         emptyText={first ? "Inget saldo på någon lagerplats" : "Inga artiklar på lagerplatsen"}
         renderCell={(row, key) => {
-          if (key === "place") return row.locationName ? `${row.warehouseName} / ${row.locationName}` : "Ingen lagerplats";
+          if (key === "place") {
+            return row.locationName ? (
+              <>
+                {row.warehouseName} / {row.locationName}
+                {row.locationBlocked && (
+                  <span style={{ marginLeft: 8 }}>
+                    <StatusPill status="stopped" label="Spärrad" compact />
+                  </span>
+                )}
+              </>
+            ) : (
+              "Ingen lagerplats"
+            );
+          }
           if (key === "article") return `${row.articleNumber} · ${row.articleName}`;
           return `${formatQuantity(Number(row.quantityOnHand))}${unit ? ` ${unit}` : ""}`;
         }}

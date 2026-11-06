@@ -7,6 +7,7 @@ import { Field, Input, Select } from "../ui/Field";
 import { ArticlePicker } from "../ui/ArticlePicker";
 import { UnitSelect, convertQuantityInput, useUnitOptions } from "../ui/UnitSelect";
 import { toBaseQuantity } from "../../lib/units";
+import { locationOptionLabel } from "../../lib/stockLocations";
 import { apiFetch } from "../../lib/api";
 import type { Article, StockLocation } from "../../lib/types";
 import { Card } from "../ui/Card";
@@ -85,7 +86,7 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
             <option value="">Artikelns lagerplats</option>
             {locations.map((l) => (
               <option key={l.id} value={l.id}>
-                {l.warehouseName} — {l.name}
+                {locationOptionLabel(l)}
               </option>
             ))}
           </Select>

@@ -1,6 +1,7 @@
 "use client";
 
 import { confirmDelete } from "../../lib/confirm";
+import { locationOptionLabel } from "../../lib/stockLocations";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { RowDeviationLink } from "../quality/RowDeviationLink";
@@ -1041,7 +1042,7 @@ function ReceiveGoodsForm({
               <option value="">Artikelns lagerplats</option>
               {locations.map((l) => (
                 <option key={l.id} value={l.id}>
-                  {l.warehouseName} — {l.name}
+                  {locationOptionLabel(l)}
                 </option>
               ))}
             </Select>

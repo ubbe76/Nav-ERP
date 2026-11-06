@@ -6,6 +6,7 @@ import { Button } from "../ui/Button";
 import { Field, Input, Select, Toggle } from "../ui/Field";
 import { ArticlePicker, type ArticlePickerValue } from "../ui/ArticlePicker";
 import { apiFetch } from "../../lib/api";
+import { outflowLocationChoices } from "../../lib/stockLocations";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import {
   ARTICLE_COPY_PART_LABELS,
@@ -344,7 +345,7 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
             {/* Empty = the auto-created "***" fallback location. */}
             <Select id="newArticleLocation" value={defaultLocationId} onChange={(e) => setDefaultLocationId(e.target.value)}>
               <option value="">*** (standard)</option>
-              {locations.map((l) => (
+              {outflowLocationChoices(locations).map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.warehouseName} — {l.name}
                 </option>
