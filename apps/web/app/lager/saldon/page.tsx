@@ -28,6 +28,11 @@ export default async function StockPage(props: { searchParams: Promise<PageSearc
   );
   const balances: RowWithId[] = balancesPage.rows.map((b) => ({ ...b, id: `${b.articleId}-${b.locationId}` }));
 
+  // ?locationId= (from Visa saldon in Lagerplatser): say which place is shown.
+  const locationId = typeof searchParams.locationId === "string" ? searchParams.locationId : undefined;
+  const shown = locationId ? balancesPage.rows.find((b) => b.locationId === locationId) : undefined;
+  const locationLabel = shown ? `${shown.warehouseName ?? "—"} — ${shown.locationName ?? "—"}` : "vald lagerplats";
+
   return (
     <AppShell active="Lager">
       <div className={shellStyles.topbar}>
@@ -54,6 +59,13 @@ export default async function StockPage(props: { searchParams: Promise<PageSearc
           <HelpLink chapter="lager" anchor="saldon" label="Hjälp om lagersaldon" />
         </div>
       </div>
+
+      {locationId && (
+        <p style={{ margin: "0 0 12px" }}>
+          Visar saldot på lagerplatsen <strong>{locationLabel}</strong>.{" "}
+          <Link href="/lager/saldon">Visa alla lagerplatser</Link>
+        </p>
+      )}
 
       <ListToolbar placeholder="Sök artikelnummer eller benämning…">
         <ListFilterSelect

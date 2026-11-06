@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
 import { Button } from "../ui/Button";
@@ -12,19 +13,38 @@ import { apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { useCan } from "../PermissionsProvider";
-import type { BlockLocationResult, StockLocation, Warehouse } from "../../lib/types";
+import { formatQuantity } from "../../lib/format";
+import type { BlockLocationResult, StockLocationRegisterRow, Warehouse } from "../../lib/types";
 import { Form, FormActions, FormError, FormHint, FormNotice } from "../ui/Form";
 import { Card } from "../ui/Card";
 import { SectionHeading } from "../ui/SectionHeading";
 import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
 import { LabelPrintDialog } from "./LabelPrintDialog";
+import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+
+type StockLocation = StockLocationRegisterRow;
+
+// "120 st · 35,5 kg" — one figure per unit, as the API sorts them.
+function formatBalances(balances: StockLocation["balances"]): string {
+  return balances.map((b) => `${formatQuantity(b.quantity)} ${b.unitCode}`).join(" · ");
+}
 
 // Date of the block in Stockholm time (the container may run UTC).
 function blockedSince(iso: string): string {
   return new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Europe/Stockholm" });
 }
 
-export function LocationsSection({ locations, warehouses }: { locations: StockLocation[]; warehouses: Warehouse[] }) {
+export function LocationsSection({
+  locations,
+  total,
+  pageSize,
+  warehouses,
+}: {
+  locations: StockLocation[];
+  total: number;
+  pageSize: number;
+  warehouses: Warehouse[];
+}) {
   const router = useRouter();
   const canWrite = useCan()(["lager"]);
   // Spärra…: the location whose dialog is open, and its note draft.
@@ -45,11 +65,9 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
   const [editActive, setEditActive] = useState(true);
   const [editFixed, setEditFixed] = useState(true);
   const [fixed, setFixed] = useState(true);
-  // Emptied locations are deactivated rather than deleted, so they are hidden
-  // here by default — the page always loads them (?includeInactive=true).
-  const [showInactive, setShowInactive] = useState(false);
-  const visibleLocations = showInactive ? locations : locations.filter((l) => l.active);
-  const inactiveCount = locations.filter((l) => !l.active).length;
+  // Emptied locations are deactivated rather than deleted; the Status filter
+  // (Aktiva by default) decides whether they are listed.
+  const visibleLocations = locations;
   // Rows ticked for Skriv ut etiketter.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [labelsOpen, setLabelsOpen] = useState(false);
@@ -144,12 +162,6 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
                 Skriv ut etiketter ({selectedIds.length})
               </Button>
             )}
-            {inactiveCount > 0 && (
-              <label style={{ display: "flex", gap: 8, alignItems: "center", fontFamily: "var(--font-body)", fontSize: 13 }}>
-                <Checkbox checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
-                Visa inaktiva ({inactiveCount})
-              </label>
-            )}
           </>
         }
       >
@@ -157,6 +169,33 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
       </SectionHeading>
       <FormError>{error}</FormError>
       {notice && <FormNotice>{notice}</FormNotice>}
+      <ListToolbar placeholder="Sök lagerplats, lager eller etikettkod…">
+        <ListFilterSelect
+          param="warehouseId"
+          allLabel="Alla lager"
+          ariaLabel="Filtrera på lager"
+          options={warehouses.map((w) => ({ value: w.id, label: w.name }))}
+        />
+        <ListFilterSelect
+          param="status"
+          allLabel="Aktiva"
+          ariaLabel="Filtrera på status"
+          options={[
+            { value: "inactive", label: "Inaktiva" },
+            { value: "all", label: "Alla" },
+          ]}
+        />
+        <ListFilterSelect
+          param="blocked"
+          allLabel="Alla lagerplatser"
+          ariaLabel="Filtrera på spärrade lagerplatser"
+          options={[
+            { value: "true", label: "Bara spärrade" },
+            { value: "false", label: "Utan spärrade" },
+          ]}
+        />
+        <ListExportLink endpoint="/api/v1/stock/locations/register/csv" />
+      </ListToolbar>
       {visibleLocations.length > 0 ? (
         <Table<StockLocation>
           columns={[
@@ -173,12 +212,14 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
                 />
               ),
             },
-            { key: "warehouseName", label: "Lager", width: "1fr" },
-            { key: "name", label: "Namn", width: "1fr" },
-            { key: "labelCode", label: "Etikettkod", width: "110px" },
-            { key: "fixed", label: "Fast", width: "80px" },
-            { key: "active", label: "Status", width: "140px" },
-            { key: "blocked", label: "Spärrad", width: "170px" },
+            { key: "warehouseName", label: "Lager", width: "minmax(90px, 1fr)" },
+            { key: "name", label: "Namn", width: "minmax(70px, 1fr)" },
+            { key: "labelCode", label: "Etikettkod", width: "90px" },
+            { key: "fixed", label: "Fast", width: "50px" },
+            { key: "active", label: "Status", width: "100px" },
+            { key: "articleCount", label: "Artiklar", width: "70px", align: "right" },
+            { key: "balances", label: "Saldo", width: "minmax(130px, 1.2fr)", align: "right" },
+            { key: "blocked", label: "Spärrad", width: "minmax(120px, 1fr)" },
             { key: "id", label: "", width: "240px", align: "right" },
           ]}
           rows={visibleLocations}
@@ -226,6 +267,10 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
                 ) : (
                   <StatusPill status="draft" label="Inaktiv" compact />
                 );
+              case "articleCount":
+                return row.articleCount;
+              case "balances":
+                return row.balances.length > 0 ? <span style={{ whiteSpace: "nowrap" }}>{formatBalances(row.balances)}</span> : "—";
               case "blocked":
                 return row.blocked ? (
                   <span style={{ display: "inline-flex", flexDirection: "column", gap: 2 }}>
@@ -266,6 +311,9 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
                     >
                       Ändra
                     </Button>
+                    <Link href={`/lager/saldon?locationId=${row.id}`} style={{ alignSelf: "center" }}>
+                      Visa saldon
+                    </Link>
                     {canWrite && row.blocked && (
                       <Button type="button" size="small" variant="ghost" disabled={pending} onClick={() => release(row)}>
                         Släpp spärr
@@ -286,14 +334,17 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
                     )}
                   </span>
                 );
+              case "labelCode":
+                return row.labelCode;
               default:
-                return row[key as keyof StockLocation];
+                return null;
             }
           }}
         />
       ) : (
-        <p>Inga lagerplatser tillagda än.</p>
+        <p>Inga lagerplatser matchar sökningen.</p>
       )}
+      <Pagination total={total} pageSize={pageSize} />
 
       <Modal open={blocking !== null} onClose={() => setBlocking(null)} title="Spärra lagerplats" compact>
         <Form onSubmit={submitBlock}>

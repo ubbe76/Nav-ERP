@@ -12,6 +12,8 @@ Lagret är **append-only**: saldot ändras aldrig direkt, utan varje förändrin
 
 Filtret **Alla lagerplatser** / **Bara spärrade** / **Utan spärrade** begränsar listan, och saldot på en [spärrad lagerplats](#sparrade-lagerplatser) märks med **Spärrad**. Kolumnen **Spärrad** finns också i CSV-exporten.
 
+En lagerplats kan visas ensam: **Visa saldon** i [Lagerplatser](#lagerplatser) öppnar listan för just den platsen.
+
 Varje rad har en **Flytta**-länk som öppnar [lagerflytten](#lagerflytt) med artikeln och lagerplatsen förvalda.
 
 Saldon och transaktioner förs alltid i artikelns **grundenhet** — även när en orderrad är skriven i en alternativ enhet räknas antalet om till grundenheten innan det bokförs (se [Artiklar](/hjalp/artiklar)).
@@ -78,6 +80,16 @@ Transaktionstyperna:
 ## Lagerplatser
 
 **Lager → Lagerplatser** hanterar lagerstrukturen: **lager** (t.ex. Huvudlager) med **lagerplatser** (t.ex. A1). Skapa nya med respektive +-knapp, och redigera befintliga med **Ändra** — namn, aktiv/inaktiv och (för lagerplatser) vilket lager platsen hör till samt om den är en **Fast lagerplats**. Kolumnen **Fast** i listan visar Ja eller Nej; en ny lagerplats är fast som förval (kryssrutan **Fast lagerplats** i **Ny lagerplats**). Se [Tomma lagerplatser städas bort](#tomma-lagerplatser-stadas-bort).
+
+Listan över lagerplatser är sidindelad och har sökfältet **Sök lagerplats, lager eller etikettkod…**. Du kan söka på platsens namn, lagrets namn eller etikettkoden, till exempel *LP0042*. Tre filter begränsar listan:
+
+- **Alla lager** (eller ett enskilt lager).
+- Status: **Aktiva** (förval), **Inaktiva** eller **Alla**. En plats som tömts och städats bort är inaktiv och syns bara under **Inaktiva** eller **Alla**.
+- **Alla lagerplatser** / **Bara spärrade** / **Utan spärrade**, som i [Saldon](#saldon).
+
+Kolumnen **Artiklar** visar hur många artiklar som har saldo på platsen (artiklar som nettar till 0 räknas inte). Kolumnen **Saldo** visar saldot per enhet, till exempel *120 st · 35,5 kg*, eftersom en summa över olika enheter inte betyder något. Länken **Visa saldon** på raden öppnar [Saldon](#saldon) bara för den platsen, och **Visa alla lagerplatser** där tar bort begränsningen. **Exportera CSV** hämtar hela urvalet, utan sidindelning, med samma sök och filter som listan: Lager, Lagerplats, Etikettkod, Fast, Spärrad, Spärrad sedan, Anteckning, Artiklar, Saldo och Status.
+
+Markera platser i listan och klicka **Skriv ut etiketter** för att skriva ut etiketterna för dem. Det gäller de markerade raderna på sidan.
 
 **Lagerplats är obligatorisk på varje transaktion**, men behöver inte väljas manuellt. Väljs ingen används i tur och ordning:
 

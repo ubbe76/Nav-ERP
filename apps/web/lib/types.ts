@@ -439,6 +439,13 @@ export interface StockLocation {
   blockedNote: string | null;
 }
 
+// GET /stock/locations/register — a location with its article count and the
+// stock summed per unit (a sum across st and kg would mean nothing).
+export interface StockLocationRegisterRow extends StockLocation {
+  articleCount: number;
+  balances: { unitCode: string; quantity: string }[];
+}
+
 // POST /stock/locations/:id/block
 export interface BlockLocationResult {
   location: StockLocation;
