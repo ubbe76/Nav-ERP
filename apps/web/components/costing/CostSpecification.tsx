@@ -10,7 +10,14 @@ import { FormActions, FormError, FormHint, FormSaved } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import { formatRate } from "../../lib/currency";
+import { formatQuantity } from "../../lib/format";
+import { OLD_CALCULATION_NOTICE, PRELIMINARY_NOTICE, isZeroAmount } from "../../lib/costVariance";
+import { Deviation, VarianceSummary } from "./VarianceSummary";
+import { formatStockholmDateTime } from "../../lib/date";
 import type {
+  CostVarianceAnalysis,
+  CostVarianceMaterialRow,
+  CostVarianceOperationRow,
   CostCalculationDetail,
   CostCalculationMaterialRow,
   CostCalculationOperationRow,
@@ -256,7 +263,186 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
           </>
         )}
       </section>
+
+      {detail.type === "post" && <VarianceSection analysis={detail.analysis} />}
     </div>
+  );
+}
+
+// --- Avvikelseanalys (#14). Tables of their own: the specification's tables
+// above keep their columns, this section never widens them. ---
+
+function qty(value: number | null): string {
+  return value === null ? "—" : formatQuantity(value);
+}
+
+function hoursText(value: number | null): string {
+  return value === null ? "—" : formatQuantity(value);
+}
+
+function VarianceSection({ analysis }: { analysis: CostVarianceAnalysis | null }) {
+  if (!analysis) {
+    return (
+      <section className={styles.section}>
+        <SectionHeading>Avvikelseanalys</SectionHeading>
+        <FormHint>{OLD_CALCULATION_NOTICE}</FormHint>
+      </section>
+    );
+  }
+  const timeRows = analysis.operationRows.filter((r): r is Extract<CostVarianceOperationRow, { kind: "time" }> => r.kind === "time");
+  const subcontractRows = analysis.operationRows.filter(
+    (r): r is Extract<CostVarianceOperationRow, { kind: "subcontract" }> => r.kind === "subcontract"
+  );
+  // Ställ/Stycke have an amount only on an operation whose time is split; in
+  // etapp 1 all reported time is Ej uppdelad, so the columns would be empty.
+  const hasSplitTime = timeRows.some((r) => r.split && (r.hours > 0 || !isZeroAmount(r.parts.setup) || !isZeroAmount(r.parts.run)));
+  const hasScrap = analysis.materialRows.some((r) => r.scrapQuantity !== 0 || r.parts.scrap !== 0);
+  return (
+    <section className={styles.section}>
+      <SectionHeading>Avvikelseanalys</SectionHeading>
+      <FormHint>
+        Kalkylerat är orderns egna rader för {formatQuantity(analysis.outputQuantity)} inlevererade, prissatta med
+        förkalkylens materialkälla ({SOURCE_LABELS[analysis.baseMaterialSource]}) per T₀,{" "}
+        {formatStockholmDateTime(analysis.basePricedAt)} (när ordern skapades). Positiv avvikelse är dyrare än kalkylerat.
+      </FormHint>
+      {analysis.preliminary && <FormHint>{PRELIMINARY_NOTICE}</FormHint>}
+
+      {analysis.materialRows.length > 0 && (
+        <>
+          <h4 className={styles.subheading}>Material och lego</h4>
+          <Table<CostVarianceMaterialRow & { id: string }>
+            columns={[
+              { key: "article", label: "Artikel", width: "minmax(160px, 1fr)" },
+              // The deviations come first: the modal is narrow, and the wide
+              // table scrolls sideways inside itself.
+              { key: "price", label: "Pris", width: "110px", align: "right" },
+              { key: "quantityPart", label: "Mängd", width: "110px", align: "right" },
+              ...(hasScrap ? [{ key: "scrap", label: "varav kassation", width: "120px", align: "right" as const }] : []),
+              { key: "baseQuantity", label: "Kalkylerat antal", width: "110px", align: "right" },
+              { key: "baseUnitCost", label: "Kalkylerat à-pris", width: "120px", align: "right" },
+              { key: "quantity", label: "Antal", width: "90px", align: "right" },
+              { key: "unitCost", label: "À-pris", width: "100px", align: "right" },
+            ]}
+            rows={analysis.materialRows.map((r) => ({ ...r, id: r.id ?? r.componentArticleId }))}
+            renderCell={(row, key) => {
+              switch (key) {
+                case "article":
+                  return (
+                    <>
+                      {row.articleNumber} · {row.articleName}
+                      {row.kind === "subcontract" && <span className={styles.tag}>lego</span>}
+                      {row.kind === "semi" && <span className={styles.tag}>halvfabrikat</span>}
+                    </>
+                  );
+                case "baseQuantity":
+                  return qty(row.baseQuantity);
+                case "baseUnitCost":
+                  return row.baseUnitCost === null ? "—" : money(row.baseUnitCost);
+                case "quantity":
+                  return qty(row.quantity);
+                case "unitCost":
+                  return money(row.unitCost);
+                case "price":
+                  return <Deviation value={row.parts.price} />;
+                case "quantityPart":
+                  return <Deviation value={row.parts.quantity} />;
+                case "scrap":
+                  return <Deviation value={row.parts.scrap} />;
+                default:
+                  return null;
+              }
+            }}
+          />
+        </>
+      )}
+
+      {timeRows.length > 0 && (
+        <>
+          <h4 className={styles.subheading}>Operationer</h4>
+          <Table<CostVarianceOperationRow & { id: string }>
+            columns={[
+              { key: "operation", label: "Operation", width: "minmax(160px, 1fr)" },
+              ...(hasSplitTime
+                ? [
+                    { key: "setupPart", label: "Ställ", width: "100px", align: "right" as const },
+                    { key: "runPart", label: "Stycke", width: "100px", align: "right" as const },
+                  ]
+                : []),
+              { key: "unclassifiedPart", label: "Ej uppdelad", width: "110px", align: "right" },
+              { key: "baseSetup", label: "Planerad ställ (h)", width: "110px", align: "right" },
+              { key: "setup", label: "Verklig ställ (h)", width: "110px", align: "right" },
+              { key: "baseRun", label: "Planerad stycke (h)", width: "120px", align: "right" },
+              { key: "run", label: "Verklig stycke (h)", width: "110px", align: "right" },
+              { key: "unclassified", label: "Ej uppdelad (h)", width: "110px", align: "right" },
+            ]}
+            rows={timeRows.map((r) => ({ ...r, id: r.id ?? `op-${r.sequenceNo}` }))}
+            renderCell={(row, key) => {
+              if (row.kind !== "time") return null;
+              switch (key) {
+                case "operation":
+                  return `${row.sequenceNo} · ${row.workCenterCode} · ${row.workCenterName}`;
+                case "baseSetup":
+                  return hoursText(row.baseSetupHours);
+                case "setup":
+                  return hoursText(row.setupHours);
+                case "baseRun":
+                  return hoursText(row.baseRunHours);
+                case "run":
+                  return hoursText(row.runHours);
+                case "unclassified":
+                  return hoursText(row.unclassifiedHours);
+                case "setupPart":
+                  return row.split ? <Deviation value={row.parts.setup} /> : "—";
+                case "runPart":
+                  return row.split ? <Deviation value={row.parts.run} /> : "—";
+                case "unclassifiedPart":
+                  return row.split ? "—" : <Deviation value={row.parts.unclassified} />;
+                default:
+                  return null;
+              }
+            }}
+          />
+        </>
+      )}
+
+      {subcontractRows.length > 0 && (
+        <>
+          <h4 className={styles.subheading}>Legooperationer</h4>
+          <Table<CostVarianceOperationRow & { id: string }>
+            columns={[
+              { key: "operation", label: "Operation", width: "minmax(160px, 1fr)" },
+              { key: "base", label: "Kalkylerat", width: "120px", align: "right" },
+              { key: "actual", label: "Utfall", width: "120px", align: "right" },
+              { key: "price", label: "Pris", width: "110px", align: "right" },
+              { key: "quantity", label: "Mängd", width: "110px", align: "right" },
+            ]}
+            rows={subcontractRows.map((r) => ({ ...r, id: r.id ?? `op-${r.sequenceNo}` }))}
+            renderCell={(row, key) => {
+              switch (key) {
+                case "operation":
+                  return `${row.sequenceNo} · ${row.workCenterCode} · ${row.workCenterName}`;
+                case "base":
+                  return money(row.base);
+                case "actual":
+                  return money(row.actual);
+                case "price":
+                  return <Deviation value={row.parts.price} />;
+                case "quantity":
+                  return <Deviation value={row.parts.quantity} />;
+                default:
+                  return null;
+              }
+            }}
+          />
+        </>
+      )}
+
+      <h4 className={styles.subheading}>Summering</h4>
+      <VarianceSummary analysis={analysis} bare />
+      <FormHint>
+        Utfall kan skilja några öre från tillverkningskostnaden i kedjan ovan, eftersom varje rad avrundas för sig.
+      </FormHint>
+    </section>
   );
 }
 
