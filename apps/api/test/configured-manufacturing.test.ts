@@ -27,6 +27,8 @@ import { configurator, makeLocation, makeUser, resetConfiguredRows, salesReposit
 import { testCostingService } from "./helpers/configurator.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { pdfText } from "./helpers/pdf.js";
+import { createReportsRepository } from "../src/modules/reports/repository/reports.repository.js";
+import { createReportsService } from "../src/modules/reports/service/reports.service.js";
 import { failure, waitForLockWaiter } from "./helpers/year-end.js";
 
 // Konfigurator 4c: a beställningsvara's TO carries its derived structure from
@@ -293,5 +295,42 @@ describe("configured TO — avvikelseanalys", () => {
       new Map([[skruv.id, 16], [plat.id, 12], [avl.id, 40], [f1.id, 6], [f2.id, 4]])
     );
     expect(analysis!.operationRows.map((r) => [r.sequenceNo, r.base])).toEqual([[10, 90], [20, 20]]);
+  });
+
+  // Kalkylutfall on a TO created the real way (Ny tillverkningsorder on the
+  // template with its choices), not a configuration written by UPDATE: Mot
+  // förkalkyl compares with configuration.cost's TVK/st (198, multi-level,
+  // with the Kalkyl operation 30) and Kalkylerat is the TO's own rows (188).
+  it("is measured in Kalkylutfall against configuration.cost, with Kalkylerat from its own rows", async () => {
+    const s = await buildToOrderWithStructure();
+    const loc = await makeLocation();
+    const user = await makeUser();
+    const mo = await mfg.createManufacturingOrder({ articleId: s.article.id, quantity: 1, configuration: { selection: FULL } }, null);
+    await mfg.start(mo.id);
+    await mfg.complete(mo.id, { quantity: 1, locationId: loc.id }, user.id);
+    const { calculation, analysis } = await testCostingService.postCalculate(mo.id, true);
+    const reports = createReportsService(createReportsRepository(db), testCostingService);
+
+    const pre = await reports.getCalculationOutcome({ view: "pre" });
+    if (pre.view !== "pre") throw new Error("view");
+    expect(pre.rows).toEqual([
+      expect.objectContaining({
+        calculationId: calculation.id,
+        manufacturingOrderId: mo.id,
+        preSource: "configuration",
+        preMultiLevel: true,
+        preTvkPerUnit: 198,
+        calculatedTvkPerUnit: 188,
+        postTvkPerUnit: analysis!.actual,
+        outputQuantity: 1,
+        perUnitBasis: "output",
+      }),
+    ]);
+    expect(pre.notComparable).toEqual({ onlyPost: 0, invalidQuantity: 0, noOutput: 0 });
+
+    const byOrder = await reports.getCalculationOutcome({ view: "analysis", groupBy: "order" });
+    if (byOrder.view !== "analysis") throw new Error("view");
+    expect(byOrder.counts).toEqual({ analysed: 1, preliminary: 0, withoutAnalysis: 0 });
+    expect(byOrder.rows).toEqual([expect.objectContaining({ calculationId: calculation.id, base: 188, actual: analysis!.actual, deviation: analysis!.deviation })]);
   });
 });

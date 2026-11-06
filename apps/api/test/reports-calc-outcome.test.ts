@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { costCalculations, db, manufacturingOrders } from "@navet/db";
-import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
+import { testArticleService, testDocumentPdfService, testSystemService } from "./helpers/services.js";
 import { buildApp } from "../src/app.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -11,6 +11,12 @@ import { createCostingRepository } from "../src/modules/costing/repository/costi
 import { createCostingService } from "../src/modules/costing/service/costing.service.js";
 import { createManufacturingRepository } from "../src/modules/manufacturing/repository/manufacturing.repository.js";
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
+import { createMailRepository } from "../src/modules/mail/repository/mail.repository.js";
+import { createMailService } from "../src/modules/mail/service/mail.service.js";
+import { createPurchaseRepository } from "../src/modules/purchase/repository/purchase.repository.js";
+import { createPurchaseService } from "../src/modules/purchase/service/purchase.service.js";
+import { createRegisterRepository } from "../src/modules/register/repository/register.repository.js";
+import { createRegisterService } from "../src/modules/register/service/register.service.js";
 import { createReportsRepository } from "../src/modules/reports/repository/reports.repository.js";
 import { createReportsService } from "../src/modules/reports/service/reports.service.js";
 import type {
@@ -23,6 +29,13 @@ import { createStockService } from "../src/modules/stock/service/stock.service.j
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
+import { waitForLockWaiter } from "./helpers/year-end.js";
+
+function gate() {
+  let open!: () => void;
+  const promise = new Promise<void>((resolve) => (open = resolve));
+  return { promise, open };
+}
 
 // Kalkylutfall against the real save paths: the förkalkyl is saved the only
 // way the costing module saves one (on the article, no MO) and the
@@ -52,7 +65,18 @@ const costingService = createCostingService(createCostingRepository(db), {
 // service is the real implementation app.ts wires.
 const reportsService = createReportsService(createReportsRepository(db), costingService);
 
-const TRUNCATE = sql`TRUNCATE cost_calculations, time_reports, employees, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, stock_transactions, stock_locations, warehouses, bom_components, articles, user_settings, audit_log, users CASCADE`;
+// Receiving a lego IO row reports the TO's lego operation (app.ts's wiring).
+const purchaseService = createPurchaseService(
+  createPurchaseRepository(db),
+  createRegisterService(createRegisterRepository(db)),
+  createMailService(createMailRepository(db), testSystemService),
+  testDocumentPdfService,
+  testArticleService,
+  testSystemService,
+  mfgService
+);
+
+const TRUNCATE = sql`TRUNCATE cost_calculations, time_reports, employees, purchase_order_rows, purchase_orders, suppliers, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, stock_transactions, stock_locations, warehouses, bom_components, articles, user_settings, audit_log, users CASCADE`;
 
 beforeEach(async () => {
   await db.execute(TRUNCATE);
@@ -338,6 +362,158 @@ describe("Kalkylutfall — Avvikelseanalys", () => {
     expect(july.counts).toEqual({ analysed: 0, preliminary: 0, withoutAnalysis: 0 });
     // A later period does not see it either.
     expect((await reportsService.getCalculationOutcome({ view: "analysis", from: "2026-09", to: "2026-12" })).rows).toEqual([]);
+  });
+
+  // The headers, the row tables and the förkalkyler are separate statements,
+  // and each one evaluates "the latest efterkalkyl per TO" again. A Spara
+  // committed between them must not give the report header A with the rows
+  // of B (A then has no rows, and its whole Utfall lands in Påslag): the
+  // report reads one snapshot. Deterministic with two clients — the other
+  // one holds the row table, so the report's second statement waits on it
+  // while the new efterkalkyl is saved and committed through the real path.
+  it("reads one snapshot: an efterkalkyl saved between the statements is not half read", async () => {
+    const p = await makeProduct();
+    const order = await makeOrder(p, { quantity: 5, drawn: 10, hours: 1.5, received: 5 });
+    const { calculation: first } = await costingService.postCalculate(order.id, true);
+    const [operation] = await mfgService.listOperations(order.id);
+
+    const locked = gate();
+    const release = gate();
+    let second: { id: string } | null = null;
+    const saving = db.transaction(async (tx) => {
+      await tx.execute(sql`lock table cost_calculation_material_rows in access exclusive mode`);
+      locked.open();
+      await release.promise;
+      // Efterrapportering, then Spara — committed while the report waits.
+      await tx.execute(
+        sql`insert into time_reports (employee_id, mo_operation_id, date, hours) values (${p.employee.id}, ${operation!.id}, '2026-07-08', 1)`
+      );
+      const inTx = createCostingService(createCostingRepository(tx), {
+        getSettings: async () => ({
+          costingMaterialSource: "standard" as const,
+          costingMoPercent: 0,
+          costingLoPercent: 0,
+          costingAffoPercent: 0,
+          costingGeneralMarkupPercent: 0,
+        }),
+      });
+      second = (await inTx.postCalculate(order.id, true)).calculation;
+    });
+    saving.catch(() => locked.open());
+    await locked.promise;
+    const report = reportsService.getCalculationOutcome({ view: "analysis" });
+    await waitForLockWaiter().finally(release.open);
+    await saving;
+    const result = await report;
+
+    if (result.view !== "analysis") throw new Error("view");
+    // The snapshot's facit is the first efterkalkyl, with its own rows: 100 + 1.5 h × 600.
+    expect(result.rows.map((r) => (r as AnalysisOrderRow).calculationId)).toEqual([first.id]);
+    expect(result.rows[0]).toMatchObject({ base: 700, actual: 1000, deviation: 300 });
+    expect((result.rows[0] as AnalysisOrderRow).parts).toMatchObject({ quantity: 0, unclassified: 300, markups: 0 });
+    // Read again, the report sees the new facit.
+    const after = await reportsService.getCalculationOutcome({ view: "analysis" });
+    expect(after.rows.map((r) => (r as AnalysisOrderRow).calculationId)).toEqual([second!.id]);
+    expect(after.rows[0]).toMatchObject({ actual: 1600 });
+  });
+});
+
+// MO and LO on both sides, and a lego operation bought on an IO: the
+// report's sums and its Resurs grouping read the saved analysis exactly as
+// GET /cost-calculations/:id derives it.
+describe("Kalkylutfall — MO, LO och lego", () => {
+  const markedUp = createCostingService(createCostingRepository(db), {
+    getSettings: async () => ({
+      costingMaterialSource: "standard" as const,
+      costingMoPercent: 10,
+      costingLoPercent: 20,
+      costingAffoPercent: 0,
+      costingGeneralMarkupPercent: 0,
+    }),
+  });
+  const markedUpReports = createReportsService(createReportsRepository(db), markedUp);
+
+  // The product of makeProduct plus a lego operation 20 (ställpris 500,
+  // styckpris 100). An order of 5: the component's price raised from 10 to
+  // 11 after T₀ and then the planned 10 drawn, 1.5 h (1 planned), and the
+  // lego bought on an IO at 450 + 90 × 5, whose receipt — the last
+  // operation — delivers the 5 and makes the order Klar.
+  //   Utfall:     110 + MO 11 + 900 + lego 900 + LO 180 = 2101
+  //   Kalkylerat: 100 + MO 10 + 600 + lego 1000 + LO 200 = 1910
+  //   Pris 10 − 100, Ej uppdelad 300, Påslag 191 − 210 = −19.
+  async function legoOrder() {
+    const p = await makeProduct();
+    const supplier = await purchaseService.createSupplier({ name: "Lego AB", active: true });
+    const lego = await mfgService.createWorkCenter({ code: "900", name: "Ytbehandling", type: "subcontract", supplierId: supplier.id, active: true });
+    await mfgService.createRoutingOperation(p.parent.id, { sequenceNo: 20, workCenterId: lego.id, setupTime: 0, runTimePerUnit: 0, setupPrice: 500, unitPrice: 100 });
+    const order = await makeOrder(p, { quantity: 5, hours: 1.5 });
+    await articleService.updateStandardCost(p.component.id, 11);
+    const [material] = await mfgService.listMaterialConsumptions(order.id);
+    await mfgService.consumeMaterial(order.id, material!.id, { locationId: p.location.id, quantity: 10 }, p.user.id);
+    const legoOperation = (await mfgService.listOperations(order.id)).find((op) => op.sequenceNo === 20)!;
+    const io = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, p.user.id);
+    const row = await purchaseService.addRow(io.id, { articleId: p.parent.id, quantity: 5, unitPrice: 90, setupPrice: 450, moOperationId: legoOperation.id });
+    await purchaseService.confirm(io.id);
+    await purchaseService.receiveGoods(io.id, row.id, { quantity: 5 }, p.user.id);
+    return { p, lego, order };
+  }
+
+  it("sums MO, LO and the lego operation per order, and groups the time and the lego per resource", async () => {
+    const { p, lego, order } = await legoOrder();
+    // Förkalkyl for 5 at today's price: 110 + 11 + 600 + 1000 + 200 = 1921.
+    await markedUp.preCalculate(p.parent.id, 5, true);
+    const { calculation, analysis } = await markedUp.postCalculate(order.id, true);
+    expect(analysis).toMatchObject({ preliminary: false, outputQuantity: 5, base: 1910, actual: 2101, deviation: 191 });
+
+    const byOrder = await markedUpReports.getCalculationOutcome({ view: "analysis", groupBy: "order" });
+    if (byOrder.view !== "analysis") throw new Error("view");
+    expect(byOrder.rows).toEqual([
+      expect.objectContaining({ calculationId: calculation.id, outputQuantity: 5, base: 1910, actual: 2101, deviation: 191, deviationPct: 10 }),
+    ]);
+    expect((byOrder.rows[0] as AnalysisOrderRow).parts).toEqual(analysis!.parts);
+    expect(byOrder.kpis).toMatchObject({ base: 1910, actual: 2101, deviation: 191, price: -90, quantity: 0, time: 300, markups: -19 });
+    // Pris + Mängd + Tid + Påslag = Avvikelse, exactly.
+    expect(Math.round((byOrder.kpis.price + byOrder.kpis.quantity + byOrder.kpis.time + byOrder.kpis.markups) * 100)).toBe(19100);
+
+    const byResource = await markedUpReports.getCalculationOutcome({ view: "analysis", groupBy: "workCenter" });
+    if (byResource.view !== "analysis") throw new Error("view");
+    expect(byResource.rows as AnalysisWorkCenterRow[]).toEqual([
+      expect.objectContaining({
+        key: `${p.workCenter.id}:time`,
+        kind: "time",
+        baseSetupHours: 0.5,
+        baseRunHours: 0.5,
+        hours: 1.5,
+        unclassifiedHours: 1.5,
+        timeDeviation: 300,
+        base: 600,
+        actual: 900,
+        baseQuantity: null,
+      }),
+      expect.objectContaining({
+        key: `${lego.id}:subcontract`,
+        workCenterCode: "900",
+        kind: "subcontract",
+        operationCount: 1,
+        orderCount: 1,
+        baseQuantity: 5,
+        subcontractQuantity: 5,
+        hours: null,
+        timeDeviation: null,
+        base: 1000,
+        actual: 900,
+        deviation: -100,
+      }),
+    ]);
+    expect((byResource.rows[1] as AnalysisWorkCenterRow).parts).toMatchObject({ price: -100, quantity: 0, markups: 0 });
+    // The table is the operations; material, MO and LO are only in the KPIs.
+    expect(byResource.totals).toMatchObject({ base: 1600, actual: 1800, deviation: 200 });
+    expect(byResource.kpis.deviation).toBe(191);
+
+    // Mot förkalkyl: each TVK with its MO/LO, the efterkalkyl's and Kalkylerat divided by N.
+    const pre = await markedUpReports.getCalculationOutcome({ view: "pre" });
+    if (pre.view !== "pre") throw new Error("view");
+    expect(pre.rows[0]).toMatchObject({ preTvkPerUnit: 384.2, calculatedTvkPerUnit: 382, postTvkPerUnit: 420.2, perUnitBasis: "output" });
   });
 });
 

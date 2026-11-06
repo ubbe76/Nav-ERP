@@ -532,10 +532,11 @@ describe("pre- and post-calculation with a lego operation", () => {
     const legoRow = (r: Awaited<ReturnType<typeof costingService.postCalculate>>) =>
       r.analysis!.operationRows.find((row) => row.kind === "subcontract")!;
 
-    // Not worked yet and no IO: the reserve takes the one-off 550 even at OK 0,
-    // and F₀ follows what it took — no Pris on an unworked operation.
+    // Not worked yet and no IO: the reserve takes no one-off (it never arose),
+    // and neither does the base — nothing on an unworked operation.
     let result = await costingService.postCalculate(order.id);
-    expect(legoRow(result)).toMatchObject({ baseQuantity: 0, baseOneOff: 550, baseUnitPrice: 100, base: 550, actual: 550, deviation: 0 });
+    expect(result.calculation.subcontractCost).toBe("0.0000");
+    expect(legoRow(result)).toMatchObject({ baseQuantity: 0, baseOneOff: 0, baseUnitPrice: 100, base: 0, actual: 0, deviation: 0 });
     expect(legoRow(result).parts).toMatchObject({ price: 0, quantity: 0 });
 
     // Reported without an IO: the fallback A = 550 + 100 × 2 is exactly the base for 2 OK.
@@ -564,18 +565,37 @@ describe("pre- and post-calculation with a lego operation", () => {
     expect(result.analysis!.parts.price).toBe(-120);
   });
 
-  it("gives an unworked lego operation on an order closed at 0 no deviation (the reserve's one-off is the base's)", async () => {
+  // The reserve (no IO receipt) takes the one-off only by the ställregel:
+  // worked, or a final order with N > 0. A Makulerad or nollstängd order's
+  // unworked operation cost nothing, so its Kalkylerat, Utfall and N-share
+  // stay 0 instead of carrying a one-off that never arose.
+  it("takes no reserve one-off for an unworked lego operation on an order closed at 0 or cancelled, but does with N > 0", async () => {
     const fixture = await makeLegoRouting({ setupPrice: 500, unitPrice: 100, transportPrice: 50 });
-    const order = await mfgService.createManufacturingOrder({ articleId: fixture.parent.id, quantity: 4 }, fixture.user.id);
-    await mfgService.complete(order.id, { quantity: 0 }, fixture.user.id);
+    const legoOf = (r: Awaited<ReturnType<typeof costingService.postCalculate>>) =>
+      r.analysis!.operationRows.find((row) => row.kind === "subcontract")!;
 
-    const result = await costingService.postCalculate(order.id, true);
+    const closedAtZero = await mfgService.createManufacturingOrder({ articleId: fixture.parent.id, quantity: 4 }, fixture.user.id);
+    await mfgService.complete(closedAtZero.id, { quantity: 0 }, fixture.user.id);
+    let result = await costingService.postCalculate(closedAtZero.id, true);
+    expect(result.calculation.subcontractCost).toBe("0.0000");
+    expect(result.analysis).toMatchObject({ preliminary: false, outputQuantity: 0, base: 0, actual: 0, deviation: 0 });
+    expect(legoOf(result)).toMatchObject({ baseQuantity: 0, baseOneOff: 0, subcontractQuantity: 0, base: 0, actual: 0, deviation: 0 });
 
-    expect(result.analysis).toMatchObject({ preliminary: false, outputQuantity: 0 });
-    const lego = result.analysis!.operationRows.find((row) => row.kind === "subcontract")!;
-    // Utfall = the reserve 550 + 100 × 0; Kalkylerat = F₀ 550 + 100 × N 0.
-    expect(lego).toMatchObject({ baseQuantity: 0, baseOneOff: 550, subcontractQuantity: 0, base: 550, actual: 550, deviation: 0 });
-    expect(lego.parts).toMatchObject({ price: 0, quantity: 0 });
+    const cancelled = await mfgService.createManufacturingOrder({ articleId: fixture.parent.id, quantity: 4 }, fixture.user.id);
+    await mfgService.cancel(cancelled.id, fixture.user.id);
+    result = await costingService.postCalculate(cancelled.id, true);
+    expect(result.calculation.subcontractCost).toBe("0.0000");
+    expect(result.analysis).toMatchObject({ preliminary: false, outputQuantity: 0, base: 0, actual: 0 });
+
+    // Slutför order delivers 4 without the lego operation reported: the order
+    // is final with N = 4, so the reserve takes F 550 (+ 100 × OK 0) and the
+    // base F₀ 550 + 100 × 4 — the missing units are Mängd, the one-off nothing.
+    const delivered = await mfgService.createManufacturingOrder({ articleId: fixture.parent.id, quantity: 4 }, fixture.user.id);
+    await mfgService.complete(delivered.id, { quantity: 4 }, fixture.user.id);
+    result = await costingService.postCalculate(delivered.id, true);
+    expect(result.calculation.subcontractCost).toBe("550.0000");
+    expect(legoOf(result)).toMatchObject({ baseQuantity: 4, baseOneOff: 550, subcontractQuantity: 0, base: 950, actual: 550 });
+    expect(legoOf(result).parts).toMatchObject({ price: 0, quantity: -400 });
   });
 });
 

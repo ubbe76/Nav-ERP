@@ -352,13 +352,21 @@ describe("cost-variance — the whole analysis", () => {
     expect(ore(analysis.actual) - ore(analysis.base)).toBe(ore(analysis.deviation));
     expect(partsSum(analysis.parts)).toBe(ore(analysis.deviation));
     for (const row of rows) expect(partsSum(row.parts)).toBe(ore(row.deviation));
-    // The order's sides are the rows' sums plus each side's markup.
+    // The order's sides are the rows' sums plus each side's markup; Kalkylerat
+    // is the base's TVK, summed like the header's from the unrounded base
+    // amounts (SQ × SP, R₀ × (Bs + Br), F₀ + P₀ × N).
     const rowBase = rows.reduce((t, r) => t + ore(r.base), 0);
     const rowActual = rows.reduce((t, r) => t + ore(r.actual), 0);
-    const materialBase = ore(analysis.materialRows[0]!.base) / 100;
-    const legoBase = (ore(analysis.materialRows[1]!.base) + ore(analysis.operationRows[1]!.base)) / 100;
-    const baseMarkup = Math.round((materialBase * 0.125 + legoBase * 0.07) * 100);
-    expect(ore(analysis.base)).toBe(rowBase + baseMarkup);
+    const baseTvk = tvkOf(
+      [
+        material({ amount: 16.6667 * 3.3333 }),
+        material({ componentArticleId: "s1", kind: "subcontract", amount: 10 * 12.345 }),
+      ],
+      [timeOp({ laborAmount: 600 * (0.5 + 1.6667) }), legoOp({ subcontractAmount: 500 + 100 * 4 })],
+      12.5,
+      7
+    );
+    expect(ore(analysis.base)).toBe(Math.round(baseTvk * 100));
     expect(ore(analysis.actual) - rowActual - (ore(analysis.base) - rowBase)).toBe(ore(analysis.parts.markups));
     // Utfall is the efterkalkyl's TVK in öre, exactly.
     expect(ore(analysis.actual)).toBe(
@@ -391,16 +399,17 @@ describe("cost-variance — the whole analysis", () => {
     expect(analysis.deviation).toBe(982);
   });
 
-  it("makes Utfall the efterkalkyl's TVK and puts the rows' rounding rest in Påslag", () => {
+  it("makes Utfall the efterkalkyl's TVK and Kalkylerat the base's, so the rows' rounding rest is no deviation", () => {
     // Three rows of 0.3333: each is 0.33 in öre, Σ 0.99, but the TVK is
-    // 0.9999 → 1.00. Without MO the whole öre is the rows' rounding rest.
+    // 0.9999 → 1.00. The base's TVK is summed the same way, so an outcome
+    // exactly as calculated has Påslag 0 — the rest is on both sides.
     const rows = [1, 2, 3].map((i) =>
       material({ componentArticleId: `c${i}`, baseQuantity: 1, baseUnitCost: 0.3333, quantity: 1, unitCost: 0.3333, amount: 0.3333 })
     );
     const analysis = analyse({}, rows, [])!;
-    expect(analysis.materialRows.map((r) => r.actual)).toEqual([0.33, 0.33, 0.33]);
-    expect([analysis.base, analysis.actual, analysis.deviation, analysis.parts.markups]).toEqual([0.99, 1, 0.01, 0.01]);
-    // The same with 200 rows and MO 25 %: Utfall still the TVK to the öre.
+    expect(analysis.materialRows.map((r) => [r.base, r.actual])).toEqual([[0.33, 0.33], [0.33, 0.33], [0.33, 0.33]]);
+    expect([analysis.base, analysis.actual, analysis.deviation, analysis.parts.markups]).toEqual([1, 1, 0, 0]);
+    // The same with 200 rows and MO 25 %: both sides the TVK to the öre.
     const many = Array.from({ length: 200 }, (_, i) =>
       material({ componentArticleId: `m${i}`, baseQuantity: 1, baseUnitCost: 0.3333, quantity: 1, unitCost: 0.3333, amount: 0.3333 })
     );
@@ -408,8 +417,12 @@ describe("cost-variance — the whole analysis", () => {
     // TVK 66.66 + 16.665 = 83.3250 → 83.33 (half away from zero on the
     // decimal value, not on the binary 8332.4999…); the rows Σ 66.00.
     expect(tvkOf(many, [], 25)).toBeCloseTo(83.325, 10);
-    expect(big.actual).toBe(83.33);
-    expect(partsSum(big.parts)).toBe(ore(big.deviation));
+    expect([big.base, big.actual, big.deviation, big.parts.markups]).toEqual([83.33, 83.33, 0, 0]);
+    // One öre over plan on one row: the deviation is that row's, not Påslag's.
+    const over = analyse({}, [...rows.slice(0, 2), material({ componentArticleId: "c3", baseQuantity: 1, baseUnitCost: 0.3333, quantity: 1, unitCost: 0.3433, amount: 0.3433 })], [])!;
+    expect([over.base, over.actual, over.deviation]).toEqual([1, 1.01, 0.01]);
+    expect(over.parts).toMatchObject({ price: 0.01, quantity: 0, markups: 0 });
+    expect(partsSum(over.parts)).toBe(ore(over.deviation));
   });
 
   it("is all zero when the outcome is the calculation", () => {

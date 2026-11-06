@@ -23,6 +23,7 @@ import {
   suppliers,
   workCenters,
   type Db,
+  type Tx,
 } from "@navet/db";
 import type { PrecisionOrderInput } from "../service/delivery-precision-calc.js";
 import type { OrderRowConfigurationCost, SalesStatisticsQuery, PurchaseStatisticsQuery, ScrapStatisticsQuery } from "@navet/shared";
@@ -62,6 +63,126 @@ function monthRangeToDates(from: string, to: string): { start: string; end: stri
 // the pure calcs do the bucketing/filtering.
 
 const toIso = (raw: string | Date | null) => (raw == null ? null : new Date(raw).toISOString());
+
+// Kalkylutfall's reads, on one executor (the caller's snapshot) and in
+// sequence: the statements share the transaction's connection.
+async function readCalculationOutcome(ex: Db | Tx, range: { from: string; to: string }, opts: { withPre: boolean }) {
+  // Aliased by hand: inside these subqueries an unqualified column would
+  // bind to whichever table is nearest, and the outer queries join others.
+  const periodPostIds = sql`(
+    select cc.id from ${costCalculations} cc
+    where cc.id in (
+      select distinct on (latest.manufacturing_order_id) latest.id
+      from ${costCalculations} latest
+      where latest.type = 'post' and latest.manufacturing_order_id is not null
+      order by latest.manufacturing_order_id, latest.calculated_at desc, latest.id desc
+    )
+    and to_char(cc.calculated_at at time zone 'Europe/Stockholm', 'YYYY-MM') between ${range.from} and ${range.to}
+  )`;
+
+  const headers = await ex
+    .select({
+      id: costCalculations.id,
+      articleId: costCalculations.articleId,
+      manufacturingOrderId: costCalculations.manufacturingOrderId,
+      orderNumber: manufacturingOrders.orderNumber,
+      configuration: manufacturingOrders.configuration,
+      articleNumber: articles.articleNumber,
+      articleName: articles.name,
+      quantity: costCalculations.quantity,
+      calculatedAt: costCalculations.calculatedAt,
+      materialCost: costCalculations.materialCost,
+      materialOverhead: costCalculations.materialOverhead,
+      laborCost: costCalculations.laborCost,
+      subcontractCost: costCalculations.subcontractCost,
+      subcontractOverhead: costCalculations.subcontractOverhead,
+      semiFinishedCost: costCalculations.semiFinishedCost,
+      moPercent: costCalculations.moPercent,
+      loPercent: costCalculations.loPercent,
+      outputQuantity: costCalculations.outputQuantity,
+      preliminary: costCalculations.preliminary,
+      basePricedAt: costCalculations.basePricedAt,
+      baseMaterialSource: costCalculations.baseMaterialSource,
+    })
+    .from(costCalculations)
+    .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, costCalculations.manufacturingOrderId))
+    .innerJoin(articles, eq(articles.id, costCalculations.articleId))
+    .where(sql`${costCalculations.id} in ${periodPostIds}`);
+
+  const materialRows = await ex
+    .select({
+      costCalculationId: costCalculationMaterialRows.costCalculationId,
+      id: costCalculationMaterialRows.id,
+      componentArticleId: costCalculationMaterialRows.componentArticleId,
+      articleNumber: articles.articleNumber,
+      articleName: articles.name,
+      kind: costCalculationMaterialRows.kind,
+      quantity: costCalculationMaterialRows.quantity,
+      unitCost: costCalculationMaterialRows.unitCost,
+      amount: costCalculationMaterialRows.amount,
+      baseQuantity: costCalculationMaterialRows.baseQuantity,
+      baseUnitCost: costCalculationMaterialRows.baseUnitCost,
+      basePriceSource: costCalculationMaterialRows.basePriceSource,
+      scrapQuantity: costCalculationMaterialRows.scrapQuantity,
+    })
+    .from(costCalculationMaterialRows)
+    .innerJoin(articles, eq(articles.id, costCalculationMaterialRows.componentArticleId))
+    .where(sql`${costCalculationMaterialRows.costCalculationId} in ${periodPostIds}`)
+    .orderBy(asc(costCalculationMaterialRows.createdAt), asc(costCalculationMaterialRows.id));
+
+  const operationRows = await ex
+    .select({
+      costCalculationId: costCalculationOperationRows.costCalculationId,
+      id: costCalculationOperationRows.id,
+      sequenceNo: costCalculationOperationRows.sequenceNo,
+      workCenterId: costCalculationOperationRows.workCenterId,
+      workCenterCode: workCenters.code,
+      workCenterName: workCenters.name,
+      hours: costCalculationOperationRows.hours,
+      setupHours: costCalculationOperationRows.setupHours,
+      runHours: costCalculationOperationRows.runHours,
+      hourlyRate: costCalculationOperationRows.hourlyRate,
+      laborAmount: costCalculationOperationRows.laborAmount,
+      subcontractAmount: costCalculationOperationRows.subcontractAmount,
+      baseSetupHours: costCalculationOperationRows.baseSetupHours,
+      baseRunHours: costCalculationOperationRows.baseRunHours,
+      baseHourlyRate: costCalculationOperationRows.baseHourlyRate,
+      baseQuantity: costCalculationOperationRows.baseQuantity,
+      subcontractQuantity: costCalculationOperationRows.subcontractQuantity,
+      baseUnitPrice: costCalculationOperationRows.baseUnitPrice,
+      baseOneOff: costCalculationOperationRows.baseOneOff,
+    })
+    .from(costCalculationOperationRows)
+    .innerJoin(workCenters, eq(workCenters.id, costCalculationOperationRows.workCenterId))
+    .where(sql`${costCalculationOperationRows.costCalculationId} in ${periodPostIds}`)
+    .orderBy(asc(costCalculationOperationRows.sequenceNo), asc(costCalculationOperationRows.id));
+
+  const preCalculations = opts.withPre
+    ? await ex
+        .select({
+          articleId: costCalculations.articleId,
+          quantity: costCalculations.quantity,
+          calculatedAt: costCalculations.calculatedAt,
+          materialCost: costCalculations.materialCost,
+          materialOverhead: costCalculations.materialOverhead,
+          laborCost: costCalculations.laborCost,
+          subcontractCost: costCalculations.subcontractCost,
+          subcontractOverhead: costCalculations.subcontractOverhead,
+          semiFinishedCost: costCalculations.semiFinishedCost,
+          multiLevel: costCalculations.multiLevel,
+        })
+        .from(costCalculations)
+        .where(
+          and(
+            eq(costCalculations.type, "pre"),
+            isNull(costCalculations.manufacturingOrderId),
+            sql`${costCalculations.articleId} in (select period.article_id from ${costCalculations} period where period.id in ${periodPostIds})`
+          )
+        )
+    : [];
+
+  return { headers, materialRows, operationRows, preCalculations };
+}
 
 export function createReportsRepository(db: Db) {
   return {
@@ -136,121 +257,14 @@ export function createReportsRepository(db: Db) {
     // article-level förkalkyler (manufacturing_order_id null — the only kind
     // the costing module saves) of the period's articles for Mot förkalkyl.
     async loadCalculationOutcome(range: { from: string; to: string }, opts: { withPre: boolean }) {
-      // Aliased by hand: inside these subqueries an unqualified column would
-      // bind to whichever table is nearest, and the outer queries join others.
-      const periodPostIds = sql`(
-        select cc.id from ${costCalculations} cc
-        where cc.id in (
-          select distinct on (latest.manufacturing_order_id) latest.id
-          from ${costCalculations} latest
-          where latest.type = 'post' and latest.manufacturing_order_id is not null
-          order by latest.manufacturing_order_id, latest.calculated_at desc, latest.id desc
-        )
-        and to_char(cc.calculated_at at time zone 'Europe/Stockholm', 'YYYY-MM') between ${range.from} and ${range.to}
-      )`;
-
-      const headers = await db
-        .select({
-          id: costCalculations.id,
-          articleId: costCalculations.articleId,
-          manufacturingOrderId: costCalculations.manufacturingOrderId,
-          orderNumber: manufacturingOrders.orderNumber,
-          configuration: manufacturingOrders.configuration,
-          articleNumber: articles.articleNumber,
-          articleName: articles.name,
-          quantity: costCalculations.quantity,
-          calculatedAt: costCalculations.calculatedAt,
-          materialCost: costCalculations.materialCost,
-          materialOverhead: costCalculations.materialOverhead,
-          laborCost: costCalculations.laborCost,
-          subcontractCost: costCalculations.subcontractCost,
-          subcontractOverhead: costCalculations.subcontractOverhead,
-          semiFinishedCost: costCalculations.semiFinishedCost,
-          moPercent: costCalculations.moPercent,
-          loPercent: costCalculations.loPercent,
-          outputQuantity: costCalculations.outputQuantity,
-          preliminary: costCalculations.preliminary,
-          basePricedAt: costCalculations.basePricedAt,
-          baseMaterialSource: costCalculations.baseMaterialSource,
-        })
-        .from(costCalculations)
-        .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, costCalculations.manufacturingOrderId))
-        .innerJoin(articles, eq(articles.id, costCalculations.articleId))
-        .where(sql`${costCalculations.id} in ${periodPostIds}`);
-
-      const materialRows = await db
-        .select({
-          costCalculationId: costCalculationMaterialRows.costCalculationId,
-          id: costCalculationMaterialRows.id,
-          componentArticleId: costCalculationMaterialRows.componentArticleId,
-          articleNumber: articles.articleNumber,
-          articleName: articles.name,
-          kind: costCalculationMaterialRows.kind,
-          quantity: costCalculationMaterialRows.quantity,
-          unitCost: costCalculationMaterialRows.unitCost,
-          amount: costCalculationMaterialRows.amount,
-          baseQuantity: costCalculationMaterialRows.baseQuantity,
-          baseUnitCost: costCalculationMaterialRows.baseUnitCost,
-          basePriceSource: costCalculationMaterialRows.basePriceSource,
-          scrapQuantity: costCalculationMaterialRows.scrapQuantity,
-        })
-        .from(costCalculationMaterialRows)
-        .innerJoin(articles, eq(articles.id, costCalculationMaterialRows.componentArticleId))
-        .where(sql`${costCalculationMaterialRows.costCalculationId} in ${periodPostIds}`)
-        .orderBy(asc(costCalculationMaterialRows.createdAt), asc(costCalculationMaterialRows.id));
-
-      const operationRows = await db
-        .select({
-          costCalculationId: costCalculationOperationRows.costCalculationId,
-          id: costCalculationOperationRows.id,
-          sequenceNo: costCalculationOperationRows.sequenceNo,
-          workCenterId: costCalculationOperationRows.workCenterId,
-          workCenterCode: workCenters.code,
-          workCenterName: workCenters.name,
-          hours: costCalculationOperationRows.hours,
-          setupHours: costCalculationOperationRows.setupHours,
-          runHours: costCalculationOperationRows.runHours,
-          hourlyRate: costCalculationOperationRows.hourlyRate,
-          laborAmount: costCalculationOperationRows.laborAmount,
-          subcontractAmount: costCalculationOperationRows.subcontractAmount,
-          baseSetupHours: costCalculationOperationRows.baseSetupHours,
-          baseRunHours: costCalculationOperationRows.baseRunHours,
-          baseHourlyRate: costCalculationOperationRows.baseHourlyRate,
-          baseQuantity: costCalculationOperationRows.baseQuantity,
-          subcontractQuantity: costCalculationOperationRows.subcontractQuantity,
-          baseUnitPrice: costCalculationOperationRows.baseUnitPrice,
-          baseOneOff: costCalculationOperationRows.baseOneOff,
-        })
-        .from(costCalculationOperationRows)
-        .innerJoin(workCenters, eq(workCenters.id, costCalculationOperationRows.workCenterId))
-        .where(sql`${costCalculationOperationRows.costCalculationId} in ${periodPostIds}`)
-        .orderBy(asc(costCalculationOperationRows.sequenceNo), asc(costCalculationOperationRows.id));
-
-      const preCalculations = opts.withPre
-        ? await db
-            .select({
-              articleId: costCalculations.articleId,
-              quantity: costCalculations.quantity,
-              calculatedAt: costCalculations.calculatedAt,
-              materialCost: costCalculations.materialCost,
-              materialOverhead: costCalculations.materialOverhead,
-              laborCost: costCalculations.laborCost,
-              subcontractCost: costCalculations.subcontractCost,
-              subcontractOverhead: costCalculations.subcontractOverhead,
-              semiFinishedCost: costCalculations.semiFinishedCost,
-              multiLevel: costCalculations.multiLevel,
-            })
-            .from(costCalculations)
-            .where(
-              and(
-                eq(costCalculations.type, "pre"),
-                isNull(costCalculations.manufacturingOrderId),
-                sql`${costCalculations.articleId} in (select period.article_id from ${costCalculations} period where period.id in ${periodPostIds})`
-              )
-            )
-        : [];
-
-      return { headers, materialRows, operationRows, preCalculations };
+      // ONE snapshot (repeatable read, read only — PIA's readSources): every
+      // statement evaluates the latest-efterkalkyl subquery again, and a Spara
+      // committed between two of them would give a TO header A with the rows
+      // of B — A without rows, its whole Utfall in Påslag. No HTTP inside.
+      return db.transaction((tx) => readCalculationOutcome(tx, range, opts), {
+        isolationLevel: "repeatable read",
+        accessMode: "read only",
+      });
     },
 
     // F1 Rapporter — försäljningsstatistik. Sign flip on credit invoices

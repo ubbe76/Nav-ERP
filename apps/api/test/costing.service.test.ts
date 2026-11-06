@@ -1487,6 +1487,29 @@ describe("costing service — variance analysis", () => {
     expect((await costingService.getCostCalculation(calculation.id))!.analysis).toEqual(analysis);
   });
 
+  // Kalkylerat is the base's TVK, summed like the header's: an outcome
+  // exactly as calculated has Påslag 0, also when the rows' öre rounding
+  // leaves a rest (10.004 → 10.00 twice, TVK 622.0091 → 622.01). A markup
+  // on the rounded base rows gave 1 öre here.
+  it("gives Påslag 0 when the outcome is exactly the calculation, with MO, LO and a rounding rest", async () => {
+    Object.assign(costingSettings, { costingMoPercent: 12.5, costingLoPercent: 7.5 });
+    const f = await makeFixture({ quantity: 5, service: { standardCost: 1.0004, quantity: 2 } });
+    await articleService.updateStandardCost(f.component.id, 1.0004);
+    // T₀ after the price change, so both sides price the component at 1.0004.
+    await db.execute(sql`update manufacturing_orders set created_at = now() where id = ${f.order.id}`);
+    await mfgService.consumeMaterial(f.order.id, f.materialRow.id, { locationId: f.location.id, quantity: 10 }, f.user.id);
+    await reportHours(f, 1); // (30 + 6 × 5) / 60
+    await mfgService.complete(f.order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
+
+    const { calculation, analysis } = await costingService.postCalculate(f.order.id, true);
+
+    expect(calculation.materialCost).toBe("10.0040");
+    expect(calculation.subcontractCost).toBe("10.0040");
+    expect(analysis!.materialRows.map((r) => [r.base, r.actual])).toEqual([[10, 10], [10, 10]]);
+    expect([analysis!.base, analysis!.actual, analysis!.deviation]).toEqual([622.01, 622.01, 0]);
+    expect(Object.values(analysis!.parts).every((p) => p === 0)).toBe(true);
+  });
+
   it("refuses a row whose base group is only partly saved, and an operation row with both groups", async () => {
     const f = await makeFixture();
     const { calculation } = await costingService.postCalculate(f.order.id, true);

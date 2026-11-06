@@ -595,8 +595,13 @@ export function createCostingService(
         // Actual cost from the linked lego IO rows (received quantity ×
         // à-pris + ställpris, in SEK) when any receipt exists; otherwise the
         // release snapshot's prices × reported OK quantity — the same
-        // standard the pre-calculation used.
+        // standard the pre-calculation used. The reserve takes the one-off
+        // F (ställpris + transport) only once it counts by the ställregel
+        // (worked, or a final order with N > 0): an unworked operation on a
+        // Makulerad or nollstängd order never cost it.
         const actual = actualSubcontractCosts.get(op.operationId);
+        const worked = operationWorked({ hours, completed, scrapped, received: actual !== undefined });
+        const oneOff = oneOffCounts(output, worked) ? Number(op.setupPrice ?? 0) : 0;
         let row: OperationRowWrite;
         if (actual !== undefined) {
           row = buildSubcontractOperationRow(op, actual.amount);
@@ -604,21 +609,16 @@ export function createCostingService(
           if (completed === 0) {
             warnings.push(`Operation ${op.sequenceNo} (${op.workCenterName}): ingen inlevererad legoorder`);
           }
-          const fallback = Number(op.setupPrice ?? 0) + Number(op.unitPrice ?? 0) * completed;
-          row = buildSubcontractOperationRow(op, fallback);
+          row = buildSubcontractOperationRow(op, oneOff + Number(op.unitPrice ?? 0) * completed);
         }
-        // Base: F₀ + P₀ × N, the one-off once it counts; Qa = what A was taken for.
-        // Without an IO receipt the reserve above takes the one-off even at OK 0,
-        // so F₀ follows what it took: the one-off is then neither Pris nor
-        // Mängd on an unworked operation (preliminary, or closed at N = 0).
-        const worked = operationWorked({ hours, completed, scrapped, received: actual !== undefined });
-        const oneOff = Number(op.setupPrice ?? 0);
+        // Base: F₀ + P₀ × N, the one-off by the same rule — the reserve's F
+        // is therefore never a deviation. Qa = what A was taken for.
         operationRows.push({
           ...row,
           baseQuantity: operationOutput(output, completed),
           subcontractQuantity: actual?.quantity ?? completed,
           baseUnitPrice: Number(op.unitPrice ?? 0),
-          baseOneOff: actual === undefined || oneOffCounts(output, worked) ? oneOff : 0,
+          baseOneOff: oneOff,
         });
         continue;
       }
