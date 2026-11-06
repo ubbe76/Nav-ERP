@@ -212,15 +212,15 @@ export function LocationsSection({
                 />
               ),
             },
-            { key: "warehouseName", label: "Lager", width: "minmax(90px, 1fr)" },
-            { key: "name", label: "Namn", width: "minmax(70px, 1fr)" },
-            { key: "labelCode", label: "Etikettkod", width: "90px" },
-            { key: "fixed", label: "Fast", width: "50px" },
-            { key: "active", label: "Status", width: "100px" },
-            { key: "articleCount", label: "Artiklar", width: "70px", align: "right" },
-            { key: "balances", label: "Saldo", width: "minmax(130px, 1.2fr)", align: "right" },
-            { key: "blocked", label: "Spärrad", width: "minmax(120px, 1fr)" },
-            { key: "id", label: "", width: "240px", align: "right" },
+            { key: "warehouseName", label: "Lager", width: "minmax(84px, 1fr)" },
+            { key: "name", label: "Namn", width: "minmax(44px, 0.5fr)" },
+            { key: "labelCode", label: "Etikettkod", width: "74px" },
+            { key: "fixed", label: "Fast", width: "40px" },
+            { key: "active", label: "Status", width: "80px" },
+            { key: "articleCount", label: "Artiklar", width: "52px", align: "right" },
+            { key: "balances", label: "Saldo", width: "minmax(106px, 1fr)", align: "right" },
+            { key: "blocked", label: "Spärrad", width: "minmax(84px, 0.6fr)" },
+            { key: "id", label: "", width: "max-content", align: "right" },
           ]}
           rows={visibleLocations}
           renderCell={(row, key) => {
@@ -296,7 +296,7 @@ export function LocationsSection({
                     </Button>
                   </span>
                 ) : (
-                  <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <span style={{ display: "inline-flex", gap: 4, justifyContent: "flex-end", whiteSpace: "nowrap" }}>
                     <Button
                       type="button"
                       size="small"
