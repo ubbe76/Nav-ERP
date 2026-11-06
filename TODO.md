@@ -40,7 +40,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
-- [ ] **Lagerplatser, fortsättning** — efter fasta platser, Automatiskt uttag och plats per rad i Utleverans (2026-11-03): **spärrade lagerplatser** (t.ex. Karantän/Reklamation — saldot räknas inte i behovsberäkningen, Materialbrist och Leveranstidskontrollen och dras aldrig automatiskt), **lagerplatsregistret** med sök och sidor och en kolumn med antal artiklar/saldo per plats, och **flera lagerplatser per artikel** (huvudplats + alternativa på Lager-fliken).
+- [ ] **Lagerplatser, fortsättning** — spärrade lagerplatser och lagerplatsregistret med sök, sidor och saldo per plats är klara (2026-11-06, migration 0185). Kvar: **flera lagerplatser per artikel** (huvudplats + alternativa på Lager-fliken, migration 0186), etapp 3 i `private/superpowers/specs/2026-11-06-lagerplatser-fortsattning-design.md`.
 - [ ] **Avvikelseanalys i efterkalkylen** — pris, mängd och tid; ställtid och stycktid → [#14](https://github.com/ubbe76/Nav-ERP/issues/14) *(hemsidan)*
 - [ ] **Alternativa resurser i planeringen och Leveranstidskontrollen** → [#15](https://github.com/ubbe76/Nav-ERP/issues/15) *(hemsidan)*
 - [ ] **Påslag per artikelgrupp, kund eller order** → [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*
