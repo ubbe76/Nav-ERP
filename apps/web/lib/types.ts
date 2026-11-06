@@ -4888,14 +4888,30 @@ export interface ScrapStatisticsResponse {
   totalScrapped: number;
 }
 
-// GET /reports/calculation-outcome?from&to — pre- vs post-kalkyl TVK per unit.
+// GET /reports/calculation-outcome?from&to&view&groupBy. view=pre (Mot
+// förkalkyl, the default) compares TVK/st; view=analysis (Avvikelseanalys)
+// sums the saved variance analyses per order, article or resource.
+export type CalculationOutcomeView = "pre" | "analysis";
+export type CalculationOutcomeGrouping = "order" | "article" | "workCenter";
+
 export interface OutcomeRow {
+  calculationId: string;
   manufacturingOrderId: string;
   orderNumber: string;
   articleNumber: string;
   articleName: string;
   quantity: number;
+  // N = Inlevererat from the analysis; null on an efterkalkyl saved before it.
+  outputQuantity: number | null;
+  // true = Ej klar; null = saved without an analysis.
+  preliminary: boolean | null;
+  // What Efterkalkyl TVK/st was divided by: N ("output") or the quantity.
+  perUnitBasis: "output" | "quantity";
+  // "configuration" = a beställningsvara's TO against its configuration cost.
+  preSource: "article" | "configuration";
   preTvkPerUnit: number;
+  // Kalkylerat ÷ N on a final analysis, otherwise null.
+  calculatedTvkPerUnit: number | null;
   postTvkPerUnit: number;
   deltaPerUnit: number;
   deltaPct: number | null;
@@ -4911,11 +4927,82 @@ export interface OutcomeRow {
 export interface CalculationOutcomeResponse {
   from: string;
   to: string;
+  view: "pre";
   rows: OutcomeRow[];
   summary: { count: number; avgDeviationPct: number | null };
-  // onlyPost: orders whose latest efterkalkyl has no comparable förkalkyl (none
-  // saved on the article at or before it, or a beställningsvara's TO).
-  notComparable: { onlyPost: number; invalidQuantity: number };
+  // onlyPost: no comparable förkalkyl; invalidQuantity: quantity 0;
+  // noOutput: a final analysis with nothing delivered (closed at 0, Makulerad).
+  notComparable: { onlyPost: number; invalidQuantity: number; noOutput: number };
+}
+
+export interface OutcomeAmounts {
+  base: number;
+  actual: number;
+  deviation: number;
+  deviationPct: number | null;
+  parts: CostVarianceParts;
+}
+
+export interface OutcomeOrderRow extends OutcomeAmounts {
+  calculationId: string;
+  manufacturingOrderId: string;
+  orderNumber: string;
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  calculatedAt: string;
+  outputQuantity: number;
+}
+
+export interface OutcomeArticleRow extends OutcomeAmounts {
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  orderCount: number;
+  outputQuantity: number;
+}
+
+export interface OutcomeWorkCenterRow extends OutcomeAmounts {
+  key: string;
+  workCenterId: string;
+  workCenterCode: string;
+  workCenterName: string;
+  kind: "time" | "subcontract";
+  operationCount: number;
+  orderCount: number;
+  baseSetupHours: number | null;
+  baseRunHours: number | null;
+  // Null until the time is registered as ställ/produktion.
+  setupHours: number | null;
+  runHours: number | null;
+  unclassifiedHours: number | null;
+  hours: number | null;
+  timeDeviation: number | null;
+  baseQuantity: number | null;
+  subcontractQuantity: number | null;
+}
+
+export interface CalculationAnalysisKpis {
+  base: number;
+  actual: number;
+  deviation: number;
+  deviationPct: number | null;
+  price: number;
+  quantity: number;
+  scrap: number;
+  time: number;
+  markups: number;
+}
+
+export interface CalculationAnalysisResponse {
+  from: string;
+  to: string;
+  view: "analysis";
+  groupBy: CalculationOutcomeGrouping;
+  rows: Array<OutcomeOrderRow | OutcomeArticleRow | OutcomeWorkCenterRow>;
+  totals: OutcomeAmounts;
+  kpis: CalculationAnalysisKpis;
+  counts: { analysed: number; preliminary: number; withoutAnalysis: number };
 }
 
 // --- Händelselogg (G1): read side of the append-only audit_log ---

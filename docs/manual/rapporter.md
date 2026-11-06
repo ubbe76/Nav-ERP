@@ -71,16 +71,38 @@ Orsaken är den som valts ur [Kvalitetsorsaker](/hjalp/kvalitet#kvalitetsorsaker
 
 ## Kalkylutfall
 
-**Rapporter → Kalkylutfall** ställer förkalkyl mot efterkalkyl per tillverkningsorder. Varje order med en sparad [efterkalkyl](/hjalp/tillverkning#efterkalkyl) jämförs med sin senaste efterkalkyl. En förkalkyl sparas däremot på artikeln, inte på ordern (se [Artiklar](/hjalp/artiklar#kalkyl)), så ordern jämförs med artikelns **senaste förkalkyl som sparades före efterkalkylen** — den kalkyl som gällde när ordern efterkalkylerades. En förkalkyl som sparas senare ändrar alltså inte utfallet för en order som redan är efterkalkylerad, och två ordrar på samma artikel kan jämföras mot olika förkalkyler. Tas den förkalkyl bort som en order jämfördes mot, jämförs ordern i stället med närmast tidigare förkalkyl.
+**Rapporter → Kalkylutfall** ställer kalkylen mot utfallet per tillverkningsorder, i två vyer som du väljer med **Vy**: **Mot förkalkyl** (förval) och **Avvikelseanalys**. Valen ligger i adressen (`?view=&groupBy=&from=&to=`), så vyn går att spara som bokmärke. Intervallet filtrerar på efterkalkylens datum. Varje vy har egen **Exportera CSV** med samma val.
 
-Tillverkningskostnaden (TVK — utan TO-påslag, som ligger utanför tillverkningskostnaden) jämförs **per styck** — förkalkylens och efterkalkylens antal kan skilja. **Avvikelse %** är efterkalkylens styck-TVK mot förkalkylens; rapportens nyckeltal är snittavvikelsen. En förkalkyl som gjordes med **Räkna om underliggande nivåer** märks **flernivå** på raden: den räknar halvfabrikaten till deras egen tillverkningskostnad medan efterkalkylen tar det pris de levererades in till, så en stor avvikelse där kan bero på metoden snarare än på tillverkningen.
+### Mot förkalkyl
+
+Varje order med en sparad [efterkalkyl](/hjalp/tillverkning#efterkalkyl) jämförs med sin senaste efterkalkyl. En förkalkyl sparas däremot på artikeln, inte på ordern (se [Artiklar](/hjalp/artiklar#kalkyl)), så ordern jämförs med artikelns **senaste förkalkyl som sparades före efterkalkylen** — den kalkyl som gällde när ordern efterkalkylerades. En förkalkyl som sparas senare ändrar alltså inte utfallet för en order som redan är efterkalkylerad, och två ordrar på samma artikel kan jämföras mot olika förkalkyler. Tas den förkalkyl bort som en order jämfördes mot, jämförs ordern i stället med närmast tidigare förkalkyl.
+
+Tillverkningskostnaden (TVK — utan TO-påslag, som ligger utanför tillverkningskostnaden) jämförs **per styck**. **Avvikelse %** är efterkalkylens styck-TVK mot förkalkylens; rapportens nyckeltal är snittavvikelsen. Kolumnerna är **Förkalkyl TVK/st**, **Kalkylerat TVK/st**, **Efterkalkyl TVK/st**, **Avvikelse/st** och **Avvikelse %**:
+
+- **Kalkylerat TVK/st** är orderns egen kalkyl (se [Avvikelseanalys](/hjalp/tillverkning#avvikelseanalys)) per inlevererat antal, och binder ihop vyerna: Förkalkyl → Kalkylerat → Efterkalkyl. Kolumnen är **—** på en order som inte är klar eller vars efterkalkyl sparades före avvikelseanalysen.
+- **Nämnaren.** När efterkalkylens analys är slutlig räknas kostnad per styck på **inlevererat antal**, inte på orderns antal; under **Antal** står då *inlev.* med det antalet. En order som stängdes på 8 av 10 visar alltså kostnaden per levererad enhet. Är ordern **Ej klar**, eller saknar efterkalkylen analys, räknas styck-TVK på orderns antal som förut.
+- **Ej klar** märker en order som inte är avslutad (Frisläppt eller Pågår). Dess efterkalkyl är preliminär, så avvikelsen visar pågående arbete och inte ett utfall.
+- **konfiguration** märker en [beställningsvara](/hjalp/tillverkning#tillverkningsorder-for-bestallningsvara). Den jämförs mot konfigurationens kostnad från kundorderraden, inte mot mallartikelns förkalkyl. Den kostnaden är räknad i flera nivåer, så samma förbehåll som för flernivå gäller.
+- **flernivå** märker en förkalkyl som gjordes med **Räkna om underliggande nivåer**: den räknar halvfabrikaten till deras egen tillverkningskostnad medan efterkalkylen tar det pris de levererades in till, så en stor avvikelse där kan bero på metoden snarare än på tillverkningen.
 
 Under tabellen redovisas ordrar som **ej jämförbara**:
 
-- **utan jämförbar förkalkyl** — artikeln hade ingen sparad förkalkyl när efterkalkylen sparades, eller ordern är en [beställningsvara](/hjalp/tillverkning#tillverkningsorder-for-bestallningsvara), vars förkalkyl hör till konfigurationen och inte till mallartikeln.
+- **utan jämförbar förkalkyl** — artikeln hade ingen sparad förkalkyl när efterkalkylen sparades, eller konfigurationens kostnad går inte att räkna fram.
 - **med ogiltigt antal** — förkalkylen eller efterkalkylen har antalet 0.
+- **utan inlevererat antal** — efterkalkylens analys är slutlig men inget levererades (ordern stängdes på 0 eller makulerades), så det finns ingen enhet att dela kostnaden på.
 
-En förkalkyl utan efterkalkylerad order räknas inte någonstans; den hör till artikeln och gör ingen order ojämförbar. Intervallet filtrerar på efterkalkylens datum, både för tabellen och för de ej jämförbara. TO-numret länkar till orderkortet.
+En förkalkyl utan efterkalkylerad order räknas inte någonstans; den hör till artikeln och gör ingen order ojämförbar. TO-numret länkar till orderkortet.
+
+### Avvikelseanalys
+
+**Avvikelseanalys** summerar orderns [avvikelse mot kalkylerat](/hjalp/tillverkning#avvikelseanalys) över alla ordrar vars senaste efterkalkyl ligger i intervallet. Välj **Gruppera** per **Order**, **Artikel** eller **Resurs**. Plus betyder dyrare än kalkylerat och minus billigare; beloppen är röda respektive gröna, men tecknet står alltid i talet.
+
+Fyra rutor överst gäller alla analyserade ordrar, oavsett gruppering: **Total avvikelse** (med procent mot kalkylerat), **Pris**, **Mängd** (med *varav kassation*) och **Tid**. Pris + Mängd + Tid + Påslag är exakt Total avvikelse; **Påslag** (som följer av material och lego) står som en rad under rutorna när det inte är noll. *Varav kassation* ingår i Mängd och läggs inte till en gång till — den kan vara större än Mängd när resten av mängden ligger under plan.
+
+- **Order** och **Artikel** visar **Inlevererat**, **Kalkylerat**, **Utfall**, **Avvikelse**, **Avvikelse %**, **Pris**, **Mängd** (med *varav kassation* under beloppet), **Ställ**, **Stycke**, **Ej uppdelad** och **Påslag**. Per artikel finns dessutom **Antal TO**, och Inlevererat är summan över ordrarna. **Timpris** visas bara när något skiljer sig. **Ställ** och **Stycke** visas bara när någon rad har tid som registrerats uppdelad; annars visas **Ej uppdelad**, där hela tidsavvikelsen ligger. Raden **Totalt** summerar tabellen.
+- **Resurs** visar bara operationerna, eftersom material och påslag inte hör till någon resurs. Varje resurs får en rad per slag, **Tid** eller **Lego**; en resurs som byter slag mellan två ordrar får alltså två rader. En tidsresurs visar **Planerad ställ (h)**, **Planerad stycke (h)**, **Ej uppdelad (h)**, **Rapporterat (h)** och **Tidsavvikelse (kr)** (verklig ställ- och stycketid visas först när tiden registreras uppdelad). En legoresurs visar **Kalkylerat**, **Utfall**, **Pris** och **Mängd**, med kalkylerat och mottaget antal under beloppen.
+
+Under tabellen står räknarna **N analyserade ordrar**, **N preliminära (Ej klar)** och **N utan analys**. De två sista ingår inte i summorna: en preliminär order är inte färdig, och en efterkalkyl som sparades före avvikelseanalysen har ingen bas att räknas mot (efterkalkylera ordern och spara igen för att få den). En order räknas i den månad då dess *senaste* efterkalkyl sparades, och aldrig i två perioder. Rapporten har ingen PDF — tabellen är för bred för A4 — men CSV-filen innehåller alla kolumner, med *varav kassation* som egen kolumn.
 
 ## Marginal
 

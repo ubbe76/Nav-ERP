@@ -25,3 +25,31 @@
   color: var(--color-text-secondary);
   white-space: nowrap;
 }
+
+/* Second line in a cell: "inlev. N" under Antal, "varav kassation" under Mängd. */
+.sub {
+  display: block;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+/* Separates the controls row from the hint under it. */
+.counters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+/* The table's stacked (mobile) summary row drops the column headings, so each
+   total carries its own label there; on the desktop grid the header does it. */
+.footLabel {
+  display: none;
+}
+@media (max-width: 640px) {
+  .footLabel {
+    display: inline;
+    margin-right: 8px;
+    font-weight: 400;
+    color: var(--color-text-secondary);
+  }
+}
