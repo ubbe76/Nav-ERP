@@ -417,6 +417,19 @@ describe("guards once variants exist", () => {
     expect((await withStock.listVariants(s.article.id))[0]!.onHand).toBe("7");
   });
 
+  // Flera lagerplatser per artikel (0186): a variant inherits the template's
+  // huvudplats only, like Kopiera från — its alternative places are not copied.
+  it("gives the variant the template's huvudplats and none of its alternative places", async () => {
+    const stockService = createStockService(createStockRepository(db));
+    const s = await build();
+    const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
+    const main = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    const alt = await stockService.createLocation({ warehouseId: warehouse.id, name: "B1", active: true });
+    await stockService.setArticleLocations(s.article.id, { primaryLocationId: main.id, alternativeLocationIds: [alt.id] });
+    const [row] = await service.createVariants(s.article.id, ONE, null);
+    expect(await stockService.getArticleLocations(row!.articleId!)).toMatchObject({ primary: { locationId: main.id }, alternatives: [] });
+  });
+
   it("lists the variants with stock on hand and answers variant-of", async () => {
     const s = await build();
     const [row] = await service.createVariants(s.article.id, ONE, null);

@@ -145,6 +145,15 @@ export class FallbackLocationNotBlockableError extends Error {
   }
 }
 
+// PUT /articles/:id/locations refused by the rules in article-locations.ts.
+// The message is Swedish and names the place — the web shows it as is.
+export class ArticleLocationInvalidError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ArticleLocationInvalidError";
+  }
+}
+
 // An outflow from a blocked place chosen by hand (utleverans, the order
 // card's Leverera, Förbruka) — the goods are in quarantine; Automatiskt
 // skips the place instead. `label` is "Huvudlager — K1". Swedish: the web

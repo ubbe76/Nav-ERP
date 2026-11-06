@@ -34,6 +34,7 @@ import {
 import { InvoiceScanMailTestFailedError } from "../src/modules/purchase/service/invoice-scan-mail.service.js";
 import { SupplierInvoiceFileFromScanError } from "../src/modules/purchase/service/supplier-invoice.service.js";
 import {
+  ArticleLocationInvalidError,
   FallbackLocationNotBlockableError,
   StockLocationAlreadyBlockedError,
   StockLocationBlockedError,
@@ -883,6 +884,8 @@ const cases: Array<[Error, string]> = [
   [new FallbackLocationNotBlockableError(), ERROR_CODES.FALLBACK_LOCATION_NOT_BLOCKABLE],
   [new StockLocationBlockedError("Huvudlager — K1"), ERROR_CODES.STOCK_LOCATION_BLOCKED],
   [new DefaultLocationBlockedError(), ERROR_CODES.DEFAULT_LOCATION_BLOCKED],
+  // Flera lagerplatser per artikel
+  [new ArticleLocationInvalidError("Lagerplatsen Huvudlager — K1 är spärrad"), ERROR_CODES.ARTICLE_LOCATION_INVALID],
 ];
 
 describe("error class name -> ERROR_CODES derivation", () => {

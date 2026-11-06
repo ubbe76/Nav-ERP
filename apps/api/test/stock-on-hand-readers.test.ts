@@ -35,6 +35,10 @@ const ALLOWED: Record<string, { reads: number; why: string }> = {
     reads: 7,
     why: "physical: getBalances (rows + count, with locationBlocked), balancesForArticles (with blocked), the transfer's overdraw check on one place, the log's running balance, the block response's articles with stock on the place, the lagerplatsregister's sums per place and unit",
   },
+  "modules/stock/repository/article-locations.ts": {
+    reads: 1,
+    why: "physical per place: the Lager tab's Lagerplatser card shows the article's balance on each of its places",
+  },
   "modules/stock/repository/stock-count.repository.ts": {
     reads: 3,
     why: "physical per place: the count freezes and lists what stands on the shelf",

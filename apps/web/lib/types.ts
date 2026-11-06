@@ -421,6 +421,25 @@ export interface Warehouse {
   active: boolean;
 }
 
+// One entry of GET /articles/:id/locations (the article's huvudplats or an
+// alternative one); quantityOnHand is the article's physical saldo there.
+export interface ArticleLocationPlace {
+  locationId: string;
+  warehouseId: string;
+  warehouseName: string;
+  name: string;
+  labelCode: string;
+  active: boolean;
+  blocked: boolean;
+  fixed: boolean;
+  quantityOnHand: string;
+}
+
+export interface ArticleLocations {
+  primary: ArticleLocationPlace | null;
+  alternatives: ArticleLocationPlace[];
+}
+
 export interface StockLocation {
   id: string;
   warehouseId: string;

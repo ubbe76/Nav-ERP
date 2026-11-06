@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, count, desc, eq, getTableColumns, ilike, inArray, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, getTableColumns, ilike, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import {
+  articleAlternativeLocations,
   articles,
   manufacturingOrders,
   purchaseOrders,
@@ -19,11 +20,13 @@ import {
 import { resolveStockLocation } from "../service/location-resolver.js";
 import { deactivateEmptyLocation, locationHoldsStock } from "../service/location-lifecycle.js";
 import { assertLocationNotUnderCount } from "../service/count-guard.js";
-import { compareOutflowLocations, FALLBACK_LOCATION_NAME } from "../service/outflow-allocation.js";
+import { articlePlacePreference, compareOutflowLocations, FALLBACK_LOCATION_NAME } from "../service/outflow-allocation.js";
 import { isCheckViolation } from "../../system/service/db-errors.js";
 import { stockValuedAt } from "./valued-at.js";
+import { readArticleLocations, replaceArticleLocations } from "./article-locations.js";
 import {
   ilikePattern,
+  type ArticleLocationsInput,
   type CreateStockLocationInput,
   type CreateStockTransactionInput,
   type CreateStockTransferInput,
@@ -394,11 +397,21 @@ export function createStockRepository(db: Db) {
 
         const articleIds = input.rows.map((row) => row.articleId);
 
-        // Captured before the cleanup below clears every pointer to the source.
+        // The followers — moved articles whose huvudplats is the source —
+        // captured before the cleanup below clears every pointer to it, and
+        // LOCKED as they are read (FOR NO KEY UPDATE, sorted, before any
+        // place lock: article → place, as in every draw). A PUT
+        // /articles/:id/locations in progress is waited out, and the
+        // locking read re-checks its WHERE on what the PUT committed: an
+        // article the PUT moved off the source is no follower, so the
+        // transfer never writes over the huvudplats the PUT has already
+        // answered with. Held until commit, nothing changes them meanwhile.
         const followers = await tx
           .select({ id: articles.id })
           .from(articles)
-          .where(and(inArray(articles.id, articleIds), eq(articles.defaultLocationId, from.id)));
+          .where(and(inArray(articles.id, articleIds), eq(articles.defaultLocationId, from.id)))
+          .orderBy(asc(articles.id))
+          .for("no key update");
 
         const transferId = randomUUID();
         for (const row of input.rows) {
@@ -449,11 +462,17 @@ export function createStockRepository(db: Db) {
         // source follow it rather than falling back to "***" — but never onto
         // a Spärrad lagerplats: a blocked place is not a Lagerplats anyone
         // chose (the resolver would skip it anyway), so they stay on "***".
+        // Only the huvudplats follows (0186): an emptied temporary source that
+        // was an alternative place is simply gone from the articles' lists
+        // (deactivateEmptyLocation deleted the assignments). Only the locked
+        // followers, and only those the cleanup has just cleared — they had
+        // the source as huvudplats up to that UPDATE (it clears the articles
+        // it locked, ours among them) and the lock kept everyone else out.
         if (deactivatedSourceLocation && followers.length > 0 && !to.blocked) {
           await tx
             .update(articles)
             .set({ defaultLocationId: to.id })
-            .where(inArray(articles.id, followers.map((a) => a.id)));
+            .where(and(inArray(articles.id, followers.map((a) => a.id)), isNull(articles.defaultLocationId)));
         }
 
         return {
@@ -519,9 +538,12 @@ export function createStockRepository(db: Db) {
 
     // Balance rows for a set of articles — used by the sales pick list to
     // show where each article can be picked from, in the order the automatic
-    // outflow draws from them (the article's own location first, then
-    // warehouse/location, "***" last — compareOutflowLocations is the one
-    // rule for both), so the paper and the booking agree. Physical: a row on
+    // outflow draws from them (the huvudplats first, then the alternative
+    // places in order, then warehouse/location, "***" last —
+    // compareOutflowLocations is the one rule for both, and `preference` is
+    // the same articlePlacePreference: 0 huvudplats, the alternative's
+    // sort_order, null other, and "***" as huvudplats counts as none), so
+    // the paper and the booking agree. Physical: a row on
     // a Spärrad lagerplats is included with blocked = true — the pick list
     // leaves it out (Automatiskt never draws there), the configurator's
     // variant list sums it like the article card.
@@ -535,22 +557,46 @@ export function createStockRepository(db: Db) {
           locationName: stockLocations.name,
           warehouseName: warehouses.name,
           blocked: sql<boolean>`coalesce(${stockLocations.blocked}, false)`,
-          isDefault: sql<boolean>`${articles.defaultLocationId} = ${stockBalances.locationId}`,
+          isPrimary: sql<boolean>`coalesce(${articles.defaultLocationId} = ${stockBalances.locationId}, false)`,
+          sortOrder: articleAlternativeLocations.sortOrder,
         })
         .from(stockBalances)
         .innerJoin(articles, eq(articles.id, stockBalances.articleId))
+        .leftJoin(
+          articleAlternativeLocations,
+          and(
+            eq(articleAlternativeLocations.articleId, stockBalances.articleId),
+            eq(articleAlternativeLocations.locationId, stockBalances.locationId)
+          )
+        )
         .leftJoin(stockLocations, eq(stockLocations.id, stockBalances.locationId))
         .leftJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
         .where(and(inArray(stockBalances.articleId, articleIds), ne(stockBalances.quantityOnHand, "0")))
         .orderBy(asc(warehouses.name), asc(stockLocations.name));
       return rows
-        .map(({ isDefault, blocked, ...row }) => ({ ...row, blocked: blocked === true, isDefault: isDefault === true }))
+        .map(({ isPrimary, sortOrder, blocked, ...row }) => ({
+          ...row,
+          blocked: blocked === true,
+          preference: articlePlacePreference({ locationName: row.locationName ?? "", isPrimary: isPrimary === true, sortOrder }),
+        }))
         .sort((a, b) =>
           compareOutflowLocations(
-            { warehouseName: a.warehouseName ?? "", locationName: a.locationName ?? "", isDefault: a.isDefault },
-            { warehouseName: b.warehouseName ?? "", locationName: b.locationName ?? "", isDefault: b.isDefault }
+            { warehouseName: a.warehouseName ?? "", locationName: a.locationName ?? "", preference: a.preference },
+            { warehouseName: b.warehouseName ?? "", locationName: b.locationName ?? "", preference: b.preference }
           )
         );
+    },
+
+    // Flera lagerplatser per artikel (0186): the Lager tab's card. The
+    // replace runs in its own transaction (article-locations.ts takes the
+    // locks); the answer is read after the commit.
+    async articleLocations(articleId: string) {
+      return readArticleLocations(db, articleId);
+    },
+
+    async replaceArticleLocations(articleId: string, input: ArticleLocationsInput) {
+      await db.transaction((tx) => replaceArticleLocations(tx, articleId, input));
+      return (await readArticleLocations(db, articleId))!;
     },
 
     // Lagerloggen. The where clause is built once (against the base table) and

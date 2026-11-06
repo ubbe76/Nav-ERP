@@ -1,5 +1,5 @@
-import { asc, eq, sql } from "drizzle-orm";
-import { articles, stockLocations, stockTransactions, type Db, type Tx } from "@navet/db";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { articleAlternativeLocations, articles, stockLocations, stockTransactions, type Db, type Tx } from "@navet/db";
 import { FALLBACK_LOCATION_NAME } from "./location-resolver.js";
 
 // A TEMPORARY stock location (fixed = false) where every article nets to zero
@@ -35,7 +35,7 @@ export async function deactivateEmptyLocation(db: Db | Tx, locationId: string): 
   // tried again: a draw that held one of those locks has committed and is
   // seen. (Two transactions can only both see the place empty when they
   // drew the same article, and the draws serialise on the article first.)
-  await db
+  const lockedArticles = await db
     .select({ id: articles.id })
     .from(articles)
     .where(eq(articles.defaultLocationId, locationId))
@@ -48,11 +48,37 @@ export async function deactivateEmptyLocation(db: Db | Tx, locationId: string): 
   await db.update(stockLocations).set({ active: false }).where(eq(stockLocations.id, locationId));
 
   // Nothing may auto-resolve into a hidden location — articles pointing here
-  // fall back to "***" (the transfer routine repoints the moved ones after).
-  await db
-    .update(articles)
-    .set({ defaultLocationId: null })
-    .where(eq(articles.defaultLocationId, locationId));
+  // fall back to their alternative places, then "***" (the transfer routine
+  // repoints the moved ones after). No alternative place is promoted: the
+  // huvudplats stays empty until someone chooses one.
+  //
+  // ONLY the articles locked above. One whose huvudplats became this place
+  // while we waited for the place lock (a PUT /articles/:id/locations or a
+  // PATCH committed meanwhile) was not locked, and an UPDATE of "every
+  // article with this place" would lock it now — place before article. A
+  // draw of it holds the article and asks for its places FOR SHARE, this
+  // one among them, so the two waited on each other (40P01). It keeps the
+  // place as huvudplats instead: inactive, so the resolver and Automatiskt
+  // skip it (its alternatives, then "***"), and the card shows it (inaktiv).
+  if (lockedArticles.length > 0) {
+    await db
+      .update(articles)
+      .set({ defaultLocationId: null })
+      .where(and(inArray(articles.id, lockedArticles.map((a) => a.id)), eq(articles.defaultLocationId, locationId)));
+  }
+
+  // Its assignments as an alternative place (0186) go too. The articles that
+  // have it only as an alternative are NOT locked first: the DELETE takes no
+  // lock on an article row (a child row, no FK check on its parent), so
+  // there is no article-after-place lock to put in order — and locking them
+  // would only widen the accepted crosswise deadlock (two draws that each
+  // empty a place the other's article uses) to more articles. A draw of such an
+  // article holds the place FOR SHARE (lockOutflowCandidates takes every
+  // alternative), so the place lock above has already waited it out, and a
+  // draw that comes after waits for this one and then reads the place gone.
+  // A PUT /articles/:id/locations locks its places FOR SHARE after the
+  // article, so it is ordered against this place lock the same way.
+  await db.delete(articleAlternativeLocations).where(eq(articleAlternativeLocations.locationId, locationId));
 
   return true;
 }

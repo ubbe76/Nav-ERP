@@ -200,6 +200,42 @@ export const blockStockLocationSchema = z.object({
 });
 export type BlockStockLocationInput = z.infer<typeof blockStockLocationSchema>;
 
+// Flera lagerplatser per artikel (migration 0186) — PUT /articles/:id/locations
+// replaces the whole set: the huvudplats (articles.default_location_id; null
+// = none, an inflow then goes to the first usable alternative or "***") and
+// the alternative places in order. The schema is only the shape: at most
+// ARTICLE_ALTERNATIVE_LOCATIONS_MAX, no duplicates and the huvudplats not
+// among them are the server's rules (stock/service/article-locations.ts),
+// so they answer 400 article-location-invalid with Swedish text like the
+// rules on the places themselves.
+export const ARTICLE_ALTERNATIVE_LOCATIONS_MAX = 20;
+export const articleLocationsSchema = z.object({
+  primaryLocationId: z.string().uuid().nullable(),
+  alternativeLocationIds: z.array(z.string().uuid()),
+});
+export type ArticleLocationsInput = z.infer<typeof articleLocationsSchema>;
+
+// GET /articles/:id/locations (and PUT's answer): one of the article's places
+// with the article's own balance there (numeric as text, "0.0000" when none).
+export interface ArticleLocationPlace {
+  locationId: string;
+  warehouseId: string;
+  warehouseName: string;
+  name: string;
+  labelCode: string;
+  active: boolean;
+  blocked: boolean;
+  fixed: boolean;
+  quantityOnHand: string;
+}
+
+// alternatives in order (Alternativ 1, 2, …). A place that is the huvudplats
+// is shown only there, even if a row still lists it as an alternative.
+export interface ArticleLocations {
+  primary: ArticleLocationPlace | null;
+  alternatives: ArticleLocationPlace[];
+}
+
 // Lagervärdering (D1) — GET /stock/valuation[/pdf]. asOf defaults to today
 // (server-side, sv-SE) when omitted; groupId narrows to one varugrupp and
 // articleCodeId to one artikelkod; groupBy picks what the report is

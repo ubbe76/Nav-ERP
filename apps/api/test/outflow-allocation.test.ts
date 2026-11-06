@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   allocateOutflow,
+  articlePlacePreference,
   compareOutflowLocations,
   withRemainder,
   type OutflowCandidate,
@@ -13,7 +14,7 @@ function candidate(over: Partial<OutflowCandidate> & { locationId: string }): Ou
     warehouseName: "Huvudlager",
     locationName: over.locationId,
     quantityOnHand: 0,
-    isDefault: false,
+    preference: null,
     active: true,
     blocked: false,
     ...over,
@@ -24,7 +25,7 @@ describe("allocateOutflow", () => {
   it("takes the article's own location first, up to its positive balance", () => {
     const { parts, remainder } = allocateOutflow(5, [
       candidate({ locationId: "A1", quantityOnHand: 10 }),
-      candidate({ locationId: "Z9", quantityOnHand: 3, isDefault: true }),
+      candidate({ locationId: "Z9", quantityOnHand: 3, preference: 0 }),
     ]);
     expect(parts).toEqual([
       { locationId: "Z9", quantity: 3 },
@@ -46,7 +47,7 @@ describe("allocateOutflow", () => {
 
   it("skips negative, empty, inactive and blocked locations", () => {
     const { parts, remainder } = allocateOutflow(4, [
-      candidate({ locationId: "neg", quantityOnHand: -3, isDefault: true }),
+      candidate({ locationId: "neg", quantityOnHand: -3, preference: 0 }),
       candidate({ locationId: "zero", quantityOnHand: 0 }),
       candidate({ locationId: "inactive", quantityOnHand: 9, active: false }),
       candidate({ locationId: "counted", quantityOnHand: 9, blocked: true }),
@@ -61,11 +62,40 @@ describe("allocateOutflow", () => {
   // article's own Lagerplats.
   it("skips a Spärrad lagerplats exactly like a place under a blocking count, own place included", () => {
     const { parts, remainder } = allocateOutflow(6, [
-      candidate({ locationId: "own-karantan", quantityOnHand: 50, isDefault: true, blocked: true }),
+      candidate({ locationId: "own-karantan", quantityOnHand: 50, preference: 0, blocked: true }),
       candidate({ locationId: "B2", quantityOnHand: 4 }),
     ]);
     expect(parts).toEqual([{ locationId: "B2", quantity: 4 }]);
     expect(remainder).toBe(2);
+  });
+
+  // Flera lagerplatser per artikel (0186): preference 0 = huvudplats,
+  // 1–20 = the alternative places' order, null = every other place.
+  it("takes the huvudplats, then alternative 1, then alternative 2, then the others, *** last", () => {
+    const { parts, remainder } = allocateOutflow(30, [
+      candidate({ locationId: "fallback", locationName: "***", warehouseName: "***", quantityOnHand: 100 }),
+      candidate({ locationId: "A1-other", locationName: "A1", quantityOnHand: 5 }),
+      candidate({ locationId: "Z2-alt2", locationName: "Z2", quantityOnHand: 5, preference: 2 }),
+      candidate({ locationId: "Z9-main", locationName: "Z9", quantityOnHand: 5, preference: 0 }),
+      candidate({ locationId: "Z5-alt1", locationName: "Z5", quantityOnHand: 5, preference: 1 }),
+    ]);
+    expect(parts.map((p) => p.locationId)).toEqual(["Z9-main", "Z5-alt1", "Z2-alt2", "A1-other", "fallback"]);
+    expect(parts.at(-1)!.quantity).toBe(10);
+    expect(remainder).toBe(0);
+  });
+
+  it("skips a blocked alternative place like any blocked place, the next alternative follows", () => {
+    const { parts } = allocateOutflow(8, [
+      candidate({ locationId: "main", quantityOnHand: 2, preference: 0 }),
+      candidate({ locationId: "alt1-karantan", quantityOnHand: 50, preference: 1, blocked: true }),
+      candidate({ locationId: "alt2", quantityOnHand: 3, preference: 2 }),
+      candidate({ locationId: "other", quantityOnHand: 9 }),
+    ]);
+    expect(parts).toEqual([
+      { locationId: "main", quantity: 2 },
+      { locationId: "alt2", quantity: 3 },
+      { locationId: "other", quantity: 3 },
+    ]);
   });
 
   it("reports what is missing as the remainder, at 4 decimals", () => {
@@ -92,12 +122,65 @@ describe("withRemainder", () => {
 describe("compareOutflowLocations", () => {
   it("is the pick list's order: own location, then warehouse and location naturally, *** last", () => {
     const sorted = [
-      { warehouseName: "***", locationName: "***", isDefault: false },
-      { warehouseName: "Huvudlager", locationName: "A10", isDefault: false },
-      { warehouseName: "Huvudlager", locationName: "A2", isDefault: false },
-      { warehouseName: "Annex", locationName: "Z", isDefault: false },
-      { warehouseName: "Huvudlager", locationName: "B1", isDefault: true },
+      { warehouseName: "***", locationName: "***", preference: null },
+      { warehouseName: "Huvudlager", locationName: "A10", preference: null },
+      { warehouseName: "Huvudlager", locationName: "A2", preference: null },
+      { warehouseName: "Annex", locationName: "Z", preference: null },
+      { warehouseName: "Huvudlager", locationName: "B1", preference: 0 },
     ].sort(compareOutflowLocations);
     expect(sorted.map((l) => l.locationName)).toEqual(["B1", "Z", "A2", "A10", "***"]);
+  });
+
+  it("puts the huvudplats first and the alternatives in their order before the rest", () => {
+    const sorted = [
+      { warehouseName: "Annex", locationName: "A1", preference: null },
+      { warehouseName: "Huvudlager", locationName: "Z3", preference: 2 },
+      { warehouseName: "Huvudlager", locationName: "Z7", preference: 1 },
+      { warehouseName: "Huvudlager", locationName: "P", preference: 0 },
+    ].sort(compareOutflowLocations);
+    expect(sorted.map((l) => l.locationName)).toEqual(["P", "Z7", "Z3", "A1"]);
+  });
+
+  it("sorts *** as huvudplats last, after the alternatives and the others — it counts as no huvudplats", () => {
+    const place = (warehouseName: string, locationName: string, isPrimary: boolean, sortOrder: number | null) => ({
+      warehouseName,
+      locationName,
+      preference: articlePlacePreference({ locationName, isPrimary, sortOrder }),
+    });
+    const sorted = [
+      place("***", "***", true, null),
+      place("Annex", "A1", false, null),
+      place("Huvudlager", "Z3", false, 2),
+      place("Huvudlager", "Z7", false, 1),
+    ].sort(compareOutflowLocations);
+    expect(sorted.map((l) => l.locationName)).toEqual(["Z7", "Z3", "A1", "***"]);
+  });
+});
+
+describe("articlePlacePreference", () => {
+  it("ranks the huvudplats 0, an alternative by its sort_order and any other place null", () => {
+    expect(articlePlacePreference({ locationName: "P", isPrimary: true, sortOrder: null })).toBe(0);
+    // A place that is both: the huvudplats wins.
+    expect(articlePlacePreference({ locationName: "P", isPrimary: true, sortOrder: 3 })).toBe(0);
+    expect(articlePlacePreference({ locationName: "Z1", isPrimary: false, sortOrder: 2 })).toBe(2);
+    expect(articlePlacePreference({ locationName: "A1", isPrimary: false, sortOrder: null })).toBeNull();
+  });
+
+  it("never ranks *** as one of the article's own places, not even as the huvudplats", () => {
+    expect(articlePlacePreference({ locationName: "***", isPrimary: true, sortOrder: null })).toBeNull();
+    expect(articlePlacePreference({ locationName: "***", isPrimary: false, sortOrder: 1 })).toBeNull();
+  });
+
+  it("splits with *** as huvudplats like with no huvudplats: alternatives, others, *** last", () => {
+    const candidates: OutflowCandidate[] = [
+      candidate({ locationId: "fallback", warehouseName: "***", locationName: "***", quantityOnHand: 2, preference: articlePlacePreference({ locationName: "***", isPrimary: true, sortOrder: null }) }),
+      candidate({ locationId: "A1", quantityOnHand: 2 }),
+      candidate({ locationId: "Z1", quantityOnHand: 2, preference: 1 }),
+    ];
+    expect(allocateOutflow(5, candidates).parts).toEqual([
+      { locationId: "Z1", quantity: 2 },
+      { locationId: "A1", quantity: 2 },
+      { locationId: "fallback", quantity: 1 },
+    ]);
   });
 });

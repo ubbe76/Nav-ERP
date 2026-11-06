@@ -93,8 +93,9 @@ Markera platser i listan och klicka **Skriv ut etiketter** för att skriva ut et
 
 **Lagerplats är obligatorisk på varje transaktion**, men behöver inte väljas manuellt. Väljs ingen används i tur och ordning:
 
-1. **Artikelns lagerplats** — fältet Lagerplats på artikelkortets Allmänt-flik (se [Artiklar](/hjalp/artiklar)). En inaktiverad eller [spärrad](#sparrade-lagerplatser) plats hoppas över.
-2. **`***`** — en reservplats (lagret `***` med lagerplatsen `***`) som systemet skapar automatiskt första gången den behövs.
+1. **Artikelns huvudplats** — kortet **Lagerplatser** på artikelkortets Lager-flik (se [Artiklar](/hjalp/artiklar#lager)). En inaktiverad eller [spärrad](#sparrade-lagerplatser) plats hoppas över. Är huvudplatsen reservplatsen (`*** (standard)` på kortet, som alla artiklar får när ingen plats väljs) räknas det som att artikeln saknar huvudplats.
+2. **Artikelns första användbara alternativa lagerplats** — i den ordning som står under **Alternativa lagerplatser**. Inleveranser fyller alltså inte på en alternativ plats bara för att det finns saldo där; de går till huvudplatsen.
+3. **`***`** — en reservplats (lagret `***` med lagerplatsen `***`) som systemet skapar automatiskt första gången den behövs.
 
 I formulären för inleveranser och justeringar heter standardvalet **"Artikelns lagerplats"**; välj en specifik plats i listan för att styra transaktionen dit i stället. Vid uttag (utleverans, materialuttag på tillverkningsorder) heter standardvalet **"Automatiskt"** och fungerar lite annorlunda, se [Uttag med Automatiskt](#uttag-med-automatiskt).
 
@@ -104,12 +105,12 @@ En lagerplats kan **spärras**, till exempel för en **Karantän** eller en **Re
 
 - Det **räknas inte** i behovsberäkningen, artikelöversiktens **Lagersaldo idag (utan spärrat)**, Materialbrist vid rapportering, frisläppets bristvarning, Leveranstidskontrollen och färdigdatumsförslaget.
 - Det **tas aldrig med Automatiskt** (se [Uttag med Automatiskt](#uttag-med-automatiskt)).
-- En inleverans eller ett nytt saldo utan vald plats hoppar över en spärrad **Lagerplats** och går till nästa plats i ordningen, till sist reservplatsen `***`. Reservplatsen kan inte spärras.
+- En inleverans eller ett nytt saldo utan vald plats hoppar över en spärrad huvudplats och går till nästa användbara alternativa plats, till sist reservplatsen `***`. Reservplatsen kan inte spärras.
 - Ett **minussaldo** på en spärrad plats räknas däremot med, som en brist. Det uppstår till exempel när en kassation tar mer än platsen hade, eller när platsen stod på minus innan den spärrades, och varorna har då i själva verket tagits från lagret du kan använda. På artikelkortet och i artikelöversikten visar **varav spärrat** bara plussaldon.
 
 Så här spärrar och släpper du, med behörigheten Lager:
 
-1. Klicka **Spärra…** på lagerplatsens rad, skriv gärna en **Anteckning** (t.ex. *Karantän, väntar på kontroll*) och klicka **Spärra**. Nav säger sedan hur många artiklar som har saldo på platsen och hur många som har den som **Lagerplats**; deras inleveranser går till nästa plats tills spärren släpps. Du kan också skapa platsen spärrad direkt med kryssrutan **Spärrad lagerplats** i **Ny lagerplats**.
+1. Klicka **Spärra…** på lagerplatsens rad, skriv gärna en **Anteckning** (t.ex. *Karantän, väntar på kontroll*) och klicka **Spärra**. Nav säger sedan hur många artiklar som har saldo på platsen och hur många som har den som huvudplats; deras inleveranser går till nästa plats tills spärren släpps. En spärrad alternativ plats hoppas också över, både vid inleverans och av Automatiskt. Du kan också skapa platsen spärrad direkt med kryssrutan **Spärrad lagerplats** i **Ny lagerplats**.
 2. Kolumnen **Spärrad** visar **Spärrad** med anteckningen och *sedan* vilket datum. I **Saldon**, på artikelkortet och i Skanna märks saldot på platsen med **Spärrad**.
 3. **Släpp spärr** tar bort spärren efter en bekräftelse. Saldot räknas då igen.
 
@@ -122,12 +123,12 @@ Behovsberäkningen sparar sitt resultat i en minut, så klicka **Uppdatera** dä
 | Inleverans, tillverkningsinleverans, Slutför, positiv **Justering**, saldoimport | Går bra när du väljer platsen. Så hamnar gods i karantän. |
 | Inleverans utan vald plats (**Artikelns lagerplats**) | Hoppar över en spärrad Lagerplats. |
 | Utleverans, **Leverera** och **Förbruka** på orderkortet | Platsen kan inte väljas för uttag (*"Lagerplatsen är spärrad"*), och i **Utleverans** visas den inte i platsvalet per rad. En skannad LP-kod på en spärrad plats ger en varning och väljs inte. |
-| **Automatiskt** | Hoppar över platsen. Det som inte räcker blir minus på artikelns Lagerplats eller på `***`, aldrig på den spärrade platsen. |
+| **Automatiskt** | Hoppar över platsen. Det som inte räcker blir minus på artikelns huvudplats, annars på första användbara alternativa plats, annars på `***`, aldrig på den spärrade platsen. |
 | Tillverkningsorderns rapportering och **Slutför order** | En vald spärrad plats tar bara emot de färdiga varorna. Materialet tas med Automatiskt. |
 | [Lagerflytt](#lagerflytt), **Justering** (även negativ), [inventering](#inventering), saldoimport | Går bra, också från platsen. En flytt ut ur karantänen är det vanliga sättet att släppa gods. |
 | **Ångra** inleverans, utleverans eller rapportering | Går bra. Varorna går tillbaka där de låg, även om platsen har spärrats sedan dess. |
 
-Artikelkortets **Lagerplats** kan inte ändras till en spärrad plats.
+Artikelkortets **Huvudplats** kan inte ändras till en spärrad plats, och en spärrad plats kan inte läggas till som **Alternativ lagerplats**.
 
 **Karantän i praktiken**
 
@@ -140,15 +141,16 @@ Artikelkortets **Lagerplats** kan inte ändras till en spärrad plats.
 
 När du lämnar **Lagerplats** på **Automatiskt** vid en utleverans eller ett materialuttag tar Nav varorna där de faktiskt finns, så att en plats inte går minus medan en annan har saldo kvar:
 
-1. Först artikelns egen lagerplats, upp till dess saldo.
-2. Sedan övriga lagerplatser med saldo, i samma ordning som på plocklistan (lager och plats i ordning, reservplatsen `***` sist). Spärrade lagerplatser (se [Spärrade lagerplatser](#sparrade-lagerplatser)) och lagerplatser som är spärrade av en pågående inventering hoppas över.
-3. Det som ändå inte räcker dras från artikelns egen lagerplats (eller `***`) och går minus där.
+1. Först artikelns **huvudplats**, upp till dess saldo. Är huvudplatsen `*** (standard)` hoppas steget över, och `***` tas sist i steg 3.
+2. Sedan artikelns **alternativa lagerplatser**, i den ordning de står på artikelkortet, upp till deras saldo.
+3. Sedan övriga lagerplatser med saldo, i samma ordning som på plocklistan (lager och plats i ordning, reservplatsen `***` sist). Spärrade lagerplatser (se [Spärrade lagerplatser](#sparrade-lagerplatser)) och lagerplatser som är spärrade av en pågående inventering hoppas över.
+4. Det som ändå inte räcker dras från samma plats som en inleverans utan vald plats skulle hamna på — huvudplatsen, annars första användbara alternativa plats, annars `***` — och går minus där.
 
 Ett uttag kan alltså ge flera rader i [transaktionsloggen](/hjalp/lager), en per lagerplats. Väljer du en specifik lagerplats tas allt därifrån, även om saldot inte räcker. Ångrar du uttaget lägger Nav tillbaka varje del på den lagerplats den togs från.
 
 ### Tomma lagerplatser städas bort
 
-En **fast** lagerplats (kryssrutan **Fast lagerplats**, kolumnen **Fast**) ligger kvar när den blir tom: den förblir aktiv och artiklar som har den som **Lagerplats** behåller den. Det är det vanliga för hyllplatser som töms och fylls på igen.
+En **fast** lagerplats (kryssrutan **Fast lagerplats**, kolumnen **Fast**) ligger kvar när den blir tom: den förblir aktiv och artiklar som har den som huvudplats eller alternativ plats behåller den. Det är det vanliga för hyllplatser som töms och fylls på igen.
 
 Bara en **tillfällig** lagerplats (**Fast lagerplats** avkryssad) städas bort. När en tillfällig lagerplats blir helt tom — oavsett om det var en lagerflytt, en utleverans, ett materialuttag eller en negativ justering som tömde den — **inaktiveras den automatiskt** och försvinner ur alla lagerplatsval i systemet. Reservplatsen `***` är fast och inaktiveras aldrig. Alla lagerplatser som fanns när funktionen infördes är fasta. Gör du en tom, fast plats tillfällig ligger den kvar aktiv tills du inaktiverar den med **Ändra** eller den töms igen.
 
@@ -161,7 +163,7 @@ Platsen raderas inte på riktigt: raden finns kvar så att transaktionsloggen fo
 
 Saldo kan alltså aldrig ligga på en lagerplats du inte ser i listorna.
 
-Pekade en artikels **Lagerplats** på en tillfällig plats som inaktiverades nollställs fältet till `***` — men om det var en lagerflytt som tömde platsen följer artikeln i stället med till den mottagande lagerplatsen.
+Pekade en artikels **Huvudplats** på en tillfällig plats som inaktiverades nollställs fältet till `*** (standard)`, och inleveranserna går då till första alternativa plats, annars till `***` — men om det var en lagerflytt som tömde platsen följer huvudplatsen i stället med till den mottagande lagerplatsen. En tillfällig plats som var **alternativ lagerplats** tas bara bort ur artikelns lista, även vid en lagerflytt.
 
 ## Lagerflytt
 
@@ -232,7 +234,7 @@ Vid start med Nav|ERP läses de ingående saldona in från fil i stället för e
 En rad per artikel och lagerplats med kolumnerna **Artikelnummer**, **Lager**, **Lagerplats**, **Antal** och **À-pris**:
 
 - **Antal är saldot efter importen**, som vid en inventering. Nav jämför med dagens saldo på platsen och bokar **skillnaden** som en vanlig lagerjustering med anteckningen *Import av lagersaldo* — den syns i [transaktionsloggen](#transaktioner) som alla andra lagerhändelser. Samma fil två gånger ändrar alltså ingenting, en rättad fil rättar saldot och **0** tömmer platsen. En rad där saldot redan stämmer räknas som överhoppad.
-- **Lager och Lagerplats** anger platsen. Ett lager eller en plats som saknas **skapas** — förhandsgranskningen visar vilka under **Skapas automatiskt**. Bara Lagerplats fungerar när platsnamnet finns i ett enda lager. Är båda tomma hamnar saldot på artikelns lagerplats, annars på reservplatsen **`***`**.
+- **Lager och Lagerplats** anger platsen. Ett lager eller en plats som saknas **skapas** — förhandsgranskningen visar vilka under **Skapas automatiskt**. Bara Lagerplats fungerar när platsnamnet finns i ett enda lager. Är båda tomma hamnar saldot på artikelns huvudplats (en spärrad hoppas över), annars på första alternativa platsen, annars på reservplatsen **`***`**.
 - **À-pris** värderar det som läggs till (kronor per grundenhet), så att [lagervärderingen](#lagervardering) stämmer från första dagen. Tom cell betyder artikelns standardkostnad — samma som en manuell justering. Saknas båda bokas ökningen utan värde, med en varning. En minskning värderas aldrig; den tar det som fanns.
 
 Raden stoppas när artikeln inte finns, är en tjänst eller en fantomartikel, när samma artikel står två gånger på samma plats, när antalet är negativt eller när platsen [inventeras](#inventering) med spärr. **Hoppa över rader som redan finns** lämnar platser där artikeln redan har ett saldo orörda. Importen är allt eller inget: har någon rad fel importeras ingenting.

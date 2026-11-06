@@ -4,7 +4,7 @@ import { AppShell } from "../../../components/AppShell";
 import { ArticleTabs } from "../../../components/articles/ArticleTabs";
 import { ArticleCardHeader } from "../../../components/articles/ArticleCardHeader";
 import { apiGet } from "../../../lib/api";
-import type { Article, ArticleGroup, BomComponent, BomTreeNode, CostCalculation, Paged, RoutingOperation, StockBalance, WorkCenter } from "../../../lib/types";
+import type { Article, ArticleLocations, ArticleGroup, BomComponent, BomTreeNode, CostCalculation, Paged, RoutingOperation, StockBalance, WorkCenter } from "../../../lib/types";
 
 export default async function ArticleDetailPage(props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -13,7 +13,7 @@ export default async function ArticleDetailPage(props: { params: Promise<{ id: s
   const article = await apiGet<Article>(`/api/v1/articles/${params.id}`, cookieHeader).catch(() => null);
   if (!article) notFound();
 
-  const [bom, bomTree, balancesPage, calculations, routing, workCenters, groups] = await Promise.all([
+  const [bom, bomTree, balancesPage, calculations, routing, workCenters, groups, articleLocations] = await Promise.all([
     apiGet<BomComponent[]>(`/api/v1/articles/${params.id}/bom`, cookieHeader),
     apiGet<BomTreeNode>(`/api/v1/articles/${params.id}/bom-tree`, cookieHeader),
     apiGet<Paged<StockBalance>>(`/api/v1/stock/balances?articleId=${params.id}&limit=1000`, cookieHeader),
@@ -21,6 +21,7 @@ export default async function ArticleDetailPage(props: { params: Promise<{ id: s
     apiGet<RoutingOperation[]>(`/api/v1/articles/${params.id}/routing`, cookieHeader),
     apiGet<WorkCenter[]>("/api/v1/work-centers", cookieHeader),
     apiGet<ArticleGroup[]>("/api/v1/article-groups", cookieHeader),
+    apiGet<ArticleLocations>(`/api/v1/articles/${params.id}/locations`, cookieHeader),
   ]);
   const balances = balancesPage.rows;
   // Running stock balance shown in the persistent header: the sum of on-hand
@@ -44,6 +45,7 @@ export default async function ArticleDetailPage(props: { params: Promise<{ id: s
         routing={routing}
         workCenters={workCenters}
         groups={groups}
+        articleLocations={articleLocations}
       />
     </AppShell>
   );

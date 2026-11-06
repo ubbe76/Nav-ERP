@@ -40,7 +40,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
-- [ ] **Lagerplatser, fortsättning** — spärrade lagerplatser och lagerplatsregistret med sök, sidor och saldo per plats är klara (2026-11-06, migration 0185). Kvar: **flera lagerplatser per artikel** (huvudplats + alternativa på Lager-fliken, migration 0186), etapp 3 i `private/superpowers/specs/2026-11-06-lagerplatser-fortsattning-design.md`.
 - [ ] **Avvikelseanalys i efterkalkylen** — pris, mängd och tid; ställtid och stycktid → [#14](https://github.com/ubbe76/Nav-ERP/issues/14) *(hemsidan)*
 - [ ] **Alternativa resurser i planeringen och Leveranstidskontrollen** → [#15](https://github.com/ubbe76/Nav-ERP/issues/15) *(hemsidan)*
 - [ ] **Påslag per artikelgrupp, kund eller order** → [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*

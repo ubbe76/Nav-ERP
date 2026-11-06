@@ -1708,7 +1708,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       header: "Lager",
       text: true,
       description:
-        "Lagrets namn, max 100 tecken. Ett lager som saknas skapas. Kräver Lagerplats. Lämna både Lager och Lagerplats tomma för att lägga saldot på artikelns lagerplats.",
+        "Lagrets namn, max 100 tecken. Ett lager som saknas skapas. Kräver Lagerplats. Lämna både Lager och Lagerplats tomma för att lägga saldot där en inleverans utan vald plats hamnar (se Lagerplats).",
       example: "Huvudlager",
     },
     {
@@ -1718,7 +1718,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       header: "Lagerplats",
       text: true,
       description:
-        "Lagerplatsens namn i lagret, max 100 tecken. En plats som saknas skapas i lagret. Utan Lager måste platsnamnet finnas och vara unikt. Tom (och Lager tomt) betyder artikelns lagerplats, annars reservplatsen ***.",
+        "Lagerplatsens namn i lagret, max 100 tecken. En plats som saknas skapas i lagret. Utan Lager måste platsnamnet finnas och vara unikt. Tom (och Lager tomt) betyder artikelns huvudplats (en spärrad hoppas över), annars första alternativa platsen, annars reservplatsen ***.",
       example: "A1-03",
     },
     {

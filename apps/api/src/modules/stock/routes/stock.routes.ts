@@ -2,6 +2,7 @@ import { locationLabelsSchema } from "@navet/shared";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   addStockCountRowSchema,
+  articleLocationsSchema,
   blockStockLocationSchema,
   createStockCountSchema,
   createStockLocationSchema,
@@ -21,7 +22,7 @@ import {
   valuationQuerySchema,
 } from "@navet/shared";
 import { requireRole } from "../../auth/middleware/auth.middleware.js";
-import { canSeeStockCost, LABEL_PRINT } from "../../auth/middleware/access-rules.js";
+import { articleCardWrite, canSeeStockCost, LABEL_PRINT } from "../../auth/middleware/access-rules.js";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
 import { errorBody } from "../../system/service/error-body.js";
@@ -33,6 +34,7 @@ import {
 } from "../service/export-columns.js";
 import type { StockService } from "../service/stock.service.js";
 import {
+  ArticleLocationInvalidError,
   ArticleNotFoundError,
   DuplicateStockCountRowError,
   FallbackLocationNotBlockableError,
@@ -163,6 +165,34 @@ export async function stockRoutes(
       return blockError(err, reply);
     }
   });
+
+  // Flera lagerplatser per artikel (0186): the Lager tab's Lagerplatser card.
+  // Served here, the article card's sub-resource like /articles/:id/suppliers
+  // (purchase): reading is the module's office, writing is Artiklar or Lager
+  // (articleCardWrite — every write under /articles lets artiklar through).
+  app.get<{ Params: { id: string } }>("/articles/:id/locations", async (req, reply) => {
+    try {
+      return await service.getArticleLocations(req.params.id);
+    } catch (err) {
+      if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  app.put<{ Params: { id: string } }>(
+    "/articles/:id/locations",
+    { config: { access: articleCardWrite(["lager"]) } },
+    async (req, reply) => {
+      const input = articleLocationsSchema.parse(req.body);
+      try {
+        return await service.setArticleLocations(req.params.id, input);
+      } catch (err) {
+        if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof ArticleLocationInvalidError) return reply.code(400).send(errorBody(err));
+        throw err;
+      }
+    }
+  );
 
   app.post("/stock/transactions", async (req, reply) => {
     const input = createStockTransactionSchema.parse(req.body);

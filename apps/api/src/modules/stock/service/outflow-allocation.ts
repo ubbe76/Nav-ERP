@@ -4,14 +4,17 @@
 // booking say the same thing. Pure: no DB imports; outflow-locations.ts reads
 // the balances and calls this.
 //
-//   1. The article's own Lagerplats (when active) up to its positive balance.
-//   2. Other locations with a positive balance in pick-list order (warehouse,
+//   1. The article's huvudplats (when active) up to its positive balance —
+//      none when it is "***" (articlePlacePreference).
+//   2. Its alternative places (0186) in their order, likewise.
+//   3. Other locations with a positive balance in pick-list order (warehouse,
 //      location), the "***" fallback last. Locations under a BLOCKING stock
 //      count are skipped (a draw there would be refused anyway), and so are
 //      Spärrade lagerplatser (0185) — their stock is not usable.
-//   3. What is still missing is the remainder — the caller takes it from
-//      resolveStockLocation (own location, else "***") and lets it go negative
-//      there, exactly as every outflow did before the split.
+//   4. What is still missing is the remainder — the caller takes it from
+//      resolveStockLocation (the huvudplats, else the first usable
+//      alternative, else "***") and lets it go negative there, exactly as
+//      every outflow did before the split.
 //
 // Quantities are the stock column's 4 decimals; a part is never 0.
 
@@ -21,8 +24,8 @@ export interface OutflowCandidate {
   locationName: string;
   // sum(quantity_delta) for the article on the location.
   quantityOnHand: number;
-  // The location is articles.default_location_id.
-  isDefault: boolean;
+  // The article's own order of places — always articlePlacePreference.
+  preference: number | null;
   active: boolean;
   // Skipped: an open stock count with blocks_transactions covers the
   // location, or the location itself is a Spärrad lagerplats.
@@ -36,16 +39,40 @@ export interface OutflowPart {
 
 export const FALLBACK_LOCATION_NAME = "***";
 
+// The article's own rank of a place — the ONE rule that inflows
+// (usableArticleLocations), Automatiskt (readCandidates) and the pick list
+// (balancesForArticles) all read: 0 = the huvudplats
+// (articles.default_location_id), 1–20 = an alternative place
+// (article_alternative_locations.sort_order), null = any other place.
+//
+// The "***" fallback is never one of the article's own places: every article
+// created without a place, and every imported one, has it as huvudplats, so
+// a huvudplats that is "***" counts as NO huvudplats. Its alternatives then
+// come first — an inflow lands on the first usable one, Automatiskt and the
+// pick list take them before the others — and "***" sorts last, exactly as
+// for an article whose huvudplats is empty. The stored value stays "***".
+// (PUT refuses "***" as an alternative, so it never has a sort_order.)
+export function articlePlacePreference(place: { locationName: string; isPrimary: boolean; sortOrder: number | null }): number | null {
+  if (place.locationName === FALLBACK_LOCATION_NAME) return null;
+  if (place.isPrimary) return 0;
+  return place.sortOrder;
+}
+
 const round4 = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
 
-// Pick-list order: the article's own location first, then by warehouse and
-// location name, the fallback last. Same collation as the terminal's material
-// sort (sv, numeric) so "A2" sorts before "A10".
+// Pick-list order: the article's own places first (huvudplats, then the
+// alternatives in order — `preference` from articlePlacePreference), then by
+// warehouse and location name, the fallback last. Same collation as the
+// terminal's material sort (sv, numeric) so "A2" sorts before "A10".
 export function compareOutflowLocations(
-  a: Pick<OutflowCandidate, "warehouseName" | "locationName" | "isDefault">,
-  b: Pick<OutflowCandidate, "warehouseName" | "locationName" | "isDefault">
+  a: Pick<OutflowCandidate, "warehouseName" | "locationName" | "preference">,
+  b: Pick<OutflowCandidate, "warehouseName" | "locationName" | "preference">
 ): number {
-  if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+  if (a.preference !== b.preference) {
+    if (a.preference === null) return 1;
+    if (b.preference === null) return -1;
+    return a.preference - b.preference;
+  }
   const aFallback = a.locationName === FALLBACK_LOCATION_NAME;
   const bFallback = b.locationName === FALLBACK_LOCATION_NAME;
   if (aFallback !== bFallback) return aFallback ? 1 : -1;

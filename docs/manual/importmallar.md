@@ -141,8 +141,8 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det 
 | Kolumn | Obligatorisk | Förklaring | Exempel |
 | --- | --- | --- | --- |
 | **Artikelnummer** | Ja | Numret på en artikel som redan finns i artikelregistret och lagerhålls — inte en tjänst eller en fantomartikel. Samma artikel får bara förekomma en gång per lagerplats i filen. | RS-12 |
-| **Lager** | Nej | Lagrets namn, max 100 tecken. Ett lager som saknas skapas. Kräver Lagerplats. Lämna både Lager och Lagerplats tomma för att lägga saldot på artikelns lagerplats. | Huvudlager |
-| **Lagerplats** | Nej | Lagerplatsens namn i lagret, max 100 tecken. En plats som saknas skapas i lagret. Utan Lager måste platsnamnet finnas och vara unikt. Tom (och Lager tomt) betyder artikelns lagerplats, annars reservplatsen ***. | A1-03 |
+| **Lager** | Nej | Lagrets namn, max 100 tecken. Ett lager som saknas skapas. Kräver Lagerplats. Lämna både Lager och Lagerplats tomma för att lägga saldot där en inleverans utan vald plats hamnar (se Lagerplats). | Huvudlager |
+| **Lagerplats** | Nej | Lagerplatsens namn i lagret, max 100 tecken. En plats som saknas skapas i lagret. Utan Lager måste platsnamnet finnas och vara unikt. Tom (och Lager tomt) betyder artikelns huvudplats (en spärrad hoppas över), annars första alternativa platsen, annars reservplatsen ***. | A1-03 |
 | **Antal** | Ja | Saldot på lagerplatsen efter importen, i artikelns grundenhet, 0 eller mer, decimalkomma eller punkt. Skillnaden mot dagens saldo bokas som en lagerjustering — samma fil två gånger ändrar inget, och 0 tömmer platsen. | 120 |
 | **À-pris** | Nej | Värdet per grundenhet i kronor för det som läggs till, decimalkomma eller punkt. Tom cell betyder artikelns standardkostnad. Används bara när saldot ökar. | 24,50 |
 

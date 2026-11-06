@@ -11,7 +11,9 @@ import { SectionHeading } from "../ui/SectionHeading";
 import { Field, Input, Select } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
-import type { Article, StockBalance } from "../../lib/types";
+import type { Article, ArticleLocations, StockBalance } from "../../lib/types";
+import { articleLocationRole, ownPrimaryLocationId } from "../../lib/stockLocations";
+import { ArticleLocationsCard } from "./ArticleLocationsCard";
 import { formatQuantity } from "../../lib/format";
 
 interface RowWithId extends StockBalance {
@@ -20,8 +22,17 @@ interface RowWithId extends StockBalance {
 
 // Lager-fliken: a Planering section (behovsberäkning input, E1) above the
 // read-only saldo table.
-export function LagerTab({ article, balances }: { article: Article; balances: StockBalance[] }) {
+export function LagerTab({
+  article,
+  balances,
+  articleLocations,
+}: {
+  article: Article;
+  balances: StockBalance[];
+  articleLocations: ArticleLocations;
+}) {
   const router = useRouter();
+  const [places, setPlaces] = useState(articleLocations);
   const [reorderPoint, setReorderPoint] = useState(article.reorderPoint ?? "");
   const [safetyStock, setSafetyStock] = useState(article.safetyStock ?? "");
   const [stockControlled, setStockControlled] = useState(article.stockControlled ? "stock" : "order");
@@ -65,6 +76,15 @@ export function LagerTab({ article, balances }: { article: Article; balances: St
 
   return (
     <div>
+      <ArticleLocationsCard
+        articleId={article.id}
+        value={places}
+        onSaved={(v) => {
+          setPlaces(v);
+          router.refresh();
+        }}
+      />
+
       <Card maxWidth={640} style={{ marginBottom: 20 }}>
         <SectionHeading>Planering</SectionHeading>
         <Form onSubmit={savePlanning}>
@@ -177,10 +197,18 @@ export function LagerTab({ article, balances }: { article: Article; balances: St
           columns={[
             { key: "warehouseName", label: "Lager", width: "1fr" },
             { key: "locationName", label: "Lagerplats", width: "1fr" },
+            { key: "role", label: "Plats", width: "140px" },
             { key: "quantityOnHand", label: "Saldo", width: "140px", align: "right" },
           ]}
           rows={rows}
           renderCell={(row, key) => {
+            if (key === "role") {
+              return articleLocationRole(
+                row.locationId,
+                ownPrimaryLocationId(places.primary),
+                places.alternatives.map((p) => p.locationId)
+              );
+            }
             if (key === "quantityOnHand") return formatQuantity(row.quantityOnHand);
             // Stock can be tracked without locations — those rows show "—".
             if (key === "locationName") {

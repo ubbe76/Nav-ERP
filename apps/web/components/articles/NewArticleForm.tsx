@@ -341,7 +341,7 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
         </FormRow>
 
         <FormRow>
-          <Field label="Lagerplats" htmlFor="newArticleLocation">
+          <Field label="Huvudplats" htmlFor="newArticleLocation">
             {/* Empty = the auto-created "***" fallback location. */}
             <Select id="newArticleLocation" value={defaultLocationId} onChange={(e) => setDefaultLocationId(e.target.value)}>
               <option value="">*** (standard)</option>
