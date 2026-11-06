@@ -11,6 +11,8 @@ export interface StockBalanceExportRow {
   articleName: string;
   warehouseName: string | null;
   locationName: string | null;
+  // Spärrad lagerplats (0185) — the web shows it as a tag after the place.
+  locationBlocked: boolean | null;
   quantityOnHand: string | number;
 }
 
@@ -19,6 +21,7 @@ export const stockBalanceExportColumns: CsvColumn<StockBalanceExportRow>[] = [
   { label: "Benämning", value: (r) => r.articleName },
   { label: "Lager", value: (r) => r.warehouseName },
   { label: "Lagerplats", value: (r) => r.locationName },
+  { label: "Spärrad", value: (r) => (r.locationBlocked ? "Ja" : "Nej") },
   { label: "Saldo", value: (r) => r.quantityOnHand, format: "number" },
 ];
 

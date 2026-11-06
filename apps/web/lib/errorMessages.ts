@@ -254,6 +254,13 @@ const MESSAGES: Record<string, MessageEntry> = {
   "deviation-file-too-large": "Filen är för stor — max 20 MB.",
   "scrap-reason-required": serverMessage("Välj en kassationsorsak."),
   "scrap-reason-invalid": "Kassationsorsaken finns inte, är inaktiv eller gäller inte kassation — välj en annan.",
+  // Spärrade lagerplatser
+  "stock-location-already-blocked": "Lagerplatsen är redan spärrad — ladda om sidan.",
+  "stock-location-not-blocked": "Lagerplatsen är inte spärrad — ladda om sidan.",
+  "fallback-location-not-blockable": "Reservplatsen *** kan inte spärras — resten av ett uttag med Automatiskt hamnar där.",
+  // The server names the place (Swedish).
+  "stock-location-blocked": serverMessage("Lagerplatsen är spärrad — välj en annan plats eller Automatiskt."),
+  "default-location-blocked": "Lagerplatsen är spärrad och kan inte väljas som artikelns lagerplats — välj en annan.",
   // The server names what went wrong with the key / the mailbox.
   "invoice-scan-ai-test-failed": serverMessage("AI-tjänsten svarade inte med den här nyckeln och modellen."),
   "invoice-scan-mail-test-failed": serverMessage("Kunde inte ansluta till e-postlådan."),

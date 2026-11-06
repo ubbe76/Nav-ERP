@@ -25,6 +25,7 @@ En mall har läget `variants` (materialiseras till vanliga artiklar) eller `to_o
 - **Mallen kan inte läggas på order:** `assertOrderableArticle` (sales/purchase/manufacturing) ⇒ 409 `article-is-template` ("63000 är en mall — välj en variant"); `GET /articles?orderable=true` (`ArticlePicker orderable`, bara på orderradernas artikelval — aldrig register, struktur eller faktura) döljer den. Läget `variants` kräver en **tillverkad** artikel som inte är fantom.
 - **Stegrutnätet är EN regel:** `isOnNumberStep(value, min, step)` i `packages/shared/src/configurator.ts` (exakt i 1e-4-enheter) används av motorn (valt värde), `createConfiguratorGroupSchema` och `updateGroup` (förvalet, även när bara steget ändras; texten `NUMBER_DEFAULT_OFF_STEP`). Test: `configurator-schema.test.ts`, `configurator.service.test.ts`.
 - Ritningar, filer, revisioner, leverantörskatalog och kundpriser följer **inte** med till varianten. Variantens kort visar **Variant av …** och en skrivskyddad vallista (`GET /articles/:id/variant-of`, `VariantOfPanel`).
+- **Variantlistans Saldo** (`listVariants`, `VariantStockReader` = stockService `balancesForArticles`) är **fysiskt** som artikelkortet — saldo på en spärrad lagerplats räknas med (0185). Test: `configurator-variants.service.test.ts`.
 
 ## Konfigurera på orderraden (4a)
 

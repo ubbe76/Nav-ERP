@@ -33,6 +33,12 @@ import {
 } from "../src/modules/purchase/service/invoice-scan-settings.service.js";
 import { InvoiceScanMailTestFailedError } from "../src/modules/purchase/service/invoice-scan-mail.service.js";
 import { SupplierInvoiceFileFromScanError } from "../src/modules/purchase/service/supplier-invoice.service.js";
+import {
+  FallbackLocationNotBlockableError,
+  StockLocationAlreadyBlockedError,
+  StockLocationBlockedError,
+  StockLocationNotBlockedError,
+} from "../src/modules/stock/service/stock.errors.js";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ERROR_CODES } from "@navet/shared";
@@ -373,6 +379,7 @@ import {
   ArticleNotFoundError,
   ArticleCopyPartNotAllowedError,
   ArticleIsTemplateError,
+  DefaultLocationBlockedError,
 } from "../src/modules/article/service/article.service.js";
 import {
   InvalidCredentialsError,
@@ -870,6 +877,12 @@ const cases: Array<[Error, string]> = [
   [new DeviationFileTooLargeError(), ERROR_CODES.DEVIATION_FILE_TOO_LARGE],
   [new ScrapReasonRequiredError(true), ERROR_CODES.SCRAP_REASON_REQUIRED],
   [new ScrapReasonInvalidError(), ERROR_CODES.SCRAP_REASON_INVALID],
+  // Spärrade lagerplatser
+  [new StockLocationAlreadyBlockedError("K1"), ERROR_CODES.STOCK_LOCATION_ALREADY_BLOCKED],
+  [new StockLocationNotBlockedError("K1"), ERROR_CODES.STOCK_LOCATION_NOT_BLOCKED],
+  [new FallbackLocationNotBlockableError(), ERROR_CODES.FALLBACK_LOCATION_NOT_BLOCKABLE],
+  [new StockLocationBlockedError("Huvudlager — K1"), ERROR_CODES.STOCK_LOCATION_BLOCKED],
+  [new DefaultLocationBlockedError(), ERROR_CODES.DEFAULT_LOCATION_BLOCKED],
 ];
 
 describe("error class name -> ERROR_CODES derivation", () => {

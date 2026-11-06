@@ -14,11 +14,13 @@ import {
   users,
   warehouses,
   type Db,
+  type Tx,
 } from "@navet/db";
 import { resolveStockLocation } from "../service/location-resolver.js";
 import { deactivateEmptyLocation, locationHoldsStock } from "../service/location-lifecycle.js";
 import { assertLocationNotUnderCount } from "../service/count-guard.js";
-import { compareOutflowLocations } from "../service/outflow-allocation.js";
+import { compareOutflowLocations, FALLBACK_LOCATION_NAME } from "../service/outflow-allocation.js";
+import { isCheckViolation } from "../../system/service/db-errors.js";
 import { stockValuedAt } from "./valued-at.js";
 import {
   ilikePattern,
@@ -37,11 +39,76 @@ import {
 } from "@navet/shared";
 import {
   ArticleNotFoundError,
+  FallbackLocationNotBlockableError,
   InactiveStockLocationError,
   InsufficientStockError,
+  StockLocationAlreadyBlockedError,
+  StockLocationNotBlockedError,
   StockLocationNotEmptyError,
   StockLocationNotFoundError,
 } from "../service/stock.errors.js";
+
+// "***" may never be blocked (the remainder of Automatiskt lands there) — the
+// CHECK behind it, caught on create and on a rename of a blocked place.
+const FALLBACK_NOT_BLOCKED_CHECK = "stock_locations_fallback_not_blocked";
+
+function rethrowFallbackBlocked(err: unknown): never {
+  if (isCheckViolation(err, FALLBACK_NOT_BLOCKED_CHECK)) throw new FallbackLocationNotBlockableError();
+  throw err;
+}
+
+// One stock location as GET /stock/locations answers with it (and the
+// Spärra/Släpp spärr responses).
+const locationColumns = {
+  id: stockLocations.id,
+  warehouseId: stockLocations.warehouseId,
+  name: stockLocations.name,
+  active: stockLocations.active,
+  // Fast lagerplats: stays when emptied.
+  fixed: stockLocations.fixed,
+  // Spärrad lagerplats (0185): not usable, never drawn automatically.
+  blocked: stockLocations.blocked,
+  blockedAt: stockLocations.blockedAt,
+  blockedNote: stockLocations.blockedNote,
+  warehouseName: warehouses.name,
+  labelNumber: stockLocations.labelNumber,
+};
+// Etikettkod (#4): what the location's label and a scan say (LP0042).
+function toLocationView<R extends { labelNumber: number }>({ labelNumber, ...row }: R) {
+  return { ...row, labelCode: formatLocationLabelCode(labelNumber) };
+}
+
+async function locationView(dbc: Db | Tx, id: string) {
+  const [row] = await dbc
+    .select(locationColumns)
+    .from(stockLocations)
+    .leftJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
+    .where(eq(stockLocations.id, id));
+  return row ? toLocationView(row) : null;
+}
+
+// What Spärra/Släpp spärr tells the user afterwards: the articles whose
+// balance on the place is not 0, and those that have it as their Lagerplats
+// (their inflows go to the next place while it is blocked). Read after the
+// UPDATE — which waited for any draw holding the place — so a draw that
+// committed meanwhile is counted.
+async function blockImpact(dbc: Db | Tx, id: string) {
+  const [[withStock], [defaults]] = await Promise.all([
+    dbc
+      .select({ n: sql<number>`count(*)::int` })
+      .from(
+        dbc
+          .select({ articleId: stockTransactions.articleId })
+          .from(stockTransactions)
+          .where(eq(stockTransactions.locationId, id))
+          .groupBy(stockTransactions.articleId)
+          .having(sql`sum(${stockTransactions.quantityDelta}) <> 0`)
+          .as("with_stock")
+      ),
+    dbc.select({ n: sql<number>`count(*)::int` }).from(articles).where(eq(articles.defaultLocationId, id)),
+  ]);
+  return { articlesWithStock: withStock?.n ?? 0, defaultForArticles: defaults?.n ?? 0 };
+}
 
 export function createStockRepository(db: Db) {
   return {
@@ -50,9 +117,24 @@ export function createStockRepository(db: Db) {
       return row;
     },
 
+    // A place may be created blocked (a Karantän); blocked_at is the moment.
     async createLocation(input: CreateStockLocationInput) {
-      const [row] = await db.insert(stockLocations).values(input).returning();
-      return row;
+      const { blocked, blockedNote, ...fields } = input;
+      const isBlocked = blocked === true;
+      try {
+        const [row] = await db
+          .insert(stockLocations)
+          .values({
+            ...fields,
+            blocked: isBlocked,
+            blockedAt: isBlocked ? new Date() : null,
+            blockedNote: isBlocked ? (blockedNote ?? null) : null,
+          })
+          .returning();
+        return row!;
+      } catch (err) {
+        rethrowFallbackBlocked(err);
+      }
     },
 
     async updateWarehouse(id: string, input: UpdateWarehouseInput) {
@@ -61,21 +143,82 @@ export function createStockRepository(db: Db) {
     },
 
     async updateLocation(id: string, input: UpdateStockLocationInput) {
+      try {
+        return await db.transaction(async (tx) => {
+          if (input.active === false || input.blockedNote !== undefined) {
+            // Locked like Spärra/Släpp spärr, so a note never lands on a
+            // place that was just unblocked.
+            const [current] = await tx
+              .select({ name: stockLocations.name, active: stockLocations.active, blocked: stockLocations.blocked })
+              .from(stockLocations)
+              .where(eq(stockLocations.id, id))
+              .for("no key update");
+            if (!current) return null;
+            // Retiring a location by hand must not strand its stock — emptying it
+            // is what deactivates a location, and that happens automatically.
+            if (input.active === false && current.active && (await locationHoldsStock(tx, id))) {
+              throw new StockLocationNotEmptyError(current.name);
+            }
+            // The note belongs to the spärr; the flag itself only changes
+            // through block/unblock.
+            if (input.blockedNote !== undefined && !current.blocked) throw new StockLocationNotBlockedError(current.name);
+          }
+          const [row] = await tx.update(stockLocations).set(input).where(eq(stockLocations.id, id)).returning();
+          return row ?? null;
+        });
+      } catch (err) {
+        // A blocked place renamed to "***".
+        rethrowFallbackBlocked(err);
+      }
+    },
+
+    // Spärra lagerplats: a whitelisted transition — ONE conditional UPDATE
+    // (open, not "***"), so two simultaneous blocks give one winner and one
+    // 409. The UPDATE waits for draws holding the place FOR SHARE
+    // (outflow-locations.ts) and draws after it see blocked = true. No
+    // stock_transactions row: a spärr is a property of the place.
+    async blockLocation(id: string, note: string | null) {
       return db.transaction(async (tx) => {
-        // Retiring a location by hand must not strand its stock — emptying it
-        // is what deactivates a location, and that happens automatically.
-        if (input.active === false) {
+        const [row] = await tx
+          .update(stockLocations)
+          .set({ blocked: true, blockedAt: new Date(), blockedNote: note })
+          .where(and(eq(stockLocations.id, id), eq(stockLocations.blocked, false), ne(stockLocations.name, FALLBACK_LOCATION_NAME)))
+          .returning({ id: stockLocations.id });
+        if (!row) {
           const [current] = await tx
-            .select({ name: stockLocations.name, active: stockLocations.active })
+            .select({ name: stockLocations.name, blocked: stockLocations.blocked })
             .from(stockLocations)
             .where(eq(stockLocations.id, id));
-          if (current?.active && (await locationHoldsStock(tx, id))) {
-            throw new StockLocationNotEmptyError(current.name);
-          }
+          if (!current) throw new StockLocationNotFoundError(id);
+          if (current.blocked) throw new StockLocationAlreadyBlockedError(current.name);
+          throw new FallbackLocationNotBlockableError();
         }
-        const [row] = await tx.update(stockLocations).set(input).where(eq(stockLocations.id, id)).returning();
-        return row ?? null;
+        return { location: (await locationView(tx, id))!, ...(await blockImpact(tx, id)) };
       });
+    },
+
+    // Släpp spärr: the mirror — only a blocked place, the time and note
+    // cleared. previousNote is for the audit row only (read unlocked first).
+    async unblockLocation(id: string) {
+      return db.transaction(async (tx) => {
+        const [before] = await tx.select({ note: stockLocations.blockedNote }).from(stockLocations).where(eq(stockLocations.id, id));
+        const [row] = await tx
+          .update(stockLocations)
+          .set({ blocked: false, blockedAt: null, blockedNote: null })
+          .where(and(eq(stockLocations.id, id), eq(stockLocations.blocked, true)))
+          .returning({ id: stockLocations.id });
+        if (!row) {
+          const [current] = await tx.select({ name: stockLocations.name }).from(stockLocations).where(eq(stockLocations.id, id));
+          if (!current) throw new StockLocationNotFoundError(id);
+          throw new StockLocationNotBlockedError(current.name);
+        }
+        return { location: (await locationView(tx, id))!, previousNote: before?.note ?? null, ...(await blockImpact(tx, id)) };
+      });
+    },
+
+    // One place in GET /stock/locations' shape; null when unknown.
+    async findLocationView(id: string) {
+      return locationView(db, id);
     },
 
     // Append-only: this is the only write path into stock. There is no update/delete
@@ -99,22 +242,12 @@ export function createStockRepository(db: Db) {
 
     async listLocations(query: ListStockLocationsQuery = { includeInactive: false }) {
       const rows = await db
-        .select({
-          id: stockLocations.id,
-          warehouseId: stockLocations.warehouseId,
-          name: stockLocations.name,
-          active: stockLocations.active,
-          // Fast lagerplats: stays when emptied.
-          fixed: stockLocations.fixed,
-          warehouseName: warehouses.name,
-          labelNumber: stockLocations.labelNumber,
-        })
+        .select(locationColumns)
         .from(stockLocations)
         .leftJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
         .where(query.includeInactive ? undefined : eq(stockLocations.active, true))
         .orderBy(asc(warehouses.name), asc(stockLocations.name));
-      // Etikettkod (#4): what the location's label and a scan say (LP0042).
-      return rows.map(({ labelNumber, ...row }) => ({ ...row, labelCode: formatLocationLabelCode(labelNumber) }));
+      return rows.map(toLocationView);
     },
 
     async createTransaction(input: CreateStockTransactionInput, createdBy?: string) {
@@ -165,7 +298,7 @@ export function createStockRepository(db: Db) {
         if (!from) throw new StockLocationNotFoundError(input.fromLocationId);
 
         const [to] = await tx
-          .select({ id: stockLocations.id, name: stockLocations.name, active: stockLocations.active })
+          .select({ id: stockLocations.id, name: stockLocations.name, active: stockLocations.active, blocked: stockLocations.blocked })
           .from(stockLocations)
           .where(eq(stockLocations.id, input.toLocationId));
         if (!to) throw new StockLocationNotFoundError(input.toLocationId);
@@ -229,8 +362,10 @@ export function createStockRepository(db: Db) {
 
         const deactivatedSourceLocation = await deactivateEmptyLocation(tx, from.id);
         // The stock physically moved, so articles that lived on the emptied
-        // source follow it rather than falling back to "***".
-        if (deactivatedSourceLocation && followers.length > 0) {
+        // source follow it rather than falling back to "***" — but never onto
+        // a Spärrad lagerplats: a blocked place is not a Lagerplats anyone
+        // chose (the resolver would skip it anyway), so they stay on "***".
+        if (deactivatedSourceLocation && followers.length > 0 && !to.blocked) {
           await tx
             .update(articles)
             .set({ defaultLocationId: to.id })
@@ -259,6 +394,8 @@ export function createStockRepository(db: Db) {
       // Utleverans: every article on the order in one call.
       if (query.articleIds) conditions.push(inArray(stockBalances.articleId, query.articleIds));
       if (query.locationId) conditions.push(eq(stockBalances.locationId, query.locationId));
+      // Spärrade lagerplatser: only them / without them.
+      if (query.blocked !== undefined) conditions.push(eq(stockLocations.blocked, query.blocked));
       const where = and(...conditions);
 
       const [rows, totalRows] = await Promise.all([
@@ -269,6 +406,8 @@ export function createStockRepository(db: Db) {
             quantityOnHand: stockBalances.quantityOnHand,
             locationName: stockLocations.name,
             warehouseName: warehouses.name,
+            // A balance on a Spärrad lagerplats — physical, but not usable.
+            locationBlocked: stockLocations.blocked,
             articleNumber: articles.articleNumber,
             articleName: articles.name,
             // The balance is in the article's base unit.
@@ -298,7 +437,10 @@ export function createStockRepository(db: Db) {
     // show where each article can be picked from, in the order the automatic
     // outflow draws from them (the article's own location first, then
     // warehouse/location, "***" last — compareOutflowLocations is the one
-    // rule for both), so the paper and the booking agree.
+    // rule for both), so the paper and the booking agree. Physical: a row on
+    // a Spärrad lagerplats is included with blocked = true — the pick list
+    // leaves it out (Automatiskt never draws there), the configurator's
+    // variant list sums it like the article card.
     async balancesForArticles(articleIds: string[]) {
       if (articleIds.length === 0) return [];
       const rows = await db
@@ -308,6 +450,7 @@ export function createStockRepository(db: Db) {
           quantityOnHand: stockBalances.quantityOnHand,
           locationName: stockLocations.name,
           warehouseName: warehouses.name,
+          blocked: sql<boolean>`coalesce(${stockLocations.blocked}, false)`,
           isDefault: sql<boolean>`${articles.defaultLocationId} = ${stockBalances.locationId}`,
         })
         .from(stockBalances)
@@ -317,7 +460,7 @@ export function createStockRepository(db: Db) {
         .where(and(inArray(stockBalances.articleId, articleIds), ne(stockBalances.quantityOnHand, "0")))
         .orderBy(asc(warehouses.name), asc(stockLocations.name));
       return rows
-        .map(({ isDefault, ...row }) => ({ ...row, isDefault: isDefault === true }))
+        .map(({ isDefault, blocked, ...row }) => ({ ...row, blocked: blocked === true, isDefault: isDefault === true }))
         .sort((a, b) =>
           compareOutflowLocations(
             { warehouseName: a.warehouseName ?? "", locationName: a.locationName ?? "", isDefault: a.isDefault },

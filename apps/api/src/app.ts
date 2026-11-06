@@ -306,7 +306,8 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   const importService = createImportService(createImportRepository(database), {
     dryRun: (fn) => runImportDryRun(database, fn),
   });
-  const stockService = createStockService(createStockRepository(database));
+  // audit: Spärra/Släpp spärr on a stock location.
+  const stockService = createStockService(createStockRepository(database), auditRepository);
   // Shared base data (leveransvillkor/betalningsvillkor/speditörer) —
   // referenced from both customers and suppliers.
   const registerService = createRegisterService(createRegisterRepository(database));

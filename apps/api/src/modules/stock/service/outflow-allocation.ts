@@ -7,7 +7,8 @@
 //   1. The article's own Lagerplats (when active) up to its positive balance.
 //   2. Other locations with a positive balance in pick-list order (warehouse,
 //      location), the "***" fallback last. Locations under a BLOCKING stock
-//      count are skipped (a draw there would be refused anyway).
+//      count are skipped (a draw there would be refused anyway), and so are
+//      Spärrade lagerplatser (0185) — their stock is not usable.
 //   3. What is still missing is the remainder — the caller takes it from
 //      resolveStockLocation (own location, else "***") and lets it go negative
 //      there, exactly as every outflow did before the split.
@@ -23,7 +24,8 @@ export interface OutflowCandidate {
   // The location is articles.default_location_id.
   isDefault: boolean;
   active: boolean;
-  // An open stock count with blocks_transactions covers the location.
+  // Skipped: an open stock count with blocks_transactions covers the
+  // location, or the location itself is a Spärrad lagerplats.
   blocked: boolean;
 }
 

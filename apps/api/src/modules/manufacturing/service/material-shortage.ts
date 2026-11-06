@@ -1,5 +1,6 @@
-import { inArray, sql } from "drizzle-orm";
-import { articles, stockBalances, units, type Db, type Tx } from "@navet/db";
+import { inArray } from "drizzle-orm";
+import { articles, units, type Db, type Tx } from "@navet/db";
+import { onHandByArticle } from "../../stock/repository/on-hand.js";
 import type { ManufacturingMaterialShortage } from "@navet/shared";
 import { errorBody } from "../../system/service/error-body.js";
 
@@ -7,9 +8,10 @@ import { errorBody } from "../../system/service/error-body.js";
 // manufacturing_material_shortage decides what a report that draws more
 // component material than is in stock runs into — nothing ("none"), a
 // question the client answers by resubmitting with allowMaterialShortage
-// ("warn") or a refusal ("block"). "Available" is the component's TOTAL
-// stock across all locations, the same basis as the release-time shortage
-// warning in releaseInTx. Same Db | Tx leaf shape as the stock module's
+// ("warn") or a refusal ("block"). "Available" is the component's USABLE
+// stock — every location except a Spärrad lagerplats (onHandByArticle) —
+// the same basis as the release-time shortage warning (shortage-warnings.ts).
+// Same Db | Tx leaf shape as the stock module's
 // count-guard: the repository calls it inside the report's own transaction,
 // after the draws are booked, and the throw rolls the whole report back.
 
@@ -21,7 +23,7 @@ export interface MaterialShortage {
   unitCode: string;
   // What THIS report draws of the article (all its material rows together).
   required: number;
-  // Total balance before this report's draws, never below 0 for display.
+  // Usable balance before this report's draws, never below 0 for display.
   available: number;
 }
 
@@ -71,7 +73,7 @@ export function materialShortageCheckApplies(check: MaterialShortageCheck): bool
   return check.mode === "block" || (check.mode === "warn" && !check.allow);
 }
 
-// Throws MaterialShortageError when any drawn component's total balance is
+// Throws MaterialShortageError when any drawn component's usable balance is
 // below zero now that `lines` are booked in this transaction. Lines of the
 // same article are added up; components of type service are never checked
 // (services are not stocked). Runs only when the check applies — the
@@ -116,20 +118,14 @@ export async function assertMaterialAvailable(
   const stocked = components.filter((c) => c.type !== "service");
   if (stocked.length === 0) return;
 
-  const balances = await tx
-    .select({
-      articleId: stockBalances.articleId,
-      total: sql<string>`coalesce(sum(${stockBalances.quantityOnHand}), 0)`,
-    })
-    .from(stockBalances)
-    .where(
-      inArray(
-        stockBalances.articleId,
-        stocked.map((c) => c.id)
-      )
-    )
-    .groupBy(stockBalances.articleId);
-  const balanceAfter = new Map(balances.map((b) => [b.articleId, Number(b.total)]));
+  // Read under the article locks, after this report's own draws. A spärr of
+  // another place committing meanwhile does not change what the report took
+  // (an automatic draw never takes from a blocked place — outflow-locations.ts).
+  const onHand = await onHandByArticle(
+    tx,
+    stocked.map((c) => c.id)
+  );
+  const balanceAfter = new Map([...onHand].map(([articleId, b]) => [articleId, b.usable]));
 
   const short = stocked.filter((c) => (balanceAfter.get(c.id) ?? 0) < 0);
   if (short.length === 0) return;

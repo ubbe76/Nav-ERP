@@ -11,6 +11,12 @@ export const listStockBalancesQuerySchema = listQuerySchema.extend({
     .transform((raw) => (raw === undefined ? undefined : raw.split(",").map((p) => p.trim()).filter((p) => p !== "")))
     .pipe(z.array(z.string().uuid()).min(1).max(200).optional()),
   locationId: z.string().uuid().optional(),
+  // Spärrade lagerplatser: "true" = only blocked places, "false" = without
+  // them, absent = all. NOT z.coerce.boolean() — that turns "false" into true.
+  blocked: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((value) => (value === undefined ? undefined : value === "true")),
 });
 export type ListStockBalancesQuery = z.infer<typeof listStockBalancesQuerySchema>;
 
@@ -108,25 +114,51 @@ export const listStockLocationsQuerySchema = z.object({
 });
 export type ListStockLocationsQuery = z.infer<typeof listStockLocationsQuerySchema>;
 
+// Spärrad lagerplats: the note on a blocked place (stock_locations.blocked_note,
+// varchar 200). Trimmed; blank = no note.
+const blockedNoteSchema = z
+  .string()
+  .trim()
+  .max(200, "Anteckningen får vara högst 200 tecken")
+  .transform((value) => (value === "" ? null : value));
+
 // fixed (Fast lagerplats): stays active when emptied; a temporary location
 // (false) is deactivated automatically the moment it is empty.
-export const createStockLocationSchema = z.object({
-  warehouseId: z.string().uuid(),
-  name: z.string().min(1).max(100),
-  active: z.boolean().default(true),
-  fixed: z.boolean().default(true),
-});
+// blocked (Spärrad lagerplats): a Karantän can be created blocked — the note
+// only goes with a blocked place.
+export const createStockLocationSchema = z
+  .object({
+    warehouseId: z.string().uuid(),
+    name: z.string().min(1).max(100),
+    active: z.boolean().default(true),
+    fixed: z.boolean().default(true),
+    blocked: z.boolean().default(false),
+    blockedNote: blockedNoteSchema.nullable().optional(),
+  })
+  .refine((data) => data.blocked || data.blockedNote == null, {
+    message: "En anteckning hör bara till en spärrad lagerplats",
+    path: ["blockedNote"],
+  });
 export type CreateStockLocationInput = z.infer<typeof createStockLocationSchema>;
 
+// blockedNote edits the note of a BLOCKED place (null/"" clears it); the
+// flag itself only changes through POST /stock/locations/:id/block|unblock.
 export const updateStockLocationSchema = z
   .object({
     name: z.string().min(1).max(100).optional(),
     warehouseId: z.string().uuid().optional(),
     active: z.boolean().optional(),
     fixed: z.boolean().optional(),
+    blockedNote: blockedNoteSchema.nullable().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateStockLocationInput = z.infer<typeof updateStockLocationSchema>;
+
+// POST /stock/locations/:id/block — Spärra lagerplats with an optional note.
+export const blockStockLocationSchema = z.object({
+  note: blockedNoteSchema.nullable().optional(),
+});
+export type BlockStockLocationInput = z.infer<typeof blockStockLocationSchema>;
 
 // Lagervärdering (D1) — GET /stock/valuation[/pdf]. asOf defaults to today
 // (server-side, sv-SE) when omitted; groupId narrows to one varugrupp and

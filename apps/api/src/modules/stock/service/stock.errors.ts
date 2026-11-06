@@ -117,3 +117,41 @@ export class DuplicateStockCountRowError extends Error {
     this.name = "DuplicateStockCountRowError";
   }
 }
+
+// --- Spärrade lagerplatser (migration 0185) ---
+
+export class StockLocationAlreadyBlockedError extends Error {
+  constructor(name: string) {
+    super(`Lagerplatsen ${name} är redan spärrad`);
+    this.name = "StockLocationAlreadyBlockedError";
+  }
+}
+
+// Släpp spärr on an open place, or a note edited on one (PATCH blockedNote).
+export class StockLocationNotBlockedError extends Error {
+  constructor(name: string) {
+    super(`Lagerplatsen ${name} är inte spärrad`);
+    this.name = "StockLocationNotBlockedError";
+  }
+}
+
+// The remainder of an Automatiskt draw lands on "***" (withRemainder), so a
+// blocked "***" would put minus on a place the usable balance leaves out.
+// Also a blocked place renamed to "***" (stock_locations_fallback_not_blocked).
+export class FallbackLocationNotBlockableError extends Error {
+  constructor() {
+    super("Reservplatsen *** kan inte spärras — resten av ett uttag med Automatiskt hamnar där");
+    this.name = "FallbackLocationNotBlockableError";
+  }
+}
+
+// An outflow from a blocked place chosen by hand (utleverans, the order
+// card's Leverera, Förbruka) — the goods are in quarantine; Automatiskt
+// skips the place instead. `label` is "Huvudlager — K1". Swedish: the web
+// shows the message as is.
+export class StockLocationBlockedError extends Error {
+  constructor(readonly label: string) {
+    super(`Lagerplatsen ${label} är spärrad — uttag görs inte därifrån. Välj en annan lagerplats eller Automatiskt.`);
+    this.name = "StockLocationBlockedError";
+  }
+}

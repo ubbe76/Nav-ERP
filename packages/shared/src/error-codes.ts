@@ -544,6 +544,18 @@ export const ERROR_CODES = {
   // Kassation with the Avvikelseorsaker register (400)
   SCRAP_REASON_REQUIRED: "scrap-reason-required",
   SCRAP_REASON_INVALID: "scrap-reason-invalid",
+
+  // Spärrade lagerplatser (Spärra/Släpp spärr, 409)
+  STOCK_LOCATION_ALREADY_BLOCKED: "stock-location-already-blocked",
+  STOCK_LOCATION_NOT_BLOCKED: "stock-location-not-blocked",
+  // "***" (the remainder of Automatiskt lands there) can never be blocked —
+  // also a rename of a blocked place to "***" (409)
+  FALLBACK_LOCATION_NOT_BLOCKABLE: "fallback-location-not-blockable",
+  // An outflow from a blocked place chosen by hand: utleverans, the order
+  // card's Leverera and Förbruka (409, Swedish message naming the place)
+  STOCK_LOCATION_BLOCKED: "stock-location-blocked",
+  // The article's Lagerplats CHANGED to a blocked place (POST/PATCH /articles, 400)
+  DEFAULT_LOCATION_BLOCKED: "default-location-blocked",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

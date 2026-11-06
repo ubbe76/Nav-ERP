@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { articles, stockLocations, stockTransactions, type Db, type Tx } from "@navet/db";
 import { FALLBACK_LOCATION_NAME } from "./location-resolver.js";
 
@@ -20,8 +20,21 @@ export async function deactivateEmptyLocation(db: Db | Tx, locationId: string): 
     .where(eq(stockLocations.id, locationId));
   if (!location || !location.active || location.fixed || location.name === FALLBACK_LOCATION_NAME) return false;
 
+  // The articles whose Lagerplats this is are locked (sorted) BEFORE the
+  // place row is updated: an Automatiskt draw of such an article holds the
+  // article and then asks for the place FOR SHARE (outflow-locations.ts), so
+  // updating the place first and the article after could wait crosswise with
+  // it. Taken before the emptiness check, so a draw that waited is seen.
+  await db
+    .select({ id: articles.id })
+    .from(articles)
+    .where(eq(articles.defaultLocationId, locationId))
+    .orderBy(asc(articles.id))
+    .for("no key update");
+
   if (await locationHoldsStock(db, locationId)) return false;
 
+  // A Spärrad lagerplats keeps its spärr (0185) — a revived one is still blocked.
   await db.update(stockLocations).set({ active: false }).where(eq(stockLocations.id, locationId));
 
   // Nothing may auto-resolve into a hidden location — articles pointing here

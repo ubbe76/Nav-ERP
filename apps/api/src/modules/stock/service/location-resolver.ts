@@ -9,7 +9,9 @@ import { FALLBACK_LOCATION_NAME } from "./outflow-allocation.js";
 //   2. the article's own default location (articles.default_location_id),
 //      but only while that location is still active — an emptied location is
 //      deactivated (see location-lifecycle.ts) and must never be resolved into
-//   3. the fallback location "***", created on first use
+//      — and not blocked: a Spärrad lagerplats (0185) only takes goods someone
+//      put there on purpose, never an inflow nobody placed
+//   3. the fallback location "***", created on first use (never blocked)
 //
 // Same pattern as system/number-series.ts's getNextOrderNumber: a plain
 // async function taking Db | Tx, so it works inside repository transactions.
@@ -42,7 +44,7 @@ export async function resolveStockLocation(
     .from(articles)
     .innerJoin(
       stockLocations,
-      and(eq(stockLocations.id, articles.defaultLocationId), eq(stockLocations.active, true))
+      and(eq(stockLocations.id, articles.defaultLocationId), eq(stockLocations.active, true), eq(stockLocations.blocked, false))
     )
     .where(eq(articles.id, articleId));
   if (article?.defaultLocationId) return article.defaultLocationId;

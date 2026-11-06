@@ -121,10 +121,11 @@ import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../sys
 // RegisterReferenceReader).
 // Rows come in pick order — the article's own location first, then as the
 // automatic outflow draws (compareOutflowLocations in the stock module).
+// blocked: a Spärrad lagerplats — physical stock the pick list leaves out.
 export interface StockBalanceReader {
   balancesForArticles(
     articleIds: string[]
-  ): Promise<{ articleId: string; quantityOnHand: string; locationName: string | null; warehouseName: string | null }[]>;
+  ): Promise<{ articleId: string; quantityOnHand: string; locationName: string | null; warehouseName: string | null; blocked: boolean }[]>;
 }
 
 // E3 (KO→TO-koppling): the narrow slice of the manufacturing service sales
@@ -1646,8 +1647,10 @@ export function createSalesService(
           extraDescription: extraDescription(r.articleExtraDescription),
           customerArticleNumber: customerArticleNumbers.get(r.articleId) ?? null,
           deliveryDate: ownDeliveryDate(r.expectedDeliveryDate, order.expectedDeliveryDate),
+          // Spärrade lagerplatser are left out — Automatiskt never draws
+          // there, so the paper says the same as the booking.
           locations: balances
-            .filter((b) => b.articleId === r.articleId)
+            .filter((b) => b.articleId === r.articleId && !b.blocked)
             .map((b) =>
               b.locationName
                 ? `${b.warehouseName} — ${b.locationName}: ${Number(b.quantityOnHand)}`

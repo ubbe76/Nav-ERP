@@ -23,7 +23,6 @@ import {
   salesOrderRows,
   salesOrders,
   stampSessions,
-  stockBalances,
   suppliers,
   units,
   weekScheduleDays,
@@ -56,6 +55,7 @@ import type { ArticleOverviewLoad } from "../service/article-overview.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 import { loadLeadTimeDefaults, loadLongOperationWeeks } from "../../system/repository/plan-settings.js";
 import { purchaseRowArrivalDate, salesRowDeliveryDate } from "./effective-dates.js";
+import { onHandByArticle } from "../../stock/repository/on-hand.js";
 
 export interface PlanningArticleInfo {
   articleId: string;
@@ -456,13 +456,9 @@ export function createPlanningRepository(db: Db) {
               eq(manufacturingOrders.id, moMaterialConsumptions.manufacturingOrderId)
             )
             .where(inArray(manufacturingOrders.status, OPEN_MO)),
-          db
-            .select({
-              articleId: stockBalances.articleId,
-              quantity: sql<string>`sum(${stockBalances.quantityOnHand})`,
-            })
-            .from(stockBalances)
-            .groupBy(stockBalances.articleId),
+          // Användbart saldo — a Spärrad lagerplats does not cover demand
+          // (same reader as the artikelöversikt below, so the invariant holds).
+          onHandByArticle(db),
           db
             .select({
               parentArticleId: bomComponents.parentArticleId,
@@ -524,7 +520,7 @@ export function createPlanningRepository(db: Db) {
           quantityPlanned: Number(r.quantityPlanned),
           quantityConsumed: Number(r.quantityConsumed),
         })),
-        stock: stockRows.map((r) => ({ articleId: r.articleId, quantity: Number(r.quantity) })),
+        stock: [...stockRows].map(([articleId, onHand]) => ({ articleId, quantity: onHand.usable })),
         bomEdges: bomEdges.map((r) => ({
           parentArticleId: r.parentArticleId,
           componentArticleId: r.componentArticleId,
@@ -643,14 +639,8 @@ export function createPlanningRepository(db: Db) {
 
       const [stockRows, salesRows, purchaseRows, moRows, materialRows, plannedRows, bomEdges, phantomRows, primary] =
         await Promise.all([
-          dbc
-            .select({
-              articleId: stockBalances.articleId,
-              quantity: sql<string>`coalesce(sum(${stockBalances.quantityOnHand}), 0)`,
-            })
-            .from(stockBalances)
-            .where(inArray(stockBalances.articleId, ids))
-            .groupBy(stockBalances.articleId),
+          // Användbart saldo plus the blocked part, which is only shown.
+          onHandByArticle(dbc, ids),
           dbc
             .select({
               articleId: salesOrderRows.articleId,
@@ -776,7 +766,7 @@ export function createPlanningRepository(db: Db) {
         }
         return map;
       }
-      const stockByArticle = new Map(stockRows.map((r) => [r.articleId, Number(r.quantity)]));
+      const stockByArticle = stockRows;
       const salesByArticle = groupBy(salesRows);
       const purchaseByArticle = groupBy(purchaseRows);
       const moByArticle = groupBy(moRows);
@@ -806,7 +796,9 @@ export function createPlanningRepository(db: Db) {
             orderQuantity: article.orderQuantity === null ? null : Number(article.orderQuantity),
             rounding: article.rounding === null ? null : Number(article.rounding),
           },
-          onHand: stockByArticle.get(article.articleId) ?? 0,
+          // onHand = usable (the calculation's start); blockedOnHand is shown only.
+          onHand: stockByArticle.get(article.articleId)?.usable ?? 0,
+          blockedOnHand: stockByArticle.get(article.articleId)?.blocked ?? 0,
           salesRows: (salesByArticle.get(article.articleId) ?? []).map((r) => ({
             ...r,
             quantityOrdered: Number(r.quantityOrdered),

@@ -21,7 +21,7 @@ Ett öppet källkod-ERP för mindre/medelstora svenska tillverkande företag. By
 
 ## Arkitekturprinciper
 
-1. **Append-only händelseloggar för lager.** Aldrig UPDATE direkt på saldon — alla lagerförändringar går via `stock_transactions`, aktuellt saldo är en vy/aggregering. Varje skrivare löser platsen med `resolveStockLocation`, varje lagerminskning anropar `deactivateEmptyLocation`, och `unit_cost` stämplas bara på inflöden (`stock.md`).
+1. **Append-only händelseloggar för lager.** Aldrig UPDATE direkt på saldon — alla lagerförändringar går via `stock_transactions`, aktuellt saldo är en vy/aggregering. Varje skrivare löser platsen med `resolveStockLocation`, varje lagerminskning anropar `deactivateEmptyLocation`, `unit_cost` stämplas bara på inflöden, och läsare som menar användbart saldo (utan spärrade lagerplatser) går via `onHandByArticle` (`stock.md`).
 2. **Explicita statusflöden.** Varje order/tillverkningsorder har en status-enum och tillståndsövergångar valideras i domänlagret, inte bara i UI. Statusmängder är vitlistor.
 3. **Materialuttag kan styras av rutten.** En BOM-rad kan peka på en av artikelns egna operationer; vid frisläpp snapshotas kopplingen till TO:n. En ny TO frisläpps i sin egen create-transaktion, antal rapporteras inkrementellt och materialet dras enligt top-up-regeln (`manufacturing.md`).
 4. **BOM är self-referencing.** En artikel kan vara både komponent och slutprodukt (viktigt för diskbänkskonfiguratorn — moduler/underrede).

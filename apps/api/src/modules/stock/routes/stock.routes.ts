@@ -1,7 +1,8 @@
 import { locationLabelsSchema } from "@navet/shared";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   addStockCountRowSchema,
+  blockStockLocationSchema,
   createStockCountSchema,
   createStockLocationSchema,
   createStockTransactionSchema,
@@ -32,6 +33,7 @@ import type { StockService } from "../service/stock.service.js";
 import {
   ArticleNotFoundError,
   DuplicateStockCountRowError,
+  FallbackLocationNotBlockableError,
   InactiveStockLocationError,
   InsufficientStockError,
   LocationUnderStockCountError,
@@ -40,6 +42,8 @@ import {
   StockCountBackdateRefusedError,
   StockCountNotOpenError,
   StockCountRowNotFoundError,
+  StockLocationAlreadyBlockedError,
+  StockLocationNotBlockedError,
   StockLocationNotEmptyError,
   StockLocationNotFoundError,
   WarehouseNotFoundError,
@@ -97,14 +101,50 @@ export async function stockRoutes(
     } catch (err) {
       if (err instanceof StockLocationNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof StockLocationNotEmptyError) return reply.code(409).send(errorBody(err));
+      // blockedNote on an open place / a blocked place renamed to "***".
+      if (err instanceof StockLocationNotBlockedError) return reply.code(409).send(errorBody(err));
+      if (err instanceof FallbackLocationNotBlockableError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });
 
   app.post("/stock/locations", async (req, reply) => {
     const input = createStockLocationSchema.parse(req.body);
-    const row = await service.createLocation(input);
-    return reply.code(201).send(row);
+    try {
+      const row = await service.createLocation(input, req.user?.id ?? null);
+      return reply.code(201).send(row);
+    } catch (err) {
+      if (err instanceof FallbackLocationNotBlockableError) return reply.code(409).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Spärra lagerplats / Släpp spärr (0185) — the module's write rule (lager).
+  // Block answers with the place and what the spärr touches (articles with a
+  // balance there, articles that have it as Lagerplats); unblock with the place.
+  const blockError = (err: unknown, reply: FastifyReply) => {
+    if (err instanceof StockLocationNotFoundError) return reply.code(404).send(errorBody(err));
+    if (err instanceof StockLocationAlreadyBlockedError) return reply.code(409).send(errorBody(err));
+    if (err instanceof StockLocationNotBlockedError) return reply.code(409).send(errorBody(err));
+    if (err instanceof FallbackLocationNotBlockableError) return reply.code(409).send(errorBody(err));
+    throw err;
+  };
+
+  app.post<{ Params: { id: string } }>("/stock/locations/:id/block", async (req, reply) => {
+    const input = blockStockLocationSchema.parse(req.body ?? {});
+    try {
+      return await service.blockLocation(req.params.id, input.note ?? null, req.user!.id);
+    } catch (err) {
+      return blockError(err, reply);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/stock/locations/:id/unblock", async (req, reply) => {
+    try {
+      return await service.unblockLocation(req.params.id, req.user!.id);
+    } catch (err) {
+      return blockError(err, reply);
+    }
   });
 
   app.post("/stock/transactions", async (req, reply) => {

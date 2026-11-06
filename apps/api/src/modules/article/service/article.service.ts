@@ -120,6 +120,17 @@ export class InvalidReferenceError extends Error {
   }
 }
 
+// Spärrad lagerplats (0185): the article's Lagerplats CHANGED to a blocked
+// place — the resolver would skip it anyway, so choosing one is a mistake.
+// An unchanged value goes through (Allmänt always sends the field), and a
+// place blocked later may stay. 400.
+export class DefaultLocationBlockedError extends Error {
+  constructor() {
+    super("Lagerplatsen är spärrad och kan inte väljas som artikelns lagerplats");
+    this.name = "DefaultLocationBlockedError";
+  }
+}
+
 export class BomComponentNotFoundError extends Error {
   constructor(id: string) {
     super(`BOM component row ${id} not found`);
@@ -351,6 +362,7 @@ export function createArticleService(repo: ArticleRepository) {
       // "Lagerplats sätts *** automatiskt" — an article always carries a
       // default location from birth; *** is created on first use. The base
       // unit falls back the same way, to the register's "st" unit.
+      if (input.defaultLocationId && (await repo.isLocationBlocked(input.defaultLocationId))) throw new DefaultLocationBlockedError();
       const defaultLocationId = input.defaultLocationId ?? (await repo.getOrCreateFallbackLocationId());
       let unitId = input.unitId;
       if (unitId) {
@@ -454,6 +466,13 @@ export function createArticleService(repo: ArticleRepository) {
       }
       if (input.articleCodeId && !(await repo.articleCodeExists(input.articleCodeId))) {
         throw new InvalidReferenceError("Unknown article code");
+      }
+      if (
+        input.defaultLocationId &&
+        input.defaultLocationId !== article.defaultLocationId &&
+        (await repo.isLocationBlocked(input.defaultLocationId))
+      ) {
+        throw new DefaultLocationBlockedError();
       }
 
       if (input.unitId !== undefined && input.unitId !== article.unitId) {
