@@ -513,7 +513,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.8.1-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.8.2-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -629,7 +629,9 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   från TO-kortet; överrapportering drar mer), **utskrivbar TO**
   (PDF med operationer, material, signaturkolumner och artikelns
   ritningar inbakade), material och operationer som kan **ändras på en
-  skapad order** utan att artikelns beredning rörs, efterkalkyl,
+  skapad order** utan att artikelns beredning rörs, efterkalkyl (lönen till
+  resursens timkostnad den arbetsdagen) med **avvikelseanalys** mot orderns
+  egen kalkyl,
   **legoinköp och förfrågningar** direkt från orderns legooperation (dagen
   godset ska vara tillbaka räknas bakåt från färdigdatumet); **föreslaget färdigdatum** på ny
   tillverkningsorder (arbetsdagen före artikelns första otäckta behov);
@@ -647,7 +649,8 @@ Alla register och strukturer är fullt redigerbara i efterhand:
 - **Tidrapportering & personal** — **stämpelterminal** (helskärmsvy för en
   delad skärm i verkstaden: närvarostämpling kom/gå med sifferknappsats,
   in-/utstämpling på order/operationer som materialiserar tidrapporter,
-  ATF-uttag; valfritt krav på **anledning vid sen ankomst och tidig
+  ATF-uttag; valfri uppdelning av tiden i **Ställ** och **Produktion**
+  med **Ställ klart**; valfritt krav på **anledning vid sen ankomst och tidig
   hemgång** och val mellan utbetald och sparad övertid vid Gå hem; gå hem pausar pågående arbeten så att bortavaron inte
   räknas in i rapporterad tid; planerat, klart och **kvar** visas per
   operation), manuella
@@ -671,8 +674,12 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   lönesystem
 - **Lager** — saldon över alla artiklar, redigerbara lager/lagerplatser
   (fasta eller tillfälliga) med automatisk reservplats `***` (inflöden utan
-  vald plats bokförs på artikelns lagerplats eller `***`, utleverans och
-  materialuttag tas där saldot finns), transaktionslogg (inflödesrader
+  vald plats bokförs på artikelns huvudplats, annars på första alternativa
+  plats, annars `***`; utleverans och materialuttag tas där saldot finns, i
+  ordningen huvudplats, alternativa platser, övriga), **spärrade
+  lagerplatser** för karantän (saldot räknas inte i planeringen och tas
+  aldrig automatiskt, men värderas som vanligt), ett lagerplatsregister med
+  sök och saldo per plats, transaktionslogg (inflödesrader
   bär inköpskostnaden `unit_cost` i SEK), inventering (som kan bokföras per
   dagen då underlaget skapades), **skanning** med
   handskanner eller mobilens kamera (Lager → Skanna, och räkning av
@@ -710,9 +717,10 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   omskick av misslyckade utskick
 - **Rapporter** — bland annat **orderförteckning** för kundorder och
   inköp (ordervärde och restvärde per order eller rad, som PDF och CSV),
-  **offertuppföljning** (hit rate i antal och värde), marginal och
-  kalkylutfall samt **produkter i arbete** per valfritt datum
-  (administratörer, som PDF)
+  **offertuppföljning** (hit rate i antal och värde), marginal,
+  **kalkylutfall** mot förkalkylen och som **avvikelseanalys** (pris,
+  mängd, ställtid, stycktid och påslag per order, artikel eller resurs)
+  samt **produkter i arbete** per valfritt datum (administratörer, som PDF)
 - **System** (admin) — företagsinformation med logotyp, nummerserier
   (även för **artikelnummer**, med egna serier per varugrupp),
   användare och behörighetsgrupper (med konton för **endast läsning**),
