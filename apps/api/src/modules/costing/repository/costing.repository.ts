@@ -61,6 +61,12 @@ export interface MaterialRowWrite {
   // Efterkalkyl: the day the standard/supplier price and rate were taken
   // (YYYY-MM-DD). Null otherwise.
   priceDate: string | null;
+  // Avvikelseanalys (#14), efterkalkyl only: SQ, SP and its price source, and
+  // the planned share of the scrapped units. Absent/null elsewhere.
+  baseQuantity?: number | null;
+  baseUnitCost?: number | null;
+  basePriceSource?: CostPriceSource | null;
+  scrapQuantity?: number | null;
 }
 
 export interface OperationRowWrite {
@@ -75,6 +81,17 @@ export interface OperationRowWrite {
   // Lego operation (subcontract work center): setupPrice + unitPrice × qty,
   // feeding subcontractCost (LO markup). Null on time-priced rows.
   subcontractAmount: number | null;
+  // Avvikelseanalys (#14), efterkalkyl only — a time row: Bs, Br, R₀ and the
+  // reported run time (null until ställ/produktion is registered); a lego
+  // row: N, Qa, P₀, F₀. Absent/null elsewhere.
+  baseSetupHours?: number | null;
+  baseRunHours?: number | null;
+  runHours?: number | null;
+  baseHourlyRate?: number | null;
+  baseQuantity?: number | null;
+  subcontractQuantity?: number | null;
+  baseUnitPrice?: number | null;
+  baseOneOff?: number | null;
 }
 
 // The calculation header the service hands over — plain numbers; the
@@ -103,6 +120,17 @@ export interface CostCalculationWrite {
   generalMarkupPercent: number;
   materialMarkupPercent: number;
   type: CostCalculationType;
+  // Avvikelseanalys (#14): N, the preliminary flag, T₀ and the förkalkyl's
+  // material source of the base. All null on a förkalkyl (CHECK).
+  outputQuantity: number | null;
+  preliminary: boolean | null;
+  basePricedAt: Date | null;
+  baseMaterialSource: CostingMaterialSource | null;
+}
+
+// A nullable number for a numeric column (absent = null).
+function numberOrNull(value: number | null | undefined): string | null {
+  return value === null || value === undefined ? null : String(value);
 }
 
 export function createCostingRepository(db: Db | Tx) {
@@ -212,13 +240,19 @@ export function createCostingRepository(db: Db | Tx) {
         .orderBy(asc(routingOperations.sequenceNo));
     },
 
+    // One row per TO material row. quantityPlanned (for the order quantity)
+    // and moOperationId are the avvikelseanalys's base; articleNumber labels
+    // its rows in a preview.
     async getMaterialConsumptionsWithCost(manufacturingOrderId: string) {
       const rows = await db
         .select({
           componentArticleId: moMaterialConsumptions.componentArticleId,
+          quantityPlanned: moMaterialConsumptions.quantityPlanned,
           quantityConsumed: moMaterialConsumptions.quantityConsumed,
+          moOperationId: moMaterialConsumptions.moOperationId,
           unitId: moMaterialConsumptions.unitId,
           unitFactor: moMaterialConsumptions.unitFactor,
+          articleNumber: articles.articleNumber,
           name: articles.name,
           type: articles.type,
           standardCost: articles.standardCost,
@@ -361,18 +395,23 @@ export function createCostingRepository(db: Db | Tx) {
       return weightedActualCosts(draws, history);
     },
 
-    // One row per operation with its total reported hours (0 if none reported yet).
+    // One row per operation with its total reported hours (0 if none reported
+    // yet). setupTime/runTimePerUnit (minutes) are the avvikelseanalys's
+    // planned time.
     async getOperationsWithReportedHours(manufacturingOrderId: string) {
       return db
         .select({
           operationId: moOperations.id,
           sequenceNo: moOperations.sequenceNo,
           workCenterId: workCenters.id,
+          workCenterCode: workCenters.code,
           workCenterName: workCenters.name,
           workCenterType: workCenters.type,
           hourlyRate: workCenters.hourlyRate,
           overheadPercent: workCenters.overheadPercent,
           reportedHours: sql<string>`coalesce(sum(${timeReports.hours}), 0)`,
+          setupTime: moOperations.setupTime,
+          runTimePerUnit: moOperations.runTimePerUnit,
           // Lego snapshot (post-calculation fallback when no IO is linked).
           setupPrice: legoOneOffSql(moOperations),
           unitPrice: moOperations.unitPrice,
@@ -391,12 +430,14 @@ export function createCostingRepository(db: Db | Tx) {
     // orders): Σ setupPrice + unitPrice × quantityReceived, each converted at
     // the order's exchange rate — the same SEK conversion the goods receipt
     // stamps on stock_transactions.unit_cost. Only rows with some receipt
-    // count (an unreceived order has cost the MO nothing yet).
+    // count (an unreceived order has cost the MO nothing yet). `quantity` =
+    // Σ received over the same rows — the Qa the avvikelseanalys prices.
     async getSubcontractActualCosts(manufacturingOrderId: string) {
       const rows = await db
         .select({
           moOperationId: purchaseOrderRows.moOperationId,
           amount: sql<string>`coalesce(sum((coalesce(${purchaseOrderRows.setupPrice}, 0) + ${purchaseOrderRows.unitPrice} * ${purchaseOrderRows.quantityReceived}) * ${purchaseOrders.exchangeRate}), 0)`,
+          quantity: sql<string>`coalesce(sum(${purchaseOrderRows.quantityReceived}), 0)`,
         })
         .from(purchaseOrderRows)
         .innerJoin(purchaseOrders, eq(purchaseOrders.id, purchaseOrderRows.purchaseOrderId))
@@ -409,7 +450,11 @@ export function createCostingRepository(db: Db | Tx) {
           )
         )
         .groupBy(purchaseOrderRows.moOperationId);
-      return new Map(rows.filter((r) => r.moOperationId !== null).map((r) => [r.moOperationId!, Number(r.amount)]));
+      return new Map(
+        rows
+          .filter((r) => r.moOperationId !== null)
+          .map((r) => [r.moOperationId!, { amount: Number(r.amount), quantity: Number(r.quantity) }])
+      );
     },
 
     // Header and its specification rows are written together — a calculation
@@ -445,6 +490,10 @@ export function createCostingRepository(db: Db | Tx) {
             generalMarkupPercent: String(input.generalMarkupPercent),
             materialMarkupPercent: String(input.materialMarkupPercent),
             type: input.type,
+            outputQuantity: numberOrNull(input.outputQuantity),
+            preliminary: input.preliminary,
+            basePricedAt: input.basePricedAt,
+            baseMaterialSource: input.baseMaterialSource,
           })
           .returning();
 
@@ -470,6 +519,10 @@ export function createCostingRepository(db: Db | Tx) {
               supplierUnitPrice: r.supplierUnitPrice === null ? null : String(r.supplierUnitPrice),
               exchangeRate: r.exchangeRate === null ? null : String(r.exchangeRate),
               priceDate: r.priceDate,
+              baseQuantity: numberOrNull(r.baseQuantity),
+              baseUnitCost: numberOrNull(r.baseUnitCost),
+              basePriceSource: r.basePriceSource ?? null,
+              scrapQuantity: numberOrNull(r.scrapQuantity),
               createdAt: new Date(now + i),
             }))
           );
@@ -488,6 +541,14 @@ export function createCostingRepository(db: Db | Tx) {
               laborAmount: String(r.laborAmount),
               overheadAmount: String(r.overheadAmount),
               subcontractAmount: r.subcontractAmount === null ? null : String(r.subcontractAmount),
+              baseSetupHours: numberOrNull(r.baseSetupHours),
+              baseRunHours: numberOrNull(r.baseRunHours),
+              runHours: numberOrNull(r.runHours),
+              baseHourlyRate: numberOrNull(r.baseHourlyRate),
+              baseQuantity: numberOrNull(r.baseQuantity),
+              subcontractQuantity: numberOrNull(r.subcontractQuantity),
+              baseUnitPrice: numberOrNull(r.baseUnitPrice),
+              baseOneOff: numberOrNull(r.baseOneOff),
             }))
           );
         }

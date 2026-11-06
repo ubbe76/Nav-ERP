@@ -24,6 +24,7 @@ import {
   resetCostingSettings,
 } from "./helpers/configured-manufacturing.js";
 import { configurator, makeLocation, makeUser, resetConfiguredRows, salesRepository, salesService } from "./helpers/configured-rows.js";
+import { testCostingService } from "./helpers/configurator.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { pdfText } from "./helpers/pdf.js";
 import { failure, waitForLockWaiter } from "./helpers/year-end.js";
@@ -267,5 +268,30 @@ describe("configured TO — Kalkyl structure rows", () => {
     const mats = await matOf(mo.id);
     expect(mats.some((m) => m.componentArticleId === s.parts.skruv.id)).toBe(false);
     expect(mats.some((m) => m.componentArticleId === s.parts.plat.id)).toBe(true);
+  });
+});
+
+// Avvikelseanalys (#14): a configured TO's base is its OWN derived rows,
+// single level like the efterkalkyl — not configuration.cost's TVK/st, which
+// is one multi-level figure (and counts the template's Kalkyl operation 30).
+describe("configured TO — avvikelseanalys", () => {
+  it("calculates the base from the TO's derived rows, not from the configuration's TVK/st", async () => {
+    const s = await buildToOrderWithStructure();
+    const loc = await makeLocation();
+    const user = await makeUser();
+    const mo = await mfg.createManufacturingOrder({ articleId: s.article.id, quantity: 1, configuration: { selection: FULL } }, null);
+    await mfg.start(mo.id);
+    await mfg.complete(mo.id, { quantity: 1, locationId: loc.id }, user.id);
+
+    const { analysis } = await testCostingService.postCalculate(mo.id, true);
+
+    expect((mo.configuration as ManufacturingOrderConfiguration).cost.manufacturingCostPerUnit).toBe(198);
+    // Material 16 + 12 + 40 + 6 + 4 = 78, op 10 (6 + 3) / 60 × 600 = 90, op 20 4 / 60 × 300 = 20.
+    expect(analysis).toMatchObject({ preliminary: false, outputQuantity: 1, base: 188 });
+    const { skruv, plat, avl, f1, f2 } = s.parts;
+    expect(new Map(analysis!.materialRows.map((r) => [r.componentArticleId, r.base]))).toEqual(
+      new Map([[skruv.id, 16], [plat.id, 12], [avl.id, 40], [f1.id, 6], [f2.id, 4]])
+    );
+    expect(analysis!.operationRows.map((r) => [r.sequenceNo, r.base])).toEqual([[10, 90], [20, 20]]);
   });
 });

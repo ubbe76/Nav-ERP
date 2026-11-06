@@ -522,6 +522,45 @@ describe("pre- and post-calculation with a lego operation", () => {
     result = await costingService.postCalculate(fixture.order.id);
     expect(result.calculation.subcontractCost).toBe("810.0000");
   });
+
+  // Avvikelseanalys (#14): Kalkylerat = F₀ (ställpris + transport, once) +
+  // P₀ × N; Pris = A − F₀ − P₀ × Qa; Mängd = (Qa − N) × P₀.
+  it("analyses the lego operation: the one-off once, IO prices as Pris, the fallback without deviation", async () => {
+    const fixture = await makeLegoRouting({ setupPrice: 500, unitPrice: 100, transportPrice: 50 });
+    const order = await mfgService.createManufacturingOrder({ articleId: fixture.parent.id, quantity: 4 }, fixture.user.id);
+    const legoOp = (await mfgService.listOperations(order.id)).find((op) => op.sequenceNo === 20)!;
+    const legoRow = (r: Awaited<ReturnType<typeof costingService.postCalculate>>) =>
+      r.analysis!.operationRows.find((row) => row.kind === "subcontract")!;
+
+    // Not worked yet: the one-off does not count on an open order.
+    let result = await costingService.postCalculate(order.id);
+    expect(legoRow(result)).toMatchObject({ baseQuantity: 0, baseOneOff: 0, baseUnitPrice: 100 });
+
+    // Reported without an IO: the fallback A = 550 + 100 × 2 is exactly the base for 2 OK.
+    await mfgService.reportOperationQuantities(legoOp.id, { quantityOk: 2, quantityScrapped: 0, markDone: false, createdBy: fixture.user.id });
+    result = await costingService.postCalculate(order.id);
+    expect(result.analysis!.preliminary).toBe(true);
+    expect(legoRow(result)).toMatchObject({ baseQuantity: 2, baseOneOff: 550, subcontractQuantity: 2, base: 750, actual: 750, deviation: 0 });
+    // Undo it again so the IO receipts below report the whole order.
+    const [report] = (await mfgService.listReports(order.id)).filter((r) => r.undoneAt === null);
+    await mfgService.undoReport(order.id, report!.id, fixture.user.id);
+
+    // Two IO rows — 450 + 90 × 3 and 110 × 1 — received in full: the order is Klar, N = 4.
+    const ioOrder = await purchaseService.createPurchaseOrder({ supplierId: fixture.supplier.id }, fixture.user.id);
+    const first = await purchaseService.addRow(ioOrder.id, { articleId: fixture.parent.id, quantity: 3, unitPrice: 90, setupPrice: 450, moOperationId: legoOp.id });
+    const second = await purchaseService.addRow(ioOrder.id, { articleId: fixture.parent.id, quantity: 1, unitPrice: 110, moOperationId: legoOp.id });
+    await purchaseService.confirm(ioOrder.id);
+    await purchaseService.receiveGoods(ioOrder.id, first.id, { quantity: 3 }, fixture.user.id);
+    await purchaseService.receiveGoods(ioOrder.id, second.id, { quantity: 1 }, fixture.user.id);
+
+    result = await costingService.postCalculate(order.id, true);
+    expect(result.calculation.subcontractCost).toBe("830.0000");
+    expect(result.analysis).toMatchObject({ preliminary: false, outputQuantity: 4 });
+    // Kalkylerat 550 + 100 × 4 = 950; Pris = 830 − 550 − 100 × 4 = −120.
+    expect(legoRow(result)).toMatchObject({ baseQuantity: 4, baseOneOff: 550, subcontractQuantity: 4, base: 950, actual: 830 });
+    expect(legoRow(result).parts).toMatchObject({ price: -120, quantity: 0 });
+    expect(result.analysis!.parts.price).toBe(-120);
+  });
 });
 
 describe("lego IO PDF", () => {

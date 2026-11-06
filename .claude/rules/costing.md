@@ -42,3 +42,24 @@ Spec `private/superpowers/specs/2026-11-06-produkter-i-arbete-design.md`; bokslu
   - legoinleveranser från före inleveransloggen (0118) har inga `purchase_receipts`-rader och räknas som 0;
   - ett lagerfört halvfabrikat får MO under Tillverkningskostnad, som i efterkalkylen.
 - Tester: `work-in-progress.test.ts` (rent), `work-in-progress.db.test.ts` (källorna per D, klar före/efter D, delinleverans, ångrad tidigare inleverans som öppnar ordern igen, kortstängd före 0117, makulerad TO före/efter makuleringsdagen, konfigurerad TO, inleverans utan pris, `standard`/`actual`, sortering, PDF, rutterna 403/400), `costing-price-at.test.ts` (`pricedAtWithdrawal`).
+
+## Avvikelseanalys i efterkalkylen (#14, migration 0187)
+
+Spec `private/superpowers/specs/2026-11-06-avvikelseanalys-efterkalkyl-design.md` (beslut: Ändrad TO = ny plan, ställ/produktion i tiden = etapp 3, timkostnad per datum = etapp 4).
+
+- **Basen = TO:ns egna, aktuella rader** för N, prissatta med **förkalkylens** regler vid **T₀ = TO:ns `created_at`**: `pricedAtWithdrawal(rader, new Map(), historik, T₀)`, `createRateAttacher` med T₀:s Stockholmsdag och `buildMaterialRow` med staffeln på **planerat** antal. Historiken laddas en gång för båda sidorna. En konfigurerad TO:s rader är dess konfiguration — `configuration.cost` används aldrig som bas. Reservpriser varnar med prefixet `Kalkylerat:`. **Efterkalkylens egna belopp rörs inte.**
+- **N och ställregeln** bor i rena `cost-variance.ts`. Klar/Stängd ⇒ N = inlevererat för allt. Annars `preliminary`: en operations tid, lego och kopplade material räknas på operationens OK, okopplat material på inlevererat. Ställtiden och legots engångskostnad (`legoOneOffSql`) räknas när operationen arbetats (tid, antal eller legoinleverans) eller när ordern är klar med N > 0, annars sparas 0. K (kassationen bakom varav kassation) = den egna operationens kasserat, plus senare operationers på en klar order.
+- **Sparat:** basens indata — huvudets `output_quantity`/`preliminary`/`base_priced_at`/`base_material_source` och radernas `base_*`, `scrap_quantity`, `subcontract_quantity` och `run_hours`. CHECK: huvudets fyra alla eller inga och bara på `post` (aldrig `actual`), varje radgrupp alla eller inga.
+- **Härlett:** delarna lagras aldrig. `costVarianceAnalysis` räknar dem vid varje läsning: GET `/cost-calculations/:id`, post-calculate och (etapp 2) Kalkylutfall. `analysis: null` = förkalkyl eller efterkalkyl sparad före 0187. Ingen backfill, eftersom basen inte går att återskapa som den var. En sparad analys ändras aldrig: priser och efterrapporter efteråt läses inte.
+- **Exakt summa:** allt räknas i hela ören (heltal).
+  - Per rad avrundas Kalkylerat och Utfall till öre och Pris/Timpris med `round2`. Mängd, Stycke eller Ej uppdelad tar resten.
+  - Påslaget (MO + LO med efterkalkylens procent på båda sidor, aldrig TO) avrundas en gång per sida på orderns summor.
+  - Orderns delar = radernas summa. `scrap` är *varav* av Mängd och summeras inte. Utfall kan skilja några öre från TVK.
+- **Förhandsvisning = sparat:** förhandsvisningen läser de beräknade raderna genom `roundAsNumeric` (Postgres avrundning av `String(värde)` till kolumnens skala). Sparandet svarar med analysen läst ur de lagrade raderna. En ny kolumn i analysen behöver sin skala i `draftVarianceAnalysis`. `base_setup_hours`/`base_run_hours` har 8 decimaler (minuter ÷ 60): med 4 räknades 4 min à 300 kr/h till 20,01.
+- **Etapp 1:** tiden är ej uppdelad (`setup_hours`/`run_hours` null på efterkalkylen ⇒ U = H ⇒ Tid (ej uppdelad)). En operation helt utan tid delas i Ställ/Stycke. `base_hourly_rate` = `hourly_rate`, så Timpris = 0.
+- **Känd egenhet:** efterkalkylens lego-reserv (ingen IO-inleverans) tar engångskostnaden även med OK 0. På en oarbetad legooperation (preliminär, eller N = 0) syns det som Pris.
+- **Tester:**
+  - `costing-variance.test.ts` (rent);
+  - blocket *variance analysis* i `costing.service.test.ts` (T₀ med bakdaterad historik, valuta på T₀:s dag, kortstängd med kassation, preliminär + tillagd rad, sparad oförändrad, `null` och CHECK);
+  - lego i `legoresurser.test.ts`;
+  - konfigurerad TO i `configured-manufacturing.test.ts`.
