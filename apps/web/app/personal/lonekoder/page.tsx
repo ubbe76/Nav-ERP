@@ -8,7 +8,7 @@ import { HelpLink } from "../../../components/ui/HelpLink";
 
 // Lönekoder: frånvarokoder och OB-tillägg, the base-data registers the
 // löneunderlag/PAXml export is built from. Admin-only, same gate as the rest
-// of the payroll settings (System → Inställningar → Lön & PAXml).
+// of the payroll settings (Personal & lön → Lön & PAXml).
 export default async function LonekoderPage(props: { searchParams: Promise<{ flik?: string }> }) {
   const { flik } = await props.searchParams;
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
