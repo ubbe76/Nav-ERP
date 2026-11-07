@@ -82,6 +82,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Testluckor
 
+- [ ] **Tester som faller mellan 00:00 och 01:00 svensk tid:** `customer-currency`, `invoice-reminder.service`, `invoice-vat-codes`, `late-interest`, `reports-delivery-precision`, `stock-blocked-locations` och `stock-valuation` (14 tester) föll när sviten kördes 00:00–00:11 och gick igenom 01:02 (2026-11-07) — testerna räknar dagen i UTC medan tjänsterna räknar Stockholmsdag. Rätta testernas datum (t.ex. `localDateOf`/Stockholmsdag) eller frys klockan.
 - [ ] **Postern och reskontran:** inaktivt regelkonto → `MissingPostingAccountError` är inte pinnat; omföringstestet täcker bara L-serien och asserterar inte räknaren; `reverse()`:s unik-race bara sekventiellt; `NoAccountingPeriodForPosting` på betalnings-/avgiftsvägarna; in-lock `fee_already_charged`; leverantörsbetalningens periodspärr end-to-end; toleranstesterna pinnar inte radantal; `makePaymentTerm`-fixturens namnkollisionsrisk.
 - [ ] **Moms:** momsomföringens advisory lock saknar deterministiskt racetest; backfilltestet för momsruta per konto mappar bara 3 av 7 konteringsnycklar.
 - [ ] **Anläggningsregister:** route-409 för inaktivt BAS-konto och för field-locked/life-too-short/has-depreciation; Review Focus-koderna på HTTP-nivå; att innevarande månad accepteras; avyttrad tillgångs redigeringsspärr; ångra med ingående avskrivning; `disposalError`-fallbacken; rader daterade efter årsslut; öppningsvalideringen med flera regelbrott; `seedBookedMonths` daterar på den 28:e; NOTICE-brus från TRUNCATE-kaskaden.

@@ -188,3 +188,30 @@ describe("Ändra operationer — routes", () => {
     });
   }
 });
+
+// Förslag på resurs (#15, etapp 2): GET …/operations carries `suggestion` per
+// operation, also for the workshop profile whose prices are nulled.
+describe("GET /manufacturing-orders/:id/operations — förslag på resurs", () => {
+  const suggestion = { workCenterId: id(), code: "120", name: "Kantpress 2", toWeek: "2030-03-04", currentToWeek: "2030-03-18", reason: "overloaded" };
+  const rows = [
+    { id: id(), sequenceNo: 10, setupPrice: "100.00", transportPrice: null, unitPrice: "5.00", resourceLocked: false, resources: [], suggestion },
+    { id: id(), sequenceNo: 20, setupPrice: null, transportPrice: null, unitPrice: null, resourceLocked: true, resources: [], suggestion: null },
+  ];
+
+  it("passes each operation's suggestion through", async () => {
+    const app = appWith({ listOperations: async () => rows as never });
+    const res = await app.inject({ method: "GET", url: `/manufacturing-orders/${id()}/operations` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().map((op: { suggestion: unknown }) => op.suggestion)).toEqual([suggestion, null]);
+  });
+
+  it("keeps the suggestion when the prices are nulled for the workshop profile", async () => {
+    const app = Fastify();
+    app.addHook("preHandler", async (req) => {
+      req.user = { id: id(), role: "user", permissions: ["tillverkningsorder_las"] } as never;
+    });
+    app.register(manufacturingRoutes, { service: { listOperations: async () => rows } as unknown as ManufacturingService });
+    const res = await app.inject({ method: "GET", url: `/manufacturing-orders/${id()}/operations` });
+    expect(res.json()[0]).toMatchObject({ setupPrice: null, unitPrice: null, suggestion });
+  });
+});

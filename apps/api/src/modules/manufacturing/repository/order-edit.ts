@@ -6,15 +6,12 @@ import {
   inquiryRows,
   manufacturingOrders,
   moMaterialConsumptions,
-  moOperationScrap,
   moOperations,
   moReportMaterials,
-  moReports,
   purchaseOrderRows,
   purchaseOrders,
   stampSessions,
   suppliers,
-  timeReports,
   units,
   workCenters,
   type Db,
@@ -27,6 +24,7 @@ import {
   clearOperationResourcesInTx,
   operationResourceRows,
   operationResourcesJson,
+  operationTouchedSql,
   switchOperationResourcesInTx,
   syncCurrentResourceTimesInTx,
 } from "./operation-resources.js";
@@ -275,18 +273,12 @@ async function exists(tx: Tx, query: PromiseLike<unknown[]>): Promise<boolean> {
   return (await query).length > 0;
 }
 
-// Has the operation ever had anything: reported quantities, a report-log
-// row (undone ones included — they are history the cascade would delete),
-// a time report, a stamp session or a scrap row.
+// Has the operation ever had anything (rörd): the leaf's operationTouchedSql,
+// the same rule the förslag på resurs read (#15). The row is the one this
+// transaction holds FOR UPDATE.
 async function operationHasHistory(tx: Tx, op: OperationRow): Promise<boolean> {
-  if (Number(op.quantityCompleted ?? 0) > 0 || Number(op.quantityScrapped) > 0) return true;
-  const id = op.id;
-  return (
-    (await exists(tx, tx.select({ id: moReports.id }).from(moReports).where(eq(moReports.moOperationId, id)).limit(1))) ||
-    (await exists(tx, tx.select({ id: timeReports.id }).from(timeReports).where(eq(timeReports.moOperationId, id)).limit(1))) ||
-    (await exists(tx, tx.select({ id: stampSessions.id }).from(stampSessions).where(eq(stampSessions.moOperationId, id)).limit(1))) ||
-    (await exists(tx, tx.select({ id: moOperationScrap.id }).from(moOperationScrap).where(eq(moOperationScrap.moOperationId, id)).limit(1)))
-  );
+  const [row] = await tx.select({ touched: operationTouchedSql() }).from(moOperations).where(eq(moOperations.id, op.id));
+  return row?.touched === true;
 }
 
 // An open or paused stamp (stopped_at null) on the operation.

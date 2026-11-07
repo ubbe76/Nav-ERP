@@ -1,5 +1,7 @@
 import { and, eq, gte, inArray, isNotNull, isNull, lte, ne, sql, type SQL } from "drizzle-orm";
 import { legoOneOffSql, legoOrderedQuantitySql } from "../../manufacturing/repository/lego-one-off.js";
+// Leaf: the rörd rule shared with Ändra operationer (#15) — no module cycle.
+import { operationTouchedSql } from "../../manufacturing/repository/operation-resources.js";
 import {
   articles,
   articleSuppliers,
@@ -15,6 +17,7 @@ import {
   manufacturingOrders,
   moMaterialConsumptions,
   moOperationPlanWeeks,
+  moOperationResources,
   moOperations,
   productionGroups,
   purchaseOrderRows,
@@ -49,7 +52,7 @@ import type {
 import type { LeadTimeDefaults } from "../service/manufacturing-lead-time.js";
 import type { PartnerDeliveryFields } from "../../system/service/delivery-days.js";
 import { loadPriceBreaks } from "../../purchase/repository/price-breaks.js";
-import type { CapacityInput, PlannedWeek } from "../service/capacity-calc.js";
+import type { CapacityInput, OperationResourceOption, PlannedWeek } from "../service/capacity-calc.js";
 import type { OperationPlan } from "../service/production-plan.js";
 import { roundPlanWeeks } from "../service/capacity-book.js";
 import type { ArticleOverviewLoad } from "../service/article-overview.js";
@@ -915,89 +918,139 @@ export function createPlanningRepository(db: Db) {
       dbc: Db | Tx = db,
       // The TO list's plan summary: only these orders' operations (the
       // calendars are loaded as usual — the finish day needs them).
-      opts: { orderIds?: string[] } = {}
+      // `resources` (#15, the readers that suggest: Beläggning, Planera's
+      // answer, the TO card): each operation's possible resources
+      // (mo_operation_resources) and, for an operation that has them,
+      // whether it is rörd (operationTouchedSql) — two more set-based
+      // queries in the same batch, never per operation.
+      opts: { orderIds?: string[]; resources?: boolean } = {}
     ): Promise<CapacityInput> {
       const openOrders = inArray(manufacturingOrders.status, ["released", "in_progress"]);
       const orderFilter = opts.orderIds ? and(openOrders, inArray(manufacturingOrders.id, opts.orderIds)) : openOrders;
-      const [workCenterRows, groupRows, operationRows, weekDayRows, dayRows, breakRows, holidayRows, planRows, timeOnResources] =
-        await Promise.all([
-          dbc
-            .select({
-              workCenterId: workCenters.id,
-              code: workCenters.code,
-              name: workCenters.name,
-              type: workCenters.type,
-              productionGroupId: workCenters.productionGroupId,
-              weekScheduleId: workCenters.weekScheduleId,
-              capacityFactor: workCenters.capacityFactor,
-              hoursPerDay: workCenters.hoursPerDay,
-              active: workCenters.active,
-              leadTimeDays: workCenters.leadTimeDays,
-            })
-            .from(workCenters),
-          dbc
-            .select({ productionGroupId: productionGroups.id, code: productionGroups.code, name: productionGroups.name })
-            .from(productionGroups),
-          dbc
-            .select({
-              moOperationId: moOperations.id,
-              manufacturingOrderId: moOperations.manufacturingOrderId,
-              orderNumber: manufacturingOrders.orderNumber,
-              articleNumber: articles.articleNumber,
-              articleName: articles.name,
-              workCenterId: moOperations.workCenterId,
-              orderQuantity: manufacturingOrders.quantity,
-              dueDate: manufacturingOrders.dueDate,
-              sequenceNo: moOperations.sequenceNo,
-              setupTime: moOperations.setupTime,
-              runTimePerUnit: moOperations.runTimePerUnit,
-              operationStatus: moOperations.status,
-              quantityCompleted: moOperations.quantityCompleted,
-              quantityScrapped: moOperations.quantityScrapped,
-              planLocked: moOperations.planLocked,
-              plannedAt: moOperations.plannedAt,
-            })
-            .from(moOperations)
-            .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
-            .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))
-            .where(orderFilter),
-          dbc
-            .select({
-              weekScheduleId: weekScheduleDays.weekScheduleId,
-              weekday: weekScheduleDays.weekday,
-              dayScheduleId: weekScheduleDays.dayScheduleId,
-            })
-            .from(weekScheduleDays),
-          dbc
-            .select({ id: daySchedules.id, startTime: daySchedules.startTime, endTime: daySchedules.endTime })
-            .from(daySchedules),
-          dbc
-            .select({
-              dayScheduleId: dayScheduleBreaks.dayScheduleId,
-              type: dayScheduleBreaks.type,
-              startTime: dayScheduleBreaks.startTime,
-              endTime: dayScheduleBreaks.endTime,
-            })
-            .from(dayScheduleBreaks),
-          dbc
-            .select({ date: holidays.date, dayScheduleId: holidays.dayScheduleId })
-            .from(holidays)
-            .where(and(gte(holidays.date, holidayFrom), lte(holidays.date, holidayTo))),
-          // The allocations of every open operation — the same status filter
-          // as the operations, so a plan row never arrives without its row.
-          dbc
-            .select({
-              moOperationId: moOperationPlanWeeks.moOperationId,
-              monday: moOperationPlanWeeks.weekMonday,
-              minutes: moOperationPlanWeeks.minutes,
-            })
-            .from(moOperationPlanWeeks)
-            .innerJoin(moOperations, eq(moOperations.id, moOperationPlanWeeks.moOperationId))
-            .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
-            .where(orderFilter)
-            .orderBy(moOperationPlanWeeks.weekMonday),
-          operationTimeOnResources(dbc, orderFilter),
-        ]);
+      const hasResources = sql`EXISTS (SELECT 1 FROM mo_operation_resources has_r WHERE has_r.mo_operation_id = "mo_operations"."id")`;
+      const [
+        workCenterRows,
+        groupRows,
+        operationRows,
+        weekDayRows,
+        dayRows,
+        breakRows,
+        holidayRows,
+        planRows,
+        timeOnResources,
+        resourceRows,
+        touchedRows,
+      ] = await Promise.all([
+        dbc
+          .select({
+            workCenterId: workCenters.id,
+            code: workCenters.code,
+            name: workCenters.name,
+            type: workCenters.type,
+            productionGroupId: workCenters.productionGroupId,
+            weekScheduleId: workCenters.weekScheduleId,
+            capacityFactor: workCenters.capacityFactor,
+            hoursPerDay: workCenters.hoursPerDay,
+            active: workCenters.active,
+            leadTimeDays: workCenters.leadTimeDays,
+          })
+          .from(workCenters),
+        dbc
+          .select({ productionGroupId: productionGroups.id, code: productionGroups.code, name: productionGroups.name })
+          .from(productionGroups),
+        dbc
+          .select({
+            moOperationId: moOperations.id,
+            manufacturingOrderId: moOperations.manufacturingOrderId,
+            orderNumber: manufacturingOrders.orderNumber,
+            articleNumber: articles.articleNumber,
+            articleName: articles.name,
+            workCenterId: moOperations.workCenterId,
+            orderQuantity: manufacturingOrders.quantity,
+            dueDate: manufacturingOrders.dueDate,
+            sequenceNo: moOperations.sequenceNo,
+            setupTime: moOperations.setupTime,
+            runTimePerUnit: moOperations.runTimePerUnit,
+            operationStatus: moOperations.status,
+            quantityCompleted: moOperations.quantityCompleted,
+            quantityScrapped: moOperations.quantityScrapped,
+            planLocked: moOperations.planLocked,
+            plannedAt: moOperations.plannedAt,
+            resourceLocked: moOperations.resourceLocked,
+          })
+          .from(moOperations)
+          .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+          .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))
+          .where(orderFilter),
+        dbc
+          .select({
+            weekScheduleId: weekScheduleDays.weekScheduleId,
+            weekday: weekScheduleDays.weekday,
+            dayScheduleId: weekScheduleDays.dayScheduleId,
+          })
+          .from(weekScheduleDays),
+        dbc
+          .select({ id: daySchedules.id, startTime: daySchedules.startTime, endTime: daySchedules.endTime })
+          .from(daySchedules),
+        dbc
+          .select({
+            dayScheduleId: dayScheduleBreaks.dayScheduleId,
+            type: dayScheduleBreaks.type,
+            startTime: dayScheduleBreaks.startTime,
+            endTime: dayScheduleBreaks.endTime,
+          })
+          .from(dayScheduleBreaks),
+        dbc
+          .select({ date: holidays.date, dayScheduleId: holidays.dayScheduleId })
+          .from(holidays)
+          .where(and(gte(holidays.date, holidayFrom), lte(holidays.date, holidayTo))),
+        // The allocations of every open operation — the same status filter
+        // as the operations, so a plan row never arrives without its row.
+        dbc
+          .select({
+            moOperationId: moOperationPlanWeeks.moOperationId,
+            monday: moOperationPlanWeeks.weekMonday,
+            minutes: moOperationPlanWeeks.minutes,
+          })
+          .from(moOperationPlanWeeks)
+          .innerJoin(moOperations, eq(moOperations.id, moOperationPlanWeeks.moOperationId))
+          .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+          .where(orderFilter)
+          .orderBy(moOperationPlanWeeks.weekMonday),
+        operationTimeOnResources(dbc, orderFilter),
+        opts.resources
+          ? dbc
+              .select({
+                moOperationId: moOperationResources.moOperationId,
+                workCenterId: moOperationResources.workCenterId,
+                rank: moOperationResources.rank,
+                setupTime: moOperationResources.setupTime,
+                runTimePerUnit: moOperationResources.runTimePerUnit,
+              })
+              .from(moOperationResources)
+              .innerJoin(moOperations, eq(moOperations.id, moOperationResources.moOperationId))
+              .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+              .where(orderFilter)
+              .orderBy(moOperationResources.moOperationId, moOperationResources.rank)
+          : Promise.resolve([]),
+        // Rörd is asked only of the operations with possible resources —
+        // the only ones a förslag can concern.
+        opts.resources
+          ? dbc
+              .select({ moOperationId: moOperations.id })
+              .from(moOperations)
+              .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+              .where(and(orderFilter, hasResources, operationTouchedSql()))
+          : Promise.resolve([]),
+      ]);
+
+      const resourcesByOperation = new Map<string, OperationResourceOption[]>();
+      for (const row of resourceRows) {
+        const list = resourcesByOperation.get(row.moOperationId) ?? [];
+        list.push({ workCenterId: row.workCenterId, rank: row.rank, setupTime: Number(row.setupTime), runTimePerUnit: Number(row.runTimePerUnit) });
+        resourcesByOperation.set(row.moOperationId, list);
+      }
+      const touched = new Set(touchedRows.map((row) => row.moOperationId));
 
       const plansByOperation = new Map<string, PlannedWeek[]>();
       for (const row of planRows) {
@@ -1031,6 +1084,9 @@ export function createPlanningRepository(db: Db) {
           ...(timeOnResources.get(r.moOperationId) ?? NO_TIME),
           plannedWeeks: plansByOperation.get(r.moOperationId) ?? null,
           plannedAt: r.plannedAt === null ? null : r.plannedAt.toISOString(),
+          ...(opts.resources
+            ? { resources: resourcesByOperation.get(r.moOperationId) ?? [], touched: touched.has(r.moOperationId) }
+            : {}),
         })),
         weekScheduleDays: weekDayRows,
         daySchedules: dayRows.map((r) => ({

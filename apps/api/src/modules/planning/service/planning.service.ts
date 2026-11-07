@@ -46,7 +46,21 @@ import {
 } from "./capacity-calc.js";
 import { buildArticleOverview, type ArticleOverview, type ArticleOverviewInput, type ArticleOverviewLoad } from "./article-overview.js";
 import { MIN_PLAN_MINUTES, PLAN_HORIZON_WEEKS, type PlanWorkCenter } from "./capacity-book.js";
-import { longOperationWarnings, planProduction, type OperationPlan, type PlanOperation, type PlanOrder, type PlanWarning } from "./production-plan.js";
+import {
+  longOperationWarnings,
+  operationsWithPlan,
+  planProduction,
+  type OperationPlan,
+  type PlanOperation,
+  type PlanOrder,
+  type PlanWarning,
+} from "./production-plan.js";
+import {
+  operationSuggestionOf,
+  resourceSuggestions,
+  type OperationResourceSuggestion,
+  type ResourceSuggestion,
+} from "./resource-suggestions.js";
 import { lockProductionPlan } from "../repository/plan-lock.js";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import {
@@ -201,6 +215,9 @@ export interface PlanRunResult {
   orders: number;
   operations: number;
   warnings: PlanWarning[];
+  // Förslag på resurs (#15) on the plan this run just wrote — Planera never
+  // switches a resource itself, the notice lists what could be switched.
+  resourceSuggestions: ResourceSuggestion[];
 }
 
 export interface PlannedOperationWeeks {
@@ -232,6 +249,10 @@ export interface ManufacturingPlanReader {
   // transaction (Planera's rules for one order), the warnings as texts.
   replanOrderInTx(tx: Tx, manufacturingOrderId: string): Promise<string[]>;
   orderPlanSummaries(orderIds: string[]): Promise<Map<string, OrderPlanSummary>>;
+  // Förslag på resurs (#15) for one TO's operations (the TO card), keyed by
+  // mo_operations.id; only operations with a förslag are in the map.
+  // Optional for the fixtures' readers: left out = no förslag.
+  operationResourceSuggestions?(manufacturingOrderId: string): Promise<Map<string, OperationResourceSuggestion>>;
 }
 
 const OPEN_MO_STATUSES: ReadonlySet<string> = new Set(["released", "in_progress"]);
@@ -897,10 +918,12 @@ export function createPlanningService(
   // resources as the book sees them (lead time included), the calendars and
   // the full-day holidays out to the horizon. Read through `dbc` so a run
   // reads AFTER the production_plan lock in its own transaction.
-  async function loadPlanWorld(dbc?: Tx) {
+  // `resources` loads the operations' possible resources and rörd (#15) —
+  // only the readers that suggest ask for it.
+  async function loadPlanWorld(dbc?: Tx, opts: { resources?: boolean } = {}) {
     const today = todayFn();
     const horizonTo = addDays(today, PLAN_HORIZON_WEEKS * 7 + 14);
-    const capacity = await repo.loadCapacityInput(addDays(today, -7), horizonTo, dbc);
+    const capacity = await repo.loadCapacityInput(addDays(today, -7), horizonTo, dbc, { resources: opts.resources });
     // Optional on the repo for the unit tests' fakes ⇒ the default limit.
     const longOperationWeeks = await repo.longOperationWeeks?.(dbc);
     return { ...planWorldOf(capacity, today), longOperationWeeks };
@@ -918,6 +941,7 @@ export function createPlanningService(
           hoursPerDay: w.hoursPerDay,
           capacityFactor: w.capacityFactor,
           leadTimeDays: w.leadTimeDays ?? null,
+          active: w.active,
         },
       ])
     );
@@ -1080,6 +1104,16 @@ export function createPlanningService(
       });
     }
     return summaries;
+  }
+
+  // Förslag på resurs for one TO (the TO card): the whole open load is read
+  // once (the book needs it), the förslag computed for this order only. The
+  // manufacturing service asks only when one of the order's operations
+  // could get one.
+  async function operationResourceSuggestions(manufacturingOrderId: string): Promise<Map<string, OperationResourceSuggestion>> {
+    const world = await loadPlanWorld(undefined, { resources: true });
+    const list = resourceSuggestions(world, new Set([manufacturingOrderId]));
+    return new Map(list.map((s) => [s.moOperationId, operationSuggestionOf(s)]));
   }
 
   // Promise.all, or one load at a time: a transaction has one connection,
@@ -1533,9 +1567,13 @@ export function createPlanningService(
       // Holidays out to the plan horizon, not just the visible weeks: Sen
       // walks a planned operation's finish day (and a lego lead time) past
       // the matrix's last column.
-      const input = await repo.loadCapacityInput(firstMonday, addDays(today, PLAN_HORIZON_WEEKS * 7 + 14));
-      const offDays = new Set(input.holidays.filter((h) => h.dayScheduleId === null).map((h) => h.date));
-      const result = computeCapacity(input, { today, weeks: query.weeks, offDays });
+      const input = await repo.loadCapacityInput(firstMonday, addDays(today, PLAN_HORIZON_WEEKS * 7 + 14), undefined, {
+        resources: true,
+      });
+      const world = planWorldOf(input, today);
+      // Förslag på resurs (#15) on the same input, in the same read.
+      const suggestions = resourceSuggestions(world);
+      const result = computeCapacity(input, { today, weeks: query.weeks, offDays: world.offDays, resourceSuggestions: suggestions });
       if (query.productionGroupId) {
         result.groups = result.groups.filter((g) => g.productionGroupId === query.productionGroupId);
       }
@@ -1548,7 +1586,7 @@ export function createPlanningService(
     async planProductionRun(userId: string | null): Promise<PlanRunResult> {
       const run = await repo.transaction(async (tx) => {
         await lockProductionPlan(tx);
-        const [world, stamped] = [await loadPlanWorld(tx), await repo.stampedOperationIds(tx)];
+        const [world, stamped] = [await loadPlanWorld(tx, { resources: true }), await repo.stampedOperationIds(tx)];
         const orders = groupOrders(world.operations, stamped);
         const result = planProduction({
           today: world.today,
@@ -1560,7 +1598,16 @@ export function createPlanningService(
         });
         const plannedAt = new Date();
         await repo.writeOperationPlans(tx, { plans: result.plans, clear: result.clear, plannedAt });
-        return { plannedAt: plannedAt.toISOString(), orders: orders.length, operations: result.plans.length, warnings: result.warnings };
+        // Förslag på resurs (#15) on the plan just written, in memory — no
+        // second read. Planera itself never switches a resource.
+        const suggestions = resourceSuggestions({ ...world, operations: operationsWithPlan(world.operations, result) });
+        return {
+          plannedAt: plannedAt.toISOString(),
+          orders: orders.length,
+          operations: result.plans.length,
+          warnings: result.warnings,
+          resourceSuggestions: suggestions,
+        };
       });
       await audit.log({
         entityType: "production_plan",
@@ -1681,6 +1728,7 @@ export function createPlanningService(
     planNewOrderInTx,
     replanOrderInTx,
     orderPlanSummaries,
+    operationResourceSuggestions,
 
     // One draft IO per primary supplier (Monitor-style grouping) plus one
     // planned TO per manufactured article. No batch transaction on purpose:

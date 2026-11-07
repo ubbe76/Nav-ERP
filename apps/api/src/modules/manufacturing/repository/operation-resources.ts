@@ -135,6 +135,23 @@ export function operationResourcesJson(): SQL<OperationResourceView[]> {
     WHERE r.mo_operation_id = "mo_operations"."id"), '[]'::jsonb)`;
 }
 
+// Rörd — has the operation ever had anything: reported quantities, a
+// report-log row (undone ones included — they are history the cascade would
+// delete), a time report, a stamp session or a scrap row. ONE rule for Ändra
+// operationer (Ta bort, lego ↔ own; order-edit.ts) and the förslag på resurs
+// (#15: only an untouched operation gets one; the planning repository's
+// loadCapacityInput). A boolean expression on the outer "mo_operations" row,
+// spelled out like operationResourcesJson.
+export function operationTouchedSql(): SQL<boolean> {
+  return sql<boolean>`(
+    coalesce("mo_operations"."quantity_completed", 0) > 0
+    OR "mo_operations"."quantity_scrapped" > 0
+    OR EXISTS (SELECT 1 FROM mo_reports touched_mr WHERE touched_mr.mo_operation_id = "mo_operations"."id")
+    OR EXISTS (SELECT 1 FROM time_reports touched_tr WHERE touched_tr.mo_operation_id = "mo_operations"."id")
+    OR EXISTS (SELECT 1 FROM stamp_sessions touched_ss WHERE touched_ss.mo_operation_id = "mo_operations"."id")
+    OR EXISTS (SELECT 1 FROM mo_operation_scrap touched_sc WHERE touched_sc.mo_operation_id = "mo_operations"."id"))`;
+}
+
 // Does the resource take part in alternatives anywhere it still matters — as
 // a beredning's alternative, as the ordinarie of a routing operation that has
 // alternatives, or among an open TO's possible resources (any rank)? Such a

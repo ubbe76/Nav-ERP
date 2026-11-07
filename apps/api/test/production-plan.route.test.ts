@@ -37,8 +37,29 @@ const id = () => crypto.randomUUID();
 const weeks = { plannedStartWeek: "2030-03-11", plannedEndWeek: "2030-03-18", planLocked: true };
 
 describe("POST /planning/plan", () => {
-  it("200s with the run and the user", async () => {
-    const result = { plannedAt: "2030-03-04T08:00:00.000Z", orders: 3, operations: 7, warnings: [] };
+  it("200s with the run and the user — the förslag på resurs ride along (#15)", async () => {
+    const result = {
+      plannedAt: "2030-03-04T08:00:00.000Z",
+      orders: 3,
+      operations: 7,
+      warnings: [],
+      resourceSuggestions: [
+        {
+          moOperationId: id(),
+          manufacturingOrderId: id(),
+          orderNumber: "TO-1001",
+          sequenceNo: 20,
+          fromWorkCenterId: id(),
+          fromCode: "110",
+          toWorkCenterId: id(),
+          toCode: "120",
+          toName: "Kantpress 2",
+          currentToWeek: "2030-03-25",
+          toWeek: "2030-03-11",
+          reason: "overloaded" as const,
+        },
+      ],
+    };
     const app = buildApp({
       planProductionRun: async (userId) => {
         expect(userId).toBe(USER);

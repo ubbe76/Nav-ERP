@@ -9,6 +9,11 @@
 // Pure, like delivery-time-check.ts: the service loads the rows, writes the
 // plans it gets back and logs the warnings. Deterministic — the same input
 // gives the same plan, and a run on its own output gives it again.
+//
+// Alternativa resurser (#15, beslut 1): every operation is placed on the
+// resource it has (op.workCenterId), alternatives or not — the engine never
+// switches one. A full resource gives a förslag (resource-suggestions.ts),
+// and the planner switches by hand.
 import {
   hasCapacityCalendar,
   mondayOf,
@@ -22,7 +27,7 @@ import {
 } from "./capacity-calc.js";
 import { addDays } from "../../system/service/delivery-days.js";
 import { DEFAULT_LONG_OPERATION_WEEKS } from "../../system/service/plan-settings.js";
-import { createCapacityBook, MIN_PLAN_MINUTES, type CapacityBook, type PlanWorkCenter } from "./capacity-book.js";
+import { createCapacityBook, MIN_PLAN_MINUTES, roundPlanWeeks, type CapacityBook, type PlanWorkCenter } from "./capacity-book.js";
 
 // Orimligt mycket tid: an operation whose remaining time alone would fill its
 // resource for more than `longOperationWeeks` normal weeks (the system
@@ -278,6 +283,24 @@ export function planProduction(input: PlanProductionInput): PlanProductionResult
   }
 
   return { plans, clear, warnings, orders };
+}
+
+// The operations as writeOperationPlans leaves them after a run: a planned
+// one with its rounded weeks (one that rounds away is cleared), a cleared one
+// without weeks or lock. Planera's answer computes its förslag on this — the
+// plan it just wrote, in memory, without reading it back (#15).
+export function operationsWithPlan(
+  operations: CapacityOperationRow[],
+  result: Pick<PlanProductionResult, "plans" | "clear">
+): CapacityOperationRow[] {
+  const planned = new Map(result.plans.map((p) => [p.operationId, roundPlanWeeks(p.weeks)]));
+  const cleared = new Set(result.clear);
+  return operations.map((op) => {
+    const weeks = planned.get(op.moOperationId);
+    if (weeks !== undefined && weeks.length > 0) return { ...op, plannedWeeks: weeks };
+    if (weeks !== undefined || cleared.has(op.moOperationId)) return { ...op, plannedWeeks: null, planLocked: false };
+    return op;
+  });
 }
 
 // Orimligt mycket tid for the operations of `orders` without planning them —

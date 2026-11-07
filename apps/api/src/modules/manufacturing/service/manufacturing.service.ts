@@ -36,6 +36,7 @@ import type {
 import { MaterialShortageError, type MaterialShortageCheck } from "./material-shortage.js";
 import { computeReadiness, type Readiness, type ReadinessResult } from "./terminal-readiness.js";
 import type { ManufacturingPlanReader } from "../../planning/service/planning.service.js";
+import type { OperationResourceSuggestion } from "../../planning/service/resource-suggestions.js";
 import type { PlannedWeek } from "../../planning/service/capacity-calc.js";
 export { MaterialShortageError, type MaterialShortage } from "./material-shortage.js";
 import type { PeriodLockChecker } from "../../payroll/service/period-lock.js";
@@ -1676,8 +1677,28 @@ export function createManufacturingService(
       return repo.listMaterialConsumptions(moId);
     },
 
+    // GET …/operations: each operation carries `suggestion` (förslag på
+    // resurs, #15) — null on most. The load is read (through the late-bound
+    // plan reader) only when an operation could get one: it has possible
+    // resources and is pending, not plan-locked, not Vald för hand and has
+    // no reported quantity. Rörd and Valregeln itself are decided by the
+    // planning side (resource-suggestions.ts); this is only the cheap gate.
     async listOperations(moId: string) {
-      return repo.listOperations(moId);
+      const operations = await repo.listOperations(moId);
+      const mayGetSuggestion = operations.some(
+        (op) =>
+          op.resources.length > 0 &&
+          op.status === "pending" &&
+          !op.planLocked &&
+          !op.resourceLocked &&
+          Number(op.quantityCompleted ?? 0) === 0 &&
+          Number(op.quantityScrapped) === 0
+      );
+      const suggestions =
+        mayGetSuggestion && planning?.operationResourceSuggestions
+          ? await planning.operationResourceSuggestions(moId)
+          : new Map<string, OperationResourceSuggestion>();
+      return operations.map((op) => ({ ...op, suggestion: suggestions.get(op.id) ?? null }));
     },
 
     // Legoinköp på TO-kortet: per lego operation what is bought and the IO

@@ -6,6 +6,8 @@
 // fully unit-testable without a database (same pattern as requirements-calc).
 import { isoWeekOf, isoWeekRange } from "../../timereport/service/schedule.service.js";
 import { addWorkingDays, isWorkingDay, nextWorkingDayOnOrAfter } from "../../system/service/delivery-days.js";
+// Types only — resource-suggestions.ts computes the förslag on these rows.
+import type { OperationResourceSuggestion, ResourceSuggestion } from "./resource-suggestions.js";
 
 export interface CapacityWorkCenter {
   workCenterId: string;
@@ -77,6 +79,23 @@ export interface CapacityOperationRow {
   plannedWeeks?: PlannedWeek[] | null;
   planLocked?: boolean;
   plannedAt?: string | null; // ISO timestamp of the run that planned it
+  // Alternativa resurser (#15): Vald för hand (mo_operations.resource_locked).
+  resourceLocked?: boolean;
+  // The operation's possible resources (mo_operation_resources, rank 0 = the
+  // beredning's ordinarie). Left out or [] = no alternatives. Loaded only by
+  // the readers that suggest (loadCapacityInput's `resources`).
+  resources?: OperationResourceOption[];
+  // Rörd (operationTouchedSql: reported, time, stamped or scrapped) — loaded
+  // with `resources`; such an operation never gets a förslag. Left out =
+  // only the row's own quantities and time flags count.
+  touched?: boolean;
+}
+
+export interface OperationResourceOption {
+  workCenterId: string;
+  rank: number;
+  setupTime: number; // minutes, resolved at the snapshot
+  runTimePerUnit: number;
 }
 
 export interface WeekScheduleDayRow {
@@ -120,6 +139,12 @@ export interface CapacityCellOrder {
   plannedEndWeek: string | null;
   planLocked: boolean;
   late: boolean; // the MO's Sen — its last pending operation finishes after the due date
+  // Alternativa resurser (#15): Vald för hand; the ordinarie's code when the
+  // operation is on an alternative (null on the ordinarie or without
+  // alternatives); the förslag (derived at this read, never stored).
+  resourceLocked: boolean;
+  ordinaryWorkCenterCode: string | null;
+  suggestion: OperationResourceSuggestion | null;
 }
 
 export interface CapacityCell {
@@ -164,6 +189,9 @@ export interface CapacitySummary {
   overloadedCells: number; // resource × week cells with loadPercent > 100
   lateOrders: { manufacturingOrderId: string; orderNumber: string; dueDate: string | null; plannedFinish: string | null }[];
   unplannedOrders: { manufacturingOrderId: string; orderNumber: string }[];
+  // Förslag på resurs (#15): every open operation's förslag, by order number
+  // and sequence (the räknare's list — not narrowed by the group filter).
+  resourceSuggestions: ResourceSuggestion[];
 }
 
 export interface CapacityResult {
@@ -469,10 +497,26 @@ export function computeCapacity(
   input: CapacityInput,
   // offDays (full-day holidays) only matter for Sen: a lego operation's lead
   // time and the finish day of a resource without a calendar.
-  options: { today: string; weeks: number; offDays?: ReadonlySet<string> }
+  // resourceSuggestions: the förslag computed on the same input
+  // (resourceSuggestions in resource-suggestions.ts) — on the cells and in
+  // the summary; left out = none.
+  options: { today: string; weeks: number; offDays?: ReadonlySet<string>; resourceSuggestions?: ResourceSuggestion[] }
 ): CapacityResult {
   const offDays = options.offDays ?? new Set<string>();
   const lookups = buildScheduleLookups(input.weekScheduleDays, input.daySchedules, input.holidays);
+  const suggestions = options.resourceSuggestions ?? [];
+  const suggestionByOperation = new Map(
+    suggestions.map((s) => [
+      s.moOperationId,
+      { workCenterId: s.toWorkCenterId, code: s.toCode, name: s.toName, toWeek: s.toWeek, currentToWeek: s.currentToWeek, reason: s.reason },
+    ])
+  );
+  const codeOf = new Map(input.workCenters.map((w) => [w.workCenterId, w.code]));
+  // On an alternative: the ordinarie (rank 0) is another resource.
+  const ordinaryCodeOf = (op: CapacityOperationRow): string | null => {
+    const ordinary = op.resources?.find((r) => r.rank === 0);
+    return ordinary && ordinary.workCenterId !== op.workCenterId ? (codeOf.get(ordinary.workCenterId) ?? null) : null;
+  };
 
   // Sen / planned per MO is walked over ALL its operations — lego included,
   // since a lego operation last in the route decides the finish — before
@@ -569,6 +613,9 @@ export function computeCapacity(
         plannedEndWeek: planned ? plannedMondays[plannedMondays.length - 1]! : null,
         planLocked: operation.planLocked ?? false,
         late: statusByOrder.get(operation.manufacturingOrderId)?.late ?? false,
+        resourceLocked: operation.resourceLocked ?? false,
+        ordinaryWorkCenterCode: ordinaryCodeOf(operation),
+        suggestion: suggestionByOperation.get(operation.moOperationId) ?? null,
       });
     }
   }
@@ -677,5 +724,9 @@ export function computeCapacity(
   lateOrders.sort(byDueThenNumber);
   unplannedOrders.sort((a, b) => (a.orderNumber < b.orderNumber ? -1 : a.orderNumber > b.orderNumber ? 1 : 0));
 
-  return { weeks, groups, summary: { plannedAt, overloadedCells, lateOrders, unplannedOrders } };
+  const resourceSuggestions = [...suggestions].sort((a, b) =>
+    a.orderNumber !== b.orderNumber ? (a.orderNumber < b.orderNumber ? -1 : 1) : a.sequenceNo - b.sequenceNo
+  );
+
+  return { weeks, groups, summary: { plannedAt, overloadedCells, lateOrders, unplannedOrders, resourceSuggestions } };
 }

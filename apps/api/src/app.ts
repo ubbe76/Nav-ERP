@@ -427,6 +427,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     planNewOrderInTx: (tx, moId, given) => planReaderRef.current!.planNewOrderInTx(tx, moId, given),
     replanOrderInTx: (tx, moId) => planReaderRef.current!.replanOrderInTx(tx, moId),
     orderPlanSummaries: (ids) => planReaderRef.current!.orderPlanSummaries(ids),
+    operationResourceSuggestions: (moId) => planReaderRef.current!.operationResourceSuggestions!(moId),
   };
   const manufacturingService = createManufacturingService(
     createManufacturingRepository(database),

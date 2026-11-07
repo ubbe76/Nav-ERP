@@ -6,7 +6,9 @@
 //
 // Pure, like capacity-calc.ts: no database imports, the caller loads flat
 // rows. The book is stateful for ONE run — every `place` books its minutes
-// so the next operation (or the next row of the check) sees them.
+// so the next operation (or the next row of the check) sees them; a `peek`
+// (provplacering) runs the same loop and books nothing. Valregeln for
+// alternativa resurser (`chooseResource`, #15) lives at the bottom.
 import {
   buildScheduleLookups,
   hasCapacityCalendar,
@@ -36,6 +38,9 @@ export interface PlanWorkCenter {
   hoursPerDay: number | null; // Kapacitet (timmar per dag) — when there is no week schedule
   capacityFactor: number;
   leadTimeDays: number | null; // legoresurs: working days the supplier takes
+  // Valregeln never tries an inactive resource (#15). Optional: left out =
+  // active, so the engine's fixtures read as before.
+  active?: boolean;
 }
 
 // Existing load: the open operations as the matrix sees them — planned ones
@@ -74,6 +79,12 @@ export interface PlaceOptions {
   // in this week no matter what is free there — up to the week's WHOLE
   // capacity, overload allowed — and continues on free capacity after it.
   forceStartWeek?: string;
+}
+
+export interface PeekOptions extends PlaceOptions {
+  // The resource's bare capacity: the existing load and this run's bookings
+  // are ignored — Valregeln's "the base without load".
+  ignoreLoad?: boolean;
 }
 
 // The smallest piece the book places in a week — mo_operation_plan_weeks
@@ -125,6 +136,10 @@ export interface CapacityBook {
   readonly horizonMonday: string; // the first Monday outside the horizon
   readonly lookups: ScheduleLookups;
   place(wc: PlanWorkCenter | null, minutes: number, options: PlaceOptions): Placement;
+  // Provplacering (#15): the same loop as `place`, but nothing is booked —
+  // `place` is `peek` plus the booking. With `ignoreLoad` the resource's bare
+  // capacity is searched.
+  peek(wc: PlanWorkCenter | null, minutes: number, options: PeekOptions): Placement;
   // Gives booked weeks back — Planera's rule for an operation that hit the
   // horizon: its partial bookings must not stay as phantom load for the
   // TOs planned after it (Leveranstidskontrollen keeps them on purpose).
@@ -220,7 +235,9 @@ export function createCapacityBook(input: CapacityBookInput): CapacityBook {
   const finishDay = (wc: PlanWorkCenter | null, monday: string, floor: string) =>
     weekFinishDay(lookups, offDays, wc, monday, floor);
 
-  function place(wc: PlanWorkCenter | null, minutes: number, options: PlaceOptions): Placement {
+  // The one placement loop behind `place` (commit = book what it takes) and
+  // `peek` (commit = false: the same answer, nothing booked).
+  function placeOn(wc: PlanWorkCenter | null, minutes: number, options: PeekOptions, commit: boolean): Placement {
     // A forced start moves the floor to that week (never into the past).
     const floor = options.forceStartWeek ? maxDate(maxDate(options.forceStartWeek, firstMonday), today) : options.floor;
     const startMonday = mondayOf(floor);
@@ -228,7 +245,7 @@ export function createCapacityBook(input: CapacityBookInput): CapacityBook {
       // No calendar: unlimited — everything in the floor's week (nothing at
       // all under the threshold).
       const whole = minutes >= MIN_PLAN_MINUTES;
-      if (wc && whole) book(wc, startMonday, minutes);
+      if (commit && wc && whole) book(wc, startMonday, minutes);
       return {
         horizonExceeded: false,
         weeks: whole ? [{ monday: startMonday, minutes }] : [],
@@ -252,13 +269,17 @@ export function createCapacityBook(input: CapacityBookInput): CapacityBook {
           partial: weeks,
         };
       }
-      const room = forced ? weekCapacity(wc, monday) : freeMinutes(wc, monday, dayFloor);
+      const room = forced
+        ? weekCapacity(wc, monday)
+        : options.ignoreLoad
+          ? weekCapacityFrom(wc, monday, maxDate(dayFloor, today))
+          : freeMinutes(wc, monday, dayFloor);
       let take = Math.min(rest, room);
       // What would be left after this week is under the threshold: it goes
       // here, with the last whole piece, never as a week of its own.
       if (rest - take < MIN_PLAN_MINUTES) take = rest;
       if (take >= MIN_PLAN_MINUTES) {
-        book(wc, monday, take);
+        if (commit) book(wc, monday, take);
         weeks.push({ monday, minutes: take });
         rest -= take;
       }
@@ -283,7 +304,8 @@ export function createCapacityBook(input: CapacityBookInput): CapacityBook {
     firstMonday,
     horizonMonday,
     lookups,
-    place,
+    place: (wc, minutes, options) => placeOn(wc, minutes, { floor: options.floor, forceStartWeek: options.forceStartWeek }, true),
+    peek: (wc, minutes, options) => placeOn(wc, minutes, options, false),
     release,
     subcontract: (wc, floor) => addWorkingDays(floor, Math.ceil(wc.leadTimeDays ?? 0), offDays),
     undatedMinutes: (workCenterId) => undatedLoad.get(workCenterId) ?? 0,
@@ -291,4 +313,93 @@ export function createCapacityBook(input: CapacityBookInput): CapacityBook {
     freeMinutes,
     weekFinishDay: finishDay,
   };
+}
+
+// --- Valregeln (#15, Alternativa resurser) ---------------------------------
+// ONE rule the förslag (resource-suggestions.ts) and Leveranstidskontrollen
+// share, each with its own base. Still one placement rule: every try is a
+// `peek` on the same book.
+
+export interface ResourceCandidate {
+  workCenter: PlanWorkCenter | null;
+  // The operation's minutes on THIS resource — an alternative's own times,
+  // or the ordinarie's where it has none (resolved by the caller).
+  minutes: number;
+}
+
+// Where the base's klar-vecka comes from. The förslag: the STORED plan's
+// last week (null = unplanned — it did not fit, or was never planned — and
+// counts as full). The check: a trial placement on the base with the load.
+export type ChoiceBase = { stored: string | null } | "trial";
+
+export type PlacedPlacement = Extract<Placement, { horizonExceeded: false }>;
+
+export interface ResourceChoice {
+  index: number; // 0 = the base, n = candidates[n]
+  baseFull: boolean; // the load pushes the base's klar-vecka (or it has none)
+  baseToWeek: string | null; // the base's klar-vecka as compared; null = unplanned, beyond the horizon or not tried
+  toWeek: string | null; // the chosen resource's klar-vecka (Monday); the base's = baseToWeek
+  placement: PlacedPlacement | null; // the chosen resource's trial with the load; null when none was made
+}
+
+// Never tried as an alternative: an inactive resource, a legoresurs, and a
+// resource without capacity (no week schedule, no hours per day) — the book
+// sees that one as unlimited and it would always win. It can still be
+// chosen by hand.
+export const triesAsAlternative = (wc: PlanWorkCenter | null): wc is PlanWorkCenter =>
+  wc != null && wc.type !== "subcontract" && wc.active !== false && hasCapacityCalendar(wc);
+
+// candidates[0] is the base (the förslag: the operation's current resource;
+// the check: the routing's ordinarie), the rest the other resources in rank
+// order. Nothing is booked — the caller books the choice if it should.
+// 1. Without an alternative that can be tried: the base, no trial at all
+//    (the existing suites and figures are untouched).
+// 2. The base is full when the load pushes its klar-vecka: its week is later
+//    than a trial on the bare base (no load) from the same floor; an
+//    unplanned base (or one beyond the horizon) is full. A base that is not
+//    full wins even when an alternative is faster (beslut 2: the ordinarie
+//    is the beredare's first choice).
+// 3. A full base: each alternative is tried WITH the load, with its own
+//    minutes; the earliest klar-VECKA wins, a tie goes to the lowest rank,
+//    and an alternative counts only when it is ready in an earlier week
+//    than the base — a tie with the base keeps the base. Weeks, not days:
+//    the plan counts in weeks and the next operation's floor is the klar-
+//    vecka, so a four-day week must not win a day inside the same week.
+export function chooseResource(
+  book: CapacityBook,
+  candidates: readonly ResourceCandidate[],
+  floor: string,
+  base: ChoiceBase
+): ResourceChoice {
+  const [first, ...others] = candidates;
+  if (!first) throw new Error("chooseResource needs the base among the candidates");
+  const stored = base === "trial" ? null : base.stored;
+  const tried = others.map((c, i) => ({ c, index: i + 1 })).filter(({ c }) => triesAsAlternative(c.workCenter));
+  if (tried.length === 0) return { index: 0, baseFull: false, baseToWeek: stored, toWeek: stored, placement: null };
+
+  let basePlacement: PlacedPlacement | null = null;
+  let baseToWeek: string | null = stored;
+  if (base === "trial") {
+    const trial = book.peek(first.workCenter, first.minutes, { floor });
+    basePlacement = trial.horizonExceeded ? null : trial;
+    baseToWeek = basePlacement?.toWeek ?? null;
+  }
+  let baseFull = true;
+  if (baseToWeek !== null) {
+    const bare = book.peek(first.workCenter, first.minutes, { floor, ignoreLoad: true });
+    baseFull = !bare.horizonExceeded && baseToWeek > bare.toWeek;
+  }
+  const keepBase: ResourceChoice = { index: 0, baseFull, baseToWeek, toWeek: baseToWeek, placement: basePlacement };
+  if (!baseFull) return keepBase;
+
+  let best: { index: number; placement: PlacedPlacement } | null = null;
+  for (const { c, index } of tried) {
+    const trial = book.peek(c.workCenter, c.minutes, { floor });
+    if (trial.horizonExceeded) continue;
+    if (best === null || trial.toWeek < best.placement.toWeek) best = { index, placement: trial };
+  }
+  if (best !== null && (baseToWeek === null || best.placement.toWeek < baseToWeek)) {
+    return { index: best.index, baseFull, baseToWeek, toWeek: best.placement.toWeek, placement: best.placement };
+  }
+  return keepBase;
 }

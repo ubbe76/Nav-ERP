@@ -42,6 +42,9 @@ const auditRepository = createAuditRepository(db);
 const periodLocks = { isDateLocked: async () => false };
 
 const planReaderRef: { current: ManufacturingPlanReader | null } = { current: null };
+// How often the TO card asked for förslag (it must not read the load
+// without an operation that could get one).
+let suggestionReads = 0;
 const mfgService = createManufacturingService(
   createManufacturingRepository(db),
   testDocumentPdfService,
@@ -59,6 +62,10 @@ const mfgService = createManufacturingService(
     planNewOrderInTx: (tx, moId, given) => planReaderRef.current!.planNewOrderInTx(tx, moId, given),
     replanOrderInTx: (tx, moId) => planReaderRef.current!.replanOrderInTx(tx, moId),
     orderPlanSummaries: (ids) => planReaderRef.current!.orderPlanSummaries(ids),
+    operationResourceSuggestions: (moId) => {
+      suggestionReads++;
+      return planReaderRef.current!.operationResourceSuggestions!(moId);
+    },
   }
 );
 const timeReportRepository = createTimeReportRepository(db);
@@ -93,6 +100,7 @@ const costingService = createCostingService(createCostingRepository(db), {
 const TRUNCATE = sql`TRUNCATE cost_calculations, mo_operation_plan_weeks, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, holidays, week_schedule_days, week_schedules, day_schedule_breaks, day_schedules, attendance_sessions, stamp_sessions, time_reports, employees, stock_transactions, stock_locations, warehouses, bom_components, articles, audit_log, users CASCADE`;
 
 beforeEach(async () => {
+  suggestionReads = 0;
   await db.execute(TRUNCATE);
   await db.delete(systemSettings).where(eq(systemSettings.key, "planning_long_operation_weeks"));
 });
@@ -132,7 +140,9 @@ async function terminalOpIds(workCenterId: string) {
 // alternatives 120 (setup som ordinarie, 30 min/st) and 130 (setup 5,
 // stycktid som ordinarie); Op 20 on 140 (no alternatives). The TO is 10 st,
 // released and planned at creation.
-async function seedWorld(opts: { inactiveAlternative?: boolean } = {}) {
+// With `fill110` a TO of 40 h on 110 is released first: it fills W1, so the
+// world's Op 10 is planned in W2 on a full 110 — while 120 and 130 are free.
+async function seedWorld(opts: { inactiveAlternative?: boolean; fill110?: boolean } = {}) {
   const user = await authRepo.create({ email: `alt-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "Planerare", role: "admin" });
   const day = await scheduleService.createDaySchedule({ code: "D8", name: "Dagtid 8h", startTime: "07:00", endTime: "15:00", breaks: [], active: true });
   const week = await scheduleService.createWeekSchedule({
@@ -164,6 +174,12 @@ async function seedWorld(opts: { inactiveAlternative?: boolean } = {}) {
   // An alternative that went inactive after it was chosen stays in the
   // beredning but is no possible resource for a new TO.
   if (opts.inactiveAlternative) await mfgService.updateWorkCenter(r150.id, { active: false });
+  let filler: { id: string } | null = null;
+  if (opts.fill110) {
+    const fillerArticle = await testArticleService.createArticle({ articleNumber: `F-${crypto.randomUUID().slice(0, 6)}`, name: "Fyllnad", type: "manufactured", unit: "st", active: true });
+    await mfgService.createRoutingOperation(fillerArticle.id, { sequenceNo: 10, workCenterId: r110.id, setupTime: 2400, runTimePerUnit: 0 });
+    filler = await mfgService.createManufacturingOrder({ articleId: fillerArticle.id, quantity: 1 }, user.id);
+  }
   const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 10 }, user.id);
   const ops = await mfgService.listOperations(order.id);
   return {
@@ -175,6 +191,7 @@ async function seedWorld(opts: { inactiveAlternative?: boolean } = {}) {
     r150,
     parent,
     routing10,
+    filler,
     order,
     op10: ops.find((o) => o.sequenceNo === 10)!,
     op20: ops.find((o) => o.sequenceNo === 20)!,
@@ -443,3 +460,147 @@ describe("the costing reads the TO's resource", () => {
   });
 });
 
+
+// Etapp 2 — förslag på resurs against Postgres: derived at every read
+// (resource-suggestions.ts), the same on the TO card, in Beläggning and in
+// Planera's answer; Planera never switches; Byt till X (Ändra's PATCH with
+// only workCenterId) follows the förslag, which then ends.
+describe("förslag på resurs (etapp 2)", () => {
+  // 110 is full in W1 (the filler), so Op 10 (610 min) is planned in W2. On
+  // 120 (10 + 30 × 10 = 310 min) and 130 (5 + 60 × 10 = 605 min) it fits W1;
+  // the same week, so rank 1 (120) wins.
+  const expected = (w: Awaited<ReturnType<typeof seedWorld>>) => ({
+    workCenterId: w.r120.id,
+    code: "120",
+    name: "Kantpress 2",
+    toWeek: W1,
+    currentToWeek: W2,
+    reason: "overloaded",
+  });
+  const allOperations = () =>
+    db
+      .select({
+        id: moOperations.id,
+        workCenterId: moOperations.workCenterId,
+        resourceLocked: moOperations.resourceLocked,
+        setupTime: moOperations.setupTime,
+        runTimePerUnit: moOperations.runTimePerUnit,
+      })
+      .from(moOperations)
+      .orderBy(moOperations.id);
+
+  it("is the same on the TO card, in Beläggning and in Planera's answer — and Planera never touches the resource", async () => {
+    const w = await seedWorld({ fill110: true });
+    expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r110.id, plannedStartWeek: W2, plannedEndWeek: W2 });
+
+    // The TO card (seedWorld read it once already).
+    suggestionReads = 0;
+    const ops = await mfgService.listOperations(w.order.id);
+    expect(ops.find((o) => o.id === w.op10.id)!.suggestion).toEqual(expected(w));
+    expect(ops.find((o) => o.id === w.op20.id)!.suggestion).toBeNull();
+    expect(suggestionReads).toBe(1);
+
+    // Beläggning: on the operation's cell, in the summary's list.
+    const capacity = await planningService.getCapacity({ weeks: 3 });
+    const r110 = capacity.groups.flatMap((g) => g.resources).find((r) => r.workCenterId === w.r110.id)!;
+    expect(r110.weeks[1]!.orders.find((o) => o.moOperationId === w.op10.id)).toMatchObject({
+      resourceLocked: false,
+      ordinaryWorkCenterCode: null,
+      suggestion: expected(w),
+    });
+    const listed = {
+      moOperationId: w.op10.id,
+      manufacturingOrderId: w.order.id,
+      orderNumber: w.order.orderNumber,
+      sequenceNo: 10,
+      fromWorkCenterId: w.r110.id,
+      fromCode: "110",
+      toWorkCenterId: w.r120.id,
+      toCode: "120",
+      toName: "Kantpress 2",
+      currentToWeek: W2,
+      toWeek: W1,
+      reason: "overloaded",
+    };
+    expect(capacity.summary.resourceSuggestions).toEqual([listed]);
+
+    // Planera: the same plan again, the förslag in its answer — and every
+    // operation keeps its resource, times and Vald för hand.
+    const before = await allOperations();
+    const run = await planningService.planProductionRun(w.user.id);
+    expect(run.resourceSuggestions).toEqual([listed]);
+    expect(await allOperations()).toEqual(before);
+    expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r110.id, resourceLocked: false, plannedEndWeek: W2 });
+    // The answer agrees with the plan it wrote, read back by the matrix.
+    expect((await planningService.getCapacity({ weeks: 3 })).summary.resourceSuggestions).toEqual(run.resourceSuggestions);
+  });
+
+  it("Byt till X with only the resource follows the förslag: the suggested week, Vald för hand, and the förslag is gone", async () => {
+    const w = await seedWorld({ fill110: true });
+    const suggestion = (await operationView(w.order.id, w.op10.id)).suggestion!;
+    const { operation } = await mfgService.updateOperation(w.order.id, w.op10.id, { workCenterId: suggestion.workCenterId }, w.user.id);
+    expect(operation).toMatchObject({
+      workCenterId: w.r120.id,
+      setupTime: "10.00",
+      runTimePerUnit: "30.0000",
+      resourceLocked: true,
+      plannedEndWeek: suggestion.toWeek,
+    });
+    suggestionReads = 0;
+    expect((await operationView(w.order.id, w.op10.id)).suggestion).toBeNull();
+    // Vald för hand closes the gate: no load is read for the card.
+    expect(suggestionReads).toBe(0);
+    expect((await planningService.getCapacity({ weeks: 3 })).summary.resourceSuggestions).toEqual([]);
+    // Planera keeps it on 120.
+    expect((await planningService.planProductionRun(w.user.id)).resourceSuggestions).toEqual([]);
+    expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r120.id, resourceLocked: true });
+  });
+
+  it("only an untouched operation that is neither locked nor Vald för hand gets one", async () => {
+    const w = await seedWorld({ fill110: true });
+    const current = async () => (await operationView(w.order.id, w.op10.id)).suggestion;
+    expect(await current()).toEqual(expected(w));
+
+    // Flytta locks the weeks: the planner's decision. Lås upp brings it back.
+    await planningService.moveOperation(w.op10.id, { weekMonday: W2, moveFollowing: true }, w.user.id);
+    expect(await current()).toBeNull();
+    await planningService.unlockOperation(w.op10.id, w.user.id);
+    expect(await current()).toEqual(expected(w));
+
+    // Vald för hand without a switch, then cleared again.
+    await mfgService.updateOperation(w.order.id, w.op10.id, { resourceLocked: true }, w.user.id);
+    expect(await current()).toBeNull();
+    await mfgService.updateOperation(w.order.id, w.op10.id, { resourceLocked: false }, w.user.id);
+    expect(await current()).toEqual(expected(w));
+
+    // Rörd: a time report (no quantity, so the card's gate still asks).
+    const worker = await employee();
+    const report = await timeReportService.createTimeReport({ employeeId: worker.id, moOperationId: w.op10.id, date: "2030-03-04", hours: 1 }, w.user.id);
+    suggestionReads = 0;
+    expect(await current()).toBeNull();
+    expect(suggestionReads).toBe(1);
+    expect((await planningService.getCapacity({ weeks: 3 })).summary.resourceSuggestions).toEqual([]);
+    await timeReportService.deleteTimeReport(report.id, w.user.id);
+    expect(await current()).toEqual(expected(w));
+
+    // Rapporterad: a reported quantity closes the card's gate before any load is read.
+    await mfgService.reportOperationQuantities(w.op10.id, { quantityOk: 1, quantityScrapped: 0, markDone: false, createdBy: w.user.id });
+    suggestionReads = 0;
+    expect(await current()).toBeNull();
+    expect(suggestionReads).toBe(0);
+  });
+
+  it("the TO card reads no load for an order without an operation that could get one", async () => {
+    const w = await seedWorld();
+    const plain = await mfgService.createManufacturingOrder({ articleId: w.parent.id, quantity: 1 }, w.user.id);
+    suggestionReads = 0;
+    // Without the filler 110 is not full: the card asks, Valregeln says no.
+    expect((await mfgService.listOperations(w.order.id)).map((o) => o.suggestion)).toEqual([null, null]);
+    expect(suggestionReads).toBe(1);
+    // An order with Op 10 Vald för hand (its other operation has no alternatives): no read at all.
+    await mfgService.updateOperation(plain.id, (await mfgService.listOperations(plain.id))[0]!.id, { resourceLocked: true }, w.user.id);
+    suggestionReads = 0;
+    expect((await mfgService.listOperations(plain.id)).every((o) => o.suggestion === null)).toBe(true);
+    expect(suggestionReads).toBe(0);
+  });
+});
