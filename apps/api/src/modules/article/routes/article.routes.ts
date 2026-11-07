@@ -109,7 +109,7 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
   app.post("/article-groups", async (req, reply) => {
     const input = createArticleGroupSchema.parse(req.body);
     try {
-      const group = await service.createArticleGroup(input);
+      const group = await service.createArticleGroup(input, req.user!.id);
       return reply.code(201).send(group);
     } catch (err) {
       if (err instanceof DuplicateArticleGroupError) return reply.code(409).send(errorBody(err));
@@ -221,7 +221,7 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
   app.patch<{ Params: { id: string } }>("/article-groups/:id", async (req, reply) => {
     const input = updateArticleGroupSchema.parse(req.body);
     try {
-      return await service.updateArticleGroup(req.params.id, input);
+      return await service.updateArticleGroup(req.params.id, input, req.user!.id);
     } catch (err) {
       if (err instanceof ArticleGroupNotFoundError || err instanceof CostCenterNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof DuplicateArticleGroupError) return reply.code(409).send(errorBody(err));

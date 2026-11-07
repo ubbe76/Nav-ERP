@@ -33,18 +33,21 @@ export async function costingRoutes(
 
   // Without `save` this only computes and returns the numbers (200, id null);
   // with it the calculation is written and answered exactly as before (201).
+  // `markups` = Pröva påslag (#16): a preview with tried price markups is
+  // still a preview, so a read-only account may try them.
   app.post<{ Params: { id: string } }>(
     "/articles/:id/cost-calculations/pre-calculate",
     { config: { access: articleCardWrite(["tillverkning"]), readOnlySafe: (req) => isPreview(preCalculateSchema, req.body) } },
     async (req, reply) => {
       const input = preCalculateSchema.parse(req.body);
+      const trial = input.markups ?? null;
       try {
         if (input.save) {
           return reply
             .code(201)
-            .send(await service.preCalculate(req.params.id, input.quantity, true, input.multiLevel ?? false));
+            .send(await service.preCalculate(req.params.id, input.quantity, true, input.multiLevel ?? false, trial));
         }
-        return reply.send(await service.preCalculate(req.params.id, input.quantity, false, input.multiLevel ?? false));
+        return reply.send(await service.preCalculate(req.params.id, input.quantity, false, input.multiLevel ?? false, trial));
       } catch (err) {
         if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
         throw err;

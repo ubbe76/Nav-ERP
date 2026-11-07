@@ -6,6 +6,7 @@ import { parcelKindSchema } from "./shipping.js";
 // varugrupp schemas below, re-exported to consumers via index.ts.
 import { vatRateSchema } from "./vat.js";
 import { optionalText } from "./coerce.js";
+import { markupPercentSchema } from "./costing.js";
 
 // Avrundning — a positive step with at most 3 decimals (numeric(14,3) in the
 // database). The decimal check is on the scaled integer so float noise never
@@ -265,6 +266,11 @@ export const createArticleGroupSchema = z.object({
   defaultCostCenterId: z.string().uuid().nullable().optional(),
   // Momssats: the rate of every article in the group; omitted = 25 %.
   vatRate: vatRateSchema.optional(),
+  // Påslag per varugrupp (#16): the group's generellt påslag and
+  // materialpåslag in the förkalkyl. null/omitted = inherit the company's
+  // (System → Kalkyler); 0 = explicitly 0 %.
+  generalMarkupPercent: markupPercentSchema.nullable().optional(),
+  materialMarkupPercent: markupPercentSchema.nullable().optional(),
 });
 export type CreateArticleGroupInput = z.infer<typeof createArticleGroupSchema>;
 
@@ -276,6 +282,9 @@ export const updateArticleGroupSchema = z.object({
   defaultCostCenterId: z.string().uuid().nullable().optional(),
   // Omitted = unchanged.
   vatRate: vatRateSchema.optional(),
+  // Omitted = unchanged, null = inherit the company's again.
+  generalMarkupPercent: markupPercentSchema.nullable().optional(),
+  materialMarkupPercent: markupPercentSchema.nullable().optional(),
 });
 export type UpdateArticleGroupInput = z.infer<typeof updateArticleGroupSchema>;
 

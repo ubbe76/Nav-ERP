@@ -1,7 +1,9 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { eq, sql } from "drizzle-orm";
-import { costCalculationMaterialRows, costCalculationOperationRows, costCalculations, db } from "@navet/db";
-import { stampOutSchema, type CostVarianceOperationRow } from "@navet/shared";
+import { readFileSync } from "node:fs";
+import { asc, eq, sql } from "drizzle-orm";
+import { articleGroups, articles, costCalculationMaterialRows, costCalculationOperationRows, costCalculations, db, systemSettings } from "@navet/db";
+import { preCalculateSchema, stampOutSchema, type CostVarianceOperationRow } from "@navet/shared";
+import { manufacturingCost, selfCost } from "../src/modules/costing/service/cost-figures.js";
 import { testArticleService, testDocumentPdfService, testSystemService } from "./helpers/services.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -79,7 +81,7 @@ const costingService = createCostingService(createCostingRepository(db), {
 // vitest's 20 s limit. article_suppliers is reached by the articles cascade
 // anyway, and the leftover supplier rows are harmless — each test creates its
 // own uniquely named one. They are cleaned up once in afterAll.
-const TRUNCATE = sql`TRUNCATE cost_calculations, time_reports, employees, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, stock_transactions, stock_locations, warehouses, bom_components, article_suppliers, articles, users CASCADE`;
+const TRUNCATE = sql`TRUNCATE cost_calculations, time_reports, employees, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, stock_transactions, stock_locations, warehouses, bom_components, article_suppliers, articles, article_groups, users CASCADE`;
 
 beforeEach(async () => {
   await db.execute(TRUNCATE);
@@ -1737,5 +1739,301 @@ describe("costing service — variance analysis", () => {
     await db.execute(
       sql`update cost_calculation_operation_rows set base_setup_hours = null, base_run_hours = null, base_hourly_rate = null, base_quantity = 1, subcontract_quantity = 1, base_unit_price = 1, base_one_off = 1 where cost_calculation_id = ${id}`
     );
+  });
+});
+
+// Påslag per nivå (#16, etapp 1): the varugrupp's price markups and Pröva
+// påslag in the förkalkyl. Only the sales price moves — TVK and SVK (and so
+// the standard cost, TB and Kalkylutfall) never do.
+describe("costing service — markup levels (#16)", () => {
+  let groupSeq = 0;
+  async function makeGroup(markups: { generalMarkupPercent?: number | null; materialMarkupPercent?: number | null }) {
+    groupSeq += 1;
+    return articleService.createArticleGroup({ code: String(9000 + groupSeq), name: `Påslagsgrupp ${groupSeq}`, ...markups });
+  }
+
+  // Company: MO 10 %, Affo 10 %, generellt 25 %, material 10 %. The parent: 2
+  // × a 10 kr component per unit and one operation, 60 min setup at 60 kr/h
+  // with TO 10 %. For 5: dM 100, MO 10, dL 60, TO 6 ⇒ TVK 170, Affo 17, SVK
+  // 187; the materialpåslag's base dM + MO = 110.
+  async function makePricedParent() {
+    Object.assign(costingSettings, {
+      costingMoPercent: 10,
+      costingAffoPercent: 10,
+      costingGeneralMarkupPercent: 25,
+      costingMaterialMarkupPercent: 10,
+    });
+    const { parent, component } = await makeParentWithBom(10, 2);
+    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true });
+    await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 60, runTimePerUnit: 0 });
+    return { parent, component };
+  }
+
+  const COST_COLUMNS = [
+    "materialCost",
+    "materialOverhead",
+    "laborCost",
+    "overhead",
+    "subcontractCost",
+    "subcontractOverhead",
+    "semiFinishedCost",
+    "businessOverhead",
+  ] as const;
+  const costsOf = (c: Record<(typeof COST_COLUMNS)[number], string>) => Object.fromEntries(COST_COLUMNS.map((k) => [k, c[k]]));
+
+  it("prices the förkalkyl with the varugrupp's markups field by field and leaves TVK and SVK alone", async () => {
+    const { parent } = await makePricedParent();
+    const { calculation: company } = await costingService.preCalculate(parent.id, 5, true);
+    // 187 + 25 % × 187 + 10 % × 110 + 6
+    expect(company).toMatchObject({
+      generalMarkupPercent: "25.00",
+      generalMarkupLevel: "company",
+      materialMarkupPercent: "10.00",
+      materialMarkupLevel: "company",
+      materialMarkupBase: "110.0000",
+      generalMarkup: "46.7500",
+      materialMarkup: "11.0000",
+      salesPrice: "250.7500",
+    });
+
+    const group = await makeGroup({ generalMarkupPercent: 40, materialMarkupPercent: null });
+    await articleService.updateArticle(parent.id, { groupId: group.id });
+    const { calculation: grouped } = await costingService.preCalculate(parent.id, 5, true);
+
+    // The group's 40 %, the company's material (the group's field is empty).
+    expect(grouped).toMatchObject({
+      generalMarkupPercent: "40.00",
+      generalMarkupLevel: "group",
+      materialMarkupPercent: "10.00",
+      materialMarkupLevel: "company",
+      materialMarkupBase: "110.0000",
+      generalMarkup: "74.8000",
+      materialMarkup: "11.0000",
+      salesPrice: "278.8000",
+      // The cost markups are always the company's.
+      moPercent: "10.00",
+      affoPercent: "10.00",
+    });
+    // Every cost bucket, TVK and SVK as without the group.
+    expect(costsOf(grouped)).toEqual(costsOf(company));
+    expect(manufacturingCost(grouped)).toBe(170);
+    expect(selfCost(grouped)).toBe(187);
+
+    // The preview answers the same as the save.
+    const { calculation: preview } = await costingService.preCalculate(parent.id, 5);
+    expect(preview).toMatchObject({ id: null, generalMarkupLevel: "group", materialMarkupLevel: "company", materialMarkupBase: "110.0000", salesPrice: "278.8000" });
+  });
+
+  it("takes the varugrupp's 0 as 0 % and its empty field as the company's", async () => {
+    const { parent } = await makePricedParent();
+    const group = await makeGroup({ generalMarkupPercent: null, materialMarkupPercent: 0 });
+    await articleService.updateArticle(parent.id, { groupId: group.id });
+
+    const { calculation } = await costingService.preCalculate(parent.id, 5, true);
+
+    expect(calculation).toMatchObject({
+      generalMarkupPercent: "25.00",
+      generalMarkupLevel: "company",
+      materialMarkupPercent: "0.00",
+      materialMarkupLevel: "group",
+      materialMarkup: "0.0000",
+      // With 0 % the amount says nothing — the base still does.
+      materialMarkupBase: "110.0000",
+      salesPrice: "239.7500",
+    });
+  });
+
+  it("previews Pröva påslag without saving anything — no calculation, no setting, no group, no article price", async () => {
+    const { parent } = await makePricedParent();
+    const group = await makeGroup({ generalMarkupPercent: 40, materialMarkupPercent: 15 });
+    await articleService.updateArticle(parent.id, { groupId: group.id });
+    const settingsBefore = await db.select().from(systemSettings).orderBy(asc(systemSettings.key));
+    const [groupBefore] = await db.select().from(articleGroups).where(eq(articleGroups.id, group.id));
+
+    // Against the real settings reader too: the costing module has no write
+    // path to System → Kalkyler at all, and a trial must not grow one.
+    const onRealSettings = createCostingService(createCostingRepository(db), testSystemService);
+    await onRealSettings.preCalculate(parent.id, 5, false, false, { generalMarkupPercent: 35 });
+    const { calculation } = await costingService.preCalculate(parent.id, 5, false, false, { generalMarkupPercent: 35 });
+
+    // 35 % tried, the material still the group's 15 % — field by field.
+    expect(calculation).toMatchObject({
+      id: null,
+      generalMarkupPercent: "35.00",
+      generalMarkupLevel: "trial",
+      materialMarkupPercent: "15.00",
+      materialMarkupLevel: "group",
+      generalMarkup: "65.4500",
+      materialMarkup: "16.5000",
+      salesPrice: "274.9500",
+    });
+    expect(await db.select().from(costCalculations)).toHaveLength(0);
+    expect(await db.select().from(systemSettings).orderBy(asc(systemSettings.key))).toEqual(settingsBefore);
+    expect((await db.select().from(articleGroups).where(eq(articleGroups.id, group.id)))[0]).toEqual(groupBefore);
+    const [article] = await db.select({ standardCost: articles.standardCost, salesPrice: articles.salesPrice }).from(articles).where(eq(articles.id, parent.id));
+    expect(article).toEqual({ standardCost: null, salesPrice: null });
+
+    // null = the current one, like an absent field.
+    const { calculation: inherited } = await costingService.preCalculate(parent.id, 5, false, false, { generalMarkupPercent: null, materialMarkupPercent: null });
+    expect(inherited).toMatchObject({ generalMarkupLevel: "group", materialMarkupLevel: "group", salesPrice: "284.3000" }); // 187 + 74.8 + 16.5 + 6
+  });
+
+  it("saves a trial as prövat with the TVK and SVK of an ordinary calculation, so TB reads the same self cost", async () => {
+    const { parent } = await makePricedParent();
+    const { calculation: regular } = await costingService.preCalculate(parent.id, 5, true);
+    const { calculation: trial } = await costingService.preCalculate(parent.id, 5, true, false, { generalMarkupPercent: 35, materialMarkupPercent: 0 });
+
+    expect(trial).toMatchObject({
+      type: "pre",
+      generalMarkupPercent: "35.00",
+      generalMarkupLevel: "trial",
+      materialMarkupPercent: "0.00",
+      materialMarkupLevel: "trial",
+      materialMarkup: "0.0000",
+      materialMarkupBase: "110.0000",
+      // 187 + 65.45 + 0 + 6
+      salesPrice: "258.4500",
+    });
+    expect(costsOf(trial)).toEqual(costsOf(regular));
+    expect(selfCost(trial)).toBe(selfCost(regular));
+
+    // The trial is now the latest förkalkyl — and TB's self cost is unchanged.
+    const latest = (await costingService.latestPreCalculationSelfCost([parent.id])).get(parent.id);
+    expect(latest).toMatchObject({ calculationId: trial.id, selfCostPerUnit: 187 / 5 });
+    // The list carries the mark the web shows as prövat.
+    const listed = await costingService.listCostCalculations(parent.id);
+    expect(listed.map((c) => [c.id, c.generalMarkupLevel, c.materialMarkupLevel])).toEqual([
+      [trial.id, "trial", "trial"],
+      [regular.id, "company", "company"],
+    ]);
+    // Saving wrote nothing back onto the article: that is Sätt standardpris /
+    // Sätt försäljningspris, below.
+    const [article] = await db.select({ standardCost: articles.standardCost, salesPrice: articles.salesPrice }).from(articles).where(eq(articles.id, parent.id));
+    expect(article).toEqual({ standardCost: null, salesPrice: null });
+  });
+
+  it("feeds back the calculation's own price — the varugrupp's or the tried one — and the same standard cost", async () => {
+    const withWriter = createCostingService(createCostingRepository(db), { getSettings: async () => costingSettings }, articleService);
+    const { parent } = await makePricedParent();
+    const group = await makeGroup({ generalMarkupPercent: 40 });
+    await articleService.updateArticle(parent.id, { groupId: group.id });
+    const { calculation: grouped } = await withWriter.preCalculate(parent.id, 5, true);
+    const { calculation: trial } = await withWriter.preCalculate(parent.id, 5, true, false, { generalMarkupPercent: 35, materialMarkupPercent: 0 });
+
+    // Sätt försäljningspris: the calculation's price per unit, never the company's.
+    expect((await withWriter.applySalesPriceFromCalculation(grouped.id))).toMatchObject({ salesPrice: "55.7600" }); // 278.8 / 5
+    expect((await withWriter.applySalesPriceFromCalculation(trial.id))).toMatchObject({ salesPrice: "51.6900" }); // 258.45 / 5
+    // Sätt standardpris: TVK per unit, the same whichever price markups ran.
+    expect((await withWriter.applyStandardCostFromCalculation(trial.id))).toMatchObject({ standardCost: "34.0000" }); // 170 / 5
+    expect((await withWriter.applyStandardCostFromCalculation(grouped.id))).toMatchObject({ standardCost: "34.0000" });
+  });
+
+  it("refuses to try a cost markup or an out-of-range percentage", () => {
+    expect(preCalculateSchema.safeParse({ quantity: 1, markups: { moPercent: 10 } }).success).toBe(false);
+    expect(preCalculateSchema.safeParse({ quantity: 1, markups: { generalMarkupPercent: 1001 } }).success).toBe(false);
+    expect(preCalculateSchema.safeParse({ quantity: 1, markups: { materialMarkupPercent: -1 } }).success).toBe(false);
+    expect(preCalculateSchema.safeParse({ quantity: 1, markups: { generalMarkupPercent: 0, materialMarkupPercent: null } }).success).toBe(true);
+    expect(preCalculateSchema.safeParse({ quantity: 1, markups: {} }).success).toBe(true);
+  });
+
+  it("prices a multi-level run's sub-levels with the sold article's materialpåslag and sums the base", async () => {
+    Object.assign(costingSettings, { costingMoPercent: 10, costingMaterialMarkupPercent: 10 });
+    const raw = await articleService.createArticle({ articleNumber: `RAW-${crypto.randomUUID()}`, name: "Råmaterial", type: "purchased", unit: "st", standardCost: 50, active: true });
+    const semi = await articleService.createArticle({ articleNumber: `SEMI-${crypto.randomUUID()}`, name: "Underrede", type: "manufactured", unit: "st", active: true });
+    const top = await articleService.createArticle({ articleNumber: `TOP-${crypto.randomUUID()}`, name: "Diskbänk", type: "manufactured", unit: "st", standardCost: 0, active: true });
+    await articleService.addBomComponent(semi.id, { componentArticleId: raw.id, quantity: 1 });
+    await articleService.addBomComponent(top.id, { componentArticleId: semi.id, quantity: 2 });
+    await articleService.addBomComponent(top.id, { componentArticleId: raw.id, quantity: 1 });
+    // The halvfabrikat's own group is NOT read: the markup is a pricing
+    // decision for what is sold.
+    const semiGroup = await makeGroup({ materialMarkupPercent: 50 });
+    const topGroup = await makeGroup({ materialMarkupPercent: 20 });
+    await articleService.updateArticle(semi.id, { groupId: semiGroup.id });
+    await articleService.updateArticle(top.id, { groupId: topGroup.id });
+
+    const { calculation } = await costingService.preCalculate(top.id, 1, true, true);
+
+    // Sub-level for 2: dM 100 + MO 10 = base 110, markup 20 % = 22. Top: its
+    // own raw 50 + MO 5 = 55, plus the lifted 110 ⇒ base 165, markup 33.
+    expect(calculation).toMatchObject({
+      multiLevel: true,
+      materialMarkupPercent: "20.00",
+      materialMarkupLevel: "group",
+      materialMarkupBase: "165.0000",
+      materialMarkup: "33.0000",
+      semiFinishedCost: "110.0000",
+    });
+    const rows = await db.select().from(costCalculationMaterialRows).where(eq(costCalculationMaterialRows.costCalculationId, calculation.id));
+    const semiRow = rows.find((r) => r.kind === "semi")!;
+    expect([semiRow.materialMarkupBase, semiRow.materialMarkupAmount]).toEqual(["110.0000", "22.0000"]);
+    expect(rows.find((r) => r.kind === "material")!.materialMarkupBase).toBe("0.0000");
+    // The Kalkylpris's identity: markup = percent × base, every level included.
+    expect(Number(calculation.materialMarkup)).toBeCloseTo(Number(calculation.materialMarkupBase) * 0.2, 10);
+  });
+
+  it("prices the efterkalkyl with the varugrupp too, its TVK and avvikelseanalys untouched", async () => {
+    Object.assign(costingSettings, { costingMoPercent: 10, costingGeneralMarkupPercent: 25, costingMaterialMarkupPercent: 10 });
+    const order = await makeOrderWithReportedWork();
+    const before = await costingService.postCalculate(order.id);
+    const group = await makeGroup({ generalMarkupPercent: 40, materialMarkupPercent: 0 });
+    await articleService.updateArticle(order.articleId, { groupId: group.id });
+
+    const after = await costingService.postCalculate(order.id, true);
+
+    expect(after.calculation).toMatchObject({
+      type: "post",
+      generalMarkupPercent: "40.00",
+      generalMarkupLevel: "group",
+      materialMarkupPercent: "0.00",
+      materialMarkupLevel: "group",
+      // dM 80 + MO 8 — an efterkalkyl is single-level.
+      materialMarkupBase: "88.0000",
+    });
+    expect(before.calculation).toMatchObject({ generalMarkupLevel: "company", materialMarkupLevel: "company", materialMarkupBase: "88.0000" });
+    expect(costsOf(after.calculation)).toEqual(costsOf(before.calculation));
+    expect(Number(after.calculation.salesPrice)).not.toBe(Number(before.calculation.salesPrice));
+    expect(after.analysis).toEqual({
+      ...before.analysis!,
+      materialRows: before.analysis!.materialRows.map((r, i) => ({ ...r, id: after.analysis!.materialRows[i]!.id })),
+      operationRows: before.analysis!.operationRows.map((r, i) => ({ ...r, id: after.analysis!.operationRows[i]!.id })),
+    });
+  });
+
+  it("gives previewStructure the template's varugrupp, which moves only the materialpåslag", async () => {
+    Object.assign(costingSettings, { costingMoPercent: 10, costingAffoPercent: 10, costingMaterialMarkupPercent: 10 });
+    const template = await articleService.createArticle({ articleNumber: `TPL-${crypto.randomUUID()}`, name: "Mall", type: "manufactured", unit: "st", active: true });
+    const part = await articleService.createArticle({ articleNumber: `PART-${crypto.randomUUID()}`, name: "Skiva", type: "purchased", unit: "st", standardCost: 10, active: true });
+    const structure = { components: [{ componentArticleId: part.id, quantity: 2, unitId: null, unitFactor: null }], operations: [] };
+
+    const company = await costingService.previewStructure(template.id, 5, structure);
+    const group = await makeGroup({ generalMarkupPercent: 90, materialMarkupPercent: 30 });
+    await articleService.updateArticle(template.id, { groupId: group.id });
+    const grouped = await costingService.previewStructure(template.id, 5, structure);
+
+    // dM 100 + MO 10 = 110: 10 % ⇒ 11, the group's 30 % ⇒ 33.
+    expect(company.materialMarkup).toBeCloseTo(11, 10);
+    expect(grouped.materialMarkup).toBeCloseTo(33, 10);
+    expect(grouped.manufacturingCost).toBe(company.manufacturingCost);
+    expect(grouped.selfCost).toBe(company.selfCost);
+    expect(grouped.selfCostPerUnit).toBe(company.selfCostPerUnit);
+  });
+
+  it("backfills the base on single-level calculations only (0194's own UPDATE)", async () => {
+    const { parent } = await makePricedParent();
+    const { calculation: single } = await costingService.preCalculate(parent.id, 5, true);
+    const { calculation: multi } = await costingService.preCalculate(parent.id, 5, true, true);
+    // As saved before 0194: no base, levels by the column default.
+    await db.execute(sql`update cost_calculations set material_markup_base = null`);
+
+    const migration = readFileSync(new URL("../../../packages/db/drizzle/0194_paslag_per_varugrupp.sql", import.meta.url), "utf8");
+    const update = migration
+      .split("--> statement-breakpoint")
+      .map((statement) => statement.trim())
+      .find((statement) => /^UPDATE "cost_calculations"/m.test(statement));
+    expect(update, "0194 must contain the backfill").toBeDefined();
+    await db.execute(sql.raw(update!.slice(update!.search(/^UPDATE "cost_calculations"/m))));
+
+    const rows = await db.select({ id: costCalculations.id, base: costCalculations.materialMarkupBase }).from(costCalculations);
+    expect(Object.fromEntries(rows.map((r) => [r.id, r.base]))).toEqual({ [single.id]: "110.0000", [multi.id]: null });
   });
 });

@@ -300,7 +300,8 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   const authService = createAuthService(createAuthRepository(database), jwtSecret, auditRepository, setupCode);
   const permissionGroupService = createPermissionGroupService(createPermissionGroupRepository(database));
   const userSettingsService = createUserSettingsService(createUserSettingsRepository(database));
-  const articleService = createArticleService(createArticleRepository(database));
+  // audit: the varugrupp's price markups (#16).
+  const articleService = createArticleService(createArticleRepository(database), auditRepository);
   // CSV import (Monitor G5): articles now; customers/suppliers reuse the
   // same module later. Admin-only routes.
   const importService = createImportService(createImportRepository(database), {

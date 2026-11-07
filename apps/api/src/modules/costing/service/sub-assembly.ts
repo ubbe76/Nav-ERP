@@ -26,7 +26,13 @@ import {
 // row's overheadAmount, and lands in the parent's TO bucket — recursively, so
 // the finished article's TO is the sum of every level's TO. Nothing is lost
 // and nothing is marked up on the way. The materialpåslag (also outside TVK)
-// travels up beside it on materialMarkupAmount, by the same rule.
+// travels up beside it on materialMarkupAmount, by the same rule, with the
+// base it was taken on (materialMarkupBase, #16).
+//
+// Påslag per nivå (#16): the sub-levels use the run's markups — the SOLD
+// article's price markups (its varugrupp → företaget, or Pröva påslag), never
+// the sub-assembly's own group's. The materialpåslag is a pricing decision for
+// what is sold; the general markup only lands at the top anyway.
 
 // One BOM level, as the article module's explodeBom returns it (phantoms
 // already dissolved).
@@ -70,11 +76,13 @@ interface Context {
 
 // What a costed sub-assembly hands up: its TVK (into the parent's semi row),
 // its TO (into the parent's TO bucket) and its materialpåslag (into the
-// parent's materialpåslag), all for the cascade quantity.
+// parent's materialpåslag) with the base it was taken on, all for the
+// cascade quantity.
 interface SubAssemblyCost {
   manufacturingCost: number;
   overhead: number;
   materialMarkup: number;
+  materialMarkupBase: number;
 }
 
 // Whether a component should be resolved into its own calculation rather than
@@ -128,6 +136,7 @@ async function manufacturingCostOf(
     manufacturingCost: costs.manufacturingCost,
     overhead: costs.overhead,
     materialMarkup: costs.materialMarkup,
+    materialMarkupBase: costs.materialMarkupBase,
   };
   ctx.memo.set(key, total);
   return total;
@@ -175,7 +184,7 @@ export async function costLevel(
         warnings
       );
       if (total !== null) {
-        materialRows.push(buildSemiFinishedRow(component, total.manufacturingCost, total.overhead, total.materialMarkup));
+        materialRows.push(buildSemiFinishedRow(component, total.manufacturingCost, total.overhead, total.materialMarkup, total.materialMarkupBase));
         continue;
       }
       // Fell back: priced from the standard cost, kind "material", and so it

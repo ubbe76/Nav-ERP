@@ -46,6 +46,7 @@ export function buildMaterialRow(
       // computed on the header's dM + MO, not per row.
       overheadAmount: 0,
       materialMarkupAmount: 0,
+      materialMarkupBase: 0,
       supplierCurrency: foreign?.currency ?? null,
       supplierUnitPrice: foreign?.unitPrice ?? null,
       exchangeRate: foreign?.rate ?? null,
@@ -71,12 +72,13 @@ export function buildMaterialRow(
 // and the specification can show the halvfabrikat's TO next to the
 // operations' TO without anything being counted twice. `materialMarkupTotal`
 // (the sub-level's materialpåslag) travels up the same way, for the same
-// reason.
+// reason, with the base it was taken on (`materialMarkupBaseTotal`, #16).
 export function buildSemiFinishedRow(
   component: { componentArticleId: string; quantity: number; unitId: string | null; unitFactor: string | null },
   manufacturingCostTotal: number,
   overheadTotal: number,
-  materialMarkupTotal: number
+  materialMarkupTotal: number,
+  materialMarkupBaseTotal: number
 ): MaterialRowWrite {
   return {
     componentArticleId: component.componentArticleId,
@@ -89,6 +91,7 @@ export function buildSemiFinishedRow(
     amount: manufacturingCostTotal,
     overheadAmount: overheadTotal,
     materialMarkupAmount: materialMarkupTotal,
+    materialMarkupBase: materialMarkupBaseTotal,
     supplierCurrency: null,
     supplierUnitPrice: null,
     exchangeRate: null,
@@ -213,7 +216,9 @@ export function directCosts(materialRows: MaterialRowWrite[], operationRows: Ope
     // material rows by `kind`, so no row can land in two buckets. Always 0 in
     // a single-level run, since nothing produces a "semi" row then.
     semiFinishedCost: sumRows(materialRows.filter((r) => r.kind === "semi"), (r) => r.amount),
-    // The sub-assemblies' materialpåslag, lifted up like their TO.
+    // The sub-assemblies' materialpåslag, lifted up like their TO, and the
+    // base it was taken on (#16).
     liftedMaterialMarkup: sumRows(materialRows, (r) => r.materialMarkupAmount),
+    liftedMaterialMarkupBase: sumRows(materialRows, (r) => r.materialMarkupBase),
   };
 }

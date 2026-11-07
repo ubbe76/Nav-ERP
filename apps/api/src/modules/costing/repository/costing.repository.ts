@@ -2,6 +2,7 @@ import { and, asc, desc, eq, getTableColumns, inArray, lt, max, ne, sql } from "
 import { legoOneOffSql } from "../../manufacturing/repository/lego-one-off.js";
 import { alias } from "drizzle-orm/pg-core";
 import {
+  articleGroups,
   articleStandardCostHistory,
   articleSupplierPriceHistory,
   articleSuppliers,
@@ -24,7 +25,13 @@ import {
   type Db,
   type Tx,
 } from "@navet/db";
-import type { CostCalculationType, CostingMaterialSource, CostMaterialRowKind, CostPriceSource } from "@navet/shared";
+import type {
+  CostCalculationMarkupLevel,
+  CostCalculationType,
+  CostingMaterialSource,
+  CostMaterialRowKind,
+  CostPriceSource,
+} from "@navet/shared";
 import { explodeBom } from "../../article/service/bom-explosion.js";
 import { weightedActualCosts } from "../service/actual-cost.js";
 import { stockValuedAt } from "../../stock/repository/valued-at.js";
@@ -54,6 +61,9 @@ export interface MaterialRowWrite {
   // Materialpåslag lifted up from a "semi" row's sub-calculation, the same
   // way as overheadAmount. 0 on material/lego rows.
   materialMarkupAmount: number;
+  // The base that markup was taken on (#16): the sub-calculation's
+  // materialMarkupBase. 0 on material/lego rows.
+  materialMarkupBase: number;
   // A supplier price in another currency: the catalog price, its currency
   // and the rate unitCost was converted at. All three null otherwise.
   supplierCurrency: string | null;
@@ -129,6 +139,11 @@ export interface CostCalculationWrite {
   affoPercent: number;
   generalMarkupPercent: number;
   materialMarkupPercent: number;
+  // Påslag per nivå (#16): where each price markup came from, and the base
+  // the materialpåslag was taken on.
+  generalMarkupLevel: CostCalculationMarkupLevel;
+  materialMarkupLevel: CostCalculationMarkupLevel;
+  materialMarkupBase: number;
   type: CostCalculationType;
   // Avvikelseanalys (#14): N, the preliminary flag, T₀ and the förkalkyl's
   // material source of the base. All null on a förkalkyl (CHECK).
@@ -199,6 +214,21 @@ export function createCostingRepository(db: Db | Tx) {
         ...r,
         supplierPriceBreaks: supplierRowId ? (breaks.get(supplierRowId) ?? []) : [],
       }));
+    },
+
+    // Påslag per varugrupp (#16): the price markups of the article's
+    // varugrupp, null per field = inherit the company's. An article without a
+    // group (or that does not exist) has none.
+    async getArticleGroupMarkups(articleId: string) {
+      const [row] = await db
+        .select({
+          generalMarkupPercent: articleGroups.generalMarkupPercent,
+          materialMarkupPercent: articleGroups.materialMarkupPercent,
+        })
+        .from(articles)
+        .innerJoin(articleGroups, eq(articleGroups.id, articles.groupId))
+        .where(eq(articles.id, articleId));
+      return row ?? null;
     },
 
     // Display data + the phantom flag for a derived structure's components
@@ -558,6 +588,9 @@ export function createCostingRepository(db: Db | Tx) {
             affoPercent: String(input.affoPercent),
             generalMarkupPercent: String(input.generalMarkupPercent),
             materialMarkupPercent: String(input.materialMarkupPercent),
+            generalMarkupLevel: input.generalMarkupLevel,
+            materialMarkupLevel: input.materialMarkupLevel,
+            materialMarkupBase: String(input.materialMarkupBase),
             type: input.type,
             outputQuantity: numberOrNull(input.outputQuantity),
             preliminary: input.preliminary,
@@ -584,6 +617,7 @@ export function createCostingRepository(db: Db | Tx) {
               amount: String(r.amount),
               overheadAmount: String(r.overheadAmount),
               materialMarkupAmount: String(r.materialMarkupAmount),
+              materialMarkupBase: String(r.materialMarkupBase),
               supplierCurrency: r.supplierCurrency,
               supplierUnitPrice: r.supplierUnitPrice === null ? null : String(r.supplierUnitPrice),
               exchangeRate: r.exchangeRate === null ? null : String(r.exchangeRate),

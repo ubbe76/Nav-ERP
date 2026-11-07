@@ -201,6 +201,16 @@ describe("Endast läsning — writes are refused", () => {
       { method: "POST", url: `/api/v1/configurator/${f.template.id}/variant`, payload: { selection: { LOCK: "A" } } },
       // Saving a calculation
       { method: "POST", url: `/api/v1/articles/${f.product.id}/cost-calculations/pre-calculate`, payload: { quantity: 1, save: true } },
+      // … also a saved Pröva påslag, and a body that does not parse (a cost
+      // markup tried) counts as a write: fail closed (#16)
+      {
+        method: "POST",
+        url: `/api/v1/articles/${f.product.id}/cost-calculations/pre-calculate`,
+        payload: { quantity: 1, save: true, markups: { generalMarkupPercent: 35 } },
+      },
+      { method: "POST", url: `/api/v1/articles/${f.product.id}/cost-calculations/pre-calculate`, payload: { quantity: 1, markups: { moPercent: 10 } } },
+      // Varugruppens påslag
+      { method: "PATCH", url: `/api/v1/article-groups/${crypto.randomUUID()}`, payload: { code: "3", name: "Diskbänkar", generalMarkupPercent: 40 } },
       { method: "POST", url: `/api/v1/manufacturing-orders/${f.order.id}/cost-calculations/post-calculate`, payload: { save: true } },
       // Reservationen after the delivery-time check
       { method: "POST", url: "/api/v1/delivery-time-check/apply", payload: { salesOrderId: crypto.randomUUID(), deliveryDate: "2030-01-01" } },
@@ -281,6 +291,11 @@ describe("Endast läsning — reads and side-effect-free POSTs work", () => {
       { url: "/api/v1/delivery-time-check", payload: { rows: [{ articleId: f.part.id, quantity: 2 }] } },
       { url: `/api/v1/articles/${f.product.id}/cost-calculations/pre-calculate`, payload: { quantity: 1 } },
       { url: `/api/v1/articles/${f.product.id}/cost-calculations/pre-calculate`, payload: { quantity: 1, save: false } },
+      // Pröva påslag (#16) is still a preview.
+      {
+        url: `/api/v1/articles/${f.product.id}/cost-calculations/pre-calculate`,
+        payload: { quantity: 1, markups: { generalMarkupPercent: 35, materialMarkupPercent: 0 } },
+      },
       { url: `/api/v1/manufacturing-orders/${f.order.id}/cost-calculations/post-calculate`, payload: undefined },
       { url: `/api/v1/manufacturing-orders/${f.order.id}/cost-calculations/post-calculate`, payload: { save: false } },
       { url: `/api/v1/articles/${f.template.id}/configurator/variants/preview`, payload: { sets: { LOCK: ["A"] }, calcQuantity: 1 } },

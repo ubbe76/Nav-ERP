@@ -61,11 +61,22 @@ export const articleGroups = pgTable(
     // (an article without a group gets 25 %) — the article has no rate of
     // its own since 0155, see articleVatRateSql. Invoice rows snapshot it.
     vatRate: numeric("vat_rate", { precision: 5, scale: 2 }).notNull().default("25"),
+    // Påslag per varugrupp (#16, migration 0194): the group's price markups
+    // in the förkalkyl, efterkalkyl and the configurator's preview — field by
+    // field, null = inherit the company's (System → Kalkyler), 0 = explicitly
+    // 0 % (costing/service/markup-levels.ts). The cost markups (MO, LO, Affo)
+    // are never set per group. numeric(6,2) like the calculation's snapshot.
+    generalMarkupPercent: numeric("general_markup_percent", { precision: 6, scale: 2 }),
+    materialMarkupPercent: numeric("material_markup_percent", { precision: 6, scale: 2 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     check("article_groups_code_digits", sql`${table.code} ~ '^[0-9]{1,4}$'`),
     check("article_groups_vat_rate_check", sql`${table.vatRate} IN (25, 12, 6, 0)`),
+    check(
+      "article_groups_markups_range",
+      sql`(${table.generalMarkupPercent} is null or ${table.generalMarkupPercent} between 0 and 1000) and (${table.materialMarkupPercent} is null or ${table.materialMarkupPercent} between 0 and 1000)`
+    ),
   ]
 );
 

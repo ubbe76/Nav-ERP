@@ -35,6 +35,20 @@ export type CostPriceSource = z.infer<typeof costPriceSourceSchema>;
 export const costMaterialRowKindSchema = z.enum(["material", "subcontract", "semi"]);
 export type CostMaterialRowKind = z.infer<typeof costMaterialRowKindSchema>;
 
+// Påslag per nivå (#16): the two PRICE markups (generellt påslag and
+// materialpåslag) can be set per order → kund → varugrupp → företaget, field
+// by field, the most specific level with a value winning (markup-levels.ts in
+// the costing module is the one rule). "trial" = Pröva påslag on the Kalkyl
+// tab. The cost markups (MO, LO, Affo, TO) are never set per level. The same
+// 0–1000 bound as System → Kalkyler.
+export const costingMarkupLevelSchema = z.enum(["order", "customer", "group", "company", "trial"]);
+export type CostingMarkupLevel = z.infer<typeof costingMarkupLevelSchema>;
+// The levels a saved calculation's header can carry (cost_calculations.
+// general_markup_level/material_markup_level, migration 0194): a calculation
+// has no customer and no order.
+export type CostCalculationMarkupLevel = Extract<CostingMarkupLevel, "group" | "company" | "trial">;
+export const markupPercentSchema = z.number().min(0).max(1000);
+
 // `save` absent or false = preview: the numbers are computed and returned but
 // nothing is written. Only an explicit `true` stores the calculation.
 export const preCalculateSchema = z.object({
@@ -45,8 +59,20 @@ export const preCalculateSchema = z.object({
   // z.boolean(), never z.coerce.boolean() — the latter turns the string
   // "false" into true, which has bitten this codebase before.
   multiLevel: z.boolean().optional(),
+  // Pröva påslag (#16): the price markups to try instead of the article's
+  // varugrupp → företaget. Absent or null = the current one for that field.
+  // Strict, so an attempt to try MO/LO/Affo is a 400, never silently ignored.
+  // Saved, the header carries level "trial" on each tried field.
+  markups: z
+    .object({
+      generalMarkupPercent: markupPercentSchema.nullable().optional(),
+      materialMarkupPercent: markupPercentSchema.nullable().optional(),
+    })
+    .strict()
+    .optional(),
 });
 export type PreCalculateInput = z.infer<typeof preCalculateSchema>;
+export type TrialMarkups = NonNullable<PreCalculateInput["markups"]>;
 
 // The post-calculation takes no other input, and the request may carry no body
 // at all (apiFetch omits it for body-less action calls), so the route parses
