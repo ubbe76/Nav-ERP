@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, ilike, inArray, lte, or } from "drizzle-orm";
+import { and, count, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { auditLog, users, type Db } from "@navet/db";
 import { ilikePattern, type ListAuditLogQuery } from "@navet/shared";
 
@@ -70,10 +70,12 @@ export function createAuditRepository(db: Db) {
       if (entityIds.length === 1) conditions.push(eq(auditLog.entityId, entityIds[0]!));
       else if (entityIds.length > 1) conditions.push(inArray(auditLog.entityId, entityIds));
       if (query.userId) conditions.push(eq(auditLog.userId, query.userId));
-      // Date-only filters — the whole day for `to`, so an event at 23:59 on
-      // the end date isn't silently cut off by a midnight boundary.
-      if (query.from) conditions.push(gte(auditLog.createdAt, new Date(`${query.from}T00:00:00`)));
-      if (query.to) conditions.push(lte(auditLog.createdAt, new Date(`${query.to}T23:59:59.999`)));
+      // Date-only filters on Stockholm days (not the server's zone) — the
+      // whole day for `to`, up to the next day's midnight, so an event at
+      // 23:59 on the end date isn't cut off. Postgres does the zone math,
+      // like the stock log's from/to.
+      if (query.from) conditions.push(sql`${auditLog.createdAt} >= (${query.from}::date)::timestamp AT TIME ZONE 'Europe/Stockholm'`);
+      if (query.to) conditions.push(sql`${auditLog.createdAt} < ((${query.to}::date + 1)::timestamp AT TIME ZONE 'Europe/Stockholm')`);
       const where = conditions.length > 0 ? and(...conditions) : undefined;
 
       const [rows, totalRows] = await Promise.all([

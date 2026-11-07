@@ -27,6 +27,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — otydliga fel, texter och småbeteenden
 
+- [ ] **PDF:ernas datum ur ett ögonblick är UTC-dagen:** `document-pdf.ts` skriver `printedAt`/`deliveredAt` (följesedeln, plocklistan, TO-utskriften, inventeringslistan, påminnelsen …) med `toISOString().slice(0, 10)`, så mellan 00:00 och 01:00 svensk tid (02:00 sommartid) står gårdagens datum. Ska vara `stockholmDateOf`. Beror inte på processens zon och fångas därför inte av `process-time-zone.test.ts`.
 
 ### Låga — layout
 

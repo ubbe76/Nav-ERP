@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { stockholmInstant } from "../src/modules/system/service/delivery-days.js";
 import { sql } from "drizzle-orm";
 import { db, payrollAttestations, payrollPeriods } from "@navet/db";
 import { PAXML_CODES } from "./helpers/services.js";
@@ -58,11 +59,13 @@ afterAll(async () => {
   await db.execute(TRUNCATE);
 });
 
-// Local (server-timezone) instant — mirrors payroll-day.ts's clockToMs, which
-// builds "local" timestamps the same way, so raw-SQL-backdated rows land on
-// the calendar dates the test expects regardless of the host's timezone.
+// Stockholm wall-clock instant — payroll-day.ts's clockToMs reads the days
+// and schedule clocks as Swedish time whatever the process's zone (the suite
+// runs UTC), so raw-SQL-backdated rows land on the calendar dates the test
+// expects.
 function localDate(year: number, month: number, day: number, hour = 0, minute = 0): Date {
-  return new Date(year, month - 1, day, hour, minute, 0);
+  const wall = new Date(Date.UTC(year, month - 1, day, hour, minute)).toISOString(); // overflow normalized like new Date(y, m, d, h, min)
+  return new Date(stockholmInstant(wall.slice(0, 10), wall.slice(11, 16)));
 }
 
 // Independent of periodDates()/the implementation — just Date.getDay() over

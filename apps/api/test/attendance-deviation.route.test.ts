@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { inArray, sql } from "drizzle-orm";
 import { attendanceDeviationReasons, db, permissionGroups, systemSettings } from "@navet/db";
 import { buildApp } from "../src/app.js";
@@ -27,14 +27,6 @@ const scheduleService = createScheduleService(createScheduleRepository(db), time
   isDateLocked: async () => false,
 });
 
-let savedTz: string | undefined;
-beforeAll(() => {
-  // The payroll day engine reads schedule clocks in the server's zone — the
-  // API container's is Europe/Stockholm.
-  savedTz = process.env.TZ;
-  process.env.TZ = "Europe/Stockholm";
-});
-
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(at("06:30:00"));
@@ -51,8 +43,6 @@ afterAll(async () => {
   await db.execute(TRUNCATE);
   await db.execute(DELETE_GROUPS);
   await db.delete(systemSettings).where(inArray(systemSettings.key, SETTING_KEYS));
-  if (savedTz === undefined) delete process.env.TZ;
-  else process.env.TZ = savedTz;
 });
 
 describe("närvaroavvikelser at the route", () => {

@@ -35,7 +35,7 @@ Behörigheterna för Personal & lön: `permissions.md`. TO-rapporteringen som st
 - Attesteringens närvarorättning följer med till arbetena (`correctAttendanceWithWork`: stängd öppen närvaro pausar, flyttad sluttid flyttar pausen med 2 s tolerans). En öppen närvaro från en tidigare dag ger 409 `attendance-open-from-earlier-day` tills terminalen skickar `forgottenStoppedAt` (`closeForgottenAndBegin`, en transaktion som bara stänger en närvaro som fortfarande är öppen — en gammal andra inskickning ger 409 `already-present`).
 - `absentToday` i `GET /stamp-sessions` bara för admin/arbetsledare (frånvaro = hälsodata).
 - Terminalens glömd-utstämpling-vy visar **Gå hem nu** bara när närvaron började Stockholmsdagen före i dag (`forgottenStopNowAllowed` i `lib/terminalOperations.ts`); äldre kräver en tid. Arbetsledarens **Sluttid** på Pågående (`StampOutForm`) skickas bara när fältet rörts — orört skickas **inget** (servern stämplar vid pausens start eller nu, med reserven i dag för en låst pausdag), aldrig förifyllnadens nedrundade minut.
-- **Dagarna är Stockholmsdagar** (`localDateOf`); `docker-compose.yml` sätter `TZ: Europe/Stockholm` eftersom lönemotorn (`clockToMs`/`dayBounds`) gör om schemaklockslag med serverns lokala tid.
+- **Dagarna är Stockholmsdagar** (`localDateOf`), och lönemotorns `clockToMs`/`dayBounds` läser schemaklockslagen som svensk väggtid (`stockholmInstant` i `delivery-days.ts`, omställningsdagarna som en `Date` i zonen: dubbla höstklockslag = sommartid, överhoppade vårklockslag med vintertidens offset) — oberoende av processens zon. Avvikelse- och utjämningstesterna kör därför i sviten UTC utan egen TZ.
 
 ## Ställ och produktion (#14 etapp 3, migration 0188)
 

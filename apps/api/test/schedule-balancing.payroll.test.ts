@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { absences, db } from "@navet/db";
 import { PAXML_CODES, testArticleService, testDocumentPdfService } from "./helpers/services.js";
@@ -22,7 +22,7 @@ import { AttendanceInputRequiredError } from "../src/modules/timereport/service/
 // resolved calendar, so a balanced week's last workday reaches them with no
 // change of their own. Real schedule/payroll/timereport services; only the
 // settings, the period lock and the clock are stubs. The payroll engine reads
-// schedule clocks in the server's zone, so the file pins Europe/Stockholm.
+// schedule clocks as Stockholm wall clock; the suite runs UTC (test/setup.ts).
 
 // Week 45 of 2026 (winter time, UTC+1): Monday 2 – Friday 6 November.
 const MON = "2026-11-02";
@@ -73,15 +73,8 @@ const TRUNCATE = sql`TRUNCATE attendance_sessions, stamp_sessions, time_reports,
   absences, absence_types, employee_day_overrides, employee_week_overrides, holidays, week_schedule_days, week_schedules,
   day_schedule_breaks, day_schedules, employees, payroll_periods, payroll_attestations, audit_log, users CASCADE`;
 
-let savedTz: string | undefined;
-beforeAll(() => {
-  savedTz = process.env.TZ;
-  process.env.TZ = "Europe/Stockholm";
-});
 afterAll(async () => {
   await db.execute(TRUNCATE);
-  if (savedTz === undefined) delete process.env.TZ;
-  else process.env.TZ = savedTz;
 });
 beforeEach(async () => {
   await db.execute(TRUNCATE);

@@ -26,6 +26,7 @@ import { round2, type ValuationGroupBy, type ValuationMethod, type ValuationQuer
 import { computeMovingAverage, type MovingAverageRow } from "./moving-average.js";
 import { computeFifo, type FifoRow } from "./fifo.js";
 import { stockValuedAt, stockValuedDate } from "../repository/valued-at.js";
+import { stockholmToday } from "../../system/service/delivery-days.js";
 import { formatNumber, type FinancialStatementPdfInput } from "../../mail/service/document-pdf.js";
 
 export interface ValuationRow {
@@ -279,7 +280,7 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
   // builder without relying on `this`.
   const service = {
     async getValuation(query: ValuationQuery): Promise<ValuationResponse> {
-      const asOf = query.asOf ?? new Date().toLocaleDateString("sv-SE");
+      const asOf = query.asOf ?? stockholmToday();
       // Direct service callers (tests, the year-end closing) may omit it.
       const groupBy: ValuationGroupBy = query.groupBy ?? "group";
 

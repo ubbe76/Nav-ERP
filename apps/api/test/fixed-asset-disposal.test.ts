@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { db } from "@navet/db";
 import { round2 } from "@navet/shared";
 import { AccountingPeriodLockedError } from "../src/modules/economy/service/accounting-period-lock.js";
@@ -188,7 +189,7 @@ describe("avyttring", () => {
       InvalidDisposalDateError
     );
     await expect(
-      service.disposeAsset(asset.id, { disposalType: "scrap", disposalDate: `${new Date().getFullYear() + 1}-01-01` }, user.id)
+      service.disposeAsset(asset.id, { disposalType: "scrap", disposalDate: `${Number(stockholmToday().slice(0, 4)) + 1}-01-01` }, user.id)
     ).rejects.toBeInstanceOf(InvalidDisposalDateError);
     const year = await testEconomyService.findFiscalYearById(planYearId);
     await testEconomyService.lockPeriod(year.periods.find((p) => p.startDate === `${Y}-09-01`)!.id, user.id);

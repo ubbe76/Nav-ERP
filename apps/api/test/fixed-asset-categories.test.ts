@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { db, fixedAssetCategories } from "@navet/db";
 import { BAS_STANDARD_ACCOUNTS } from "../src/modules/economy/service/bas-accounts.js";
 import { AccountNotFoundError, InactiveAccountError } from "../src/modules/economy/service/economy.service.js";
@@ -118,7 +119,7 @@ describe("anläggningsgrupper", () => {
   it("refuses to delete a category that has an asset", async () => {
     const { category, user } = await setupFixedAssets();
     await service.createAsset(
-      { name: "Svarv", categoryId: category.id, acquisitionDate: `${new Date().getFullYear() - 1}-02-14`, acquisitionCost: 120000, residualValue: 0 },
+      { name: "Svarv", categoryId: category.id, acquisitionDate: `${Number(stockholmToday().slice(0, 4)) - 1}-02-14`, acquisitionCost: 120000, residualValue: 0 },
       user.id
     );
     await expect(service.deleteCategory(category.id)).rejects.toBeInstanceOf(FixedAssetCategoryInUseError);

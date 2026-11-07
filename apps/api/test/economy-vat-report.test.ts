@@ -51,7 +51,7 @@ afterAll(async () => {
   await resetVatCodes();
 });
 
-const CURRENT_YEAR = new Date().getFullYear();
+const CURRENT_YEAR = Number(stockholmToday().slice(0, 4));
 const JAN = { from: `${CURRENT_YEAR}-01-01`, to: `${CURRENT_YEAR}-01-31` };
 const FEB = { from: `${CURRENT_YEAR}-02-01`, to: `${CURRENT_YEAR}-02-28` };
 const MAR = { from: `${CURRENT_YEAR}-03-01`, to: `${CURRENT_YEAR}-03-31` };

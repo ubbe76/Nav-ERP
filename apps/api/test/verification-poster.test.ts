@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { and, asc, eq, getTableColumns, sql } from "drizzle-orm";
 import {
   accounts,
@@ -81,7 +82,7 @@ afterAll(async () => {
 
 // Same rationale as economy-verifications.test.ts: the fiscal year must cover
 // "today" so nothing here goes red when the real calendar rolls over.
-const CURRENT_YEAR = new Date().getFullYear();
+const CURRENT_YEAR = Number(stockholmToday().slice(0, 4));
 const FISCAL_YEAR_LABEL = String(CURRENT_YEAR);
 const INVOICE_DATE = `${CURRENT_YEAR}-03-15`;
 const CANCEL_DATE = `${CURRENT_YEAR}-04-01`;

@@ -370,12 +370,57 @@ export function deliveryHolidayWindow(dates: string[], extraWorkingDays: number)
   };
 }
 
+// Datum är Stockholmsdagar: the API's ONE reading of the Swedish calendar
+// day and wall clock, whatever zone the process runs in (the test suite runs
+// UTC on purpose; process-time-zone.test.ts keeps the local-zone Date API
+// out of src).
+
 // Today as a Stockholm day — the "from today" of every suggestion.
 export function stockholmToday(): string {
   return stockholmDateOf(new Date());
 }
 
+// sv-SE formats ISO-style (YYYY-MM-DD).
+const STOCKHOLM_DAY = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" });
+
 // The Stockholm day (YYYY-MM-DD) of an instant — the container may run UTC.
 export function stockholmDateOf(instant: Date): string {
-  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(instant);
+  return STOCKHOLM_DAY.format(instant);
+}
+
+const STOCKHOLM_WALL_CLOCK = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Europe/Stockholm",
+  year: "numeric",
+  month: "numeric",
+  day: "numeric",
+  hour: "numeric",
+  minute: "numeric",
+  second: "numeric",
+  hourCycle: "h23",
+});
+const DAY_MS = 86_400_000;
+
+// Stockholm's UTC offset (ms) at an instant: its wall clock read as UTC,
+// minus the instant (whole seconds — the formatter has no milliseconds).
+function stockholmOffsetMs(ms: number): number {
+  const p = Object.fromEntries(STOCKHOLM_WALL_CLOCK.formatToParts(new Date(ms)).map((x) => [x.type, Number(x.value)]));
+  const wall = new Date(Date.UTC(2000, 0, 1, p.hour, p.minute, p.second));
+  wall.setUTCFullYear(p.year!, p.month! - 1, p.day); // Date.UTC would read years 0–99 as 19xx
+  return wall.getTime() - Math.floor(ms / 1000) * 1000;
+}
+
+// The instant (epoch ms) of a Stockholm wall clock: date YYYY-MM-DD, clock
+// "HH:MM" or "HH:MM:SS" — the payroll day's bounds and schedule clocks. On
+// the two switch days it reads the clock the way a Date in the zone itself
+// would: an autumn clock that occurs twice is its first occurrence (summer
+// time), a spring clock the jump skips is read with the winter offset
+// (02:30 → 03:30 summer time).
+export function stockholmInstant(date: string, clock: string): number {
+  const wall = Date.parse(`${date}T${clock.length === 5 ? `${clock}:00` : clock}Z`); // the wall clock read as UTC
+  const before = stockholmOffsetMs(wall - DAY_MS);
+  const after = stockholmOffsetMs(wall + DAY_MS);
+  if (before === after) return wall - before;
+  if (stockholmOffsetMs(wall - before) === before) return wall - before;
+  if (stockholmOffsetMs(wall - after) === after) return wall - after;
+  return wall - before;
 }

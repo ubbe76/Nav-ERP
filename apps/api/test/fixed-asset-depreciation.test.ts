@@ -10,8 +10,8 @@ import {
   FixedAssetLifeTooShortError,
   NothingToDepreciateError,
   currentMonthStockholm,
-  stockholmToday,
 } from "../src/modules/economy/service/fixed-asset.service.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import {
   MissingPostingAccountError,
   NoAccountingPeriodForPostingError,
@@ -241,7 +241,7 @@ describe("bokför avskrivningar", () => {
   it("refuses a future month, a locked month and a month without a period — and writes nothing", async () => {
     const { user, category, planYearId } = await setupFixedAssets();
     await createAsset(user.id, category.id);
-    const nextYear = new Date().getFullYear() + 1;
+    const nextYear = Number(stockholmToday().slice(0, 4)) + 1;
     await expect(service.bookDepreciation({ throughMonth: `${nextYear}-01` }, user.id)).rejects.toBeInstanceOf(DepreciationMonthInFutureError);
 
     await lockMonth(planYearId, `${Y}-06`, user.id);

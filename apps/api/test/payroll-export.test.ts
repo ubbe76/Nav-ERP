@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { stockholmInstant } from "../src/modules/system/service/delivery-days.js";
 import { and, eq, sql } from "drizzle-orm";
 import { auditLog, db } from "@navet/db";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
@@ -414,8 +415,10 @@ afterAll(async () => {
 const YEAR = 2026;
 const MONTH = 5;
 
+// Stockholm wall-clock instant, as payroll-day.ts's clockToMs reads it.
 function localDate(year: number, month: number, day: number, hour = 0, minute = 0): Date {
-  return new Date(year, month - 1, day, hour, minute, 0);
+  const wall = new Date(Date.UTC(year, month - 1, day, hour, minute)).toISOString(); // overflow normalized like new Date(y, m, d, h, min)
+  return new Date(stockholmInstant(wall.slice(0, 10), wall.slice(11, 16)));
 }
 
 async function backdateAttendanceSession(id: string, startedAt: Date, stoppedAt: Date | null) {

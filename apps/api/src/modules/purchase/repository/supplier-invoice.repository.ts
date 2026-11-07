@@ -33,6 +33,7 @@ import {
   type PaymentReferenceKind,
 } from "@navet/shared";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
+import { stockholmToday } from "../../system/service/delivery-days.js";
 import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions } from "../../economy/service/dimension-check.js";
 import { domesticVatCodeIdSql, loadPostingVatCodes, loadVatCodeBook } from "../../economy/repository/vat-codes.js";
 // Type-only (erased at compile time), so declaring the poster interface at
@@ -678,9 +679,9 @@ export function createSupplierInvoiceRepository(db: Db | Tx) {
               tx,
               invoice.verificationId,
               {
-                // Same today-in-sv-SE idiom as economy.service's reverse()
-                // and the invoice issue stamps.
-                date: new Date().toLocaleDateString("sv-SE"),
+                // The Stockholm day, like economy.service's reverse() and
+                // the invoice issue stamps.
+                date: stockholmToday(),
                 description: `Makulering ${invoice.registrationNumber} (${invoice.invoiceNumber}) — ${supplier!.name}`,
               },
               userId

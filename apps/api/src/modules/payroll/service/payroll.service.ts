@@ -12,6 +12,7 @@ import type { PayrollRepository } from "../repository/payroll.repository.js";
 // Append-only audit trail; the payroll module is its first writer (block G1).
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
+import { addDays, stockholmDateOf, stockholmToday } from "../../system/service/delivery-days.js";
 // The employee register lives in the timereport module; payroll only needs
 // existence checks, and reuses its 404 shape (same trick as ATF/schedule's
 // EmployeeReader — see schedule.service.ts:165 — but across module
@@ -129,25 +130,15 @@ export interface PeriodSummary {
 // (module-scope, no DB access — kept separate from the service factory so
 // they're trivially unit-testable and never touch the closures below.)
 
-function localDateString(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-// All local calendar dates a raw [start, end) attendance interval touches,
-// inclusive of both endpoints' dates. computeEmployeeDay clips the interval
-// to each day's bounds itself, so over-including a boundary date here just
-// yields an empty (filtered-out) contribution on that day — never a wrong one.
+// All Stockholm calendar dates a raw [start, end) attendance interval
+// touches, inclusive of both endpoints' dates. computeEmployeeDay clips the
+// interval to each day's bounds itself, so over-including a boundary date
+// here just yields an empty (filtered-out) contribution on that day — never
+// a wrong one.
 function spanningDates(start: Date, end: Date): string[] {
   const dates: string[] = [];
-  const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-  const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-  while (cursor <= last) {
-    dates.push(localDateString(cursor));
-    cursor.setDate(cursor.getDate() + 1);
-  }
+  const last = stockholmDateOf(end);
+  for (let date = stockholmDateOf(start); date <= last; date = addDays(date, 1)) dates.push(date);
   return dates;
 }
 
@@ -329,18 +320,14 @@ function computeDaysForEmployee(inputs: EmployeeDayInputs): PayrollDay[] {
   });
 }
 
-// Shared attendance-range window for one calendar month: local midnight of
-// day 1 through local midnight of the day after the last day.
+// Shared attendance-range window for one calendar month: Stockholm midnight
+// of day 1 through Stockholm midnight of the day after the last day.
 function attendanceWindow(dates: string[]): { from: Date; to: Date } {
   return {
     from: new Date(dayBounds(dates[0]!).start),
     to: new Date(dayBounds(dates[dates.length - 1]!).end),
   };
 }
-
-// Today in the server's local timezone as YYYY-MM-DD (sv-SE formats
-// ISO-style) — same idiom as timereport/atf.
-const localToday = () => new Date().toLocaleDateString("sv-SE");
 
 // Audit-log entity id for a period: "2026-05" (the period has no natural
 // external key, and its row id means nothing to a reader of the log).
@@ -1112,7 +1099,7 @@ export function createPayrollService(
     async getPayrollPdf(year: number, month: number) {
       const summary = await loadPeriodSummary(year, month);
       const status = summary.lockedAt
-        ? `Låst ${localDateString(new Date(summary.lockedAt))}`
+        ? `Låst ${stockholmDateOf(new Date(summary.lockedAt))}`
         : "Ej låst (preliminärt)";
 
       const content = await pdf.renderPayrollReport({
@@ -1191,7 +1178,7 @@ export function createPayrollService(
       const { from, to } = periodRange(year, month);
       // Locking a period that is still running would freeze a basis that is
       // still being reported into.
-      if (to >= localToday()) throw new PeriodNotEndedError(year, month);
+      if (to >= stockholmToday()) throw new PeriodNotEndedError(year, month);
 
       const period = await repo.ensurePayrollPeriod(year, month);
       if (period.status === "locked") throw new PayrollPeriodLockedError(from);
@@ -1326,7 +1313,7 @@ export function createPayrollService(
         days,
         sessions: sessions.map((s) => ({
           id: s.id,
-          date: localDateString(s.startedAt),
+          date: stockholmDateOf(s.startedAt),
           startedAt: s.startedAt.toISOString(),
           stoppedAt: s.stoppedAt ? s.stoppedAt.toISOString() : null,
           lateMinutes: lateBySession.get(s.id) ?? 0,

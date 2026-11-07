@@ -4,6 +4,7 @@ import { PURCHASE_ORDER_STATUS_LABELS } from "../../purchase/service/export-colu
 import { SALES_ORDER_STATUS_LABELS } from "../../sales/service/export-columns.js";
 import { ORDER_REGISTER_MAX_ROWS, type OrderRegisterRepository } from "../repository/order-register.repository.js";
 import { buildOrderRegister, type OrderRegisterOrder, type OrderRegisterRow } from "./order-register.js";
+import { stockholmToday } from "../../system/service/delivery-days.js";
 
 export type OrderRegisterKind = "sales" | "purchase";
 type RegisterQuery = SalesOrderRegisterQuery | PurchaseOrderRegisterQuery;
@@ -36,8 +37,6 @@ const SIDE = {
     statusLabels: PURCHASE_ORDER_STATUS_LABELS as Record<string, string>,
   },
 } as const;
-
-const stockholmToday = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(new Date());
 
 // The PDF subtitle states the selection in words, so a printed list says
 // what it is a list of.

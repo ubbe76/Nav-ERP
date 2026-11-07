@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import Fastify from "fastify";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -32,7 +33,7 @@ afterAll(async () => {
   await db.execute(TRUNCATE);
 });
 
-const YEAR = new Date().getFullYear();
+const YEAR = Number(stockholmToday().slice(0, 4));
 
 async function setupEconomy() {
   const user = await authRepo.create({

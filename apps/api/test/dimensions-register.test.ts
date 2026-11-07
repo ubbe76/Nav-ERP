@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { eq, sql } from "drizzle-orm";
 import {
   articleGroups,
@@ -53,7 +54,7 @@ afterAll(async () => {
   await db.execute(TRUNCATE);
 });
 
-const YEAR = new Date().getFullYear();
+const YEAR = Number(stockholmToday().slice(0, 4));
 const DATE = `${YEAR}-03-15`;
 
 async function user() {

@@ -8,6 +8,8 @@ paths:
   - "apps/web/components/ui/DeliveryDateHint*"
   - "apps/api/test/delivery-days*"
   - "apps/api/test/business*"
+  - "apps/api/test/stockholm-day*"
+  - "apps/api/test/process-time-zone*"
 ---
 
 # Fasta leveransdagar, transportdagar och arbetsdagar (migration 0122)
@@ -16,6 +18,7 @@ Spec `docs/superpowers/specs/2026-10-17-fasta-leveransdagar-design.md`.
 
 - **Data:** `suppliers` och `customers` bär `delivery_weekdays` (smallint[], ISO 1–7, tom = inga fasta dagar), `delivery_day_mode` (enum arrival|dispatch, null = förvalet) och `transit_days` (0–60, null = förvalet); zod `partnerDeliveryFields` (`packages/shared/src/delivery.ts`) sorterar och tar bort dubbletter. Förvalen är `system_settings`-nycklarna `supplier_delivery_day_mode` (arrival), `supplier_transit_days`, `customer_delivery_day_mode` (dispatch), `customer_transit_days` (0); veckodagarna har inget förval.
 - **All datumlogik bor i rena `system/service/delivery-days.ts`** (noll DB-importer), även `isWorkingDay`/`previousWorkingDay`/`addDays` som `due-date-suggestion.ts` re-exporterar — EN implementation. `system/repository/delivery-context.ts` (`loadDeliveryContext`, `Db | Tx`) laddar förvalen och heldagshelgerna i fönstret `deliveryHolidayWindow`.
+- **Stockholmsdag och väggtid** bor också här, EN implementation: `stockholmToday`, `stockholmDateOf(instant)` och `stockholmInstant(date, clock)` (svensk väggtid → epoch ms; omställningsdagarna som en `Date` i zonen — dubbla höstklockslag = sommartid, överhoppade vårklockslag med vintertidens offset, brute-force-jämfört 1990–2040 mot den gamla lokala koden under `TZ=Europe/Stockholm`). Lönemotorns `clockToMs`/`dayBounds` bygger på den. API-sviten kör i UTC (`test/setup.ts`); vakttestet `process-time-zone.test.ts` underkänner processens zon i `src` (`toLocaleDateString`/`Intl.DateTimeFormat` utan `timeZone`, lokala `get*`/`set*`, `new Date(år, månad, …)`, zonlösa datum-tid-strängar, `CURRENT_DATE`/`now()::date` — databasens sessionszon är postgres-containerns UTC) med tillåtelselista och antal per fil.
 - Ledtid och transportdagar räknas i **arbetsdagar**; "från i dag" startar på `nextWorkingDayOnOrAfter(today)`; sökningar efter en listad dag ger upp efter 60 dagar och returnerar indatumet. `latestDispatchFor` **startar vid senaste möjliga avsändningsdag** (`latestDispatchStart`: dagen före den transit:e arbetsdagen räknat bakåt, kan vara en ikryssad lördag), inte vid leveransdatumet, eftersom transit är upp till 60 arbetsdagar — en brute-force-jämförelse i `delivery-days.test.ts` pinnar ekvivalensen.
 - **Utan inställningar (inga dagar, transit 0, ledtid 0) kortsluter allt till beteendet före funktionen** (testat).
 - **Datumintervallet:** fält som matar datumaritmetiken (förslagsfrågornas `date`, kundorderns `expectedDeliveryDate` i create och header-PATCH) valideras med `businessDateSchema` (`packages/shared/src/business-date.ts`, 1900-01-01–2999-12-31) — `addDays` på år 9999 ger `+010000-…` som Postgres avvisar. `deliveryHolidayWindow` klampar till samma intervall (`BUSINESS_DATE_MIN/MAX`) så äldre lagrade datum aldrig ger 500 i artikelöversikten.

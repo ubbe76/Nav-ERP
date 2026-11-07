@@ -10,6 +10,7 @@ import {
   type UpdateFixedAssetInput,
 } from "@navet/shared";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
+import { stockholmToday } from "../../system/service/delivery-days.js";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/db-errors.js";
 import * as repo from "../repository/fixed-asset.repository.js";
@@ -331,7 +332,7 @@ const POSTING_ACCOUNT_KEYS = ["assetAccountId", "accumulatedDepreciationAccountI
 export const DEPRECIATION_LOCK_SQL = sql`SELECT pg_advisory_xact_lock(hashtext('fixed_asset_depreciations'))`;
 
 export function currentMonthStockholm(): string {
-  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(new Date()).slice(0, 7);
+  return stockholmToday().slice(0, 7);
 }
 
 // Ordinary runs (dated the month's last day) need a month that has ended;
@@ -430,10 +431,6 @@ export interface DisposalPreview {
   loss: number;
   rows: { accountNumber: string; accountName: string; debit: number; credit: number }[];
   warnings: DisposalWarning[];
-}
-
-export function stockholmToday(): string {
-  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(new Date());
 }
 
 // `booked` is the asset's LIVE rows; the opening amount (ingående
