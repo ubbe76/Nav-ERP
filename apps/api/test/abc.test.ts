@@ -106,6 +106,28 @@ describe("classifyAbc", () => {
   });
 });
 
+describe("classifyAbc at the boundary", () => {
+  it("decides the limit exactly in one scale: an article ending exactly on the A limit is the last A, float noise in the running sum never flips it", () => {
+    // Values 0.7, 0.1, 0.1, 0.1 (total 1): before = 0, 0.7, 0.8, 0.9 — in
+    // floats 0.7 + 0.1 = 0.7999999999999999, which divided by the total
+    // would read 79.99999 % and wrongly make C an A at A = 80 %.
+    const r = classifyAbc([row("A", 7, 0.1), row("B", 1, 0.1), row("C", 1, 0.1), row("D", 1, 0.1)], { aPercent: 80, bPercent: 90 });
+    expect(r.total).toBe(1);
+    expect(r.rows.map((x) => [x.articleNumber, x.cumulativeShare, x.abcClass])).toEqual([
+      ["A", 70, "A"],
+      ["B", 80, "A"],
+      ["C", 90, "B"],
+      ["D", 100, "C"],
+    ]);
+    // The same in ten-thousandths: 0.1 / 0.125 is exactly 80 %.
+    const small = classifyAbc([row("A", 1, 0.1), row("B", 1, 0.0125), row("C", 1, 0.0125)], { aPercent: 80, bPercent: 90 });
+    expect(small.rows.map((x) => x.abcClass)).toEqual(["A", "B", "C"]);
+    // Just below the limit stays A: 79.99 % before the second article.
+    const below = classifyAbc([row("A", 7999, 1), row("B", 2001, 1)], LIMITS);
+    expect(below.rows.map((x) => x.abcClass)).toEqual(["A", "A"]);
+  });
+});
+
 describe("the ABC settings", () => {
   const settings = (values: Record<string, string | null>) => decodeAbcSettings((key) => values[key] ?? null);
 

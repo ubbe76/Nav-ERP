@@ -105,6 +105,8 @@ function latestVerb(kind: RequirementRow["proposalKind"]): string {
 
 function needDateText(p: RequirementProposal): string {
   if (p.reason === "reorder_point") return "Beställningspunkt";
+  // Prognos (#10): a proposal of forecast demand only — never Passerat.
+  if (p.reason === "forecast") return p.needDate ? `Prognos ${p.needDate}` : "Prognos";
   if (p.reason === "undated") return "Saknar datum";
   return p.needDate ?? "—";
 }

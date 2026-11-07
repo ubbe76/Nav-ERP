@@ -4825,7 +4825,7 @@ export interface RequirementProposal {
   latestDate: string | null;
   late: boolean;
   quantity: number;
-  reason: "demand" | "reorder_point" | "undated";
+  reason: "demand" | "reorder_point" | "forecast" | "undated";
 }
 
 export interface RequirementRow {
@@ -4965,7 +4965,7 @@ export interface PlanningOrderProposal {
   salesOrderRowId?: string;
   // The proposal's behovsdatum; omitted when it has none.
   needDate?: string;
-  // reorder_point: dated today for no deadline — never reported late.
+  // reorder_point / forecast: no deadline — never reported late, no warning.
   reason?: RequirementProposal["reason"];
 }
 

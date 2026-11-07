@@ -460,7 +460,7 @@ describe("agreement with behovsberäkningen", () => {
     );
 
     expect(mrpRow.projected).toBe(4);
-    expect(overview.closingBalance).toBe(mrpRow.projected - mrpRow.demandDerived);
+    expect(overview.closingBalance).toBe(mrpRow.projected + mrpRow.demandDerived);
     expect(summary(overview.rows)).toEqual([
       ["mo_material", "2026-09-15", -4, 6],
       ["purchase_order", "2026-09-20", 5, 11],

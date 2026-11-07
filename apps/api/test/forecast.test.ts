@@ -258,16 +258,20 @@ describe("behovsberäkningen with forecast demand", () => {
     expect(f.demandForecast).toBe(200);
     expect(f.projected).toBe(-170);
     // March: 25 a week from today; April: 22 working days in five weeks.
+    // Forecast-only weeks are `forecast` proposals: dated by the piece,
+    // never Passerat (see the describe below).
     expect(f.proposals.map((p) => [p.needDate, p.quantity, p.reason])).toEqual([
-      ["2030-03-11", 20, "demand"], // 30 in stock covers week 10 and 5 of week 11
-      ["2030-03-18", 25, "demand"],
-      ["2030-03-25", 25, "demand"],
-      ["2030-04-01", 22.7273, "demand"],
-      ["2030-04-08", 22.7273, "demand"],
-      ["2030-04-15", 22.7273, "demand"],
-      ["2030-04-22", 22.7273, "demand"],
-      ["2030-04-29", 9.0908, "demand"],
+      ["2030-03-11", 20, "forecast"], // 30 in stock covers week 10 and 5 of week 11
+      ["2030-03-18", 25, "forecast"],
+      ["2030-03-25", 25, "forecast"],
+      ["2030-04-01", 22.7273, "forecast"],
+      ["2030-04-08", 22.7273, "forecast"],
+      ["2030-04-15", 22.7273, "forecast"],
+      ["2030-04-22", 22.7273, "forecast"],
+      ["2030-04-29", 9.0908, "forecast"],
     ]);
+    expect(f.proposals.every((p) => !p.late && p.latestDate! >= TODAY)).toBe(true);
+    expect(f.anyLate).toBe(false);
     expect(sum(f.proposals)).toBe(170);
     // A relevant row even without orders or stock: the forecast is the demand.
     expect(rows.find((r) => r.articleId === "o")).toBeUndefined();
@@ -285,11 +289,13 @@ describe("behovsberäkningen with forecast demand", () => {
     expect(f.demandSales).toBe(60);
     expect(f.demandForecast).toBe(40);
     expect(f.projected).toBe(-100);
-    expect(f.proposals.map((p) => [p.needDate, p.quantity])).toEqual([
-      ["2030-03-04", 10],
-      ["2030-03-11", 70], // the order's 60 and the week's 10 of forecast
-      ["2030-03-18", 10],
-      ["2030-03-25", 10],
+    expect(f.proposals.map((p) => [p.needDate, p.quantity, p.reason])).toEqual([
+      ["2030-03-04", 10, "forecast"],
+      // The order's 60 and the week's 10 of forecast: the firm order dates
+      // the group and makes it an ordinary demand proposal.
+      ["2030-03-12", 70, "demand"],
+      ["2030-03-18", 10, "forecast"],
+      ["2030-03-25", 10, "forecast"],
     ]);
     // Above the forecast: nothing is added.
     const above = rowFor(
@@ -334,22 +340,58 @@ describe("behovsberäkningen with forecast demand", () => {
     expect(sum(c.proposals)).toBe(200);
   });
 
-  it("the parent's proposal cascade does not consume a prognosstyrd component's forecast (the overview cannot see it either)", () => {
-    const rows = computeRequirements(
-      calcInput({
-        articles: [art({ articleId: "p", type: "manufactured" }), art({ articleId: "c", forecastControlled: true })],
-        bomEdges: [{ parentArticleId: "p", componentArticleId: "c", quantity: 1 }],
-        salesRows: [{ articleId: "p", orderStatus: "confirmed", quantityOrdered: 50, quantityDelivered: 0, expectedDeliveryDate: "2030-03-20" }],
-        forecast: { calendar: cal(["2030-03"]), articles: [fc({ articleId: "c", average: 100 })] },
-      })
+  it("the parent's proposal cascade consumes a prognosstyrd component's forecast exactly as the released TO's material does (user decision 2026-11-07)", () => {
+    // A KO on the parent without a TO: 50 derived demand on the component
+    // in March ⇒ forecast demand 100 − 50 = 50, total 100 — not 150.
+    const base = {
+      articles: [art({ articleId: "p", type: "manufactured" }), art({ articleId: "c", forecastControlled: true })],
+      bomEdges: [{ parentArticleId: "p", componentArticleId: "c", quantity: 1 }],
+      forecast: { calendar: cal(["2030-03"]), articles: [fc({ articleId: "c", average: 100 })] },
+    };
+    const before = rowFor(
+      computeRequirements(
+        calcInput({
+          ...base,
+          salesRows: [{ articleId: "p", orderStatus: "confirmed", quantityOrdered: 50, quantityDelivered: 0, expectedDeliveryDate: "2030-03-20" }],
+        })
+      ),
+      "c"
     );
-    const c = rowFor(rows, "c");
-    expect(c.demandDerived).toBe(50);
-    expect(c.demandForecast).toBe(100);
-    expect(sum(c.proposals)).toBe(150);
+    expect(before.demandDerived).toBe(50);
+    expect(before.demandForecast).toBe(50);
+    expect(before.projected).toBe(-100);
+    expect(sum(before.proposals)).toBe(100);
+    // The cascade's week (the parent's latest start, 03-19) is a mixed
+    // group — dated by the derived demand, an ordinary demand proposal —
+    // and only cascaded once more if the component were manufactured.
+    expect(before.proposals.find((p) => p.needWeek === "2030-03-18")).toMatchObject({ needDate: "2030-03-19", reason: "demand" });
+
+    // After the parent's TO is released: the same 50 is TO material now.
+    const after = rowFor(
+      computeRequirements(
+        calcInput({
+          ...base,
+          manufacturingOrders: [{ articleId: "p", status: "released", quantity: 50, configured: false, startDate: "2030-03-19" }],
+          moMaterialRows: [{ componentArticleId: "c", orderStatus: "released", quantityPlanned: 50, quantityConsumed: 0, needDate: "2030-03-19" }],
+        })
+      ),
+      "c"
+    );
+    expect(after.demandMo).toBe(50);
+    expect(after.demandDerived).toBe(0);
+    expect(after.demandForecast).toBe(50);
+    expect(after.projected).toBe(-100);
+    expect(sum(after.proposals)).toBe(100);
+    // The derived demand of a configured row consumes the same way.
+    const configured = rowFor(
+      computeRequirements(calcInput({ ...base, derivedDemands: [{ articleId: "c", quantity: 30, needDate: "2030-03-12" }] })),
+      "c"
+    );
+    expect(configured.demandDerived).toBe(30);
+    expect(configured.demandForecast).toBe(70);
   });
 
-  it("the invariant with the artikelöversikt: closingBalance === projected − demandDerived, forecast on both sides", () => {
+  it("the invariant with the artikelöversikt: closingBalance === projected + demandDerived − (the overview's forecast − demandForecast)", () => {
     const forecastArticle = fc({ articleId: "f", average: 100, own: months([["2030-04", 50]]), consumedThisMonth: 12 });
     const horizonCal = cal(["2030-03", "2030-04"]);
     const rows = computeRequirements(
@@ -357,7 +399,12 @@ describe("behovsberäkningen with forecast demand", () => {
         articles: [art({ articleId: "f", forecastControlled: true }), art({ articleId: "p", type: "manufactured" })],
         bomEdges: [{ parentArticleId: "p", componentArticleId: "f", quantity: 3 }],
         stock: [{ articleId: "f", quantity: 40 }],
-        salesRows: [{ articleId: "f", orderStatus: "confirmed", quantityOrdered: 20, quantityDelivered: 5, expectedDeliveryDate: "2030-03-14" }],
+        salesRows: [
+          { articleId: "f", orderStatus: "confirmed", quantityOrdered: 20, quantityDelivered: 5, expectedDeliveryDate: "2030-03-14" },
+          // The parent's KO: 10 − the planned TO's 4 ⇒ a proposal of 6, 18
+          // derived demand on f dated the parent's latest start (04-19).
+          { articleId: "p", orderStatus: "confirmed", quantityOrdered: 10, quantityDelivered: 0, expectedDeliveryDate: "2030-04-20" },
+        ],
         purchaseRows: [{ articleId: "f", orderStatus: "confirmed", quantityOrdered: 30, quantityReceived: 0 }],
         manufacturingOrders: [{ articleId: "p", status: "planned", quantity: 4, configured: false, startDate: "2030-04-10" }],
         moMaterialRows: [{ componentArticleId: "f", orderStatus: "released", quantityPlanned: 10, quantityConsumed: 2, needDate: "2030-03-25" }],
@@ -381,11 +428,18 @@ describe("behovsberäkningen with forecast demand", () => {
     };
     const overview = buildArticleOverview(overviewInput);
 
-    // March: forecast 100 − orders (15 + 8) − consumed 12 = 65; April: own 50 − planned 12 = 38.
+    // Overview — March: forecast 100 − orders (15 + 8) − consumed 12 = 65;
+    // April: own 50 − planned 12 = 38. The calc also lets the parent's
+    // derived 18 consume April: 50 − 12 − 18 = 20 ⇒ 85.
     const forecastRows = overview.rows.filter((r) => r.kind === "forecast");
-    expect(sum(forecastRows.map((r) => ({ quantity: -r.quantity })))).toBe(103);
-    expect(mrp.demandForecast).toBe(103);
-    expect(overview.closingBalance).toBe(mrp.projected - mrp.demandDerived);
+    const overviewForecast = sum(forecastRows.map((r) => ({ quantity: -r.quantity })));
+    expect(overviewForecast).toBe(103);
+    expect(mrp.demandDerived).toBe(18);
+    expect(mrp.demandForecast).toBe(85);
+    // The overview has no row for derived demand and consumes its forecast
+    // by firm rows only — the two differ by exactly those two terms.
+    expect(overview.closingBalance).toBe(mrp.projected + mrp.demandDerived - (overviewForecast - mrp.demandForecast));
+    expect(overview.closingBalance).toBe(40 - 15 - 8 - 12 - 103 + 30);
     expect(forecastRows[0]).toMatchObject({
       id: "fc:2030-03:2030-03-04",
       kind: "forecast",
@@ -499,5 +553,91 @@ describe("forecast rows are not firm demand", () => {
     // The same stock with a firm demand instead is taken first.
     const firm = checkDeliveryTime({ ...input, overviews: new Map([["f", { onHand: 10, rows: [salesRow("2030-03-04", 10)] }]]) });
     expect(firm.rows[0]!.chain.some((s) => s.kind === "stock")).toBe(false);
+  });
+});
+
+// --- Forecast proposals are never Passerat -------------------------------------
+
+describe("forecast-only proposals are never Passerat", () => {
+  const leadTen = { articleId: "f", supplierId: "s", supplierName: "Lev", price: 1, currency: "SEK", leadTimeDays: 10, supplierDelivery: undefined };
+
+  it("a purchased prognosstyrd article with a lead time: every forecast-only week is `forecast`, latest date floored at today, late false", () => {
+    const f = rowFor(
+      computeRequirements(
+        calcInput({
+          articles: [art({ articleId: "f", forecastControlled: true })],
+          primarySuppliers: [leadTen],
+          forecast: { calendar: cal(["2030-03"]), articles: [fc({ average: 100 })] },
+        })
+      ),
+      "f"
+    );
+    expect(f.proposals.map((p) => [p.needDate, p.latestDate, p.late, p.reason])).toEqual([
+      // The current month's first piece is dated today — with 10 days' lead
+      // time the latest order day would be in the past: floored at today.
+      ["2030-03-04", TODAY, false, "forecast"],
+      ["2030-03-11", TODAY, false, "forecast"],
+      ["2030-03-18", TODAY, false, "forecast"],
+      // Far enough ahead: the real latest order day, as for any demand.
+      ["2030-03-25", "2030-03-08", false, "forecast"],
+    ]);
+    expect(f.anyLate).toBe(false);
+    expect(f.earliestLatestDate).toBe(TODAY);
+  });
+
+  it("a firm demand in the same week keeps its own dating and lateness — the forecast never hides a late order", () => {
+    const f = rowFor(
+      computeRequirements(
+        calcInput({
+          articles: [art({ articleId: "f", forecastControlled: true })],
+          primarySuppliers: [leadTen],
+          salesRows: [{ articleId: "f", orderStatus: "confirmed", quantityOrdered: 5, quantityDelivered: 0, expectedDeliveryDate: "2030-03-06" }],
+          forecast: { calendar: cal(["2030-03"]), articles: [fc({ average: 100 })] },
+        })
+      ),
+      "f"
+    );
+    // The KO's 5 and the week's 20 of forecast (100 − 5 over four weeks = 23.75, minus the order).
+    expect(f.proposals[0]).toMatchObject({ needDate: "2030-03-06", needWeek: TODAY, late: true, reason: "demand" });
+    expect(f.proposals[0]!.latestDate! < TODAY).toBe(true);
+    expect(f.proposals.slice(1).every((p) => p.reason === "forecast" && !p.late)).toBe(true);
+    expect(f.anyLate).toBe(true);
+  });
+
+  it("a manufactured prognosstyrd parent's forecast proposals give the component `forecast` material — never late there either", () => {
+    const rows = computeRequirements(
+      calcInput({
+        articles: [art({ articleId: "p", type: "manufactured", forecastControlled: true }), art({ articleId: "c" })],
+        bomEdges: [{ parentArticleId: "p", componentArticleId: "c", quantity: 2 }],
+        primarySuppliers: [{ ...leadTen, articleId: "c" }],
+        leadDaysFor: () => 5,
+        forecast: { calendar: cal(["2030-03"]), articles: [fc({ articleId: "p", average: 100 })] },
+      })
+    );
+    const p = rowFor(rows, "p");
+    const c = rowFor(rows, "c");
+    expect(p.proposals.every((pr) => pr.reason === "forecast" && !pr.late && pr.latestDate! >= TODAY)).toBe(true);
+    expect(c.demandDerived).toBe(200);
+    expect(c.proposals.length).toBeGreaterThan(0);
+    expect(c.proposals.every((pr) => pr.reason === "forecast" && !pr.late && pr.latestDate! >= TODAY)).toBe(true);
+    // Reorder-point material in the same week wins the label: "now", today.
+    const withRop = rowFor(
+      computeRequirements(
+        calcInput({
+          articles: [
+            art({ articleId: "p", type: "manufactured", forecastControlled: true }),
+            art({ articleId: "r", type: "manufactured", reorderPoint: 1 }),
+            art({ articleId: "c" }),
+          ],
+          bomEdges: [
+            { parentArticleId: "p", componentArticleId: "c", quantity: 2 },
+            { parentArticleId: "r", componentArticleId: "c", quantity: 1 },
+          ],
+          forecast: { calendar: cal(["2030-03"]), articles: [fc({ articleId: "p", average: 100 })] },
+        })
+      ),
+      "c"
+    );
+    expect(withRop.proposals[0]).toMatchObject({ needDate: TODAY, latestDate: TODAY, late: false, reason: "reorder_point" });
   });
 });

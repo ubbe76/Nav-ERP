@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { inArray, sql } from "drizzle-orm";
+import { buildCsv } from "@navet/shared";
 import { articleForecasts, db, stockTransactions, systemSettings } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -24,6 +25,7 @@ import { createStockService } from "../src/modules/stock/service/stock.service.j
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { createPlanningRepository } from "../src/modules/planning/repository/planning.repository.js";
 import { createPlanningService, ForecastMonthOutsideHorizonError, ArticleNotFoundError } from "../src/modules/planning/service/planning.service.js";
+import { requirementsExportColumns } from "../src/modules/planning/service/export-columns.js";
 import type { AuditEntry } from "../src/modules/system/repository/audit.repository.js";
 
 // Prognos (#10) against the database. "Today" is pinned to Monday
@@ -190,9 +192,9 @@ describe("prognosstyrd i behovsberäkningen och artikelöversikten", () => {
     expect(row.demandForecast).toBe(58);
     expect(row.onHand).toBe(3);
     expect(row.projected).toBe(-55);
-    expect(row.proposals[0]).toMatchObject({ needDate: "2030-03-11", needWeek: "2030-03-11", quantity: 1, reason: "demand" });
+    expect(row.proposals[0]).toMatchObject({ needDate: "2030-03-11", needWeek: "2030-03-11", quantity: 1, reason: "forecast", late: false });
     expect(sum(row.proposals.map((p) => p.quantity))).toBe(55);
-    expect(row.proposals.every((p) => p.reason === "demand")).toBe(true);
+    expect(row.proposals.every((p) => p.reason === "forecast" && !p.late)).toBe(true);
 
     const overview = await planningService.getArticleOverview(f.id);
     const forecastRows = overview.rows.filter((r) => r.kind === "forecast");
@@ -208,7 +210,7 @@ describe("prognosstyrd i behovsberäkningen och artikelöversikten", () => {
     });
     expect(sum(forecastRows.map((r) => -r.quantity))).toBe(58);
     expect(overview.rows.every((r) => r.kind === "forecast")).toBe(true);
-    expect(overview.closingBalance).toBe(row.projected - row.demandDerived);
+    expect(overview.closingBalance).toBe(row.projected + row.demandDerived);
 
     const twin = (await requirementRow(h.id, "FC-OFF"))!;
     expect(twin).toMatchObject({ demandForecast: 0, projected: 3, proposals: [] });
@@ -235,7 +237,7 @@ describe("prognosstyrd i behovsberäkningen och artikelöversikten", () => {
     const overview = await planningService.getArticleOverview(f.id);
     expect(overview.rows.filter((r) => r.kind === "sales_order")).toHaveLength(1);
     expect(sum(overview.rows.filter((r) => r.kind === "forecast").map((r) => -r.quantity))).toBe(52);
-    expect(overview.closingBalance).toBe(row.projected - row.demandDerived);
+    expect(overview.closingBalance).toBe(row.projected + row.demandDerived);
   });
 
   it("a manufactured prognosstyrd article cascades its forecast proposals to the components", async () => {
@@ -249,6 +251,126 @@ describe("prognosstyrd i behovsberäkningen och artikelöversikten", () => {
     expect(parent.proposalKind).toBe("manufacture");
     expect(component.demandDerived).toBeCloseTo(2 * 55, 9);
     expect(component.demandForecast).toBe(0);
+  });
+});
+
+async function supplierFor(articleIds: string[], leadTimeDays = 0) {
+  const supplier = await purchaseService.createSupplier({ name: "Stål AB", active: true });
+  for (const articleId of articleIds) {
+    await purchaseService.addArticleSupplier(articleId, { supplierId: supplier.id, price: 10, currency: "SEK", leadTimeDays, isPrimary: true });
+  }
+  return supplier;
+}
+
+async function koFor(articleId: string, quantity: number, userId: string, date: string) {
+  const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+  return salesService.createQuote({ customerId: customer.id, confirm: true, expectedDeliveryDate: date, rows: [{ articleId, quantity, unitPrice: 100 }] }, userId);
+}
+
+describe("prognosförslag är aldrig Passerat", () => {
+  it("a purchased article with a lead time: `forecast` proposals, none late, outside latest=late, and Skapa ordrar warns for none", async () => {
+    const { article: f } = await forecastArticle("FC-LEAD");
+    await supplierFor([f.id], 10);
+    const user = await makeUser();
+
+    const row = (await requirementRow(f.id, "FC-LEAD"))!;
+    expect(row.proposals.length).toBeGreaterThan(0);
+    expect(row.proposals.every((p) => p.reason === "forecast" && !p.late && p.latestDate! >= TODAY)).toBe(true);
+    expect(row.anyLate).toBe(false);
+    // The first piece is this week, dated today: its latest order day
+    // would be in the past with 10 days' lead time — floored at today.
+    expect(row.proposals[0]).toMatchObject({ needDate: "2030-03-11", latestDate: TODAY, late: false });
+
+    const late = await planningService.listRequirements({ limit: 50, offset: 0, latest: "late" } as never);
+    expect(late.rows.find((r) => r.articleId === f.id)).toBeUndefined();
+    const thisWeek = await planningService.listRequirements({ limit: 50, offset: 0, latest: "this_week" } as never);
+    const inWeek = thisWeek.rows.find((r) => r.articleId === f.id)!.proposals.map((p) => p.latestDate!);
+    expect(inWeek.length).toBeGreaterThan(0);
+    expect(inWeek.every((d) => d >= TODAY && d <= "2030-03-10")).toBe(true);
+
+    // Skapa ordrar: the delivery date is the earliest possible (after the
+    // need) — a `forecast` proposal is never reported as late, like a
+    // reorder-point proposal.
+    const result = await planningService.createOrdersFromProposals(
+      { proposals: row.proposals.map((p) => ({ articleId: f.id, quantity: p.quantity, kind: "purchase" as const, needDate: p.needDate!, reason: p.reason })) },
+      user.id
+    );
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toEqual([]);
+    expect(result.purchaseOrders).toHaveLength(1);
+    // The same proposals sent as plain demand WOULD warn — the reason is what silences it.
+    const asDemand = await planningService.createOrdersFromProposals(
+      { proposals: [{ articleId: f.id, quantity: 1, kind: "purchase" as const, needDate: "2030-03-11", reason: "demand" }] },
+      user.id
+    );
+    expect(asDemand.warnings).toHaveLength(1);
+  });
+
+  it("a manufactured article with a lead time: the TO gets the floor date and no 'hinner inte' warning", async () => {
+    const { article: m } = await forecastArticle("FC-SLOW", true, "manufactured");
+    await articleService.updateArticle(m.id, { manufacturingLeadTimeDays: 10 });
+    const user = await makeUser();
+    const row = (await requirementRow(m.id, "FC-SLOW"))!;
+    expect(row.proposals.every((p) => p.reason === "forecast" && !p.late)).toBe(true);
+
+    const first = row.proposals[0]!;
+    const result = await planningService.createOrdersFromProposals(
+      { proposals: [{ articleId: m.id, quantity: first.quantity, kind: "manufacture", needDate: first.needDate!, reason: first.reason }] },
+      user.id
+    );
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toEqual([]);
+    // Today + 10 working days = Monday 03-18 — after the need, yet no warning.
+    expect((await mfgService.getManufacturingOrder(result.manufacturingOrders[0]!.id))!.dueDate).toBe("2030-03-18");
+  });
+});
+
+describe("härlett behov förbrukar prognosen i behovsberäkningen (användarbeslut 2026-11-07)", () => {
+  it("a KO on the parent without a TO consumes the component's forecast like the released TO's material does; the overview and the card stay firm-only", async () => {
+    const { article: c } = await forecastArticle("FC-COMP");
+    const parent = await articleService.createArticle({ articleNumber: "FC-PAR", name: "Förälder", type: "manufactured", active: true });
+    await articleService.addBomComponent(parent.id, { componentArticleId: c.id, quantity: 1 });
+    const user = await makeUser();
+    await koFor(parent.id, 5, user.id, "2030-03-20");
+
+    // Before the TO: the parent's proposal gives 5 derived demand on the
+    // component in March ⇒ March forecast demand 8 − 5 = 3, total 53.
+    const before = (await requirementRow(c.id, "FC-COMP"))!;
+    expect(before).toMatchObject({ demandDerived: 5, demandMo: 0, demandForecast: 53, projected: -55 });
+    expect(sum(before.proposals.map((p) => p.quantity))).toBe(55);
+    // The overview has no row for the derived demand: 58 forecast, and the
+    // extended invariant holds.
+    const overviewBefore = await planningService.getArticleOverview(c.id);
+    const overviewForecast = sum(overviewBefore.rows.filter((r) => r.kind === "forecast").map((r) => -r.quantity));
+    expect(overviewForecast).toBe(58);
+    expect(overviewBefore.rows.every((r) => r.kind === "forecast")).toBe(true);
+    expect(overviewBefore.closingBalance).toBe(before.projected + before.demandDerived - (overviewForecast - before.demandForecast));
+    // The Prognos card knows no derived demand either.
+    const cardBefore = await planningService.getArticleForecast(c.id);
+    expect(cardBefore.months[0]).toMatchObject({ month: "2030-03", actualDemand: 0, alreadyConsumed: 2, forecastDemand: 8 });
+
+    // After the parent's TO is released: the same 5 is TO material.
+    await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5, dueDate: "2030-03-20" }, user.id);
+    const after = (await requirementRow(c.id, "FC-COMP"))!;
+    expect(after).toMatchObject({ demandDerived: 0, demandMo: 5, demandForecast: 53, projected: -55 });
+    expect(sum(after.proposals.map((p) => p.quantity))).toBe(55);
+    const overviewAfter = await planningService.getArticleOverview(c.id);
+    expect(sum(overviewAfter.rows.filter((r) => r.kind === "forecast").map((r) => -r.quantity))).toBe(53);
+    expect(overviewAfter.closingBalance).toBe(after.projected + after.demandDerived - (53 - after.demandForecast));
+    expect(overviewAfter.closingBalance).toBe(after.projected);
+    const cardAfter = await planningService.getArticleForecast(c.id);
+    expect(cardAfter.months[0]).toMatchObject({ month: "2030-03", actualDemand: 5, forecastDemand: 3 });
+  });
+
+  it("the CSV's Behov includes the forecast, with Varav prognos right after it", async () => {
+    const { article: f } = await forecastArticle("FC-CSV");
+    const exported = await planningService.listRequirementsForExport({ limit: 50, offset: 0, showAll: true, search: "FC-CSV" } as never);
+    const csv = buildCsv(requirementsExportColumns, exported.rows);
+    const lines = csv.trim().split(/\r?\n/);
+    expect(lines[0]).toContain("Saldo;Behov;Varav prognos;Inkommande;Netto;");
+    // Saldo 3; Behov 58 (all forecast); Varav prognos 58; Inkommande 0; Netto −55.
+    expect(lines.find((l) => l.startsWith("FC-CSV"))).toContain(";3;58;58;0;-55;");
+    expect(f.id).toBeTruthy();
   });
 });
 

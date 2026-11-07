@@ -68,14 +68,23 @@ export function classifyAbc<T extends AbcInputRow>(rows: readonly T[], limits: A
   const summary = new Map<AbcClass, AbcSummaryRow>(
     (["A", "B", "C"] as const).map((abcClass) => [abcClass, { abcClass, count: 0, value: 0, share: 0 }])
   );
+  // The boundary is decided in ONE scale, exactly: the running sum is
+  // rounded to the same 4 decimals as the values and the total, both are
+  // taken as integers in ten-thousandths, and "share before < limit" is
+  // compared as cumulative × 100 < limit × total — integer arithmetic, no
+  // division, so an article that ends exactly on the A limit is the last A
+  // and the next one starts B (a float quotient like 79.99999 or 80.00001
+  // would decide it at random).
+  const units = (n: number) => Math.round(n * 1e4);
+  const totalUnits = units(total);
   let cumulative = 0;
   const out = valued.map(({ row, value, missingStandardCost }) => {
-    const before = total > 0 ? (cumulative / total) * 100 : 100;
-    cumulative += value;
+    const before = units(cumulative);
+    cumulative = round4(cumulative + value);
     let abcClass: AbcClass = "C";
     if (value > 0 && total > 0) {
-      if (before < limits.aPercent) abcClass = "A";
-      else if (before < limits.bPercent) abcClass = "B";
+      if (before * 100 < limits.aPercent * totalUnits) abcClass = "A";
+      else if (before * 100 < limits.bPercent * totalUnits) abcClass = "B";
     }
     const entry = summary.get(abcClass)!;
     entry.count++;

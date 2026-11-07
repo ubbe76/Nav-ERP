@@ -882,7 +882,13 @@ export function createPlanningService(
   // material must be there when the work begins. One dating load and ONE
   // delivery context for the whole set (KO ship dates and TO starts share
   // the holiday register); nothing is loaded for a set without dates or TOs.
-  async function dateOverviewLoads(loads: ArticleOverviewLoad[], dbc?: Tx): Promise<ArticleOverviewInput[]> {
+  async function dateOverviewLoads(
+    loads: ArticleOverviewLoad[],
+    dbc?: Tx,
+    // A forecast load the caller already has for these articles
+    // (getArticleForecast needs it for every article, flagged or not).
+    preloaded?: ForecastLoad
+  ): Promise<ArticleOverviewInput[]> {
     const dates: string[] = [];
     const moIds = new Set<string>();
     const parentIds = new Set<string>();
@@ -898,7 +904,7 @@ export function createPlanningService(
     // batch; the holiday window must then reach the horizon's end.
     const today = todayFn();
     const forecastIds = loads.filter((l) => isForecastArticle(l.article)).map((l) => l.article.articleId);
-    const forecast = forecastIds.length > 0 ? await loadForecastInputs(forecastIds, today, dbc) : null;
+    const forecast = forecastIds.length > 0 ? (preloaded ?? (await loadForecastInputs(forecastIds, today, dbc))) : null;
     if (forecast) dates.push(today, forecast.horizonEnd);
     const dating = moIds.size > 0 ? await leadTimeInputsFor({ orderIds: [...moIds], articleIds: [...parentIds] }, dbc) : null;
     const ctx: DeliveryContext | null =
@@ -2233,9 +2239,13 @@ export function createPlanningService(
     // card can show what Prognosstyrd would do; only the flag makes the
     // behovsberäkning and the overview plan for it.
     async getArticleForecast(articleId: string): Promise<ArticleForecast> {
-      const input = await loadOverviewInput(articleId);
+      const raw = await repo.loadArticleOverviewInput(articleId);
+      if (!raw) throw new ArticleNotFoundError(articleId);
       const today = todayFn();
+      // ONE forecast load, shared with the overview's dating (which would
+      // otherwise load it again for a prognosstyrd article).
       const loaded = await loadForecastInputs([articleId], today);
+      const input = (await dateOverviewLoads([raw], undefined, loaded))[0]!;
       const article = loaded.articles.get(articleId)!;
       const consumption = loaded.consumption.get(articleId) ?? new Map<ForecastMonth, number>();
       // The overview without forecast rows: the firm rows are what the forecast is consumed by.
@@ -2899,15 +2909,18 @@ export function createPlanningService(
       // after the need is created anyway and reported in `warnings`, exactly
       // like a late IO row — except a reorder-point proposal: it is dated
       // today for no deadline (the list never marks it Passerat), so its
-      // floor date is simply "as soon as possible".
+      // floor date is simply "as soon as possible". The same for a
+      // forecast-only proposal (Prognos #10): a forecast is not a deadline.
       const today = todayFn();
+      const noDeadline = (reason: CreatePlanningOrdersInput["proposals"][number]["reason"]) =>
+        reason === "reorder_point" || reason === "forecast";
       const pushLateManufacturing = (
         orderNumber: string,
         articleId: string,
         s: DueDateSuggestion | null,
         reason: CreatePlanningOrdersInput["proposals"][number]["reason"]
       ) => {
-        if (!s?.late || reason === "reorder_point") return;
+        if (!s?.late || noDeadline(reason)) return;
         result.warnings.push({
           orderNumber,
           articleNumber: numberFor(articleId),
@@ -3025,8 +3038,9 @@ export function createPlanningService(
         quantity: number;
         unitPrice: number;
         demandDate: string | null;
-        // A reorder-point proposal: dated, but never reported late.
-        reorderPoint: boolean;
+        // A reorder-point or forecast-only proposal: dated, but never
+        // reported late (no deadline behind it).
+        noDeadline: boolean;
         // The fallback date when the delivery context cannot be loaded (the
         // working day before the demand, today at the earliest — the TO
         // färdigdatum rule, exactly as before fasta leveransdagar).
@@ -3059,7 +3073,7 @@ export function createPlanningService(
           // Stafflat: the break for the proposal quantity, else grundpriset.
           unitPrice: resolveSupplierPrice(supplier, proposal.quantity).price ?? 0,
           demandDate,
-          reorderPoint: proposal.reason === "reorder_point",
+          noDeadline: noDeadline(proposal.reason),
           fallbackDate,
         });
         bySupplier.set(supplier.supplierId, group);
@@ -3129,7 +3143,7 @@ export function createPlanningService(
               ...(rowDate && rowDate !== orderDate ? { expectedDeliveryDate: rowDate } : {}),
             });
             rowCount += 1;
-            if (late && rowDate && row.demandDate && !row.reorderPoint) {
+            if (late && rowDate && row.demandDate && !row.noDeadline) {
               result.warnings.push({
                 orderNumber: order.orderNumber,
                 articleNumber: numberFor(row.articleId),

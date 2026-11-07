@@ -204,7 +204,9 @@ export function ForecastCard({
         {formatQuantity(data.average)}
         {unit} per månad. Eget antal ersätter snittet för månaden; tomt fält =
         snittet. Prognosbehov är prognosen minus månadens order och behov (och i
-        innevarande månad det som redan förbrukats). Prognosen är inget skarpt
+        innevarande månad det som redan förbrukats). Behovsberäkningen räknar
+        dessutom av härlett behov från förslag på överordnade artiklar, så den
+        kan visa ett mindre prognosbehov än kortet. Prognosen är inget skarpt
         behov och flyttar aldrig färdigdatum eller leveranstidskontroll.
       </FormHint>
       <FormActions>

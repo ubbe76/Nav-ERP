@@ -42,7 +42,10 @@ export const requirementsExportColumns: CsvColumn<RequirementExportRow>[] = [
   { label: "Typ", value: typeLabel },
   { label: "Referens", value: reference },
   { label: "Saldo", value: (r) => r.onHand, format: "number" },
-  { label: "Behov", value: (r) => r.demandSales + r.demandMo + r.demandDerived, format: "number" },
+  // Prognos (#10): the forecast is part of Behov, as on the web, and shown
+  // on its own right after it.
+  { label: "Behov", value: (r) => r.demandSales + r.demandMo + r.demandDerived + r.demandForecast, format: "number" },
+  { label: "Varav prognos", value: (r) => r.demandForecast, format: "number" },
   { label: "Inkommande", value: (r) => r.supplyPo + r.supplyPoDraft + r.supplyMo, format: "number" },
   { label: "Netto", value: (r) => r.projected, format: "number" },
   { label: "Beställningspunkt", value: (r) => r.reorderPoint, format: "number" },

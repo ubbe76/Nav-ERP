@@ -835,7 +835,7 @@ export function SettingsForm({
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <input
             type="number"
-            min="1"
+            min="2"
             max={100}
             step="1"
             aria-label="ABC — gräns B (%)"

@@ -4,8 +4,10 @@
 // flat rows, this module owns the rules. It deliberately shares the status
 // sets and the phantom-dissolving explosion with the behovsberäkning so the
 // two can never disagree about what counts — closingBalance equals the MRP
-// row's projected minus demandDerived (derived demand comes from order
-// PROPOSALS, which are not orders yet and therefore have no row here).
+// row's projected PLUS demandDerived (projected subtracts the derived demand,
+// which comes from order PROPOSALS — not orders yet, so no row here), minus
+// the difference between this overview's forecast and the calc's
+// demandForecast (the calc lets derived demand consume the forecast too).
 import {
   DEMAND_SALES_STATUSES,
   MATERIAL_MO_STATUSES,
@@ -339,8 +341,9 @@ export function buildArticleOverview(input: ArticleOverviewInput): ArticleOvervi
 
   // Prognos (#10): the weekly forecast demands, consumed by the demand rows
   // above — the same rule and the same dated rows as the behovsberäkning's
-  // (requirements-calc.ts pushes them before the derived demand), so the
-  // invariant closingBalance === projected − demandDerived holds with them.
+  // consumed by the firm rows only (the calc also lets derived demand consume
+  // it), so the invariant is closingBalance === projected + demandDerived −
+  // (this forecast − the calc's demandForecast).
   if (input.forecast) {
     const pieces = forecastWeeklyDemands(input.forecast.input, firmDemandsOf(rows), input.forecast.calendar);
     for (const piece of pieces) {

@@ -59,6 +59,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Konfigurator:** återanvänd inaktiv variant läggs in tyst — visa "Varianten X fanns redan (inaktiv)"; antalsbyte på rad vars mall lämnat Beställningsvara saknar tips om att ange pris; `createQuote` rapporterar bara första ogiltiga rad; ingen laddningstext medan mallens grupper hämtas i Konfigurera; ingen "välj alla" i behovsberäkningens konfigurerade sektion; "— Välj —" kan inte tömma ett förval *(enligt spec)*.
 - [ ] **Varianter:** dubblettnummer inom samma körning säger "finns redan"; standardvärdeshjälpen nämner inte tomt mått / Med-Utan; Skapa variant är inaktiv i stället för dold vid ogiltig konfiguration.
 - [ ] **Konfigurator, prestanda:** `evaluateRowConfiguration` laddar mallen två gånger + full förkalkyl per utvärdering; derive per tangenttryck utan debounce (gammalt TB syns tills svaret kommer); extra evaluate direkt efter Lägg in; `createVariants`-förkalkylen läser på vanliga `db` medan transaktionen håller mallåset (upp till 200 lån i följd); variantsteget i `resolvePrice` gör en extra PK-uppslagning per prissättning; kunden hämtas två gånger per utskrift/mejl.
+- [ ] **Artikelimporten:** kolumnen **Prognosstyrd** (#10) importeras inte — fältet sätts på artikelkortet (Lager → Planering).
 - [ ] **Stafflade leverantörspriser:** visa "Staffelpris från N" i IO-radformuläret (API:t returnerar redan `fromQuantity`/`source`); webben saknar klienttak på 50 staffelsteg (zod ger 400).
 - [ ] **Legoförfrågan:** artikelkolumnen i behovsberäkningen blir trång när en legorad har många förfrågningar.
 - [ ] **Kopiera från befintlig artikel:** ritningsrevisioner kopieras inte.
@@ -124,7 +125,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 ### Medel
 
 - [ ] **D3 Spårbarhet batch/serienr** (L) — vid behov, senare → [#8](https://github.com/ubbe76/Nav-ERP/issues/8) *(hemsidan, under både Tillverkning och Lager)*
-- [ ] **Prognos och ABC-klassning** → [#10](https://github.com/ubbe76/Nav-ERP/issues/10)
 
 ### Låg
 
