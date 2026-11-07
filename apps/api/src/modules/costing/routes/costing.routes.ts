@@ -2,7 +2,8 @@ import type { FastifyInstance } from "fastify";
 import type { ZodType } from "zod";
 import { articleCardWrite } from "../../auth/middleware/access-rules.js";
 import { requireRole } from "../../auth/middleware/auth.middleware.js";
-import { postCalculateSchema, preCalculateSchema, workInProgressQuerySchema } from "@navet/shared";
+import { ForbiddenError } from "../../auth/middleware/permission.middleware.js";
+import { postCalculateSchema, preCalculateSchema, satisfiesRule, workInProgressQuerySchema } from "@navet/shared";
 import type { CostingService } from "../service/costing.service.js";
 import type { WorkInProgressService } from "../service/work-in-progress.service.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
@@ -13,6 +14,7 @@ import {
   InvalidCalculationQuantityError,
   ManufacturingOrderNotFoundError,
   PostCalculationLockedError,
+  TrialSalesPriceNotAllowedError,
 } from "../service/costing.service.js";
 
 // Endast läsning: a calculation without `save` only computes and answers, so
@@ -125,13 +127,18 @@ export async function costingRoutes(
     }
   );
 
+  // Pröva påslag (#16): a calculation saved with tried markups writes a price
+  // its author chose freely, so it takes Artiklar — the permission the
+  // article card's own price field needs. Tillverkning alone gets 403.
   app.post<{ Params: { id: string } }>(
     "/cost-calculations/:id/apply-sales-price",
     { config: { access: articleCardWrite(["tillverkning"]) } },
     async (req, reply) => {
       try {
-        return { article: await service.applySalesPriceFromCalculation(req.params.id) };
+        const mayApplyTrial = satisfiesRule(req.user!, ["artiklar"]);
+        return { article: await service.applySalesPriceFromCalculation(req.params.id, { mayApplyTrial }) };
       } catch (err) {
+        if (err instanceof TrialSalesPriceNotAllowedError) return reply.code(403).send(errorBody(new ForbiddenError()));
         if (err instanceof CostCalculationNotFoundError) return reply.code(404).send(errorBody(err));
         if (err instanceof InvalidCalculationQuantityError) return reply.code(400).send(errorBody(err));
         throw err;

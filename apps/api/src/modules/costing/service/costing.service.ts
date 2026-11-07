@@ -95,6 +95,16 @@ export class InvalidCalculationQuantityError extends Error {
   }
 }
 
+// Sätt försäljningspris from a calculation saved with Pröva påslag, by a user
+// who may not set the article's sales price directly (no Artiklar). The route
+// answers 403 forbidden — the same refusal as the price field on the card.
+export class TrialSalesPriceNotAllowedError extends Error {
+  constructor(id: string) {
+    super(`Cost calculation ${id} uses tried markups; setting the sales price from it requires the Artiklar permission`);
+    this.name = "TrialSalesPriceNotAllowedError";
+  }
+}
+
 // Narrow slice of the article service — writing a calculated figure back onto
 // the article. Injected rather than imported so the standard cost travels the
 // SAME path the article card uses, and its history row is written inside
@@ -493,7 +503,10 @@ export function createCostingService(
   // markups resolved for the costed (sold) article — Pröva påslag →
   // varugrupp → företaget, field by field (markup-levels.ts, the one rule).
   // MO, LO and Affo stay the company's, so TVK and SVK never move. The whole
-  // run — multi-level sub-levels included — uses the result.
+  // run — multi-level sub-levels included — uses the result. The two price
+  // percentages come back rounded to the header's two decimals
+  // (effectiveMarkups → roundPercent), so the amounts are priced at exactly
+  // the percentage the header stores — company, group and trial alike.
   async function articleMarkups(articleId: string, company: CostingMarkups, trial: TrialMarkups | null = null) {
     const group = await repo.getArticleGroupMarkups(articleId);
     const resolved = calculationMarkups(
@@ -1014,9 +1027,17 @@ export function createCostingService(
       return articles.updateStandardCost(calculation.articleId, round(perUnitCost, 4));
     },
 
-    async applySalesPriceFromCalculation(id: string) {
+    // Pröva påslag (#16, the review of etapp 1): a calculation saved with a
+    // tried markup can carry any price markup its author typed, and the route
+    // only asks for Artiklar OR Tillverkning — while setting the article's
+    // försäljningspris directly needs Artiklar. So writing a TRIED price back
+    // takes Artiklar too (`mayApplyTrial`, decided by the route); a calculation
+    // on the group's and the company's markups stays open to Tillverkning.
+    async applySalesPriceFromCalculation(id: string, opts: { mayApplyTrial?: boolean } = {}) {
       const calculation = await repo.findCostCalculationById(id);
       if (!calculation) throw new CostCalculationNotFoundError(id);
+      const tried = calculation.generalMarkupLevel === "trial" || calculation.materialMarkupLevel === "trial";
+      if (tried && opts.mayApplyTrial === false) throw new TrialSalesPriceNotAllowedError(id);
       const perUnitPrice = perUnit(Number(calculation.salesPrice), calculation.quantity);
       if (perUnitPrice === null) throw new InvalidCalculationQuantityError(id);
       return articles.updateSalesPrice(calculation.articleId, round(perUnitPrice, 4));

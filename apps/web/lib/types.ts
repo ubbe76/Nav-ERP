@@ -5149,6 +5149,8 @@ export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
   customer_payment: "Kundbetalning",
   price_list: "Prislista",
   customer_price: "Kundpris",
+  customer: "Kund",
+  article_group: "Varugrupp",
   manufacturing_order: "Tillverkningsorder",
   stock_count_session: "Inventering",
   user: "Användare",

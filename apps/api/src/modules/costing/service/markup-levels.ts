@@ -52,12 +52,24 @@ export interface EffectiveMarkups<L extends CostingMarkupLevel = CostingMarkupLe
 // The levels above the company, most specific first.
 const LEVEL_ORDER = ["trial", "order", "customer", "group"] as const;
 
+// A resolved percentage at the scale the calculation's header stores it
+// (numeric(6,2), toHeader's round(…, 2)) — the same formula, so rounding an
+// already-rounded value changes nothing. markupPercentSchema bounds the range
+// but not the decimals, nor does the company's setting: without this
+// a tried 12.345 % priced the amounts at 12.345 while the header said 12.35,
+// and the Kalkylpris delta against that header came out some öre wrong (the
+// review of etapp 1). Every reader goes through effectiveMarkups, so the
+// amounts and the stored percentage can no longer differ.
+export function roundPercent(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
 function resolveField(levels: MarkupLevels, field: keyof LevelMarkups): ResolvedMarkup {
   for (const level of LEVEL_ORDER) {
     const value = levels[level]?.[field];
-    if (value !== null && value !== undefined) return { percent: value, level };
+    if (value !== null && value !== undefined) return { percent: roundPercent(value), level };
   }
-  return { percent: levels.company[field], level: "company" };
+  return { percent: roundPercent(levels.company[field]), level: "company" };
 }
 
 export function effectiveMarkups(levels: MarkupLevels): EffectiveMarkups {

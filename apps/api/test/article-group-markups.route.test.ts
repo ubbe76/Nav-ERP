@@ -177,3 +177,45 @@ describe("Pröva påslag — POST /articles/:id/cost-calculations/pre-calculate"
     }
   });
 });
+
+// The review of etapp 1: pre-calculate (with save) and apply-sales-price are
+// open to Artiklar OR Tillverkning, but setting the article's försäljningspris
+// directly needs Artiklar. A tried calculation carries whatever markup its
+// author typed, so writing ITS price back takes Artiklar too.
+describe("Sätt försäljningspris från en prövad kalkyl — POST /cost-calculations/:id/apply-sales-price", () => {
+  it("needs Artiklar for a tried calculation; Tillverkning still applies an ordinary one and the standard cost", async () => {
+    const article = await testArticleService.createArticle({
+      articleNumber: `P-${crypto.randomUUID().slice(0, 8)}`,
+      name: "Diskbänk",
+      type: "manufactured",
+      unit: "st",
+      active: true,
+    });
+    const url = `/articles/${article.id}/cost-calculations/pre-calculate`;
+    const workshop = await userCookie(["tillverkning"]);
+
+    // Tillverkning may still save a trial (harmless: TVK and SVK as usual)…
+    const trial = await call(workshop, "POST", url, { quantity: 1, save: true, markups: { generalMarkupPercent: 900 } });
+    expect(trial.statusCode).toBe(201);
+    const trialId = trial.json().calculation.id as string;
+    // …and apply its standard cost, but not its price.
+    expect((await call(workshop, "POST", `/cost-calculations/${trialId}/apply-standard-cost`)).statusCode).toBe(200);
+    const refused = await call(workshop, "POST", `/cost-calculations/${trialId}/apply-sales-price`);
+    expect([refused.statusCode, refused.json().code]).toEqual([403, "forbidden"]);
+    // A material-only trial is a trial too.
+    const materialTrial = await call(workshop, "POST", url, { quantity: 1, save: true, markups: { materialMarkupPercent: 50 } });
+    expect((await call(workshop, "POST", `/cost-calculations/${materialTrial.json().calculation.id}/apply-sales-price`)).statusCode).toBe(403);
+    const [unchanged] = await db.execute<{ sales_price: string | null }>(sql`select sales_price from articles where id = ${article.id}`);
+    expect(unchanged!.sales_price).toBeNull();
+
+    // An ordinary calculation (the group's and the company's markups) stays open to Tillverkning.
+    const ordinary = await call(workshop, "POST", url, { quantity: 1, save: true });
+    expect((await call(workshop, "POST", `/cost-calculations/${ordinary.json().calculation.id}/apply-sales-price`)).statusCode).toBe(200);
+
+    // Artiklar (and admin) apply the tried price.
+    const articles = await userCookie(["artiklar"]);
+    expect((await call(articles, "POST", `/cost-calculations/${trialId}/apply-sales-price`)).statusCode).toBe(200);
+    const { cookie: admin } = await adminCookie();
+    expect((await call(admin, "POST", `/cost-calculations/${materialTrial.json().calculation.id}/apply-sales-price`)).statusCode).toBe(200);
+  });
+});

@@ -1824,6 +1824,32 @@ describe("costing service — markup levels (#16)", () => {
     expect(preview).toMatchObject({ id: null, generalMarkupLevel: "group", materialMarkupLevel: "company", materialMarkupBase: "110.0000", salesPrice: "278.8000" });
   });
 
+  // The review of etapp 1: markupPercentSchema bounds the range, not the
+  // decimals. The amounts must be priced at the percentage the header stores
+  // (two decimals), or the Kalkylpris delta against the header is off by öre.
+  it("prices a percentage with more than two decimals at the two the header stores — trial and company alike", async () => {
+    const { parent } = await makePricedParent();
+    const { calculation: tried } = await costingService.preCalculate(parent.id, 5, true, false, {
+      generalMarkupPercent: 12.345,
+      materialMarkupPercent: 7.125,
+    });
+    // 187 × 12.35 % = 23.0945 (12.345 % would be 23.0852); 110 × 7.13 % = 7.843.
+    expect(tried).toMatchObject({
+      generalMarkupPercent: "12.35",
+      generalMarkup: "23.0945",
+      materialMarkupPercent: "7.13",
+      materialMarkup: "7.8430",
+      salesPrice: "223.9375", // 187 + 23.0945 + 7.843 + 6
+    });
+    expect(Number(tried.generalMarkup)).toBe(Math.round(selfCost(tried) * Number(tried.generalMarkupPercent) * 100) / 10000);
+    expect(Number(tried.materialMarkup)).toBe(Math.round(Number(tried.materialMarkupBase) * Number(tried.materialMarkupPercent) * 100) / 10000);
+
+    // The company's setting has no decimal bound either.
+    Object.assign(costingSettings, { costingGeneralMarkupPercent: 25.125 });
+    const { calculation: company } = await costingService.preCalculate(parent.id, 5);
+    expect(company).toMatchObject({ generalMarkupPercent: "25.13", generalMarkupLevel: "company", generalMarkup: "46.9931" }); // 187 × 25.13 %
+  });
+
   it("takes the varugrupp's 0 as 0 % and its empty field as the company's", async () => {
     const { parent } = await makePricedParent();
     const group = await makeGroup({ generalMarkupPercent: null, materialMarkupPercent: 0 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculationMarkups, effectiveMarkups, percentOrNull } from "../src/modules/costing/service/markup-levels.js";
+import { calculationMarkups, effectiveMarkups, percentOrNull, roundPercent } from "../src/modules/costing/service/markup-levels.js";
 
 // Påslag per nivå (#16): the one rule for the price markups — field by field,
 // null inherits, 0 is explicitly 0 %, most specific level first.
@@ -79,6 +79,18 @@ describe("effectiveMarkups — påslag per nivå", () => {
     });
     // A tried value equal to the inherited one is still a trial: it was given.
     expect(effectiveMarkups({ trial: { generalMarkupPercent: 25 }, company: COMPANY }).generalMarkup.level).toBe("trial");
+  });
+
+  // The review of etapp 1: the percentages the calculation prices with are
+  // the ones its header stores (numeric(6,2)), on every level.
+  it("answers each percentage at the header's two decimals", () => {
+    expect(effectiveMarkups({ trial: { generalMarkupPercent: 12.345 }, company: { generalMarkupPercent: 25.125, materialMarkupPercent: 7.125 } })).toEqual({
+      generalMarkup: { percent: 12.35, level: "trial" },
+      materialMarkup: { percent: 7.13, level: "company" },
+    });
+    expect(effectiveMarkups({ customer: { materialMarkupPercent: 0.004 }, company: COMPANY }).materialMarkup).toEqual({ percent: 0, level: "customer" });
+    expect(roundPercent(40)).toBe(40);
+    expect(roundPercent(roundPercent(12.345))).toBe(12.35);
   });
 });
 
