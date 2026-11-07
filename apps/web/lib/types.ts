@@ -1464,6 +1464,9 @@ export interface Customer extends PartnerCardFields {
   // price-resolver.ts). A decimal column, so it arrives as a string like the
   // other money/percentage fields.
   discountPercent: string;
+  // Påslag per kund (#16): null = inherits (varugruppen, then företaget).
+  generalMarkupPercent: string | null;
+  materialMarkupPercent: string | null;
   // Vårt leverantörsnummer hos kunden (kundens motsvarighet till
   // Supplier.ourCustomerNumber) — nullable free-text field.
   ourSupplierNumber: string | null;
@@ -1782,6 +1785,9 @@ export interface SalesOrderRow {
   // Ställkostnad: set on the automatically added charge row — the id of the
   // article row it belongs to (null for an ordinary row).
   setupForRowId: string | null;
+  // Kalkylpris (#16): set by the server when the price came from the customer's
+  // markup and was not typed over. Old rows are false.
+  calculatedPrice: boolean;
 }
 
 // GET /articles/:id/self-cost — the same figure for an article that has no row
@@ -1809,6 +1815,17 @@ export interface PriceQuote {
   price: { unitPrice: number; discountPercent: number; source: string } | null;
   currency?: string;
   exchangeRate?: number;
+  // Kalkylpris (#16): present when price.source is "calculated" (not for OAuth clients).
+  calculated?: {
+    calculationId: string;
+    calculatedAt: string;
+    quantity: number;
+    generalMarkup: { percent: number; level: "order" | "customer" | "group" | "company" };
+    materialMarkup: { percent: number; level: "order" | "customer" | "group" | "company" };
+  };
+  // Why the customer's markup could not price the article (the chain then fell
+  // through to the article's price).
+  calculatedPriceUnavailable?: "no-calculation" | "material-base-missing";
 }
 
 // Leveranstillfälle (delivery occasion) — C2. One row per utleverans event;

@@ -32,6 +32,7 @@ import { SupplierPaymentDetailsSection } from "../banking/SupplierPaymentDetails
 import { CustomerPricesTab } from "./CustomerPricesTab";
 import { CustomerArticleNumbersTab } from "./CustomerArticleNumbersTab";
 import { PeppolFields } from "./PeppolFields";
+import { useCan } from "../PermissionsProvider";
 import { useDimensions } from "../../lib/dimensions";
 import { CostCenterSelect } from "../economy/DimensionSelect";
 import { DeliveryDaysFields, type DeliveryDayDefaults, type DeliveryDaysValue } from "./DeliveryDaysFields";
@@ -1042,6 +1043,16 @@ function VillkorTab({
   const [discountPercent, setDiscountPercent] = useState(
     isCustomer ? String(Number((partner as Customer).discountPercent)) : "0"
   );
+  // Påslag per kund (#16): blank = inherits (varugruppen, then företaget); 0 is
+  // an explicit 0 %. Writing needs Försäljning, as the rest of the card.
+  const canSetMarkups = useCan()(["forsaljning"]);
+  const markupText = (value: string | null | undefined) => (value === null || value === undefined ? "" : String(Number(value)));
+  const [generalMarkup, setGeneralMarkup] = useState(
+    isCustomer ? markupText((partner as Customer).generalMarkupPercent) : ""
+  );
+  const [materialMarkup, setMaterialMarkup] = useState(
+    isCustomer ? markupText((partner as Customer).materialMarkupPercent) : ""
+  );
   // Frakt etapp 2: default freight product (customers only, and only when
   // the freight integration is enabled — otherwise no field, nothing sent).
   const [freightProducts, setFreightProducts] = useState<FreightProduct[] | null>(null);
@@ -1102,6 +1113,12 @@ function VillkorTab({
           // means "no discount", sent as 0, never as a blank string.
           ...(isCustomer
             ? { discountPercent: discountPercent.trim() === "" ? 0 : Number(discountPercent) }
+            : {}),
+          ...(isCustomer && canSetMarkups
+            ? {
+                generalMarkupPercent: generalMarkup.trim() === "" ? null : Number(generalMarkup),
+                materialMarkupPercent: materialMarkup.trim() === "" ? null : Number(materialMarkup),
+              }
             : {}),
           ...(isCustomer ? { privatePerson, collectiveInvoicing, invoiceOnHold, reverseChargeConstruction } : {}),
           // Förseningsersättning is hidden for a privatperson — what is sent
@@ -1387,6 +1404,46 @@ function VillkorTab({
               />
             </Field>
           </FormRow>
+        )}
+
+        {isCustomer && (
+          <>
+            <FormRow>
+              <Field label="Generellt påslag (%)" htmlFor="generalMarkupPercent">
+                <Input
+                  id="generalMarkupPercent"
+                  type="number"
+                  min="0"
+                  max="1000"
+                  step="0.01"
+                  size="sm"
+                  placeholder="Ärvs"
+                  disabled={!canSetMarkups}
+                  value={generalMarkup}
+                  onChange={(e) => setGeneralMarkup(e.target.value)}
+                />
+              </Field>
+              <Field label="Materialpåslag (%)" htmlFor="materialMarkupPercent">
+                <Input
+                  id="materialMarkupPercent"
+                  type="number"
+                  min="0"
+                  max="1000"
+                  step="0.01"
+                  size="sm"
+                  placeholder="Ärvs"
+                  disabled={!canSetMarkups}
+                  value={materialMarkup}
+                  onChange={(e) => setMaterialMarkup(e.target.value)}
+                />
+              </Field>
+            </FormRow>
+            <FormHint>
+              Tomt = varugruppens eller företagets. Kundens påslag ger Kalkylpris på offert och order för artiklar utan
+              kundpris och prislistepris, räknat på artikelns senaste sparade förkalkyl. Kundrabatten läggs inte på
+              kalkylpriset.
+            </FormHint>
+          </>
         )}
 
         {/* Valuta: the price chain only uses a list in the order's own

@@ -294,6 +294,8 @@ POST /api/v1/oauth/token
 
 Ett ogiltigt val ger `valid: false` med meddelanden i `errors` och per grupp — samma meddelanden som dialogen **Konfigurera** visar.
 
+`source` i `GET /price-quote` kan vara `calculated` (**Kalkylpris**): kunden har ett eget påslag och artikeln saknar kundpris och prislistepris, se [Kalkylpris och kundens påslag](/hjalp/forsaljning#kalkylpris-och-kundens-paslag). Priset kommer då utan rabatt; underlaget (kalkylen och procentsatserna) visas bara för inloggade användare, inte för API-klienter.
+
 **Förval, tomma val och `null`.** I `selection` gäller: en **saknad nyckel** betyder att gruppens förval används (finns inget förval är gruppen tom). `null` betyder att gruppen medvetet lämnas **tom** — förvalet används inte. För en obligatorisk grupp ger det felet att gruppen måste fyllas i; för en ja/nej-grupp betyder `null` Nej. Det är samma sak som att välja **— Välj —** i dialogen **Konfigurera**.
 
 **4. Lägg en offert** — `POST /api/v1/quotes` är det vanliga offertanropet, men en rad kan ha `configuration` i stället för (eller utöver) ett eget à-pris:

@@ -39,7 +39,14 @@ import { marginLabel, useArticleSelfCost, useConfiguredSelfCost } from "./useArt
 import { computeLineMargin, sumMargins } from "../../lib/margin";
 import { formatMoney } from "../../lib/format";
 import { currencyLabel, formatRate, SEK, toSek } from "../../lib/currency";
-import { parseRate, priceQuotePath } from "../../lib/priceQuote";
+import {
+  calculatedPriceText,
+  calculatedUnavailableText,
+  omitUnitPriceOnCreate,
+  omitUnitPriceOnEdit,
+  parseRate,
+  priceQuotePath,
+} from "../../lib/priceQuote";
 import { useOrderRate } from "../../lib/useOrderRate";
 import { CurrencyInput } from "../ui/CurrencyInput";
 import { OrderRateField } from "./OrderRateField";
@@ -143,6 +150,8 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   // afterwards never silently overwrites it ("manuellt vinner"). Reset
   // whenever edit mode is (re)opened.
   const [editPriceTouched, setEditPriceTouched] = useState(false);
+  // The latest price-quote answer that filled the edit fields (Kalkylpris source and text).
+  const [editQuote, setEditQuote] = useState<PriceQuote | null>(null);
   // The article behind the row being edited — fetched so the unit dropdown
   // knows the base unit + alternative units.
   const [editArticle, setEditArticle] = useState<Article | null>(null);
@@ -248,6 +257,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           }
           setRowError(null);
           if (evaluation.price.unitPrice === null || editPriceTouchedNow.current) return;
+          setEditQuote(null);
           setEditPrice(String(toUnitPrice(evaluation.price.unitPrice, factor)));
           setEditDiscountPercent(String(evaluation.price.discountPercent));
         })
@@ -262,6 +272,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     )
       .then((quote) => {
         if (seq !== editRequestSeq.current || editPriceTouchedNow.current) return;
+        setEditQuote(quote);
         if (!quote.price) return;
         setEditPrice(String(toUnitPrice(quote.price.unitPrice, factor)));
         setEditDiscountPercent(String(quote.price.discountPercent));
@@ -325,6 +336,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     setEditPrice(String(toUnitPrice(Number(row.unitPrice), row.unitFactor)));
     setEditDiscountPercent(String(Number(row.discountPercent)));
     setEditPriceTouched(false);
+    setEditQuote(null);
     setEditUnitId(row.unitId ?? "");
     setEditDeliveryDate(row.expectedDeliveryDate ?? "");
     setEditArticle(null);
@@ -386,10 +398,17 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         method: "PATCH",
         body: JSON.stringify({
           quantity: Number(editQuantity),
-          // Always sent explicitly — the web never relies on the server's
-          // own price-chain resolution (that path is for the configurator).
-          unitPrice: Number(editPrice),
-          discountPercent: Number(editDiscountPercent),
+          // Sent explicitly — except when the quantity changed and the price
+          // is an untouched Kalkylpris, which the server then re-prices itself
+          // (and keeps the row flagged). The same quantity sends the price as
+          // before, so the flag stays.
+          ...(omitUnitPriceOnEdit({
+            priceTouched: editPriceTouched,
+            quantityChanged: toBaseQuantity(Number(editQuantity), editFactor) !== Number(row.quantityOrdered),
+            quote: editQuote,
+          })
+            ? {}
+            : { unitPrice: Number(editPrice), discountPercent: Number(editDiscountPercent) }),
           unitId: editUnitId === "" ? null : editUnitId,
           expectedDeliveryDate: editDeliveryDate || null,
           bumpRevision,
@@ -539,6 +558,12 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
       />
 
       <FormError margin="below">{rowError}</FormError>
+      {editingRowId !== null && !editPriceTouched && editQuote && calculatedPriceText(editQuote, formatStockholmDate) && (
+        <FormHint>{calculatedPriceText(editQuote, formatStockholmDate)}</FormHint>
+      )}
+      {editingRowId !== null && !editPriceTouched && calculatedUnavailableText(editQuote) && (
+        <FormNotice>{calculatedUnavailableText(editQuote)}</FormNotice>
+      )}
 
       {rows.length > 0 ? (
         <Table<SalesOrderRow>
@@ -701,6 +726,11 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
                       setEditPriceTouched(true);
                     }}
                   />
+                ) : row.calculatedPrice ? (
+                  <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                    {`${formatMoney(toUnitPrice(Number(row.unitPrice), row.unitFactor))} ${order.currency}`}
+                    <StatusPill status="done" label="Kalkylpris" compact />
+                  </span>
                 ) : (
                   `${formatMoney(toUnitPrice(Number(row.unitPrice), row.unitFactor))} ${order.currency}`
                 );
@@ -1354,6 +1384,8 @@ function AddRowForm({
   // the price-chain prefill below never overwrites a touched field
   // ("manuellt vinner"). Reset when the article changes.
   const [priceTouched, setPriceTouched] = useState(false);
+  // The latest price-quote answer that filled the fields (Kalkylpris source, text, warning).
+  const [quote, setQuote] = useState<PriceQuote | null>(null);
   const [configureTemplate, setConfigureTemplate] = useState<Article | null>(null);
   const [configureKey, setConfigureKey] = useState(0);
   const [variantInfo, setVariantInfo] = useState<{ articleNumber: string; created: boolean } | null>(null);
@@ -1377,6 +1409,7 @@ function AddRowForm({
   function handleArticleChange(next: Article | null) {
     setVariantInfo(null);
     setRowConfiguration(null);
+    setQuote(null);
     if (next?.configuratorMode === "variants" || next?.configuratorMode === "to_order") {
       // variants: Konfigurera hands back the variant article; to_order: the template stays and the choices go on the row.
       setArticle(next.configuratorMode === "to_order" ? next : null);
@@ -1395,6 +1428,7 @@ function AddRowForm({
   function handleConfigured(draft: RowConfigurationDraft) {
     setConfigureTemplate(null);
     setRowConfiguration(draft);
+    setQuote(null);
     if (!priceTouched && draft.evaluation.price.unitPrice !== null) {
       setUnitPrice(String(toUnitPrice(draft.evaluation.price.unitPrice, currentFactor)));
       setDiscountPercent(String(draft.evaluation.price.discountPercent));
@@ -1442,11 +1476,12 @@ function AddRowForm({
       // Valuta: salesOrderId — the order's own currency and rate decide.
       priceQuotePath({ customerId, articleId, quantity: baseQuantity, salesOrderId: orderId })
     )
-      .then((quote) => {
+      .then((answer) => {
         if (seq !== requestSeq.current || priceTouchedNow.current) return;
-        if (!quote.price) return;
-        setUnitPrice(String(toUnitPrice(quote.price.unitPrice, currentFactor)));
-        setDiscountPercent(String(quote.price.discountPercent));
+        setQuote(answer);
+        if (!answer.price) return;
+        setUnitPrice(String(toUnitPrice(answer.price.unitPrice, currentFactor)));
+        setDiscountPercent(String(answer.price.discountPercent));
       })
       .catch(() => {
         // Best-effort prefill — silently leave the fields untouched on error.
@@ -1503,10 +1538,11 @@ function AddRowForm({
         body: JSON.stringify({
           articleId: article.id,
           quantity: Number(quantity),
-          // Always sent explicitly — the web never relies on the server's
-          // own price-chain resolution (that path is for the configurator).
-          unitPrice: Number(unitPrice),
-          discountPercent: Number(discountPercent),
+          // Sent explicitly — except an untouched Kalkylpris, which the
+          // server prices itself so the row is flagged as calculated.
+          ...(omitUnitPriceOnCreate(priceTouched, quote)
+            ? {}
+            : { unitPrice: Number(unitPrice), discountPercent: Number(discountPercent) }),
           unitId: unitId === "" ? null : unitId,
           ...(deliveryDate ? { expectedDeliveryDate: deliveryDate } : {}),
           ...(rowConfiguration ? { configuration: { selection: rowConfiguration.selection } } : {}),
@@ -1618,6 +1654,11 @@ function AddRowForm({
           Tomt = samma som ordern{orderDeliveryDate ? ` (${orderDeliveryDate})` : ""}.
         </FormHint>
       </Field>
+
+      {!priceTouched && calculatedPriceText(quote ?? { price: null }, formatStockholmDate) && (
+        <FormHint>{calculatedPriceText(quote ?? { price: null }, formatStockholmDate)}</FormHint>
+      )}
+      {!priceTouched && calculatedUnavailableText(quote) && <FormNotice>{calculatedUnavailableText(quote)}</FormNotice>}
 
       {/* Live against the fields, without a server round-trip per keystroke —
           the self cost is fetched once per article. */}
