@@ -42,6 +42,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 - [ ] **Påslag per artikelgrupp, kund eller order** → [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*
 - [ ] **Förkalkylera flera artiklar på en gång** — i dag förkalkyleras en artikel i taget på Kalkyl-fliken. Välj artikelnummer från och till och filtrera (t.ex. varugrupp, artikeltyp, artikelkod, aktiva), förkalkylera alla träffar i ett svep med valt antal och visa resultatet med ändringen mot senaste förkalkyl. Användarens önskan 2026-11-07.
+- [ ] **Listan Kopierat** — kopiera artiklar till en lista som heter **Kopierat** och använd den i andra funktioner i appen i stället för att filtrera (t.ex. när flera artiklar förkalkyleras på en gång). Läggs artiklar till när listan redan har innehåll frågar appen om de ska läggas till eller ersätta innehållet. Användarens önskan 2026-11-07.
 - [ ] **Löneperioden:** upplåsning nollar snapshotten utan spår av vad som exporterats — spara den i upplåsningens audit-rad.
 - [ ] **Händelseloggen:** ingen `created`-händelse för TO.
 - [ ] **Välj vad Översikten visar** → [#17](https://github.com/ubbe76/Nav-ERP/issues/17)
