@@ -24,6 +24,7 @@ import { markSalesOrderInProduction } from "../src/modules/sales/service/product
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { createReportsRepository } from "../src/modules/reports/repository/reports.repository.js";
 import { createReportsService, resolveReportRange } from "../src/modules/reports/service/reports.service.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const authRepo = createAuthRepository(db);
@@ -82,7 +83,7 @@ afterAll(async () => {
 });
 
 const isoDate = (offsetDays: number) => {
-  const d = new Date();
+  const d = new Date(`${stockholmToday()}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + offsetDays);
   return d.toISOString().slice(0, 10);
 };

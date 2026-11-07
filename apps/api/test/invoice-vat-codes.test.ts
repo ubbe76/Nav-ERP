@@ -26,6 +26,7 @@ import { pdfText } from "./helpers/pdf.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/services.js";
 import { resetVatCodes, vatCodeId } from "./helpers/vat-codes.js";
 import { vatRateGroupId } from "./helpers/vat-group.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // Momskoder steg 2 (spec 4.1–4.5): the customer invoice rows get their
 // momskod from salesVatCode (explicit vatCodeId wins, a bare vatRate is its
@@ -625,7 +626,7 @@ describe("invoice PDF — momskoder", () => {
 
   it("leaves Levererad out when the delivery date is the invoice date, and prints no text for a plain domestic invoice", async () => {
     const customer = await makeCustomer();
-    const today = new Date().toLocaleDateString("sv-SE");
+    const today = stockholmToday();
     const draft = await invoiceService.create(
       { customerId: customer.id, rows: [{ description: "Bänkskiva", quantity: 1, unitPrice: 100, deliveryDate: today }] },
       user.id

@@ -21,6 +21,7 @@ import { createVerificationPoster } from "../src/modules/economy/service/verific
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/services.js";
 import { createReportsRepository } from "../src/modules/reports/repository/reports.repository.js";
 import { createReportsService } from "../src/modules/reports/service/reports.service.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -54,7 +55,7 @@ const TRUNCATE = sql`TRUNCATE posting_rules, verification_rows, verifications, v
 // Same rationale as supplier-invoice.service.test.ts's POSTING_DATE — dates
 // itself "today" so the fiscal year setupPostingBaseline lays out always
 // covers it, and so the default (current-month) report range picks it up.
-const POSTING_DATE = new Date().toLocaleDateString("sv-SE");
+const POSTING_DATE = stockholmToday();
 const currentMonth = () => POSTING_DATE.slice(0, 7);
 
 beforeEach(async () => {

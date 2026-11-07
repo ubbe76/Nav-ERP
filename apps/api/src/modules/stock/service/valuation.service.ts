@@ -26,6 +26,7 @@ import { round2, type ValuationGroupBy, type ValuationMethod, type ValuationQuer
 import { computeMovingAverage, type MovingAverageRow } from "./moving-average.js";
 import { computeFifo, type FifoRow } from "./fifo.js";
 import { stockValuedAt, stockValuedDate } from "../repository/valued-at.js";
+import { stockholmToday } from "../../system/service/delivery-days.js";
 import { formatNumber, type FinancialStatementPdfInput } from "../../mail/service/document-pdf.js";
 
 export interface ValuationRow {
@@ -99,6 +100,8 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
   // article; falls back to the EARLIEST row when asOf predates every row
   // (documented convention — "the price before any known price is the first
   // one we ever recorded", not an invented one). No rows at all -> null.
+  // valid_from is an instant: its Stockholm day, not the database session's
+  // (UTC) — a price changed 1 January 00:30 is not the 31 December price.
   async function fetchStandardPrices(articleIds: string[], asOf: string) {
     const prices = new Map<string, number | null>();
     if (articleIds.length === 0) return prices;
@@ -107,7 +110,7 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
       .select({
         articleId: articleStandardCostHistory.articleId,
         cost: articleStandardCostHistory.cost,
-        withinBound: sql<boolean>`${articleStandardCostHistory.validFrom}::date <= ${asOf}::date`,
+        withinBound: sql<boolean>`(${articleStandardCostHistory.validFrom} AT TIME ZONE 'Europe/Stockholm')::date <= ${asOf}::date`,
       })
       .from(articleStandardCostHistory)
       .where(inArray(articleStandardCostHistory.articleId, articleIds))
@@ -279,7 +282,7 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
   // builder without relying on `this`.
   const service = {
     async getValuation(query: ValuationQuery): Promise<ValuationResponse> {
-      const asOf = query.asOf ?? new Date().toLocaleDateString("sv-SE");
+      const asOf = query.asOf ?? stockholmToday();
       // Direct service callers (tests, the year-end closing) may omit it.
       const groupBy: ValuationGroupBy = query.groupBy ?? "group";
 

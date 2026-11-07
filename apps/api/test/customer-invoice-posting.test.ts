@@ -32,6 +32,7 @@ import {
   testSystemService,
 } from "./helpers/services.js";
 import { resetVatCodes, vatCodeId } from "./helpers/vat-codes.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // B2: issuing a customer invoice books an F verification inside the SAME
 // transaction as the FA-number allocation. This suite drives the real wiring
@@ -179,7 +180,7 @@ function numericPart(invoiceNumber: string) {
 // The period covering today — the invoice date every issue() below stamps.
 async function currentPeriod(fiscalYearId: string) {
   const year = await testEconomyService.findFiscalYearById(fiscalYearId);
-  const today = new Date().toLocaleDateString("sv-SE");
+  const today = stockholmToday();
   return year.periods.find((period) => period.startDate <= today && period.endDate >= today)!;
 }
 

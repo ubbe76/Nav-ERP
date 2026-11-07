@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import {
   attendanceDeviationReasons,
@@ -41,8 +41,7 @@ import {
 // Stämpla in närvaro, Stämpla in (regel 5) and Gå hem, wired with the real
 // schedule, payroll day and disposition writer — only the settings, the
 // period lock and the clock are stubs. The payroll engine reads schedule
-// clocks in the server's zone (Europe/Stockholm in the container), so the
-// file pins that zone.
+// clocks as Stockholm wall clock; the suite itself runs UTC (test/setup.ts).
 
 const DAY = "2026-06-10"; // Wednesday, summer time (UTC+2)
 const PREV = "2026-06-09";
@@ -89,15 +88,8 @@ const service = createTimeReportService(timeReportRepository, mfgService, period
 
 const TRUNCATE = sql`TRUNCATE attendance_deviation_reasons, attendance_sessions, atf_transactions, overtime_dispositions, employee_day_overrides, day_schedules, holidays, absences, stamp_sessions, time_reports, employees, mo_reports, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, bom_components, articles, payroll_periods, audit_log, users CASCADE`;
 
-let savedTz: string | undefined;
-beforeAll(() => {
-  savedTz = process.env.TZ;
-  process.env.TZ = "Europe/Stockholm";
-});
 afterAll(async () => {
   await db.execute(TRUNCATE);
-  if (savedTz === undefined) delete process.env.TZ;
-  else process.env.TZ = savedTz;
 });
 beforeEach(async () => {
   await db.execute(TRUNCATE);

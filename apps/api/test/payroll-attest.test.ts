@@ -1,4 +1,5 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { stockholmInstant, stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { and, eq, sql } from "drizzle-orm";
 import { auditLog, db, payrollPeriods } from "@navet/db";
 import { PAXML_CODES, testArticleService, testDocumentPdfService } from "./helpers/services.js";
@@ -101,10 +102,13 @@ afterAll(async () => {
 const YEAR = 2026;
 const MONTH = 5;
 
-// Local (server-timezone) instant — mirrors payroll-day.ts's clockToMs so
-// raw-SQL-backdated sessions land on the calendar date the test expects.
+// Stockholm wall-clock instant — payroll-day.ts's clockToMs reads the days
+// and schedule clocks as Swedish time whatever the process's zone (the suite
+// runs UTC), so raw-SQL-backdated sessions land on the calendar date the test
+// expects.
 function localDate(year: number, month: number, day: number, hour = 0, minute = 0): Date {
-  return new Date(year, month - 1, day, hour, minute, 0);
+  const wall = new Date(Date.UTC(year, month - 1, day, hour, minute)).toISOString(); // overflow normalized like new Date(y, m, d, h, min)
+  return new Date(stockholmInstant(wall.slice(0, 10), wall.slice(11, 16)));
 }
 
 // Established pattern (payroll-summary.test.ts): create through the repo,
@@ -267,11 +271,23 @@ describe("payroll attestation", () => {
 describe("payroll period locking", () => {
   it("refuses to lock a period that has not ended yet", async () => {
     const { user } = await seedPeriod();
-    const now = new Date();
+    const [year, month] = stockholmToday().split("-").map(Number) as [number, number];
 
-    await expect(
-      service.lockPeriod(now.getFullYear(), now.getMonth() + 1, user.id)
-    ).rejects.toBeInstanceOf(PeriodNotEndedError);
+    await expect(service.lockPeriod(year, month, user.id)).rejects.toBeInstanceOf(PeriodNotEndedError);
+  });
+
+  it("the month has ended when the Stockholm day is the 1st, though UTC is still on the 31st", async () => {
+    const { user, employee } = await seedPeriod();
+    await service.attest(YEAR, MONTH, employee.id, user.id);
+    // Only Date is faked — the pg client's timers stay real.
+    vi.useFakeTimers({ now: new Date("2026-05-31T21:30:00Z"), toFake: ["Date"] }); // 23:30 on 31 May in Stockholm
+    try {
+      await expect(service.lockPeriod(YEAR, MONTH, user.id)).rejects.toBeInstanceOf(PeriodNotEndedError);
+      vi.setSystemTime(new Date("2026-05-31T23:30:00Z")); // 01:30 on 1 June in Stockholm
+      expect((await service.lockPeriod(YEAR, MONTH, user.id)).status).toBe("locked");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refuses to lock while an employee is unattested, naming them", async () => {

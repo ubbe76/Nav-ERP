@@ -8,6 +8,7 @@ import { createStockService } from "../src/modules/stock/service/stock.service.j
 import { createValuationService } from "../src/modules/stock/service/valuation.service.js";
 import { testDocumentPdfService } from "./helpers/services.js";
 import { pdfText } from "./helpers/pdf.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // Service-level coverage for the lagervärdering report (D1): quantity comes
 // from stock_transactions (already historical, arkitekturprincip 1); the
@@ -119,6 +120,21 @@ describe("getValuation — standard method", () => {
     expect(rowAfter?.value).toBe(2000);
   });
 
+  it("a price changed 1 January 00:30 in Stockholm (23:30Z on 31 December) is not the year-end price", async () => {
+    const location = await makeLocation();
+    const article = await makeArticle();
+    await insertHistory(article.id, 100, new Date("2026-01-01T12:00:00Z"));
+    await insertTransaction({ articleId: article.id, locationId: location.id, quantityDelta: 10, createdAt: new Date("2026-06-01T10:00:00Z") });
+    // The database session runs UTC, where valid_from::date would be 31 December.
+    await insertHistory(article.id, 200, new Date("2026-12-31T23:30:00Z"));
+
+    const yearEnd = await valuationService.getValuation({ asOf: "2026-12-31", method: "standard" });
+    expect(rowFor(yearEnd, article.id)?.unitCost).toBe(100);
+    expect(rowFor(yearEnd, article.id)?.value).toBe(1000);
+    const newYear = await valuationService.getValuation({ asOf: "2027-01-01", method: "standard" });
+    expect(rowFor(newYear, article.id)?.unitCost).toBe(200);
+  });
+
   it("falls back to the earliest history row when asOf predates every row", async () => {
     const location = await makeLocation();
     const article = await makeArticle();
@@ -134,7 +150,7 @@ describe("getValuation — standard method", () => {
     await insertHistory(article.id, 500, new Date("2999-01-01T12:00:00Z"));
     await insertHistory(article.id, 600, new Date("2999-06-01T12:00:00Z"));
 
-    const todayStr = new Date().toLocaleDateString("sv-SE");
+    const todayStr = stockholmToday();
     const result = await valuationService.getValuation({ asOf: todayStr, method: "standard" });
     const row = rowFor(result, article.id);
     expect(row?.unitCost).toBe(500);
@@ -143,7 +159,7 @@ describe("getValuation — standard method", () => {
 
   it("defaults asOf to today when omitted", async () => {
     const result = await valuationService.getValuation({ method: "standard" });
-    expect(result.asOf).toBe(new Date().toLocaleDateString("sv-SE"));
+    expect(result.asOf).toBe(stockholmToday());
   });
 });
 

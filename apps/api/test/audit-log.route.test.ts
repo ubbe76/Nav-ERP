@@ -13,6 +13,7 @@ import { createLoginThrottle } from "../src/modules/auth/service/login-throttle.
 import { requireAuth, SESSION_COOKIE } from "../src/modules/auth/middleware/auth.middleware.js";
 import { auditLogRoutes } from "../src/modules/system/routes/audit-log.routes.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // G1 (Agent 3) — route-level coverage for the read side of the audit trail:
 // the admin gate (requireAuth + requireRole("admin"), same wiring as
@@ -136,7 +137,7 @@ describe("GET /audit-log", () => {
     // Scoped to entityType so the assertion isn't thrown off by
     // createUserAndLogin's own "user"/"created" audit entry (auth.service.ts
     // logs user creation now too, post-G1-merge) landing in today's window.
-    const today = new Date().toISOString().slice(0, 10);
+    const today = stockholmToday(); // from/to are Stockholm days
     const byDate = await app.inject({
       url: `/audit-log?entityType=sales_order&from=${today}&to=${today}`,
       headers: { cookie },
@@ -145,6 +146,21 @@ describe("GET /audit-log", () => {
     expect(dateRows.some((r) => r.entityId === "KO-2400001")).toBe(false);
     expect(dateRows.map((r) => r.entityId)).toEqual(["KO-2500001"]);
     await app.close();
+  });
+
+  it("reads from/to as Stockholm days, not the process's or the database's zone", async () => {
+    // 2026-11-07 in Stockholm (UTC+1) runs 2026-11-06T23:00Z – 2026-11-07T23:00Z.
+    const at = (iso: string, entityId: string) =>
+      db.insert(auditLog).values({ entityType: "tz_probe", entityId, action: "probe", createdAt: new Date(iso) });
+    await at("2026-11-06T22:59:59Z", "before");
+    await at("2026-11-06T23:00:00Z", "first");
+    await at("2026-11-07T22:59:59.999Z", "last");
+    await at("2026-11-07T23:00:00Z", "after");
+
+    const day = await auditRepo.listAuditLog({ entityType: "tz_probe", from: "2026-11-07", to: "2026-11-07", limit: 50, offset: 0 });
+    expect(day.rows.map((r) => r.entityId).sort()).toEqual(["first", "last"]);
+    const fromOnly = await auditRepo.listAuditLog({ entityType: "tz_probe", from: "2026-11-08", limit: 50, offset: 0 });
+    expect(fromOnly.rows.map((r) => r.entityId)).toEqual(["after"]);
   });
 
   it("searches entityId and action via ILIKE", async () => {

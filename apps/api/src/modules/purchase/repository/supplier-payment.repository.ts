@@ -40,6 +40,7 @@ import {
   type ListSupplierPaymentsQuery,
 } from "@navet/shared";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
+import { stockholmToday } from "../../system/service/delivery-days.js";
 import { readPostingSettings } from "../../system/service/posting-settings.js";
 // Type-only (erased at compile time), so declaring the poster interface at the
 // consuming service does not create a runtime import cycle — same seam as
@@ -181,10 +182,12 @@ export function createSupplierPaymentRepository(db: Db) {
       const agg = openItemAggregates(db);
       const conditions: SQL[] = [eq(supplierInvoices.status, "approved"), sql`${agg.openExpr} <> 0`];
       if (query.supplierId) conditions.push(eq(supplierInvoices.supplierId, query.supplierId));
-      // NULL < CURRENT_DATE is NULL, so an invoice with no due date (a payment
+      // Overdue = due before today's Stockholm day (not the database
+      // session's CURRENT_DATE, which is the postgres container's zone).
+      // NULL < today is NULL, so an invoice with no due date (a payment
       // term like "KONTANT", or one simply not typed in) drops out of the
       // overdue view without a separate IS NOT NULL.
-      if (query.overdueOnly) conditions.push(sql`${supplierInvoices.dueDate} < CURRENT_DATE`);
+      if (query.overdueOnly) conditions.push(sql`${supplierInvoices.dueDate} < ${stockholmToday()}::date`);
       if (query.search) {
         const pattern = ilikePattern(query.search);
         conditions.push(
@@ -769,12 +772,12 @@ export function createSupplierPaymentRepository(db: Db) {
           tx,
           payment.verificationId,
           {
-            // Same today-in-sv-SE idiom as the supplier invoice's
+            // The Stockholm day, like the supplier invoice's
             // cancellation and economy.service's reverse(): the omföring
             // is dated the cancellation day (or opts.date, e.g. the
             // bank's booking day of a return), so THAT day's period must
             // be open.
-            date: opts.date ?? new Date().toLocaleDateString("sv-SE"),
+            date: opts.date ?? stockholmToday(),
             description: `Makulering betalning ${payment.paymentNumber} — ${supplier!.name}`,
           },
           userId

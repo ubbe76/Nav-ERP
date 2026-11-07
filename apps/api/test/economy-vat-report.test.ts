@@ -16,6 +16,7 @@ import {
 } from "../src/modules/economy/service/vat-report.service.js";
 
 import { postingVatCode, resetVatCodes } from "./helpers/vat-codes.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 const repo = createEconomyRepository(db);
 const authRepo = createAuthRepository(db);
@@ -50,7 +51,7 @@ afterAll(async () => {
   await resetVatCodes();
 });
 
-const CURRENT_YEAR = new Date().getFullYear();
+const CURRENT_YEAR = Number(stockholmToday().slice(0, 4));
 const JAN = { from: `${CURRENT_YEAR}-01-01`, to: `${CURRENT_YEAR}-01-31` };
 const FEB = { from: `${CURRENT_YEAR}-02-01`, to: `${CURRENT_YEAR}-02-28` };
 const MAR = { from: `${CURRENT_YEAR}-03-01`, to: `${CURRENT_YEAR}-03-31` };
@@ -632,7 +633,7 @@ describe("vat report — settlement", () => {
   // so the two ranges never coincide regardless of when the suite runs.
   it("a settlement's reversal is itself invisible in the month it is booked", async () => {
     const { user } = await setupEconomy();
-    const today = new Date().toLocaleDateString("sv-SE");
+    const today = stockholmToday();
     const target = today.slice(5, 7) === "01" ? FEB : JAN;
     await bookSale(user.id, `${target.from.slice(0, 8)}10`, 1000, "2610", 25);
     const settled = await vatReport.settle(target, user.id);
@@ -650,7 +651,7 @@ describe("vat report — settlement", () => {
   // exclusion is keyed on vat_settlements links, not on reversal-ness.
   it("a reversal of an ordinary verification still counts in the boxes (mirrored)", async () => {
     const { user } = await setupEconomy();
-    const today = new Date().toLocaleDateString("sv-SE");
+    const today = stockholmToday();
     const target = today.slice(5, 7) === "01" ? FEB : JAN;
     await bookSale(user.id, `${target.from.slice(0, 8)}10`, 100, "2610", 25);
     const series = await repo.findSeriesByCode("A");

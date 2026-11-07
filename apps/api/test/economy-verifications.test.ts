@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { and, eq, sql } from "drizzle-orm";
 import { accountingPeriods, auditLog, db, users, verificationRows, verifications } from "@navet/db";
 import { verificationRowInputSchema } from "@navet/shared";
@@ -71,11 +72,11 @@ async function makeAccount(number: string, name: string) {
 }
 
 // setupEconomy()'s fiscal year MUST cover "today": the reverse() tests below
-// stamp the mirrored draft with the real current date
-// (new Date().toLocaleDateString("sv-SE")), so a year hardcoded to a fixed
+// stamp the mirrored draft with the real current Stockholm day
+// (stockholmToday()), so a year hardcoded to a fixed
 // label/range would go red the moment the real calendar rolls past it (e.g.
 // 2026-12-31 -> 2027-01-01) — derived once here instead.
-const CURRENT_YEAR = new Date().getFullYear();
+const CURRENT_YEAR = Number(stockholmToday().slice(0, 4));
 const FISCAL_YEAR_LABEL = String(CURRENT_YEAR);
 const FISCAL_YEAR_START = `${CURRENT_YEAR}-01-01`;
 const FISCAL_YEAR_END = `${CURRENT_YEAR}-12-31`;
@@ -901,7 +902,7 @@ describe("economy service — reverse (Omför)", () => {
     expect(reversal.displayNumber).toBe("Utkast");
     expect(reversal.reversesVerificationId).toBe(booked.id);
     expect(reversal.description).toBe(`Omföring av ${booked.displayNumber}`);
-    expect(reversal.date).toBe(new Date().toLocaleDateString("sv-SE"));
+    expect(reversal.date).toBe(stockholmToday());
     expect(reversal.seriesId).toBe(booked.seriesId);
 
     expect(reversal.rows).toHaveLength(3);

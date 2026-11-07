@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { sql } from "drizzle-orm";
 import { db, permissionGroups } from "@navet/db";
 import { buildApp } from "../src/app.js";
@@ -34,7 +35,7 @@ afterAll(async () => {
   await db.execute(DELETE_GROUPS);
 });
 
-const YEAR = new Date().getFullYear();
+const YEAR = Number(stockholmToday().slice(0, 4));
 const DATE = `${YEAR}-03-15`;
 
 async function login(email: string) {

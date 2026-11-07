@@ -31,7 +31,7 @@ afterAll(async () => {
   await db.execute(TRUNCATE);
 });
 
-const YEAR = new Date().getFullYear();
+const YEAR = Number(stockholmToday().slice(0, 4));
 const DATE = `${YEAR}-03-15`;
 
 async function setup() {

@@ -9,6 +9,7 @@ import { parseSieFile } from "./sie-parse.js";
 import type { VerificationPoster } from "./verification-poster.js";
 import { buildSieFile, sieAccountType, type SieExportData } from "./sie-export.js";
 import { sieDate } from "./sie-format.js";
+import { stockholmToday } from "../../system/service/delivery-days.js";
 
 export class SieFiscalYearNotFoundError extends Error {
   constructor(id: string) {
@@ -164,7 +165,7 @@ export function createSieService(deps: {
 
       const data: SieExportData = {
         program: { name: "Nav-ERP", version: programVersion },
-        generatedDate: new Date().toLocaleDateString("sv-SE"),
+        generatedDate: stockholmToday(),
         generatedBy: signature,
         company: { name: company.name, orgNumber: company.orgNumber },
         fiscalYears: [

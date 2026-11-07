@@ -10,6 +10,17 @@ if (process.env.VITEST_POOL_ID && process.env.TEST_BASE_DATABASE_URL) {
   process.env.DATABASE_URL = workerDatabaseUrl(process.env.TEST_BASE_DATABASE_URL, process.env.VITEST_POOL_ID);
 }
 
+// Datum är Stockholmsdagar — in the code, not through the process's zone:
+// the API reads the Swedish day and wall clock with stockholmToday /
+// stockholmDateOf / stockholmInstant (src/modules/system/service/delivery-days),
+// and docker-compose.yml's TZ=Europe/Stockholm is only a second safety. The
+// suite runs UTC on purpose — the very case the rule guards against — so a
+// new dependency on the process's zone fails here between 00:00 and 01:00
+// Swedish time (02:00 in summer) instead of in production.
+// process-time-zone.test.ts keeps the local-zone Date API out of src; tests
+// count the Stockholm day with stockholmToday() too.
+process.env.TZ = "UTC";
+
 // Runs per test file. Migrating the test database happens once in
 // global-setup.ts; this is only the guard, kept here as well so the check
 // survives even if the global setup is ever removed or reordered.

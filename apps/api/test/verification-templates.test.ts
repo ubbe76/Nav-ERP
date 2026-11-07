@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -33,7 +34,7 @@ afterAll(async () => {
   await db.execute(TRUNCATE);
 });
 
-const YEAR = new Date().getFullYear();
+const YEAR = Number(stockholmToday().slice(0, 4));
 
 async function setup() {
   const user = await authRepo.create({ email: `tpl-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "Ekonom", role: "admin" });

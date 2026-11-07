@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { stockholmToday } from "../../src/modules/system/service/delivery-days.js";
 import { db } from "@navet/db";
 import { createAuthRepository } from "../../src/modules/auth/repository/auth.repository.js";
 import { createFixedAssetService } from "../../src/modules/economy/service/fixed-asset.service.js";
@@ -28,7 +29,7 @@ export const testFixedAssetService = createFixedAssetService({
 // Last calendar year: every month lies in the past, so a run "t.o.m." any of
 // its months never trips the future-month guard, a disposal date in it is
 // never "after today", and its periods are all open.
-export const PLAN_YEAR = new Date().getFullYear() - 1;
+export const PLAN_YEAR = Number(stockholmToday().slice(0, 4)) - 1;
 
 export async function resetFixedAssets() {
   await db.execute(FIXED_ASSET_TRUNCATE);

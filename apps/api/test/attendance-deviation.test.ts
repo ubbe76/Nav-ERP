@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   AttendanceInputRequiredError,
   assessArrival,
@@ -7,18 +7,9 @@ import {
 } from "../src/modules/timereport/service/attendance-deviation.js";
 
 // Pure rules for sen ankomst / tidig hemgång — no DB. The payroll engine
-// (and therefore these rules) reads schedule clocks in the server's local
-// zone, which the API container sets to Europe/Stockholm; the test pins the
-// same zone so the instants below mean what they say.
-let savedTz: string | undefined;
-beforeAll(() => {
-  savedTz = process.env.TZ;
-  process.env.TZ = "Europe/Stockholm";
-});
-afterAll(() => {
-  if (savedTz === undefined) delete process.env.TZ;
-  else process.env.TZ = savedTz;
-});
+// (and therefore these rules) reads schedule clocks as Stockholm wall clock
+// whatever the process's zone (the suite runs UTC, test/setup.ts), so the
+// instants below carry their offset.
 
 const DAY = "2026-06-10"; // Wednesday, summer time (UTC+2)
 const schedule = { startTime: "07:00", endTime: "16:00", netMinutes: 480 };

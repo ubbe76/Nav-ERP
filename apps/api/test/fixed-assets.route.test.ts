@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import Fastify from "fastify";
 import { ZodError } from "zod";
 import { fixedAssetRoutes } from "../src/modules/economy/routes/fixed-asset.routes.js";
@@ -235,7 +236,7 @@ describe("fixed-asset-depreciation-runs routes", () => {
     const future = await app.inject({
       method: "POST",
       url: "/fixed-asset-depreciation-runs",
-      payload: { throughMonth: `${new Date().getFullYear() + 1}-01` },
+      payload: { throughMonth: `${Number(stockholmToday().slice(0, 4)) + 1}-01` },
     });
     expect(future.statusCode).toBe(400);
     expect(future.json().code).toBe("depreciation-month-in-future");

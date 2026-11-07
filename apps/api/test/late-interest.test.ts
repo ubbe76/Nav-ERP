@@ -34,6 +34,7 @@ import { createPaymentService } from "../src/modules/sales/service/payment.servi
 import { addDays, halfYearStartsBetween } from "../src/modules/sales/service/late-interest.js";
 import { pdfText } from "./helpers/pdf.js";
 import { DEFAULT_POSTING_SETTINGS, POSTING_BASELINE_YEAR, setupPostingBaseline, testSystemService } from "./helpers/services.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // Dröjsmålsränta och förseningsersättning (etapp 5 C): Räntefakturering end
 // to end — the candidates, Skapa räntefakturor (one invoice per customer,
@@ -84,7 +85,7 @@ const lateInterestService = createLateInterestService({
 const TRUNCATE = sql`TRUNCATE late_interest_charges, reference_rates, posting_rules, verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, customer_payment_rows, customer_payments, invoice_reminders, invoice_documents, invoice_rows, invoices, customers, email_log, audit_log, users CASCADE`;
 
 const Y = POSTING_BASELINE_YEAR;
-const TODAY = new Date().toLocaleDateString("sv-SE");
+const TODAY = stockholmToday();
 // Fixed dates inside the baseline fiscal year: due 1 September, asOf 20 October.
 const DUE = `${Y}-09-01`;
 const AS_OF = `${Y}-10-20`;

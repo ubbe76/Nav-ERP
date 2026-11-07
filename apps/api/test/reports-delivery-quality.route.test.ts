@@ -5,6 +5,7 @@ import { buildApp } from "../src/app.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createAuthService } from "../src/modules/auth/service/auth.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // Leveransprecision — Gruppera: Motpart through the real app: per supplier
 // the precision of its received orders plus the quality columns from the
@@ -37,7 +38,7 @@ const get = (url: string) => app.inject({ method: "GET", url: `/api/v1${url}`, h
 const post = (url: string, payload?: unknown) => app.inject({ method: "POST", url: `/api/v1${url}`, headers: { cookie }, payload });
 
 const isoDate = (offsetDays: number) => {
-  const d = new Date();
+  const d = new Date(`${stockholmToday()}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + offsetDays);
   return d.toISOString().slice(0, 10);
 };

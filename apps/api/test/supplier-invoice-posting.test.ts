@@ -32,6 +32,7 @@ import {
   testSystemService,
 } from "./helpers/services.js";
 import { vatCodeId } from "./helpers/vat-codes.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // B2: approving a supplier invoice books an L verification inside the SAME
 // transaction as the draft → approved flip, and cancelling an approved one
@@ -101,7 +102,7 @@ afterAll(async () => {
 // The reversal is always dated "today"; the invoice date is what decides the
 // posting period for the approval itself. A month that is NOT the current one
 // lets a test lock exactly one of the two.
-const TODAY = new Date().toLocaleDateString("sv-SE");
+const TODAY = stockholmToday();
 const OTHER_MONTH = Number(TODAY.slice(5, 7)) === 1 ? "02" : "01";
 const OTHER_MONTH_DATE = `${POSTING_BASELINE_YEAR}-${OTHER_MONTH}-15`;
 

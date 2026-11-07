@@ -2,16 +2,19 @@
 // worked time, overtime, OB (obekväm arbetstid / inconvenient-hours premium)
 // and unaccounted time from raw attendance + the day's schedule/absences.
 //
-// No DB, no imports from other modules: plain TypeScript + the standard
-// library only. Everything downstream (period summaries, attestation
-// snapshots, PAXml export) consumes DayComputation, so this file is the
-// single source of truth for the arithmetic — see the algorithm comments
-// below for the exact rules.
+// No DB; the only import is the pure Stockholm wall clock
+// (system/service/delivery-days.ts) — every date and clock here is
+// Stockholm's, whatever zone the process runs in. Everything downstream
+// (period summaries, attestation snapshots, PAXml export) consumes
+// DayComputation, so this file is the single source of truth for the
+// arithmetic — see the algorithm comments below for the exact rules.
 //
 // All interval math is done in epoch ms and only floored to whole minutes at
 // the final summation step (sum raw ms first, `Math.floor(ms / 60000)`
 // once) — never per interval-pair — so partial-minute overlaps never
 // accumulate rounding error across multiple additions.
+
+import { addDays, stockholmInstant } from "../../system/service/delivery-days.js";
 
 export interface Interval {
   start: number; // epoch ms, inclusive
@@ -37,7 +40,7 @@ export interface ObRuleInput {
 }
 
 export interface DayComputationInput {
-  date: string; // local YYYY-MM-DD
+  date: string; // Stockholm YYYY-MM-DD
   isHoliday: boolean; // date exists in holidays (any kind)
   schedule: DayScheduleInput | null; // null = ledig (no scheduled work)
   attendance: Interval[]; // raw session intervals, may extend past the day
@@ -72,28 +75,24 @@ export interface DayComputation {
  */
 export function dayKindOf(date: string, isHoliday: boolean): ObRuleInput["dayKind"] {
   if (isHoliday) return "holiday";
-  const weekday = new Date(`${date}T00:00:00`).getDay();
+  const weekday = new Date(`${date}T00:00:00Z`).getUTCDay(); // the date's own weekday, no zone involved
   if (weekday === 0) return "sunday";
   if (weekday === 6) return "saturday";
   return "weekday";
 }
 
-/** Builds a LOCAL (server-local) epoch ms timestamp from a YYYY-MM-DD date and an "HH:MM" clock. */
+/** The epoch ms of a YYYY-MM-DD date's "HH:MM" Stockholm wall clock — not the server's zone. */
 export function clockToMs(date: string, clock: string): number {
-  return new Date(`${date}T${clock}:00`).getTime();
+  return stockholmInstant(date, clock);
 }
 
 /**
- * [00:00 local, next local day's 00:00). The next day is computed via the
- * Date constructor's (year, month, day+1) overload rather than by adding
- * 24h of milliseconds, so DST transition days keep the correct wall-clock
- * length.
+ * [00:00 Stockholm, the next Stockholm day's 00:00). The end is the next
+ * date's own midnight rather than 24h of milliseconds later, so DST
+ * transition days keep their wall-clock length (23 or 25 hours).
  */
 export function dayBounds(date: string): Interval {
-  const [year, month, day] = date.split("-").map(Number) as [number, number, number];
-  const start = clockToMs(date, "00:00");
-  const end = new Date(year, month - 1, day + 1).getTime();
-  return { start, end };
+  return { start: clockToMs(date, "00:00"), end: clockToMs(addDays(date, 1), "00:00") };
 }
 
 /**
@@ -207,7 +206,7 @@ function sumMinutes(values: number[]): number {
  * Computes one employee's one day. See the module comment and
  * task-6-brief.md for the exact algorithm this mirrors line for line:
  *
- * - presence = attendance clipped to the local day, merged.
+ * - presence = attendance clipped to the Stockholm day, merged.
  * - workedIntervals = presence minus unpaid break windows (paid breaks are
  *   not subtracted — they count as worked time).
  * - OB overlap is computed against workedIntervals (post-break-subtraction),
@@ -287,20 +286,11 @@ export function computeEmployeeDay(input: DayComputationInput): DayComputation {
   };
 }
 
-function formatLocalDate(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-/** All YYYY-MM-DD dates of the given calendar month, built via a local Date loop (no UTC shift). */
+/** All YYYY-MM-DD dates of the given calendar month — pure calendar arithmetic, no zone. */
 export function periodDates(year: number, month: number): string[] {
-  const daysInMonth = new Date(year, month, 0).getDate();
+  const first = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
   const dates: string[] = [];
-  for (let day = 1; day <= daysInMonth; day++) {
-    dates.push(formatLocalDate(new Date(year, month - 1, day)));
-  }
+  for (let date = first; date.slice(0, 7) === first.slice(0, 7); date = addDays(date, 1)) dates.push(date);
   return dates;
 }
 

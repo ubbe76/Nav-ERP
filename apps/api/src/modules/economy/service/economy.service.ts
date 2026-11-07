@@ -1044,7 +1044,7 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
       if (await repo.findReversalOf(id)) throw new AlreadyReversedError(id);
 
       const sourceDetail = await service.findVerificationById(id);
-      const today = new Date().toLocaleDateString("sv-SE");
+      const today = stockholmToday();
       const year = await repo.findFiscalYearForDate(today);
       if (!year) throw new NoFiscalYearForDateError(today);
       // repo.createVerification has no year check of its own — the mirror

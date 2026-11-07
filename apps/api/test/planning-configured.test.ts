@@ -17,6 +17,7 @@ import {
   salesService,
   seedStock,
 } from "./helpers/configured-rows.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // Konfigurator 4c — behovsberäkningen with beställningsvaror, against the
 // database: the configured KO rows become proposal rows with their derived
@@ -44,7 +45,7 @@ const list = async () =>
 // suggestion itself does) — its working day before is always the Tuesday,
 // holidays aside (the test DB has none).
 function futureWeekday(days: number): string {
-  const d = new Date();
+  const d = new Date(`${stockholmToday()}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   while (d.getUTCDay() !== 3) d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);

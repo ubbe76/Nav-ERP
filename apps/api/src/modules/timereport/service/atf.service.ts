@@ -3,6 +3,7 @@ import type { AtfRepository } from "../repository/atf.repository.js";
 import { EmployeeNotFoundError } from "./timereport.service.js";
 // Leaf file in the payroll module — no import cycle (see period-lock.ts).
 import { PayrollPeriodLockedError, type PeriodLockChecker } from "../../payroll/service/period-lock.js";
+import { stockholmToday } from "../../system/service/delivery-days.js";
 
 export class AtfTransactionNotFoundError extends Error {
   constructor(id: string) {
@@ -51,9 +52,6 @@ export interface AtfSettingsReader {
   getSettings(): Promise<{ atfMinutesPerWeek: number }>;
 }
 
-// Today in the server's local timezone as YYYY-MM-DD (sv-SE formats ISO-style).
-const localToday = () => new Date().toLocaleDateString("sv-SE");
-
 export function createAtfService(
   repo: AtfRepository,
   employees: AtfEmployeeReader,
@@ -71,7 +69,7 @@ export function createAtfService(
     // adjustments − stored withdrawals. In weekly mode (veckouttag) accrual
     // is taken out continuously via the shorter schedule, so it never
     // reaches the balance.
-    async getAtfStatus(employeeId: string, asOf = localToday()) {
+    async getAtfStatus(employeeId: string, asOf = stockholmToday()) {
       const employee = await requireEmployee(employeeId);
       const [{ atfMinutesPerWeek: systemMinutes }, sums, transactions] = await Promise.all([
         settings.getSettings(),

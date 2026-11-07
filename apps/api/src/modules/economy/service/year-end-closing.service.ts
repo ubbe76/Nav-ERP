@@ -46,7 +46,8 @@ import {
   type FxRole,
   type FxSideSummary,
 } from "./fx-revaluation.js";
-import { reconciliationLine, stockholmToday, type DepreciationRunResult, type RunDepreciationInput } from "./fixed-asset.service.js";
+import { reconciliationLine, type DepreciationRunResult, type RunDepreciationInput } from "./fixed-asset.service.js";
+import { stockholmToday } from "../../system/service/delivery-days.js";
 import { readVatAccountMovements } from "./vat-account-movements.js";
 import { findUnassignedAccounts } from "./vat-report.service.js";
 import {

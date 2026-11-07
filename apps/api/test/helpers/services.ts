@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { stockholmToday } from "../../src/modules/system/service/delivery-days.js";
 import { db, salesOrders, type Db } from "@navet/db";
 import { createArticleRepository } from "../../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../../src/modules/article/service/article.service.js";
@@ -23,7 +24,7 @@ export const testEconomyService = createEconomyService(testEconomyRepository, { 
 
 // Same CURRENT_YEAR rationale as economy-verifications.test.ts: a literal
 // year would go red the moment the real calendar rolls over.
-export const POSTING_BASELINE_YEAR = new Date().getFullYear();
+export const POSTING_BASELINE_YEAR = Number(stockholmToday().slice(0, 4));
 
 // The posting accounts as readPostingSettings resolves them with no settings
 // rows written (codeSetting fallbacks) — all BAS numbers, so seeding the

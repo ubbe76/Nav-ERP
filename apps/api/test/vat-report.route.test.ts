@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import Fastify from "fastify";
 import { sql } from "drizzle-orm";
 import { ZodError } from "zod";
@@ -46,7 +47,7 @@ afterAll(async () => {
   await db.execute(TRUNCATE);
 });
 
-const YEAR = new Date().getFullYear();
+const YEAR = Number(stockholmToday().slice(0, 4));
 const MAR = { from: `${YEAR}-03-01`, to: `${YEAR}-03-31` };
 
 async function setupEconomy() {

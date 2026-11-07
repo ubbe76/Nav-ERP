@@ -27,6 +27,7 @@ import {
 } from "./calc-outcome-calc.js";
 import { storedVarianceAnalysis } from "../../costing/service/cost-variance.js";
 import { groupOrderMargin } from "./order-margin-calc.js";
+import { stockholmToday } from "../../system/service/delivery-days.js";
 
 // Gruppera: Motpart adds the per-counterparty rows to each side; the month
 // view (groupBy month, the default) is unchanged.
@@ -124,8 +125,6 @@ export function resolveReportRange(
   // month axis into its safety cap. Clamp to a single (empty) month instead.
   return from > to ? { from, to: from } : { from, to };
 }
-
-const stockholmToday = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(new Date());
 
 // Narrow slice of the costing service — the margin report measures invoiced
 // revenue against each article's latest saved pre-calculation. Same

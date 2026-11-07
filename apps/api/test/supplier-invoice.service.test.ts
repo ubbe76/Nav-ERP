@@ -32,6 +32,7 @@ import { createSystemService } from "../src/modules/system/service/system.servic
 import { createVerificationPoster } from "../src/modules/economy/service/verification-poster.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/services.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -77,7 +78,7 @@ const TRUNCATE = sql`TRUNCATE supplier_invoice_files, posting_rules, verificatio
 // The invoice date decides the posting period, so the transition tests date
 // their invoices "today" — inside the fiscal year setupPostingBaseline lays
 // out. A hard-coded year would go red the moment the calendar rolls over.
-const POSTING_DATE = new Date().toLocaleDateString("sv-SE");
+const POSTING_DATE = stockholmToday();
 
 beforeEach(async () => {
   await db.execute(TRUNCATE);

@@ -1,3 +1,4 @@
+import { addDaysIso } from "./date";
 import type { TerminalOperation } from "./types";
 
 // Pure sort / filter / search / label helpers for the stamp terminal's
@@ -91,15 +92,19 @@ export function splitSelection(
   return { start, hiddenCount: Math.max(selected.size - start.length, 0) };
 }
 
+const STOCKHOLM_DAY = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" });
+
 // Glömd utstämpling: "Gå hem nu" (stop the attendance open since an earlier
 // day right now) only makes sense for a shift that ran past midnight — the
 // attendance started on the Stockholm day before today. Older than that, the
-// operator must give the time they went home.
+// operator must give the time they went home. "The day before" is calendar
+// arithmetic on today's date, not now − 24 h: the night after the spring
+// switch that would be two days back (and the evening after the autumn one,
+// today).
 export function forgottenStopNowAllowed(startedAt: string, now: number): boolean {
-  const day = (ms: number) => new Date(ms).toLocaleDateString("sv-SE", { timeZone: "Europe/Stockholm" });
   const started = Date.parse(startedAt);
   if (Number.isNaN(started)) return false;
-  return day(started) === day(now - 24 * 60 * 60 * 1000);
+  return STOCKHOLM_DAY.format(started) === addDaysIso(STOCKHOLM_DAY.format(now), -1);
 }
 
 // sv-SE with at most 4 decimals — hides float noise from the API.
