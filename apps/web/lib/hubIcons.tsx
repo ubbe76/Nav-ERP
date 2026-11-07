@@ -148,6 +148,7 @@ export const HUB_ICONS: Record<string, LucideIcon> = {
   "/kvalitet/avvikelser": ShieldAlert,
   "/kvalitet/orsaker": Tags,
   "/lager/saldon": Warehouse,
+  "/lager/abc-analys": ChartBar,
   "/lager/transaktioner": ArrowLeftRight,
   "/lager/skanna": ScanLine,
   "/lager/platser": MapPin,

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { orderRowConfigurationInputSchema } from "./configurator.js";
 import { listQuerySchema } from "./list.js";
+import { abcClassListParam } from "./abc.js";
 import { businessDateSchema } from "./business-date.js";
 
 // Behovsberäkning (MRP light) — query and order-creation schemas. The
@@ -34,6 +35,16 @@ export const listRequirementsQuerySchema = listQuerySchema.extend({
 });
 export type ListRequirementsQuery = z.infer<typeof listRequirementsQuerySchema>;
 
+// ABC-klassning (#10, etapp 2): GET /planning/abc — the list pattern over a
+// classification that is computed for the whole selection at every read
+// (the cumulative share needs the total), then filtered and paged in
+// memory. `class` takes a comma-separated list ("A,B").
+export const listAbcQuerySchema = listQuerySchema.extend({
+  class: abcClassListParam(),
+  type: z.enum(["purchased", "manufactured"]).optional(),
+});
+export type ListAbcQuery = z.infer<typeof listAbcQuerySchema>;
+
 // Beläggning (E2) — the capacity matrix is a whole-dataset derivation, not a
 // paged list; the only knobs are the horizon and an optional group filter.
 export const capacityQuerySchema = z.object({
@@ -63,9 +74,10 @@ export const createPlanningOrdersSchema = z.object({
           // as before.
           needDate: businessDateSchema.optional(),
           // The proposal's reason: a reorder-point proposal (and material for
-          // one) is "now" for no deadline, so Skapa ordrar never warns that
-          // it is late. Omitted = an ordinary demand.
-          reason: z.enum(["demand", "reorder_point", "undated"]).optional(),
+          // one) is "now" for no deadline, and a forecast-only proposal
+          // (Prognos #10) is for no deadline either, so Skapa ordrar never
+          // warns that either is late. Omitted = an ordinary demand.
+          reason: z.enum(["demand", "reorder_point", "forecast", "undated"]).optional(),
         })
         .refine((p) => p.kind !== "subcontract" || p.moOperationId !== undefined, {
           message: "moOperationId is required for subcontract proposals",
@@ -194,3 +206,16 @@ export const missingComponentsSchema = z.object({
     .min(1),
 });
 export type MissingComponentsInput = z.infer<typeof missingComponentsSchema>;
+
+// Prognos (#10): PUT /articles/:id/forecast — the own quantity per month
+// ("YYYY-MM"; null removes it so the average applies again). Only months in
+// the horizon are accepted (400 forecast-month-outside-horizon); a month is
+// given at most once.
+export const forecastMonthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "month must be YYYY-MM");
+export const articleForecastUpdateSchema = z.object({
+  months: z
+    .array(z.object({ month: forecastMonthSchema, quantity: z.coerce.number().nonnegative().nullable() }))
+    .min(1)
+    .refine((months) => new Set(months.map((m) => m.month)).size === months.length, { message: "each month at most once" }),
+});
+export type ArticleForecastUpdateInput = z.infer<typeof articleForecastUpdateSchema>;

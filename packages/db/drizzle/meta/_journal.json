@@ -1387,6 +1387,13 @@
       "when": 1794049261044,
       "tag": "0197_paslag_prisursprung",
       "breakpoints": true
+    },
+    {
+      "idx": 198,
+      "version": "7",
+      "when": 1794077096557,
+      "tag": "0198_prognos",
+      "breakpoints": true
     }
   ]
 }

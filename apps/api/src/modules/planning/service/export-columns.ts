@@ -10,7 +10,7 @@
 // (showAll) is one line with those columns empty.
 import { type CsvColumn } from "@navet/shared";
 import type { RequirementRow } from "./requirements-calc.js";
-import type { RequirementExportRow } from "./planning.service.js";
+import type { AbcRow, RequirementExportRow } from "./planning.service.js";
 
 const TYPE_LABELS: Record<RequirementRow["type"], string> = {
   purchased: "Inköp",
@@ -42,7 +42,10 @@ export const requirementsExportColumns: CsvColumn<RequirementExportRow>[] = [
   { label: "Typ", value: typeLabel },
   { label: "Referens", value: reference },
   { label: "Saldo", value: (r) => r.onHand, format: "number" },
-  { label: "Behov", value: (r) => r.demandSales + r.demandMo + r.demandDerived, format: "number" },
+  // Prognos (#10): the forecast is part of Behov, as on the web, and shown
+  // on its own right after it.
+  { label: "Behov", value: (r) => r.demandSales + r.demandMo + r.demandDerived + r.demandForecast, format: "number" },
+  { label: "Varav prognos", value: (r) => r.demandForecast, format: "number" },
   { label: "Inkommande", value: (r) => r.supplyPo + r.supplyPoDraft + r.supplyMo, format: "number" },
   { label: "Netto", value: (r) => r.projected, format: "number" },
   { label: "Beställningspunkt", value: (r) => r.reorderPoint, format: "number" },
@@ -61,3 +64,33 @@ export const requirementsExportColumns: CsvColumn<RequirementExportRow>[] = [
   },
   { label: "Huvudleverantör", value: (r) => r.primarySupplier?.supplierName ?? null },
 ];
+
+// ABC-klassning (#10, etapp 2): CSV columns for GET /planning/abc/csv. The
+// price columns (Standardkostnad, Förbrukningsvärde, Andel, Ackumulerad
+// andel) are left out entirely for a user without price permission — the
+// same way the avvikelse export drops Avvikelsekostnad — so the file never
+// carries an empty price column that looks like a zero.
+export function abcExportColumns(seePrices: boolean): CsvColumn<AbcRow>[] {
+  const columns: CsvColumn<AbcRow>[] = [
+    { label: "Artikelnummer", value: (r) => r.articleNumber },
+    { label: "Benämning", value: (r) => r.name },
+    { label: "Typ", value: (r) => TYPE_LABELS[r.type] },
+    { label: "ABC-klass", value: (r) => r.abcClass },
+    { label: "Förbrukat antal", value: (r) => r.consumed, format: "number" },
+  ];
+  if (seePrices) {
+    columns.push(
+      { label: "Standardkostnad", value: (r) => r.standardCost, format: "money" },
+      { label: "Förbrukningsvärde", value: (r) => r.value, format: "money" },
+      { label: "Andel (%)", value: (r) => r.share, format: "number" },
+      { label: "Ackumulerad andel (%)", value: (r) => r.cumulativeShare, format: "number" }
+    );
+  }
+  columns.push(
+    { label: "Saknar standardpris", value: (r) => (r.missingStandardCost ? "Ja" : "Nej") },
+    { label: "Beställningspunkt", value: (r) => r.reorderPoint, format: "number" },
+    { label: "Säkerhetslager", value: (r) => r.safetyStock, format: "number" },
+    { label: "Prognosstyrd", value: (r) => (r.forecastControlled ? "Ja" : "Nej") }
+  );
+  return columns;
+}

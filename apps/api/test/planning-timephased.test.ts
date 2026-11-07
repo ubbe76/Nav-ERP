@@ -159,7 +159,7 @@ describe("artikelöversikt — material is needed when the TO starts", () => {
     ]);
 
     const row = (await list({ search: "TP-C" })).find((r) => r.articleId === part.id)!;
-    expect(overview.closingBalance).toBe(row.projected - row.demandDerived);
+    expect(overview.closingBalance).toBe(row.projected + row.demandDerived);
     // The behovsberäkning sees the same need dates: one proposal per week.
     expect(row.proposals.map((p) => [p.needDate, p.needWeek, p.latestDate, p.quantity, p.late])).toEqual([
       ["2030-03-06", "2030-03-04", "2030-03-05", 2, false],
@@ -348,6 +348,7 @@ describe("GET /planning/requirements — latest filter, sort and CSV", () => {
     expect(exported.total).toBe(5); // TP-2 has two proposals
     const csv = buildCsv(requirementsExportColumns, exported.rows);
     const lines = csv.trim().split("\r\n").length > 1 ? csv.trim().split("\r\n") : csv.trim().split("\n");
+    expect(lines[0]).toContain("Saldo;Behov;Varav prognos;Inkommande;Netto;");
     expect(lines[0]).toContain("Behovsdatum;Senaste datum;Passerat");
     expect(lines.filter((l) => l.startsWith("TP-2"))).toHaveLength(2);
     expect(lines.find((l) => l.startsWith("TP-1"))).toContain("2030-03-01;2030-02-28;Ja");

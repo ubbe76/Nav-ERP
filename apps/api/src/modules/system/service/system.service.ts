@@ -47,10 +47,17 @@ import {
 } from "./posting-settings.js";
 import { isUniqueViolation } from "./db-errors.js";
 import {
+  decodeForecastSettings,
   decodeLeadTimeDefaults,
   decodeLongOperationWeeks,
   PLANNING_DEFAULT_LEAD_TIME_DAYS_KEY,
   PLANNING_LONG_OPERATION_WEEKS_KEY,
+  PLANNING_FORECAST_HISTORY_MONTHS_KEY,
+  PLANNING_ABC_PERIOD_MONTHS_KEY,
+  PLANNING_ABC_CLASS_A_PERCENT_KEY,
+  PLANNING_ABC_CLASS_B_PERCENT_KEY,
+  decodeAbcSettings,
+  PLANNING_FORECAST_HORIZON_MONTHS_KEY,
   PLANNING_QUEUE_TIME_DAYS_KEY,
 } from "./plan-settings.js";
 import {
@@ -310,6 +317,8 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
     const byKey = new Map(rows.map((row) => [row.key, row.value] as const));
     const get = (key: string) => byKey.get(key) ?? null;
     const leadTimeDefaults = decodeLeadTimeDefaults(get);
+    const forecastSettings = decodeForecastSettings(get);
+    const abcSettings = decodeAbcSettings(get);
 
     return {
       allowMultipleStamps: get(ALLOW_MULTIPLE_STAMPS_KEY) === "true",
@@ -366,6 +375,13 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       // the keys, the defaults (0) and the decode.
       planningDefaultLeadTimeDays: leadTimeDefaults.defaultLeadDays,
       planningQueueTimeDays: leadTimeDefaults.queueDays,
+      planningForecastHistoryMonths: forecastSettings.historyMonths,
+      planningForecastHorizonMonths: forecastSettings.horizonMonths,
+      // ABC-klassning (#10): the period and the class limits (a pair that
+      // breaks 1 ≤ A < B ≤ 100 decodes to the defaults).
+      planningAbcPeriodMonths: abcSettings.periodMonths,
+      planningAbcClassAPercent: abcSettings.aPercent,
+      planningAbcClassBPercent: abcSettings.bPercent,
       // Fasta leveransdagar — the default mode/transit days for partners
       // without their own; junk decodes to the default (delivery-days.ts).
       ...flattenDeliveryDefaults(decodeDeliveryDefaults(get)),
@@ -724,6 +740,22 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       }
       if (input.planningQueueTimeDays !== undefined) {
         await set(PLANNING_QUEUE_TIME_DAYS_KEY, String(input.planningQueueTimeDays));
+      }
+      if (input.planningForecastHistoryMonths !== undefined) {
+        await set(PLANNING_FORECAST_HISTORY_MONTHS_KEY, String(input.planningForecastHistoryMonths));
+      }
+      if (input.planningForecastHorizonMonths !== undefined) {
+        await set(PLANNING_FORECAST_HORIZON_MONTHS_KEY, String(input.planningForecastHorizonMonths));
+      }
+      if (input.planningAbcPeriodMonths !== undefined) {
+        await set(PLANNING_ABC_PERIOD_MONTHS_KEY, String(input.planningAbcPeriodMonths));
+      }
+      // The schema guarantees the pair arrives together with A < B.
+      if (input.planningAbcClassAPercent !== undefined) {
+        await set(PLANNING_ABC_CLASS_A_PERCENT_KEY, String(input.planningAbcClassAPercent));
+      }
+      if (input.planningAbcClassBPercent !== undefined) {
+        await set(PLANNING_ABC_CLASS_B_PERCENT_KEY, String(input.planningAbcClassBPercent));
       }
       if (input.supplierDeliveryDayMode !== undefined) {
         await set(DELIVERY_SETTING_KEYS.supplierMode, input.supplierDeliveryDayMode);

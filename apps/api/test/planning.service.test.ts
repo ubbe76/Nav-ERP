@@ -840,7 +840,7 @@ describe("planning service — getArticleOverview", () => {
     const mrpRow = rows.find((r) => r.articleId === f.c.id)!;
 
     expect(mrpRow).toBeDefined();
-    expect(overview.closingBalance).toBe(mrpRow.projected - mrpRow.demandDerived);
+    expect(overview.closingBalance).toBe(mrpRow.projected + mrpRow.demandDerived);
   });
 
   // Delinleverans: the received part of an open TO is already stock — only
@@ -917,7 +917,7 @@ describe("planning service — Spärrade lagerplatser", () => {
     const overview = await planningService.getArticleOverview(a.id);
     expect([overview.onHand, overview.blockedOnHand]).toEqual([4, 20]);
     // The invariant holds with blocked stock — both read onHandByArticle.
-    expect(overview.closingBalance).toBe(row.projected - row.demandDerived);
+    expect(overview.closingBalance).toBe(row.projected + row.demandDerived);
   });
 
   it("the färdigdatumsförslag finds the firm demand although blocked stock would cover it", async () => {

@@ -50,6 +50,14 @@ export function SettingsForm({
   const [defaultLeadTimeSaved, setDefaultLeadTimeSaved] = useState(false);
   const [queueTimeDays, setQueueTimeDays] = useState(String(settings.planningQueueTimeDays));
   const [queueTimeSaved, setQueueTimeSaved] = useState(false);
+  // Prognos and ABC-analys (#10): whole numbers, saved on blur. The two ABC
+  // limits are always sent together.
+  const [forecastHistory, setForecastHistory] = useState(String(settings.planningForecastHistoryMonths));
+  const [forecastHorizon, setForecastHorizon] = useState(String(settings.planningForecastHorizonMonths));
+  const [abcPeriod, setAbcPeriod] = useState(String(settings.planningAbcPeriodMonths));
+  const [abcA, setAbcA] = useState(String(settings.planningAbcClassAPercent));
+  const [abcB, setAbcB] = useState(String(settings.planningAbcClassBPercent));
+  const [planSaved, setPlanSaved] = useState<string | null>(null);
   const [quoteValidityDays, setQuoteValidityDays] = useState(String(settings.quoteValidityDays));
   const [quoteValiditySaved, setQuoteValiditySaved] = useState(false);
   const [setupArticle, setSetupArticle] = useState<ArticlePickerValue | null>(setupChargeArticle);
@@ -233,6 +241,57 @@ export function SettingsForm({
     if (updated) {
       setQueueTimeDays(String(updated.planningQueueTimeDays));
       setQueueTimeSaved(true);
+    }
+  }
+
+  function wholeNumber(raw: string, badInput: boolean, min: number, max: number): number | null {
+    const trimmed = raw.trim();
+    const value = trimmed === "" ? NaN : Number(trimmed);
+    if (badInput || !Number.isInteger(value) || value < min || value > max) return null;
+    return value;
+  }
+
+  async function savePlanMonths(
+    key: "forecastHistory" | "forecastHorizon" | "abcPeriod",
+    raw: string,
+    badInput: boolean
+  ) {
+    setPlanSaved(null);
+    const spec = {
+      forecastHistory: { field: "planningForecastHistoryMonths", max: 36, label: "Prognos — historik", set: setForecastHistory },
+      forecastHorizon: { field: "planningForecastHorizonMonths", max: 24, label: "Prognos — horisont", set: setForecastHorizon },
+      abcPeriod: { field: "planningAbcPeriodMonths", max: 36, label: "ABC — period", set: setAbcPeriod },
+    }[key];
+    const value = wholeNumber(raw, badInput, 1, spec.max);
+    if (value === null) {
+      setError(`${spec.label} måste vara ett heltal 1–${spec.max} månader`);
+      return;
+    }
+    const updated = await save({ [spec.field]: value });
+    if (updated) {
+      spec.set(String(updated[spec.field as keyof SystemSettings]));
+      setPlanSaved(key);
+    }
+  }
+
+  // The class limits are a pair: both are sent whichever field was edited.
+  async function saveAbcLimits(badInput: boolean) {
+    setPlanSaved(null);
+    const a = wholeNumber(abcA, badInput, 1, 100);
+    const b = wholeNumber(abcB, badInput, 1, 100);
+    if (a === null || b === null) {
+      setError("ABC — gräns A och B måste vara heltal 1–100 procent");
+      return;
+    }
+    if (a >= b) {
+      setError("ABC — gräns A måste vara lägre än gräns B");
+      return;
+    }
+    const updated = await save({ planningAbcClassAPercent: a, planningAbcClassBPercent: b });
+    if (updated) {
+      setAbcA(String(updated.planningAbcClassAPercent));
+      setAbcB(String(updated.planningAbcClassBPercent));
+      setPlanSaved("abcLimits");
     }
   }
 
@@ -670,6 +729,126 @@ export function SettingsForm({
             onBlur={(e) => saveQueueTimeDays(e.currentTarget.validity.badInput)}
           />
           {queueTimeSaved && <span className={styles.saved}>Sparat</span>}
+        </div>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Prognos — historik (månader)</div>
+          <div className={styles.description}>Antal hela månader före innevarande som förbrukningen räknas över när snittet för en prognosstyrd artikel tas fram (1–36).</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="number"
+            min="1"
+            max={36}
+            step="1"
+            aria-label="Prognos — historik (månader)"
+            className={styles.numberInput}
+            value={forecastHistory}
+            disabled={pending}
+            onChange={(e) => {
+              setPlanSaved(null);
+              setForecastHistory(e.target.value);
+            }}
+            onBlur={(e) => savePlanMonths("forecastHistory", e.currentTarget.value, e.currentTarget.validity.badInput)}
+          />
+          {planSaved === "forecastHistory" && <span className={styles.saved}>Sparat</span>}
+        </div>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Prognos — horisont (månader)</div>
+          <div className={styles.description}>Hur många månader framåt (från och med innevarande) prognosen planeras och kan få eget antal (1–24).</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="number"
+            min="1"
+            max={24}
+            step="1"
+            aria-label="Prognos — horisont (månader)"
+            className={styles.numberInput}
+            value={forecastHorizon}
+            disabled={pending}
+            onChange={(e) => {
+              setPlanSaved(null);
+              setForecastHorizon(e.target.value);
+            }}
+            onBlur={(e) => savePlanMonths("forecastHorizon", e.currentTarget.value, e.currentTarget.validity.badInput)}
+          />
+          {planSaved === "forecastHorizon" && <span className={styles.saved}>Sparat</span>}
+        </div>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>ABC — period (månader)</div>
+          <div className={styles.description}>Antal hela månader före innevarande som förbrukningsvärdet i ABC-analysen räknas över (1–36).</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="number"
+            min="1"
+            max={36}
+            step="1"
+            aria-label="ABC — period (månader)"
+            className={styles.numberInput}
+            value={abcPeriod}
+            disabled={pending}
+            onChange={(e) => {
+              setPlanSaved(null);
+              setAbcPeriod(e.target.value);
+            }}
+            onBlur={(e) => savePlanMonths("abcPeriod", e.currentTarget.value, e.currentTarget.validity.badInput)}
+          />
+          {planSaved === "abcPeriod" && <span className={styles.saved}>Sparat</span>}
+        </div>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>ABC — gräns A (%)</div>
+          <div className={styles.description}>Klass A är de artiklar som tillsammans står för upp till så här många procent av förbrukningsvärdet. Sparas tillsammans med gräns B — A måste vara lägre än B.</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="number"
+            min="1"
+            max={99}
+            step="1"
+            aria-label="ABC — gräns A (%)"
+            className={styles.numberInput}
+            value={abcA}
+            disabled={pending}
+            onChange={(e) => {
+              setPlanSaved(null);
+              setAbcA(e.target.value);
+            }}
+            onBlur={(e) => saveAbcLimits(e.currentTarget.validity.badInput)}
+          />
+          {planSaved === "abcLimits" && <span className={styles.saved}>Sparat</span>}
+        </div>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>ABC — gräns B (%)</div>
+          <div className={styles.description}>Klass B går upp till denna gräns; resten är klass C. Heltal 2–100.</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="number"
+            min="2"
+            max={100}
+            step="1"
+            aria-label="ABC — gräns B (%)"
+            className={styles.numberInput}
+            value={abcB}
+            disabled={pending}
+            onChange={(e) => {
+              setPlanSaved(null);
+              setAbcB(e.target.value);
+            }}
+            onBlur={(e) => saveAbcLimits(e.currentTarget.validity.badInput)}
+          />
+          {planSaved === "abcLimits" && <span className={styles.saved}>Sparat</span>}
         </div>
       </div>
       <div className={styles.row}>

@@ -37,7 +37,8 @@ const COLUMNS = [
   { key: "balance", label: "Disponibelt", width: "84px", align: "right" as const },
 ];
 
-function hrefFor(row: ArticleOverviewRow): string {
+// Forecast rows have no document: null = no link.
+function hrefFor(row: ArticleOverviewRow): string | null {
   switch (row.documentType) {
     case "sales_order":
       return `/forsaljning/ordrar/${row.documentId}`;
@@ -45,6 +46,8 @@ function hrefFor(row: ArticleOverviewRow): string {
       return `/inkop/ordrar/${row.documentId}`;
     case "manufacturing_order":
       return `/tillverkning/ordrar/${row.documentId}`;
+    default:
+      return null;
   }
 }
 
@@ -240,11 +243,14 @@ export function ArticleOverviewContent({ articleId, onChangeArticle, pickerId }:
                   return row.date ?? <span className={styles.muted}>Saknar datum</span>;
                 case "kind":
                   return OVERVIEW_KIND_LABELS[row.kind];
-                case "document":
+                case "document": {
+                  const href = hrefFor(row);
                   return (
                     <>
-                      {canOpen(hrefFor(row)) ? (
-                        <Link href={hrefFor(row)} className={styles.rowLink}>
+                      {href === null ? (
+                        <span className={styles.muted}>{row.documentNumber}</span>
+                      ) : canOpen(href) ? (
+                        <Link href={href} className={styles.rowLink}>
                           {row.documentNumber}
                         </Link>
                       ) : (
@@ -258,6 +264,7 @@ export function ArticleOverviewContent({ articleId, onChangeArticle, pickerId }:
                       )}
                     </>
                   );
+                }
                 case "partner":
                   return row.partner ?? "—";
                 case "quantity":

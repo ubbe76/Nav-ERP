@@ -2,7 +2,7 @@
 // Table column order/labels exactly (apps/web/components/articles/ArticlesPageClient.tsx).
 // Ytbehandling/Färg are export-only — the web table itself has no column for
 // them (article card fields, not list columns).
-import type { ArticleType } from "@navet/shared";
+import type { AbcClass, ArticleType } from "@navet/shared";
 import { type CsvColumn } from "@navet/shared";
 
 // Server-side mirror of the web's ARTICLE_TYPE_LABELS (apps/web/lib/types.ts)
@@ -28,6 +28,9 @@ export interface ArticleExportRow {
   extraDescription: string | null;
   barcode: string | null;
   active: boolean;
+  // ABC-klassning (#10): null outside the classification (inactive,
+  // service, phantom, template) — not a price, so never hidden.
+  abcClass: AbcClass | null;
 }
 
 export const articleExportColumns: CsvColumn<ArticleExportRow>[] = [
@@ -39,6 +42,7 @@ export const articleExportColumns: CsvColumn<ArticleExportRow>[] = [
   { label: "Enhet", value: (r) => r.unit },
   { label: "Standardkostnad", value: (r) => r.standardCost, format: "money" },
   { label: "Status", value: (r) => (r.active ? "Aktiv" : "Inaktiv") },
+  { label: "ABC", value: (r) => r.abcClass },
   { label: "Ytbehandling", value: (r) => r.surfaceTreatment },
   { label: "Färg", value: (r) => r.colour },
   { label: "Extra benämning", value: (r) => r.extraDescription },

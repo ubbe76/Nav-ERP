@@ -29,6 +29,7 @@ import {
   type PartnerDeliveryFields,
 } from "../../system/service/delivery-days.js";
 import { mondayOf } from "./capacity-calc.js";
+import { forecastWeeklyDemands, type ArticleForecastInput, type ForecastCalendar } from "./forecast.js";
 
 // "lost" (Förlorad) is closed like cancelled — never demand.
 export type SalesOrderStatus =
@@ -69,6 +70,9 @@ export interface RequirementsArticle {
   orderQuantity: number | null;
   // Avrundning — applied to the proposal after the order-quantity multiple.
   rounding: number | null;
+  // Prognosstyrd (#10) — the service builds `RequirementsInput.forecast` for
+  // these; the calc itself only reads that. Optional so fixtures plan as before.
+  forecastControlled?: boolean;
   // Konfigurator: the article's configurator template mode, if any. A
   // to_order template (beställningsvara) never gets a proposal of its own —
   // its configured KO rows do (ConfiguredRowNeed).
@@ -232,6 +236,15 @@ export interface RequirementsInput {
   // Undated; see derivedDemands for the dated form.
   configuredCascade: Map<string, number>;
   derivedDemands?: DerivedDemand[];
+  // Prognos (#10): the forecast-controlled articles' averages/own quantities
+  // and the calendar (forecast.ts). The calc turns them into weekly forecast
+  // demands per article inside the level loop, so the month's forecast is
+  // consumed by the firm demand (the rows the artikelöversikt shows) AND by
+  // the derived demand the parents' proposals and the configured rows have
+  // pushed by then. The overview consumes by firm rows only, so the
+  // invariant with it is closingBalance === projected + demandDerived −
+  // (the overview's forecast − demandForecast). Absent = no forecast demand.
+  forecast?: { calendar: ForecastCalendar; articles: ArticleForecastInput[] };
   // The time-phasing's calendar. All optional with safe defaults so a caller
   // without them gets undated proposals dated from the real today: `today`
   // (Stockholm day) decides the current week, "late" and the reorder-point
@@ -246,12 +259,17 @@ export interface RequirementsInput {
   leadDaysFor?: (articleId: string, quantity: number) => number;
 }
 
-export type ProposalReason = "demand" | "reorder_point" | "undated";
+export type ProposalReason = "demand" | "reorder_point" | "forecast" | "undated";
 
 // One proposal of an article row: a need week's uncovered demand (demand),
-// the reorder-point top-up dated today (reorder_point) or the undated
-// demands (undated, sorted last — "Saknar datum"). `key` is stable per
-// article and week so the web can keep selections across refreshes.
+// the reorder-point top-up dated today (reorder_point), a week whose
+// uncovered demand is ONLY forecast (forecast — Prognos #10: dated by its
+// first forecast piece, latest date never before today, never Passerat: a
+// forecast is not a deadline, and the current month's first piece is dated
+// today so every prognosstyrd article with a lead time would otherwise be
+// late on every run) or the undated demands (undated, sorted last — "Saknar
+// datum"). `key` is stable per article and week so the web can keep
+// selections across refreshes.
 export interface RequirementProposal {
   key: string;
   needDate: string | null; // the group's first uncovered demand day
@@ -277,6 +295,9 @@ export interface RequirementRow {
   demandSales: number;
   demandMo: number;
   demandDerived: number;
+  // Prognos (#10): the weekly forecast demands' sum ("varav prognos") —
+  // part of `projected` like the others; 0 for every other article.
+  demandForecast: number;
   supplyPo: number;
   // Draft IOs in their own bucket: a draft is this system's counterpart of a
   // released orderförslag — excluding it would re-propose already-ordered
@@ -452,6 +473,11 @@ interface Demand {
   // "now" but for no deadline — it must never make a proposal Passerat, the
   // same promise the reorder-point proposal itself keeps.
   asap?: boolean;
+  // A forecast piece (or material for a forecast-only proposal): dated, but
+  // not a deadline — a week with only such demand is a `forecast` proposal,
+  // never Passerat. A firm demand in the same week dates the proposal and
+  // decides its lateness, so the forecast never hides a real late order.
+  forecast?: boolean;
 }
 
 function pushDemand(map: Map<string, Demand[]>, articleId: string, demand: Demand) {
@@ -574,6 +600,10 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
     (a, b) => (levels.get(a.articleId) ?? 0) - (levels.get(b.articleId) ?? 0)
   );
 
+  // Prognos (#10): the prognosstyrda articles' forecast inputs, computed per
+  // article inside the level loop below (see there).
+  const forecastInputs = new Map((input.forecast?.articles ?? []).map((a) => [a.articleId, a] as const));
+
   const demandDerived = new Map<string, number>();
   // Konfigurator 4c: the configured rows' derived material (one derivation
   // per configuration, done by the planning service) is demand from TOs that
@@ -596,6 +626,27 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
     const isConfiguredTemplate = article.configuratorMode === "to_order";
 
     const id = article.articleId;
+
+    // Prognos (#10): the forecast demand per week (forecast.ts owns the
+    // rule), consumed by every demand dated in the month that is known by
+    // now — the firm rows (the same the artikelöversikt lists) AND the
+    // derived demand the levels above have already pushed here (the parents'
+    // proposal cascades, the configured rows' material): the article's
+    // level comes after its parents', so a KO on the parent without a TO
+    // consumes the component's forecast exactly as the TO's material does
+    // once it is released (user decision 2026-11-07, no double counting).
+    // The overview knows no derived demand and consumes by firm rows only,
+    // so its forecast can be larger — see the invariant in planning.md.
+    let dForecast = 0;
+    const forecastArticle = input.forecast ? forecastInputs.get(id) : undefined;
+    if (forecastArticle) {
+      for (const piece of forecastWeeklyDemands(forecastArticle, demands.get(id) ?? [], input.forecast!.calendar)) {
+        dForecast += piece.quantity;
+        pushDemand(demands, id, { date: piece.date, quantity: piece.quantity, forecast: true });
+      }
+      dForecast = round4(dForecast);
+    }
+
     const stockQty = onHand.get(id) ?? 0;
     const dSales = demandSales.get(id) ?? 0;
     const dMo = demandMo.get(id) ?? 0;
@@ -603,7 +654,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
     const sPo = supplyPo.get(id) ?? 0;
     const sPoDraft = supplyPoDraft.get(id) ?? 0;
     const sMo = supplyMo.get(id) ?? 0;
-    const projected = stockQty - (dSales + dMo + dDerived) + (sPo + sPoDraft + sMo);
+    const projected = stockQty - (dSales + dMo + dDerived + dForecast) + (sPo + sPoDraft + sMo);
 
     const kind = article.type === "manufactured" ? "manufacture" : "purchase";
     const proposals: RequirementProposal[] = [];
@@ -627,22 +678,30 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
 
       // Walk the demands drawing on the pool; what is not covered is
       // grouped per need week (undated in its own group, last).
-      // A group's need date is its first uncovered REAL demand; a group of
+      // A group's need date is its first uncovered FIRM demand; a group of
       // only reorder-point material (asap) is dated today like the
-      // reorder-point proposal and never late.
-      const groups = new Map<string | null, { needDate: string | null; uncovered: number }>();
+      // reorder-point proposal and never late; a group of only forecast
+      // (Prognos #10) is dated by its first forecast piece, never late.
+      // Firm wins over both, reorder-point material over forecast.
+      const groups = new Map<
+        string | null,
+        { needDate: string | null; forecastDate: string | null; asap: boolean; uncovered: number }
+      >();
       for (const demand of own) {
         const covered = Math.min(pool, demand.quantity);
         pool = round4(pool - covered);
         const uncovered = round4(demand.quantity - covered);
         if (uncovered <= 0) continue;
         const week = demand.date === null ? null : needWeekOf(demand.date, thisMonday);
-        const realDate = demand.asap ? null : demand.date;
+        const firmDate = demand.asap || demand.forecast ? null : demand.date;
+        const forecastDate = demand.forecast ? demand.date : null;
         const group = groups.get(week);
         if (group) {
           group.uncovered = round4(group.uncovered + uncovered);
-          if (group.needDate === null) group.needDate = realDate;
-        } else groups.set(week, { needDate: realDate, uncovered });
+          if (group.needDate === null) group.needDate = firmDate;
+          if (group.forecastDate === null) group.forecastDate = forecastDate;
+          group.asap ||= demand.asap === true;
+        } else groups.set(week, { needDate: firmDate, forecastDate, asap: demand.asap === true, uncovered });
       }
 
       // One proposal per group in week order: the uncovered quantity less
@@ -658,7 +717,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
         }
         const quantity = orderQuantityFor(net, article);
         carry = round4(quantity - net);
-        if (week !== null && group.needDate === null) {
+        if (week !== null && group.needDate === null && (group.asap || group.forecastDate === null)) {
           // Only reorder-point material in this week: "now", never late.
           proposals.push({
             key: `${kind}:${id}:${week}`,
@@ -671,7 +730,10 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
           });
           continue;
         }
-        const needDate = group.needDate;
+        // Only forecast in this week: dated by its first piece, the latest
+        // date floored at today (a forecast is not a deadline), never late.
+        const forecastOnly = week !== null && group.needDate === null;
+        const needDate = forecastOnly ? group.forecastDate : group.needDate;
         let latestDate: string | null = null;
         if (needDate !== null) {
           if (kind === "manufacture") {
@@ -690,6 +752,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
             });
           }
         }
+        if (forecastOnly && (latestDate === null || latestDate < today)) latestDate = today;
         proposals.push({
           key: `${kind}:${id}:${week ?? "undated"}`,
           needDate,
@@ -697,9 +760,9 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
           latestDate,
           // A dated purchase with no possible arrival at all (latestDate null)
           // is as late as it gets.
-          late: needDate !== null && (latestDate === null || latestDate < today),
+          late: !forecastOnly && needDate !== null && (latestDate === null || latestDate < today),
           quantity,
-          reason: needDate === null ? "undated" : "demand",
+          reason: forecastOnly ? "forecast" : needDate === null ? "undated" : "demand",
         });
       }
 
@@ -741,6 +804,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
             date: proposal.latestDate,
             quantity: componentQuantity,
             asap: proposal.reason === "reorder_point",
+            forecast: proposal.reason === "forecast",
           });
         }
       }
@@ -750,6 +814,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
       dSales > 0 ||
       dMo > 0 ||
       dDerived > 0 ||
+      dForecast > 0 ||
       sPo > 0 ||
       sPoDraft > 0 ||
       sMo > 0 ||
@@ -772,6 +837,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
       demandSales: dSales,
       demandMo: dMo,
       demandDerived: dDerived,
+      demandForecast: dForecast,
       supplyPo: sPo,
       supplyPoDraft: sPoDraft,
       supplyMo: sMo,
@@ -847,6 +913,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
         demandSales: 0,
         demandMo: 0,
         demandDerived: 0,
+        demandForecast: 0,
         supplyPo: 0,
         supplyPoDraft: 0,
         supplyMo: 0,
@@ -906,6 +973,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
         demandSales: 0,
         demandMo: 0,
         demandDerived: 0,
+        demandForecast: 0,
         supplyPo: 0,
         supplyPoDraft: 0,
         supplyMo: 0,

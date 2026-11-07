@@ -637,6 +637,6 @@ describe("to_order template (4b/4c): a TO needs the choices, purchasing is refus
     expect(mrp.rows.find((r) => r.articleId === plain.id)!.demandSales).toBe(3);
     const overview = await planningService.getArticleOverview(article.id);
     expect(overview.rows.filter((r) => r.kind === "sales_order").map((r) => r.quantity)).toEqual([-4]);
-    expect(overview.closingBalance).toBe(templateRow.projected - templateRow.demandDerived);
+    expect(overview.closingBalance).toBe(templateRow.projected + templateRow.demandDerived);
   });
 });

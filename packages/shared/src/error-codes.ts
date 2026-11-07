@@ -510,6 +510,8 @@ export const ERROR_CODES = {
   // date under the lock / no manufactured shortage to make a TO for.
   DELIVERY_TIME_CHANGED: "delivery-time-changed",
   NOTHING_TO_RESERVE: "nothing-to-reserve",
+  // Prognos (#10): PUT /articles/:id/forecast with a month outside the horizon.
+  FORECAST_MONTH_OUTSIDE_HORIZON: "forecast-month-outside-horizon",
   // Flytta halvfabrikaten (pegging #9): a TO's due date is no longer the one
   // the dialog showed — 409, nothing written (body.orderNumber,
   // body.expectedDueDate, body.currentDueDate).

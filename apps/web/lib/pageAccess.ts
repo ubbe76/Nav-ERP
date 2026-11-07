@@ -38,6 +38,8 @@ const ENTRIES: readonly Entry[] = [
   { path: "/forsaljning/leveranstidskontroll", rule: ["forsaljning", "tillverkning"] },
   { path: "/forsaljning", rule: ["forsaljning"] },
   { path: "/kunder", rule: ["forsaljning"] },
+  // ABC-analys reads the planning module (office), like Behovsberäkning.
+  { path: "/lager/abc-analys", rule: ["office"] },
   { path: "/lager", rule: ["lager"] },
   { path: "/personal", rule: ["personal"] },
   { path: "/kvalitet", rule: ["kvalitet"] },

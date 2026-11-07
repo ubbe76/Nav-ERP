@@ -112,9 +112,63 @@ export interface Article {
   rounding: string | null;
   // Manufactured articles only: lead time in days; null = derived from the routing.
   manufacturingLeadTimeDays: number | null;
+  // Prognosstyrd (#10): the behovsberäkning plans the monthly forecast.
+  forecastControlled: boolean;
+  // ABC-klass (#10) — only when fetched with ?withAbc=true; null = outside the classification.
+  abcClass?: AbcClass | null;
   active: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export type AbcClass = "A" | "B" | "C";
+
+// GET /articles/:id/forecast (#10) — mirrors apps/api/src/modules/planning.
+export interface ArticleForecast {
+  forecastControlled: boolean;
+  historyMonths: number;
+  horizonMonths: number;
+  average: number;
+  history: { month: string; consumed: number }[];
+  months: ArticleForecastMonth[];
+}
+
+export interface ArticleForecastMonth {
+  month: string;
+  average: number;
+  // The own quantity (Eget antal); null = the average applies.
+  own: number | null;
+  forecast: number;
+  actualDemand: number;
+  // Current month only.
+  alreadyConsumed: number | null;
+  forecastDemand: number;
+}
+
+// GET /planning/abc (#10).
+export interface AbcRow {
+  articleId: string;
+  articleNumber: string;
+  name: string;
+  type: "purchased" | "manufactured";
+  consumed: number;
+  standardCost: number | null;
+  value: number | null;
+  share: number | null;
+  cumulativeShare: number | null;
+  abcClass: AbcClass;
+  missingStandardCost: boolean;
+  reorderPoint: number | null;
+  safetyStock: number | null;
+  forecastControlled: boolean;
+}
+
+export interface AbcResponse {
+  rows: AbcRow[];
+  total: number;
+  summary: { abcClass: AbcClass; count: number; value: number | null; share: number | null }[];
+  period: { months: number; from: string; to: string };
+  limits: { aPercent: number; bPercent: number };
 }
 
 export interface ArticleGroup {
@@ -3249,6 +3303,14 @@ export interface SystemSettings {
   // Standardkötid: working days waited between consecutive operations when
   // the lead time comes from the routing; 0 = none.
   planningQueueTimeDays: number;
+  // Prognos (#10): history window and horizon in whole months.
+  planningForecastHistoryMonths: number;
+  planningForecastHorizonMonths: number;
+  // ABC-analys (#10): consumption period in months and the A/B limits in
+  // whole percent (always saved as a pair, A < B).
+  planningAbcPeriodMonths: number;
+  planningAbcClassAPercent: number;
+  planningAbcClassBPercent: number;
   supplierDeliveryDayMode: DeliveryDayMode;
   supplierTransitDays: number;
   customerDeliveryDayMode: DeliveryDayMode;
@@ -4763,7 +4825,7 @@ export interface RequirementProposal {
   latestDate: string | null;
   late: boolean;
   quantity: number;
-  reason: "demand" | "reorder_point" | "undated";
+  reason: "demand" | "reorder_point" | "forecast" | "undated";
 }
 
 export interface RequirementRow {
@@ -4778,6 +4840,8 @@ export interface RequirementRow {
   demandSales: number;
   demandMo: number;
   demandDerived: number;
+  // Prognos (#10): the part of the demand that is forecast (varav prognos).
+  demandForecast?: number;
   supplyPo: number;
   // Open quantity on DRAFT purchase orders — counted separately so re-running
   // the routine doesn't re-propose material already put on a draft IO.
@@ -4836,7 +4900,8 @@ export type OverviewRowKind =
   | "mo_material"
   | "mo_planned_material"
   | "manufacturing_order"
-  | "purchase_order";
+  | "purchase_order"
+  | "forecast";
 
 export const OVERVIEW_KIND_LABELS: Record<OverviewRowKind, string> = {
   sales_order: "Kundorder",
@@ -4844,6 +4909,7 @@ export const OVERVIEW_KIND_LABELS: Record<OverviewRowKind, string> = {
   mo_planned_material: "Material till planerad TO",
   manufacturing_order: "Tillverkningsorder",
   purchase_order: "Inköpsorder",
+  forecast: "Prognos",
 };
 
 export interface ArticleOverviewRow {
@@ -4851,8 +4917,9 @@ export interface ArticleOverviewRow {
   kind: OverviewRowKind;
   direction: "demand" | "supply";
   date: string | null;
-  documentType: "sales_order" | "purchase_order" | "manufacturing_order";
-  documentId: string;
+  // null on forecast rows (no document to open).
+  documentType: "sales_order" | "purchase_order" | "manufacturing_order" | null;
+  documentId: string | null;
   documentNumber: string;
   status: string;
   partner: string | null;
@@ -4898,7 +4965,7 @@ export interface PlanningOrderProposal {
   salesOrderRowId?: string;
   // The proposal's behovsdatum; omitted when it has none.
   needDate?: string;
-  // reorder_point: dated today for no deadline — never reported late.
+  // reorder_point / forecast: no deadline — never reported late, no warning.
   reason?: RequirementProposal["reason"];
 }
 
@@ -5319,6 +5386,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   plugin_key_rotated: "Ny API-nyckel",
   plugin_secret_rotated: "Ny webbhookshemlighet",
   plugin_uninstalled: "Tillägg avinstallerat",
+  forecast_updated: "Prognos ändrad",
 };
 
 export function auditEntityTypeLabel(entityType: string): string {

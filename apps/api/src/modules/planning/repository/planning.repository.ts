@@ -7,6 +7,7 @@ import {
   type ResourceSwitch,
 } from "../../manufacturing/repository/operation-resources.js";
 import {
+  articleForecasts,
   articles,
   articleSuppliers,
   bomComponents,
@@ -30,6 +31,7 @@ import {
   salesOrderRows,
   salesOrders,
   stampSessions,
+  stockTransactions,
   suppliers,
   timeReports,
   units,
@@ -54,7 +56,10 @@ import type {
   DatingWorkCenter,
 } from "../service/requirements-dating.js";
 import type { LeadTimeDefaults } from "../service/manufacturing-lead-time.js";
-import type { PartnerDeliveryFields } from "../../system/service/delivery-days.js";
+import { addDays, stockholmDateOf, stockholmInstant, type PartnerDeliveryFields } from "../../system/service/delivery-days.js";
+import { stockValuedAt } from "../../stock/repository/valued-at.js";
+import { loadAbcSettings, loadForecastSettings } from "../../system/repository/plan-settings.js";
+import type { ForecastMonth } from "../service/forecast.js";
 import { loadPriceBreaks } from "../../purchase/repository/price-breaks.js";
 import type { CapacityInput, OperationResourceOption, PlannedWeek } from "../service/capacity-calc.js";
 import type { OperationPlan } from "../service/production-plan.js";
@@ -85,6 +90,18 @@ async function operationTimeOnResources(dbc: Db | Tx, orderFilter: SQL | undefin
   return new Map(rows.map((row) => [row.moOperationId, { timeOnCurrentResource: row.onCurrent, timeOnOtherResource: row.onOther }]));
 }
 const NO_TIME = { timeOnCurrentResource: false, timeOnOtherResource: false };
+
+// ABC-klassning (#10): one selected article as abcArticles returns it.
+export interface AbcArticleRow {
+  articleId: string;
+  articleNumber: string;
+  name: string;
+  type: "purchased" | "manufactured";
+  standardCost: number | null;
+  reorderPoint: number | null;
+  safetyStock: number | null;
+  forecastControlled: boolean;
+}
 
 export interface PlanningArticleInfo {
   articleId: string;
@@ -155,6 +172,16 @@ function chunk<T>(list: T[], size: number): T[][] {
 // dependent demand. Dropping the EDGE also keeps a phantom under such a row
 // from being exploded into demand — its whole subtree is costing-only.
 const DEMAND_BOM_ROWS = eq(bomComponents.costingOnly, false);
+
+// Förbrukning (#10, ONE definition shared by the forecast and the coming ABC
+// classification): the net of sales deliveries and TO material draws —
+// −Σ quantity_delta of these types, so an undone delivery/report (a positive
+// row of the same type) cancels itself out. Receipts, stock counts,
+// transfers and undone receipts are not consumption.
+const CONSUMPTION_TYPES = ["sales_delivery", "mo_consumption"] as const;
+// The Stockholm month of a stock row's värderingsdag (the same instant
+// idx_stock_transactions_valued_at is built on).
+const stockMonth = sql<string>`to_char(${stockValuedAt} AT TIME ZONE 'Europe/Stockholm', 'YYYY-MM')`;
 
 // Pegging (#9): what coverageParents loads for a set of parent TOs.
 export interface CoverageParentsLoad {
@@ -429,6 +456,7 @@ export function createPlanningRepository(db: Db) {
               orderQuantity: articles.orderQuantity,
               rounding: articles.rounding,
               manufacturingLeadTimeDays: articles.manufacturingLeadTimeDays,
+              forecastControlled: articles.forecastControlled,
               // Konfigurator: same left join as the article list's configuratorMode.
               configuratorMode: configuratorTemplates.mode,
             })
@@ -535,6 +563,7 @@ export function createPlanningRepository(db: Db) {
           orderQuantity: r.orderQuantity === null ? null : Number(r.orderQuantity),
           rounding: r.rounding === null ? null : Number(r.rounding),
           manufacturingLeadTimeDays: r.manufacturingLeadTimeDays,
+          forecastControlled: r.forecastControlled,
           configuratorMode: r.configuratorMode,
         })),
         salesRows: salesRows.map((r) => ({
@@ -677,9 +706,15 @@ export function createPlanningRepository(db: Db) {
           reorderPoint: articles.reorderPoint,
           orderQuantity: articles.orderQuantity,
           rounding: articles.rounding,
+          // Prognos (#10): the service builds the forecast rows for a
+          // prognosstyrd article; the template mode keeps the eligibility
+          // rule the same as the behovsberäkning's (isForecastArticle).
+          forecastControlled: articles.forecastControlled,
+          configuratorMode: configuratorTemplates.mode,
         })
         .from(articles)
         .innerJoin(units, eq(units.id, articles.unitId))
+        .leftJoin(configuratorTemplates, eq(configuratorTemplates.articleId, articles.id))
         .where(inArray(articles.id, ids));
       if (articleRows.length === 0) return result;
 
@@ -841,6 +876,8 @@ export function createPlanningRepository(db: Db) {
             reorderPoint: article.reorderPoint === null ? null : Number(article.reorderPoint),
             orderQuantity: article.orderQuantity === null ? null : Number(article.orderQuantity),
             rounding: article.rounding === null ? null : Number(article.rounding),
+            forecastControlled: article.forecastControlled,
+            configuratorMode: article.configuratorMode,
           },
           // onHand = usable (the calculation's start); blockedOnHand is shown only.
           onHand: stockByArticle.get(article.articleId)?.usable ?? 0,
@@ -870,6 +907,161 @@ export function createPlanningRepository(db: Db) {
         });
       }
       return result;
+    },
+
+    // --- Prognos (#10) -----------------------------------------------------
+
+    // The history window and the horizon (system settings, one query).
+    async forecastSettings(dbc: Db | Tx = db) {
+      return loadForecastSettings(dbc);
+    },
+
+    // Förbrukning per article and Stockholm month over [from, to] (both
+    // inclusive Stockholm days): ONE grouped query, one row per (article,
+    // month) with consumption; a month without a row consumed 0. `null`
+    // article ids = every article (the ABC classification's read). The
+    // range is applied to the värderingsdag instant so the expression index
+    // is used; the month is the same instant's Stockholm month.
+    async consumptionByMonth(
+      articleIds: string[] | null,
+      from: string,
+      to: string,
+      dbc: Db | Tx = db
+    ): Promise<{ articleId: string; month: ForecastMonth; consumed: number }[]> {
+      if (articleIds && articleIds.length === 0) return [];
+      // Bound as ISO text: a Date next to a SQL expression (not a column)
+      // has no column mapper, and the driver refuses it.
+      const fromInstant = new Date(stockholmInstant(from, "00:00")).toISOString();
+      const toInstant = new Date(stockholmInstant(addDays(to, 1), "00:00")).toISOString();
+      const rows = await dbc
+        .select({
+          articleId: stockTransactions.articleId,
+          month: stockMonth,
+          consumed: sql<string>`-sum(${stockTransactions.quantityDelta})`,
+        })
+        .from(stockTransactions)
+        .where(
+          and(
+            inArray(stockTransactions.transactionType, [...CONSUMPTION_TYPES]),
+            sql`${stockValuedAt} >= ${fromInstant}::timestamptz`,
+            sql`${stockValuedAt} < ${toInstant}::timestamptz`,
+            articleIds ? inArray(stockTransactions.articleId, [...new Set(articleIds)]) : undefined
+          )
+        )
+        .groupBy(stockTransactions.articleId, stockMonth);
+      return rows.map((r) => ({ articleId: r.articleId, month: r.month, consumed: Number(r.consumed) }));
+    },
+
+    // --- ABC-klassning (#10, etapp 2) -------------------------------------
+
+    // The period and the class limits (system settings, one query).
+    async abcSettings(dbc: Db | Tx = db) {
+      return loadAbcSettings(dbc);
+    },
+
+    // The classification's selection: active purchased and manufactured
+    // articles that are neither phantoms nor configurator templates (in
+    // either mode — a variant template's variants and a beställningsvara's
+    // configured TOs are what moves in stock, never the template itself),
+    // with the current standard cost and the Planering card's fields.
+    async abcArticles(dbc: Db | Tx = db): Promise<AbcArticleRow[]> {
+      const rows = await dbc
+        .select({
+          articleId: articles.id,
+          articleNumber: articles.articleNumber,
+          name: articles.name,
+          type: articles.type,
+          standardCost: articles.standardCost,
+          reorderPoint: articles.reorderPoint,
+          safetyStock: articles.safetyStock,
+          forecastControlled: articles.forecastControlled,
+        })
+        .from(articles)
+        .leftJoin(configuratorTemplates, eq(configuratorTemplates.articleId, articles.id))
+        .where(
+          and(
+            eq(articles.active, true),
+            eq(articles.isPhantom, false),
+            inArray(articles.type, ["purchased", "manufactured"]),
+            isNull(configuratorTemplates.articleId)
+          )
+        );
+      return rows.map((r) => ({
+        articleId: r.articleId,
+        articleNumber: r.articleNumber,
+        name: r.name,
+        type: r.type as "purchased" | "manufactured",
+        standardCost: r.standardCost === null ? null : Number(r.standardCost),
+        reorderPoint: r.reorderPoint === null ? null : Number(r.reorderPoint),
+        safetyStock: r.safetyStock === null ? null : Number(r.safetyStock),
+        forecastControlled: r.forecastControlled,
+      }));
+    },
+
+    // The Stockholm day of each article's first stock movement (any type) —
+    // the short-history rule's divisor (forecast.ts). Absent = never moved.
+    async firstMovementByArticle(articleIds: string[] | null, dbc: Db | Tx = db): Promise<Map<string, string>> {
+      if (articleIds && articleIds.length === 0) return new Map();
+      const rows = await dbc
+        .select({ articleId: stockTransactions.articleId, first: sql<Date>`min(${stockValuedAt})`.mapWith(stockTransactions.createdAt) })
+        .from(stockTransactions)
+        .where(articleIds ? inArray(stockTransactions.articleId, [...new Set(articleIds)]) : undefined)
+        .groupBy(stockTransactions.articleId);
+      return new Map(rows.map((r) => [r.articleId, stockholmDateOf(r.first)]));
+    },
+
+    // The articles' own quantities per month ("YYYY-MM" → quantity).
+    async ownForecastQuantities(articleIds: string[], dbc: Db | Tx = db): Promise<Map<string, Map<ForecastMonth, number>>> {
+      const out = new Map<string, Map<ForecastMonth, number>>();
+      if (articleIds.length === 0) return out;
+      const rows = await dbc
+        .select({ articleId: articleForecasts.articleId, month: articleForecasts.month, quantity: articleForecasts.quantity })
+        .from(articleForecasts)
+        .where(inArray(articleForecasts.articleId, [...new Set(articleIds)]));
+      for (const r of rows) {
+        const months = out.get(r.articleId) ?? new Map<ForecastMonth, number>();
+        months.set(r.month.slice(0, 7), Number(r.quantity));
+        out.set(r.articleId, months);
+      }
+      return out;
+    },
+
+    // PUT /articles/:id/forecast: replace the given months in ONE
+    // transaction — null deletes the own quantity (the average applies
+    // again), a number upserts it. Returns the months' values before and
+    // after for the händelselogg.
+    async replaceArticleForecasts(
+      articleId: string,
+      months: { month: ForecastMonth; quantity: number | null }[],
+      userId: string | null
+    ): Promise<{ before: Map<ForecastMonth, number>; after: Map<ForecastMonth, number> }> {
+      return db.transaction(async (tx) => {
+        const dates = months.map((m) => `${m.month}-01`);
+        const existing = await tx
+          .select({ month: articleForecasts.month, quantity: articleForecasts.quantity })
+          .from(articleForecasts)
+          .where(and(eq(articleForecasts.articleId, articleId), inArray(articleForecasts.month, dates)));
+        const before = new Map(existing.map((r) => [r.month.slice(0, 7), Number(r.quantity)]));
+        const after = new Map(before);
+        const toDelete = months.filter((m) => m.quantity === null).map((m) => `${m.month}-01`);
+        if (toDelete.length > 0) {
+          await tx.delete(articleForecasts).where(and(eq(articleForecasts.articleId, articleId), inArray(articleForecasts.month, toDelete)));
+          for (const m of months) if (m.quantity === null) after.delete(m.month);
+        }
+        const toWrite = months.filter((m): m is { month: ForecastMonth; quantity: number } => m.quantity !== null);
+        if (toWrite.length > 0) {
+          const now = new Date();
+          await tx
+            .insert(articleForecasts)
+            .values(toWrite.map((m) => ({ articleId, month: `${m.month}-01`, quantity: String(m.quantity), updatedAt: now, updatedBy: userId })))
+            .onConflictDoUpdate({
+              target: [articleForecasts.articleId, articleForecasts.month],
+              set: { quantity: sql`excluded.quantity`, updatedAt: now, updatedBy: userId },
+            });
+          for (const m of toWrite) after.set(m.month, m.quantity);
+        }
+        return { before, after };
+      });
     },
 
     // Tidsfasade förslag: the dating inputs for a set of TOs and the articles

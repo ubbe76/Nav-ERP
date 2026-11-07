@@ -231,14 +231,14 @@ describe("behovsberäkning — beställningsvara", () => {
     expect(created.errors[0]!.articleNumber).toBe(s.article.articleNumber);
   });
 
-  it("the overview of a component and the calc agree (closingBalance === projected − demandDerived) with a planned configured TO", async () => {
+  it("the overview of a component and the calc agree (closingBalance === projected + demandDerived) with a planned configured TO", async () => {
     const { s, row } = await confirmedRow();
     await mfg.createFromSalesOrderRow(row.id, {}, null);
     const rows = await list();
     for (const id of [s.parts.skruv.id, s.parts.plat.id, s.parts.f1.id, s.article.id]) {
       const calc = rows.find((r) => r.articleId === id && r.proposalKind !== "configured")!;
       const overview = await planning.getArticleOverview(id);
-      expect(overview.closingBalance).toBeCloseTo(calc.projected - calc.demandDerived, 4);
+      expect(overview.closingBalance).toBeCloseTo(calc.projected + calc.demandDerived, 4);
     }
     // The planned configured TO is seen ONCE in a component's overview: as
     // its material row, never as a planned-TO explosion of the template.

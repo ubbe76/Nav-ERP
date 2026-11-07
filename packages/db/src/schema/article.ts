@@ -2,11 +2,13 @@ import { sql } from "drizzle-orm";
 import {
   check,
   customType,
+  date,
   index,
   integer,
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -158,6 +160,12 @@ export const articles = pgTable("articles", {
   // Styrning (Monitor's Lagerstyrd/Orderstyrd) — information only; the
   // behovsberäkning reads the reorder point and safety stock, not this flag.
   stockControlled: boolean("stock_controlled").notNull().default(false),
+  // Prognosstyrd (#10, migration 0198): the behovsberäkning and the
+  // artikelöversikt add a forecast demand per month in the horizon — the
+  // average consumption over the history window, or the article's own
+  // quantity in article_forecasts — consumed by the month's real demand
+  // (planning/service/forecast.ts). Every other article behaves as before.
+  forecastControlled: boolean("forecast_controlled").notNull().default(false),
   packageTypeId: uuid("package_type_id").references(() => packageTypes.id, { onDelete: "restrict" }),
   // Frakt — "egna mått" (used when the article has no package type + antal
   // per kolli): kolliart (null = Paket), stapelbar, pallplatser and flakmeter.
@@ -373,5 +381,28 @@ export const bomComponents = pgTable(
     check("no_self_reference", sql`${table.parentArticleId} <> ${table.componentArticleId}`),
     index("idx_bom_parent").on(table.parentArticleId),
     index("idx_bom_component").on(table.componentArticleId),
+  ]
+);
+
+// Prognos (#10, migration 0198): the article's OWN forecast quantity for one
+// month — it wins over the average (forecast.ts). A missing row means the
+// average applies; null is never stored (PUT /articles/:id/forecast deletes
+// the row instead). `month` is always the first of the month (CHECK), the
+// quantity never negative.
+export const articleForecasts = pgTable(
+  "article_forecasts",
+  {
+    articleId: uuid("article_id")
+      .notNull()
+      .references(() => articles.id, { onDelete: "cascade" }),
+    month: date("month").notNull(),
+    quantity: numeric("quantity", { precision: 14, scale: 4 }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.articleId, table.month] }),
+    check("article_forecasts_month_first_of_month", sql`extract(day from ${table.month}) = 1`),
+    check("article_forecasts_quantity_nonnegative", sql`${table.quantity} >= 0`),
   ]
 );

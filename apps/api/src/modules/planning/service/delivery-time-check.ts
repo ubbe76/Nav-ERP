@@ -20,7 +20,7 @@
 // delivery date.
 import { roundUpToMultiple } from "@navet/shared";
 import { explodeOneLevel, type BomEdge } from "./requirements-calc.js";
-import type { ArticleOverviewRow } from "./article-overview.js";
+import { isFirmOverviewRow, type ArticleOverviewRow } from "./article-overview.js";
 import {
   mondayOf,
   routingOperationMinutes,
@@ -500,6 +500,9 @@ function runCheck(input: DeliveryTimeCheckInput, options: CheckOptions): CheckRu
       pool.add({ date: t0, delta: overview.onHand, source: overview.onHand > 0 ? { kind: "stock" } : null });
     }
     for (const row of overview?.rows ?? []) {
+      // Prognos (#10): a forecast row never draws from the pool — a promised
+      // delivery date rests on firm demand only.
+      if (!isFirmOverviewRow(row)) continue;
       if (row.direction === "supply") {
         // Undated supply counts now (the overview counts it too), late
         // supply counts now as well — both flagged so the row can say so.

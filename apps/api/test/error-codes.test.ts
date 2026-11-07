@@ -1,6 +1,7 @@
 import {
   ComponentMoveChangedError,
   DeliveryTimeChangedError,
+  ForecastMonthOutsideHorizonError,
   MissingComponentsChangedError,
   NothingToCreateError,
   NothingToReserveError,
@@ -918,6 +919,8 @@ const cases: Array<[Error, string]> = [
   [new FallbackLocationNotBlockableError(), ERROR_CODES.FALLBACK_LOCATION_NOT_BLOCKABLE],
   [new StockLocationBlockedError("Huvudlager — K1"), ERROR_CODES.STOCK_LOCATION_BLOCKED],
   [new DefaultLocationBlockedError(), ERROR_CODES.DEFAULT_LOCATION_BLOCKED],
+  // Prognos (#10)
+  [new ForecastMonthOutsideHorizonError("2031-01"), ERROR_CODES.FORECAST_MONTH_OUTSIDE_HORIZON],
   // Flera lagerplatser per artikel
   [new ArticleLocationInvalidError("Lagerplatsen Huvudlager — K1 är spärrad"), ERROR_CODES.ARTICLE_LOCATION_INVALID],
 ];

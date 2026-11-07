@@ -447,6 +447,11 @@ export const LAGER_SECTIONS: ModuleNavSection[] = [
         description: "Saldo per artikel och lagerplats, härlett ur transaktionsloggen.",
       },
       {
+        href: "/lager/abc-analys",
+        title: "ABC-analys",
+        description: "Artiklarna klassade A, B och C på förbrukningsvärde — underlag för beställningspunkt och säkerhetslager.",
+      },
+      {
         href: "/lager/transaktioner",
         title: "Transaktioner",
         description: "Hela lagerloggen — varje in- och utflöde med typ, antal, plats och referens.",

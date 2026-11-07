@@ -10,7 +10,7 @@ export default async function ArticleDetailPage(props: { params: Promise<{ id: s
   const params = await props.params;
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
 
-  const article = await apiGet<Article>(`/api/v1/articles/${params.id}`, cookieHeader).catch(() => null);
+  const article = await apiGet<Article>(`/api/v1/articles/${params.id}?withAbc=true`, cookieHeader).catch(() => null);
   if (!article) notFound();
 
   const [bom, bomTree, balancesPage, calculations, routing, workCenters, groups, articleLocations] = await Promise.all([

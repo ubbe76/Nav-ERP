@@ -49,3 +49,87 @@ export function decodeLeadTimeDefaults(get: (key: string) => string | null | und
     queueDays: decodeLeadTimeSettingDays(get(PLANNING_QUEUE_TIME_DAYS_KEY), DEFAULT_QUEUE_TIME_DAYS),
   };
 }
+
+// Prognos (#10): the history window (whole calendar months before the
+// current one the average consumption is taken over) and the horizon (the
+// current month plus the following ones that get a forecast demand). Whole
+// months, 1–36 and 1–24; absent or junk ⇒ the defaults 12 and 6. The
+// planning run and the settings page decode through this one function.
+export const PLANNING_FORECAST_HISTORY_MONTHS_KEY = "planning_forecast_history_months";
+export const PLANNING_FORECAST_HORIZON_MONTHS_KEY = "planning_forecast_horizon_months";
+export const DEFAULT_FORECAST_HISTORY_MONTHS = 12;
+export const DEFAULT_FORECAST_HORIZON_MONTHS = 6;
+export const MAX_FORECAST_HISTORY_MONTHS = 36;
+export const MAX_FORECAST_HORIZON_MONTHS = 24;
+
+// Absent, blank or junk (NaN, not a whole number, below 1, above the cap)
+// ⇒ the fallback.
+export function decodeForecastMonths(raw: string | null | undefined, fallback: number, max: number): number {
+  if (raw == null || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > max) return fallback;
+  return parsed;
+}
+
+export interface ForecastSettings {
+  historyMonths: number;
+  horizonMonths: number;
+}
+
+export function decodeForecastSettings(get: (key: string) => string | null | undefined): ForecastSettings {
+  return {
+    historyMonths: decodeForecastMonths(get(PLANNING_FORECAST_HISTORY_MONTHS_KEY), DEFAULT_FORECAST_HISTORY_MONTHS, MAX_FORECAST_HISTORY_MONTHS),
+    horizonMonths: decodeForecastMonths(get(PLANNING_FORECAST_HORIZON_MONTHS_KEY), DEFAULT_FORECAST_HORIZON_MONTHS, MAX_FORECAST_HORIZON_MONTHS),
+  };
+}
+
+// ABC-klassning (#10, etapp 2): the period (whole months before the current
+// one the förbrukningsvärde is summed over, 1–36, default 12) and the class
+// limits as cumulative percent of the total value — A while the cumulative
+// share before the article is below the A limit, B while below the B limit,
+// C the rest (defaults 80 and 95). The limits are a pair: 1 ≤ A < B ≤ 100,
+// whole percent. A stored pair that breaks the rule (hand-edited rows, or
+// one key written without the other) decodes to BOTH defaults, never to a
+// half-valid pair. The planning read and the settings page decode here.
+export const PLANNING_ABC_PERIOD_MONTHS_KEY = "planning_abc_period_months";
+export const PLANNING_ABC_CLASS_A_PERCENT_KEY = "planning_abc_class_a_percent";
+export const PLANNING_ABC_CLASS_B_PERCENT_KEY = "planning_abc_class_b_percent";
+export const DEFAULT_ABC_PERIOD_MONTHS = 12;
+export const DEFAULT_ABC_CLASS_A_PERCENT = 80;
+export const DEFAULT_ABC_CLASS_B_PERCENT = 95;
+export const MAX_ABC_PERIOD_MONTHS = 36;
+
+export interface AbcLimits {
+  aPercent: number;
+  bPercent: number;
+}
+
+export interface AbcSettings extends AbcLimits {
+  periodMonths: number;
+}
+
+// 1 ≤ A < B ≤ 100, both whole numbers — ONE rule for the decode, the PATCH
+// (shared/system.ts mirrors it in zod) and the classification.
+export function validAbcLimits(aPercent: unknown, bPercent: unknown): boolean {
+  return (
+    Number.isInteger(aPercent) &&
+    Number.isInteger(bPercent) &&
+    (aPercent as number) >= 1 &&
+    (aPercent as number) < (bPercent as number) &&
+    (bPercent as number) <= 100
+  );
+}
+
+export function decodeAbcSettings(get: (key: string) => string | null | undefined): AbcSettings {
+  const rawA = get(PLANNING_ABC_CLASS_A_PERCENT_KEY);
+  const rawB = get(PLANNING_ABC_CLASS_B_PERCENT_KEY);
+  const a = rawA == null || rawA.trim() === "" ? DEFAULT_ABC_CLASS_A_PERCENT : Number(rawA);
+  const b = rawB == null || rawB.trim() === "" ? DEFAULT_ABC_CLASS_B_PERCENT : Number(rawB);
+  const limits: AbcLimits = validAbcLimits(a, b)
+    ? { aPercent: a, bPercent: b }
+    : { aPercent: DEFAULT_ABC_CLASS_A_PERCENT, bPercent: DEFAULT_ABC_CLASS_B_PERCENT };
+  return {
+    periodMonths: decodeForecastMonths(get(PLANNING_ABC_PERIOD_MONTHS_KEY), DEFAULT_ABC_PERIOD_MONTHS, MAX_ABC_PERIOD_MONTHS),
+    ...limits,
+  };
+}

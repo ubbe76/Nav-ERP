@@ -266,6 +266,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "fallback-location-not-blockable": "Reservplatsen *** kan inte spärras — resten av ett uttag med Automatiskt hamnar där.",
   // The server names the place (Swedish).
   "stock-location-blocked": serverMessage("Lagerplatsen är spärrad — välj en annan plats eller Automatiskt."),
+  "forecast-month-outside-horizon": "Månaden ligger utanför prognoshorisonten — bara månader i horisonten kan få ett eget antal.",
   "default-location-blocked": "Lagerplatsen är spärrad och kan inte väljas som artikelns lagerplats — välj en annan.",
   // Lager-flikens Lagerplatser: the server names the place and the rule (Swedish).
   "article-location-invalid": serverMessage("Lagerplatserna kunde inte sparas — kontrollera huvudplatsen och de alternativa platserna."),

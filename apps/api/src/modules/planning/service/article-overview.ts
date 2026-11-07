@@ -4,8 +4,10 @@
 // flat rows, this module owns the rules. It deliberately shares the status
 // sets and the phantom-dissolving explosion with the behovsberäkning so the
 // two can never disagree about what counts — closingBalance equals the MRP
-// row's projected minus demandDerived (derived demand comes from order
-// PROPOSALS, which are not orders yet and therefore have no row here).
+// row's projected PLUS demandDerived (projected subtracts the derived demand,
+// which comes from order PROPOSALS — not orders yet, so no row here), minus
+// the difference between this overview's forecast and the calc's
+// demandForecast (the calc lets derived demand consume the forecast too).
 import {
   DEMAND_SALES_STATUSES,
   MATERIAL_MO_STATUSES,
@@ -19,6 +21,7 @@ import {
   type SalesOrderStatus,
 } from "./requirements-calc.js";
 import type { PartnerDeliveryFields } from "../../system/service/delivery-days.js";
+import { forecastWeeklyDemands, type ArticleForecastInput, type DatedDemand, type ForecastCalendar } from "./forecast.js";
 
 export interface OverviewArticle {
   articleId: string;
@@ -33,6 +36,10 @@ export interface OverviewArticle {
   // Same article shape as RequirementsArticle so the two readers never drift;
   // the overview itself rounds nothing.
   rounding: number | null;
+  // Prognosstyrd (#10) — passed through; the service decides whether to
+  // build `ArticleOverviewInput.forecast` from it. Optional for the fixtures.
+  forecastControlled?: boolean;
+  configuratorMode?: "variants" | "to_order" | null;
 }
 
 export interface OverviewSalesRow {
@@ -123,6 +130,10 @@ export interface ArticleOverviewInput {
   bomEdges: BomEdge[];
   phantomIds: string[];
   primarySupplier: { supplierId: string; supplierName: string; leadTimeDays: number | null } | null;
+  // Prognos (#10): present only for a prognosstyrd article — the builder adds
+  // the weekly forecast demands (forecast.ts) consumed by the demand rows
+  // above, the same way the behovsberäkning does. Absent = no forecast rows.
+  forecast?: { input: ArticleForecastInput; calendar: ForecastCalendar };
 }
 
 // What the repository loads: the input without the TO start dates, which the
@@ -138,7 +149,9 @@ export type OverviewRowKind =
   | "mo_material"
   | "mo_planned_material"
   | "manufacturing_order"
-  | "purchase_order";
+  | "purchase_order"
+  // Prognos (#10): one week's forecast demand — no document behind it.
+  | "forecast";
 
 export interface ArticleOverviewRow {
   // Kind-prefixed source id — unique across kinds, stable between reloads.
@@ -146,8 +159,9 @@ export interface ArticleOverviewRow {
   kind: OverviewRowKind;
   direction: "demand" | "supply";
   date: string | null; // YYYY-MM-DD; null = the order has no date yet
-  documentType: "sales_order" | "purchase_order" | "manufacturing_order";
-  documentId: string;
+  // null only on `forecast` rows (documentNumber then reads "Prognos 2026-11 · v.47").
+  documentType: "sales_order" | "purchase_order" | "manufacturing_order" | null;
+  documentId: string | null;
   documentNumber: string;
   status: string;
   // Customer / supplier name; for MO material the parent article.
@@ -175,7 +189,24 @@ const KIND_ORDER: Record<OverviewRowKind, number> = {
   sales_order: 2,
   mo_material: 3,
   mo_planned_material: 4,
+  forecast: 5,
 };
+
+// Inte ett skarpt behov (#10): a forecast row is planned for by the
+// behovsberäkning but never moves a färdigdatum suggestion, a pegging
+// allocation or a promised delivery date — pegOverview (and findFirmDemand
+// on top of it) and Leveranstidskontrollen's pools skip the rows this says
+// no to. ONE filter for all three.
+export function isFirmOverviewRow(row: Pick<ArticleOverviewRow, "kind">): boolean {
+  return row.kind !== "forecast";
+}
+
+// The firm demand rows as the forecast rule reads them (forecast.ts): the
+// dated quantities that consume a month's forecast. Shared by the builder
+// and GET /articles/:id/forecast so both see the same real demand.
+export function firmDemandsOf(rows: readonly ArticleOverviewRow[]): DatedDemand[] {
+  return rows.filter((r) => r.direction === "demand" && isFirmOverviewRow(r)).map((r) => ({ date: r.date, quantity: -r.quantity }));
+}
 
 function compareStrings(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -306,6 +337,31 @@ export function buildArticleOverview(input: ArticleOverviewInput): ArticleOvervi
       balance: 0,
       isDraft: false,
     });
+  }
+
+  // Prognos (#10): the weekly forecast demands, consumed by the demand rows
+  // above — the same rule and the same dated rows as the behovsberäkning's
+  // consumed by the firm rows only (the calc also lets derived demand consume
+  // it), so the invariant is closingBalance === projected + demandDerived −
+  // (this forecast − the calc's demandForecast).
+  if (input.forecast) {
+    const pieces = forecastWeeklyDemands(input.forecast.input, firmDemandsOf(rows), input.forecast.calendar);
+    for (const piece of pieces) {
+      rows.push({
+        id: `fc:${piece.month}:${piece.date}`,
+        kind: "forecast",
+        direction: "demand",
+        date: piece.date,
+        documentType: null,
+        documentId: null,
+        documentNumber: piece.label,
+        status: "forecast",
+        partner: null,
+        quantity: -piece.quantity,
+        balance: 0,
+        isDraft: false,
+      });
+    }
   }
 
   rows.sort(compareOverviewRows);
