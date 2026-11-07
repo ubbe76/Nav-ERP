@@ -362,8 +362,13 @@ export function createArticleRepository(db: Db) {
       return row ?? null;
     },
 
-    async list(query: ListArticlesQuery) {
+    // `onlyIds`: the ABC-klassning filter (#10) — the class is derived for
+    // the whole register by the planning module, so the service passes the
+    // matching ids and `total` follows the filter (the TO list's
+    // component_late works the same way).
+    async list(query: ListArticlesQuery, opts: { onlyIds?: string[] } = {}) {
       const conditions = [];
+      if (opts.onlyIds) conditions.push(inArray(articles.id, opts.onlyIds));
       if (query.search) {
         const pattern = ilikePattern(query.search);
         conditions.push(or(ilike(articles.articleNumber, pattern), ilike(articles.name, pattern)));

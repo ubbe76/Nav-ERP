@@ -175,6 +175,16 @@ const systemSettingsFieldsSchema = z.object({
     // demand, 1–24, default 6).
     planningForecastHistoryMonths: z.number().int().min(1).max(36).optional(),
     planningForecastHorizonMonths: z.number().int().min(1).max(24).optional(),
+    // ABC-klassning (#10): the period (whole months before the current one
+    // the förbrukningsvärde is summed over, 1–36, default 12) and the class
+    // limits as cumulative percent of the total value (A below the first,
+    // B below the second, C the rest; defaults 80 and 95). The limits are a
+    // pair: 1 ≤ A < B ≤ 100, so they are always sent together (the refine
+    // on updateSystemSettingsSchema) — a stored pair that breaks the rule
+    // decodes to the defaults (plan-settings.ts).
+    planningAbcPeriodMonths: z.number().int().min(1).max(36).optional(),
+    planningAbcClassAPercent: z.number().int().min(1).max(100).optional(),
+    planningAbcClassBPercent: z.number().int().min(1).max(100).optional(),
     // Fasta leveransdagar: the default mode and transit days for suppliers
     // and customers without their own (delivery-days.ts decodes the keys).
     supplierDeliveryDayMode: deliveryDayModeSchema.optional(),
@@ -262,10 +272,15 @@ const systemSettingsFieldsSchema = z.object({
       .optional(),
   });
 
-export const updateSystemSettingsSchema = systemSettingsFieldsSchema.refine(
-  (data) => Object.keys(data).length > 0,
-  "At least one field must be provided"
-);
+export const updateSystemSettingsSchema = systemSettingsFieldsSchema
+  .refine((data) => Object.keys(data).length > 0, "At least one field must be provided")
+  // ABC-klassning: the limits are a pair — given one, give both, and A < B.
+  .refine(
+    (data) =>
+      (data.planningAbcClassAPercent === undefined) === (data.planningAbcClassBPercent === undefined) &&
+      (data.planningAbcClassAPercent === undefined || data.planningAbcClassAPercent < data.planningAbcClassBPercent!),
+    { message: "ABC class limits must be given together with A < B", path: ["planningAbcClassBPercent"] }
+  );
 export type UpdateSystemSettingsInput = z.infer<typeof updateSystemSettingsSchema>;
 
 // PATCH /settings/posting — exactly the keys Ekonomi → Konteringsregler

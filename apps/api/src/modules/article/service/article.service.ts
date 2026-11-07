@@ -1,5 +1,5 @@
 import { renderLabelsPdf, type LabelInput } from "../../mail/service/label-pdf.js";
-import type { ArticleLabelsInput } from "@navet/shared";
+import type { AbcClass, ArticleLabelsInput } from "@navet/shared";
 import {
   articleCopyPartAllowed,
   deriveLoadingMeters,
@@ -324,7 +324,20 @@ function groupMarkups(row: { generalMarkupPercent: string | null; materialMarkup
 // `audit` is optional so the many tests that build the service with the
 // repository alone keep compiling; app.ts wires the real writer. Only the
 // varugrupp's markups write to it (article_group / markups_changed).
-export function createArticleService(repo: ArticleRepository, audit: AuditWriter = { log: async () => {} }) {
+// ABC-klassning (#10, etapp 2): the class per article, derived for the whole
+// register by the planning module (abc.ts) and bound late in app.ts — the
+// article module must not depend on planning. Absent (the fixtures) ⇒ every
+// article's abcClass is null and the abcClass filter matches nothing.
+export interface AbcClassReader {
+  abcClassByArticle(): Promise<ReadonlyMap<string, AbcClass>>;
+}
+
+export function createArticleService(
+  repo: ArticleRepository,
+  audit: AuditWriter = { log: async () => {} },
+  readers: { abc?: AbcClassReader } = {}
+) {
+  const abcClasses = async (): Promise<ReadonlyMap<string, AbcClass> | null> => (readers.abc ? readers.abc.abcClassByArticle() : null);
   // article_group / markups_changed — only when a price markup actually
   // changed (the dialog always sends both fields). Kundpriser and prislistor
   // are logged the same way: the markup is the same kind of pricing policy.
@@ -480,12 +493,34 @@ export function createArticleService(repo: ArticleRepository, audit: AuditWriter
       return renderLabelsPdf(labels, input.format, input.start);
     },
 
-    async getArticle(id: string) {
-      return repo.findById(id);
+    // `withAbc` (the card, GET /articles/:id?withAbc=true): its ABC class
+    // too (null outside the classification's selection or without a reader)
+    // — one whole classification per read, so it is opt-in: the
+    // configurator and other modules call getArticle many times per request.
+    async getArticle(id: string, opts: { withAbc?: boolean } = {}) {
+      const article = await repo.findById(id);
+      if (!article) return null;
+      if (!opts.withAbc) return article;
+      const classes = await abcClasses();
+      return { ...article, abcClass: classes?.get(id) ?? null };
     },
 
+    // ABC-klassning: the class per row from ONE classification, only when
+    // asked for (`withAbc`, or the abcClass filter, which needs it) — the
+    // ArticlePicker searches this list on every keystroke. The filter
+    // becomes an id list for the repository so `total` follows it.
     async listArticles(query: ListArticlesQuery) {
-      return repo.list(query);
+      const filtering = (query.abcClass?.length ?? 0) > 0;
+      if (!filtering && query.withAbc !== true) return repo.list(query);
+      const classes = await abcClasses();
+      let onlyIds: string[] | undefined;
+      if (filtering) {
+        const wanted = new Set<AbcClass>(query.abcClass);
+        onlyIds = classes ? [...classes].filter(([, c]) => wanted.has(c)).map(([id]) => id) : [];
+        if (onlyIds.length === 0) return { rows: [], total: 0 };
+      }
+      const page = await repo.list(query, { onlyIds });
+      return { ...page, rows: page.rows.map((row) => ({ ...row, abcClass: classes?.get(row.id) ?? null })) };
     },
 
     // `userId` is only read by the händelselogg below (Prognosstyrd); the

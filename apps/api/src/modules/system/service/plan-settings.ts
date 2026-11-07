@@ -82,3 +82,54 @@ export function decodeForecastSettings(get: (key: string) => string | null | und
     horizonMonths: decodeForecastMonths(get(PLANNING_FORECAST_HORIZON_MONTHS_KEY), DEFAULT_FORECAST_HORIZON_MONTHS, MAX_FORECAST_HORIZON_MONTHS),
   };
 }
+
+// ABC-klassning (#10, etapp 2): the period (whole months before the current
+// one the förbrukningsvärde is summed over, 1–36, default 12) and the class
+// limits as cumulative percent of the total value — A while the cumulative
+// share before the article is below the A limit, B while below the B limit,
+// C the rest (defaults 80 and 95). The limits are a pair: 1 ≤ A < B ≤ 100,
+// whole percent. A stored pair that breaks the rule (hand-edited rows, or
+// one key written without the other) decodes to BOTH defaults, never to a
+// half-valid pair. The planning read and the settings page decode here.
+export const PLANNING_ABC_PERIOD_MONTHS_KEY = "planning_abc_period_months";
+export const PLANNING_ABC_CLASS_A_PERCENT_KEY = "planning_abc_class_a_percent";
+export const PLANNING_ABC_CLASS_B_PERCENT_KEY = "planning_abc_class_b_percent";
+export const DEFAULT_ABC_PERIOD_MONTHS = 12;
+export const DEFAULT_ABC_CLASS_A_PERCENT = 80;
+export const DEFAULT_ABC_CLASS_B_PERCENT = 95;
+export const MAX_ABC_PERIOD_MONTHS = 36;
+
+export interface AbcLimits {
+  aPercent: number;
+  bPercent: number;
+}
+
+export interface AbcSettings extends AbcLimits {
+  periodMonths: number;
+}
+
+// 1 ≤ A < B ≤ 100, both whole numbers — ONE rule for the decode, the PATCH
+// (shared/system.ts mirrors it in zod) and the classification.
+export function validAbcLimits(aPercent: unknown, bPercent: unknown): boolean {
+  return (
+    Number.isInteger(aPercent) &&
+    Number.isInteger(bPercent) &&
+    (aPercent as number) >= 1 &&
+    (aPercent as number) < (bPercent as number) &&
+    (bPercent as number) <= 100
+  );
+}
+
+export function decodeAbcSettings(get: (key: string) => string | null | undefined): AbcSettings {
+  const rawA = get(PLANNING_ABC_CLASS_A_PERCENT_KEY);
+  const rawB = get(PLANNING_ABC_CLASS_B_PERCENT_KEY);
+  const a = rawA == null || rawA.trim() === "" ? DEFAULT_ABC_CLASS_A_PERCENT : Number(rawA);
+  const b = rawB == null || rawB.trim() === "" ? DEFAULT_ABC_CLASS_B_PERCENT : Number(rawB);
+  const limits: AbcLimits = validAbcLimits(a, b)
+    ? { aPercent: a, bPercent: b }
+    : { aPercent: DEFAULT_ABC_CLASS_A_PERCENT, bPercent: DEFAULT_ABC_CLASS_B_PERCENT };
+  return {
+    periodMonths: decodeForecastMonths(get(PLANNING_ABC_PERIOD_MONTHS_KEY), DEFAULT_ABC_PERIOD_MONTHS, MAX_ABC_PERIOD_MONTHS),
+    ...limits,
+  };
+}

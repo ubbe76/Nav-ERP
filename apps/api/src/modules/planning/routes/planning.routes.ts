@@ -7,12 +7,13 @@ import {
   createPlanningOrdersSchema,
   deliveryTimeCheckSchema,
   dueDateSuggestionQuerySchema,
+  listAbcQuerySchema,
   listRequirementsQuerySchema,
   missingComponentsSchema,
   moveOperationSchema,
 } from "@navet/shared";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
-import { requirementsExportColumns } from "../service/export-columns.js";
+import { abcExportColumns, requirementsExportColumns } from "../service/export-columns.js";
 import {
   ArticleNotFoundError,
   ComponentMoveChangedError,
@@ -31,6 +32,8 @@ import {
   PlanWeekInPastError,
   SalesOrderNotFoundError,
   SalesOrderNotOpenError,
+  type AbcList,
+  type AbcRow,
   type PlanningService,
 } from "../service/planning.service.js";
 import {
@@ -50,7 +53,7 @@ import {
 import { ConfiguratorInvalidConfigurationError, ConfiguratorModeChangedError, ConfiguratorNotToOrderModeError } from "../../configurator/service/configurator.errors.js";
 import { InvalidStatusTransitionError as SalesStatusError } from "../../sales/service/sales.service.js";
 import { errorBody } from "../../system/service/error-body.js";
-import { articleCardWrite, DELIVERY_CHECK, MO_READ, OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
+import { articleCardWrite, canSeePrices, DELIVERY_CHECK, MO_READ, OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
 
 export async function planningRoutes(app: FastifyInstance, opts: { service: PlanningService }) {
   const { service } = opts;
@@ -68,6 +71,37 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
     columns: requirementsExportColumns,
     // One line per proposal (tidsfasade förslag).
     fetch: (query) => service.listRequirementsForExport(query),
+  });
+
+  // ABC-klassning (#10, etapp 2): derived at every read like the
+  // behovsberäkning and read with the module's rule (office) like it — the
+  // page is a planning analysis with values, not something the workshop
+  // profile needs (the article register shows the class alone under
+  // OVERVIEW_READ). Prices are office data: without canSeePrices the price
+  // columns are nulled (same response shape, like GET /articles) and the
+  // CSV leaves them out.
+  type PriceHidden<T, K extends keyof T> = Omit<T, K> & { [P in K]: null };
+  type AbcRowWithoutPrices = PriceHidden<AbcRow, "standardCost" | "value" | "share" | "cumulativeShare">;
+  type AbcListWithoutPrices = Omit<AbcList, "rows" | "summary"> & {
+    rows: AbcRowWithoutPrices[];
+    summary: PriceHidden<AbcList["summary"][number], "value" | "share">[];
+  };
+  const hideAbcPrices = (list: AbcList): AbcListWithoutPrices => ({
+    ...list,
+    rows: list.rows.map((r) => ({ ...r, standardCost: null, value: null, share: null, cumulativeShare: null })),
+    summary: list.summary.map((s) => ({ ...s, value: null, share: null })),
+  });
+  app.get("/planning/abc", async (req) => {
+    const list = await service.listAbc(listAbcQuerySchema.parse(req.query));
+    return canSeePrices(req.user!) ? list : hideAbcPrices(list);
+  });
+
+  registerListCsvRoute(app, {
+    path: "/planning/abc/csv",
+    querySchema: listAbcQuerySchema,
+    filenameBase: "abc-analys",
+    columns: (req) => abcExportColumns(canSeePrices(req.user!)),
+    fetch: (query) => service.listAbc(query),
   });
 
   // Artikelöversikt — per-article subresource served from the module that

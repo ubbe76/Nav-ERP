@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { orderRowConfigurationInputSchema } from "./configurator.js";
 import { listQuerySchema } from "./list.js";
+import { abcClassListParam } from "./abc.js";
 import { businessDateSchema } from "./business-date.js";
 
 // Behovsberäkning (MRP light) — query and order-creation schemas. The
@@ -33,6 +34,16 @@ export const listRequirementsQuerySchema = listQuerySchema.extend({
   latest: z.enum(["late", "this_week", "next_week", "four_weeks"]).optional(),
 });
 export type ListRequirementsQuery = z.infer<typeof listRequirementsQuerySchema>;
+
+// ABC-klassning (#10, etapp 2): GET /planning/abc — the list pattern over a
+// classification that is computed for the whole selection at every read
+// (the cumulative share needs the total), then filtered and paged in
+// memory. `class` takes a comma-separated list ("A,B").
+export const listAbcQuerySchema = listQuerySchema.extend({
+  class: abcClassListParam(),
+  type: z.enum(["purchased", "manufactured"]).optional(),
+});
+export type ListAbcQuery = z.infer<typeof listAbcQuerySchema>;
 
 // Beläggning (E2) — the capacity matrix is a whole-dataset derivation, not a
 // paged list; the only knobs are the horizon and an optional group filter.

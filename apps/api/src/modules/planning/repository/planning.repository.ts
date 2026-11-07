@@ -58,7 +58,7 @@ import type {
 import type { LeadTimeDefaults } from "../service/manufacturing-lead-time.js";
 import { addDays, stockholmDateOf, stockholmInstant, type PartnerDeliveryFields } from "../../system/service/delivery-days.js";
 import { stockValuedAt } from "../../stock/repository/valued-at.js";
-import { loadForecastSettings } from "../../system/repository/plan-settings.js";
+import { loadAbcSettings, loadForecastSettings } from "../../system/repository/plan-settings.js";
 import type { ForecastMonth } from "../service/forecast.js";
 import { loadPriceBreaks } from "../../purchase/repository/price-breaks.js";
 import type { CapacityInput, OperationResourceOption, PlannedWeek } from "../service/capacity-calc.js";
@@ -90,6 +90,18 @@ async function operationTimeOnResources(dbc: Db | Tx, orderFilter: SQL | undefin
   return new Map(rows.map((row) => [row.moOperationId, { timeOnCurrentResource: row.onCurrent, timeOnOtherResource: row.onOther }]));
 }
 const NO_TIME = { timeOnCurrentResource: false, timeOnOtherResource: false };
+
+// ABC-klassning (#10): one selected article as abcArticles returns it.
+export interface AbcArticleRow {
+  articleId: string;
+  articleNumber: string;
+  name: string;
+  type: "purchased" | "manufactured";
+  standardCost: number | null;
+  reorderPoint: number | null;
+  safetyStock: number | null;
+  forecastControlled: boolean;
+}
 
 export interface PlanningArticleInfo {
   articleId: string;
@@ -938,6 +950,52 @@ export function createPlanningRepository(db: Db) {
         )
         .groupBy(stockTransactions.articleId, stockMonth);
       return rows.map((r) => ({ articleId: r.articleId, month: r.month, consumed: Number(r.consumed) }));
+    },
+
+    // --- ABC-klassning (#10, etapp 2) -------------------------------------
+
+    // The period and the class limits (system settings, one query).
+    async abcSettings(dbc: Db | Tx = db) {
+      return loadAbcSettings(dbc);
+    },
+
+    // The classification's selection: active purchased and manufactured
+    // articles that are neither phantoms nor configurator templates (in
+    // either mode — a variant template's variants and a beställningsvara's
+    // configured TOs are what moves in stock, never the template itself),
+    // with the current standard cost and the Planering card's fields.
+    async abcArticles(dbc: Db | Tx = db): Promise<AbcArticleRow[]> {
+      const rows = await dbc
+        .select({
+          articleId: articles.id,
+          articleNumber: articles.articleNumber,
+          name: articles.name,
+          type: articles.type,
+          standardCost: articles.standardCost,
+          reorderPoint: articles.reorderPoint,
+          safetyStock: articles.safetyStock,
+          forecastControlled: articles.forecastControlled,
+        })
+        .from(articles)
+        .leftJoin(configuratorTemplates, eq(configuratorTemplates.articleId, articles.id))
+        .where(
+          and(
+            eq(articles.active, true),
+            eq(articles.isPhantom, false),
+            inArray(articles.type, ["purchased", "manufactured"]),
+            isNull(configuratorTemplates.articleId)
+          )
+        );
+      return rows.map((r) => ({
+        articleId: r.articleId,
+        articleNumber: r.articleNumber,
+        name: r.name,
+        type: r.type as "purchased" | "manufactured",
+        standardCost: r.standardCost === null ? null : Number(r.standardCost),
+        reorderPoint: r.reorderPoint === null ? null : Number(r.reorderPoint),
+        safetyStock: r.safetyStock === null ? null : Number(r.safetyStock),
+        forecastControlled: r.forecastControlled,
+      }));
     },
 
     // The Stockholm day of each article's first stock movement (any type) —

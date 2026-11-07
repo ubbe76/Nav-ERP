@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { customers, db, type Db } from "@navet/db";
 import { createArticleRepository, insertArticle } from "./modules/article/repository/article.repository.js";
 import { insertBomRows } from "./modules/article/repository/bom-write.js";
-import { createArticleService } from "./modules/article/service/article.service.js";
+import { createArticleService, type AbcClassReader } from "./modules/article/service/article.service.js";
 import { articleRoutes } from "./modules/article/routes/article.routes.js";
 import { createAuthRepository } from "./modules/auth/repository/auth.repository.js";
 import { createAuthService } from "./modules/auth/service/auth.service.js";
@@ -300,7 +300,13 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   const permissionGroupService = createPermissionGroupService(createPermissionGroupRepository(database));
   const userSettingsService = createUserSettingsService(createUserSettingsRepository(database));
   // audit: the varugrupp's price markups (#16).
-  const articleService = createArticleService(createArticleRepository(database), auditRepository);
+  // ABC-klassning (#10): the article register's class column/filter and
+  // the card's class come from the planning service, built far below —
+  // bound late like planReaderRef.
+  const abcClassRef: { current: AbcClassReader | null } = { current: null };
+  const articleService = createArticleService(createArticleRepository(database), auditRepository, {
+    abc: { abcClassByArticle: () => abcClassRef.current!.abcClassByArticle() },
+  });
   // CSV import (Monitor G5): articles now; customers/suppliers reuse the
   // same module later. Admin-only routes.
   const importService = createImportService(createImportRepository(database), {
@@ -754,6 +760,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     salesOrderDates: salesService,
   });
   planReaderRef.current = planningService;
+  abcClassRef.current = planningService;
   // Aviseringar — derived at every read. The behovsberäkning (through its
   // cache) and the TO list's Sen come from the planning service; the
   // "due within N days" window from the system settings.

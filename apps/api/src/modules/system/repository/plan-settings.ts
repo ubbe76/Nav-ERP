@@ -1,14 +1,19 @@
 import { eq, inArray } from "drizzle-orm";
 import { systemSettings, type Db, type Tx } from "@navet/db";
 import {
+  decodeAbcSettings,
   decodeForecastSettings,
   decodeLeadTimeDefaults,
   decodeLongOperationWeeks,
+  PLANNING_ABC_CLASS_A_PERCENT_KEY,
+  PLANNING_ABC_CLASS_B_PERCENT_KEY,
+  PLANNING_ABC_PERIOD_MONTHS_KEY,
   PLANNING_DEFAULT_LEAD_TIME_DAYS_KEY,
   PLANNING_FORECAST_HISTORY_MONTHS_KEY,
   PLANNING_FORECAST_HORIZON_MONTHS_KEY,
   PLANNING_LONG_OPERATION_WEEKS_KEY,
   PLANNING_QUEUE_TIME_DAYS_KEY,
+  type AbcSettings,
   type ForecastSettings,
 } from "../service/plan-settings.js";
 
@@ -42,4 +47,15 @@ export async function loadForecastSettings(dbc: Db | Tx): Promise<ForecastSettin
     .where(inArray(systemSettings.key, [PLANNING_FORECAST_HISTORY_MONTHS_KEY, PLANNING_FORECAST_HORIZON_MONTHS_KEY]));
   const byKey = new Map(rows.map((r) => [r.key, r.value]));
   return decodeForecastSettings((key) => byKey.get(key));
+}
+
+// ABC-klassning (#10, etapp 2): the period and the two class limits in ONE
+// query, read once per classification (Db | Tx).
+export async function loadAbcSettings(dbc: Db | Tx): Promise<AbcSettings> {
+  const rows = await dbc
+    .select({ key: systemSettings.key, value: systemSettings.value })
+    .from(systemSettings)
+    .where(inArray(systemSettings.key, [PLANNING_ABC_PERIOD_MONTHS_KEY, PLANNING_ABC_CLASS_A_PERCENT_KEY, PLANNING_ABC_CLASS_B_PERCENT_KEY]));
+  const byKey = new Map(rows.map((r) => [r.key, r.value]));
+  return decodeAbcSettings((key) => byKey.get(key));
 }

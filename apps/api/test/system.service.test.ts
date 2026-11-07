@@ -4,7 +4,7 @@ import { auditLog, companyInfo, db, numberSeries, systemSettings } from "@navet/
 import { updateSystemSettingsSchema } from "@navet/shared";
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService, NumberSeriesNotFoundError } from "../src/modules/system/service/system.service.js";
-import { decodeForecastMonths, decodeForecastSettings, decodeLeadTimeDefaults, decodeLeadTimeSettingDays } from "../src/modules/system/service/plan-settings.js";
+import { decodeAbcSettings, decodeForecastMonths, decodeForecastSettings, decodeLeadTimeDefaults, decodeLeadTimeSettingDays } from "../src/modules/system/service/plan-settings.js";
 import { getNextOrderNumber } from "../src/modules/system/service/number-series.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -297,6 +297,26 @@ describe("system service — settings", () => {
     expect(updateSystemSettingsSchema.safeParse({ planningForecastHorizonMonths: 2.5 }).success).toBe(false);
     expect(updateSystemSettingsSchema.safeParse({ planningForecastHorizonMonths: 25 }).success).toBe(false);
     expect(updateSystemSettingsSchema.safeParse({ planningForecastHistoryMonths: 36, planningForecastHorizonMonths: 1 }).success).toBe(true);
+  });
+
+  it("defaults the ABC period to 12 months and the limits to 80/95, round-trips them, and a stored pair that breaks A < B decodes to the defaults", async () => {
+    const keys = ["planning_abc_period_months", "planning_abc_class_a_percent", "planning_abc_class_b_percent"];
+    await db.delete(systemSettings).where(inArray(systemSettings.key, keys));
+    try {
+      expect(await systemService.getSettings()).toMatchObject({ planningAbcPeriodMonths: 12, planningAbcClassAPercent: 80, planningAbcClassBPercent: 95 });
+      expect(await systemService.updateSettings({ planningAbcPeriodMonths: 6, planningAbcClassAPercent: 70, planningAbcClassBPercent: 90 })).toMatchObject({
+        planningAbcPeriodMonths: 6,
+        planningAbcClassAPercent: 70,
+        planningAbcClassBPercent: 90,
+      });
+      // A hand-edited row that puts A above B: both limits fall back, the period stays.
+      await db.insert(systemSettings).values({ key: "planning_abc_class_a_percent", value: "95" }).onConflictDoUpdate({ target: systemSettings.key, set: { value: "95" } });
+      expect(await systemService.getSettings()).toMatchObject({ planningAbcPeriodMonths: 6, planningAbcClassAPercent: 80, planningAbcClassBPercent: 95 });
+    } finally {
+      await db.delete(systemSettings).where(inArray(systemSettings.key, keys));
+    }
+    // The pure decode and the PATCH's pair rule are covered in abc.test.ts.
+    expect(decodeAbcSettings(() => null)).toEqual({ periodMonths: 12, aPercent: 80, bPercent: 95 });
   });
 
   it("defaults the delivery-day settings and round-trips them; junk decodes to the defaults", async () => {

@@ -1,6 +1,7 @@
 import { articleBarcodeSchema } from "./scan.js";
 import { z } from "zod";
 import { listQuerySchema } from "./list.js";
+import { abcClassListParam } from "./abc.js";
 import { parcelKindSchema } from "./shipping.js";
 // vatRates/vatRateSchema moved to vat.ts in B5 — imported here for the
 // varugrupp schemas below, re-exported to consumers via index.ts.
@@ -32,8 +33,24 @@ export const listArticlesQuerySchema = listQuerySchema.extend({
   // forms' Konfigurera entry point); they carry configuratorMode as always.
   // Without orderable it has no effect.
   configurable: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
+  // ABC-klassning (#10): only articles in these classes ("A,B"). The class
+  // is derived for the whole register at read time (the planning module's
+  // classification), so the filter is applied as an id list and `total`
+  // follows it. Without a classification reader nothing matches.
+  abcClass: abcClassListParam(),
+  // ABC-klassning on the rows (abcClass): opt-in like withOperations — the
+  // classification reads the whole register's consumption, and the
+  // ArticlePicker searches this list on every keystroke. The register page
+  // and its CSV ask for it; the abcClass filter implies it.
+  withAbc: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
 });
 export type ListArticlesQuery = z.infer<typeof listArticlesQuerySchema>;
+
+// GET /articles/:id?withAbc=true — the card's ABC class (opt-in for the same
+// reason; the configurator and other readers call getArticle without it).
+export const getArticleQuerySchema = z.object({
+  withAbc: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
+});
 
 // "Kopiera från befintlig artikel": the parts of a source article a new
 // article can be created from. Beredning (BOM + routing) only goes to a

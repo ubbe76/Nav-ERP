@@ -11,6 +11,7 @@ import {
   createBomComponentSchema,
   createDrawingRevisionSchema,
   listArticlesQuerySchema,
+  getArticleQuerySchema,
   updateArticleDrawingSchema,
   updateArticleGroupSchema,
   updateArticleRevisionSchema,
@@ -70,11 +71,16 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
     querySchema: listArticlesQuerySchema,
     filenameBase: "artiklar",
     columns: articleExportColumns,
-    fetch: (query) => service.listArticles(query),
+    // The export has the ABC column — always with the classification.
+    fetch: async (query) => {
+      const page = await service.listArticles({ ...query, withAbc: true });
+      return { ...page, rows: page.rows.map((row) => ({ abcClass: null, ...row })) };
+    },
   });
 
   app.get<{ Params: { id: string } }>("/articles/:id", async (req, reply) => {
-    const article = await service.getArticle(req.params.id);
+    const { withAbc } = getArticleQuerySchema.parse(req.query);
+    const article = await service.getArticle(req.params.id, { withAbc });
     if (!article) return reply.code(404).send({ error: "Article not found" });
     return article;
   });

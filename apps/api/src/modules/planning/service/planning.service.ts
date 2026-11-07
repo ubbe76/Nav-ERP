@@ -7,6 +7,7 @@ import type {
   ConfiguratorSelection,
   CreatePlanningOrdersInput,
   DeliveryTimeCheckRequest,
+  ListAbcQuery,
   ListRequirementsQuery,
   MoveOperationInput,
   Paged,
@@ -90,7 +91,9 @@ import {
   type ForecastMonth,
   type ForecastMonthRow,
 } from "./forecast.js";
-import type { ForecastSettings } from "../../system/service/plan-settings.js";
+import type { AbcSettings, ForecastSettings } from "../../system/service/plan-settings.js";
+import { classifyAbc, type AbcClass, type AbcClassification, type AbcSummaryRow } from "./abc.js";
+import type { AbcArticleRow } from "../repository/planning.repository.js";
 import { MIN_PLAN_MINUTES, PLAN_HORIZON_WEEKS, type PlanWorkCenter } from "./capacity-book.js";
 import {
   longOperationWarnings,
@@ -162,6 +165,26 @@ export class ForecastMonthOutsideHorizonError extends Error {
     super(`Month ${month} is outside the forecast horizon`);
     this.name = "ForecastMonthOutsideHorizonError";
   }
+}
+
+// ABC-klassning (#10, etapp 2): one row of GET /planning/abc — the article,
+// its förbrukning over the period, the value and the class, plus the
+// Planering card's fields shown beside it. The price columns (standardCost,
+// value, share, cumulativeShare) are nulled by the route for a user
+// without price permission.
+export interface AbcRow extends AbcArticleRow, AbcClassification {
+  consumed: number;
+}
+
+export interface AbcList {
+  rows: AbcRow[];
+  total: number;
+  // The whole classification's count and value per class (not the filter's).
+  summary: AbcSummaryRow[];
+  // The period the consumption was summed over (whole months before the
+  // current one) and the limits in force — for the page's help text.
+  period: { months: number; from: string; to: string };
+  limits: { aPercent: number; bPercent: number };
 }
 
 export interface ArticleForecast {
@@ -2249,6 +2272,62 @@ export function createPlanningService(
         });
       }
       return this.getArticleForecast(articleId);
+    },
+
+    // ABC-klassning (#10, etapp 2): the whole classification at every read
+    // — the settings, the selection and the consumption over the period
+    // (consumptionByMonth over every article, the ONE consumption
+    // definition shared with the prognos) in three queries, then the pure
+    // classifyAbc. The cumulative share needs the total, so the filters of
+    // GET /planning/abc and the article register's abcClass are applied to
+    // this result in memory, never per row. Nothing is cached: three
+    // indexed queries per read, and a standard cost change shows at once.
+    async computeAbc(): Promise<AbcList & { byArticle: Map<string, AbcClass> }> {
+      const today = todayFn();
+      const settings: AbcSettings = await repo.abcSettings();
+      const months = historyMonths(today, settings.periodMonths);
+      const from = firstDayOf(months[0]!);
+      const to = lastDayOf(months[months.length - 1]!);
+      const [articles, consumption] = await Promise.all([repo.abcArticles(), repo.consumptionByMonth(null, from, to)]);
+      const consumed = new Map<string, number>();
+      for (const r of consumption) consumed.set(r.articleId, Math.round(((consumed.get(r.articleId) ?? 0) + r.consumed) * 1e4) / 1e4);
+      const classified = classifyAbc(
+        articles.map((a) => ({ ...a, consumed: consumed.get(a.articleId) ?? 0 })),
+        settings
+      );
+      return {
+        rows: classified.rows,
+        total: classified.rows.length,
+        summary: classified.summary,
+        period: { months: settings.periodMonths, from, to },
+        limits: { aPercent: settings.aPercent, bPercent: settings.bPercent },
+        byArticle: new Map(classified.rows.map((r) => [r.articleId, r.abcClass])),
+      };
+    },
+
+    // GET /planning/abc: the list pattern over the classification — search
+    // on article number/name, class and type filters, then paging; `total`
+    // follows the filters, `summary` is the whole classification's.
+    async listAbc(query: ListAbcQuery): Promise<AbcList> {
+      const { byArticle: _byArticle, ...computed } = await this.computeAbc();
+      let rows = computed.rows;
+      if (query.class && query.class.length > 0) {
+        const wanted = new Set<AbcClass>(query.class);
+        rows = rows.filter((r) => wanted.has(r.abcClass));
+      }
+      if (query.type) rows = rows.filter((r) => r.type === query.type);
+      if (query.search) {
+        const term = query.search.toLowerCase();
+        rows = rows.filter((r) => r.articleNumber.toLowerCase().includes(term) || r.name.toLowerCase().includes(term));
+      }
+      return { ...computed, rows: rows.slice(query.offset, query.offset + query.limit), total: rows.length };
+    },
+
+    // The article register's and the article card's ABC column: class per
+    // selected article (absent = outside the selection — inactive, service,
+    // phantom, template). Bound late into the article service in app.ts.
+    async abcClassByArticle(): Promise<Map<string, AbcClass>> {
+      return (await this.computeAbc()).byArticle;
     },
 
     // Färdigdatumsförslag for a new TO on the article — one working day
