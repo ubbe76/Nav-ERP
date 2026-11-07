@@ -124,10 +124,10 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 - [ ] **D3 Spårbarhet batch/serienr** (L) — vid behov, senare → [#8](https://github.com/ubbe76/Nav-ERP/issues/8) *(hemsidan, under både Tillverkning och Lager)*
 - [ ] **Prognos och ABC-klassning** → [#10](https://github.com/ubbe76/Nav-ERP/issues/10)
-- [ ] **Planering och beställningspunkt per lager** → [#11](https://github.com/ubbe76/Nav-ERP/issues/11) *(hemsidan)*
 
 ### Låg
 
+- [ ] **Planering och beställningspunkt per lager** (vid behov, senare — användarens beslut 2026-11-07) → [#11](https://github.com/ubbe76/Nav-ERP/issues/11) *(hemsidan)*
 - [ ] **Detaljplanering per dag eller timme och köberäkning** (medvetet utanför v1) → [#18](https://github.com/ubbe76/Nav-ERP/issues/18) *(hemsidan)*
 - [ ] **Bakdaterade lagerrörelser** → [#19](https://github.com/ubbe76/Nav-ERP/issues/19) *(hemsidan)*. FIFO-värderingen och inventering per underlagets datum (#26) är klara sedan 2026-11-04. Kvar är att registrera andra lagerrörelser med ett tidigare värderingsdatum, eftersom kolumnen `valued_at` redan finns. Hemsidans text ("Det finns ingen FIFO-värdering …" och metodlistorna i `areas.ts`) ändras vid nästa version.
 - [ ] **Lämna momsdeklarationen direkt till Skatteverket** → [#20](https://github.com/ubbe76/Nav-ERP/issues/20) *(hemsidan)*
