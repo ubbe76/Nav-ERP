@@ -1694,6 +1694,36 @@ export interface SalesOrder extends DocumentTermsFields {
   // Detail-only: mirrors the customer's Samlingsfaktura flag — drives
   // SalesOrderDetail's "Fakturera" link to /forsaljning/samlingsfakturering.
   customerCollectiveInvoicing?: boolean;
+  // Påslag på offert och order (#16): the order's own markups as decimal
+  // strings ("20.00"), null = inherited. customerMarkups (GET :id only) are
+  // the customer's own values, the placeholder of the header form.
+  generalMarkupPercent?: string | null;
+  materialMarkupPercent?: string | null;
+  customerMarkups?: { generalMarkupPercent: string | null; materialMarkupPercent: string | null };
+}
+
+// POST /sales-orders/:id/markups/preview, the 409 markup-repricing-not-confirmed
+// body's `repricing` and the header PATCH's `repricing` (#16): what new order
+// markups do to the rows priced from the förkalkyl.
+export type MarkupRepricingKeptReason = "manual" | "delivered" | "invoiced" | "unchanged" | "no-price";
+
+export interface MarkupRepricingPlan {
+  changed: boolean;
+  before: { generalMarkupPercent: number | null; materialMarkupPercent: number | null };
+  after: { generalMarkupPercent: number | null; materialMarkupPercent: number | null };
+  currency: string;
+  exchangeRate: number;
+  rows: {
+    rowId: string;
+    articleId: string;
+    articleNumber: string;
+    quantity: number;
+    before: { unitPrice: number; discountPercent: number };
+    after: { unitPrice: number; discountPercent: number; source: string };
+    calculatedPrice: boolean;
+    calculatedPriceUnavailable?: "no-calculation" | "material-base-missing" | "calculation-outdated";
+  }[];
+  kept: { rowId: string; articleNumber: string; reason: MarkupRepricingKeptReason }[];
 }
 
 // GET /collective-invoicing/candidates — customers flagged Samlingsfaktura
@@ -1825,7 +1855,7 @@ export interface PriceQuote {
   };
   // Why the customer's markup could not price the article (the chain then fell
   // through to the article's price).
-  calculatedPriceUnavailable?: "no-calculation" | "material-base-missing";
+  calculatedPriceUnavailable?: "no-calculation" | "material-base-missing" | "calculation-outdated";
 }
 
 // Leveranstillfälle (delivery occasion) — C2. One row per utleverans event;

@@ -360,6 +360,20 @@ Radlistan visar à-priser och summa i orderns valuta (**89,84 EUR**, **Summa …
 
 **Kundorderlistan** och **Offerter** har kolumnen **Valuta**.
 
+### Påslag på offert och order
+
+Ett påslag kan också sättas på just den här offerten eller ordern. I **Ändra orderhuvud** finns **Generellt påslag (%)** och **Materialpåslag (%)** (0–1 000, två decimaler). Platshållaren visar kundens eget värde, eller *Ärvs* när kunden inte har något; tomt fält betyder att ordern ärver kundens, sedan varugruppens och sist företagets påslag, och **0** är ett uttryckligt 0 %. Orderns påslag går före kundens, fält för fält. Fälten kräver behörigheten Försäljning och går bara att sätta på orderkortet, inte i **Ny offert** eller **Ny kundorder**. Är ett påslag satt visas det i orderhuvudet som **Generellt påslag** respektive **Materialpåslag**, och ändringen loggas under **Historik** som **Påslag ändrade**.
+
+**Omräkning.** Ändrar du ett påslag och trycker **Spara** frågar Nav först vad ändringen gör med raderna. Raderna som räknas om är de som prissatts ur kalkylen (märkta **Kalkylpris**, se [Kalkylpris och kundens påslag](#kalkylpris-och-kundens-paslag)) och som varken är levererade eller fakturerade, inte heller på ett fakturautkast. Bekräftelsen listar varje rad med artikelnummer och à-pris före och efter, de rader som inte ändras med orsaken (*handskrivet pris*, *levererad*, *fakturerad*, *samma pris som förut* eller *kalkylen ger inget pris*) och meningen *Handskrivna priser och levererade eller fakturerade rader ändras inte.* Knappen **Räkna om och spara** räknar om raderna och sparar huvudet i ett svep; **Avbryt** sparar ingenting. Därefter frågar Nav som vanligt om ordern ska få en ny revision. Ändrar påslagen inget pris, eller har ordern inga kalkylprissatta rader, sparas huvudet utan bekräftelse.
+
+**Det som aldrig räknas om:**
+
+- Rader med ett à-pris du skrivit själv, och rader som inte prissatts ur kalkylen: konfigurerade rader, ställkostnadsrader och fraktraden.
+- Levererade och fakturerade rader, även delvis.
+- **Rader som fick artikelpriset innan ordern fick ett påslag räknas aldrig om.** De märktes inte som Kalkylpris när de lades in, och Nav gissar inte i efterhand. Vill du att de ska följa påslaget tar du bort raden och lägger till den igen.
+
+Kan kalkylen inte ge något pris med de nya påslagen (till exempel *Förkalkylen är sparad före ändringen av påslagskedjan — förkalkylera igen*) går raden vidare i kedjan och får artikelns försäljningspris, vilket syns i bekräftelsen. Ändras raderna eller påslagen av någon annan medan du sparar avvisas sparningen med ett meddelande och orderkortet läses om; öppna **Ändra orderhuvud** och spara igen. Ändringen påverkar aldrig förkalkylen, lagervärdet eller kundens eller varugruppens egna påslag.
+
 ### Leveransdatum per rad
 
 Orderns **Leveransdatum** gäller alla rader. Ska en rad levereras ett annat datum ger du den ett eget:

@@ -54,6 +54,8 @@ import { apiFetch } from "../../lib/api";
 import { stashReleaseWarnings } from "../../lib/releaseWarnings";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { askBumpRevision } from "../../lib/revision";
+import { changedMarkups, parseMarkupField, repricingMessage } from "../../lib/markupRepricing";
+import { ApiError } from "../../lib/api";
 import { headerDimensionFields, useDimensions } from "../../lib/dimensions";
 import { DimensionFields } from "../economy/DimensionSelect";
 import { salesDocumentKind } from "../../lib/salesDocumentKind";
@@ -66,6 +68,7 @@ import {
   type ManufacturingOrderStatus,
   type OrderFreight,
   type PriceQuote,
+  type MarkupRepricingPlan,
   type SalesOrder,
   type SalesOrderRow,
   type StockLocation,
@@ -518,6 +521,12 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
             ? [{ label: "Kurs", value: `1 ${order.currency} = ${formatRate(order.exchangeRate)} kr` }]
             : []),
           { label: "Leveransdatum", value: order.expectedDeliveryDate },
+          ...(order.generalMarkupPercent != null
+            ? [{ label: "Generellt påslag", value: `${Number(order.generalMarkupPercent).toLocaleString("sv-SE")} %` }]
+            : []),
+          ...(order.materialMarkupPercent != null
+            ? [{ label: "Materialpåslag", value: `${Number(order.materialMarkupPercent).toLocaleString("sv-SE")} %` }]
+            : []),
           ...(order.status === "quote"
             ? [
                 {
@@ -579,9 +588,11 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
             // together with the quantity.
             // While a row is being edited the tracks that hold inputs widen
             // (the table then scrolls inside its card) so no input is clipped.
-            // The action column holds Ändra and the ⋯ menu on one line.
+            // The action column is max-content: Ändra and the ⋯ menu on one
+            // line, Spara above Avbryt while editing (side by side they
+            // outgrew the card at 1400 px and clipped Ändra on the other rows).
             { key: "articleNumber", label: "Artikelnummer", width: "110px" },
-            { key: "articleName", label: "Benämning", width: editingRowId ? "minmax(170px, 3fr)" : "minmax(90px, 3fr)" },
+            { key: "articleName", label: "Benämning", width: editingRowId ? "minmax(110px, 3fr)" : "minmax(90px, 3fr)" },
             { key: "quantityOrdered", label: "Beställt", width: shareTrack(editingRowId ? 90 : 66), align: "right" },
             { key: "unitCode", label: "Enhet", width: editingRowId ? "84px" : "52px" },
             { key: "quantityDelivered", label: "Levererat", width: shareTrack(66), align: "right" },
@@ -597,7 +608,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
             // Wide enough for the footer's "69 600,00 SEK" on one line.
             { key: "lineAmount", label: "Belopp", width: shareTrack(96), align: "right" },
             ...(rowsEditable || canReclaim
-              ? ([{ key: "id", label: "", width: editingRowId ? "140px" : "104px", align: "right" }] as const)
+              ? ([{ key: "id", label: "", width: "max-content", align: "right" }] as const)
               : []),
           ]}
           rows={rows}
@@ -759,7 +770,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
               case "id":
                 if (!rowsEditable) return <RowDeviationLink label="Reklamera" params={reclaimParams(row)} />;
                 return editingRowId === row.id ? (
-                  <span style={{ display: "inline-flex", gap: 8 }}>
+                  <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                     <Button type="button" size="small" variant="primary" disabled={rowPending} onClick={() => saveRow(row)}>
                       Spara
                     </Button>
@@ -997,9 +1008,11 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         <EditHeaderForm
           order={order}
           rowCount={rows.length}
+          rows={rows}
           deliveryAddresses={deliveryAddresses}
           registers={registers}
           onDone={refresh}
+          onReload={() => router.refresh()}
           onCancel={() => setModal(null)}
         />
       </Modal>
@@ -1130,16 +1143,35 @@ function customerNumberFields(order: SalesOrder) {
 // terms, so the card asks about a new revision exactly once. Leveransdatum
 // and anteckning are set when the quote is created and stay read-only.
 
+// The placeholder of a markup field: the customer's own value, else "Ärvs".
+function markupPlaceholder(customerValue: string | null | undefined): string {
+  return customerValue == null ? "Ärvs" : `${Number(customerValue).toLocaleString("sv-SE", { maximumFractionDigits: 2 })} (kunden)`;
+}
+
+// The confirmation before a save that reprices Kalkylpris rows. The plan's
+// prices are per base unit; each row shows its own unit.
+function confirmRepricing(plan: MarkupRepricingPlan, rows: SalesOrderRow[]): Promise<boolean> {
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return confirmDialog(
+    repricingMessage(plan, { priceOf: (rowId, price) => toUnitPrice(price, byId.get(rowId)?.unitFactor ?? null) }),
+    { confirmLabel: "Räkna om och spara" }
+  );
+}
+
 function EditHeaderForm({
   order,
   rowCount,
+  rows,
   deliveryAddresses,
   registers,
   onDone,
+  onReload,
   onCancel,
 }: {
   order: SalesOrder;
   rowCount: number;
+  rows: SalesOrderRow[];
+  onReload: () => void;
   deliveryAddresses: CustomerDeliveryAddress[];
   registers: TermsRegisters;
   onDone: () => void;
@@ -1183,6 +1215,10 @@ function EditHeaderForm({
     currency: headerCurrency,
     initial: { currency: order.currency, rate: order.currency === SEK ? "" : String(Number(order.exchangeRate)) },
   });
+  // Påslag på offert och order: the order's own markups (Försäljning only).
+  const canSetMarkups = useCan()(["forsaljning"]);
+  const [generalMarkup, setGeneralMarkup] = useState(order.generalMarkupPercent ? String(Number(order.generalMarkupPercent)) : "");
+  const [materialMarkup, setMaterialMarkup] = useState(order.materialMarkupPercent ? String(Number(order.materialMarkupPercent)) : "");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -1202,11 +1238,45 @@ function EditHeaderForm({
       return;
     }
     const rateChanged = canChangeCurrency && headerForeign && newRate !== null && newRate !== Number(order.exchangeRate);
-    const bumpRevision = await askBumpRevision(order.revision);
+    // Påslag: only a changed field is sent. When it reprices rows, the user
+    // confirms the plan first (Avbryt = nothing is saved).
+    const general = parseMarkupField(generalMarkup);
+    const material = parseMarkupField(materialMarkup);
+    if (canSetMarkups && (Number.isNaN(general) || Number.isNaN(material))) {
+      setError("Påslag anges som ett tal mellan 0 och 1000, eller lämnas tomt");
+      return;
+    }
+    const markups = canSetMarkups
+      ? changedMarkups(
+          { general: order.generalMarkupPercent, material: order.materialMarkupPercent },
+          { general, material }
+        )
+      : {};
+    let repriceConfirmed = false;
     setError(null);
+    if (Object.keys(markups).length > 0) {
+      setPending(true);
+      try {
+        const plan = await apiFetch<MarkupRepricingPlan>(`/api/v1/sales-orders/${order.id}/markups/preview`, {
+          method: "POST",
+          body: JSON.stringify(markups),
+        });
+        if (plan.rows.length > 0) {
+          if (!(await confirmRepricing(plan, rows))) return;
+          repriceConfirmed = true;
+        }
+      } catch (err) {
+        setError(apiErrorMessage(err, "Kunde inte räkna om påslagen"));
+        return;
+      } finally {
+        setPending(false);
+      }
+    }
+    const bumpRevision = await askBumpRevision(order.revision);
     setPending(true);
     try {
-      await apiFetch(`/api/v1/sales-orders/${order.id}`, {
+      const patch = (withConfirm: boolean) =>
+        apiFetch(`/api/v1/sales-orders/${order.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           ...(currencyChanged ? { currency: headerCurrency } : {}),
@@ -1220,12 +1290,34 @@ function EditHeaderForm({
           ...termsPayload(terms),
           // Giltig t.o.m. only exists on a quote (the API refuses it otherwise).
           ...(order.status === "quote" ? { quoteValidUntil: quoteValidUntil || null } : {}),
+          ...markups,
+          ...(withConfirm ? { confirmRepricing: true } : {}),
           bumpRevision,
         }),
       });
+      try {
+        await patch(repriceConfirmed);
+      } catch (err) {
+        // The rows changed under the preview: show the plan again and retry once confirmed.
+        if (err instanceof ApiError && err.code === "markup-repricing-not-confirmed") {
+          const plan = (err.body as { repricing?: MarkupRepricingPlan } | undefined)?.repricing;
+          if (plan && (await confirmRepricing(plan, rows))) await patch(true);
+          else if (plan) return;
+          else throw err;
+        } else {
+          throw err;
+        }
+      }
       onDone();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte spara"));
+      // The order moved under the save: read it again so the card is current.
+      if (
+        err instanceof ApiError &&
+        (err.code === "markup-repricing-conflict" || err.code === "sales-order-markups-changed")
+      ) {
+        onReload();
+      }
     } finally {
       setPending(false);
     }
@@ -1308,6 +1400,43 @@ function EditHeaderForm({
               först. Kursen kan ändras; raderna behåller sina priser.
             </FormHint>
           )}
+        </>
+      )}
+
+      {canSetMarkups && (
+        <>
+          <FormRow>
+            <Field label="Generellt påslag (%)" htmlFor="headerGeneralMarkup">
+              <Input
+                id="headerGeneralMarkup"
+                type="number"
+                min="0"
+                max="1000"
+                step="0.01"
+                size="xs"
+                placeholder={markupPlaceholder(order.customerMarkups?.generalMarkupPercent)}
+                value={generalMarkup}
+                onChange={(e) => setGeneralMarkup(e.target.value)}
+              />
+            </Field>
+            <Field label="Materialpåslag (%)" htmlFor="headerMaterialMarkup">
+              <Input
+                id="headerMaterialMarkup"
+                type="number"
+                min="0"
+                max="1000"
+                step="0.01"
+                size="xs"
+                placeholder={markupPlaceholder(order.customerMarkups?.materialMarkupPercent)}
+                value={materialMarkup}
+                onChange={(e) => setMaterialMarkup(e.target.value)}
+              />
+            </Field>
+          </FormRow>
+          <FormHint attached>
+            Tomt = kundens påslag, annars varugruppens eller företagets. Ett ändrat påslag räknar om à-priset på rader som
+            prissatts ur kalkylen (Kalkylpris); handskrivna priser och levererade rader ändras inte.
+          </FormHint>
         </>
       )}
 

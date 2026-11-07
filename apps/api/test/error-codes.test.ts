@@ -55,8 +55,11 @@ import { SetupChargeArticleNotFoundError } from "../src/modules/system/service/s
 import {
   CustomerArticleNumberNotFoundError,
   DuplicateCustomerArticleNumberError,
+  MarkupRepricingConflictError,
+  MarkupRepricingNotConfirmedError,
   PriceListCurrencyLockedError,
   SalesOrderCurrencyChangedError,
+  SalesOrderMarkupsChangedError,
   SalesOrderCurrencyLockedError,
   SalesOrderExchangeRateError,
 } from "../src/modules/sales/service/sales.errors.js";
@@ -628,6 +631,20 @@ const cases: Array<[Error, string]> = [
   [new SalesOrderCurrencyChangedError("KO-1", "SEK", "EUR"), ERROR_CODES.SALES_ORDER_CURRENCY_CHANGED],
   [new SalesOrderExchangeRateError(), ERROR_CODES.SALES_ORDER_EXCHANGE_RATE],
   [new PriceListCurrencyLockedError("PL1"), ERROR_CODES.PRICE_LIST_CURRENCY_LOCKED],
+  [
+    new MarkupRepricingNotConfirmedError("KO-1", {
+      changed: true,
+      before: { generalMarkupPercent: null, materialMarkupPercent: null },
+      after: { generalMarkupPercent: 20, materialMarkupPercent: null },
+      currency: "SEK",
+      exchangeRate: 1,
+      rows: [],
+      kept: [],
+    }),
+    ERROR_CODES.MARKUP_REPRICING_NOT_CONFIRMED,
+  ],
+  [new MarkupRepricingConflictError("KO-1"), ERROR_CODES.MARKUP_REPRICING_CONFLICT],
+  [new SalesOrderMarkupsChangedError("KO-1"), ERROR_CODES.SALES_ORDER_MARKUPS_CHANGED],
   [new InvoiceRowCurrencyMismatchError("EUR", "SEK"), ERROR_CODES.INVOICE_ROW_CURRENCY_MISMATCH],
   [new InvoiceExchangeRateError("sek"), ERROR_CODES.INVOICE_EXCHANGE_RATE],
   [new ReminderFeeCurrencyError("EUR"), ERROR_CODES.REMINDER_FEE_CURRENCY],

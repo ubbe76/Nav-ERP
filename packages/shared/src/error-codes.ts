@@ -108,6 +108,12 @@ export const ERROR_CODES = {
   // A new row priced in the order's old currency after a concurrent
   // currency change (409, body.pricedIn/body.currency)
   SALES_ORDER_CURRENCY_CHANGED: "sales-order-currency-changed",
+  // Påslag på offert och order (#16): a header save that reprices rows without
+  // confirmRepricing (409, body.repricing is the plan), rows that kept changing
+  // under the repricing (409), a row priced while the markups changed (409)
+  MARKUP_REPRICING_NOT_CONFIRMED: "markup-repricing-not-confirmed",
+  MARKUP_REPRICING_CONFLICT: "markup-repricing-conflict",
+  SALES_ORDER_MARKUPS_CHANGED: "sales-order-markups-changed",
   // A rate other than 1 on a SEK order/quote/price question (400)
   SALES_ORDER_EXCHANGE_RATE: "sales-order-exchange-rate",
   // A new currency on a price list that has rows (409)

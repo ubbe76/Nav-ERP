@@ -51,7 +51,7 @@ export interface CalculatedPriceInfo {
   materialMarkup: { percent: number; level: MarkupLevel };
 }
 
-export type CalculatedPriceUnavailable = "no-calculation" | "material-base-missing";
+export type CalculatedPriceUnavailable = "no-calculation" | "material-base-missing" | "calculation-outdated";
 
 // The slice of a price-quote answer the Kalkylpris helpers read.
 export interface CalculatedQuoteLike {
@@ -95,6 +95,8 @@ export function calculatedUnavailableText(quote: CalculatedQuoteLike | null | un
       return "Kundens påslag kunde inte användas — artikeln saknar sparad förkalkyl. Artikelns försäljningspris används.";
     case "material-base-missing":
       return "Kundens påslag kunde inte användas — spara en ny förkalkyl för artikeln. Artikelns försäljningspris används.";
+    case "calculation-outdated":
+      return "Kundens påslag kunde inte användas — förkalkylen är sparad före ändringen av påslagskedjan, förkalkylera igen. Artikelns försäljningspris används.";
     default:
       return null;
   }
