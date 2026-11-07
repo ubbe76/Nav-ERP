@@ -384,7 +384,10 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
                       </div>
                     )}
                     {showSetupPrice && editingRowId === row.id && (
-                      <div style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      // Wraps like the date fields below: in the narrow
+                      // Benämning track (1280 px) the label takes its own
+                      // line instead of squeezing the input.
+                      <div style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                         <label htmlFor={`setupPrice-${row.id}`} style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
                           Ställpris
                         </label>

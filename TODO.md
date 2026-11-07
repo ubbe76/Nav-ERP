@@ -30,7 +30,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — layout
 
-- [ ] **Inköpsorderkortet:** radtabellens åtgärdskolumn har fast bredd (`width: editingRowId ? "140px" : "104px"`, `PurchaseOrderDetail.tsx:308`) — samma som klippte **Ändra** på kundorderkortet vid 1400 px (rättat där med `max-content` och Spara över Avbryt i #16 etapp 3). Prova i 1400 px och gör likadant om den klipps.
 
 ### Låga — fel i manualen
 
@@ -127,7 +126,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Koppling mellan en TO och dess halvfabrikats TO:er (pegging)** → [#9](https://github.com/ubbe76/Nav-ERP/issues/9) *(hemsidan)*
 - [ ] **Prognos och ABC-klassning** → [#10](https://github.com/ubbe76/Nav-ERP/issues/10)
 - [ ] **Planering och beställningspunkt per lager** → [#11](https://github.com/ubbe76/Nav-ERP/issues/11) *(hemsidan)*
-- [ ] **Semester- och kompsaldo** → [#12](https://github.com/ubbe76/Nav-ERP/issues/12) *(hemsidan)*
 
 ### Låg
 
@@ -144,6 +142,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 ### Medvetet utanför
 
 - EDI för order och fakturor — bortvalt i v1 enligt CLAUDE.md. *(hemsidan)*
+- Semester- och kompsaldo — förs i lönesystemet; Nav|ERP registrerar semester och kompledighet som frånvaro i timmar (beslut 2026-11-07, #12 stängt). *(hemsidan)*
 - Lönesystem — Nav|ERP räknar inte ut lön, skatteavdrag eller arbetsgivaravgifter; PAXml-filen innehåller timmar per tidkod och dag, inte belopp (se Beslut). *(hemsidan)*
 
 ## Beslut
