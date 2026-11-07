@@ -2427,6 +2427,34 @@ export interface MOOperationSummary {
 // Everything here is derived server-side from released/in-progress
 // manufacturing orders' remaining operation time; the web side only renders
 // it, no client-side aggregation.
+// Alternativa resurser (#15, etapp 2): an operation's förslag — derived at
+// every read, never stored. toWeek/currentToWeek are Mondays (YYYY-MM-DD);
+// currentToWeek is null when the operation is unplanned.
+export interface ResourceSuggestionOnOperation {
+  workCenterId: string;
+  code: string;
+  name: string;
+  toWeek: string;
+  currentToWeek: string | null;
+  reason: "overloaded" | "unplanned";
+}
+
+// The list form: the Beläggning summary's räknare and Planera's notice.
+export interface ResourceSuggestionRow {
+  moOperationId: string;
+  manufacturingOrderId: string;
+  orderNumber: string;
+  sequenceNo: number;
+  fromWorkCenterId: string;
+  fromCode: string;
+  toWorkCenterId: string;
+  toCode: string;
+  toName: string;
+  currentToWeek: string | null;
+  toWeek: string;
+  reason: "overloaded" | "unplanned";
+}
+
 export interface CapacityCellOrder {
   manufacturingOrderId: string;
   orderNumber: string;
@@ -2440,6 +2468,11 @@ export interface CapacityCellOrder {
   remainingHours: number;
   moOperationId: string;
   hoursInWeek: number;
+  // Alternativa resurser (#15, etapp 2): förslag on another resource (null =
+  // none), Vald för hand, and the ordinary resource's code on an alternative.
+  suggestion: ResourceSuggestionOnOperation | null;
+  resourceLocked: boolean;
+  ordinaryWorkCenterCode: string | null;
   // Produktionsplanering: false = unplanned (counted in the due-date week).
   planned: boolean;
   // Mondays (YYYY-MM-DD); null when unplanned.
@@ -2498,6 +2531,7 @@ export interface CapacitySummary {
   overloadedCells: number;
   lateOrders: { manufacturingOrderId: string; orderNumber: string; dueDate: string; plannedFinish: string | null }[];
   unplannedOrders: { manufacturingOrderId: string; orderNumber: string }[];
+  resourceSuggestions: ResourceSuggestionRow[];
 }
 
 export interface CapacityResult {
@@ -2525,6 +2559,7 @@ export interface PlanResult {
   orders: number;
   operations: number;
   warnings: PlanWarning[];
+  resourceSuggestions: ResourceSuggestionRow[];
 }
 
 // POST /planning/operations/:opId/move.
@@ -2658,6 +2693,8 @@ export interface MOOperation {
   // Vald för hand (the resource was switched by hand).
   resources?: MOOperationResource[];
   resourceLocked?: boolean;
+  // Förslag on an alternative resource (null/absent = none).
+  suggestion?: ResourceSuggestionOnOperation | null;
   createdAt: string;
 }
 

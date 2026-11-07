@@ -59,6 +59,8 @@ import { chainLines } from "../../lib/costChain";
 import { SectionHeading } from "../ui/SectionHeading";
 import { AuditTrailSection } from "../system/AuditTrailSection";
 import { Lock } from "lucide-react";
+import { suggestionText } from "../../lib/resourceSuggestion";
+import { SwitchResourceButton } from "../planning/SwitchResourceButton";
 import { plannedWeekLabel } from "../../lib/planning";
 
 interface ManufacturingOrderDetailProps {
@@ -464,6 +466,25 @@ export function ManufacturingOrderDetail({
                             <StatusPill status="draft" label="Vald för hand" compact />
                           </span>
                         )}
+                      </div>
+                    )}
+                    {canEditLines && row.suggestion && (
+                      // Förslag på alternativ resurs (derived at read; Planera
+                      // never switches). Byt till X = PATCH workCenterId.
+                      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 4, fontSize: 12, color: "var(--color-text-secondary)" }}>
+                        <StatusPill status="delayed" label={`Förslag: ${row.suggestion.code}`} compact />
+                        <span>{suggestionText(row.suggestion)}</span>
+                        <SwitchResourceButton
+                          manufacturingOrderId={order.id}
+                          moOperationId={row.id}
+                          workCenterId={row.suggestion.workCenterId}
+                          code={row.suggestion.code}
+                          onSwitched={() => {
+                            setChangeNotice(null);
+                            afterLineChange();
+                          }}
+                          onError={setLineError}
+                        />
                       </div>
                     )}
                     {row.workCenterType === "subcontract" && (

@@ -354,3 +354,25 @@
   color: var(--color-text-primary);
   overflow-wrap: anywhere;
 }
+
+/* Alternativa resurser: the förslag under an operation in the expansion, and
+   a förslag row in the lists (text left, Byt till X right; wraps on a phone). */
+.suggestionLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  margin-top: 6px;
+  color: var(--color-text-secondary);
+}
+
+.suggestionRow {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+}
+
+.noticeSection {
+  margin-top: 8px;
+}

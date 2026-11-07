@@ -9,12 +9,14 @@ import { ListFilterSelect, useListNavigation } from "../ui/ListControls";
 import { Button } from "../ui/Button";
 import { FormError, FormHint, FormNotice } from "../ui/Form";
 import { MoveOperationDialog, type MoveTarget } from "./MoveOperationDialog";
-import { Clock, Lock } from "lucide-react";
+import { ArrowLeftRight, Clock, Lock } from "lucide-react";
 import { apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatStockholmDateTime } from "../../lib/date";
 import { plannedWeekLabel } from "../../lib/planning";
+import { planSuggestionNotice, suggestionCountLabel, suggestionShift, suggestionText } from "../../lib/resourceSuggestion";
+import { SwitchResourceButton } from "./SwitchResourceButton";
 import { useCan } from "../PermissionsProvider";
 import type {
   CapacityCell,
@@ -26,8 +28,17 @@ import type {
   PlanResult,
   PlanWarning,
   ProductionGroup,
+  ResourceSuggestionRow,
 } from "../../lib/types";
 import styles from "./BelaggningPageClient.module.css";
+
+// Byt till X: who may switch (Tillverkning, like Flytta/Planera) and what to do
+// after a switch. Threaded to the expansion rows and the lists.
+interface SwitchHandlers {
+  canSwitch: boolean;
+  onSwitched: (moOperationId: string) => void;
+  onError: (message: string | null) => void;
+}
 
 const WEEK_OPTIONS = [4, 8, 13, 26];
 const DEFAULT_WEEKS = 8;
@@ -95,6 +106,7 @@ export function BelaggningPageClient() {
   const [showAllWarnings, setShowAllWarnings] = useState(false);
   const [summaryList, setSummaryList] = useState<SummaryList | null>(null);
   const [moveTarget, setMoveTarget] = useState<MoveTarget | null>(null);
+  const [switchError, setSwitchError] = useState<string | null>(null);
 
   useEffect(() => {
     apiFetch<ProductionGroup[]>("/api/v1/production-groups").then(setGroups).catch(() => setGroups([]));
@@ -168,6 +180,19 @@ export function BelaggningPageClient() {
     setMoveTarget({ order, resource });
   }
 
+  // After Byt till X the operation is Vald för hand and its förslag is gone:
+  // drop it from Planera's notice and reload the matrix.
+  const switchHandlers: SwitchHandlers = {
+    canSwitch: canPlan,
+    onSwitched: (moOperationId) => {
+      setPlanResult((prev) =>
+        prev ? { ...prev, resourceSuggestions: prev.resourceSuggestions.filter((r) => r.moOperationId !== moOperationId) } : prev
+      );
+      setReloadTick((n) => n + 1);
+    },
+    onError: setSwitchError,
+  };
+
   const overloadedList = data ? overloadedCellList(data) : [];
   const spansMultipleYears = data ? new Set(data.weeks.map((w) => w.isoYear)).size > 1 : false;
   const gridTemplateColumns = data ? `220px repeat(${data.weeks.length + 2}, minmax(96px, 1fr))` : undefined;
@@ -206,6 +231,7 @@ export function BelaggningPageClient() {
 
       <FormError margin="below">{loadError}</FormError>
       <FormError margin="below">{planError}</FormError>
+      <FormError margin="below">{switchError}</FormError>
       {loading && data && <FormHint>Uppdaterar…</FormHint>}
 
       {planResult && (
@@ -229,6 +255,18 @@ export function BelaggningPageClient() {
               Visa alla ({planResult.warnings.length})
             </button>
           )}
+          {planResult.resourceSuggestions.length > 0 && (
+            <>
+              <div className={styles.noticeSection}>{planSuggestionNotice(planResult.resourceSuggestions.length)}:</div>
+              <ul className={styles.warningList}>
+                {planResult.resourceSuggestions.map((r) => (
+                  <li key={r.moOperationId}>
+                    <SuggestionLine row={r} handlers={switchHandlers} />
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </FormNotice>
       )}
 
@@ -238,6 +276,7 @@ export function BelaggningPageClient() {
           overloaded={overloadedList}
           open={summaryList}
           onOpen={(list) => setSummaryList((prev) => (prev === list ? null : list))}
+          switchHandlers={switchHandlers}
         />
       )}
 
@@ -265,6 +304,7 @@ export function BelaggningPageClient() {
                 onCellClick={toggleCell}
                 canMove={canPlan}
                 onMove={openMove}
+                switchHandlers={switchHandlers}
               />
             ))}
           </div>
@@ -293,6 +333,7 @@ function GroupBlock({
   onCellClick,
   canMove,
   onMove,
+  switchHandlers,
 }: {
   group: CapacityGroupBlock;
   weeks: CapacityWeek[];
@@ -301,6 +342,7 @@ function GroupBlock({
   onCellClick: (resource: CapacityResourceRow, colKey: string, label: string, cell: CapacityCell) => void;
   canMove: boolean;
   onMove: (resource: CapacityResourceRow, order: CapacityCellOrder) => void;
+  switchHandlers: SwitchHandlers;
 }) {
   return (
     <>
@@ -316,6 +358,7 @@ function GroupBlock({
           onCellClick={onCellClick}
           canMove={canMove}
           onMove={onMove}
+          switchHandlers={switchHandlers}
         />
       ))}
 
@@ -339,6 +382,7 @@ function ResourceBlock({
   onCellClick,
   canMove,
   onMove,
+  switchHandlers,
 }: {
   resource: CapacityResourceRow;
   weeks: CapacityWeek[];
@@ -347,6 +391,7 @@ function ResourceBlock({
   onCellClick: (resource: CapacityResourceRow, colKey: string, label: string, cell: CapacityCell) => void;
   canMove: boolean;
   onMove: (resource: CapacityResourceRow, order: CapacityCellOrder) => void;
+  switchHandlers: SwitchHandlers;
 }) {
   const isExpandedHere = expanded?.workCenterId === resource.workCenterId;
   const weekLabels = weeks.map((w) => weekLabel(w, spansMultipleYears));
@@ -398,6 +443,7 @@ function ResourceBlock({
           label={`${resource.code} · ${resource.name} — ${expanded.label}`}
           orders={expanded.cell.orders}
           onMove={canMove ? (order) => onMove(resource, order) : undefined}
+          switchHandlers={switchHandlers}
         />
       )}
     </>
@@ -407,6 +453,7 @@ function ResourceBlock({
 function CellContent({ cell, flags = true }: { cell: CapacityCell; flags?: boolean }) {
   const hasLocked = flags && cell.orders.some((o) => o.planLocked);
   const hasLate = flags && cell.orders.some((o) => o.late);
+  const hasSuggestion = flags && cell.orders.some((o) => o.suggestion !== null);
   return (
     <>
       <span className={styles.cellHours}>
@@ -421,8 +468,13 @@ function CellContent({ cell, flags = true }: { cell: CapacityCell; flags?: boole
           </div>
         </>
       )}
-      {(hasLocked || hasLate) && (
+      {(hasLocked || hasLate || hasSuggestion) && (
         <span className={styles.cellFlags}>
+          {hasSuggestion && (
+            <span title="Innehåller operationer med förslag på alternativ resurs" role="img" aria-label="Innehåller förslag på alternativ resurs">
+              <ArrowLeftRight size={12} aria-hidden="true" />
+            </span>
+          )}
           {hasLate && (
             <span title="Innehåller sena ordrar" role="img" aria-label="Innehåller sena ordrar">
               <Clock size={12} aria-hidden="true" />
@@ -482,10 +534,12 @@ function ExpansionRow({
   label,
   orders,
   onMove,
+  switchHandlers,
 }: {
   label: string;
   orders: CapacityCellOrder[];
   onMove?: (order: CapacityCellOrder) => void;
+  switchHandlers: SwitchHandlers;
 }) {
   return (
     <div className={styles.expansion}>
@@ -520,12 +574,38 @@ function ExpansionRow({
                     Låst
                   </span>
                 )}
+                {o.ordinaryWorkCenterCode !== null && (
+                  <span title={`Ordinarie: ${o.ordinaryWorkCenterCode}`}>
+                    <StatusPill status="running" label={`Alternativ (för ${o.ordinaryWorkCenterCode})`} compact />
+                  </span>
+                )}
+                {o.resourceLocked && (
+                  <span title="Resursen är vald för hand — Planeringen föreslår inget byte">
+                    <StatusPill status="draft" label="Vald för hand" compact />
+                  </span>
+                )}
                 {onMove && (
                   <Button type="button" variant="secondary" size="small" onClick={() => onMove(o)}>
                     Flytta…
                   </Button>
                 )}
               </div>
+              {o.suggestion && (
+                <div className={styles.suggestionLine}>
+                  <StatusPill status="delayed" label={`Förslag: ${o.suggestion.code}`} compact />
+                  <span>{suggestionText(o.suggestion)}</span>
+                  {switchHandlers.canSwitch && (
+                    <SwitchResourceButton
+                      manufacturingOrderId={o.manufacturingOrderId}
+                      moOperationId={o.moOperationId}
+                      workCenterId={o.suggestion.workCenterId}
+                      code={o.suggestion.code}
+                      onSwitched={() => switchHandlers.onSwitched(o.moOperationId)}
+                      onError={switchHandlers.onError}
+                    />
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
@@ -559,7 +639,31 @@ function WarningLine({ warning }: { warning: PlanWarning }) {
   );
 }
 
-type SummaryList = "overloaded" | "late" | "unplanned";
+// One förslag as a list row: order link, Op, "110 → 120, v.49 → v.47" and Byt till X.
+function SuggestionLine({ row, handlers }: { row: ResourceSuggestionRow; handlers: SwitchHandlers }) {
+  return (
+    <span className={styles.suggestionRow}>
+      <span>
+        <Link href={`/tillverkning/ordrar/${row.manufacturingOrderId}`} className={styles.noticeLink}>
+          {row.orderNumber}
+        </Link>{" "}
+        op {row.sequenceNo}: {suggestionShift({ ...row, code: row.toCode })}
+      </span>
+      {handlers.canSwitch && (
+        <SwitchResourceButton
+          manufacturingOrderId={row.manufacturingOrderId}
+          moOperationId={row.moOperationId}
+          workCenterId={row.toWorkCenterId}
+          code={row.toCode}
+          onSwitched={() => handlers.onSwitched(row.moOperationId)}
+          onError={handlers.onError}
+        />
+      )}
+    </span>
+  );
+}
+
+type SummaryList = "overloaded" | "late" | "unplanned" | "suggestions";
 
 interface OverloadedCell {
   key: string;
@@ -593,11 +697,13 @@ function PlanSummary({
   overloaded,
   open,
   onOpen,
+  switchHandlers,
 }: {
   summary: CapacityResult["summary"];
   overloaded: OverloadedCell[];
   open: SummaryList | null;
   onOpen: (list: SummaryList) => void;
+  switchHandlers: SwitchHandlers;
 }) {
   const lateCount = summary.lateOrders.length;
   const unplannedCount = summary.unplannedOrders.length;
@@ -614,6 +720,11 @@ function PlanSummary({
       text: `${unplannedCount} ej ${unplannedCount === 1 ? "planerad" : "planerade"}`,
     },
   ];
+  // Alternativa resurser: only shown when there is something to suggest.
+  const suggestionCount = summary.resourceSuggestions.length;
+  if (suggestionCount > 0) {
+    items.push({ list: "suggestions", count: suggestionCount, text: suggestionCountLabel(suggestionCount) });
+  }
   return (
     <div className={styles.summary}>
       <div className={styles.summaryLine}>
@@ -654,6 +765,15 @@ function PlanSummary({
                 {o.orderNumber}
               </Link>{" "}
               — färdigdatum {o.dueDate}, planerat klar {o.plannedFinish ?? "—"}
+            </li>
+          ))}
+        </ul>
+      )}
+      {open === "suggestions" && (
+        <ul className={styles.summaryList}>
+          {summary.resourceSuggestions.map((r) => (
+            <li key={r.moOperationId}>
+              <SuggestionLine row={r} handlers={switchHandlers} />
             </li>
           ))}
         </ul>
