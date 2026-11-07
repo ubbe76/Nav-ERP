@@ -127,4 +127,16 @@ describe("forgottenStopNowAllowed", () => {
     expect(forgottenStopNowAllowed("2026-10-01T06:00:00Z", now)).toBe(false);
     expect(forgottenStopNowAllowed("not a date", now)).toBe(false);
   });
+  it("the day before is the calendar's, not 24 hours back, across the switches", () => {
+    // Monday 30 March 2026 00:30 summer time (the night after the spring
+    // switch) = 29 March 22:30Z; 24 hours back is Saturday 23:30 winter time.
+    const mondayAfterSpring = Date.parse("2026-03-29T22:30:00Z");
+    expect(forgottenStopNowAllowed("2026-03-29T05:00:00Z", mondayAfterSpring)).toBe(true); // Sunday 07:00
+    expect(forgottenStopNowAllowed("2026-03-28T21:00:00Z", mondayAfterSpring)).toBe(false); // Saturday 22:00
+    // Sunday 25 October 2026 23:30 winter time (the evening of the autumn
+    // switch) = 22:30Z; 24 hours back is still Sunday, 00:30 summer time.
+    const sundayAfterAutumn = Date.parse("2026-10-25T22:30:00Z");
+    expect(forgottenStopNowAllowed("2026-10-24T18:00:00Z", sundayAfterAutumn)).toBe(true); // Saturday 20:00
+    expect(forgottenStopNowAllowed("2026-10-25T06:00:00Z", sundayAfterAutumn)).toBe(false); // Sunday 07:00, today
+  });
 });

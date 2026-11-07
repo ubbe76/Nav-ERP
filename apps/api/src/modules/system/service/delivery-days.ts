@@ -417,6 +417,40 @@ function stockholmOffsetMs(ms: number): number {
 // (02:30 → 03:30 summer time).
 export function stockholmInstant(date: string, clock: string): number {
   const wall = Date.parse(`${date}T${clock.length === 5 ? `${clock}:00` : clock}Z`); // the wall clock read as UTC
+  const dayStart = Date.parse(`${date}T00:00:00Z`);
+  // A clock inside the date (00:00–24:00) on a date without a switch nearby:
+  // one offset for the whole day, looked up once per date.
+  if (wall >= dayStart && wall <= dayStart + DAY_MS) {
+    const offset = steadyOffsetOf(date, dayStart);
+    if (offset !== null) return wall - offset;
+  }
+  return instantNearSwitch(wall);
+}
+
+// The formatter costs ~5 µs and a payroll day reads some fifteen clocks per
+// employee, so the offset is kept per date. instantNearSwitch's probes for a
+// clock on the date lie at wall ± 24 h, all inside [date − 1 day, date + 2
+// days]; when the offset is the same at both ends of that window it is the
+// same throughout (Stockholm's switches are months apart, never two within
+// three days), and every probe would have read it — the result is exactly the
+// one instantNearSwitch gives. Otherwise null: the date is a switch day or
+// next to one, and the clock goes the long way.
+const steadyOffsets = new Map<string, number | null>();
+const STEADY_OFFSETS_MAX = 4096;
+
+function steadyOffsetOf(date: string, dayStart: number): number | null {
+  const cached = steadyOffsets.get(date);
+  if (cached !== undefined) return cached;
+  const first = stockholmOffsetMs(dayStart - DAY_MS);
+  const offset = first === stockholmOffsetMs(dayStart + 2 * DAY_MS) ? first : null;
+  if (steadyOffsets.size >= STEADY_OFFSETS_MAX) steadyOffsets.clear();
+  steadyOffsets.set(date, offset);
+  return offset;
+}
+
+// The offset either side of the wall clock: equal, there is no switch within
+// a day of it; different, the clock is read with the offset that gives it back.
+function instantNearSwitch(wall: number): number {
   const before = stockholmOffsetMs(wall - DAY_MS);
   const after = stockholmOffsetMs(wall + DAY_MS);
   if (before === after) return wall - before;

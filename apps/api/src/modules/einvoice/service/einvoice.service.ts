@@ -14,6 +14,7 @@ import { InvoiceNotFoundError } from "../../sales/service/invoice.service.js";
 import { CustomerNotFoundError } from "../../sales/service/sales.service.js";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
+import { stockholmDateOf } from "../../system/service/delivery-days.js";
 import { LIVE_TRANSMISSION_CONSTRAINT, type EinvoiceRepository, type TransmissionRow } from "../repository/einvoice.repository.js";
 import { EInvoiceProviderError, type LookupResult } from "./einvoice-provider.js";
 import type { CompanyInfoReader, CompanyInfoRow, EinvoiceSettingsService } from "./einvoice-settings.service.js";
@@ -395,7 +396,6 @@ function autoSendMessage(t: TransmissionView): string {
 }
 
 const sha256 = (buf: Buffer) => createHash("sha256").update(buf).digest("hex");
-const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 
 export function createEinvoiceService(deps: {
   repo: EinvoiceRepository;
@@ -439,7 +439,8 @@ export function createEinvoiceService(deps: {
       orderLinks,
       creditedInvoiceNumber: credited?.invoiceNumber ?? null,
       attachment: pdf,
-      today: isoDate(now()),
+      // The issue date when the invoice has none: the Stockholm day, not UTC's.
+      today: stockholmDateOf(now()),
     });
     const problems = checkUblInput(input);
     if (problems.length > 0) throw new EinvoiceDocumentInvalidError(problems);

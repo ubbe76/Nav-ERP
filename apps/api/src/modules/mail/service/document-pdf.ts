@@ -10,6 +10,7 @@ import {
 import { code128Width, drawCode128, drawQrCode } from "./pdf-codes.js";
 import { DOCUMENT_TEXTS, documentTexts, type DocumentTexts } from "./document-texts.js";
 import type { SystemService } from "../../system/service/system.service.js";
+import { stockholmDateOf } from "../../system/service/delivery-days.js";
 
 // One shared A4 layout for all outgoing business documents (förfrågan,
 // inköpsorder, offert, orderbekräftelse): company header with logo, document
@@ -913,6 +914,15 @@ export function formatNumber(value: number, decimals = 2, language: DocumentLang
     .replace("−", "-");
 }
 
+// A document's dates are Stockholm days: an instant (printedAt, deliveredAt,
+// an order's createdAt, a draft's now) prints as the Swedish day, not UTC's
+// (which is the day before between 00:00 and 01:00/02:00), and a date
+// column's UTC midnight (due date, invoice date) is the same day in
+// Stockholm, always ahead of UTC.
+function documentDay(date: Date): string {
+  return stockholmDateOf(date);
+}
+
 // "2026-10-20 14:32" in Europe/Stockholm — the pallet card's Datum, so a
 // container running UTC still prints the clock the operator saw.
 const STOCKHOLM_DATE_TIME = new Intl.DateTimeFormat("sv-SE", {
@@ -1192,7 +1202,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       payment.ocrNumber ? `${t.ocrNumber}: ${payment.ocrNumber}` : null,
       company?.bankgiro ? `${t.bankgiro}: ${company.bankgiro}` : null,
       company?.plusgiro ? `${t.plusgiro}: ${company.plusgiro}` : null,
-      payment.dueDate ? `${t.dueDate}: ${payment.dueDate.toISOString().slice(0, 10)}` : null,
+      payment.dueDate ? `${t.dueDate}: ${documentDay(payment.dueDate)}` : null,
     ].filter((line): line is string => Boolean(line));
     if (boxLines.length === 0) return startY;
 
@@ -1234,10 +1244,10 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       .font("Helvetica")
       .fontSize(10)
       .fillColor("#444444")
-      .text(meta(t.meta.date, input.date.toISOString().slice(0, 10)), left, y);
+      .text(meta(t.meta.date, documentDay(input.date)), left, y);
     y += 14;
     if (input.dueDate) {
-      doc.text(meta(t.meta.dueDate, input.dueDate.toISOString().slice(0, 10)), left, y);
+      doc.text(meta(t.meta.dueDate, documentDay(input.dueDate)), left, y);
       y += 14;
     }
     if (input.orderReference) {
@@ -1608,17 +1618,17 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     doc.font("Helvetica-Bold").fontSize(18).text(t.titles.paymentReminder(input.level), left, y);
     y += 26;
     doc.font("Helvetica").fontSize(10).fillColor("#444444");
-    doc.text(`${t.meta.date}: ${input.printedAt.toISOString().slice(0, 10)}`, left, y);
+    doc.text(`${t.meta.date}: ${documentDay(input.printedAt)}`, left, y);
     y += 14;
     // The reference block — which invoice this is about.
     doc.text(t.reminder.invoice(input.documentNumber), left, y);
     y += 14;
     if (input.invoiceDate) {
-      doc.text(`${t.reminder.invoiceDate}: ${input.invoiceDate.toISOString().slice(0, 10)}`, left, y);
+      doc.text(`${t.reminder.invoiceDate}: ${documentDay(input.invoiceDate)}`, left, y);
       y += 14;
     }
     if (input.dueDate) {
-      doc.text(`${t.reminder.dueDate}: ${input.dueDate.toISOString().slice(0, 10)}`, left, y);
+      doc.text(`${t.reminder.dueDate}: ${documentDay(input.dueDate)}`, left, y);
       y += 14;
     }
     doc.fillColor("#000000");
@@ -1749,7 +1759,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     drawTitleBarcode(doc, input.documentNumber, y);
     y += 26;
     doc.font("Helvetica").fontSize(10).fillColor("#444444");
-    doc.text(`Utskriven: ${input.printedAt.toISOString().slice(0, 10)}`, left, y);
+    doc.text(`Utskriven: ${documentDay(input.printedAt)}`, left, y);
     y += 14;
     doc.text(`Kund: ${input.customerName}`, left, y);
     y += 14;
@@ -1858,7 +1868,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     drawTitleBarcode(doc, input.locationLabelCode, y);
     y += 26;
     doc.font("Helvetica").fontSize(10).fillColor("#444444");
-    doc.text(`Utskriven: ${input.printedAt.toISOString().slice(0, 10)}`, left, y);
+    doc.text(`Utskriven: ${documentDay(input.printedAt)}`, left, y);
     y += 14;
     doc.text(`Lagerplats: ${input.warehouseName} — ${input.locationName}`, left, y);
     y += 14;
@@ -1943,7 +1953,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     doc.font("Helvetica-Bold").fontSize(18).text(`${t.titles.deliveryNote} ${input.documentNumber}`, left, y);
     y += 26;
     doc.font("Helvetica").fontSize(10).fillColor("#444444");
-    doc.text(`${dn.deliveryDate}: ${input.deliveredAt.toISOString().slice(0, 10)}`, left, y);
+    doc.text(`${dn.deliveryDate}: ${documentDay(input.deliveredAt)}`, left, y);
     y += 14;
     if (input.undoneAt) {
       doc.font("Helvetica-Bold").text(dn.undone(formatStockholmDateTime(input.undoneAt)), left, y).font("Helvetica");
@@ -2059,7 +2069,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     doc.font("Helvetica-Bold").fontSize(18).text(`Tillverkningsorder ${input.orderNumber}`, left, y);
     y += 26;
     doc.font("Helvetica").fontSize(10).fillColor("#444444");
-    doc.text(`Utskriven: ${input.printedAt.toISOString().slice(0, 10)}    Status: ${input.statusLabel}`, left, y);
+    doc.text(`Utskriven: ${documentDay(input.printedAt)}    Status: ${input.statusLabel}`, left, y);
     doc.fillColor("#000000");
     y += 22;
 

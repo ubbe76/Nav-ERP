@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, asc, eq, sql } from "drizzle-orm";
 import {
   accounts,
@@ -271,6 +271,27 @@ describe("kundreskontra — öppna poster", () => {
       offset: 0,
     });
     expect(both.rows.map((r) => r.id)).toEqual([overdue.id]);
+  });
+
+  it("overdue is before the Stockholm day: due on 6 November is overdue at 23:30Z on the 6th", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const dueSixth = await makeIssuedInvoice(customer.id, user.id, 500);
+    const dueSeventh = await makeIssuedInvoice(customer.id, user.id, 500);
+    await db.update(invoices).set({ dueDate: "2026-11-06" }).where(eq(invoices.id, dueSixth.id));
+    await db.update(invoices).set({ dueDate: "2026-11-07" }).where(eq(invoices.id, dueSeventh.id));
+    const overdueIds = async () =>
+      (await paymentService.listOpenInvoices({ overdueOnly: true, limit: 50, offset: 0 })).rows.map((r) => r.id);
+
+    // Only Date is faked — the pg client's timers stay real.
+    vi.useFakeTimers({ now: new Date("2026-11-06T22:30:00Z"), toFake: ["Date"] }); // 23:30 on the 6th in Stockholm
+    try {
+      expect(await overdueIds()).toEqual([]);
+      vi.setSystemTime(new Date("2026-11-06T23:30:00Z")); // 00:30 on the 7th; UTC (and CURRENT_DATE) still the 6th
+      expect(await overdueIds()).toEqual([dueSixth.id]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("summarizes påminnelser per invoice: reminderCount + whether a fee was ever charged", async () => {

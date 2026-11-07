@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { stockholmInstant, stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { and, eq, sql } from "drizzle-orm";
 import { auditLog, db, payrollPeriods } from "@navet/db";
@@ -274,6 +274,20 @@ describe("payroll period locking", () => {
     const [year, month] = stockholmToday().split("-").map(Number) as [number, number];
 
     await expect(service.lockPeriod(year, month, user.id)).rejects.toBeInstanceOf(PeriodNotEndedError);
+  });
+
+  it("the month has ended when the Stockholm day is the 1st, though UTC is still on the 31st", async () => {
+    const { user, employee } = await seedPeriod();
+    await service.attest(YEAR, MONTH, employee.id, user.id);
+    // Only Date is faked — the pg client's timers stay real.
+    vi.useFakeTimers({ now: new Date("2026-05-31T21:30:00Z"), toFake: ["Date"] }); // 23:30 on 31 May in Stockholm
+    try {
+      await expect(service.lockPeriod(YEAR, MONTH, user.id)).rejects.toBeInstanceOf(PeriodNotEndedError);
+      vi.setSystemTime(new Date("2026-05-31T23:30:00Z")); // 01:30 on 1 June in Stockholm
+      expect((await service.lockPeriod(YEAR, MONTH, user.id)).status).toBe("locked");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refuses to lock while an employee is unattested, naming them", async () => {

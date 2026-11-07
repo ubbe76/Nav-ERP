@@ -120,6 +120,21 @@ describe("getValuation — standard method", () => {
     expect(rowAfter?.value).toBe(2000);
   });
 
+  it("a price changed 1 January 00:30 in Stockholm (23:30Z on 31 December) is not the year-end price", async () => {
+    const location = await makeLocation();
+    const article = await makeArticle();
+    await insertHistory(article.id, 100, new Date("2026-01-01T12:00:00Z"));
+    await insertTransaction({ articleId: article.id, locationId: location.id, quantityDelta: 10, createdAt: new Date("2026-06-01T10:00:00Z") });
+    // The database session runs UTC, where valid_from::date would be 31 December.
+    await insertHistory(article.id, 200, new Date("2026-12-31T23:30:00Z"));
+
+    const yearEnd = await valuationService.getValuation({ asOf: "2026-12-31", method: "standard" });
+    expect(rowFor(yearEnd, article.id)?.unitCost).toBe(100);
+    expect(rowFor(yearEnd, article.id)?.value).toBe(1000);
+    const newYear = await valuationService.getValuation({ asOf: "2027-01-01", method: "standard" });
+    expect(rowFor(newYear, article.id)?.unitCost).toBe(200);
+  });
+
   it("falls back to the earliest history row when asOf predates every row", async () => {
     const location = await makeLocation();
     const article = await makeArticle();

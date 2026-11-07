@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, asc, eq, sql } from "drizzle-orm";
 import {
   accounts,
@@ -299,6 +299,25 @@ describe("leverantörsreskontra — öppna poster", () => {
       offset: 0,
     });
     expect(both.rows.map((row) => row.id)).toEqual([overdue.id]);
+  });
+
+  it("overdue is before the Stockholm day: due on 6 November is overdue at 23:30Z on the 6th", async () => {
+    const user = await makeUser();
+    const supplier = await makeSupplier("Förfall AB");
+    const dueSixth = await makeApprovedInvoice(supplier.id, user.id, 500, { dueDate: "2026-11-06" });
+    await makeApprovedInvoice(supplier.id, user.id, 500, { dueDate: "2026-11-07" });
+    const overdueIds = async () =>
+      (await supplierPaymentService.listOpenInvoices({ overdueOnly: true, limit: 50, offset: 0 })).rows.map((row) => row.id);
+
+    // Only Date is faked — the pg client's timers stay real.
+    vi.useFakeTimers({ now: new Date("2026-11-06T22:30:00Z"), toFake: ["Date"] }); // 23:30 on the 6th in Stockholm
+    try {
+      expect(await overdueIds()).toEqual([]);
+      vi.setSystemTime(new Date("2026-11-06T23:30:00Z")); // 00:30 on the 7th; UTC (and CURRENT_DATE) still the 6th
+      expect(await overdueIds()).toEqual([dueSixth.id]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("carries the payment term's due date into the förfallolista — a term that is no number of days leaves none — and searches on number, supplier invoice number and supplier name", async () => {
