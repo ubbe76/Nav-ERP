@@ -477,6 +477,7 @@ export function ManufacturingOrderDetail({
                         <SwitchResourceButton
                           manufacturingOrderId={order.id}
                           moOperationId={row.id}
+                          fromWorkCenterId={row.workCenterId}
                           workCenterId={row.suggestion.workCenterId}
                           code={row.suggestion.code}
                           onSwitched={() => {

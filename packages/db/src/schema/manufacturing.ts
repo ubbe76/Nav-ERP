@@ -492,7 +492,11 @@ export const moOperationScrap = pgTable("mo_operation_scrap", {
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 },
-  (table) => [check("mo_operation_scrap_reason", sql`${table.reasonId} IS NOT NULL OR ${table.reason} IS NOT NULL`)]
+  (table) => [
+    check("mo_operation_scrap_reason", sql`${table.reasonId} IS NOT NULL OR ${table.reason} IS NOT NULL`),
+    // Rörd (operationTouchedSql, migration 0193): any scrap on the operation.
+    index("mo_operation_scrap_by_operation").on(table.moOperationId),
+  ]
 );
 
 // Rapporteringslogg: one row per reporting event on a TO — a stamp-out in
@@ -537,7 +541,11 @@ export const moReports = pgTable(
     undoneAt: timestamp("undone_at", { withTimezone: true }),
     undoneBy: uuid("undone_by").references(() => users.id, { onDelete: "set null" }),
   },
-  (table) => [index("mo_reports_by_order").on(table.manufacturingOrderId, table.createdAt)]
+  (table) => [
+    index("mo_reports_by_order").on(table.manufacturingOrderId, table.createdAt),
+    // Rörd (operationTouchedSql, migration 0193): any report-log row on the operation.
+    index("mo_reports_by_operation").on(table.moOperationId),
+  ]
 );
 
 // Material a report drew, per material row and stock location — Ångra

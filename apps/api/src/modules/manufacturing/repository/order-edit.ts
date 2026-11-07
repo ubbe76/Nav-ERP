@@ -245,7 +245,8 @@ export type OperationEditFailure =
   | "stamped"
   | "linked_purchase"
   | "reported"
-  | "last_operation_locked";
+  | "last_operation_locked"
+  | "resource_changed";
 
 export type OperationEditResult =
   | { ok: true; order: OrderRow; before: OperationRowView | null; operation: OperationRowView; warnings: string[]; replanned: boolean }
@@ -380,6 +381,13 @@ export async function updateOperationInTx(
   const locked = await lockEditableOrder(tx, moId);
   if (!locked.ok) return locked;
   if (op.status === "done") return { ok: false, reason: "done" };
+  // Byt till X's precondition (#15), read on the row this transaction holds
+  // FOR UPDATE: the operation is still on the resource the förslag was made
+  // for, and has not been moved (Flyttad) since — a förslag is only ever
+  // made for an unlocked operation. Ändra does not send it.
+  if (input.expectedWorkCenterId !== undefined && (op.workCenterId !== input.expectedWorkCenterId || op.planLocked)) {
+    return { ok: false, reason: "resource_changed" };
+  }
 
   const workCenterChanged = input.workCenterId !== undefined && input.workCenterId !== op.workCenterId;
   if (workCenterChanged) {

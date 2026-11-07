@@ -9,9 +9,13 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 // switch is made by hand — PATCH …/operations/:opId { workCenterId } puts the
 // operation in the suggestion's week and makes it Vald för hand. The caller
 // hides the button without Tillverkning (useCan) and reloads on success.
+// expectedWorkCenterId = the resource the förslag was made for: a switch on
+// an operation that changed resource or was moved meanwhile is refused (409
+// mo-operation-resource-changed) instead of switching blind.
 export function SwitchResourceButton({
   manufacturingOrderId,
   moOperationId,
+  fromWorkCenterId,
   workCenterId,
   code,
   onSwitched,
@@ -19,6 +23,7 @@ export function SwitchResourceButton({
 }: {
   manufacturingOrderId: string;
   moOperationId: string;
+  fromWorkCenterId: string; // the operation's current resource, as the förslag saw it
   workCenterId: string;
   code: string;
   onSwitched: () => void;
@@ -32,7 +37,7 @@ export function SwitchResourceButton({
     try {
       await apiFetch(`/api/v1/manufacturing-orders/${manufacturingOrderId}/operations/${moOperationId}`, {
         method: "PATCH",
-        body: JSON.stringify({ workCenterId }),
+        body: JSON.stringify({ workCenterId, expectedWorkCenterId: fromWorkCenterId }),
       });
       onSwitched();
     } catch (err) {

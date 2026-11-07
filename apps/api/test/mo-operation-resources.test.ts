@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
-import { auditLog, db, moOperationResources, moOperations, stampSessions, systemSettings } from "@navet/db";
+import { auditLog, db, moOperationResources, moOperations, moReports, stampSessions, systemSettings } from "@navet/db";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createCostingRepository } from "../src/modules/costing/repository/costing.repository.js";
@@ -9,6 +9,7 @@ import { createManufacturingRepository } from "../src/modules/manufacturing/repo
 import { updateOperationInTx } from "../src/modules/manufacturing/repository/order-edit.js";
 import {
   createManufacturingService,
+  MoOperationResourceChangedError,
   MoOperationStampedError,
 } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { createPlanningRepository } from "../src/modules/planning/repository/planning.repository.js";
@@ -588,6 +589,50 @@ describe("förslag på resurs (etapp 2)", () => {
     suggestionReads = 0;
     expect(await current()).toBeNull();
     expect(suggestionReads).toBe(0);
+  });
+
+  it("rörd through the report log (an undone report) or a stamp alone gives no förslag — on the card, in Beläggning and in Planera", async () => {
+    const w = await seedWorld({ fill110: true });
+    const current = async () => (await operationView(w.order.id, w.op10.id)).suggestion;
+    const listed = async () => (await planningService.getCapacity({ weeks: 3 })).summary.resourceSuggestions;
+    expect(await current()).toEqual(expected(w));
+
+    // An undone report: the quantities are back at 0, the log row stays (mo_reports).
+    const [report] = await db
+      .insert(moReports)
+      .values({ manufacturingOrderId: w.order.id, moOperationId: w.op10.id, kind: "operation", source: "terminal", undoneAt: new Date() })
+      .returning({ id: moReports.id });
+    expect(await current()).toBeNull();
+    expect(await listed()).toEqual([]);
+    expect((await planningService.planProductionRun(w.user.id)).resourceSuggestions).toEqual([]);
+    await db.delete(moReports).where(eq(moReports.id, report!.id));
+    expect(await current()).toEqual(expected(w));
+
+    // A closed stamp whose time report is gone (stamp_sessions alone).
+    const worker = await employee();
+    await db.insert(stampSessions).values({ employeeId: worker.id, moOperationId: w.op10.id, stoppedAt: new Date(), createdBy: w.user.id });
+    expect(await current()).toBeNull();
+    expect(await listed()).toEqual([]);
+    expect((await planningService.planProductionRun(w.user.id)).resourceSuggestions).toEqual([]);
+  });
+
+  it("Byt till X sends its precondition: a moved operation, or one on another resource since, is refused and nothing changes", async () => {
+    const w = await seedWorld({ fill110: true });
+    const byt = (expectedWorkCenterId: string) =>
+      mfgService.updateOperation(w.order.id, w.op10.id, { workCenterId: w.r120.id, expectedWorkCenterId }, w.user.id);
+    // Flyttad since the förslag was read: the weeks are the planner's decision.
+    await planningService.moveOperation(w.op10.id, { weekMonday: W2, moveFollowing: true }, w.user.id);
+    await expect(byt(w.r110.id)).rejects.toBeInstanceOf(MoOperationResourceChangedError);
+    expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r110.id, planLocked: true, resourceLocked: false });
+    // Ändra without the precondition still switches a locked operation (it loses the lock).
+    await planningService.unlockOperation(w.op10.id, w.user.id);
+    // Someone switched it to 130 meanwhile.
+    await mfgService.updateOperation(w.order.id, w.op10.id, { workCenterId: w.r130.id }, w.user.id);
+    await expect(byt(w.r110.id)).rejects.toBeInstanceOf(MoOperationResourceChangedError);
+    expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r130.id, resourceLocked: true });
+    // On the resource it expects, unlocked: the switch goes through.
+    const { operation } = await byt(w.r130.id);
+    expect(operation).toMatchObject({ workCenterId: w.r120.id, setupTime: "10.00", runTimePerUnit: "30.0000", resourceLocked: true });
   });
 
   it("the TO card reads no load for an order without an operation that could get one", async () => {

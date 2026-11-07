@@ -85,6 +85,10 @@ export interface PeekOptions extends PlaceOptions {
   // The resource's bare capacity: the existing load and this run's bookings
   // are ignored — Valregeln's "the base without load".
   ignoreLoad?: boolean;
+  // The existing load minus these weeks (an operation's own stored load, as
+  // the book holds it — operationLoadWeeks): a stored plan measured against
+  // the load as it is now, without competing with itself (#15 granskningen).
+  without?: readonly PlannedWeek[];
 }
 
 // The smallest piece the book places in a week — mo_operation_plan_weeks
@@ -181,14 +185,30 @@ export function createCapacityBook(input: CapacityBookInput): CapacityBook {
   }
   const booked = new Map<string, Map<string, number>>(); // this run's own bookings
 
+  // Capacity per (resource, Monday, from-day), computed once per book: the
+  // placement loop, the rolled load and every peek of Valregeln ask the same
+  // weeks again and again. Keyed on the resource object (one per resource in
+  // a run), so two differently configured objects never share an entry.
+  const capacityCache = new WeakMap<PlanWorkCenter, Map<string, number>>();
   function weekCapacityFrom(wc: PlanWorkCenter, monday: string, fromDay: string): number {
+    const from = maxDate(fromDay, monday);
+    let cache = capacityCache.get(wc);
+    if (!cache) {
+      cache = new Map();
+      capacityCache.set(wc, cache);
+    }
+    const key = `${monday}|${from}`;
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit;
     let minutes = 0;
     for (let i = 0; i < 7; i++) {
       const day = addDays(monday, i);
-      if (day < fromDay) continue;
+      if (day < from) continue;
       minutes += resourceDayMinutes(lookups, wc, day);
     }
-    return minutes * wc.capacityFactor;
+    const capacity = minutes * wc.capacityFactor;
+    cache.set(key, capacity);
+    return capacity;
   }
   const weekCapacity = (wc: PlanWorkCenter, monday: string) => weekCapacityFrom(wc, monday, maxDate(monday, today));
 
@@ -197,12 +217,8 @@ export function createCapacityBook(input: CapacityBookInput): CapacityBook {
   // week) rolls into the next — a backlog never vanishes just because its
   // week is over-full. Only resources with a capacity calendar are rolled
   // (the others are unlimited anyway); undated load stays out (noted).
-  const rolledLoadByResource = new Map<string, Map<string, number>>();
-  function rolledLoad(wc: PlanWorkCenter): Map<string, number> {
-    let rolled = rolledLoadByResource.get(wc.workCenterId);
-    if (rolled) return rolled;
-    rolled = new Map();
-    const buckets = existingLoad.get(wc.workCenterId) ?? new Map<string, number>();
+  function rollBuckets(wc: PlanWorkCenter, buckets: ReadonlyMap<string, number>): Map<string, number> {
+    const rolled = new Map<string, number>();
     const lastBucket = [...buckets.keys()].reduce((a, b) => maxDate(a, b), firstMonday);
     let carry = 0;
     for (let monday = firstMonday; monday < horizonMonday && (carry > EPS || monday <= lastBucket); monday = addDays(monday, 7)) {
@@ -211,17 +227,33 @@ export function createCapacityBook(input: CapacityBookInput): CapacityBook {
       rolled.set(monday, Math.min(load, capacity));
       carry = Math.max(0, load - capacity);
     }
+    return rolled;
+  }
+  const rolledLoadByResource = new Map<string, Map<string, number>>();
+  function rolledLoad(wc: PlanWorkCenter): Map<string, number> {
+    let rolled = rolledLoadByResource.get(wc.workCenterId);
+    if (rolled) return rolled;
+    rolled = rollBuckets(wc, existingLoad.get(wc.workCenterId) ?? new Map<string, number>());
     rolledLoadByResource.set(wc.workCenterId, rolled);
     return rolled;
+  }
+  // The same rolled load with some weeks taken out of the buckets first (an
+  // operation's own stored load) — never cached, the caller's weeks differ.
+  function rolledLoadWithout(wc: PlanWorkCenter, without: readonly PlannedWeek[]): Map<string, number> {
+    if (without.length === 0) return rolledLoad(wc);
+    const buckets = new Map(existingLoad.get(wc.workCenterId) ?? []);
+    for (const w of without) buckets.set(w.monday, Math.max(0, (buckets.get(w.monday) ?? 0) - w.minutes));
+    return rollBuckets(wc, buckets);
   }
 
   // Minutes a resource can still take in week `monday`, counting only days
   // from `fromDay`: never more than what is left of the whole week (from
   // today) after the existing load and this run's bookings.
-  function freeMinutes(wc: PlanWorkCenter, monday: string, fromDay: string): number {
-    const left = weekCapacity(wc, monday) - (rolledLoad(wc).get(monday) ?? 0) - (booked.get(wc.workCenterId)?.get(monday) ?? 0);
+  function freeMinutesOn(wc: PlanWorkCenter, monday: string, fromDay: string, rolled: Map<string, number>): number {
+    const left = weekCapacity(wc, monday) - (rolled.get(monday) ?? 0) - (booked.get(wc.workCenterId)?.get(monday) ?? 0);
     return Math.max(0, Math.min(weekCapacityFrom(wc, monday, maxDate(fromDay, today)), left));
   }
+  const freeMinutes = (wc: PlanWorkCenter, monday: string, fromDay: string) => freeMinutesOn(wc, monday, fromDay, rolledLoad(wc));
   function book(wc: PlanWorkCenter, monday: string, minutes: number) {
     const weeks = booked.get(wc.workCenterId) ?? new Map<string, number>();
     weeks.set(monday, (weeks.get(monday) ?? 0) + minutes);
@@ -260,6 +292,7 @@ export function createCapacityBook(input: CapacityBookInput): CapacityBook {
     let rest = minutes;
     let dayFloor = floor;
     let forced = !!options.forceStartWeek;
+    const rolled = options.ignoreLoad ? null : options.without ? rolledLoadWithout(wc, options.without) : rolledLoad(wc);
     while (rest >= MIN_PLAN_MINUTES) {
       if (monday >= horizonMonday) {
         return {
@@ -273,7 +306,7 @@ export function createCapacityBook(input: CapacityBookInput): CapacityBook {
         ? weekCapacity(wc, monday)
         : options.ignoreLoad
           ? weekCapacityFrom(wc, monday, maxDate(dayFloor, today))
-          : freeMinutes(wc, monday, dayFloor);
+          : freeMinutesOn(wc, monday, dayFloor, rolled!);
       let take = Math.min(rest, room);
       // What would be left after this week is under the threshold: it goes
       // here, with the last whole piece, never as a week of its own.
@@ -327,19 +360,22 @@ export interface ResourceCandidate {
   minutes: number;
 }
 
-// Where the base's klar-vecka comes from. The förslag: the STORED plan's
-// last week (null = unplanned — it did not fit, or was never planned — and
-// counts as full). The check: a trial placement on the base with the load.
-export type ChoiceBase = { stored: string | null } | "trial";
+// Where the base's klar-vecka comes from. The check: a trial placement on
+// the base with the load. The förslag: the STORED plan's last week (null =
+// unplanned, or a plan whose weeks have passed) measured against a trial
+// with the load minus the operation's own stored weeks (`without`, as the
+// book holds them) — the plan's age never decides, the load does (#15
+// granskningen av etapp 2).
+export type ChoiceBase = "trial" | { stored: string | null; without?: readonly PlannedWeek[] };
 
 export type PlacedPlacement = Extract<Placement, { horizonExceeded: false }>;
 
 export interface ResourceChoice {
   index: number; // 0 = the base, n = candidates[n]
-  baseFull: boolean; // the load pushes the base's klar-vecka (or it has none)
-  baseToWeek: string | null; // the base's klar-vecka as compared; null = unplanned, beyond the horizon or not tried
+  baseFull: boolean; // the load pushes the base's klar-vecka (or it does not fit within the horizon)
+  baseToWeek: string | null; // the base's klar-vecka as compared; null = beyond the horizon (or unplanned and not tried)
   toWeek: string | null; // the chosen resource's klar-vecka (Monday); the base's = baseToWeek
-  placement: PlacedPlacement | null; // the chosen resource's trial with the load; null when none was made
+  placement: PlacedPlacement | null; // the chosen resource's trial with the load; null when none was made (or the base is stored)
 }
 
 // Never tried as an alternative: an inactive resource, a legoresurs, and a
@@ -349,22 +385,56 @@ export interface ResourceChoice {
 export const triesAsAlternative = (wc: PlanWorkCenter | null): wc is PlanWorkCenter =>
   wc != null && wc.type !== "subcontract" && wc.active !== false && hasCapacityCalendar(wc);
 
+export interface BaseMeasure {
+  // The load pushes the base: its trial WITH the load finishes in a later
+  // week than its trial on the bare resource from the same floor, or it does
+  // not fit within the horizon.
+  full: boolean;
+  // The base's klar-vecka: the trial's week; for a stored base the earlier
+  // of the stored week and the trial (a stale plan that would now finish
+  // earlier counts as the trial, one the load has since pushed keeps the
+  // week the planner sees). null = beyond the horizon and nothing stored.
+  toWeek: string | null;
+  trial: PlacedPlacement | null; // the trial with the load; null beyond the horizon
+}
+
+// ONE measure of the base — Valregeln's "is it full" and the förslag walk's
+// floor (resource-suggestions.ts) read the same numbers. `forceStartWeek`
+// mirrors Planera's påbörjad operation (the floor walk only).
+export function measureBase(
+  book: CapacityBook,
+  base: ResourceCandidate,
+  floor: string,
+  choiceBase: ChoiceBase,
+  opts: { forceStartWeek?: string } = {}
+): BaseMeasure {
+  const stored = choiceBase === "trial" ? null : choiceBase.stored;
+  const without = choiceBase === "trial" ? undefined : choiceBase.without;
+  const tried = book.peek(base.workCenter, base.minutes, { floor, without, forceStartWeek: opts.forceStartWeek });
+  const trial = tried.horizonExceeded ? null : tried;
+  const bare = book.peek(base.workCenter, base.minutes, { floor, ignoreLoad: true, forceStartWeek: opts.forceStartWeek });
+  const full = trial === null || (!bare.horizonExceeded && trial.toWeek > bare.toWeek);
+  const toWeek = trial === null ? stored : stored === null || trial.toWeek < stored ? trial.toWeek : stored;
+  return { full, toWeek, trial };
+}
+
 // candidates[0] is the base (the förslag: the operation's current resource;
 // the check: the routing's ordinarie), the rest the other resources in rank
 // order. Nothing is booked — the caller books the choice if it should.
 // 1. Without an alternative that can be tried: the base, no trial at all
 //    (the existing suites and figures are untouched).
-// 2. The base is full when the load pushes its klar-vecka: its week is later
-//    than a trial on the bare base (no load) from the same floor; an
-//    unplanned base (or one beyond the horizon) is full. A base that is not
+// 2. The base is full when the load pushes its klar-vecka (measureBase): a
+//    trial with the load finishes later than a trial on the bare base from
+//    the same floor, or does not fit within the horizon. A base that is not
 //    full wins even when an alternative is faster (beslut 2: the ordinarie
 //    is the beredare's first choice).
 // 3. A full base: each alternative is tried WITH the load, with its own
 //    minutes; the earliest klar-VECKA wins, a tie goes to the lowest rank,
 //    and an alternative counts only when it is ready in an earlier week
-//    than the base — a tie with the base keeps the base. Weeks, not days:
-//    the plan counts in weeks and the next operation's floor is the klar-
-//    vecka, so a four-day week must not win a day inside the same week.
+//    than the base's klar-vecka — a tie with the base keeps the base. Weeks,
+//    not days: the plan counts in weeks and the next operation's floor is
+//    the klar-vecka, so a four-day week must not win a day inside the same
+//    week.
 export function chooseResource(
   book: CapacityBook,
   candidates: readonly ResourceCandidate[],
@@ -377,20 +447,16 @@ export function chooseResource(
   const tried = others.map((c, i) => ({ c, index: i + 1 })).filter(({ c }) => triesAsAlternative(c.workCenter));
   if (tried.length === 0) return { index: 0, baseFull: false, baseToWeek: stored, toWeek: stored, placement: null };
 
-  let basePlacement: PlacedPlacement | null = null;
-  let baseToWeek: string | null = stored;
-  if (base === "trial") {
-    const trial = book.peek(first.workCenter, first.minutes, { floor });
-    basePlacement = trial.horizonExceeded ? null : trial;
-    baseToWeek = basePlacement?.toWeek ?? null;
-  }
-  let baseFull = true;
-  if (baseToWeek !== null) {
-    const bare = book.peek(first.workCenter, first.minutes, { floor, ignoreLoad: true });
-    baseFull = !bare.horizonExceeded && baseToWeek > bare.toWeek;
-  }
-  const keepBase: ResourceChoice = { index: 0, baseFull, baseToWeek, toWeek: baseToWeek, placement: basePlacement };
-  if (!baseFull) return keepBase;
+  const measured = measureBase(book, first, floor, base);
+  const baseToWeek = measured.toWeek;
+  const keepBase: ResourceChoice = {
+    index: 0,
+    baseFull: measured.full,
+    baseToWeek,
+    toWeek: baseToWeek,
+    placement: base === "trial" ? measured.trial : null,
+  };
+  if (!measured.full) return keepBase;
 
   let best: { index: number; placement: PlacedPlacement } | null = null;
   for (const { c, index } of tried) {
@@ -399,7 +465,7 @@ export function chooseResource(
     if (best === null || trial.toWeek < best.placement.toWeek) best = { index, placement: trial };
   }
   if (best !== null && (baseToWeek === null || best.placement.toWeek < baseToWeek)) {
-    return { index: best.index, baseFull, baseToWeek, toWeek: best.placement.toWeek, placement: best.placement };
+    return { index: best.index, baseFull: true, baseToWeek, toWeek: best.placement.toWeek, placement: best.placement };
   }
   return keepBase;
 }

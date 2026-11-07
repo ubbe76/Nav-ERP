@@ -313,7 +313,11 @@ export const timeReports = pgTable("time_reports", {
   // Who entered this report in the system — distinct from employeeId (who did the work).
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+},
+  // Rörd (operationTouchedSql, migration 0193): "has the operation any time
+  // report" is asked per operation by the förslag på resurs and Ändra.
+  (table) => [index("time_reports_by_operation").on(table.moOperationId)]
+);
 
 // Stämpling: a shop-floor clock-in on an MO operation, made at the stamp
 // terminal. Stopping the session computes hours and materializes a
@@ -355,6 +359,8 @@ export const stampSessions = pgTable(
   },
   (table) => [
     index("stamp_sessions_open_by_employee").on(table.employeeId).where(sql`${table.stoppedAt} is null`),
+    // Rörd (operationTouchedSql, migration 0193): any stamp on the operation.
+    index("stamp_sessions_by_operation").on(table.moOperationId),
     // One open work stamp per employee and operation (migration 0173) — the
     // same race as attendance: two would both become time reports.
     uniqueIndex("stamp_sessions_one_open_per_operation")

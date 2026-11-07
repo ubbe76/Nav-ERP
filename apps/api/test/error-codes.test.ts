@@ -373,6 +373,7 @@ import {
   MoOperationReportedError,
   MoOperationSequenceTakenError,
   MoOperationStampedError,
+  MoOperationResourceChangedError,
 } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { MoOperationNotFoundError } from "../src/modules/purchase/service/purchase.service.js";
 import {
@@ -790,6 +791,7 @@ const cases: Array<[Error, string]> = [
   [new MoOperationSequenceTakenError(10), ERROR_CODES.MO_OPERATION_SEQUENCE_TAKEN],
   [new MoOperationDoneError(), ERROR_CODES.MO_OPERATION_DONE],
   [new MoOperationStampedError(), ERROR_CODES.MO_OPERATION_STAMPED],
+  [new MoOperationResourceChangedError(), ERROR_CODES.MO_OPERATION_RESOURCE_CHANGED],
   [new MoOperationLinkedPurchaseError(), ERROR_CODES.MO_OPERATION_LINKED_PURCHASE],
   [new MoOperationReportedError(), ERROR_CODES.MO_OPERATION_REPORTED],
   [new LastOperationLockedError(), ERROR_CODES.LAST_OPERATION_LOCKED],

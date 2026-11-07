@@ -440,6 +440,7 @@ function ResourceBlock({
 
       {isExpandedHere && expanded && (
         <ExpansionRow
+          workCenterId={resource.workCenterId}
           label={`${resource.code} · ${resource.name} — ${expanded.label}`}
           orders={expanded.cell.orders}
           onMove={canMove ? (order) => onMove(resource, order) : undefined}
@@ -531,11 +532,15 @@ function CellView({
 }
 
 function ExpansionRow({
+  workCenterId,
   label,
   orders,
   onMove,
   switchHandlers,
 }: {
+  // The expanded resource — every order in its cells is an operation on it
+  // (the förslag's "from", sent as Byt till's precondition).
+  workCenterId: string;
   label: string;
   orders: CapacityCellOrder[];
   onMove?: (order: CapacityCellOrder) => void;
@@ -598,6 +603,7 @@ function ExpansionRow({
                     <SwitchResourceButton
                       manufacturingOrderId={o.manufacturingOrderId}
                       moOperationId={o.moOperationId}
+                      fromWorkCenterId={workCenterId}
                       workCenterId={o.suggestion.workCenterId}
                       code={o.suggestion.code}
                       onSwitched={() => switchHandlers.onSwitched(o.moOperationId)}
@@ -653,6 +659,7 @@ function SuggestionLine({ row, handlers }: { row: ResourceSuggestionRow; handler
         <SwitchResourceButton
           manufacturingOrderId={row.manufacturingOrderId}
           moOperationId={row.moOperationId}
+          fromWorkCenterId={row.fromWorkCenterId}
           workCenterId={row.toWorkCenterId}
           code={row.toCode}
           onSwitched={() => handlers.onSwitched(row.moOperationId)}

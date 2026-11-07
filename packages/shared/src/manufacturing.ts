@@ -320,6 +320,12 @@ export const updateMoOperationSchema = z
     // the operation suggestions again. Ignored on an operation without
     // resource rows (it is always false there).
     resourceLocked: z.boolean().optional(),
+    // Byt till X's precondition (#15): the resource the planner saw the
+    // förslag on. The switch is refused (409 mo-operation-resource-changed)
+    // when the operation is no longer on it, or has been moved (Flyttad,
+    // plan_locked) since — a förslag is only ever made for an unlocked
+    // operation. Ändra does not send it.
+    expectedWorkCenterId: z.string().uuid().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateMoOperationInput = z.infer<typeof updateMoOperationSchema>;

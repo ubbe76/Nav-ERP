@@ -454,6 +454,15 @@ export class MoOperationStampedError extends Error {
   }
 }
 
+// Byt till X (#15): the operation is no longer on the resource the förslag
+// was made for, or was moved (Flyttad) since — nothing is changed. 409.
+export class MoOperationResourceChangedError extends Error {
+  constructor() {
+    super("The operation changed resource or was moved since the förslag was shown — nothing was changed");
+    this.name = "MoOperationResourceChangedError";
+  }
+}
+
 export class MoOperationLinkedPurchaseError extends Error {
   constructor() {
     super("A purchase order or inquiry row points at the operation");
@@ -984,7 +993,8 @@ export function createManufacturingService(
       | "stamped"
       | "linked_purchase"
       | "reported"
-      | "last_operation_locked",
+      | "last_operation_locked"
+      | "resource_changed",
     moId: string,
     status: string,
     sequenceNo: number,
@@ -1009,6 +1019,8 @@ export function createManufacturingService(
         return new MoOperationReportedError();
       case "last_operation_locked":
         return new LastOperationLockedError();
+      case "resource_changed":
+        return new MoOperationResourceChangedError();
     }
   }
 

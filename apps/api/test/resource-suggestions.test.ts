@@ -135,10 +135,29 @@ describe("resourceSuggestions — when the current resource is full", () => {
     expect(resourceSuggestions(world([load("wc-110", W43, 40), candidate])).map((s) => [s.toCode, s.toWeek])).toEqual([["120", W43]]);
   });
 
-  it("counts an unplanned operation as full", () => {
+  it("measures an unplanned operation by its trial: pushed by the load ⇒ a förslag, free ⇒ none", () => {
     const candidate = op("TO-1", 10, 10, { resources: ALTERNATIVES, plannedWeeks: null });
-    expect(resourceSuggestions(world([candidate]))).toEqual([
+    expect(resourceSuggestions(world([...FULL_110, candidate]))).toEqual([
       expect.objectContaining({ toCode: "120", currentToWeek: null, toWeek: W43, reason: "unplanned" }),
+    ]);
+    // An empty 110 takes it this week: never planned is not the same as full.
+    expect(resourceSuggestions(world([candidate]))).toEqual([]);
+  });
+
+  it("gives nothing for a stale plan: the load, not the plan's age, decides (another TO cancelled)", () => {
+    // The plan ends in W45 because 110 WAS full W43–W44; that TO is gone, so
+    // a trial now finishes in W43 like the bare 110 — no "overloaded".
+    const candidate = op("TO-1", 10, 10, { resources: ALTERNATIVES, plannedWeeks: weeks([W45, 10]) });
+    expect(resourceSuggestions(world([...FULL_110, candidate]))).toHaveLength(1);
+    expect(resourceSuggestions(world([candidate]))).toEqual([]);
+  });
+
+  it("compares with the trial when the load now finishes the stored plan earlier", () => {
+    // Stored W46, but with the load as it is the operation finishes in W45
+    // on 110 (W43–W44 full): full all the same, and the förslag says W45.
+    const candidate = op("TO-1", 10, 10, { resources: ALTERNATIVES, plannedWeeks: weeks([W46, 10]) });
+    expect(resourceSuggestions(world([...FULL_110, candidate])).map((s) => [s.toCode, s.currentToWeek, s.toWeek, s.reason])).toEqual([
+      ["120", W45, W43, "overloaded"],
     ]);
   });
 
@@ -204,12 +223,37 @@ describe("resourceSuggestions — which operations", () => {
 });
 
 describe("resourceSuggestions — the floor and the walk", () => {
-  it("starts after the previous operation's stored klar-vecka", () => {
-    // Op 10 on 140 ends W45; Op 20 on 110 is stored W46 (110 full W45). 120 is free from W45.
+  it("starts after the previous operation's klar-vecka", () => {
+    // Op 10 on 140 ends W45 (140 is full W43–W44); Op 20 on 110 is stored
+    // W46 (110 full W45). 120 is free from W45.
     const op10 = op("TO-1", 10, 10, { workCenterId: "wc-140", plannedWeeks: weeks([W45, 10]) });
     const op20 = op("TO-1", 20, 10, { resources: ALTERNATIVES, plannedWeeks: weeks([W46, 10]) });
-    const out = resourceSuggestions(world([load("wc-110", W45, 40), op10, op20]));
+    const out = resourceSuggestions(world([load("wc-140", W43, 40), load("wc-140", W44, 40), load("wc-110", W45, 40), op10, op20]));
     expect(out.map((s) => [s.sequenceNo, s.toCode, s.currentToWeek, s.toWeek])).toEqual([[20, "120", W46, W45]]);
+  });
+
+  it("measures the previous operation like the base: one that finished early, or whose stored week is stale, does not hold the floor", () => {
+    // Op 10 was planned W45 and is done already: Op 20's stored W46 is stale,
+    // 110 is empty — a trial finishes this week, so no förslag at all.
+    const done10 = op("TO-1", 10, 10, { workCenterId: "wc-140", plannedWeeks: weeks([W45, 10]), operationStatus: "done", quantityCompleted: 1 });
+    const op20 = op("TO-1", 20, 10, { resources: ALTERNATIVES, plannedWeeks: weeks([W46, 10]) });
+    expect(resourceSuggestions(world([done10, op20]))).toEqual([]);
+    // Pending but stale (140 is empty now): the floor is Op 10's trial (W43),
+    // not its stored W45 — and from W43 110 is free.
+    const stale10 = op("TO-1", 10, 10, { workCenterId: "wc-140", plannedWeeks: weeks([W45, 10]) });
+    expect(resourceSuggestions(world([stale10, op20]))).toEqual([]);
+  });
+
+  it("does not clamp a previous operation whose week has passed into the current week", () => {
+    // Op 10 on 140 was planned in W41 and has 40 h left; 140 is full this
+    // week, so it finishes in W44 — not "this week", as the clamped stored
+    // week would say. Op 20 (stored W45, 110 full in W44) is measured from
+    // W44: 120 is free there, so the förslag is W44, not W43.
+    const W41 = "2026-10-05";
+    const op10 = op("TO-1", 10, 40, { workCenterId: "wc-140", plannedWeeks: weeks([W41, 40]) });
+    const op20 = op("TO-1", 20, 10, { resources: ALTERNATIVES, plannedWeeks: weeks([W45, 10]) });
+    const out = resourceSuggestions(world([load("wc-140", W43, 40), load("wc-110", W44, 40), op10, op20]));
+    expect(out.map((s) => [s.sequenceNo, s.toCode, s.currentToWeek, s.toWeek])).toEqual([[20, "120", W45, W44]]);
   });
 
   it("starts after a lego operation's lead time", () => {
@@ -220,17 +264,26 @@ describe("resourceSuggestions — the floor and the walk", () => {
     expect(out.map((s) => [s.toCode, s.toWeek])).toEqual([["120", W45]]);
   });
 
-  it("starts today when the previous operation is unplanned or the operation is the first", () => {
+  it("gives nothing after an own operation with time but no plan — Planera's horizonHit", () => {
+    // Op 10 did not fit (or was never planned): Planera plans nothing after
+    // it, so Op 20 gets no förslag even though 110 is full and 120 free.
     const op10 = op("TO-1", 10, 10, { workCenterId: "wc-140", plannedWeeks: null });
     const op20 = op("TO-1", 20, 10, { resources: ALTERNATIVES, plannedWeeks: weeks([W45, 10]) });
-    expect(resourceSuggestions(world([...FULL_110, op10, op20])).map((s) => [s.sequenceNo, s.toWeek])).toEqual([[20, W43]]);
+    expect(resourceSuggestions(world([...FULL_110, op10, op20]))).toEqual([]);
+    // The unplanned operation itself may still get one, and the first
+    // operation starts today.
+    const first = op("TO-1", 10, 10, { resources: ALTERNATIVES, plannedWeeks: null });
+    expect(resourceSuggestions(world([...FULL_110, first, op20])).map((s) => [s.sequenceNo, s.reason, s.toWeek])).toEqual([[10, "unplanned", W43]]);
+    // A lego operation or one without time left is no such stop.
+    const empty10 = op("TO-1", 10, 0, { workCenterId: "wc-140", plannedWeeks: null });
+    expect(resourceSuggestions(world([...FULL_110, empty10, op20])).map((s) => [s.sequenceNo, s.toWeek])).toEqual([[20, W43]]);
   });
 
-  it("suggests for several operations in sequence, each from the stored plan of the one before (not from its förslag)", () => {
+  it("suggests for several operations in sequence, each from the plan of the one before (not from its förslag)", () => {
     const op10 = op("TO-1", 10, 10, { resources: ALTERNATIVES, plannedWeeks: weeks([W45, 10]) });
     const op20 = op("TO-1", 20, 10, { resources: ALTERNATIVES, plannedWeeks: weeks([W45, 10]) });
     const out = resourceSuggestions(world([...FULL_110, load("wc-110", W45, 20), op10, op20]));
-    // Op 10: 120 in W43. Op 20's floor is Op 10's stored W45, where 110 is
+    // Op 10: 120 in W43. Op 20's floor is Op 10's W45 on 110, where 110 is
     // not pushed by load beyond W45 — the bare 110 from W45 is W45 too.
     expect(out.map((s) => [s.sequenceNo, s.toCode, s.toWeek])).toEqual([[10, "120", W43]]);
   });
@@ -254,6 +307,7 @@ describe("resourceSuggestions — the floor and the walk", () => {
       op("TO-1", 10, 30, { resources: ALTERNATIVES, plannedWeeks: null }),
       op("TO-2", 20, 15, { resources: ALTERNATIVES, plannedWeeks: weeks([W46, 15]) }),
       op("TO-2", 10, 5, { workCenterId: "wc-140", plannedWeeks: weeks([W44, 5]) }),
+      load("wc-140", W43, 40),
     ];
     const first = resourceSuggestions(world(ops));
     expect(first.map((s) => [s.orderNumber, s.sequenceNo, s.toCode, s.toWeek])).toEqual([

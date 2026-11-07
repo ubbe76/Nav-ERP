@@ -615,6 +615,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "mo-operation-sequence-taken": "Sekvensnumret används redan av en annan operation på ordern.",
   "mo-operation-done": "Operationen är klar och kan inte ändras.",
   "mo-operation-stamped": "Någon är instämplad på operationen — stämpla ut först.",
+  "mo-operation-resource-changed":
+    "Operationen har bytt resurs eller flyttats sedan förslaget visades — inget ändrades. Ladda om sidan för att se det nya läget.",
   "mo-operation-linked-purchase": "En inköpsorder eller förfrågan pekar på operationen — ta bort den raden först.",
   "mo-operation-reported": "Något är redan rapporterat på operationen — den går inte att ta bort eller byta typ av resurs på.",
   "last-operation-locked": "Varor är redan inlevererade — ändringen skulle byta vilken operation som är sist. Behåll den sista operationen.",

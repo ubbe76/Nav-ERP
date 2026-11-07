@@ -11,12 +11,20 @@
 import {
   chooseResource,
   createCapacityBook,
+  measureBase,
   MIN_PLAN_MINUTES,
   type CapacityBookInput,
+  type ChoiceBase,
   type PlanWorkCenter,
   type ResourceCandidate,
 } from "./capacity-book.js";
-import { mondayOf, operationLoadWeeks, remainingOperationMinutes, type CapacityOperationRow } from "./capacity-calc.js";
+import {
+  mondayOf,
+  operationLoadWeeks,
+  remainingOperationMinutes,
+  type CapacityOperationRow,
+  type PlannedWeek,
+} from "./capacity-calc.js";
 
 const maxDate = (a: string, b: string) => (a > b ? a : b);
 
@@ -32,9 +40,10 @@ export interface SuggestionWorld {
   horizonWeeks?: number;
 }
 
-// Why the current resource counts as full: the load pushes its stored
-// klar-vecka, or the operation has no plan (it did not fit within the
-// horizon, or was never planned).
+// Why the current resource counts as full: the load pushes its klar-vecka
+// ("overloaded"), or the operation has no plan to compare with — it did not
+// fit within the horizon, was never planned, or its stored weeks have passed
+// and it no longer fits ("unplanned").
 export type SuggestionReason = "overloaded" | "unplanned";
 
 // One operation's förslag as the TO card and the matrix cell carry it.
@@ -43,7 +52,10 @@ export interface OperationResourceSuggestion {
   code: string;
   name: string;
   toWeek: string; // Monday of the week it would be ready on the suggested resource
-  currentToWeek: string | null; // the stored plan's last week (never before the current week); null = unplanned
+  // The current resource's klar-vecka as compared (measureBase): the stored
+  // plan's last week, or the trial's when the load now finishes it earlier
+  // (a stale plan); null = unplanned.
+  currentToWeek: string | null;
   reason: SuggestionReason;
 }
 
@@ -109,11 +121,16 @@ const compareText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 // booked on the alternatives, so no load counts twice.
 //
 // Per order the walk is Planera's (production-plan.ts): the floor is today,
-// moved by each earlier pending operation's stored klar-vecka (the next
-// operation may use the rest of that week — the floor is a Monday) or a lego
-// operation's lead time; an unplanned earlier operation moves nothing. The
-// base is the operation's CURRENT resource, its klar-vecka the stored plan's
-// last week (chooseResource with { stored }).
+// moved by each earlier pending operation's klar-vecka (the next operation
+// may use the rest of that week — the floor is a Monday) or a lego
+// operation's lead time. A locked operation stays where it is (its stored
+// weeks); every other one is measured like the base (measureBase): a trial
+// with the load minus its own stored weeks, the earlier of that and the
+// stored week — a stored week that has passed is no plan any more, the trial
+// decides (granskningen av etapp 2: the plan's age must not move the floor).
+// An own operation with time but no plan stops the walk, as Planera's
+// horizonHit does: nothing after it gets a förslag. The base is the
+// operation's CURRENT resource (chooseResource with the stored base).
 export function resourceSuggestions(world: SuggestionWorld, onlyOrderIds?: ReadonlySet<string>): ResourceSuggestion[] {
   const inScope = (orderId: string) => !onlyOrderIds || onlyOrderIds.has(orderId);
   if (!world.operations.some((op) => inScope(op.manufacturingOrderId) && mayGetResourceSuggestion(op))) return [];
@@ -155,13 +172,30 @@ export function resourceSuggestions(world: SuggestionWorld, onlyOrderIds?: Reado
       const minutes = remainingOperationMinutes(op);
       if (minutes < MIN_PLAN_MINUTES) continue; // nothing left to place (Planera clears it)
       const chunks = operationLoadWeeks(op, firstMonday);
-      const endWeek = hasPlan(op) && chunks.length > 0 ? chunks[chunks.length - 1]!.monday : null;
 
-      if (mayGetResourceSuggestion(op)) {
-        const suggestion = suggestFor(op, wc, minutes, floor, endWeek);
-        if (suggestion) out.push(suggestion);
+      let endWeek: string | null;
+      if (op.planLocked && hasPlan(op)) {
+        // Locked (Flytta, the reservation): Planera never moves it.
+        endWeek = chunks.length > 0 ? chunks[chunks.length - 1]!.monday : null;
+      } else {
+        const lastStored = hasPlan(op) ? op.plannedWeeks!.reduce((last, w) => maxDate(last, w.monday), "") : null;
+        const base: ChoiceBase = {
+          stored: lastStored !== null && lastStored >= firstMonday ? lastStored : null,
+          without: chunks.filter((c): c is PlannedWeek => c.monday !== null),
+        };
+        if (mayGetResourceSuggestion(op)) {
+          const suggestion = suggestFor(op, wc, minutes, floor, base);
+          if (suggestion) out.push(suggestion);
+        }
+        // Planera's horizonHit: an operation that did not fit (or was never
+        // planned) — nothing after it is planned, so nothing gets a förslag.
+        if (!hasPlan(op)) break;
+        const started = (op.quantityCompleted ?? 0) > 0 || op.quantityScrapped > 0;
+        endWeek = measureBase(book, { workCenter: wc, minutes }, floor, base, {
+          forceStartWeek: started ? firstMonday : undefined,
+        }).toWeek;
+        if (endWeek === null) break; // a passed plan that no longer fits within the horizon
       }
-
       if (endWeek !== null) {
         ready = maxDate(ready, book.weekFinishDay(wc, endWeek, floor));
         floor = maxDate(floor, endWeek);
@@ -175,7 +209,7 @@ export function resourceSuggestions(world: SuggestionWorld, onlyOrderIds?: Reado
     wc: PlanWorkCenter | null,
     minutes: number,
     floor: string,
-    endWeek: string | null
+    base: ChoiceBase
   ): ResourceSuggestion | null {
     const others = [...(op.resources ?? [])]
       .filter((r) => r.workCenterId !== op.workCenterId)
@@ -187,9 +221,10 @@ export function resourceSuggestions(world: SuggestionWorld, onlyOrderIds?: Reado
         minutes: remainingOperationMinutes({ ...op, setupTime: r.setupTime, runTimePerUnit: r.runTimePerUnit }),
       })),
     ];
-    const choice = chooseResource(book, candidates, floor, { stored: endWeek });
+    const choice = chooseResource(book, candidates, floor, base);
     if (choice.index === 0 || choice.toWeek === null) return null;
     const to = candidates[choice.index]!.workCenter!;
+    const currentToWeek = hasPlan(op) ? choice.baseToWeek : null;
     return {
       moOperationId: op.moOperationId,
       manufacturingOrderId: op.manufacturingOrderId,
@@ -200,9 +235,9 @@ export function resourceSuggestions(world: SuggestionWorld, onlyOrderIds?: Reado
       toWorkCenterId: to.workCenterId,
       toCode: to.code,
       toName: to.name,
-      currentToWeek: endWeek,
+      currentToWeek,
       toWeek: choice.toWeek,
-      reason: endWeek === null ? "unplanned" : "overloaded",
+      reason: currentToWeek === null ? "unplanned" : "overloaded",
     };
   }
 }

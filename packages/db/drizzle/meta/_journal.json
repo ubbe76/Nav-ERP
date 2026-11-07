@@ -1352,6 +1352,13 @@
       "when": 1794003152106,
       "tag": "0192_tidrapportens_resurs",
       "breakpoints": true
+    },
+    {
+      "idx": 193,
+      "version": "7",
+      "when": 1794011607655,
+      "tag": "0193_rord_index",
+      "breakpoints": true
     }
   ]
 }

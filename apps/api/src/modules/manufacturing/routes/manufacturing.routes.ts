@@ -46,6 +46,7 @@ import {
   MoOperationReportedError,
   MoOperationSequenceTakenError,
   MoOperationStampedError,
+  MoOperationResourceChangedError,
   NotSubcontractOperationError,
   OperationFileNotFoundError,
   WorkCenterSupplierNotFoundError,
@@ -664,6 +665,7 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
     if (err instanceof MoOperationSequenceTakenError) return reply.code(409).send(errorBody(err));
     if (err instanceof MoOperationDoneError) return reply.code(409).send(errorBody(err));
     if (err instanceof MoOperationStampedError) return reply.code(409).send(errorBody(err));
+    if (err instanceof MoOperationResourceChangedError) return reply.code(409).send(errorBody(err));
     if (err instanceof MoOperationLinkedPurchaseError) return reply.code(409).send(errorBody(err));
     if (err instanceof MoOperationReportedError) return reply.code(409).send(errorBody(err));
     if (err instanceof LastOperationLockedError) return reply.code(409).send(errorBody(err));

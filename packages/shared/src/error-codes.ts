@@ -491,6 +491,8 @@ export const ERROR_CODES = {
   MO_OPERATION_SEQUENCE_TAKEN: "mo-operation-sequence-taken",
   MO_OPERATION_DONE: "mo-operation-done",
   MO_OPERATION_STAMPED: "mo-operation-stamped",
+  // Byt till X (#15): the operation changed resource or was moved since the förslag
+  MO_OPERATION_RESOURCE_CHANGED: "mo-operation-resource-changed",
   MO_OPERATION_LINKED_PURCHASE: "mo-operation-linked-purchase",
   MO_OPERATION_REPORTED: "mo-operation-reported",
   LAST_OPERATION_LOCKED: "last-operation-locked",
