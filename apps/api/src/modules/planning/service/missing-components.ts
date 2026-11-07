@@ -27,11 +27,13 @@
 // of the same article. Purchased components get a note (the behovsberäkning
 // owns them), service articles nothing.
 //
-// Never a TO the create would refuse: a variants template (prepareCreate's
-// assertOrderableArticle), a beställningsvara (needs a configuration), or an
-// article without structure and routing (the Leveranstidskontroll's "saknar
-// beredning" — no TO without operations) gets a note instead. Cycle guard on
-// the article path; MISSING_MAX_DEPTH bounds the tree.
+// A note instead of a TO where one would be refused or pointless: a
+// variants template (prepareCreate's assertOrderableArticle) and a
+// beställningsvara (needs a configuration) the create refuses; an article
+// without structure and routing is not refused by the create but gets a
+// note too — the Leveranstidskontroll's "saknar beredning" policy (a TO
+// without operations is nothing to plan). Cycle guard on the article path;
+// MISSING_MAX_DEPTH bounds the tree.
 import type { BomEdge } from "./requirements-calc.js";
 import { explodeFromIndex, orderQuantityFor } from "./requirements-calc.js";
 import { suggestDueDate } from "./due-date-suggestion.js";

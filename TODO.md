@@ -123,7 +123,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 ### Medel
 
 - [ ] **D3 Spårbarhet batch/serienr** (L) — vid behov, senare → [#8](https://github.com/ubbe76/Nav-ERP/issues/8) *(hemsidan, under både Tillverkning och Lager)*
-- [ ] **Koppling mellan en TO och dess halvfabrikats TO:er (pegging)** → [#9](https://github.com/ubbe76/Nav-ERP/issues/9) *(hemsidan)*
 - [ ] **Prognos och ABC-klassning** → [#10](https://github.com/ubbe76/Nav-ERP/issues/10)
 - [ ] **Planering och beställningspunkt per lager** → [#11](https://github.com/ubbe76/Nav-ERP/issues/11) *(hemsidan)*
 

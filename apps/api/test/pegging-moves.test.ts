@@ -89,8 +89,8 @@ afterAll(async () => {
 // Two resources on a 40 h week. P (Ledtid 5 working days, Op 10 on R2) is
 // made of one H (Op 10 on R1, 60 min/st ⇒ 1 working day for a few pieces),
 // H of one S (the same), S of one purchased R. `semiLeadDays` sets H's
-// Ledtid (dagar) field instead.
-async function seedWorld(opts: { semiLeadDays?: number } = {}) {
+// Ledtid (dagar) field instead; `productNeedsSub` puts S directly on P too.
+async function seedWorld(opts: { semiLeadDays?: number; productNeedsSub?: boolean } = {}) {
   const user = await authRepo.create({
     email: `peg-${crypto.randomUUID()}@example.com`,
     passwordHash: "not-a-real-hash",
@@ -129,6 +129,7 @@ async function seedWorld(opts: { semiLeadDays?: number } = {}) {
   await articleService.addBomComponent(sub.id, { componentArticleId: raw.id, quantity: 1 });
   await articleService.addBomComponent(semi.id, { componentArticleId: sub.id, quantity: 1 });
   await articleService.addBomComponent(product.id, { componentArticleId: semi.id, quantity: 1 });
+  if (opts.productNeedsSub) await articleService.addBomComponent(product.id, { componentArticleId: sub.id, quantity: 1 });
   return { user, r1, r2, raw, sub, semi, product };
 }
 
@@ -191,6 +192,52 @@ describe("moves in GET /manufacturing-orders/:id/coverage", () => {
         reason: "late",
       },
     ]);
+  });
+
+  it("a TO shared between two levels follows the moved parent's NEW start: P needs H and S, H needs S, one S TO covers both", async () => {
+    const world = await seedWorld({ productNeedsSub: true });
+    // P due Fri 03-29, Ledtid 5 ⇒ needs H and S on Fri 03-22. H due Wed
+    // 03-27 starts 03-26 ⇒ needs S then. One S TO (4) due Tue 03-26 covers
+    // P's 2 (late) and H's 2 (in time).
+    const parent = await mfgService.createManufacturingOrder({ articleId: world.product.id, quantity: 2, dueDate: "2030-03-29" }, world.user.id);
+    const semi = await unplannedMfgService.createManufacturingOrder({ articleId: world.semi.id, quantity: 2, dueDate: "2030-03-27" }, world.user.id);
+    const sub = await unplannedMfgService.createManufacturingOrder({ articleId: world.sub.id, quantity: 4, dueDate: "2030-03-26" }, world.user.id);
+
+    // Seen from P alone S would be offered 03-21 (the day before P's need).
+    // But H moved to 03-21 starts Wed 03-20 and needs S then — the chain
+    // finds that at level 2 and recomputes: S is offered Tue 03-19, the
+    // working day before H's NEW start, so ticking both never makes S late
+    // for H. S stays at level 1 (where P first met it), shared ⇒ not
+    // preselected; nothing is listed under H since S is already listed.
+    expect(await movesOf(parent.id)).toEqual([
+      expect.objectContaining({ manufacturingOrderId: semi.id, level: 1, parentMoveId: null, currentDueDate: "2030-03-27", suggestedDueDate: "2030-03-21", exclusive: true, preselected: true, reason: "late" }),
+      expect.objectContaining({
+        manufacturingOrderId: sub.id,
+        level: 1,
+        parentMoveId: null,
+        currentDueDate: "2030-03-26",
+        suggestedDueDate: "2030-03-19",
+        late: false,
+        exclusive: false,
+        preselected: false,
+        reason: "late",
+      }),
+    ]);
+
+    // Ticking both: S is in time for H's new start as well.
+    await planningService.moveComponentOrders(
+      parent.id,
+      {
+        moves: [
+          { manufacturingOrderId: semi.id, dueDate: "2030-03-21", expectedDueDate: "2030-03-27" },
+          { manufacturingOrderId: sub.id, dueDate: "2030-03-19", expectedDueDate: "2030-03-26" },
+        ],
+      },
+      world.user.id
+    );
+    expect((await planningService.getManufacturingOrderCoverage(parent.id)).componentLate).toBe(false);
+    expect((await planningService.getManufacturingOrderCoverage(semi.id)).componentLate).toBe(false);
+    expect(await movesOf(parent.id)).toEqual([]);
   });
 
   it("a TO that also goes to other needs is shown but not preselected, and its suggestion follows the earliest of ALL its needs", async () => {

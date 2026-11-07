@@ -334,13 +334,13 @@ Kalkylen räknas aldrig om i efterhand: ändrar du inställningar gäller det fr
 
 I tabellen **Material** på TO-kortet visar kolumnen **Täcks av** vad som täcker varje materialrad, en rad per källa: *Lager*, *IO-123 · 2026-11-20* (en inköpsorder i utkast står som *(utkast)*) eller *TO-456 · 2026-11-18*. Ordernumren är länkar till kortet. Det som ingenting täcker står som *Saknas 12 st*. Täcks raden av flera källor, eller delvis, visas antalet på varje rad. Kommer en källa efter att materialet behövs står *N dagar för sent* i varningsfärg, och saknar den datum står *saknar datum*. Lagret är aldrig sent.
 
-Sektionen **Går till** visar åt andra hållet vilka behov ordern själv täcker: kundorder eller tillverkningsorder, **Behovsdatum**, **Antal** och *N dagar för sent* när ordern inte hinner. Det som blir över står som *Till lager 10 st*, och ett negativt lagersaldo visas som *Negativt lagersaldo*. Sektionen visas bara när ordern täcker något.
+Sektionen **Går till** visar åt andra hållet vilka behov ordern själv täcker: kundorder eller tillverkningsorder, **Behovsdatum**, **Antal** och *N dagar för sent* när ordern inte hinner. Det som blir över står som *Till lager 10 st*, och ett negativt lagersaldo visas som *Negativt lagersaldo*. Sektionen visas så länge ordern har något kvar att tillverka.
 
 Kopplingen är härledd — den räknas fram varje gång kortet visas och ingenting är reserverat. Den kan därför ändras när ett tidigare behov kommer in: lager och ordrar fördelas på behoven i datumordning, det tidigaste behovet först.
 
 ### Halvfabrikat sent
 
-Märket **Halvfabrikat sent** visas på TO-kortet (bredvid **Sen**), i listan **Tillverkning → Ordrar** och i Beläggningen när en tillverkningsorder för ett halvfabrikat som ordern behöver blir klar efter att behovet uppstår. Halvfabrikatets klardatum är planens slutdatum, annars **Planerat färdigdatum** — samma datum som avgör **Sen**. Lager är aldrig sent, och en sen inköpsorder eller saknat inköpsmaterial ger inget märke (kortet visar dem i **Täcks av**). Filtrera listan med statusvalet **Halvfabrikat sent**.
+Märket **Halvfabrikat sent** visas på TO-kortet (bredvid **Sen**), i listan **Tillverkning → Ordrar** och i Beläggningen när en tillverkningsorder för ett halvfabrikat som ordern behöver blir klar efter att behovet uppstår. Det gäller frisläppta och pågående ordrar — samma ordrar som kan bli **Sen**. Halvfabrikatets klardatum är planens slutdatum, annars **Planerat färdigdatum** — samma datum som avgör **Sen**. Lager är aldrig sent, och en sen inköpsorder eller saknat inköpsmaterial ger inget märke (kortet visar dem i **Täcks av**). Filtrera listan med statusvalet **Halvfabrikat sent**.
 
 ### Flytta halvfabrikaten
 
@@ -352,7 +352,7 @@ Avmarkerar du en rad avmarkeras och inaktiveras de ordrar som hör under den. Tr
 
 ### Skapa saknade halvfabrikat
 
-Knappen **Skapa saknade halvfabrikat…** (behörighet Tillverkning) finns när ett tillverkat material ingenting täcker. Dialogen **Skapa saknade halvfabrikat** visar hela trädet med indrag per nivå: **Artikel**, **Benämning**, **Antal** och **Färdigdatum** (*hinner inte* när datumet inte räcker, *saknar datum* när behovet saknar datum). Nedanför står noteringar — till exempel inköpta artiklar som saknas, de skapas inte här utan syns i Behovsberäkningen.
+Knappen **Skapa saknade halvfabrikat…** (behörighet Tillverkning) finns när ett tillverkat material ingenting täcker. Dialogen **Skapa saknade halvfabrikat** visar hela trädet med indrag per nivå: artikelnummer och benämning, **Antal** och **Färdigdatum** (*hinner inte* när datumet inte räcker, *saknar datum* när behovet saknar datum). Nedanför står noteringar — till exempel inköpta artiklar som saknas, de skapas inte här utan syns i Behovsberäkningen.
 
 Antalet nettas som i Behovsberäkningen: lager och befintliga ordrar dras av, ordermultipel och **Avrundning** tillämpas. Bara tillverkade artiklar får en order; hela strukturen skapas i ett svep. **Skapa N tillverkningsordrar** skapar dem, och beskedet listar de nya ordernumren (länkar) och eventuella varningar. Har läget ändrats sedan förhandsvisningen — någon annan skapade en order, eller behovet föll bort — skapas ingenting utan dialogen visar den nya förhandsvisningen.
 

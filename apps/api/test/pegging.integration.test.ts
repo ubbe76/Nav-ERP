@@ -17,6 +17,7 @@ import { createStockRepository } from "../src/modules/stock/repository/stock.rep
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import {
   createPlanningService,
+  InvalidStatusTransitionError,
   ManufacturingOrderNotFoundError,
   type ManufacturingPlanReader,
 } from "../src/modules/planning/service/planning.service.js";
@@ -274,6 +275,51 @@ describe("the chain product → halvfabrikat → raw material", () => {
     ]);
     expect(coverage.componentLate).toBe(true);
     expect((await planningService.getManufacturingOrderCoverage(semi.id)).surplus).toBe(3);
+  });
+
+  it("a planned (legacy) parent is no parent: no material table, so no coverage, no mark, not in the filter, nothing to create — while its own TO stays a supply", async () => {
+    const world = await seedWorld();
+    const parent = await mfgService.createManufacturingOrder({ articleId: world.product.id, quantity: 2, dueDate: "2030-03-29" }, world.user.id);
+    const semi = await unplannedMfgService.createManufacturingOrder({ articleId: world.semi.id, quantity: 2, dueDate: "2030-03-27" }, world.user.id);
+    // Back to the pre-release shape of an older order: status planned and
+    // no material rows. Its BOM explosion still shows in H's overview as
+    // a planned demand the late H TO covers — but that is not a parent.
+    await db.execute(sql`DELETE FROM mo_material_consumptions WHERE manufacturing_order_id = ${parent.id}`);
+    await db.execute(sql`UPDATE manufacturing_orders SET status = 'planned' WHERE id = ${parent.id}`);
+    expect((await planningService.getArticleOverview(world.semi.id)).rows.map((r) => [r.kind, r.documentId])).toEqual([
+      ["mo_planned_material", parent.id],
+      ["manufacturing_order", semi.id],
+    ]);
+
+    expect(await planningService.getManufacturingOrderCoverage(parent.id)).toEqual({
+      manufacturingOrderId: parent.id,
+      orderNumber: parent.orderNumber,
+      status: "planned",
+      materials: [],
+      goesTo: [],
+      surplus: 0,
+      componentLate: false,
+      moves: [],
+    });
+    expect((await mfgService.getManufacturingOrder(parent.id))?.componentLate).toBe(false);
+    expect((await list()).rows.find((r) => r.id === parent.id)).toMatchObject({ status: "planned", componentLate: false });
+    expect((await list("component_late")).total).toBe(0);
+    expect([...(await planningService.componentLateOrders([parent.id, semi.id]))]).toEqual([]);
+    expect(await planningService.getMissingComponents(parent.id)).toEqual({ orders: [], notes: [] });
+    const err = await planningService
+      .createMissingComponents(parent.id, { expected: [{ articleId: world.semi.id, quantity: 2, level: 1 }] }, world.user.id)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(InvalidStatusTransitionError);
+    expect(err).toMatchObject({ orderNumber: parent.orderNumber, status: "planned" });
+
+    // A planned TO is still a supply for its own article, late like any
+    // other: a released product TO needing H on Fri 03-15 (due 03-22 − 5),
+    // ahead of the planned parent's need, is covered by the planned H TO.
+    await db.execute(sql`UPDATE manufacturing_orders SET status = 'planned' WHERE id = ${semi.id}`);
+    const released = await mfgService.createManufacturingOrder({ articleId: world.product.id, quantity: 2, dueDate: "2030-03-22" }, world.user.id);
+    const coverage = await planningService.getManufacturingOrderCoverage(released.id);
+    expect(coverage.materials[0]!.allocations.map((a) => [a.kind, a.documentId, a.late])).toEqual([["manufacturing_order", semi.id, true]]);
+    expect(coverage.componentLate).toBe(true);
   });
 
   it("a closed TO has no coverage, an unknown id is 404", async () => {

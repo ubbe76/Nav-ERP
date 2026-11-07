@@ -1,7 +1,7 @@
 "use client";
 
 import { RowDeviationLink } from "../quality/RowDeviationLink";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
@@ -126,9 +126,18 @@ export function ManufacturingOrderDetail({
   const [coverage, setCoverage] = useState<ManufacturingOrderCoverage | null>(null);
   const [moveOpen, setMoveOpen] = useState(false);
   const [missingOpen, setMissingOpen] = useState(false);
+  // A request sequence: the effect and the dialogs' onMoved/onCreated can
+  // overlap, and only the LAST request may write — an older answer landing
+  // after the post-commit one would show stale Saknas/moves.
+  const coverageSeq = useRef(0);
   const loadCoverage = useCallback(async () => {
-    const res = await apiFetch<ManufacturingOrderCoverage>(`/api/v1/manufacturing-orders/${order.id}/coverage`);
-    setCoverage(res);
+    const seq = ++coverageSeq.current;
+    try {
+      const res = await apiFetch<ManufacturingOrderCoverage>(`/api/v1/manufacturing-orders/${order.id}/coverage`);
+      if (seq === coverageSeq.current) setCoverage(res);
+    } catch (err) {
+      if (seq === coverageSeq.current) throw err;
+    }
   }, [order.id]);
   useEffect(() => {
     loadCoverage().catch(() => setCoverage(null));

@@ -163,15 +163,12 @@ export interface CoverageParentsLoad {
     orderNumber: string;
     status: ManufacturingOrderStatus;
     articleId: string;
+    articleNumber: string;
     quantity: number;
     dueDate: string | null;
-    configured: boolean;
   }[];
   // Per released/in-progress TO: the component articles with rest.
   materialComponents: Map<string, string[]>;
-  // Only loaded when a planned, unconfigured parent is in the set.
-  bomEdges: { parentArticleId: string; componentArticleId: string; quantity: number }[];
-  phantomIds: string[];
 }
 
 export function createPlanningRepository(db: Db) {
@@ -1269,29 +1266,30 @@ export function createPlanningRepository(db: Db) {
     },
 
     // Pegging (#9): the parents a coverage is computed for — the TO heads
-    // and, per released/in-progress TO, the component articles of its
-    // material rows with rest (the overview's mo_material rows); a planned,
-    // unconfigured TO has no snapshot, so the service explodes its BOM with
-    // the edges and phantoms loaded here (only when such a parent exists).
-    // Unknown ids are absent. Two to four set-based queries, never per order.
+    // (with the article number, for the notes) and, per TO, the component
+    // articles of its material rows with rest (the overview's mo_material
+    // rows). Only a released/in-progress TO has a material table, so a
+    // planned (legacy) TO gets none — the service treats it as closed.
+    // Unknown ids are absent. Two set-based queries, never per order.
     async coverageParents(orderIds: string[], dbc: Db | Tx = db): Promise<CoverageParentsLoad> {
       const ids = [...new Set(orderIds)];
-      const empty: CoverageParentsLoad = { orders: [], materialComponents: new Map(), bomEdges: [], phantomIds: [] };
+      const empty: CoverageParentsLoad = { orders: [], materialComponents: new Map() };
       if (ids.length === 0) return empty;
-      // One query at a time: inside a transaction (Skapa saknade halvfabrikat
-      // runs this under the plan lock) the connection cannot run statements
-      // concurrently.
+      // One query at a time, like loadAll — keep the reads sequential inside
+      // the transaction (Skapa saknade halvfabrikat runs this under the plan
+      // lock).
       const orders = await dbc
         .select({
           id: manufacturingOrders.id,
           orderNumber: manufacturingOrders.orderNumber,
           status: manufacturingOrders.status,
           articleId: manufacturingOrders.articleId,
+          articleNumber: articles.articleNumber,
           quantity: manufacturingOrders.quantity,
           dueDate: manufacturingOrders.dueDate,
-          configured: isNotNull(manufacturingOrders.configuration),
         })
         .from(manufacturingOrders)
+        .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))
         .where(inArray(manufacturingOrders.id, ids));
       const materials = await dbc
         .select({
@@ -1311,15 +1309,7 @@ export function createPlanningRepository(db: Db) {
         if (!list.includes(m.componentArticleId)) list.push(m.componentArticleId);
         materialComponents.set(m.manufacturingOrderId, list);
       }
-      const needsExplosion = orders.some((o) => o.status === "planned" && !o.configured);
-      const bomEdges = needsExplosion ? await this.loadBomEdges(dbc) : [];
-      const phantomIds = needsExplosion ? await this.phantomArticleIds(dbc) : [];
-      return {
-        orders: orders.map((o) => ({ ...o, quantity: Number(o.quantity), configured: o.configured === true })),
-        materialComponents,
-        bomEdges,
-        phantomIds,
-      };
+      return { orders: orders.map((o) => ({ ...o, quantity: Number(o.quantity) })), materialComponents };
     },
 
     // The phantom articles — with loadBomEdges the whole demand structure an

@@ -93,8 +93,9 @@ afterAll(async () => {
 
 // Two resources on a 40 h week. P (Ledtid 5 working days, Op 10 on R2) is
 // made of one H (Op 10 on R1, 60 min/st ⇒ 1 working day for a few pieces),
-// H of one S (the same), S of one purchased R.
-async function seedWorld(opts: { semiOrderQuantity?: number } = {}) {
+// H of one S (the same), S of one purchased R. `productNeedsRaw` puts two
+// R directly on P too.
+async function seedWorld(opts: { semiOrderQuantity?: number; productNeedsRaw?: boolean } = {}) {
   const user = await authRepo.create({
     email: `missing-${crypto.randomUUID()}@example.com`,
     passwordHash: "not-a-real-hash",
@@ -133,6 +134,7 @@ async function seedWorld(opts: { semiOrderQuantity?: number } = {}) {
   await articleService.addBomComponent(sub.id, { componentArticleId: raw.id, quantity: 1 });
   await articleService.addBomComponent(semi.id, { componentArticleId: sub.id, quantity: 1 });
   await articleService.addBomComponent(product.id, { componentArticleId: semi.id, quantity: 1 });
+  if (opts.productNeedsRaw) await articleService.addBomComponent(product.id, { componentArticleId: raw.id, quantity: 2 });
   return { user, r1, r2, raw, sub, semi, product };
 }
 
@@ -215,6 +217,46 @@ describe("GET /manufacturing-orders/:id/missing-components (getMissingComponents
     expect(templated.notes).toEqual([
       "Behovet saknar datum — de nya tillverkningsordrarna får inget färdigdatum",
       `${world.sub.articleNumber} är en variantmall — välj en variant`,
+    ]);
+  });
+
+  it("a purchased article the parent lacks directly is a note at level 1 — also when nothing is to be manufactured", async () => {
+    const world = await seedWorld({ productNeedsRaw: true });
+    const parent = await mfgService.createManufacturingOrder({ articleId: world.product.id, quantity: 2, dueDate: "2030-03-29" }, world.user.id);
+    // P lacks 4 R directly (level 1), the new S TO lacks 2 R (level 3).
+    let preview = await planningService.getMissingComponents(parent.id);
+    expect(preview.orders.map((o) => [o.articleId, o.level])).toEqual([
+      [world.semi.id, 1],
+      [world.sub.id, 2],
+    ]);
+    expect(preview.notes).toEqual([
+      `${world.raw.articleNumber} köps (4 st saknas) — syns i Behovsberäkningen`,
+      `${world.raw.articleNumber} köps (2 st saknas) — syns i Behovsberäkningen`,
+    ]);
+
+    // H covered ⇒ no TO, but the purchased shortage is still told.
+    await unplannedMfgService.createManufacturingOrder({ articleId: world.semi.id, quantity: 2, dueDate: "2030-03-27" }, world.user.id);
+    preview = await planningService.getMissingComponents(parent.id);
+    expect(preview).toEqual({ orders: [], notes: [`${world.raw.articleNumber} köps (4 st saknas) — syns i Behovsberäkningen`] });
+    await expect(planningService.createMissingComponents(parent.id, { expected: [{ articleId: world.semi.id, quantity: 2, level: 1 }] }, world.user.id)).rejects.toBeInstanceOf(
+      NothingToCreateError
+    );
+  });
+
+  it("the cycle note names the parent's ARTICLE: P → H → S", async () => {
+    const world = await seedWorld();
+    // The article service refuses a BOM cycle, so the edge S → H is planted
+    // directly (the structure of an imported register can hold one).
+    await db.execute(sql`INSERT INTO bom_components (parent_article_id, component_article_id, quantity) VALUES (${world.sub.id}, ${world.semi.id}, 1)`);
+    const parent = await mfgService.createManufacturingOrder({ articleId: world.product.id, quantity: 2, dueDate: "2030-03-29" }, world.user.id);
+    const preview = await planningService.getMissingComponents(parent.id);
+    expect(preview.orders.map((o) => [o.articleId, o.level])).toEqual([
+      [world.semi.id, 1],
+      [world.sub.id, 2],
+    ]);
+    expect(preview.notes).toEqual([
+      `${world.semi.articleNumber} ingår i sin egen struktur (${world.product.articleNumber} → ${world.semi.articleNumber} → ${world.sub.articleNumber}) — hoppas över`,
+      `${world.raw.articleNumber} köps (2 st saknas) — syns i Behovsberäkningen`,
     ]);
   });
 

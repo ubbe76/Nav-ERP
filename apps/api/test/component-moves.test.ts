@@ -5,8 +5,10 @@ import {
   compareMoves,
   flattenMoves,
   moveCandidates,
+  recordEarlierNeed,
   redateParentDemands,
   suggestMove,
+  withEarliestNeed,
   type CoverageMove,
   type MoveCandidate,
 } from "../src/modules/planning/service/component-moves.js";
@@ -161,6 +163,45 @@ describe("suggestMove", () => {
     // The floor after the late TO's due date (03-27) would be a later date —
     // nothing (it would only lower the TO's priority in Planera).
     expect(suggestMove(candidate({}), { ...opts, leadDays: 20 })).toBeNull();
+  });
+});
+
+describe("the shared-TO fixpoint: withEarliestNeed and recordEarlierNeed", () => {
+  const c = (earliestNeed: string | null): MoveCandidate => ({
+    manufacturingOrderId: "mo-s",
+    orderNumber: "TO-3",
+    articleId: "s",
+    articleNumber: "S-1",
+    currentDueDate: "2030-03-26",
+    earliestNeed,
+    exclusive: false,
+    lateForParent: true,
+  });
+
+  it("withEarliestNeed pulls the need forward to an earlier override only — the same object otherwise", () => {
+    const dated = c("2030-03-22");
+    expect(withEarliestNeed(dated, undefined)).toBe(dated);
+    expect(withEarliestNeed(dated, "2030-03-22")).toBe(dated);
+    expect(withEarliestNeed(dated, "2030-03-25")).toBe(dated);
+    expect(withEarliestNeed(dated, "2030-03-20")).toEqual({ ...dated, earliestNeed: "2030-03-20" });
+    expect(withEarliestNeed(c(null), "2030-03-20")).toEqual({ ...c(null), earliestNeed: "2030-03-20" });
+  });
+
+  it("recordEarlierNeed lowers the override for an earlier find and reports the change; nothing for undated, equal, later or already-lower", () => {
+    const overrides = new Map<string, string>();
+    expect(recordEarlierNeed(overrides, "mo-s", "2030-03-22", null)).toBe(false);
+    expect(recordEarlierNeed(overrides, "mo-s", "2030-03-22", "2030-03-22")).toBe(false);
+    expect(recordEarlierNeed(overrides, "mo-s", "2030-03-22", "2030-03-25")).toBe(false);
+    expect(overrides.size).toBe(0);
+    expect(recordEarlierNeed(overrides, "mo-s", "2030-03-22", "2030-03-20")).toBe(true);
+    expect(overrides.get("mo-s")).toBe("2030-03-20");
+    // The next pass suggests from 03-20; a find of 03-21 is not earlier.
+    expect(recordEarlierNeed(overrides, "mo-s", "2030-03-20", "2030-03-21")).toBe(false);
+    expect(recordEarlierNeed(overrides, "mo-s", "2030-03-20", "2030-03-18")).toBe(true);
+    expect(overrides.get("mo-s")).toBe("2030-03-18");
+    // A TO suggested from no dated need at all takes any dated find.
+    expect(recordEarlierNeed(overrides, "mo-u", null, "2030-04-01")).toBe(true);
+    expect(overrides.get("mo-u")).toBe("2030-04-01");
   });
 });
 

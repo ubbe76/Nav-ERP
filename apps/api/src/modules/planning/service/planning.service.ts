@@ -17,8 +17,10 @@ import { pegOverview, type PegAllocation, type PegSupplyKind, type Pegging } fro
 import {
   flattenMoves,
   moveCandidates,
+  recordEarlierNeed,
   redateParentDemands,
   suggestMove,
+  withEarliestNeed,
   type CoverageMove,
   type MoveCandidate,
 } from "./component-moves.js";
@@ -33,7 +35,6 @@ import {
 } from "./missing-components.js";
 import {
   DEMAND_SALES_STATUSES,
-  SUPPLY_MO_STATUSES,
   buildBomIndex,
   computeLowLevelCodes,
   computeRequirements,
@@ -1392,11 +1393,15 @@ export function createPlanningService(
 
   // --- Pegging (#9) ----------------------------------------------------
   // The coverage for a set of parent TOs in a fixed number of loads: the
-  // parents' component articles (material rows with rest; a planned,
-  // unconfigured TO's one-level explosion) → their artikelöversikter in ONE
-  // batch (one dating, one delivery context) → the TO supplies' ready dates
-  // from ONE orderPlanSummaries call (plannedFinish ?? dueDate — the rule
-  // that decides Sen) → pegOverview per article. Never per order.
+  // parents' component articles (their material rows with rest) → their
+  // artikelöversikter in ONE batch (one dating, one delivery context) → the
+  // TO supplies' ready dates from ONE orderPlanSummaries call (plannedFinish
+  // ?? dueDate — the rule that decides Sen) → pegOverview per article. Never
+  // per order. A parent is a released/in-progress TO (OPEN_MO_STATUSES —
+  // the set the list's component_late filter and Sen are built on): a
+  // planned TO (legacy — every new TO is released in its create) has no
+  // material table and behaves like a closed one here, although it stays a
+  // supply and a move candidate as every planned TO does.
   // `withParentArticles`: the parents' own articles too (Går till). `dbc`:
   // every load bound to a transaction (Skapa saknade halvfabrikat under the
   // plan lock) — the loads already run one after the other.
@@ -1414,19 +1419,9 @@ export function createPlanningService(
   async function pegParents(parentIds: string[], opts: { withParentArticles?: boolean } = {}, dbc?: Tx): Promise<PeggedParents> {
     const today = todayFn();
     const load = await repo.coverageParents(parentIds, dbc);
-    const parents = load.orders.filter((o) => SUPPLY_MO_STATUSES.has(o.status));
+    const parents = load.orders.filter((o) => OPEN_MO_STATUSES.has(o.status));
     const componentsOf = new Map<string, string[]>();
-    const bomIndex = buildBomIndex(load.bomEdges);
-    const phantomIds = new Set(load.phantomIds);
-    for (const o of parents) {
-      const components = [...(load.materialComponents.get(o.id) ?? [])];
-      if (o.status === "planned" && !o.configured) {
-        for (const [articleId, need] of explodeFromIndex(bomIndex, phantomIds, o.articleId, o.quantity)) {
-          if (need > 0 && !components.includes(articleId)) components.push(articleId);
-        }
-      }
-      componentsOf.set(o.id, components);
-    }
+    for (const o of parents) componentsOf.set(o.id, [...(load.materialComponents.get(o.id) ?? [])]);
     const articleIds = new Set<string>([...componentsOf.values()].flat());
     if (opts.withParentArticles) for (const o of parents) articleIds.add(o.articleId);
     const overviews = articleIds.size > 0 ? await loadOverviewInputs([...articleIds], dbc) : new Map<string, ArticleOverviewInput>();
@@ -1472,15 +1467,41 @@ export function createPlanningService(
   // Never per order. A TO is listed once; an article already on the path
   // from the parent is not descended into (cycle guard); MOVE_MAX_DEPTH
   // bounds the chain.
+  //
+  // A TO shared between two levels (P needs H and S, H needs S, one TO-S
+  // covers both): listed at level 1 from P's need, it reappears at level 2
+  // from the moved H's need, which the re-dated pegging may put EARLIER than
+  // anything known at level 1. Its suggestion must follow the earliest of
+  // ALL its needs, so such a find is recorded as an override
+  // (recordEarlierNeed) and the whole chain is recomputed with the overrides
+  // applied (withEarliestNeed), until a pass finds none — a fixpoint, capped
+  // at MOVE_MAX_PASSES (the last result stands). Without a shared TO the
+  // first pass is final, so the common case costs exactly what it did.
   const MOVE_MAX_DEPTH = 10;
+  const MOVE_MAX_PASSES = 5;
   type MoveLevelParent = { id: string; moveId: string | null; articlePath: string[] };
   const isDemandOf = (parentId: string) => (d: Pegging["demands"][number]) =>
     !!d.row && d.row.documentId === parentId && (d.row.kind === "mo_material" || d.row.kind === "mo_planned_material");
 
   async function componentMoves(world: PeggedParents, parent: CoverageParentsLoad["orders"][number]): Promise<CoverageMove[]> {
+    const overrides = new Map<string, string>();
+    for (let pass = 1; ; pass++) {
+      const { moves, newOverrides } = await componentMovesPass(world, parent, overrides);
+      if (!newOverrides || pass >= MOVE_MAX_PASSES) return moves;
+    }
+  }
+
+  async function componentMovesPass(
+    world: PeggedParents,
+    parent: CoverageParentsLoad["orders"][number],
+    overrides: Map<string, string>
+  ): Promise<{ moves: CoverageMove[]; newOverrides: boolean }> {
     const today = world.today;
     const out: CoverageMove[] = [];
-    const listed = new Set<string>([parent.id]);
+    let newOverrides = false;
+    // The earliest need each listed TO was suggested from (after the
+    // overrides) — a later, earlier find for the same TO is an override.
+    const usedNeed = new Map<string, string | null>();
     // The starts of every moved TO so far — a TO deep in the chain can need
     // an article a TO higher up needs too.
     const movedStarts = new Map<string, string | null>();
@@ -1494,9 +1515,15 @@ export function createPlanningService(
           const pegging = levelWorld.peggings.get(articleId);
           const overview = levelWorld.overviews.get(articleId);
           if (!pegging || !overview) continue;
-          for (const candidate of moveCandidates(pegging, overview.article, isDemandOf(p.id))) {
-            if (listed.has(candidate.manufacturingOrderId)) continue;
-            listed.add(candidate.manufacturingOrderId);
+          for (const found of moveCandidates(pegging, overview.article, isDemandOf(p.id))) {
+            const id = found.manufacturingOrderId;
+            if (id === parent.id) continue;
+            if (usedNeed.has(id)) {
+              if (recordEarlierNeed(overrides, id, usedNeed.get(id)!, found.earliestNeed)) newOverrides = true;
+              continue;
+            }
+            const candidate = withEarliestNeed(found, overrides.get(id));
+            usedNeed.set(id, candidate.earliestNeed);
             candidates.push({ parent: p, candidate });
           }
         }
@@ -1524,7 +1551,10 @@ export function createPlanningService(
         ])
       );
       // The holidays the suggestions and the new starts can reach — the
-      // window of dueDateOffDays over the level's needs and lead times.
+      // window of dueDateOffDays over the level's needs and lead times. The
+      // new starts share its bound (today + 2 × lead + 14 days): a very long
+      // lead time can walk past it and then skips no holidays — the same
+      // deliberate limit as the dating window's.
       const needs = candidates.flatMap((c) => (c.candidate.earliestNeed ? [c.candidate.earliestNeed] : []));
       let offDays = new Set<string>();
       if (needs.length > 0) {
@@ -1578,7 +1608,7 @@ export function createPlanningService(
         levelWorld.peggings.set(articleId, pegOverview(redated, { today, readyDates: levelWorld.readyDates, offDays: levelWorld.offDays }));
       }
     }
-    return flattenMoves(out);
+    return { moves: flattenMoves(out), newOverrides };
   }
 
   // The parent's material needs in the component articles' peggings: the
@@ -1634,11 +1664,13 @@ export function createPlanningService(
     }
     const today = world.today;
     const needs = parentDemands(world, parent.id).map(({ articleId, demand }) => ({ articleId, needDate: demand.date, uncovered: demand.uncovered }));
-    const seeds = [...new Set(needs.filter((n) => n.uncovered > 0).map((n) => n.articleId))].filter(
-      (id) => world.overviews.get(id)?.article.type === "manufactured"
-    );
+    // Every article the parent is short of — a purchased one gets its note
+    // (level 1 is read from `articles` too) — and the manufactured ones the
+    // tree grows from.
+    const shortIds = [...new Set(needs.filter((n) => n.uncovered > 0).map((n) => n.articleId))];
+    const seeds = shortIds.filter((id) => world.overviews.get(id)?.article.type === "manufactured");
     const empty: MissingComputed = { head: parent, open: true, preview: { orders: [], notes: [] } };
-    if (seeds.length === 0) return empty;
+    if (shortIds.length === 0) return empty;
 
     // The demand BOM and the phantoms (one load each), then every article
     // the tree can reach from the seeds — phantoms dissolved, cycle guard,
@@ -1646,7 +1678,7 @@ export function createPlanningService(
     const [bomEdges, phantomIdList] = await loadAll(!!dbc, [() => repo.loadBomEdges(dbc), () => repo.phantomArticleIds(dbc)]);
     const bomIndex = buildBomIndex(bomEdges);
     const phantomIds = new Set(phantomIdList);
-    const reachable = new Set<string>(seeds);
+    const reachable = new Set<string>(shortIds);
     let frontier = seeds.map((id) => ({ id, path: new Set([parent.articleId, id]) }));
     for (let level = 2; frontier.length > 0 && level <= MISSING_MAX_DEPTH; level++) {
       const next: typeof frontier = [];
@@ -1700,7 +1732,7 @@ export function createPlanningService(
     const maxNeed = needDates.length > 0 ? needDates.reduce((a, b) => (a > b ? a : b)) : today;
     const offDays = new Set(await repo.fullDayHolidaysBetween(from, maxNeed > floorEnd ? maxNeed : floorEnd, dbc));
     const preview = planMissingComponents({
-      parent: { articleId: parent.articleId, articleNumber: overviews.get(parent.articleId)?.article.articleNumber ?? parent.orderNumber },
+      parent: { articleId: parent.articleId, articleNumber: parent.articleNumber },
       today,
       offDays,
       needs,

@@ -123,6 +123,29 @@ export function suggestMove(
   return { suggestedDueDate: s.dueDate, late: s.late, reason };
 }
 
+// The fixpoint for a TO shared between two levels of the chain (the service
+// runs the chain again with the overrides when a pass records one). The
+// candidate with its earliest need pulled forward to an earlier override —
+// the same object when nothing is earlier.
+export function withEarliestNeed(c: MoveCandidate, override: string | undefined): MoveCandidate {
+  if (override === undefined || (c.earliestNeed !== null && c.earliestNeed <= override)) return c;
+  return { ...c, earliestNeed: override };
+}
+
+// A listed TO (suggested from `used`, the earliest need after the overrides)
+// reappears deeper in the chain with the earliest need `found` in the
+// re-dated pegging. Earlier than what it was suggested from ⇒ the override
+// for the TO is lowered to it, and the caller runs the chain again. Returns
+// whether the overrides changed.
+export function recordEarlierNeed(overrides: Map<string, string>, manufacturingOrderId: string, used: string | null, found: string | null): boolean {
+  if (found === null) return false;
+  if (used !== null && found >= used) return false;
+  const prev = overrides.get(manufacturingOrderId);
+  if (prev !== undefined && prev <= found) return false;
+  overrides.set(manufacturingOrderId, found);
+  return true;
+}
+
 // The chain: a moved TO starts on another day, so its material needs (its
 // mo_material / mo_planned_material rows in the component articles'
 // overviews) sit on that day instead — `starts` is computeMoStartDates'
