@@ -606,6 +606,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   // Reservationen från Leveranstidskontrollen (the 409 body carries the new result).
   "delivery-time-changed": "Läget har ändrats sedan kontrollen — se det nya datumet och försök igen.",
   "nothing-to-reserve": "Kontrollen fann inget att tillverka — det som saknas köps in eller finns redan på väg.",
+  // Flytta halvfabrikaten (pegging #9): the dialog's dates are stale
+  "component-move-changed": "Färdigdatumet har ändrats sedan dialogen öppnades — ladda om och försök igen.",
   "mo-report-time-locked": "Stämplingens tid ligger i en låst löneperiod — rapporteringen kan inte ångras.",
   "manufacturing-order-has-reports": "Ordern har rapporteringar — ångra dem först under Rapporteringar.",
   "manufacturing-order-stamped-in": "Någon är instämplad på ordern — stämpla ut först.",

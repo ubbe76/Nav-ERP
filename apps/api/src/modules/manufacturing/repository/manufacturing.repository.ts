@@ -1682,6 +1682,30 @@ export function createManufacturingRepository(db: Db) {
       return row ?? null;
     },
 
+    // Flytta halvfabrikaten (pegging #9): the orders FOR UPDATE in id order
+    // — only the order rows, nothing else, so the lock order of every other
+    // writer (operation → order, advisory → operations → order, order →
+    // material → stock) is never inverted. Unknown ids are simply absent.
+    async lockManufacturingOrdersInTx(tx: Tx, ids: string[]) {
+      if (ids.length === 0) return [];
+      return tx
+        .select({
+          id: manufacturingOrders.id,
+          orderNumber: manufacturingOrders.orderNumber,
+          status: manufacturingOrders.status,
+          dueDate: manufacturingOrders.dueDate,
+        })
+        .from(manufacturingOrders)
+        .where(inArray(manufacturingOrders.id, ids))
+        .orderBy(asc(manufacturingOrders.id))
+        .for("update");
+    },
+
+    // The due date of one locked order (lockManufacturingOrdersInTx first).
+    async setDueDateInTx(tx: Tx, id: string, dueDate: string) {
+      await tx.update(manufacturingOrders).set({ dueDate, updatedAt: new Date() }).where(eq(manufacturingOrders.id, id));
+    },
+
     // The orders the plan can call Sen: released/in progress, the same set
     // orderPlanSummaries loads (and Aviseringarna's sena TO:er).
     async listOpenManufacturingOrderIds(): Promise<string[]> {

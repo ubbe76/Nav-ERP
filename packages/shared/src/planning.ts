@@ -155,3 +155,24 @@ export const applyDeliveryTimeSchema = z.object({
   useAlternatives: z.boolean().optional(),
 });
 export type ApplyDeliveryTimeInput = z.infer<typeof applyDeliveryTimeSchema>;
+
+// POST /manufacturing-orders/:id/component-moves — Flytta halvfabrikaten
+// (pegging #9): the chosen TOs from GET …/coverage's `moves` with the due
+// date to set and the one the dialog showed (expectedDueDate, null = none);
+// a TO whose date changed meanwhile refuses the whole request
+// (component-move-changed). Each TO at most once.
+export const componentMovesSchema = z.object({
+  moves: z
+    .array(
+      z.object({
+        manufacturingOrderId: z.string().uuid(),
+        dueDate: businessDateSchema,
+        expectedDueDate: businessDateSchema.nullable(),
+      })
+    )
+    .min(1)
+    .refine((moves) => new Set(moves.map((m) => m.manufacturingOrderId)).size === moves.length, {
+      message: "A manufacturing order may only be listed once",
+    }),
+});
+export type ComponentMovesInput = z.infer<typeof componentMovesSchema>;

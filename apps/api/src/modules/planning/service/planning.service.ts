@@ -1,6 +1,7 @@
 import type {
   ApplyDeliveryTimeInput,
   CapacityQuery,
+  ComponentMovesInput,
   ConfiguratorSelection,
   CreatePlanningOrdersInput,
   DeliveryTimeCheckRequest,
@@ -12,6 +13,14 @@ import type { Tx } from "@navet/db";
 import { roundUpToMultiple } from "@navet/shared";
 import type { CoverageParentsLoad, PlanningRepository } from "../repository/planning.repository.js";
 import { pegOverview, type PegAllocation, type PegSupplyKind, type Pegging } from "./pegging.js";
+import {
+  flattenMoves,
+  moveCandidates,
+  redateParentDemands,
+  suggestMove,
+  type CoverageMove,
+  type MoveCandidate,
+} from "./component-moves.js";
 import {
   DEMAND_SALES_STATUSES,
   SUPPLY_MO_STATUSES,
@@ -33,6 +42,8 @@ import {
   computeLegoOperationDates,
   computeMoStartDates,
   configuredLeadDays,
+  moLeadDays,
+  type DatingMoOperation,
   type LeadTimeContext,
 } from "./requirements-dating.js";
 import { legoReturnDate, NO_LEAD_TIME_DEFAULTS } from "./manufacturing-lead-time.js";
@@ -116,6 +127,28 @@ export class ManufacturingOrderNotFoundError extends Error {
   constructor(id: string) {
     super(`Manufacturing order ${id} not found`);
     this.name = "ManufacturingOrderNotFoundError";
+  }
+}
+
+// Flytta halvfabrikaten: a TO in the request is not open (same code as the
+// manufacturing module's header PATCH — own copy, planning stays a leaf).
+export class InvalidStatusTransitionError extends Error {
+  constructor(public orderNumber: string, public status: string) {
+    super(`Cannot move the planned finish date of a ${status} order (${orderNumber})`);
+    this.name = "InvalidStatusTransitionError";
+  }
+}
+
+// Flytta halvfabrikaten: a TO's due date is no longer the one the dialog
+// showed (expectedDueDate) — someone moved it meanwhile. Nothing is written.
+export class ComponentMoveChangedError extends Error {
+  constructor(
+    public orderNumber: string,
+    public expectedDueDate: string | null,
+    public currentDueDate: string | null
+  ) {
+    super(`The due date of ${orderNumber} changed meanwhile (expected ${expectedDueDate ?? "none"}, now ${currentDueDate ?? "none"})`);
+    this.name = "ComponentMoveChangedError";
   }
 }
 
@@ -333,9 +366,34 @@ export interface ManufacturingOrderCoverage {
   goesTo: CoverageGoesTo[];
   surplus: number; // "till lager"
   componentLate: boolean;
-  // Flytta halvfabrikaten (etapp 2) — always [] for now.
-  moves: never[];
+  // Flytta halvfabrikaten: the TOs covering this TO's needs whose due date
+  // should change, and theirs (component-moves.ts) — flat, depth-first.
+  moves: CoverageMove[];
 }
+
+// Flytta halvfabrikaten's answer. The notice is a user-facing Swedish text
+// like the warnings elsewhere (Skapa ordrar, releaseWarnings).
+export interface ComponentMovesResult {
+  moved: { id: string; orderNumber: string; dueDate: string }[];
+  notice: string;
+}
+export const COMPONENT_MOVE_NOTICE = "Kör Planera i Beläggning för att lägga om veckorna.";
+
+// What the manufacturing module answers Flytta halvfabrikaten's write
+// (setDueDatesInTx): every TO must exist, be open and still have the due
+// date the dialog showed, else nothing is written.
+export type SetDueDatesOutcome =
+  | { ok: true; updated: { id: string; orderNumber: string; before: string | null; after: string }[] }
+  | { ok: false; reason: "not_found"; manufacturingOrderId: string }
+  | { ok: false; reason: "invalid_status"; manufacturingOrderId: string; orderNumber: string; status: string }
+  | {
+      ok: false;
+      reason: "due_date_changed";
+      manufacturingOrderId: string;
+      orderNumber: string;
+      expectedDueDate: string | null;
+      currentDueDate: string | null;
+    };
 
 const OPEN_MO_STATUSES: ReadonlySet<string> = new Set(["released", "in_progress"]);
 // The händelselogg's view of a reservation's switch: "Op 20: 110 → 120".
@@ -406,6 +464,10 @@ export interface ManufacturingOrderCreator {
     createdBy: string | null,
     opts?: { plannedWeeks?: GivenOperationPlan[] } & GivenPlanOptions
   ): Promise<{ id: string; orderNumber: string; quantity: string | number; releaseWarnings: string[] }>;
+  // Flytta halvfabrikaten (pegging #9): the TOs' due dates set inside the
+  // planning transaction — the manufacturing module owns manufacturing_orders
+  // (the lock, the status guard and the expected-date check live there).
+  setDueDatesInTx(tx: Tx, moves: ComponentMovesInput["moves"]): Promise<SetDueDatesOutcome>;
 }
 
 // Reservationen's sales-side writes: the KO rows locked up front (the lock
@@ -1302,6 +1364,10 @@ export function createPlanningService(
     componentsOf: Map<string, string[]>;
     overviews: Map<string, ArticleOverview>;
     peggings: Map<string, Pegging>;
+    // What the peggings were computed with — Flytta halvfabrikaten re-pegs a
+    // re-dated overview with the same ready dates and holidays.
+    readyDates: Map<string, string | null>;
+    offDays: Set<string>;
   };
   async function pegParents(parentIds: string[], opts: { withParentArticles?: boolean } = {}): Promise<PeggedParents> {
     const today = todayFn();
@@ -1347,7 +1413,128 @@ export function createPlanningService(
     const offDays =
       dates.length > 1 ? new Set(await repo.fullDayHolidaysBetween(dates.reduce((a, b) => (a < b ? a : b)), dates.reduce((a, b) => (a > b ? a : b)))) : new Set<string>();
     const peggings = new Map<string, Pegging>([...built].map(([id, overview]) => [id, pegOverview(overview, { today, readyDates, offDays })]));
-    return { today, parents, componentsOf, overviews: built, peggings };
+    return { today, parents, componentsOf, overviews: built, peggings, readyDates, offDays };
+  }
+
+  // --- Flytta halvfabrikaten (pegging #9, etapp 2) ------------------------
+  // The move rows for one parent (component-moves.ts owns the rules), level
+  // by level: the TO supplies covering the level's parents' needs → ONE
+  // dating load for their lead times and ONE holiday load for the
+  // suggestions → the suggested due dates → the moved TOs become the next
+  // level's parents: their start dates are recomputed in memory with the
+  // suggested due dates (computeMoStartDates, the overview's own rule), their
+  // material rows in the next level's overviews (pegParents, one batch) are
+  // re-dated and re-pegged, and their halvfabrikat get rows under them.
+  // Never per order. A TO is listed once; an article already on the path
+  // from the parent is not descended into (cycle guard); MOVE_MAX_DEPTH
+  // bounds the chain.
+  const MOVE_MAX_DEPTH = 10;
+  type MoveLevelParent = { id: string; moveId: string | null; articlePath: string[] };
+  const isDemandOf = (parentId: string) => (d: Pegging["demands"][number]) =>
+    !!d.row && d.row.documentId === parentId && (d.row.kind === "mo_material" || d.row.kind === "mo_planned_material");
+
+  async function componentMoves(world: PeggedParents, parent: CoverageParentsLoad["orders"][number]): Promise<CoverageMove[]> {
+    const today = world.today;
+    const out: CoverageMove[] = [];
+    const listed = new Set<string>([parent.id]);
+    // The starts of every moved TO so far — a TO deep in the chain can need
+    // an article a TO higher up needs too.
+    const movedStarts = new Map<string, string | null>();
+    let parents: MoveLevelParent[] = [{ id: parent.id, moveId: null, articlePath: [parent.articleId] }];
+    let levelWorld = world;
+    for (let level = 1; parents.length > 0 && level <= MOVE_MAX_DEPTH; level++) {
+      const candidates: { parent: MoveLevelParent; candidate: MoveCandidate }[] = [];
+      for (const p of parents) {
+        for (const articleId of levelWorld.componentsOf.get(p.id) ?? []) {
+          if (p.articlePath.includes(articleId)) continue;
+          const pegging = levelWorld.peggings.get(articleId);
+          const overview = levelWorld.overviews.get(articleId);
+          if (!pegging || !overview) continue;
+          for (const candidate of moveCandidates(pegging, overview.article, isDemandOf(p.id))) {
+            if (listed.has(candidate.manufacturingOrderId)) continue;
+            listed.add(candidate.manufacturingOrderId);
+            candidates.push({ parent: p, candidate });
+          }
+        }
+      }
+      if (candidates.length === 0) break;
+
+      // The candidates' lead times — the same measure as their start dates
+      // (moLeadDays: own operations, else the routing for the quantity).
+      const dating = await leadTimeInputsFor({
+        orderIds: candidates.map((c) => c.candidate.manufacturingOrderId),
+        articleIds: [...new Set(candidates.map((c) => c.candidate.articleId))],
+      });
+      const opsOf = new Map<string, DatingMoOperation[]>();
+      for (const op of dating.operations) opsOf.set(op.manufacturingOrderId, [...(opsOf.get(op.manufacturingOrderId) ?? []), op]);
+      const orderOf = (c: MoveCandidate, dueDate: string | null) => ({
+        manufacturingOrderId: c.manufacturingOrderId,
+        articleId: c.articleId,
+        quantity: dating.orderQuantities.get(c.manufacturingOrderId) ?? 0,
+        dueDate,
+      });
+      const leadOf = new Map(
+        candidates.map(({ candidate: c }) => [
+          c.manufacturingOrderId,
+          moLeadDays(orderOf(c, c.currentDueDate), opsOf.get(c.manufacturingOrderId), dating.articleLeadTimes, dating.context),
+        ])
+      );
+      // The holidays the suggestions and the new starts can reach — the
+      // window of dueDateOffDays over the level's needs and lead times.
+      const needs = candidates.flatMap((c) => (c.candidate.earliestNeed ? [c.candidate.earliestNeed] : []));
+      let offDays = new Set<string>();
+      if (needs.length > 0) {
+        const minNeed = needs.reduce((a, b) => (a < b ? a : b));
+        const maxNeed = needs.reduce((a, b) => (a > b ? a : b));
+        const maxLead = Math.max(0, ...leadOf.values());
+        const from = holidayLookbackStart(minNeed) < today ? holidayLookbackStart(minNeed) : today;
+        const floorEnd = addDays(today, 2 * maxLead + 14);
+        offDays = new Set(await repo.fullDayHolidaysBetween(from, maxNeed > floorEnd ? maxNeed : floorEnd));
+      }
+
+      const moves: { parent: MoveLevelParent; candidate: MoveCandidate; move: CoverageMove }[] = [];
+      for (const { parent: p, candidate: c } of candidates) {
+        const s = suggestMove(c, { today, offDays, leadDays: leadOf.get(c.manufacturingOrderId) ?? 0 });
+        if (!s) continue;
+        const move: CoverageMove = {
+          id: `mv:${c.manufacturingOrderId}`,
+          parentMoveId: p.moveId,
+          manufacturingOrderId: c.manufacturingOrderId,
+          orderNumber: c.orderNumber,
+          articleId: c.articleId,
+          articleNumber: c.articleNumber,
+          level,
+          currentDueDate: c.currentDueDate,
+          suggestedDueDate: s.suggestedDueDate,
+          late: s.late,
+          exclusive: c.exclusive,
+          preselected: c.exclusive,
+          reason: s.reason,
+        };
+        moves.push({ parent: p, candidate: c, move });
+        out.push(move);
+      }
+      if (moves.length === 0) break;
+
+      // Next level: the moved TOs' own needs, dated by their new starts.
+      const starts = computeMoStartDates({
+        orders: moves.map((m) => orderOf(m.candidate, m.move.suggestedDueDate)),
+        operations: dating.operations,
+        articleLeadTimes: dating.articleLeadTimes,
+        context: dating.context,
+        offDays,
+      });
+      for (const [id, start] of starts) movedStarts.set(id, start);
+      parents = moves.map((m) => ({ id: m.move.manufacturingOrderId, moveId: m.move.id, articlePath: [...m.parent.articlePath, m.move.articleId] }));
+      levelWorld = await pegParents(parents.map((p) => p.id));
+      for (const [articleId, overview] of levelWorld.overviews) {
+        const redated = redateParentDemands(overview, movedStarts);
+        if (redated === overview) continue;
+        levelWorld.overviews.set(articleId, redated);
+        levelWorld.peggings.set(articleId, pegOverview(redated, { today, readyDates: levelWorld.readyDates, offDays: levelWorld.offDays }));
+      }
+    }
+    return flattenMoves(out);
   }
 
   // The parent's material needs in the component articles' peggings: the
@@ -2095,9 +2282,10 @@ export function createPlanningService(
     componentLateOrders,
 
     // Pegging (#9) — the TO card's Täcks av / Går till: what covers each of
-    // the TO's material needs, and which demands its own output goes to.
-    // A closed/done/cancelled TO has neither. `moves` (Flytta
-    // halvfabrikaten) comes in etapp 2 — always [] here.
+    // the TO's material needs, and which demands its own output goes to,
+    // plus Flytta halvfabrikaten's rows (`moves`, only computed here — the
+    // list's and Beläggning's componentLateOrders never pay for the chain).
+    // A closed/done/cancelled TO has none of it.
     async getManufacturingOrderCoverage(manufacturingOrderId: string): Promise<ManufacturingOrderCoverage> {
       const world = await pegParents([manufacturingOrderId], { withParentArticles: true });
       const parent = world.parents.find((p) => p.id === manufacturingOrderId);
@@ -2160,8 +2348,43 @@ export function createPlanningService(
         goesTo,
         surplus: supply?.surplus ?? 0,
         componentLate: isComponentLate(world, parent.id),
-        moves: [],
+        moves: await componentMoves(world, parent),
       };
+    },
+
+    // Flytta halvfabrikaten: the chosen TOs' due dates, all or nothing, in
+    // ONE transaction through the manufacturing module (it owns the table:
+    // the TOs FOR UPDATE sorted by id, open, and still on the due date the
+    // dialog showed — else 409 and nothing written). Planned weeks are not
+    // touched: Planera re-prioritises on the due date (the notice says so).
+    // Händelselogg after commit: `updated` per moved TO like the header
+    // PATCH, with the reason and the parent order.
+    async moveComponentOrders(manufacturingOrderId: string, input: ComponentMovesInput, userId: string | null): Promise<ComponentMovesResult> {
+      const [head] = (await repo.coverageParents([manufacturingOrderId])).orders;
+      if (!head) throw new ManufacturingOrderNotFoundError(manufacturingOrderId);
+      const updated = await repo.transaction(async (tx) => {
+        const outcome = await deps.manufacturing.setDueDatesInTx(tx, input.moves);
+        if (outcome.ok) return outcome.updated;
+        switch (outcome.reason) {
+          case "not_found":
+            throw new ManufacturingOrderNotFoundError(outcome.manufacturingOrderId);
+          case "invalid_status":
+            throw new InvalidStatusTransitionError(outcome.orderNumber, outcome.status);
+          case "due_date_changed":
+            throw new ComponentMoveChangedError(outcome.orderNumber, outcome.expectedDueDate, outcome.currentDueDate);
+        }
+      });
+      for (const u of updated) {
+        if (u.before === u.after) continue;
+        await audit.log({
+          entityType: "manufacturing_order",
+          entityId: u.orderNumber,
+          action: "updated",
+          detail: { before: { dueDate: u.before }, after: { dueDate: u.after }, reason: "component_move", forOrder: head.orderNumber },
+          userId,
+        });
+      }
+      return { moved: updated.map((u) => ({ id: u.id, orderNumber: u.orderNumber, dueDate: u.after })), notice: COMPONENT_MOVE_NOTICE };
     },
 
     // One draft IO per primary supplier (Monitor-style grouping) plus one

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import {
   applyDeliveryTimeSchema,
   capacityQuerySchema,
+  componentMovesSchema,
   createPlanningOrdersSchema,
   deliveryTimeCheckSchema,
   dueDateSuggestionQuerySchema,
@@ -12,6 +13,8 @@ import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { requirementsExportColumns } from "../service/export-columns.js";
 import {
   ArticleNotFoundError,
+  ComponentMoveChangedError,
+  InvalidStatusTransitionError,
   ManufacturingOrderNotFoundError,
   ConfigurationNotAllowedError,
   ConfigurationRequiredError,
@@ -81,6 +84,26 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
       return await service.getManufacturingOrderCoverage(req.params.id);
     } catch (err) {
       if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Flytta halvfabrikaten (pegging #9): the chosen TOs' due dates, all or
+  // nothing. Module default write = tillverkning. 409 component-move-changed
+  // carries which TO and the dates; 409 invalid-status-transition a TO that
+  // is no longer open; 404 for the parent or a listed TO that does not exist.
+  app.post<{ Params: { id: string } }>("/manufacturing-orders/:id/component-moves", async (req, reply) => {
+    const input = componentMovesSchema.parse(req.body);
+    try {
+      return await service.moveComponentOrders(req.params.id, input, req.user!.id);
+    } catch (err) {
+      if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof ComponentMoveChangedError) {
+        return reply
+          .code(409)
+          .send({ ...errorBody(err), orderNumber: err.orderNumber, expectedDueDate: err.expectedDueDate, currentDueDate: err.currentDueDate });
+      }
+      if (err instanceof InvalidStatusTransitionError) return reply.code(409).send({ ...errorBody(err), orderNumber: err.orderNumber });
       throw err;
     }
   });

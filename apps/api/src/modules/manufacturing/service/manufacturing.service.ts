@@ -35,7 +35,7 @@ import type {
 // runs inside the report transactions; the mode is read here, outside them.
 import { MaterialShortageError, type MaterialShortageCheck } from "./material-shortage.js";
 import { computeReadiness, type Readiness, type ReadinessResult } from "./terminal-readiness.js";
-import type { GivenOperationPlan, GivenPlanOptions, ManufacturingPlanReader } from "../../planning/service/planning.service.js";
+import type { GivenOperationPlan, GivenPlanOptions, ManufacturingPlanReader, SetDueDatesOutcome } from "../../planning/service/planning.service.js";
 import type { OperationResourceSuggestion } from "../../planning/service/resource-suggestions.js";
 export { MaterialShortageError, type MaterialShortage } from "./material-shortage.js";
 import type { PeriodLockChecker } from "../../payroll/service/period-lock.js";
@@ -1642,6 +1642,45 @@ export function createManufacturingService(
         });
       }
       return updated;
+    },
+
+    // Flytta halvfabrikaten (pegging #9): several orders' planned finish
+    // dates inside the caller's transaction (the planning service's), all or
+    // nothing. The orders are locked FOR UPDATE in id order; each must be
+    // open — the header PATCH's status guard above — and still have the due
+    // date the dialog showed (expectedDueDate), else the outcome says which
+    // one and nothing is written (the caller throws, the transaction rolls
+    // back). Logs nothing — the caller writes the händelselogg after commit.
+    async setDueDatesInTx(
+      tx: Tx,
+      moves: { manufacturingOrderId: string; dueDate: string; expectedDueDate: string | null }[]
+    ): Promise<SetDueDatesOutcome> {
+      const ids = [...new Set(moves.map((m) => m.manufacturingOrderId))].sort();
+      const locked = new Map((await repo.lockManufacturingOrdersInTx(tx, ids)).map((o) => [o.id, o]));
+      for (const id of ids) if (!locked.has(id)) return { ok: false, reason: "not_found", manufacturingOrderId: id };
+      for (const m of moves) {
+        const order = locked.get(m.manufacturingOrderId)!;
+        if (!["planned", "released", "in_progress"].includes(order.status)) {
+          return { ok: false, reason: "invalid_status", manufacturingOrderId: order.id, orderNumber: order.orderNumber, status: order.status };
+        }
+        if (order.dueDate !== m.expectedDueDate) {
+          return {
+            ok: false,
+            reason: "due_date_changed",
+            manufacturingOrderId: order.id,
+            orderNumber: order.orderNumber,
+            expectedDueDate: m.expectedDueDate,
+            currentDueDate: order.dueDate,
+          };
+        }
+      }
+      const updated: Extract<SetDueDatesOutcome, { ok: true }>["updated"] = [];
+      for (const m of moves) {
+        const order = locked.get(m.manufacturingOrderId)!;
+        if (order.dueDate !== m.dueDate) await repo.setDueDateInTx(tx, order.id, m.dueDate);
+        updated.push({ id: order.id, orderNumber: order.orderNumber, before: order.dueDate, after: m.dueDate });
+      }
+      return { ok: true, updated };
     },
 
     async getManufacturingOrder(id: string) {

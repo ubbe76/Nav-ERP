@@ -137,7 +137,12 @@ describe("the chain product → halvfabrikat → raw material", () => {
     const semi = await unplannedMfgService.createManufacturingOrder({ articleId: world.semi.id, quantity: 2, dueDate: "2030-03-27" }, world.user.id);
 
     const coverage = await planningService.getManufacturingOrderCoverage(parent.id);
-    expect(coverage).toMatchObject({ manufacturingOrderId: parent.id, orderNumber: parent.orderNumber, status: "released", componentLate: true, moves: [] });
+    expect(coverage).toMatchObject({ manufacturingOrderId: parent.id, orderNumber: parent.orderNumber, status: "released", componentLate: true });
+    // Flytta halvfabrikaten (etapp 2, the rules in pegging-moves.test.ts):
+    // the late halvfabrikat TO is offered the working day before the need.
+    expect(coverage.moves).toEqual([
+      expect.objectContaining({ manufacturingOrderId: semi.id, level: 1, parentMoveId: null, currentDueDate: "2030-03-27", suggestedDueDate: "2030-03-21", late: false, exclusive: true, preselected: true, reason: "late" }),
+    ]);
     expect(coverage.materials).toEqual([
       expect.objectContaining({
         kind: "mo_material",

@@ -134,17 +134,6 @@ export function computeMoStartDates(input: {
   const result = new Map<string, string | null>();
   for (const order of input.orders) {
     const ops = opsOf.get(order.manufacturingOrderId);
-    let leadDays: number;
-    if (ops && ops.length > 0) {
-      const work: LeadTimeWork[] = ops.map((op) => ({
-        minutes: remainingOperationMinutes(op),
-        resource: input.context.resourceOf(op.workCenterId),
-        done: op.operationStatus === "done",
-      }));
-      leadDays = manufacturingLeadDays(input.articleLeadTimes.get(order.articleId), work, input.context.defaults);
-    } else {
-      leadDays = input.context.leadDaysFor(order.articleId, order.quantity);
-    }
     result.set(
       order.manufacturingOrderId,
       moStartDate({
@@ -155,12 +144,34 @@ export function computeMoStartDates(input: {
           (op) => op.planLocked || (op.quantityCompleted ?? 0) > 0 || op.quantityScrapped > 0
         ),
         dueDate: order.dueDate,
-        leadDays,
+        leadDays: moLeadDays(order, ops, input.articleLeadTimes, input.context),
         offDays: input.offDays,
       })
     );
   }
   return result;
+}
+
+// ONE existing TO's lead time as computeMoStartDates measures it (see
+// above): its own operations' remaining minutes when it has any, else the
+// article's routing for its quantity. Exported for Flytta halvfabrikaten
+// (pegging #9), whose färdigdatumsförslag for an existing TO must use the
+// same lead time its start date is computed with.
+export function moLeadDays(
+  order: DatingManufacturingOrder,
+  ops: readonly DatingMoOperation[] | undefined,
+  articleLeadTimes: ArticleLeadTimeFields,
+  context: LeadTimeContext
+): number {
+  if (ops && ops.length > 0) {
+    const work: LeadTimeWork[] = ops.map((op) => ({
+      minutes: remainingOperationMinutes(op),
+      resource: context.resourceOf(op.workCenterId),
+      done: op.operationStatus === "done",
+    }));
+    return manufacturingLeadDays(articleLeadTimes.get(order.articleId), work, context.defaults);
+  }
+  return context.leadDaysFor(order.articleId, order.quantity);
 }
 
 // Every lego operation's dates (legoOperationDates): backward from its TO's
