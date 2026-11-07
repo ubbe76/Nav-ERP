@@ -235,6 +235,8 @@ describe("reservationen — Skapa tillverkningsordrar för det som saknas", () =
     expect(applied).toEqual({
       deliveryDate: W3,
       shipDate: W3,
+      // No operation has an alternative (#15): the ordinarie run.
+      usesAlternatives: false,
       manufacturingOrders: [
         expect.objectContaining({ articleNumber: world.child.articleNumber, quantity: 10, level: 2, salesOrderRowId: null }),
         expect.objectContaining({ articleNumber: world.parent.articleNumber, quantity: 10, level: 1, salesOrderRowId: row.id }),

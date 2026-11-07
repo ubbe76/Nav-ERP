@@ -202,3 +202,77 @@ describe("reservationen — configured row", () => {
     expect(await salesService.getSalesOrder(order.id)).toMatchObject({ status: "in_production", expectedDeliveryDate: check.deliveryDate });
   });
 });
+
+// Alternativa resurser (#15, etapp 3): the derived base operation carries the
+// template routing row, so the check tries that row's alternatives on it and
+// the reservation's TO (whose snapshot takes the same row's alternatives) is
+// switched to the one the check chose. Today pinned to Monday 2030-03-04;
+// 610 and the alternative 640 get 8 h a day, and a filler TO fills 610 in
+// that week. The conditional operation 20 has no routing row and stays.
+describe("reservationen — configured row on an alternative resource", () => {
+  const TODAY = "2030-03-04";
+  const pinnedRef: { current: ManufacturingPlanReader | null } = { current: null };
+  const pinnedMfg = createManufacturingService(
+    createManufacturingRepository(db),
+    testDocumentPdfService,
+    testArticleService,
+    {
+      findRowForManufacturing: salesRepository.findRowForManufacturing,
+      lockRowForManufacturing: salesRepository.lockRowForManufacturing,
+      markInProduction: markSalesOrderInProduction,
+    },
+    undefined,
+    (t, s, q, o) => configurator.deriveForManufacturing(t, s, q, o),
+    undefined,
+    undefined,
+    {
+      planNewOrderInTx: (tx, moId, given) => pinnedRef.current!.planNewOrderInTx(tx, moId, given),
+      replanOrderInTx: (tx, moId) => pinnedRef.current!.replanOrderInTx(tx, moId),
+      orderPlanSummaries: (ids) => pinnedRef.current!.orderPlanSummaries(ids),
+    }
+  );
+  const pinned = createPlanningService(createPlanningRepository(db), {
+    purchase: purchaseService as never,
+    manufacturing: pinnedMfg,
+    configuredStructure: (t, s, q, o) => configurator.deriveForManufacturing(t, s, q, o),
+    requirementsCacheMs: 0,
+    salesOrderDates: salesService,
+    today: () => TODAY,
+  });
+  pinnedRef.current = pinned;
+
+  it("tries the template row's alternatives on the derived operation and writes the chosen one Vald för hand", async () => {
+    const user = await makeUser();
+    const { s, order, row } = await confirmedRow(2);
+    await pinnedMfg.updateWorkCenter(s.wc10.id, { hoursPerDay: 8 });
+    const alt = await pinnedMfg.createWorkCenter({ code: "640", name: "Kap 2", type: "machine", hoursPerDay: 8, capacityFactor: 1, active: true });
+    await pinnedMfg.updateRoutingOperation(s.article.id, s.op10.id, { alternatives: [{ workCenterId: alt.id }] });
+    const filler = await testArticleService.createArticle({ articleNumber: `FY-${crypto.randomUUID().slice(0, 6)}`, name: "Fyllnad", type: "manufactured", unit: "st", active: true } as never);
+    await pinnedMfg.createRoutingOperation(filler.id, { sequenceNo: 10, workCenterId: s.wc10.id, setupTime: 2400, runTimePerUnit: 0 });
+    await pinnedMfg.createManufacturingOrder({ articleId: filler.id, quantity: 1 }, user.id);
+
+    const check = await pinned.checkDeliveryTime({ salesOrderId: order.id });
+    // Op 10 (12 min) on 640 this week instead of 610 next week.
+    expect(check).toMatchObject({ usesAlternatives: true, deliveryDate: "2030-03-11", ordinaryDeliveryDate: "2030-03-18" });
+    const op10 = check.rows[0]!.chain.find((step) => step.kind === "operation" && step.sequenceNo === 10);
+    expect(op10).toMatchObject({ workCenterCode: "640", alternativeOf: { workCenterCode: "610", toWeek: "2030-03-11" } });
+    expect(check.batches[0]!.operations.map((o) => [o.sequenceNo, o.workCenterId])).toEqual([
+      [10, alt.id],
+      [20, s.wc20.id],
+    ]);
+
+    const applied = await pinned.applyDeliveryTime({ salesOrderId: order.id, deliveryDate: check.deliveryDate! }, user.id);
+    expect(applied.manufacturingOrders).toEqual([
+      expect.objectContaining({
+        salesOrderRowId: row.id,
+        resourceSwitches: [{ sequenceNo: 10, fromWorkCenterId: s.wc10.id, fromCode: "610", toWorkCenterId: alt.id, toCode: "640" }],
+      }),
+    ]);
+    const ops = await pinnedMfg.listOperations(applied.manufacturingOrders[0]!.id);
+    expect(ops.map((o) => [o.sequenceNo, o.workCenterId, o.resourceLocked, o.planLocked])).toEqual([
+      [10, alt.id, true, true],
+      [20, s.wc20.id, false, true],
+    ]);
+    expect(await planRows(ops[0]!.id)).toEqual(check.batches[0]!.operations[0]!.weeks);
+  });
+});

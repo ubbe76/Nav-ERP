@@ -35,9 +35,8 @@ import type {
 // runs inside the report transactions; the mode is read here, outside them.
 import { MaterialShortageError, type MaterialShortageCheck } from "./material-shortage.js";
 import { computeReadiness, type Readiness, type ReadinessResult } from "./terminal-readiness.js";
-import type { ManufacturingPlanReader } from "../../planning/service/planning.service.js";
+import type { GivenOperationPlan, ManufacturingPlanReader } from "../../planning/service/planning.service.js";
 import type { OperationResourceSuggestion } from "../../planning/service/resource-suggestions.js";
-import type { PlannedWeek } from "../../planning/service/capacity-calc.js";
 export { MaterialShortageError, type MaterialShortage } from "./material-shortage.js";
 import type { PeriodLockChecker } from "../../payroll/service/period-lock.js";
 import {
@@ -1531,14 +1530,15 @@ export function createManufacturingService(
     // whole tree of TOs atomically). The validation and the configurator's
     // derivation read as plain committed reads, like createManufacturingOrder;
     // the repository body takes the production_plan lock first. With
-    // `plannedWeeks` (by sequence number) the allocations are written as
-    // given instead of planned by the engine. Logs nothing — the caller
-    // writes its own händelselogg (and "released" per TO if it wants it).
+    // `plannedWeeks` (by sequence number and resource — an alternative the
+    // reservation chose is switched to, Vald för hand) the allocations are
+    // written as given instead of planned by the engine. Logs nothing — the
+    // caller writes its own händelselogg (and "released" per TO if it wants it).
     async createManufacturingOrderInTx(
       tx: Tx,
       input: CreateManufacturingOrderInput,
       createdBy: string | null,
-      opts: { plannedWeeks?: { sequenceNo: number; weeks: PlannedWeek[] }[] } = {}
+      opts: { plannedWeeks?: GivenOperationPlan[] } = {}
     ) {
       const prepared = await prepareCreate(input);
       const result = await repo.createManufacturingOrderInTx(

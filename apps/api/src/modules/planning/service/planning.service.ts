@@ -64,8 +64,10 @@ import {
 import { lockProductionPlan } from "../repository/plan-lock.js";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import {
-  checkDeliveryTime,
-  type DeliveryTimeCheckResult,
+  deliveryTimeAnswer,
+  runDeliveryTimeChecks,
+  type DeliveryTimeAnswer,
+  type DeliveryTimeRuns,
   type DtcArticle,
   type DtcOperation,
   type DtcRowInput,
@@ -149,8 +151,10 @@ const RESERVABLE_SALES_ORDER_STATUSES: ReadonlySet<string> = new Set(["confirmed
 // so the dialog can show it and offer the button again. Nothing is written.
 export class DeliveryTimeChangedError extends Error {
   constructor(
+    // The date in the mode the client chose (useAlternatives); `result` is
+    // the check's own answer, as POST /delivery-time-check gives it.
     public deliveryDate: string | null,
-    public result: DeliveryTimeCheckResult,
+    public result: DeliveryTimeAnswer,
     // The date held but the number of TOs to create did not (expectedOrders).
     public orders?: { expected: number; actual: number }
   ) {
@@ -244,7 +248,7 @@ export interface OrderPlanSummary {
 // like the configurator's readers): a new TO's operations planned inside
 // its own create transaction, and the list's summaries.
 export interface ManufacturingPlanReader {
-  planNewOrderInTx(tx: Tx, manufacturingOrderId: string, given?: { sequenceNo: number; weeks: PlannedWeek[] }[]): Promise<string[]>;
+  planNewOrderInTx(tx: Tx, manufacturingOrderId: string, given?: GivenOperationPlan[]): Promise<string[]>;
   // Ändra operationer: the order's operations replanned inside the edit's
   // transaction (Planera's rules for one order), the warnings as texts.
   replanOrderInTx(tx: Tx, manufacturingOrderId: string): Promise<string[]>;
@@ -256,6 +260,8 @@ export interface ManufacturingPlanReader {
 }
 
 const OPEN_MO_STATUSES: ReadonlySet<string> = new Set(["released", "in_progress"]);
+// The händelselogg's view of a reservation's switch: "Op 20: 110 → 120".
+const switchAuditView = (s: ReservedResourceSwitch) => ({ sequenceNo: s.sequenceNo, fromCode: s.fromCode, toCode: s.toCode });
 const hasPlan = (op: CapacityOperationRow) => !!op.plannedWeeks && op.plannedWeeks.length > 0;
 
 export class ConfigurationRequiredError extends Error {
@@ -312,14 +318,15 @@ export interface ManufacturingOrderCreator {
   ): Promise<{ id: string; orderNumber: string }>;
   // Reservationen: the same create inside the caller's transaction (the
   // whole tree of TOs, all or nothing), with the weeks the check booked
-  // written as the plan (by sequence number). With a salesOrderRowId the TO
-  // is linked to the row and the KO flips to in_production, exactly like
-  // Skapa TO; a configured row's structure is derived from the row.
+  // written as the plan (by sequence number and resource — an alternative
+  // the check chose is switched to, Vald för hand). With a salesOrderRowId
+  // the TO is linked to the row and the KO flips to in_production, exactly
+  // like Skapa TO; a configured row's structure is derived from the row.
   createManufacturingOrderInTx(
     tx: Tx,
     input: { articleId?: string; salesOrderRowId?: string; quantity: number; note?: string; dueDate?: string | null },
     createdBy: string | null,
-    opts?: { plannedWeeks?: { sequenceNo: number; weeks: PlannedWeek[] }[] }
+    opts?: { plannedWeeks?: GivenOperationPlan[] }
   ): Promise<{ id: string; orderNumber: string; quantity: string | number; releaseWarnings: string[] }>;
 }
 
@@ -333,10 +340,35 @@ export interface SalesOrderDateWriter {
   setExpectedDeliveryDateInTx(tx: Tx, salesOrderId: string, date: string): Promise<{ orderNumber: string; previous: string | null }>;
 }
 
+// The reservation's given plan for one operation of a new TO (the check's
+// batch): the weeks to write, keyed by sequence number, and the resource the
+// check placed it on. A resource other than the operation's own must be one
+// of its possible resources (mo_operation_resources) — then the operation
+// is switched to it (Vald för hand) before the weeks are written. Left out
+// = the operation's own resource.
+export interface GivenOperationPlan {
+  sequenceNo: number;
+  workCenterId?: string;
+  weeks: PlannedWeek[];
+}
+
+// An operation the reservation put on an alternative (read back from the
+// TO: Vald för hand on another resource than rank 0).
+export interface ReservedResourceSwitch {
+  sequenceNo: number;
+  fromWorkCenterId: string;
+  fromCode: string;
+  toWorkCenterId: string;
+  toCode: string;
+}
+
 // What POST /delivery-time-check/apply answers with.
 export interface ApplyDeliveryTimeResult {
   deliveryDate: string;
   shipDate: string;
+  // The TOs were made on the date with alternatives (the check's
+  // usesAlternatives in the mode the client chose).
+  usesAlternatives: boolean;
   // In creation order: children before their parents; level 1 = the KO
   // row's own article (linked to the row), 2+ = semi-finished parts.
   manufacturingOrders: {
@@ -346,6 +378,8 @@ export interface ApplyDeliveryTimeResult {
     quantity: number;
     level: number;
     salesOrderRowId: string | null;
+    // The operations put on an alternative, Vald för hand ([] = none).
+    resourceSwitches: ReservedResourceSwitch[];
   }[];
   // The TOs' releaseWarnings (material shortage, a plan the engine had to
   // make), prefixed with the TO number. Never a refusal.
@@ -976,39 +1010,71 @@ export function createPlanningService(
   // lock; the advisory lock is reentrant, so taking it again is harmless and
   // keeps this safe to call on its own). Every other open operation is
   // existing load. With `given` (the reservation) the allocations are
-  // written as they are, keyed by sequence number — no engine run. Returns
-  // the warnings as texts for releaseWarnings: the horizon ("not planned")
-  // and Sen, never a refusal.
-  async function planNewOrderInTx(
-    tx: Tx,
-    manufacturingOrderId: string,
-    given?: { sequenceNo: number; weeks: PlannedWeek[] }[]
-  ): Promise<string[]> {
+  // written as they are, keyed by (sequence number, resource) — no engine
+  // run. Returns the warnings as texts for releaseWarnings: the horizon
+  // ("not planned") and Sen, never a refusal.
+  async function planNewOrderInTx(tx: Tx, manufacturingOrderId: string, given?: GivenOperationPlan[]): Promise<string[]> {
     await lockProductionPlan(tx);
     const world = await loadPlanWorld(tx);
-    const own = world.operations.filter((o) => o.manufacturingOrderId === manufacturingOrderId);
+    let own = world.operations.filter((o) => o.manufacturingOrderId === manufacturingOrderId);
     if (own.length === 0) return [];
     const plannedAt = new Date();
-    // The reservation's weeks are keyed by sequence number: when the TO's
-    // operations are not the ones the check planned (a configured row whose
-    // template changed in between), the engine plans it instead and says so.
-    const ownOrder: PlanOrder = {
-      id: manufacturingOrderId,
-      orderNumber: own[0]!.orderNumber,
-      dueDate: own[0]!.dueDate,
-      operations: own.map((o) => ({ ...o, started: false })),
+    // The reservation's weeks are keyed by (sequence number, resource): when
+    // the TO's operations are not the ones the check planned (a configured
+    // row whose template changed in between, an alternative that is not
+    // among the operation's possible resources) the engine plans it on the
+    // ordinarie instead and says so.
+    const bySeq = new Map(own.map((o) => [o.sequenceNo, o]));
+    const resources = new Map<string, { workCenterId: string; setupTime: number; runTimePerUnit: number }[]>();
+    if (given?.some((g) => g.workCenterId !== undefined && g.workCenterId !== bySeq.get(g.sequenceNo)?.workCenterId)) {
+      for (const r of await repo.orderOperationResources(tx, manufacturingOrderId)) {
+        resources.set(r.moOperationId, [
+          ...(resources.get(r.moOperationId) ?? []),
+          { workCenterId: r.workCenterId, setupTime: Number(r.setupTime), runTimePerUnit: Number(r.runTimePerUnit) },
+        ]);
+      }
+    }
+    // The target row of a given plan: null = on the operation's own
+    // resource, undefined = no match.
+    const targetOf = (g: GivenOperationPlan) => {
+      const op = bySeq.get(g.sequenceNo);
+      if (!op) return undefined;
+      if (g.workCenterId === undefined || g.workCenterId === op.workCenterId) return null;
+      return resources.get(op.moOperationId)?.find((r) => r.workCenterId === g.workCenterId);
     };
-    const givenMatches =
-      given !== undefined &&
-      given.length === own.length &&
-      given.every((g) => own.some((o) => o.sequenceNo === g.sequenceNo));
+    const givenMatches = given !== undefined && given.length === own.length && given.every((g) => targetOf(g) !== undefined);
     const warnings: string[] = [];
     if (given && !givenMatches) {
       warnings.push("Operationerna stämmer inte med leveranstidskontrollens — ordern planerades på ledig kapacitet i stället");
       given = undefined;
     }
     if (given) {
-      const bySeq = new Map(own.map((o) => [o.sequenceNo, o]));
+      // The alternatives the check chose: switched through the one switch
+      // writer (the row's times, Vald för hand) BEFORE the weeks are
+      // written — the weeks were booked on the alternative. The TO is this
+      // transaction's own, so no one else can have moved it.
+      const switches = given.flatMap((g) => {
+        const target = targetOf(g);
+        const op = bySeq.get(g.sequenceNo)!;
+        return target ? [{ op, target }] : [];
+      });
+      if (switches.length > 0) {
+        const switched = await repo.switchOperationResources(
+          tx,
+          switches.map(({ op, target }) => ({
+            moOperationId: op.moOperationId,
+            fromWorkCenterId: op.workCenterId,
+            toWorkCenterId: target.workCenterId,
+            resourceLocked: true,
+          }))
+        );
+        if (switched.length !== switches.length) throw new Error("The reservation's resource switch did not apply to its own TO");
+        const moved = new Map(switches.map(({ op, target }) => [op.moOperationId, target]));
+        own = own.map((o) => {
+          const target = moved.get(o.moOperationId);
+          return target ? { ...o, workCenterId: target.workCenterId, setupTime: target.setupTime, runTimePerUnit: target.runTimePerUnit, resourceLocked: true } : o;
+        });
+      }
       const plans: OperationPlan[] = [];
       const clear: string[] = [];
       for (const g of given) {
@@ -1032,10 +1098,16 @@ export function createPlanningService(
         offDays: world.offDays,
         workCenters: world.workCenters,
         schedule: world.schedule,
-        orders: [ownOrder],
+        orders: [{ id: manufacturingOrderId, orderNumber: own[0]!.orderNumber, dueDate: own[0]!.dueDate, operations: own.map((o) => ({ ...o, started: false })) }],
         longOperationWeeks: world.longOperationWeeks,
       }).map((w) => w.message);
     }
+    const ownOrder: PlanOrder = {
+      id: manufacturingOrderId,
+      orderNumber: own[0]!.orderNumber,
+      dueDate: own[0]!.dueDate,
+      operations: own.map((o) => ({ ...o, started: false })),
+    };
     const others = world.operations.filter((o) => o.manufacturingOrderId !== manufacturingOrderId);
     const result = planProduction({
       today: world.today,
@@ -1135,10 +1207,13 @@ export function createPlanningService(
   // `dbc` every read is bound to the reservation's transaction (the
   // configurator's derivation is a plain committed read, like
   // prepareCreate's); `action: "reserve"` also requires a confirmed order.
+  // Alternativa resurser (#15): both runs on the same loaded input — with
+  // only the ordinarie and with the alternatives (runDeliveryTimeChecks);
+  // deliveryTimeAnswer composes what the caller shows or reserves.
   async function runDeliveryTimeCheck(
     request: DeliveryTimeCheckRequest,
     opts: { dbc?: Tx; action: "check" | "reserve" } = { action: "check" }
-  ): Promise<DeliveryTimeCheckResult & { order: { id: string; orderNumber: string } | null }> {
+  ): Promise<{ runs: DeliveryTimeRuns; order: { id: string; orderNumber: string } | null }> {
     const dbc = opts.dbc;
     const today = todayFn();
     let customerId = request.customerId ?? null;
@@ -1192,6 +1267,9 @@ export function createPlanningService(
     // Configured rows: derived structure, or an existing variant as a
     // plain article. The check never creates a variant.
     const dtcRows: DtcRowInput[] = [];
+    // A configured row's operations with the template routing row behind
+    // them (base operations) — their alternatives are loaded with the tree's.
+    const configuredOperations: { op: DtcOperation; routingOperationId: string | null }[] = [];
     for (const r of requestRows) {
       const a = rowArticles.get(r.articleId);
       if (!a) throw new ArticleNotFoundError(r.articleId);
@@ -1237,22 +1315,27 @@ export function createPlanningService(
         dtcRows.push({ key: r.key, articleId: variantId, quantity: r.quantity });
         continue;
       }
+      const operations: DtcOperation[] = [];
+      if (batchQuantity > 0) {
+        for (const o of s.operations) {
+          const op: DtcOperation = {
+            sequenceNo: o.sequenceNo,
+            workCenterId: o.workCenterId,
+            description: o.description,
+            setupTime: Number(o.setupTime),
+            runTimePerUnit: Number(o.runTimePerUnit),
+          };
+          operations.push(op);
+          configuredOperations.push({ op, routingOperationId: o.routingOperationId });
+        }
+      }
       dtcRows.push({
         key: r.key,
         articleId: r.articleId,
         quantity: r.quantity,
         structure: {
           quantity: batchQuantity,
-          operations:
-            batchQuantity > 0
-              ? s.operations.map((o) => ({
-                  sequenceNo: o.sequenceNo,
-                  workCenterId: o.workCenterId,
-                  description: o.description,
-                  setupTime: Number(o.setupTime),
-                  runTimePerUnit: Number(o.runTimePerUnit),
-                }))
-              : [],
+          operations,
           materials: batchQuantity > 0 ? s.materials.map((m) => ({ articleId: m.componentArticleId, quantity: m.totalQuantity })) : [],
           covered,
         },
@@ -1306,12 +1389,29 @@ export function createPlanningService(
       const overview = buildArticleOverview(input);
       overviews.set(articleId, { onHand: overview.onHand, rows: overview.rows });
     }
+    // Alternativa resurser (#15): the routing rows' alternatives as the TO's
+    // snapshot would take them, times resolved against the operation's own
+    // (the alternative's, else the operation's) — for the tree's routings
+    // and a configured row's base operations still on the row's ordinarie.
+    const alternativeRows = await repo.routingAlternatives(
+      [...new Set([...routingRows.map((r) => r.id), ...configuredOperations.flatMap((c) => (c.routingOperationId ? [c.routingOperationId] : []))])],
+      dbc
+    );
+    const alternativesOf = new Map<string, typeof alternativeRows>();
+    for (const a of alternativeRows) alternativesOf.set(a.routingOperationId, [...(alternativesOf.get(a.routingOperationId) ?? []), a]);
+    const resolvedAlternatives = (routingOperationId: string | null, op: Omit<DtcOperation, "alternatives">) =>
+      (routingOperationId ? (alternativesOf.get(routingOperationId) ?? []) : [])
+        .filter((a) => a.ordinaryWorkCenterId === op.workCenterId)
+        .map((a) => ({
+          workCenterId: a.workCenterId,
+          setupTime: a.setupTime ?? op.setupTime,
+          runTimePerUnit: a.runTimePerUnit ?? op.runTimePerUnit,
+        }));
+    for (const c of configuredOperations) c.op.alternatives = resolvedAlternatives(c.routingOperationId, c.op);
     const routings = new Map<string, DtcOperation[]>();
     for (const r of routingRows) {
-      routings.set(r.articleId, [
-        ...(routings.get(r.articleId) ?? []),
-        { sequenceNo: r.sequenceNo, workCenterId: r.workCenterId, description: r.description, setupTime: r.setupTime, runTimePerUnit: r.runTimePerUnit },
-      ]);
+      const op = { sequenceNo: r.sequenceNo, workCenterId: r.workCenterId, description: r.description, setupTime: r.setupTime, runTimePerUnit: r.runTimePerUnit };
+      routings.set(r.articleId, [...(routings.get(r.articleId) ?? []), { ...op, alternatives: resolvedAlternatives(r.id, op) }]);
     }
     const leadTimeOf = new Map(leadTimes.map((l) => [l.workCenterId, l.leadTimeDays]));
     const workCenters = new Map<string, DtcWorkCenter>(
@@ -1326,11 +1426,13 @@ export function createPlanningService(
           hoursPerDay: w.hoursPerDay,
           capacityFactor: w.capacityFactor,
           leadTimeDays: leadTimeOf.get(w.workCenterId) ?? null,
+          // Valregeln never tries an inactive alternative.
+          active: w.active,
         },
       ])
     );
 
-    const result = checkDeliveryTime({
+    const runs = runDeliveryTimeChecks({
       today,
       offDays: delivery.offDays,
       articles,
@@ -1355,7 +1457,7 @@ export function createPlanningService(
       customer: customerFields ? effectiveDeliverySettings(customerFields, "customer", delivery.defaults) : null,
       rows: dtcRows,
     });
-    return { ...result, order: checkedOrder };
+    return { runs, order: checkedOrder };
   }
 
   return {
@@ -1449,10 +1551,12 @@ export function createPlanningService(
       return suggestDueDate(demand, { today, offDays: await dueDateOffDays(demand.date, today, leadDays), leadDays });
     },
 
-    // Leveranstidskontroll — reads only (nothing is booked).
-    async checkDeliveryTime(request: DeliveryTimeCheckRequest): Promise<DeliveryTimeCheckResult> {
-      const { order: _order, ...result } = await runDeliveryTimeCheck(request);
-      return result;
+    // Leveranstidskontroll — reads only (nothing is booked). With
+    // alternatives (#15) the answer is the run with them when it gives an
+    // earlier delivery date, with the ordinarie's dates beside it.
+    async checkDeliveryTime(request: DeliveryTimeCheckRequest): Promise<DeliveryTimeAnswer> {
+      const { runs } = await runDeliveryTimeCheck(request);
+      return deliveryTimeAnswer(runs);
     },
 
     // Reservationen (Skapa tillverkningsordrar för det som saknas): ONE
@@ -1471,14 +1575,23 @@ export function createPlanningService(
         // The lock FIRST, before the check reads: what it sees is what the
         // TOs are planned against (same order as every other plan write).
         await lockProductionPlan(tx);
-        const { order, ...result } = await runDeliveryTimeCheck({ salesOrderId: input.salesOrderId }, { dbc: tx, action: "reserve" });
+        const { order, runs } = await runDeliveryTimeCheck({ salesOrderId: input.salesOrderId }, { dbc: tx, action: "reserve" });
+        // The run in the mode the client chose (useAlternatives, förval
+        // true: the alternatives when they give the earlier date) — the
+        // same pure composition the check answered with, on what the
+        // transaction reads under the lock. A 409 carries the check's own
+        // answer so the dialog can show both dates again.
+        const result = deliveryTimeAnswer(runs, input.useAlternatives);
         if (result.deliveryDate !== input.deliveryDate || result.shipDate === null) {
-          throw new DeliveryTimeChangedError(result.deliveryDate, result);
+          throw new DeliveryTimeChangedError(result.deliveryDate, deliveryTimeAnswer(runs));
         }
         // The client showed N TOs: a different count now (a TO created in
         // between covers a row, a template changed) is a changed outcome too.
         if (input.expectedOrders !== undefined && input.expectedOrders !== result.batches.length) {
-          throw new DeliveryTimeChangedError(result.deliveryDate, result, { expected: input.expectedOrders, actual: result.batches.length });
+          throw new DeliveryTimeChangedError(result.deliveryDate, deliveryTimeAnswer(runs), {
+            expected: input.expectedOrders,
+            actual: result.batches.length,
+          });
         }
         if (result.batches.length === 0) throw new NothingToReserveError();
         const orderNumber = order!.orderNumber;
@@ -1507,12 +1620,19 @@ export function createPlanningService(
                   note: `Skapad från leveranstidskontroll för ${orderNumber}`,
                 },
             userId,
-            { plannedWeeks: batch.operations.map((o) => ({ sequenceNo: o.sequenceNo, weeks: o.weeks })) }
+            // By (sequence number, resource): an operation the check put on
+            // an alternative is switched to it, Vald för hand, before its
+            // weeks are written (planNewOrderInTx).
+            { plannedWeeks: batch.operations.map((o) => ({ sequenceNo: o.sequenceNo, workCenterId: o.workCenterId, weeks: o.weeks })) }
           );
           // The promised weeks are locked: Planera keeps them until Lås upp
           // (operations without a plan — lego, 0 minutes, beyond the
-          // horizon — have nothing to lock).
+          // horizon — have nothing to lock). With Vald för hand the resource
+          // is locked too.
           await repo.lockOrderPlans(tx, created.id);
+          // What was actually switched, read back (a TO whose operations no
+          // longer matched the check was planned on the ordinarie instead).
+          const resourceSwitches = result.usesAlternatives ? await repo.orderResourceSwitches(tx, created.id) : [];
           manufacturingOrders.push({
             id: created.id,
             orderNumber: created.orderNumber,
@@ -1522,6 +1642,7 @@ export function createPlanningService(
             quantity: Number(created.quantity),
             level: batch.level,
             salesOrderRowId: linked ? batch.rowKey : null,
+            resourceSwitches,
           });
           warnings.push(...created.releaseWarnings.map((w) => `${created.orderNumber}: ${w}`));
         }
@@ -1529,11 +1650,24 @@ export function createPlanningService(
         return {
           orderNumber,
           previousDeliveryDate: dateWrite.previous,
-          result: { deliveryDate: input.deliveryDate, shipDate: result.shipDate, manufacturingOrders, warnings },
+          result: {
+            deliveryDate: input.deliveryDate,
+            shipDate: result.shipDate,
+            usesAlternatives: result.usesAlternatives,
+            manufacturingOrders,
+            warnings,
+          },
         };
       });
       for (const mo of applied.result.manufacturingOrders) {
-        await audit.log({ entityType: "manufacturing_order", entityId: mo.orderNumber, action: "released", userId });
+        await audit.log({
+          entityType: "manufacturing_order",
+          entityId: mo.orderNumber,
+          action: "released",
+          // The operations the reservation put on an alternative (Vald för hand).
+          detail: mo.resourceSwitches.length > 0 ? { resourceSwitches: mo.resourceSwitches.map(switchAuditView) } : undefined,
+          userId,
+        });
       }
       await audit.log({
         entityType: "sales_order",
@@ -1548,7 +1682,9 @@ export function createPlanningService(
             articleNumber: mo.articleNumber,
             quantity: mo.quantity,
             level: mo.level,
+            ...(mo.resourceSwitches.length > 0 ? { resourceSwitches: mo.resourceSwitches.map(switchAuditView) } : {}),
           })),
+          ...(applied.result.usesAlternatives ? { usesAlternatives: true } : {}),
           warnings: applied.result.warnings,
         },
         userId,

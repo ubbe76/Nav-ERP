@@ -1,7 +1,11 @@
 import { and, eq, gte, inArray, isNotNull, isNull, lte, ne, sql, type SQL } from "drizzle-orm";
 import { legoOneOffSql, legoOrderedQuantitySql } from "../../manufacturing/repository/lego-one-off.js";
 // Leaf: the rörd rule shared with Ändra operationer (#15) — no module cycle.
-import { operationTouchedSql } from "../../manufacturing/repository/operation-resources.js";
+import {
+  operationTouchedSql,
+  switchOperationResourcesInTx,
+  type ResourceSwitch,
+} from "../../manufacturing/repository/operation-resources.js";
 import {
   articles,
   articleSuppliers,
@@ -1371,6 +1375,7 @@ export function createPlanningRepository(db: Db) {
       if (articleIds.length === 0) return [];
       const rows = await dbc
         .select({
+          id: routingOperations.id,
           articleId: routingOperations.articleId,
           sequenceNo: routingOperations.sequenceNo,
           workCenterId: routingOperations.workCenterId,
@@ -1381,6 +1386,89 @@ export function createPlanningRepository(db: Db) {
         .from(routingOperations)
         .where(and(inArray(routingOperations.articleId, articleIds), eq(routingOperations.costingOnly, false)));
       return rows.map((r) => ({ ...r, setupTime: Number(r.setupTime), runTimePerUnit: Number(r.runTimePerUnit) }));
+    },
+
+    // Alternativa resurser (#15, etapp 3) for Leveranstidskontrollen: the
+    // alternatives of these routing rows as the TO's snapshot would take them
+    // (snapshotOperationResourcesInTx): a row that is worked (not Kalkyl) on
+    // an own ordinarie, the alternative's resource active and not lego and
+    // never the ordinarie, in rank order. The times are raw (null = som
+    // ordinarie) — the caller resolves them against the operation's own, as
+    // the snapshot does; `ordinaryWorkCenterId` lets it apply them only to
+    // an operation still on the row's ordinarie (a configured row's base
+    // operation).
+    async routingAlternatives(routingOperationIds: string[], dbc: Db | Tx = db) {
+      if (routingOperationIds.length === 0) return [];
+      const rows = await dbc.execute<{
+        routing_operation_id: string;
+        ordinary_work_center_id: string;
+        work_center_id: string;
+        setup_time: string | null;
+        run_time_per_unit: string | null;
+      }>(sql`
+        SELECT a.routing_operation_id, ro.work_center_id AS ordinary_work_center_id, a.work_center_id,
+          a.setup_time::text AS setup_time, a.run_time_per_unit::text AS run_time_per_unit
+        FROM routing_operation_alternatives a
+        JOIN routing_operations ro ON ro.id = a.routing_operation_id AND NOT ro.costing_only
+        JOIN work_centers owc ON owc.id = ro.work_center_id AND owc.type <> 'subcontract'
+        JOIN work_centers w ON w.id = a.work_center_id AND w.active AND w.type <> 'subcontract'
+        WHERE a.routing_operation_id IN (${sql.join(
+          routingOperationIds.map((id) => sql`${id}::uuid`),
+          sql`, `
+        )})
+          AND a.work_center_id <> ro.work_center_id
+        ORDER BY a.routing_operation_id, a.rank`);
+      return [...rows].map((r) => ({
+        routingOperationId: r.routing_operation_id,
+        ordinaryWorkCenterId: r.ordinary_work_center_id,
+        workCenterId: r.work_center_id,
+        setupTime: r.setup_time === null ? null : Number(r.setup_time),
+        runTimePerUnit: r.run_time_per_unit === null ? null : Number(r.run_time_per_unit),
+      }));
+    },
+
+    // The reservation (#15): the possible resources of one TO's operations
+    // (mo_operation_resources) with their times — what a given plan's
+    // resource is matched against.
+    async orderOperationResources(tx: Tx, manufacturingOrderId: string) {
+      return tx
+        .select({
+          moOperationId: moOperationResources.moOperationId,
+          workCenterId: moOperationResources.workCenterId,
+          setupTime: moOperationResources.setupTime,
+          runTimePerUnit: moOperationResources.runTimePerUnit,
+        })
+        .from(moOperationResources)
+        .innerJoin(moOperations, eq(moOperations.id, moOperationResources.moOperationId))
+        .where(eq(moOperations.manufacturingOrderId, manufacturingOrderId));
+    },
+
+    // The reservation (#15): the switch to the alternatives the check chose,
+    // through the leaf's ONE switch writer (resource and the row's times,
+    // Vald för hand, plan_locked cleared). Returns the ids switched.
+    async switchOperationResources(tx: Tx, switches: ResourceSwitch[]): Promise<string[]> {
+      return switchOperationResourcesInTx(tx, switches);
+    },
+
+    // The reservation's händelselogg (#15): the operations of a TO it put on
+    // an alternative, read back from what was written — Vald för hand on a
+    // resource other than the beredning's ordinarie (rank 0).
+    async orderResourceSwitches(tx: Tx, manufacturingOrderId: string) {
+      const rows = await tx.execute<{ sequence_no: number; from_id: string; from_code: string; to_id: string; to_code: string }>(sql`
+        SELECT o.sequence_no, r0.work_center_id AS from_id, fw.code AS from_code, o.work_center_id AS to_id, tw.code AS to_code
+        FROM mo_operations o
+        JOIN mo_operation_resources r0 ON r0.mo_operation_id = o.id AND r0.rank = 0
+        JOIN work_centers fw ON fw.id = r0.work_center_id
+        JOIN work_centers tw ON tw.id = o.work_center_id
+        WHERE o.manufacturing_order_id = ${manufacturingOrderId} AND o.resource_locked AND o.work_center_id <> r0.work_center_id
+        ORDER BY o.sequence_no`);
+      return [...rows].map((r) => ({
+        sequenceNo: Number(r.sequence_no),
+        fromWorkCenterId: r.from_id,
+        fromCode: r.from_code,
+        toWorkCenterId: r.to_id,
+        toCode: r.to_code,
+      }));
     },
 
     // Legoresurser's lead time in days (Monitor's Lego export).

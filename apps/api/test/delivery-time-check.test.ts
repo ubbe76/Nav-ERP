@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   checkDeliveryTime,
+  deliveryTimeAnswer,
+  runDeliveryTimeChecks,
   type DeliveryTimeCheckInput,
   type DtcArticle,
   type DtcOperation,
@@ -942,5 +944,169 @@ describe("Leveranstidskontroll — planned load, weeks and batches", () => {
       })
     );
     expect(result.batches.map((b) => [b.rowKey, b.quantity])).toEqual([["a", 10]]);
+  });
+});
+
+// --- Alternativa resurser (#15, etapp 3): the two runs and the answer ------
+describe("Leveranstidskontroll — alternativa resurser", () => {
+  const wc2: DtcWorkCenter = { ...wc1, workCenterId: "wc-2", code: "120", name: "Kantpress 2" };
+  const inactive: DtcWorkCenter = { ...wc1, workCenterId: "wc-i", code: "160", name: "Inaktiv", active: false };
+  const noCapacity: DtcWorkCenter = { ...wc1, workCenterId: "wc-n", code: "150", name: "Utan kapacitet", weekScheduleId: null };
+  const workCenters = new Map([wc1, wc2, inactive, noCapacity].map((w) => [w.workCenterId, w] as const));
+  // An operation of `hours` on 110 with 120 (and others) as alternatives "som ordinarie".
+  const withAlternatives = (hours: number, ...alternatives: string[]): DtcOperation => ({
+    ...op(10, hours),
+    alternatives: (alternatives.length > 0 ? alternatives : ["wc-2"]).map((workCenterId) => ({ workCenterId, setupTime: hours * 60, runTimePerUnit: 0 })),
+  });
+  const made = (ops: DtcOperation[], extra: Partial<DeliveryTimeCheckInput> = {}) =>
+    input({ articles: articles(article("m", "manufactured")), routings: new Map([["m", ops]]), workCenters, rows: [row("m", 1)], ...extra });
+  const FULL_110 = [existing("wc-1", "2026-10-21", 40)];
+
+  it("a full ordinarie: the run with alternatives gives an earlier date, and the answer carries both dates and the alternative", () => {
+    const runs = runDeliveryTimeChecks(made([withAlternatives(8)], { existingOperations: FULL_110 }));
+    // Only the ordinarie: 110 is full this week, so W44 — ready Friday the 30th.
+    expect(runs.ordinary).toMatchObject({ shipDate: "2026-11-02", deliveryDate: "2026-11-02" });
+    expect(runs.ordinary.batches[0]!.operations).toEqual([{ sequenceNo: 10, workCenterId: "wc-1", weeks: [{ monday: "2026-10-26", minutes: 480 }] }]);
+    const answer = deliveryTimeAnswer(runs);
+    expect(answer).toMatchObject({
+      usesAlternatives: true,
+      shipDate: "2026-10-26",
+      deliveryDate: "2026-10-26",
+      ordinaryShipDate: "2026-11-02",
+      ordinaryDeliveryDate: "2026-11-02",
+    });
+    expect(answer.rows[0]).toMatchObject({ readyDate: "2026-10-23", ordinaryReadyDate: "2026-10-30" });
+    expect(answer.rows[0]!.chain).toEqual([
+      {
+        kind: "operation",
+        articleNumber: "NR-m",
+        quantity: 1,
+        sequenceNo: 10,
+        description: "Op 10",
+        workCenterCode: "120",
+        workCenterName: "Kantpress 2",
+        fromWeek: "2026-10-19",
+        toWeek: "2026-10-19",
+        weeks: [{ monday: "2026-10-19", minutes: 480 }],
+        date: "2026-10-23",
+        // 110 would have finished in W44.
+        alternativeOf: { workCenterId: "wc-1", workCenterCode: "110", workCenterName: "Kantpress", toWeek: "2026-10-26" },
+      },
+    ]);
+    // The batch is on the resource the run chose — what the reservation
+    // writes — and every operation names its resource and the ordinarie.
+    expect(answer.batches[0]!.operations).toEqual([
+      {
+        sequenceNo: 10,
+        workCenterId: "wc-2",
+        workCenterCode: "120",
+        workCenterName: "Kantpress 2",
+        weeks: [{ monday: "2026-10-19", minutes: 480 }],
+        alternativeOf: { workCenterId: "wc-1", workCenterCode: "110", workCenterName: "Kantpress", toWeek: "2026-10-26" },
+      },
+    ]);
+
+    // Med ordinarie resurser: the ordinarie run, no alternative anywhere.
+    const ordinary = deliveryTimeAnswer(runs, false);
+    expect(ordinary).toMatchObject({ usesAlternatives: false, deliveryDate: "2026-11-02", ordinaryShipDate: null, ordinaryDeliveryDate: null });
+    expect(ordinary.rows[0]!.chain[0]).toMatchObject({ workCenterCode: "110", alternativeOf: null });
+    expect(ordinary.batches[0]!.operations[0]).toMatchObject({ workCenterId: "wc-1", workCenterCode: "110", alternativeOf: null });
+  });
+
+  it("equal weeks keep the ordinarie: a base that is not full, or an alternative that is no earlier", () => {
+    // 110 is free: not full, even though 120 would be faster.
+    const free = deliveryTimeAnswer(runDeliveryTimeChecks(made([{ ...withAlternatives(8), alternatives: [{ workCenterId: "wc-2", setupTime: 60, runTimePerUnit: 0 }] }])));
+    expect(free).toMatchObject({ usesAlternatives: false, deliveryDate: "2026-10-26", ordinaryDeliveryDate: null, ordinaryShipDate: null });
+    expect(free.rows[0]!.chain[0]).toMatchObject({ workCenterCode: "110", alternativeOf: null });
+    expect(free.rows[0]!.ordinaryReadyDate).toBe(free.rows[0]!.readyDate);
+    // 110 and 120 both full this week: W44 either way — the ordinarie stays.
+    const tie = runDeliveryTimeChecks(made([withAlternatives(8)], { existingOperations: [...FULL_110, existing("wc-2", "2026-10-21", 40)] }));
+    expect(tie.withAlternatives!.batches[0]!.operations[0]!.workCenterId).toBe("wc-1");
+    expect(deliveryTimeAnswer(tie)).toMatchObject({ usesAlternatives: false, deliveryDate: "2026-11-02" });
+  });
+
+  it("counts the alternatives only when they move the delivery date — otherwise the whole answer is the ordinarie run", () => {
+    // Row 1 would be ready a week earlier on 120, but row 2 (bought, 15
+    // working days) decides the date either way.
+    const runs = runDeliveryTimeChecks(
+      made([withAlternatives(8)], {
+        articles: articles(article("m", "manufactured"), article("p")),
+        suppliers: new Map([["p", supplier(15)]]),
+        existingOperations: FULL_110,
+        rows: [row("m", 1), row("p", 1)],
+      })
+    );
+    expect(runs.withAlternatives!.rows[0]!.readyDate).toBe("2026-10-23");
+    expect(runs.withAlternatives!.deliveryDate).toBe(runs.ordinary.deliveryDate);
+    const answer = deliveryTimeAnswer(runs);
+    expect(answer).toMatchObject({ usesAlternatives: false, deliveryDate: runs.ordinary.deliveryDate, ordinaryDeliveryDate: null });
+    expect(answer.rows[0]).toMatchObject({ readyDate: "2026-10-30", ordinaryReadyDate: "2026-10-30" });
+    expect(answer.batches[0]!.operations[0]!.workCenterId).toBe("wc-1");
+  });
+
+  it("books the chosen resource: the next row sees the alternative's load", () => {
+    // Two rows of 30 h; 110 is full this week, 120 free. Row 1 takes 120 in
+    // W43; row 2 would need 120 too, but only 10 h are left there — W44 on
+    // either, so it stays on 110.
+    const runs = runDeliveryTimeChecks(
+      made([withAlternatives(30)], { existingOperations: FULL_110, rows: [row("m", 1, { key: "a" }), row("m", 1, { key: "b" })] })
+    );
+    const answer = deliveryTimeAnswer(runs);
+    expect(answer.batches.map((b) => [b.rowKey, b.operations[0]!.workCenterId, b.readyDate])).toEqual([
+      ["a", "wc-2", "2026-10-23"],
+      ["b", "wc-1", "2026-10-30"],
+    ]);
+    // Only the ordinarie: 30 h in W44, then 10 h + 20 h into W45.
+    expect(answer).toMatchObject({ usesAlternatives: true, shipDate: "2026-11-02", ordinaryShipDate: "2026-11-09" });
+  });
+
+  it("a configured row's operations take their alternatives the same way", () => {
+    const runs = runDeliveryTimeChecks(
+      input({
+        articles: articles(article("t", "manufactured")),
+        workCenters,
+        existingOperations: FULL_110,
+        rows: [row("t", 1, { key: "cfg", structure: { quantity: 1, operations: [withAlternatives(8)], materials: [] } })],
+      })
+    );
+    const answer = deliveryTimeAnswer(runs);
+    expect(answer).toMatchObject({ usesAlternatives: true, deliveryDate: "2026-10-26", ordinaryDeliveryDate: "2026-11-02" });
+    expect(answer.batches).toEqual([
+      expect.objectContaining({
+        rowKey: "cfg",
+        operations: [expect.objectContaining({ sequenceNo: 10, workCenterId: "wc-2", workCenterCode: "120", weeks: [{ monday: "2026-10-19", minutes: 480 }] })],
+      }),
+    ]);
+  });
+
+  it("never tries an inactive alternative or one without capacity; without alternatives the check runs once", () => {
+    const untried = runDeliveryTimeChecks(made([withAlternatives(8, "wc-i", "wc-n")], { existingOperations: FULL_110 }));
+    expect(untried.withAlternatives!.batches[0]!.operations[0]!.workCenterId).toBe("wc-1");
+    expect(deliveryTimeAnswer(untried)).toMatchObject({ usesAlternatives: false, deliveryDate: "2026-11-02" });
+    const plain = runDeliveryTimeChecks(made([op(10, 8)], { existingOperations: FULL_110 }));
+    expect(plain.withAlternatives).toBeNull();
+    // The answer is the run itself, every operation step marked as on the ordinarie.
+    const answer = deliveryTimeAnswer(plain);
+    expect(answer).toEqual({
+      ...plain.ordinary,
+      rows: plain.ordinary.rows.map((r) => ({ ...r, chain: r.chain.map((c) => ({ ...c, alternativeOf: null })), ordinaryReadyDate: r.readyDate })),
+      batches: plain.ordinary.batches.map((b) => ({
+        ...b,
+        operations: b.operations.map((o) => ({ ...o, workCenterCode: "110", workCenterName: "Kantpress", alternativeOf: null })),
+      })),
+      usesAlternatives: false,
+      ordinaryShipDate: null,
+      ordinaryDeliveryDate: null,
+    });
+  });
+
+  it("is deterministic: the same input gives the same answer (the check and the reservation's run under the lock)", () => {
+    const build = () => made([withAlternatives(30)], { existingOperations: FULL_110, rows: [row("m", 1, { key: "a" }), row("m", 1, { key: "b" })] });
+    expect(deliveryTimeAnswer(runDeliveryTimeChecks(build()))).toEqual(deliveryTimeAnswer(runDeliveryTimeChecks(build())));
+    // The input is not mutated by a run.
+    const once = build();
+    const snapshot = JSON.stringify([...once.routings]);
+    runDeliveryTimeChecks(once);
+    expect(JSON.stringify([...once.routings])).toBe(snapshot);
   });
 });

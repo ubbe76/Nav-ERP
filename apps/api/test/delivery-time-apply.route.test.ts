@@ -51,9 +51,18 @@ const id = () => crypto.randomUUID();
 const result: ApplyDeliveryTimeResult = {
   deliveryDate: "2030-03-11",
   shipDate: "2030-03-11",
+  usesAlternatives: true,
   manufacturingOrders: [
-    { id: id(), orderNumber: "TO-100", articleNumber: "BARN", quantity: 10, level: 2, salesOrderRowId: null },
-    { id: id(), orderNumber: "TO-101", articleNumber: "FAR", quantity: 10, level: 1, salesOrderRowId: id() },
+    { id: id(), orderNumber: "TO-100", articleNumber: "BARN", quantity: 10, level: 2, salesOrderRowId: null, resourceSwitches: [] },
+    {
+      id: id(),
+      orderNumber: "TO-101",
+      articleNumber: "FAR",
+      quantity: 10,
+      level: 1,
+      salesOrderRowId: id(),
+      resourceSwitches: [{ sequenceNo: 10, fromWorkCenterId: id(), fromCode: "110", toWorkCenterId: id(), toCode: "120" }],
+    },
   ],
   warnings: [],
 };
@@ -84,8 +93,30 @@ describe("POST /delivery-time-check/apply (route, inject)", () => {
     expect(res.statusCode).toBe(200);
   });
 
+  it("passes useAlternatives (the date the client chose) through; left out it is not sent on", async () => {
+    const salesOrderId = id();
+    const seen: unknown[] = [];
+    const app = buildApp(async (input) => {
+      seen.push(input);
+      return result;
+    });
+    for (const useAlternatives of [false, true]) {
+      const res = await app.inject({
+        method: "POST",
+        url: "/delivery-time-check/apply",
+        payload: { salesOrderId, deliveryDate: "2030-03-11", useAlternatives },
+      });
+      expect(res.statusCode).toBe(200);
+    }
+    expect(seen).toEqual([
+      { salesOrderId, deliveryDate: "2030-03-11", useAlternatives: false },
+      { salesOrderId, deliveryDate: "2030-03-11", useAlternatives: true },
+    ]);
+  });
+
   it.each([
     {},
+    { salesOrderId: id(), deliveryDate: "2030-03-11", useAlternatives: "ja" },
     { salesOrderId: id() },
     { deliveryDate: "2030-03-11" },
     { salesOrderId: "nope", deliveryDate: "2030-03-11" },
@@ -102,7 +133,16 @@ describe("POST /delivery-time-check/apply (route, inject)", () => {
   });
 
   it("409 delivery-time-changed carries the new check result in the body", async () => {
-    const newResult = { shipDate: "2030-03-18", deliveryDate: "2030-03-18", rows: [], notes: [], batches: [] };
+    const newResult = {
+      shipDate: "2030-03-18",
+      deliveryDate: "2030-03-18",
+      rows: [],
+      notes: [],
+      batches: [],
+      usesAlternatives: true,
+      ordinaryShipDate: "2030-03-25",
+      ordinaryDeliveryDate: "2030-03-25",
+    };
     const app = buildApp(async () => {
       throw new DeliveryTimeChangedError("2030-03-18", newResult);
     });
@@ -116,7 +156,16 @@ describe("POST /delivery-time-check/apply (route, inject)", () => {
   });
 
   it("409 delivery-time-changed when the number of TOs changed, with the new result", async () => {
-    const newResult = { shipDate: "2030-03-11", deliveryDate: "2030-03-11", rows: [], notes: [], batches: [] };
+    const newResult = {
+      shipDate: "2030-03-11",
+      deliveryDate: "2030-03-11",
+      rows: [],
+      notes: [],
+      batches: [],
+      usesAlternatives: false,
+      ordinaryShipDate: null,
+      ordinaryDeliveryDate: null,
+    };
     const app = buildApp(async () => {
       throw new DeliveryTimeChangedError("2030-03-11", newResult, { expected: 2, actual: 1 });
     });
