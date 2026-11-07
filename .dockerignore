@@ -1,9 +1,17 @@
 # Keeps `COPY . .` in the Dockerfiles from dragging the host's installed
 # node_modules and stale local build output into the build context — those
 # are rebuilt fresh inside each image stage instead.
+#
+# Patterns are matched from the context root with no implicit `**/`: a bare
+# `.next` only ever matched a root-level .next, so apps/web/.next — including
+# `next dev`'s cache under .next/dev, gigabytes after a few preview runs — was
+# sent with every build, copied into the build stage and from there into the
+# runtime image (dev-web grew to 6.6 GB).
 node_modules
 **/node_modules
-.next
+**/.next
 **/dist
 .git
 .claude
+# The private repo (plans, real-file tests) is never part of an image.
+private
