@@ -488,7 +488,9 @@ export function createArticleService(repo: ArticleRepository, audit: AuditWriter
       return repo.list(query);
     },
 
-    async updateArticle(id: string, input: UpdateArticleInput) {
+    // `userId` is only read by the händelselogg below (Prognosstyrd); the
+    // batch editor and the fixtures leave it out.
+    async updateArticle(id: string, input: UpdateArticleInput, userId: string | null = null) {
       const article = await repo.findById(id);
       if (!article) throw new ArticleNotFoundError(id);
 
@@ -553,6 +555,23 @@ export function createArticleService(repo: ArticleRepository, audit: AuditWriter
         });
       } else {
         await write();
+      }
+      // Prognosstyrd (#10) is logged on the article: switching it on or off
+      // changes what the behovsberäkning plans for, which the log should
+      // explain afterwards. The other planning fields are not logged (as
+      // before) — only this flag turns a whole demand source on or off.
+      if (input.forecastControlled !== undefined && input.forecastControlled !== article.forecastControlled) {
+        await audit.log({
+          entityType: "article",
+          entityId: id,
+          action: "updated",
+          detail: {
+            articleNumber: article.articleNumber,
+            before: { forecastControlled: article.forecastControlled },
+            after: { forecastControlled: input.forecastControlled },
+          },
+          userId,
+        });
       }
       // Re-read joined so the response carries unit codes like the GET.
       return repo.findById(id);

@@ -4,7 +4,7 @@ import { auditLog, companyInfo, db, numberSeries, systemSettings } from "@navet/
 import { updateSystemSettingsSchema } from "@navet/shared";
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService, NumberSeriesNotFoundError } from "../src/modules/system/service/system.service.js";
-import { decodeLeadTimeDefaults, decodeLeadTimeSettingDays } from "../src/modules/system/service/plan-settings.js";
+import { decodeForecastMonths, decodeForecastSettings, decodeLeadTimeDefaults, decodeLeadTimeSettingDays } from "../src/modules/system/service/plan-settings.js";
 import { getNextOrderNumber } from "../src/modules/system/service/number-series.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -259,6 +259,44 @@ describe("system service — settings", () => {
     expect(updateSystemSettingsSchema.safeParse({ planningQueueTimeDays: 60.5 }).success).toBe(false);
     expect(updateSystemSettingsSchema.safeParse({ planningQueueTimeDays: 1.25 }).success).toBe(false);
     expect(updateSystemSettingsSchema.safeParse({ planningDefaultLeadTimeDays: 60, planningQueueTimeDays: 0.3 }).success).toBe(true);
+  });
+
+  it("defaults the forecast window to 12 and the horizon to 6 months, round-trips whole months, and junk or out-of-range decodes to the defaults", async () => {
+    const keys = ["planning_forecast_history_months", "planning_forecast_horizon_months"];
+    await db.delete(systemSettings).where(inArray(systemSettings.key, keys));
+    try {
+      expect(await systemService.getSettings()).toMatchObject({ planningForecastHistoryMonths: 12, planningForecastHorizonMonths: 6 });
+      expect(await systemService.updateSettings({ planningForecastHistoryMonths: 3, planningForecastHorizonMonths: 2 })).toMatchObject({
+        planningForecastHistoryMonths: 3,
+        planningForecastHorizonMonths: 2,
+      });
+      expect(await systemService.updateSettings({ planningForecastHorizonMonths: 24 })).toMatchObject({
+        planningForecastHistoryMonths: 3,
+        planningForecastHorizonMonths: 24,
+      });
+      for (const [key, value] of [
+        ["planning_forecast_history_months", "garbage"],
+        ["planning_forecast_horizon_months", "25"],
+      ] as const) {
+        await db.insert(systemSettings).values({ key, value }).onConflictDoUpdate({ target: systemSettings.key, set: { value } });
+      }
+      expect(await systemService.getSettings()).toMatchObject({ planningForecastHistoryMonths: 12, planningForecastHorizonMonths: 6 });
+    } finally {
+      await db.delete(systemSettings).where(inArray(systemSettings.key, keys));
+    }
+    // The pure decode: blank, 0, a decimal and above the cap ⇒ the fallback.
+    expect(decodeForecastMonths("", 12, 36)).toBe(12);
+    expect(decodeForecastMonths("0", 12, 36)).toBe(12);
+    expect(decodeForecastMonths("1.5", 12, 36)).toBe(12);
+    expect(decodeForecastMonths("37", 12, 36)).toBe(12);
+    expect(decodeForecastMonths(" 36 ", 12, 36)).toBe(36);
+    expect(decodeForecastSettings(() => null)).toEqual({ historyMonths: 12, horizonMonths: 6 });
+    // The API's 400: whole months, 1–36 and 1–24.
+    expect(updateSystemSettingsSchema.safeParse({ planningForecastHistoryMonths: 0 }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ planningForecastHistoryMonths: 37 }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ planningForecastHorizonMonths: 2.5 }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ planningForecastHorizonMonths: 25 }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ planningForecastHistoryMonths: 36, planningForecastHorizonMonths: 1 }).success).toBe(true);
   });
 
   it("defaults the delivery-day settings and round-trips them; junk decodes to the defaults", async () => {

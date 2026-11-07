@@ -122,6 +122,7 @@ export async function insertArticle(tx: Tx, input: InsertArticleInput): Promise<
     rounding: input.rounding !== undefined ? String(input.rounding) : undefined,
     safetyStock: input.safetyStock ? String(input.safetyStock) : undefined,
     stockControlled: input.stockControlled ?? false,
+    forecastControlled: input.forecastControlled ?? false,
     manufacturingLeadTimeDays: input.manufacturingLeadTimeDays ?? null,
     packageTypeId: input.packageTypeId,
     parcelKind: input.parcelKind ?? null,

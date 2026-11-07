@@ -53,6 +53,10 @@ const ALLOWED: Record<string, { reads: number; why: string }> = {
     reads: 1,
     why: "physical: Negativt saldo is a bookkeeping error whatever the place",
   },
+  "modules/planning/repository/planning.repository.ts": {
+    reads: 1,
+    why: "log reader: förbrukning per månad for the prognos (#10) — the net sales_delivery/mo_consumption outflows, not a stock balance",
+  },
   "modules/costing/repository/work-in-progress.repository.ts": {
     reads: 2,
     why: "log reader: net material drawn per TO, not a stock balance",

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import {
   applyDeliveryTimeSchema,
+  articleForecastUpdateSchema,
   capacityQuerySchema,
   componentMovesSchema,
   createPlanningOrdersSchema,
@@ -15,6 +16,7 @@ import { requirementsExportColumns } from "../service/export-columns.js";
 import {
   ArticleNotFoundError,
   ComponentMoveChangedError,
+  ForecastMonthOutsideHorizonError,
   InvalidStatusTransitionError,
   ManufacturingOrderNotFoundError,
   MissingComponentsChangedError,
@@ -48,7 +50,7 @@ import {
 import { ConfiguratorInvalidConfigurationError, ConfiguratorModeChangedError, ConfiguratorNotToOrderModeError } from "../../configurator/service/configurator.errors.js";
 import { InvalidStatusTransitionError as SalesStatusError } from "../../sales/service/sales.service.js";
 import { errorBody } from "../../system/service/error-body.js";
-import { DELIVERY_CHECK, MO_READ, OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
+import { articleCardWrite, DELIVERY_CHECK, MO_READ, OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
 
 export async function planningRoutes(app: FastifyInstance, opts: { service: PlanningService }) {
   const { service } = opts;
@@ -79,6 +81,35 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
       throw err;
     }
   });
+
+  // Prognos (#10): the article's forecast picture (history, average, one row
+  // per horizon month) — read like the artikelöversikt it is derived with.
+  app.get<{ Params: { id: string } }>("/articles/:id/forecast", { config: { access: OVERVIEW_READ } }, async (req, reply) => {
+    try {
+      return await service.getArticleForecast(req.params.id);
+    } catch (err) {
+      if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // The own quantities per month (the article card's Prognos card): a write
+  // under /articles, so the Artiklar menu may make it as well as the module's
+  // own (tillverkning). 400 forecast-month-outside-horizon, 404 for the article.
+  app.put<{ Params: { id: string } }>(
+    "/articles/:id/forecast",
+    { config: { access: articleCardWrite(["tillverkning"]) } },
+    async (req, reply) => {
+      const input = articleForecastUpdateSchema.parse(req.body);
+      try {
+        return await service.updateArticleForecast(req.params.id, input, req.user?.id ?? null);
+      } catch (err) {
+        if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof ForecastMonthOutsideHorizonError) return reply.code(400).send({ ...errorBody(err), month: err.month });
+        throw err;
+      }
+    }
+  );
 
   // Pegging (#9): the TO card's Täcks av / Går till. MO_READ like the TO
   // card itself (the workshop profile sees it; no prices in the answer).

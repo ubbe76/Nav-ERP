@@ -88,7 +88,8 @@ export function moveCandidates(
     }
     if (round4(toParent) <= 0) continue;
     out.push({
-      manufacturingOrderId: supply.row.documentId,
+      // A manufacturing_order supply always has its TO's id (null only on forecast rows).
+      manufacturingOrderId: supply.row.documentId!,
       orderNumber: supply.row.documentNumber,
       articleId: article.articleId,
       articleNumber: article.articleNumber,
@@ -155,7 +156,7 @@ export function recordEarlierNeed(overrides: Map<string, string>, manufacturingO
 export function redateParentDemands(overview: ArticleOverview, starts: ReadonlyMap<string, string | null>): ArticleOverview {
   let changed = false;
   const rows: ArticleOverviewRow[] = overview.rows.map((row) => {
-    if ((row.kind === "mo_material" || row.kind === "mo_planned_material") && starts.has(row.documentId)) {
+    if ((row.kind === "mo_material" || row.kind === "mo_planned_material") && row.documentId !== null && starts.has(row.documentId)) {
       const date = starts.get(row.documentId) ?? null;
       if (date !== row.date) {
         changed = true;

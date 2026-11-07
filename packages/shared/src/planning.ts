@@ -194,3 +194,16 @@ export const missingComponentsSchema = z.object({
     .min(1),
 });
 export type MissingComponentsInput = z.infer<typeof missingComponentsSchema>;
+
+// Prognos (#10): PUT /articles/:id/forecast — the own quantity per month
+// ("YYYY-MM"; null removes it so the average applies again). Only months in
+// the horizon are accepted (400 forecast-month-outside-horizon); a month is
+// given at most once.
+export const forecastMonthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "month must be YYYY-MM");
+export const articleForecastUpdateSchema = z.object({
+  months: z
+    .array(z.object({ month: forecastMonthSchema, quantity: z.coerce.number().nonnegative().nullable() }))
+    .min(1)
+    .refine((months) => new Set(months.map((m) => m.month)).size === months.length, { message: "each month at most once" }),
+});
+export type ArticleForecastUpdateInput = z.infer<typeof articleForecastUpdateSchema>;

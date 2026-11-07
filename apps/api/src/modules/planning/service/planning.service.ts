@@ -1,5 +1,6 @@
 import type {
   ApplyDeliveryTimeInput,
+  ArticleForecastUpdateInput,
   CapacityQuery,
   ComponentMovesInput,
   MissingComponentsInput as MissingComponentsRequest,
@@ -70,7 +71,26 @@ import {
   type CapacityResult,
   type PlannedWeek,
 } from "./capacity-calc.js";
-import { buildArticleOverview, type ArticleOverview, type ArticleOverviewInput, type ArticleOverviewLoad } from "./article-overview.js";
+import {
+  buildArticleOverview,
+  firmDemandsOf,
+  type ArticleOverview,
+  type ArticleOverviewInput,
+  type ArticleOverviewLoad,
+} from "./article-overview.js";
+import {
+  articleForecastInput,
+  firstDayOf,
+  forecastMonthRows,
+  historyMonths,
+  horizonMonths,
+  isForecastArticle,
+  lastDayOf,
+  type ArticleForecastInput,
+  type ForecastMonth,
+  type ForecastMonthRow,
+} from "./forecast.js";
+import type { ForecastSettings } from "../../system/service/plan-settings.js";
 import { MIN_PLAN_MINUTES, PLAN_HORIZON_WEEKS, type PlanWorkCenter } from "./capacity-book.js";
 import {
   longOperationWarnings,
@@ -134,6 +154,25 @@ export class ArticleNotFoundError extends Error {
 }
 
 // Own copy for the same reason (pegging #9: GET /manufacturing-orders/:id/coverage).
+// Prognos (#10): PUT /articles/:id/forecast with a month outside the
+// horizon (the current month plus planning_forecast_horizon_months − 1) —
+// 400, nothing written.
+export class ForecastMonthOutsideHorizonError extends Error {
+  constructor(public readonly month: string) {
+    super(`Month ${month} is outside the forecast horizon`);
+    this.name = "ForecastMonthOutsideHorizonError";
+  }
+}
+
+export interface ArticleForecast {
+  forecastControlled: boolean;
+  historyMonths: number;
+  horizonMonths: number;
+  average: number;
+  history: { month: ForecastMonth; consumed: number }[];
+  months: ForecastMonthRow[];
+}
+
 export class ManufacturingOrderNotFoundError extends Error {
   constructor(id: string) {
     super(`Manufacturing order ${id} not found`);
@@ -767,6 +806,54 @@ export function createPlanningService(
     return deliveryHolidayWindow(dates, 60 + maxField);
   }
 
+  // Prognos (#10): the forecast inputs for a set of prognosstyrd articles in
+  // ONE batch — the settings first (they decide the window), then the
+  // consumption over the window plus the current month to today, the first
+  // stock movements and the own quantities in parallel. forecast.ts turns
+  // them into each article's average/own/consumed-so-far.
+  type ForecastLoad = {
+    settings: ForecastSettings;
+    history: ForecastMonth[];
+    horizon: ForecastMonth[];
+    horizonEnd: string;
+    articles: Map<string, ArticleForecastInput>;
+    consumption: Map<string, Map<ForecastMonth, number>>;
+  };
+  async function loadForecastInputs(articleIds: string[], today: string, dbc?: Tx): Promise<ForecastLoad> {
+    const settings = await repo.forecastSettings(dbc);
+    const history = historyMonths(today, settings.historyMonths);
+    const horizon = horizonMonths(today, settings.horizonMonths);
+    const horizonEnd = lastDayOf(horizon[horizon.length - 1]!);
+    const consumption = new Map<string, Map<ForecastMonth, number>>();
+    const articles = new Map<string, ArticleForecastInput>();
+    if (articleIds.length === 0) return { settings, history, horizon, horizonEnd, articles, consumption };
+    const ids = [...new Set(articleIds)];
+    const [rows, firstMovement, own] = await Promise.all([
+      repo.consumptionByMonth(ids, firstDayOf(history[0]!), today, dbc),
+      repo.firstMovementByArticle(ids, dbc),
+      repo.ownForecastQuantities(ids, dbc),
+    ]);
+    for (const r of rows) {
+      const months = consumption.get(r.articleId) ?? new Map<ForecastMonth, number>();
+      months.set(r.month, r.consumed);
+      consumption.set(r.articleId, months);
+    }
+    for (const articleId of ids) {
+      articles.set(
+        articleId,
+        articleForecastInput({
+          articleId,
+          consumption: consumption.get(articleId) ?? new Map(),
+          own: own.get(articleId) ?? new Map(),
+          firstMovementDate: firstMovement.get(articleId) ?? null,
+          history,
+          today,
+        })
+      );
+    }
+    return { settings, history, horizon, horizonEnd, articles, consumption };
+  }
+
   // Tidsfasade förslag (#13): the artikelöversikt's material rows and planned
   // TOs are dated with the TO's START (moStartDate), not its due date — the
   // material must be there when the work begins. One dating load and ONE
@@ -784,6 +871,12 @@ export function createPlanningService(
         if (m.dueDate) dates.push(m.dueDate);
       }
     }
+    // Prognos (#10): the prognosstyrda articles' forecast inputs in one
+    // batch; the holiday window must then reach the horizon's end.
+    const today = todayFn();
+    const forecastIds = loads.filter((l) => isForecastArticle(l.article)).map((l) => l.article.articleId);
+    const forecast = forecastIds.length > 0 ? await loadForecastInputs(forecastIds, today, dbc) : null;
+    if (forecast) dates.push(today, forecast.horizonEnd);
     const dating = moIds.size > 0 ? await leadTimeInputsFor({ orderIds: [...moIds], articleIds: [...parentIds] }, dbc) : null;
     const ctx: DeliveryContext | null =
       dates.length > 0 ? await repo.deliveryContext(datingWindow(dates, dating?.articleLeadTimes ?? new Map()), dbc) : null;
@@ -813,12 +906,18 @@ export function createPlanningService(
           offDays: ctx?.offDays ?? new Set<string>(),
         })
       : new Map<string, string | null>();
-    return loads.map((l) => ({
-      ...l,
-      salesRows: ctx ? shiftToShipDates(l.salesRows, ctx) : l.salesRows,
-      materialRows: l.materialRows.map((m) => ({ ...m, needDate: starts.get(m.moId) ?? null })),
-      plannedMos: l.plannedMos.map((m) => ({ ...m, needDate: starts.get(m.moId) ?? null })),
-    }));
+    return loads.map((l) => {
+      const forecastInput = forecast?.articles.get(l.article.articleId);
+      return {
+        ...l,
+        salesRows: ctx ? shiftToShipDates(l.salesRows, ctx) : l.salesRows,
+        materialRows: l.materialRows.map((m) => ({ ...m, needDate: starts.get(m.moId) ?? null })),
+        plannedMos: l.plannedMos.map((m) => ({ ...m, needDate: starts.get(m.moId) ?? null })),
+        ...(forecast && forecastInput
+          ? { forecast: { input: forecastInput, calendar: { today, offDays: ctx?.offDays ?? new Set<string>(), horizon: forecast.horizon } } }
+          : {}),
+      };
+    });
   }
 
   async function loadOverviewInput(articleId: string): Promise<ArticleOverviewInput> {
@@ -910,8 +1009,13 @@ export function createPlanningService(
     const today = todayFn();
     const dating = load.dating;
     const leadTime = buildLeadTimeContext(dating);
+    // Prognos (#10): one batch for every prognosstyrd article; the holiday
+    // window then reaches the horizon's end.
+    const forecastIds = load.articles.filter(isForecastArticle).map((a) => a.articleId);
+    const forecast = forecastIds.length > 0 ? await loadForecastInputs(forecastIds, today) : null;
     const dates = [
       today,
+      ...(forecast ? [forecast.horizonEnd] : []),
       ...load.salesRows.flatMap((r) => (r.expectedDeliveryDate ? [r.expectedDeliveryDate] : [])),
       ...loadedConfigured.flatMap((r) => (r.expectedDeliveryDate ? [r.expectedDeliveryDate] : [])),
       ...load.manufacturingOrders.flatMap((o) => (o.dueDate ? [o.dueDate] : [])),
@@ -1037,6 +1141,7 @@ export function createPlanningService(
       configuredRows: needs,
       configuredCascade: new Map(),
       derivedDemands,
+      ...(forecast ? { forecast: { calendar: { today, offDays, horizon: forecast.horizon }, articles: [...forecast.articles.values()] } } : {}),
       today,
       offDays,
       deliveryDefaults: delivery.defaults,
@@ -1431,7 +1536,7 @@ export function createPlanningService(
     const dates: string[] = [today];
     for (const overview of built.values()) {
       for (const row of overview.rows) {
-        if (row.kind === "manufacturing_order") moSupplyIds.add(row.documentId);
+        if (row.kind === "manufacturing_order") moSupplyIds.add(row.documentId!);
         if (row.date) dates.push(row.date);
       }
     }
@@ -1440,7 +1545,7 @@ export function createPlanningService(
     for (const overview of built.values()) {
       for (const row of overview.rows) {
         if (row.kind !== "manufacturing_order") continue;
-        const ready = summaries.get(row.documentId)?.plannedFinish ?? row.date;
+        const ready = summaries.get(row.documentId!)?.plannedFinish ?? row.date;
         readyDates.set(row.id, ready);
         if (ready) dates.push(ready);
       }
@@ -2096,6 +2201,54 @@ export function createPlanningService(
     async getArticleOverviews(articleIds: string[]): Promise<Map<string, ArticleOverview>> {
       const inputs = await loadOverviewInputs(articleIds);
       return new Map([...inputs].map(([articleId, input]) => [articleId, buildArticleOverview(input)]));
+    },
+
+    // Prognos (#10): the article's forecast picture — the history window's
+    // consumption, the average and one row per horizon month (own quantity,
+    // forecast, real demand as the overview dates it, consumed so far,
+    // forecast demand). Computed for every article, flagged or not, so the
+    // card can show what Prognosstyrd would do; only the flag makes the
+    // behovsberäkning and the overview plan for it.
+    async getArticleForecast(articleId: string): Promise<ArticleForecast> {
+      const input = await loadOverviewInput(articleId);
+      const today = todayFn();
+      const loaded = await loadForecastInputs([articleId], today);
+      const article = loaded.articles.get(articleId)!;
+      const consumption = loaded.consumption.get(articleId) ?? new Map<ForecastMonth, number>();
+      // The overview without forecast rows: the firm rows are what the forecast is consumed by.
+      const overview = buildArticleOverview({ ...input, forecast: undefined });
+      return {
+        forecastControlled: input.article.forecastControlled === true,
+        historyMonths: loaded.settings.historyMonths,
+        horizonMonths: loaded.settings.horizonMonths,
+        average: article.average,
+        history: loaded.history.map((month) => ({ month, consumed: consumption.get(month) ?? 0 })),
+        months: forecastMonthRows(article, firmDemandsOf(overview.rows), { today, horizon: loaded.horizon }),
+      };
+    },
+
+    // PUT /articles/:id/forecast: the own quantities for the given months
+    // (null removes one), only months in the horizon, one transaction, a
+    // händelselogg entry on the article when something changed.
+    async updateArticleForecast(articleId: string, input: ArticleForecastUpdateInput, userId: string | null): Promise<ArticleForecast> {
+      const [info] = await repo.articleInfoForIds([articleId]);
+      if (!info) throw new ArticleNotFoundError(articleId);
+      const settings = await repo.forecastSettings();
+      const horizon = new Set(horizonMonths(todayFn(), settings.horizonMonths));
+      for (const m of input.months) if (!horizon.has(m.month)) throw new ForecastMonthOutsideHorizonError(m.month);
+      const { before, after } = await repo.replaceArticleForecasts(articleId, input.months, userId);
+      const text = (values: Map<ForecastMonth, number>) =>
+        input.months.map((m) => `${m.month}: ${values.has(m.month) ? String(values.get(m.month)) : "—"}`).join(", ");
+      if (text(before) !== text(after)) {
+        await audit.log({
+          entityType: "article",
+          entityId: articleId,
+          action: "forecast_updated",
+          detail: { articleNumber: info.articleNumber, before: text(before), after: text(after) },
+          userId,
+        });
+      }
+      return this.getArticleForecast(articleId);
     },
 
     // Färdigdatumsförslag for a new TO on the article — one working day

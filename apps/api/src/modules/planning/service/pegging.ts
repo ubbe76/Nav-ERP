@@ -26,7 +26,7 @@
 // an undated demand is never late. daysLate is counted in working days —
 // the holiday set is the caller's.
 import { workingDaysBetween } from "../../system/service/delivery-days.js";
-import type { ArticleOverview, ArticleOverviewRow, OverviewRowKind } from "./article-overview.js";
+import { isFirmOverviewRow, type ArticleOverview, type ArticleOverviewRow, type OverviewRowKind } from "./article-overview.js";
 
 // The stock pseudo-row's id on both sides: the supply "stock" (onHand > 0)
 // and the demand "stock" (onHand < 0) can never both exist.
@@ -97,6 +97,10 @@ export function pegOverview(overview: ArticleOverview, opts: PegOptions): Peggin
     demands.push({ id: STOCK_PEG_ID, row: null, date: opts.today, quantity: round4(-overview.onHand), allocations: [], uncovered: 0 });
   }
   for (const row of overview.rows) {
+    // Prognos (#10): a forecast row is not a firm demand — it never takes a
+    // supply, so it never moves a färdigdatum or a koppling (and
+    // findFirmDemand, built on this, never dates a TO from it).
+    if (!isFirmOverviewRow(row)) continue;
     if (row.direction === "supply") {
       const ready = opts.readyDates.has(row.id) ? (opts.readyDates.get(row.id) ?? null) : row.date;
       supplies.push({

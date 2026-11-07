@@ -29,6 +29,7 @@ import {
   type PartnerDeliveryFields,
 } from "../../system/service/delivery-days.js";
 import { mondayOf } from "./capacity-calc.js";
+import { forecastWeeklyDemands, type ArticleForecastInput, type ForecastCalendar } from "./forecast.js";
 
 // "lost" (Förlorad) is closed like cancelled — never demand.
 export type SalesOrderStatus =
@@ -69,6 +70,9 @@ export interface RequirementsArticle {
   orderQuantity: number | null;
   // Avrundning — applied to the proposal after the order-quantity multiple.
   rounding: number | null;
+  // Prognosstyrd (#10) — the service builds `RequirementsInput.forecast` for
+  // these; the calc itself only reads that. Optional so fixtures plan as before.
+  forecastControlled?: boolean;
   // Konfigurator: the article's configurator template mode, if any. A
   // to_order template (beställningsvara) never gets a proposal of its own —
   // its configured KO rows do (ConfiguredRowNeed).
@@ -232,6 +236,14 @@ export interface RequirementsInput {
   // Undated; see derivedDemands for the dated form.
   configuredCascade: Map<string, number>;
   derivedDemands?: DerivedDemand[];
+  // Prognos (#10): the forecast-controlled articles' averages/own quantities
+  // and the calendar (forecast.ts). The calc turns them into weekly forecast
+  // demands AFTER the real demands are collected (so they consume the
+  // forecast) and BEFORE the derived demand (configured rows' material and
+  // the proposal cascade), exactly the rows the artikelöversikt shows — the
+  // invariant closingBalance === projected − demandDerived keeps holding.
+  // Absent = no forecast demand.
+  forecast?: { calendar: ForecastCalendar; articles: ArticleForecastInput[] };
   // The time-phasing's calendar. All optional with safe defaults so a caller
   // without them gets undated proposals dated from the real today: `today`
   // (Stockholm day) decides the current week, "late" and the reorder-point
@@ -277,6 +289,9 @@ export interface RequirementRow {
   demandSales: number;
   demandMo: number;
   demandDerived: number;
+  // Prognos (#10): the weekly forecast demands' sum ("varav prognos") —
+  // part of `projected` like the others; 0 for every other article.
+  demandForecast: number;
   supplyPo: number;
   // Draft IOs in their own bucket: a draft is this system's counterpart of a
   // released orderförslag — excluding it would re-propose already-ordered
@@ -574,6 +589,21 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
     (a, b) => (levels.get(a.articleId) ?? 0) - (levels.get(b.articleId) ?? 0)
   );
 
+  // Prognos (#10): the forecast demand per week of every prognosstyrd
+  // article, consumed by the real demands collected above (the same rows the
+  // artikelöversikt lists) — pushed before the derived demand so the two
+  // readers compute the same pieces (forecast.ts owns the rule).
+  const demandForecast = new Map<string, number>();
+  if (input.forecast) {
+    for (const article of input.forecast.articles) {
+      const pieces = forecastWeeklyDemands(article, demands.get(article.articleId) ?? [], input.forecast.calendar);
+      for (const piece of pieces) {
+        addTo(demandForecast, article.articleId, piece.quantity);
+        pushDemand(demands, article.articleId, { date: piece.date, quantity: piece.quantity });
+      }
+    }
+  }
+
   const demandDerived = new Map<string, number>();
   // Konfigurator 4c: the configured rows' derived material (one derivation
   // per configuration, done by the planning service) is demand from TOs that
@@ -600,10 +630,11 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
     const dSales = demandSales.get(id) ?? 0;
     const dMo = demandMo.get(id) ?? 0;
     const dDerived = demandDerived.get(id) ?? 0;
+    const dForecast = round4(demandForecast.get(id) ?? 0);
     const sPo = supplyPo.get(id) ?? 0;
     const sPoDraft = supplyPoDraft.get(id) ?? 0;
     const sMo = supplyMo.get(id) ?? 0;
-    const projected = stockQty - (dSales + dMo + dDerived) + (sPo + sPoDraft + sMo);
+    const projected = stockQty - (dSales + dMo + dDerived + dForecast) + (sPo + sPoDraft + sMo);
 
     const kind = article.type === "manufactured" ? "manufacture" : "purchase";
     const proposals: RequirementProposal[] = [];
@@ -750,6 +781,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
       dSales > 0 ||
       dMo > 0 ||
       dDerived > 0 ||
+      dForecast > 0 ||
       sPo > 0 ||
       sPoDraft > 0 ||
       sMo > 0 ||
@@ -772,6 +804,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
       demandSales: dSales,
       demandMo: dMo,
       demandDerived: dDerived,
+      demandForecast: dForecast,
       supplyPo: sPo,
       supplyPoDraft: sPoDraft,
       supplyMo: sMo,
@@ -847,6 +880,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
         demandSales: 0,
         demandMo: 0,
         demandDerived: 0,
+        demandForecast: 0,
         supplyPo: 0,
         supplyPoDraft: 0,
         supplyMo: 0,
@@ -906,6 +940,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
         demandSales: 0,
         demandMo: 0,
         demandDerived: 0,
+        demandForecast: 0,
         supplyPo: 0,
         supplyPoDraft: 0,
         supplyMo: 0,

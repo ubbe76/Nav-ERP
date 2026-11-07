@@ -130,7 +130,7 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
   app.patch<{ Params: { id: string } }>("/articles/:id", async (req, reply) => {
     const input = updateArticleSchema.parse(req.body);
     try {
-      const article = await service.updateArticle(req.params.id, input);
+      const article = await service.updateArticle(req.params.id, input, req.user?.id ?? null);
       return article;
     } catch (err) {
       if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));

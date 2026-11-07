@@ -47,10 +47,13 @@ import {
 } from "./posting-settings.js";
 import { isUniqueViolation } from "./db-errors.js";
 import {
+  decodeForecastSettings,
   decodeLeadTimeDefaults,
   decodeLongOperationWeeks,
   PLANNING_DEFAULT_LEAD_TIME_DAYS_KEY,
   PLANNING_LONG_OPERATION_WEEKS_KEY,
+  PLANNING_FORECAST_HISTORY_MONTHS_KEY,
+  PLANNING_FORECAST_HORIZON_MONTHS_KEY,
   PLANNING_QUEUE_TIME_DAYS_KEY,
 } from "./plan-settings.js";
 import {
@@ -310,6 +313,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
     const byKey = new Map(rows.map((row) => [row.key, row.value] as const));
     const get = (key: string) => byKey.get(key) ?? null;
     const leadTimeDefaults = decodeLeadTimeDefaults(get);
+    const forecastSettings = decodeForecastSettings(get);
 
     return {
       allowMultipleStamps: get(ALLOW_MULTIPLE_STAMPS_KEY) === "true",
@@ -366,6 +370,8 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       // the keys, the defaults (0) and the decode.
       planningDefaultLeadTimeDays: leadTimeDefaults.defaultLeadDays,
       planningQueueTimeDays: leadTimeDefaults.queueDays,
+      planningForecastHistoryMonths: forecastSettings.historyMonths,
+      planningForecastHorizonMonths: forecastSettings.horizonMonths,
       // Fasta leveransdagar — the default mode/transit days for partners
       // without their own; junk decodes to the default (delivery-days.ts).
       ...flattenDeliveryDefaults(decodeDeliveryDefaults(get)),
@@ -724,6 +730,12 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       }
       if (input.planningQueueTimeDays !== undefined) {
         await set(PLANNING_QUEUE_TIME_DAYS_KEY, String(input.planningQueueTimeDays));
+      }
+      if (input.planningForecastHistoryMonths !== undefined) {
+        await set(PLANNING_FORECAST_HISTORY_MONTHS_KEY, String(input.planningForecastHistoryMonths));
+      }
+      if (input.planningForecastHorizonMonths !== undefined) {
+        await set(PLANNING_FORECAST_HORIZON_MONTHS_KEY, String(input.planningForecastHorizonMonths));
       }
       if (input.supplierDeliveryDayMode !== undefined) {
         await set(DELIVERY_SETTING_KEYS.supplierMode, input.supplierDeliveryDayMode);

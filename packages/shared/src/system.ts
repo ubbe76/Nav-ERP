@@ -169,6 +169,12 @@ const systemSettingsFieldsSchema = z.object({
     // (dagar); 0 = off (the default when unset).
     planningDefaultLeadTimeDays: z.number().min(0).max(60).multipleOf(0.1).optional(),
     planningQueueTimeDays: z.number().min(0).max(60).multipleOf(0.1).optional(),
+    // Prognos (#10): the history window (whole months before the current one
+    // the average consumption is taken over, 1–36, default 12) and the
+    // horizon (the current month plus the following ones that get a forecast
+    // demand, 1–24, default 6).
+    planningForecastHistoryMonths: z.number().int().min(1).max(36).optional(),
+    planningForecastHorizonMonths: z.number().int().min(1).max(24).optional(),
     // Fasta leveransdagar: the default mode and transit days for suppliers
     // and customers without their own (delivery-days.ts decodes the keys).
     supplierDeliveryDayMode: deliveryDayModeSchema.optional(),

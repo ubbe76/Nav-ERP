@@ -35,6 +35,7 @@ export const COPIED_INFORMATION_FIELDS = [
   "reorderPoint",
   "safetyStock",
   "stockControlled",
+  "forecastControlled",
   "orderQuantity",
   "rounding",
   "manufacturingLeadTimeDays",
