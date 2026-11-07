@@ -176,3 +176,21 @@ export const componentMovesSchema = z.object({
     }),
 });
 export type ComponentMovesInput = z.infer<typeof componentMovesSchema>;
+
+// POST /manufacturing-orders/:id/missing-components — Skapa saknade
+// halvfabrikat (pegging #9): the tree the client confirmed from GET
+// …/missing-components, as (articleId, quantity, level) — the server
+// recomputes the preview under the plan lock and refuses another tree
+// (missing-components-changed) or an empty one (nothing-to-create).
+export const missingComponentsSchema = z.object({
+  expected: z
+    .array(
+      z.object({
+        articleId: z.string().uuid(),
+        quantity: z.coerce.number().positive(),
+        level: z.number().int().min(1),
+      })
+    )
+    .min(1),
+});
+export type MissingComponentsInput = z.infer<typeof missingComponentsSchema>;

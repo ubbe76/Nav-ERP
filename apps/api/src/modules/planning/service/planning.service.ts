@@ -2,6 +2,7 @@ import type {
   ApplyDeliveryTimeInput,
   CapacityQuery,
   ComponentMovesInput,
+  MissingComponentsInput as MissingComponentsRequest,
   ConfiguratorSelection,
   CreatePlanningOrdersInput,
   DeliveryTimeCheckRequest,
@@ -21,6 +22,15 @@ import {
   type CoverageMove,
   type MoveCandidate,
 } from "./component-moves.js";
+import {
+  MISSING_MAX_DEPTH,
+  creationOrder,
+  lateWarning,
+  planMissingComponents,
+  sameMissingOrders,
+  type MissingArticle,
+  type MissingComponentsPreview,
+} from "./missing-components.js";
 import {
   DEMAND_SALES_STATUSES,
   SUPPLY_MO_STATUSES,
@@ -149,6 +159,25 @@ export class ComponentMoveChangedError extends Error {
   ) {
     super(`The due date of ${orderNumber} changed meanwhile (expected ${expectedDueDate ?? "none"}, now ${currentDueDate ?? "none"})`);
     this.name = "ComponentMoveChangedError";
+  }
+}
+
+// Skapa saknade halvfabrikat: the preview recomputed under the lock is not
+// the one the client confirmed (expected) — a TO created meanwhile, a
+// changed need. 409; the body carries the fresh preview, nothing written.
+export class MissingComponentsChangedError extends Error {
+  constructor(public result: MissingComponentsPreview) {
+    super("Läget har ändrats sedan förhandsvisningen — se de nya tillverkningsordrarna och försök igen");
+    this.name = "MissingComponentsChangedError";
+  }
+}
+
+// Skapa saknade halvfabrikat: nothing left to make a TO for (covered
+// meanwhile, or what is missing is bought). 409.
+export class NothingToCreateError extends Error {
+  constructor() {
+    super("Det finns inga saknade halvfabrikat att skapa tillverkningsordrar för");
+    this.name = "NothingToCreateError";
   }
 }
 
@@ -378,6 +407,15 @@ export interface ComponentMovesResult {
   notice: string;
 }
 export const COMPONENT_MOVE_NOTICE = "Kör Planera i Beläggning för att lägga om veckorna.";
+
+// Skapa saknade halvfabrikat's answer: the TOs in creation order (children
+// before parents), `quantity` the TO's own quantity from the create.
+export interface CreateMissingComponentsResult {
+  manufacturingOrders: { id: string; orderNumber: string; articleNumber: string; quantity: number; level: number }[];
+  // The preview's late rows (hinner inte) and the TOs' releaseWarnings
+  // prefixed with the TO number. Never a refusal.
+  warnings: string[];
+}
 
 // What the manufacturing module answers Flytta halvfabrikaten's write
 // (setDueDatesInTx): every TO must exist, be open and still have the due
@@ -1323,12 +1361,14 @@ export function createPlanningService(
     return result.warnings.filter((w) => shown.has(w.kind)).map((w) => w.message);
   }
 
-  async function orderPlanSummaries(orderIds: string[]): Promise<Map<string, OrderPlanSummary>> {
+  // `dbc`: Skapa saknade halvfabrikat pegs under the plan lock in its own
+  // transaction (undefined = the plain db, as every other read).
+  async function orderPlanSummaries(orderIds: string[], dbc?: Tx): Promise<Map<string, OrderPlanSummary>> {
     const summaries = new Map<string, OrderPlanSummary>();
     if (orderIds.length === 0) return summaries;
     const today = todayFn();
     const horizonTo = addDays(today, PLAN_HORIZON_WEEKS * 7 + 14);
-    const capacity = await repo.loadCapacityInput(addDays(today, -7), horizonTo, undefined, { orderIds });
+    const capacity = await repo.loadCapacityInput(addDays(today, -7), horizonTo, dbc, { orderIds });
     const world = planWorldOf(capacity, today);
     const lookups = buildScheduleLookups(capacity.weekScheduleDays, capacity.daySchedules, capacity.holidays);
     const byOrder = new Map<string, CapacityOperationRow[]>();
@@ -1357,7 +1397,9 @@ export function createPlanningService(
   // batch (one dating, one delivery context) → the TO supplies' ready dates
   // from ONE orderPlanSummaries call (plannedFinish ?? dueDate — the rule
   // that decides Sen) → pegOverview per article. Never per order.
-  // `withParentArticles`: the parents' own articles too (Går till).
+  // `withParentArticles`: the parents' own articles too (Går till). `dbc`:
+  // every load bound to a transaction (Skapa saknade halvfabrikat under the
+  // plan lock) — the loads already run one after the other.
   type PeggedParents = {
     today: string;
     parents: CoverageParentsLoad["orders"];
@@ -1369,9 +1411,9 @@ export function createPlanningService(
     readyDates: Map<string, string | null>;
     offDays: Set<string>;
   };
-  async function pegParents(parentIds: string[], opts: { withParentArticles?: boolean } = {}): Promise<PeggedParents> {
+  async function pegParents(parentIds: string[], opts: { withParentArticles?: boolean } = {}, dbc?: Tx): Promise<PeggedParents> {
     const today = todayFn();
-    const load = await repo.coverageParents(parentIds);
+    const load = await repo.coverageParents(parentIds, dbc);
     const parents = load.orders.filter((o) => SUPPLY_MO_STATUSES.has(o.status));
     const componentsOf = new Map<string, string[]>();
     const bomIndex = buildBomIndex(load.bomEdges);
@@ -1387,7 +1429,7 @@ export function createPlanningService(
     }
     const articleIds = new Set<string>([...componentsOf.values()].flat());
     if (opts.withParentArticles) for (const o of parents) articleIds.add(o.articleId);
-    const overviews = articleIds.size > 0 ? await loadOverviewInputs([...articleIds]) : new Map<string, ArticleOverviewInput>();
+    const overviews = articleIds.size > 0 ? await loadOverviewInputs([...articleIds], dbc) : new Map<string, ArticleOverviewInput>();
     const built = new Map<string, ArticleOverview>([...overviews].map(([id, input]) => [id, buildArticleOverview(input)]));
 
     const moSupplyIds = new Set<string>();
@@ -1398,7 +1440,7 @@ export function createPlanningService(
         if (row.date) dates.push(row.date);
       }
     }
-    const summaries = moSupplyIds.size > 0 ? await orderPlanSummaries([...moSupplyIds]) : new Map<string, OrderPlanSummary>();
+    const summaries = moSupplyIds.size > 0 ? await orderPlanSummaries([...moSupplyIds], dbc) : new Map<string, OrderPlanSummary>();
     const readyDates = new Map<string, string | null>();
     for (const overview of built.values()) {
       for (const row of overview.rows) {
@@ -1411,7 +1453,9 @@ export function createPlanningService(
     // Full-day holidays over the span for daysLate; nothing to count without
     // a dated row.
     const offDays =
-      dates.length > 1 ? new Set(await repo.fullDayHolidaysBetween(dates.reduce((a, b) => (a < b ? a : b)), dates.reduce((a, b) => (a > b ? a : b)))) : new Set<string>();
+      dates.length > 1
+        ? new Set(await repo.fullDayHolidaysBetween(dates.reduce((a, b) => (a < b ? a : b)), dates.reduce((a, b) => (a > b ? a : b)), dbc))
+        : new Set<string>();
     const peggings = new Map<string, Pegging>([...built].map(([id, overview]) => [id, pegOverview(overview, { today, readyDates, offDays })]));
     return { today, parents, componentsOf, overviews: built, peggings, readyDates, offDays };
   }
@@ -1567,6 +1611,105 @@ export function createPlanningService(
     if (ids.length === 0) return new Set();
     const world = await pegParents(ids);
     return new Set(world.parents.filter((p) => isComponentLate(world, p.id)).map((p) => p.id));
+  }
+
+  // --- Skapa saknade halvfabrikat (pegging #9, etapp 3) -------------------
+  // The preview for one parent, computed from a fixed number of loads: the
+  // parent pegged (pegParents, one batch) → the articles its uncovered
+  // manufactured needs can reach through the demand BOM (one edge load, one
+  // phantom load, the walk in memory) → their overviews in ONE batch (the
+  // closing balances the netting starts from) → their configurator modes,
+  // lead-time rules and routings in one load each → the holidays over the
+  // window → planMissingComponents (missing-components.ts owns the rules).
+  // `dbc`: the create recomputes it under the plan lock in its transaction.
+  // null = no such TO; a closed/done/cancelled parent gives an empty preview.
+  type MissingComputed = { head: CoverageParentsLoad["orders"][number]; open: boolean; preview: MissingComponentsPreview };
+  async function computeMissingComponents(parentId: string, dbc?: Tx): Promise<MissingComputed | null> {
+    const world = await pegParents([parentId], {}, dbc);
+    const parent = world.parents.find((p) => p.id === parentId);
+    if (!parent) {
+      const [head] = (await repo.coverageParents([parentId], dbc)).orders;
+      if (!head) return null;
+      return { head, open: false, preview: { orders: [], notes: [] } };
+    }
+    const today = world.today;
+    const needs = parentDemands(world, parent.id).map(({ articleId, demand }) => ({ articleId, needDate: demand.date, uncovered: demand.uncovered }));
+    const seeds = [...new Set(needs.filter((n) => n.uncovered > 0).map((n) => n.articleId))].filter(
+      (id) => world.overviews.get(id)?.article.type === "manufactured"
+    );
+    const empty: MissingComputed = { head: parent, open: true, preview: { orders: [], notes: [] } };
+    if (seeds.length === 0) return empty;
+
+    // The demand BOM and the phantoms (one load each), then every article
+    // the tree can reach from the seeds — phantoms dissolved, cycle guard,
+    // the same depth bound as the planner.
+    const [bomEdges, phantomIdList] = await loadAll(!!dbc, [() => repo.loadBomEdges(dbc), () => repo.phantomArticleIds(dbc)]);
+    const bomIndex = buildBomIndex(bomEdges);
+    const phantomIds = new Set(phantomIdList);
+    const reachable = new Set<string>(seeds);
+    let frontier = seeds.map((id) => ({ id, path: new Set([parent.articleId, id]) }));
+    for (let level = 2; frontier.length > 0 && level <= MISSING_MAX_DEPTH; level++) {
+      const next: typeof frontier = [];
+      for (const f of frontier) {
+        for (const childId of explodeFromIndex(bomIndex, phantomIds, f.id, 1).keys()) {
+          if (f.path.has(childId)) continue;
+          reachable.add(childId);
+          next.push({ id: childId, path: new Set([...f.path, childId]) });
+        }
+      }
+      frontier = next;
+    }
+    const missingOverviews = [...reachable].filter((id) => !world.overviews.has(id));
+    const extra = missingOverviews.length > 0 ? await loadOverviewInputs(missingOverviews, dbc) : new Map<string, ArticleOverviewInput>();
+    const overviews = new Map<string, ArticleOverview>(world.overviews);
+    for (const [id, input] of extra) overviews.set(id, buildArticleOverview(input));
+    const ids = [...reachable].filter((id) => overviews.has(id));
+    const [modes, dating] = await loadAll(!!dbc, [
+      () => repo.deliveryCheckArticles(ids, dbc),
+      () => leadTimeInputsFor({ orderIds: [], articleIds: ids }, dbc),
+    ]);
+    const modeOf = new Map(modes.map((a) => [a.articleId, a.configuratorMode]));
+    const routed = new Set(dating.routings.map((r) => r.articleId));
+    const articles = new Map<string, MissingArticle>(
+      ids.map((id) => {
+        const o = overviews.get(id)!;
+        return [
+          id,
+          {
+            articleId: id,
+            articleNumber: o.article.articleNumber,
+            name: o.article.name,
+            type: o.article.type,
+            unitCode: o.article.unitCode,
+            orderQuantity: o.article.orderQuantity,
+            rounding: o.article.rounding,
+            closingBalance: o.closingBalance,
+            configuratorMode: modeOf.get(id) ?? null,
+            hasRouting: routed.has(id),
+          },
+        ];
+      })
+    );
+    // The holidays the suggestions and the new starts can reach: the
+    // dueDateOffDays window over the needs, with the longest lead time the
+    // dating window allows (60 working days plus the largest Ledtid field).
+    const needDates = needs.flatMap((n) => (n.needDate ? [n.needDate] : []));
+    const maxField = Math.max(0, ...[...dating.articleLeadTimes.values()].map((d) => d ?? 0));
+    const from = needDates.length > 0 ? [holidayLookbackStart(needDates.reduce((a, b) => (a < b ? a : b))), today].sort()[0]! : today;
+    const floorEnd = addDays(today, 2 * (60 + maxField) + 14);
+    const maxNeed = needDates.length > 0 ? needDates.reduce((a, b) => (a > b ? a : b)) : today;
+    const offDays = new Set(await repo.fullDayHolidaysBetween(from, maxNeed > floorEnd ? maxNeed : floorEnd, dbc));
+    const preview = planMissingComponents({
+      parent: { articleId: parent.articleId, articleNumber: overviews.get(parent.articleId)?.article.articleNumber ?? parent.orderNumber },
+      today,
+      offDays,
+      needs,
+      articles,
+      bomIndex,
+      phantomIds,
+      leadDaysFor: dating.context.leadDaysFor,
+    });
+    return { head: parent, open: true, preview };
   }
 
   // Förslag på resurs for one TO (the TO card): the whole open load is read
@@ -2385,6 +2528,85 @@ export function createPlanningService(
         });
       }
       return { moved: updated.map((u) => ({ id: u.id, orderNumber: u.orderNumber, dueDate: u.after })), notice: COMPONENT_MOVE_NOTICE };
+    },
+
+    // Skapa saknade halvfabrikat: the preview (GET) — the TOs that would
+    // cover what the parent's material needs are left without, the whole
+    // structure down. A closed parent has nothing; 404 for an unknown TO.
+    async getMissingComponents(manufacturingOrderId: string): Promise<MissingComponentsPreview> {
+      const computed = await computeMissingComponents(manufacturingOrderId);
+      if (!computed) throw new ManufacturingOrderNotFoundError(manufacturingOrderId);
+      return computed.preview;
+    },
+
+    // Skapa saknade halvfabrikat: the create, all or nothing, in ONE
+    // transaction — the production_plan lock FIRST (every create takes it
+    // again, reentrant), the preview recomputed with every read bound to the
+    // transaction, nothing left ⇒ 409 nothing-to-create, another tree than
+    // the client confirmed ⇒ 409 missing-components-changed with the fresh
+    // preview, then the TOs deepest level first (children before parents,
+    // as the reservation) through the manufacturing module's create — each
+    // planned in the transaction. Logged after the commit: `released` per
+    // TO and component_orders_created on the parent.
+    async createMissingComponents(
+      manufacturingOrderId: string,
+      input: MissingComponentsRequest,
+      userId: string | null
+    ): Promise<CreateMissingComponentsResult> {
+      const created = await repo.transaction(async (tx) => {
+        await lockProductionPlan(tx);
+        const computed = await computeMissingComponents(manufacturingOrderId, tx);
+        if (!computed) throw new ManufacturingOrderNotFoundError(manufacturingOrderId);
+        if (!computed.open) throw new InvalidStatusTransitionError(computed.head.orderNumber, computed.head.status);
+        const { preview } = computed;
+        if (preview.orders.length === 0) throw new NothingToCreateError();
+        if (!sameMissingOrders(preview.orders, input.expected)) throw new MissingComponentsChangedError(preview);
+        const manufacturingOrders: CreateMissingComponentsResult["manufacturingOrders"] = [];
+        const warnings: string[] = preview.orders.filter((o) => o.late).map(lateWarning);
+        for (const row of creationOrder(preview.orders)) {
+          const made = await deps.manufacturing.createManufacturingOrderInTx(
+            tx,
+            {
+              articleId: row.articleId,
+              quantity: row.quantity,
+              dueDate: row.dueDate,
+              note: `Skapad för ${computed.head.orderNumber} (halvfabrikat)`,
+            },
+            userId
+          );
+          manufacturingOrders.push({
+            id: made.id,
+            orderNumber: made.orderNumber,
+            articleNumber: row.articleNumber,
+            // The TO's own quantity (prepareCreate rounds to the article's
+            // step — orderQuantityFor rounds the same way; this is the authority).
+            quantity: Number(made.quantity),
+            level: row.level,
+          });
+          warnings.push(...made.releaseWarnings.map((w) => `${made.orderNumber}: ${w}`));
+        }
+        return { orderNumber: computed.head.orderNumber, manufacturingOrders, warnings };
+      });
+      for (const mo of created.manufacturingOrders) {
+        await audit.log({ entityType: "manufacturing_order", entityId: mo.orderNumber, action: "released", userId });
+      }
+      await audit.log({
+        entityType: "manufacturing_order",
+        entityId: created.orderNumber,
+        action: "component_orders_created",
+        detail: {
+          orderNumbers: created.manufacturingOrders.map((mo) => mo.orderNumber),
+          manufacturingOrders: created.manufacturingOrders.map((mo) => ({
+            orderNumber: mo.orderNumber,
+            articleNumber: mo.articleNumber,
+            quantity: mo.quantity,
+            level: mo.level,
+          })),
+          warnings: created.warnings,
+        },
+        userId,
+      });
+      return { manufacturingOrders: created.manufacturingOrders, warnings: created.warnings };
     },
 
     // One draft IO per primary supplier (Monitor-style grouping) plus one

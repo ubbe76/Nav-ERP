@@ -83,6 +83,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   reopened: "Öppnad igen",
   issued: "Utfärdad",
   released: "Frisläppt",
+  // Skapa saknade halvfabrikat (pegging #9) on the parent TO.
+  component_orders_created: "Halvfabrikat skapade",
   started: "Startad",
   closed: "Stängd",
   completed: "Färdigrapporterad",

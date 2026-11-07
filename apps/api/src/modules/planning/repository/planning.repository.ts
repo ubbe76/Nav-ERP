@@ -1258,8 +1258,10 @@ export function createPlanningRepository(db: Db) {
 
     // Färdigdatumsförslag: the holiday register's full days off in [from, to]
     // — a holiday WITH a day schedule is a shortened working day, not off.
-    async fullDayHolidaysBetween(from: string, to: string): Promise<string[]> {
-      const rows = await db
+    // `dbc`: Skapa saknade halvfabrikat reads under the plan lock in its own
+    // transaction.
+    async fullDayHolidaysBetween(from: string, to: string, dbc: Db | Tx = db): Promise<string[]> {
+      const rows = await dbc
         .select({ date: holidays.date })
         .from(holidays)
         .where(and(gte(holidays.date, from), lte(holidays.date, to), isNull(holidays.dayScheduleId)));
@@ -1311,13 +1313,20 @@ export function createPlanningRepository(db: Db) {
       }
       const needsExplosion = orders.some((o) => o.status === "planned" && !o.configured);
       const bomEdges = needsExplosion ? await this.loadBomEdges(dbc) : [];
-      const phantomRows = needsExplosion ? await dbc.select({ id: articles.id }).from(articles).where(eq(articles.isPhantom, true)) : [];
+      const phantomIds = needsExplosion ? await this.phantomArticleIds(dbc) : [];
       return {
         orders: orders.map((o) => ({ ...o, quantity: Number(o.quantity), configured: o.configured === true })),
         materialComponents,
         bomEdges,
-        phantomIds: phantomRows.map((r) => r.id),
+        phantomIds,
       };
+    },
+
+    // The phantom articles — with loadBomEdges the whole demand structure an
+    // in-memory explosion needs (Skapa saknade halvfabrikat).
+    async phantomArticleIds(dbc: Db | Tx = db): Promise<string[]> {
+      const rows = await dbc.select({ id: articles.id }).from(articles).where(eq(articles.isPhantom, true));
+      return rows.map((r) => r.id);
     },
 
     // Just the BOM edges — Skapa ordrar orders its TO proposals parents first

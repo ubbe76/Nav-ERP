@@ -7,9 +7,13 @@ import {
   ComponentMoveChangedError,
   InvalidStatusTransitionError,
   ManufacturingOrderNotFoundError,
+  MissingComponentsChangedError,
+  NothingToCreateError,
   type ManufacturingOrderCoverage,
   type PlanningService,
 } from "../src/modules/planning/service/planning.service.js";
+import type { MissingComponentsPreview } from "../src/modules/planning/service/missing-components.js";
+import { ArticleIsTemplateError } from "../src/modules/article/service/article.service.js";
 import { MO_READ } from "../src/modules/auth/middleware/access-rules.js";
 
 // GET /manufacturing-orders/:id/coverage and POST …/component-moves
@@ -178,6 +182,159 @@ describe("POST /manufacturing-orders/:id/component-moves", () => {
     const app = appWith({}, routes);
     await app.ready();
     const route = routes.find((r) => r.url === "/manufacturing-orders/:id/component-moves" && r.method === "POST");
+    expect(route).toBeDefined();
+    expect(route?.config ?? {}).not.toHaveProperty("access");
+    expect(route?.config ?? {}).not.toHaveProperty("readOnlySafe");
+  });
+});
+
+// Skapa saknade halvfabrikat (pegging #9, etapp 3): the preview and the
+// create — the contract with a faked service.
+describe("GET /manufacturing-orders/:id/missing-components", () => {
+  const preview: MissingComponentsPreview = {
+    orders: [
+      { key: "mc:1", parentKey: null, level: 1, articleId: id(), articleNumber: "HF-1", articleName: "Halvfabrikat", quantity: 5, dueDate: "2030-03-21", late: false, needDate: "2030-03-22" },
+      { key: "mc:2", parentKey: "mc:1", level: 2, articleId: id(), articleNumber: "DH-1", articleName: "Delhalvfabrikat", quantity: 5, dueDate: "2030-03-19", late: true, needDate: "2030-03-20" },
+    ],
+    notes: ["R-1 köps (5 st saknas) — syns i Behovsberäkningen"],
+  };
+
+  it("answers the service's preview as is", async () => {
+    const moId = id();
+    const calls: string[] = [];
+    const app = appWith({
+      getMissingComponents: async (x) => {
+        calls.push(x);
+        return preview;
+      },
+    });
+    const res = await app.inject({ method: "GET", url: `/manufacturing-orders/${moId}/missing-components` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual(preview);
+    expect(calls).toEqual([moId]);
+  });
+
+  it("404 manufacturing-order-not-found for an unknown TO", async () => {
+    const app = appWith({
+      getMissingComponents: async (x) => {
+        throw new ManufacturingOrderNotFoundError(x);
+      },
+    });
+    const res = await app.inject({ method: "GET", url: `/manufacturing-orders/${id()}/missing-components` });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toMatchObject({ code: "manufacturing-order-not-found" });
+  });
+
+  it("is read with MO_READ, like the TO card", async () => {
+    const routes: RouteOptions[] = [];
+    const app = appWith({}, routes);
+    await app.ready();
+    const route = routes.find((r) => r.url === "/manufacturing-orders/:id/missing-components" && r.method === "GET");
+    expect(route?.config).toMatchObject({ access: MO_READ });
+  });
+});
+
+describe("POST /manufacturing-orders/:id/missing-components", () => {
+  const expected = [
+    { articleId: id(), quantity: 5, level: 1 },
+    { articleId: id(), quantity: 5, level: 2 },
+  ];
+  const answer = {
+    manufacturingOrders: [
+      { id: id(), orderNumber: "TO-1003", articleNumber: "DH-1", quantity: 5, level: 2 },
+      { id: id(), orderNumber: "TO-1004", articleNumber: "HF-1", quantity: 5, level: 1 },
+    ],
+    warnings: ["DH-1: Färdigdatumet (2030-03-19) hinner inte före behovet (2030-03-20)"],
+  };
+
+  it("passes the parsed body and the user on and answers { manufacturingOrders, warnings }", async () => {
+    const moId = id();
+    const calls: unknown[] = [];
+    const app = appWith({
+      createMissingComponents: async (parentId, input, userId) => {
+        calls.push([parentId, input, typeof userId]);
+        return answer;
+      },
+    });
+    const res = await app.inject({ method: "POST", url: `/manufacturing-orders/${moId}/missing-components`, payload: { expected } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual(answer);
+    expect(calls).toEqual([[moId, { expected }, "string"]]);
+  });
+
+  it("400 for an empty list, a missing level, a non-positive quantity, a malformed id or no body", async () => {
+    const calls: unknown[] = [];
+    const app = appWith({
+      createMissingComponents: async () => {
+        calls.push(1);
+        return answer;
+      },
+    });
+    const url = `/manufacturing-orders/${id()}/missing-components`;
+    for (const payload of [
+      { expected: [] },
+      { expected: [{ articleId: id(), quantity: 5 }] },
+      { expected: [{ articleId: id(), quantity: 0, level: 1 }] },
+      { expected: [{ articleId: id(), quantity: 5, level: 0 }] },
+      { expected: [{ articleId: "HF-1", quantity: 5, level: 1 }] },
+      {},
+    ]) {
+      const res = await app.inject({ method: "POST", url, payload });
+      expect(res.statusCode, JSON.stringify(payload)).toBe(400);
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it("404 not found; 409 missing-components-changed with the fresh preview; 409 nothing-to-create; 409 invalid-status-transition; 409 for a template the create refuses", async () => {
+    const url = `/manufacturing-orders/${id()}/missing-components`;
+    const payload = { expected };
+    const notFound = await appWith({
+      createMissingComponents: async (x) => {
+        throw new ManufacturingOrderNotFoundError(x);
+      },
+    }).inject({ method: "POST", url, payload });
+    expect(notFound.statusCode).toBe(404);
+    expect(notFound.json()).toMatchObject({ code: "manufacturing-order-not-found" });
+
+    const fresh: MissingComponentsPreview = { orders: [], notes: ["x"] };
+    const changed = await appWith({
+      createMissingComponents: async () => {
+        throw new MissingComponentsChangedError(fresh);
+      },
+    }).inject({ method: "POST", url, payload });
+    expect(changed.statusCode).toBe(409);
+    expect(changed.json()).toMatchObject({ code: "missing-components-changed", result: fresh });
+
+    const nothing = await appWith({
+      createMissingComponents: async () => {
+        throw new NothingToCreateError();
+      },
+    }).inject({ method: "POST", url, payload });
+    expect(nothing.statusCode).toBe(409);
+    expect(nothing.json()).toMatchObject({ code: "nothing-to-create" });
+
+    const closed = await appWith({
+      createMissingComponents: async () => {
+        throw new InvalidStatusTransitionError("TO-1002", "done");
+      },
+    }).inject({ method: "POST", url, payload });
+    expect(closed.statusCode).toBe(409);
+    expect(closed.json()).toMatchObject({ code: "invalid-status-transition", orderNumber: "TO-1002" });
+
+    const template = await appWith({
+      createMissingComponents: async () => {
+        throw new ArticleIsTemplateError("HF-1");
+      },
+    }).inject({ method: "POST", url, payload });
+    expect(template.statusCode).toBe(409);
+    expect(template.json()).toMatchObject({ code: "article-is-template" });
+  });
+
+  it("is the module's write (tillverkning) — no access override, never readOnlySafe", async () => {
+    const routes: RouteOptions[] = [];
+    const app = appWith({}, routes);
+    await app.ready();
+    const route = routes.find((r) => r.url === "/manufacturing-orders/:id/missing-components" && r.method === "POST");
     expect(route).toBeDefined();
     expect(route?.config ?? {}).not.toHaveProperty("access");
     expect(route?.config ?? {}).not.toHaveProperty("readOnlySafe");

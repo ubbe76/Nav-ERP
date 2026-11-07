@@ -1,6 +1,8 @@
 import {
   ComponentMoveChangedError,
   DeliveryTimeChangedError,
+  MissingComponentsChangedError,
+  NothingToCreateError,
   NothingToReserveError,
   OperationNotFoundError,
   OperationNotPlannableError,
@@ -823,6 +825,8 @@ const cases: Array<[Error, string]> = [
   [new NothingToReserveError(), ERROR_CODES.NOTHING_TO_RESERVE],
   // Flytta halvfabrikaten (pegging #9)
   [new ComponentMoveChangedError("TO-1002", "2030-03-27", "2030-03-21"), ERROR_CODES.COMPONENT_MOVE_CHANGED],
+  [new MissingComponentsChangedError({ orders: [], notes: [] }), ERROR_CODES.MISSING_COMPONENTS_CHANGED],
+  [new NothingToCreateError(), ERROR_CODES.NOTHING_TO_CREATE],
   // Snabbare manuell bokföring (etapp 3)
   [new VerificationTemplateNotFoundError("t-1"), ERROR_CODES.VERIFICATION_TEMPLATE_NOT_FOUND],
   [new VerificationTemplateNameTakenError("Hyra"), ERROR_CODES.VERIFICATION_TEMPLATE_NAME_TAKEN],
