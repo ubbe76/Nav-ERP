@@ -32,6 +32,10 @@ export async function latestPreCalculations(dbc: Db | Tx, articleIds: string[]) 
       // The Kalkylpris's inputs: F₀, g₀, m₀ and B (null on a multi-level
       // calculation saved before 0194 that 0195 could not backfill).
       salesPrice: costCalculations.salesPrice,
+      // The stored generellt påslag and Affo (with its percentage) tell a
+      // calculation from before 0130 (TO inside TVK/SVK) from today's chain.
+      generalMarkup: costCalculations.generalMarkup,
+      affoPercent: costCalculations.affoPercent,
       generalMarkupPercent: costCalculations.generalMarkupPercent,
       materialMarkupPercent: costCalculations.materialMarkupPercent,
       materialMarkupBase: costCalculations.materialMarkupBase,

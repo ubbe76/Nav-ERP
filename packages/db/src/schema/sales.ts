@@ -409,6 +409,17 @@ export const salesOrders = pgTable("sales_orders", {
   // its currency; SEK orders have rate 1.
   currency: varchar("currency", { length: 3 }).notNull().default("SEK"),
   exchangeRate: numeric("exchange_rate", { precision: 14, scale: 6 }).notNull().default("1"),
+  // Påslag på offert och order (#16 etapp 3, migration 0196): the order's
+  // own generellt påslag and materialpåslag — null = inherit (kund →
+  // varugrupp → företaget), 0 = explicitly 0 %. Only the PRICE markups; a
+  // value on either gives the order's rows the Kalkylpris step of the price
+  // chain, and a change reprices the rows priced from it (calculated_price,
+  // not delivered, not invoiced) in the header's own transaction. Set on the
+  // order card only — never on create, never by an API client. A quote that
+  // is confirmed is the same row, so the markups follow it. numeric(6,2) and
+  // 0–1000 like the customer's and the varugrupp's.
+  generalMarkupPercent: numeric("general_markup_percent", { precision: 6, scale: 2 }),
+  materialMarkupPercent: numeric("material_markup_percent", { precision: 6, scale: 2 }),
   // Legacy pre-C1 stamp: orders invoiced before the invoice module got an
   // FA- number written straight onto the order. Never written since C1 —
   // invoicing (partial and collective) lives in invoices/invoice_rows.
@@ -421,6 +432,10 @@ export const salesOrders = pgTable("sales_orders", {
   check("sales_orders_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`),
   check("sales_orders_sek_rate", sql`${table.currency} <> 'SEK' OR ${table.exchangeRate} = 1`),
   check("sales_orders_rate_positive", sql`${table.exchangeRate} > 0`),
+  check(
+    "sales_orders_markups_range",
+    sql`(${table.generalMarkupPercent} is null or ${table.generalMarkupPercent} between 0 and 1000) and (${table.materialMarkupPercent} is null or ${table.materialMarkupPercent} between 0 and 1000)`
+  ),
 ]);
 
 // The same article may appear on several rows (0177) — split deliveries with

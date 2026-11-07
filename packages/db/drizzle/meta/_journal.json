@@ -1373,6 +1373,13 @@
       "when": 1794041442956,
       "tag": "0195_paslag_per_kund",
       "breakpoints": true
+    },
+    {
+      "idx": 196,
+      "version": "7",
+      "when": 1794045843459,
+      "tag": "0196_paslag_per_order",
+      "breakpoints": true
     }
   ]
 }

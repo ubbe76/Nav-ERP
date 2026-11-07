@@ -128,7 +128,9 @@ export function hasOwnMarkups(...levels: (LevelMarkups | null | undefined)[]): b
 // What the Kalkylpris reads off the article's latest saved förkalkyl, as
 // numbers: F₀ (sales_price), SVK (selfCost of the buckets), B
 // (material_markup_base, null on an old multi-level calculation), g₀ and m₀
-// (its own percentages) and q (its quantity).
+// (its own percentages) and q (its quantity). The stored generellt påslag
+// and Affo, with Affo's percentage, tell whether the calculation was priced
+// under today's chain (see calculatedUnitPrice).
 export interface CalculationForPrice {
   salesPrice: number;
   selfCost: number;
@@ -136,6 +138,36 @@ export interface CalculationForPrice {
   generalMarkupPercent: number;
   materialMarkupPercent: number;
   quantity: number;
+  generalMarkup: number;
+  businessOverhead: number;
+  affoPercent: number;
+}
+
+// The tolerance for "the stored amount is percent × base": the buckets are
+// stored at four decimals, so a calculation under today's chain is off by
+// well under a hundredth (seven buckets × 0.00005 × at most 1000 %), while
+// one from before 0130 is off by TO × the percentage. Affo is taken with the
+// company's percentage as set, and the header stores it at two decimals, so
+// a setting with more decimals moves the amount by up to half a hundredth of
+// a percent of its base — allowed too (TO × Affo % is far larger).
+function chainTolerance(base: number): number {
+  return Math.max(0.01, (Math.abs(base) * 0.005) / 100);
+}
+
+// Whether the stored generellt påslag and Affo are the ones today's chain
+// takes on the stored buckets: generellt påslag = g₀ × SVK and Affo = Affo % ×
+// TVK, both without TO. A calculation saved before 0130 (commit 931f4d1,
+// 2026-10-20) had TO inside TVK and SVK, so both were taken on TO too, and
+// SVK × (g − g₀) re-prices it some kronor wrong. Affo catches it also when g₀
+// is 0 (the generellt påslag then says nothing). A calculation whose
+// percentage columns were not yet snapshotted (0 with an amount) fails too.
+function pricedUnderCurrentChain(calculation: CalculationForPrice): boolean {
+  const manufacturing = calculation.selfCost - calculation.businessOverhead;
+  return (
+    Math.abs(calculation.generalMarkup - (calculation.selfCost * calculation.generalMarkupPercent) / 100) <=
+      chainTolerance(calculation.selfCost) &&
+    Math.abs(calculation.businessOverhead - (manufacturing * calculation.affoPercent) / 100) <= chainTolerance(manufacturing)
+  );
 }
 
 export type CalculatedUnitPrice = { unitPrice: number } | { unavailable: CalculatedPriceUnavailable };
@@ -149,12 +181,16 @@ export type CalculatedUnitPrice = { unitPrice: number } | { unavailable: Calcula
 // costing.md). With g = g₀ and m = m₀ the delta is 0 and the answer is the
 // one Sätt försäljningspris writes (round4(F₀ / q), the same arithmetic). g
 // and m ≥ 0 keep P ≥ SVK + TO. Unavailable: q ≤ 0 ("no-calculation": no
-// per-unit figure, as for Sätt försäljningspris), or B unknown while m ≠ m₀
-// ("material-base-missing" — with m = m₀ the base is not needed).
+// per-unit figure, as for Sätt försäljningspris), a calculation from before
+// 0130 while g ≠ g₀ ("calculation-outdated" — its SVK is not today's, see
+// pricedUnderCurrentChain; with g = g₀ SVK is not needed), or B unknown
+// while m ≠ m₀ ("material-base-missing" — with m = m₀ the base is not
+// needed).
 export function calculatedUnitPrice(calculation: CalculationForPrice, generalPercent: number, materialPercent: number): CalculatedUnitPrice {
   if (!Number.isFinite(calculation.quantity) || calculation.quantity <= 0) return { unavailable: "no-calculation" };
   const generalDelta = generalPercent - calculation.generalMarkupPercent;
   const materialDelta = materialPercent - calculation.materialMarkupPercent;
+  if (generalDelta !== 0 && !pricedUnderCurrentChain(calculation)) return { unavailable: "calculation-outdated" };
   if (calculation.materialMarkupBase === null && materialDelta !== 0) return { unavailable: "material-base-missing" };
   const total =
     calculation.salesPrice +

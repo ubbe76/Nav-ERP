@@ -11,7 +11,7 @@ import { palletCardCodeSchema } from "./system.js";
 import { invoiceDeliverySchema, peppolIdFieldSchema } from "./einvoice.js";
 import { currencyCodeSchema, exchangeRateValueSchema } from "./currency.js";
 import { documentLanguageSchema } from "./document-language.js";
-import { markupPercentSchema } from "./costing.js";
+import { markupPercentSchema, type CalculatedPriceUnavailable } from "./costing.js";
 
 // "lost" (Förlorad): a quote the customer did not take — closed like
 // cancelled (no edits, no documents), reopenable to quote.
@@ -339,16 +339,83 @@ export const updateSalesOrderHeaderSchema = z
     // Kostnadsställen och projekt: the order's dimensions, the default for
     // the invoice rows billed from it.
     ...dimensionFields,
+    // Påslag på offert och order (#16 etapp 3): the order's own generellt
+    // påslag and materialpåslag. Omitted = unchanged, null = inherit again
+    // (kund → varugrupp → företaget), 0 = explicitly 0 %. Not in
+    // createQuoteSchema: set on the order card only, never by a client.
+    // A change reprices the Kalkylpris rows that are neither delivered nor
+    // invoiced; when that changes a row, the save needs confirmRepricing
+    // (409 markup-repricing-not-confirmed otherwise, with the preview of
+    // POST /sales-orders/:id/markups/preview in `repricing`).
+    generalMarkupPercent: markupPercentSchema.nullable().optional(),
+    materialMarkupPercent: markupPercentSchema.nullable().optional(),
+    confirmRepricing: z.boolean().optional(),
     // `false` saves without bumping the order's revision — the UI asks on
     // every save; omitted means bump (external callers unchanged).
     bumpRevision: z.boolean().optional(),
   })
   .refine(
-    (data) => Object.keys(data).some((key) => key !== "bumpRevision"),
+    (data) => Object.keys(data).some((key) => key !== "bumpRevision" && key !== "confirmRepricing"),
     "At least one field must be provided"
   )
   .refine((data) => !(data.deliveryAddressId !== undefined && data.newDeliveryAddress), oneDeliveryAddressChoice);
 export type UpdateSalesOrderHeaderInput = z.infer<typeof updateSalesOrderHeaderSchema>;
+
+// Påslag på offert och order (#16 etapp 3): POST
+// /sales-orders/:id/markups/preview — what saving these markups on the
+// header would do to the rows, computed and answered, nothing written
+// (readOnlySafe). Omitted = the order's current value, null = inherit.
+export const salesOrderMarkupsPreviewSchema = z
+  .object({
+    generalMarkupPercent: markupPercentSchema.nullable().optional(),
+    materialMarkupPercent: markupPercentSchema.nullable().optional(),
+  })
+  .strict();
+export type SalesOrderMarkupsPreviewInput = z.infer<typeof salesOrderMarkupsPreviewSchema>;
+
+// The order's two price markups as numbers, null = inherits.
+export interface SalesOrderMarkups {
+  generalMarkupPercent: number | null;
+  materialMarkupPercent: number | null;
+}
+
+// Why a row keeps its price when the order's markups change: its price was
+// written by hand (or it is configured, a ställkostnad or the freight row —
+// never a Kalkylpris), it is (partly) delivered or on an invoice row (a
+// draft counts), the chain's new answer is the price it already has, or the
+// chain has no price for it at all any more.
+export type MarkupRepricingKeptReason = "manual" | "delivered" | "invoiced" | "unchanged" | "no-price";
+
+// One row the new markups reprice: the price chain's answer for the row
+// with the order's new markups, in the order's currency and at its rate,
+// per base unit (like the stored row). `calculatedPrice` is the row's flag
+// afterwards — false when the chain now prices it another way (a price
+// list, the article's price because the step no longer applies or the
+// calculation cannot carry it — `calculatedPriceUnavailable` says why).
+export interface MarkupRepricingRow {
+  rowId: string;
+  articleId: string;
+  articleNumber: string;
+  quantity: number;
+  before: { unitPrice: number; discountPercent: number };
+  after: { unitPrice: number; discountPercent: number; source: PriceSource };
+  calculatedPrice: boolean;
+  calculatedPriceUnavailable?: CalculatedPriceUnavailable;
+}
+
+// The preview's answer, the 409's `repricing` and the header PATCH's
+// `repricing` after a save. `changed` = a markup actually changes (rounded
+// to the column's two decimals); without a change nothing is repriced and
+// both lists are empty.
+export interface MarkupRepricing {
+  changed: boolean;
+  before: SalesOrderMarkups;
+  after: SalesOrderMarkups;
+  currency: string;
+  exchangeRate: number;
+  rows: MarkupRepricingRow[];
+  kept: { rowId: string; articleNumber: string; reason: MarkupRepricingKeptReason }[];
+}
 
 export const createQuoteSchema = z.object({
   customerId: z.string().uuid(),

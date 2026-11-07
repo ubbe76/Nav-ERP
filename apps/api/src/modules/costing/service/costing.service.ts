@@ -1091,6 +1091,11 @@ export function createCostingService(
           generalMarkupPercent: Number(calculation.generalMarkupPercent),
           materialMarkupPercent: Number(calculation.materialMarkupPercent),
           quantity: Number(calculation.quantity),
+          // Whether it was priced under today's chain (before 0130 TO sat
+          // inside TVK/SVK — "calculation-outdated" when g moves).
+          generalMarkup: Number(calculation.generalMarkup),
+          businessOverhead: Number(calculation.businessOverhead),
+          affoPercent: Number(calculation.affoPercent),
         },
         resolved.generalMarkup.percent,
         resolved.materialMarkup.percent

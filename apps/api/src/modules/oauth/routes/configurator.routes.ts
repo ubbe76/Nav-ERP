@@ -47,6 +47,18 @@ import {
 // token (external configurator). The first three are exactly what
 // architecture.md §5 names for that integration; GET /price-quote (C3) was
 // added on top so the configurator can pre-fill customer prices too.
+// Påslag på offert och order (#16 etapp 3): the order's own price markups
+// are our pricing decision, set on the order card — a client never sets them
+// (createQuoteSchema has no such fields, so sent ones are dropped) and never
+// reads them back, like the Kalkylpris's basis. A new quote has none; a
+// quote a seller gave markups before the client confirms it would show them.
+function withoutOrderMarkups<T extends { generalMarkupPercent?: unknown; materialMarkupPercent?: unknown }>(
+  order: T
+): Omit<T, "generalMarkupPercent" | "materialMarkupPercent"> {
+  const { generalMarkupPercent: _general, materialMarkupPercent: _material, ...rest } = order;
+  return rest;
+}
+
 export async function configuratorRoutes(
   app: FastifyInstance,
   opts: { salesService: SalesService; articleService: ArticleService; configuratorService: ConfiguratorService }
@@ -101,7 +113,7 @@ export async function configuratorRoutes(
       // (configuration_cost) — salesService strips it, so the external
       // configurator never sees what a configuration costs us to make.
       const result = await salesService.createQuote(input, req.user?.id ?? null);
-      return reply.code(201).send(result);
+      return reply.code(201).send(req.apiClient ? { ...result, order: withoutOrderMarkups(result.order) } : result);
     } catch (err) {
       // The delivery address must belong to the quote's customer.
       if (err instanceof DeliveryAddressNotFoundError) return reply.code(400).send(errorBody(err));
@@ -187,10 +199,12 @@ export async function configuratorRoutes(
     if (!result) return reply.code(404).send({ error: "Article not found" });
     // Kalkylpris (#16): a client gets the price (source "calculated"), never
     // its basis — which calculation, the percentages and their levels are
-    // ours, like a configured row's förkalkyl. A session (the order forms)
-    // gets `calculated` for the à-pris help text.
+    // ours, like a configured row's förkalkyl. Nor why the step could not be
+    // used: calculatedPriceUnavailable says the customer has a markup of its
+    // own and whether the article has a förkalkyl (the review of etapp 2). A
+    // session (the order forms) gets both for the à-pris help text.
     if (req.apiClient) {
-      const { calculated: _basis, ...priceOnly } = result;
+      const { calculated: _basis, calculatedPriceUnavailable: _reason, ...priceOnly } = result;
       return priceOnly;
     }
     return result;
@@ -210,7 +224,8 @@ export async function configuratorRoutes(
       }
     }
     try {
-      return await salesService.confirm(req.params.id, req.user?.id ?? null);
+      const confirmed = await salesService.confirm(req.params.id, req.user?.id ?? null);
+      return req.apiClient ? withoutOrderMarkups(confirmed) : confirmed;
     } catch (err) {
       if (err instanceof SalesOrderNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));

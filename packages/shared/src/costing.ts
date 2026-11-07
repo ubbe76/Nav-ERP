@@ -62,8 +62,12 @@ export type OrderMarkupLevel = Exclude<CostingMarkupLevel, "trial">;
 // Why the step could not be used (the chain then goes on to the article's
 // försäljningspris): no saved förkalkyl (or one with quantity ≤ 0), or a
 // multi-level calculation saved before 0194 without a materialpåslag base
-// while the material markup differs from the calculation's.
-export const calculatedPriceUnavailableSchema = z.enum(["no-calculation", "material-base-missing"]);
+// while the material markup differs from the calculation's, or a
+// calculation saved under the chain before 0130 (TO inside TVK/SVK, so its
+// generellt påslag and Affo were taken on TO too) while the general markup
+// differs from the calculation's — "calculation-outdated", save a new
+// förkalkyl (the review of etapp 2).
+export const calculatedPriceUnavailableSchema = z.enum(["no-calculation", "material-base-missing", "calculation-outdated"]);
 export type CalculatedPriceUnavailable = z.infer<typeof calculatedPriceUnavailableSchema>;
 
 // The basis of a Kalkylpris, on GET /price-quote for a session (an OAuth

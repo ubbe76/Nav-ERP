@@ -30,7 +30,7 @@ import { testArticleService } from "./helpers/services.js";
 // the rows' calculated_price flag, the configurator's rows and the OAuth API.
 //
 // The förkalkyl is the spec's example (påhittad): 50 st, SVK 10 000
-// (dM 5 000 + MO 1 000 + dL 3 000 + Affo 1 000), base B = dM + MO = 6 000,
+// (dM 5 000 + MO 1 000 + dL 2 000 + Affo 25 % = 2 000), base B = dM + MO = 6 000,
 // TO 500, g₀ 40 % ⇒ 4 000, m₀ 10 % ⇒ 600, F₀ = 15 100 (302 kr/st).
 // A customer with g = 20 % and m = 0 %: P = 15 100 − 2 000 − 600 = 12 500,
 // i.e. 250 kr/st; TB/st = 250 − 200.
@@ -41,8 +41,14 @@ const PASSWORD = "correcthorsebattery";
 const TRUNCATE = sql`TRUNCATE audit_log, cost_calculations, customer_prices, price_list_rows, price_lists, invoice_rows, invoices, sales_order_rows, sales_orders, customers, api_clients, article_groups, user_settings, users CASCADE`;
 // Only this file's groups — never TRUNCATE permission_groups (the seeded ones).
 const DELETE_GROUPS = sql`DELETE FROM permission_groups WHERE code LIKE 'PKU%'`;
-const SETTING_KEYS = ["costing_general_markup_percent", "costing_material_markup_percent", "setup_charge_article_id"];
-const DELETE_SETTINGS = sql`DELETE FROM system_settings WHERE key IN ('costing_general_markup_percent', 'costing_material_markup_percent', 'setup_charge_article_id')`;
+const SETTING_KEYS = [
+  "costing_general_markup_percent",
+  "costing_material_markup_percent",
+  "costing_mo_percent",
+  "costing_affo_percent",
+  "setup_charge_article_id",
+];
+const DELETE_SETTINGS = sql`DELETE FROM system_settings WHERE key IN ('costing_general_markup_percent', 'costing_material_markup_percent', 'costing_mo_percent', 'costing_affo_percent', 'setup_charge_article_id')`;
 
 let app: ReturnType<typeof buildApp>;
 let admin: string;
@@ -123,9 +129,10 @@ async function saveCalculation(articleId: string, overrides: Partial<typeof cost
       quantity: "50",
       materialCost: "5000",
       materialOverhead: "1000",
-      laborCost: "3000",
+      laborCost: "2000",
       overhead: "500",
-      businessOverhead: "1000",
+      businessOverhead: "2000",
+      affoPercent: "25",
       generalMarkup: "4000",
       materialMarkup: "600",
       salesPrice: "15100",
@@ -342,6 +349,7 @@ describe("Kalkylpris i priskedjan — GET /price-quote", () => {
       laborCost: "401.0007",
       subcontractCost: "0.5",
       businessOverhead: "156.4122",
+      affoPercent: "21", // 21 % × TVK 744.8229 = 156.4128, the rounding of the stored buckets
       overhead: "12.3456",
       generalMarkupPercent: "33.33",
       generalMarkup: "300.3846",
@@ -494,7 +502,7 @@ describe("konfiguratorn och Kalkylpriset", () => {
       return res.json().row as { articleId: string; unitPrice: string; calculatedPrice: boolean };
     };
     const { article: other } = await configurator.resolveVariant(template.id, { LOCK: "A", BREDD: 900 }, null);
-    await saveCalculation(other.id, { generalMarkupPercent: "30" }); // 15 100 − 1 000 − 600 ⇒ 270
+    await saveCalculation(other.id, { generalMarkupPercent: "30", generalMarkup: "3000" }); // 15 100 − 1 000 − 600 ⇒ 270
     expect(await reconfigure({ LOCK: "A", BREDD: 900 })).toMatchObject({ articleId: other.id, unitPrice: "270.0000", calculatedPrice: true });
     // With the template's base price back, the template's chain prices the variant again.
     await db.update(articles).set({ salesPrice: "1000" }).where(eq(articles.id, template.id));
@@ -535,5 +543,139 @@ describe("OAuth — /price-quote och POST /quotes", () => {
     expect(created.json().rows[0]).not.toHaveProperty("configurationCost");
     const stored = await db.select({ calculatedPrice: salesOrderRows.calculatedPrice }).from(salesOrderRows).where(inArray(salesOrderRows.id, [created.json().rows[0].id]));
     expect(stored).toEqual([{ calculatedPrice: true }]);
+  });
+});
+
+// The review of etapp 2 (2026-11-07).
+describe("granskningen av etapp 2", () => {
+  it("refuses a calculation saved before 0130 (TO inside TVK/SVK) when the general markup moves — calculation-outdated", async () => {
+    const article = await makeArticle({ salesPrice: 300 });
+    // The old chain: TVK 8 000 + TO 500 ⇒ Affo 25 % = 2 125, SVK 10 625,
+    // generellt 40 % = 4 250, F₀ = SVK + generellt = 14 875.
+    await saveCalculation(article.id, { businessOverhead: "2125", generalMarkup: "4250", materialMarkup: "0", salesPrice: "14875" });
+    const moves = await makeCustomer({ generalMarkupPercent: 20, materialMarkupPercent: 0 });
+    const keeps = await makeCustomer({ generalMarkupPercent: 40, materialMarkupPercent: 0 });
+
+    const refused = (await priceQuote(admin, { customerId: moves.id, articleId: article.id, quantity: 1 })).json();
+    expect(refused.price).toEqual({ unitPrice: 300, discountPercent: 0, source: "article" });
+    expect(refused.calculatedPriceUnavailable).toBe("calculation-outdated");
+    // g = g₀: SVK is not needed — 14 875 − 6 000 × 10 % = 14 275 ⇒ 285.5.
+    const kept = (await priceQuote(admin, { customerId: keeps.id, articleId: article.id, quantity: 1 })).json();
+    expect(kept.price).toEqual({ unitPrice: 285.5, discountPercent: 0, source: "calculated" });
+  });
+
+  it("a discount sent with the à-pris omitted makes the row partly handwritten — calculated_price false, on create, add and Ändra", async () => {
+    const article = await makeArticle({ salesPrice: 300 });
+    await saveCalculation(article.id);
+    const customer = await makeCustomer({ generalMarkupPercent: 20, materialMarkupPercent: 0 });
+    const { order, rows } = await createQuote({ customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, discountPercent: 5 }] });
+    expect(rows.map((r) => [Number(r.unitPrice), Number(r.discountPercent), r.calculatedPrice])).toEqual([[250, 5, false]]);
+
+    const added = await call(admin, "POST", `/sales-orders/${order.id}/rows`, { articleId: article.id, quantity: 1, discountPercent: 0 });
+    expect(added.json()).toMatchObject({ unitPrice: "250.0000", discountPercent: "0.00", calculatedPrice: false });
+
+    const plain = await call(admin, "POST", `/sales-orders/${order.id}/rows`, { articleId: article.id, quantity: 1 });
+    expect(plain.json()).toMatchObject({ calculatedPrice: true });
+    const changed = await call(admin, "PATCH", `/sales-orders/${order.id}/rows/${plain.json().id}`, { quantity: 2, discountPercent: 3 });
+    expect(changed.json().row).toMatchObject({ unitPrice: "250.0000", discountPercent: "3.00", calculatedPrice: false });
+  });
+
+  it("Ändra with the same quantity and the à-pris omitted keeps the row's price; only a quantity change re-prices", async () => {
+    const article = await makeArticle({ salesPrice: 300 });
+    await saveCalculation(article.id, { calculatedAt: new Date("2026-11-01T08:00:00Z") });
+    const customer = await makeCustomer({ generalMarkupPercent: 20, materialMarkupPercent: 0 });
+    const { order, rows } = await createQuote({ customerId: customer.id, rows: [{ articleId: article.id, quantity: 2 }] });
+    const rowId = rows[0]!.id;
+    // A newer förkalkyl with F₀ 16 100: 16 100 − 2 000 − 600 = 13 500 ⇒ 270.
+    await saveCalculation(article.id, { calculatedAt: new Date("2026-11-05T08:00:00Z"), salesPrice: "16100" });
+
+    const same = await call(admin, "PATCH", `/sales-orders/${order.id}/rows/${rowId}`, { quantity: 2 });
+    expect(same.statusCode).toBe(200);
+    expect(same.json().row).toMatchObject({ unitPrice: "250.0000", calculatedPrice: true });
+    const moved = await call(admin, "PATCH", `/sales-orders/${order.id}/rows/${rowId}`, { quantity: 3 });
+    expect(moved.json().row).toMatchObject({ unitPrice: "270.0000", calculatedPrice: true });
+  });
+
+  it("an OAuth client gets neither the basis nor why the Kalkylpris could not be used", async () => {
+    const uncalculated = await makeArticle({ salesPrice: 300 });
+    const customer = await makeCustomer({ generalMarkupPercent: 20, materialMarkupPercent: 0 });
+    const { user } = await adminSession();
+    const { client, clientSecret } = await oauthService.createApiClient({ name: "Hemsidan", scopes: [...API_CLIENT_SCOPES] }, user.id);
+    const token = await app.inject({ method: "POST", url: "/api/v1/oauth/token", payload: { clientId: client.id, clientSecret } });
+    const authorization = `Bearer ${(token.json() as { accessToken: string }).accessToken}`;
+    const url = `/api/v1/price-quote?customerId=${customer.id}&articleId=${uncalculated.id}&quantity=1`;
+
+    const forClient = await app.inject({ method: "GET", url, headers: { authorization } });
+    expect(forClient.json()).toEqual({
+      articleNumber: uncalculated.articleNumber,
+      price: { unitPrice: 300, discountPercent: 0, source: "article" },
+      currency: "SEK",
+      exchangeRate: 1,
+    });
+    expect((await app.inject({ method: "GET", url, headers: { cookie: admin } })).json().calculatedPriceUnavailable).toBe("no-calculation");
+  });
+
+  it("Ändra konfiguration on a beställningsvara row clears the flag — its price is the template's, never a Kalkylpris", async () => {
+    const { article } = await buildToOrder();
+    await saveCalculation(article.id);
+    const customer = await makeCustomer({ generalMarkupPercent: 20, materialMarkupPercent: 0 });
+    const { order, rows } = await createQuote({
+      customerId: customer.id,
+      rows: [{ articleId: article.id, quantity: 1, configuration: { selection: { LOCK: "B", BREDD: 800 } } }],
+    });
+    // Whatever wrote it (a flag that could only be stale), the new configuration's price is the template's.
+    await db.update(salesOrderRows).set({ calculatedPrice: true }).where(eq(salesOrderRows.id, rows[0]!.id));
+    const res = await call(admin, "PUT", `/sales-orders/${order.id}/rows/${rows[0]!.id}/configuration`, { selection: { LOCK: "A", BREDD: 800 } });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().row).toMatchObject({ unitPrice: "1000.0000", calculatedPrice: false });
+  });
+
+  // A real multi-level förkalkyl through the costing API — the base and the
+  // halvfabrikat as the run stores them — re-priced by the chain, and the same
+  // markups tried on the calculation itself: the delta is exact.
+  it("prices a multi-level calculation with a halvfabrikat and its base through the chain, exactly as trying the markups on it", async () => {
+    await setSetting("costing_mo_percent", "10");
+    await setSetting("costing_affo_percent", "10");
+    await setSetting("costing_general_markup_percent", "25");
+    await setSetting("costing_material_markup_percent", "10");
+    const raw = await testArticleService.createArticle({
+      articleNumber: `RAW-${crypto.randomUUID().slice(0, 8)}`, name: "Plåt", type: "purchased", unit: "st", standardCost: 50, active: true,
+    });
+    const lego = await testArticleService.createArticle({
+      articleNumber: `LEGO-${crypto.randomUUID().slice(0, 8)}`, name: "Pulverlack", type: "service", unit: "st", standardCost: 20, active: true,
+    });
+    const semi = await testArticleService.createArticle({
+      articleNumber: `SEMI-${crypto.randomUUID().slice(0, 8)}`, name: "Underrede", type: "manufactured", unit: "st", active: true,
+    });
+    const top = await makeArticle({ salesPrice: 300 });
+    await testArticleService.addBomComponent(semi.id, { componentArticleId: raw.id, quantity: 1 });
+    await testArticleService.addBomComponent(semi.id, { componentArticleId: lego.id, quantity: 1 });
+    await testArticleService.addBomComponent(top.id, { componentArticleId: semi.id, quantity: 2 });
+    await testArticleService.addBomComponent(top.id, { componentArticleId: raw.id, quantity: 1 });
+
+    const saved = await call(admin, "POST", `/articles/${top.id}/cost-calculations/pre-calculate`, { quantity: 1, save: true, multiLevel: true });
+    expect(saved.statusCode, saved.body).toBe(201);
+    // Sub-level for 2: dM 100 + MO 10 + lego 40 = TVK 150, its base 110. Top:
+    // 50 + 5 + 150 = TVK 205, Affo 20.5, SVK 225.5, generellt 56.375,
+    // materialpåslag 10 % × (55 + 110) = 16.5 ⇒ 298.375.
+    expect(saved.json().calculation).toMatchObject({
+      multiLevel: true,
+      semiFinishedCost: "150.0000",
+      materialMarkupBase: "165.0000",
+      salesPrice: "298.3750",
+    });
+
+    const customer = await makeCustomer({ generalMarkupPercent: 40, materialMarkupPercent: 0 });
+    const quote = (await priceQuote(admin, { customerId: customer.id, articleId: top.id, quantity: 1 })).json();
+    const tried = await call(admin, "POST", `/articles/${top.id}/cost-calculations/pre-calculate`, {
+      quantity: 1,
+      multiLevel: true,
+      markups: { generalMarkupPercent: 40, materialMarkupPercent: 0 },
+    });
+    expect(tried.statusCode).toBe(200);
+    // 298.375 + 225.5 × 15 % − 165 × 10 % = 315.7 = 225.5 + 40 % × 225.5.
+    expect(quote.price).toEqual({ unitPrice: 315.7, discountPercent: 0, source: "calculated" });
+    expect(quote.price.unitPrice).toBe(Number(tried.json().calculation.salesPrice));
+    expect(quote.calculated).toMatchObject({ calculationId: saved.json().calculation.id, generalMarkup: { percent: 40, level: "customer" } });
   });
 });

@@ -5,7 +5,6 @@ import Fastify from "fastify";
 import { ZodError } from "zod";
 import { eq } from "drizzle-orm";
 import { customers, db, type Db } from "@navet/db";
-import type { PriceQuoteQuery } from "@navet/shared";
 import { createArticleRepository, insertArticle } from "./modules/article/repository/article.repository.js";
 import { insertBomRows } from "./modules/article/repository/bom-write.js";
 import { createArticleService } from "./modules/article/service/article.service.js";
@@ -128,7 +127,7 @@ import { createSalesRepository } from "./modules/sales/repository/sales.reposito
 import { createSalesService, type RowConfigurationReader } from "./modules/sales/service/sales.service.js";
 import { markSalesOrderInProduction } from "./modules/sales/service/production-transition.js";
 import { salesRoutes } from "./modules/sales/routes/sales.routes.js";
-import { resolvePrice, type VariantPriceReader } from "./modules/sales/service/price-resolver.js";
+import { resolvePrice, type PriceChainQuery, type VariantPriceReader } from "./modules/sales/service/price-resolver.js";
 import { configuratorRoutes as templateConfiguratorRoutes } from "./modules/configurator/routes/configurator.routes.js";
 import { publicConfiguratorRoutes } from "./modules/configurator/routes/public-configurator.routes.js";
 import { createConfiguratorService, type ConfiguredStructureReader } from "./modules/configurator/service/configurator.service.js";
@@ -533,7 +532,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   // late binding needed. The configurator's own binding below gets no
   // reader: a beställningsvara (base price + additions) never gets one.
   const variantPriceRef: { current: VariantPriceReader | null } = { current: null };
-  const salesPriceChain = (query: PriceQuoteQuery) =>
+  const salesPriceChain = (query: PriceChainQuery) =>
     resolvePrice(database, query, {
       variantPrice: (q) => (variantPriceRef.current ? variantPriceRef.current(q) : Promise.resolve(undefined)),
       calculatedPrice: (dbc, q) => costingService.calculatedPrice(dbc, q),

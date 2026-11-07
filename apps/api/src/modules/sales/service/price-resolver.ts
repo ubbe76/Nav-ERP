@@ -1,6 +1,6 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { articles, customerPrices, customers, priceListRows, priceLists, type Db, type Tx } from "@navet/db";
-import { fromSek, SEK, type CalculatedPriceDetail, type CalculatedPriceUnavailable, type PriceSource } from "@navet/shared";
+import { fromSek, SEK, type CalculatedPriceDetail, type CalculatedPriceUnavailable, type PriceQuoteQuery, type PriceSource } from "@navet/shared";
 
 // setupPrice: the matched customer rule's ställpris (> 0 only), in the same
 // currency as unitPrice — a customer rule only applies in the customer's own
@@ -19,6 +19,12 @@ export type PriceResolution = {
 
 // A level's two price markups as the Kalkylpris reads them: null = inherit.
 export type PriceMarkups = { generalMarkupPercent: number | null; materialMarkupPercent: number | null };
+
+// What the sales service asks the bound chain (app.ts's salesPriceChain):
+// the price quote, plus the order's own markups (#16 etapp 3) when the row
+// is on an order that has one — omitted otherwise, so every reader stub
+// sees the call it saw before.
+export type PriceChainQuery = PriceQuoteQuery & { orderMarkups?: PriceMarkups | null };
 
 // Kalkylpris (#16 etapp 2): the costing module's reader (costingService.
 // calculatedPrice, bound in app.ts). null = the step does not apply (no
@@ -62,8 +68,9 @@ export type PriceCurrency = { currency?: string; exchangeRate?: number };
 // the last fallback: it applies on the list/base price only when no
 // customer-specific rule matched — never on the Kalkylpris.
 //
-// Kalkylpris (#16 etapp 2): only when the customer (or, from etapp 3, the
-// order — `orderMarkups`) has a price markup of its own and neither a
+// Kalkylpris (#16 etapp 2–3): only when the customer or the order
+// (`orderMarkups`, order → kund → varugrupp → företaget field by field) has
+// a price markup of its own and neither a
 // customer rule nor the price list priced the row: agreed prices go before a
 // computed one. The article's latest saved förkalkyl re-priced with the
 // row's markups (opts.calculatedPrice), in SEK and converted with the

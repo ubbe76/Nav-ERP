@@ -126,8 +126,9 @@ describe("calculationMarkups — a calculation's levels", () => {
   });
 });
 
-// Kalkylpris (#16 etapp 2): the spec's example — 50 st, SVK 10 000, B 6 000,
-// TO 500, g₀ 40 %, m₀ 10 % ⇒ F₀ 15 100 (302 kr/st).
+// Kalkylpris (#16 etapp 2): the spec's example — 50 st, SVK 10 000 (TVK
+// 8 000 + Affo 25 % = 2 000), B 6 000, TO 500, g₀ 40 % (4 000), m₀ 10 % ⇒
+// F₀ 15 100 (302 kr/st).
 const CALCULATION = {
   salesPrice: 15100,
   selfCost: 10000,
@@ -135,6 +136,9 @@ const CALCULATION = {
   generalMarkupPercent: 40,
   materialMarkupPercent: 10,
   quantity: 50,
+  generalMarkup: 4000,
+  businessOverhead: 2000,
+  affoPercent: 25,
 };
 
 describe("orderRowMarkups and hasOwnMarkups — the row's levels", () => {
@@ -180,5 +184,35 @@ describe("calculatedUnitPrice — the Kalkylpris as a delta against the calculat
   it("is unavailable on a calculation without a usable quantity", () => {
     expect(calculatedUnitPrice({ ...CALCULATION, quantity: 0 }, 20, 0)).toEqual({ unavailable: "no-calculation" });
     expect(calculatedUnitPrice({ ...CALCULATION, quantity: -1 }, 20, 0)).toEqual({ unavailable: "no-calculation" });
+  });
+
+  // The review of etapp 2: before 0130 (931f4d1) TO sat inside TVK and SVK,
+  // so the stored generellt påslag and Affo were taken on TO too and
+  // SVK × (g − g₀) re-prices such a calculation some kronor wrong.
+  it("refuses a calculation from before 0130 when the general markup moves — and only then", () => {
+    // TO 500 inside: Affo 25 % × 8 500 = 2 125, SVK then 10 625, generellt 40 % = 4 250.
+    const before0130 = { ...CALCULATION, selfCost: 10125, businessOverhead: 2125, generalMarkup: 4250, salesPrice: 14875 };
+    expect(calculatedUnitPrice(before0130, 20, 10)).toEqual({ unavailable: "calculation-outdated" });
+    // g = g₀: SVK is not needed, the material delta is on the base alone.
+    expect(calculatedUnitPrice(before0130, 40, 10)).toEqual({ unitPrice: 297.5 });
+    expect(calculatedUnitPrice(before0130, 40, 0)).toEqual({ unitPrice: 285.5 }); // 14 875 − 600
+    // Generellt 0 % says nothing — the Affo on TO gives it away.
+    const noGeneral = { ...before0130, generalMarkupPercent: 0, generalMarkup: 0 };
+    expect(calculatedUnitPrice(noGeneral, 20, 10)).toEqual({ unavailable: "calculation-outdated" });
+    // Percentages never snapshotted (0) under an amount.
+    expect(calculatedUnitPrice({ ...CALCULATION, generalMarkupPercent: 0 }, 20, 10)).toEqual({ unavailable: "calculation-outdated" });
+  });
+
+  it("accepts today's chain within the four-decimal rounding of the stored buckets and an Affo setting with more decimals", () => {
+    // 0.004 off on the generellt påslag: rounding, not TO.
+    expect(calculatedUnitPrice({ ...CALCULATION, generalMarkup: 4000.004 }, 20, 0)).toEqual({ unitPrice: 250 });
+    // Affo set to 12.346 %, stored as 12.35 %: 8 000 × 12.346 % = 987.68 vs 988 — within half a hundredth of a percent.
+    const affo = { ...CALCULATION, affoPercent: 12.35, businessOverhead: 987.68, selfCost: 8987.68, generalMarkup: 3595.072 };
+    expect(calculatedUnitPrice(affo, 40, 10)).toEqual({ unitPrice: 302 });
+    expect("unitPrice" in calculatedUnitPrice(affo, 20, 0)).toBe(true);
+    // TO 500 × 25 % = 125 is far outside.
+    expect(calculatedUnitPrice({ ...CALCULATION, businessOverhead: 2125, selfCost: 10125, generalMarkup: 4050 }, 20, 0)).toEqual({
+      unavailable: "calculation-outdated",
+    });
   });
 });
