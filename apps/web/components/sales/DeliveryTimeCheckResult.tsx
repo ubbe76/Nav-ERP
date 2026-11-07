@@ -1,5 +1,5 @@
 import { FormNotice } from "../ui/Form";
-import { formatDtcQuantity, formatDtcStep } from "../../lib/deliveryTimeCheck";
+import { chosenDtcDate, formatDtcAlternativeSummary, formatDtcQuantity, formatDtcStep } from "../../lib/deliveryTimeCheck";
 import type { DeliveryTimeCheckResult as Result } from "../../lib/types";
 import styles from "./DeliveryTimeCheckResult.module.css";
 
@@ -7,21 +7,75 @@ import styles from "./DeliveryTimeCheckResult.module.css";
 // kundorder and the stand-alone page). Rows are cards rather than a table so
 // the chain of steps reads top to bottom and nothing scrolls sideways at
 // phone width.
-export function DeliveryTimeCheckResult({ result, withCustomer }: { result: Result; withCustomer: boolean }) {
+//
+// When the alternative resources gave an earlier date (usesAlternatives) both
+// dates are shown. With onAlternativeModeChange the user picks which one to use
+// (radio buttons); the dialog owns the choice. Without it (the stand-alone
+// page, Ny kundorder) the two dates are only listed.
+export function DeliveryTimeCheckResult({
+  result,
+  withCustomer,
+  withAlternatives = true,
+  onAlternativeModeChange,
+}: {
+  result: Result;
+  withCustomer: boolean;
+  withAlternatives?: boolean;
+  onAlternativeModeChange?: (withAlternatives: boolean) => void;
+}) {
   const hasDate = result.deliveryDate !== null && result.shipDate !== null;
+  const usesAlt = result.usesAlternatives === true;
+  const ordinary = result.ordinaryDeliveryDate ?? null;
+  const showOrdinary = usesAlt && !withAlternatives && onAlternativeModeChange !== undefined;
+  const primaryDate = withCustomer ? result.deliveryDate : result.shipDate;
   return (
     <div>
+      {hasDate && usesAlt && (
+        <div className={styles.altBox}>
+          <div className={styles.altSummary}>
+            {withCustomer
+              ? formatDtcAlternativeSummary(result.deliveryDate!, ordinary)
+              : `Avsändning ${result.shipDate} med alternativa resurser (ordinarie: ${result.ordinaryShipDate ?? "inget datum inom två år"})`}
+          </div>
+          {onAlternativeModeChange && withCustomer && (
+            <div role="radiogroup" aria-label="Datum att använda" className={styles.altChoice}>
+              <label className={styles.altOption}>
+                <input
+                  type="radio"
+                  name="dtc-mode"
+                  checked={withAlternatives}
+                  onChange={() => onAlternativeModeChange(true)}
+                />
+                <span>Med alternativa resurser ({chosenDtcDate(result, true)})</span>
+              </label>
+              {ordinary ? (
+                <label className={styles.altOption}>
+                  <input
+                    type="radio"
+                    name="dtc-mode"
+                    checked={!withAlternatives}
+                    onChange={() => onAlternativeModeChange(false)}
+                  />
+                  <span>Med ordinarie resurser ({ordinary})</span>
+                </label>
+              ) : (
+                <div className={styles.altHint}>Ordinarie resurser ger inget datum inom två år.</div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       {hasDate ? (
         <div className={styles.summary}>
           {withCustomer && (
             <div>
               <div className={styles.summaryLabel}>Leveransdatum</div>
-              <div className={styles.summaryValue}>{result.deliveryDate}</div>
+              <div className={styles.summaryValue}>{showOrdinary ? (ordinary ?? primaryDate) : result.deliveryDate}</div>
             </div>
           )}
           <div>
             <div className={styles.summaryLabel}>Avsändningsdag</div>
-            <div className={styles.summaryValue}>{result.shipDate}</div>
+            <div className={styles.summaryValue}>{showOrdinary ? (result.ordinaryShipDate ?? result.shipDate) : result.shipDate}</div>
           </div>
         </div>
       ) : (
@@ -50,12 +104,14 @@ export function DeliveryTimeCheckResult({ result, withCustomer }: { result: Resu
               </span>
               <span>
                 <span className={styles.cell}>Klar </span>
-                <span className={styles.cellValue}>{row.readyDate ?? "—"}</span>
+                <span className={styles.cellValue}>{(showOrdinary ? (row.ordinaryReadyDate ?? row.readyDate) : row.readyDate) ?? "—"}</span>
               </span>
             </div>
             {row.chain.length > 0 && (
               <>
-                <div className={styles.chainLabel}>Vad som begränsar</div>
+                <div className={styles.chainLabel}>
+                  {showOrdinary ? "Vad som begränsar (med alternativa resurser)" : "Vad som begränsar"}
+                </div>
                 <ol className={styles.chain}>
                   {row.chain.map((step, i) => (
                     <li key={i}>{formatDtcStep(step)}</li>

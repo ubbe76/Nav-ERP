@@ -6089,6 +6089,9 @@ export type DtcStep =
       // Minutes booked per week (Mondays).
       weeks?: { monday: string; minutes: number }[];
       date: string;
+      // Set when the step runs on an alternative resource; toWeek is the week
+      // the ordinary resource would have given.
+      alternativeOf?: DtcAlternativeOf | null;
     }
   | {
       kind: "subcontract";
@@ -6102,7 +6105,15 @@ export type DtcStep =
       date: string;
     };
 
+export interface DtcAlternativeOf {
+  workCenterId: string;
+  workCenterCode: string;
+  workCenterName: string;
+  toWeek: string;
+}
+
 export interface DeliveryTimeCheckRow {
+  ordinaryReadyDate?: string | null;
   key: string;
   articleId: string;
   articleNumber: string;
@@ -6123,7 +6134,14 @@ export interface DtcBatch {
   articleNumber: string;
   quantity: number;
   readyDate: string | null;
-  operations: { sequenceNo: number; workCenterId: string; weeks: { monday: string; minutes: number }[] }[];
+  operations: {
+    sequenceNo: number;
+    workCenterId: string;
+    workCenterCode?: string;
+    workCenterName?: string;
+    alternativeOf?: DtcAlternativeOf | null;
+    weeks: { monday: string; minutes: number }[];
+  }[];
 }
 
 // POST /delivery-time-check/apply.
@@ -6137,7 +6155,15 @@ export interface ApplyDeliveryTimeResult {
     quantity: number;
     level: number;
     salesOrderRowId: string | null;
+    resourceSwitches?: {
+      sequenceNo: number;
+      fromWorkCenterId: string;
+      fromCode: string;
+      toWorkCenterId: string;
+      toCode: string;
+    }[];
   }[];
+  usesAlternatives?: boolean;
   // Plain texts, or plan warnings carrying a message.
   warnings: (string | { message: string })[];
 }
@@ -6146,6 +6172,12 @@ export interface DeliveryTimeCheckResult {
   shipDate: string | null;
   // = shipDate without a customer; null = some row has no date.
   deliveryDate: string | null;
+  // True when the dates, rows and batches are with alternative resources
+  // (they gave an earlier date). The ordinary dates are then set (null = the
+  // ordinary resources give no date within two years).
+  usesAlternatives?: boolean;
+  ordinaryShipDate?: string | null;
+  ordinaryDeliveryDate?: string | null;
   rows: DeliveryTimeCheckRow[];
   notes: string[];
   // Shortage batches of manufactured articles; empty/absent = nothing to create.
