@@ -1,5 +1,7 @@
 import {
   SEK,
+  type CalculatedPriceDetail,
+  type CalculatedPriceUnavailable,
   type CostCalculationMarkupLevel,
   type CostCalculationType,
   type CostingMaterialSource,
@@ -8,6 +10,7 @@ import {
   type DerivedCosting,
   type TrialMarkups,
 } from "@navet/shared";
+import type { Db, Tx } from "@navet/db";
 import type {
   CostCalculationWrite,
   CostingRepository,
@@ -15,7 +18,15 @@ import type {
   OperationRowWrite,
 } from "../repository/costing.repository.js";
 import { applyMarkups, type CostingMarkups, type MarkedUpCosts } from "./markup.js";
-import { calculationMarkups, percentOrNull } from "./markup-levels.js";
+import {
+  calculatedUnitPrice,
+  calculationMarkups,
+  hasOwnMarkups,
+  orderRowMarkups,
+  percentOrNull,
+  type LevelMarkups,
+} from "./markup-levels.js";
+import { readCalculatedPriceBasis } from "../repository/calculated-price.js";
 import {
   buildMaterialRow,
   buildOperationRow,
@@ -1041,6 +1052,60 @@ export function createCostingService(
       const perUnitPrice = perUnit(Number(calculation.salesPrice), calculation.quantity);
       if (perUnitPrice === null) throw new InvalidCalculationQuantityError(id);
       return articles.updateSalesPrice(calculation.articleId, round(perUnitPrice, 4));
+    },
+
+    // Kalkylpris (#16 etapp 2) — the price chain's step after the price list
+    // (sales/service/price-resolver.ts, bound in app.ts). null = the step
+    // does not apply: neither the customer nor the order has a price markup
+    // of its own, so the article's försäljningspris stays the company's
+    // price and nothing is read. Otherwise the article's latest saved
+    // förkalkyl (the one TB reads — calculated-price.ts) re-priced with the
+    // row's markups, order → customer → varugrupp → company (orderRowMarkups,
+    // field by field), as a delta against the calculation's own percentages
+    // and base (calculatedUnitPrice). SEK, four decimals; the chain converts
+    // to the order's currency. `dbc` is the caller's handle — a transaction
+    // in etapp 3's repricing; the company's percentages come from the
+    // settings reader, never from the transaction.
+    async calculatedPrice(
+      dbc: Db | Tx,
+      q: { articleId: string; customer: LevelMarkups | null; order?: LevelMarkups | null }
+    ): Promise<{ unitPrice: number; calculated: CalculatedPriceDetail } | { unavailable: CalculatedPriceUnavailable } | null> {
+      if (!hasOwnMarkups(q.customer, q.order)) return null;
+      const { markups: company } = await loadCostingConfig(settings);
+      const { calculation, group } = await readCalculatedPriceBasis(dbc, q.articleId);
+      const resolved = orderRowMarkups({
+        order: q.order ?? null,
+        customer: q.customer,
+        group: group && {
+          generalMarkupPercent: percentOrNull(group.generalMarkupPercent),
+          materialMarkupPercent: percentOrNull(group.materialMarkupPercent),
+        },
+        company: { generalMarkupPercent: company.generalMarkupPercent, materialMarkupPercent: company.materialMarkupPercent },
+      });
+      if (!calculation) return { unavailable: "no-calculation" };
+      const priced = calculatedUnitPrice(
+        {
+          salesPrice: Number(calculation.salesPrice),
+          selfCost: selfCost(calculation),
+          materialMarkupBase: calculation.materialMarkupBase === null ? null : Number(calculation.materialMarkupBase),
+          generalMarkupPercent: Number(calculation.generalMarkupPercent),
+          materialMarkupPercent: Number(calculation.materialMarkupPercent),
+          quantity: Number(calculation.quantity),
+        },
+        resolved.generalMarkup.percent,
+        resolved.materialMarkup.percent
+      );
+      if ("unavailable" in priced) return priced;
+      return {
+        unitPrice: priced.unitPrice,
+        calculated: {
+          calculationId: calculation.id,
+          calculatedAt: new Date(calculation.calculatedAt).toISOString(),
+          quantity: Number(calculation.quantity),
+          generalMarkup: resolved.generalMarkup,
+          materialMarkup: resolved.materialMarkup,
+        },
+      };
     },
 
     // Self cost per unit from each article's latest saved pre-calculation —

@@ -2062,4 +2062,38 @@ describe("costing service — markup levels (#16)", () => {
     const rows = await db.select({ id: costCalculations.id, base: costCalculations.materialMarkupBase }).from(costCalculations);
     expect(Object.fromEntries(rows.map((r) => [r.id, r.base]))).toEqual({ [single.id]: "110.0000", [multi.id]: null });
   });
+
+  // The review of etapp 1: a multi-level calculation without semi-finished
+  // cost lifts no base either, so its base is exactly dM + MO — 0195 fills
+  // it. One with semi-finished cost stays null (the sub-levels' base is lost).
+  it("backfills the base on multi-level calculations without semi-finished cost too (0195's UPDATE)", async () => {
+    const { parent } = await makePricedParent();
+    const { calculation: single } = await costingService.preCalculate(parent.id, 5, true);
+    const { calculation: multi } = await costingService.preCalculate(parent.id, 5, true, true);
+    const { calculation: withSemi } = await costingService.preCalculate(parent.id, 5, true, true);
+    expect(multi).toMatchObject({ multiLevel: true, semiFinishedCost: "0.0000" });
+    await db.execute(sql`update cost_calculations set material_markup_base = null`);
+    // As if a manufactured component had been costed from its own structure.
+    await db.execute(sql`update cost_calculations set semi_finished_cost = 5 where id = ${withSemi.id}`);
+
+    const updateOf = (file: string) => {
+      const migration = readFileSync(new URL(`../../../packages/db/drizzle/${file}`, import.meta.url), "utf8");
+      const update = migration
+        .split("--> statement-breakpoint")
+        .map((statement) => statement.trim())
+        .find((statement) => /^UPDATE "cost_calculations"/m.test(statement));
+      expect(update, `${file} must contain the backfill`).toBeDefined();
+      return sql.raw(update!.slice(update!.search(/^UPDATE "cost_calculations"/m)));
+    };
+    // In migration order.
+    await db.execute(updateOf("0194_paslag_per_varugrupp.sql"));
+    await db.execute(updateOf("0195_paslag_per_kund.sql"));
+
+    const rows = await db.select({ id: costCalculations.id, base: costCalculations.materialMarkupBase }).from(costCalculations);
+    expect(Object.fromEntries(rows.map((r) => [r.id, r.base]))).toEqual({
+      [single.id]: "110.0000",
+      [multi.id]: "110.0000",
+      [withSemi.id]: null,
+    });
+  });
 });

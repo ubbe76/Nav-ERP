@@ -36,6 +36,7 @@ import { explodeBom } from "../../article/service/bom-explosion.js";
 import { weightedActualCosts } from "../service/actual-cost.js";
 import { stockValuedAt } from "../../stock/repository/valued-at.js";
 import { loadPriceBreaks } from "../../purchase/repository/price-breaks.js";
+import { latestPreCalculations } from "./calculated-price.js";
 import type { HourlyRateHistoryRow, ReportedTimeRow, StandardCostHistoryRow, SupplierSnapshotRow } from "../service/price-at.js";
 
 // At most one row per article thanks to the article_suppliers_one_primary
@@ -722,26 +723,11 @@ export function createCostingRepository(db: Db | Tx) {
     //
     // DISTINCT ON is the point: one row per article without a correlated
     // subquery per article, so a whole order's lines resolve in one query.
+    // TB's calculation — the same query the Kalkylpris reads (the leaf
+    // calculated-price.ts), so a row's price and its TB never come from two
+    // different calculations.
     async findLatestPreCalculationsByArticles(articleIds: string[]) {
-      if (articleIds.length === 0) return [];
-      return db
-        .selectDistinctOn([costCalculations.articleId], {
-          articleId: costCalculations.articleId,
-          id: costCalculations.id,
-          quantity: costCalculations.quantity,
-          calculatedAt: costCalculations.calculatedAt,
-          materialCost: costCalculations.materialCost,
-          materialOverhead: costCalculations.materialOverhead,
-          laborCost: costCalculations.laborCost,
-          overhead: costCalculations.overhead,
-          subcontractCost: costCalculations.subcontractCost,
-          subcontractOverhead: costCalculations.subcontractOverhead,
-          semiFinishedCost: costCalculations.semiFinishedCost,
-          businessOverhead: costCalculations.businessOverhead,
-        })
-        .from(costCalculations)
-        .where(and(eq(costCalculations.type, "pre"), inArray(costCalculations.articleId, articleIds)))
-        .orderBy(asc(costCalculations.articleId), desc(costCalculations.calculatedAt), desc(costCalculations.id));
+      return latestPreCalculations(db, articleIds);
     },
 
     async listCostCalculationsByManufacturingOrder(manufacturingOrderId: string) {

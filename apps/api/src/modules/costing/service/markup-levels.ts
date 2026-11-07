@@ -1,4 +1,4 @@
-import type { CostCalculationMarkupLevel, CostingMarkupLevel } from "@navet/shared";
+import type { CalculatedPriceUnavailable, CostCalculationMarkupLevel, CostingMarkupLevel, OrderMarkupLevel } from "@navet/shared";
 
 // Påslag per nivå (#16) — the ONE rule for which price markup applies. Pure:
 // no DB, no settings lookup, so every reader (förkalkyl, efterkalkyl, the
@@ -18,8 +18,8 @@ import type { CostCalculationMarkupLevel, CostingMarkupLevel } from "@navet/shar
 //
 // Order, most specific first: trial (Pröva påslag on the Kalkyl tab) → order
 // → customer → varugrupp → company. A calculation passes trial/group/company
-// only (calculationMarkups below); an order row from etapp 2 passes
-// order/customer/group/company.
+// only (calculationMarkups below); an order row's Kalkylpris passes
+// order/customer/group/company (orderRowMarkups below).
 
 export interface LevelMarkups {
   generalMarkupPercent?: number | null;
@@ -99,6 +99,68 @@ export function calculationMarkups(
     generalMarkup: asCalculationLevel(resolved.generalMarkup),
     materialMarkup: asCalculationLevel(resolved.materialMarkup),
   };
+}
+
+function asOrderLevel(resolved: ResolvedMarkup): ResolvedMarkup<OrderMarkupLevel> {
+  // Unreachable: orderRowMarkups never passes a trial.
+  if (resolved.level === "trial") throw new Error("An order row cannot carry the level trial");
+  return { percent: resolved.percent, level: resolved.level };
+}
+
+// An order row's price markups (the Kalkylpris, #16 etapp 2): order →
+// customer → the article's varugrupp → company, typed without trial.
+export function orderRowMarkups(levels: Omit<MarkupLevels, "trial">): EffectiveMarkups<OrderMarkupLevel> {
+  const resolved = effectiveMarkups(levels);
+  return {
+    generalMarkup: asOrderLevel(resolved.generalMarkup),
+    materialMarkup: asOrderLevel(resolved.materialMarkup),
+  };
+}
+
+// The price chain's Kalkylpris step applies only when the customer or the
+// order has a price markup of its OWN — i.e. at least one field resolves on
+// one of those levels. Without one the article's försäljningspris is the
+// company's price, exactly as before #16. Checked before anything is read.
+export function hasOwnMarkups(...levels: (LevelMarkups | null | undefined)[]): boolean {
+  return levels.some((l) => (l?.generalMarkupPercent ?? null) !== null || (l?.materialMarkupPercent ?? null) !== null);
+}
+
+// What the Kalkylpris reads off the article's latest saved förkalkyl, as
+// numbers: F₀ (sales_price), SVK (selfCost of the buckets), B
+// (material_markup_base, null on an old multi-level calculation), g₀ and m₀
+// (its own percentages) and q (its quantity).
+export interface CalculationForPrice {
+  salesPrice: number;
+  selfCost: number;
+  materialMarkupBase: number | null;
+  generalMarkupPercent: number;
+  materialMarkupPercent: number;
+  quantity: number;
+}
+
+export type CalculatedUnitPrice = { unitPrice: number } | { unavailable: CalculatedPriceUnavailable };
+
+// Kalkylpris per unit in SEK — a delta against the calculation itself:
+//
+//   P = F₀ + SVK × (g − g₀)/100 + B × (m − m₀)/100,   Kalkylpris/st = round4(P / q)
+//
+// Exact because every level prices on the same SVK and the same base
+// (materialpåslag = m × B on every level of a multi-level calculation,
+// costing.md). With g = g₀ and m = m₀ the delta is 0 and the answer is the
+// one Sätt försäljningspris writes (round4(F₀ / q), the same arithmetic). g
+// and m ≥ 0 keep P ≥ SVK + TO. Unavailable: q ≤ 0 ("no-calculation": no
+// per-unit figure, as for Sätt försäljningspris), or B unknown while m ≠ m₀
+// ("material-base-missing" — with m = m₀ the base is not needed).
+export function calculatedUnitPrice(calculation: CalculationForPrice, generalPercent: number, materialPercent: number): CalculatedUnitPrice {
+  if (!Number.isFinite(calculation.quantity) || calculation.quantity <= 0) return { unavailable: "no-calculation" };
+  const generalDelta = generalPercent - calculation.generalMarkupPercent;
+  const materialDelta = materialPercent - calculation.materialMarkupPercent;
+  if (calculation.materialMarkupBase === null && materialDelta !== 0) return { unavailable: "material-base-missing" };
+  const total =
+    calculation.salesPrice +
+    (calculation.selfCost * generalDelta) / 100 +
+    ((calculation.materialMarkupBase ?? 0) * materialDelta) / 100;
+  return { unitPrice: Math.round((total / calculation.quantity) * 10000) / 10000 };
 }
 
 // A nullable numeric(6,2) column as Drizzle hands it back ("40.00" | null).

@@ -212,6 +212,9 @@ export type SalesRowWrite = Omit<CreateSalesOrderRowInput, "configuration"> &
     // Ställkostnad: written as its own row (quantity 1, the Ställkostnads-
     // artikel) right after this one, linked by setup_for_row_id.
     setupCharge?: { articleId: string; unitPrice: number } | null;
+    // Kalkylpris (#16): the chain itself priced the row with its Kalkylpris
+    // step (à-pris omitted). Server-derived only; omitted = false.
+    calculatedPrice?: boolean;
   };
 
 // The linked Ställkostnad row of `mainRowId` — one shape for createQuote and
@@ -266,6 +269,7 @@ async function insertRow(tx: Tx, salesOrderId: string, input: SalesRowWrite) {
       configuration: input.configuration ?? null,
       configurationCost: input.configurationCost ?? null,
       expectedDeliveryDate: input.expectedDeliveryDate ?? null,
+      calculatedPrice: input.calculatedPrice ?? false,
     })
     .returning();
   if (input.setupCharge) {
@@ -374,6 +378,12 @@ async function rowConfigurationGuards(
   return { ok: true, row: found.row, orderStatus: found.orderStatus };
 }
 
+// A customer's price markup (#16) for its numeric(6,2) column: undefined =
+// leave it (drizzle skips the key), null = inherit again.
+function markupColumn(value: number | null | undefined): string | null | undefined {
+  return value === undefined || value === null ? value : String(value);
+}
+
 // Överleverans on a customer PATCH: the percentage belongs to Tillåt only
 // (CHECK customers_over_delivery_percent). Another choice clears it; a
 // percentage sent alone is kept only if the stored choice is Tillåt.
@@ -410,10 +420,13 @@ export function createSalesRepository(db: Db) {
       // guard updateCustomer already applies below.
       // Dröjsmålsränta: lateInterestRate is numeric(5,2) — the same
       // string/omit treatment as discountPercent (null clears).
-      const { discountPercent, lateInterestRate, overDelivery, overDeliveryPercent, ...rest } = input;
+      const { discountPercent, lateInterestRate, overDelivery, overDeliveryPercent, generalMarkupPercent, materialMarkupPercent, ...rest } = input;
       const values = {
         ...rest,
         ...(discountPercent === undefined ? {} : { discountPercent: String(discountPercent) }),
+        // Påslag per kund (#16): numeric(6,2), null/omitted = inherit.
+        generalMarkupPercent: markupColumn(generalMarkupPercent),
+        materialMarkupPercent: markupColumn(materialMarkupPercent),
         ...(lateInterestRate === undefined ? {} : { lateInterestRate: lateInterestRate === null ? null : String(lateInterestRate) }),
         // Överleverans: the percentage belongs to Tillåt only (CHECK
         // customers_over_delivery_percent).
@@ -436,10 +449,13 @@ export function createSalesRepository(db: Db) {
     },
 
     async updateCustomer(id: string, input: UpdateCustomerInput) {
-      const { discountPercent, lateInterestRate, overDelivery, overDeliveryPercent, ...rest } = input;
+      const { discountPercent, lateInterestRate, overDelivery, overDeliveryPercent, generalMarkupPercent, materialMarkupPercent, ...rest } = input;
       const set = {
         ...rest,
         ...(discountPercent === undefined ? {} : { discountPercent: String(discountPercent) }),
+        // Påslag per kund (#16): undefined = unchanged (drizzle skips the key), null = inherit again.
+        generalMarkupPercent: markupColumn(generalMarkupPercent),
+        materialMarkupPercent: markupColumn(materialMarkupPercent),
         ...(lateInterestRate === undefined ? {} : { lateInterestRate: lateInterestRate === null ? null : String(lateInterestRate) }),
         ...overDeliveryUpdate(overDelivery, overDeliveryPercent),
       };
@@ -819,6 +835,7 @@ export function createSalesRepository(db: Db) {
                 configurationCost: r.configurationCost ?? null,
                 // null = the row follows the order's Leveransdatum.
                 expectedDeliveryDate: r.expectedDeliveryDate ?? null,
+                calculatedPrice: r.calculatedPrice ?? false,
                 createdAt: new Date(now + stamp++),
               };
               return id && r.setupCharge
@@ -1242,8 +1259,19 @@ export function createSalesRepository(db: Db) {
       // when a quantity change repriced a configured row; undefined leaves
       // the stored one as it is. 4c: likewise the förkalkyl at the new
       // quantity (configurationCost; undefined = untouched, null = unknown).
+      // Kalkylpris (#16): `priceOrigin` decides calculated_price — "calculated"
+      // (the chain's Kalkylpris repriced the row) ⇒ true, "chain" (another
+      // chain step did) ⇒ false, "manual" (an à-pris was sent) ⇒ false only
+      // when it differs from the stored one: the order card always sends the
+      // price, and resending it must not turn a Kalkylpris into a
+      // handwritten one. Compared under the row lock at the column's 4
+      // decimals. undefined leaves the flag.
       patch: Omit<UpdateSalesOrderRowInput, "unitId" | "bumpRevision"> &
-        Partial<UnitSnapshot> & { configuration?: OrderRowConfiguration; configurationCost?: OrderRowConfigurationCost | null },
+        Partial<UnitSnapshot> & {
+          configuration?: OrderRowConfiguration;
+          configurationCost?: OrderRowConfigurationCost | null;
+          priceOrigin?: "calculated" | "chain" | "manual";
+        },
       bump = true
     ): Promise<SalesRowMutationResult> {
       return db.transaction(async (tx) => {
@@ -1273,6 +1301,7 @@ export function createSalesRepository(db: Db) {
           configuration?: OrderRowConfiguration;
           configurationCost?: OrderRowConfigurationCost | null;
           expectedDeliveryDate?: string | null;
+          calculatedPrice?: boolean;
         } = {};
         if (patch.quantity !== undefined) set.quantityOrdered = String(patch.quantity);
         if (patch.unitPrice !== undefined) set.unitPrice = String(patch.unitPrice);
@@ -1282,6 +1311,15 @@ export function createSalesRepository(db: Db) {
         if (patch.configuration !== undefined) set.configuration = patch.configuration;
         if (patch.configurationCost !== undefined) set.configurationCost = patch.configurationCost;
         if (patch.expectedDeliveryDate !== undefined) set.expectedDeliveryDate = patch.expectedDeliveryDate;
+        if (patch.priceOrigin === "calculated") set.calculatedPrice = true;
+        else if (patch.priceOrigin === "chain") set.calculatedPrice = false;
+        else if (
+          patch.priceOrigin === "manual" &&
+          patch.unitPrice !== undefined &&
+          Math.round(patch.unitPrice * 10000) !== Math.round(Number(row.unitPrice) * 10000)
+        ) {
+          set.calculatedPrice = false;
+        }
         const [updated] = await tx.update(salesOrderRows).set(set).where(eq(salesOrderRows.id, rowId)).returning();
 
         if (bump) await bumpRevision(tx, orderId);
@@ -1317,6 +1355,9 @@ export function createSalesRepository(db: Db) {
         configurationCost: OrderRowConfigurationCost | null;
         unitPrice: number;
         discountPercent: number;
+        // Kalkylpris (#16): the replaced price came from the chain's
+        // Kalkylpris (a variant row only — a beställningsvara never has one).
+        calculatedPrice: boolean;
       },
       bump = true
     ): Promise<RowConfigurationMutationResult> {
@@ -1332,6 +1373,7 @@ export function createSalesRepository(db: Db) {
             configurationCost: patch.configurationCost,
             unitPrice: String(patch.unitPrice),
             discountPercent: String(patch.discountPercent),
+            calculatedPrice: patch.calculatedPrice,
           })
           .where(eq(salesOrderRows.id, rowId))
           .returning();

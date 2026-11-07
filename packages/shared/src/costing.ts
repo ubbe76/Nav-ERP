@@ -48,6 +48,36 @@ export type CostingMarkupLevel = z.infer<typeof costingMarkupLevelSchema>;
 // has no customer and no order.
 export type CostCalculationMarkupLevel = Extract<CostingMarkupLevel, "group" | "company" | "trial">;
 export const markupPercentSchema = z.number().min(0).max(1000);
+// The levels an order row's price markups can resolve on (the Kalkylpris):
+// a row has no trial.
+export type OrderMarkupLevel = Exclude<CostingMarkupLevel, "trial">;
+
+// Kalkylpris (#16 etapp 2) — the price chain's step after the price list,
+// used when the customer (from etapp 3 also the order) has a price markup of
+// its own: the article's latest saved förkalkyl re-priced with the markups
+// in force for the row, as a delta against the calculation's own
+// percentages and base (costing/service/markup-levels.ts). No customer
+// discount on top.
+//
+// Why the step could not be used (the chain then goes on to the article's
+// försäljningspris): no saved förkalkyl (or one with quantity ≤ 0), or a
+// multi-level calculation saved before 0194 without a materialpåslag base
+// while the material markup differs from the calculation's.
+export const calculatedPriceUnavailableSchema = z.enum(["no-calculation", "material-base-missing"]);
+export type CalculatedPriceUnavailable = z.infer<typeof calculatedPriceUnavailableSchema>;
+
+// The basis of a Kalkylpris, on GET /price-quote for a session (an OAuth
+// client gets the price, never this): which calculation, and each price
+// markup with the level it came from.
+export interface CalculatedPriceDetail {
+  calculationId: string;
+  calculatedAt: string;
+  // The calculation's quantity — the Kalkylpris is its price per unit at
+  // that quantity, whatever the row's quantity.
+  quantity: number;
+  generalMarkup: { percent: number; level: OrderMarkupLevel };
+  materialMarkup: { percent: number; level: OrderMarkupLevel };
+}
 
 // `save` absent or false = preview: the numbers are computed and returned but
 // nothing is written. Only an explicit `true` stores the calculation.

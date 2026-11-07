@@ -528,9 +528,16 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   // configuratorService is built after salesService and itself reads the sales
   // chain for the template's base price (its own binding below has no reader,
   // which ends the recursion).
+  // Kalkylpris (#16 etapp 2): the chain's step after the price list reads
+  // the article's latest förkalkyl through costingService, built above — no
+  // late binding needed. The configurator's own binding below gets no
+  // reader: a beställningsvara (base price + additions) never gets one.
   const variantPriceRef: { current: VariantPriceReader | null } = { current: null };
   const salesPriceChain = (query: PriceQuoteQuery) =>
-    resolvePrice(database, query, { variantPrice: (q) => (variantPriceRef.current ? variantPriceRef.current(q) : Promise.resolve(undefined)) });
+    resolvePrice(database, query, {
+      variantPrice: (q) => (variantPriceRef.current ? variantPriceRef.current(q) : Promise.resolve(undefined)),
+      calculatedPrice: (dbc, q) => costingService.calculatedPrice(dbc, q),
+    });
   // Konfigurator 4b: the row-configuration reader is bound late for the same
   // reason as variantPriceRef.
   const rowConfigurationRef: { current: RowConfigurationReader | null } = { current: null };

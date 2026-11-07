@@ -185,6 +185,14 @@ export async function configuratorRoutes(
       throw err;
     }
     if (!result) return reply.code(404).send({ error: "Article not found" });
+    // Kalkylpris (#16): a client gets the price (source "calculated"), never
+    // its basis — which calculation, the percentages and their levels are
+    // ours, like a configured row's förkalkyl. A session (the order forms)
+    // gets `calculated` for the à-pris help text.
+    if (req.apiClient) {
+      const { calculated: _basis, ...priceOnly } = result;
+      return priceOnly;
+    }
     return result;
   });
 

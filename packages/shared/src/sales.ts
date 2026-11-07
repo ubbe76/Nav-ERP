@@ -11,6 +11,7 @@ import { palletCardCodeSchema } from "./system.js";
 import { invoiceDeliverySchema, peppolIdFieldSchema } from "./einvoice.js";
 import { currencyCodeSchema, exchangeRateValueSchema } from "./currency.js";
 import { documentLanguageSchema } from "./document-language.js";
+import { markupPercentSchema } from "./costing.js";
 
 // "lost" (Förlorad): a quote the customer did not take — closed like
 // cancelled (no edits, no documents), reopenable to quote.
@@ -141,6 +142,12 @@ export const createCustomerSchema = z.object({
   carrierCustomerNumber: z.string().max(50).optional(),
   // Kundrabatt — blanket percentage, the price chain's last fallback.
   discountPercent: blankSafe(z.coerce.number().min(0).max(100)).default(0),
+  // Påslag per kund (#16): the customer's own generellt påslag and
+  // materialpåslag. null/omitted = inherit (varugrupp → företaget), 0 =
+  // explicitly 0 %. A value on either gives the customer's rows the
+  // Kalkylpris step of the price chain (no customer discount on it).
+  generalMarkupPercent: markupPercentSchema.nullable().optional(),
+  materialMarkupPercent: markupPercentSchema.nullable().optional(),
   // Vårt leverantörsnummer — the customer's number for us as their supplier.
   ourSupplierNumber: z.string().max(50).optional(),
   // Samlingsfaktura — billed via the collective invoicing routine only.
@@ -214,6 +221,9 @@ export const updateCustomerSchema = z
     priceListId: z.string().uuid().nullable().optional(),
     carrierCustomerNumber: z.string().max(50).nullable().optional(),
     discountPercent: blankSafe(z.coerce.number().min(0).max(100)).optional(),
+    // Påslag per kund (#16): omitted = unchanged, null = inherit again.
+    generalMarkupPercent: markupPercentSchema.nullable().optional(),
+    materialMarkupPercent: markupPercentSchema.nullable().optional(),
     ourSupplierNumber: z.string().max(50).nullable().optional(),
     collectiveInvoicing: z.boolean().optional(),
     invoiceOnHold: z.boolean().optional(),
@@ -609,10 +619,15 @@ export type SendReminderInput = z.infer<typeof sendReminderSchema>;
 // --- C3 Kundpriser ---
 // customer_discount = the customer's blanket discount applied on the price
 // list / base price (last fallback, below every customer-specific rule).
+// calculated = Kalkylpris (#16 etapp 2): the article's latest förkalkyl with
+// the customer's (or the order's) price markups, after the price list and
+// before the article's price, never with the customer discount. New in an
+// existing enum — integrations comparing against the values must know it.
 export const priceSourceSchema = z.enum([
   "customer_article",
   "customer_group",
   "price_list",
+  "calculated",
   "customer_discount",
   "article",
 ]);

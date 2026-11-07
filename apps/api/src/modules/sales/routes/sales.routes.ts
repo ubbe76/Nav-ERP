@@ -132,7 +132,7 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
   app.post("/customers", async (req, reply) => {
     const input = createCustomerSchema.parse(req.body);
     try {
-      const customer = await service.createCustomer(input);
+      const customer = await service.createCustomer(input, req.user?.id ?? null);
       return reply.code(201).send(customer);
     } catch (err) {
       if (err instanceof RegisterEntryNotFoundError) return reply.code(404).send(errorBody(err));
@@ -150,7 +150,7 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
   app.patch<{ Params: { id: string } }>("/customers/:id", async (req, reply) => {
     const input = updateCustomerSchema.parse(req.body);
     try {
-      return await service.updateCustomer(req.params.id, input);
+      return await service.updateCustomer(req.params.id, input, req.user?.id ?? null);
     } catch (err) {
       if (err instanceof CustomerNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof RegisterEntryNotFoundError) return reply.code(404).send(errorBody(err));

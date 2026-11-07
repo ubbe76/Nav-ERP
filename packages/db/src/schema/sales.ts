@@ -97,6 +97,13 @@ export const customers = pgTable("customers", {
   // last fallback — on the price-list or base price, never on top of a
   // customer-specific price or group rule (Monitor's "Rabatt" on the customer).
   discountPercent: numeric("discount_percent", { precision: 5, scale: 2 }).notNull().default("0"),
+  // Påslag per kund (#16, migration 0195): the customer's own generellt
+  // påslag and materialpåslag — null = inherit (varugrupp → företaget), 0 =
+  // explicitly 0 %. Only the PRICE markups; a value on either field gives the
+  // customer's rows the Kalkylpris step in the price chain (price-resolver.ts,
+  // markup-levels.ts). numeric(6,2) and 0–1000 like the varugrupp's.
+  generalMarkupPercent: numeric("general_markup_percent", { precision: 6, scale: 2 }),
+  materialMarkupPercent: numeric("material_markup_percent", { precision: 6, scale: 2 }),
   // Invoice address (fakturaadress) — the plain address/postalCode/city
   // fields above are the visiting address (besöksadress). Delivery
   // addresses live in customer_delivery_addresses.
@@ -175,6 +182,10 @@ export const customers = pgTable("customers", {
   check("customers_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`),
   check("customers_language_valid", sql`${table.language} IN ('sv', 'en')`),
   check("customers_late_interest_rate", sql`${table.lateInterestRate} IS NULL OR ${table.lateInterestRate} >= 0`),
+  check(
+    "customers_markups_range",
+    sql`(${table.generalMarkupPercent} is null or ${table.generalMarkupPercent} between 0 and 1000) and (${table.materialMarkupPercent} is null or ${table.materialMarkupPercent} between 0 and 1000)`
+  ),
   // A percentage only with Tillåt — Tillåt inte and Systemets förval have none.
   check(
     "customers_over_delivery_percent",
@@ -456,6 +467,14 @@ export const salesOrderRows = pgTable(
     // stays a plain row if its article row goes (the service removes an
     // undelivered one with it).
     setupForRowId: uuid("setup_for_row_id").references((): AnyPgColumn => salesOrderRows.id, { onDelete: "set null" }),
+    // Påslag per kund och order (#16, migration 0195): the row's à-pris came
+    // from the price chain's Kalkylpris step and has not been written over
+    // since. Set by the server only — true when the chain itself gave the
+    // Kalkylpris with the à-pris omitted, false on an explicit à-pris (an
+    // unchanged one on a PATCH keeps it). Rows before 0195 are false: unknown
+    // counts as handwritten. Etapp 3 reprices these rows when the order's
+    // markups change.
+    calculatedPrice: boolean("calculated_price").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

@@ -406,6 +406,15 @@ function throwRowConfigurationFailure(result: Extract<RowConfigurationMutationRe
   }
 }
 
+// Påslag per kund (#16): the customer's two price markups as the audit entry
+// records them — numbers, null = inherits (varugrupp → företaget).
+function customerMarkups(row: { generalMarkupPercent: string | null; materialMarkupPercent: string | null } | null) {
+  return {
+    generalMarkupPercent: row?.generalMarkupPercent == null ? null : Number(row.generalMarkupPercent),
+    materialMarkupPercent: row?.materialMarkupPercent == null ? null : Number(row.materialMarkupPercent),
+  };
+}
+
 function termLabel(code: string | null, name: string | null) {
   if (!code && !name) return null;
   return [code, name].filter(Boolean).join(" \u00b7 ");
@@ -605,6 +614,10 @@ export function createSalesService(
     let discountPercent = input.discountPercent ?? 0;
     // Ställpris of the matched customer rule — undefined until the chain ran.
     let chainSetupPrice: number | undefined;
+    // Kalkylpris (#16): true only when the chain itself priced the row with
+    // its Kalkylpris step — an explicit à-pris (even the same figure) is a
+    // handwritten price, and a configured row never has a Kalkylpris.
+    let calculatedPrice = false;
     if (input.unitPrice !== undefined) {
       unitPrice = toBasePrice(input.unitPrice, selection.unitFactor);
     } else if (configuration) {
@@ -619,6 +632,7 @@ export function createSalesService(
       unitPrice = resolution.price.unitPrice;
       if (input.discountPercent === undefined) discountPercent = resolution.price.discountPercent;
       chainSetupPrice = resolution.price.setupPrice ?? 0;
+      calculatedPrice = resolution.price.source === "calculated";
     }
     const setupCharge = configuration ? null : await setupChargeFor(pricing, input.articleId, quantity, chainSetupPrice);
     const { configuration: _raw, ...rest } = input;
@@ -632,6 +646,7 @@ export function createSalesService(
       configuration,
       configurationCost,
       setupCharge,
+      calculatedPrice,
     };
   }
 
@@ -932,22 +947,41 @@ export function createSalesService(
     return order ? overDeliveryPercentFor(order.customerId) : 0;
   }
 
+  // Påslag per kund (#16): customer / markups_changed with before/after —
+  // only when a price markup actually changed (the card sends both fields on
+  // every save), like the varugrupp's. Kundpriser and prislistor are logged
+  // the same way: the markup is the same kind of agreement.
+  async function logCustomerMarkups(
+    customerId: string,
+    before: ReturnType<typeof customerMarkups>,
+    after: ReturnType<typeof customerMarkups>,
+    userId: string | null
+  ) {
+    if (before.generalMarkupPercent === after.generalMarkupPercent && before.materialMarkupPercent === after.materialMarkupPercent) return;
+    await audit.log({ entityType: "customer", entityId: customerId, action: "markups_changed", detail: { before, after }, userId });
+  }
+
   return {
-    async createCustomer(input: CreateCustomerInput) {
+    async createCustomer(input: CreateCustomerInput, userId: string | null = null) {
       await validateRegisterRefs(input);
+      let created;
       try {
-        const created = await repo.createCustomer(input);
-        return withVatTreatment(created);
+        created = await repo.createCustomer(input);
       } catch (err) {
         // customers' only unique constraint is customer_number, so a 23505
         // here can mean nothing else.
         if (isUniqueViolation(err)) throw new DuplicateCustomerNumberError(input.customerNumber ?? "");
         throw err;
       }
+      await logCustomerMarkups(created.id, customerMarkups(null), customerMarkups(created), userId);
+      return withVatTreatment(created);
     },
 
-    async updateCustomer(id: string, input: UpdateCustomerInput) {
+    async updateCustomer(id: string, input: UpdateCustomerInput, userId: string | null = null) {
       await validateRegisterRefs(input);
+      // Read only when a markup is sent — the audit's before.
+      const markupsSent = input.generalMarkupPercent !== undefined || input.materialMarkupPercent !== undefined;
+      const current = markupsSent ? await repo.findCustomerById(id) : null;
       let row;
       try {
         row = await repo.updateCustomer(id, input);
@@ -956,6 +990,7 @@ export function createSalesService(
         throw err;
       }
       if (!row) throw new CustomerNotFoundError(id);
+      if (markupsSent) await logCustomerMarkups(id, customerMarkups(current), customerMarkups(row), userId);
       return withVatTreatment(row);
     },
 
@@ -1281,6 +1316,11 @@ export function createSalesService(
       // untouched (a unit-only or note-only PATCH doesn't reprice).
       let unitPrice = input.unitPrice !== undefined ? toBasePrice(input.unitPrice, factor) : undefined;
       let discountPercent = input.discountPercent;
+      // Kalkylpris (#16): an à-pris sent ⇒ "manual" (the repository clears
+      // calculated_price only when it differs from the stored price — the
+      // card always resends it); the chain repricing an ordinary row ⇒ its
+      // answer. A configured row is never calculated (its flag stays false).
+      let priceOrigin: "calculated" | "chain" | "manual" | undefined = input.unitPrice !== undefined ? "manual" : undefined;
       let configurationPatch: OrderRowConfiguration | undefined;
       // 4c: undefined = leave configuration_cost as stored.
       let configurationCostPatch: OrderRowConfigurationCost | null | undefined;
@@ -1343,6 +1383,7 @@ export function createSalesService(
           if (resolution?.price) {
             unitPrice = resolution.price.unitPrice;
             if (discountPercent === undefined) discountPercent = resolution.price.discountPercent;
+            priceOrigin = resolution.price.source === "calculated" ? "calculated" : "chain";
           }
         }
       }
@@ -1358,6 +1399,7 @@ export function createSalesService(
           configuration: configurationPatch,
           configurationCost: configurationCostPatch,
           expectedDeliveryDate: input.expectedDeliveryDate,
+          priceOrigin,
         },
         input.bumpRevision !== false
       );
@@ -1423,6 +1465,8 @@ export function createSalesService(
         configurationCost: OrderRowConfigurationCost | null;
         unitPrice: number;
         discountPercent: number;
+        // Kalkylpris (#16): the replaced price is the chain's Kalkylpris.
+        calculatedPrice: boolean;
       };
       let beforeKey: string | null;
       let afterKey: string | null;
@@ -1442,6 +1486,8 @@ export function createSalesService(
           configurationCost: evaluated.cost,
           unitPrice: evaluated.configuration.price.unitPrice,
           discountPercent: evaluated.configuration.price.discountPercent,
+          // A beställningsvara is priced by its template (base + additions).
+          calculatedPrice: false,
         };
         beforeKey = stored.key;
         afterKey = evaluated.configuration.key;
@@ -1472,6 +1518,9 @@ export function createSalesService(
           configurationCost: null,
           unitPrice: resolution.price.unitPrice,
           discountPercent: resolution.price.discountPercent,
+          // The variant's own chain (when the template's could not price it)
+          // may end in the Kalkylpris, like any article's.
+          calculatedPrice: resolution.price.source === "calculated",
         };
         beforeKey = variantOf.configKey;
         afterKey = variant.id === existing.articleId ? variantOf.configKey : ((await rowConfiguration.variantOf(variant.id))?.configKey ?? null);
