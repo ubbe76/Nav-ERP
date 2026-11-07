@@ -95,23 +95,29 @@ describe("POST /delivery-time-check/apply (route, inject)", () => {
 
   it("passes useAlternatives (the date the client chose) through; left out it is not sent on", async () => {
     const salesOrderId = id();
-    const seen: unknown[] = [];
+    const seen: Record<string, unknown>[] = [];
     const app = buildApp(async (input) => {
-      seen.push(input);
+      seen.push(input as unknown as Record<string, unknown>);
       return result;
     });
-    for (const useAlternatives of [false, true]) {
+    for (const useAlternatives of [false, true, undefined]) {
       const res = await app.inject({
         method: "POST",
         url: "/delivery-time-check/apply",
-        payload: { salesOrderId, deliveryDate: "2030-03-11", useAlternatives },
+        payload: { salesOrderId, deliveryDate: "2030-03-11", ...(useAlternatives === undefined ? {} : { useAlternatives }) },
       });
       expect(res.statusCode).toBe(200);
     }
     expect(seen).toEqual([
       { salesOrderId, deliveryDate: "2030-03-11", useAlternatives: false },
       { salesOrderId, deliveryDate: "2030-03-11", useAlternatives: true },
+      { salesOrderId, deliveryDate: "2030-03-11" },
     ]);
+    // Left out is no key at all, so the service's förval (true:
+    // deliveryTimeAnswer's default) decides — never a false the schema put
+    // there. The förval itself: the first reservation test in
+    // delivery-time-apply-alternatives.test.ts.
+    expect("useAlternatives" in seen[2]!).toBe(false);
   });
 
   it.each([

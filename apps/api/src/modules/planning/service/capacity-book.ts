@@ -390,11 +390,19 @@ export interface BaseMeasure {
   // week than its trial on the bare resource from the same floor, or it does
   // not fit within the horizon.
   full: boolean;
-  // The base's klar-vecka: the trial's week; for a stored base the earlier
-  // of the stored week and the trial (a stale plan that would now finish
-  // earlier counts as the trial, one the load has since pushed keeps the
-  // week the planner sees). null = beyond the horizon and nothing stored.
+  // The base's klar-vecka AS COMPARED (Valregeln, the förslag's
+  // currentToWeek): the trial's week; for a stored base the earlier of the
+  // stored week and the trial (a stale plan that would now finish earlier
+  // counts as the trial, one the load has since pushed keeps the week the
+  // planner sees). null = beyond the horizon and nothing stored.
   toWeek: string | null;
+  // The trial's own klar-vecka — where Planera would put the base now
+  // (null beyond the horizon). The förslag walk's floor reads THIS, not
+  // `toWeek`: a Byt replans the whole order with Planera's rules, so a
+  // previous operation whose stored week is overbooked ends in the trial's
+  // week, and a floor from the stored week would promise a week the switch
+  // never gives (granskningen av etapp 3).
+  trialToWeek: string | null;
   trial: PlacedPlacement | null; // the trial with the load; null beyond the horizon
 }
 
@@ -415,7 +423,7 @@ export function measureBase(
   const bare = book.peek(base.workCenter, base.minutes, { floor, ignoreLoad: true, forceStartWeek: opts.forceStartWeek });
   const full = trial === null || (!bare.horizonExceeded && trial.toWeek > bare.toWeek);
   const toWeek = trial === null ? stored : stored === null || trial.toWeek < stored ? trial.toWeek : stored;
-  return { full, toWeek, trial };
+  return { full, toWeek, trialToWeek: trial?.toWeek ?? null, trial };
 }
 
 // candidates[0] is the base (the förslag: the operation's current resource;

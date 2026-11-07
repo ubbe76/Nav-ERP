@@ -68,7 +68,7 @@ const mfgService = createManufacturingService(
   undefined,
   undefined,
   {
-    planNewOrderInTx: (tx, moId, given) => planReaderRef.current!.planNewOrderInTx(tx, moId, given),
+    planNewOrderInTx: (tx, moId, given, opts) => planReaderRef.current!.planNewOrderInTx(tx, moId, given, opts),
     replanOrderInTx: (tx, moId) => planReaderRef.current!.replanOrderInTx(tx, moId),
     orderPlanSummaries: (ids) => planReaderRef.current!.orderPlanSummaries(ids),
   }

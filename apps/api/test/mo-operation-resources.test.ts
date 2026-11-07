@@ -11,6 +11,7 @@ import {
   createManufacturingService,
   MoOperationResourceChangedError,
   MoOperationStampedError,
+  WorkCenterInAlternativesError,
 } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { createPlanningRepository } from "../src/modules/planning/repository/planning.repository.js";
 import { createPlanningService, type ManufacturingPlanReader } from "../src/modules/planning/service/planning.service.js";
@@ -34,6 +35,7 @@ import { waitForLockWaiter } from "./helpers/year-end.js";
 // "Today" is pinned to Monday 2030-03-04 like mo-edit.test.ts.
 const W1 = "2030-03-04";
 const W2 = "2030-03-11";
+const W3 = "2030-03-18";
 const TODAY = W1;
 
 const stockService = createStockService(createStockRepository(db));
@@ -60,7 +62,7 @@ const mfgService = createManufacturingService(
   periodLocks,
   undefined,
   {
-    planNewOrderInTx: (tx, moId, given) => planReaderRef.current!.planNewOrderInTx(tx, moId, given),
+    planNewOrderInTx: (tx, moId, given, opts) => planReaderRef.current!.planNewOrderInTx(tx, moId, given, opts),
     replanOrderInTx: (tx, moId) => planReaderRef.current!.replanOrderInTx(tx, moId),
     orderPlanSummaries: (ids) => planReaderRef.current!.orderPlanSummaries(ids),
     operationResourceSuggestions: (moId) => {
@@ -435,6 +437,40 @@ describe("Byt resurs — against a concurrent instämpling", () => {
   });
 });
 
+describe("the snapshot against a concurrent type change", () => {
+  const outcome = (r: PromiseSettledResult<unknown>) => (r.status === "fulfilled" ? "ok" : (r.reason as Error).name);
+
+  it("a resource the TO is snapshotting cannot become lego meanwhile: the change waits for the TO and is then refused (409)", async () => {
+    const w = await seedWorld();
+    await mfgService.cancel(w.order.id, w.user.id); // its rows are history now
+    let open!: () => void;
+    const release = new Promise<void>((resolve) => (open = resolve));
+    let snapshotted!: () => void;
+    const inside = new Promise<void>((resolve) => (snapshotted = resolve));
+    // A TO being created: its snapshot has written 120 among Op 10's rows
+    // (uncommitted) and holds the resources FOR SHARE.
+    let created!: { id: string };
+    const creating = db.transaction(async (tx) => {
+      created = await mfgService.createManufacturingOrderInTx(tx, { articleId: w.parent.id, quantity: 1 }, w.user.id);
+      snapshotted();
+      await release;
+    });
+    await inside;
+    // Meanwhile the beredning drops its alternatives — 120 is no
+    // beredningsalternativ any more, and the TO's rows are not committed.
+    await mfgService.updateRoutingOperation(w.parent.id, w.routing10.id, { alternatives: [] });
+    const typeChange = mfgService.updateWorkCenter(w.r120.id, { type: "subcontract" });
+    // Released even when the wait fails, so the open transaction never hangs the file.
+    await waitForLockWaiter().finally(open);
+    const results = await Promise.allSettled([creating, typeChange]);
+    // The type change waited for the TO, then found 120 among its rows.
+    expect(results.map(outcome)).toEqual(["ok", WorkCenterInAlternativesError.name]);
+    const op10 = (await mfgService.listOperations(created.id)).find((o) => o.sequenceNo === 10)!;
+    expect(op10.resources.map((r) => r.code)).toEqual(["110", "120", "130"]);
+    expect((await mfgService.getWorkCenter(w.r120.id))!.type).not.toBe("subcontract");
+  });
+});
+
 describe("the costing reads the TO's resource", () => {
   it("prices the efterkalkyl and the variance base on the switched resource; the förkalkyl stays on the ordinarie", async () => {
     const w = await seedWorld();
@@ -616,6 +652,53 @@ describe("förslag på resurs (etapp 2)", () => {
     expect((await planningService.planProductionRun(w.user.id)).resourceSuggestions).toEqual([]);
   });
 
+  it("after an overbooked previous operation the förslag starts where Planera puts it — Byt gives exactly the förslag's week", async () => {
+    const w = await seedWorld();
+    await mfgService.cancel(w.order.id, w.user.id); // the seed's TO is no load here
+    const article = async (prefix: string) =>
+      testArticleService.createArticle({ articleNumber: `${prefix}-${crypto.randomUUID().slice(0, 6)}`, name: prefix, type: "manufactured", unit: "st", active: true });
+    // 30 h on 140 and 80 h on 110 (W1–W2) come first.
+    const f140 = await article("F140");
+    await mfgService.createRoutingOperation(f140.id, { sequenceNo: 10, workCenterId: w.r140.id, setupTime: 1800, runTimePerUnit: 0 });
+    await mfgService.createManufacturingOrder({ articleId: f140.id, quantity: 1 }, w.user.id);
+    const f110 = await article("F110");
+    await mfgService.createRoutingOperation(f110.id, { sequenceNo: 10, workCenterId: w.r110.id, setupTime: 4800, runTimePerUnit: 0 });
+    await mfgService.createManufacturingOrder({ articleId: f110.id, quantity: 1 }, w.user.id);
+    // The order: Op 10 on 140 (10 h) fills 140's W1; Op 20 on 110 (10 h),
+    // 120 as an alternative, lands in W3 behind the 80 h.
+    const product = await article("S");
+    await mfgService.createRoutingOperation(product.id, { sequenceNo: 10, workCenterId: w.r140.id, setupTime: 600, runTimePerUnit: 0 });
+    await mfgService.createRoutingOperation(product.id, {
+      sequenceNo: 20,
+      workCenterId: w.r110.id,
+      setupTime: 600,
+      runTimePerUnit: 0,
+      alternatives: [{ workCenterId: w.r120.id }],
+    });
+    const order = await mfgService.createManufacturingOrder({ articleId: product.id, quantity: 1 }, w.user.id);
+    const [op10, op20] = await mfgService.listOperations(order.id);
+    expect([op10!.plannedEndWeek, op20!.plannedEndWeek]).toEqual([W1, W3]);
+
+    // 140 loses half its capacity: Op 10's stored W1 is overbooked now — the
+    // 30 h ahead of it take W1's 20 h and 10 h of W2, so Planera puts Op 10
+    // in W2. The förslag starts there: 120 in W2, not in W1 as a floor from
+    // the stored week would promise.
+    await mfgService.updateWorkCenter(w.r140.id, { capacityFactor: 0.5 });
+    const suggestion = (await operationView(order.id, op20!.id)).suggestion;
+    expect(suggestion).toMatchObject({ workCenterId: w.r120.id, toWeek: W2, currentToWeek: W3, reason: "overloaded" });
+
+    // Byt till 120: the order is replanned with Planera's rules and lands in
+    // exactly the förslag's week.
+    const { operation } = await mfgService.updateOperation(
+      order.id,
+      op20!.id,
+      { workCenterId: suggestion!.workCenterId, expectedWorkCenterId: w.r110.id },
+      w.user.id
+    );
+    expect(operation).toMatchObject({ workCenterId: w.r120.id, resourceLocked: true, plannedEndWeek: suggestion!.toWeek });
+    expect(await opRow(op10!.id)).toMatchObject({ plannedStartWeek: W2, plannedEndWeek: W2 });
+  });
+
   it("Byt till X sends its precondition: a moved operation, or one on another resource since, is refused and nothing changes", async () => {
     const w = await seedWorld({ fill110: true });
     const byt = (expectedWorkCenterId: string) =>
@@ -624,10 +707,10 @@ describe("förslag på resurs (etapp 2)", () => {
     await planningService.moveOperation(w.op10.id, { weekMonday: W2, moveFollowing: true }, w.user.id);
     await expect(byt(w.r110.id)).rejects.toBeInstanceOf(MoOperationResourceChangedError);
     expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r110.id, planLocked: true, resourceLocked: false });
-    // Ändra without the precondition still switches a locked operation (it loses the lock).
-    await planningService.unlockOperation(w.op10.id, w.user.id);
-    // Someone switched it to 130 meanwhile.
+    // Ändra without the precondition still switches the locked operation:
+    // someone switches it to 130 meanwhile, and it loses the lock.
     await mfgService.updateOperation(w.order.id, w.op10.id, { workCenterId: w.r130.id }, w.user.id);
+    expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r130.id, resourceLocked: true, planLocked: false });
     await expect(byt(w.r110.id)).rejects.toBeInstanceOf(MoOperationResourceChangedError);
     expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r130.id, resourceLocked: true });
     // On the resource it expects, unlocked: the switch goes through.

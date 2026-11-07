@@ -248,7 +248,10 @@ export interface OrderPlanSummary {
 // like the configurator's readers): a new TO's operations planned inside
 // its own create transaction, and the list's summaries.
 export interface ManufacturingPlanReader {
-  planNewOrderInTx(tx: Tx, manufacturingOrderId: string, given?: GivenOperationPlan[]): Promise<string[]>;
+  // `refuseMismatch` (the reservation on the date with alternatives): a
+  // given plan the TO's operations no longer match throws
+  // ReservedPlanMismatchError instead of the engine's plan with a warning.
+  planNewOrderInTx(tx: Tx, manufacturingOrderId: string, given?: GivenOperationPlan[], opts?: GivenPlanOptions): Promise<string[]>;
   // Ändra operationer: the order's operations replanned inside the edit's
   // transaction (Planera's rules for one order), the warnings as texts.
   replanOrderInTx(tx: Tx, manufacturingOrderId: string): Promise<string[]>;
@@ -326,7 +329,7 @@ export interface ManufacturingOrderCreator {
     tx: Tx,
     input: { articleId?: string; salesOrderRowId?: string; quantity: number; note?: string; dueDate?: string | null },
     createdBy: string | null,
-    opts?: { plannedWeeks?: GivenOperationPlan[] }
+    opts?: { plannedWeeks?: GivenOperationPlan[] } & GivenPlanOptions
   ): Promise<{ id: string; orderNumber: string; quantity: string | number; releaseWarnings: string[] }>;
 }
 
@@ -350,6 +353,26 @@ export interface GivenOperationPlan {
   sequenceNo: number;
   workCenterId?: string;
   weeks: PlannedWeek[];
+}
+
+export interface GivenPlanOptions {
+  // Refuse (ReservedPlanMismatchError) instead of planning on the ordinarie
+  // with a warning when the TO's operations no longer match the given plan.
+  refuseMismatch?: boolean;
+}
+
+// Reservationen on the date with alternatives (#15, granskningen av etapp
+// 3): a TO's operations or possible resources no longer match what the
+// check under the lock planned — a routing edit or a deactivated resource
+// committed between the check's read and the TO's snapshot, so the
+// alternative the date rests on is not among the operation's resources.
+// planNewOrderInTx throws it (refuseMismatch) and applyDeliveryTime turns it
+// into DeliveryTimeChangedError with a fresh check, after the rollback.
+export class ReservedPlanMismatchError extends Error {
+  constructor() {
+    super("The TO's operations no longer match the reservation's plan");
+    this.name = "ReservedPlanMismatchError";
+  }
 }
 
 // An operation the reservation put on an alternative (read back from the
@@ -1012,8 +1035,14 @@ export function createPlanningService(
   // existing load. With `given` (the reservation) the allocations are
   // written as they are, keyed by (sequence number, resource) — no engine
   // run. Returns the warnings as texts for releaseWarnings: the horizon
-  // ("not planned") and Sen, never a refusal.
-  async function planNewOrderInTx(tx: Tx, manufacturingOrderId: string, given?: GivenOperationPlan[]): Promise<string[]> {
+  // ("not planned") and Sen, never a refusal — except ReservedPlanMismatchError
+  // with `refuseMismatch`.
+  async function planNewOrderInTx(
+    tx: Tx,
+    manufacturingOrderId: string,
+    given?: GivenOperationPlan[],
+    opts: GivenPlanOptions = {}
+  ): Promise<string[]> {
     await lockProductionPlan(tx);
     const world = await loadPlanWorld(tx);
     let own = world.operations.filter((o) => o.manufacturingOrderId === manufacturingOrderId);
@@ -1023,7 +1052,8 @@ export function createPlanningService(
     // the TO's operations are not the ones the check planned (a configured
     // row whose template changed in between, an alternative that is not
     // among the operation's possible resources) the engine plans it on the
-    // ordinarie instead and says so.
+    // ordinarie instead and says so — or, with refuseMismatch (the
+    // reservation on the date with alternatives), refuses.
     const bySeq = new Map(own.map((o) => [o.sequenceNo, o]));
     const resources = new Map<string, { workCenterId: string; setupTime: number; runTimePerUnit: number }[]>();
     if (given?.some((g) => g.workCenterId !== undefined && g.workCenterId !== bySeq.get(g.sequenceNo)?.workCenterId)) {
@@ -1045,6 +1075,9 @@ export function createPlanningService(
     const givenMatches = given !== undefined && given.length === own.length && given.every((g) => targetOf(g) !== undefined);
     const warnings: string[] = [];
     if (given && !givenMatches) {
+      // The reservation on the date with alternatives: the date rests on the
+      // given plan, never on the engine's (409 delivery-time-changed).
+      if (opts.refuseMismatch) throw new ReservedPlanMismatchError();
       warnings.push("Operationerna stämmer inte med leveranstidskontrollens — ordern planerades på ledig kapacitet i stället");
       given = undefined;
     }
@@ -1622,16 +1655,22 @@ export function createPlanningService(
             userId,
             // By (sequence number, resource): an operation the check put on
             // an alternative is switched to it, Vald för hand, before its
-            // weeks are written (planNewOrderInTx).
-            { plannedWeeks: batch.operations.map((o) => ({ sequenceNo: o.sequenceNo, workCenterId: o.workCenterId, weeks: o.weeks })) }
+            // weeks are written (planNewOrderInTx). On the date with
+            // alternatives a TO that no longer matches is refused — the
+            // engine's plan on the ordinarie would not hold the date.
+            {
+              plannedWeeks: batch.operations.map((o) => ({ sequenceNo: o.sequenceNo, workCenterId: o.workCenterId, weeks: o.weeks })),
+              refuseMismatch: result.usesAlternatives,
+            }
           );
           // The promised weeks are locked: Planera keeps them until Lås upp
           // (operations without a plan — lego, 0 minutes, beyond the
           // horizon — have nothing to lock). With Vald för hand the resource
           // is locked too.
           await repo.lockOrderPlans(tx, created.id);
-          // What was actually switched, read back (a TO whose operations no
-          // longer matched the check was planned on the ordinarie instead).
+          // What was actually switched, read back (without alternatives a TO
+          // whose operations no longer matched the check was planned on the
+          // ordinarie instead).
           const resourceSwitches = result.usesAlternatives ? await repo.orderResourceSwitches(tx, created.id) : [];
           manufacturingOrders.push({
             id: created.id,
@@ -1658,6 +1697,14 @@ export function createPlanningService(
             warnings,
           },
         };
+      }).catch(async (err: unknown): Promise<never> => {
+        if (!(err instanceof ReservedPlanMismatchError)) throw err;
+        // Rolled back: a routing edit or a deactivated resource committed
+        // between the check under the lock and a TO's snapshot, so the
+        // alternative the date rests on is gone. A fresh check (committed
+        // state, nothing of ours) is the 409's body, like any changed outcome.
+        const { runs } = await runDeliveryTimeCheck({ salesOrderId: input.salesOrderId });
+        throw new DeliveryTimeChangedError(deliveryTimeAnswer(runs, input.useAlternatives).deliveryDate, deliveryTimeAnswer(runs));
       });
       for (const mo of applied.result.manufacturingOrders) {
         await audit.log({

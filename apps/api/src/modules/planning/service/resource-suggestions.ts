@@ -124,10 +124,15 @@ const compareText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 // moved by each earlier pending operation's klar-vecka (the next operation
 // may use the rest of that week — the floor is a Monday) or a lego
 // operation's lead time. A locked operation stays where it is (its stored
-// weeks); every other one is measured like the base (measureBase): a trial
-// with the load minus its own stored weeks, the earlier of that and the
-// stored week — a stored week that has passed is no plan any more, the trial
-// decides (granskningen av etapp 2: the plan's age must not move the floor).
+// weeks); every other one is measured like the base (measureBase): the
+// floor is its trial's week with the load minus its own stored weeks —
+// where Planera puts it when a Byt replans the order — and the stored week
+// only when the trial does not fit within the horizon. Never the earlier of
+// the two: a previous operation whose stored week is overbooked would hold
+// the floor a week early and promise a week the switch never gives
+// (granskningen av etapp 3); a stored week that has passed is no plan any
+// more (granskningen av etapp 2: the plan's age must not move the floor).
+// The earliest-of rule is only the comparison's (Valregeln, currentToWeek).
 // An own operation with time but no plan stops the walk, as Planera's
 // horizonHit does: nothing after it gets a förslag. The base is the
 // operation's CURRENT resource (chooseResource with the stored base).
@@ -191,9 +196,14 @@ export function resourceSuggestions(world: SuggestionWorld, onlyOrderIds?: Reado
         // planned) — nothing after it is planned, so nothing gets a förslag.
         if (!hasPlan(op)) break;
         const started = (op.quantityCompleted ?? 0) > 0 || op.quantityScrapped > 0;
-        endWeek = measureBase(book, { workCenter: wc, minutes }, floor, base, {
+        const measured = measureBase(book, { workCenter: wc, minutes }, floor, base, {
           forceStartWeek: started ? firstMonday : undefined,
-        }).toWeek;
+        });
+        // The trial's week, where Planera puts it when a Byt replans the
+        // order — never the earlier stored week of an overbooked plan
+        // (granskningen av etapp 3). The stored week only when the trial
+        // does not fit within the horizon.
+        endWeek = measured.trialToWeek ?? measured.toWeek;
         if (endWeek === null) break; // a passed plan that no longer fits within the horizon
       }
       if (endWeek !== null) {

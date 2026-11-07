@@ -424,7 +424,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   // late like configuredStructureRef.
   const planReaderRef: { current: ManufacturingPlanReader | null } = { current: null };
   const planReader: ManufacturingPlanReader = {
-    planNewOrderInTx: (tx, moId, given) => planReaderRef.current!.planNewOrderInTx(tx, moId, given),
+    planNewOrderInTx: (tx, moId, given, opts) => planReaderRef.current!.planNewOrderInTx(tx, moId, given, opts),
     replanOrderInTx: (tx, moId) => planReaderRef.current!.replanOrderInTx(tx, moId),
     orderPlanSummaries: (ids) => planReaderRef.current!.orderPlanSummaries(ids),
     operationResourceSuggestions: (moId) => planReaderRef.current!.operationResourceSuggestions!(moId),

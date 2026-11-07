@@ -1060,6 +1060,74 @@ describe("Leveranstidskontroll — alternativa resurser", () => {
     expect(answer).toMatchObject({ usesAlternatives: true, shipDate: "2026-11-02", ordinaryShipDate: "2026-11-09" });
   });
 
+  it("an ordinarie without a date within the horizon: the alternative's date, and Med ordinarie resurser has none", () => {
+    // 5000 h on 110 is more than two years of 40 h weeks; on 120 (its own
+    // 10 h) it is done this week.
+    const big: DtcOperation = { ...op(10, 5000), alternatives: [{ workCenterId: "wc-2", setupTime: 600, runTimePerUnit: 0 }] };
+    const runs = runDeliveryTimeChecks(made([big]));
+    expect(runs.ordinary).toMatchObject({ shipDate: null, deliveryDate: null, batches: [] });
+    const answer = deliveryTimeAnswer(runs);
+    expect(answer).toMatchObject({ usesAlternatives: true, deliveryDate: "2026-10-26", ordinaryShipDate: null, ordinaryDeliveryDate: null });
+    expect(answer.rows[0]).toMatchObject({ readyDate: "2026-10-23", ordinaryReadyDate: null });
+    expect(answer.batches[0]!.operations[0]).toMatchObject({ workCenterId: "wc-2", alternativeOf: { workCenterCode: "110", toWeek: null } });
+    // useAlternatives false: the ordinarie run — no date and nothing to reserve.
+    expect(deliveryTimeAnswer(runs, false)).toMatchObject({
+      usesAlternatives: false,
+      shipDate: null,
+      deliveryDate: null,
+      ordinaryShipDate: null,
+      ordinaryDeliveryDate: null,
+      batches: [],
+    });
+  });
+
+  it("keeps only the alternatives the delivery date needs: a row that is not critical goes back to its ordinarie", () => {
+    // Row A (8 h on 110, alternative 120): 110 is full this week, so A
+    // would be a week earlier on 120 too. Row C (8 h on 130, alternative
+    // 140): 130 is full W43–W45, 140 only W43 — C decides the date and
+    // needs 140.
+    const wc3: DtcWorkCenter = { ...wc1, workCenterId: "wc-3", code: "130", name: "Svets" };
+    const wc4: DtcWorkCenter = { ...wc1, workCenterId: "wc-4", code: "140", name: "Svets 2" };
+    const opC: DtcOperation = { ...op(10, 8, "wc-3"), alternatives: [{ workCenterId: "wc-4", setupTime: 480, runTimePerUnit: 0 }] };
+    const build = (rows: DtcRowInput[]) =>
+      input({
+        articles: articles(article("a", "manufactured"), article("c", "manufactured")),
+        routings: new Map([
+          ["a", [withAlternatives(8)]],
+          ["c", [opC]],
+        ]),
+        workCenters: new Map([...workCenters, ["wc-3", wc3], ["wc-4", wc4]]),
+        existingOperations: [
+          ...FULL_110,
+          existing("wc-3", "2026-10-21", 40),
+          existing("wc-3", "2026-10-28", 40),
+          existing("wc-3", "2026-11-04", 40),
+          existing("wc-4", "2026-10-21", 40),
+        ],
+        rows,
+      });
+    // Alone, A takes 120 (a week earlier).
+    expect(deliveryTimeAnswer(runDeliveryTimeChecks(build([row("a", 1)])))).toMatchObject({ usesAlternatives: true, deliveryDate: "2026-10-26" });
+
+    const runs = runDeliveryTimeChecks(build([row("a", 1), row("c", 1)]));
+    const answer = deliveryTimeAnswer(runs);
+    // C on 140 is ready Friday the 30th (W44), on 130 the 13th (W46). A on
+    // 110 is ready the 30th too, so 120 would not move the date: only C's
+    // operation is on an alternative.
+    expect(answer).toMatchObject({ usesAlternatives: true, shipDate: "2026-11-02", ordinaryShipDate: "2026-11-16" });
+    expect(answer.batches.map((b) => [b.rowKey, b.operations[0]!.workCenterCode, b.operations[0]!.alternativeOf?.workCenterCode ?? null, b.readyDate])).toEqual([
+      ["r-a", "110", null, "2026-10-30"],
+      ["r-c", "140", "130", "2026-10-30"],
+    ]);
+    expect(answer.rows.map((r) => [r.key, r.readyDate, r.ordinaryReadyDate])).toEqual([
+      ["r-a", "2026-10-30", "2026-10-30"],
+      ["r-c", "2026-10-30", "2026-11-13"],
+    ]);
+    expect(answer.rows[0]!.chain[0]).toMatchObject({ workCenterCode: "110", alternativeOf: null });
+    // The reservation's run under the lock is the same pure pass.
+    expect(deliveryTimeAnswer(runDeliveryTimeChecks(build([row("a", 1), row("c", 1)])))).toEqual(answer);
+  });
+
   it("a configured row's operations take their alternatives the same way", () => {
     const runs = runDeliveryTimeChecks(
       input({

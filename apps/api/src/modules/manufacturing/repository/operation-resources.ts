@@ -22,15 +22,32 @@ const SWITCH_BATCH = 500;
 // operations carry the template's routing row and are covered the same way;
 // its conditional operations have none and get no rows. Operations that
 // already have rows are left alone, so a second call (Släpp of an older
-// configured TO written at creation) is harmless. One statement.
+// configured TO written at creation) is harmless.
+//
+// The resources are locked FOR SHARE first (sorted), and the INSERT reads
+// only the locked ones: a concurrent updateWorkCenter to lego (FOR NO KEY
+// UPDATE) waits for this transaction and then finds the TO's rows
+// (workCenterInAlternativesInTx), or this waits for it and sees the
+// legoresurs — never a lego alternative in an open TO (granskningen av
+// etapp 3; the FK insert's FOR KEY SHARE does not conflict with the type
+// change). Lock order: the TO's rows (the caller's) → work_centers last;
+// updateWorkCenter and the routing edit hold work_centers without waiting
+// for a TO row, so there is no cycle. An operation without routing
+// alternatives locks nothing.
 export async function snapshotOperationResourcesInTx(tx: Tx, manufacturingOrderId: string): Promise<void> {
+  const locked = await lockOperationResourceCandidatesInTx(tx, manufacturingOrderId);
+  if (locked.length === 0) return;
+  const ids = sql.join(
+    locked.map((id) => sql`${id}::uuid`),
+    sql`, `
+  );
   await tx.execute(sql`
     WITH ops AS (
       SELECT mo.id, mo.work_center_id, mo.setup_time, mo.run_time_per_unit, ro.id AS routing_id
       FROM mo_operations mo
       JOIN routing_operations ro ON ro.id = mo.routing_operation_id
         AND ro.work_center_id = mo.work_center_id AND NOT ro.costing_only
-      JOIN work_centers owc ON owc.id = mo.work_center_id AND owc.type <> 'subcontract'
+      JOIN work_centers owc ON owc.id = mo.work_center_id AND owc.type <> 'subcontract' AND owc.id IN (${ids})
       WHERE mo.manufacturing_order_id = ${manufacturingOrderId}
         AND NOT EXISTS (SELECT 1 FROM mo_operation_resources r WHERE r.mo_operation_id = mo.id)
     ), alts AS (
@@ -40,13 +57,33 @@ export async function snapshotOperationResourcesInTx(tx: Tx, manufacturingOrderI
         coalesce(a.run_time_per_unit, ops.run_time_per_unit) AS run_time_per_unit
       FROM ops
       JOIN routing_operation_alternatives a ON a.routing_operation_id = ops.routing_id AND a.work_center_id <> ops.work_center_id
-      JOIN work_centers w ON w.id = a.work_center_id AND w.active AND w.type <> 'subcontract'
+      JOIN work_centers w ON w.id = a.work_center_id AND w.active AND w.type <> 'subcontract' AND w.id IN (${ids})
     )
     INSERT INTO mo_operation_resources (mo_operation_id, work_center_id, rank, setup_time, run_time_per_unit)
     SELECT ops.id, ops.work_center_id, 0::smallint, ops.setup_time, ops.run_time_per_unit
     FROM ops WHERE EXISTS (SELECT 1 FROM alts WHERE alts.mo_operation_id = ops.id)
     UNION ALL
     SELECT mo_operation_id, work_center_id, rank, setup_time, run_time_per_unit FROM alts`);
+}
+
+// The resources a snapshot of the TO may read — every own resource and
+// routing alternative of its operations whose routing row has alternatives —
+// locked FOR SHARE in id order. Returns the locked ids.
+async function lockOperationResourceCandidatesInTx(tx: Tx, manufacturingOrderId: string): Promise<string[]> {
+  const rows = await tx.execute<{ id: string }>(sql`
+    SELECT w.id FROM work_centers w
+    WHERE w.id IN (
+      SELECT mo.work_center_id FROM mo_operations mo
+      WHERE mo.manufacturing_order_id = ${manufacturingOrderId}
+        AND EXISTS (SELECT 1 FROM routing_operation_alternatives a WHERE a.routing_operation_id = mo.routing_operation_id)
+      UNION
+      SELECT a.work_center_id FROM mo_operations mo
+      JOIN routing_operation_alternatives a ON a.routing_operation_id = mo.routing_operation_id
+      WHERE mo.manufacturing_order_id = ${manufacturingOrderId}
+    )
+    ORDER BY w.id
+    FOR SHARE OF w`);
+  return [...rows].map((r) => r.id);
 }
 
 export interface ResourceSwitch {
@@ -66,9 +103,22 @@ export interface ResourceSwitch {
 // the weeks were booked on the old resource; the caller's plan writer
 // writes the new weeks afterwards (Ändra's replanOrderInTx, the
 // reservation's planned weeks). Returns the ids actually switched. The
-// caller holds the operations' row locks (Ändra: lockOrderOperations).
+// caller holds the operations' row locks (Ändra: lockOrderOperations); the
+// target resources are locked FOR SHARE after them (sorted, like the
+// snapshot), so a type change to lego cannot slip in under the switch.
 export async function switchOperationResourcesInTx(tx: Tx, switches: ResourceSwitch[]): Promise<string[]> {
   const switched: string[] = [];
+  const targets = [...new Set(switches.map((s) => s.toWorkCenterId))].sort();
+  if (targets.length > 0) {
+    await tx.execute(sql`
+      SELECT id FROM work_centers
+      WHERE id IN (${sql.join(
+        targets.map((id) => sql`${id}::uuid`),
+        sql`, `
+      )})
+      ORDER BY id
+      FOR SHARE`);
+  }
   for (let i = 0; i < switches.length; i += SWITCH_BATCH) {
     const part = switches.slice(i, i + SWITCH_BATCH);
     const values = sql.join(

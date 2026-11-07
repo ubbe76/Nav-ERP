@@ -40,7 +40,7 @@ const mfg = createManufacturingService(
   undefined,
   undefined,
   {
-    planNewOrderInTx: (tx, moId, given) => planReaderRef.current!.planNewOrderInTx(tx, moId, given),
+    planNewOrderInTx: (tx, moId, given, opts) => planReaderRef.current!.planNewOrderInTx(tx, moId, given, opts),
     replanOrderInTx: (tx, moId) => planReaderRef.current!.replanOrderInTx(tx, moId),
     orderPlanSummaries: (ids) => planReaderRef.current!.orderPlanSummaries(ids),
   }
@@ -226,7 +226,7 @@ describe("reservationen — configured row on an alternative resource", () => {
     undefined,
     undefined,
     {
-      planNewOrderInTx: (tx, moId, given) => pinnedRef.current!.planNewOrderInTx(tx, moId, given),
+      planNewOrderInTx: (tx, moId, given, opts) => pinnedRef.current!.planNewOrderInTx(tx, moId, given, opts),
       replanOrderInTx: (tx, moId) => pinnedRef.current!.replanOrderInTx(tx, moId),
       orderPlanSummaries: (ids) => pinnedRef.current!.orderPlanSummaries(ids),
     }

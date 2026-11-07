@@ -67,7 +67,7 @@ const mfgService = createManufacturingService(
   undefined,
   undefined,
   {
-    planNewOrderInTx: (tx, moId, given) => planReaderRef.current!.planNewOrderInTx(tx, moId, given),
+    planNewOrderInTx: (tx, moId, given, opts) => planReaderRef.current!.planNewOrderInTx(tx, moId, given, opts),
     replanOrderInTx: (tx, moId) => planReaderRef.current!.replanOrderInTx(tx, moId),
     orderPlanSummaries: (ids) => planReaderRef.current!.orderPlanSummaries(ids),
     operationResourceSuggestions: (moId) => planReaderRef.current!.operationResourceSuggestions!(moId),
@@ -186,7 +186,26 @@ async function seedWorld(opts: { fill110?: boolean } = { fill110: true }) {
     { customerId: customer.id, confirm: true, rows: [{ articleId: product.id, quantity: 10, unitPrice: 100 }] },
     user.id
   );
-  return { user, r110, r120, r130, product, fillerArticle, filler120, order, row: rows[0]! };
+  return { user, week, wc, r110, r120, r130, product, fillerArticle, filler120, customer, order, row: rows[0]! };
+}
+
+// A manufactured article with one operation per entry (setup minutes,
+// minutes per piece, alternatives) — the extra worlds below.
+async function madeArticle(
+  prefix: string,
+  operations: { workCenterId: string; setupTime?: number; runTimePerUnit?: number; alternatives?: { workCenterId: string; runTimePerUnit?: number }[] }[]
+) {
+  const article = await articleService.createArticle({ articleNumber: `${prefix}-${crypto.randomUUID().slice(0, 6)}`, name: prefix, type: "manufactured", active: true });
+  for (const [i, o] of operations.entries()) {
+    await mfgService.createRoutingOperation(article.id, {
+      sequenceNo: (i + 1) * 10,
+      workCenterId: o.workCenterId,
+      setupTime: o.setupTime ?? 0,
+      runTimePerUnit: o.runTimePerUnit ?? 0,
+      ...(o.alternatives ? { alternatives: o.alternatives } : {}),
+    });
+  }
+  return article;
 }
 
 const opStep = (check: { rows: { chain: unknown[] }[] }, sequenceNo: number) =>
@@ -391,5 +410,172 @@ describe("reservationen med alternativa resurser", () => {
     const applied = await planningService.applyDeliveryTime({ salesOrderId: w.order.id, deliveryDate: W3 }, w.user.id);
     expect(applied).toMatchObject({ usesAlternatives: false, manufacturingOrders: [expect.objectContaining({ resourceSwitches: [] })] });
     expect((await mfgService.listOperations(applied.manufacturingOrders[0]!.id))[0]).toMatchObject({ workCenterId: w.r110.id, resourceLocked: false });
+  });
+});
+
+// The reservation's planning service with another manufacturing service —
+// to step in between the check under the lock and a TO's snapshot.
+function planningServiceWith(manufacturing: typeof mfgService) {
+  return createPlanningService(createPlanningRepository(db), {
+    purchase: {
+      createPurchaseOrder: async () => {
+        throw new Error("not used");
+      },
+      addRow: async () => {},
+      cancel: async () => {},
+    },
+    manufacturing,
+    requirementsCacheMs: 0,
+    today: () => TODAY,
+    audit: {
+      async log(entry) {
+        auditEntries.push({ entityType: entry.entityType, entityId: entry.entityId, action: entry.action, detail: entry.detail });
+      },
+    },
+    salesOrderDates: salesService,
+  });
+}
+
+describe("granskningen av etapp 3", () => {
+  it("only the operations the date needs get the alternative: a row that is not critical is made on its ordinarie", async () => {
+    // Row A (the product): Op 10 would be a week earlier on 120 (110 full
+    // in W1). Row C: 10 h on 140 (full W1–W2) with 150 as an alternative
+    // (full W1): ready Friday W2 on 150, W3 on 140 — C decides the date, and
+    // A on its ordinarie is ready Friday W2 as well.
+    const w = await seedWorld();
+    const r140 = await w.wc("140", "Svets 2");
+    const r150 = await w.wc("150", "Svets 3");
+    const f140 = await madeArticle("F140", [{ workCenterId: r140.id, setupTime: 4800 }]);
+    const f150 = await madeArticle("F150", [{ workCenterId: r150.id, setupTime: 2400 }]);
+    await mfgService.createManufacturingOrder({ articleId: f140.id, quantity: 1 }, w.user.id);
+    await mfgService.createManufacturingOrder({ articleId: f150.id, quantity: 1 }, w.user.id);
+    const c = await madeArticle("C", [{ workCenterId: r140.id, setupTime: 600, alternatives: [{ workCenterId: r150.id }] }]);
+    const { order, rows } = await salesService.createQuote(
+      {
+        customerId: w.customer.id,
+        confirm: true,
+        rows: [
+          { articleId: w.product.id, quantity: 10, unitPrice: 100 },
+          { articleId: c.id, quantity: 1, unitPrice: 100 },
+        ],
+      },
+      w.user.id
+    );
+    const check = await planningService.checkDeliveryTime({ salesOrderId: order.id });
+    expect(check).toMatchObject({ usesAlternatives: true, deliveryDate: W3, ordinaryDeliveryDate: "2030-03-25" });
+    const batchResources = check.batches.map((b) => [b.rowKey, b.operations.map((o) => [o.sequenceNo, o.workCenterCode, o.alternativeOf?.workCenterCode ?? null])]);
+    expect(batchResources).toEqual([
+      [rows[0]!.id, [[10, "110", null], [20, "130", null]]],
+      [rows[1]!.id, [[10, "150", "140"]]],
+    ]);
+
+    // The reservation writes exactly that: Vald för hand on C's operation only.
+    const applied = await planningService.applyDeliveryTime({ salesOrderId: order.id, deliveryDate: W3, expectedOrders: 2 }, w.user.id);
+    expect(applied.manufacturingOrders.map((m) => [m.salesOrderRowId, m.resourceSwitches.map((s) => [s.sequenceNo, s.fromCode, s.toCode])])).toEqual([
+      [rows[0]!.id, []],
+      [rows[1]!.id, [[10, "140", "150"]]],
+    ]);
+    const resources = async (moId: string) => (await mfgService.listOperations(moId)).map((o) => [o.workCenterId, o.resourceLocked]);
+    expect(await resources(applied.manufacturingOrders[0]!.id)).toEqual([
+      [w.r110.id, false],
+      [w.r130.id, false],
+    ]);
+    expect(await resources(applied.manufacturingOrders[1]!.id)).toEqual([[r150.id, true]]);
+  });
+
+  it("refuses with a fresh check when the alternative is gone before the TO's snapshot (a deactivated resource) — nothing written", async () => {
+    const w = await seedWorld();
+    expect(await planningService.checkDeliveryTime({ salesOrderId: w.order.id })).toMatchObject({ usesAlternatives: true, deliveryDate: W2 });
+    // 120 is deactivated (committed) after the check under the lock has read
+    // it, just before the TO is created: the snapshot no longer has it.
+    let deactivated = false;
+    const stepping = planningServiceWith({
+      ...mfgService,
+      async createManufacturingOrderInTx(tx, input, createdBy, opts) {
+        if (!deactivated) {
+          deactivated = true;
+          await mfgService.updateWorkCenter(w.r120.id, { active: false });
+        }
+        return mfgService.createManufacturingOrderInTx(tx, input, createdBy, opts);
+      },
+    });
+    const failure = await stepping
+      .applyDeliveryTime({ salesOrderId: w.order.id, deliveryDate: W2, expectedOrders: 1 }, w.user.id)
+      .then(() => null, (err: unknown) => err);
+    expect(deactivated).toBe(true);
+    // Not the engine's plan on 110 with a warning: the date rested on 120.
+    expect(failure).toBeInstanceOf(DeliveryTimeChangedError);
+    expect((failure as DeliveryTimeChangedError).deliveryDate).toBe(W3);
+    expect((failure as DeliveryTimeChangedError).result).toMatchObject({ usesAlternatives: false, deliveryDate: W3, ordinaryDeliveryDate: null });
+    expect(await orderCount()).toBe(1); // the filler only
+    expect(await salesOrderRow(w.order.id)).toEqual({ status: "confirmed", expectedDeliveryDate: null });
+    expect(auditEntries.filter((e) => e.action === "released" || e.action === "delivery_time_applied")).toEqual([]);
+
+    // The new date goes through, on the ordinarie.
+    const applied = await planningService.applyDeliveryTime({ salesOrderId: w.order.id, deliveryDate: W3 }, w.user.id);
+    expect(applied).toMatchObject({ usesAlternatives: false, manufacturingOrders: [expect.objectContaining({ resourceSwitches: [] })] });
+  });
+
+  it("an ordinarie without a date and an alternative with one: the reservation with useAlternatives false has no date to promise", async () => {
+    const w = await seedWorld();
+    // 60 min/st on 110 but 1 min/st on 120: 5000 st is 5000 h on 110 — more
+    // than two years of 40 h weeks — and 83 h on 120 (ready Friday W3).
+    const big = await madeArticle("B", [{ workCenterId: w.r110.id, runTimePerUnit: 60, alternatives: [{ workCenterId: w.r120.id, runTimePerUnit: 1 }] }]);
+    const { order } = await salesService.createQuote(
+      { customerId: w.customer.id, confirm: true, rows: [{ articleId: big.id, quantity: 5000, unitPrice: 100 }] },
+      w.user.id
+    );
+    const check = await planningService.checkDeliveryTime({ salesOrderId: order.id });
+    expect(check).toMatchObject({ usesAlternatives: true, shipDate: "2030-03-25", deliveryDate: "2030-03-25", ordinaryShipDate: null, ordinaryDeliveryDate: null });
+    expect(check.rows[0]).toMatchObject({ readyDate: "2030-03-22", ordinaryReadyDate: null });
+
+    // Med ordinarie resurser: the ordinarie run has no date, so nothing can be promised.
+    const failure = await planningService
+      .applyDeliveryTime({ salesOrderId: order.id, deliveryDate: "2030-03-25", useAlternatives: false }, w.user.id)
+      .then(() => null, (err: unknown) => err);
+    expect(failure).toBeInstanceOf(DeliveryTimeChangedError);
+    expect((failure as DeliveryTimeChangedError).deliveryDate).toBeNull();
+    expect((failure as Error).message).toBe("Läget har ändrats sedan kontrollen — det går inte längre att lova ett datum");
+    // The body is the check's own answer: the alternative's date, no ordinarie date.
+    expect((failure as DeliveryTimeChangedError).result).toMatchObject({ usesAlternatives: true, deliveryDate: "2030-03-25", ordinaryDeliveryDate: null });
+    expect(await orderCount()).toBe(1);
+
+    // Left out (förval true): the alternative's date, made on 120.
+    const applied = await planningService.applyDeliveryTime({ salesOrderId: order.id, deliveryDate: "2030-03-25" }, w.user.id);
+    expect(applied).toMatchObject({ usesAlternatives: true, manufacturingOrders: [expect.objectContaining({ resourceSwitches: [expect.objectContaining({ toCode: "120" })] })] });
+  });
+
+  it("a component's TO on an alternative in a tree of several levels: only its operation is Vald för hand", async () => {
+    // K (10 h on 110, 120 as an alternative) under T (1 h on 130). 110 is
+    // full in W1: K on 120 is ready Friday W1, and T after it the same day.
+    const w = await seedWorld();
+    const part = await madeArticle("K", [{ workCenterId: w.r110.id, runTimePerUnit: 60, alternatives: [{ workCenterId: w.r120.id }] }]);
+    const top = await madeArticle("T", [{ workCenterId: w.r130.id, runTimePerUnit: 6 }]);
+    await articleService.addBomComponent(top.id, { componentArticleId: part.id, quantity: 1 });
+    const { order, rows } = await salesService.createQuote(
+      { customerId: w.customer.id, confirm: true, rows: [{ articleId: top.id, quantity: 10, unitPrice: 100 }] },
+      w.user.id
+    );
+    const check = await planningService.checkDeliveryTime({ salesOrderId: order.id });
+    expect(check).toMatchObject({ usesAlternatives: true, deliveryDate: W2, ordinaryDeliveryDate: W3 });
+    expect(check.batches.map((b) => [b.level, b.articleId, b.operations.map((o) => [o.workCenterCode, o.alternativeOf?.workCenterCode ?? null])])).toEqual([
+      [2, part.id, [["120", "110"]]],
+      [1, top.id, [["130", null]]],
+    ]);
+
+    const applied = await planningService.applyDeliveryTime({ salesOrderId: order.id, deliveryDate: W2, expectedOrders: 2 }, w.user.id);
+    expect(applied.manufacturingOrders.map((m) => [m.level, m.salesOrderRowId, m.resourceSwitches.map((s) => [s.sequenceNo, s.fromCode, s.toCode])])).toEqual([
+      [2, null, [[10, "110", "120"]]],
+      [1, rows[0]!.id, []],
+    ]);
+    const [partMo, topMo] = applied.manufacturingOrders;
+    const partOps = await mfgService.listOperations(partMo!.id);
+    expect(partOps.map((o) => [o.workCenterId, o.resourceLocked, o.planLocked])).toEqual([[w.r120.id, true, true]]);
+    expect(await planRows(partOps[0]!.id)).toEqual([{ monday: W1, minutes: 600 }]);
+    expect((await mfgService.listOperations(topMo!.id)).map((o) => [o.workCenterId, o.resourceLocked, o.planLocked])).toEqual([[w.r130.id, false, true]]);
+    expect(auditEntries.filter((e) => e.action === "released").map((e) => [e.entityId, e.detail])).toEqual([
+      [partMo!.orderNumber, { resourceSwitches: [{ sequenceNo: 10, fromCode: "110", toCode: "120" }] }],
+      [topMo!.orderNumber, undefined],
+    ]);
   });
 });

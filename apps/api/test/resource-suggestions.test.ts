@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PlanWorkCenter } from "../src/modules/planning/service/capacity-book.js";
+import { planProduction } from "../src/modules/planning/service/production-plan.js";
 import type { CapacityOperationRow, OperationResourceOption, PlannedWeek } from "../src/modules/planning/service/capacity-calc.js";
 import {
   mayGetResourceSuggestion,
@@ -254,6 +255,39 @@ describe("resourceSuggestions — the floor and the walk", () => {
     const op20 = op("TO-1", 20, 10, { resources: ALTERNATIVES, plannedWeeks: weeks([W45, 10]) });
     const out = resourceSuggestions(world([load("wc-140", W43, 40), load("wc-110", W44, 40), op10, op20]));
     expect(out.map((s) => [s.sequenceNo, s.toCode, s.currentToWeek, s.toWeek])).toEqual([[20, "120", W45, W44]]);
+  });
+
+  it("starts after where Planera puts an overbooked previous operation — Byt gives exactly the förslag's week", () => {
+    // Op 10 on 140 is stored in W43, but 140 is full there now (another TO
+    // came in on a locked week): its trial ends in W44. Op 20 on 110 is
+    // stored in W45 (110 full W44–W45); 120 is free. A floor from Op 10's
+    // stored W43 would promise 120 in W43 — after the switch the order is
+    // replanned with Planera's rules, Op 10 lands in W44 and Op 20 with it.
+    const op10 = op("TO-1", 10, 10, { workCenterId: "wc-140", plannedWeeks: weeks([W43, 10]) });
+    const op20 = op("TO-1", 20, 10, { resources: ALTERNATIVES, plannedWeeks: weeks([W45, 10]) });
+    const others = [load("wc-140", W43, 40), load("wc-110", W44, 40), load("wc-110", W45, 40)];
+    const w = world([...others, op10, op20]);
+    const out = resourceSuggestions(w);
+    expect(out.map((s) => [s.sequenceNo, s.toCode, s.currentToWeek, s.toWeek])).toEqual([[20, "120", W45, W44]]);
+
+    // Byt till 120: Ändra replans the one order with Planera's rules
+    // (replanOrderInTx) — every other order is existing load.
+    const switched = { ...op20, workCenterId: "wc-120", resourceLocked: true };
+    const replanned = planProduction({
+      today: w.today,
+      offDays: w.offDays,
+      workCenters: w.workCenters,
+      schedule: w.schedule,
+      orders: [{ id: "mo-TO-1", orderNumber: "TO-1", dueDate: null, operations: [op10, switched].map((o) => ({ ...o, started: false })) }],
+      existingOperations: others,
+    });
+    const endWeek = (id: string) => replanned.plans.find((p) => p.operationId === id)?.endWeek;
+    expect([endWeek("TO-1:10"), endWeek("TO-1:20")]).toEqual([W44, out[0]!.toWeek]);
+
+    // Not overbooked (140 has room in W43): the floor stays W43, and so does
+    // the förslag.
+    const free = resourceSuggestions(world([load("wc-110", W43, 40), load("wc-110", W44, 40), op10, op20]));
+    expect(free.map((s) => [s.sequenceNo, s.toCode, s.toWeek])).toEqual([[20, "120", W43]]);
   });
 
   it("starts after a lego operation's lead time", () => {

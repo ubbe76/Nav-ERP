@@ -35,7 +35,7 @@ import type {
 // runs inside the report transactions; the mode is read here, outside them.
 import { MaterialShortageError, type MaterialShortageCheck } from "./material-shortage.js";
 import { computeReadiness, type Readiness, type ReadinessResult } from "./terminal-readiness.js";
-import type { GivenOperationPlan, ManufacturingPlanReader } from "../../planning/service/planning.service.js";
+import type { GivenOperationPlan, GivenPlanOptions, ManufacturingPlanReader } from "../../planning/service/planning.service.js";
 import type { OperationResourceSuggestion } from "../../planning/service/resource-suggestions.js";
 export { MaterialShortageError, type MaterialShortage } from "./material-shortage.js";
 import type { PeriodLockChecker } from "../../payroll/service/period-lock.js";
@@ -1532,13 +1532,15 @@ export function createManufacturingService(
     // the repository body takes the production_plan lock first. With
     // `plannedWeeks` (by sequence number and resource — an alternative the
     // reservation chose is switched to, Vald för hand) the allocations are
-    // written as given instead of planned by the engine. Logs nothing — the
-    // caller writes its own händelselogg (and "released" per TO if it wants it).
+    // written as given instead of planned by the engine; `refuseMismatch`
+    // throws the planning service's ReservedPlanMismatchError when they no
+    // longer match the TO's operations. Logs nothing — the caller writes its
+    // own händelselogg (and "released" per TO if it wants it).
     async createManufacturingOrderInTx(
       tx: Tx,
       input: CreateManufacturingOrderInput,
       createdBy: string | null,
-      opts: { plannedWeeks?: GivenOperationPlan[] } = {}
+      opts: { plannedWeeks?: GivenOperationPlan[] } & GivenPlanOptions = {}
     ) {
       const prepared = await prepareCreate(input);
       const result = await repo.createManufacturingOrderInTx(
@@ -1547,7 +1549,7 @@ export function createManufacturingService(
         createdBy,
         prepared.linkedSalesOrder,
         prepared.configured,
-        planning ? (t, moId) => planning.planNewOrderInTx(t, moId, opts.plannedWeeks) : undefined
+        planning ? (t, moId) => planning.planNewOrderInTx(t, moId, opts.plannedWeeks, { refuseMismatch: opts.refuseMismatch }) : undefined
       );
       if (!result.ok) throw createOutcomeError(result);
       return { ...result.order, releaseWarnings: result.warnings };
