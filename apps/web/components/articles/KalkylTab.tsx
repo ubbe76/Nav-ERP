@@ -1,19 +1,30 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
 import { Checkbox, Field, Input } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
 import { chainLines } from "../../lib/costChain";
 import type { CostCalculation, CostCalculationDraft } from "../../lib/types";
-import { Form, FormActions, FormError, FormHint, FormStack } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint, FormRow, FormStack } from "../ui/Form";
 import { Card } from "../ui/Card";
 import { CostChain } from "../ui/CostChain";
 import { CostCalculationList } from "../costing/CostCalculationList";
 import { SectionHeading } from "../ui/SectionHeading";
 import { computeLineMargin } from "../../lib/margin";
 import styles from "./KalkylTab.module.css";
+
+// The markups Pröva påslag sends; absent key = the ones that apply.
+type TryMarkups = { generalMarkupPercent?: number; materialMarkupPercent?: number };
+
+function isTrial(m: TryMarkups) {
+  return m.generalMarkupPercent !== undefined || m.materialMarkupPercent !== undefined;
+}
+
+function markupsBody(m: TryMarkups) {
+  return isTrial(m) ? { markups: m } : {};
+}
 
 const checkboxRowStyle = {
   display: "flex",
@@ -37,6 +48,18 @@ export function KalkylTab({
   const router = useRouter();
   const [quantity, setQuantity] = useState("1");
   const [multiLevel, setMultiLevel] = useState(false);
+  // Pröva påslag (#16): the two price markups to try instead of the ones that
+  // apply to the article (its varugrupp's, else the company's). Prefilled with
+  // the applying values; only a field the user has changed is sent, so an
+  // untouched panel calculates exactly like before and never makes a "prövat"
+  // calculation. Nothing in System → Kalkyler is written either way.
+  const [generalTry, setGeneralTry] = useState("");
+  const [materialTry, setMaterialTry] = useState("");
+  const [applying, setApplying] = useState<{ general: string; material: string } | null>(null);
+  // "Manual wins": the late baseline response never overwrites typed values.
+  // The refs mirror the touched flags for when the response lands.
+  const generalTouchedNow = useRef(false);
+  const materialTouchedNow = useRef(false);
   // The computed but unsaved calculation. Nothing is written until the user
   // asks for it with Spara kalkyl. Tagged with the INPUTS it was computed for
   // — quantity and the multi-level flag — so a response that lands after a
@@ -49,12 +72,46 @@ export function KalkylTab({
     warnings: string[];
     quantity: string;
     multiLevel: boolean;
+    markups: TryMarkups;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [saving, setSaving] = useState(false);
   // Opens the specification for the calculation that was just saved.
   const [openId, setOpenId] = useState<string | null>(null);
+
+  // The markups that apply to this article today: a read-only preview, which
+  // saves nothing. Its result fills the two fields unless the user got there
+  // first.
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ calculation: CostCalculationDraft }>(
+      `/api/v1/articles/${articleId}/cost-calculations/pre-calculate`,
+      { method: "POST", body: JSON.stringify({ quantity: 1 }) }
+    )
+      .then(({ calculation }) => {
+        if (cancelled) return;
+        const general = String(Number(calculation.generalMarkupPercent));
+        const material = String(Number(calculation.materialMarkupPercent));
+        setApplying({ general, material });
+        if (!generalTouchedNow.current) setGeneralTry(general);
+        if (!materialTouchedNow.current) setMaterialTry(material);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [articleId]);
+
+  // The markups to send: a field that differs from what applies.
+  function tryMarkups(): TryMarkups {
+    const out: TryMarkups = {};
+    if (applying) {
+      if (generalTry.trim() !== "" && Number(generalTry) !== Number(applying.general)) out.generalMarkupPercent = Number(generalTry);
+      if (materialTry.trim() !== "" && Number(materialTry) !== Number(applying.material)) out.materialMarkupPercent = Number(materialTry);
+    }
+    return out;
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -65,12 +122,13 @@ export function KalkylTab({
     // input), and the response must stay tied to the quantity it was for.
     const requestedQuantity = quantity;
     const requestedMultiLevel = multiLevel;
+    const requestedMarkups = tryMarkups();
     try {
       const result = await apiFetch<{ calculation: CostCalculationDraft; warnings: string[] }>(
         `/api/v1/articles/${articleId}/cost-calculations/pre-calculate`,
-        { method: "POST", body: JSON.stringify({ quantity: Number(requestedQuantity), multiLevel: requestedMultiLevel }) }
+        { method: "POST", body: JSON.stringify({ quantity: Number(requestedQuantity), multiLevel: requestedMultiLevel, ...markupsBody(requestedMarkups) }) }
       );
-      setPreview({ ...result, quantity: requestedQuantity, multiLevel: requestedMultiLevel });
+      setPreview({ ...result, quantity: requestedQuantity, multiLevel: requestedMultiLevel, markups: requestedMarkups });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Kunde inte beräkna kalkylen");
     } finally {
@@ -94,7 +152,7 @@ export function KalkylTab({
         `/api/v1/articles/${articleId}/cost-calculations/pre-calculate`,
         {
           method: "POST",
-          body: JSON.stringify({ quantity: Number(preview.quantity), multiLevel: preview.multiLevel, save: true }),
+          body: JSON.stringify({ quantity: Number(preview.quantity), multiLevel: preview.multiLevel, save: true, ...markupsBody(preview.markups) }),
         }
       );
       setPreview(null);
@@ -161,6 +219,47 @@ export function KalkylTab({
               standardpris. Ett halvfabrikat utan struktur och rutt får sitt standardpris, med en varning.
             </FormHint>
 
+            <SectionHeading>Pröva påslag</SectionHeading>
+            <FormRow>
+              <Field label="Generellt påslag (%)" htmlFor="tryGeneralMarkup">
+                <Input
+                  id="tryGeneralMarkup"
+                  type="number"
+                  min="0"
+                  max="1000"
+                  step="any"
+                  size="xs"
+                  value={generalTry}
+                  onChange={(e) => {
+                    generalTouchedNow.current = true;
+                    setGeneralTry(e.target.value);
+                    setPreview(null);
+                  }}
+                />
+              </Field>
+              <Field label="Materialpåslag (%)" htmlFor="tryMaterialMarkup">
+                <Input
+                  id="tryMaterialMarkup"
+                  type="number"
+                  min="0"
+                  max="1000"
+                  step="any"
+                  size="xs"
+                  value={materialTry}
+                  onChange={(e) => {
+                    materialTouchedNow.current = true;
+                    setMaterialTry(e.target.value);
+                    setPreview(null);
+                  }}
+                />
+              </Field>
+            </FormRow>
+            <FormHint attached>
+              Förifyllt med påslagen som gäller för artikeln: varugruppens, annars företagets. Ändra ett värde för att
+              räkna förkalkylen med det i stället. Inget i System → Kalkyler ändras, och MO-, LO-, Affo- och TO-påslagen
+              är alltid de vanliga.
+            </FormHint>
+
             <FormActions>
               <Button type="submit" variant="primary" disabled={pending}>
                 {pending ? "Beräknar…" : "Förkalkylera"}
@@ -175,7 +274,11 @@ export function KalkylTab({
         {preview && preview.quantity === quantity && preview.multiLevel === multiLevel && (
           <Card maxWidth={360}>
             <FormStack>
-              <FormHint>Beräkningen sparas först när du klickar Spara kalkyl.</FormHint>
+              <FormHint>
+                {isTrial(preview.markups)
+                  ? "Prövningen sparas först när du klickar Spara som prövad kalkyl. Företagets inställningar ändras inte."
+                  : "Beräkningen sparas först när du klickar Spara kalkyl."}
+              </FormHint>
               {preview.warnings.map((w, i) => (
                 <FormError key={i}>{w}</FormError>
               ))}
@@ -184,7 +287,7 @@ export function KalkylTab({
               <CostChain lines={chainLines(preview.calculation, Number(preview.calculation.quantity))} />
               <FormActions>
                 <Button type="button" variant="primary" disabled={saving} onClick={save}>
-                  {saving ? "Sparar…" : "Spara kalkyl"}
+                  {saving ? "Sparar…" : isTrial(preview.markups) ? "Spara som prövad kalkyl" : "Spara kalkyl"}
                 </Button>
               </FormActions>
             </FormStack>

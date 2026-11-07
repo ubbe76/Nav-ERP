@@ -427,7 +427,7 @@ När en ny version av Nav lägger till en färg saknar redan sparade teman den. 
 
 ## Kalkyler
 
-**System → Kalkyler** styr hur för- och efterkalkylen räknar. Inställningarna är systemomfattande och gäller alla artiklar. Kalkylerna körs från artikelkortets flik **Kalkyl** och från tillverkningsordern (se [Artiklar](/hjalp/artiklar) och [Tillverkning](/hjalp/tillverkning)).
+**System → Kalkyler** styr hur för- och efterkalkylen räknar. Inställningarna är företagets och gäller alla artiklar, utom att **Generellt påslag** och **Materialpåslag** kan sättas per varugrupp (se [Påslagen](#paslagen)) och prövas på en enskild artikel (se [Pröva påslag](/hjalp/artiklar#prova-paslag)). Kalkylerna körs från artikelkortets flik **Kalkyl** och från tillverkningsordern (se [Artiklar](/hjalp/artiklar) och [Tillverkning](/hjalp/tillverkning)).
 
 ### Materialkostnad i förkalkylen och efterkalkylen
 
@@ -460,6 +460,8 @@ Påslagen anges i procent och får ha decimaler. Alla är 0 % från början, vil
 - **Generellt påslag (%)** — läggs på självkostnaden. Därefter läggs materialpåslaget och TO-påslaget till, och summan är försäljningspriset.
 - **Materialpåslag (%)** — ett försäljningspåslag på materialet. Läggs på direkt material + MO-påslaget och ingår **bara i försäljningspriset**, inte i tillverkningskostnaden (TVK) eller självkostnaden (SVK). Självkostnaden blir alltså den riktiga kostnaden, medan priset du sätter (och offererar via artikelns försäljningspris) bär påslaget för materialet. Det läggs **bredvid** det generella påslaget, inte ovanpå: det generella påslaget räknas på självkostnaden som förut, och materialpåslaget får inget generellt påslag på sig.
 
+**Varugruppen kan ha egna prispåslag.** På **Artiklar → Varugrupper** har varje varugrupp fälten **Generellt påslag (%)** och **Materialpåslag (%)** (se [Artiklar](/hjalp/artiklar#varugrupper)). Ett påslag som varugruppen har gäller för gruppens artiklar i förkalkylen i stället för företagets; är fältet tomt gäller **företagets** värde, och fälten avgörs var för sig. Bara de två prispåslagen kan sättas per varugrupp. **MO-, LO- och Affo-påslagen är alltid företagets** (och TO-påslaget resursens), så **självkostnaden** och standardpriset blir desamma oavsett varugrupp — det är försäljningspriset som skiljer sig. Varje kalkyl sparar vilken nivå påslagen kom från, och specifikationen och kedjan visar den (se [Artiklar](/hjalp/artiklar#kalkyl)).
+
 **TO-påslaget sätts inte här.** Tillverkningsomkostnaden är knuten till resursen som utför operationen och anges som **TO-påslag (%)** per arbetsplats under **Tillverkning → Resurser**. TO-påslaget ingår **inte** i tillverkningskostnaden (TVK) eller självkostnaden (SVK): det läggs till sist i kedjan, efter det generella påslaget, direkt på försäljningspriset, och får därför varken Affo-påslag eller generellt påslag på sig.
 
 **Halvfabrikat bär inget påslag.** Kör du en förkalkyl med **Räkna om underliggande nivåer** (se [Artiklar](/hjalp/artiklar#kalkyl)) kostas varje tillverkat halvfabrikat ur sin egen struktur och rutt, och kommer in i kedjan som en egen post **Halvfabrikat**. Den posten får varken MO- eller LO-påslag: påslagen är redan pålagda en nivå ned, inne i halvfabrikatets egen tillverkningskostnad. Affo-påslaget och det generella påslaget träffar den däremot — de är företagsgemensamma och ska ligga på den färdiga artikeln exakt en gång. Halvfabrikatets eget TO-påslag följer inte med i posten utan läggs till kedjans **TO-påslag**, tillsammans med slutartikelns egna operationers — det hamnar alltså på försäljningspriset precis som slutartikelns eget. Halvfabrikatets materialpåslag (på dess eget direkta material + MO) följer med upp på samma sätt och läggs till kedjans **Materialpåslag**.
@@ -486,6 +488,8 @@ Panelen **Så räknas försäljningspriset** längst ned på sidan visar hela ke
 ─────────────────────────────────
 = Försäljningspris
 ```
+
+Under panelen står **Var påslagen sätts**: MO, LO och Affo sätts av företaget (här), TO av resursen (under **Tillverkning → Resurser**), och **Generellt påslag** och **Materialpåslag** av varugruppen, annars av företaget — det mest specifika gäller för varje påslag för sig.
 
 Samma kedja visas som **Kalkylspecifikation** på artikelkortets flik Kalkyl efter varje beräkning.
 

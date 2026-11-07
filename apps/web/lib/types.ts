@@ -3,6 +3,7 @@ import type { ManufacturingOrderConfiguration, OrderRowConfiguration } from "./c
 import type { DocumentRateSourceValue } from "./currency";
 import type { DocumentLanguage } from "./documentLanguage";
 import type { Permission } from "./permissions";
+import type { MarkupLevel } from "./markupLevels";
 import type { VatBoxSetting, VatDeclarationBoxes, VatReportingPeriod } from "./vatBoxes";
 import type {
   BuyerVatNumberProblem,
@@ -128,6 +129,10 @@ export interface ArticleGroup {
   vatRate: string;
   // Kostnadsställe (förval) for the revenue/cost rows of this group's articles.
   defaultCostCenterId?: string | null;
+  // Prispåslag (#16) the group sets for its articles, e.g. "40.00"; null =
+  // inherits the company's (System → Kalkyler).
+  generalMarkupPercent: string | null;
+  materialMarkupPercent: string | null;
   createdAt: string;
 }
 
@@ -346,6 +351,10 @@ export interface CostCalculation {
   affoPercent: string;
   generalMarkupPercent: string;
   materialMarkupPercent: string;
+  // Where each price markup came from (#16): the company's setting, the
+  // article's varugrupp, or a trial (Pröva påslag).
+  generalMarkupLevel: MarkupLevel;
+  materialMarkupLevel: MarkupLevel;
   type: CostCalculationType;
   calculatedAt: string;
 }
@@ -5165,6 +5174,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   demo_data_created: "Exempeldata skapad",
   created: "Skapad",
   updated: "Ändrad",
+  markups_changed: "Påslag ändrade",
   vat_code_changed: "Momskod ändrad",
   onboarding_number_series_reviewed: "Nummerserier granskade",
   deleted: "Borttagen",

@@ -11,6 +11,7 @@ import { NewArticleGroupForm } from "./NewArticleGroupForm";
 import { apiFetch } from "../../lib/api";
 import type { ArticleGroup, ArticleNumberSeriesOption } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
+import { groupMarkupsText } from "../../lib/markupLevels";
 import { HelpLink } from "../ui/HelpLink";
 
 export function ArticleGroupsPageClient({ groups }: { groups: ArticleGroup[] }) {
@@ -49,6 +50,7 @@ export function ArticleGroupsPageClient({ groups }: { groups: ArticleGroup[] }) 
           { key: "code", label: "Kod", width: "0.4fr" },
           { key: "name", label: "Namn", width: "1.2fr" },
           { key: "vat", label: "Moms", width: "0.5fr" },
+          { key: "markups", label: "Påslag", width: "0.7fr" },
           { key: "series", label: "Nummerserie", width: "1fr" },
           { key: "description", label: "Beskrivning", width: "minmax(0, 2.4fr)" },
         ]}
@@ -69,6 +71,8 @@ export function ArticleGroupsPageClient({ groups }: { groups: ArticleGroup[] }) 
               );
             case "vat":
               return `${Number(group.vatRate)} %`;
+            case "markups":
+              return groupMarkupsText(group.generalMarkupPercent, group.materialMarkupPercent);
             case "series":
               return group.numberSeriesKey ? (seriesNames[group.numberSeriesKey] ?? group.numberSeriesKey) : "Standard";
             case "description":

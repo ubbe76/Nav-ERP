@@ -10,6 +10,7 @@ import { apiFetch } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import { formatStockholmDateTime } from "../../lib/date";
 import type { CostCalculation } from "../../lib/types";
+import { StatusPill } from "../ui/StatusPill";
 import { CostSpecification } from "./CostSpecification";
 import styles from "./CostCalculationList.module.css";
 
@@ -19,6 +20,12 @@ const TYPE_LABELS: Record<CostCalculation["type"], string> = { pre: "Förkalkyl"
 // already writes, so an amount never wraps inside its cell.
 function money(value: string | number) {
   return `${formatMoney(value)}\u00a0kr`;
+}
+
+// A calculation with a tried price markup (Pröva påslag, #16). Optional chaining
+// on purpose: a row from before the levels existed has neither field.
+function isTrial(c: CostCalculation) {
+  return c.generalMarkupLevel === "trial" || c.materialMarkupLevel === "trial";
 }
 
 // Sales price divided by quantity — "—" rather than Infinity/NaN for the
@@ -120,9 +127,14 @@ export function CostCalculationList({
           switch (key) {
             case "type":
               return (
-                <button type="button" className={styles.rowLink} onClick={() => setSelected(row.id)}>
-                  {TYPE_LABELS[row.type]}
-                </button>
+                <span className={styles.typeCell}>
+                  <button type="button" className={styles.rowLink} onClick={() => setSelected(row.id)}>
+                    {TYPE_LABELS[row.type]}
+                  </button>
+                  {/* Pröva påslag (#16): a saved calculation run with markups
+                      tried instead of the ones that applied. */}
+                  {isTrial(row) && <StatusPill status="draft" compact label="Prövat" />}
+                </span>
               );
             case "quantity":
               return Number(row.quantity).toLocaleString("sv-SE");
