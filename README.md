@@ -513,7 +513,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.8.2-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.8.3-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -541,7 +541,8 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   fantomflagga), varugrupper (1–4-siffrig kod, styr kontering och
   momssats), artikelkoder för urval och gruppering, artikelkort med flikar
   för Struktur (BOM, redigerbara rader med cykelskydd), Rutt (redigerbara
-  operationer), lagersaldo, kalkyl (för-/efterkalkyl-underlag) och
+  operationer), lagersaldo, kalkyl (för-/efterkalkyl-underlag och
+  **Pröva påslag**) och
   **filer** (ritningar i PDF/JPEG/PNG, max 20 MB, som följer med
   TO-utskriften och kan bifogas i ordermejl); **flikarna anpassas efter
   artikeltyp** — Beredning visas bara för tillverkade artiklar, medan köpta
@@ -608,7 +609,11 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   per leveransrad så länge den inte är fakturerad; ny offert eller kundorder (skapas
   direkt som bekräftad) från kundkortet eller listan; offerter med
   **giltighetstid** som kan markeras **Förlorad** med förlustorsak; kundpriser med
-  **ställpris** som läggs på ordern som en egen ställkostnadsrad; kundfakturor med
+  **ställpris** som läggs på ordern som en egen ställkostnadsrad; **påslag per
+  varugrupp, kund eller order** som ger ett **Kalkylpris** ur artikelns
+  förkalkyl när kunden saknar kundpris och prislistepris (ett ändrat
+  orderpåslag räknar om priskedjans rader efter bekräftelse, handskrivna
+  priser ändras aldrig); kundfakturor med
   prislistor/kundpriser, och **utfärdade fakturor och påminnelser
   arkiveras som PDF** exakt som de skickades; **e-faktura via Peppol**
   (Peppol BIS Billing 3, faktura och kreditfaktura till företagskunder i
@@ -620,7 +625,9 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   och Försäljning; villkoren ligger också på förfrågan, inköpsorder och
   offert/kundorder (snapshotas från partnern vid skapandet, redigerbara
   på dokumentkortet och utskrivna på PDF:erna)
-- **Tillverkning** — resurser (maskiner/personal med timkostnad),
+- **Tillverkning** — resurser (maskiner/personal med timkostnad) och
+  **alternativa resurser** per operation (beläggningen och
+  Leveranstidskontrollen föreslår ett alternativ när ordinarie är full),
   tillverkningsorder med fullt statusflöde (planerad → frisläppt → pågår →
   klar → stängd), **strukturkomponenter kopplade till operationer** som
   dras automatiskt från lagret när operationen avrapporteras — för
