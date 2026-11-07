@@ -12,6 +12,7 @@ import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { requirementsExportColumns } from "../service/export-columns.js";
 import {
   ArticleNotFoundError,
+  ManufacturingOrderNotFoundError,
   ConfigurationNotAllowedError,
   ConfigurationRequiredError,
   CustomerNotFoundError,
@@ -41,7 +42,7 @@ import {
 import { ConfiguratorInvalidConfigurationError, ConfiguratorModeChangedError, ConfiguratorNotToOrderModeError } from "../../configurator/service/configurator.errors.js";
 import { InvalidStatusTransitionError as SalesStatusError } from "../../sales/service/sales.service.js";
 import { errorBody } from "../../system/service/error-body.js";
-import { DELIVERY_CHECK, OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
+import { DELIVERY_CHECK, MO_READ, OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
 
 export async function planningRoutes(app: FastifyInstance, opts: { service: PlanningService }) {
   const { service } = opts;
@@ -69,6 +70,17 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
       return await service.getArticleOverview(req.params.id);
     } catch (err) {
       if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Pegging (#9): the TO card's Täcks av / Går till. MO_READ like the TO
+  // card itself (the workshop profile sees it; no prices in the answer).
+  app.get<{ Params: { id: string } }>("/manufacturing-orders/:id/coverage", { config: { access: MO_READ } }, async (req, reply) => {
+    try {
+      return await service.getManufacturingOrderCoverage(req.params.id);
+    } catch (err) {
+      if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
       throw err;
     }
   });

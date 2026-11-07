@@ -54,16 +54,29 @@ export function statusListParam<T extends readonly [string, ...string[]]>(values
 
 // The order lists' (kund-, inköps- and tillverkningsorder) status filter also
 // takes "late" — Sen, derived when the list is read by the same rule as
-// Aviseringarna, never a stored status. splitLateFilter separates it from the
-// real statuses; given together, both apply.
+// Aviseringarna, never a stored status. The TO list also takes
+// "component_late" — Halvfabrikat sent (pegging #9), derived the same way.
+// splitLateFilter separates the pseudo statuses from the real ones; given
+// together, all apply.
 export const LATE_FILTER = "late";
+export const COMPONENT_LATE_FILTER = "component_late";
+const PSEUDO_STATUSES: ReadonlySet<string> = new Set([LATE_FILTER, COMPONENT_LATE_FILTER]);
 export function orderStatusListParam<T extends readonly [string, ...string[]]>(values: T) {
   return statusListParam([...values, LATE_FILTER] as unknown as readonly [T[number] | typeof LATE_FILTER, ...(T[number] | typeof LATE_FILTER)[]]);
 }
+// The TO list: the real statuses plus both pseudo statuses.
+export function manufacturingOrderStatusListParam<T extends readonly [string, ...string[]]>(values: T) {
+  type Value = T[number] | typeof LATE_FILTER | typeof COMPONENT_LATE_FILTER;
+  return statusListParam([...values, LATE_FILTER, COMPONENT_LATE_FILTER] as unknown as readonly [Value, ...Value[]]);
+}
 export function splitLateFilter<S extends string>(
-  status: readonly (S | typeof LATE_FILTER)[] | undefined
-): { statuses: S[] | undefined; late: boolean } {
-  if (!status) return { statuses: undefined, late: false };
-  const statuses = status.filter((s): s is S => s !== LATE_FILTER);
-  return { statuses: statuses.length > 0 ? statuses : undefined, late: statuses.length !== status.length };
+  status: readonly (S | typeof LATE_FILTER | typeof COMPONENT_LATE_FILTER)[] | undefined
+): { statuses: S[] | undefined; late: boolean; componentLate: boolean } {
+  if (!status) return { statuses: undefined, late: false, componentLate: false };
+  const statuses = status.filter((s): s is S => !PSEUDO_STATUSES.has(s));
+  return {
+    statuses: statuses.length > 0 ? statuses : undefined,
+    late: status.includes(LATE_FILTER),
+    componentLate: status.includes(COMPONENT_LATE_FILTER),
+  };
 }

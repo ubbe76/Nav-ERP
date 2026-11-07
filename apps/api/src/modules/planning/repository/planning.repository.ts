@@ -156,6 +156,24 @@ function chunk<T>(list: T[], size: number): T[][] {
 // from being exploded into demand — its whole subtree is costing-only.
 const DEMAND_BOM_ROWS = eq(bomComponents.costingOnly, false);
 
+// Pegging (#9): what coverageParents loads for a set of parent TOs.
+export interface CoverageParentsLoad {
+  orders: {
+    id: string;
+    orderNumber: string;
+    status: ManufacturingOrderStatus;
+    articleId: string;
+    quantity: number;
+    dueDate: string | null;
+    configured: boolean;
+  }[];
+  // Per released/in-progress TO: the component articles with rest.
+  materialComponents: Map<string, string[]>;
+  // Only loaded when a planned, unconfigured parent is in the set.
+  bomEdges: { parentArticleId: string; componentArticleId: string; quantity: number }[];
+  phantomIds: string[];
+}
+
 export function createPlanningRepository(db: Db) {
   // Pending lego (subcontract) operations on released/in_progress MOs, with
   // the already-ordered quantity per operation (Σ quantity_ordered on
@@ -1246,6 +1264,60 @@ export function createPlanningRepository(db: Db) {
         .from(holidays)
         .where(and(gte(holidays.date, from), lte(holidays.date, to), isNull(holidays.dayScheduleId)));
       return rows.map((r) => r.date);
+    },
+
+    // Pegging (#9): the parents a coverage is computed for — the TO heads
+    // and, per released/in-progress TO, the component articles of its
+    // material rows with rest (the overview's mo_material rows); a planned,
+    // unconfigured TO has no snapshot, so the service explodes its BOM with
+    // the edges and phantoms loaded here (only when such a parent exists).
+    // Unknown ids are absent. Two to four set-based queries, never per order.
+    async coverageParents(orderIds: string[], dbc: Db | Tx = db): Promise<CoverageParentsLoad> {
+      const ids = [...new Set(orderIds)];
+      const empty: CoverageParentsLoad = { orders: [], materialComponents: new Map(), bomEdges: [], phantomIds: [] };
+      if (ids.length === 0) return empty;
+      // One query at a time: inside a transaction (Skapa saknade halvfabrikat
+      // runs this under the plan lock) the connection cannot run statements
+      // concurrently.
+      const orders = await dbc
+        .select({
+          id: manufacturingOrders.id,
+          orderNumber: manufacturingOrders.orderNumber,
+          status: manufacturingOrders.status,
+          articleId: manufacturingOrders.articleId,
+          quantity: manufacturingOrders.quantity,
+          dueDate: manufacturingOrders.dueDate,
+          configured: isNotNull(manufacturingOrders.configuration),
+        })
+        .from(manufacturingOrders)
+        .where(inArray(manufacturingOrders.id, ids));
+      const materials = await dbc
+        .select({
+          manufacturingOrderId: moMaterialConsumptions.manufacturingOrderId,
+          componentArticleId: moMaterialConsumptions.componentArticleId,
+        })
+        .from(moMaterialConsumptions)
+        .where(
+          and(
+            inArray(moMaterialConsumptions.manufacturingOrderId, ids),
+            sql`${moMaterialConsumptions.quantityPlanned} > ${moMaterialConsumptions.quantityConsumed}`
+          )
+        );
+      const materialComponents = new Map<string, string[]>();
+      for (const m of materials) {
+        const list = materialComponents.get(m.manufacturingOrderId) ?? [];
+        if (!list.includes(m.componentArticleId)) list.push(m.componentArticleId);
+        materialComponents.set(m.manufacturingOrderId, list);
+      }
+      const needsExplosion = orders.some((o) => o.status === "planned" && !o.configured);
+      const bomEdges = needsExplosion ? await this.loadBomEdges(dbc) : [];
+      const phantomRows = needsExplosion ? await dbc.select({ id: articles.id }).from(articles).where(eq(articles.isPhantom, true)) : [];
+      return {
+        orders: orders.map((o) => ({ ...o, quantity: Number(o.quantity), configured: o.configured === true })),
+        materialComponents,
+        bomEdges,
+        phantomIds: phantomRows.map((r) => r.id),
+      };
     },
 
     // Just the BOM edges — Skapa ordrar orders its TO proposals parents first

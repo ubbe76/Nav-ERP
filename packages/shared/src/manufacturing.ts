@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { optionalText } from "./coerce.js";
 import { configuratorSelectionSchema } from "./configurator.js";
-import { listQuerySchema, orderStatusListParam, statusListParam } from "./list.js";
+import { listQuerySchema, manufacturingOrderStatusListParam, statusListParam } from "./list.js";
 
 export const manufacturingOrderStatusSchema = z.enum([
   "planned",
@@ -14,8 +14,9 @@ export const manufacturingOrderStatusSchema = z.enum([
 export type ManufacturingOrderStatus = z.infer<typeof manufacturingOrderStatusSchema>;
 
 export const listManufacturingOrdersQuerySchema = listQuerySchema.extend({
-  // Also "late" (Sen) — see orderStatusListParam in list.ts.
-  status: orderStatusListParam(manufacturingOrderStatusSchema.options),
+  // Also "late" (Sen) and "component_late" (Halvfabrikat sent, pegging #9)
+  // — see manufacturingOrderStatusListParam in list.ts.
+  status: manufacturingOrderStatusListParam(manufacturingOrderStatusSchema.options),
   // Adds an `operations` summary (sequence, status, work center, production
   // group) to each row, e.g. for integrations. An extra batched query, so
   // it's opt-in. Same "true"/"false" string pattern as withOpenRows in sales.ts.

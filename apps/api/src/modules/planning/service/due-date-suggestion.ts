@@ -16,6 +16,7 @@
 // demand date decides which holidays the service has to load.
 import { addDays, addWorkingDays, isWorkingDay, previousWorkingDay } from "../../system/service/delivery-days.js";
 import type { ArticleOverview, ArticleOverviewRow } from "./article-overview.js";
+import { pegOverview, STOCK_PEG_ID } from "./pegging.js";
 
 export interface FirmDemand {
   date: string; // YYYY-MM-DD
@@ -50,37 +51,31 @@ function fromRow(row: ArticleOverviewRow & { date: string }, source: FirmDemand[
 
 const hasDate = (row: ArticleOverviewRow): row is ArticleOverviewRow & { date: string } => row.date !== null;
 
-// Same scale as the overview (numeric(14,4)) — keeps float noise from
-// turning an exactly covered demand into a 1e-15 shortage.
-const round4 = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
-
+// ONE coverage rule: the demands pegging (pegging.ts) leaves uncovered —
+// the pool is stock plus every open supply, the demands draw in overview
+// order, so the quantity left per demand is the prefix-sum walk's. A
+// shortage the supply does not make up for negative stock is the first
+// uncovered "demand" and a shortage today, before the linked row is looked
+// at (pegging.test.ts pins the equivalence with the old walk).
 export function findFirmDemand(
   overview: ArticleOverview,
   opts: { today: string; salesOrderRowId?: string }
 ): FirmDemand | null {
-  let available = round4(
-    overview.rows.filter((r) => r.direction === "supply").reduce((sum, r) => sum + r.quantity, overview.onHand)
-  );
-  if (available < 0) {
+  const uncovered = pegOverview(overview, { today: opts.today, readyDates: new Map() }).demands.filter((d) => d.uncovered > 0);
+  const first = uncovered[0];
+  if (!first) return null;
+  if (first.id === STOCK_PEG_ID) {
     return { date: opts.today, source: "shortage", documentType: null, documentId: null, documentNumber: null };
-  }
-  // Demands in the overview's date order (undated last); quantity is signed,
-  // so adding it draws the pool down.
-  const uncovered: ArticleOverviewRow[] = [];
-  for (const row of overview.rows) {
-    if (row.direction !== "demand") continue;
-    available = round4(available + row.quantity);
-    if (available < 0) uncovered.push(row);
   }
 
   if (opts.salesOrderRowId) {
-    const linked = uncovered.find((r) => r.id === `so:${opts.salesOrderRowId}`);
+    const linked = uncovered.find((d) => d.id === `so:${opts.salesOrderRowId}`)?.row;
     if (linked && hasDate(linked)) return fromRow(linked, "sales_order_row");
   }
   // An undated first shortage (every dated demand is covered) gives nothing
   // to plan by.
-  const first = uncovered[0];
-  return first && hasDate(first) ? fromRow(first, "shortage") : null;
+  const row = first.row;
+  return row && hasDate(row) ? fromRow(row, "shortage") : null;
 }
 
 // The working-day calendar lives in the delivery-days leaf (one

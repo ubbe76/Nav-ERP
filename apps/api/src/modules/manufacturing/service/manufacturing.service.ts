@@ -701,6 +701,13 @@ export function createManufacturingService(
   // the list carries nulls, exactly as before the plan existed.
   planning?: ManufacturingPlanReader
 ) {
+  // Halvfabrikat sent (pegging #9) for a set of TOs through the late-bound
+  // plan reader; without one (fixtures, older wiring) nothing is.
+  async function componentLateIds(ids: string[]): Promise<Set<string>> {
+    if (!planning?.componentLateOrders || ids.length === 0) return new Set();
+    return planning.componentLateOrders(ids);
+  }
+
   // The check every drawing report runs with: the configured mode and the
   // caller's override flag (meaningful in "warn" only).
   async function materialShortageCheck(allow: boolean | undefined): Promise<MaterialShortageCheck> {
@@ -1645,34 +1652,49 @@ export function createManufacturingService(
         const row = await salesOrders.findRowForManufacturing(order.salesOrderRowId);
         if (row) salesOrder = { id: row.salesOrderId, orderNumber: row.orderNumber, customerName: row.customerName };
       }
-      // Produktionsplanering: the same plan summary as the list rows.
+      // Produktionsplanering: the same plan summary as the list rows;
+      // Halvfabrikat sent (pegging #9) the same way.
       const summary = planning ? (await planning.orderPlanSummaries([order.id])).get(order.id) : undefined;
+      const componentLate = await componentLateIds([order.id]);
       return {
         ...order,
         salesOrder,
         plannedStartWeek: summary?.plannedStartWeek ?? null,
         plannedEndWeek: summary?.plannedEndWeek ?? null,
         late: summary?.late ?? false,
+        componentLate: componentLate.has(order.id),
       };
     },
 
     // Produktionsplanering: each row carries plannedStartWeek/plannedEndWeek
     // (min/max over its pending operations' planned weeks) and late (Sen)
-    // from the plan — nulls/false without a plan reader or a plan.
-    // The status filter Sen is the plan's verdict, not a stored status: it
-    // asks for the summaries of every open order first and lists the late
-    // ones (so paging and total stay in SQL), reusing those summaries for
-    // the page. Without a plan reader nothing is Sen.
+    // from the plan — nulls/false without a plan reader or a plan — and
+    // componentLate (Halvfabrikat sent, pegging #9) from the plan reader.
+    // The status filters Sen and Halvfabrikat sent are the plan's verdict,
+    // not stored statuses: they ask for the verdict on every open order
+    // first and list the matching ones (so paging and total stay in SQL),
+    // reusing those verdicts for the page. Given together, both apply.
+    // Without a plan reader nothing is Sen or component-late.
     async listManufacturingOrders(query: ListManufacturingOrdersQuery) {
+      const filter = splitLateFilter(query.status);
       let summaries: Awaited<ReturnType<ManufacturingPlanReader["orderPlanSummaries"]>> | null = null;
-      let lateIds: string[] | undefined;
-      if (splitLateFilter(query.status).late) {
-        const openIds = await repo.listOpenManufacturingOrderIds();
-        summaries = planning ? await planning.orderPlanSummaries(openIds) : new Map();
-        lateIds = openIds.filter((id) => summaries!.get(id)?.late === true);
+      let componentLate: Set<string> | null = null;
+      let onlyIds: string[] | undefined;
+      if (filter.late || filter.componentLate) {
+        onlyIds = await repo.listOpenManufacturingOrderIds();
+        if (filter.late) {
+          summaries = planning ? await planning.orderPlanSummaries(onlyIds) : new Map();
+          onlyIds = onlyIds.filter((id) => summaries!.get(id)?.late === true);
+        }
+        if (filter.componentLate) {
+          componentLate = await componentLateIds(onlyIds);
+          onlyIds = onlyIds.filter((id) => componentLate!.has(id));
+        }
       }
-      const result = await repo.listManufacturingOrders(query, lateIds);
-      summaries ??= planning ? await planning.orderPlanSummaries(result.rows.map((row) => row.id)) : new Map();
+      const result = await repo.listManufacturingOrders(query, onlyIds);
+      const pageIds = result.rows.map((row) => row.id);
+      summaries ??= planning ? await planning.orderPlanSummaries(pageIds) : new Map();
+      componentLate ??= await componentLateIds(pageIds);
       return {
         ...result,
         rows: result.rows.map((row) => {
@@ -1682,6 +1704,7 @@ export function createManufacturingService(
             plannedStartWeek: summary?.plannedStartWeek ?? null,
             plannedEndWeek: summary?.plannedEndWeek ?? null,
             late: summary?.late ?? false,
+            componentLate: componentLate!.has(row.id),
           };
         }),
       };

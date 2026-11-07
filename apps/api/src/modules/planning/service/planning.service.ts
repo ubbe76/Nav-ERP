@@ -10,11 +10,15 @@ import type {
 } from "@navet/shared";
 import type { Tx } from "@navet/db";
 import { roundUpToMultiple } from "@navet/shared";
-import type { PlanningRepository } from "../repository/planning.repository.js";
+import type { CoverageParentsLoad, PlanningRepository } from "../repository/planning.repository.js";
+import { pegOverview, type PegAllocation, type PegSupplyKind, type Pegging } from "./pegging.js";
 import {
   DEMAND_SALES_STATUSES,
+  SUPPLY_MO_STATUSES,
+  buildBomIndex,
   computeLowLevelCodes,
   computeRequirements,
+  explodeFromIndex,
   latestStartFor,
   proposalSummary,
   type ConfiguredRowNeed,
@@ -104,6 +108,14 @@ export class ArticleNotFoundError extends Error {
   constructor(id: string) {
     super(`Article ${id} not found`);
     this.name = "ArticleNotFoundError";
+  }
+}
+
+// Own copy for the same reason (pegging #9: GET /manufacturing-orders/:id/coverage).
+export class ManufacturingOrderNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Manufacturing order ${id} not found`);
+    this.name = "ManufacturingOrderNotFoundError";
   }
 }
 
@@ -242,6 +254,12 @@ export interface OrderPlanSummary {
   plannedStartWeek: string | null;
   plannedEndWeek: string | null;
   late: boolean;
+  // orderPlanStatus's finish (the plan's last week through weekFinishDay,
+  // lego through the resource's lead time, never before today) when the TO
+  // is planned, else null. Pegging (#9) reads the TO's ready date as
+  // plannedFinish ?? dueDate — the same rule that decides Sen, from the
+  // same load, so the two can never disagree.
+  plannedFinish: string | null;
 }
 
 // What the manufacturing module needs from the plan (bound late in app.ts,
@@ -260,6 +278,63 @@ export interface ManufacturingPlanReader {
   // mo_operations.id; only operations with a förslag are in the map.
   // Optional for the fixtures' readers: left out = no förslag.
   operationResourceSuggestions?(manufacturingOrderId: string): Promise<Map<string, OperationResourceSuggestion>>;
+  // Pegging (#9): of the given TOs, those with Halvfabrikat sent — a TO
+  // covering one of their material needs is late for it. Optional for the
+  // fixtures' readers: left out = nothing is component-late.
+  componentLateOrders?(orderIds: string[]): Promise<Set<string>>;
+}
+
+// --- Pegging (#9): the TO card's coverage ---------------------------------
+export interface CoverageAllocation {
+  kind: PegSupplyKind;
+  documentId: string | null; // null = stock
+  documentNumber: string | null;
+  quantity: number;
+  readyDate: string | null; // floored at today; null = undated
+  late: boolean;
+  undated: boolean;
+  daysLate: number;
+  isDraft: boolean;
+}
+
+// One of the parent's material needs (a material row with rest, or a planned
+// TO's explosion) and what covers it.
+export interface CoverageMaterial {
+  rowId: string; // the overview row id (mat:<rowId> / pmat:<moId>)
+  kind: "mo_material" | "mo_planned_material";
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  articleType: "manufactured" | "purchased" | "service";
+  needDate: string | null;
+  quantity: number; // rest, base unit
+  allocations: CoverageAllocation[];
+  uncovered: number;
+}
+
+// Where the parent's own output goes — the demands its supply row covers.
+// kind "stock": the shortage of a negative balance (today).
+export interface CoverageGoesTo {
+  kind: "sales_order" | "mo_material" | "mo_planned_material" | "stock";
+  documentId: string | null;
+  documentNumber: string | null;
+  partner: string | null;
+  needDate: string | null;
+  quantity: number;
+  late: boolean;
+  daysLate: number;
+}
+
+export interface ManufacturingOrderCoverage {
+  manufacturingOrderId: string;
+  orderNumber: string;
+  status: string;
+  materials: CoverageMaterial[];
+  goesTo: CoverageGoesTo[];
+  surplus: number; // "till lager"
+  componentLate: boolean;
+  // Flytta halvfabrikaten (etapp 2) — always [] for now.
+  moves: never[];
 }
 
 const OPEN_MO_STATUSES: ReadonlySet<string> = new Set(["released", "in_progress"]);
@@ -1206,9 +1281,105 @@ export function createPlanningService(
         plannedStartWeek: mondays[0] ?? null,
         plannedEndWeek: mondays[mondays.length - 1] ?? null,
         late: status.late,
+        plannedFinish: status.planned ? status.plannedFinish : null,
       });
     }
     return summaries;
+  }
+
+
+  // --- Pegging (#9) ----------------------------------------------------
+  // The coverage for a set of parent TOs in a fixed number of loads: the
+  // parents' component articles (material rows with rest; a planned,
+  // unconfigured TO's one-level explosion) → their artikelöversikter in ONE
+  // batch (one dating, one delivery context) → the TO supplies' ready dates
+  // from ONE orderPlanSummaries call (plannedFinish ?? dueDate — the rule
+  // that decides Sen) → pegOverview per article. Never per order.
+  // `withParentArticles`: the parents' own articles too (Går till).
+  type PeggedParents = {
+    today: string;
+    parents: CoverageParentsLoad["orders"];
+    componentsOf: Map<string, string[]>;
+    overviews: Map<string, ArticleOverview>;
+    peggings: Map<string, Pegging>;
+  };
+  async function pegParents(parentIds: string[], opts: { withParentArticles?: boolean } = {}): Promise<PeggedParents> {
+    const today = todayFn();
+    const load = await repo.coverageParents(parentIds);
+    const parents = load.orders.filter((o) => SUPPLY_MO_STATUSES.has(o.status));
+    const componentsOf = new Map<string, string[]>();
+    const bomIndex = buildBomIndex(load.bomEdges);
+    const phantomIds = new Set(load.phantomIds);
+    for (const o of parents) {
+      const components = [...(load.materialComponents.get(o.id) ?? [])];
+      if (o.status === "planned" && !o.configured) {
+        for (const [articleId, need] of explodeFromIndex(bomIndex, phantomIds, o.articleId, o.quantity)) {
+          if (need > 0 && !components.includes(articleId)) components.push(articleId);
+        }
+      }
+      componentsOf.set(o.id, components);
+    }
+    const articleIds = new Set<string>([...componentsOf.values()].flat());
+    if (opts.withParentArticles) for (const o of parents) articleIds.add(o.articleId);
+    const overviews = articleIds.size > 0 ? await loadOverviewInputs([...articleIds]) : new Map<string, ArticleOverviewInput>();
+    const built = new Map<string, ArticleOverview>([...overviews].map(([id, input]) => [id, buildArticleOverview(input)]));
+
+    const moSupplyIds = new Set<string>();
+    const dates: string[] = [today];
+    for (const overview of built.values()) {
+      for (const row of overview.rows) {
+        if (row.kind === "manufacturing_order") moSupplyIds.add(row.documentId);
+        if (row.date) dates.push(row.date);
+      }
+    }
+    const summaries = moSupplyIds.size > 0 ? await orderPlanSummaries([...moSupplyIds]) : new Map<string, OrderPlanSummary>();
+    const readyDates = new Map<string, string | null>();
+    for (const overview of built.values()) {
+      for (const row of overview.rows) {
+        if (row.kind !== "manufacturing_order") continue;
+        const ready = summaries.get(row.documentId)?.plannedFinish ?? row.date;
+        readyDates.set(row.id, ready);
+        if (ready) dates.push(ready);
+      }
+    }
+    // Full-day holidays over the span for daysLate; nothing to count without
+    // a dated row.
+    const offDays =
+      dates.length > 1 ? new Set(await repo.fullDayHolidaysBetween(dates.reduce((a, b) => (a < b ? a : b)), dates.reduce((a, b) => (a > b ? a : b)))) : new Set<string>();
+    const peggings = new Map<string, Pegging>([...built].map(([id, overview]) => [id, pegOverview(overview, { today, readyDates, offDays })]));
+    return { today, parents, componentsOf, overviews: built, peggings };
+  }
+
+  // The parent's material needs in the component articles' peggings: the
+  // demand rows whose document is the parent (mo_material / mo_planned_material).
+  function parentDemands(world: PeggedParents, parentId: string) {
+    const out: { articleId: string; pegging: Pegging; demand: Pegging["demands"][number] }[] = [];
+    for (const articleId of world.componentsOf.get(parentId) ?? []) {
+      const pegging = world.peggings.get(articleId);
+      if (!pegging) continue;
+      for (const demand of pegging.demands) {
+        const row = demand.row;
+        if (row && row.documentId === parentId && (row.kind === "mo_material" || row.kind === "mo_planned_material")) {
+          out.push({ articleId, pegging, demand });
+        }
+      }
+    }
+    return out;
+  }
+  const supplyOf = (pegging: Pegging, allocation: PegAllocation) => pegging.supplies.find((s) => s.id === allocation.supplyId)!;
+  // Halvfabrikat sent: a late allocation from a TO supply. A late IO or
+  // missing material gives nothing (the behovsberäkning's and Materialbrist's).
+  function isComponentLate(world: PeggedParents, parentId: string): boolean {
+    return parentDemands(world, parentId).some(({ pegging, demand }) =>
+      demand.allocations.some((a) => a.late && supplyOf(pegging, a).kind === "manufacturing_order")
+    );
+  }
+
+  async function componentLateOrders(orderIds: string[]): Promise<Set<string>> {
+    const ids = [...new Set(orderIds)];
+    if (ids.length === 0) return new Set();
+    const world = await pegParents(ids);
+    return new Set(world.parents.filter((p) => isComponentLate(world, p.id)).map((p) => p.id));
   }
 
   // Förslag på resurs for one TO (the TO card): the whole open load is read
@@ -1756,7 +1927,16 @@ export function createPlanningService(
       const world = planWorldOf(input, today);
       // Förslag på resurs (#15) on the same input, in the same read.
       const suggestions = resourceSuggestions(world);
-      const result = computeCapacity(input, { today, weeks: query.weeks, offDays: world.offDays, resourceSuggestions: suggestions });
+      // Halvfabrikat sent (pegging #9) on the order chips — one batch over
+      // every order in the load.
+      const componentLate = await componentLateOrders([...new Set(input.operations.map((op) => op.manufacturingOrderId))]);
+      const result = computeCapacity(input, {
+        today,
+        weeks: query.weeks,
+        offDays: world.offDays,
+        resourceSuggestions: suggestions,
+        componentLateOrders: componentLate,
+      });
       if (query.productionGroupId) {
         result.groups = result.groups.filter((g) => g.productionGroupId === query.productionGroupId);
       }
@@ -1912,6 +2092,77 @@ export function createPlanningService(
     replanOrderInTx,
     orderPlanSummaries,
     operationResourceSuggestions,
+    componentLateOrders,
+
+    // Pegging (#9) — the TO card's Täcks av / Går till: what covers each of
+    // the TO's material needs, and which demands its own output goes to.
+    // A closed/done/cancelled TO has neither. `moves` (Flytta
+    // halvfabrikaten) comes in etapp 2 — always [] here.
+    async getManufacturingOrderCoverage(manufacturingOrderId: string): Promise<ManufacturingOrderCoverage> {
+      const world = await pegParents([manufacturingOrderId], { withParentArticles: true });
+      const parent = world.parents.find((p) => p.id === manufacturingOrderId);
+      if (!parent) {
+        const [head] = (await repo.coverageParents([manufacturingOrderId])).orders;
+        if (!head) throw new ManufacturingOrderNotFoundError(manufacturingOrderId);
+        return { manufacturingOrderId, orderNumber: head.orderNumber, status: head.status, materials: [], goesTo: [], surplus: 0, componentLate: false, moves: [] };
+      }
+      const materials: CoverageMaterial[] = parentDemands(world, parent.id).map(({ articleId, pegging, demand }) => {
+        const article = world.overviews.get(articleId)!.article;
+        const row = demand.row!;
+        return {
+          rowId: row.id,
+          kind: row.kind as CoverageMaterial["kind"],
+          articleId,
+          articleNumber: article.articleNumber,
+          articleName: article.name,
+          articleType: article.type,
+          needDate: demand.date,
+          quantity: demand.quantity,
+          allocations: demand.allocations.map((a) => {
+            const supply = supplyOf(pegging, a);
+            return {
+              kind: supply.kind,
+              documentId: supply.row?.documentId ?? null,
+              documentNumber: supply.row?.documentNumber ?? null,
+              quantity: a.quantity,
+              readyDate: a.readyDate,
+              late: a.late,
+              undated: a.undated,
+              daysLate: a.daysLate,
+              isDraft: supply.row?.isDraft ?? false,
+            };
+          }),
+          uncovered: demand.uncovered,
+        };
+      });
+      materials.sort((a, b) => a.articleNumber.localeCompare(b.articleNumber, "sv", { numeric: true }) || a.rowId.localeCompare(b.rowId));
+
+      const own = world.peggings.get(parent.articleId);
+      const supply = own?.supplies.find((s) => s.id === `mo:${parent.id}`);
+      const goesTo: CoverageGoesTo[] = (supply?.allocations ?? []).map((a) => {
+        const demand = own!.demands.find((d) => d.id === a.demandId)!;
+        return {
+          kind: (demand.row?.kind as CoverageGoesTo["kind"] | undefined) ?? "stock",
+          documentId: demand.row?.documentId ?? null,
+          documentNumber: demand.row?.documentNumber ?? null,
+          partner: demand.row?.partner ?? null,
+          needDate: demand.date,
+          quantity: a.quantity,
+          late: a.late,
+          daysLate: a.daysLate,
+        };
+      });
+      return {
+        manufacturingOrderId,
+        orderNumber: parent.orderNumber,
+        status: parent.status,
+        materials,
+        goesTo,
+        surplus: supply?.surplus ?? 0,
+        componentLate: isComponentLate(world, parent.id),
+        moves: [],
+      };
+    },
 
     // One draft IO per primary supplier (Monitor-style grouping) plus one
     // planned TO per manufactured article. No batch transaction on purpose:
