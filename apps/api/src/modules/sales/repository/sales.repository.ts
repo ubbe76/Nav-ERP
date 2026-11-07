@@ -58,6 +58,7 @@ import {
   type PriceListRowInput,
   type SalesDocumentKind,
   type SalesOrderStatus,
+  type SalesRowPriceOrigin,
   type UpdateContactInput,
   type UpdateCustomerInput,
   type UpdateCustomerPriceInput,
@@ -219,9 +220,9 @@ export type SalesRowWrite = Omit<CreateSalesOrderRowInput, "configuration"> &
     // Ställkostnad: written as its own row (quantity 1, the Ställkostnads-
     // artikel) right after this one, linked by setup_for_row_id.
     setupCharge?: { articleId: string; unitPrice: number } | null;
-    // Kalkylpris (#16): the chain itself priced the row with its Kalkylpris
-    // step (à-pris omitted). Server-derived only; omitted = false.
-    calculatedPrice?: boolean;
+    // Påslag (#16, 0197): where the à-pris came from (the chain's step,
+    // or manual). Server-derived only; omitted = manual (the column's default).
+    priceOrigin?: SalesRowPriceOrigin;
   };
 
 // The linked Ställkostnad row of `mainRowId` — one shape for createQuote and
@@ -260,18 +261,27 @@ export type RowConfigurationMutationResult =
 // Påslag på offert och order (#16 etapp 3): the repricing the service planned
 // OUTSIDE the header's transaction (the price chain reads the settings and
 // the configurator's variant step on their own connections), re-checked
-// under the locks. One entry per row the lock below selects — calculated,
-// undelivered, neither configured nor a ställkostnad — with the row's stored
-// columns as the plan read them and the planned new price (null = the row
-// keeps its price: invoiced, unchanged, no price, the freight row).
+// under the locks. One entry per row the lock below selects — priced by the
+// chain (origin chain or calculated), undelivered, neither configured nor a
+// ställkostnad — with the row's stored columns as the plan read them and the
+// planned new price and origin (null = the row keeps its price: invoiced,
+// unchanged, no price, the freight row). An `after` with the row's own price
+// and another origin only moves the origin.
 export type PlannedRowReprice = {
   articleId: string;
   quantityOrdered: string;
   unitFactor: string | null;
   unitPrice: string;
   discountPercent: string;
-  after: { unitPrice: number; discountPercent: number; calculatedPrice: boolean } | null;
+  priceOrigin: SalesRowPriceOrigin;
+  after: { unitPrice: number; discountPercent: number; priceOrigin: SalesRowPriceOrigin } | null;
 };
+
+// Why a planned row was not written by the header's save: it sits on a live
+// invoice now (a draft or a credit note included), or it left the
+// candidates between the plan and the locks — deleted, delivered or given a
+// handwritten price.
+export type RepricingKeptUnderLock = { rowId: string; reason: "invoiced" | "deleted" | "delivered" | "manual" };
 
 // Sent with every header PATCH that carries a markup field: what the plan
 // was made against (re-read under the order's lock — any difference is
@@ -284,13 +294,15 @@ export type HeaderMarkupsGuard = {
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
-// The rows a change of the order's markups may reprice: priced from the
-// Kalkylpris (calculated_price), nothing delivered, not configured, not a
-// ställkostnad. Invoiced rows are told apart afterwards (rowsOnInvoices).
+// The rows a change of the order's markups may reprice: priced by the chain
+// (price_origin chain or calculated — never manual), nothing delivered, not
+// configured, not a ställkostnad. Invoiced rows are told apart afterwards
+// (rowsOnInvoices).
+const REPRICED_ORIGINS: SalesRowPriceOrigin[] = ["chain", "calculated"];
 function repricingCandidateWhere(orderId: string) {
   return and(
     eq(salesOrderRows.salesOrderId, orderId),
-    eq(salesOrderRows.calculatedPrice, true),
+    inArray(salesOrderRows.priceOrigin, REPRICED_ORIGINS),
     eq(salesOrderRows.quantityDelivered, "0"),
     isNull(salesOrderRows.configuration),
     isNull(salesOrderRows.setupForRowId)
@@ -356,7 +368,7 @@ async function insertRow(tx: Tx, salesOrderId: string, input: SalesRowWrite) {
       configuration: input.configuration ?? null,
       configurationCost: input.configurationCost ?? null,
       expectedDeliveryDate: input.expectedDeliveryDate ?? null,
-      calculatedPrice: input.calculatedPrice ?? false,
+      priceOrigin: input.priceOrigin ?? "manual",
     })
     .returning();
   if (input.setupCharge) {
@@ -798,7 +810,9 @@ export function createSalesRepository(db: Db) {
     // whose currency, rate or markups are no longer the ones planned with.
     // Stale ⇒ nothing written, the service plans again. Then the header and
     // the planned prices are written, a row now on an invoice (a draft
-    // included) keeping its price. No price chain runs in here.
+    // included) keeping its price. A planned row the lock no longer selected
+    // (deleted, delivered or made manual in between) keeps its price too;
+    // `kept` says why for each. No price chain runs in here.
     async updateSalesOrderHeaderWithAddress(orderId: string, input: UpdateSalesOrderHeaderInput, markups?: HeaderMarkupsGuard) {
       return db.transaction(async (tx) => {
         const locked = markups?.reprice
@@ -844,7 +858,7 @@ export function createSalesRepository(db: Db) {
           if (row) return { ok: false as const, reason: "currency_locked" as const };
         }
         const repriced: string[] = [];
-        const invoiced: string[] = [];
+        const kept: RepricingKeptUnderLock[] = [];
         if (markups) {
           const { expected, reprice } = markups;
           const sameMarkups =
@@ -864,7 +878,8 @@ export function createSalesRepository(db: Db) {
               plan.quantityOrdered === row.quantityOrdered &&
               plan.unitFactor === row.unitFactor &&
               plan.unitPrice === row.unitPrice &&
-              plan.discountPercent === row.discountPercent;
+              plan.discountPercent === row.discountPercent &&
+              plan.priceOrigin === row.priceOrigin;
             if (locked.some((row) => !asPlanned(row, reprice.get(row.id)))) return { ok: false as const, reason: "stale" as const };
             const onInvoices = await rowsOnInvoices(
               tx,
@@ -874,14 +889,35 @@ export function createSalesRepository(db: Db) {
               const after = reprice.get(row.id)!.after;
               if (!after) continue;
               if (onInvoices.has(row.id)) {
-                invoiced.push(row.id);
+                kept.push({ rowId: row.id, reason: "invoiced" });
                 continue;
               }
               await tx
                 .update(salesOrderRows)
-                .set({ unitPrice: String(after.unitPrice), discountPercent: String(after.discountPercent), calculatedPrice: after.calculatedPrice })
+                .set({ unitPrice: String(after.unitPrice), discountPercent: String(after.discountPercent), priceOrigin: after.priceOrigin })
                 .where(eq(salesOrderRows.id, row.id));
               repriced.push(row.id);
+            }
+            // The planned rows that left the candidates before the lock: why
+            // each kept its price — for the answer only, nothing is written
+            // on it.
+            const left = [...reprice.entries()].filter(([id, plan]) => plan.after && !lockedIds.has(id)).map(([id]) => id);
+            if (left.length > 0) {
+              const current = new Map(
+                (
+                  await tx
+                    .select({ id: salesOrderRows.id, priceOrigin: salesOrderRows.priceOrigin, quantityDelivered: salesOrderRows.quantityDelivered })
+                    .from(salesOrderRows)
+                    .where(inArray(salesOrderRows.id, left))
+                ).map((r) => [r.id, r])
+              );
+              for (const id of left) {
+                const row = current.get(id);
+                kept.push({
+                  rowId: id,
+                  reason: !row ? "deleted" : row.priceOrigin === "manual" ? "manual" : Number(row.quantityDelivered) > 0 ? "delivered" : "manual",
+                });
+              }
             }
           }
         }
@@ -902,7 +938,7 @@ export function createSalesRepository(db: Db) {
               )
             );
         }
-        return { ok: true as const, order: updated!, repriced, invoiced };
+        return { ok: true as const, order: updated!, repriced, kept };
       });
     },
 
@@ -1002,7 +1038,7 @@ export function createSalesRepository(db: Db) {
                 configurationCost: r.configurationCost ?? null,
                 // null = the row follows the order's Leveransdatum.
                 expectedDeliveryDate: r.expectedDeliveryDate ?? null,
-                calculatedPrice: r.calculatedPrice ?? false,
+                priceOrigin: r.priceOrigin ?? "manual",
                 createdAt: new Date(now + stamp++),
               };
               return id && r.setupCharge
@@ -1446,14 +1482,14 @@ export function createSalesRepository(db: Db) {
       // when a quantity change repriced a configured row; undefined leaves
       // the stored one as it is. 4c: likewise the förkalkyl at the new
       // quantity (configurationCost; undefined = untouched, null = unknown).
-      // Kalkylpris (#16): `priceOrigin` decides calculated_price — "calculated"
-      // (the chain's Kalkylpris repriced the row) ⇒ true, "chain" (another
-      // chain step did) ⇒ false, "manual" (an à-pris was sent) ⇒ false only
-      // when it differs from the stored one: the order card always sends the
-      // price, and resending it must not turn a Kalkylpris into a
-      // handwritten one. Compared under the row lock at the column's 4
-      // decimals. undefined leaves the flag.
-      // Påslag (#16 etapp 3): with a chain price ("calculated"/"chain"),
+      // Påslag (#16, 0197): `priceOrigin` is written as given — the service
+      // sends it when it set the price itself (the chain at a new quantity:
+      // its step, or manual with a rabatt sent along; a configured row:
+      // manual). Without it, an à-pris or a rabatt in the patch that differs
+      // from the stored one makes the row manual, compared under the row
+      // lock at the columns' scales (4 and 2 decimals): the order card
+      // always resends both, and resending them unchanged keeps the origin.
+      // Påslag (#16 etapp 3): when the chain priced the row,
       // `pricedWithMarkups` is the order's markups it was priced with —
       // re-read FOR KEY SHARE after the row lock (row → order, as the
       // revision bump), "markups_changed" when a header PATCH changed them.
@@ -1461,7 +1497,7 @@ export function createSalesRepository(db: Db) {
         Partial<UnitSnapshot> & {
           configuration?: OrderRowConfiguration;
           configurationCost?: OrderRowConfigurationCost | null;
-          priceOrigin?: "calculated" | "chain" | "manual";
+          priceOrigin?: SalesRowPriceOrigin;
           pricedWithMarkups?: PriceMarkups | null;
         },
       bump = true
@@ -1496,7 +1532,7 @@ export function createSalesRepository(db: Db) {
           configuration?: OrderRowConfiguration;
           configurationCost?: OrderRowConfigurationCost | null;
           expectedDeliveryDate?: string | null;
-          calculatedPrice?: boolean;
+          priceOrigin?: SalesRowPriceOrigin;
         } = {};
         if (patch.quantity !== undefined) set.quantityOrdered = String(patch.quantity);
         if (patch.unitPrice !== undefined) set.unitPrice = String(patch.unitPrice);
@@ -1506,14 +1542,13 @@ export function createSalesRepository(db: Db) {
         if (patch.configuration !== undefined) set.configuration = patch.configuration;
         if (patch.configurationCost !== undefined) set.configurationCost = patch.configurationCost;
         if (patch.expectedDeliveryDate !== undefined) set.expectedDeliveryDate = patch.expectedDeliveryDate;
-        if (patch.priceOrigin === "calculated") set.calculatedPrice = true;
-        else if (patch.priceOrigin === "chain") set.calculatedPrice = false;
+        if (patch.priceOrigin !== undefined) set.priceOrigin = patch.priceOrigin;
         else if (
-          patch.priceOrigin === "manual" &&
-          patch.unitPrice !== undefined &&
-          Math.round(patch.unitPrice * 10000) !== Math.round(Number(row.unitPrice) * 10000)
+          (patch.unitPrice !== undefined && Math.round(patch.unitPrice * 10000) !== Math.round(Number(row.unitPrice) * 10000)) ||
+          (patch.discountPercent !== undefined &&
+            Math.round(patch.discountPercent * 100) !== Math.round(Number(row.discountPercent) * 100))
         ) {
-          set.calculatedPrice = false;
+          set.priceOrigin = "manual";
         }
         const [updated] = await tx.update(salesOrderRows).set(set).where(eq(salesOrderRows.id, rowId)).returning();
 
@@ -1550,9 +1585,9 @@ export function createSalesRepository(db: Db) {
         configurationCost: OrderRowConfigurationCost | null;
         unitPrice: number;
         discountPercent: number;
-        // Kalkylpris (#16): the replaced price came from the chain's
-        // Kalkylpris (a variant row only — a beställningsvara never has one).
-        calculatedPrice: boolean;
+        // Påslag (#16, 0197): the replaced price's origin — the variant
+        // chain's step on a variant row, manual on a beställningsvara.
+        priceOrigin: SalesRowPriceOrigin;
         // A variant row priced by the chain: the order's markups it was
         // priced with, re-read like updateRow's (#16 etapp 3).
         pricedWithMarkups?: PriceMarkups | null;
@@ -1574,7 +1609,7 @@ export function createSalesRepository(db: Db) {
             configurationCost: patch.configurationCost,
             unitPrice: String(patch.unitPrice),
             discountPercent: String(patch.discountPercent),
-            calculatedPrice: patch.calculatedPrice,
+            priceOrigin: patch.priceOrigin,
           })
           .where(eq(salesOrderRows.id, rowId))
           .returning();

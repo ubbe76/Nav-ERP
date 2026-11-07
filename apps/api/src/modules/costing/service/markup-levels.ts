@@ -149,9 +149,12 @@ export interface CalculationForPrice {
 // one from before 0130 is off by TO × the percentage. Affo is taken with the
 // company's percentage as set, and the header stores it at two decimals, so
 // a setting with more decimals moves the amount by up to half a hundredth of
-// a percent of its base — allowed too (TO × Affo % is far larger).
+// a percent of its base — allowed too (TO × Affo % is far larger). The two
+// add up: a setting of exactly half a hundredth (12.345 % stored as 12.34)
+// lands on the second term, and the bucket's own four-decimal rounding on
+// top of it must not tip it over (the review of etapp 3).
 function chainTolerance(base: number): number {
-  return Math.max(0.01, (Math.abs(base) * 0.005) / 100);
+  return 0.01 + (Math.abs(base) * 0.005) / 100;
 }
 
 // Whether the stored generellt påslag and Affo are the ones today's chain

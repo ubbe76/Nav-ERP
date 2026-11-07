@@ -268,7 +268,7 @@ export class PriceListCurrencyLockedError extends Error {
 }
 
 // Påslag på offert och order (#16 etapp 3): saving new markups on the header
-// would reprice Kalkylpris rows, and the save did not confirm it
+// would reprice rows the price chain priced, and the save did not confirm it
 // (confirmRepricing). Nothing is written; `repricing` is the preview — which
 // rows change and how — for the confirmation. 409
 // markup-repricing-not-confirmed.

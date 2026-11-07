@@ -215,4 +215,29 @@ describe("calculatedUnitPrice — the Kalkylpris as a delta against the calculat
       unavailable: "calculation-outdated",
     });
   });
+
+  // The review of etapp 3: Affo set to exactly half a hundredth of a percent
+  // (12.345 %, stored as 12.34 %) is off by the whole second term of the
+  // tolerance, and the bucket's four-decimal rounding came on top of it —
+  // a false calculation-outdated with max(0.01, …).
+  it("accepts an Affo setting of exactly half a hundredth of a percent, with the bucket's rounding on top", () => {
+    // TVK 7 777.7777 × 12.345 % = 960.166657… ⇒ 960.1667; × 12.34 % = 959.7778 — 0.38893 off, ½ hundredth is 0.38889.
+    const tvk = 7777.7777;
+    const businessOverhead = 960.1667;
+    const selfCost = tvk + businessOverhead;
+    const halfHundredth = {
+      ...CALCULATION,
+      affoPercent: 12.34,
+      businessOverhead,
+      selfCost,
+      generalMarkup: 3495.1778, // 40 % of SVK at four decimals
+      salesPrice: selfCost + 3495.1778 + 600 + 500,
+    };
+    expect(Math.abs(businessOverhead - (tvk * 12.34) / 100)).toBeGreaterThan((tvk * 0.005) / 100);
+    expect("unitPrice" in calculatedUnitPrice(halfHundredth, 20, 10)).toBe(true);
+    // Still far from a calculation with TO inside (TO 500 × 12.34 % ≈ 62).
+    expect(calculatedUnitPrice({ ...halfHundredth, businessOverhead: businessOverhead + 61.7 }, 20, 10)).toEqual({
+      unavailable: "calculation-outdated",
+    });
+  });
 });

@@ -1380,6 +1380,13 @@
       "when": 1794045843459,
       "tag": "0196_paslag_per_order",
       "breakpoints": true
+    },
+    {
+      "idx": 197,
+      "version": "7",
+      "when": 1794049261044,
+      "tag": "0197_paslag_prisursprung",
+      "breakpoints": true
     }
   ]
 }

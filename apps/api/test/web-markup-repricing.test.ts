@@ -20,8 +20,8 @@ const plan: MarkupRepricingPlan = {
       articleId: "a1",
       articleNumber: "3001",
       quantity: 1,
-      before: { unitPrice: 4087.92, discountPercent: 0 },
-      after: { unitPrice: 4428.58, discountPercent: 0, source: "calculated" },
+      before: { unitPrice: 4087.92, discountPercent: 0, priceOrigin: "calculated" },
+      after: { unitPrice: 4428.58, discountPercent: 0, source: "calculated", priceOrigin: "calculated" },
       calculatedPrice: true,
     },
   ],
@@ -61,16 +61,58 @@ describe("Påslag på order (web helpers)", () => {
     expect(keptReasonText("delivered")).toBe("levererad");
     expect(keptReasonText("invoiced")).toBe("fakturerad");
     expect(keptReasonText("unchanged")).toBe("samma pris som förut");
-    expect(keptReasonText("no-price")).toBe("kalkylen ger inget pris");
+    expect(keptReasonText("no-price")).toBe("priskedjan ger inget pris");
+    expect(keptReasonText("deleted")).toBe("borttagen");
   });
 
-  it("lists rows before and after, the kept rows with reasons and the limitation", () => {
+  it("lists rows before and after and the kept rows with reasons — no limitation any more", () => {
     const text = repricingMessage(plan);
-    expect(text).toContain("räknar om à-priset på 1 rad");
+    expect(text).toContain("räknar om à-priset på 1 rad som prissatts av priskedjan");
     expect(text).toContain("3001: 4 087,92 → 4 428,58 SEK");
     expect(text).toContain("3002: handskrivet pris");
     expect(text).toContain("3003: levererad");
-    expect(text).toContain("Rader som fick artikelpriset innan ordern fick ett påslag räknas aldrig om.");
+    expect(text).toContain("Handskrivna priser och levererade eller fakturerade rader ändras inte.");
+    expect(text).not.toContain("räknas aldrig om");
+  });
+
+  // The review of etapp 3: only the markups the save changes are listed.
+  it("names only the markups that change", () => {
+    expect(repricingMessage(plan)).toContain("(generellt påslag ärvs → 30 %).");
+    expect(repricingMessage(plan)).not.toContain("materialpåslag");
+    const both = {
+      ...plan,
+      before: { generalMarkupPercent: 20, materialMarkupPercent: null },
+      after: { generalMarkupPercent: 30, materialMarkupPercent: 0 },
+    };
+    expect(repricingMessage(both)).toContain("(generellt påslag 20 % → 30 %, materialpåslag ärvs → 0 %).");
+    const material = {
+      ...plan,
+      before: { generalMarkupPercent: 30, materialMarkupPercent: 5 },
+      after: { generalMarkupPercent: 30, materialMarkupPercent: 0 },
+    };
+    expect(repricingMessage(material)).toContain("(materialpåslag 5 % → 0 %).");
+    expect(repricingMessage(material)).not.toContain("generellt påslag");
+  });
+
+  it("says when a row's price changes step: now the Kalkylpris, or no longer", () => {
+    const row = plan.rows[0]!;
+    const steps = {
+      ...plan,
+      rows: [
+        { ...row, rowId: "r4", articleNumber: "3004", before: { ...row.before, priceOrigin: "chain" as const } },
+        {
+          ...row,
+          rowId: "r5",
+          articleNumber: "3005",
+          after: { ...row.after, source: "article", priceOrigin: "chain" as const },
+          calculatedPrice: false,
+        },
+      ],
+    };
+    const text = repricingMessage(steps);
+    expect(text).toContain("3004: 4 087,92 → 4 428,58 SEK (nu Kalkylpris)");
+    expect(text).toContain("3005: 4 087,92 → 4 428,58 SEK (inte längre Kalkylpris)");
+    expect(repricingMessage(plan)).not.toContain("Kalkylpris)");
   });
 
   it("shows prices in the row's own unit and caps a long kept list", () => {

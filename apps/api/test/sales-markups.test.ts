@@ -27,7 +27,8 @@ import { testArticleService } from "./helpers/services.js";
 // Påslag per kund och Kalkylpris (#16 etapp 2) through the real app: the
 // customer's two price markups, the price chain's Kalkylpris step (after the
 // price list, before the article's price, never with the customer discount),
-// the rows' calculated_price flag, the configurator's rows and the OAuth API.
+// the rows' price origin (calculated_price before 0197), the configurator's
+// rows and the OAuth API.
 //
 // The förkalkyl is the spec's example (påhittad): 50 st, SVK 10 000
 // (dM 5 000 + MO 1 000 + dL 2 000 + Affo 25 % = 2 000), base B = dM + MO = 6 000,
@@ -162,7 +163,7 @@ async function createQuote(payload: Record<string, unknown>) {
 
 const storedRows = (orderId: string) =>
   db
-    .select({ id: salesOrderRows.id, unitPrice: salesOrderRows.unitPrice, calculatedPrice: salesOrderRows.calculatedPrice })
+    .select({ id: salesOrderRows.id, unitPrice: salesOrderRows.unitPrice, priceOrigin: salesOrderRows.priceOrigin })
     .from(salesOrderRows)
     .where(eq(salesOrderRows.salesOrderId, orderId))
     .orderBy(salesOrderRows.createdAt, salesOrderRows.id);
@@ -393,7 +394,7 @@ describe("Kalkylpris i priskedjan — GET /price-quote", () => {
   });
 });
 
-describe("calculated_price på orderraden", () => {
+describe("Kalkylpris på orderraden (prisets ursprung, 0197)", () => {
   async function setup() {
     const article = await makeArticle({ salesPrice: 300 });
     await saveCalculation(article.id);
@@ -451,7 +452,7 @@ describe("calculated_price på orderraden", () => {
     await db.update(customers).set({ priceListId: list!.id }).where(eq(customers.id, customer.id));
     await db.insert(priceListRows).values({ priceListId: list!.id, articleId: article.id, fromQuantity: "1", unitPrice: "260" });
     expect((await patch(second.id, { quantity: 2 })).json().row).toMatchObject({ unitPrice: "260.0000", calculatedPrice: false });
-    expect((await storedRows(order.id)).map((r) => r.calculatedPrice)).toEqual([true, false]);
+    expect((await storedRows(order.id)).map((r) => r.priceOrigin)).toEqual(["calculated", "chain"]);
   });
 
   it("gives a Kalkylpris row no Ställkostnad row — the ställpris only comes from a matched customer rule", async () => {
@@ -541,8 +542,8 @@ describe("OAuth — /price-quote och POST /quotes", () => {
     expect(created.statusCode).toBe(201);
     expect(created.json().rows).toEqual([expect.objectContaining({ unitPrice: "250.0000", discountPercent: "0.00", calculatedPrice: true })]);
     expect(created.json().rows[0]).not.toHaveProperty("configurationCost");
-    const stored = await db.select({ calculatedPrice: salesOrderRows.calculatedPrice }).from(salesOrderRows).where(inArray(salesOrderRows.id, [created.json().rows[0].id]));
-    expect(stored).toEqual([{ calculatedPrice: true }]);
+    const stored = await db.select({ priceOrigin: salesOrderRows.priceOrigin }).from(salesOrderRows).where(inArray(salesOrderRows.id, [created.json().rows[0].id]));
+    expect(stored).toEqual([{ priceOrigin: "calculated" }]);
   });
 });
 
@@ -564,7 +565,7 @@ describe("granskningen av etapp 2", () => {
     expect(kept.price).toEqual({ unitPrice: 285.5, discountPercent: 0, source: "calculated" });
   });
 
-  it("a discount sent with the à-pris omitted makes the row partly handwritten — calculated_price false, on create, add and Ändra", async () => {
+  it("a discount sent with the à-pris omitted makes the row partly handwritten — manual, on create, add and Ändra", async () => {
     const article = await makeArticle({ salesPrice: 300 });
     await saveCalculation(article.id);
     const customer = await makeCustomer({ generalMarkupPercent: 20, materialMarkupPercent: 0 });
@@ -624,7 +625,7 @@ describe("granskningen av etapp 2", () => {
       rows: [{ articleId: article.id, quantity: 1, configuration: { selection: { LOCK: "B", BREDD: 800 } } }],
     });
     // Whatever wrote it (a flag that could only be stale), the new configuration's price is the template's.
-    await db.update(salesOrderRows).set({ calculatedPrice: true }).where(eq(salesOrderRows.id, rows[0]!.id));
+    await db.update(salesOrderRows).set({ priceOrigin: "calculated" }).where(eq(salesOrderRows.id, rows[0]!.id));
     const res = await call(admin, "PUT", `/sales-orders/${order.id}/rows/${rows[0]!.id}/configuration`, { selection: { LOCK: "A", BREDD: 800 } });
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json().row).toMatchObject({ unitPrice: "1000.0000", calculatedPrice: false });

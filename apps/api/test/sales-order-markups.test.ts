@@ -5,10 +5,13 @@ import {
   articles,
   auditLog,
   costCalculations,
+  customers,
   db,
   invoiceRows,
   invoices,
   permissionGroups,
+  priceListRows,
+  priceLists,
   salesOrderRows,
   salesOrders,
   systemSettings,
@@ -21,7 +24,7 @@ import { createOAuthService } from "../src/modules/oauth/service/oauth.service.j
 import { createSalesRepository, type PlannedRowReprice } from "../src/modules/sales/repository/sales.repository.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { resetConfigurator } from "./helpers/configurator.js";
-import { buildToOrder } from "./helpers/configured-rows.js";
+import { buildToOrder, buildVariants } from "./helpers/configured-rows.js";
 import { testArticleService } from "./helpers/services.js";
 import { waitForLockWaiter } from "./helpers/year-end.js";
 
@@ -44,7 +47,7 @@ const authService = createAuthService(createAuthRepository(db), "unused", create
 const oauthService = createOAuthService(createOAuthRepository(db), "unused");
 const salesRepository = createSalesRepository(db);
 const PASSWORD = "correcthorsebattery";
-const TRUNCATE = sql`TRUNCATE audit_log, cost_calculations, customer_prices, price_list_rows, price_lists, invoice_rows, invoices, sales_order_rows, sales_orders, customers, api_clients, article_groups, user_settings, users CASCADE`;
+const TRUNCATE = sql`TRUNCATE audit_log, cost_calculations, customer_prices, price_list_rows, price_lists, invoice_rows, invoices, sales_order_rows, sales_orders, customers, api_clients, article_groups, user_settings, stock_transactions, stock_locations, warehouses, users CASCADE`;
 // Only this file's groups — never TRUNCATE permission_groups (the seeded ones).
 const DELETE_GROUPS = sql`DELETE FROM permission_groups WHERE code LIKE 'POM%'`;
 const DELETE_SETTINGS = sql`DELETE FROM system_settings WHERE key IN ('costing_general_markup_percent', 'costing_material_markup_percent', 'freight_article_id')`;
@@ -144,7 +147,7 @@ async function makeCustomer(fields: Record<string, unknown> = {}) {
   return res.json() as { id: string };
 }
 
-type Row = { id: string; unitPrice: string; discountPercent: string; calculatedPrice: boolean };
+type Row = { id: string; unitPrice: string; discountPercent: string; calculatedPrice: boolean; priceOrigin: string };
 async function createQuote(payload: Record<string, unknown>) {
   const res = await call(admin, "POST", "/quotes", payload);
   expect(res.statusCode, res.body).toBe(201);
@@ -168,7 +171,7 @@ const storedRows = (orderId: string) =>
       id: salesOrderRows.id,
       unitPrice: salesOrderRows.unitPrice,
       discountPercent: salesOrderRows.discountPercent,
-      calculatedPrice: salesOrderRows.calculatedPrice,
+      priceOrigin: salesOrderRows.priceOrigin,
       quantityOrdered: salesOrderRows.quantityOrdered,
       unitFactor: salesOrderRows.unitFactor,
     })
@@ -295,9 +298,11 @@ describe("orderns påslag i priskedjan", () => {
     await saveCalculation(article.id);
     const plain = await makeCustomer();
     const { order } = await createQuote({ customerId: plain.id, rows: [{ articleId: article.id, quantity: 1 }] });
-    expect((await storedRows(order.id))[0]).toMatchObject({ unitPrice: "300.0000", calculatedPrice: false });
+    expect((await storedRows(order.id))[0]).toMatchObject({ unitPrice: "300.0000", priceOrigin: "chain" });
 
-    expect((await patchHeader(order.id, { generalMarkupPercent: 20 })).statusCode).toBe(200);
+    // The article-price row was priced by the chain, so the order's markup reprices it too (0197).
+    expect((await patchHeader(order.id, { generalMarkupPercent: 20, confirmRepricing: true })).statusCode).toBe(200);
+    expect((await storedRows(order.id))[0]).toMatchObject({ unitPrice: "250.0000", priceOrigin: "calculated" });
     // The company has 0 % material: 15 100 − 2 000 − 600 ⇒ 250.
     const row = await addRow(order.id, { articleId: article.id, quantity: 1 });
     expect(row).toMatchObject({ unitPrice: "250.0000", calculatedPrice: true });
@@ -315,7 +320,7 @@ describe("orderns påslag i priskedjan", () => {
     expect(second.rows[0]).toMatchObject({ unitPrice: "276.0000", calculatedPrice: true }); // 15 100 − 1 000 − 300
     const saved = await patchHeader(second.order.id, { generalMarkupPercent: 20, materialMarkupPercent: null, confirmRepricing: true });
     expect(saved.statusCode, saved.body).toBe(200);
-    expect((await storedRows(second.order.id))[0]).toMatchObject({ unitPrice: "256.0000", calculatedPrice: true });
+    expect((await storedRows(second.order.id))[0]).toMatchObject({ unitPrice: "256.0000", priceOrigin: "calculated" });
     const onOrder = (
       await call(admin, "GET", `/price-quote?customerId=${negotiated.id}&articleId=${article.id}&quantity=1&salesOrderId=${second.order.id}`)
     ).json();
@@ -326,7 +331,8 @@ describe("orderns påslag i priskedjan", () => {
 describe("omräkningen när orderns påslag ändras", () => {
   // R1 Kalkylpris, R2 handwritten, R3 Kalkylpris partly delivered, R4
   // Kalkylpris on a draft invoice, R5 a beställningsvara and R6 the freight
-  // row (both flagged by hand — neither can be a Kalkylpris).
+  // row (both given the origin calculated by hand — neither can follow the
+  // markups).
   async function mixedOrder() {
     const { article, customer } = await calculatedOrder();
     const { article: template } = await buildToOrder();
@@ -345,8 +351,8 @@ describe("omräkningen när orderns påslag ändras", () => {
     });
     const [r1, r2, r3, r4, r5, r6] = rows.map((r) => r.id) as [string, string, string, string, string, string];
     await db.update(salesOrderRows).set({ quantityDelivered: "1" }).where(eq(salesOrderRows.id, r3));
-    await db.update(salesOrderRows).set({ calculatedPrice: true }).where(eq(salesOrderRows.id, r5));
-    await db.update(salesOrderRows).set({ calculatedPrice: true }).where(eq(salesOrderRows.id, r6));
+    await db.update(salesOrderRows).set({ priceOrigin: "calculated" }).where(eq(salesOrderRows.id, r5));
+    await db.update(salesOrderRows).set({ priceOrigin: "calculated" }).where(eq(salesOrderRows.id, r6));
     const [vatCode] = await db.execute<{ id: string }>(sql`select id from vat_codes order by code limit 1`);
     const [invoice] = await db.insert(invoices).values({ customerId: customer.id }).returning();
     await db.insert(invoiceRows).values({
@@ -382,8 +388,8 @@ describe("omräkningen när orderns påslag ändras", () => {
           articleId: expect.any(String),
           articleNumber: expect.any(String),
           quantity: 1,
-          before: { unitPrice: 250, discountPercent: 0 },
-          after: { unitPrice: 270, discountPercent: 0, source: "calculated" },
+          before: { unitPrice: 250, discountPercent: 0, priceOrigin: "calculated" },
+          after: { unitPrice: 270, discountPercent: 0, source: "calculated", priceOrigin: "calculated" },
           calculatedPrice: true,
         },
       ],
@@ -421,7 +427,7 @@ describe("omräkningen när orderns påslag ändras", () => {
     expect(saved.json().repricing.kept.map((k: { reason: string }) => k.reason)).toEqual(["manual", "delivered", "invoiced", "manual", "manual"]);
 
     const after = await storedRows(order.id);
-    expect(after[0]).toMatchObject({ unitPrice: "270.0000", discountPercent: "0.00", calculatedPrice: true });
+    expect(after[0]).toMatchObject({ unitPrice: "270.0000", discountPercent: "0.00", priceOrigin: "calculated" });
     // Handwritten, delivered, invoiced, configured and freight rows: untouched.
     expect(after.slice(1)).toEqual(before.slice(1));
     // One content change, one revision.
@@ -439,8 +445,8 @@ describe("omräkningen när orderns påslag ändras", () => {
             {
               rowId: rows.r1,
               articleNumber: expect.any(String),
-              before: { unitPrice: 250, discountPercent: 0 },
-              after: { unitPrice: 270, discountPercent: 0, source: "calculated" },
+              before: { unitPrice: 250, discountPercent: 0, priceOrigin: "calculated" },
+              after: { unitPrice: 270, discountPercent: 0, source: "calculated", priceOrigin: "calculated" },
             },
           ],
           kept: 5,
@@ -465,7 +471,7 @@ describe("omräkningen när orderns påslag ändras", () => {
     expect(await markupAudits()).toHaveLength(1);
   });
 
-  it("takes the chain's new answer: cleared order markups on a customer without its own give the article's price and drop the flag", async () => {
+  it("takes the chain's new answer: cleared order markups on a customer without its own give the article's price, and the row stays chain", async () => {
     const { article, customer } = await calculatedOrder({});
     const { order } = await createQuote({ customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 300 }] });
     await patchHeader(order.id, { generalMarkupPercent: 20 });
@@ -474,10 +480,15 @@ describe("omräkningen när orderns påslag ändras", () => {
 
     const previewed = (await preview(order.id, { generalMarkupPercent: null })).json();
     expect(previewed.rows).toEqual([
-      expect.objectContaining({ rowId: row.id, after: { unitPrice: 300, discountPercent: 0, source: "article" }, calculatedPrice: false }),
+      expect.objectContaining({
+        rowId: row.id,
+        before: { unitPrice: 250, discountPercent: 0, priceOrigin: "calculated" },
+        after: { unitPrice: 300, discountPercent: 0, source: "article", priceOrigin: "chain" },
+        calculatedPrice: false,
+      }),
     ]);
     expect((await patchHeader(order.id, { generalMarkupPercent: null, confirmRepricing: true })).statusCode).toBe(200);
-    expect((await storedRows(order.id))[1]).toMatchObject({ unitPrice: "300.0000", calculatedPrice: false });
+    expect((await storedRows(order.id))[1]).toMatchObject({ unitPrice: "300.0000", priceOrigin: "chain" });
   });
 
   it("prices in the order's currency at its rate — the new one when the same save changes it; a new rate alone reprices nothing", async () => {
@@ -536,7 +547,7 @@ describe("låsordningen — rad → order", () => {
       expect(res.statusCode, res.body).toBe(200);
       // Planned again with the committed quantity: 3 × Kalkylpris 270.
       expect(res.json().repricing.rows).toEqual([expect.objectContaining({ rowId, quantity: 3, after: expect.objectContaining({ unitPrice: 270 }) })]);
-      expect((await storedRows(order.id))[0]).toMatchObject({ quantityOrdered: "3.0000", unitPrice: "270.0000", calculatedPrice: true });
+      expect((await storedRows(order.id))[0]).toMatchObject({ quantityOrdered: "3.0000", unitPrice: "270.0000", priceOrigin: "calculated" });
       expect((await storedOrder(order.id)).revision).toBe(revision + 2);
     } finally {
       goOn.open();
@@ -585,7 +596,8 @@ describe("låsordningen — rad → order", () => {
       unitFactor: row!.unitFactor,
       unitPrice,
       discountPercent: row!.discountPercent,
-      after: { unitPrice: 270, discountPercent: 0, calculatedPrice: true },
+      priceOrigin: row!.priceOrigin,
+      after: { unitPrice: 270, discountPercent: 0, priceOrigin: "calculated" },
     });
     const expected = { currency: "SEK", exchangeRate: "1.000000", generalMarkupPercent: null, materialMarkupPercent: null };
     const attempt = (reprice: Map<string, PlannedRowReprice>, exp = expected) =>
@@ -600,7 +612,7 @@ describe("låsordningen — rad → order", () => {
     expect((await storedRows(order.id)).map((r) => r.unitPrice)).toEqual(["250.0000", "250.0000"]);
 
     const ok = await attempt(new Map([[first!.id, planOf(first)], [second!.id, planOf(second)]]));
-    expect(ok).toMatchObject({ ok: true, repriced: [first!.id, second!.id].sort(), invoiced: [] });
+    expect(ok).toMatchObject({ ok: true, repriced: [first!.id, second!.id].sort(), kept: [] });
   });
 
   it("concurrent header and row PATCHes never deadlock", async () => {
@@ -671,7 +683,7 @@ describe("offert till order och det externa API:t", () => {
     const confirmed = await call(admin, "POST", `/sales-orders/${order.id}/confirm`);
     expect(confirmed.statusCode, confirmed.body).toBe(200);
     expect(confirmed.json()).toMatchObject({ status: "confirmed", generalMarkupPercent: "20.00", materialMarkupPercent: null });
-    expect((await storedRows(order.id)).find((r) => r.id === row.id)).toMatchObject({ unitPrice: "250.0000", calculatedPrice: true });
+    expect((await storedRows(order.id)).find((r) => r.id === row.id)).toMatchObject({ unitPrice: "250.0000", priceOrigin: "calculated" });
     expect(await addRow(order.id, { articleId: article.id, quantity: 1 })).toMatchObject({ unitPrice: "250.0000", calculatedPrice: true });
   });
 
@@ -698,5 +710,460 @@ describe("offert till order och det externa API:t", () => {
     expect(confirmed.json()).toMatchObject({ status: "confirmed" });
     expect(confirmed.json()).not.toHaveProperty("generalMarkupPercent");
     expect(confirmed.json()).not.toHaveProperty("materialMarkupPercent");
+  });
+});
+
+// The review of etapp 3 (2026-11-07): the row's price origin (0197) instead
+// of 0195's calculated_price boolean — manual (an à-pris or a rabatt written
+// by hand), chain (the price chain, any step) or calculated (its Kalkylpris)
+// — on every write path, the repricing of the chain rows, and the smaller
+// findings (the preview's rate, the kept reasons under the locks, the
+// beställningsvara's 409) and the test gaps.
+describe("granskningen av etapp 3 — prisets ursprung", () => {
+  const patchRow = (orderId: string, rowId: string, body: Record<string, unknown>) =>
+    call(admin, "PATCH", `/sales-orders/${orderId}/rows/${rowId}`, body);
+  const planned = (row: Awaited<ReturnType<typeof storedRows>>[number], articleId: string): PlannedRowReprice => ({
+    articleId,
+    quantityOrdered: row.quantityOrdered,
+    unitFactor: row.unitFactor,
+    unitPrice: row.unitPrice,
+    discountPercent: row.discountPercent,
+    priceOrigin: row.priceOrigin,
+    after: { unitPrice: 270, discountPercent: 0, priceOrigin: "calculated" },
+  });
+  async function invoiceRowFor(invoiceId: string, salesOrderRowId: string, articleId: string) {
+    const [vatCode] = await db.execute<{ id: string }>(sql`select id from vat_codes order by code limit 1`);
+    await db.insert(invoiceRows).values({
+      invoiceId,
+      salesOrderRowId,
+      articleId,
+      description: "Diskbänk",
+      quantity: "1",
+      unitPrice: "250",
+      vatCodeId: vatCode!.id,
+      vatRate: "25",
+      lineAmount: "250",
+      vatAmount: "62.5",
+    });
+  }
+
+  // Finding 1: the card's Ändra resends price and quantity with the new
+  // rabatt; only the price was compared, so the row stayed calculated and the
+  // next markup change wrote the chain's rabatt 0 over it.
+  it("a rabatt written on Ändra with the same price and quantity makes the row handwritten — a markup change never zeroes it", async () => {
+    const { article, customer } = await calculatedOrder();
+    const { order, rows } = await createQuote({
+      customerId: customer.id,
+      rows: [{ articleId: article.id, quantity: 1 }, { articleId: article.id, quantity: 1 }],
+    });
+    const [discounted, resent] = rows as [Row, Row];
+    expect(rows.map((r) => r.priceOrigin)).toEqual(["calculated", "calculated"]);
+
+    const res = await patchRow(order.id, discounted.id, { quantity: 1, unitPrice: 250, discountPercent: 10 });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().row).toMatchObject({ unitPrice: "250.0000", discountPercent: "10.00", priceOrigin: "manual", calculatedPrice: false });
+    // The same values resent keep the origin — manual here, calculated on the other row.
+    expect((await patchRow(order.id, discounted.id, { quantity: 1, unitPrice: 250, discountPercent: 10 })).json().row).toMatchObject({
+      priceOrigin: "manual",
+    });
+    expect((await patchRow(order.id, resent.id, { quantity: 1, unitPrice: 250, discountPercent: 0 })).json().row).toMatchObject({
+      priceOrigin: "calculated",
+    });
+
+    const saved = await patchHeader(order.id, { generalMarkupPercent: 30, confirmRepricing: true });
+    expect(saved.statusCode, saved.body).toBe(200);
+    expect(saved.json().repricing.rows.map((r: { rowId: string }) => r.rowId)).toEqual([resent.id]);
+    expect(saved.json().repricing.kept).toEqual([{ rowId: discounted.id, articleNumber: article.articleNumber, reason: "manual" }]);
+    expect(await storedRows(order.id)).toEqual([
+      expect.objectContaining({ id: discounted.id, unitPrice: "250.0000", discountPercent: "10.00", priceOrigin: "manual" }),
+      expect.objectContaining({ id: resent.id, unitPrice: "270.0000", discountPercent: "0.00", priceOrigin: "calculated" }),
+    ]);
+  });
+
+  it("sets the origin on every write path: POST /quotes, Lägg till rad, Ändra, Ändra konfiguration and offert till order", async () => {
+    const { article, customer } = await calculatedOrder(); // the customer's 20 % / 0 % ⇒ Kalkylpris 250
+    const uncalculated = await makeArticle({ salesPrice: 100 });
+    const { article: toOrder } = await buildToOrder();
+    const { template } = await buildVariants();
+    const beställningsvara = { articleId: toOrder.id, quantity: 1, configuration: { selection: { LOCK: "B", BREDD: 800 } } };
+    const { order, rows } = await createQuote({
+      customerId: customer.id,
+      rows: [
+        { articleId: article.id, quantity: 1 }, // the Kalkylpris
+        { articleId: uncalculated.id, quantity: 1 }, // no förkalkyl: the article's price
+        { articleId: article.id, quantity: 1, unitPrice: 250 }, // an à-pris — even the chain's figure
+        { articleId: article.id, quantity: 1, discountPercent: 0 }, // a rabatt — even the chain's 0
+        beställningsvara, // priced by its template
+        { articleId: template.id, quantity: 1, configuration: { selection: { LOCK: "A", BREDD: 900 } } }, // a variant: the template's chain
+      ],
+    });
+    expect(rows.map((r) => [r.priceOrigin, r.calculatedPrice])).toEqual([
+      ["calculated", true],
+      ["chain", false],
+      ["manual", false],
+      ["manual", false],
+      ["manual", false],
+      ["chain", false],
+    ]);
+    const [calculatedRow, chainRow, , , configuredRow, variantRow] = rows as [Row, Row, Row, Row, Row, Row];
+
+    // Lägg till rad: the same rules.
+    const add = async (payload: Record<string, unknown>) => (await addRow(order.id, payload)).priceOrigin;
+    expect(await add({ articleId: article.id, quantity: 1 })).toBe("calculated");
+    expect(await add({ articleId: uncalculated.id, quantity: 1 })).toBe("chain");
+    expect(await add({ articleId: article.id, quantity: 1, unitPrice: 199 })).toBe("manual");
+    expect(await add({ articleId: article.id, quantity: 1, discountPercent: 5 })).toBe("manual");
+    expect(await add(beställningsvara)).toBe("manual");
+
+    // Ändra: the same values keep the origin, a changed à-pris or rabatt is
+    // handwritten, a new quantity with the à-pris omitted is the chain's
+    // answer (with a rabatt sent along: handwritten).
+    const edit = async (rowId: string, body: Record<string, unknown>) => {
+      const res = await patchRow(order.id, rowId, body);
+      expect(res.statusCode, res.body).toBe(200);
+      return [res.json().row.unitPrice, res.json().row.priceOrigin];
+    };
+    expect(await edit(chainRow.id, { quantity: 1, unitPrice: 100, discountPercent: 0 })).toEqual(["100.0000", "chain"]);
+    expect(await edit(chainRow.id, { discountPercent: 0 })).toEqual(["100.0000", "chain"]);
+    expect(await edit(chainRow.id, { quantity: 2 })).toEqual(["100.0000", "chain"]);
+    expect(await edit(chainRow.id, { quantity: 2, unitPrice: 90 })).toEqual(["90.0000", "manual"]);
+    expect(await edit(chainRow.id, { quantity: 2, unitPrice: 90, discountPercent: 0 })).toEqual(["90.0000", "manual"]);
+    expect(await edit(chainRow.id, { quantity: 3 })).toEqual(["100.0000", "chain"]);
+    expect(await edit(chainRow.id, { discountPercent: 5 })).toEqual(["100.0000", "manual"]);
+    expect(await edit(chainRow.id, { quantity: 4 })).toEqual(["100.0000", "chain"]);
+    expect(await edit(chainRow.id, { quantity: 5, discountPercent: 5 })).toEqual(["100.0000", "manual"]);
+    expect(await edit(calculatedRow.id, { quantity: 2 })).toEqual(["250.0000", "calculated"]);
+    // A beställningsvara's new quantity is priced by its template: still manual.
+    expect(await edit(configuredRow.id, { quantity: 2 })).toEqual(["1050.0000", "manual"]);
+
+    // Ändra konfiguration: the beställningsvara stays manual, the variant row takes the chain's origin.
+    const reconfigure = async (rowId: string, selection: Record<string, unknown>) => {
+      const res = await call(admin, "PUT", `/sales-orders/${order.id}/rows/${rowId}/configuration`, { selection });
+      expect(res.statusCode, res.body).toBe(200);
+      return res.json().row.priceOrigin;
+    };
+    await db.update(salesOrderRows).set({ priceOrigin: "chain" }).where(eq(salesOrderRows.id, configuredRow.id));
+    expect(await reconfigure(configuredRow.id, { LOCK: "A", BREDD: 800 })).toBe("manual");
+    await db.update(salesOrderRows).set({ unitPrice: "1", priceOrigin: "manual" }).where(eq(salesOrderRows.id, variantRow.id));
+    expect(await reconfigure(variantRow.id, { LOCK: "B", BREDD: 900 })).toBe("chain");
+
+    // Offert till order: the same rows, so the origins stand.
+    const before = (await storedRows(order.id)).map((r) => [r.id, r.priceOrigin]);
+    expect((await call(admin, "POST", `/sales-orders/${order.id}/confirm`)).statusCode).toBe(200);
+    expect((await storedRows(order.id)).map((r) => [r.id, r.priceOrigin])).toEqual(before);
+    // GET rows carries both the origin and the derived tag.
+    const listed = (await call(admin, "GET", `/sales-orders/${order.id}/rows`)).json() as { priceOrigin: string; calculatedPrice: boolean }[];
+    expect(listed.every((r) => r.calculatedPrice === (r.priceOrigin === "calculated"))).toBe(true);
+  });
+
+  it("an article-price row gets the Kalkylpris when the order gets a markup, setting a cleared markup again undoes the clearing, and a price-list row keeps its price", async () => {
+    const article = await makeArticle({ salesPrice: 300 });
+    await saveCalculation(article.id);
+    const listed = await makeArticle({ salesPrice: 300 });
+    await saveCalculation(listed.id);
+    const [list] = await db.insert(priceLists).values({ code: "PL-OM", name: "Lista OM" }).returning();
+    await db.insert(priceListRows).values({ priceListId: list!.id, articleId: listed.id, fromQuantity: "1", unitPrice: "260" });
+    // No markup anywhere yet: the rows get the article's price and the price list's.
+    const customer = await makeCustomer();
+    await db.update(customers).set({ priceListId: list!.id }).where(eq(customers.id, customer.id));
+    const { order, rows } = await createQuote({
+      customerId: customer.id,
+      rows: [
+        { articleId: article.id, quantity: 1 },
+        { articleId: listed.id, quantity: 1 },
+        { articleId: article.id, quantity: 1, unitPrice: 300 },
+      ],
+    });
+    const [plain, fromList, handwritten] = rows as [Row, Row, Row];
+    expect(rows.map((r) => [r.unitPrice, r.priceOrigin])).toEqual([
+      ["300.0000", "chain"],
+      ["260.0000", "chain"],
+      ["300.0000", "manual"],
+    ]);
+
+    const previewed = (await preview(order.id, { generalMarkupPercent: 20 })).json();
+    expect(previewed.rows).toEqual([
+      expect.objectContaining({
+        rowId: plain.id,
+        before: { unitPrice: 300, discountPercent: 0, priceOrigin: "chain" },
+        after: { unitPrice: 250, discountPercent: 0, source: "calculated", priceOrigin: "calculated" },
+        calculatedPrice: true,
+      }),
+    ]);
+    expect(previewed.kept).toEqual([
+      { rowId: fromList.id, articleNumber: listed.articleNumber, reason: "unchanged" },
+      { rowId: handwritten.id, articleNumber: article.articleNumber, reason: "manual" },
+    ]);
+
+    const markup = async (generalMarkupPercent: number | null) => {
+      const res = await patchHeader(order.id, { generalMarkupPercent, confirmRepricing: true });
+      expect(res.statusCode, res.body).toBe(200);
+      return (await storedRows(order.id)).map((r) => [r.unitPrice, r.priceOrigin]);
+    };
+    const withMarkup = [
+      ["250.0000", "calculated"],
+      ["260.0000", "chain"],
+      ["300.0000", "manual"],
+    ];
+    expect(await markup(20)).toEqual(withMarkup);
+    // Cleared by mistake: the article's price again — and the row still follows the markups …
+    expect(await markup(null)).toEqual([
+      ["300.0000", "chain"],
+      ["260.0000", "chain"],
+      ["300.0000", "manual"],
+    ]);
+    // … so setting the markup again undoes the clearing.
+    expect(await markup(20)).toEqual(withMarkup);
+  });
+
+  // Finding 3: the PATCH plans with the rate of the same save; the preview did not take it.
+  it("previews with the rate the same save gives the order, under the header's rules", async () => {
+    const { article, customer } = await calculatedOrder();
+    const { order } = await createQuote({ customerId: customer.id, currency: "EUR", exchangeRate: 11.5, rows: [{ articleId: article.id, quantity: 1 }] });
+
+    const withRate = await preview(order.id, { generalMarkupPercent: 30, exchangeRate: 12 });
+    expect(withRate.statusCode, withRate.body).toBe(200);
+    expect(withRate.json()).toMatchObject({
+      exchangeRate: 12,
+      rows: [{ before: { unitPrice: fromSek(250, 11.5) }, after: { unitPrice: fromSek(270, 12) } }],
+    });
+    expect((await preview(order.id, { generalMarkupPercent: 30 })).json()).toMatchObject({
+      exchangeRate: 11.5,
+      rows: [{ after: { unitPrice: fromSek(270, 11.5) } }],
+    });
+    expect((await storedOrder(order.id)).exchangeRate).toBe("11.500000");
+    const saved = await patchHeader(order.id, { generalMarkupPercent: 30, exchangeRate: 12, confirmRepricing: true });
+    expect(saved.statusCode, saved.body).toBe(200);
+    expect(saved.json().repricing.rows).toEqual(withRate.json().rows);
+
+    // SEK only at 1; the rate only as a quote or a confirmed order.
+    const sek = await createQuote({ customerId: customer.id, rows: [{ articleId: article.id, quantity: 1 }] });
+    const refused = await preview(sek.order.id, { generalMarkupPercent: 30, exchangeRate: 2 });
+    expect([refused.statusCode, refused.json().code]).toEqual([400, "sales-order-exchange-rate"]);
+    expect((await preview(sek.order.id, { generalMarkupPercent: 30, exchangeRate: 1 })).statusCode).toBe(200);
+    await db.update(salesOrders).set({ status: "in_production" }).where(eq(salesOrders.id, order.id));
+    expect((await preview(order.id, { generalMarkupPercent: 40, exchangeRate: 13 })).json().code).toBe("invalid-status-transition");
+    expect((await preview(order.id, { generalMarkupPercent: 40 })).statusCode).toBe(200);
+  });
+
+  // Finding 5: a planned row the lock no longer selects was reported as
+  // "delivered" whatever had happened to it.
+  it("says why each planned row kept its price when it left the candidates before the locks: deleted, handwritten, delivered or invoiced", async () => {
+    const { article, customer } = await calculatedOrder();
+    const { order, rows } = await createQuote({
+      customerId: customer.id,
+      rows: Array.from({ length: 5 }, () => ({ articleId: article.id, quantity: 1 })),
+    });
+    // The header locks the candidates in id order: the first one is held while the others change.
+    const [first, deleted, manual, delivered, invoiced] = rows.map((r) => r.id).sort() as [string, string, string, string, string];
+    const holding = gate();
+    const goOn = gate();
+    const writer = db.transaction(async (tx) => {
+      await tx.select({ id: salesOrderRows.id }).from(salesOrderRows).where(eq(salesOrderRows.id, first)).for("update");
+      holding.open();
+      await goOn.promise;
+      await tx.delete(salesOrderRows).where(eq(salesOrderRows.id, deleted));
+      await tx.update(salesOrderRows).set({ unitPrice: "199", priceOrigin: "manual" }).where(eq(salesOrderRows.id, manual));
+      await tx.update(salesOrderRows).set({ quantityDelivered: "1" }).where(eq(salesOrderRows.id, delivered));
+    });
+    writer.catch(() => holding.open());
+    await holding.promise;
+    const [draft] = await db.insert(invoices).values({ customerId: customer.id }).returning();
+    try {
+      // Planned with all five, then waits for the first row.
+      const header = patchHeader(order.id, { generalMarkupPercent: 30, confirmRepricing: true });
+      await waitForLockWaiter();
+      await invoiceRowFor(draft!.id, invoiced, article.id);
+      goOn.open();
+      await writer;
+      const res = await header;
+      expect(res.statusCode, res.body).toBe(200);
+      expect(res.json().repricing.rows.map((r: { rowId: string }) => r.rowId)).toEqual([first]);
+      const reasons = Object.fromEntries(
+        (res.json().repricing.kept as { rowId: string; reason: string }[]).map((k) => [k.rowId, k.reason])
+      );
+      expect(reasons).toEqual({ [deleted]: "deleted", [manual]: "manual", [delivered]: "delivered", [invoiced]: "invoiced" });
+      expect((await markupAudits())[0]!.detail).toMatchObject({ kept: 4 });
+      expect(Object.fromEntries((await storedRows(order.id)).map((r) => [r.id, r.unitPrice]))).toEqual({
+        [first]: "270.0000",
+        [manual]: "199.0000",
+        [delivered]: "250.0000",
+        [invoiced]: "250.0000",
+      });
+    } finally {
+      goOn.open();
+    }
+  });
+
+  // Test gap: the candidates re-read under the order's lock.
+  it("re-reads the candidates under the order's lock: a row that became one after the row locks makes the plan stale", async () => {
+    const { article, customer } = await calculatedOrder();
+    const { order } = await createQuote({ customerId: customer.id, rows: [{ articleId: article.id, quantity: 1 }] });
+    const [row] = await storedRows(order.id);
+    const expected = { currency: "SEK", exchangeRate: "1.000000", generalMarkupPercent: null, materialMarkupPercent: null };
+    // Another writer holds the order and adds a Kalkylpris row before it commits.
+    const holding = gate();
+    const commit = gate();
+    const writer = db.transaction(async (tx) => {
+      await tx.select({ id: salesOrders.id }).from(salesOrders).where(eq(salesOrders.id, order.id)).for("no key update");
+      holding.open();
+      await commit.promise;
+      await tx
+        .insert(salesOrderRows)
+        .values({ salesOrderId: order.id, articleId: article.id, quantityOrdered: "1", unitPrice: "250", priceOrigin: "calculated" });
+    });
+    writer.catch(() => holding.open());
+    await holding.promise;
+    try {
+      // The plan's row is locked, then the order's lock waits for the writer.
+      const attempt = salesRepository.updateSalesOrderHeaderWithAddress(
+        order.id,
+        { generalMarkupPercent: 30 },
+        { expected, reprice: new Map([[row!.id, planned(row!, article.id)]]) }
+      );
+      await waitForLockWaiter();
+      commit.open();
+      await writer;
+      expect(await attempt).toEqual({ ok: false, reason: "stale" });
+    } finally {
+      commit.open();
+    }
+    expect(await storedOrder(order.id)).toMatchObject({ generalMarkupPercent: null });
+    expect((await storedRows(order.id)).map((r) => r.unitPrice)).toEqual(["250.0000", "250.0000"]);
+    // Planned again, the save takes both.
+    const saved = await patchHeader(order.id, { generalMarkupPercent: 30, confirmRepricing: true });
+    expect(saved.json().repricing.rows).toHaveLength(2);
+  });
+
+  // Test gap: the currency and the rate re-read under the order's lock.
+  it("re-reads the currency and the rate under the order's lock: another than planned ⇒ stale, nothing written", async () => {
+    const { article, customer } = await calculatedOrder();
+    const { order } = await createQuote({ customerId: customer.id, currency: "EUR", exchangeRate: 11.5, rows: [{ articleId: article.id, quantity: 1 }] });
+    const [row] = await storedRows(order.id);
+    const attempt = () =>
+      salesRepository.updateSalesOrderHeaderWithAddress(
+        order.id,
+        { generalMarkupPercent: 30 },
+        {
+          expected: { currency: "EUR", exchangeRate: "11.500000", generalMarkupPercent: null, materialMarkupPercent: null },
+          reprice: new Map([[row!.id, planned(row!, article.id)]]),
+        }
+      );
+    await db.update(salesOrders).set({ exchangeRate: "12" }).where(eq(salesOrders.id, order.id));
+    expect(await attempt()).toEqual({ ok: false, reason: "stale" });
+    await db.update(salesOrders).set({ currency: "NOK", exchangeRate: "11.5" }).where(eq(salesOrders.id, order.id));
+    expect(await attempt()).toEqual({ ok: false, reason: "stale" });
+    expect(await storedOrder(order.id)).toMatchObject({ generalMarkupPercent: null });
+    expect((await storedRows(order.id))[0]!.unitPrice).toBe(row!.unitPrice);
+    await db.update(salesOrders).set({ currency: "EUR" }).where(eq(salesOrders.id, order.id));
+    expect(await attempt()).toMatchObject({ ok: true, repriced: [row!.id], kept: [] });
+  });
+
+  // Test gap + finding 6: Ändra konfiguration's markups re-check, and no 409
+  // for a beställningsvara, whose template chain never reads the markups.
+  it("refuses Ändra konfiguration on a variant row priced with the old markups, but adds a beställningsvara meanwhile", async () => {
+    const { template } = await buildVariants();
+    const { article: toOrder } = await buildToOrder();
+    const customer = await makeCustomer();
+    const { order, rows } = await createQuote({
+      customerId: customer.id,
+      rows: [{ articleId: template.id, quantity: 1, configuration: { selection: { LOCK: "A", BREDD: 900 } } }],
+    });
+    expect(rows[0]).toMatchObject({ unitPrice: "1000.0000", priceOrigin: "chain" });
+
+    // A header save in flight: the order FOR UPDATE and the new markups.
+    const holding = gate();
+    const commit = gate();
+    const headerSave = db.transaction(async (tx) => {
+      await tx.select({ id: salesOrders.id }).from(salesOrders).where(eq(salesOrders.id, order.id)).for("update");
+      await tx.update(salesOrders).set({ generalMarkupPercent: "30" }).where(eq(salesOrders.id, order.id));
+      holding.open();
+      await commit.promise;
+    });
+    headerSave.catch(() => holding.open());
+    await holding.promise;
+    try {
+      const reconfigured = call(admin, "PUT", `/sales-orders/${order.id}/rows/${rows[0]!.id}/configuration`, {
+        selection: { LOCK: "B", BREDD: 900 },
+      });
+      const added = call(admin, "POST", `/sales-orders/${order.id}/rows`, {
+        articleId: toOrder.id,
+        quantity: 1,
+        configuration: { selection: { LOCK: "A", BREDD: 800 } },
+      });
+      await waitForLockWaiters(2);
+      commit.open();
+      await headerSave;
+      const [reconfiguredRes, addedRes] = await Promise.all([reconfigured, added]);
+      expect([reconfiguredRes.statusCode, reconfiguredRes.json().code]).toEqual([409, "sales-order-markups-changed"]);
+      expect(addedRes.statusCode, addedRes.body).toBe(201);
+      expect(addedRes.json()).toMatchObject({ unitPrice: "1000.0000", priceOrigin: "manual" });
+    } finally {
+      commit.open();
+    }
+    expect((await storedRows(order.id))[0]).toMatchObject({ id: rows[0]!.id, unitPrice: "1000.0000" });
+  });
+
+  // Test gap: deliverBatch locks its rows in id order before the loop.
+  it("Utleverans locks its rows in id order, so it never waits crosswise with the header's id-ordered row locks", async () => {
+    const { article, customer } = await calculatedOrder();
+    const { order, rows } = await createQuote({
+      customerId: customer.id,
+      confirm: true,
+      rows: [{ articleId: article.id, quantity: 1 }, { articleId: article.id, quantity: 1 }],
+    });
+    expect((await call(admin, "POST", `/sales-orders/${order.id}/start-production`)).statusCode).toBe(200);
+    const [low, high] = rows.map((r) => r.id).sort() as [string, string];
+
+    // The header's repricing: the candidate rows FOR UPDATE in id order — low, then high.
+    const holding = gate();
+    const goOn = gate();
+    const header = db.transaction(async (tx) => {
+      await tx.select({ id: salesOrderRows.id }).from(salesOrderRows).where(eq(salesOrderRows.id, low)).for("update");
+      holding.open();
+      await goOn.promise;
+      await tx.select({ id: salesOrderRows.id }).from(salesOrderRows).where(eq(salesOrderRows.id, high)).for("update");
+    });
+    header.catch(() => holding.open());
+    await holding.promise;
+    try {
+      // The delivery names its rows high first.
+      const delivery = call(admin, "POST", `/sales-orders/${order.id}/deliver`, {
+        rows: [
+          { rowId: high, quantity: 1 },
+          { rowId: low, quantity: 1 },
+        ],
+      });
+      await waitForLockWaiter();
+      goOn.open();
+      // Had the delivery taken `high` before waiting for `low`, the header's
+      // second lock would deadlock with it (40P01 after deadlock_timeout).
+      const outcome = await Promise.race([header.then(() => "locked" as const), sleep(5000).then(() => "waited" as const)]);
+      expect(outcome).toBe("locked");
+      const res = await delivery;
+      expect(res.statusCode, res.body).toBe(201);
+    } finally {
+      goOn.open();
+    }
+  });
+
+  // Test gap: a credit note counts as invoiced, a cancelled invoice does not.
+  it("keeps a row on a credit note and reprices one on a cancelled invoice", async () => {
+    const { article, customer } = await calculatedOrder();
+    const { order, rows } = await createQuote({
+      customerId: customer.id,
+      rows: [{ articleId: article.id, quantity: 1 }, { articleId: article.id, quantity: 1 }],
+    });
+    const [onCancelled, onCredit] = rows as [Row, Row];
+    const [cancelled] = await db.insert(invoices).values({ customerId: customer.id, status: "cancelled" }).returning();
+    const [credit] = await db.insert(invoices).values({ customerId: customer.id, type: "credit" }).returning();
+    await invoiceRowFor(cancelled!.id, onCancelled.id, article.id);
+    await invoiceRowFor(credit!.id, onCredit.id, article.id);
+
+    const res = await patchHeader(order.id, { generalMarkupPercent: 30, confirmRepricing: true });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().repricing.rows.map((r: { rowId: string }) => r.rowId)).toEqual([onCancelled.id]);
+    expect(res.json().repricing.kept).toEqual([{ rowId: onCredit.id, articleNumber: article.articleNumber, reason: "invoiced" }]);
+    expect((await storedRows(order.id)).map((r) => r.unitPrice)).toEqual(["270.0000", "250.0000"]);
   });
 });

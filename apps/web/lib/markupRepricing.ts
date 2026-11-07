@@ -1,7 +1,8 @@
 import type { MarkupRepricingKeptReason, MarkupRepricingPlan } from "./types";
 
 // Påslag på offert och order (#16): the header form's two percent fields and
-// the confirmation shown before a save that reprices Kalkylpris rows.
+// the confirmation shown before a save that reprices rows — the rows the
+// price chain priced (origin chain or calculated, 0197).
 
 // The numeric value of a Generellt påslag / Materialpåslag field: null when
 // empty (inherit), NaN when it is not a number from 0 to 1000. Rounded to the
@@ -33,7 +34,8 @@ const KEPT_REASONS: Record<MarkupRepricingKeptReason, string> = {
   delivered: "levererad",
   invoiced: "fakturerad",
   unchanged: "samma pris som förut",
-  "no-price": "kalkylen ger inget pris",
+  "no-price": "priskedjan ger inget pris",
+  deleted: "borttagen",
 };
 
 export function keptReasonText(reason: MarkupRepricingKeptReason): string {
@@ -48,10 +50,25 @@ function percentText(n: number | null): string {
   return n === null ? "ärvs" : `${n.toLocaleString("sv-SE", { maximumFractionDigits: 2 })} %`;
 }
 
-// The limit that has to be said: rows priced before the order had a markup
-// carry no Kalkylpris flag and are never repriced.
-export const REPRICING_LIMIT_TEXT =
-  "Rader som fick artikelpriset innan ordern fick ett påslag räknas aldrig om.";
+// "generellt påslag 20 % → 30 %" for each markup the save changes — an
+// unchanged field is not mentioned.
+function markupChanges(plan: MarkupRepricingPlan): string[] {
+  const changes: string[] = [];
+  const say = (label: string, before: number | null, after: number | null) => {
+    if (before !== after) changes.push(`${label} ${percentText(before)} → ${percentText(after)}`);
+  };
+  say("generellt påslag", plan.before.generalMarkupPercent, plan.after.generalMarkupPercent);
+  say("materialpåslag", plan.before.materialMarkupPercent, plan.after.materialMarkupPercent);
+  return changes;
+}
+
+// A row whose price changes step is said so: an article-price row that now
+// gets the Kalkylpris, or a Kalkylpris row the chain now prices another way.
+function originNote(row: MarkupRepricingPlan["rows"][number]): string {
+  if (row.before.priceOrigin !== "calculated" && row.after.priceOrigin === "calculated") return " (nu Kalkylpris)";
+  if (row.before.priceOrigin === "calculated" && row.after.priceOrigin !== "calculated") return " (inte längre Kalkylpris)";
+  return "";
+}
 
 // The confirmation text. `priceOf` turns a base-unit price into the price the
 // row shows (its own unit); default is the base-unit price as it is.
@@ -61,25 +78,22 @@ export function repricingMessage(
 ): string {
   const priceOf = options.priceOf ?? ((_id, price) => price);
   const lines: string[] = [];
+  const changes = markupChanges(plan);
   lines.push(
-    `Påslagen räknar om à-priset på ${plan.rows.length} ${plan.rows.length === 1 ? "rad" : "rader"} som prissatts ur kalkylen ` +
-      `(generellt påslag ${percentText(plan.before.generalMarkupPercent)} → ${percentText(plan.after.generalMarkupPercent)}, ` +
-      `materialpåslag ${percentText(plan.before.materialMarkupPercent)} → ${percentText(plan.after.materialMarkupPercent)}).`
+    `Påslagen räknar om à-priset på ${plan.rows.length} ${plan.rows.length === 1 ? "rad" : "rader"} som prissatts av priskedjan` +
+      (changes.length > 0 ? ` (${changes.join(", ")}).` : ".")
   );
   lines.push("");
   for (const row of plan.rows) {
     const before = money(priceOf(row.rowId, row.before.unitPrice));
     const after = money(priceOf(row.rowId, row.after.unitPrice));
-    // A row the chain now prices another way is said so; the flag is gone.
-    const note =
-      !row.calculatedPrice && row.after.source !== "calculated" ? " (inte längre Kalkylpris)" : "";
-    lines.push(`${row.articleNumber}: ${before} → ${after} ${plan.currency}${note}`);
+    lines.push(`${row.articleNumber}: ${before} → ${after} ${plan.currency}${originNote(row)}`);
   }
   if (plan.kept.length > 0) {
     lines.push("", "Ändras inte:");
     for (const k of plan.kept.slice(0, KEPT_LIMIT)) lines.push(`${k.articleNumber}: ${keptReasonText(k.reason)}`);
     if (plan.kept.length > KEPT_LIMIT) lines.push(`… och ${plan.kept.length - KEPT_LIMIT} till`);
   }
-  lines.push("", "Handskrivna priser och levererade eller fakturerade rader ändras inte. " + REPRICING_LIMIT_TEXT);
+  lines.push("", "Handskrivna priser och levererade eller fakturerade rader ändras inte.");
   return lines.join("\n");
 }

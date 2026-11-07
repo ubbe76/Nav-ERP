@@ -21,18 +21,24 @@ const articlePrice: CalculatedQuoteLike = { price: { source: "article" } };
 const date = () => "2026-11-07";
 
 describe("Kalkylpris helpers (web)", () => {
-  it("omits the price on create only when untouched and calculated", () => {
+  // Prisets ursprung (0197): any chain suggestion is omitted, so the row gets
+  // the chain's origin and follows the order's markups; no suggestion (none
+  // fetched, a configured row, no price) is sent as typed.
+  it("omits the price on create when untouched and the chain suggested it, whatever its step", () => {
     expect(omitUnitPriceOnCreate(false, calculated)).toBe(true);
+    expect(omitUnitPriceOnCreate(false, articlePrice)).toBe(true);
     expect(omitUnitPriceOnCreate(true, calculated)).toBe(false);
-    expect(omitUnitPriceOnCreate(false, articlePrice)).toBe(false);
+    expect(omitUnitPriceOnCreate(true, articlePrice)).toBe(false);
+    expect(omitUnitPriceOnCreate(false, { price: null })).toBe(false);
     expect(omitUnitPriceOnCreate(false, null)).toBe(false);
   });
 
   it("omits the price on edit only with a changed quantity", () => {
     expect(omitUnitPriceOnEdit({ priceTouched: false, quantityChanged: true, quote: calculated })).toBe(true);
+    expect(omitUnitPriceOnEdit({ priceTouched: false, quantityChanged: true, quote: articlePrice })).toBe(true);
     expect(omitUnitPriceOnEdit({ priceTouched: false, quantityChanged: false, quote: calculated })).toBe(false);
     expect(omitUnitPriceOnEdit({ priceTouched: true, quantityChanged: true, quote: calculated })).toBe(false);
-    expect(omitUnitPriceOnEdit({ priceTouched: false, quantityChanged: true, quote: articlePrice })).toBe(false);
+    expect(omitUnitPriceOnEdit({ priceTouched: false, quantityChanged: true, quote: null })).toBe(false);
   });
 
   it("texts the source with level, and the warning", () => {

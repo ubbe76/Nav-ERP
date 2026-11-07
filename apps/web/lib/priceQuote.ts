@@ -37,10 +37,13 @@ export function parseRate(text: string): number | null {
 }
 
 // Kalkylpris (#16): GET /price-quote answers `source: "calculated"` when the
-// customer's own markup priced the article from its latest saved förkalkyl.
-// The order-row forms then OMIT unitPrice (and send discountPercent only when
-// touched) so the server sets the row's calculated_price flag; a price the
-// operator typed is always sent ("manuellt vinner").
+// customer's or the order's own markup priced the article from its latest
+// saved förkalkyl. Prisets ursprung (0197): the order-row forms OMIT unitPrice
+// and discountPercent while both are untouched and the suggestion came from
+// the price chain (any step), so the server prices the row itself and gives
+// it the chain's origin — such a row follows a later change of the order's
+// markups. A price or a rabatt the operator typed is always sent ("manuellt
+// vinner") and makes the row handwritten.
 export type MarkupLevel = "order" | "customer" | "group" | "company";
 
 export interface CalculatedPriceInfo {
@@ -102,19 +105,25 @@ export function calculatedUnavailableText(quote: CalculatedQuoteLike | null | un
   }
 }
 
-// New quote/order and Lägg till rad: leave unitPrice out while the field is
-// untouched and the suggestion shown is the Kalkylpris.
-export function omitUnitPriceOnCreate(priceTouched: boolean, quote: CalculatedQuoteLike | null | undefined): boolean {
-  return !priceTouched && isCalculatedQuote(quote);
+// The suggestion shown came from the price chain (any step). A configured
+// row has no quote (the configurator prices it) and is always sent.
+function isChainQuote(quote: CalculatedQuoteLike | null | undefined): boolean {
+  return quote?.price != null;
 }
 
-// Ändra: only when the quantity changed (the Kalkylpris depends on it) and the
-// price field is untouched. With the same quantity the price is sent as before,
-// which keeps the row's flag.
+// New quote/order and Lägg till rad: leave unitPrice and discountPercent out
+// while both fields are untouched and the suggestion came from the chain.
+export function omitUnitPriceOnCreate(priceTouched: boolean, quote: CalculatedQuoteLike | null | undefined): boolean {
+  return !priceTouched && isChainQuote(quote);
+}
+
+// Ändra: only when the quantity changed (the chain's price depends on it) and
+// the fields are untouched. With the same quantity the price and the rabatt
+// are sent as they are, which keeps the row's origin.
 export function omitUnitPriceOnEdit(options: {
   priceTouched: boolean;
   quantityChanged: boolean;
   quote: CalculatedQuoteLike | null | undefined;
 }): boolean {
-  return options.quantityChanged && !options.priceTouched && isCalculatedQuote(options.quote);
+  return options.quantityChanged && !options.priceTouched && isChainQuote(options.quote);
 }

@@ -411,7 +411,7 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
         return reply.code(409).send({ ...errorBody(err), currency: err.currency, date: err.date });
       }
       if (err instanceof SalesOrderExchangeRateError) return reply.code(400).send(errorBody(err));
-      // Påslag (#16 etapp 3): new markups would reprice Kalkylpris rows and
+      // Påslag (#16 etapp 3): new markups would reprice rows the chain priced and
       // the save did not confirm it — the preview rides along; or the rows
       // kept changing under the repricing.
       if (err instanceof MarkupRepricingNotConfirmedError) return reply.code(409).send({ ...errorBody(err), repricing: err.repricing });
@@ -431,6 +431,8 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
     } catch (err) {
       if (err instanceof SalesOrderNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
+      // The rate of the same save: a rate ≠ 1 on SEK, as in the PATCH.
+      if (err instanceof SalesOrderExchangeRateError) return reply.code(400).send(errorBody(err));
       throw err;
     }
   });

@@ -1704,8 +1704,14 @@ export interface SalesOrder extends DocumentTermsFields {
 
 // POST /sales-orders/:id/markups/preview, the 409 markup-repricing-not-confirmed
 // body's `repricing` and the header PATCH's `repricing` (#16): what new order
-// markups do to the rows priced from the förkalkyl.
-export type MarkupRepricingKeptReason = "manual" | "delivered" | "invoiced" | "unchanged" | "no-price";
+// markups do to the rows the price chain priced (origin chain or calculated).
+// "deleted" only in the PATCH's answer (the row went between plan and save).
+export type MarkupRepricingKeptReason = "manual" | "delivered" | "invoiced" | "unchanged" | "no-price" | "deleted";
+
+// Prisets ursprung (0197, sales_order_rows.price_origin): manual = à-pris or
+// rabatt written by hand, chain = the price chain (any step), calculated =
+// its Kalkylpris step. Mirrors SalesRowPriceOrigin in @navet/shared.
+export type SalesRowPriceOrigin = "manual" | "chain" | "calculated";
 
 export interface MarkupRepricingPlan {
   changed: boolean;
@@ -1718,8 +1724,8 @@ export interface MarkupRepricingPlan {
     articleId: string;
     articleNumber: string;
     quantity: number;
-    before: { unitPrice: number; discountPercent: number };
-    after: { unitPrice: number; discountPercent: number; source: string };
+    before: { unitPrice: number; discountPercent: number; priceOrigin: SalesRowPriceOrigin };
+    after: { unitPrice: number; discountPercent: number; source: string; priceOrigin: SalesRowPriceOrigin };
     calculatedPrice: boolean;
     calculatedPriceUnavailable?: "no-calculation" | "material-base-missing" | "calculation-outdated";
   }[];
@@ -1815,8 +1821,10 @@ export interface SalesOrderRow {
   // Ställkostnad: set on the automatically added charge row — the id of the
   // article row it belongs to (null for an ordinary row).
   setupForRowId: string | null;
-  // Kalkylpris (#16): set by the server when the price came from the customer's
-  // markup and was not typed over. Old rows are false.
+  // Påslag (#16, 0197): where the à-pris came from, set by the server only;
+  // calculatedPrice = priceOrigin "calculated" (the Kalkylpris tag). Rows from
+  // before 0197 that were not Kalkylpris are manual.
+  priceOrigin: SalesRowPriceOrigin;
   calculatedPrice: boolean;
 }
 

@@ -343,8 +343,9 @@ export const updateSalesOrderHeaderSchema = z
     // påslag and materialpåslag. Omitted = unchanged, null = inherit again
     // (kund → varugrupp → företaget), 0 = explicitly 0 %. Not in
     // createQuoteSchema: set on the order card only, never by a client.
-    // A change reprices the Kalkylpris rows that are neither delivered nor
-    // invoiced; when that changes a row, the save needs confirmRepricing
+    // A change reprices the rows the price chain priced (price origin chain
+    // or calculated, 0197) that are neither delivered nor invoiced; when
+    // that changes a row, the save needs confirmRepricing
     // (409 markup-repricing-not-confirmed otherwise, with the preview of
     // POST /sales-orders/:id/markups/preview in `repricing`).
     generalMarkupPercent: markupPercentSchema.nullable().optional(),
@@ -365,10 +366,14 @@ export type UpdateSalesOrderHeaderInput = z.infer<typeof updateSalesOrderHeaderS
 // /sales-orders/:id/markups/preview — what saving these markups on the
 // header would do to the rows, computed and answered, nothing written
 // (readOnlySafe). Omitted = the order's current value, null = inherit.
+// `exchangeRate` = the rate the same save gives the order (the header
+// PATCH plans with it), omitted = the order's current one; the header's
+// rules apply (SEK only 1, quote or confirmed only).
 export const salesOrderMarkupsPreviewSchema = z
   .object({
     generalMarkupPercent: markupPercentSchema.nullable().optional(),
     materialMarkupPercent: markupPercentSchema.nullable().optional(),
+    exchangeRate: exchangeRateValueSchema.optional(),
   })
   .strict();
 export type SalesOrderMarkupsPreviewInput = z.infer<typeof salesOrderMarkupsPreviewSchema>;
@@ -379,26 +384,38 @@ export interface SalesOrderMarkups {
   materialMarkupPercent: number | null;
 }
 
+// Påslag (#16, migration 0197): where a sales order row's à-pris came from
+// — sales_order_rows.price_origin. "manual" = an à-pris or a rabatt written
+// by hand (and every row whose origin is unknown); "chain" = the price chain
+// set it, whatever step; "calculated" = the chain's Kalkylpris step. Set by
+// the server only. The rows' `calculatedPrice` is `priceOrigin ===
+// "calculated"` (the order card's Kalkylpris tag).
+export const SALES_ROW_PRICE_ORIGINS = ["manual", "chain", "calculated"] as const;
+export type SalesRowPriceOrigin = (typeof SALES_ROW_PRICE_ORIGINS)[number];
+
 // Why a row keeps its price when the order's markups change: its price was
 // written by hand (or it is configured, a ställkostnad or the freight row —
-// never a Kalkylpris), it is (partly) delivered or on an invoice row (a
-// draft counts), the chain's new answer is the price it already has, or the
-// chain has no price for it at all any more.
-export type MarkupRepricingKeptReason = "manual" | "delivered" | "invoiced" | "unchanged" | "no-price";
+// never priced by the chain), it is (partly) delivered or on an invoice row
+// (a draft and a credit note count), the chain's new answer is the price it
+// already has, or the chain has no price for it at all any more. "deleted"
+// only after a save: the row was removed between the plan and the locks.
+export type MarkupRepricingKeptReason = "manual" | "delivered" | "invoiced" | "unchanged" | "no-price" | "deleted";
 
 // One row the new markups reprice: the price chain's answer for the row
 // with the order's new markups, in the order's currency and at its rate,
-// per base unit (like the stored row). `calculatedPrice` is the row's flag
-// afterwards — false when the chain now prices it another way (a price
-// list, the article's price because the step no longer applies or the
-// calculation cannot carry it — `calculatedPriceUnavailable` says why).
+// per base unit (like the stored row), and the row's price origin before and
+// after. `calculatedPrice` is `after.priceOrigin === "calculated"` — false
+// when the chain now prices it another way (a price list, the article's
+// price because the step no longer applies or the calculation cannot carry
+// it — `calculatedPriceUnavailable` says why); the row stays "chain" and
+// follows the next markup change.
 export interface MarkupRepricingRow {
   rowId: string;
   articleId: string;
   articleNumber: string;
   quantity: number;
-  before: { unitPrice: number; discountPercent: number };
-  after: { unitPrice: number; discountPercent: number; source: PriceSource };
+  before: { unitPrice: number; discountPercent: number; priceOrigin: SalesRowPriceOrigin };
+  after: { unitPrice: number; discountPercent: number; source: PriceSource; priceOrigin: SalesRowPriceOrigin };
   calculatedPrice: boolean;
   calculatedPriceUnavailable?: CalculatedPriceUnavailable;
 }

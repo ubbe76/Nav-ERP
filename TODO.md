@@ -30,6 +30,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — layout
 
+- [ ] **Inköpsorderkortet:** radtabellens åtgärdskolumn har fast bredd (`width: editingRowId ? "140px" : "104px"`, `PurchaseOrderDetail.tsx:308`) — samma som klippte **Ändra** på kundorderkortet vid 1400 px (rättat där med `max-content` och Spara över Avbryt i #16 etapp 3). Prova i 1400 px och gör likadant om den klipps.
 
 ### Låga — fel i manualen
 

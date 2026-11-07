@@ -49,6 +49,15 @@ const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 // ways always work (spec 2026-10-21-e-faktura-peppol-design.md §1).
 export const invoiceDeliveryEnum = pgEnum("invoice_delivery", ["email", "peppol"]);
 
+// Påslag på offert och order (#16, migration 0197): where a sales order
+// row's à-pris came from. "manual" = an à-pris or a rabatt written by hand
+// (and every row whose origin is unknown — the safe default); "chain" = the
+// price chain set it, whatever step (kundpris, prislista, variantsteget,
+// artikelpriset); "calculated" = the chain's Kalkylpris step. A change of
+// the order's markups re-runs the chain for the chain and calculated rows
+// that are neither delivered nor invoiced; manual rows never move.
+export const salesRowPriceOriginEnum = pgEnum("sales_row_price_origin", ["manual", "chain", "calculated"]);
+
 // Förlorad (lost): a quote the customer did not take — closed like
 // cancelled, with a reason from quote_loss_reasons; Öppna igen takes it back
 // to quote (uppföljning av offerter, 2026-10-21).
@@ -482,14 +491,16 @@ export const salesOrderRows = pgTable(
     // stays a plain row if its article row goes (the service removes an
     // undelivered one with it).
     setupForRowId: uuid("setup_for_row_id").references((): AnyPgColumn => salesOrderRows.id, { onDelete: "set null" }),
-    // Påslag per kund och order (#16, migration 0195): the row's à-pris came
-    // from the price chain's Kalkylpris step and has not been written over
-    // since. Set by the server only — true when the chain itself gave the
-    // Kalkylpris with the à-pris omitted, false on an explicit à-pris (an
-    // unchanged one on a PATCH keeps it). Rows before 0195 are false: unknown
-    // counts as handwritten. Etapp 3 reprices these rows when the order's
-    // markups change.
-    calculatedPrice: boolean("calculated_price").notNull().default(false),
+    // Påslag per kund och order (#16, migration 0197 — replaced 0195's
+    // calculated_price boolean): where the à-pris came from
+    // (salesRowPriceOriginEnum). Set by the server only: the chain's step
+    // when the à-pris and the rabatt are omitted, manual when either is sent
+    // (on a PATCH only when it differs from the stored one — the card always
+    // resends them). The default is manual, so a row written without an
+    // origin (ställkostnad, frakt) is never repriced; 0197 made the old
+    // calculated rows "calculated" and every other existing row "manual".
+    // A change of the order's markups reprices the chain and calculated rows.
+    priceOrigin: salesRowPriceOriginEnum("price_origin").notNull().default("manual"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

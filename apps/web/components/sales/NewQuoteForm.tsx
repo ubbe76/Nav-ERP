@@ -288,8 +288,9 @@ export function NewQuoteForm({
           rows: rows.map((r) => ({
             articleId: r.article!.id,
             quantity: Number(r.quantity),
-            // Sent explicitly — except an untouched Kalkylpris, which the
-            // server prices itself so the row is flagged as calculated.
+            // Sent explicitly — except an untouched chain suggestion, which
+            // the server prices itself so the row gets the chain's origin
+            // (and follows the order's markups later).
             ...(omitUnitPriceOnCreate(r.priceTouched, r.quote)
               ? {}
               : { unitPrice: Number(r.unitPrice), discountPercent: Number(r.discountPercent) }),

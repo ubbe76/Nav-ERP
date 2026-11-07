@@ -402,9 +402,9 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         body: JSON.stringify({
           quantity: Number(editQuantity),
           // Sent explicitly — except when the quantity changed and the price
-          // is an untouched Kalkylpris, which the server then re-prices itself
-          // (and keeps the row flagged). The same quantity sends the price as
-          // before, so the flag stays.
+          // is an untouched chain suggestion, which the server then re-prices
+          // itself (the row keeps the chain's origin). The same quantity sends
+          // the price and the rabatt as they are, so the origin stays.
           ...(omitUnitPriceOnEdit({
             priceTouched: editPriceTouched,
             quantityChanged: toBaseQuantity(Number(editQuantity), editFactor) !== Number(row.quantityOrdered),
@@ -1148,8 +1148,8 @@ function markupPlaceholder(customerValue: string | null | undefined): string {
   return customerValue == null ? "Ärvs" : `${Number(customerValue).toLocaleString("sv-SE", { maximumFractionDigits: 2 })} (kunden)`;
 }
 
-// The confirmation before a save that reprices Kalkylpris rows. The plan's
-// prices are per base unit; each row shows its own unit.
+// The confirmation before a save that reprices rows the price chain priced.
+// The plan's prices are per base unit; each row shows its own unit.
 function confirmRepricing(plan: MarkupRepricingPlan, rows: SalesOrderRow[]): Promise<boolean> {
   const byId = new Map(rows.map((r) => [r.id, r]));
   return confirmDialog(
@@ -1238,6 +1238,10 @@ function EditHeaderForm({
       return;
     }
     const rateChanged = canChangeCurrency && headerForeign && newRate !== null && newRate !== Number(order.exchangeRate);
+    const ratePatch = headerForeign && (currencyChanged || rateChanged) ? { exchangeRate: newRate } : {};
+    // The preview plans with the rate this save gives the order, as the PATCH
+    // does. A new currency needs an order without rows — nothing to reprice.
+    const previewRate = !currencyChanged && rateChanged ? { exchangeRate: newRate } : {};
     // Påslag: only a changed field is sent. When it reprices rows, the user
     // confirms the plan first (Avbryt = nothing is saved).
     const general = parseMarkupField(generalMarkup);
@@ -1259,7 +1263,7 @@ function EditHeaderForm({
       try {
         const plan = await apiFetch<MarkupRepricingPlan>(`/api/v1/sales-orders/${order.id}/markups/preview`, {
           method: "POST",
-          body: JSON.stringify(markups),
+          body: JSON.stringify({ ...markups, ...previewRate }),
         });
         if (plan.rows.length > 0) {
           if (!(await confirmRepricing(plan, rows))) return;
@@ -1280,7 +1284,7 @@ function EditHeaderForm({
         method: "PATCH",
         body: JSON.stringify({
           ...(currencyChanged ? { currency: headerCurrency } : {}),
-          ...(headerForeign && (currencyChanged || rateChanged) ? { exchangeRate: newRate } : {}),
+          ...ratePatch,
           ...(showOrderNumber ? { customerOrderNumber: customerOrderNumber.trim() || null } : {}),
           customerInquiryNumber: customerInquiryNumber.trim() || null,
           customerReference: customerReference.trim() || null,
@@ -1435,7 +1439,8 @@ function EditHeaderForm({
           </FormRow>
           <FormHint attached>
             Tomt = kundens påslag, annars varugruppens eller företagets. Ett ändrat påslag räknar om à-priset på rader som
-            prissatts ur kalkylen (Kalkylpris); handskrivna priser och levererade rader ändras inte.
+            prissatts av priskedjan, även rader med artikelns försäljningspris; handskrivna priser och levererade eller
+            fakturerade rader ändras inte.
           </FormHint>
         </>
       )}
@@ -1667,8 +1672,9 @@ function AddRowForm({
         body: JSON.stringify({
           articleId: article.id,
           quantity: Number(quantity),
-          // Sent explicitly — except an untouched Kalkylpris, which the
-          // server prices itself so the row is flagged as calculated.
+          // Sent explicitly — except an untouched chain suggestion, which
+          // the server prices itself so the row gets the chain's origin
+          // (and follows the order's markups later).
           ...(omitUnitPriceOnCreate(priceTouched, quote)
             ? {}
             : { unitPrice: Number(unitPrice), discountPercent: Number(discountPercent) }),
