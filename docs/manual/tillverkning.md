@@ -116,7 +116,7 @@ Leverantörens namn-/kontaktkolumner ("Namn (2)"/"Namn (3)") samt "Skapa inte fa
 
 ## Tillverkningsorder
 
-**Tillverkning → Ordrar** listar alla TO med sök och statusfilter. Statusfiltret har också **Sen**: frisläppta och pågående ordrar som produktionsplaneringen markerar **Sen** — samma urval som aviseringen [Sena tillverkningsordrar](/hjalp/aviseringar). **Sen** är ingen egen status utan räknas fram när listan visas.
+**Tillverkning → Ordrar** listar alla TO med sök och statusfilter. Statusfiltret har också **Sen**: frisläppta och pågående ordrar som produktionsplaneringen markerar **Sen** — samma urval som aviseringen [Sena tillverkningsordrar](/hjalp/aviseringar). **Sen** är ingen egen status utan räknas fram när listan visas. Filtret har också **Halvfabrikat sent** — ordrar där ett halvfabrikat som ordern behöver blir klart för sent, se [Halvfabrikat sent](#halvfabrikat-sent).
 
 ### Läsläge
 
@@ -330,6 +330,32 @@ Efterkalkylen räknar aldrig om underliggande nivåer. **Räkna om underliggande
 
 Kalkylen räknas aldrig om i efterhand: ändrar du inställningar gäller det från nästa beräkning, och gamla kalkyler står kvar med de påslag de kördes med. En ändrad timkostnad gäller från den dag den ändrades, så den påverkar bara tid som arbetas från och med den dagen.
 
+### Täcks av och Går till
+
+I tabellen **Material** på TO-kortet visar kolumnen **Täcks av** vad som täcker varje materialrad, en rad per källa: *Lager*, *IO-123 · 2026-11-20* (en inköpsorder i utkast står som *(utkast)*) eller *TO-456 · 2026-11-18*. Ordernumren är länkar till kortet. Det som ingenting täcker står som *Saknas 12 st*. Täcks raden av flera källor, eller delvis, visas antalet på varje rad. Kommer en källa efter att materialet behövs står *N dagar för sent* i varningsfärg, och saknar den datum står *saknar datum*. Lagret är aldrig sent.
+
+Sektionen **Går till** visar åt andra hållet vilka behov ordern själv täcker: kundorder eller tillverkningsorder, **Behovsdatum**, **Antal** och *N dagar för sent* när ordern inte hinner. Det som blir över står som *Till lager 10 st*, och ett negativt lagersaldo visas som *Negativt lagersaldo*. Sektionen visas bara när ordern täcker något.
+
+Kopplingen är härledd — den räknas fram varje gång kortet visas och ingenting är reserverat. Den kan därför ändras när ett tidigare behov kommer in: lager och ordrar fördelas på behoven i datumordning, det tidigaste behovet först.
+
+### Halvfabrikat sent
+
+Märket **Halvfabrikat sent** visas på TO-kortet (bredvid **Sen**), i listan **Tillverkning → Ordrar** och i Beläggningen när en tillverkningsorder för ett halvfabrikat som ordern behöver blir klar efter att behovet uppstår. Halvfabrikatets klardatum är planens slutdatum, annars **Planerat färdigdatum** — samma datum som avgör **Sen**. Lager är aldrig sent, och en sen inköpsorder eller saknat inköpsmaterial ger inget märke (kortet visar dem i **Täcks av**). Filtrera listan med statusvalet **Halvfabrikat sent**.
+
+### Flytta halvfabrikaten
+
+Knappen **Flytta halvfabrikaten…** (behörighet Tillverkning, bara på en öppen order) finns när något halvfabrikat bör få nytt färdigdatum. Dialogen **Flytta halvfabrikaten** listar tillverkningsordrarna med indrag per nivå — halvfabrikatets egna halvfabrikat står under det — med **Nuvarande färdigdatum** och **Föreslaget färdigdatum** och en kort orsak: *Sen för ordern*, *Behövs tidigare*, *Kan bli klar senare* eller *Saknar färdigdatum*.
+
+Förslaget är arbetsdagen före det tidigaste behovet bland alla behov ordern täcker, så en flytt gör aldrig ordern sen för ett annat behov. Går en order också till andra behov står *går också till andra behov* och den är inte förvald. *hinner inte* betyder att förslaget är första möjliga dag med ledtiden och ändå ligger efter behovet. En sen order vars färdigdatum redan ligger före behovet får inget förslag — då är det planen eller kapaciteten som gör den sen.
+
+Avmarkerar du en rad avmarkeras och inaktiveras de ordrar som hör under den. Tryck **Flytta** (avstängd utan markerade rader) och bekräfta. Bara **färdigdatum** ändras: kör **Planera** i Beläggningen för att lägga om veckorna, som dialogen påminner om. Har något datum ändrats under tiden visas ett felmeddelande och raderna läses in på nytt.
+
+### Skapa saknade halvfabrikat
+
+Knappen **Skapa saknade halvfabrikat…** (behörighet Tillverkning) finns när ett tillverkat material ingenting täcker. Dialogen **Skapa saknade halvfabrikat** visar hela trädet med indrag per nivå: **Artikel**, **Benämning**, **Antal** och **Färdigdatum** (*hinner inte* när datumet inte räcker, *saknar datum* när behovet saknar datum). Nedanför står noteringar — till exempel inköpta artiklar som saknas, de skapas inte här utan syns i Behovsberäkningen.
+
+Antalet nettas som i Behovsberäkningen: lager och befintliga ordrar dras av, ordermultipel och **Avrundning** tillämpas. Bara tillverkade artiklar får en order; hela strukturen skapas i ett svep. **Skapa N tillverkningsordrar** skapar dem, och beskedet listar de nya ordernumren (länkar) och eventuella varningar. Har läget ändrats sedan förhandsvisningen — någon annan skapade en order, eller behovet föll bort — skapas ingenting utan dialogen visar den nya förhandsvisningen.
+
 ### Skriv ut TO
 
 **Skriv ut TO (PDF)** överst på tillverkningsorderns detaljsida skapar underlaget som lämnas till operatören:
@@ -455,7 +481,7 @@ Sökrutan matchar även kundordernumret och valen.
 
 Kolumnerna är innevarande vecka och framåt (välj horisont med **Veckor**: 4/8/13/26), följt av **Senare** (färdigdatum bortom horisonten) och **Odaterat** (ordrar utan **Planerat färdigdatum**). Planerade operationer ligger i sina planerade veckor — en operation som sträcker sig över flera veckor finns i en cell per vecka, med sin andel av tiden. Oplanerade operationer ligger i färdigdatumets vecka; ett passerat färdigdatum rullas in i innevarande vecka och ordern märks **Försenad**. Raderna grupperas per produktionsgrupp med en **Summa**-rad per grupp (resurser utan grupp hamnar under **Ogrupperade resurser**); filtrera med produktionsgruppsvalet.
 
-Varje cell visar last / tillgänglig tid och beläggningsgrad: neutral till 85 %, gul över 85 % och röd över 100 %. Klicka på en cell för att fälla ut vilka ordrar och operationer som utgör lasten, med länk till TO-kortet. Per operation visas **timmar i veckan** och hur många timmar som är kvar totalt, de planerade veckorna (**v.45–47**, eller **Ej planerad**), färdigdatum och märkena **Försenad**, **Sen** och **Låst**, samt knappen **Flytta…**.
+Varje cell visar last / tillgänglig tid och beläggningsgrad: neutral till 85 %, gul över 85 % och röd över 100 %. Klicka på en cell för att fälla ut vilka ordrar och operationer som utgör lasten, med länk till TO-kortet. Per operation visas **timmar i veckan** och hur många timmar som är kvar totalt, de planerade veckorna (**v.45–47**, eller **Ej planerad**), färdigdatum och märkena **Försenad**, **Sen**, **Halvfabrikat sent** (ett halvfabrikat som ordern behöver blir klart för sent, se [Halvfabrikat sent](#halvfabrikat-sent)) och **Låst**, samt knappen **Flytta…**.
 
 Cellerna markerar dessutom med små symboler när de innehåller **sena ordrar** (klocka), **låsta operationer** (hänglås) eller operationer med **förslag på alternativ resurs** (dubbelpil). Överbelagda celler är röda.
 

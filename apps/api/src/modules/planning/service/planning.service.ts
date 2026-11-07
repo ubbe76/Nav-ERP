@@ -2594,16 +2594,10 @@ export function createPlanningService(
         entityType: "manufacturing_order",
         entityId: created.orderNumber,
         action: "component_orders_created",
-        detail: {
-          orderNumbers: created.manufacturingOrders.map((mo) => mo.orderNumber),
-          manufacturingOrders: created.manufacturingOrders.map((mo) => ({
-            orderNumber: mo.orderNumber,
-            articleNumber: mo.articleNumber,
-            quantity: mo.quantity,
-            level: mo.level,
-          })),
-          warnings: created.warnings,
-        },
+        // One readable line in Historik (AuditDetail prints "key: value" and
+        // JSON for arrays/objects); each new TO has its own `released` row,
+        // and the warnings were shown in the dialog (as for any new TO).
+        detail: { orderNumbers: created.manufacturingOrders.map((mo) => mo.orderNumber).join(", ") },
         userId,
       });
       return { manufacturingOrders: created.manufacturingOrders, warnings: created.warnings };

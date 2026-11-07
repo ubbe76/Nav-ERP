@@ -2463,6 +2463,8 @@ export interface ManufacturingOrder {
   plannedStartWeek?: string | null;
   plannedEndWeek?: string | null;
   late?: boolean;
+  // Pegging (#9): a halvfabrikat TO covering this order's need is late (Halvfabrikat sent).
+  componentLate?: boolean;
   // Konfigurator 4c: the choices of a made-to-order (beställningsvara) TO; null for a plain TO.
   configuration: ManufacturingOrderConfiguration | null;
   // Only present when the list was fetched with ?withOperations=true
@@ -2546,6 +2548,8 @@ export interface CapacityCellOrder {
   planLocked: boolean;
   // Planned finish is after the order's due date (Sen).
   late: boolean;
+  // Pegging (#9): Halvfabrikat sent.
+  componentLate?: boolean;
 }
 
 export interface CapacityCell {
@@ -5262,6 +5266,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   reopened: "Öppnad igen",
   issued: "Utfärdad",
   released: "Frisläppt",
+  component_orders_created: "Halvfabrikat skapade",
   started: "Startad",
   report_undone: "Rapportering ångrad",
   closed: "Stängd",
@@ -6630,5 +6635,101 @@ export interface WorkInProgressReport {
   totalValue: number;
   unvaluedCount: number;
   cappedCount: number;
+  warnings: string[];
+}
+
+
+// Pegging (#9): GET /manufacturing-orders/:id/coverage. Quantities are in the
+// component's BASE unit.
+export interface CoverageAllocation {
+  kind: "stock" | "purchase_order" | "manufacturing_order";
+  documentId: string | null;
+  documentNumber: string | null;
+  quantity: number;
+  readyDate: string | null;
+  late: boolean;
+  undated: boolean;
+  daysLate: number;
+  isDraft: boolean;
+}
+
+export interface CoverageMaterial {
+  rowId: string; // "mat:<moMaterialId>" / "pmat:<moId>"
+  kind: "mo_material" | "mo_planned_material";
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  articleType: "manufactured" | "purchased" | "service";
+  needDate: string | null;
+  quantity: number;
+  allocations: CoverageAllocation[];
+  uncovered: number;
+}
+
+export interface CoverageGoesTo {
+  kind: "sales_order" | "mo_material" | "mo_planned_material" | "stock";
+  documentId: string | null;
+  documentNumber: string | null;
+  partner: string | null;
+  needDate: string | null;
+  quantity: number;
+  late: boolean;
+  daysLate: number;
+}
+
+export type CoverageMoveReason = "late" | "needed_earlier" | "later_possible" | "undated";
+
+export interface CoverageMove {
+  id: string;
+  parentMoveId: string | null;
+  manufacturingOrderId: string;
+  orderNumber: string;
+  articleId: string;
+  articleNumber: string;
+  level: number;
+  currentDueDate: string | null;
+  suggestedDueDate: string;
+  late: boolean;
+  exclusive: boolean;
+  preselected: boolean;
+  reason: CoverageMoveReason;
+}
+
+export interface ManufacturingOrderCoverage {
+  manufacturingOrderId: string;
+  orderNumber: string;
+  status: string;
+  materials: CoverageMaterial[];
+  goesTo: CoverageGoesTo[];
+  surplus: number;
+  componentLate: boolean;
+  moves: CoverageMove[];
+}
+
+export interface ComponentMovesResult {
+  moved: { id: string; orderNumber: string; dueDate: string }[];
+  notice: string;
+}
+
+export interface MissingComponentRow {
+  key: string;
+  parentKey: string | null;
+  level: number;
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  quantity: number;
+  dueDate: string | null;
+  late: boolean;
+  needDate: string | null;
+}
+
+export interface MissingComponentsPreview {
+  orders: MissingComponentRow[];
+  notes: string[];
+}
+
+export interface CreateMissingComponentsResult {
+  manufacturingOrders: { id: string; orderNumber: string; articleNumber: string; quantity: number; level: number }[];
   warnings: string[];
 }

@@ -42,6 +42,8 @@ describe("händelseloggens etiketter", () => {
     ["entity", "article_group"],
     ["entity", "customer"],
     ["action", "markups_changed"],
+    // Pegging (#9).
+    ["action", "component_orders_created"],
   ])("labels the %s %s on both sides", (kind, key) => {
     const api = kind === "entity" ? AUDIT_ENTITY_TYPE_LABELS : AUDIT_ACTION_LABELS;
     expect(api[key]).toMatch(/\S/);

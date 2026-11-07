@@ -273,14 +273,7 @@ describe("POST /manufacturing-orders/:id/missing-components (createMissingCompon
       [
         "component_orders_created",
         parent.orderNumber,
-        {
-          orderNumbers: [subOrder!.orderNumber, semiOrder!.orderNumber],
-          manufacturingOrders: [
-            { orderNumber: subOrder!.orderNumber, articleNumber: world.sub.articleNumber, quantity: 2, level: 2 },
-            { orderNumber: semiOrder!.orderNumber, articleNumber: world.semi.articleNumber, quantity: 2, level: 1 },
-          ],
-          warnings: releaseWarnings,
-        },
+        { orderNumbers: `${subOrder!.orderNumber}, ${semiOrder!.orderNumber}` },
         world.user.id,
       ],
     ]);
