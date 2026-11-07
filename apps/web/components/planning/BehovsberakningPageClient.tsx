@@ -744,7 +744,8 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
         emptyText={loading ? "Hämtar…" : "Inga artiklar matchar filtren"}
         renderCell={(row, key) => {
           const state = rowStates[row.id] ?? makeRowState(row);
-          const demand = row.demandSales + row.demandMo + row.demandDerived;
+          const demandForecast = row.demandForecast ?? 0;
+          const demand = row.demandSales + row.demandMo + row.demandDerived + demandForecast;
           const incoming = row.supplyPo + row.supplyPoDraft + row.supplyMo;
           const isLego = row.proposalKind === "subcontract";
           const rowDisabled = !isSelectable(row);
@@ -810,8 +811,15 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
               return row.onHand.toLocaleString("sv-SE");
             case "demand":
               return (
-                <span title={`KO: ${row.demandSales} · TO-material: ${row.demandMo} · Härlett: ${row.demandDerived}`}>
+                <span
+                  title={`KO: ${row.demandSales} · TO-material: ${row.demandMo} · Härlett: ${row.demandDerived} · Prognos: ${demandForecast}`}
+                >
                   {demand.toLocaleString("sv-SE")}
+                  {demandForecast > 0 && (
+                    <span style={{ display: "block", fontSize: "0.85em", color: "var(--color-text-muted)" }}>
+                      varav prognos {demandForecast.toLocaleString("sv-SE", { maximumFractionDigits: 4 })}
+                    </span>
+                  )}
                 </span>
               );
             case "incoming":

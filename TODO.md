@@ -93,6 +93,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Inventeringen:** INV-nummerstegning; positiv diff utan standardpris → null; spärrsläpp efter registrering.
 - [ ] **Terminalen och närvaron:** anställd-cascade och FK-race; lego-inleverans; Slutför order över flera op; admin-fall; 2 s-gränsen.
 - [ ] **Artikelöversikten:** `toBeCloseTo` i invarianttestet om bråktal någonsin används.
+- [ ] **Produktionsplaneringen:** kapplöpningstestet "Planera and a new TO at once (plan first)" i `production-plan.integration.test.ts` föll en gång under hela sviten 2026-11-07 (förväntade v.11, fick v.10) men gick igenom tre gånger ensamt — ordningen avgörs av `Promise.all`; styr den med en låsväntare (`waitForLockWaiter`) om den flagnar igen.
 
 ### Att besluta
 

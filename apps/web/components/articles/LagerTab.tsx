@@ -14,6 +14,7 @@ import { apiFetch } from "../../lib/api";
 import type { Article, ArticleLocations, StockBalance } from "../../lib/types";
 import { articleLocationRole, ownPrimaryLocationId } from "../../lib/stockLocations";
 import { ArticleLocationsCard } from "./ArticleLocationsCard";
+import { ForecastCard } from "./ForecastCard";
 import { formatQuantity } from "../../lib/format";
 
 interface RowWithId extends StockBalance {
@@ -39,6 +40,7 @@ export function LagerTab({
   const [orderQuantity, setOrderQuantity] = useState(article.orderQuantity ?? "");
   const [rounding, setRounding] = useState(article.rounding ?? "");
   const [leadTime, setLeadTime] = useState(article.manufacturingLeadTimeDays != null ? String(article.manufacturingLeadTimeDays) : "");
+  const [forecastControlled, setForecastControlled] = useState(article.forecastControlled ?? false);
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +59,7 @@ export function LagerTab({
           stockControlled: stockControlled === "stock",
           orderQuantity: orderQuantity.trim() === "" ? null : Number(orderQuantity),
           rounding: rounding.trim() === "" ? null : Number(rounding),
+          forecastControlled,
           // Only manufactured articles carry a lead time; others leave it untouched.
           ...(article.type === "manufactured"
             ? { manufacturingLeadTimeDays: leadTime.trim() === "" ? null : Number(leadTime) }
@@ -168,6 +171,21 @@ export function LagerTab({
               Ledtid (dagar): tomt fält räknar ledtiden ur operationerna i rutten.
             </FormHint>
           )}
+          <label style={{ display: "flex", alignItems: "center", gap: 8, margin: "12px 0 4px" }}>
+            <input type="checkbox" checked={forecastControlled} onChange={(e) => setForecastControlled(e.target.checked)} />
+            Prognosstyrd
+          </label>
+          <FormHint attached>
+            Prognosstyrd: behovsberäkningen planerar ett månadsbehov (snitt eller eget antal) för artikeln. Passar slutprodukter och
+            reservdelar. Prognoskortet visas under Planering när artikeln är sparad som Prognosstyrd.
+          </FormHint>
+          <p style={{ margin: "12px 0 4px" }}>
+            ABC-klass: <strong>{article.abcClass ?? "—"}</strong>
+          </p>
+          <FormHint attached>
+            Klassen räknas på förbrukningsvärdet (förbrukat antal × standardpris) under perioden som anges i System →
+            Inställningar (ABC — period). — betyder att artikeln står utanför klassningen.
+          </FormHint>
           <FormHint attached>
             Används av behovsberäkningen. Beställningspunkt och Säkerhetslager jämförs mot projicerat saldo — det större av dem är golvet, och
             förslaget fyller upp till det. Styrning (Orderstyrd/Lagerstyrd) är bara information. Förslag avrundas upp till
@@ -183,6 +201,8 @@ export function LagerTab({
           </FormActions>
         </Form>
       </Card>
+
+      {article.forecastControlled && <ForecastCard articleId={article.id} unitCode={article.unit} />}
 
       <p style={{ margin: "0 0 12px" }}>
         <GatedLink href={`/lager/transaktioner?article=${article.id}`} style={{ color: "var(--accent-fg)" }}>

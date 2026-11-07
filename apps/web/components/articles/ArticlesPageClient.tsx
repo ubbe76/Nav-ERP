@@ -300,6 +300,16 @@ export function ArticlesPageClient({
           ariaLabel="Filtrera på artikelkod"
           options={articleCodes.map((c) => ({ value: c.id, label: `${c.code} · ${c.name}` }))}
         />
+        <ListFilterSelect
+          param="abcClass"
+          allLabel="Alla ABC-klasser"
+          ariaLabel="Filtrera på ABC-klass"
+          options={[
+            { value: "A", label: "ABC-klass A" },
+            { value: "B", label: "ABC-klass B" },
+            { value: "C", label: "ABC-klass C" },
+          ]}
+        />
         <ListExportLink endpoint="/api/v1/articles/csv" />
       </ListToolbar>
 
@@ -324,6 +334,7 @@ export function ArticlesPageClient({
             { key: "articleNumber", label: "Artikelnummer", width: "160px" },
             { key: "name", label: "Benämning", width: "minmax(200px, 1fr)" },
             { key: "type", label: "Typ", width: editable ? "170px" : "160px" },
+            { key: "abcClass", label: "ABC", width: "60px" },
             { key: "groupName", label: "Varugrupp", width: editable ? "190px" : "140px" },
             { key: "articleCodeName", label: "Artikelkod", width: "140px" },
             { key: "unit", label: "Standardenhet", width: editable ? "140px" : "130px" },
@@ -445,6 +456,8 @@ export function ArticlesPageClient({
                     </Select>
                   </div>
                 );
+              case "abcClass":
+                return article.abcClass ?? "–";
               case "standardCost":
                 return article.standardCost ? `${Number(article.standardCost).toFixed(2)} kr` : "–";
               case "active":

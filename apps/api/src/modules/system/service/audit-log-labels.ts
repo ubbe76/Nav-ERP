@@ -127,6 +127,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   plugin_key_rotated: "Ny API-nyckel",
   plugin_secret_rotated: "Ny webbhookshemlighet",
   plugin_uninstalled: "Tillägg avinstallerat",
+  // Prognos (#10): own monthly quantities changed on an article.
+  forecast_updated: "Prognos ändrad",
 };
 
 export function auditEntityTypeLabel(entityType: string): string {
