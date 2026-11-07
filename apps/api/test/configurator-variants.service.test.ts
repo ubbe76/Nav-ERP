@@ -324,6 +324,22 @@ describe("createVariants", () => {
   });
 });
 
+// Alternativa resurser (#15): a variant's base operation gets the template
+// row's alternatives (copyRoutingAlternatives); a Kalkyl operation never has any.
+describe("createVariants — alternativa resurser", () => {
+  it("gives the variant's base operation the template's alternatives with ranks and times", async () => {
+    const s = await build();
+    const alt = await workCenter("205", 450);
+    await mfgService.updateRoutingOperation(s.article.id, s.op10.id, { alternatives: [{ workCenterId: alt.id, runTimePerUnit: 0.5 }] });
+    const [row] = await service.createVariants(s.article.id, ONE, null);
+    const ops = await mfgService.listRoutingOperations(row!.articleId!);
+    expect(ops.find((o) => o.sequenceNo === 10)!.alternatives.map((a) => [a.code, a.rank, a.setupTime, a.runTimePerUnit])).toEqual([
+      ["205", 1, null, "0.5000"],
+    ]);
+    expect(ops.find((o) => o.sequenceNo === 20)!.alternatives).toEqual([]);
+  });
+});
+
 describe("guards once variants exist", () => {
   it("locks the codes variants use: group and alternative codes cannot change, the alternative cannot be deleted but can be deactivated", async () => {
     const s = await build();

@@ -10,6 +10,8 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
+  smallint,
   text,
   timestamp,
   unique,
@@ -222,6 +224,41 @@ export const routingOperations = pgTable(
   (table) => [unique().on(table.articleId, table.sequenceNo)]
 );
 
+// Alternativa resurser (#15, migration 0191): the other resources an own
+// operation of the beredning can run on, in order (rank 1, 2, …; the
+// operation's own work_center_id is the ordinarie). The times are minutes
+// like the routing's; null = som ordinarie, read at every use, so a changed
+// ordinary time follows. Only on an own operation that is worked: never on a
+// legoresurs (neither side) and never on a Kalkyl operation — the service
+// refuses it (routing-alternatives.ts holds the rules). An alternative is
+// never the ordinarie, at most 5 per operation (the CHECK backs the zod
+// max). work_center_id restrict: a resource that is an alternative cannot
+// vanish. Snapshotted to mo_operation_resources at release.
+export const routingOperationAlternatives = pgTable(
+  "routing_operation_alternatives",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    routingOperationId: uuid("routing_operation_id")
+      .notNull()
+      .references(() => routingOperations.id, { onDelete: "cascade" }),
+    workCenterId: uuid("work_center_id")
+      .notNull()
+      .references(() => workCenters.id, { onDelete: "restrict" }),
+    rank: smallint("rank").notNull(),
+    setupTime: numeric("setup_time", { precision: 10, scale: 2 }),
+    runTimePerUnit: numeric("run_time_per_unit", { precision: 10, scale: 4 }),
+  },
+  (table) => [
+    unique("routing_operation_alternatives_operation_work_center").on(table.routingOperationId, table.workCenterId),
+    unique("routing_operation_alternatives_operation_rank").on(table.routingOperationId, table.rank),
+    check("routing_operation_alternatives_rank_range", sql`${table.rank} BETWEEN 1 AND 5`),
+    check(
+      "routing_operation_alternatives_times",
+      sql`(${table.setupTime} is null or ${table.setupTime} >= 0) and (${table.runTimePerUnit} is null or ${table.runTimePerUnit} >= 0)`
+    ),
+  ]
+);
+
 // One optional drawing per lego operation (routing_operations UNIQUE) — used
 // when the operation's useArticleDrawing is off. Stored in Postgres like
 // article_files (PDF/JPEG/PNG, max 20 MB); list queries must never select
@@ -354,6 +391,13 @@ export const moOperations = pgTable(
     plannedEndWeek: date("planned_end_week"),
     planLocked: boolean("plan_locked").notNull().default(false),
     plannedAt: timestamp("planned_at", { withTimezone: true }),
+    // "Vald för hand" (alternativa resurser, #15): the resource was chosen by
+    // hand among the operation's mo_operation_resources (Byt till X, Ändra
+    // operationer, the reservation). Only meaningful with resource rows — an
+    // operation without them always has false. Kept apart from plan_locked:
+    // a resource choice does not lock the weeks, and Lås upp must not forget
+    // that the resource was chosen by hand.
+    resourceLocked: boolean("resource_locked").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -367,6 +411,37 @@ export const moOperations = pgTable(
     check("mo_operations_plan_locked", sql`not ${table.planLocked} or ${table.plannedStartWeek} is not null`),
     // The terminal's sort and the TO list read by start week.
     index("idx_mo_operations_planned_start").on(table.plannedStartWeek),
+  ]
+);
+
+// Alternativa resurser (#15): the operation's possible resources as they were
+// at release — rank 0 = the beredning's ordinarie, 1… = its alternatives
+// (inactive ones left out), each with its times resolved (the alternative's
+// own, else the operation's). Rows exist only for operations with
+// alternatives; an operation without rows behaves exactly as before.
+// Invariant: with rows, the operation's work_center_id is one of them and
+// that row carries the operation's times (Ändra writes both; a switch copies
+// the target row's times to the operation; a switch by hand to a resource
+// outside the rows deletes them). Written by
+// manufacturing/repository/operation-resources.ts only.
+export const moOperationResources = pgTable(
+  "mo_operation_resources",
+  {
+    moOperationId: uuid("mo_operation_id")
+      .notNull()
+      .references(() => moOperations.id, { onDelete: "cascade" }),
+    workCenterId: uuid("work_center_id")
+      .notNull()
+      .references(() => workCenters.id, { onDelete: "restrict" }),
+    rank: smallint("rank").notNull(),
+    setupTime: numeric("setup_time", { precision: 10, scale: 2 }).notNull(),
+    runTimePerUnit: numeric("run_time_per_unit", { precision: 10, scale: 4 }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.moOperationId, table.workCenterId] }),
+    unique("mo_operation_resources_operation_rank").on(table.moOperationId, table.rank),
+    check("mo_operation_resources_rank_range", sql`${table.rank} BETWEEN 0 AND 5`),
+    check("mo_operation_resources_times", sql`${table.setupTime} >= 0 and ${table.runTimePerUnit} >= 0`),
   ]
 );
 
@@ -417,7 +492,11 @@ export const moOperationScrap = pgTable("mo_operation_scrap", {
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 },
-  (table) => [check("mo_operation_scrap_reason", sql`${table.reasonId} IS NOT NULL OR ${table.reason} IS NOT NULL`)]
+  (table) => [
+    check("mo_operation_scrap_reason", sql`${table.reasonId} IS NOT NULL OR ${table.reason} IS NOT NULL`),
+    // Rörd (operationTouchedSql, migration 0193): any scrap on the operation.
+    index("mo_operation_scrap_by_operation").on(table.moOperationId),
+  ]
 );
 
 // Rapporteringslogg: one row per reporting event on a TO — a stamp-out in
@@ -462,7 +541,11 @@ export const moReports = pgTable(
     undoneAt: timestamp("undone_at", { withTimezone: true }),
     undoneBy: uuid("undone_by").references(() => users.id, { onDelete: "set null" }),
   },
-  (table) => [index("mo_reports_by_order").on(table.manufacturingOrderId, table.createdAt)]
+  (table) => [
+    index("mo_reports_by_order").on(table.manufacturingOrderId, table.createdAt),
+    // Rörd (operationTouchedSql, migration 0193): any report-log row on the operation.
+    index("mo_reports_by_operation").on(table.moOperationId),
+  ]
 );
 
 // Material a report drew, per material row and stock location — Ångra

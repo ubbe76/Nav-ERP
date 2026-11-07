@@ -1,5 +1,5 @@
 import { asc, eq, sql } from "drizzle-orm";
-import { routingOperations, type Tx } from "@navet/db";
+import { routingOperationAlternatives, routingOperations, type Tx } from "@navet/db";
 
 // Tx-only routing writers — the manufacturing module owns routing_operations,
 // so every caller that writes a routing inside a larger transaction (Kopiera
@@ -51,5 +51,61 @@ export async function copyRouting(tx: Tx, sourceArticleId: string, targetArticle
       SELECT ${inserted!.id}, filename, content_type, size_bytes, data
       FROM routing_operation_files WHERE routing_operation_id = ${oldId}`);
   }
+  await copyRoutingAlternatives(
+    tx,
+    [...operationMap].map(([from, to]) => ({ from, to }))
+  );
   return operationMap;
+}
+
+// --- Alternativa resurser (#15) ---
+
+// The alternatives of one operation as a set, in rank order (1..n): DELETE +
+// INSERT, so a reordering never meets the (operation, rank) unique index
+// halfway. The caller holds the operation's row lock and has run the rules
+// (routing-alternatives.ts). Times null = som ordinarie.
+export async function replaceRoutingAlternatives(
+  tx: Tx,
+  routingOperationId: string,
+  alternatives: { workCenterId: string; setupTime?: number | null; runTimePerUnit?: number | null }[]
+): Promise<void> {
+  await tx.delete(routingOperationAlternatives).where(eq(routingOperationAlternatives.routingOperationId, routingOperationId));
+  if (alternatives.length === 0) return;
+  await tx.insert(routingOperationAlternatives).values(
+    alternatives.map((a, i) => ({
+      routingOperationId,
+      workCenterId: a.workCenterId,
+      rank: i + 1,
+      setupTime: a.setupTime == null ? null : String(a.setupTime),
+      runTimePerUnit: a.runTimePerUnit == null ? null : String(a.runTimePerUnit),
+    }))
+  );
+}
+
+// The companion of copyRouting and insertRoutingOperations: copies the
+// alternatives of each `from` operation onto its `to` operation with ranks
+// and times (null stays null — som ordinarie of the copy). ONE rule for
+// Kopiera beredning and the configurator's variants: only when `to` is an
+// own, non-Kalkyl operation on the same ordinarie as `from` — a variant
+// whose derived base operation landed on another resource or became Kalkyl
+// gets none (the alternatives were chosen for the template's ordinarie), and
+// an alternative that is `to`'s ordinarie is never copied. One statement.
+export async function copyRoutingAlternatives(tx: Tx, pairs: { from: string; to: string }[]): Promise<void> {
+  if (pairs.length === 0) return;
+  const values = sql.join(
+    pairs.map((p) => sql`(${p.from}::uuid, ${p.to}::uuid)`),
+    sql`, `
+  );
+  await tx.execute(sql`
+    INSERT INTO routing_operation_alternatives (routing_operation_id, work_center_id, rank, setup_time, run_time_per_unit)
+    SELECT t.id, a.work_center_id, a.rank, a.setup_time, a.run_time_per_unit
+    FROM (VALUES ${values}) AS v(from_id, to_id)
+    JOIN routing_operations f ON f.id = v.from_id
+    JOIN routing_operations t ON t.id = v.to_id
+    JOIN work_centers twc ON twc.id = t.work_center_id
+    JOIN routing_operation_alternatives a ON a.routing_operation_id = f.id
+    WHERE t.work_center_id = f.work_center_id
+      AND NOT t.costing_only
+      AND twc.type <> 'subcontract'
+      AND a.work_center_id <> t.work_center_id`);
 }

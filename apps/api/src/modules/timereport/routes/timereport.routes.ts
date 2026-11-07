@@ -29,6 +29,7 @@ import {
   InvalidAttendanceIntervalError,
   InvalidStopTimeError,
   StampSessionAlreadyStoppedError,
+  StampWorkCenterChangedError,
   StampSessionNotFoundError,
   StopTimeNotAllowedError,
   TimeReportNotFoundError,
@@ -208,7 +209,8 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
       if (
         err instanceof InactiveEmployeeError ||
         err instanceof AlreadyStampedInError ||
-        err instanceof InvalidStatusTransitionError
+        err instanceof InvalidStatusTransitionError ||
+        err instanceof StampWorkCenterChangedError
       ) {
         return reply.code(409).send(errorBody(err));
       }

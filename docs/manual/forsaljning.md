@@ -423,6 +423,8 @@ Själva kontrollen är en beräkning som läser och räknar — den ändrar inge
 - **I Ny kundorder:** samma knapp räknar formulärets rader (och vald kund) innan ordern är sparad.
 - **Fristående:** **Försäljning → Leveranstidskontroll**. Lägg in rader med **Lägg till rad** — artikel och antal; en konfigurerbar mall konfigureras med **Konfigurera**, som på en orderrad — välj om du vill en **Kund** och klicka **Kontrollera**.
 
+Ger [alternativa resurser](/hjalp/artiklar#alternativa-resurser) ett tidigare datum visar dialogen båda datumen och låter dig välja — se [Alternativa resurser i kontrollen](#alternativa-resurser-i-kontrollen).
+
 Knappen **Använd datumet** i dialogen sätter orderns **Förväntat leveransdatum**; i **Ny kundorder** fylls fältet i. Knappen visas bara när kontrollen räknats med en kund — utan kund är datumet avsändningsdagen och dialogen visar i stället texten "Välj kund för att räkna med kundens transportdagar." Raderna på ordern ändras aldrig — har några rader ett [eget leveransdatum](#leveransdatum-per-rad) behåller de det, och dialogen säger hur många de är. Kräver behörigheten Försäljning eller Tillverkning.
 
 ### Skapa tillverkningsordrar för det som saknas
@@ -435,8 +437,21 @@ Räknade kontrollen med tillverkade artiklar som saknas i lager, visas under res
 - Tillverkningsordrarna **låses** i de veckor kontrollen räknade, så att **Planera** i [Beläggning](/hjalp/tillverkning#belaggning) inte flyttar dem — det lovade datumet håller tills någon väljer **Lås upp** på operationen.
 - Allt eller inget: går något fel skapas ingen order alls och datumet ändras inte.
 - Efter lyckat resultat visar dialogen de skapade tillverkningsordrarna med länkar (till dem du har behörighet att öppna) och orderkortet läses om.
+- **Med alternativa resurser:** när kontrollen visade båda datumen och du valt **Med alternativa resurser** byter tillverkningsordrarna resurs på de operationer som lades på ett alternativ. Bytet skrivs på operationen med **Vald för hand**, och veckorna låses tillsammans med resursen, så att **Planera** inte flyttar tillbaka den. Bara de alternativ som behövs för datumet skrivs (se [Alternativa resurser i kontrollen](#alternativa-resurser-i-kontrollen)). Efteråt visar dialogen under varje tillverkningsorder vad som byttes, till exempel *TO-1234: op 20 bytt från 110 till 120 (Vald för hand)*. Operationer på ordinarie resurs påverkas inte. Har beredningen ändrats eller resursen inaktiverats mellan kontrollen och skapandet så att alternativet inte längre finns, skapas ingenting: dialogen visar "Läget har ändrats sedan kontrollen" och byter till den nya kontrollen. Väljer du **Med ordinarie resurser** byts ingen resurs.
 - **Läget kan ha ändrats:** har någon annan hunnit boka kapacitet eller skapa en order sedan kontrollen, eller har antalet tillverkningsordrar som skulle skapas ändrats, visas "Läget har ändrats sedan kontrollen — det nya datumet är …" och dialogen byter till den nya kontrollen. Ingenting har skapats — granska resultatet och klicka **Använd datumet** igen.
+- **Använd datumet utan tillverkningsordrar** (kryssrutan avkryssad, på en offert eller i **Ny kundorder**) sparar bara datumet, och ingen resurs skrivs. Bygger det valda datumet på alternativ resurs varnar dialogen: *Datumet bygger på alternativ resurs. Tillverkningsordrar som skapas senare planeras på ordinarie resurs — skapa dem här för att hålla datumet.* Tillverkningsordrar som skapas senare får i stället ett förslag i [Beläggning](/hjalp/tillverkning#belaggning).
 - Finns det inget att skapa (allt täcks av lager och öppna ordrar) visas ingen kryssruta, och **Använd datumet** sätter bara datumet.
+
+### Alternativa resurser i kontrollen
+
+Har en operation i beredningen [alternativa resurser](/hjalp/artiklar#alternativa-resurser) prövar kontrollen dem när den ordinarie resursen är full. Den räknar två gånger, med alternativ och med bara ordinarie resurser, och använder alternativen **bara när de ger ett tidigare leveransdatum** (eller ett datum där ordinarie resurser inte ger något inom två år). Annars är hela svaret räknat på ordinarie resurser och inget av det som beskrivs här visas.
+
+Alternativen behålls **bara där de behövs för datumet.** Blir en rad klar tidigare på ett alternativ men avgör en annan rad leveransdatumet, räknas raden på ordinarie resurs i stället. Kontrollen prövar varje alternativ i tur och ordning och lägger tillbaka operationen på ordinarie resurs så länge leveransdatumet håller. Det är bara de kvarvarande alternativen som visas och som skrivs på tillverkningsordrarna.
+
+- Överst står en rad som *Leverans 2026-11-12 med alternativa resurser (ordinarie: 2026-11-19)*. Ger ordinarie resurser inget datum inom två år står det *(ordinarie resurser ger inget datum inom två år)*.
+- Under raden väljer du datum med två radioknappar: **Med alternativa resurser (2026-11-12)**, som är förvald, och **Med ordinarie resurser (2026-11-19)**. Valet styr vilket datum **Använd datumet** använder, och vilket läge tillverkningsordrarna skapas i. Väljer du **Med ordinarie resurser** visar leveransdatum, avsändningsdag och *Klar* ordinariedatumen; stegen under *Vad som begränsar* visar fortfarande körningen med alternativ.
+- I *Vad som begränsar* står resursen på varje operation, och används ett alternativ står det efter resursen, till exempel *BÄNK-1 op 20 Bocka — Kantpress 2 (120) (alternativ till 110, ordinarie v. 49), vecka 46, klar 2026-11-12*. Veckan är den som den ordinarie resursen hade gett.
+- Den fristående sidan och **Ny kundorder** listar bara de två datumen — där finns inget val att göra.
 
 ### Vad som räknas
 

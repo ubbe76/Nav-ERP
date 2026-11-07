@@ -19,6 +19,7 @@ import {
   MoOperationReportedError,
   MoOperationSequenceTakenError,
   MoOperationStampedError,
+  MoOperationResourceChangedError,
   NotSubcontractOperationError,
   WorkCenterNotFoundError,
   WorkCenterSupplierNotFoundError,
@@ -149,6 +150,22 @@ describe("Ändra operationer — routes", () => {
     expect(empty.statusCode).toBe(400);
   });
 
+  it("PATCH …/operations/:opId passes Byt till X's precondition on; a malformed one is 400", async () => {
+    const calls: unknown[] = [];
+    const app = appWith({
+      updateOperation: async (_moId, _opId, input) => {
+        calls.push(input);
+        return { operation: { id: "o1" } as never, warnings: [] };
+      },
+    });
+    const [from, to] = [id(), id()];
+    const ok = await app.inject({ method: "PATCH", url: `/manufacturing-orders/${id()}/operations/${id()}`, payload: { workCenterId: to, expectedWorkCenterId: from } });
+    expect(ok.statusCode).toBe(200);
+    expect(calls).toEqual([{ workCenterId: to, expectedWorkCenterId: from }]);
+    const bad = await app.inject({ method: "PATCH", url: `/manufacturing-orders/${id()}/operations/${id()}`, payload: { workCenterId: to, expectedWorkCenterId: "110" } });
+    expect(bad.statusCode).toBe(400);
+  });
+
   it("DELETE …/operations/:opId answers 200 { warnings, unlinkedMaterials }", async () => {
     const app = appWith({ removeOperation: async () => ({ warnings: ["TO-1 beräknas bli sen"], unlinkedMaterials: 2 }) });
     const res = await app.inject({ method: "DELETE", url: `/manufacturing-orders/${id()}/operations/${id()}` });
@@ -164,6 +181,7 @@ describe("Ändra operationer — routes", () => {
     [new MoOperationSequenceTakenError(10), 409, ERROR_CODES.MO_OPERATION_SEQUENCE_TAKEN],
     [new MoOperationDoneError(), 409, ERROR_CODES.MO_OPERATION_DONE],
     [new MoOperationStampedError(), 409, ERROR_CODES.MO_OPERATION_STAMPED],
+    [new MoOperationResourceChangedError(), 409, ERROR_CODES.MO_OPERATION_RESOURCE_CHANGED],
     [new MoOperationLinkedPurchaseError(), 409, ERROR_CODES.MO_OPERATION_LINKED_PURCHASE],
     [new MoOperationReportedError(), 409, ERROR_CODES.MO_OPERATION_REPORTED],
     [new LastOperationLockedError(), 409, ERROR_CODES.LAST_OPERATION_LOCKED],
@@ -187,4 +205,31 @@ describe("Ändra operationer — routes", () => {
       }
     });
   }
+});
+
+// Förslag på resurs (#15, etapp 2): GET …/operations carries `suggestion` per
+// operation, also for the workshop profile whose prices are nulled.
+describe("GET /manufacturing-orders/:id/operations — förslag på resurs", () => {
+  const suggestion = { workCenterId: id(), code: "120", name: "Kantpress 2", toWeek: "2030-03-04", currentToWeek: "2030-03-18", reason: "overloaded" };
+  const rows = [
+    { id: id(), sequenceNo: 10, setupPrice: "100.00", transportPrice: null, unitPrice: "5.00", resourceLocked: false, resources: [], suggestion },
+    { id: id(), sequenceNo: 20, setupPrice: null, transportPrice: null, unitPrice: null, resourceLocked: true, resources: [], suggestion: null },
+  ];
+
+  it("passes each operation's suggestion through", async () => {
+    const app = appWith({ listOperations: async () => rows as never });
+    const res = await app.inject({ method: "GET", url: `/manufacturing-orders/${id()}/operations` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().map((op: { suggestion: unknown }) => op.suggestion)).toEqual([suggestion, null]);
+  });
+
+  it("keeps the suggestion when the prices are nulled for the workshop profile", async () => {
+    const app = Fastify();
+    app.addHook("preHandler", async (req) => {
+      req.user = { id: id(), role: "user", permissions: ["tillverkningsorder_las"] } as never;
+    });
+    app.register(manufacturingRoutes, { service: { listOperations: async () => rows } as unknown as ManufacturingService });
+    const res = await app.inject({ method: "GET", url: `/manufacturing-orders/${id()}/operations` });
+    expect(res.json()[0]).toMatchObject({ setupPrice: null, unitPrice: null, suggestion });
+  });
 });

@@ -5,6 +5,7 @@ import {
   pricedAtWithdrawal,
   primarySupplierAt,
   reportedTime,
+  reportedTimeByResource,
   standardCostAt,
   type SupplierSnapshotRow,
 } from "../src/modules/costing/service/price-at.js";
@@ -199,5 +200,64 @@ describe("reportedTime", () => {
       { date: "2026-05-10", hours: "0.20" },
     ]);
     expect(laborAtWorkDays(time.days, [], 500).hours).toBe(time.hours);
+  });
+});
+
+// Alternativa resurser (#15): an operation's time per resource it was worked
+// on — the efterkalkyl's and PIA's one grouping, so each resource's hours
+// are priced at its own day rates and a Byt resurs never reprices them.
+describe("reportedTimeByResource", () => {
+  const rate = (validFrom: string, hourlyRate: string) => ({ validFrom: at(validFrom), hourlyRate });
+
+  it("puts each resource's time on it, a report without a resource on the current one, and the current one first", () => {
+    const parts = reportedTimeByResource(
+      [
+        { date: "2026-12-10", workCenterId: "wc-110", kind: "setup", hours: "0.50" },
+        { date: "2026-12-10", workCenterId: "wc-110", kind: "run", hours: "2.50" },
+        { date: "2027-01-12", workCenterId: "wc-120", kind: "run", hours: "1.00" },
+        // Before 0192: no resource — counted on the operation's current one.
+        { date: "2026-11-02", workCenterId: null, kind: null, hours: "0.25" },
+        { date: "2027-01-13", hours: "0.75" },
+      ],
+      "wc-120"
+    );
+    expect(parts).toEqual([
+      {
+        workCenterId: "wc-120",
+        hours: 2,
+        setupHours: 0,
+        runHours: 1,
+        days: [
+          { date: "2026-11-02", hours: 0.25 },
+          { date: "2027-01-12", hours: 1 },
+          { date: "2027-01-13", hours: 0.75 },
+        ],
+      },
+      { workCenterId: "wc-110", hours: 3, setupHours: 0.5, runHours: 2.5, days: [{ date: "2026-12-10", hours: 3 }] },
+    ]);
+    // Each priced at its own resource's rate that day: 3 h × 600 on 110, not 300.
+    expect(laborAtWorkDays(parts[1]!.days, [rate("2026-01-01T00:00:00Z", "600.00")], 0).laborAmount).toBe(1800);
+  });
+
+  it("always gives the current resource, also without time, and nothing else", () => {
+    expect(reportedTimeByResource([], "wc-120")).toEqual([
+      { workCenterId: "wc-120", hours: 0, setupHours: null, runHours: null, days: [] },
+    ]);
+    // A reader that does not group on the resource (every row null) is today's single row.
+    expect(reportedTimeByResource([{ date: "2026-05-09", hours: 2 }], "wc-120")).toEqual([
+      { workCenterId: "wc-120", ...reportedTime([{ date: "2026-05-09", hours: 2 }]) },
+    ]);
+  });
+
+  it("orders the other resources by id, so the rows are stable", () => {
+    const ids = reportedTimeByResource(
+      [
+        { date: "2026-05-09", workCenterId: "c", hours: 1 },
+        { date: "2026-05-09", workCenterId: "a", hours: 1 },
+        { date: "2026-05-09", workCenterId: "b", hours: 1 },
+      ],
+      "b"
+    ).map((part) => part.workCenterId);
+    expect(ids).toEqual(["b", "a", "c"]);
   });
 });

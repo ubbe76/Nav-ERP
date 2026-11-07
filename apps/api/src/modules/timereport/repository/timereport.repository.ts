@@ -41,9 +41,16 @@ const timeReportListColumns = {
   manufacturingOrderId: moOperations.manufacturingOrderId,
   manufacturingOrderNumber: manufacturingOrders.orderNumber,
   operationSequenceNo: moOperations.sequenceNo,
+  // The resource the time was worked on (time_reports.work_center_id, #15);
+  // a report from before the column shows the operation's (see
+  // timeReportResource).
   workCenterName: workCenters.name,
   source: sql<"terminal" | "manual">`case when ${stampSessions.id} is null then 'manual' else 'terminal' end`,
 };
+
+// The join to the report's resource: its own, or (null, before 0192) the
+// operation's current one — the same coalesce the efterkalkyl prices on.
+const timeReportResource = eq(workCenters.id, sql`coalesce(${timeReports.workCenterId}, ${moOperations.workCenterId})`);
 
 // A stamp's Avvikelseorsak as stored (null = none).
 export type StampReason = { reasonId: string | null; note: string | null };
@@ -174,21 +181,40 @@ export function createTimeReportRepository(db: Db) {
       return row !== undefined;
     },
 
-    async createTimeReport(input: CreateTimeReportInput, createdBy: string) {
-      const [row] = await db
-        .insert(timeReports)
-        .values({
-          employeeId: input.employeeId,
-          moOperationId: input.moOperationId,
-          date: input.date,
-          hours: String(input.hours),
-          // Ställ/produktion; absent = ej uppdelad.
-          kind: input.kind ?? null,
-          note: input.note,
-          createdBy,
-        })
-        .returning();
-      return row!;
+    // The report keeps the resource the time was worked on (#15, 0192):
+    // `workCenterId` when the caller knows it (a stamp-out passes the
+    // stamp's), otherwise the operation's resource, read FOR KEY SHARE — the
+    // FK's own lock mode, so nothing new conflicts — in the INSERT's
+    // transaction: a Byt resurs in progress is waited for and its new
+    // resource taken, never the old one it is replacing.
+    async createTimeReport(input: CreateTimeReportInput, createdBy: string, workCenterId?: string | null) {
+      return db.transaction(async (tx) => {
+        let resource = workCenterId ?? null;
+        if (resource === null) {
+          const [op] = await tx
+            .select({ workCenterId: moOperations.workCenterId })
+            .from(moOperations)
+            .where(eq(moOperations.id, input.moOperationId))
+            .for("key share");
+          // An unknown operation fails on the FK below, as before.
+          resource = op?.workCenterId ?? null;
+        }
+        const [row] = await tx
+          .insert(timeReports)
+          .values({
+            employeeId: input.employeeId,
+            moOperationId: input.moOperationId,
+            date: input.date,
+            hours: String(input.hours),
+            // Ställ/produktion; absent = ej uppdelad.
+            kind: input.kind ?? null,
+            workCenterId: resource,
+            note: input.note,
+            createdBy,
+          })
+          .returning();
+        return row!;
+      });
     },
 
     async listTimeReports(query: ListQuery) {
@@ -204,7 +230,7 @@ export function createTimeReportRepository(db: Db) {
           .innerJoin(employees, eq(employees.id, timeReports.employeeId))
           .innerJoin(moOperations, eq(moOperations.id, timeReports.moOperationId))
           .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
-          .innerJoin(workCenters, eq(workCenters.id, moOperations.workCenterId))
+          .innerJoin(workCenters, timeReportResource)
           .leftJoin(stampSessions, eq(stampSessions.timeReportId, timeReports.id))
           .where(where)
           .orderBy(desc(timeReports.date), desc(timeReports.createdAt))
@@ -228,16 +254,40 @@ export function createTimeReportRepository(db: Db) {
         .innerJoin(employees, eq(employees.id, timeReports.employeeId))
         .innerJoin(moOperations, eq(moOperations.id, timeReports.moOperationId))
         .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
-        .innerJoin(workCenters, eq(workCenters.id, moOperations.workCenterId))
+        .innerJoin(workCenters, timeReportResource)
         .leftJoin(stampSessions, eq(stampSessions.timeReportId, timeReports.id))
         .where(eq(moOperations.manufacturingOrderId, manufacturingOrderId));
     },
 
-    // `kind` (ställ/produktion, null = ej uppdelad) follows the stamp to the
-    // time report every stop materializes.
-    async createStampSession(employeeId: string, moOperationId: string, createdBy: string, kind: TimeKind | null = null) {
-      const [row] = await db.insert(stampSessions).values({ employeeId, moOperationId, createdBy, kind }).returning();
-      return row!;
+    // `kind` (ställ/produktion, null = ej uppdelad) and the resource follow
+    // the stamp to the time report every stop materializes. The resource is
+    // the operation's, read FOR KEY SHARE in the INSERT's transaction (the
+    // FK's own lock mode): an instämpling that starts during a Byt resurs
+    // waits for it and takes the new resource, and a Byt that starts after
+    // the read waits for this commit and is then refused (someone is
+    // stamped in). `check` runs on the locked resource before the INSERT —
+    // stampIn passes the terminal's expected station, and throws to refuse.
+    async createStampSession(
+      employeeId: string,
+      moOperationId: string,
+      createdBy: string,
+      kind: TimeKind | null = null,
+      check?: (workCenterId: string) => void
+    ) {
+      return db.transaction(async (tx) => {
+        const [op] = await tx
+          .select({ workCenterId: moOperations.workCenterId })
+          .from(moOperations)
+          .where(eq(moOperations.id, moOperationId))
+          .for("key share");
+        // An unknown operation fails on the FK below, as before.
+        if (op) check?.(op.workCenterId);
+        const [row] = await tx
+          .insert(stampSessions)
+          .values({ employeeId, moOperationId, createdBy, kind, workCenterId: op?.workCenterId ?? null })
+          .returning();
+        return row!;
+      });
     },
 
     async findStampSessionById(id: string) {

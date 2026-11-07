@@ -1338,6 +1338,27 @@
       "when": 1793994181097,
       "tag": "0190_prishistorikens_ordning",
       "breakpoints": true
+    },
+    {
+      "idx": 191,
+      "version": "7",
+      "when": 1794000103611,
+      "tag": "0191_alternativa_resurser",
+      "breakpoints": true
+    },
+    {
+      "idx": 192,
+      "version": "7",
+      "when": 1794003152106,
+      "tag": "0192_tidrapportens_resurs",
+      "breakpoints": true
+    },
+    {
+      "idx": 193,
+      "version": "7",
+      "when": 1794011607655,
+      "tag": "0193_rord_index",
+      "breakpoints": true
     }
   ]
 }

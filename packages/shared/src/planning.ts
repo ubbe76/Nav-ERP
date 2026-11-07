@@ -142,9 +142,16 @@ export type MoveOperationInput = z.infer<typeof moveOperationSchema>;
 // expectedOrders: the number of TOs the client showed (the check's
 // batches.length) — a different count under the lock is refused the same
 // way. Left out, only the date is compared.
+// useAlternatives (#15, förval true): the date the client chose when the
+// check showed both — true = Med alternativa resurser (the alternatives are
+// used when they give the earlier date; the TOs' operations on an
+// alternative are written Vald för hand), false = Med ordinarie resurser.
+// The server runs the check in that mode and compares deliveryDate with it.
+// Left out = true.
 export const applyDeliveryTimeSchema = z.object({
   salesOrderId: z.string().uuid(),
   deliveryDate: businessDateSchema,
   expectedOrders: z.number().int().min(0).optional(),
+  useAlternatives: z.boolean().optional(),
 });
 export type ApplyDeliveryTimeInput = z.infer<typeof applyDeliveryTimeSchema>;

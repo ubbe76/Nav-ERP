@@ -131,6 +131,9 @@ export type VariantWriters = {
   insertArticle: (tx: Tx, input: InsertArticleInput) => Promise<{ id: string } | null>;
   insertBomRows: (tx: Tx, parentArticleId: string, rows: BomRowInsert[]) => Promise<void>;
   insertRoutingOperations: (tx: Tx, articleId: string, rows: RoutingOperationInsert[]) => Promise<Map<number, string>>;
+  // Alternativa resurser: the template's alternatives onto the variant's
+  // base operations (from = template routing row, to = the variant's).
+  copyRoutingAlternatives: (tx: Tx, pairs: { from: string; to: string }[]) => Promise<void>;
 };
 // The stock module's balances, for the variant list's Saldo (summed per article here).
 export type VariantStockReader = { balancesForArticles(ids: string[]): Promise<{ articleId: string; quantityOnHand: string }[]> };
@@ -934,6 +937,13 @@ export function createConfiguratorService(deps: {
     // The template is locked, so the copy source cannot have vanished.
     if (!created) throw new ConfiguratorTemplateNotFoundError();
     const operationIds = await deps.writers.insertRoutingOperations(tx, created.id, row.routing.map(toRoutingInsert));
+    // A base operation gets the template's alternativa resurser — only while
+    // it is still on the template row's ordinarie (copyRoutingAlternatives'
+    // rule); a conditional operation has none.
+    await deps.writers.copyRoutingAlternatives(
+      tx,
+      row.routing.flatMap((r) => (r.copyFrom ? [{ from: r.copyFrom.id, to: operationIds.get(r.sequenceNo)! }] : []))
+    );
     await deps.writers.insertBomRows(
       tx, created.id,
       row.bom.map((b) => ({

@@ -59,6 +59,8 @@ import { chainLines } from "../../lib/costChain";
 import { SectionHeading } from "../ui/SectionHeading";
 import { AuditTrailSection } from "../system/AuditTrailSection";
 import { Lock } from "lucide-react";
+import { suggestionText } from "../../lib/resourceSuggestion";
+import { SwitchResourceButton } from "../planning/SwitchResourceButton";
 import { plannedWeekLabel } from "../../lib/planning";
 
 interface ManufacturingOrderDetailProps {
@@ -450,6 +452,42 @@ export function ManufacturingOrderDetail({
                 return (
                   <div>
                     {row.workCenterCode} · {row.description ?? row.workCenterName}
+                    {(row.resources?.length ?? 0) > 0 && row.workCenterType !== "subcontract" && (
+                      // Alternativa resurser: which resource the order uses and
+                      // whether it is an alternative; Vald för hand = switched by hand.
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
+                        {row.resources!.find((r) => r.workCenterId === row.workCenterId)?.rank !== 0 && (
+                          <span title={`Ordinarie: ${row.resources!.find((r) => r.rank === 0)?.code ?? ""}`}>
+                            <StatusPill status="running" label="Alternativ" compact />
+                          </span>
+                        )}
+                        {row.resourceLocked && (
+                          <span title="Resursen är vald för hand — Planeringen föreslår inget byte">
+                            <StatusPill status="draft" label="Vald för hand" compact />
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {canEditLines && row.suggestion && (
+                      // Förslag på alternativ resurs (derived at read; Planera
+                      // never switches). Byt till X = PATCH workCenterId.
+                      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 4, fontSize: 12, color: "var(--color-text-secondary)" }}>
+                        <StatusPill status="delayed" label={`Förslag: ${row.suggestion.code}`} compact />
+                        <span>{suggestionText(row.suggestion)}</span>
+                        <SwitchResourceButton
+                          manufacturingOrderId={order.id}
+                          moOperationId={row.id}
+                          fromWorkCenterId={row.workCenterId}
+                          workCenterId={row.suggestion.workCenterId}
+                          code={row.suggestion.code}
+                          onSwitched={() => {
+                            setChangeNotice(null);
+                            afterLineChange();
+                          }}
+                          onError={setLineError}
+                        />
+                      </div>
+                    )}
                     {row.workCenterType === "subcontract" && (
                       // Lego: bought from a supplier, not stamped — the
                       // terminal hides it, so say where the receipt comes
@@ -543,7 +581,7 @@ export function ManufacturingOrderDetail({
               case "actualTime":
                 return row.actualTime !== null ? Number(row.actualTime) : "–";
               default:
-                return row[key as keyof MOOperation];
+                return null;
             }
           }}
         />
@@ -655,6 +693,7 @@ export function ManufacturingOrderDetail({
             workCenters={workCenters}
             editing={operationDialog?.editing ?? null}
             defaultSequenceNo={(operations.reduce((max, op) => Math.max(max, op.sequenceNo), 0)) + 10}
+            reportedTime={operationDialog?.editing ? !operationUntouched(operationDialog.editing) : false}
             onSubmit={(payload) => saveOperation(operationDialog?.editing ?? null, payload)}
             onSaved={() => {
               setOperationDialog(null);

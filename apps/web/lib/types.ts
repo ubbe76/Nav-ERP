@@ -2291,6 +2291,21 @@ export const WORK_CENTER_TYPE_LABELS: Record<WorkCenter["type"], string> = {
   subcontract: "Lego",
 };
 
+// Alternativa resurser (#15): an alternative resource of an own routing
+// operation, in rank order (rank 1 = first). The times are minutes; null =
+// "Som ordinarie" (the operation's own time).
+export interface RoutingAlternative {
+  workCenterId: string;
+  code: string;
+  name: string;
+  rank: number;
+  setupTime: string | null;
+  runTimePerUnit: string | null;
+  active: boolean;
+  // false = no week schedule or hours per day, so a suggestion never lands there.
+  hasCapacity: boolean;
+}
+
 export interface RoutingOperation {
   id: string;
   articleId: string;
@@ -2335,6 +2350,8 @@ export interface RoutingOperation {
   useArticleDrawing: boolean;
   // Whether a drawing is uploaded on the operation (routing_operation_files).
   hasFile: boolean;
+  // Alternativa resurser, in rank order. [] / absent = none.
+  alternatives?: RoutingAlternative[];
 }
 
 export type ManufacturingOrderStatus =
@@ -2410,6 +2427,34 @@ export interface MOOperationSummary {
 // Everything here is derived server-side from released/in-progress
 // manufacturing orders' remaining operation time; the web side only renders
 // it, no client-side aggregation.
+// Alternativa resurser (#15, etapp 2): an operation's förslag — derived at
+// every read, never stored. toWeek/currentToWeek are Mondays (YYYY-MM-DD);
+// currentToWeek is null when the operation is unplanned.
+export interface ResourceSuggestionOnOperation {
+  workCenterId: string;
+  code: string;
+  name: string;
+  toWeek: string;
+  currentToWeek: string | null;
+  reason: "overloaded" | "unplanned";
+}
+
+// The list form: the Beläggning summary's räknare and Planera's notice.
+export interface ResourceSuggestionRow {
+  moOperationId: string;
+  manufacturingOrderId: string;
+  orderNumber: string;
+  sequenceNo: number;
+  fromWorkCenterId: string;
+  fromCode: string;
+  toWorkCenterId: string;
+  toCode: string;
+  toName: string;
+  currentToWeek: string | null;
+  toWeek: string;
+  reason: "overloaded" | "unplanned";
+}
+
 export interface CapacityCellOrder {
   manufacturingOrderId: string;
   orderNumber: string;
@@ -2423,6 +2468,11 @@ export interface CapacityCellOrder {
   remainingHours: number;
   moOperationId: string;
   hoursInWeek: number;
+  // Alternativa resurser (#15, etapp 2): förslag on another resource (null =
+  // none), Vald för hand, and the ordinary resource's code on an alternative.
+  suggestion: ResourceSuggestionOnOperation | null;
+  resourceLocked: boolean;
+  ordinaryWorkCenterCode: string | null;
   // Produktionsplanering: false = unplanned (counted in the due-date week).
   planned: boolean;
   // Mondays (YYYY-MM-DD); null when unplanned.
@@ -2481,6 +2531,7 @@ export interface CapacitySummary {
   overloadedCells: number;
   lateOrders: { manufacturingOrderId: string; orderNumber: string; dueDate: string; plannedFinish: string | null }[];
   unplannedOrders: { manufacturingOrderId: string; orderNumber: string }[];
+  resourceSuggestions: ResourceSuggestionRow[];
 }
 
 export interface CapacityResult {
@@ -2508,6 +2559,7 @@ export interface PlanResult {
   orders: number;
   operations: number;
   warnings: PlanWarning[];
+  resourceSuggestions: ResourceSuggestionRow[];
 }
 
 // POST /planning/operations/:opId/move.
@@ -2581,6 +2633,17 @@ export interface LegoPurchaseOperation {
   inquiries: { inquiryId: string; inquiryNumber: string; status: InquiryStatus }[];
 }
 
+// Alternativa resurser (#15): one of an order operation's possible resources,
+// snapshotted at release. rank 0 = ordinarie; the times are resolved minutes.
+export interface MOOperationResource {
+  workCenterId: string;
+  code: string;
+  name: string;
+  rank: number;
+  setupTime: string;
+  runTimePerUnit: string;
+}
+
 export interface MOOperation {
   id: string;
   manufacturingOrderId: string;
@@ -2626,6 +2689,12 @@ export interface MOOperation {
   plannedEndWeek: string | null;
   planLocked: boolean;
   plannedAt: string | null;
+  // Alternativa resurser: the possible resources ([] = none, so no choice) and
+  // Vald för hand (the resource was switched by hand).
+  resources?: MOOperationResource[];
+  resourceLocked?: boolean;
+  // Förslag on an alternative resource (null/absent = none).
+  suggestion?: ResourceSuggestionOnOperation | null;
   createdAt: string;
 }
 
@@ -2965,6 +3034,10 @@ export interface TimeReport {
   manufacturingOrderId: string;
   manufacturingOrderNumber: string;
   operationSequenceNo: number;
+  // The resource the time was worked on (#15); workCenterName is its name.
+  // null = a report from before it was recorded: the name is then the
+  // operation's current resource.
+  workCenterId: string | null;
   workCenterName: string;
   date: string;
   hours: string;
@@ -2993,6 +3066,9 @@ export interface StampSession {
   stoppedAt: string | null;
   // Ställ / Produktion; null = ej uppdelad. Follows the stamp to its time report.
   kind: TimeKind | null;
+  // The resource stamped in on (#15), carried to the time report; null = a
+  // stamp opened before it was recorded.
+  workCenterId: string | null;
   // Going home pauses open work: pausedAt set while away, pausedSeconds
   // accumulates over pauses. Paused time is excluded from reported hours.
   pausedAt: string | null;
@@ -6013,6 +6089,9 @@ export type DtcStep =
       // Minutes booked per week (Mondays).
       weeks?: { monday: string; minutes: number }[];
       date: string;
+      // Set when the step runs on an alternative resource; toWeek is the week
+      // the ordinary resource would have given.
+      alternativeOf?: DtcAlternativeOf | null;
     }
   | {
       kind: "subcontract";
@@ -6026,7 +6105,15 @@ export type DtcStep =
       date: string;
     };
 
+export interface DtcAlternativeOf {
+  workCenterId: string;
+  workCenterCode: string;
+  workCenterName: string;
+  toWeek: string;
+}
+
 export interface DeliveryTimeCheckRow {
+  ordinaryReadyDate?: string | null;
   key: string;
   articleId: string;
   articleNumber: string;
@@ -6047,7 +6134,14 @@ export interface DtcBatch {
   articleNumber: string;
   quantity: number;
   readyDate: string | null;
-  operations: { sequenceNo: number; workCenterId: string; weeks: { monday: string; minutes: number }[] }[];
+  operations: {
+    sequenceNo: number;
+    workCenterId: string;
+    workCenterCode?: string;
+    workCenterName?: string;
+    alternativeOf?: DtcAlternativeOf | null;
+    weeks: { monday: string; minutes: number }[];
+  }[];
 }
 
 // POST /delivery-time-check/apply.
@@ -6061,7 +6155,15 @@ export interface ApplyDeliveryTimeResult {
     quantity: number;
     level: number;
     salesOrderRowId: string | null;
+    resourceSwitches?: {
+      sequenceNo: number;
+      fromWorkCenterId: string;
+      fromCode: string;
+      toWorkCenterId: string;
+      toCode: string;
+    }[];
   }[];
+  usesAlternatives?: boolean;
   // Plain texts, or plan warnings carrying a message.
   warnings: (string | { message: string })[];
 }
@@ -6070,6 +6172,12 @@ export interface DeliveryTimeCheckResult {
   shipDate: string | null;
   // = shipDate without a customer; null = some row has no date.
   deliveryDate: string | null;
+  // True when the dates, rows and batches are with alternative resources
+  // (they gave an earlier date). The ordinary dates are then set (null = the
+  // ordinary resources give no date within two years).
+  usesAlternatives?: boolean;
+  ordinaryShipDate?: string | null;
+  ordinaryDeliveryDate?: string | null;
   rows: DeliveryTimeCheckRow[];
   notes: string[];
   // Shortage batches of manufactured articles; empty/absent = nothing to create.

@@ -34,6 +34,9 @@ export const ERROR_CODES = {
   PERIOD_NOT_LOCKED: "period-not-locked",
   INVALID_ATTENDANCE_INTERVAL: "invalid-attendance-interval",
   ALREADY_PRESENT: "already-present",
+  // Terminalens gamla lista: the operation was switched to another resource
+  // after the terminal listed it (409 on POST /stamp-sessions).
+  STAMP_WORK_CENTER_CHANGED: "stamp-work-center-changed",
   ATTENDANCE_OPEN_FROM_EARLIER_DAY: "attendance-open-from-earlier-day",
   // Närvaroavvikelser: the terminal must ask for a reason / an overtime choice
   ATTENDANCE_INPUT_REQUIRED: "attendance-input-required",
@@ -460,6 +463,12 @@ export const ERROR_CODES = {
   // template now resolves differently (a förval added since).
   ROW_CONFIGURATION_OUTDATED: "row-configuration-outdated",
   WORK_CENTER_NOT_FOUND: "work-center-not-found",
+  // Alternativa resurser (#15): the beredning's rules for an operation's alternatives
+  ROUTING_ALTERNATIVE_INVALID: "routing-alternative-invalid",
+  ROUTING_OPERATION_HAS_ALTERNATIVES: "routing-operation-has-alternatives",
+  // A resource in alternatives (a beredning's, or an open TO's possible
+  // resources) cannot be made a legoresurs (409).
+  WORK_CENTER_IN_ALTERNATIVES: "work-center-in-alternatives",
   // Ångra rapportering / Makulera order (TO)
   MO_REPORT_NOT_FOUND: "mo-report-not-found",
   MO_REPORT_ALREADY_UNDONE: "mo-report-already-undone",
@@ -482,6 +491,8 @@ export const ERROR_CODES = {
   MO_OPERATION_SEQUENCE_TAKEN: "mo-operation-sequence-taken",
   MO_OPERATION_DONE: "mo-operation-done",
   MO_OPERATION_STAMPED: "mo-operation-stamped",
+  // Byt till X (#15): the operation changed resource or was moved since the förslag
+  MO_OPERATION_RESOURCE_CHANGED: "mo-operation-resource-changed",
   MO_OPERATION_LINKED_PURCHASE: "mo-operation-linked-purchase",
   MO_OPERATION_REPORTED: "mo-operation-reported",
   LAST_OPERATION_LOCKED: "last-operation-locked",

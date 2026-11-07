@@ -98,6 +98,15 @@ export interface OperationRowWrite {
 // The calculation header the service hands over — plain numbers; the
 // repository stringifies them for the numeric columns. Exported so the service
 // can compute the header first and decide afterwards whether to save it.
+// A resource time was reported on (getReportedTime, #15): what the
+// efterkalkyl's row for that resource needs beyond its id.
+export interface ReportedTimeResource {
+  workCenterCode: string;
+  workCenterName: string;
+  hourlyRate: string;
+  overheadPercent: string;
+}
+
 export interface CostCalculationWrite {
   articleId: string;
   manufacturingOrderId: string | null;
@@ -448,30 +457,42 @@ export function createCostingRepository(db: Db | Tx) {
       return histories;
     },
 
-    // The order's reported time — ONE grouped query on (operation, work day,
-    // kind), per operation. reportedTime (price-at.ts) derives H, Hs (ställ),
-    // Hr (produktion) and the work days Lön is priced on (each day at that
-    // day's hourly rate, #14 etapp 4) from these same rows: two reads could
-    // straddle a time report's commit and give H ≠ Σ H_d.
+    // The order's reported time — ONE grouped query on (operation, resource,
+    // work day, kind), per operation. reportedTimeByResource and reportedTime
+    // (price-at.ts) derive H, Hs (ställ), Hr (produktion) and the work days
+    // Lön is priced on (each day at that day's hourly rate, #14 etapp 4) from
+    // these same rows: two reads could straddle a time report's commit and
+    // give H ≠ Σ H_d. The resource is the one the time was worked on
+    // (time_reports.work_center_id, #15), or the operation's current one for
+    // a report from before 0192; `resources` carries its labels, current
+    // hourly rate (no history) and TO percentage.
     async getReportedTime(manufacturingOrderId: string) {
       const rows = await db
         .select({
           operationId: timeReports.moOperationId,
+          workCenterId: workCenters.id,
+          workCenterCode: workCenters.code,
+          workCenterName: workCenters.name,
+          hourlyRate: workCenters.hourlyRate,
+          overheadPercent: workCenters.overheadPercent,
           date: timeReports.date,
           kind: timeReports.kind,
           hours: sql<string>`sum(${timeReports.hours})`,
         })
         .from(timeReports)
         .innerJoin(moOperations, eq(moOperations.id, timeReports.moOperationId))
+        .innerJoin(workCenters, eq(workCenters.id, sql`coalesce(${timeReports.workCenterId}, ${moOperations.workCenterId})`))
         .where(eq(moOperations.manufacturingOrderId, manufacturingOrderId))
-        .groupBy(timeReports.moOperationId, timeReports.date, timeReports.kind);
+        .groupBy(timeReports.moOperationId, workCenters.id, timeReports.date, timeReports.kind);
       const byOperation = new Map<string, ReportedTimeRow[]>();
-      for (const { operationId, ...row } of rows) {
+      const resources = new Map<string, ReportedTimeResource>();
+      for (const { operationId, workCenterCode, workCenterName, hourlyRate, overheadPercent, ...row } of rows) {
+        resources.set(row.workCenterId, { workCenterCode, workCenterName, hourlyRate, overheadPercent });
         const list = byOperation.get(operationId);
         if (list) list.push(row);
         else byOperation.set(operationId, [row]);
       }
-      return byOperation;
+      return { byOperation, resources };
     },
 
     // Actual lego cost per operation from the linked IO rows (non-cancelled
@@ -635,7 +656,9 @@ export function createCostingRepository(db: Db | Tx) {
         .from(costCalculationOperationRows)
         .innerJoin(workCenters, eq(workCenters.id, costCalculationOperationRows.workCenterId))
         .where(eq(costCalculationOperationRows.costCalculationId, costCalculationId))
-        .orderBy(asc(costCalculationOperationRows.sequenceNo));
+        // An operation worked on several resources has a row each (#15): by
+        // code in byte order, as the efterkalkyl computes them.
+        .orderBy(asc(costCalculationOperationRows.sequenceNo), sql`${workCenters.code} collate "C"`, asc(costCalculationOperationRows.id));
     },
 
     async findCostCalculationById(id: string) {

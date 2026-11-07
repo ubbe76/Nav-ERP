@@ -13,6 +13,7 @@ import {
   moReports,
   productionGroups,
   purchaseOrders,
+  routingOperationAlternatives,
   routingOperationFiles,
   routingOperations,
   stampSessions,
@@ -73,6 +74,8 @@ import {
   type MaterialShortageCheck,
 } from "../service/material-shortage.js";
 import { shortageWarnings } from "./shortage-warnings.js";
+import { snapshotOperationResourcesInTx, workCenterInAlternativesInTx } from "./operation-resources.js";
+import { replaceRoutingAlternatives } from "./routing-write.js";
 // Ändra material och operationer: the edit transactions and the row
 // selects they share with the list endpoints.
 import {
@@ -737,6 +740,11 @@ async function releaseInTx(tx: Tx, moId: string) {
           .returning()
       : [];
   const operationByRoutingId = new Map(operationRows.map((op) => [op.routingOperationId, op.id]));
+  // Alternativa resurser: the operations' possible resources, snapshotted
+  // like the times — the plain TO's rows just written, or a configured TO's
+  // rows written at creation (its base operations carry the template's
+  // routing row). Later beredning edits never touch them.
+  await snapshotOperationResourcesInTx(tx, moId);
 
   // Soft shortage check over the material rows the TO now has — the
   // freshly snapshotted ones for a plain TO, the rows written at
@@ -933,6 +941,49 @@ async function undoReportInTx(
   return { ok: true, order: updatedOrder!, statusBefore: order.status, report, timeReport };
 }
 
+// Alternativa resurser (#15) for GET /articles/:id/routing and the routing
+// create/update answers: operation id → its alternatives in rank order, each
+// with the resource's code/name, whether it is active and whether it has
+// capacity (a week schedule or Kapacitet (timmar per dag) — the planning's
+// hasCapacityCalendar rule; a resource without it is never suggested).
+// Times null = som ordinarie. One query.
+export interface RoutingAlternativeView {
+  workCenterId: string;
+  code: string;
+  name: string;
+  rank: number;
+  setupTime: string | null;
+  runTimePerUnit: string | null;
+  active: boolean;
+  hasCapacity: boolean;
+}
+async function listRoutingAlternatives(dbc: Db | Tx, operationIds: string[]): Promise<Map<string, RoutingAlternativeView[]>> {
+  const map = new Map<string, RoutingAlternativeView[]>();
+  if (operationIds.length === 0) return map;
+  const rows = await dbc
+    .select({
+      routingOperationId: routingOperationAlternatives.routingOperationId,
+      workCenterId: routingOperationAlternatives.workCenterId,
+      code: workCenters.code,
+      name: workCenters.name,
+      rank: routingOperationAlternatives.rank,
+      setupTime: routingOperationAlternatives.setupTime,
+      runTimePerUnit: routingOperationAlternatives.runTimePerUnit,
+      active: workCenters.active,
+      hasCapacity: sql<boolean>`(${workCenters.weekScheduleId} is not null or ${workCenters.hoursPerDay} is not null)`,
+    })
+    .from(routingOperationAlternatives)
+    .innerJoin(workCenters, eq(workCenters.id, routingOperationAlternatives.workCenterId))
+    .where(inArray(routingOperationAlternatives.routingOperationId, operationIds))
+    .orderBy(asc(routingOperationAlternatives.routingOperationId), asc(routingOperationAlternatives.rank));
+  for (const { routingOperationId, ...view } of rows) {
+    const list = map.get(routingOperationId) ?? [];
+    list.push(view);
+    map.set(routingOperationId, list);
+  }
+  return map;
+}
+
 export function createManufacturingRepository(db: Db) {
   return {
     async createWorkCenter(input: CreateWorkCenterInput) {
@@ -974,28 +1025,45 @@ export function createManufacturingRepository(db: Db) {
       return row ?? null;
     },
 
+    // "in_alternatives": the edit makes the resource a legoresurs while it
+    // takes part in alternatives (workCenterInAlternativesInTx) — refused,
+    // nothing written. Asked on the resource's row locked FOR NO KEY UPDATE
+    // (the UPDATE's own lock mode, so no FK insert waits on it), in the
+    // UPDATE's transaction: two type changes of one resource run one after
+    // the other.
     async updateWorkCenter(id: string, input: UpdateWorkCenterInput) {
-      const [row] = await db
-        .update(workCenters)
-        .set({
-          ...input,
-          hourlyRate: input.hourlyRate === undefined ? undefined : String(input.hourlyRate),
-          overheadPercent: input.overheadPercent === undefined ? undefined : String(input.overheadPercent),
-          capacityFactor: input.capacityFactor === undefined ? undefined : String(input.capacityFactor),
-          // Nullable numerics: undefined = untouched, null = cleared.
-          hoursPerDay: numericPatch(input.hoursPerDay),
-          defaultSetupTime: numericPatch(input.defaultSetupTime),
-          calcRate1: numericPatch(input.calcRate1),
-          calcRate2: numericPatch(input.calcRate2),
-          leadTimeDays: numericPatch(input.leadTimeDays),
-          queueTimeDays: numericPatch(input.queueTimeDays),
-          orderLeadTimeDays: numericPatch(input.orderLeadTimeDays),
-          defaultOperationName:
-            input.defaultOperationName === undefined ? undefined : blankToNull(input.defaultOperationName),
-        })
-        .where(eq(workCenters.id, id))
-        .returning();
-      return row ?? null;
+      return db.transaction(async (tx) => {
+        if (input.type === "subcontract") {
+          const [current] = await tx
+            .select({ type: workCenters.type })
+            .from(workCenters)
+            .where(eq(workCenters.id, id))
+            .for("no key update");
+          if (!current) return null;
+          if (current.type !== "subcontract" && (await workCenterInAlternativesInTx(tx, id))) return "in_alternatives" as const;
+        }
+        const [row] = await tx
+          .update(workCenters)
+          .set({
+            ...input,
+            hourlyRate: input.hourlyRate === undefined ? undefined : String(input.hourlyRate),
+            overheadPercent: input.overheadPercent === undefined ? undefined : String(input.overheadPercent),
+            capacityFactor: input.capacityFactor === undefined ? undefined : String(input.capacityFactor),
+            // Nullable numerics: undefined = untouched, null = cleared.
+            hoursPerDay: numericPatch(input.hoursPerDay),
+            defaultSetupTime: numericPatch(input.defaultSetupTime),
+            calcRate1: numericPatch(input.calcRate1),
+            calcRate2: numericPatch(input.calcRate2),
+            leadTimeDays: numericPatch(input.leadTimeDays),
+            queueTimeDays: numericPatch(input.queueTimeDays),
+            orderLeadTimeDays: numericPatch(input.orderLeadTimeDays),
+            defaultOperationName:
+              input.defaultOperationName === undefined ? undefined : blankToNull(input.defaultOperationName),
+          })
+          .where(eq(workCenters.id, id))
+          .returning();
+        return row ?? null;
+      });
     },
 
     // Terminal: every stampable operation (released/in-progress order,
@@ -1149,59 +1217,118 @@ export function createManufacturingRepository(db: Db) {
       });
     },
 
+    // The operation and its alternativa resurser in one transaction; the
+    // service has run the rules (routing-alternatives.ts) — a new operation
+    // has no earlier alternatives to race with.
     async createRoutingOperation(articleId: string, input: CreateRoutingOperationInput) {
-      const [row] = await db
-        .insert(routingOperations)
-        .values({
-          articleId,
-          sequenceNo: input.sequenceNo,
-          description: blankToNull(input.description),
-          workCenterId: input.workCenterId,
-          setupTime: String(input.setupTime),
-          runTimePerUnit: String(input.runTimePerUnit),
-          cycleTimePerUnit: input.cycleTimePerUnit != null ? String(input.cycleTimePerUnit) : null,
-          timeUnit: input.timeUnit ?? "minutes_per_unit",
-          costingOnly: input.costingOnly ?? false,
-          comment: blankToNull(input.comment),
-          printOnWorkCard: input.printOnWorkCard ?? false,
-          packingInstructions: blankToNull(input.packingInstructions),
-          subcontractSupplierId: input.subcontractSupplierId ?? null,
-          setupPrice: input.setupPrice != null ? String(input.setupPrice) : null,
-          transportPrice: input.transportPrice != null ? String(input.transportPrice) : null,
-          unitPrice: input.unitPrice != null ? String(input.unitPrice) : null,
-          showNetWeight: input.showNetWeight ?? false,
-          useArticleDrawing: input.useArticleDrawing ?? true,
-        })
-        .returning();
-      return row!;
+      return db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(routingOperations)
+          .values({
+            articleId,
+            sequenceNo: input.sequenceNo,
+            description: blankToNull(input.description),
+            workCenterId: input.workCenterId,
+            setupTime: String(input.setupTime),
+            runTimePerUnit: String(input.runTimePerUnit),
+            cycleTimePerUnit: input.cycleTimePerUnit != null ? String(input.cycleTimePerUnit) : null,
+            timeUnit: input.timeUnit ?? "minutes_per_unit",
+            costingOnly: input.costingOnly ?? false,
+            comment: blankToNull(input.comment),
+            printOnWorkCard: input.printOnWorkCard ?? false,
+            packingInstructions: blankToNull(input.packingInstructions),
+            subcontractSupplierId: input.subcontractSupplierId ?? null,
+            setupPrice: input.setupPrice != null ? String(input.setupPrice) : null,
+            transportPrice: input.transportPrice != null ? String(input.transportPrice) : null,
+            unitPrice: input.unitPrice != null ? String(input.unitPrice) : null,
+            showNetWeight: input.showNetWeight ?? false,
+            useArticleDrawing: input.useArticleDrawing ?? true,
+          })
+          .returning();
+        if (input.alternatives && input.alternatives.length > 0) await replaceRoutingAlternatives(tx, row!.id, input.alternatives);
+        return row!;
+      });
     },
 
-    // Scoped to the article so a row id from another article's routing 404s.
-    async updateRoutingOperation(articleId: string, operationId: string, input: UpdateRoutingOperationInput) {
-      const [row] = await db
-        .update(routingOperations)
-        .set({
-          ...input,
-          setupTime: input.setupTime === undefined ? undefined : String(input.setupTime),
-          runTimePerUnit: input.runTimePerUnit === undefined ? undefined : String(input.runTimePerUnit),
-          cycleTimePerUnit:
-            input.cycleTimePerUnit === undefined
-              ? undefined
-              : input.cycleTimePerUnit === null
-                ? null
-                : String(input.cycleTimePerUnit),
-          comment: input.comment === undefined ? undefined : blankToNull(input.comment),
-          packingInstructions:
-            input.packingInstructions === undefined ? undefined : blankToNull(input.packingInstructions),
-          description: input.description === undefined ? undefined : blankToNull(input.description),
-          setupPrice: input.setupPrice === undefined ? undefined : input.setupPrice === null ? null : String(input.setupPrice),
-          transportPrice:
-            input.transportPrice === undefined ? undefined : input.transportPrice === null ? null : String(input.transportPrice),
-          unitPrice: input.unitPrice === undefined ? undefined : input.unitPrice === null ? null : String(input.unitPrice),
-        })
-        .where(and(eq(routingOperations.id, operationId), eq(routingOperations.articleId, articleId)))
-        .returning();
-      return row ?? null;
+    // Scoped to the article so a row id from another article's routing 404s
+    // (null). One transaction: the operation FOR NO KEY UPDATE, its current
+    // alternatives, then `prepare` — the service's rules on the locked state
+    // (it throws to refuse, or returns the patch to write) — then the UPDATE
+    // and, when the patch carries `alternatives`, the set replaced. Two edits
+    // of one operation run one after the other, so the alternative rules
+    // never judge a state another edit is changing.
+    // - NO KEY UPDATE, the UPDATE's own lock mode, not FOR UPDATE: a TO
+    //   created meanwhile takes FOR KEY SHARE on the routing row through
+    //   mo_operations.routing_operation_id, and must not wait for the edit.
+    // - `workCenter` reads through the transaction (never another pool
+    //   connection while the lock is held) and FOR SHARE: a type change of
+    //   that resource (updateWorkCenter, FOR NO KEY UPDATE) waits for this
+    //   edit or this edit for it, so the rules never judge a resource that
+    //   is just becoming a legoresurs.
+    async updateRoutingOperation(
+      articleId: string,
+      operationId: string,
+      prepare: (
+        current: typeof routingOperations.$inferSelect,
+        alternatives: (typeof routingOperationAlternatives.$inferSelect)[],
+        workCenter: (id: string) => Promise<typeof workCenters.$inferSelect | null>
+      ) => Promise<UpdateRoutingOperationInput>
+    ) {
+      return db.transaction(async (tx) => {
+        const [current] = await tx
+          .select()
+          .from(routingOperations)
+          .where(and(eq(routingOperations.id, operationId), eq(routingOperations.articleId, articleId)))
+          .for("no key update");
+        if (!current) return null;
+        const currentAlternatives = await tx
+          .select()
+          .from(routingOperationAlternatives)
+          .where(eq(routingOperationAlternatives.routingOperationId, operationId))
+          .orderBy(asc(routingOperationAlternatives.rank));
+        const workCenter = async (id: string) => {
+          const [row] = await tx.select().from(workCenters).where(eq(workCenters.id, id)).for("share");
+          return row ?? null;
+        };
+        const { alternatives, ...input } = await prepare(current, currentAlternatives, workCenter);
+        // Only the alternatives (e.g. [] on a lego operation, whose patch
+        // keeps no cleared lego fields): no column to set — drizzle refuses
+        // an empty SET.
+        if (!Object.values(input).some((value) => value !== undefined)) {
+          if (alternatives !== undefined) await replaceRoutingAlternatives(tx, operationId, alternatives);
+          return current;
+        }
+        const [row] = await tx
+          .update(routingOperations)
+          .set({
+            ...input,
+            setupTime: input.setupTime === undefined ? undefined : String(input.setupTime),
+            runTimePerUnit: input.runTimePerUnit === undefined ? undefined : String(input.runTimePerUnit),
+            cycleTimePerUnit:
+              input.cycleTimePerUnit === undefined
+                ? undefined
+                : input.cycleTimePerUnit === null
+                  ? null
+                  : String(input.cycleTimePerUnit),
+            comment: input.comment === undefined ? undefined : blankToNull(input.comment),
+            packingInstructions:
+              input.packingInstructions === undefined ? undefined : blankToNull(input.packingInstructions),
+            description: input.description === undefined ? undefined : blankToNull(input.description),
+            setupPrice: input.setupPrice === undefined ? undefined : input.setupPrice === null ? null : String(input.setupPrice),
+            transportPrice:
+              input.transportPrice === undefined ? undefined : input.transportPrice === null ? null : String(input.transportPrice),
+            unitPrice: input.unitPrice === undefined ? undefined : input.unitPrice === null ? null : String(input.unitPrice),
+          })
+          .where(and(eq(routingOperations.id, operationId), eq(routingOperations.articleId, articleId)))
+          .returning();
+        if (alternatives !== undefined) await replaceRoutingAlternatives(tx, operationId, alternatives);
+        return row ?? null;
+      });
+    },
+
+    // Alternativa resurser per routing operation — see listRoutingAlternatives.
+    async listRoutingAlternatives(operationIds: string[]) {
+      return listRoutingAlternatives(db, operationIds);
     },
 
     // Guards the "Kalkyl" flag: a BOM row linked to an operation that never
@@ -1228,7 +1355,7 @@ export function createManufacturingRepository(db: Db) {
 
     async listRoutingOperationsByArticle(articleId: string) {
       // hasFile via EXISTS — list queries must never select the bytea data.
-      return db
+      const operations = await db
         .select({
           ...getTableColumns(routingOperations),
           workCenterName: workCenters.name,
@@ -1241,6 +1368,8 @@ export function createManufacturingRepository(db: Db) {
         .innerJoin(workCenters, eq(workCenters.id, routingOperations.workCenterId))
         .leftJoin(suppliers, eq(suppliers.id, routingOperations.subcontractSupplierId))
         .where(eq(routingOperations.articleId, articleId));
+      const alternatives = await listRoutingAlternatives(db, operations.map((op) => op.id));
+      return operations.map((op) => ({ ...op, alternatives: alternatives.get(op.id) ?? [] }));
     },
 
     // Feeds the inquiry row form's Legooperation select — the article's own

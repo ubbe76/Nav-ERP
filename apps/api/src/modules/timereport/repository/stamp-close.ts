@@ -50,7 +50,7 @@ export type AutoClosedStamp = { sessionId: string; moOperationId: string; employ
 // Regel 10: stamps out every open (or paused) stamp on the given operations
 // or on every operation of the order — 0/0, no quantities, the time up to
 // the pause start (paused) or `at`, with the stamp's kind (ställ/
-// produktion). The time report is dated on the stop
+// produktion) and resource. The time report is dated on the stop
 // time's day, or today when that day lies in a locked payroll period: an old
 // paused stamp must never block an operation from turning done. The caller
 // writes the matching mo_reports rows (the manufacturing repository owns
@@ -74,6 +74,21 @@ export async function closeStampSessionsInTx(
     .orderBy(asc(stampSessions.id))
     .for("update");
 
+  // The time lands on the stamp's resource (#15, 0192); a stamp opened
+  // before the column takes the operation's — the same one, since Byt resurs
+  // is refused while a stamp is open.
+  const withoutResource = [...new Set(open.filter((s) => s.workCenterId === null).map((s) => s.moOperationId))];
+  const operationResource = new Map(
+    withoutResource.length === 0
+      ? []
+      : (
+          await dbc
+            .select({ id: moOperations.id, workCenterId: moOperations.workCenterId })
+            .from(moOperations)
+            .where(inArray(moOperations.id, withoutResource))
+        ).map((op) => [op.id, op.workCenterId] as const)
+  );
+
   const closed: AutoClosedStamp[] = [];
   for (const session of open) {
     const stoppedAt = effectiveStopTime(session, opts.at);
@@ -87,8 +102,10 @@ export async function closeStampSessionsInTx(
         moOperationId: session.moOperationId,
         date,
         hours: String(hours),
-        // Ställ/produktion as stamped in (null = ej uppdelad).
+        // Ställ/produktion as stamped in (null = ej uppdelad), and the
+        // resource stamped in on.
         kind: session.kind,
+        workCenterId: session.workCenterId ?? operationResource.get(session.moOperationId) ?? null,
         note: opts.note,
         createdBy: opts.createdBy,
       })

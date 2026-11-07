@@ -46,6 +46,7 @@ import {
   MoOperationReportedError,
   MoOperationSequenceTakenError,
   MoOperationStampedError,
+  MoOperationResourceChangedError,
   NotSubcontractOperationError,
   OperationFileNotFoundError,
   WorkCenterSupplierNotFoundError,
@@ -71,6 +72,9 @@ import {
   ScrapReasonInvalidError,
   ScrapReasonRequiredError,
   ProductionGroupNotFoundError,
+  RoutingAlternativeInvalidError,
+  RoutingOperationHasAlternativesError,
+  WorkCenterInAlternativesError,
   RoutingOperationNotFoundError,
   WeekScheduleNotFoundError,
   WorkCenterNotFoundError,
@@ -141,6 +145,7 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
         return reply.code(404).send(errorBody(err));
       }
       if (err instanceof DuplicateWorkCenterCodeError) return reply.code(409).send(errorBody(err));
+      if (err instanceof WorkCenterInAlternativesError) return reply.code(409).send(errorBody(err));
       if (err instanceof WeekScheduleNotFoundError) return reply.code(400).send(errorBody(err));
       if (err instanceof WorkCenterSupplierNotFoundError) return reply.code(400).send(errorBody(err));
       throw err;
@@ -215,6 +220,7 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
         if (err instanceof WorkCenterNotFoundError) return reply.code(404).send(errorBody(err));
         if (err instanceof NotSubcontractOperationError) return reply.code(400).send(errorBody(err));
         if (err instanceof WorkCenterSupplierNotFoundError) return reply.code(400).send(errorBody(err));
+        if (err instanceof RoutingAlternativeInvalidError) return reply.code(400).send(errorBody(err));
         throw err;
       }
     }
@@ -234,6 +240,8 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
         if (err instanceof OperationHasLinkedMaterialError) return reply.code(409).send(errorBody(err));
         if (err instanceof NotSubcontractOperationError) return reply.code(400).send(errorBody(err));
         if (err instanceof WorkCenterSupplierNotFoundError) return reply.code(400).send(errorBody(err));
+        if (err instanceof RoutingAlternativeInvalidError) return reply.code(400).send(errorBody(err));
+        if (err instanceof RoutingOperationHasAlternativesError) return reply.code(409).send(errorBody(err));
         throw err;
       }
     }
@@ -657,6 +665,7 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
     if (err instanceof MoOperationSequenceTakenError) return reply.code(409).send(errorBody(err));
     if (err instanceof MoOperationDoneError) return reply.code(409).send(errorBody(err));
     if (err instanceof MoOperationStampedError) return reply.code(409).send(errorBody(err));
+    if (err instanceof MoOperationResourceChangedError) return reply.code(409).send(errorBody(err));
     if (err instanceof MoOperationLinkedPurchaseError) return reply.code(409).send(errorBody(err));
     if (err instanceof MoOperationReportedError) return reply.code(409).send(errorBody(err));
     if (err instanceof LastOperationLockedError) return reply.code(409).send(errorBody(err));

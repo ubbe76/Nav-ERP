@@ -19,6 +19,9 @@ import { unitsPerHourToMinutesPerUnit } from "@navet/shared";
 import { normalizeDecimal } from "./csv.js";
 import type { ExistingArticle } from "./articles.js";
 import { padWorkCenterCode } from "./work-centers.js";
+// Pure (no DB imports): the beredning's rule for alternativa resurser, so a
+// row error reads exactly like the card's 409.
+import { routingOperationHasAlternativesProblem } from "../../manufacturing/service/routing-alternatives.js";
 import {
   ImportMappingError,
   normalizeHeader,
@@ -284,7 +287,9 @@ export interface RoutingImportDeps {
   suppliersByNumber(numbers: string[]): Promise<Map<string, { id: string }>>;
   routingOperationsByArticle(
     articleIds: string[]
-  ): Promise<Map<string, Map<number, { id: string; costingOnly: boolean; hasLegoFields?: boolean }>>>;
+  ): Promise<
+    Map<string, Map<number, { id: string; costingOnly: boolean; hasLegoFields?: boolean; alternativeWorkCenterIds?: string[] }>>
+  >;
 }
 
 export interface RoutingCreatePlan {
@@ -432,6 +437,7 @@ export async function planRoutingImport(
     // Set when the row rewrites an existing operation (input.updateExisting).
     let existingOperationId: string | null = null;
     let existingHasLegoFields = false;
+    let existingAlternativeIds: string[] = [];
     if (article && sequenceNo !== null) {
       const key = `${article.id}#${sequenceNo}`;
       const existingOperation = existingOperations.get(article.id)?.get(sequenceNo);
@@ -454,6 +460,7 @@ export async function planRoutingImport(
         if (input.updateExisting) {
           existingOperationId = existingOperation.id;
           existingHasLegoFields = existingOperation.hasLegoFields === true;
+          existingAlternativeIds = existingOperation.alternativeWorkCenterIds ?? [];
         } else {
           errors.push(`Operation ${sequenceNo} finns redan på artikel ${articleNumber} — ta bort raden ur filen`);
         }
@@ -467,6 +474,7 @@ export async function planRoutingImport(
     const rawCode = record["workCenterCode"] ?? "";
     values["workCenterCode"] = rawCode;
     let workCenterId: string | null = null;
+    let workCenterCode = "";
     let isSubcontract = false;
     let workCenterSupplierId: string | null = null;
     if (rawCode === "") {
@@ -482,6 +490,7 @@ export async function planRoutingImport(
           errors.push(`Resursen ${code} finns inte i resursregistret`);
         } else {
           workCenterId = workCenter.id;
+          workCenterCode = workCenter.code;
           isSubcontract = workCenter.type === "subcontract";
           workCenterSupplierId = workCenter.supplierId ?? null;
         }
@@ -559,6 +568,20 @@ export async function planRoutingImport(
       } else {
         costingOnly = parsed;
       }
+    }
+
+    // Alternativa resurser (#15): the file has no column for them (the
+    // exports carry none), so an update never touches them — but it must not
+    // leave an operation with alternatives on a legoresurs, as Kalkyl or with
+    // one of its alternatives as ordinarie. Same rule and text as the
+    // beredning's 409.
+    if (existingOperationId && workCenterId !== null) {
+      const problem = routingOperationHasAlternativesProblem({
+        alternativeWorkCenterIds: existingAlternativeIds,
+        ordinary: { id: workCenterId, code: workCenterCode, type: isSubcontract ? "subcontract" : "machine" },
+        costingOnly,
+      });
+      if (problem) errors.push(problem);
     }
 
     // Same 1000-character ceiling as createRoutingOperationSchema — a file

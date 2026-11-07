@@ -6,15 +6,12 @@ import {
   inquiryRows,
   manufacturingOrders,
   moMaterialConsumptions,
-  moOperationScrap,
   moOperations,
   moReportMaterials,
-  moReports,
   purchaseOrderRows,
   purchaseOrders,
   stampSessions,
   suppliers,
-  timeReports,
   units,
   workCenters,
   type Db,
@@ -23,6 +20,14 @@ import {
 import { toBaseQuantity, type CreateMoOperationInput, type UpdateMoOperationInput } from "@navet/shared";
 // Produktionsplanering: a leaf with only the lock SQL — no module cycle.
 import { lockProductionPlan } from "../../planning/repository/plan-lock.js";
+import {
+  clearOperationResourcesInTx,
+  operationResourceRows,
+  operationResourcesJson,
+  operationTouchedSql,
+  switchOperationResourcesInTx,
+  syncCurrentResourceTimesInTx,
+} from "./operation-resources.js";
 import { shortageWarnings } from "./shortage-warnings.js";
 
 // Ändra material och operationer på en skapad tillverkningsorder — the
@@ -65,6 +70,9 @@ export type MaterialRow = Awaited<ReturnType<ReturnType<typeof selectMaterialRow
 
 // The same shape as GET /manufacturing-orders/:id/operations rows (the
 // planned weeks are mirror columns on mo_operations and ride along).
+// `resources` = the operation's possible resources (alternativa resurser,
+// operation-resources.ts), [] without alternatives; resourceLocked ("Vald
+// för hand") is a column.
 export function selectOperationRows(dbc: Db | Tx) {
   return dbc
     .select({
@@ -73,6 +81,7 @@ export function selectOperationRows(dbc: Db | Tx) {
       workCenterCode: workCenters.code,
       workCenterType: workCenters.type,
       subcontractSupplierName: suppliers.name,
+      resources: operationResourcesJson(),
     })
     .from(moOperations)
     .innerJoin(workCenters, eq(workCenters.id, moOperations.workCenterId))
@@ -236,7 +245,8 @@ export type OperationEditFailure =
   | "stamped"
   | "linked_purchase"
   | "reported"
-  | "last_operation_locked";
+  | "last_operation_locked"
+  | "resource_changed";
 
 export type OperationEditResult =
   | { ok: true; order: OrderRow; before: OperationRowView | null; operation: OperationRowView; warnings: string[]; replanned: boolean }
@@ -264,18 +274,12 @@ async function exists(tx: Tx, query: PromiseLike<unknown[]>): Promise<boolean> {
   return (await query).length > 0;
 }
 
-// Has the operation ever had anything: reported quantities, a report-log
-// row (undone ones included — they are history the cascade would delete),
-// a time report, a stamp session or a scrap row.
+// Has the operation ever had anything (rörd): the leaf's operationTouchedSql,
+// the same rule the förslag på resurs read (#15). The row is the one this
+// transaction holds FOR UPDATE.
 async function operationHasHistory(tx: Tx, op: OperationRow): Promise<boolean> {
-  if (Number(op.quantityCompleted ?? 0) > 0 || Number(op.quantityScrapped) > 0) return true;
-  const id = op.id;
-  return (
-    (await exists(tx, tx.select({ id: moReports.id }).from(moReports).where(eq(moReports.moOperationId, id)).limit(1))) ||
-    (await exists(tx, tx.select({ id: timeReports.id }).from(timeReports).where(eq(timeReports.moOperationId, id)).limit(1))) ||
-    (await exists(tx, tx.select({ id: stampSessions.id }).from(stampSessions).where(eq(stampSessions.moOperationId, id)).limit(1))) ||
-    (await exists(tx, tx.select({ id: moOperationScrap.id }).from(moOperationScrap).where(eq(moOperationScrap.moOperationId, id)).limit(1)))
-  );
+  const [row] = await tx.select({ touched: operationTouchedSql() }).from(moOperations).where(eq(moOperations.id, op.id));
+  return row?.touched === true;
 }
 
 // An open or paused stamp (stopped_at null) on the operation.
@@ -377,6 +381,13 @@ export async function updateOperationInTx(
   const locked = await lockEditableOrder(tx, moId);
   if (!locked.ok) return locked;
   if (op.status === "done") return { ok: false, reason: "done" };
+  // Byt till X's precondition (#15), read on the row this transaction holds
+  // FOR UPDATE: the operation is still on the resource the förslag was made
+  // for, and has not been moved (Flyttad) since — a förslag is only ever
+  // made for an unlocked operation. Ändra does not send it.
+  if (input.expectedWorkCenterId !== undefined && (op.workCenterId !== input.expectedWorkCenterId || op.planLocked)) {
+    return { ok: false, reason: "resource_changed" };
+  }
 
   const workCenterChanged = input.workCenterId !== undefined && input.workCenterId !== op.workCenterId;
   if (workCenterChanged) {
@@ -405,7 +416,22 @@ export async function updateOperationInTx(
     (input.runTimePerUnit !== undefined && input.runTimePerUnit !== Number(op.runTimePerUnit));
   const replanNeeded = timeChanged || workCenterChanged || sequenceChanged;
 
+  // Alternativa resurser: a switch to one of the operation's resources goes
+  // through the one switch writer (the row's times unless the edit gives
+  // its own, Vald för hand unless resourceLocked: false); a switch outside
+  // them leaves the operation without alternatives. resource_locked is only
+  // ever true while the operation has rows.
+  const resources = await operationResourceRows(tx, opId);
+  const target = workCenterChanged ? resources.find((r) => r.workCenterId === input.workCenterId) : undefined;
+  const keepsResources = resources.length > 0 && (!workCenterChanged || target !== undefined);
+  const resourceLocked = !keepsResources ? false : workCenterChanged ? (input.resourceLocked ?? true) : input.resourceLocked;
+
   const before = await operationRow(tx, opId);
+  if (target) {
+    await switchOperationResourcesInTx(tx, [
+      { moOperationId: opId, fromWorkCenterId: op.workCenterId, toWorkCenterId: target.workCenterId, resourceLocked: resourceLocked! },
+    ]);
+  }
   await tx
     .update(moOperations)
     .set({
@@ -427,8 +453,11 @@ export async function updateOperationInTx(
       // The weeks were booked on the old resource: a locked operation that
       // changes resource loses its lock and is replanned like any other.
       planLocked: workCenterChanged && op.planLocked ? false : undefined,
+      resourceLocked,
     })
     .where(eq(moOperations.id, opId));
+  if (keepsResources) await syncCurrentResourceTimesInTx(tx, opId);
+  else if (resources.length > 0) await clearOperationResourcesInTx(tx, opId);
   const warnings = replanNeeded && replan ? await replan(tx, moId) : [];
   return { ok: true, order: locked.order, before, operation: await operationRow(tx, opId), warnings, replanned: replanNeeded && !!replan };
 }

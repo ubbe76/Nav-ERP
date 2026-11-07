@@ -47,6 +47,8 @@ const WATCHED = [
   "configurator_variants",
   "manufacturing_orders",
   "mo_operations",
+  "mo_operation_resources",
+  "routing_operation_alternatives",
   "stamp_sessions",
   "attendance_sessions",
   "time_reports",
@@ -136,7 +138,7 @@ async function fixtures(adminId: string) {
     active: true,
   } as never);
   const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
-  await mfgService.createRoutingOperation(product.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
+  const routing = await mfgService.createRoutingOperation(product.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
   const order = await mfgService.createManufacturingOrder({ articleId: product.id, quantity: 5 }, adminId);
   const [operation] = await mfgService.listOperations(order.id);
   const employee = await timeReportService.createEmployee({ employeeNumber: "107", name: "Urban", active: true });
@@ -152,7 +154,7 @@ async function fixtures(adminId: string) {
   const lock = await configurator.createGroup(template.id, { code: "LOCK", name: "Lås", kind: "choice", required: true });
   await configurator.createValue(template.id, lock.id, { code: "A", name: "Lås A", priceAdd: 0, active: true });
 
-  return { product, part, order, operation: operation!, employee, template };
+  return { product, part, order, operation: operation!, employee, template, routing };
 }
 
 describe("Endast läsning — the session", () => {
@@ -183,6 +185,9 @@ describe("Endast läsning — writes are refused", () => {
       { method: "PATCH", url: `/api/v1/articles/${f.product.id}`, payload: { name: "Ändrad" } },
       // Försäljning: Ny kundorder (the configurator scope, requireAuthOrClient)
       { method: "POST", url: "/api/v1/quotes", payload: { customerId: crypto.randomUUID(), rows: [] } },
+      // Alternativa resurser: the beredning's set and Byt till / Vald för hand
+      { method: "PATCH", url: `/api/v1/articles/${f.product.id}/routing/${f.routing.id}`, payload: { alternatives: [] } },
+      { method: "PATCH", url: `/api/v1/manufacturing-orders/${f.order.id}/operations/${f.operation.id}`, payload: { resourceLocked: true } },
       // Tillverkning: stämpla in i terminalen
       { method: "POST", url: "/api/v1/stamp-sessions", payload: { employeeId: f.employee.id, moOperationId: f.operation.id } },
       { method: "POST", url: "/api/v1/attendance-sessions", payload: { employeeId: f.employee.id } },

@@ -11,6 +11,13 @@
 // (capacity-book.ts — the same rule Planera uses), but the check itself
 // writes nothing: the batches it returns are what a reservation creates
 // TOs from.
+//
+// Alternativa resurser (#15, etapp 3): the check runs twice on the same
+// input — with only the routing's ordinarie resources, and with the
+// alternatives tried by Valregeln (chooseResource, the förslag's rule with
+// the "trial" base). runDeliveryTimeChecks/deliveryTimeAnswer below compose
+// the answer: the alternatives count only when they give an earlier
+// delivery date.
 import { roundUpToMultiple } from "@navet/shared";
 import { explodeOneLevel, type BomEdge } from "./requirements-calc.js";
 import type { ArticleOverviewRow } from "./article-overview.js";
@@ -23,7 +30,7 @@ import {
   type PlannedWeek,
   type WeekScheduleDayRow,
 } from "./capacity-calc.js";
-import { createCapacityBook, type PlanWorkCenter } from "./capacity-book.js";
+import { chooseResource, createCapacityBook, type PlanWorkCenter, type ResourceCandidate } from "./capacity-book.js";
 import {
   addWorkingDays,
   deliveryFromShipDate,
@@ -48,6 +55,27 @@ export interface DtcOperation {
   description: string | null;
   setupTime: number;
   runTimePerUnit: number;
+  // Alternativa resurser (#15): the routing row's ACTIVE alternatives in
+  // rank order, times resolved like the TO's snapshot (the alternative's
+  // own, else this operation's). Only tried in the run with alternatives;
+  // left out or [] = the operation has none.
+  alternatives?: DtcAlternative[];
+}
+
+export interface DtcAlternative {
+  workCenterId: string;
+  setupTime: number;
+  runTimePerUnit: number;
+}
+
+// An operation step placed on an alternative: the ordinarie it stands in
+// for, and the week the ordinarie would have finished (null = not within
+// the horizon) — "120 (alternativ till 110, som ger v.48)".
+export interface DtcAlternativeOf {
+  workCenterId: string;
+  workCenterCode: string;
+  workCenterName: string;
+  toWeek: string | null;
 }
 
 // The resource as the book sees it (code/name/calendar/factor/lead time).
@@ -148,6 +176,10 @@ export type DtcStep =
       toWeek: string; // Monday of the week it finishes
       weeks: PlannedWeek[]; // the allocation (what was booked when the horizon was hit)
       date: string;
+      // The run with alternatives: the ordinarie this step's resource stands
+      // in for, null on the ordinarie. Left out by a run without them;
+      // deliveryTimeAnswer sets it (null) on every operation step.
+      alternativeOf?: DtcAlternativeOf | null;
     }
   | {
       kind: "subcontract";
@@ -183,9 +215,19 @@ export interface DtcBatch {
   articleNumber: string;
   quantity: number; // rounded up to the article's step
   readyDate: string; // the TO's due date
-  // Every operation of the batch in sequence order: the allocation to
-  // write (lego, 0 minutes ⇒ []).
-  operations: { sequenceNo: number; workCenterId: string; weeks: PlannedWeek[] }[];
+  // Every operation of the batch in sequence order: the resource the run
+  // chose (an alternative only in the run with alternatives) and the
+  // allocation to write (lego, 0 minutes ⇒ []).
+  operations: DtcBatchOperation[];
+}
+
+export interface DtcBatchOperation {
+  sequenceNo: number;
+  workCenterId: string;
+  weeks: PlannedWeek[];
+  // The run with alternatives: the ordinarie this operation's resource stands
+  // in for, null on the ordinarie (left out by a run without them).
+  alternativeOf?: DtcAlternativeOf | null;
 }
 
 export interface DeliveryTimeCheckResult {
@@ -401,8 +443,35 @@ class ArticlePool {
   }
 }
 
-export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCheckResult {
+export interface CheckOptions {
+  // Try each operation's alternatives with Valregeln (chooseResource, base
+  // "trial": the ordinarie with the load) and book the chosen resource.
+  // Off (the default) = only the ordinarie, exactly as before #15.
+  alternatives?: boolean;
+  // The run with alternatives: only these operations may take one (by
+  // choice key, see CheckRun); every other one stays on its ordinarie with
+  // no trial. Left out = all — the beskärningspass in runDeliveryTimeChecks
+  // narrows it.
+  alternativesAt?: ReadonlySet<string>;
+}
+
+export function checkDeliveryTime(input: DeliveryTimeCheckInput, options: CheckOptions = {}): DeliveryTimeCheckResult {
+  return runCheck(input, options).result;
+}
+
+// One run and the operations it put on an alternative, in the order it chose
+// them (rows in order, children before parents, operations in sequence).
+// A choice key names the operation the same way in every run on the same
+// input: the row, the article path from the row's article down to the made
+// one (a component under two parents is two keys) and the sequence number.
+interface CheckRun {
+  result: DeliveryTimeCheckResult;
+  alternativeChoices: string[];
+}
+
+function runCheck(input: DeliveryTimeCheckInput, options: CheckOptions): CheckRun {
   const { today, offDays } = input;
+  const alternativeChoices: string[] = [];
   const t0 = nextWorkingDayOnOrAfter(today, offDays);
   const globalNotes = new Set<string>();
   const batches: DtcBatch[] = [];
@@ -469,7 +538,8 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
     operations: DtcOperation[],
     quantity: number,
     materialReady: string,
-    notes: RowNotes
+    notes: RowNotes,
+    choicePrefix: string
   ): { readyDate: string | null; steps: DtcStep[]; allocations: DtcBatch["operations"] } {
     const steps: DtcStep[] = [];
     const allocations: DtcBatch["operations"] = [];
@@ -490,35 +560,66 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
         if (wc.leadTimeDays == null) notes.legoNoLead.add(code);
         ready = book.subcontract(wc, maxDate(ready, floor));
         floor = ready;
+        const tag = options.alternatives ? { alternativeOf: null } : {};
         steps.push({ kind: "subcontract", ...base, leadTimeDays: wc.leadTimeDays, date: ready });
-        allocations.push({ sequenceNo: op.sequenceNo, workCenterId: op.workCenterId, weeks: [] });
+        allocations.push({ sequenceNo: op.sequenceNo, workCenterId: op.workCenterId, weeks: [], ...tag });
         continue;
       }
       const minutes = routingOperationMinutes(op, quantity);
+      const tag = options.alternatives ? { alternativeOf: null } : {};
       if (minutes <= EPS) {
-        steps.push({ kind: "operation", ...base, fromWeek: mondayOf(floor), toWeek: mondayOf(floor), weeks: [], date: ready });
-        allocations.push({ sequenceNo: op.sequenceNo, workCenterId: op.workCenterId, weeks: [] });
+        steps.push({ kind: "operation", ...base, fromWeek: mondayOf(floor), toWeek: mondayOf(floor), weeks: [], date: ready, ...tag });
+        allocations.push({ sequenceNo: op.sequenceNo, workCenterId: op.workCenterId, weeks: [], ...tag });
         continue;
       }
-      const placed = book.place(wc ?? null, minutes, { floor });
+      // Valregeln (the run with alternatives): the ordinarie is the base,
+      // tried with the load; only when the load pushes it are the
+      // alternatives tried, and one counts only in an earlier week. The
+      // chosen resource is booked so the next operation and row see it.
+      let target = { wc: wc ?? null, workCenterId: op.workCenterId, minutes, step: base, alternativeOf: null as DtcAlternativeOf | null };
+      const choiceKey = `${choicePrefix}#${op.sequenceNo}`;
+      if (options.alternatives && (op.alternatives?.length ?? 0) > 0 && (!options.alternativesAt || options.alternativesAt.has(choiceKey))) {
+        const candidates: ResourceCandidate[] = [
+          { workCenter: wc ?? null, minutes },
+          ...op.alternatives!.map((a) => ({
+            workCenter: input.workCenters.get(a.workCenterId) ?? null,
+            minutes: routingOperationMinutes(a, quantity),
+          })),
+        ];
+        const choice = chooseResource(book, candidates, floor, "trial");
+        if (choice.index > 0) {
+          alternativeChoices.push(choiceKey);
+          const chosen = candidates[choice.index]!.workCenter!;
+          target = {
+            wc: chosen,
+            workCenterId: chosen.workCenterId,
+            minutes: candidates[choice.index]!.minutes,
+            step: { ...base, workCenterCode: chosen.code, workCenterName: chosen.name },
+            alternativeOf: { workCenterId: op.workCenterId, workCenterCode: code, workCenterName: wc?.name ?? "", toWeek: choice.baseToWeek },
+          };
+        }
+      }
+      const onTarget = options.alternatives ? { alternativeOf: target.alternativeOf } : {};
+      const placed = book.place(target.wc, target.minutes, { floor });
       if (placed.horizonExceeded) {
         steps.push({
           kind: "operation",
-          ...base,
+          ...target.step,
           fromWeek: placed.searchedFrom,
           toWeek: placed.searchedTo,
           weeks: placed.partial,
-          date: book.weekFinishDay(wc ?? null, placed.searchedTo, floor),
+          date: book.weekFinishDay(target.wc, placed.searchedTo, floor),
+          ...onTarget,
         });
         return { readyDate: null, steps, allocations };
       }
-      if (placed.unscheduled) notes.unscheduled.add(code);
-      else usedResources.add(wc!.workCenterId);
+      if (placed.unscheduled) notes.unscheduled.add(target.step.workCenterCode);
+      else usedResources.add(target.wc!.workCenterId);
       ready = maxDate(ready, placed.readyDate);
       // The next operation may use what is left of the finishing week.
       floor = maxDate(floor, placed.toWeek);
-      steps.push({ kind: "operation", ...base, fromWeek: placed.fromWeek, toWeek: placed.toWeek, weeks: placed.weeks, date: ready });
-      allocations.push({ sequenceNo: op.sequenceNo, workCenterId: op.workCenterId, weeks: placed.weeks });
+      steps.push({ kind: "operation", ...target.step, fromWeek: placed.fromWeek, toWeek: placed.toWeek, weeks: placed.weeks, date: ready, ...onTarget });
+      allocations.push({ sequenceNo: op.sequenceNo, workCenterId: target.workCenterId, weeks: placed.weeks, ...onTarget });
     }
     return { readyDate: ready, steps, allocations };
   }
@@ -587,7 +688,7 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
       notes.noPreparation.add(article.articleNumber);
       return { readyDate: t0, chain: [] };
     }
-    const scheduled = scheduleOperations(article, operations, quantity, materialReady, notes);
+    const scheduled = scheduleOperations(article, operations, quantity, materialReady, notes, `${rowKey}|${[...nextPath].join("/")}`);
     if (scheduled.readyDate === null) {
       notes.other.add("Kapaciteten räcker inte inom två år");
     } else {
@@ -725,5 +826,129 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
   }
   const deliveryDate =
     shipDate === null ? null : input.customer ? deliveryFromShipDate(shipDate, input.customer, offDays) : shipDate;
-  return { shipDate, deliveryDate, rows, notes: [...globalNotes], batches };
+  return { result: { shipDate, deliveryDate, rows, notes: [...globalNotes], batches }, alternativeChoices };
+}
+
+// --- Alternativa resurser: the two runs and the answer (#15, etapp 3) ----
+
+// Does any operation the check may place have an alternative? Without one
+// the check runs once, exactly as before #15.
+function hasAlternatives(input: DeliveryTimeCheckInput): boolean {
+  const any = (ops: DtcOperation[]) => ops.some((o) => (o.alternatives?.length ?? 0) > 0);
+  return [...input.routings.values()].some(any) || input.rows.some((r) => r.structure !== undefined && any(r.structure.operations));
+}
+
+export interface DeliveryTimeRuns {
+  ordinary: DeliveryTimeCheckResult; // only the routing's ordinarie resources
+  // null = no operation has an alternative. When it gives the earlier
+  // delivery date this is the PRUNED run (pruneAlternatives): only the
+  // alternatives the date needs.
+  withAlternatives: DeliveryTimeCheckResult | null;
+  // The resources by id — the answer names each batch operation's resource.
+  workCenters: ReadonlyMap<string, Pick<DtcWorkCenter, "code" | "name">>;
+}
+
+// Both runs on the SAME input (each with its own book). Pure, so the check
+// and the reservation's run under the lock give the same answer on the same
+// data — the beskärningspass included, so the answer and the reservation
+// write the same alternatives.
+export function runDeliveryTimeChecks(input: DeliveryTimeCheckInput): DeliveryTimeRuns {
+  const ordinary = checkDeliveryTime(input);
+  let withAlternatives: DeliveryTimeCheckResult | null = null;
+  if (hasAlternatives(input)) {
+    const full = runCheck(input, { alternatives: true });
+    withAlternatives = alternativesGiveEarlierDate({ ordinary, withAlternatives: full.result })
+      ? pruneAlternatives(input, full)
+      : full.result;
+  }
+  return { ordinary, withAlternatives, workCenters: input.workCenters };
+}
+
+// Beskärningspasset (granskningen av etapp 3): the greedy run puts every
+// operation whose ordinarie is full on an alternative — also on rows that do
+// not decide the delivery date, and the reservation would write Vald för
+// hand on each of them. In a fixed order (the order the full run chose them)
+// each alternative is put back on its ordinarie, the run redone, and the
+// restore kept as long as the delivery date holds (no later than the full
+// run's). The allowed set only shrinks — a later run may never take an
+// alternative the full run did not — so one pass is complete, and what is
+// left is the alternatives the date needs. Deterministic: the same input
+// gives the same pass, in the check and in the reservation's run.
+function pruneAlternatives(input: DeliveryTimeCheckInput, full: CheckRun): DeliveryTimeCheckResult {
+  const target = full.result.deliveryDate!;
+  let allowed = new Set(full.alternativeChoices);
+  let kept = full.result;
+  for (const key of full.alternativeChoices) {
+    const narrower = new Set(allowed);
+    narrower.delete(key);
+    const trial = runCheck(input, { alternatives: true, alternativesAt: narrower }).result;
+    if (trial.deliveryDate !== null && trial.deliveryDate <= target) {
+      allowed = narrower;
+      kept = trial;
+    }
+  }
+  return kept;
+}
+
+// The answer POST /delivery-time-check gives (and the run the reservation
+// writes). The alternatives count only when they give an EARLIER delivery
+// date than the ordinarie alone (or a date where the ordinarie gives none
+// within the horizon) — Valregeln's "earlier or not at all" for the whole
+// promise: when they do not, the answer is the ordinarie run, with no
+// alternative anywhere, and the reservation makes its TOs on the ordinarie.
+// When they do, the run is the pruned one (runDeliveryTimeChecks): only the
+// operations the date needs are on an alternative.
+// A batch operation as the answer gives it: the resource it was placed on,
+// named, and the ordinarie it stands in for (null = on the ordinarie) — every
+// operation, not only the critical chain's.
+export interface AnsweredBatchOperation extends DtcBatchOperation {
+  workCenterCode: string;
+  workCenterName: string;
+  alternativeOf: DtcAlternativeOf | null;
+}
+
+export interface DeliveryTimeAnswer extends Omit<DeliveryTimeCheckResult, "rows" | "batches"> {
+  batches: (Omit<DtcBatch, "operations"> & { operations: AnsweredBatchOperation[] })[];
+  // The dates, rows, chains and batches rest on alternatives.
+  usesAlternatives: boolean;
+  // With only the ordinarie resources — set only when usesAlternatives
+  // (null otherwise: the same dates); with usesAlternatives a null means the
+  // ordinarie gives no date within the horizon.
+  ordinaryShipDate: string | null;
+  ordinaryDeliveryDate: string | null;
+  rows: (DtcRowResult & { ordinaryReadyDate: string | null })[]; // the row's ready day with only the ordinarie
+}
+
+export function alternativesGiveEarlierDate(runs: Pick<DeliveryTimeRuns, "ordinary" | "withAlternatives">): boolean {
+  const alt = runs.withAlternatives;
+  if (alt === null || alt.deliveryDate === null) return false;
+  return runs.ordinary.deliveryDate === null || alt.deliveryDate < runs.ordinary.deliveryDate;
+}
+
+// `useAlternatives` false = the ordinarie run whatever the alternatives give
+// (the reservation of a user who chose Med ordinarie resurser).
+export function deliveryTimeAnswer(runs: DeliveryTimeRuns, useAlternatives = true): DeliveryTimeAnswer {
+  const usesAlternatives = useAlternatives && alternativesGiveEarlierDate(runs);
+  const primary = usesAlternatives ? runs.withAlternatives! : runs.ordinary;
+  const ordinaryReady = new Map(runs.ordinary.rows.map((r) => [r.key, r.readyDate]));
+  return {
+    ...primary,
+    rows: primary.rows.map((r) => ({
+      ...r,
+      chain: r.chain.map((step) => (step.kind === "operation" ? { ...step, alternativeOf: step.alternativeOf ?? null } : step)),
+      ordinaryReadyDate: ordinaryReady.get(r.key) ?? null,
+    })),
+    batches: primary.batches.map((b) => ({
+      ...b,
+      operations: b.operations.map((o) => ({
+        ...o,
+        workCenterCode: runs.workCenters.get(o.workCenterId)?.code ?? "?",
+        workCenterName: runs.workCenters.get(o.workCenterId)?.name ?? "",
+        alternativeOf: o.alternativeOf ?? null,
+      })),
+    })),
+    usesAlternatives,
+    ordinaryShipDate: usesAlternatives ? runs.ordinary.shipDate : null,
+    ordinaryDeliveryDate: usesAlternatives ? runs.ordinary.deliveryDate : null,
+  };
 }

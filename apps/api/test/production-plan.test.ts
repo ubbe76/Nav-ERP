@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   compareOrderPriority,
   longOperationWarnings,
+  operationsWithPlan,
   planProduction,
   type PlanOperation,
   type PlanOrder,
@@ -612,5 +613,43 @@ describe("Planera — orimligt mycket tid", () => {
       ],
     });
     expect(warnings.map((w) => [w.kind, w.orderNumber, w.sequenceNo])).toEqual([["long_operation", "TO-1", 30]]);
+  });
+});
+
+// Alternativa resurser (#15, beslut 1): the engine places on the resource the
+// operation has — a free alternative changes nothing. The förslag are
+// resource-suggestions.ts's business.
+describe("Planera — alternativa resurser", () => {
+  it("plans an operation with alternatives on its current resource, even when an alternative is free", () => {
+    const result = plan({
+      orders: [
+        order("a", "TO-1", null, (o) => [
+          pop(o, 10, 20, {
+            resources: [
+              { workCenterId: "wc-1", rank: 0, setupTime: h(20), runTimePerUnit: 0 },
+              { workCenterId: "wc-3", rank: 1, setupTime: h(5), runTimePerUnit: 0 },
+            ],
+          }),
+        ]),
+      ],
+      // wc-1 is full this week; wc-3 (the alternative) is empty.
+      existingOperations: [existing(40, W43)],
+    });
+    expect(plansOf(result)).toEqual([["a:10", weeks([W44, 20])]]);
+  });
+
+  it("operationsWithPlan gives the operations as the writer leaves them: rounded weeks, cleared without weeks or lock", () => {
+    const a = pop({ id: "a", orderNumber: "TO-1", dueDate: null }, 10, 1, { plannedWeeks: weeks([W43, 1]) });
+    const b = pop({ id: "a", orderNumber: "TO-1", dueDate: null }, 20, 1, { plannedWeeks: weeks([W43, 1]), planLocked: true });
+    const c = pop({ id: "a", orderNumber: "TO-1", dueDate: null }, 30, 1, { plannedWeeks: weeks([W45, 1]) });
+    const out = operationsWithPlan([a, b, c], {
+      plans: [{ operationId: a.moOperationId, manufacturingOrderId: "a", weeks: [{ monday: W44, minutes: 59.996 }], startWeek: W44, endWeek: W44 }],
+      clear: [b.moOperationId],
+    });
+    expect(out.map((op) => [op.moOperationId, op.plannedWeeks, op.planLocked ?? false])).toEqual([
+      ["a:10", [{ monday: W44, minutes: 60 }], false],
+      ["a:20", null, false],
+      ["a:30", weeks([W45, 1]), false],
+    ]);
   });
 });

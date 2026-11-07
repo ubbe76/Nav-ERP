@@ -7,7 +7,7 @@ import { FormActions, FormError, FormHint, FormNotice } from "../ui/Form";
 import { GatedLink } from "../ui/GatedLink";
 import { Modal } from "../ui/Modal";
 import { DeliveryTimeCheckResult } from "./DeliveryTimeCheckResult";
-import { applyDeliveryTime, runDeliveryTimeCheck, type DeliveryTimeCheckRequest } from "../../lib/deliveryTimeCheck";
+import { applyDeliveryTime, chosenDtcDate, runDeliveryTimeCheck, type DeliveryTimeCheckRequest } from "../../lib/deliveryTimeCheck";
 import { ApiError } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import type { ApplyDeliveryTimeResult, DeliveryTimeCheckResult as Result } from "../../lib/types";
@@ -55,6 +55,8 @@ export function DeliveryTimeCheckDialog({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [reserve, setReserve] = useState(true);
+  // Which date is used when the alternatives gave an earlier one.
+  const [withAlternatives, setWithAlternatives] = useState(true);
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [changedNotice, setChangedNotice] = useState<string | null>(null);
@@ -69,6 +71,7 @@ export function DeliveryTimeCheckDialog({
     setError(null);
     setLoading(true);
     setReserve(true);
+    setWithAlternatives(true);
     setApplyError(null);
     setChangedNotice(null);
     setApplied(null);
@@ -91,12 +94,21 @@ export function DeliveryTimeCheckDialog({
   const batchCount = result?.batches?.length ?? 0;
   const canReserve = canCreateOrders && withCustomer && !!salesOrderId && batchCount > 0;
 
-  async function applyReservation(orderId: string, deliveryDate: string, expectedOrders: number) {
+  const usesAlt = result?.usesAlternatives === true;
+  const effectiveAlt = usesAlt && withAlternatives && chosenDtcDate(result!, true) !== null;
+  // The shown batches are the alternative run's; with ordinary resources the
+  // count can differ, so the count guard is only sent for the shown run.
+  async function applyReservation(orderId: string, deliveryDate: string, expectedOrders: number | undefined) {
     setApplyError(null);
     setChangedNotice(null);
     setApplying(true);
     try {
-      const res = await applyDeliveryTime({ salesOrderId: orderId, deliveryDate, expectedOrders });
+      const res = await applyDeliveryTime({
+        salesOrderId: orderId,
+        deliveryDate,
+        expectedOrders,
+        ...(usesAlt ? { useAlternatives: effectiveAlt } : {}),
+      });
       setApplied(res);
       onApplied?.();
     } catch (err) {
@@ -105,9 +117,10 @@ export function DeliveryTimeCheckDialog({
         // Someone booked capacity in between: show the new check and let the
         // user decide again.
         setResult(newResult);
+        setWithAlternatives(true);
         setChangedNotice(
           newResult.deliveryDate
-            ? `Läget har ändrats sedan kontrollen — det nya datumet är ${newResult.deliveryDate}`
+            ? `Läget har ändrats sedan kontrollen — det nya datumet är ${newResult.deliveryDate}${newResult.usesAlternatives ? " med alternativa resurser" : ""}`
             : "Läget har ändrats sedan kontrollen — kontrollen hittar inget datum längre"
         );
       } else {
@@ -118,9 +131,15 @@ export function DeliveryTimeCheckDialog({
     }
   }
 
+  const chosenDate = result ? chosenDtcDate(result, withAlternatives) : null;
+  const noOrdersWarning =
+    usesAlt && effectiveAlt && !(canReserve && reserve)
+      ? "Datumet bygger på alternativ resurs. Tillverkningsordrar som skapas senare planeras på ordinarie resurs — skapa dem här för att hålla datumet."
+      : null;
+
   function useDate(date: string) {
     if (canReserve && reserve && salesOrderId) {
-      void applyReservation(salesOrderId, date, batchCount);
+      void applyReservation(salesOrderId, date, usesAlt && !effectiveAlt ? undefined : batchCount);
       return;
     }
     onUseDate(date);
@@ -135,7 +154,14 @@ export function DeliveryTimeCheckDialog({
       <FormError>{applyError}</FormError>
       {changedNotice && <FormNotice>{changedNotice}</FormNotice>}
       {loading && <FormHint>Kontrollerar…</FormHint>}
-      {result && <DeliveryTimeCheckResult result={result} withCustomer={withCustomer} />}
+      {result && (
+        <DeliveryTimeCheckResult
+          result={result}
+          withCustomer={withCustomer}
+          withAlternatives={withAlternatives}
+          onAlternativeModeChange={applied ? undefined : setWithAlternatives}
+        />
+      )}
       {result && !withCustomer && <FormHint>Välj kund för att räkna med kundens transportdagar.</FormHint>}
 
       {canReserve && !applied && (
@@ -144,6 +170,8 @@ export function DeliveryTimeCheckDialog({
           <span>Skapa tillverkningsordrar för det som saknas ({batchCount} st)</span>
         </label>
       )}
+
+      {withCustomer && !applied && noOrdersWarning && <FormNotice>{noOrdersWarning}</FormNotice>}
 
       {applied && (
         <>
@@ -165,6 +193,11 @@ export function DeliveryTimeCheckDialog({
                   <span className={styles.createdMeta}>
                     {mo.articleNumber} · {mo.quantity} st{mo.level > 1 ? " · halvfabrikat" : ""}
                   </span>
+                  {(mo.resourceSwitches ?? []).map((sw) => (
+                    <div key={sw.sequenceNo} className={styles.createdMeta}>
+                      {mo.orderNumber}: op {sw.sequenceNo} bytt från {sw.fromCode} till {sw.toCode} (Vald för hand)
+                    </div>
+                  ))}
                 </li>
               ))}
             </ul>
@@ -175,7 +208,7 @@ export function DeliveryTimeCheckDialog({
         </>
       )}
 
-      {withCustomer && result?.deliveryDate && !applied && rowsWithOwnDate > 0 && (
+      {withCustomer && chosenDate && !applied && rowsWithOwnDate > 0 && (
         <FormHint>
           {rowsWithOwnDate === 1
             ? "1 rad har ett eget leveransdatum och behåller det."
@@ -184,8 +217,8 @@ export function DeliveryTimeCheckDialog({
       )}
 
       <FormActions>
-        {withCustomer && result?.deliveryDate && !applied && (
-          <Button type="button" variant="primary" disabled={busy} onClick={() => useDate(result.deliveryDate!)}>
+        {withCustomer && chosenDate && !applied && (
+          <Button type="button" variant="primary" disabled={busy} onClick={() => useDate(chosenDate)}>
             {busy ? "Sparar…" : "Använd datumet"}
           </Button>
         )}

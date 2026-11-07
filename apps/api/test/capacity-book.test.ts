@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  chooseResource,
   createCapacityBook,
   MIN_PLAN_MINUTES,
   PLAN_HORIZON_WEEKS,
@@ -292,6 +293,226 @@ describe("capacity book — placement", () => {
   it("the capacity factor scales the week", () => {
     const doubled: PlanWorkCenter = { ...wc1, capacityFactor: 2 };
     expect(book().weekCapacity(doubled, W44)).toBe(h(80));
+    // The week capacity is cached per resource object: the same week asked
+    // again (and from a later day) gives the same figures, and another
+    // configuration of the same resource is never served from the cache.
+    const one = book();
+    expect([one.weekCapacity(wc1, W44), one.weekCapacity(wc1, W44), one.weekCapacity(doubled, W44)]).toEqual([h(40), h(40), h(80)]);
+    expect([one.freeMinutes(wc1, W44, "2026-10-29"), one.freeMinutes(wc1, W44, "2026-10-29")]).toEqual([h(16), h(16)]);
     expect(book().place(doubled, h(60), { floor: TODAY })).toMatchObject({ weeks: weeks([W43, 60]) });
+  });
+});
+
+// --- Alternativa resurser (#15): provplacering and Valregeln ---------------
+
+const wc2: PlanWorkCenter = { ...wc1, workCenterId: "wc-2", code: "120", name: "Kantpress 2" };
+const wc3: PlanWorkCenter = { ...wc1, workCenterId: "wc-3", code: "130", name: "Kantpress 3" };
+const noCapacity: PlanWorkCenter = { ...wc1, workCenterId: "wc-n", code: "150", name: "Utan kapacitet", weekScheduleId: null };
+const inactive: PlanWorkCenter = { ...wc1, workCenterId: "wc-i", code: "160", name: "Inaktiv", active: false };
+const lego: PlanWorkCenter = { ...wc1, workCenterId: "wc-l", code: "900", name: "Lego", type: "subcontract", weekScheduleId: null, leadTimeDays: 5 };
+
+// A book where `load` hours sit on each resource in the given weeks.
+function loadedBook(load: [workCenterId: string, monday: string, hours: number][], partial: Partial<CapacityBookInput> = {}) {
+  return book({
+    workCenters: new Map([wc1, wc2, wc3, noCapacity, inactive, lego].map((w) => [w.workCenterId, w])),
+    existingOperations: load.map(([workCenterId, monday, hours], i) =>
+      existing(workCenterId, monday, hours, { moOperationId: `load-${i}`, plannedWeeks: [{ monday, minutes: h(hours) }] })
+    ),
+    ...partial,
+  });
+}
+const cand = (workCenter: PlanWorkCenter | null, hours: number) => ({ workCenter, minutes: h(hours) });
+
+describe("capacity book — peek (provplacering)", () => {
+  it("gives exactly what place gives, and books nothing", () => {
+    const b = loadedBook([["wc-1", W43, 30]]);
+    const peeked = b.peek(wc1, h(20), { floor: TODAY });
+    expect(peeked).toEqual({
+      horizonExceeded: false,
+      weeks: weeks([W43, 10], [W44, 10]),
+      fromWeek: W43,
+      toWeek: W44,
+      readyDate: "2026-10-30",
+      unscheduled: false,
+    });
+    // Nothing booked: the same peek again, and place agrees with it.
+    expect(b.peek(wc1, h(20), { floor: TODAY })).toEqual(peeked);
+    expect(b.freeMinutes(wc1, W43, TODAY)).toBe(h(10));
+    expect(b.place(wc1, h(20), { floor: TODAY })).toEqual(peeked);
+    // place booked: the next peek sees it.
+    expect(b.freeMinutes(wc1, W43, TODAY)).toBe(0);
+    expect(b.peek(wc1, h(20), { floor: TODAY })).toMatchObject({ weeks: weeks([W44, 20]), toWeek: W44 });
+  });
+
+  it("with ignoreLoad searches the bare capacity, from the floor", () => {
+    const b = loadedBook([["wc-1", W43, 40], ["wc-1", W44, 40]]);
+    expect(b.peek(wc1, h(50), { floor: TODAY, ignoreLoad: true })).toMatchObject({ weeks: weeks([W43, 40], [W44, 10]), toWeek: W44 });
+    // From Thursday: two days (16 h) left of the floor's week.
+    expect(b.peek(wc1, h(20), { floor: "2026-10-22", ignoreLoad: true })).toMatchObject({ weeks: weeks([W43, 16], [W44, 4]), toWeek: W44 });
+    expect(b.freeMinutes(wc1, W43, TODAY)).toBe(0);
+  });
+
+  it("with without leaves the given weeks out of the existing load before it is rolled", () => {
+    // 40 h in W43 and 40 h in W44, of which 30 h in W44 are the operation's own.
+    const b = loadedBook([["wc-1", W43, 40], ["wc-1", W44, 40]]);
+    expect(b.peek(wc1, h(20), { floor: TODAY })).toMatchObject({ weeks: weeks([W45, 20]), toWeek: W45 });
+    expect(b.peek(wc1, h(20), { floor: TODAY, without: weeks([W44, 30]) })).toMatchObject({ weeks: weeks([W44, 20]), toWeek: W44 });
+    // A backlog rolls: 60 h in W43 spills 20 h into W44 — without 20 of them nothing spills.
+    const backlog = loadedBook([["wc-1", W43, 60]]);
+    expect(backlog.peek(wc1, h(30), { floor: TODAY })).toMatchObject({ weeks: weeks([W44, 20], [W45, 10]) });
+    expect(backlog.peek(wc1, h(30), { floor: TODAY, without: weeks([W43, 20]) })).toMatchObject({ weeks: weeks([W44, 30]) });
+    // Nothing booked, and the book's own load is untouched by the trial.
+    expect(b.freeMinutes(wc1, W44, TODAY)).toBe(0);
+  });
+
+  it("does not book a resource without a calendar either", () => {
+    const b = loadedBook([]);
+    expect(b.peek(noCapacity, h(5), { floor: TODAY })).toMatchObject({ toWeek: W43, unscheduled: true });
+    expect(b.place(noCapacity, h(5), { floor: TODAY })).toMatchObject({ toWeek: W43, unscheduled: true });
+  });
+});
+
+describe("chooseResource — Valregeln", () => {
+  it("without an alternative that can be tried it gives the base and makes no trial at all", () => {
+    const b = loadedBook([["wc-1", W43, 40]]);
+    const base = { index: 0, baseFull: false, baseToWeek: null, toWeek: null, placement: null };
+    expect(chooseResource(b, [cand(wc1, 10)], TODAY, "trial")).toEqual(base);
+    // A resource without capacity, an inactive one, a legoresurs and an
+    // unknown one are never tried — the book sees no capacity as unlimited.
+    expect(chooseResource(b, [cand(wc1, 10), cand(noCapacity, 1), cand(inactive, 1), cand(lego, 1), cand(null, 1)], TODAY, "trial")).toEqual(base);
+    expect(chooseResource(b, [cand(wc1, 10), cand(noCapacity, 1)], TODAY, { stored: W45 })).toEqual({ ...base, baseToWeek: W45, toWeek: W45 });
+  });
+
+  it("a base that is not full gives no alternative, even when an alternative is faster", () => {
+    // 50 h on an empty 110: two weeks even without load. 120 would do it in one.
+    const b = loadedBook([]);
+    const choice = chooseResource(b, [cand(wc1, 50), cand(wc2, 30)], TODAY, "trial");
+    expect(choice).toMatchObject({ index: 0, baseFull: false, baseToWeek: W44, toWeek: W44 });
+    expect(choice.placement).toMatchObject({ weeks: weeks([W43, 40], [W44, 10]) });
+  });
+
+  it("a full base gives the alternative ready in the earliest week, and a tie in week goes to the lowest rank", () => {
+    // 110 is full this week: 10 h waits until W44. 120 is full too, 130 is free.
+    const b = loadedBook([["wc-1", W43, 40], ["wc-2", W43, 40]]);
+    const choice = chooseResource(b, [cand(wc1, 10), cand(wc2, 10), cand(wc3, 10)], TODAY, "trial");
+    expect(choice).toMatchObject({ index: 2, baseFull: true, baseToWeek: W44, toWeek: W43 });
+    expect(choice.placement).toMatchObject({ weeks: weeks([W43, 10]), readyDate: "2026-10-23" });
+    // Both alternatives free: the same week, so rank 1 wins.
+    const tie = chooseResource(loadedBook([["wc-1", W43, 40]]), [cand(wc1, 10), cand(wc2, 10), cand(wc3, 10)], TODAY, "trial");
+    expect(tie).toMatchObject({ index: 1, toWeek: W43 });
+    // Weeks, not days: 130 would be ready Tuesday, 120 Friday — same week, rank wins.
+    const days = chooseResource(loadedBook([["wc-1", W43, 40], ["wc-2", W43, 30]]), [cand(wc1, 10), cand(wc2, 10), cand(wc3, 2)], TODAY, "trial");
+    expect(days).toMatchObject({ index: 1, toWeek: W43 });
+    // Nothing was booked by the choice.
+    expect(b.freeMinutes(wc3, W43, TODAY)).toBe(h(40));
+  });
+
+  it("an alternative wins only in an EARLIER week than the base — a tie keeps the base", () => {
+    // 110: 5 h left this week, so 10 h finishes in W44 (full: bare it is W43).
+    // 120: 2 h left — also W44.
+    const b = loadedBook([["wc-1", W43, 35], ["wc-2", W43, 38]]);
+    expect(chooseResource(b, [cand(wc1, 10), cand(wc2, 10)], TODAY, "trial")).toMatchObject({
+      index: 0,
+      baseFull: true,
+      baseToWeek: W44,
+      toWeek: W44,
+    });
+  });
+
+  it("a base beyond the horizon gives an alternative; all beyond the horizon gives the base", () => {
+    const horizon = { horizonWeeks: 2 };
+    const b = loadedBook([["wc-1", W43, 40], ["wc-1", W44, 40]], horizon);
+    expect(chooseResource(b, [cand(wc1, 10), cand(wc2, 10)], TODAY, "trial")).toMatchObject({ index: 1, baseFull: true, baseToWeek: null, toWeek: W43 });
+    const all = loadedBook([["wc-1", W43, 40], ["wc-1", W44, 40], ["wc-2", W43, 40], ["wc-2", W44, 40]], horizon);
+    expect(chooseResource(all, [cand(wc1, 10), cand(wc2, 10)], TODAY, "trial")).toEqual({
+      index: 0,
+      baseFull: true,
+      baseToWeek: null,
+      toWeek: null,
+      placement: null,
+    });
+  });
+
+  it("never tries a resource without capacity or an inactive one, even when the base is full", () => {
+    const b = loadedBook([["wc-1", W43, 40]]);
+    // Only untried ones: the base without a trial, as without alternatives.
+    expect(chooseResource(b, [cand(wc1, 10), cand(noCapacity, 10), cand(inactive, 10)], TODAY, "trial")).toMatchObject({ index: 0, placement: null });
+    expect(chooseResource(b, [cand(wc1, 10), cand(noCapacity, 10), cand(inactive, 10), cand(wc3, 10)], TODAY, "trial")).toMatchObject({
+      index: 3,
+      toWeek: W43,
+    });
+  });
+
+  it("tries each alternative with its own minutes — own times or som ordinarie", () => {
+    // 120 has 10 h left this week.
+    const b = loadedBook([["wc-1", W43, 40], ["wc-2", W43, 30]]);
+    // Som ordinarie: the same 20 h as 110 — W44 on 120 too, no better than the base.
+    expect(chooseResource(b, [cand(wc1, 20), cand(wc2, 20)], TODAY, "trial")).toMatchObject({ index: 0, baseToWeek: W44 });
+    // Its own, shorter time: 8 h fits this week.
+    expect(chooseResource(b, [cand(wc1, 20), cand(wc2, 8)], TODAY, "trial")).toMatchObject({ index: 1, toWeek: W43 });
+  });
+
+  it("measures the förslag's stored base by a trial with the load minus its own weeks — the plan's age never decides", () => {
+    // A stale plan: nothing loads 110 now, the stored plan ends in W45. The
+    // trial finishes in W43 like the bare base — not full, the base keeps it
+    // (and its week is the trial's, the earlier of the two).
+    expect(chooseResource(loadedBook([]), [cand(wc1, 10), cand(wc2, 10)], TODAY, { stored: W45 })).toEqual({
+      index: 0,
+      baseFull: false,
+      baseToWeek: W43,
+      toWeek: W43,
+      placement: null,
+    });
+    // The load pushes it: 110 is full W43–W44, the operation's own 10 h sit
+    // in W45 (left out of its own trial). Full, and 120 is free in W43.
+    const pushed = loadedBook([["wc-1", W43, 40], ["wc-1", W44, 40], ["wc-1", W45, 10]]);
+    const own = weeks([W45, 10]);
+    expect(chooseResource(pushed, [cand(wc1, 10), cand(wc2, 10)], TODAY, { stored: W45, without: own })).toMatchObject({
+      index: 1,
+      baseFull: true,
+      baseToWeek: W45,
+      toWeek: W43,
+      placement: { weeks: weeks([W43, 10]) },
+    });
+    // A stored week EARLIER than the trial (load added since) keeps the
+    // stored week as the one to beat: 120 would be W45 too — no förslag.
+    const later = loadedBook([["wc-1", W43, 40], ["wc-1", W44, 40], ["wc-2", W43, 40], ["wc-2", W44, 40]]);
+    expect(chooseResource(later, [cand(wc1, 10), cand(wc2, 10)], TODAY, { stored: W44 })).toMatchObject({
+      index: 0,
+      baseFull: true,
+      baseToWeek: W44,
+    });
+    // Unplanned (stored null) is measured by its trial too: free ⇒ not full.
+    expect(chooseResource(loadedBook([]), [cand(wc1, 10), cand(wc2, 10)], TODAY, { stored: null })).toMatchObject({
+      index: 0,
+      baseFull: false,
+      baseToWeek: W43,
+    });
+    // …and its own unplanned load (in its due week) is not its competitor.
+    const unplanned = loadedBook([["wc-1", W43, 40]]);
+    expect(chooseResource(unplanned, [cand(wc1, 40), cand(wc2, 40)], TODAY, { stored: null, without: weeks([W43, 40]) })).toMatchObject({
+      index: 0,
+      baseFull: false,
+      baseToWeek: W43,
+    });
+    expect(chooseResource(unplanned, [cand(wc1, 40), cand(wc2, 40)], TODAY, { stored: null })).toMatchObject({ index: 1, baseToWeek: W44, toWeek: W43 });
+    // Beyond the horizon with nothing stored: full, any alternative that fits wins.
+    const horizon = loadedBook([["wc-1", W43, 40], ["wc-1", W44, 40]], { horizonWeeks: 2 });
+    expect(chooseResource(horizon, [cand(wc1, 10), cand(wc2, 10)], TODAY, { stored: null })).toMatchObject({ index: 1, baseToWeek: null, toWeek: W43 });
+    // Trial: the same empty book — 110 is not full, so the base with its trial.
+    expect(chooseResource(loadedBook([]), [cand(wc1, 10), cand(wc2, 10)], TODAY, "trial")).toMatchObject({
+      index: 0,
+      baseFull: false,
+      baseToWeek: W43,
+      placement: { weeks: weeks([W43, 10]) },
+    });
+  });
+
+  it("compares from the floor: a later floor moves both the bare base and the alternatives", () => {
+    const b = loadedBook([["wc-1", W44, 40]]);
+    // From W44: 110 is full there (10 h → W45), 120 is free in W44.
+    expect(chooseResource(b, [cand(wc1, 10), cand(wc2, 10)], W44, "trial")).toMatchObject({ index: 1, baseToWeek: W45, toWeek: W44 });
+    // From today the base is not full: W43 is free.
+    expect(chooseResource(b, [cand(wc1, 10), cand(wc2, 10)], TODAY, "trial")).toMatchObject({ index: 0, baseFull: false, baseToWeek: W43 });
   });
 });

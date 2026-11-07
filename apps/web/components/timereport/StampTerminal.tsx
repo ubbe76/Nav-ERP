@@ -84,6 +84,13 @@ function isReasonInvalid(err: unknown) {
   return err instanceof ApiError && err.code === "attendance-reason-invalid";
 }
 
+// Terminalens gamla lista: the operation was switched to another resource
+// (Byt resurs) after the list was loaded — the stamp names the listed
+// station and the server refuses it.
+function isWorkCenterChanged(err: unknown) {
+  return err instanceof ApiError && err.code === "stamp-work-center-changed";
+}
+
 function minutesText(minutes: number) {
   return minutes === 1 ? "1 minut" : `${minutes} minuter`;
 }
@@ -462,6 +469,7 @@ export function StampTerminal({
     if (operations.length === 0) return;
     setBusy(true);
     const failed: TerminalOperation[] = [...earlierFailed];
+    let moved = false;
     let attendanceStarted = false;
     let reasonPending = attendanceReason;
     try {
@@ -473,6 +481,9 @@ export function StampTerminal({
             body: JSON.stringify({
               employeeId: employee.id,
               moOperationId: operation.operationId,
+              // The station the list showed: an operation the planner has
+              // moved since is refused instead of started on the old one.
+              workCenterId: operation.workCenterId,
               ...(timeKind ? { kind: timeKind } : {}),
               ...(reasonPending ? { attendanceReason: reasonPending } : {}),
             }),
@@ -504,6 +515,7 @@ export function StampTerminal({
               apiErrorMessage(err, "Anledningen finns inte längre — välj en annan.")
             ));
           }
+          if (isWorkCenterChanged(err)) moved = true;
           failed.push(operation);
         }
       }
@@ -521,10 +533,11 @@ export function StampTerminal({
         // only the failed ones checked.
         setSelectedOperationIds(new Set(failed.map((op) => op.operationId)));
         const names = failed.map((op) => `${op.orderNumber} op ${op.sequenceNo}`).join(", ");
+        const movedText = moved ? " En operation har flyttats till en annan resurs — listan är uppdaterad." : "";
         setError(
-          failed.length === earlierFailed.length + operations.length
+          (failed.length === earlierFailed.length + operations.length
             ? `Instämpling misslyckades: ${names}.`
-            : `Instämpling misslyckades för: ${names}. Övriga är instämplade.`
+            : `Instämpling misslyckades för: ${names}. Övriga är instämplade.`) + movedText
         );
         setStep({ name: "pickOperations", employee });
       }
@@ -772,7 +785,14 @@ export function StampTerminal({
       try {
         await apiFetch("/api/v1/stamp-sessions", {
           method: "POST",
-          body: JSON.stringify({ employeeId: employee.id, moOperationId: session.moOperationId, kind: "run" }),
+          body: JSON.stringify({
+            employeeId: employee.id,
+            moOperationId: session.moOperationId,
+            kind: "run",
+            // The resource the setup was stamped on: a Byt resurs between the
+            // two calls is refused rather than producing on another station.
+            ...(session.workCenterId ? { workCenterId: session.workCenterId } : {}),
+          }),
         });
         setError(null);
         setNotice("Ställ klart — produktionen är instämplad.");

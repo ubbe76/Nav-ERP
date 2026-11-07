@@ -35,10 +35,15 @@ import type {
 // runs inside the report transactions; the mode is read here, outside them.
 import { MaterialShortageError, type MaterialShortageCheck } from "./material-shortage.js";
 import { computeReadiness, type Readiness, type ReadinessResult } from "./terminal-readiness.js";
-import type { ManufacturingPlanReader } from "../../planning/service/planning.service.js";
-import type { PlannedWeek } from "../../planning/service/capacity-calc.js";
+import type { GivenOperationPlan, GivenPlanOptions, ManufacturingPlanReader } from "../../planning/service/planning.service.js";
+import type { OperationResourceSuggestion } from "../../planning/service/resource-suggestions.js";
 export { MaterialShortageError, type MaterialShortage } from "./material-shortage.js";
 import type { PeriodLockChecker } from "../../payroll/service/period-lock.js";
+import {
+  routingAlternativesProblem,
+  routingOperationHasAlternativesProblem,
+  type AlternativeResource,
+} from "./routing-alternatives.js";
 import type { DocumentPdfService, PalletCardPdfInput } from "../../mail/service/document-pdf.js";
 import { documentLanguageOf, localized } from "@navet/shared";
 import { documentTexts } from "../../mail/service/document-texts.js";
@@ -206,6 +211,38 @@ export class OperationHasLinkedMaterialError extends Error {
   constructor() {
     super("The operation has BOM rows linked to it and cannot be marked as a Kalkyl operation");
     this.name = "OperationHasLinkedMaterialError";
+  }
+}
+
+// Alternativa resurser (#15): the set sent with a routing operation breaks a
+// rule — the ordinarie or a legoresurs as alternative, a duplicate, too
+// many, an inactive resource added, or alternatives on a lego or Kalkyl
+// operation (400; Swedish text from routing-alternatives.ts).
+export class RoutingAlternativeInvalidError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RoutingAlternativeInvalidError";
+  }
+}
+
+// The operation keeps its alternatives (no set sent) but is moved to a
+// legoresurs, made Kalkyl, or given one of its alternatives as ordinarie
+// (409; Swedish text). The web sends the set along when it swaps them.
+export class RoutingOperationHasAlternativesError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RoutingOperationHasAlternativesError";
+  }
+}
+
+// A resource that takes part in alternatives — a beredning's alternative,
+// the ordinarie of a routing operation with alternatives, or among an open
+// TO's possible resources — cannot be made a legoresurs (409): alternatives
+// are always own resources that are worked, never bought.
+export class WorkCenterInAlternativesError extends Error {
+  constructor() {
+    super("The resource takes part in alternatives and cannot be made a legoresurs");
+    this.name = "WorkCenterInAlternativesError";
   }
 }
 
@@ -413,6 +450,15 @@ export class MoOperationStampedError extends Error {
   constructor() {
     super("Someone is stamped in on the operation — the resource cannot be changed");
     this.name = "MoOperationStampedError";
+  }
+}
+
+// Byt till X (#15): the operation is no longer on the resource the förslag
+// was made for, or was moved (Flyttad) since — nothing is changed. 409.
+export class MoOperationResourceChangedError extends Error {
+  constructor() {
+    super("The operation changed resource or was moved since the förslag was shown — nothing was changed");
+    this.name = "MoOperationResourceChangedError";
   }
 }
 
@@ -946,7 +992,8 @@ export function createManufacturingService(
       | "stamped"
       | "linked_purchase"
       | "reported"
-      | "last_operation_locked",
+      | "last_operation_locked"
+      | "resource_changed",
     moId: string,
     status: string,
     sequenceNo: number,
@@ -971,7 +1018,26 @@ export function createManufacturingService(
         return new MoOperationReportedError();
       case "last_operation_locked":
         return new LastOperationLockedError();
+      case "resource_changed":
+        return new MoOperationResourceChangedError();
     }
+  }
+
+  // Alternativa resurser: the resources of a sent set, in its order — an
+  // unknown one is a 404 like an unknown ordinarie.
+  // `find` is the reader to resolve them with: committed data on a new
+  // operation, the edit's own transaction (FOR SHARE) on an existing one.
+  async function alternativeResources(
+    alternatives: { workCenterId: string }[],
+    find: (id: string) => Promise<AlternativeResource | null> = repo.findWorkCenterById
+  ): Promise<AlternativeResource[]> {
+    const resources: AlternativeResource[] = [];
+    for (const { workCenterId } of alternatives) {
+      const workCenter = await find(workCenterId);
+      if (!workCenter) throw new WorkCenterNotFoundError(workCenterId);
+      resources.push(workCenter);
+    }
+    return resources;
   }
 
   // The order's operations are replanned inside the edit's transaction by
@@ -1008,6 +1074,9 @@ export function createManufacturingService(
       setupPrice: op.setupPrice === null ? null : Number(op.setupPrice),
       unitPrice: op.unitPrice === null ? null : Number(op.unitPrice),
       showNetWeight: op.showNetWeight,
+      // Alternativa resurser: Vald för hand, so a switch shows the resource
+      // (workCenterCode above) and the flag before and after.
+      resourceLocked: op.resourceLocked,
     };
   }
   function changedFields<T extends Record<string, unknown>>(before: T, after: T): { before: Partial<T>; after: Partial<T> } {
@@ -1214,6 +1283,7 @@ export function createManufacturingService(
         throw err;
       }
       if (!row) throw new WorkCenterNotFoundError(id);
+      if (row === "in_alternatives") throw new WorkCenterInAlternativesError();
       return row;
     },
 
@@ -1262,8 +1332,19 @@ export function createManufacturingService(
       if (!workCenter) throw new WorkCenterNotFoundError(input.workCenterId);
       // Default the operation's supplier from the resource when not given.
       const withDefaults = assertLegoFieldsForResource(workCenter, input, "create");
+      // Alternativa resurser: every one is new on a new operation.
+      if (input.alternatives && input.alternatives.length > 0) {
+        const resources = await alternativeResources(input.alternatives);
+        const problem = routingAlternativesProblem({
+          ordinary: workCenter,
+          costingOnly: input.costingOnly ?? false,
+          alternatives: resources.map((workCenter) => ({ workCenter, isNew: true })),
+        });
+        if (problem) throw new RoutingAlternativeInvalidError(problem);
+      }
       try {
-        return await repo.createRoutingOperation(articleId, withDefaults);
+        const row = await repo.createRoutingOperation(articleId, withDefaults);
+        return { ...row, alternatives: (await repo.listRoutingAlternatives([row.id])).get(row.id) ?? [] };
       } catch (err) {
         if (isUniqueViolation(err)) throw new DuplicateSequenceNoError();
         if (isForeignKeyViolation(err, "routing_operations_subcontract_supplier_id_suppliers_id_fk")) {
@@ -1312,25 +1393,42 @@ export function createManufacturingService(
       if (input.costingOnly === true && (await repo.countBomComponentsForOperation(operationId)) > 0) {
         throw new OperationHasLinkedMaterialError();
       }
-
-      // Lego guard — the effective resource decides whether lego fields are
-      // legal. Switching to a non-lego resource clears them (and any
-      // incoming non-null lego value alongside such a switch is refused).
-      let patch = input;
-      const existing = await repo.findRoutingOperation(articleId, operationId);
-      if (!existing) throw new RoutingOperationNotFoundError(operationId);
-      const workCenterId = input.workCenterId ?? existing.workCenterId;
-      const workCenter = await repo.findWorkCenterById(workCenterId);
-      if (!workCenter) throw new WorkCenterNotFoundError(workCenterId);
-      assertLegoFieldsForResource(workCenter, input, "update");
-      if (workCenter.type !== "subcontract") {
-        patch = { ...input, ...CLEARED_LEGO_FIELDS, useArticleDrawing: true };
-      }
-
       try {
-        const row = await repo.updateRoutingOperation(articleId, operationId, patch);
+        // The rules run on the operation as locked in the transaction
+        // (repo.updateRoutingOperation): the effective ordinarie and Kalkyl
+        // flag, and the alternatives it has now. Every resource is read
+        // through that transaction (`findWorkCenter`, FOR SHARE) — an
+        // unknown one is a 404 and rolls the edit back.
+        const row = await repo.updateRoutingOperation(articleId, operationId, async (existing, currentAlternatives, findWorkCenter) => {
+          // Lego guard — the effective resource decides whether lego fields
+          // are legal. Switching to a non-lego resource clears them (and any
+          // incoming non-null lego value alongside such a switch is refused).
+          const workCenterId = input.workCenterId ?? existing.workCenterId;
+          const workCenter = await findWorkCenter(workCenterId);
+          if (!workCenter) throw new WorkCenterNotFoundError(workCenterId);
+          assertLegoFieldsForResource(workCenter, input, "update");
+          const costingOnly = input.costingOnly ?? existing.costingOnly;
+          const sentResources = input.alternatives ? await alternativeResources(input.alternatives, findWorkCenter) : undefined;
+          if (sentResources) {
+            const before = new Set(currentAlternatives.map((a) => a.workCenterId));
+            const problem = routingAlternativesProblem({
+              ordinary: workCenter,
+              costingOnly,
+              alternatives: sentResources.map((r) => ({ workCenter: r, isNew: !before.has(r.id) })),
+            });
+            if (problem) throw new RoutingAlternativeInvalidError(problem);
+          } else {
+            const problem = routingOperationHasAlternativesProblem({
+              alternativeWorkCenterIds: currentAlternatives.map((a) => a.workCenterId),
+              ordinary: workCenter,
+              costingOnly,
+            });
+            if (problem) throw new RoutingOperationHasAlternativesError(problem);
+          }
+          return workCenter.type !== "subcontract" ? { ...input, ...CLEARED_LEGO_FIELDS, useArticleDrawing: true } : input;
+        });
         if (!row) throw new RoutingOperationNotFoundError(operationId);
-        return row;
+        return { ...row, alternatives: (await repo.listRoutingAlternatives([row.id])).get(row.id) ?? [] };
       } catch (err) {
         if (isUniqueViolation(err)) throw new DuplicateSequenceNoError();
         if (isForeignKeyViolation(err, "routing_operations_subcontract_supplier_id_suppliers_id_fk")) {
@@ -1432,14 +1530,17 @@ export function createManufacturingService(
     // whole tree of TOs atomically). The validation and the configurator's
     // derivation read as plain committed reads, like createManufacturingOrder;
     // the repository body takes the production_plan lock first. With
-    // `plannedWeeks` (by sequence number) the allocations are written as
-    // given instead of planned by the engine. Logs nothing — the caller
-    // writes its own händelselogg (and "released" per TO if it wants it).
+    // `plannedWeeks` (by sequence number and resource — an alternative the
+    // reservation chose is switched to, Vald för hand) the allocations are
+    // written as given instead of planned by the engine; `refuseMismatch`
+    // throws the planning service's ReservedPlanMismatchError when they no
+    // longer match the TO's operations. Logs nothing — the caller writes its
+    // own händelselogg (and "released" per TO if it wants it).
     async createManufacturingOrderInTx(
       tx: Tx,
       input: CreateManufacturingOrderInput,
       createdBy: string | null,
-      opts: { plannedWeeks?: { sequenceNo: number; weeks: PlannedWeek[] }[] } = {}
+      opts: { plannedWeeks?: GivenOperationPlan[] } & GivenPlanOptions = {}
     ) {
       const prepared = await prepareCreate(input);
       const result = await repo.createManufacturingOrderInTx(
@@ -1448,7 +1549,7 @@ export function createManufacturingService(
         createdBy,
         prepared.linkedSalesOrder,
         prepared.configured,
-        planning ? (t, moId) => planning.planNewOrderInTx(t, moId, opts.plannedWeeks) : undefined
+        planning ? (t, moId) => planning.planNewOrderInTx(t, moId, opts.plannedWeeks, { refuseMismatch: opts.refuseMismatch }) : undefined
       );
       if (!result.ok) throw createOutcomeError(result);
       return { ...result.order, releaseWarnings: result.warnings };
@@ -1590,8 +1691,28 @@ export function createManufacturingService(
       return repo.listMaterialConsumptions(moId);
     },
 
+    // GET …/operations: each operation carries `suggestion` (förslag på
+    // resurs, #15) — null on most. The load is read (through the late-bound
+    // plan reader) only when an operation could get one: it has possible
+    // resources and is pending, not plan-locked, not Vald för hand and has
+    // no reported quantity. Rörd and Valregeln itself are decided by the
+    // planning side (resource-suggestions.ts); this is only the cheap gate.
     async listOperations(moId: string) {
-      return repo.listOperations(moId);
+      const operations = await repo.listOperations(moId);
+      const mayGetSuggestion = operations.some(
+        (op) =>
+          op.resources.length > 0 &&
+          op.status === "pending" &&
+          !op.planLocked &&
+          !op.resourceLocked &&
+          Number(op.quantityCompleted ?? 0) === 0 &&
+          Number(op.quantityScrapped) === 0
+      );
+      const suggestions =
+        mayGetSuggestion && planning?.operationResourceSuggestions
+          ? await planning.operationResourceSuggestions(moId)
+          : new Map<string, OperationResourceSuggestion>();
+      return operations.map((op) => ({ ...op, suggestion: suggestions.get(op.id) ?? null }));
     },
 
     // Legoinköp på TO-kortet: per lego operation what is bought and the IO

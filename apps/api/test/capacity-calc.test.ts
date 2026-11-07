@@ -7,6 +7,7 @@ import {
   remainingByPlannedWeeks,
   remainingOperationMinutes,
   resourceDayMinutes,
+  setupDoneOnCurrentResource,
   resolveResourceWeekHours,
   routingOperationMinutes,
   type CapacityInput,
@@ -109,6 +110,26 @@ describe("remainingOperationMinutes", () => {
         op({ setupTime: 60, runTimePerUnit: 5, orderQuantity: 10, quantityCompleted: 0, quantityScrapped: 3 })
       )
     ).toBe(50); // 5 × 10 remaining, no setup
+  });
+
+  // Alternativa resurser (#15): the setup belongs to the resource the
+  // operation is on now — the avvikelseanalys's ställregel (time, OK or
+  // scrapped = worked) on the current resource.
+  it("drops setup once the current resource has reported time, even without a quantity (Ställ klart)", () => {
+    expect(
+      remainingOperationMinutes(op({ setupTime: 30, runTimePerUnit: 6, orderQuantity: 10, quantityCompleted: 0, timeOnCurrentResource: true }))
+    ).toBe(60);
+  });
+
+  it("plans the new resource's setup after a Byt resurs: the quantity was worked on another resource", () => {
+    const switched = op({ setupTime: 30, runTimePerUnit: 6, orderQuantity: 10, quantityCompleted: 4, timeOnOtherResource: true });
+    expect(setupDoneOnCurrentResource(switched)).toBe(false);
+    expect(remainingOperationMinutes(switched)).toBe(6 * 6 + 30);
+    // Once the new resource has reported time its setup is done.
+    expect(remainingOperationMinutes({ ...switched, timeOnCurrentResource: true })).toBe(36);
+    // Without any time the quantity decides, as before (left out = no time).
+    expect(setupDoneOnCurrentResource(op({ quantityCompleted: 4 }))).toBe(true);
+    expect(setupDoneOnCurrentResource(op({ quantityCompleted: 0, timeOnCurrentResource: false, timeOnOtherResource: false }))).toBe(false);
   });
 
   it("clamps an over-reported operation to zero", () => {
@@ -620,6 +641,7 @@ describe("computeCapacity — planned operations", () => {
       overloadedCells: 0,
       lateOrders: [],
       unplannedOrders: [{ manufacturingOrderId: "mo-u", orderNumber: "PO-U" }],
+      resourceSuggestions: [],
     });
   });
 
@@ -717,6 +739,7 @@ describe("computeCapacity — planned operations", () => {
       overloadedCells: 0,
       lateOrders: [],
       unplannedOrders: [{ manufacturingOrderId: "mo-1", orderNumber: "PO-1" }],
+      resourceSuggestions: [],
     });
   });
 });
@@ -729,5 +752,61 @@ describe("routingOperationMinutes", () => {
     expect(remainingOperationMinutes(op({ setupTime: 30, runTimePerUnit: 2.5, orderQuantity: 10 }))).toBe(
       routingOperationMinutes({ setupTime: 30, runTimePerUnit: 2.5 }, 10)
     );
+  });
+});
+
+// Alternativa resurser (#15): the cells carry Vald för hand, the ordinarie
+// when the operation is on an alternative, and the förslag computed on the
+// same input (resource-suggestions.ts); the summary lists the förslag.
+describe("computeCapacity — förslag på resurs", () => {
+  it("puts the förslag on the operation's cells and in the summary, by order number and sequence", () => {
+    const suggestion = (moOperationId: string, orderNumber: string, sequenceNo: number) => ({
+      moOperationId,
+      manufacturingOrderId: `mo-${orderNumber}`,
+      orderNumber,
+      sequenceNo,
+      fromWorkCenterId: "wc-1",
+      fromCode: "110",
+      toWorkCenterId: "wc-2",
+      toCode: "120",
+      toName: "Kantpress 2",
+      currentToWeek: "2026-08-31",
+      toWeek: "2026-08-17",
+      reason: "overloaded" as const,
+    });
+    const resources = [
+      { workCenterId: "wc-1", rank: 0, setupTime: 0, runTimePerUnit: 6 },
+      { workCenterId: "wc-2", rank: 1, setupTime: 0, runTimePerUnit: 3 },
+    ];
+    const result = computeCapacity(
+      calcInput({
+        workCenters: [wc({ workCenterId: "wc-1", code: "110" }), wc({ workCenterId: "wc-2", code: "120" })],
+        operations: [
+          op({ moOperationId: "op-b", manufacturingOrderId: "mo-PO-B", orderNumber: "PO-B", dueDate: "2026-08-20", resources }),
+          op({ moOperationId: "op-a", manufacturingOrderId: "mo-PO-A", orderNumber: "PO-A", dueDate: "2026-08-20", resources }),
+          // On the alternative, chosen by hand: the ordinarie's code rides along.
+          op({ moOperationId: "op-c", manufacturingOrderId: "mo-PO-C", orderNumber: "PO-C", dueDate: "2026-08-20", workCenterId: "wc-2", resources, resourceLocked: true }),
+        ],
+      }),
+      { today: TODAY, weeks: 2, resourceSuggestions: [suggestion("op-b", "PO-B", 10), suggestion("op-a", "PO-A", 10)] }
+    );
+    const cell = (workCenterId: string, moOperationId: string) =>
+      resourceRow(result, workCenterId).weeks[0]!.orders.find((o) => o.moOperationId === moOperationId)!;
+    expect(cell("wc-1", "op-a")).toMatchObject({
+      resourceLocked: false,
+      ordinaryWorkCenterCode: null,
+      suggestion: { workCenterId: "wc-2", code: "120", name: "Kantpress 2", toWeek: "2026-08-17", currentToWeek: "2026-08-31", reason: "overloaded" },
+    });
+    expect(cell("wc-2", "op-c")).toMatchObject({ resourceLocked: true, ordinaryWorkCenterCode: "110", suggestion: null });
+    expect(result.summary.resourceSuggestions.map((s) => s.orderNumber)).toEqual(["PO-A", "PO-B"]);
+  });
+
+  it("without förslag and alternatives every cell says so", () => {
+    const result = computeCapacity(calcInput({ workCenters: [wc({ workCenterId: "wc-1" })], operations: [op({ dueDate: "2026-08-20" })] }), {
+      today: TODAY,
+      weeks: 1,
+    });
+    expect(resourceRow(result, "wc-1").weeks[0]!.orders[0]).toMatchObject({ resourceLocked: false, ordinaryWorkCenterCode: null, suggestion: null });
+    expect(result.summary.resourceSuggestions).toEqual([]);
   });
 });

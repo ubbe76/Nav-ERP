@@ -9,6 +9,7 @@
 // stock log); time_reports on the work date; mo_reports and purchase_receipts
 // are "alive on D": created on or before D and not undone, or undone after D.
 import { and, asc, eq, lt, ne, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import {
   articles,
   manufacturingOrders,
@@ -196,18 +197,25 @@ export function createWorkInProgressRepository(db: Db | Tx) {
       return { draws, history };
     },
 
-    // Lön: hours per operation and work day on or before D (the work date,
-    // not when it was registered). The service prices each day at that
-    // day's hourly rate (laborAtWorkDays, the efterkalkyl's rule, #14 etapp
-    // 4); hourlyRate is the current one, for a resource without history.
+    // Lön: hours per operation, resource and work day on or before D (the
+    // work date, not when it was registered). The resource is the one the
+    // time was worked on (time_reports.work_center_id, #15), or the
+    // operation's current one for a report from before 0192, so a Byt resurs
+    // after D never moves PIA per D. The service prices each day at that
+    // resource's hourly rate that day (laborAtWorkDays, the efterkalkyl's
+    // rule, #14 etapp 4); hourlyRate is its current one, for a resource
+    // without history. operationWorkCenterId/-Type are the operation's
+    // resource now: a lego operation's cost is its IO, never time.
     async listReportedHours(asOf: string) {
+      const operationResource = alias(workCenters, "operation_resource");
       return db
         .select({
           manufacturingOrderId: moOperations.manufacturingOrderId,
           operationId: moOperations.id,
           sequenceNo: moOperations.sequenceNo,
+          operationWorkCenterId: moOperations.workCenterId,
+          operationWorkCenterType: operationResource.type,
           workCenterId: workCenters.id,
-          workCenterType: workCenters.type,
           hourlyRate: workCenters.hourlyRate,
           overheadPercent: workCenters.overheadPercent,
           date: timeReports.date,
@@ -215,9 +223,10 @@ export function createWorkInProgressRepository(db: Db | Tx) {
         })
         .from(timeReports)
         .innerJoin(moOperations, eq(moOperations.id, timeReports.moOperationId))
-        .innerJoin(workCenters, eq(workCenters.id, moOperations.workCenterId))
+        .innerJoin(operationResource, eq(operationResource.id, moOperations.workCenterId))
+        .innerJoin(workCenters, eq(workCenters.id, sql`coalesce(${timeReports.workCenterId}, ${moOperations.workCenterId})`))
         .where(and(sql`${timeReports.date} <= ${asOf}::date`, sql`${moOperations.manufacturingOrderId} IN ${candidateOrders(asOf)}`))
-        .groupBy(moOperations.id, workCenters.id, timeReports.date);
+        .groupBy(moOperations.id, operationResource.id, workCenters.id, timeReports.date);
     },
 
     // Lego: getSubcontractActualCosts per D — per lego IO row (order not

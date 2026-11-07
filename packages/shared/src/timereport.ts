@@ -307,6 +307,11 @@ export const stampInSchema = z.object({
   // follows the stamp to its time report. Null or absent = ej uppdelad.
   // Ställ klart = stamp out 0/0, then stamp in again with kind "run".
   kind: timeKindSchema.nullable().optional(),
+  // The station the terminal listed the operation on (#15): when the
+  // operation has been switched to another resource since — an older list —
+  // the stamp is refused (409 stamp-work-center-changed) instead of
+  // starting work on a station the planner moved it from. Absent = no check.
+  workCenterId: z.string().uuid().optional(),
 });
 export type StampInInput = z.infer<typeof stampInSchema>;
 

@@ -81,6 +81,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "period-not-locked": "Perioden är inte låst.",
   "invalid-attendance-interval": "Sluttiden måste vara efter starttiden",
   "already-present": "Medarbetaren är redan instämplad",
+  "stamp-work-center-changed":
+    "Operationen har flyttats till en annan resurs sedan listan hämtades — välj den i den uppdaterade listan.",
   "attendance-open-from-earlier-day": "Närvaron har stått öppen sedan en tidigare dag — ange när du gick hem.",
   "attendance-input-required": "Ange anledning eller hur övertiden ska ersättas innan stämplingen sparas.",
   "attendance-reason-invalid": "Anledningen finns inte eller är inaktiv — välj en annan.",
@@ -557,6 +559,13 @@ const MESSAGES: Record<string, MessageEntry> = {
   "row-configuration-changed":
     "Raden konfigurerades om medan tillverkningsordern skapades — kontrollera raden och försök igen, eller använd Ändra konfiguration.",
   "work-center-not-found": "Resursen finns inte.",
+  // Alternativa resurser (#15): the API's text names the resource and the rule
+  // in Swedish, so it is shown as it is.
+  "routing-alternative-invalid": (err) => err.message || "Alternativen är inte giltiga.",
+  "routing-operation-has-alternatives": (err) =>
+    err.message || "Operationen har alternativa resurser — ta bort dem först.",
+  "work-center-in-alternatives":
+    "Resursen ingår i alternativa resurser — i en beredning eller på en öppen tillverkningsorder — och kan inte bli en legoresurs. Ta bort den som alternativ först.",
   // Ångra rapportering / Makulera order (TO)
   "mo-report-not-found": "Rapporteringen finns inte — ladda om sidan.",
   "report-has-no-pallet-card": "Rapporten har inget pallkort — bara en operationsrapport som inte är ångrad kan skrivas ut.",
@@ -606,6 +615,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "mo-operation-sequence-taken": "Sekvensnumret används redan av en annan operation på ordern.",
   "mo-operation-done": "Operationen är klar och kan inte ändras.",
   "mo-operation-stamped": "Någon är instämplad på operationen — stämpla ut först.",
+  "mo-operation-resource-changed":
+    "Operationen har bytt resurs eller flyttats sedan förslaget visades — inget ändrades. Ladda om sidan för att se det nya läget.",
   "mo-operation-linked-purchase": "En inköpsorder eller förfrågan pekar på operationen — ta bort den raden först.",
   "mo-operation-reported": "Något är redan rapporterat på operationen — den går inte att ta bort eller byta typ av resurs på.",
   "last-operation-locked": "Varor är redan inlevererade — ändringen skulle byta vilken operation som är sist. Behåll den sista operationen.",

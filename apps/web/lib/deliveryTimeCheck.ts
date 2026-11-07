@@ -29,6 +29,8 @@ export function applyDeliveryTime(body: {
   salesOrderId: string;
   deliveryDate: string;
   expectedOrders?: number;
+  // false = the date with ordinary resources; omitted = with alternatives.
+  useAlternatives?: boolean;
 }): Promise<ApplyDeliveryTimeResult> {
   return apiFetch<ApplyDeliveryTimeResult>("/api/v1/delivery-time-check/apply", {
     method: "POST",
@@ -70,11 +72,32 @@ export function formatDtcStep(step: DtcStep): string {
       const from = isoWeekNumber(step.fromWeek);
       const to = isoWeekNumber(step.toWeek);
       const weeks = step.fromWeek === step.toWeek ? `vecka ${from}` : `vecka ${from}–${to}`;
-      return `${step.articleNumber} op ${step.sequenceNo}${step.description ? ` ${step.description}` : ""} — ${step.workCenterName} (${step.workCenterCode}), ${weeks}, klar ${step.date}`;
+      const alt = step.alternativeOf
+        ? ` (alternativ till ${step.alternativeOf.workCenterCode}, ordinarie v. ${isoWeekNumber(step.alternativeOf.toWeek)})`
+        : "";
+      return `${step.articleNumber} op ${step.sequenceNo}${step.description ? ` ${step.description}` : ""} — ${step.workCenterName} (${step.workCenterCode})${alt}, ${weeks}, klar ${step.date}`;
     }
     case "subcontract": {
       const days = step.leadTimeDays === null ? "" : ` ${step.leadTimeDays} dagar,`;
       return `${step.articleNumber} op ${step.sequenceNo}${step.description ? ` ${step.description}` : ""} — lego ${step.workCenterName} (${step.workCenterCode}),${days} klar ${step.date}`;
     }
   }
+}
+
+// The one line under the dates when the alternatives give an earlier date.
+// Quoted by the manual (Leveranstidskontroll).
+export function formatDtcAlternativeSummary(date: string, ordinary: string | null): string {
+  return ordinary
+    ? `Leverans ${date} med alternativa resurser (ordinarie: ${ordinary})`
+    : `Leverans ${date} med alternativa resurser (ordinarie resurser ger inget datum inom två år)`;
+}
+
+// Which date the dialog hands on: with alternatives (the default) or the
+// ordinary one. Without usesAlternatives there is only one date.
+export function chosenDtcDate(
+  result: { usesAlternatives?: boolean; deliveryDate: string | null; ordinaryDeliveryDate?: string | null },
+  withAlternatives: boolean
+): string | null {
+  if (!result.usesAlternatives) return result.deliveryDate;
+  return withAlternatives ? result.deliveryDate : (result.ordinaryDeliveryDate ?? null);
 }
