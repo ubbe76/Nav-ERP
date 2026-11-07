@@ -23,6 +23,7 @@ import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/servic
 import { createReportsRepository } from "../src/modules/reports/repository/reports.repository.js";
 import { createReportsService } from "../src/modules/reports/service/reports.service.js";
 import { buildSalesStatisticsCsv } from "../src/modules/reports/service/reports-csv.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -84,7 +85,7 @@ async function makeArticle(name = "Rapportartikel") {
   });
 }
 
-const currentMonth = () => new Date().toLocaleDateString("sv-SE").slice(0, 7);
+const currentMonth = () => stockholmToday().slice(0, 7);
 
 describe("reports service — sales statistics: month grouping", () => {
   it("sums issued invoices, subtracts a credit note, and excludes draft/cancelled invoices", async () => {

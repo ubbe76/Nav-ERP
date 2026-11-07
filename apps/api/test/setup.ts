@@ -10,6 +10,14 @@ if (process.env.VITEST_POOL_ID && process.env.TEST_BASE_DATABASE_URL) {
   process.env.DATABASE_URL = workerDatabaseUrl(process.env.TEST_BASE_DATABASE_URL, process.env.VITEST_POOL_ID);
 }
 
+// Datum är Stockholmsdagar: docker-compose.yml sets TZ=Europe/Stockholm on
+// api/web, and several services still read the container's local day
+// (`toLocaleDateString("sv-SE")`, `new Date().getFullYear()`). A test run in a
+// UTC container disagreed with them between 00:00 and 01:00 Swedish time (02:00
+// in summer), so the test process gets the deployment's zone. Tests count the
+// Stockholm day with stockholmToday() (src/modules/system/service/delivery-days).
+process.env.TZ = "Europe/Stockholm";
+
 // Runs per test file. Migrating the test database happens once in
 // global-setup.ts; this is only the guard, kept here as well so the check
 // survives even if the global setup is ever removed or reordered.

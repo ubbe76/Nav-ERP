@@ -35,6 +35,7 @@ import {
   testSystemService,
 } from "./helpers/services.js";
 import { insertTestPlugin } from "./helpers/plugins.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // Tillägg — every event in the catalogue is sent by its own path through the
 // REAL services (wired as app.ts does), in the change's own transaction: one
@@ -91,7 +92,7 @@ const TRUNCATE = sql`TRUNCATE plugin_deliveries, plugin_events, plugins, posting
   purchase_orders, suppliers, mo_reports, mo_material_consumptions, mo_operation_scrap, mo_operations, manufacturing_orders,
   routing_operations, bom_components, work_centers, stock_transactions, stock_locations, warehouses, articles, audit_log, users CASCADE`;
 const DELETE_GROUPS = sql`DELETE FROM permission_groups WHERE code LIKE 'plg-%'`;
-const TODAY = new Date().toLocaleDateString("sv-SE");
+const TODAY = stockholmToday();
 
 let pluginId: string;
 let userId: string;

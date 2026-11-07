@@ -188,7 +188,11 @@ describe("the job's guards", () => {
     for (let i = 0; i < MAIL_MAX_LETTERS + 3; i++) mailbox.deliver(letter);
     expect(await run()).toMatchObject({ letters: MAIL_MAX_LETTERS });
     expect(mailbox.state.inbox.map((l) => l.uid)).toEqual([51, 52, 53]);
-  });
+    // The cap is a module constant (not injectable without touching src), so
+    // the test really handles MAIL_MAX_LETTERS letters: each is a log row, an
+    // audit entry, a lease renewal and a move. 0.8 s alone, but over 20 s when
+    // the whole suite saturates the database — hence the own timeout.
+  }, 90_000);
 
   it("writes a missing server, user or password as last_error without connecting", async () => {
     await enableMail({ mailPassword: null });
@@ -246,7 +250,8 @@ describe("a letter", () => {
     expect(received!.detail).toMatchObject({ source: "email", filename: "faktura-4711.pdf", from: "faktura@platgrossisten.example" });
     expect(await setting("invoice_scan_mail_last_error")).toBeNull();
     expect(await setting("invoice_scan_mail_last_success_at")).not.toBeNull();
-  });
+    // First PDF render and interpretation in the file: 16 s under full-suite load (1.4 s alone).
+  }, 90_000);
 
   it("imports every PDF and skips the inline logo, the image beside a PDF and the XML", async () => {
     await enableMail();

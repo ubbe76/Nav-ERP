@@ -44,6 +44,7 @@ import {
   testEconomyService,
   testSystemService,
 } from "./helpers/services.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // B4 leverantörsreskontra: registering a supplier payment settles open items
 // and books the U verification inside ONE transaction. This suite drives the
@@ -63,7 +64,7 @@ const supplierPaymentService = createSupplierPaymentService(createSupplierPaymen
 // registration produced, never an absolute one.
 const TRUNCATE = sql`TRUNCATE posting_rules, verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, supplier_payment_rows, supplier_payments, supplier_invoice_rows, supplier_invoices, suppliers, payment_terms, audit_log, users CASCADE`;
 
-const TODAY = new Date().toLocaleDateString("sv-SE");
+const TODAY = stockholmToday();
 
 beforeEach(async () => {
   await db.execute(TRUNCATE);

@@ -15,11 +15,12 @@ import { supplierPaymentRoutes } from "../src/modules/purchase/routes/supplier-p
 import { createExchangeRateService } from "../src/modules/system/service/exchange-rates.js";
 import { exchangeRateRoutes } from "../src/modules/system/routes/exchange-rates.routes.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline, testSystemService } from "./helpers/services.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // Valuta steg 1 — the HTTP contract of the new routes and fields. Riksbanken
 // is a fake fetch (the suite never calls out).
 
-const TODAY = new Date().toLocaleDateString("sv-SE");
+const TODAY = stockholmToday();
 const authRepo = createAuthRepository(db);
 let userId = "";
 

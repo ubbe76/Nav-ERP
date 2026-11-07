@@ -36,6 +36,7 @@ import {
   testEconomyService,
   testSystemService,
 } from "./helpers/services.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // B3 kundreskontra: registering a customer payment settles open items and
 // books the K verification inside ONE transaction. This suite drives the real
@@ -74,7 +75,7 @@ const paymentService = createPaymentService(createPaymentRepository(db), poster,
 // registration produced, never an absolute one.
 const TRUNCATE = sql`TRUNCATE posting_rules, verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, customer_payment_rows, customer_payments, invoice_rows, invoices, customers, audit_log, users CASCADE`;
 
-const TODAY = new Date().toLocaleDateString("sv-SE");
+const TODAY = stockholmToday();
 
 // Same fixture as invoice-reminder.service.test.ts's own MAIL — this suite
 // only needs sendReminder for the Påminnelser-column fixture below, not for

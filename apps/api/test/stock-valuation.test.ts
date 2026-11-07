@@ -8,6 +8,7 @@ import { createStockService } from "../src/modules/stock/service/stock.service.j
 import { createValuationService } from "../src/modules/stock/service/valuation.service.js";
 import { testDocumentPdfService } from "./helpers/services.js";
 import { pdfText } from "./helpers/pdf.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // Service-level coverage for the lagervärdering report (D1): quantity comes
 // from stock_transactions (already historical, arkitekturprincip 1); the
@@ -134,7 +135,7 @@ describe("getValuation — standard method", () => {
     await insertHistory(article.id, 500, new Date("2999-01-01T12:00:00Z"));
     await insertHistory(article.id, 600, new Date("2999-06-01T12:00:00Z"));
 
-    const todayStr = new Date().toLocaleDateString("sv-SE");
+    const todayStr = stockholmToday();
     const result = await valuationService.getValuation({ asOf: todayStr, method: "standard" });
     const row = rowFor(result, article.id);
     expect(row?.unitCost).toBe(500);
@@ -143,7 +144,7 @@ describe("getValuation — standard method", () => {
 
   it("defaults asOf to today when omitted", async () => {
     const result = await valuationService.getValuation({ method: "standard" });
-    expect(result.asOf).toBe(new Date().toLocaleDateString("sv-SE"));
+    expect(result.asOf).toBe(stockholmToday());
   });
 });
 

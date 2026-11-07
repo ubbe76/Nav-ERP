@@ -10,6 +10,7 @@ import {
 } from "../src/modules/system/service/exchange-rates.js";
 import { makeVariantService } from "./helpers/configurator.js";
 import { buildToOrder, buildVariants, configurator, resetConfiguredRows, salesService } from "./helpers/configured-rows.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // Valuta steg 3: the configurator's prices in the order's currency — a
 // beställningsvara row and a variant row on an order in EUR, and evaluate
@@ -18,7 +19,7 @@ import { buildToOrder, buildVariants, configurator, resetConfiguredRows, salesSe
 beforeEach(resetConfiguredRows);
 afterAll(resetConfiguredRows);
 
-const TODAY = new Date().toLocaleDateString("sv-SE");
+const TODAY = stockholmToday();
 const stubRates = new Map<string, number>();
 const lookups: string[] = [];
 const rates: ExchangeRateReader = {

@@ -60,13 +60,14 @@ import {
 } from "../src/modules/system/service/exchange-rates.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline, testSystemService } from "./helpers/services.js";
 import { pdfText } from "./helpers/pdf.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // Valuta steg 3: kunder, prislistor, kundordrar, kundfakturor och
 // kundbetalningar i annan valuta än SEK — end to end on the real services,
 // the real poster and the real posting settings. The rate lookup is a stub
 // (the suite never calls Riksbanken).
 
-const TODAY = new Date().toLocaleDateString("sv-SE");
+const TODAY = stockholmToday();
 
 const stubRates = new Map<string, Omit<ExchangeRateLookup, "currency" | "requestedDate">>();
 const lookups: { currency: string; date: string }[] = [];

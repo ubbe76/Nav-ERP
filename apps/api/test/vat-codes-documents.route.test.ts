@@ -32,6 +32,7 @@ import { createSystemService } from "../src/modules/system/service/system.servic
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/services.js";
 import { resetVatCodes, vatCodeId } from "./helpers/vat-codes.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // Momskoder steg 2 — the HTTP contract of the document fields and their
 // errors on a bare app (permissions are permissions-coverage's; steg 2 adds
@@ -85,7 +86,7 @@ const purchaseService = createPurchaseService(
 const supplierInvoiceService = createSupplierInvoiceService(createSupplierInvoiceRepository(db), poster, auditRepository);
 
 const TRUNCATE = sql`TRUNCATE supplier_invoice_files, posting_rules, verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, supplier_invoice_rows, supplier_invoices, supplier_contacts, suppliers, invoice_documents, invoice_rows, invoices, delivery_rows, deliveries, sales_order_rows, sales_orders, customers, bom_components, articles, audit_log, users CASCADE`;
-const TODAY = new Date().toLocaleDateString("sv-SE");
+const TODAY = stockholmToday();
 
 let userId: string;
 

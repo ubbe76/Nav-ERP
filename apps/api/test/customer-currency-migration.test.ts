@@ -13,6 +13,7 @@ import { createPaymentRepository } from "../src/modules/sales/repository/payment
 import { createPaymentService } from "../src/modules/sales/service/payment.service.js";
 import { receivablesTotalAsOf } from "../src/modules/sales/repository/open-amounts.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline, testSystemService } from "./helpers/services.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // Migration 0145 (Valuta steg 3): the backfill block is re-run here against
 // SEK invoices and payments whose new columns are blanked out, inside a
@@ -50,7 +51,7 @@ const poster = createVerificationPoster({ read: readPostingSettings });
 const stub = { async sendMail() {}, async render() { return Buffer.alloc(0); }, async renderPaymentReminder() { return Buffer.alloc(0); } };
 const invoiceService = createInvoiceService(createInvoiceRepository(db), stub, stub, poster);
 const paymentService = createPaymentService(createPaymentRepository(db), poster);
-const TODAY = new Date().toLocaleDateString("sv-SE");
+const TODAY = stockholmToday();
 
 const TRUNCATE = sql`TRUNCATE posting_rules, verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, customer_payment_rows, customer_payments, invoice_documents, invoice_reminders, invoice_rows, invoices, customers, audit_log, users CASCADE`;
 

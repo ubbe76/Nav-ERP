@@ -36,12 +36,13 @@ import {
 } from "../src/modules/system/service/exchange-rates.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline, testSystemService } from "./helpers/services.js";
 import { vatCodeId } from "./helpers/vat-codes.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // Valuta steg 1: leverantörsfaktura och leverantörsbetalning i annan valuta
 // än SEK, end to end on the real poster and the real posting settings. The
 // rate lookup is a stub — the Riksbanken client has its own suite.
 
-const TODAY = new Date().toLocaleDateString("sv-SE");
+const TODAY = stockholmToday();
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/db/drizzle/", import.meta.url));
 
 // What the stub answers per currency; absent = unavailable.

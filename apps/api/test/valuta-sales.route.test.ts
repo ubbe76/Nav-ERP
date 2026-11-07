@@ -34,6 +34,7 @@ import {
   type ExchangeRateReader,
 } from "../src/modules/system/service/exchange-rates.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline, testSystemService } from "./helpers/services.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // Valuta steg 3 — the HTTP contract of the new fields and errors on the
 // sales routes (customers, price lists, orders, price quote, invoices,
@@ -208,7 +209,7 @@ describe("fakturor och betalningar", () => {
     const draft = await app.inject({ method: "POST", url: "/invoices", payload: { customerId: customer.id, exchangeRate: 11, rows: [{ description: "X", quantity: 1, unitPrice: 800, vatRate: 25 }] } });
     const invoiceId = draft.json().id;
     await app.inject({ method: "POST", url: `/invoices/${invoiceId}/issue` });
-    const today = new Date().toLocaleDateString("sv-SE");
+    const today = stockholmToday();
     const base = { customerId: customer.id, paymentDate: today, bankAccountNumber: "1930", amount: 1000, rows: [{ invoiceId, appliedAmount: 1000 }] };
 
     const missing = await app.inject({ method: "POST", url: "/payments", payload: base });

@@ -38,6 +38,7 @@ import {
   testEconomyService,
   testSystemService,
 } from "./helpers/services.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // B3 kundreskontra, Task 6: betalningspåminnelser. The reminder is an email
 // with a PDF; the statutory one-time fee it may carry is a real bokförings-
@@ -80,7 +81,7 @@ const paymentService = createPaymentService(createPaymentRepository(db), poster)
 // number_series is NEVER truncated (shared, sequence-like base data).
 const TRUNCATE = sql`TRUNCATE posting_rules, verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, customer_payment_rows, customer_payments, invoice_reminders, invoice_rows, invoices, customers, email_log, audit_log, users CASCADE`;
 
-const TODAY = new Date().toLocaleDateString("sv-SE");
+const TODAY = stockholmToday();
 
 // Mirrors document-pdf.ts's formatNumber (sv-SE uses U+00A0 as the thousands
 // separator, so a literal " " in an expectation would never match).

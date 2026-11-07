@@ -11,6 +11,7 @@ import { createSalesRepository } from "../src/modules/sales/repository/sales.rep
 import { markSalesOrderInProduction } from "../src/modules/sales/service/production-transition.js";
 import { createReportsRepository } from "../src/modules/reports/repository/reports.repository.js";
 import { createReportsService } from "../src/modules/reports/service/reports.service.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const authRepo = createAuthRepository(db);
@@ -69,7 +70,7 @@ async function makeReleasedOperation(articleName: string, workCenterName: string
   return { user, parent, workCenter, order, operation: operations[0]! };
 }
 
-const currentMonth = () => new Date().toLocaleDateString("sv-SE").slice(0, 7);
+const currentMonth = () => stockholmToday().slice(0, 7);
 
 describe("reports service — scrap statistics", () => {
   it("groups by exact reason string — 'Spån' and 'spån' stay separate rows", async () => {

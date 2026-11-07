@@ -36,6 +36,7 @@ import {
 } from "../src/modules/system/service/vat-reporting-settings.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline, testEconomyRepository, testEconomyService } from "./helpers/services.js";
 import { resetVatCodes, vatCodeId } from "./helpers/vat-codes.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // Periodisk sammanställning (Momskoder steg 3) against Postgres: which
 // invoices count (issued and paid invoices and credit notes in the range,
@@ -109,7 +110,7 @@ afterAll(async () => {
 
 // The issue date is the server's today (invoiceService.issue), so the
 // summaries below cover the current month/quarter.
-const TODAY = new Date().toLocaleDateString("sv-SE");
+const TODAY = stockholmToday();
 const YEAR = Number(TODAY.slice(0, 4));
 const MONTH = Number(TODAY.slice(5, 7));
 const pad = (n: number) => String(n).padStart(2, "0");

@@ -15,6 +15,7 @@ import { createSupplierInvoiceRepository } from "../src/modules/purchase/reposit
 import { createSupplierInvoiceService } from "../src/modules/purchase/service/supplier-invoice.service.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline, testEconomyService, testSystemService } from "./helpers/services.js";
 import { FIXED_ASSET_TRUNCATE, RESET_ASSET_SERIES, PLAN_YEAR, accountId as basAccountId, setupFixedAssets, testFixedAssetService } from "./helpers/fixed-assets.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 
 // Kostnadsställen och projekt in the bookkeeping (etapp 5 del A), against
 // Postgres: the poster puts the objects on the revenue row of a customer
@@ -49,7 +50,7 @@ afterAll(async () => {
   await testSystemService.updateSettings({ ...DEFAULT_POSTING_SETTINGS });
 });
 
-const TODAY = new Date().toLocaleDateString("sv-SE");
+const TODAY = stockholmToday();
 
 async function makeUser() {
   return authRepo.create({ email: `dimpost-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "Ekonom", role: "admin" });
