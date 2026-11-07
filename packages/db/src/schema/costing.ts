@@ -31,6 +31,12 @@ export const costPriceSourceEnum = pgEnum("cost_price_source", [
 // inside its calculated manufacturing cost.
 export const costMaterialRowKindEnum = pgEnum("cost_material_row_kind", ["material", "subcontract", "semi"]);
 
+// Where a calculation's price markup (generellt påslag, materialpåslag) came
+// from (#16, migration 0194): the company (System → Kalkyler), the article's
+// varugrupp, or Pröva påslag ("trial"). A calculation has no customer and no
+// order, so those levels never appear here.
+export const costingMarkupLevelEnum = pgEnum("costing_markup_level", ["company", "group", "trial"]);
+
 export const costCalculations = pgTable("cost_calculations", {
   id: uuid("id").primaryKey().defaultRandom(),
   articleId: uuid("article_id")
@@ -91,6 +97,21 @@ export const costCalculations = pgTable("cost_calculations", {
   affoPercent: numeric("affo_percent", { precision: 6, scale: 2 }).notNull().default("0"),
   generalMarkupPercent: numeric("general_markup_percent", { precision: 6, scale: 2 }).notNull().default("0"),
   materialMarkupPercent: numeric("material_markup_percent", { precision: 6, scale: 2 }).notNull().default("0"),
+  // Påslag per nivå (#16, migration 0194): the level each price markup above
+  // was resolved on — varugrupp → företaget, or "trial" (Pröva påslag; the
+  // list and the specification show prövat). The cost markups are always the
+  // company's. Default company = every calculation saved before 0194.
+  generalMarkupLevel: costingMarkupLevelEnum("general_markup_level").notNull().default("company"),
+  materialMarkupLevel: costingMarkupLevelEnum("material_markup_level").notNull().default("company"),
+  // The base the materialpåslag was taken on: dM + MO of this level plus
+  // what the sub-assemblies lifted up (their material_markup_base), so
+  // material_markup = material_markup_percent × this. Lets the Kalkylpris
+  // (etapp 2) re-price the markup exactly at another percentage — on a
+  // multi-level calculation dM + MO alone misses the sub-levels' material,
+  // and with 0 % the markup amount says nothing. 0194 backfilled
+  // material_cost + material_overhead where multi_level = false (exact);
+  // null = a multi-level calculation saved before 0194.
+  materialMarkupBase: numeric("material_markup_base", { precision: 14, scale: 4 }),
   type: costCalculationTypeEnum("type").notNull(),
   calculatedAt: timestamp("calculated_at", { withTimezone: true }).notNull().defaultNow(),
   // Avvikelseanalys (#14, migration 0187): what the efterkalkyl's base — the
@@ -146,6 +167,10 @@ export const costCalculationMaterialRows = pgTable(
     // material_markup = the markup on this level's dM + MO + this. 0 on
     // material/lego rows and on rows saved before the column existed.
     materialMarkupAmount: numeric("material_markup_amount", { precision: 14, scale: 4 }).notNull().default("0"),
+    // The sub-calculation's material_markup_base beside material_markup_amount
+    // on a "semi" row (#16, 0194): the header's base = this level's dM + MO +
+    // Σ this. 0 on material/lego rows and on rows saved before the column.
+    materialMarkupBase: numeric("material_markup_base", { precision: 14, scale: 4 }).notNull().default("0"),
     // A supplier price in another currency (material source "supplier"):
     // the catalog price as stated, its currency and the rate (SEK per 1 unit,
     // the day's rate from getRate) unit_cost was converted at. All three or

@@ -25,6 +25,7 @@ import {
 } from "@navet/shared";
 import type { Db, Tx } from "@navet/db";
 import type { ArticleRepository } from "../repository/article.repository.js";
+import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { DEFAULT_ARTICLE_SERIES_KEY, SeriesExhaustedError } from "../../system/service/number-series.js";
 import { ERROR_CODES } from "@navet/shared";
@@ -311,7 +312,37 @@ export class ArticleUnitInUseError extends Error {
 const ARTICLE_NUMBER_UNIQUE = "articles_article_number_unique";
 const ARTICLE_NUMBER_RETRIES = 5;
 
-export function createArticleService(repo: ArticleRepository) {
+// Påslag per varugrupp (#16): the group's two price markups as the audit
+// entry records them — numbers, null = inherits the company's.
+function groupMarkups(row: { generalMarkupPercent: string | null; materialMarkupPercent: string | null } | null) {
+  return {
+    generalMarkupPercent: row?.generalMarkupPercent == null ? null : Number(row.generalMarkupPercent),
+    materialMarkupPercent: row?.materialMarkupPercent == null ? null : Number(row.materialMarkupPercent),
+  };
+}
+
+// `audit` is optional so the many tests that build the service with the
+// repository alone keep compiling; app.ts wires the real writer. Only the
+// varugrupp's markups write to it (article_group / markups_changed).
+export function createArticleService(repo: ArticleRepository, audit: AuditWriter = { log: async () => {} }) {
+  // article_group / markups_changed — only when a price markup actually
+  // changed (the dialog always sends both fields). Kundpriser and prislistor
+  // are logged the same way: the markup is the same kind of pricing policy.
+  async function logGroupMarkups(
+    groupId: string,
+    before: ReturnType<typeof groupMarkups>,
+    after: ReturnType<typeof groupMarkups>,
+    userId: string | null
+  ) {
+    if (
+      before.generalMarkupPercent === after.generalMarkupPercent &&
+      before.materialMarkupPercent === after.materialMarkupPercent
+    ) {
+      return;
+    }
+    await audit.log({ entityType: "article_group", entityId: groupId, action: "markups_changed", detail: { before, after }, userId });
+  }
+
   // A group (or an article) may only point at an article number series.
   async function assertArticleNumberSeries(key: string | null | undefined) {
     if (key && !(await repo.findArticleNumberSeries(key))) throw new InvalidReferenceError("Unknown article number series");
@@ -654,19 +685,25 @@ export function createArticleService(repo: ArticleRepository) {
       };
     },
 
-    async createArticleGroup(input: CreateArticleGroupInput) {
+    async createArticleGroup(input: CreateArticleGroupInput, userId: string | null = null) {
       await assertArticleNumberSeries(input.numberSeriesKey);
       await repo.resolveDimensions({ costCenterId: input.defaultCostCenterId });
       if (await repo.findArticleGroupByCode(input.code)) throw new DuplicateArticleGroupError("code", input.code);
       if (await repo.findArticleGroupByName(input.name)) throw new DuplicateArticleGroupError("name", input.name);
-      return repo.createArticleGroup(input);
+      const row = await repo.createArticleGroup(input);
+      await logGroupMarkups(row.id, groupMarkups(null), groupMarkups(row), userId);
+      return row;
     },
 
-    async updateArticleGroup(id: string, input: UpdateArticleGroupInput) {
+    async updateArticleGroup(id: string, input: UpdateArticleGroupInput, userId: string | null = null) {
       await assertArticleNumberSeries(input.numberSeriesKey);
+      // Read once when either the Kostnadsställe or a markup is sent: the
+      // former is validated against it, the latter audited against it.
+      const markupsSent = input.generalMarkupPercent !== undefined || input.materialMarkupPercent !== undefined;
+      const current =
+        input.defaultCostCenterId !== undefined || markupsSent ? await repo.findArticleGroupById(id) : null;
       // Kostnadsställe (förval): a new choice must be active; the kept one may stay.
       if (input.defaultCostCenterId !== undefined) {
-        const current = await repo.findArticleGroupById(id);
         if (!current) throw new ArticleGroupNotFoundError(id);
         await repo.resolveDimensions({ costCenterId: input.defaultCostCenterId }, { existing: { costCenterId: current.defaultCostCenterId, projectId: null } });
       }
@@ -679,6 +716,7 @@ export function createArticleService(repo: ArticleRepository) {
 
       const row = await repo.updateArticleGroup(id, input);
       if (!row) throw new ArticleGroupNotFoundError(id);
+      if (markupsSent) await logGroupMarkups(id, groupMarkups(current), groupMarkups(row), userId);
       return row;
     },
 

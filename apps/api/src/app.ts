@@ -5,7 +5,6 @@ import Fastify from "fastify";
 import { ZodError } from "zod";
 import { eq } from "drizzle-orm";
 import { customers, db, type Db } from "@navet/db";
-import type { PriceQuoteQuery } from "@navet/shared";
 import { createArticleRepository, insertArticle } from "./modules/article/repository/article.repository.js";
 import { insertBomRows } from "./modules/article/repository/bom-write.js";
 import { createArticleService } from "./modules/article/service/article.service.js";
@@ -128,7 +127,7 @@ import { createSalesRepository } from "./modules/sales/repository/sales.reposito
 import { createSalesService, type RowConfigurationReader } from "./modules/sales/service/sales.service.js";
 import { markSalesOrderInProduction } from "./modules/sales/service/production-transition.js";
 import { salesRoutes } from "./modules/sales/routes/sales.routes.js";
-import { resolvePrice, type VariantPriceReader } from "./modules/sales/service/price-resolver.js";
+import { resolvePrice, type PriceChainQuery, type VariantPriceReader } from "./modules/sales/service/price-resolver.js";
 import { configuratorRoutes as templateConfiguratorRoutes } from "./modules/configurator/routes/configurator.routes.js";
 import { publicConfiguratorRoutes } from "./modules/configurator/routes/public-configurator.routes.js";
 import { createConfiguratorService, type ConfiguredStructureReader } from "./modules/configurator/service/configurator.service.js";
@@ -300,7 +299,8 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   const authService = createAuthService(createAuthRepository(database), jwtSecret, auditRepository, setupCode);
   const permissionGroupService = createPermissionGroupService(createPermissionGroupRepository(database));
   const userSettingsService = createUserSettingsService(createUserSettingsRepository(database));
-  const articleService = createArticleService(createArticleRepository(database));
+  // audit: the varugrupp's price markups (#16).
+  const articleService = createArticleService(createArticleRepository(database), auditRepository);
   // CSV import (Monitor G5): articles now; customers/suppliers reuse the
   // same module later. Admin-only routes.
   const importService = createImportService(createImportRepository(database), {
@@ -527,9 +527,16 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   // configuratorService is built after salesService and itself reads the sales
   // chain for the template's base price (its own binding below has no reader,
   // which ends the recursion).
+  // Kalkylpris (#16 etapp 2): the chain's step after the price list reads
+  // the article's latest förkalkyl through costingService, built above — no
+  // late binding needed. The configurator's own binding below gets no
+  // reader: a beställningsvara (base price + additions) never gets one.
   const variantPriceRef: { current: VariantPriceReader | null } = { current: null };
-  const salesPriceChain = (query: PriceQuoteQuery) =>
-    resolvePrice(database, query, { variantPrice: (q) => (variantPriceRef.current ? variantPriceRef.current(q) : Promise.resolve(undefined)) });
+  const salesPriceChain = (query: PriceChainQuery) =>
+    resolvePrice(database, query, {
+      variantPrice: (q) => (variantPriceRef.current ? variantPriceRef.current(q) : Promise.resolve(undefined)),
+      calculatedPrice: (dbc, q) => costingService.calculatedPrice(dbc, q),
+    });
   // Konfigurator 4b: the row-configuration reader is bound late for the same
   // reason as variantPriceRef.
   const rowConfigurationRef: { current: RowConfigurationReader | null } = { current: null };

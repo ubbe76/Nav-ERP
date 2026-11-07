@@ -30,6 +30,7 @@ import {
   updatePriceListSchema,
   updateSalesOrderHeaderSchema,
   updateSalesOrderRowSchema,
+  salesOrderMarkupsPreviewSchema,
 } from "@navet/shared";
 import { z } from "zod";
 import { MailSendError, SmtpNotConfiguredError } from "../../mail/service/mail.service.js";
@@ -75,6 +76,9 @@ import {
   SalesOrderCurrencyChangedError,
   SalesOrderCurrencyLockedError,
   SalesOrderExchangeRateError,
+  MarkupRepricingConflictError,
+  MarkupRepricingNotConfirmedError,
+  SalesOrderMarkupsChangedError,
 } from "../service/sales.errors.js";
 import { ExchangeRateUnavailableError } from "../../system/service/exchange-rates.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
@@ -132,7 +136,7 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
   app.post("/customers", async (req, reply) => {
     const input = createCustomerSchema.parse(req.body);
     try {
-      const customer = await service.createCustomer(input);
+      const customer = await service.createCustomer(input, req.user?.id ?? null);
       return reply.code(201).send(customer);
     } catch (err) {
       if (err instanceof RegisterEntryNotFoundError) return reply.code(404).send(errorBody(err));
@@ -150,7 +154,7 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
   app.patch<{ Params: { id: string } }>("/customers/:id", async (req, reply) => {
     const input = updateCustomerSchema.parse(req.body);
     try {
-      return await service.updateCustomer(req.params.id, input);
+      return await service.updateCustomer(req.params.id, input, req.user?.id ?? null);
     } catch (err) {
       if (err instanceof CustomerNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof RegisterEntryNotFoundError) return reply.code(404).send(errorBody(err));
@@ -407,6 +411,28 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
         return reply.code(409).send({ ...errorBody(err), currency: err.currency, date: err.date });
       }
       if (err instanceof SalesOrderExchangeRateError) return reply.code(400).send(errorBody(err));
+      // Påslag (#16 etapp 3): new markups would reprice rows the chain priced and
+      // the save did not confirm it — the preview rides along; or the rows
+      // kept changing under the repricing.
+      if (err instanceof MarkupRepricingNotConfirmedError) return reply.code(409).send({ ...errorBody(err), repricing: err.repricing });
+      if (err instanceof MarkupRepricingConflictError) return reply.code(409).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Påslag på offert och order (#16 etapp 3): what saving these markups on
+  // the header would do to the rows — computed and answered, nothing written
+  // (readOnlySafe). The module's write rule (Försäljning), like the header
+  // PATCH it previews; prices are office data.
+  app.post<{ Params: { id: string } }>("/sales-orders/:id/markups/preview", { config: { readOnlySafe: true } }, async (req, reply) => {
+    const input = salesOrderMarkupsPreviewSchema.parse(req.body ?? {});
+    try {
+      return await service.previewOrderMarkups(req.params.id, input);
+    } catch (err) {
+      if (err instanceof SalesOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
+      // The rate of the same save: a rate ≠ 1 on SEK, as in the PATCH.
+      if (err instanceof SalesOrderExchangeRateError) return reply.code(400).send(errorBody(err));
       throw err;
     }
   });
@@ -461,6 +487,8 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       if (err instanceof SalesOrderCurrencyChangedError) {
         return reply.code(409).send({ ...errorBody(err), pricedIn: err.pricedIn, currency: err.currency });
       }
+      // Påslag (#16 etapp 3): …or the order's markups.
+      if (err instanceof SalesOrderMarkupsChangedError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });
@@ -493,6 +521,9 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       // to the template since): Ändra konfiguration, not a silent reprice.
       if (err instanceof RowConfigurationOutdatedError) return reply.code(409).send(errorBody(err));
       if (err instanceof ConfiguratorTemplateNotFoundError) return reply.code(404).send(errorBody(err));
+      // Påslag (#16 etapp 3): the chain priced the row with the order's
+      // markups as read, and a header PATCH changed them meanwhile.
+      if (err instanceof SalesOrderMarkupsChangedError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });
@@ -526,6 +557,8 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
         return reply.code(409).send(errorBody(err));
       }
       if (err instanceof ConfiguratorVariantTooLongError) return reply.code(400).send(errorBody(err));
+      // Påslag (#16 etapp 3): a variant row priced with markups that changed.
+      if (err instanceof SalesOrderMarkupsChangedError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });

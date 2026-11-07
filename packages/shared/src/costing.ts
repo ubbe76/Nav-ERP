@@ -35,6 +35,54 @@ export type CostPriceSource = z.infer<typeof costPriceSourceSchema>;
 export const costMaterialRowKindSchema = z.enum(["material", "subcontract", "semi"]);
 export type CostMaterialRowKind = z.infer<typeof costMaterialRowKindSchema>;
 
+// Påslag per nivå (#16): the two PRICE markups (generellt påslag and
+// materialpåslag) can be set per order → kund → varugrupp → företaget, field
+// by field, the most specific level with a value winning (markup-levels.ts in
+// the costing module is the one rule). "trial" = Pröva påslag on the Kalkyl
+// tab. The cost markups (MO, LO, Affo, TO) are never set per level. The same
+// 0–1000 bound as System → Kalkyler.
+export const costingMarkupLevelSchema = z.enum(["order", "customer", "group", "company", "trial"]);
+export type CostingMarkupLevel = z.infer<typeof costingMarkupLevelSchema>;
+// The levels a saved calculation's header can carry (cost_calculations.
+// general_markup_level/material_markup_level, migration 0194): a calculation
+// has no customer and no order.
+export type CostCalculationMarkupLevel = Extract<CostingMarkupLevel, "group" | "company" | "trial">;
+export const markupPercentSchema = z.number().min(0).max(1000);
+// The levels an order row's price markups can resolve on (the Kalkylpris):
+// a row has no trial.
+export type OrderMarkupLevel = Exclude<CostingMarkupLevel, "trial">;
+
+// Kalkylpris (#16 etapp 2) — the price chain's step after the price list,
+// used when the customer (from etapp 3 also the order) has a price markup of
+// its own: the article's latest saved förkalkyl re-priced with the markups
+// in force for the row, as a delta against the calculation's own
+// percentages and base (costing/service/markup-levels.ts). No customer
+// discount on top.
+//
+// Why the step could not be used (the chain then goes on to the article's
+// försäljningspris): no saved förkalkyl (or one with quantity ≤ 0), or a
+// multi-level calculation saved before 0194 without a materialpåslag base
+// while the material markup differs from the calculation's, or a
+// calculation saved under the chain before 0130 (TO inside TVK/SVK, so its
+// generellt påslag and Affo were taken on TO too) while the general markup
+// differs from the calculation's — "calculation-outdated", save a new
+// förkalkyl (the review of etapp 2).
+export const calculatedPriceUnavailableSchema = z.enum(["no-calculation", "material-base-missing", "calculation-outdated"]);
+export type CalculatedPriceUnavailable = z.infer<typeof calculatedPriceUnavailableSchema>;
+
+// The basis of a Kalkylpris, on GET /price-quote for a session (an OAuth
+// client gets the price, never this): which calculation, and each price
+// markup with the level it came from.
+export interface CalculatedPriceDetail {
+  calculationId: string;
+  calculatedAt: string;
+  // The calculation's quantity — the Kalkylpris is its price per unit at
+  // that quantity, whatever the row's quantity.
+  quantity: number;
+  generalMarkup: { percent: number; level: OrderMarkupLevel };
+  materialMarkup: { percent: number; level: OrderMarkupLevel };
+}
+
 // `save` absent or false = preview: the numbers are computed and returned but
 // nothing is written. Only an explicit `true` stores the calculation.
 export const preCalculateSchema = z.object({
@@ -45,8 +93,20 @@ export const preCalculateSchema = z.object({
   // z.boolean(), never z.coerce.boolean() — the latter turns the string
   // "false" into true, which has bitten this codebase before.
   multiLevel: z.boolean().optional(),
+  // Pröva påslag (#16): the price markups to try instead of the article's
+  // varugrupp → företaget. Absent or null = the current one for that field.
+  // Strict, so an attempt to try MO/LO/Affo is a 400, never silently ignored.
+  // Saved, the header carries level "trial" on each tried field.
+  markups: z
+    .object({
+      generalMarkupPercent: markupPercentSchema.nullable().optional(),
+      materialMarkupPercent: markupPercentSchema.nullable().optional(),
+    })
+    .strict()
+    .optional(),
 });
 export type PreCalculateInput = z.infer<typeof preCalculateSchema>;
+export type TrialMarkups = NonNullable<PreCalculateInput["markups"]>;
 
 // The post-calculation takes no other input, and the request may carry no body
 // at all (apiFetch omits it for body-less action calls), so the route parses

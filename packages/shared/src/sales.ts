@@ -11,6 +11,7 @@ import { palletCardCodeSchema } from "./system.js";
 import { invoiceDeliverySchema, peppolIdFieldSchema } from "./einvoice.js";
 import { currencyCodeSchema, exchangeRateValueSchema } from "./currency.js";
 import { documentLanguageSchema } from "./document-language.js";
+import { markupPercentSchema, type CalculatedPriceUnavailable } from "./costing.js";
 
 // "lost" (Förlorad): a quote the customer did not take — closed like
 // cancelled (no edits, no documents), reopenable to quote.
@@ -141,6 +142,12 @@ export const createCustomerSchema = z.object({
   carrierCustomerNumber: z.string().max(50).optional(),
   // Kundrabatt — blanket percentage, the price chain's last fallback.
   discountPercent: blankSafe(z.coerce.number().min(0).max(100)).default(0),
+  // Påslag per kund (#16): the customer's own generellt påslag and
+  // materialpåslag. null/omitted = inherit (varugrupp → företaget), 0 =
+  // explicitly 0 %. A value on either gives the customer's rows the
+  // Kalkylpris step of the price chain (no customer discount on it).
+  generalMarkupPercent: markupPercentSchema.nullable().optional(),
+  materialMarkupPercent: markupPercentSchema.nullable().optional(),
   // Vårt leverantörsnummer — the customer's number for us as their supplier.
   ourSupplierNumber: z.string().max(50).optional(),
   // Samlingsfaktura — billed via the collective invoicing routine only.
@@ -214,6 +221,9 @@ export const updateCustomerSchema = z
     priceListId: z.string().uuid().nullable().optional(),
     carrierCustomerNumber: z.string().max(50).nullable().optional(),
     discountPercent: blankSafe(z.coerce.number().min(0).max(100)).optional(),
+    // Påslag per kund (#16): omitted = unchanged, null = inherit again.
+    generalMarkupPercent: markupPercentSchema.nullable().optional(),
+    materialMarkupPercent: markupPercentSchema.nullable().optional(),
     ourSupplierNumber: z.string().max(50).nullable().optional(),
     collectiveInvoicing: z.boolean().optional(),
     invoiceOnHold: z.boolean().optional(),
@@ -329,16 +339,100 @@ export const updateSalesOrderHeaderSchema = z
     // Kostnadsställen och projekt: the order's dimensions, the default for
     // the invoice rows billed from it.
     ...dimensionFields,
+    // Påslag på offert och order (#16 etapp 3): the order's own generellt
+    // påslag and materialpåslag. Omitted = unchanged, null = inherit again
+    // (kund → varugrupp → företaget), 0 = explicitly 0 %. Not in
+    // createQuoteSchema: set on the order card only, never by a client.
+    // A change reprices the rows the price chain priced (price origin chain
+    // or calculated, 0197) that are neither delivered nor invoiced; when
+    // that changes a row, the save needs confirmRepricing
+    // (409 markup-repricing-not-confirmed otherwise, with the preview of
+    // POST /sales-orders/:id/markups/preview in `repricing`).
+    generalMarkupPercent: markupPercentSchema.nullable().optional(),
+    materialMarkupPercent: markupPercentSchema.nullable().optional(),
+    confirmRepricing: z.boolean().optional(),
     // `false` saves without bumping the order's revision — the UI asks on
     // every save; omitted means bump (external callers unchanged).
     bumpRevision: z.boolean().optional(),
   })
   .refine(
-    (data) => Object.keys(data).some((key) => key !== "bumpRevision"),
+    (data) => Object.keys(data).some((key) => key !== "bumpRevision" && key !== "confirmRepricing"),
     "At least one field must be provided"
   )
   .refine((data) => !(data.deliveryAddressId !== undefined && data.newDeliveryAddress), oneDeliveryAddressChoice);
 export type UpdateSalesOrderHeaderInput = z.infer<typeof updateSalesOrderHeaderSchema>;
+
+// Påslag på offert och order (#16 etapp 3): POST
+// /sales-orders/:id/markups/preview — what saving these markups on the
+// header would do to the rows, computed and answered, nothing written
+// (readOnlySafe). Omitted = the order's current value, null = inherit.
+// `exchangeRate` = the rate the same save gives the order (the header
+// PATCH plans with it), omitted = the order's current one; the header's
+// rules apply (SEK only 1, quote or confirmed only).
+export const salesOrderMarkupsPreviewSchema = z
+  .object({
+    generalMarkupPercent: markupPercentSchema.nullable().optional(),
+    materialMarkupPercent: markupPercentSchema.nullable().optional(),
+    exchangeRate: exchangeRateValueSchema.optional(),
+  })
+  .strict();
+export type SalesOrderMarkupsPreviewInput = z.infer<typeof salesOrderMarkupsPreviewSchema>;
+
+// The order's two price markups as numbers, null = inherits.
+export interface SalesOrderMarkups {
+  generalMarkupPercent: number | null;
+  materialMarkupPercent: number | null;
+}
+
+// Påslag (#16, migration 0197): where a sales order row's à-pris came from
+// — sales_order_rows.price_origin. "manual" = an à-pris or a rabatt written
+// by hand (and every row whose origin is unknown); "chain" = the price chain
+// set it, whatever step; "calculated" = the chain's Kalkylpris step. Set by
+// the server only. The rows' `calculatedPrice` is `priceOrigin ===
+// "calculated"` (the order card's Kalkylpris tag).
+export const SALES_ROW_PRICE_ORIGINS = ["manual", "chain", "calculated"] as const;
+export type SalesRowPriceOrigin = (typeof SALES_ROW_PRICE_ORIGINS)[number];
+
+// Why a row keeps its price when the order's markups change: its price was
+// written by hand (or it is configured, a ställkostnad or the freight row —
+// never priced by the chain), it is (partly) delivered or on an invoice row
+// (a draft and a credit note count), the chain's new answer is the price it
+// already has, or the chain has no price for it at all any more. "deleted"
+// only after a save: the row was removed between the plan and the locks.
+export type MarkupRepricingKeptReason = "manual" | "delivered" | "invoiced" | "unchanged" | "no-price" | "deleted";
+
+// One row the new markups reprice: the price chain's answer for the row
+// with the order's new markups, in the order's currency and at its rate,
+// per base unit (like the stored row), and the row's price origin before and
+// after. `calculatedPrice` is `after.priceOrigin === "calculated"` — false
+// when the chain now prices it another way (a price list, the article's
+// price because the step no longer applies or the calculation cannot carry
+// it — `calculatedPriceUnavailable` says why); the row stays "chain" and
+// follows the next markup change.
+export interface MarkupRepricingRow {
+  rowId: string;
+  articleId: string;
+  articleNumber: string;
+  quantity: number;
+  before: { unitPrice: number; discountPercent: number; priceOrigin: SalesRowPriceOrigin };
+  after: { unitPrice: number; discountPercent: number; source: PriceSource; priceOrigin: SalesRowPriceOrigin };
+  calculatedPrice: boolean;
+  calculatedPriceUnavailable?: CalculatedPriceUnavailable;
+}
+
+// The preview's answer, the 409's `repricing` and the header PATCH's
+// `repricing` after a save. `changed` = a markup actually changes (rounded
+// to the column's two decimals); without a change nothing is repriced and
+// both lists are empty.
+export interface MarkupRepricing {
+  changed: boolean;
+  before: SalesOrderMarkups;
+  after: SalesOrderMarkups;
+  currency: string;
+  exchangeRate: number;
+  rows: MarkupRepricingRow[];
+  kept: { rowId: string; articleNumber: string; reason: MarkupRepricingKeptReason }[];
+}
 
 export const createQuoteSchema = z.object({
   customerId: z.string().uuid(),
@@ -609,10 +703,15 @@ export type SendReminderInput = z.infer<typeof sendReminderSchema>;
 // --- C3 Kundpriser ---
 // customer_discount = the customer's blanket discount applied on the price
 // list / base price (last fallback, below every customer-specific rule).
+// calculated = Kalkylpris (#16 etapp 2): the article's latest förkalkyl with
+// the customer's (or the order's) price markups, after the price list and
+// before the article's price, never with the customer discount. New in an
+// existing enum — integrations comparing against the values must know it.
 export const priceSourceSchema = z.enum([
   "customer_article",
   "customer_group",
   "price_list",
+  "calculated",
   "customer_discount",
   "article",
 ]);

@@ -39,7 +39,14 @@ import { marginLabel, useArticleSelfCost, useConfiguredSelfCost } from "./useArt
 import { computeLineMargin, sumMargins } from "../../lib/margin";
 import { formatMoney } from "../../lib/format";
 import { currencyLabel, formatRate, SEK, toSek } from "../../lib/currency";
-import { parseRate, priceQuotePath } from "../../lib/priceQuote";
+import {
+  calculatedPriceText,
+  calculatedUnavailableText,
+  omitUnitPriceOnCreate,
+  omitUnitPriceOnEdit,
+  parseRate,
+  priceQuotePath,
+} from "../../lib/priceQuote";
 import { useOrderRate } from "../../lib/useOrderRate";
 import { CurrencyInput } from "../ui/CurrencyInput";
 import { OrderRateField } from "./OrderRateField";
@@ -47,6 +54,8 @@ import { apiFetch } from "../../lib/api";
 import { stashReleaseWarnings } from "../../lib/releaseWarnings";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { askBumpRevision } from "../../lib/revision";
+import { changedMarkups, parseMarkupField, repricingMessage } from "../../lib/markupRepricing";
+import { ApiError } from "../../lib/api";
 import { headerDimensionFields, useDimensions } from "../../lib/dimensions";
 import { DimensionFields } from "../economy/DimensionSelect";
 import { salesDocumentKind } from "../../lib/salesDocumentKind";
@@ -59,6 +68,7 @@ import {
   type ManufacturingOrderStatus,
   type OrderFreight,
   type PriceQuote,
+  type MarkupRepricingPlan,
   type SalesOrder,
   type SalesOrderRow,
   type StockLocation,
@@ -143,6 +153,8 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   // afterwards never silently overwrites it ("manuellt vinner"). Reset
   // whenever edit mode is (re)opened.
   const [editPriceTouched, setEditPriceTouched] = useState(false);
+  // The latest price-quote answer that filled the edit fields (Kalkylpris source and text).
+  const [editQuote, setEditQuote] = useState<PriceQuote | null>(null);
   // The article behind the row being edited — fetched so the unit dropdown
   // knows the base unit + alternative units.
   const [editArticle, setEditArticle] = useState<Article | null>(null);
@@ -248,6 +260,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           }
           setRowError(null);
           if (evaluation.price.unitPrice === null || editPriceTouchedNow.current) return;
+          setEditQuote(null);
           setEditPrice(String(toUnitPrice(evaluation.price.unitPrice, factor)));
           setEditDiscountPercent(String(evaluation.price.discountPercent));
         })
@@ -262,6 +275,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     )
       .then((quote) => {
         if (seq !== editRequestSeq.current || editPriceTouchedNow.current) return;
+        setEditQuote(quote);
         if (!quote.price) return;
         setEditPrice(String(toUnitPrice(quote.price.unitPrice, factor)));
         setEditDiscountPercent(String(quote.price.discountPercent));
@@ -325,6 +339,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     setEditPrice(String(toUnitPrice(Number(row.unitPrice), row.unitFactor)));
     setEditDiscountPercent(String(Number(row.discountPercent)));
     setEditPriceTouched(false);
+    setEditQuote(null);
     setEditUnitId(row.unitId ?? "");
     setEditDeliveryDate(row.expectedDeliveryDate ?? "");
     setEditArticle(null);
@@ -386,10 +401,17 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         method: "PATCH",
         body: JSON.stringify({
           quantity: Number(editQuantity),
-          // Always sent explicitly — the web never relies on the server's
-          // own price-chain resolution (that path is for the configurator).
-          unitPrice: Number(editPrice),
-          discountPercent: Number(editDiscountPercent),
+          // Sent explicitly — except when the quantity changed and the price
+          // is an untouched chain suggestion, which the server then re-prices
+          // itself (the row keeps the chain's origin). The same quantity sends
+          // the price and the rabatt as they are, so the origin stays.
+          ...(omitUnitPriceOnEdit({
+            priceTouched: editPriceTouched,
+            quantityChanged: toBaseQuantity(Number(editQuantity), editFactor) !== Number(row.quantityOrdered),
+            quote: editQuote,
+          })
+            ? {}
+            : { unitPrice: Number(editPrice), discountPercent: Number(editDiscountPercent) }),
           unitId: editUnitId === "" ? null : editUnitId,
           expectedDeliveryDate: editDeliveryDate || null,
           bumpRevision,
@@ -499,6 +521,12 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
             ? [{ label: "Kurs", value: `1 ${order.currency} = ${formatRate(order.exchangeRate)} kr` }]
             : []),
           { label: "Leveransdatum", value: order.expectedDeliveryDate },
+          ...(order.generalMarkupPercent != null
+            ? [{ label: "Generellt påslag", value: `${Number(order.generalMarkupPercent).toLocaleString("sv-SE")} %` }]
+            : []),
+          ...(order.materialMarkupPercent != null
+            ? [{ label: "Materialpåslag", value: `${Number(order.materialMarkupPercent).toLocaleString("sv-SE")} %` }]
+            : []),
           ...(order.status === "quote"
             ? [
                 {
@@ -539,6 +567,12 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
       />
 
       <FormError margin="below">{rowError}</FormError>
+      {editingRowId !== null && !editPriceTouched && editQuote && calculatedPriceText(editQuote, formatStockholmDate) && (
+        <FormHint>{calculatedPriceText(editQuote, formatStockholmDate)}</FormHint>
+      )}
+      {editingRowId !== null && !editPriceTouched && calculatedUnavailableText(editQuote) && (
+        <FormNotice>{calculatedUnavailableText(editQuote)}</FormNotice>
+      )}
 
       {rows.length > 0 ? (
         <Table<SalesOrderRow>
@@ -554,9 +588,11 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
             // together with the quantity.
             // While a row is being edited the tracks that hold inputs widen
             // (the table then scrolls inside its card) so no input is clipped.
-            // The action column holds Ändra and the ⋯ menu on one line.
+            // The action column is max-content: Ändra and the ⋯ menu on one
+            // line, Spara above Avbryt while editing (side by side they
+            // outgrew the card at 1400 px and clipped Ändra on the other rows).
             { key: "articleNumber", label: "Artikelnummer", width: "110px" },
-            { key: "articleName", label: "Benämning", width: editingRowId ? "minmax(170px, 3fr)" : "minmax(90px, 3fr)" },
+            { key: "articleName", label: "Benämning", width: editingRowId ? "minmax(110px, 3fr)" : "minmax(90px, 3fr)" },
             { key: "quantityOrdered", label: "Beställt", width: shareTrack(editingRowId ? 90 : 66), align: "right" },
             { key: "unitCode", label: "Enhet", width: editingRowId ? "84px" : "52px" },
             { key: "quantityDelivered", label: "Levererat", width: shareTrack(66), align: "right" },
@@ -572,7 +608,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
             // Wide enough for the footer's "69 600,00 SEK" on one line.
             { key: "lineAmount", label: "Belopp", width: shareTrack(96), align: "right" },
             ...(rowsEditable || canReclaim
-              ? ([{ key: "id", label: "", width: editingRowId ? "140px" : "104px", align: "right" }] as const)
+              ? ([{ key: "id", label: "", width: "max-content", align: "right" }] as const)
               : []),
           ]}
           rows={rows}
@@ -701,6 +737,11 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
                       setEditPriceTouched(true);
                     }}
                   />
+                ) : row.calculatedPrice ? (
+                  <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                    {`${formatMoney(toUnitPrice(Number(row.unitPrice), row.unitFactor))} ${order.currency}`}
+                    <StatusPill status="done" label="Kalkylpris" compact />
+                  </span>
                 ) : (
                   `${formatMoney(toUnitPrice(Number(row.unitPrice), row.unitFactor))} ${order.currency}`
                 );
@@ -729,7 +770,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
               case "id":
                 if (!rowsEditable) return <RowDeviationLink label="Reklamera" params={reclaimParams(row)} />;
                 return editingRowId === row.id ? (
-                  <span style={{ display: "inline-flex", gap: 8 }}>
+                  <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                     <Button type="button" size="small" variant="primary" disabled={rowPending} onClick={() => saveRow(row)}>
                       Spara
                     </Button>
@@ -967,9 +1008,11 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         <EditHeaderForm
           order={order}
           rowCount={rows.length}
+          rows={rows}
           deliveryAddresses={deliveryAddresses}
           registers={registers}
           onDone={refresh}
+          onReload={() => router.refresh()}
           onCancel={() => setModal(null)}
         />
       </Modal>
@@ -1100,16 +1143,35 @@ function customerNumberFields(order: SalesOrder) {
 // terms, so the card asks about a new revision exactly once. Leveransdatum
 // and anteckning are set when the quote is created and stay read-only.
 
+// The placeholder of a markup field: the customer's own value, else "Ärvs".
+function markupPlaceholder(customerValue: string | null | undefined): string {
+  return customerValue == null ? "Ärvs" : `${Number(customerValue).toLocaleString("sv-SE", { maximumFractionDigits: 2 })} (kunden)`;
+}
+
+// The confirmation before a save that reprices rows the price chain priced.
+// The plan's prices are per base unit; each row shows its own unit.
+function confirmRepricing(plan: MarkupRepricingPlan, rows: SalesOrderRow[]): Promise<boolean> {
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return confirmDialog(
+    repricingMessage(plan, { priceOf: (rowId, price) => toUnitPrice(price, byId.get(rowId)?.unitFactor ?? null) }),
+    { confirmLabel: "Räkna om och spara" }
+  );
+}
+
 function EditHeaderForm({
   order,
   rowCount,
+  rows,
   deliveryAddresses,
   registers,
   onDone,
+  onReload,
   onCancel,
 }: {
   order: SalesOrder;
   rowCount: number;
+  rows: SalesOrderRow[];
+  onReload: () => void;
   deliveryAddresses: CustomerDeliveryAddress[];
   registers: TermsRegisters;
   onDone: () => void;
@@ -1153,6 +1215,10 @@ function EditHeaderForm({
     currency: headerCurrency,
     initial: { currency: order.currency, rate: order.currency === SEK ? "" : String(Number(order.exchangeRate)) },
   });
+  // Påslag på offert och order: the order's own markups (Försäljning only).
+  const canSetMarkups = useCan()(["forsaljning"]);
+  const [generalMarkup, setGeneralMarkup] = useState(order.generalMarkupPercent ? String(Number(order.generalMarkupPercent)) : "");
+  const [materialMarkup, setMaterialMarkup] = useState(order.materialMarkupPercent ? String(Number(order.materialMarkupPercent)) : "");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -1172,15 +1238,53 @@ function EditHeaderForm({
       return;
     }
     const rateChanged = canChangeCurrency && headerForeign && newRate !== null && newRate !== Number(order.exchangeRate);
-    const bumpRevision = await askBumpRevision(order.revision);
+    const ratePatch = headerForeign && (currencyChanged || rateChanged) ? { exchangeRate: newRate } : {};
+    // The preview plans with the rate this save gives the order, as the PATCH
+    // does. A new currency needs an order without rows — nothing to reprice.
+    const previewRate = !currencyChanged && rateChanged ? { exchangeRate: newRate } : {};
+    // Påslag: only a changed field is sent. When it reprices rows, the user
+    // confirms the plan first (Avbryt = nothing is saved).
+    const general = parseMarkupField(generalMarkup);
+    const material = parseMarkupField(materialMarkup);
+    if (canSetMarkups && (Number.isNaN(general) || Number.isNaN(material))) {
+      setError("Påslag anges som ett tal mellan 0 och 1000, eller lämnas tomt");
+      return;
+    }
+    const markups = canSetMarkups
+      ? changedMarkups(
+          { general: order.generalMarkupPercent, material: order.materialMarkupPercent },
+          { general, material }
+        )
+      : {};
+    let repriceConfirmed = false;
     setError(null);
+    if (Object.keys(markups).length > 0) {
+      setPending(true);
+      try {
+        const plan = await apiFetch<MarkupRepricingPlan>(`/api/v1/sales-orders/${order.id}/markups/preview`, {
+          method: "POST",
+          body: JSON.stringify({ ...markups, ...previewRate }),
+        });
+        if (plan.rows.length > 0) {
+          if (!(await confirmRepricing(plan, rows))) return;
+          repriceConfirmed = true;
+        }
+      } catch (err) {
+        setError(apiErrorMessage(err, "Kunde inte räkna om påslagen"));
+        return;
+      } finally {
+        setPending(false);
+      }
+    }
+    const bumpRevision = await askBumpRevision(order.revision);
     setPending(true);
     try {
-      await apiFetch(`/api/v1/sales-orders/${order.id}`, {
+      const patch = (withConfirm: boolean) =>
+        apiFetch(`/api/v1/sales-orders/${order.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           ...(currencyChanged ? { currency: headerCurrency } : {}),
-          ...(headerForeign && (currencyChanged || rateChanged) ? { exchangeRate: newRate } : {}),
+          ...ratePatch,
           ...(showOrderNumber ? { customerOrderNumber: customerOrderNumber.trim() || null } : {}),
           customerInquiryNumber: customerInquiryNumber.trim() || null,
           customerReference: customerReference.trim() || null,
@@ -1190,12 +1294,34 @@ function EditHeaderForm({
           ...termsPayload(terms),
           // Giltig t.o.m. only exists on a quote (the API refuses it otherwise).
           ...(order.status === "quote" ? { quoteValidUntil: quoteValidUntil || null } : {}),
+          ...markups,
+          ...(withConfirm ? { confirmRepricing: true } : {}),
           bumpRevision,
         }),
       });
+      try {
+        await patch(repriceConfirmed);
+      } catch (err) {
+        // The rows changed under the preview: show the plan again and retry once confirmed.
+        if (err instanceof ApiError && err.code === "markup-repricing-not-confirmed") {
+          const plan = (err.body as { repricing?: MarkupRepricingPlan } | undefined)?.repricing;
+          if (plan && (await confirmRepricing(plan, rows))) await patch(true);
+          else if (plan) return;
+          else throw err;
+        } else {
+          throw err;
+        }
+      }
       onDone();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte spara"));
+      // The order moved under the save: read it again so the card is current.
+      if (
+        err instanceof ApiError &&
+        (err.code === "markup-repricing-conflict" || err.code === "sales-order-markups-changed")
+      ) {
+        onReload();
+      }
     } finally {
       setPending(false);
     }
@@ -1281,6 +1407,44 @@ function EditHeaderForm({
         </>
       )}
 
+      {canSetMarkups && (
+        <>
+          <FormRow>
+            <Field label="Generellt påslag (%)" htmlFor="headerGeneralMarkup">
+              <Input
+                id="headerGeneralMarkup"
+                type="number"
+                min="0"
+                max="1000"
+                step="0.01"
+                size="xs"
+                placeholder={markupPlaceholder(order.customerMarkups?.generalMarkupPercent)}
+                value={generalMarkup}
+                onChange={(e) => setGeneralMarkup(e.target.value)}
+              />
+            </Field>
+            <Field label="Materialpåslag (%)" htmlFor="headerMaterialMarkup">
+              <Input
+                id="headerMaterialMarkup"
+                type="number"
+                min="0"
+                max="1000"
+                step="0.01"
+                size="xs"
+                placeholder={markupPlaceholder(order.customerMarkups?.materialMarkupPercent)}
+                value={materialMarkup}
+                onChange={(e) => setMaterialMarkup(e.target.value)}
+              />
+            </Field>
+          </FormRow>
+          <FormHint attached>
+            Tomt = kundens påslag, annars varugruppens eller företagets. Ett ändrat påslag räknar om à-priset på rader som
+            prissatts av priskedjan, även rader med artikelns försäljningspris; handskrivna priser och levererade eller
+            fakturerade rader ändras inte.
+          </FormHint>
+        </>
+      )}
+
       {order.status === "quote" && (
         <Field label="Giltig t.o.m." htmlFor="headerQuoteValidUntil">
           <Input
@@ -1354,6 +1518,8 @@ function AddRowForm({
   // the price-chain prefill below never overwrites a touched field
   // ("manuellt vinner"). Reset when the article changes.
   const [priceTouched, setPriceTouched] = useState(false);
+  // The latest price-quote answer that filled the fields (Kalkylpris source, text, warning).
+  const [quote, setQuote] = useState<PriceQuote | null>(null);
   const [configureTemplate, setConfigureTemplate] = useState<Article | null>(null);
   const [configureKey, setConfigureKey] = useState(0);
   const [variantInfo, setVariantInfo] = useState<{ articleNumber: string; created: boolean } | null>(null);
@@ -1377,6 +1543,7 @@ function AddRowForm({
   function handleArticleChange(next: Article | null) {
     setVariantInfo(null);
     setRowConfiguration(null);
+    setQuote(null);
     if (next?.configuratorMode === "variants" || next?.configuratorMode === "to_order") {
       // variants: Konfigurera hands back the variant article; to_order: the template stays and the choices go on the row.
       setArticle(next.configuratorMode === "to_order" ? next : null);
@@ -1395,6 +1562,7 @@ function AddRowForm({
   function handleConfigured(draft: RowConfigurationDraft) {
     setConfigureTemplate(null);
     setRowConfiguration(draft);
+    setQuote(null);
     if (!priceTouched && draft.evaluation.price.unitPrice !== null) {
       setUnitPrice(String(toUnitPrice(draft.evaluation.price.unitPrice, currentFactor)));
       setDiscountPercent(String(draft.evaluation.price.discountPercent));
@@ -1442,11 +1610,12 @@ function AddRowForm({
       // Valuta: salesOrderId — the order's own currency and rate decide.
       priceQuotePath({ customerId, articleId, quantity: baseQuantity, salesOrderId: orderId })
     )
-      .then((quote) => {
+      .then((answer) => {
         if (seq !== requestSeq.current || priceTouchedNow.current) return;
-        if (!quote.price) return;
-        setUnitPrice(String(toUnitPrice(quote.price.unitPrice, currentFactor)));
-        setDiscountPercent(String(quote.price.discountPercent));
+        setQuote(answer);
+        if (!answer.price) return;
+        setUnitPrice(String(toUnitPrice(answer.price.unitPrice, currentFactor)));
+        setDiscountPercent(String(answer.price.discountPercent));
       })
       .catch(() => {
         // Best-effort prefill — silently leave the fields untouched on error.
@@ -1503,10 +1672,12 @@ function AddRowForm({
         body: JSON.stringify({
           articleId: article.id,
           quantity: Number(quantity),
-          // Always sent explicitly — the web never relies on the server's
-          // own price-chain resolution (that path is for the configurator).
-          unitPrice: Number(unitPrice),
-          discountPercent: Number(discountPercent),
+          // Sent explicitly — except an untouched chain suggestion, which
+          // the server prices itself so the row gets the chain's origin
+          // (and follows the order's markups later).
+          ...(omitUnitPriceOnCreate(priceTouched, quote)
+            ? {}
+            : { unitPrice: Number(unitPrice), discountPercent: Number(discountPercent) }),
           unitId: unitId === "" ? null : unitId,
           ...(deliveryDate ? { expectedDeliveryDate: deliveryDate } : {}),
           ...(rowConfiguration ? { configuration: { selection: rowConfiguration.selection } } : {}),
@@ -1618,6 +1789,11 @@ function AddRowForm({
           Tomt = samma som ordern{orderDeliveryDate ? ` (${orderDeliveryDate})` : ""}.
         </FormHint>
       </Field>
+
+      {!priceTouched && calculatedPriceText(quote ?? { price: null }, formatStockholmDate) && (
+        <FormHint>{calculatedPriceText(quote ?? { price: null }, formatStockholmDate)}</FormHint>
+      )}
+      {!priceTouched && calculatedUnavailableText(quote) && <FormNotice>{calculatedUnavailableText(quote)}</FormNotice>}
 
       {/* Live against the fields, without a server round-trip per keystroke —
           the self cost is fetched once per article. */}

@@ -53,6 +53,7 @@ const WATCHED = [
   "attendance_sessions",
   "time_reports",
   "sales_orders",
+  "sales_order_rows",
   "stock_transactions",
   "user_settings",
   "audit_log",
@@ -201,6 +202,16 @@ describe("Endast läsning — writes are refused", () => {
       { method: "POST", url: `/api/v1/configurator/${f.template.id}/variant`, payload: { selection: { LOCK: "A" } } },
       // Saving a calculation
       { method: "POST", url: `/api/v1/articles/${f.product.id}/cost-calculations/pre-calculate`, payload: { quantity: 1, save: true } },
+      // … also a saved Pröva påslag, and a body that does not parse (a cost
+      // markup tried) counts as a write: fail closed (#16)
+      {
+        method: "POST",
+        url: `/api/v1/articles/${f.product.id}/cost-calculations/pre-calculate`,
+        payload: { quantity: 1, save: true, markups: { generalMarkupPercent: 35 } },
+      },
+      { method: "POST", url: `/api/v1/articles/${f.product.id}/cost-calculations/pre-calculate`, payload: { quantity: 1, markups: { moPercent: 10 } } },
+      // Varugruppens påslag
+      { method: "PATCH", url: `/api/v1/article-groups/${crypto.randomUUID()}`, payload: { code: "3", name: "Diskbänkar", generalMarkupPercent: 40 } },
       { method: "POST", url: `/api/v1/manufacturing-orders/${f.order.id}/cost-calculations/post-calculate`, payload: { save: true } },
       // Reservationen after the delivery-time check
       { method: "POST", url: "/api/v1/delivery-time-check/apply", payload: { salesOrderId: crypto.randomUUID(), deliveryDate: "2030-01-01" } },
@@ -275,17 +286,33 @@ describe("Endast läsning — reads and side-effect-free POSTs work", () => {
     const { admin, cookie: adminCookie } = await adminSession();
     const { cookie } = await readOnlySession(adminCookie);
     const f = await fixtures(admin.id);
+    // An order for the markups preview (#16 etapp 3).
+    const customer = await app.inject({ method: "POST", url: "/api/v1/customers", headers: { cookie: adminCookie }, payload: { name: "Kund AB" } });
+    const quote = await app.inject({
+      method: "POST",
+      url: "/api/v1/quotes",
+      headers: { cookie: adminCookie },
+      payload: { customerId: customer.json().id, rows: [{ articleId: f.part.id, quantity: 1, unitPrice: 10 }] },
+    });
+    expect(quote.statusCode).toBe(201);
     const before = await counts();
 
     const calls = [
       { url: "/api/v1/delivery-time-check", payload: { rows: [{ articleId: f.part.id, quantity: 2 }] } },
       { url: `/api/v1/articles/${f.product.id}/cost-calculations/pre-calculate`, payload: { quantity: 1 } },
       { url: `/api/v1/articles/${f.product.id}/cost-calculations/pre-calculate`, payload: { quantity: 1, save: false } },
+      // Pröva påslag (#16) is still a preview.
+      {
+        url: `/api/v1/articles/${f.product.id}/cost-calculations/pre-calculate`,
+        payload: { quantity: 1, markups: { generalMarkupPercent: 35, materialMarkupPercent: 0 } },
+      },
       { url: `/api/v1/manufacturing-orders/${f.order.id}/cost-calculations/post-calculate`, payload: undefined },
       { url: `/api/v1/manufacturing-orders/${f.order.id}/cost-calculations/post-calculate`, payload: { save: false } },
       { url: `/api/v1/articles/${f.template.id}/configurator/variants/preview`, payload: { sets: { LOCK: ["A"] }, calcQuantity: 1 } },
       { url: `/api/v1/configurator/${f.template.id}/evaluate`, payload: { selection: { LOCK: "A" } } },
       { url: `/api/v1/configurator/${f.template.id}/derive`, payload: { selection: { LOCK: "A" } } },
+      // Påslag på offert och order (#16 etapp 3): what new markups would reprice.
+      { url: `/api/v1/sales-orders/${quote.json().order.id}/markups/preview`, payload: { generalMarkupPercent: 30 } },
     ];
     for (const call of calls) {
       const res = await app.inject({ method: "POST", url: call.url, headers: { cookie }, payload: call.payload });
@@ -405,6 +432,9 @@ describe("Endast läsning — the allowlist", () => {
         // for the id list, nothing is written.
         "POST /api/v1/articles/labels",
         "POST /api/v1/stock/locations/labels",
+        // Påslag på offert och order (#16 etapp 3): the header's repricing
+        // preview — the save is the header PATCH.
+        "POST /api/v1/sales-orders/:id/markups/preview",
         // The one route that writes: the account's own preferences.
         "PATCH /api/v1/me/settings",
       ].sort()

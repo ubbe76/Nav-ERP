@@ -51,6 +51,13 @@ export interface DirectCosts {
    * cannot travel inside semiFinishedCost. Always 0 in a single-level run.
    */
   liftedMaterialMarkup: number;
+  /**
+   * The base the sub-assemblies' liftedMaterialMarkup was taken on — their
+   * own dM + MO plus what THEIR sub-assemblies lifted, recursively (#16).
+   * Required for the same reason as semiFinishedCost. Always 0 in a
+   * single-level run.
+   */
+  liftedMaterialMarkupBase: number;
 }
 
 export interface MarkedUpCosts extends DirectCosts {
@@ -64,6 +71,14 @@ export interface MarkedUpCosts extends DirectCosts {
   generalMarkup: number;
   /** Materialpåslag on dM + MO, plus what the sub-assemblies lifted up. */
   materialMarkup: number;
+  /**
+   * What the materialpåslag was taken on: dM + MO plus the sub-assemblies'
+   * base. Every level of a run uses the same materialpåslag (the sold
+   * article's, sub-assembly.ts), so materialMarkup = percent × this — the
+   * header stores it so the Kalkylpris (#16 etapp 2) can re-price the markup
+   * at another percentage exactly.
+   */
+  materialMarkupBase: number;
   /** SVK + generellt påslag + materialpåslag + TO. */
   salesPrice: number;
 }
@@ -105,6 +120,7 @@ export function applyMarkups(direct: DirectCosts, markups: CostingMarkups): Mark
     selfCost,
     generalMarkup,
     materialMarkup,
+    materialMarkupBase: direct.materialCost + materialOverhead + direct.liftedMaterialMarkupBase,
     salesPrice: selfCost + generalMarkup + materialMarkup + direct.overhead,
   };
 }

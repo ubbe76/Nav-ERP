@@ -21,6 +21,10 @@ export function NewArticleGroupForm({ group, onSuccess }: { group?: ArticleGroup
   const [numberSeriesKey, setNumberSeriesKey] = useState(group?.numberSeriesKey ?? "");
   const dims = useDimensions();
   const [defaultCostCenterId, setDefaultCostCenterId] = useState(group?.defaultCostCenterId ?? "");
+  // Prispåslag (#16): "" = inherits the company's (System → Kalkyler).
+  const [generalMarkup, setGeneralMarkup] = useState(group?.generalMarkupPercent == null ? "" : String(Number(group.generalMarkupPercent)));
+  const [materialMarkup, setMaterialMarkup] = useState(group?.materialMarkupPercent == null ? "" : String(Number(group.materialMarkupPercent)));
+  const [companyMarkups, setCompanyMarkups] = useState<{ general: number; material: number } | null>(null);
   const [seriesOptions, setSeriesOptions] = useState<ArticleNumberSeriesOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -29,6 +33,9 @@ export function NewArticleGroupForm({ group, onSuccess }: { group?: ArticleGroup
     apiFetch<ArticleNumberSeriesOption[]>("/api/v1/article-number-series")
       .then(setSeriesOptions)
       .catch(() => setSeriesOptions([]));
+    apiFetch<{ costingGeneralMarkupPercent: number; costingMaterialMarkupPercent: number }>("/api/v1/settings")
+      .then((s) => setCompanyMarkups({ general: Number(s.costingGeneralMarkupPercent), material: Number(s.costingMaterialMarkupPercent) }))
+      .catch(() => setCompanyMarkups(null));
   }, []);
 
   async function handleSubmit(e: FormEvent) {
@@ -38,6 +45,8 @@ export function NewArticleGroupForm({ group, onSuccess }: { group?: ArticleGroup
     try {
       const body = JSON.stringify({ code, name, description, vatRate: Number(vatRate), numberSeriesKey: numberSeriesKey === "" ? null : numberSeriesKey,
         defaultCostCenterId: defaultCostCenterId || null,
+        generalMarkupPercent: generalMarkup.trim() === "" ? null : Number(generalMarkup),
+        materialMarkupPercent: materialMarkup.trim() === "" ? null : Number(materialMarkup),
       });
       if (group) {
         await apiFetch(`/api/v1/article-groups/${group.id}`, { method: "PATCH", body });
@@ -111,6 +120,37 @@ export function NewArticleGroupForm({ group, onSuccess }: { group?: ArticleGroup
           <FormHint>Sätts på faktura- och leverantörsfakturarader för gruppens artiklar när inget annat kostnadsställe anges.</FormHint>
         </Field>
       )}
+
+      <Field label="Generellt påslag (%)" htmlFor="generalMarkupPercent">
+        <Input
+          id="generalMarkupPercent"
+          type="number"
+          min="0"
+          max="1000"
+          step="0.01"
+          size="xs"
+          placeholder={companyMarkups ? `Företagets (${companyMarkups.general} %)` : "Företagets"}
+          value={generalMarkup}
+          onChange={(e) => setGeneralMarkup(e.target.value)}
+        />
+      </Field>
+      <Field label="Materialpåslag (%)" htmlFor="materialMarkupPercent">
+        <Input
+          id="materialMarkupPercent"
+          type="number"
+          min="0"
+          max="1000"
+          step="0.01"
+          size="xs"
+          placeholder={companyMarkups ? `Företagets (${companyMarkups.material} %)` : "Företagets"}
+          value={materialMarkup}
+          onChange={(e) => setMaterialMarkup(e.target.value)}
+        />
+        <FormHint>
+          Prispåslag för gruppens artiklar i förkalkylen. Tomt = företagets, under System → Kalkyler. 0 är 0 %. Påverkar
+          försäljningspriset, inte självkostnaden.
+        </FormHint>
+      </Field>
 
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>

@@ -14,7 +14,14 @@ import { UnitSelect, convertPriceInput, convertQuantityInput, useUnitOptions, ty
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { currencyLabel, SEK } from "../../lib/currency";
-import { parseRate, priceQuotePath } from "../../lib/priceQuote";
+import {
+  calculatedPriceText,
+  calculatedUnavailableText,
+  omitUnitPriceOnCreate,
+  parseRate,
+  priceQuotePath,
+} from "../../lib/priceQuote";
+import { formatStockholmDate } from "../../lib/date";
 import { useOrderRate } from "../../lib/useOrderRate";
 import { CurrencyInput } from "../ui/CurrencyInput";
 import { OrderRateField } from "./OrderRateField";
@@ -52,6 +59,10 @@ interface QuoteRow {
   // themselves — the price-chain prefill never overwrites a touched field
   // ("manuellt vinner"). Reset when the article changes.
   priceTouched: boolean;
+  // The latest price-quote answer that filled the fields: its source (Kalkylpris)
+  // decides whether unitPrice is left out of the create call, and it carries
+  // the text and the warning shown under the price.
+  quote?: PriceQuote | null;
   // Set when the article came from Konfigurera (Varianten … skapades / fanns redan).
   variantInfo: { articleNumber: string; created: boolean } | null;
   // Beställningsvara (to_order): the template stays the row's article, the choices travel with the row.
@@ -277,10 +288,12 @@ export function NewQuoteForm({
           rows: rows.map((r) => ({
             articleId: r.article!.id,
             quantity: Number(r.quantity),
-            // Always sent explicitly — the web never relies on the server's
-            // own price-chain resolution (that path is for the configurator).
-            unitPrice: Number(r.unitPrice),
-            discountPercent: Number(r.discountPercent),
+            // Sent explicitly — except an untouched chain suggestion, which
+            // the server prices itself so the row gets the chain's origin
+            // (and follows the order's markups later).
+            ...(omitUnitPriceOnCreate(r.priceTouched, r.quote)
+              ? {}
+              : { unitPrice: Number(r.unitPrice), discountPercent: Number(r.discountPercent) }),
             unitId: r.unitId === "" ? null : r.unitId,
             configuration: r.configuration ? { selection: r.configuration.selection } : undefined,
             expectedDeliveryDate: perRowDates && r.deliveryDate ? r.deliveryDate : undefined,
@@ -546,6 +559,7 @@ function QuoteRowFields({
         article: article.configuratorMode === "to_order" ? article : null,
         unitId: article.salesUnitId ?? "",
         priceTouched: false,
+        quote: null,
         variantInfo: null,
         configuration: null,
       });
@@ -554,7 +568,7 @@ function QuoteRowFields({
       setConfigureKey((k) => k + 1);
       return;
     }
-    onChange({ article, unitId: article?.salesUnitId ?? "", priceTouched: false, variantInfo: null, configuration: null });
+    onChange({ article, unitId: article?.salesUnitId ?? "", priceTouched: false, quote: null, variantInfo: null, configuration: null });
   }
 
   function handleConfigured(draft: RowConfigurationDraft) {
@@ -562,6 +576,7 @@ function QuoteRowFields({
     if (!row.priceTouched && draft.evaluation.price.unitPrice !== null) {
       onChange({
         configuration: draft,
+        quote: null,
         unitPrice: String(toUnitPrice(draft.evaluation.price.unitPrice, currentFactor)),
         discountPercent: String(draft.evaluation.price.discountPercent),
       });
@@ -576,6 +591,7 @@ function QuoteRowFields({
       article: variant,
       unitId: variant.salesUnitId ?? "",
       priceTouched: false, // the price-quote effect now prices the variant through its chain
+      quote: null,
       variantInfo: { articleNumber: variant.articleNumber, created },
     });
   }
@@ -608,8 +624,13 @@ function QuoteRowFields({
     apiFetch<PriceQuote>(priceQuotePath({ customerId, articleId, quantity: baseQuantity, currency, exchangeRate }))
       .then((quote) => {
         if (seq !== requestSeq.current) return; // superseded by a newer article/quantity edit
-        if (priceTouchedNow.current || !quote.price) return; // no chain match — leave the fields as they are, no error shown
+        if (priceTouchedNow.current) return;
+        if (!quote.price) {
+          onChange({ quote }); // no chain match — the fields stay as they are, only a warning may show
+          return;
+        }
         onChange({
+          quote,
           unitPrice: String(toUnitPrice(quote.price.unitPrice, currentFactor)),
           discountPercent: String(quote.price.discountPercent),
         });
@@ -645,6 +666,7 @@ function QuoteRowFields({
         if (seq !== requestSeq.current) return;
         if (priceTouchedNow.current || evaluation.price.unitPrice === null) return;
         onChange({
+          quote: null,
           unitPrice: String(toUnitPrice(evaluation.price.unitPrice, currentFactor)),
           discountPercent: String(evaluation.price.discountPercent),
         });
@@ -761,6 +783,12 @@ function QuoteRowFields({
             onChange={(e) => onChange({ deliveryDate: e.target.value })}
           />
         </Field>
+      )}
+      {!row.priceTouched && row.quote && calculatedPriceText(row.quote, formatStockholmDate) && (
+        <FormHint>{calculatedPriceText(row.quote, formatStockholmDate)}</FormHint>
+      )}
+      {!row.priceTouched && calculatedUnavailableText(row.quote) && (
+        <FormNotice>{calculatedUnavailableText(row.quote)}</FormNotice>
       )}
       {/* Täckningsbidrag against the article's latest saved pre-calculation,
           recomputed locally as the price is typed. */}

@@ -204,6 +204,25 @@ describe("Kalkylutfall — Mot förkalkyl", () => {
     expect(result.notComparable).toEqual({ onlyPost: 1, invalidQuantity: 0, noOutput: 0 });
   });
 
+  // Pröva påslag (#16): a saved trial moves only the price markups, so as
+  // the article's latest förkalkyl it gives the ordinary TVK/st.
+  it("measures against a saved Pröva påslag with the ordinary TVK", async () => {
+    const p = await makeProduct();
+    const order = await makeOrder(p, { quantity: 4 });
+    await costingService.preCalculate(p.parent.id, 10, true);
+    const { calculation: trial } = await costingService.preCalculate(p.parent.id, 10, true, false, {
+      generalMarkupPercent: 300,
+      materialMarkupPercent: 50,
+    });
+    expect([trial.generalMarkupLevel, trial.materialMarkupLevel]).toEqual(["trial", "trial"]);
+    await costingService.postCalculate(order.id, true);
+
+    const result = await reportsService.getCalculationOutcome({});
+
+    if (result.view !== "pre") throw new Error("view");
+    expect(result.rows[0]).toMatchObject({ preTvkPerUnit: 110, preCalculatedAt: new Date(trial.calculatedAt).toISOString() });
+  });
+
   it("divides by N on a kortstängd order, adds Kalkylerat TVK/st and marks Ej klar", async () => {
     const { posts } = await scenario();
 

@@ -20,6 +20,7 @@ import {
   deliveryTerms,
   freightProducts,
   invoiceRows,
+  invoices,
   manufacturingOrders,
   paymentTerms,
   priceListRows,
@@ -57,6 +58,7 @@ import {
   type PriceListRowInput,
   type SalesDocumentKind,
   type SalesOrderStatus,
+  type SalesRowPriceOrigin,
   type UpdateContactInput,
   type UpdateCustomerInput,
   type UpdateCustomerPriceInput,
@@ -75,7 +77,13 @@ import { resolveStockLocation } from "../../stock/service/location-resolver.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { allocateOutflowLocations, lockArticlesForOutflow } from "../../stock/service/outflow-locations.js";
-import { PriceListInUseError, RowHasManufacturingOrdersError, SalesOrderCurrencyChangedError } from "../service/sales.errors.js";
+import {
+  PriceListInUseError,
+  RowHasManufacturingOrdersError,
+  SalesOrderCurrencyChangedError,
+  SalesOrderMarkupsChangedError,
+} from "../service/sales.errors.js";
+import type { PriceMarkups } from "../service/price-resolver.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/db-errors.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 import { getInvoicedQuantitiesWith } from "./invoice.repository.js";
@@ -212,6 +220,9 @@ export type SalesRowWrite = Omit<CreateSalesOrderRowInput, "configuration"> &
     // Ställkostnad: written as its own row (quantity 1, the Ställkostnads-
     // artikel) right after this one, linked by setup_for_row_id.
     setupCharge?: { articleId: string; unitPrice: number } | null;
+    // Påslag (#16, 0197): where the à-pris came from (the chain's step,
+    // or manual). Server-derived only; omitted = manual (the column's default).
+    priceOrigin?: SalesRowPriceOrigin;
   };
 
 // The linked Ställkostnad row of `mainRowId` — one shape for createQuote and
@@ -237,17 +248,108 @@ function setupChargeRowValues(
 
 export type SalesRowMutationResult =
   | { ok: true; row: typeof salesOrderRows.$inferSelect | null; orderStatus: SalesOrderStatus }
-  | { ok: false; reason: "row_not_found" | "quantity_below_delivered" | "row_has_deliveries" };
+  | { ok: false; reason: "row_not_found" | "quantity_below_delivered" | "row_has_deliveries" | "markups_changed" };
 
 export type RowConfigurationMutationResult =
   | { ok: true; row: typeof salesOrderRows.$inferSelect; previous: typeof salesOrderRows.$inferSelect; orderStatus: SalesOrderStatus }
   | {
       ok: false;
-      reason: "row_not_found" | "order_status" | "delivered" | "manufacturing_order" | "invoice_row";
+      reason: "row_not_found" | "order_status" | "delivered" | "manufacturing_order" | "invoice_row" | "markups_changed";
       orderStatus?: SalesOrderStatus;
     };
 
+// Påslag på offert och order (#16 etapp 3): the repricing the service planned
+// OUTSIDE the header's transaction (the price chain reads the settings and
+// the configurator's variant step on their own connections), re-checked
+// under the locks. One entry per row the lock below selects — priced by the
+// chain (origin chain or calculated), undelivered, neither configured nor a
+// ställkostnad — with the row's stored columns as the plan read them and the
+// planned new price and origin (null = the row keeps its price: invoiced,
+// unchanged, no price, the freight row). An `after` with the row's own price
+// and another origin only moves the origin.
+export type PlannedRowReprice = {
+  articleId: string;
+  quantityOrdered: string;
+  unitFactor: string | null;
+  unitPrice: string;
+  discountPercent: string;
+  priceOrigin: SalesRowPriceOrigin;
+  after: { unitPrice: number; discountPercent: number; priceOrigin: SalesRowPriceOrigin } | null;
+};
+
+// Why a planned row was not written by the header's save: it sits on a live
+// invoice now (a draft or a credit note included), or it left the
+// candidates between the plan and the locks — deleted, delivered or given a
+// handwritten price.
+export type RepricingKeptUnderLock = { rowId: string; reason: "invoiced" | "deleted" | "delivered" | "manual" };
+
+// Sent with every header PATCH that carries a markup field: what the plan
+// was made against (re-read under the order's lock — any difference is
+// "stale" and the service plans again) and the plan itself (null = the
+// markups do not change, nothing is repriced).
+export type HeaderMarkupsGuard = {
+  expected: { currency: string; exchangeRate: string; generalMarkupPercent: string | null; materialMarkupPercent: string | null };
+  reprice: Map<string, PlannedRowReprice> | null;
+};
+
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+// The rows a change of the order's markups may reprice: priced by the chain
+// (price_origin chain or calculated — never manual), nothing delivered, not
+// configured, not a ställkostnad. Invoiced rows are told apart afterwards
+// (rowsOnInvoices).
+const REPRICED_ORIGINS: SalesRowPriceOrigin[] = ["chain", "calculated"];
+function repricingCandidateWhere(orderId: string) {
+  return and(
+    eq(salesOrderRows.salesOrderId, orderId),
+    inArray(salesOrderRows.priceOrigin, REPRICED_ORIGINS),
+    eq(salesOrderRows.quantityDelivered, "0"),
+    isNull(salesOrderRows.configuration),
+    isNull(salesOrderRows.setupForRowId)
+  );
+}
+
+// The rows that sit on an invoice row of a live invoice — a draft and a
+// credit note count, a cancelled invoice does not. Such a row keeps its
+// price when the order's markups change.
+async function rowsOnInvoices(exec: Db | Tx, rowIds: string[]): Promise<Set<string>> {
+  if (rowIds.length === 0) return new Set();
+  const found = await exec
+    .selectDistinct({ rowId: invoiceRows.salesOrderRowId })
+    .from(invoiceRows)
+    .innerJoin(invoices, eq(invoices.id, invoiceRows.invoiceId))
+    .where(and(inArray(invoiceRows.salesOrderRowId, rowIds), ne(invoices.status, "cancelled")));
+  return new Set(found.map((r) => r.rowId).filter((id): id is string => id !== null));
+}
+
+// The order's own markups as the numbers a row was priced with.
+function orderMarkupsOf(order: { generalMarkupPercent: string | null; materialMarkupPercent: string | null }): PriceMarkups {
+  return {
+    generalMarkupPercent: order.generalMarkupPercent === null ? null : Number(order.generalMarkupPercent),
+    materialMarkupPercent: order.materialMarkupPercent === null ? null : Number(order.materialMarkupPercent),
+  };
+}
+
+// A row priced by the chain (an omitted à-pris) used the order's markups as
+// the service read them, before the row's transaction. The header PATCH
+// changes them under the order's FOR UPDATE and reprices only the rows it
+// can see, so the writer re-reads them FOR KEY SHARE (which waits for that
+// lock) after its own row lock: unchanged ⇒ the price stands; changed ⇒ the
+// row is refused (sales-order-markups-changed) instead of landing with the
+// old markups' price. null `priced` = no markups of the order's own.
+async function orderMarkupsUnchanged(tx: Tx, orderId: string, priced: PriceMarkups | null): Promise<boolean> {
+  const [order] = await tx
+    .select({ generalMarkupPercent: salesOrders.generalMarkupPercent, materialMarkupPercent: salesOrders.materialMarkupPercent })
+    .from(salesOrders)
+    .where(eq(salesOrders.id, orderId))
+    .for("key share");
+  if (!order) return true;
+  const current = orderMarkupsOf(order);
+  return (
+    current.generalMarkupPercent === (priced?.generalMarkupPercent ?? null) &&
+    current.materialMarkupPercent === (priced?.materialMarkupPercent ?? null)
+  );
+}
 
 // One order row (and its ställkostnadsrad, when the write carries one)
 // inside the caller's transaction — shared by addRow and findOrAddArticleRow.
@@ -266,6 +368,7 @@ async function insertRow(tx: Tx, salesOrderId: string, input: SalesRowWrite) {
       configuration: input.configuration ?? null,
       configurationCost: input.configurationCost ?? null,
       expectedDeliveryDate: input.expectedDeliveryDate ?? null,
+      priceOrigin: input.priceOrigin ?? "manual",
     })
     .returning();
   if (input.setupCharge) {
@@ -296,13 +399,25 @@ async function insertNewDeliveryAddress(tx: Tx, customerId: string, input: NewDe
 
 // bumpRevision is a directive, not a column — stripped before the spread.
 // Valuta: the rate is numeric (a string column), resolved by the service.
+// Påslag (#16 etapp 3): the two markups are numeric columns (strings);
+// confirmRepricing is a directive like bumpRevision.
 async function writeSalesOrderHeader(dbc: Db | Tx, orderId: string, input: UpdateSalesOrderHeaderInput) {
-  const { bumpRevision, newDeliveryAddress: _newDeliveryAddress, exchangeRate, ...fields } = input;
+  const {
+    bumpRevision,
+    confirmRepricing: _confirmRepricing,
+    newDeliveryAddress: _newDeliveryAddress,
+    exchangeRate,
+    generalMarkupPercent,
+    materialMarkupPercent,
+    ...fields
+  } = input;
   const [row] = await dbc
     .update(salesOrders)
     .set({
       ...fields,
       ...(exchangeRate !== undefined ? { exchangeRate: String(exchangeRate) } : {}),
+      generalMarkupPercent: markupColumn(generalMarkupPercent),
+      materialMarkupPercent: markupColumn(materialMarkupPercent),
       revision: bumpRevision !== false ? sql`${salesOrders.revision} + 1` : undefined,
       updatedAt: new Date(),
     })
@@ -374,6 +489,12 @@ async function rowConfigurationGuards(
   return { ok: true, row: found.row, orderStatus: found.orderStatus };
 }
 
+// A customer's price markup (#16) for its numeric(6,2) column: undefined =
+// leave it (drizzle skips the key), null = inherit again.
+function markupColumn(value: number | null | undefined): string | null | undefined {
+  return value === undefined || value === null ? value : String(value);
+}
+
 // Överleverans on a customer PATCH: the percentage belongs to Tillåt only
 // (CHECK customers_over_delivery_percent). Another choice clears it; a
 // percentage sent alone is kept only if the stored choice is Tillåt.
@@ -410,10 +531,13 @@ export function createSalesRepository(db: Db) {
       // guard updateCustomer already applies below.
       // Dröjsmålsränta: lateInterestRate is numeric(5,2) — the same
       // string/omit treatment as discountPercent (null clears).
-      const { discountPercent, lateInterestRate, overDelivery, overDeliveryPercent, ...rest } = input;
+      const { discountPercent, lateInterestRate, overDelivery, overDeliveryPercent, generalMarkupPercent, materialMarkupPercent, ...rest } = input;
       const values = {
         ...rest,
         ...(discountPercent === undefined ? {} : { discountPercent: String(discountPercent) }),
+        // Påslag per kund (#16): numeric(6,2), null/omitted = inherit.
+        generalMarkupPercent: markupColumn(generalMarkupPercent),
+        materialMarkupPercent: markupColumn(materialMarkupPercent),
         ...(lateInterestRate === undefined ? {} : { lateInterestRate: lateInterestRate === null ? null : String(lateInterestRate) }),
         // Överleverans: the percentage belongs to Tillåt only (CHECK
         // customers_over_delivery_percent).
@@ -436,10 +560,13 @@ export function createSalesRepository(db: Db) {
     },
 
     async updateCustomer(id: string, input: UpdateCustomerInput) {
-      const { discountPercent, lateInterestRate, overDelivery, overDeliveryPercent, ...rest } = input;
+      const { discountPercent, lateInterestRate, overDelivery, overDeliveryPercent, generalMarkupPercent, materialMarkupPercent, ...rest } = input;
       const set = {
         ...rest,
         ...(discountPercent === undefined ? {} : { discountPercent: String(discountPercent) }),
+        // Påslag per kund (#16): undefined = unchanged (drizzle skips the key), null = inherit again.
+        generalMarkupPercent: markupColumn(generalMarkupPercent),
+        materialMarkupPercent: markupColumn(materialMarkupPercent),
         ...(lateInterestRate === undefined ? {} : { lateInterestRate: lateInterestRate === null ? null : String(lateInterestRate) }),
         ...overDeliveryUpdate(overDelivery, overDeliveryPercent),
       };
@@ -671,8 +798,26 @@ export function createSalesRepository(db: Db) {
     // longer uses is deleted — nothing else can reference it, but the
     // NOT EXISTS keeps a second order pointing at it (only possible through
     // a bug) from losing its address.
-    async updateSalesOrderHeaderWithAddress(orderId: string, input: UpdateSalesOrderHeaderInput) {
+    //
+    // Påslag på offert och order (#16 etapp 3): with `markups` (any markup
+    // field sent) the plan the service made outside is re-checked here. Lock
+    // order rad → order, as updateRow/deliverBatch/the invoice's commit: the
+    // candidate rows FOR UPDATE in id order first, then the order. Under the
+    // order's lock no row can be added (addRow's KEY SHARE waits) and the
+    // candidates are read again without a lock — a row that became one in
+    // between (committed after the first read) makes the plan "stale", as
+    // does a locked row whose columns differ from the plan's, or an order
+    // whose currency, rate or markups are no longer the ones planned with.
+    // Stale ⇒ nothing written, the service plans again. Then the header and
+    // the planned prices are written, a row now on an invoice (a draft
+    // included) keeping its price. A planned row the lock no longer selected
+    // (deleted, delivered or made manual in between) keeps its price too;
+    // `kept` says why for each. No price chain runs in here.
+    async updateSalesOrderHeaderWithAddress(orderId: string, input: UpdateSalesOrderHeaderInput, markups?: HeaderMarkupsGuard) {
       return db.transaction(async (tx) => {
+        const locked = markups?.reprice
+          ? await tx.select().from(salesOrderRows).where(repricingCandidateWhere(orderId)).orderBy(asc(salesOrderRows.id)).for("update")
+          : [];
         const [order] = await tx
           .select({
             id: salesOrders.id,
@@ -680,6 +825,9 @@ export function createSalesRepository(db: Db) {
             customerId: salesOrders.customerId,
             deliveryAddressId: salesOrders.deliveryAddressId,
             currency: salesOrders.currency,
+            exchangeRate: salesOrders.exchangeRate,
+            generalMarkupPercent: salesOrders.generalMarkupPercent,
+            materialMarkupPercent: salesOrders.materialMarkupPercent,
           })
           .from(salesOrders)
           .where(eq(salesOrders.id, orderId))
@@ -709,6 +857,70 @@ export function createSalesRepository(db: Db) {
             .limit(1);
           if (row) return { ok: false as const, reason: "currency_locked" as const };
         }
+        const repriced: string[] = [];
+        const kept: RepricingKeptUnderLock[] = [];
+        if (markups) {
+          const { expected, reprice } = markups;
+          const sameMarkups =
+            order.generalMarkupPercent === expected.generalMarkupPercent && order.materialMarkupPercent === expected.materialMarkupPercent;
+          // Without a plan only the markups matter (another PATCH changed
+          // them ⇒ this one does change them after all); with one the
+          // currency and rate the prices were planned in too.
+          const sameBasis = sameMarkups && (!reprice || (order.currency === expected.currency && order.exchangeRate === expected.exchangeRate));
+          if (!sameBasis) return { ok: false as const, reason: "stale" as const };
+          if (reprice) {
+            const lockedIds = new Set(locked.map((r) => r.id));
+            const now = await tx.select({ id: salesOrderRows.id }).from(salesOrderRows).where(repricingCandidateWhere(orderId));
+            if (now.some((r) => !lockedIds.has(r.id))) return { ok: false as const, reason: "stale" as const };
+            const asPlanned = (row: (typeof locked)[number], plan: PlannedRowReprice | undefined) =>
+              plan !== undefined &&
+              plan.articleId === row.articleId &&
+              plan.quantityOrdered === row.quantityOrdered &&
+              plan.unitFactor === row.unitFactor &&
+              plan.unitPrice === row.unitPrice &&
+              plan.discountPercent === row.discountPercent &&
+              plan.priceOrigin === row.priceOrigin;
+            if (locked.some((row) => !asPlanned(row, reprice.get(row.id)))) return { ok: false as const, reason: "stale" as const };
+            const onInvoices = await rowsOnInvoices(
+              tx,
+              locked.filter((r) => reprice.get(r.id)!.after).map((r) => r.id)
+            );
+            for (const row of locked) {
+              const after = reprice.get(row.id)!.after;
+              if (!after) continue;
+              if (onInvoices.has(row.id)) {
+                kept.push({ rowId: row.id, reason: "invoiced" });
+                continue;
+              }
+              await tx
+                .update(salesOrderRows)
+                .set({ unitPrice: String(after.unitPrice), discountPercent: String(after.discountPercent), priceOrigin: after.priceOrigin })
+                .where(eq(salesOrderRows.id, row.id));
+              repriced.push(row.id);
+            }
+            // The planned rows that left the candidates before the lock: why
+            // each kept its price — for the answer only, nothing is written
+            // on it.
+            const left = [...reprice.entries()].filter(([id, plan]) => plan.after && !lockedIds.has(id)).map(([id]) => id);
+            if (left.length > 0) {
+              const current = new Map(
+                (
+                  await tx
+                    .select({ id: salesOrderRows.id, priceOrigin: salesOrderRows.priceOrigin, quantityDelivered: salesOrderRows.quantityDelivered })
+                    .from(salesOrderRows)
+                    .where(inArray(salesOrderRows.id, left))
+                ).map((r) => [r.id, r])
+              );
+              for (const id of left) {
+                const row = current.get(id);
+                kept.push({
+                  rowId: id,
+                  reason: !row ? "deleted" : row.priceOrigin === "manual" ? "manual" : Number(row.quantityDelivered) > 0 ? "delivered" : "manual",
+                });
+              }
+            }
+          }
+        }
         const { newDeliveryAddress, ...fields } = input;
         if (newDeliveryAddress) {
           fields.deliveryAddressId = (await insertNewDeliveryAddress(tx, order.customerId, newDeliveryAddress)).id;
@@ -726,8 +938,15 @@ export function createSalesRepository(db: Db) {
               )
             );
         }
-        return { ok: true as const, order: updated! };
+        return { ok: true as const, order: updated!, repriced, kept };
       });
+    },
+
+    // Påslag (#16 etapp 3): the plan's read of which rows sit on a live
+    // invoice (rowsOnInvoices) — re-read under the locks when the plan is
+    // carried out.
+    async rowsOnInvoices(rowIds: string[]) {
+      return rowsOnInvoices(db, rowIds);
     },
 
     // Atomic: the order header and all its rows are created together, per
@@ -819,6 +1038,7 @@ export function createSalesRepository(db: Db) {
                 configurationCost: r.configurationCost ?? null,
                 // null = the row follows the order's Leveransdatum.
                 expectedDeliveryDate: r.expectedDeliveryDate ?? null,
+                priceOrigin: r.priceOrigin ?? "manual",
                 createdAt: new Date(now + stamp++),
               };
               return id && r.setupCharge
@@ -1107,15 +1327,35 @@ export function createSalesRepository(db: Db) {
     // FOR NO KEY UPDATE), which a held FOR SHARE would deadlock. Only the
     // order is locked here (no row exists yet), so the rad → huvud order of
     // updateRow/replaceRowConfiguration is not crossed.
-    async addRow(salesOrderId: string, input: SalesRowWrite, pricedIn?: string) {
+    //
+    // Påslag (#16 etapp 3): `pricedWithMarkups` (a row priced by the chain)
+    // is the order's markups the service priced with — compared under the
+    // same KEY SHARE, so a header PATCH that changed them meanwhile (and
+    // repriced only the rows it saw) refuses this row instead
+    // (sales-order-markups-changed). undefined = an à-pris was sent.
+    async addRow(salesOrderId: string, input: SalesRowWrite, pricedIn?: string, pricedWithMarkups?: PriceMarkups | null) {
       return db.transaction(async (tx) => {
         if (pricedIn !== undefined) {
           const [order] = await tx
-            .select({ orderNumber: salesOrders.orderNumber, currency: salesOrders.currency })
+            .select({
+              orderNumber: salesOrders.orderNumber,
+              currency: salesOrders.currency,
+              generalMarkupPercent: salesOrders.generalMarkupPercent,
+              materialMarkupPercent: salesOrders.materialMarkupPercent,
+            })
             .from(salesOrders)
             .where(eq(salesOrders.id, salesOrderId))
             .for("key share");
           if (order && order.currency !== pricedIn) throw new SalesOrderCurrencyChangedError(order.orderNumber, pricedIn, order.currency);
+          if (order && pricedWithMarkups !== undefined) {
+            const current = orderMarkupsOf(order);
+            if (
+              current.generalMarkupPercent !== (pricedWithMarkups?.generalMarkupPercent ?? null) ||
+              current.materialMarkupPercent !== (pricedWithMarkups?.materialMarkupPercent ?? null)
+            ) {
+              throw new SalesOrderMarkupsChangedError(order.orderNumber);
+            }
+          }
         }
         return insertRow(tx, salesOrderId, input);
       });
@@ -1242,8 +1482,24 @@ export function createSalesRepository(db: Db) {
       // when a quantity change repriced a configured row; undefined leaves
       // the stored one as it is. 4c: likewise the förkalkyl at the new
       // quantity (configurationCost; undefined = untouched, null = unknown).
+      // Påslag (#16, 0197): `priceOrigin` is written as given — the service
+      // sends it when it set the price itself (the chain at a new quantity:
+      // its step, or manual with a rabatt sent along; a configured row:
+      // manual). Without it, an à-pris or a rabatt in the patch that differs
+      // from the stored one makes the row manual, compared under the row
+      // lock at the columns' scales (4 and 2 decimals): the order card
+      // always resends both, and resending them unchanged keeps the origin.
+      // Påslag (#16 etapp 3): when the chain priced the row,
+      // `pricedWithMarkups` is the order's markups it was priced with —
+      // re-read FOR KEY SHARE after the row lock (row → order, as the
+      // revision bump), "markups_changed" when a header PATCH changed them.
       patch: Omit<UpdateSalesOrderRowInput, "unitId" | "bumpRevision"> &
-        Partial<UnitSnapshot> & { configuration?: OrderRowConfiguration; configurationCost?: OrderRowConfigurationCost | null },
+        Partial<UnitSnapshot> & {
+          configuration?: OrderRowConfiguration;
+          configurationCost?: OrderRowConfigurationCost | null;
+          priceOrigin?: SalesRowPriceOrigin;
+          pricedWithMarkups?: PriceMarkups | null;
+        },
       bump = true
     ): Promise<SalesRowMutationResult> {
       return db.transaction(async (tx) => {
@@ -1253,6 +1509,9 @@ export function createSalesRepository(db: Db) {
           .where(and(eq(salesOrderRows.id, rowId), eq(salesOrderRows.salesOrderId, orderId)))
           .for("update");
         if (!row) return { ok: false, reason: "row_not_found" };
+        if (patch.pricedWithMarkups !== undefined && !(await orderMarkupsUnchanged(tx, orderId, patch.pricedWithMarkups))) {
+          return { ok: false, reason: "markups_changed" };
+        }
         // An over-delivered row (#24) holds more delivered than ordered: an
         // edit that resends the same quantity (the card always sends it) is
         // no reduction and must not be refused.
@@ -1273,6 +1532,7 @@ export function createSalesRepository(db: Db) {
           configuration?: OrderRowConfiguration;
           configurationCost?: OrderRowConfigurationCost | null;
           expectedDeliveryDate?: string | null;
+          priceOrigin?: SalesRowPriceOrigin;
         } = {};
         if (patch.quantity !== undefined) set.quantityOrdered = String(patch.quantity);
         if (patch.unitPrice !== undefined) set.unitPrice = String(patch.unitPrice);
@@ -1282,6 +1542,14 @@ export function createSalesRepository(db: Db) {
         if (patch.configuration !== undefined) set.configuration = patch.configuration;
         if (patch.configurationCost !== undefined) set.configurationCost = patch.configurationCost;
         if (patch.expectedDeliveryDate !== undefined) set.expectedDeliveryDate = patch.expectedDeliveryDate;
+        if (patch.priceOrigin !== undefined) set.priceOrigin = patch.priceOrigin;
+        else if (
+          (patch.unitPrice !== undefined && Math.round(patch.unitPrice * 10000) !== Math.round(Number(row.unitPrice) * 10000)) ||
+          (patch.discountPercent !== undefined &&
+            Math.round(patch.discountPercent * 100) !== Math.round(Number(row.discountPercent) * 100))
+        ) {
+          set.priceOrigin = "manual";
+        }
         const [updated] = await tx.update(salesOrderRows).set(set).where(eq(salesOrderRows.id, rowId)).returning();
 
         if (bump) await bumpRevision(tx, orderId);
@@ -1317,12 +1585,21 @@ export function createSalesRepository(db: Db) {
         configurationCost: OrderRowConfigurationCost | null;
         unitPrice: number;
         discountPercent: number;
+        // Påslag (#16, 0197): the replaced price's origin — the variant
+        // chain's step on a variant row, manual on a beställningsvara.
+        priceOrigin: SalesRowPriceOrigin;
+        // A variant row priced by the chain: the order's markups it was
+        // priced with, re-read like updateRow's (#16 etapp 3).
+        pricedWithMarkups?: PriceMarkups | null;
       },
       bump = true
     ): Promise<RowConfigurationMutationResult> {
       return db.transaction(async (tx) => {
         const found = await rowConfigurationGuards(tx, orderId, rowId, true);
         if (!found.ok) return found;
+        if (patch.pricedWithMarkups !== undefined && !(await orderMarkupsUnchanged(tx, orderId, patch.pricedWithMarkups))) {
+          return { ok: false, reason: "markups_changed" };
+        }
 
         const [updated] = await tx
           .update(salesOrderRows)
@@ -1332,6 +1609,7 @@ export function createSalesRepository(db: Db) {
             configurationCost: patch.configurationCost,
             unitPrice: String(patch.unitPrice),
             discountPercent: String(patch.discountPercent),
+            priceOrigin: patch.priceOrigin,
           })
           .where(eq(salesOrderRows.id, rowId))
           .returning();
@@ -1500,6 +1778,19 @@ export function createSalesRepository(db: Db) {
               .where(and(inArray(salesOrderRows.id, rowIds), eq(salesOrderRows.salesOrderId, orderId)))
           ).map((r) => r.articleId);
           await lockArticlesForOutflow(tx, articleIds);
+          // The order's rows in id order before the loop takes them one by
+          // one in the request's order — the header PATCH that reprices
+          // rows (#16 etapp 3) and the invoice's commit lock several rows
+          // of an order in id order too, so two of them never wait on each
+          // other crosswise.
+          if (rowIds.length > 0) {
+            await tx
+              .select({ id: salesOrderRows.id })
+              .from(salesOrderRows)
+              .where(and(inArray(salesOrderRows.id, rowIds), eq(salesOrderRows.salesOrderId, orderId)))
+              .orderBy(asc(salesOrderRows.id))
+              .for("update");
+          }
 
           const updatedRows: (typeof salesOrderRows.$inferSelect)[] = [];
           // Ångra utleverans: where each row's goods were taken from and the

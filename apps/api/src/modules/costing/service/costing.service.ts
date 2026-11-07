@@ -1,11 +1,16 @@
 import {
   SEK,
+  type CalculatedPriceDetail,
+  type CalculatedPriceUnavailable,
+  type CostCalculationMarkupLevel,
   type CostCalculationType,
   type CostingMaterialSource,
   type CostingSupplierPriceTier,
   type CostVarianceAnalysis,
   type DerivedCosting,
+  type TrialMarkups,
 } from "@navet/shared";
+import type { Db, Tx } from "@navet/db";
 import type {
   CostCalculationWrite,
   CostingRepository,
@@ -13,6 +18,15 @@ import type {
   OperationRowWrite,
 } from "../repository/costing.repository.js";
 import { applyMarkups, type CostingMarkups, type MarkedUpCosts } from "./markup.js";
+import {
+  calculatedUnitPrice,
+  calculationMarkups,
+  hasOwnMarkups,
+  orderRowMarkups,
+  percentOrNull,
+  type LevelMarkups,
+} from "./markup-levels.js";
+import { readCalculatedPriceBasis } from "../repository/calculated-price.js";
 import {
   buildMaterialRow,
   buildOperationRow,
@@ -89,6 +103,16 @@ export class InvalidCalculationQuantityError extends Error {
   constructor(id: string) {
     super(`Cost calculation ${id} has no usable quantity`);
     this.name = "InvalidCalculationQuantityError";
+  }
+}
+
+// Sätt försäljningspris from a calculation saved with Pröva påslag, by a user
+// who may not set the article's sales price directly (no Artiklar). The route
+// answers 403 forbidden — the same refusal as the price field on the card.
+export class TrialSalesPriceNotAllowedError extends Error {
+  constructor(id: string) {
+    super(`Cost calculation ${id} uses tried markups; setting the sales price from it requires the Artiklar permission`);
+    this.name = "TrialSalesPriceNotAllowedError";
   }
 }
 
@@ -223,6 +247,12 @@ export interface CostCalculationDraft {
   affoPercent: string;
   generalMarkupPercent: string;
   materialMarkupPercent: string;
+  // Påslag per nivå (#16): where each price markup came from, and the base
+  // the materialpåslag was taken on (always set on a new calculation; null
+  // only on a multi-level calculation saved before 0194).
+  generalMarkupLevel: CostCalculationMarkupLevel;
+  materialMarkupLevel: CostCalculationMarkupLevel;
+  materialMarkupBase: string | null;
   type: CostCalculationType;
   calculatedAt: null;
   // Avvikelseanalys (#14) — null on a förkalkyl.
@@ -235,6 +265,12 @@ export interface CostCalculationDraft {
 // The saved header exactly as the repository returns it. Named so the
 // save-aware overloads below can say which of the two shapes a call yields.
 export type SavedCostCalculation = Awaited<ReturnType<CostingRepository["createCostCalculation"]>>;
+
+// The level each price markup of a calculation was resolved on (#16).
+interface MarkupLevelsOfHeader {
+  generalMarkupLevel: CostCalculationMarkupLevel;
+  materialMarkupLevel: CostCalculationMarkupLevel;
+}
 
 // Money columns are numeric(14,4), percent columns numeric(6,2). Two
 // different paths turn a header number into the stored/displayed text: the
@@ -264,9 +300,10 @@ function percent(value: number): string {
 // Everything the calculation is, before it is (maybe) written. TVK and SVK from
 // applyMarkups are derived and never stored, so they are deliberately dropped
 // here; the System → Kalkyler configuration is snapshotted onto the header so
-// an old calculation stays explainable after the settings change. Every field
-// is rounded to its column's scale here — the one and only rounding — so the
-// draft and the saved row can never diverge on it (see `round` above).
+// an old calculation stays explainable after the settings change — with the
+// level each price markup came from (#16). Every field is rounded to its
+// column's scale here — the one and only rounding — so the draft and the
+// saved row can never diverge on it (see `round` above).
 function toHeader(
   identity: {
     articleId: string;
@@ -278,6 +315,7 @@ function toHeader(
   costs: MarkedUpCosts,
   source: CostingMaterialSource,
   markups: CostingMarkups,
+  levels: MarkupLevelsOfHeader,
   // The avvikelseanalys's header inputs — efterkalkyl only.
   variance: { outputQuantity: number; preliminary: boolean; basePricedAt: Date; baseMaterialSource: CostingMaterialSource } | null = null
 ): CostCalculationWrite {
@@ -304,6 +342,9 @@ function toHeader(
     affoPercent: round(markups.affoPercent, 2),
     generalMarkupPercent: round(markups.generalMarkupPercent, 2),
     materialMarkupPercent: round(markups.materialMarkupPercent, 2),
+    generalMarkupLevel: levels.generalMarkupLevel,
+    materialMarkupLevel: levels.materialMarkupLevel,
+    materialMarkupBase: round(costs.materialMarkupBase, 4),
     outputQuantity: variance ? round(variance.outputQuantity, 4) : null,
     preliminary: variance?.preliminary ?? null,
     basePricedAt: variance?.basePricedAt ?? null,
@@ -335,6 +376,9 @@ function toDraft(header: CostCalculationWrite): CostCalculationDraft {
     affoPercent: percent(header.affoPercent),
     generalMarkupPercent: percent(header.generalMarkupPercent),
     materialMarkupPercent: percent(header.materialMarkupPercent),
+    generalMarkupLevel: header.generalMarkupLevel,
+    materialMarkupLevel: header.materialMarkupLevel,
+    materialMarkupBase: money(header.materialMarkupBase),
     type: header.type,
     calculatedAt: null,
     outputQuantity: header.outputQuantity === null ? null : money(header.outputQuantity),
@@ -466,6 +510,36 @@ export function createCostingService(
     };
   }
 
+  // Påslag per nivå (#16): System → Kalkyler's markups with the two PRICE
+  // markups resolved for the costed (sold) article — Pröva påslag →
+  // varugrupp → företaget, field by field (markup-levels.ts, the one rule).
+  // MO, LO and Affo stay the company's, so TVK and SVK never move. The whole
+  // run — multi-level sub-levels included — uses the result. The two price
+  // percentages come back rounded to the header's two decimals
+  // (effectiveMarkups → roundPercent), so the amounts are priced at exactly
+  // the percentage the header stores — company, group and trial alike.
+  async function articleMarkups(articleId: string, company: CostingMarkups, trial: TrialMarkups | null = null) {
+    const group = await repo.getArticleGroupMarkups(articleId);
+    const resolved = calculationMarkups(
+      company,
+      group && {
+        generalMarkupPercent: percentOrNull(group.generalMarkupPercent),
+        materialMarkupPercent: percentOrNull(group.materialMarkupPercent),
+      },
+      trial
+    );
+    const markups: CostingMarkups = {
+      ...company,
+      generalMarkupPercent: resolved.generalMarkup.percent,
+      materialMarkupPercent: resolved.materialMarkup.percent,
+    };
+    const levels: MarkupLevelsOfHeader = {
+      generalMarkupLevel: resolved.generalMarkup.level,
+      materialMarkupLevel: resolved.materialMarkup.level,
+    };
+    return { markups, levels };
+  }
+
 
   // No MO required — direct BOM components x their unit cost + Routing x work
   // center hourly rate, for a hypothetical quantity, then the markups from
@@ -478,12 +552,17 @@ export function createCostingService(
   // MANUFACTURED component into its own structure and routing instead of
   // reading its standard cost; see sub-assembly.ts. Off by default, and with
   // it off this produces exactly the numbers it always has.
-  async function computePreCalculation(articleId: string, quantity: number, multiLevel: boolean) {
+  //
+  // `trial` (Pröva påslag, #16): price markups that override the article's
+  // varugrupp → företaget for this run only; nothing in the settings or on
+  // the group changes, and the header records level "trial" per tried field.
+  async function computePreCalculation(articleId: string, quantity: number, multiLevel: boolean, trial: TrialMarkups | null) {
     const article = await repo.findArticleById(articleId);
     if (!article) throw new ArticleNotFoundError(articleId);
 
     const warnings: string[] = [];
-    const { source: configured, supplierPriceTier, markups } = await loadCostingConfig(settings);
+    const { source: configured, supplierPriceTier, markups: company } = await loadCostingConfig(settings);
+    const { markups, levels } = await articleMarkups(articleId, company, trial);
     const source = preCalculationSource(configured, warnings);
     const port = ratedPort(repo, createRateAttacher(rates, source, today()));
 
@@ -522,7 +601,8 @@ export function createCostingService(
       { articleId, manufacturingOrderId: null, quantity, type: "pre", multiLevel },
       costs,
       configured,
-      markups
+      markups,
+      levels
     );
     return { header, materialRows, operationRows, warnings };
   }
@@ -561,7 +641,10 @@ export function createCostingService(
     if (!order) throw new ManufacturingOrderNotFoundError(manufacturingOrderId);
 
     const warnings: string[] = [];
-    const { source: preSource, postSource: source, supplierPriceTier, markups } = await loadCostingConfig(settings);
+    const { source: preSource, postSource: source, supplierPriceTier, markups: company } = await loadCostingConfig(settings);
+    // The order's article's varugrupp → företaget (#16): only the sales price
+    // moves — TVK and the variance analysis (MO/LO) are the company's.
+    const { markups, levels } = await articleMarkups(order.articleId, company);
 
     const rawConsumptions = await repo.getMaterialConsumptionsWithCost(manufacturingOrderId);
     // One load of the price histories serves both sides: the efterkalkyl's
@@ -749,6 +832,7 @@ export function createCostingService(
       costs,
       source,
       markups,
+      levels,
       { outputQuantity: output.received, preliminary: output.preliminary, basePricedAt, baseMaterialSource: baseSource }
     );
     const labels: VarianceLabels = {
@@ -765,19 +849,22 @@ export function createCostingService(
     articleId: string,
     quantity: number,
     save: true,
-    multiLevel?: boolean
+    multiLevel?: boolean,
+    trial?: TrialMarkups | null
   ): Promise<{ calculation: SavedCostCalculation; warnings: string[] }>;
   async function preCalculate(
     articleId: string,
     quantity: number,
     save?: false,
-    multiLevel?: boolean
+    multiLevel?: boolean,
+    trial?: TrialMarkups | null
   ): Promise<{ calculation: CostCalculationDraft; warnings: string[] }>;
   // multiLevel is the FOURTH parameter, deliberately after `save`: callers
   // already pass `true` in third position to mean "save", and moving that
   // meaning would silently turn every one of them into a multi-level preview.
-  async function preCalculate(articleId: string, quantity: number, save = false, multiLevel = false) {
-    const { header, materialRows, operationRows, warnings } = await computePreCalculation(articleId, quantity, multiLevel);
+  // `trial` (Pröva påslag, #16) is the fifth, for the same reason.
+  async function preCalculate(articleId: string, quantity: number, save = false, multiLevel = false, trial: TrialMarkups | null = null) {
+    const { header, materialRows, operationRows, warnings } = await computePreCalculation(articleId, quantity, multiLevel, trial);
     const calculation = save ? await repo.createCostCalculation(header, materialRows, operationRows) : toDraft(header);
     return { calculation, warnings: distinct(warnings) };
   }
@@ -824,8 +911,13 @@ export function createCostingService(
   // the same markups, material source and supplier tier. Nothing is saved.
   async function previewStructure(articleId: string, quantity: number, structure: PreviewStructure): Promise<DerivedCosting> {
     const warnings: string[] = [];
-    const { source: configured, supplierPriceTier, markups } = await loadCostingConfig(settings);
+    const { source: configured, supplierPriceTier, markups: company } = await loadCostingConfig(settings);
     const source = preCalculationSource(configured, warnings);
+    // The template's varugrupp → företaget (#16). Moves only the test
+    // panel's Materialpåslag: the price is the template's own model (grundpris
+    // + tillägg), and TVK/SVK — the beställningsvara's cost and the variant's
+    // standard price — never read the price markups.
+    const { markups } = await articleMarkups(articleId, company);
 
     const labels = new Map(
       (await repo.getArticleLabels([...new Set(structure.components.map((c) => c.componentArticleId))])).map((a) => [a.id, a])
@@ -946,12 +1038,79 @@ export function createCostingService(
       return articles.updateStandardCost(calculation.articleId, round(perUnitCost, 4));
     },
 
-    async applySalesPriceFromCalculation(id: string) {
+    // Pröva påslag (#16, the review of etapp 1): a calculation saved with a
+    // tried markup can carry any price markup its author typed, and the route
+    // only asks for Artiklar OR Tillverkning — while setting the article's
+    // försäljningspris directly needs Artiklar. So writing a TRIED price back
+    // takes Artiklar too (`mayApplyTrial`, decided by the route); a calculation
+    // on the group's and the company's markups stays open to Tillverkning.
+    async applySalesPriceFromCalculation(id: string, opts: { mayApplyTrial?: boolean } = {}) {
       const calculation = await repo.findCostCalculationById(id);
       if (!calculation) throw new CostCalculationNotFoundError(id);
+      const tried = calculation.generalMarkupLevel === "trial" || calculation.materialMarkupLevel === "trial";
+      if (tried && opts.mayApplyTrial === false) throw new TrialSalesPriceNotAllowedError(id);
       const perUnitPrice = perUnit(Number(calculation.salesPrice), calculation.quantity);
       if (perUnitPrice === null) throw new InvalidCalculationQuantityError(id);
       return articles.updateSalesPrice(calculation.articleId, round(perUnitPrice, 4));
+    },
+
+    // Kalkylpris (#16 etapp 2) — the price chain's step after the price list
+    // (sales/service/price-resolver.ts, bound in app.ts). null = the step
+    // does not apply: neither the customer nor the order has a price markup
+    // of its own, so the article's försäljningspris stays the company's
+    // price and nothing is read. Otherwise the article's latest saved
+    // förkalkyl (the one TB reads — calculated-price.ts) re-priced with the
+    // row's markups, order → customer → varugrupp → company (orderRowMarkups,
+    // field by field), as a delta against the calculation's own percentages
+    // and base (calculatedUnitPrice). SEK, four decimals; the chain converts
+    // to the order's currency. `dbc` is the caller's handle — a transaction
+    // in etapp 3's repricing; the company's percentages come from the
+    // settings reader, never from the transaction.
+    async calculatedPrice(
+      dbc: Db | Tx,
+      q: { articleId: string; customer: LevelMarkups | null; order?: LevelMarkups | null }
+    ): Promise<{ unitPrice: number; calculated: CalculatedPriceDetail } | { unavailable: CalculatedPriceUnavailable } | null> {
+      if (!hasOwnMarkups(q.customer, q.order)) return null;
+      const { markups: company } = await loadCostingConfig(settings);
+      const { calculation, group } = await readCalculatedPriceBasis(dbc, q.articleId);
+      const resolved = orderRowMarkups({
+        order: q.order ?? null,
+        customer: q.customer,
+        group: group && {
+          generalMarkupPercent: percentOrNull(group.generalMarkupPercent),
+          materialMarkupPercent: percentOrNull(group.materialMarkupPercent),
+        },
+        company: { generalMarkupPercent: company.generalMarkupPercent, materialMarkupPercent: company.materialMarkupPercent },
+      });
+      if (!calculation) return { unavailable: "no-calculation" };
+      const priced = calculatedUnitPrice(
+        {
+          salesPrice: Number(calculation.salesPrice),
+          selfCost: selfCost(calculation),
+          materialMarkupBase: calculation.materialMarkupBase === null ? null : Number(calculation.materialMarkupBase),
+          generalMarkupPercent: Number(calculation.generalMarkupPercent),
+          materialMarkupPercent: Number(calculation.materialMarkupPercent),
+          quantity: Number(calculation.quantity),
+          // Whether it was priced under today's chain (before 0130 TO sat
+          // inside TVK/SVK — "calculation-outdated" when g moves).
+          generalMarkup: Number(calculation.generalMarkup),
+          businessOverhead: Number(calculation.businessOverhead),
+          affoPercent: Number(calculation.affoPercent),
+        },
+        resolved.generalMarkup.percent,
+        resolved.materialMarkup.percent
+      );
+      if ("unavailable" in priced) return priced;
+      return {
+        unitPrice: priced.unitPrice,
+        calculated: {
+          calculationId: calculation.id,
+          calculatedAt: new Date(calculation.calculatedAt).toISOString(),
+          quantity: Number(calculation.quantity),
+          generalMarkup: resolved.generalMarkup,
+          materialMarkup: resolved.materialMarkup,
+        },
+      };
     },
 
     // Self cost per unit from each article's latest saved pre-calculation —

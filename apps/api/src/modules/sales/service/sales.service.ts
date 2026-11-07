@@ -32,11 +32,23 @@ import type {
   UpdatePriceListRowInput,
   UpdateSalesOrderHeaderInput,
   UpdateSalesOrderRowInput,
+  MarkupRepricing,
+  MarkupRepricingRow,
+  SalesOrderMarkups,
+  SalesOrderMarkupsPreviewInput,
+  PriceSource,
+  SalesRowPriceOrigin,
 } from "@navet/shared";
 import { linkDeviationInTx } from "../../quality/repository/deviation-link-tx.js";
 import type { Tx } from "@navet/db";
-import type { RowConfigurationMutationResult, SalesRepository, SalesRowWrite } from "../repository/sales.repository.js";
-import type { PriceResolution } from "./price-resolver.js";
+import type {
+  HeaderMarkupsGuard,
+  PlannedRowReprice,
+  RowConfigurationMutationResult,
+  SalesRepository,
+  SalesRowWrite,
+} from "../repository/sales.repository.js";
+import type { PriceChainQuery, PriceMarkups, PriceResolution } from "./price-resolver.js";
 import type { RegisterReferenceReader } from "../../register/service/register.service.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import type { MailService } from "../../mail/service/mail.service.js";
@@ -87,6 +99,9 @@ import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { selectionFromEntries } from "../../configurator/service/variant-identity.js";
 import { rowConfigurationLines } from "../../configurator/service/configuration-lines.js";
 import { ConfiguratorInvalidConfigurationError } from "../../configurator/service/configurator.errors.js";
+// Påslag (#16): the costing module's pure rounding of a percentage to the
+// header columns' two decimals — the same one effectiveMarkups uses.
+import { roundPercent } from "../../costing/service/markup-levels.js";
 import type { RowConfigurationEvaluation } from "../../configurator/service/configurator.service.js";
 // G1: append-only audit trail (payroll/timereport precedent) — optional with
 // a no-op default so the dozens of pre-existing test call sites that build
@@ -113,6 +128,9 @@ import {
   RowConfigurationLockedError,
   SalesOrderCurrencyLockedError,
   SalesOrderExchangeRateError,
+  MarkupRepricingConflictError,
+  MarkupRepricingNotConfirmedError,
+  SalesOrderMarkupsChangedError,
 } from "./sales.errors.js";
 import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
 
@@ -383,16 +401,29 @@ export class DeliveryUndoneError extends Error {
 // selfCostPerUnit/selfCostCalculatedAt, and every other row this service
 // returns (create, add, update, Ändra konfiguration, delivery) goes through
 // here. The OAuth POST /quotes answer is therefore cost-free too.
-function withoutConfigurationCost<T extends { configurationCost?: unknown }>(row: T): Omit<T, "configurationCost"> {
+// Påslag (#16, 0197): every returned row also carries `calculatedPrice`,
+// derived from its price origin — the order card's Kalkylpris tag.
+function withoutConfigurationCost<T extends { configurationCost?: unknown; priceOrigin: SalesRowPriceOrigin }>(
+  row: T
+): Omit<T, "configurationCost"> & { calculatedPrice: boolean } {
   const { configurationCost: _cost, ...rest } = row;
-  return rest;
+  return { ...rest, calculatedPrice: row.priceOrigin === "calculated" };
+}
+
+// Påslag (#16, 0197): the price origin of a row the price chain priced —
+// its Kalkylpris step or any other.
+function chainOrigin(source: PriceSource): SalesRowPriceOrigin {
+  return source === "calculated" ? "calculated" : "chain";
 }
 
 // Ändra konfiguration (4b): one mapping from the repository's refusal
 // reasons to errors, shared by the variant branch's unlocked pre-read and
 // the locked re-check so both raise the identical RowConfigurationLockedError.
-function throwRowConfigurationFailure(result: Extract<RowConfigurationMutationResult, { ok: false }>, rowId: string): never {
+function throwRowConfigurationFailure(result: Extract<RowConfigurationMutationResult, { ok: false }>, rowId: string, orderNumber = ""): never {
   switch (result.reason) {
+    // Påslag (#16 etapp 3): only the locked write re-reads the markups.
+    case "markups_changed":
+      throw new SalesOrderMarkupsChangedError(orderNumber);
     case "row_not_found":
       throw new SalesOrderRowNotFoundError(rowId);
     case "order_status":
@@ -404,6 +435,42 @@ function throwRowConfigurationFailure(result: Extract<RowConfigurationMutationRe
     case "invoice_row":
       throw new RowConfigurationLockedError("raden är fakturerad");
   }
+}
+
+// Påslag på offert och order (#16 etapp 3): the order's own two price
+// markups as numbers (null = inherits kund → varugrupp → företaget), and as
+// the chain's `orderMarkups` — null when the order has none of its own.
+function salesOrderMarkups(order: { generalMarkupPercent?: string | null; materialMarkupPercent?: string | null }): SalesOrderMarkups {
+  return {
+    generalMarkupPercent: order.generalMarkupPercent == null ? null : Number(order.generalMarkupPercent),
+    materialMarkupPercent: order.materialMarkupPercent == null ? null : Number(order.materialMarkupPercent),
+  };
+}
+function ownOrderMarkups(markups: SalesOrderMarkups): PriceMarkups | null {
+  return markups.generalMarkupPercent === null && markups.materialMarkupPercent === null ? null : markups;
+}
+// A sent markup at the column's two decimals (what the header will store),
+// omitted = the current one.
+function nextOrderMarkups(current: SalesOrderMarkups, input: { generalMarkupPercent?: number | null; materialMarkupPercent?: number | null }): SalesOrderMarkups {
+  const next = (sent: number | null | undefined, stored: number | null) =>
+    sent === undefined ? stored : sent === null ? null : roundPercent(sent);
+  return {
+    generalMarkupPercent: next(input.generalMarkupPercent, current.generalMarkupPercent),
+    materialMarkupPercent: next(input.materialMarkupPercent, current.materialMarkupPercent),
+  };
+}
+// The header's planned repricing attempts before MarkupRepricingConflictError:
+// a plan goes stale only when the order's rows change between the plan and
+// the locks, so a second attempt nearly always goes through.
+const REPRICING_ATTEMPTS = 3;
+
+// Påslag per kund (#16): the customer's two price markups as the audit entry
+// records them — numbers, null = inherits (varugrupp → företaget).
+function customerMarkups(row: { generalMarkupPercent: string | null; materialMarkupPercent: string | null } | null) {
+  return {
+    generalMarkupPercent: row?.generalMarkupPercent == null ? null : Number(row.generalMarkupPercent),
+    materialMarkupPercent: row?.materialMarkupPercent == null ? null : Number(row.materialMarkupPercent),
+  };
 }
 
 function termLabel(code: string | null, name: string | null) {
@@ -444,7 +511,9 @@ export function createSalesService(
   // a db handle by the caller (app.ts) — same "inject a bound function"
   // shape as the other cross-module readers above, kept explicit rather than
   // constructing its own Db here.
-  resolvePrice: (query: PriceQuoteQuery) => Promise<PriceResolution>,
+  // Påslag (#16 etapp 3): the query carries the order's own markups when
+  // the row is on an order that has one (chainQuery below).
+  resolvePrice: (query: PriceChainQuery) => Promise<PriceResolution>,
   // G1: optional, defaults to a no-op — see the import comment above.
   audit: AuditWriter = { log: async () => {} },
   // E3: optional — see ManufacturingCoverageReader above. app.ts wires
@@ -469,16 +538,157 @@ export function createSalesService(
   rates: ExchangeRateReader | null = null
 ) {
   // Valuta: what a row on an order is priced in — the order's customer, its
-  // currency and its rate (SEK at rate 1 for a SEK order).
-  type RowPricing = { customerId: string; currency: string; exchangeRate: number };
-  function orderPricing(order: { customerId: string; currency: string; exchangeRate: string | number }): RowPricing {
-    return { customerId: order.customerId, currency: order.currency, exchangeRate: Number(order.exchangeRate) };
+  // currency and its rate (SEK at rate 1 for a SEK order). Påslag (#16 etapp
+  // 3): and the order's own price markups (null = none, the customer's →
+  // varugrupp → företaget apply).
+  type RowPricing = { customerId: string; currency: string; exchangeRate: number; orderMarkups?: PriceMarkups | null };
+  function orderPricing(order: {
+    customerId: string;
+    currency: string;
+    exchangeRate: string | number;
+    generalMarkupPercent?: string | null;
+    materialMarkupPercent?: string | null;
+  }): RowPricing {
+    return {
+      customerId: order.customerId,
+      currency: order.currency,
+      exchangeRate: Number(order.exchangeRate),
+      orderMarkups: ownOrderMarkups(salesOrderMarkups(order)),
+    };
   }
   // The pricing a chain read gets: SEK orders pass no currency at all, so the
   // chain (and every reader stub) sees exactly the call it saw before.
   function chainCurrency(pricing: RowPricing): { currency?: string; exchangeRate?: number } {
     return pricing.currency === SEK ? {} : { currency: pricing.currency, exchangeRate: pricing.exchangeRate };
   }
+  // The price chain's own reads (resolvePrice): the currency, plus the
+  // order's markups only when it has any — the configurator's template chain
+  // (rowConfiguration.evaluate) never takes them (no Kalkylpris there).
+  function chainQuery(pricing: RowPricing): { currency?: string; exchangeRate?: number; orderMarkups?: PriceMarkups } {
+    return { ...chainCurrency(pricing), ...(pricing.orderMarkups ? { orderMarkups: pricing.orderMarkups } : {}) };
+  }
+  // Påslag på offert och order (#16 etapp 3, beslut 3; the price origin of
+  // 0197): what new markups on the header do to the rows — the ONE plan
+  // behind the preview, the confirmation's 409 and the save. A row is
+  // repriced when the price chain priced it (price_origin chain or
+  // calculated — a manual row, with an à-pris or a rabatt written by hand,
+  // never moves), it has nothing delivered, is on no invoice row of a live
+  // invoice (a draft and a credit note count), and is neither configured, a
+  // ställkostnad nor the freight row. Its new price is the price chain's
+  // answer for the row with the order's NEW markups, in the order's currency
+  // at `exchangeRate` (the rate the header will have), per base unit at the
+  // row's quantity: the Kalkylpris with the new markups (an article-price
+  // row gets it too), or — when the step no longer applies or the
+  // calculation cannot carry the new markups — whatever the chain prices it
+  // with now; the row is then "chain" and follows the next change, so a
+  // cleared markup can be set again. A chain row from a kundpris or a
+  // prislista gets the chain's answer again (the same price unless the
+  // agreement changed — the preview shows it). A chain without any price
+  // leaves the row as it is. Without an actual change of a markup nothing is
+  // repriced (a newer calculation alone never moves a price). Read outside
+  // any transaction: the chain reads the settings and the configurator's
+  // variant step on their own connections. `reprice` is the plan the
+  // header's transaction re-checks under its locks (repository
+  // updateSalesOrderHeaderWithAddress): every row the lock will select, with
+  // its columns as read here.
+  async function planMarkupRepricing(
+    order: NonNullable<Awaited<ReturnType<SalesRepository["findSalesOrderById"]>>>,
+    input: { generalMarkupPercent?: number | null; materialMarkupPercent?: number | null },
+    exchangeRate: number = Number(order.exchangeRate)
+  ): Promise<{ repricing: MarkupRepricing; reprice: Map<string, PlannedRowReprice> | null }> {
+    const before = salesOrderMarkups(order);
+    const after = nextOrderMarkups(before, input);
+    const changed =
+      before.generalMarkupPercent !== after.generalMarkupPercent || before.materialMarkupPercent !== after.materialMarkupPercent;
+    const repricing: MarkupRepricing = { changed, before, after, currency: order.currency, exchangeRate, rows: [], kept: [] };
+    if (!changed) return { repricing, reprice: null };
+
+    const [rows, freightArticleId] = await Promise.all([repo.listRowsByOrder(order.id), freight.freightArticleId()]);
+    // The rows the header's lock selects (repricingCandidateWhere).
+    const lockable = rows.filter(
+      (r) => r.priceOrigin !== "manual" && Number(r.quantityDelivered) === 0 && r.configuration === null && r.setupForRowId === null
+    );
+    const onInvoices = await repo.rowsOnInvoices(lockable.map((r) => r.id));
+    const pricing: RowPricing = { customerId: order.customerId, currency: order.currency, exchangeRate, orderMarkups: ownOrderMarkups(after) };
+    const reprice = new Map<string, PlannedRowReprice>();
+    const lockableIds = new Set(lockable.map((r) => r.id));
+    for (const row of rows) {
+      const kept = (reason: MarkupRepricing["kept"][number]["reason"]) =>
+        repricing.kept.push({ rowId: row.id, articleNumber: row.articleNumber, reason });
+      const plan = (planned: PlannedRowReprice["after"]) =>
+        reprice.set(row.id, {
+          articleId: row.articleId,
+          quantityOrdered: row.quantityOrdered,
+          unitFactor: row.unitFactor,
+          unitPrice: row.unitPrice,
+          discountPercent: row.discountPercent,
+          priceOrigin: row.priceOrigin,
+          after: planned,
+        });
+      if (!lockableIds.has(row.id)) {
+        // Manual first: a handwritten price is the reason whatever else holds.
+        kept(row.priceOrigin !== "manual" && Number(row.quantityDelivered) > 0 ? "delivered" : "manual");
+        continue;
+      }
+      if (row.articleId === freightArticleId) {
+        plan(null);
+        kept("manual");
+        continue;
+      }
+      if (onInvoices.has(row.id)) {
+        plan(null);
+        kept("invoiced");
+        continue;
+      }
+      const resolution = await resolvePrice({
+        customerId: order.customerId,
+        articleId: row.articleId,
+        quantity: Number(row.quantityOrdered),
+        ...chainQuery(pricing),
+      });
+      if (!resolution?.price) {
+        plan(null);
+        kept("no-price");
+        continue;
+      }
+      const next = {
+        unitPrice: resolution.price.unitPrice,
+        discountPercent: resolution.price.discountPercent,
+        priceOrigin: chainOrigin(resolution.price.source),
+      };
+      // Compared at the columns' scales: à-pris numeric(14,4), rabatt (5,2).
+      const samePrice =
+        Math.round(next.unitPrice * 10000) === Math.round(Number(row.unitPrice) * 10000) &&
+        Math.round(next.discountPercent * 100) === Math.round(Number(row.discountPercent) * 100);
+      if (samePrice) {
+        // The price stands; a step that changed (the same figure out of the
+        // Kalkylpris or the article's price) only moves the origin, which
+        // needs no confirmation.
+        plan(next.priceOrigin === row.priceOrigin ? null : next);
+        kept("unchanged");
+        continue;
+      }
+      plan(next);
+      const repriced: MarkupRepricingRow = {
+        rowId: row.id,
+        articleId: row.articleId,
+        articleNumber: row.articleNumber,
+        quantity: Number(row.quantityOrdered),
+        before: { unitPrice: Number(row.unitPrice), discountPercent: Number(row.discountPercent), priceOrigin: row.priceOrigin },
+        after: {
+          unitPrice: next.unitPrice,
+          discountPercent: next.discountPercent,
+          source: resolution.price.source,
+          priceOrigin: next.priceOrigin,
+        },
+        calculatedPrice: next.priceOrigin === "calculated",
+        ...(resolution.calculatedPriceUnavailable ? { calculatedPriceUnavailable: resolution.calculatedPriceUnavailable } : {}),
+      };
+      repricing.rows.push(repriced);
+    }
+    return { repricing, reprice };
+  }
+
   // Valuta: a document's rate — SEK is always 1 (another explicit rate is a
   // 400), an explicit rate wins, else today's rate from Riksbanken /
   // Valutakurser. Looked up BEFORE any transaction (it may call Riksbanken);
@@ -551,7 +761,11 @@ export function createSalesService(
       unitId?: string | null;
       configuration?: OrderRowConfigurationInput;
     },
-  >(pricing: RowPricing, input: T, userId?: string | null): Promise<Omit<T, "configuration"> & SalesRowWrite> {
+  >(
+    pricing: RowPricing,
+    input: T,
+    userId?: string | null
+  ): Promise<Omit<T, "configuration"> & SalesRowWrite & { chainPriced: boolean }> {
     const { customerId } = pricing;
     // Delprojekt 5: a configuration on a template in mode variants resolves
     // (fetches or creates) the variant — the same resolveVariant as Konfigurera,
@@ -605,6 +819,15 @@ export function createSalesService(
     let discountPercent = input.discountPercent ?? 0;
     // Ställpris of the matched customer rule — undefined until the chain ran.
     let chainSetupPrice: number | undefined;
+    // Påslag (#16, 0197): the row's price origin. The chain's step only when
+    // the chain priced the row with neither an à-pris nor a rabatt sent; an
+    // explicit à-pris (even the chain's figure) or a rabatt is the seller's
+    // (manual), and a beställningsvara is priced by its template (manual —
+    // it never follows the order's markups). `chainPriced` = the chain
+    // priced the row, so it read the order's markups (addRow re-checks
+    // them under its lock).
+    let priceOrigin: SalesRowPriceOrigin = "manual";
+    let chainPriced = false;
     if (input.unitPrice !== undefined) {
       unitPrice = toBasePrice(input.unitPrice, selection.unitFactor);
     } else if (configuration) {
@@ -614,11 +837,15 @@ export function createSalesService(
       unitPrice = configuration.price.unitPrice;
       if (input.discountPercent === undefined) discountPercent = configuration.price.discountPercent;
     } else {
-      const resolution = await resolvePrice({ customerId, articleId: input.articleId, quantity, ...chainCurrency(pricing) });
+      const resolution = await resolvePrice({ customerId, articleId: input.articleId, quantity, ...chainQuery(pricing) });
       if (!resolution?.price) throw new PriceNotFoundError(resolution?.articleNumber ?? input.articleId);
       unitPrice = resolution.price.unitPrice;
       if (input.discountPercent === undefined) discountPercent = resolution.price.discountPercent;
       chainSetupPrice = resolution.price.setupPrice ?? 0;
+      chainPriced = true;
+      // A discount sent with the à-pris omitted is the seller's: the row is
+      // then partly handwritten and is never repriced (the review of etapp 2).
+      priceOrigin = input.discountPercent === undefined ? chainOrigin(resolution.price.source) : "manual";
     }
     const setupCharge = configuration ? null : await setupChargeFor(pricing, input.articleId, quantity, chainSetupPrice);
     const { configuration: _raw, ...rest } = input;
@@ -632,6 +859,8 @@ export function createSalesService(
       configuration,
       configurationCost,
       setupCharge,
+      priceOrigin,
+      chainPriced,
     };
   }
 
@@ -649,7 +878,7 @@ export function createSalesService(
     if (!setupChargeArticleId || setupChargeArticleId === articleId) return null;
     const setupPrice =
       knownSetupPrice ??
-      (await resolvePrice({ customerId: pricing.customerId, articleId, quantity, ...chainCurrency(pricing) }))?.price
+      (await resolvePrice({ customerId: pricing.customerId, articleId, quantity, ...chainQuery(pricing) }))?.price
         ?.setupPrice ??
       0;
     return setupPrice > 0 ? { articleId: setupChargeArticleId, unitPrice: setupPrice } : null;
@@ -932,22 +1161,41 @@ export function createSalesService(
     return order ? overDeliveryPercentFor(order.customerId) : 0;
   }
 
+  // Påslag per kund (#16): customer / markups_changed with before/after —
+  // only when a price markup actually changed (the card sends both fields on
+  // every save), like the varugrupp's. Kundpriser and prislistor are logged
+  // the same way: the markup is the same kind of agreement.
+  async function logCustomerMarkups(
+    customerId: string,
+    before: ReturnType<typeof customerMarkups>,
+    after: ReturnType<typeof customerMarkups>,
+    userId: string | null
+  ) {
+    if (before.generalMarkupPercent === after.generalMarkupPercent && before.materialMarkupPercent === after.materialMarkupPercent) return;
+    await audit.log({ entityType: "customer", entityId: customerId, action: "markups_changed", detail: { before, after }, userId });
+  }
+
   return {
-    async createCustomer(input: CreateCustomerInput) {
+    async createCustomer(input: CreateCustomerInput, userId: string | null = null) {
       await validateRegisterRefs(input);
+      let created;
       try {
-        const created = await repo.createCustomer(input);
-        return withVatTreatment(created);
+        created = await repo.createCustomer(input);
       } catch (err) {
         // customers' only unique constraint is customer_number, so a 23505
         // here can mean nothing else.
         if (isUniqueViolation(err)) throw new DuplicateCustomerNumberError(input.customerNumber ?? "");
         throw err;
       }
+      await logCustomerMarkups(created.id, customerMarkups(null), customerMarkups(created), userId);
+      return withVatTreatment(created);
     },
 
-    async updateCustomer(id: string, input: UpdateCustomerInput) {
+    async updateCustomer(id: string, input: UpdateCustomerInput, userId: string | null = null) {
       await validateRegisterRefs(input);
+      // Read only when a markup is sent — the audit's before.
+      const markupsSent = input.generalMarkupPercent !== undefined || input.materialMarkupPercent !== undefined;
+      const current = markupsSent ? await repo.findCustomerById(id) : null;
       let row;
       try {
         row = await repo.updateCustomer(id, input);
@@ -956,6 +1204,7 @@ export function createSalesService(
         throw err;
       }
       if (!row) throw new CustomerNotFoundError(id);
+      if (markupsSent) await logCustomerMarkups(id, customerMarkups(current), customerMarkups(row), userId);
       return withVatTreatment(row);
     },
 
@@ -1082,12 +1331,86 @@ export function createSalesService(
         { costCenterId: input.costCenterId, projectId: input.projectId },
         { existing: { costCenterId: order.costCenterId, projectId: order.projectId } }
       );
-      const { currency: _currency, exchangeRate: _exchangeRate, ...headerInput } = input;
-      const result = await repo.updateSalesOrderHeaderWithAddress(orderId, { ...headerInput, ...currencyFields, ...dimensions });
-      if (!result.ok) {
-        if (result.reason === "not_found") throw new SalesOrderNotFoundError(orderId);
-        if (result.reason === "currency_locked") throw new SalesOrderCurrencyLockedError(order.orderNumber);
-        throw new InvalidStatusTransitionError(`Cannot change the header of an order in status "${result.status}"`);
+      const { currency: _currency, exchangeRate: _exchangeRate, confirmRepricing, ...sentHeader } = input;
+      // The markups as the header stores them — two decimals, rounded the
+      // same way as the plan (roundPercent), never by Postgres on its own.
+      const roundSent = (v: number | null | undefined) => (v === undefined || v === null ? v : roundPercent(v));
+      const headerInput = {
+        ...sentHeader,
+        ...(input.generalMarkupPercent !== undefined ? { generalMarkupPercent: roundSent(input.generalMarkupPercent) } : {}),
+        ...(input.materialMarkupPercent !== undefined ? { materialMarkupPercent: roundSent(input.materialMarkupPercent) } : {}),
+      };
+      // Påslag på offert och order (#16 etapp 3): a markup sent ⇒ the plan
+      // (planMarkupRepricing) — at the rate the header will have — and, when
+      // it reprices a row, the confirmation. The repository re-checks the
+      // plan under its locks; a stale plan (the rows, the rate or the
+      // markups changed in between) is made again, a few times.
+      const markupsSent = input.generalMarkupPercent !== undefined || input.materialMarkupPercent !== undefined;
+      let current = order;
+      let planned: Awaited<ReturnType<typeof planMarkupRepricing>> | null = null;
+      let result: Awaited<ReturnType<SalesRepository["updateSalesOrderHeaderWithAddress"]>> | undefined;
+      for (let attempt = 1; attempt <= REPRICING_ATTEMPTS; attempt++) {
+        let guard: HeaderMarkupsGuard | undefined;
+        if (markupsSent) {
+          planned = await planMarkupRepricing(current, input, currencyFields.exchangeRate ?? Number(current.exchangeRate));
+          if (planned.repricing.rows.length > 0 && confirmRepricing !== true) {
+            throw new MarkupRepricingNotConfirmedError(current.orderNumber, planned.repricing);
+          }
+          guard = {
+            expected: {
+              currency: current.currency,
+              exchangeRate: current.exchangeRate,
+              generalMarkupPercent: current.generalMarkupPercent,
+              materialMarkupPercent: current.materialMarkupPercent,
+            },
+            reprice: planned.reprice,
+          };
+        }
+        result = await repo.updateSalesOrderHeaderWithAddress(orderId, { ...headerInput, ...currencyFields, ...dimensions }, guard);
+        if (result.ok || result.reason !== "stale") break;
+        const reread = await repo.findSalesOrderById(orderId);
+        if (!reread) throw new SalesOrderNotFoundError(orderId);
+        current = reread;
+      }
+      if (!result!.ok) {
+        if (result!.reason === "not_found") throw new SalesOrderNotFoundError(orderId);
+        if (result!.reason === "currency_locked") throw new SalesOrderCurrencyLockedError(order.orderNumber);
+        if (result!.reason === "stale") throw new MarkupRepricingConflictError(order.orderNumber);
+        throw new InvalidStatusTransitionError(`Cannot change the header of an order in status "${result!.status}"`);
+      }
+      const saved = result!;
+      // What the save actually repriced: a planned row that became invoiced
+      // under the lock kept its price, and so did one the lock no longer
+      // selected — deleted, delivered or given a handwritten price in
+      // between; the repository says which.
+      let repricing: MarkupRepricing | undefined;
+      if (planned) {
+        const repricedIds = new Set(saved.repriced);
+        const keptUnderLock = new Map(saved.kept.map((k) => [k.rowId, k.reason]));
+        repricing = {
+          ...planned.repricing,
+          rows: planned.repricing.rows.filter((r) => repricedIds.has(r.rowId)),
+          kept: [
+            ...planned.repricing.kept,
+            ...planned.repricing.rows
+              .filter((r) => !repricedIds.has(r.rowId))
+              .map((r) => ({ rowId: r.rowId, articleNumber: r.articleNumber, reason: keptUnderLock.get(r.rowId) ?? ("manual" as const) })),
+          ],
+        };
+        if (repricing.changed) {
+          await audit.log({
+            entityType: "sales_order",
+            entityId: current.orderNumber,
+            action: "markups_changed",
+            detail: {
+              before: repricing.before,
+              after: repricing.after,
+              rows: repricing.rows.map((r) => ({ rowId: r.rowId, articleNumber: r.articleNumber, before: r.before, after: r.after })),
+              kept: repricing.kept.length,
+            },
+            userId: userId ?? null,
+          });
+        }
       }
       // Valuta: a new currency or rate is logged on the order (the rate
       // decides what every SEK price converts to from now on).
@@ -1101,12 +1424,35 @@ export function createSalesService(
           action: "exchange_rate_changed",
           detail: {
             before: { currency: order.currency, exchangeRate: order.exchangeRate },
-            after: { currency: result.order.currency, exchangeRate: result.order.exchangeRate },
+            after: { currency: saved.order.currency, exchangeRate: saved.order.exchangeRate },
           },
           userId: userId ?? null,
         });
       }
-      return repo.findSalesOrderById(result.order.id);
+      const updated = await repo.findSalesOrderById(saved.order.id);
+      // `repricing` only when a markup was sent: what the save did to the rows.
+      return updated && repricing ? { ...updated, repricing } : updated;
+    },
+
+    // Påslag på offert och order (#16 etapp 3): POST
+    // /sales-orders/:id/markups/preview — what saving these markups would do
+    // to the rows (the same plan as the save), nothing written. The status
+    // guard is the header's.
+    // `exchangeRate`: the rate the same save gives the order, which the
+    // PATCH plans with — under the header's own rules (quote or confirmed
+    // only, SEK only 1); omitted = the order's current rate.
+    async previewOrderMarkups(orderId: string, input: SalesOrderMarkupsPreviewInput): Promise<MarkupRepricing> {
+      const order = await repo.findSalesOrderById(orderId);
+      if (!order) throw new SalesOrderNotFoundError(orderId);
+      if (order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
+        throw new InvalidStatusTransitionError(`Cannot change the header of an order in status "${order.status}"`);
+      }
+      const { exchangeRate: sentRate, ...markups } = input;
+      if (sentRate !== undefined && order.status !== "quote" && order.status !== "confirmed") {
+        throw new InvalidStatusTransitionError(`Cannot change the currency or rate of an order in status "${order.status}"`);
+      }
+      const rate = sentRate === undefined ? Number(order.exchangeRate) : await documentRate(order.currency, sentRate);
+      return (await planMarkupRepricing(order, markups, rate)).repricing;
     },
 
     // Reservationen (Leveranstidskontroll → Skapa tillverkningsordrar): the
@@ -1184,10 +1530,28 @@ export function createSalesService(
 
     // overDeliveryPercent: Tillåten överleverans for the order's customer
     // (#24) — Utleverans counts picked goods up to it.
+    //
+    // Påslag på offert och order (#16 etapp 3): customerMarkups = the
+    // customer's own two price markups (numeric strings like the order's
+    // generalMarkupPercent/materialMarkupPercent, null = inherits varugrupp →
+    // företaget) — the header form's placeholders, so the card can say which
+    // markup a row gets and from where: the order's field, else the
+    // customer's, else the article's varugrupp or the company's.
     async getSalesOrder(id: string) {
       const order = await repo.findSalesOrderById(id);
       if (!order) return order;
-      return { ...order, overDeliveryPercent: await overDeliveryPercentFor(order.customerId) };
+      const [overDeliveryPercent, customer] = await Promise.all([
+        overDeliveryPercentFor(order.customerId),
+        repo.findCustomerById(order.customerId),
+      ]);
+      return {
+        ...order,
+        overDeliveryPercent,
+        customerMarkups: {
+          generalMarkupPercent: customer?.generalMarkupPercent ?? null,
+          materialMarkupPercent: customer?.materialMarkupPercent ?? null,
+        },
+      };
     },
 
     async listSalesOrders(query: ListSalesOrdersQuery, today: string = stockholmToday()) {
@@ -1224,6 +1588,8 @@ export function createSalesService(
         const articleCost = costs?.get(row.articleId);
         return {
           ...row,
+          // Påslag (#16, 0197): the Kalkylpris tag, from the price origin.
+          calculatedPrice: row.priceOrigin === "calculated",
           quantityInProduction: entry?.quantity ?? 0,
           manufacturingOrders: entry?.orders ?? [],
           // null = no saved pre-calculation for the article (or no derivable
@@ -1243,11 +1609,14 @@ export function createSalesService(
         throw new InvalidStatusTransitionError(`Cannot add rows to an order in status "${order.status}"`);
       }
       const pricing = orderPricing(order);
-      const write = await resolveRowInput(pricing, input, userId ?? null);
+      const { chainPriced, ...write } = await resolveRowInput(pricing, input, userId ?? null);
       // Valuta: the repository re-reads the currency under the order's key
       // lock and refuses a row priced in a currency the order no longer has.
-      // An article already on the order simply gets a second row.
-      const row = await repo.addRow(salesOrderId, write, pricing.currency);
+      // An article already on the order simply gets a second row. Påslag
+      // (#16 etapp 3): likewise the order's markups, but only when the price
+      // chain priced the row — a beställningsvara's template chain never
+      // reads them, so a markup change cannot make its price stale.
+      const row = await repo.addRow(salesOrderId, write, pricing.currency, chainPriced ? (pricing.orderMarkups ?? null) : undefined);
       await logRowAdded(order.orderNumber, row, userId);
       return withoutConfigurationCost(row);
     },
@@ -1281,6 +1650,14 @@ export function createSalesService(
       // untouched (a unit-only or note-only PATCH doesn't reprice).
       let unitPrice = input.unitPrice !== undefined ? toBasePrice(input.unitPrice, factor) : undefined;
       let discountPercent = input.discountPercent;
+      // Påslag (#16, 0197): the price origin. Set here only when this method
+      // prices the row itself — the chain at a new quantity (its step, or
+      // manual with a rabatt sent along) or a configured row's template
+      // (manual). Otherwise the repository decides under the row lock: a sent
+      // à-pris or rabatt that differs from the stored one ⇒ manual, the same
+      // values (the card always resends them) keep the origin.
+      let priceOrigin: SalesRowPriceOrigin | undefined;
+      let chainPriced = false;
       let configurationPatch: OrderRowConfiguration | undefined;
       // 4c: undefined = leave configuration_cost as stored.
       let configurationCostPatch: OrderRowConfigurationCost | null | undefined;
@@ -1317,7 +1694,10 @@ export function createSalesService(
         }
         configurationCostPatch = evaluated.cost;
       }
-      if (input.unitPrice === undefined && quantity !== undefined) {
+      // Only a quantity CHANGE re-prices (the review of etapp 2): the same
+      // quantity with the à-pris omitted keeps the row's price, so a newer
+      // calculation or price list never moves it behind the seller's back.
+      if (input.unitPrice === undefined && quantityChanged) {
         if (stored) {
           // 4b: a configured row is repriced through the template's chain at
           // the new quantity; the choices stay. Same quantity ⇒ the row's
@@ -1329,6 +1709,7 @@ export function createSalesService(
             unitPrice = evaluated.configuration.price.unitPrice;
             if (discountPercent === undefined) discountPercent = evaluated.configuration.price.discountPercent;
             configurationPatch = { ...stored, price: evaluated.configuration.price };
+            priceOrigin = "manual";
           }
         } else {
           // An empty chain means there is no staffel the new quantity could
@@ -1337,12 +1718,16 @@ export function createSalesService(
           const resolution = await resolvePrice({
             customerId: order.customerId,
             articleId: existing.articleId,
-            quantity,
-            ...chainCurrency(orderPricing(order)),
+            quantity: quantity!,
+            ...chainQuery(orderPricing(order)),
           });
           if (resolution?.price) {
             unitPrice = resolution.price.unitPrice;
             if (discountPercent === undefined) discountPercent = resolution.price.discountPercent;
+            chainPriced = true;
+            // A discount sent along is the seller's — the row is then partly
+            // handwritten and never repriced (the review of etapp 2).
+            priceOrigin = input.discountPercent === undefined ? chainOrigin(resolution.price.source) : "manual";
           }
         }
       }
@@ -1358,6 +1743,10 @@ export function createSalesService(
           configuration: configurationPatch,
           configurationCost: configurationCostPatch,
           expectedDeliveryDate: input.expectedDeliveryDate,
+          priceOrigin,
+          // Påslag (#16 etapp 3): a chain price was computed with the order's
+          // markups as read above — re-checked under the row lock.
+          ...(chainPriced ? { pricedWithMarkups: orderPricing(order).orderMarkups ?? null } : {}),
         },
         input.bumpRevision !== false
       );
@@ -1396,6 +1785,8 @@ export function createSalesService(
           throw new OverDeliveryError();
         case "row_has_deliveries":
           throw new RowHasDeliveriesError();
+        case "markups_changed":
+          throw new SalesOrderMarkupsChangedError(order.orderNumber);
       }
     },
 
@@ -1423,6 +1814,9 @@ export function createSalesService(
         configurationCost: OrderRowConfigurationCost | null;
         unitPrice: number;
         discountPercent: number;
+        // Påslag (#16, 0197): the replaced price's origin.
+        priceOrigin: SalesRowPriceOrigin;
+        pricedWithMarkups?: PriceMarkups | null;
       };
       let beforeKey: string | null;
       let afterKey: string | null;
@@ -1442,6 +1836,9 @@ export function createSalesService(
           configurationCost: evaluated.cost,
           unitPrice: evaluated.configuration.price.unitPrice,
           discountPercent: evaluated.configuration.price.discountPercent,
+          // A beställningsvara is priced by its template (base + additions) —
+          // never by the order's markups, so it is manual.
+          priceOrigin: "manual",
         };
         beforeKey = stored.key;
         afterKey = evaluated.configuration.key;
@@ -1460,7 +1857,7 @@ export function createSalesService(
           customerId: order.customerId,
           articleId: variant.id,
           quantity,
-          ...chainCurrency(orderPricing(order)),
+          ...chainQuery(orderPricing(order)),
         });
         if (!resolution?.price) throw new PriceNotFoundError(resolution?.articleNumber ?? variant.id);
         next = {
@@ -1472,13 +1869,19 @@ export function createSalesService(
           configurationCost: null,
           unitPrice: resolution.price.unitPrice,
           discountPercent: resolution.price.discountPercent,
+          // The variant's chain (the template's, or the variant's own when the
+          // template's could not price it — which may end in the Kalkylpris,
+          // like any article's).
+          priceOrigin: chainOrigin(resolution.price.source),
+          // Priced with the order's markups as read above (#16 etapp 3).
+          pricedWithMarkups: orderPricing(order).orderMarkups ?? null,
         };
         beforeKey = variantOf.configKey;
         afterKey = variant.id === existing.articleId ? variantOf.configKey : ((await rowConfiguration.variantOf(variant.id))?.configKey ?? null);
       }
 
       const result = await repo.replaceRowConfiguration(salesOrderId, rowId, next, input.bumpRevision !== false);
-      if (!result.ok) throwRowConfigurationFailure(result, rowId);
+      if (!result.ok) throwRowConfigurationFailure(result, rowId, order.orderNumber);
       await audit.log({
         entityType: "sales_order_row",
         entityId: order.orderNumber,
@@ -2415,6 +2818,9 @@ export function createSalesService(
     async getPriceQuote(query: PriceQuoteQuery) {
       let currency: string;
       let exchangeRate: number;
+      // Påslag (#16 etapp 3): a row on an order is priced with the order's
+      // own markups too.
+      let orderMarkups: PriceMarkups | null = null;
       if (query.salesOrderId) {
         // Another customer's order is no answer (an OAuth client bound to a
         // customer must not read someone else's order through its id).
@@ -2422,6 +2828,7 @@ export function createSalesService(
         if (!order || order.customerId !== query.customerId) throw new SalesOrderNotFoundError(query.salesOrderId);
         currency = order.currency;
         exchangeRate = Number(order.exchangeRate);
+        orderMarkups = ownOrderMarkups(salesOrderMarkups(order));
       } else {
         const customer = await repo.findCustomerById(query.customerId);
         currency = query.currency ?? customer?.currency ?? SEK;
@@ -2432,6 +2839,7 @@ export function createSalesService(
         articleId: query.articleId,
         quantity: query.quantity,
         ...(currency === SEK ? {} : { currency, exchangeRate }),
+        ...(orderMarkups ? { orderMarkups } : {}),
       });
       return resolution ? { ...resolution, currency, exchangeRate } : null;
     },

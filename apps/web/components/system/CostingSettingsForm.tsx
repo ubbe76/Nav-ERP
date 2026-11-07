@@ -262,6 +262,19 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
         <div style={{ fontWeight: 600, fontSize: 15 }}>Så räknas försäljningspriset</div>
         <FormHint>Räkneexempel med 1 000 kr material, 500 kr lön, 50 kr TO och 200 kr lego.</FormHint>
         <CostChain lines={lines} />
+
+        <div style={{ fontWeight: 600, fontSize: 15, marginTop: 18 }}>Var påslagen sätts</div>
+        <dl style={{ margin: "8px 0 0", display: "grid", gridTemplateColumns: "minmax(0, 11rem) minmax(0, 1fr)", gap: "6px 16px", fontSize: 13 }}>
+          <dt>MO, LO och Affo</dt>
+          <dd style={{ margin: 0 }}>Företaget, här.</dd>
+          <dt>TO</dt>
+          <dd style={{ margin: 0 }}>Resursen, under Tillverkning → Resurser.</dd>
+          <dt>Generellt påslag och materialpåslag</dt>
+          <dd style={{ margin: 0 }}>
+            Varugruppen, annars företaget, här. Det mest specifika gäller för varje påslag för sig. På en artikel kan du
+            också pröva andra påslag, under fliken Kalkyl.
+          </dd>
+        </dl>
       </div>
     </Card>
   );

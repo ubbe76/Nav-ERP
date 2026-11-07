@@ -201,6 +201,12 @@ async function updateArticleRow(dbc: Db | Tx, id: string, input: UpdateArticleIn
   return row ?? null;
 }
 
+// A varugrupp's price markup (#16) for its numeric column: undefined =
+// leave it (drizzle skips the key), null = inherit the company's again.
+function markupColumn(value: number | null | undefined): string | null | undefined {
+  return value === undefined || value === null ? value : String(value);
+}
+
 export function createArticleRepository(db: Db) {
   return {
     // New articles get the "***" fallback location unless one is chosen.
@@ -494,19 +500,29 @@ export function createArticleRepository(db: Db) {
     },
 
     async createArticleGroup(input: CreateArticleGroupInput) {
-      const { vatRate, ...rest } = input;
+      const { vatRate, generalMarkupPercent, materialMarkupPercent, ...rest } = input;
       const [row] = await db
         .insert(articleGroups)
-        .values({ ...rest, vatRate: vatRate !== undefined ? String(vatRate) : undefined })
+        .values({
+          ...rest,
+          vatRate: vatRate !== undefined ? String(vatRate) : undefined,
+          generalMarkupPercent: markupColumn(generalMarkupPercent),
+          materialMarkupPercent: markupColumn(materialMarkupPercent),
+        })
         .returning();
       return row!;
     },
 
     async updateArticleGroup(id: string, input: UpdateArticleGroupInput) {
-      const { vatRate, ...rest } = input;
+      const { vatRate, generalMarkupPercent, materialMarkupPercent, ...rest } = input;
       const [row] = await db
         .update(articleGroups)
-        .set({ ...rest, vatRate: vatRate !== undefined ? String(vatRate) : undefined })
+        .set({
+          ...rest,
+          vatRate: vatRate !== undefined ? String(vatRate) : undefined,
+          generalMarkupPercent: markupColumn(generalMarkupPercent),
+          materialMarkupPercent: markupColumn(materialMarkupPercent),
+        })
         .where(eq(articleGroups.id, id))
         .returning();
       return row ?? null;

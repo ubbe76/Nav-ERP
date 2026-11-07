@@ -200,6 +200,10 @@ const MESSAGES: Record<string, MessageEntry> = {
       ? `Orderns valuta ändrades till ${body.currency} medan raden prissattes i ${body.pricedIn} — lägg till raden igen.`
       : "Orderns valuta ändrades medan raden prissattes — lägg till raden igen.";
   },
+  // Påslag på offert och order
+  "markup-repricing-not-confirmed": "Påslagen räknar om à-priset på rader — bekräfta omräkningen.",
+  "markup-repricing-conflict": "Raderna på ordern ändrades medan påslagen sparades — ordern har lästs om, försök igen.",
+  "sales-order-markups-changed": "Orderns påslag ändrades medan raden prissattes — ordern har lästs om, spara raden igen.",
   "price-list-currency-locked": "Valutan kan inte ändras när prislistan har rader.",
   "invoice-row-currency-mismatch": (err) => {
     const body = err.body as { rowCurrency?: string; invoiceCurrency?: string } | undefined;

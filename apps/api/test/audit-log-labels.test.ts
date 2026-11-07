@@ -38,6 +38,10 @@ describe("händelseloggens etiketter", () => {
     ["action", "rejected"],
     ["action", "restored"],
     ["action", "booking_taken_over"],
+    // Påslag per nivå (#16).
+    ["entity", "article_group"],
+    ["entity", "customer"],
+    ["action", "markups_changed"],
   ])("labels the %s %s on both sides", (kind, key) => {
     const api = kind === "entity" ? AUDIT_ENTITY_TYPE_LABELS : AUDIT_ACTION_LABELS;
     expect(api[key]).toMatch(/\S/);

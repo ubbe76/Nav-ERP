@@ -1,5 +1,6 @@
 import type { CostChainLine } from "../components/ui/CostChain";
 import { formatMoney } from "./format";
+import { markupLabel, type MarkupLevel } from "./markupLevels";
 
 // Just the påläggskalkyl's money fields, as the API's strings. Narrower than
 // CostCalculation on purpose: a preview draft has no id, no calculatedAt and no
@@ -16,6 +17,13 @@ export interface CostChainSource {
   generalMarkup: string;
   materialMarkup: string;
   salesPrice: string;
+  // The two price markups' percent and where each came from (#16). Optional:
+  // the example in System → Kalkyler has no level, and the chain then shows
+  // the plain label.
+  generalMarkupPercent?: string;
+  generalMarkupLevel?: MarkupLevel;
+  materialMarkupPercent?: string;
+  materialMarkupLevel?: MarkupLevel;
 }
 
 // TVK and SVK are plain sums of the stored steps — the API never stores them.
@@ -67,10 +75,10 @@ export function chainLines(c: CostChainSource, quantity?: number): CostChainLine
     line("Tillverkningskostnad (TVK)", manufacturingCost(c), "subtotal"),
     line("Affo-påslag", Number(c.businessOverhead), "markup"),
     line("Självkostnad (SVK)", selfCost, "subtotal"),
-    line("Generellt påslag", Number(c.generalMarkup), "markup"),
+    line(markupLabel("Generellt påslag", c.generalMarkupPercent, c.generalMarkupLevel), Number(c.generalMarkup), "markup"),
     // Like Halvfabrikat: only when it applies, so calculations saved before
     // the markup existed do not grow a "0 kr" row. On dM + MO, no stacking.
-    ...(materialMarkup !== 0 ? [line("Materialpåslag", materialMarkup, "markup")] : []),
+    ...(materialMarkup !== 0 ? [line(markupLabel("Materialpåslag", c.materialMarkupPercent, c.materialMarkupLevel), materialMarkup, "markup")] : []),
     // TO last: outside TVK and SVK, no Affo or profit markup on it.
     line("TO-påslag", Number(c.overhead), "markup"),
     line("Försäljningspris", Number(c.salesPrice), "result"),

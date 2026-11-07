@@ -3,6 +3,7 @@ import type { ManufacturingOrderConfiguration, OrderRowConfiguration } from "./c
 import type { DocumentRateSourceValue } from "./currency";
 import type { DocumentLanguage } from "./documentLanguage";
 import type { Permission } from "./permissions";
+import type { MarkupLevel } from "./markupLevels";
 import type { VatBoxSetting, VatDeclarationBoxes, VatReportingPeriod } from "./vatBoxes";
 import type {
   BuyerVatNumberProblem,
@@ -128,6 +129,10 @@ export interface ArticleGroup {
   vatRate: string;
   // Kostnadsställe (förval) for the revenue/cost rows of this group's articles.
   defaultCostCenterId?: string | null;
+  // Prispåslag (#16) the group sets for its articles, e.g. "40.00"; null =
+  // inherits the company's (System → Kalkyler).
+  generalMarkupPercent: string | null;
+  materialMarkupPercent: string | null;
   createdAt: string;
 }
 
@@ -346,6 +351,10 @@ export interface CostCalculation {
   affoPercent: string;
   generalMarkupPercent: string;
   materialMarkupPercent: string;
+  // Where each price markup came from (#16): the company's setting, the
+  // article's varugrupp, or a trial (Pröva påslag).
+  generalMarkupLevel: MarkupLevel;
+  materialMarkupLevel: MarkupLevel;
   type: CostCalculationType;
   calculatedAt: string;
 }
@@ -1455,6 +1464,9 @@ export interface Customer extends PartnerCardFields {
   // price-resolver.ts). A decimal column, so it arrives as a string like the
   // other money/percentage fields.
   discountPercent: string;
+  // Påslag per kund (#16): null = inherits (varugruppen, then företaget).
+  generalMarkupPercent: string | null;
+  materialMarkupPercent: string | null;
   // Vårt leverantörsnummer hos kunden (kundens motsvarighet till
   // Supplier.ourCustomerNumber) — nullable free-text field.
   ourSupplierNumber: string | null;
@@ -1682,6 +1694,42 @@ export interface SalesOrder extends DocumentTermsFields {
   // Detail-only: mirrors the customer's Samlingsfaktura flag — drives
   // SalesOrderDetail's "Fakturera" link to /forsaljning/samlingsfakturering.
   customerCollectiveInvoicing?: boolean;
+  // Påslag på offert och order (#16): the order's own markups as decimal
+  // strings ("20.00"), null = inherited. customerMarkups (GET :id only) are
+  // the customer's own values, the placeholder of the header form.
+  generalMarkupPercent?: string | null;
+  materialMarkupPercent?: string | null;
+  customerMarkups?: { generalMarkupPercent: string | null; materialMarkupPercent: string | null };
+}
+
+// POST /sales-orders/:id/markups/preview, the 409 markup-repricing-not-confirmed
+// body's `repricing` and the header PATCH's `repricing` (#16): what new order
+// markups do to the rows the price chain priced (origin chain or calculated).
+// "deleted" only in the PATCH's answer (the row went between plan and save).
+export type MarkupRepricingKeptReason = "manual" | "delivered" | "invoiced" | "unchanged" | "no-price" | "deleted";
+
+// Prisets ursprung (0197, sales_order_rows.price_origin): manual = à-pris or
+// rabatt written by hand, chain = the price chain (any step), calculated =
+// its Kalkylpris step. Mirrors SalesRowPriceOrigin in @navet/shared.
+export type SalesRowPriceOrigin = "manual" | "chain" | "calculated";
+
+export interface MarkupRepricingPlan {
+  changed: boolean;
+  before: { generalMarkupPercent: number | null; materialMarkupPercent: number | null };
+  after: { generalMarkupPercent: number | null; materialMarkupPercent: number | null };
+  currency: string;
+  exchangeRate: number;
+  rows: {
+    rowId: string;
+    articleId: string;
+    articleNumber: string;
+    quantity: number;
+    before: { unitPrice: number; discountPercent: number; priceOrigin: SalesRowPriceOrigin };
+    after: { unitPrice: number; discountPercent: number; source: string; priceOrigin: SalesRowPriceOrigin };
+    calculatedPrice: boolean;
+    calculatedPriceUnavailable?: "no-calculation" | "material-base-missing" | "calculation-outdated";
+  }[];
+  kept: { rowId: string; articleNumber: string; reason: MarkupRepricingKeptReason }[];
 }
 
 // GET /collective-invoicing/candidates — customers flagged Samlingsfaktura
@@ -1773,6 +1821,11 @@ export interface SalesOrderRow {
   // Ställkostnad: set on the automatically added charge row — the id of the
   // article row it belongs to (null for an ordinary row).
   setupForRowId: string | null;
+  // Påslag (#16, 0197): where the à-pris came from, set by the server only;
+  // calculatedPrice = priceOrigin "calculated" (the Kalkylpris tag). Rows from
+  // before 0197 that were not Kalkylpris are manual.
+  priceOrigin: SalesRowPriceOrigin;
+  calculatedPrice: boolean;
 }
 
 // GET /articles/:id/self-cost — the same figure for an article that has no row
@@ -1800,6 +1853,17 @@ export interface PriceQuote {
   price: { unitPrice: number; discountPercent: number; source: string } | null;
   currency?: string;
   exchangeRate?: number;
+  // Kalkylpris (#16): present when price.source is "calculated" (not for OAuth clients).
+  calculated?: {
+    calculationId: string;
+    calculatedAt: string;
+    quantity: number;
+    generalMarkup: { percent: number; level: "order" | "customer" | "group" | "company" };
+    materialMarkup: { percent: number; level: "order" | "customer" | "group" | "company" };
+  };
+  // Why the customer's markup could not price the article (the chain then fell
+  // through to the article's price).
+  calculatedPriceUnavailable?: "no-calculation" | "material-base-missing" | "calculation-outdated";
 }
 
 // Leveranstillfälle (delivery occasion) — C2. One row per utleverans event;
@@ -5140,6 +5204,8 @@ export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
   customer_payment: "Kundbetalning",
   price_list: "Prislista",
   customer_price: "Kundpris",
+  customer: "Kund",
+  article_group: "Varugrupp",
   manufacturing_order: "Tillverkningsorder",
   stock_count_session: "Inventering",
   user: "Användare",
@@ -5165,6 +5231,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   demo_data_created: "Exempeldata skapad",
   created: "Skapad",
   updated: "Ändrad",
+  markups_changed: "Påslag ändrade",
   vat_code_changed: "Momskod ändrad",
   onboarding_number_series_reviewed: "Nummerserier granskade",
   deleted: "Borttagen",

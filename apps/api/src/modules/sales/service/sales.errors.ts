@@ -1,3 +1,5 @@
+import type { MarkupRepricing } from "@navet/shared";
+
 // Domain errors for C3 Kundpriser: the price-list register (price_lists /
 // price_list_rows) and the price-resolution chain (Task 7). The rest of the
 // sales module's error classes grew organically inside sales.service.ts, but
@@ -262,5 +264,38 @@ export class PriceListCurrencyLockedError extends Error {
   constructor(code: string) {
     super(`Valutan på prislistan ${code} kan inte ändras när listan har rader`);
     this.name = "PriceListCurrencyLockedError";
+  }
+}
+
+// Påslag på offert och order (#16 etapp 3): saving new markups on the header
+// would reprice rows the price chain priced, and the save did not confirm it
+// (confirmRepricing). Nothing is written; `repricing` is the preview — which
+// rows change and how — for the confirmation. 409
+// markup-repricing-not-confirmed.
+export class MarkupRepricingNotConfirmedError extends Error {
+  constructor(public orderNumber: string, public repricing: MarkupRepricing) {
+    super(`Påslagen på ${orderNumber} räknar om à-priset på ${repricing.rows.length} rad(er) — bekräfta omräkningen`);
+    this.name = "MarkupRepricingNotConfirmedError";
+  }
+}
+
+// The order's rows (or its rate or markups) kept changing under the
+// repricing — planned outside the transaction, re-checked under the locks —
+// on every attempt. Nothing is written. 409 markup-repricing-conflict.
+export class MarkupRepricingConflictError extends Error {
+  constructor(public orderNumber: string) {
+    super(`Raderna på ${orderNumber} ändrades medan påslagen sparades — försök igen`);
+    this.name = "MarkupRepricingConflictError";
+  }
+}
+
+// A row was priced by the chain with the order's markups as they were read,
+// and the header's markups changed before the row was written (a concurrent
+// header PATCH, which reprices only the rows it can see). Re-read the order
+// and save the row again. 409 sales-order-markups-changed.
+export class SalesOrderMarkupsChangedError extends Error {
+  constructor(public orderNumber: string) {
+    super(`Påslagen på ${orderNumber} ändrades medan raden prissattes — spara raden igen`);
+    this.name = "SalesOrderMarkupsChangedError";
   }
 }

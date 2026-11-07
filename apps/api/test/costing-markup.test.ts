@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyMarkups, resolveUnitCost } from "../src/modules/costing/service/markup.js";
 
-const DIRECT = { materialCost: 100, laborCost: 60, overhead: 6, subcontractCost: 40, semiFinishedCost: 0, liftedMaterialMarkup: 0 };
+const DIRECT = { materialCost: 100, laborCost: 60, overhead: 6, subcontractCost: 40, semiFinishedCost: 0, liftedMaterialMarkup: 0, liftedMaterialMarkupBase: 0 };
 const NO_MARKUPS = { moPercent: 0, loPercent: 0, affoPercent: 0, generalMarkupPercent: 0, materialMarkupPercent: 0 };
 
 describe("applyMarkups — påläggskalkyl", () => {
@@ -97,6 +97,29 @@ describe("applyMarkups — påläggskalkyl", () => {
     // 10 % of dM 100 (no MO) + 12 lifted — the 300 gets nothing here
     expect(costs.materialMarkup).toBeCloseTo(22, 10);
     expect(costs.salesPrice).toBeCloseTo(100 + 60 + 40 + 300 + 22 + 6, 10);
+  });
+
+  it("reports the materialpåslag's base beside it, the amount unchanged (#16)", () => {
+    const single = applyMarkups(DIRECT, { ...NO_MARKUPS, moPercent: 10, materialMarkupPercent: 30 });
+    // dM 100 + MO 10; the amount is what it always was
+    expect(single.materialMarkupBase).toBeCloseTo(110, 10);
+    expect(single.materialMarkup).toBeCloseTo(33, 10);
+
+    // A sub-assembly lifted 12 kr taken on its own base 120 (10 % of it):
+    // the base sums, and the markup is still percent × base — the identity
+    // the Kalkylpris re-prices on.
+    const multi = applyMarkups(
+      { ...DIRECT, semiFinishedCost: 300, liftedMaterialMarkup: 12, liftedMaterialMarkupBase: 120 },
+      { ...NO_MARKUPS, materialMarkupPercent: 10 }
+    );
+    expect(multi.materialMarkupBase).toBeCloseTo(220, 10);
+    expect(multi.materialMarkup).toBeCloseTo(22, 10);
+    expect(multi.materialMarkup).toBeCloseTo(multi.materialMarkupBase * 0.1, 10);
+
+    // With 0 % the amount says nothing, the base still does.
+    const zero = applyMarkups({ ...DIRECT, liftedMaterialMarkupBase: 120 }, NO_MARKUPS);
+    expect(zero.materialMarkup).toBe(0);
+    expect(zero.materialMarkupBase).toBe(220);
   });
 
   it("does not put the MO markup on lego or the LO markup on material", () => {

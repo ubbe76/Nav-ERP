@@ -11,7 +11,7 @@ export type ConfiguratorArticleField = (typeof CONFIGURATOR_ARTICLE_FIELDS)[numb
 export type ConfiguratorRuleEffect = "exclude" | "require" | "limit";
 // Mirror of priceSourceSchema in packages/shared/src/sales.ts (pinned by
 // apps/api/test/configurator.shared.test.ts).
-export const PRICE_SOURCES = ["customer_article", "customer_group", "price_list", "customer_discount", "article"] as const;
+export const PRICE_SOURCES = ["customer_article", "customer_group", "price_list", "calculated", "customer_discount", "article"] as const;
 export type PriceSource = (typeof PRICE_SOURCES)[number];
 
 export const CONFIGURATOR_MODE_LABELS: Record<ConfiguratorMode, string> = {

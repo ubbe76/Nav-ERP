@@ -30,6 +30,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — layout
 
+- [ ] **Inköpsorderkortet:** radtabellens åtgärdskolumn har fast bredd (`width: editingRowId ? "140px" : "104px"`, `PurchaseOrderDetail.tsx:308`) — samma som klippte **Ändra** på kundorderkortet vid 1400 px (rättat där med `max-content` och Spara över Avbryt i #16 etapp 3). Prova i 1400 px och gör likadant om den klipps.
 
 ### Låga — fel i manualen
 
@@ -40,7 +41,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
-- [ ] **Påslag per artikelgrupp, kund eller order** → [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*
 - [ ] **Förkalkylera flera artiklar på en gång** — i dag förkalkyleras en artikel i taget på Kalkyl-fliken. Välj artikelnummer från och till och filtrera (t.ex. varugrupp, artikeltyp, artikelkod, aktiva), förkalkylera alla träffar i ett svep med valt antal och visa resultatet med ändringen mot senaste förkalkyl. Användarens önskan 2026-11-07.
 - [ ] **Listan Kopierat** — kopiera artiklar till en lista som heter **Kopierat** och använd den i andra funktioner i appen i stället för att filtrera (t.ex. när flera artiklar förkalkyleras på en gång). Läggs artiklar till när listan redan har innehåll frågar appen om de ska läggas till eller ersätta innehållet. Användarens önskan 2026-11-07.
 - [ ] **Löneperioden:** upplåsning nollar snapshotten utan spår av vad som exporterats — spara den i upplåsningens audit-rad.
@@ -55,7 +55,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Betalfiler i pain.001.001.09 (ISO 20022 version 2019)** — Nav skriver pain.001.001.03, som bankerna fortfarande tar (Nordeas MIG för .03 uppdaterades i september 2026); Nordea m.fl. går över till version 2019 på sikt. Bankprofilerna och golden-filerna behöver en andra version när någon bank slutar ta .03.
 - [ ] **Dokument på engelska:** avvikelseorsakens namn skrivs på svenska även på ett engelskt reklamationsbesked (`deviation_reasons` saknar `name_en`); en kreditfaktura kopierar källfakturans frakt-/ränterader med deras text, så en kredit till en kund som bytt språk efter fakturan får raderna på fakturans språk.
 - [ ] **Behovsberäkningen, tidsfasade förslag:** sorteringen **Sortering: Senaste datum** lägger ett inköpsförslag utan möjlig ankomst (senaste datum saknas, markerat **Passerat**) sist i stället för först; efter **Uppdatera** rensas val för förslag som flyttat vecka bara på den visade sidan (andra sidors val kan ha kvar ett gammalt behovsdatum); **Skapa ordrar** utan behovsdatum (integrationer) laddar ledtidsunderlaget även för inköpsartiklar.
-- [ ] **Kalkyl:** pröva andra påslag på en enskild artikel — ingår i [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*
 - [ ] **Momsrapporten:** visar Deklarerad även när ett kvartal bara delvis överlappar en deklarerad månad — en hint "överlappar en deklarerad månad".
 - [ ] **Faktura:** icke-admin ser ingen bokföringsindikation på fakturakorten (verifikatnumret som ren text vore lika säkert som den admin-spärrade länken); fakturalistans sökning matchar kundens nuvarande namn men visar ögonblicksbilden; `?orderId=` utan rest droppas tyst när flera ordrar faktureras; Lägg till rad saknar enhetsväljare (antalet är basenheten).
 - [ ] **Konfigurator:** återanvänd inaktiv variant läggs in tyst — visa "Varianten X fanns redan (inaktiv)"; antalsbyte på rad vars mall lämnat Beställningsvara saknar tips om att ange pris; `createQuote` rapporterar bara första ogiltiga rad; ingen laddningstext medan mallens grupper hämtas i Konfigurera; ingen "välj alla" i behovsberäkningens konfigurerade sektion; "— Välj —" kan inte tömma ett förval *(enligt spec)*.

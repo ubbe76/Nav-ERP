@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Table } from "../ui/Table";
 import { CostChain } from "../ui/CostChain";
 import { chainLines } from "../../lib/costChain";
+import { MARKUP_LEVEL_WORDS, type MarkupLevel } from "../../lib/markupLevels";
 import { Button } from "../ui/Button";
 import { FormActions, FormError, FormHint, FormSaved } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
@@ -37,6 +38,12 @@ const SOURCE_LABELS: Record<CostingMaterialSource, string> = {
 
 function money(value: string | number) {
   return `${formatMoney(value)} kr`;
+}
+
+// " (varugruppen)" after a price markup's percent; nothing on a calculation
+// that carries no level.
+function levelSuffix(level: MarkupLevel | undefined) {
+  return level ? ` (${MARKUP_LEVEL_WORDS[level]})` : "";
 }
 
 function percent(value: string) {
@@ -83,7 +90,13 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
     const label = target === "standard" ? "standardpriset" : "försäljningspriset";
     // The standard cost also drives stock valuation and the value of a
     // manufacturing receipt, so overwriting it is not cosmetic — confirm.
-    if (!(await confirmDialog(`Skriva över artikelns ${label} med kalkylens värde?`))) return;
+    // A tried calculation's price carries the markups that were tried, not the
+    // ones that apply — say so before it becomes the article's price.
+    const trialNote =
+      target === "sales" && (detail?.generalMarkupLevel === "trial" || detail?.materialMarkupLevel === "trial")
+        ? " Kalkylen är prövad: priset bygger på de påslag som prövades, inte på dem som gäller för artikeln."
+        : "";
+    if (!(await confirmDialog(`Skriva över artikelns ${label} med kalkylens värde?${trialNote}`))) return;
     setApplyError(null);
     setApplied(null);
     setApplying(target);
@@ -120,7 +133,11 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
       <FormHint>
         Beräknad med materialkälla {SOURCE_LABELS[detail.materialSource]}, MO {percent(detail.moPercent)}, LO{" "}
         {percent(detail.loPercent)}, Affo {percent(detail.affoPercent)}, generellt påslag{" "}
-        {percent(detail.generalMarkupPercent)}, materialpåslag {percent(detail.materialMarkupPercent)}.
+        {percent(detail.generalMarkupPercent)}
+        {levelSuffix(detail.generalMarkupLevel)}, materialpåslag {percent(detail.materialMarkupPercent)}
+        {levelSuffix(detail.materialMarkupLevel)}.
+        {(detail.generalMarkupLevel === "trial" || detail.materialMarkupLevel === "trial") &&
+          " Prövad kalkyl (Pröva påslag): påslagen är inte de som gäller för artikeln, och självkostnaden är densamma som i en vanlig förkalkyl."}
         {detail.multiLevel &&
           " Flernivåkalkyl: tillverkade halvfabrikat kostades ur sina egna strukturer och rutter, och bär därför inget MO-påslag här; deras TO-påslag och materialpåslag ingår i kedjans TO-påslag och materialpåslag."}
         {hasPriceDate
