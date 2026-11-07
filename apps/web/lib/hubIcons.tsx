@@ -144,6 +144,7 @@ export const HUB_ICONS: Record<string, LucideIcon> = {
   "/personal/attestering": BadgeCheck,
   "/personal/loneunderlag": FileSpreadsheet,
   "/personal/lonekoder": ListOrdered,
+  "/personal/lon-paxml": SlidersHorizontal,
   "/kvalitet/avvikelser": ShieldAlert,
   "/kvalitet/orsaker": Tags,
   "/lager/saldon": Warehouse,

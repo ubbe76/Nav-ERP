@@ -389,10 +389,9 @@ export const PERSONAL_SECTIONS: ModuleNavSection[] = [
         roles: ["admin"],
       },
       {
-        // The panel lives under System → Inställningar (admin-only end to end).
-        href: "/system/installningar",
+        href: "/personal/lon-paxml",
         title: "Lön & PAXml",
-        description: "Tidkoder för PAXml-exporten, övertidsregler och anledning vid sen ankomst — panelen Lön & PAXml under System → Inställningar.",
+        description: "Tidkoder för PAXml-exporten, övertidsregler och anledning vid sen ankomst.",
         roles: ["admin"],
       },
     ],

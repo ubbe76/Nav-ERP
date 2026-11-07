@@ -7,7 +7,7 @@ import { Field, Input } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import type { SystemSettings } from "../../lib/types";
-import cardStyles from "./SettingsForm.module.css";
+import cardStyles from "../system/SettingsForm.module.css";
 
 // PAXml löneart codes for the payroll export (löneunderlag) and the daily
 // overtime grace period. The codes themselves mean nothing to NAV — they are
@@ -92,7 +92,7 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
   }
 
   return (
-    <div className={cardStyles.card} style={{ marginTop: 18 }}>
+    <div className={cardStyles.card}>
       <Form onSubmit={handleSave}>
         <div>
           <div className={cardStyles.label}>Lön &amp; PAXml</div>

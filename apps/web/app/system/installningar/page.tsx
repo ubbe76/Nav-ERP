@@ -1,13 +1,13 @@
 import { headers } from "next/headers";
 import { AppShell } from "../../../components/AppShell";
 import { SettingsForm } from "../../../components/system/SettingsForm";
-import { PayrollSettingsForm } from "../../../components/system/PayrollSettingsForm";
 import { AlertSettingsForm } from "../../../components/system/AlertSettingsForm";
 import { SmtpSettingsForm } from "../../../components/system/SmtpSettingsForm";
 import { getCurrentUser, apiGet } from "../../../lib/api";
 import type { Article, SystemSettings } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
 import { HelpLink } from "../../../components/ui/HelpLink";
+import { GatedLink } from "../../../components/ui/GatedLink";
 
 export default async function SettingsPage() {
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
@@ -41,6 +41,10 @@ export default async function SettingsPage() {
         <HelpLink chapter="system" anchor="installningar" label="Hjälp om inställningar" />
       </div>
 
+      <p style={{ marginTop: 0 }}>
+        Lön &amp; PAXml ställs in under <GatedLink href="/personal/lon-paxml">Personal &amp; lön → Lön &amp; PAXml</GatedLink>.
+      </p>
+
       <SettingsForm
         settings={settings}
         setupChargeArticle={
@@ -50,7 +54,6 @@ export default async function SettingsPage() {
         }
       />
       <AlertSettingsForm settings={settings} />
-      <PayrollSettingsForm settings={settings} />
       <SmtpSettingsForm settings={settings} />
     </AppShell>
   );
