@@ -188,6 +188,7 @@ export function ManufacturingOrdersPageClient({
           options={[
             ...Object.entries(MANUFACTURING_ORDER_STATUS_PILL).map(([value, pill]) => ({ value, label: pill.label })),
             { value: "late", label: "Sen" },
+            { value: "component_late", label: "Halvfabrikat sent" },
           ]}
         />
         {!readOnly && <ListExportLink endpoint="/api/v1/manufacturing-orders/csv" />}
@@ -306,6 +307,11 @@ export function ManufacturingOrdersPageClient({
                 <span className={styles.plannedCell}>
                   {weeks ?? "—"}
                   {order.late && <StatusPill status="delayed" label="Sen" compact />}
+                  {order.componentLate && (
+                    <span title="En halvfabrikat-TO som ordern behöver blir klar efter behovet">
+                      <StatusPill status="delayed" label="Halvfabrikat sent" compact />
+                    </span>
+                  )}
                 </span>
               );
             }

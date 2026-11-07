@@ -510,6 +510,15 @@ export const ERROR_CODES = {
   // date under the lock / no manufactured shortage to make a TO for.
   DELIVERY_TIME_CHANGED: "delivery-time-changed",
   NOTHING_TO_RESERVE: "nothing-to-reserve",
+  // Flytta halvfabrikaten (pegging #9): a TO's due date is no longer the one
+  // the dialog showed — 409, nothing written (body.orderNumber,
+  // body.expectedDueDate, body.currentDueDate).
+  COMPONENT_MOVE_CHANGED: "component-move-changed",
+  // Skapa saknade halvfabrikat (pegging #9): the preview recomputed under the
+  // lock differs from the one confirmed (body.result = the fresh preview) /
+  // nothing left to create. 409, nothing written.
+  MISSING_COMPONENTS_CHANGED: "missing-components-changed",
+  NOTHING_TO_CREATE: "nothing-to-create",
   // Dröjsmålsränta och förseningsersättning (bokföringsgranskningen etapp 5 C)
   // Räntefakturering while Debitera dröjsmålsränta is off (409)
   LATE_INTEREST_DISABLED: "late-interest-disabled",

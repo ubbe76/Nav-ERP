@@ -1,7 +1,7 @@
 "use client";
 
 import { RowDeviationLink } from "../quality/RowDeviationLink";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
@@ -36,6 +36,7 @@ import {
   type EmployeeDirectoryEntry,
   type LegoPurchaseOperation,
   type ManufacturingOrder,
+  type ManufacturingOrderCoverage,
   type MOMaterialConsumption,
   type MOOperationDeleteResult,
   type MOOperationSaveResult,
@@ -62,6 +63,9 @@ import { Lock } from "lucide-react";
 import { suggestionText } from "../../lib/resourceSuggestion";
 import { SwitchResourceButton } from "../planning/SwitchResourceButton";
 import { plannedWeekLabel } from "../../lib/planning";
+import { CoveredByCell, GoesToSection, coverageOfRow } from "./CoverageSections";
+import { MoveComponentsDialog } from "./MoveComponentsDialog";
+import { MissingComponentsDialog } from "./MissingComponentsDialog";
 
 interface ManufacturingOrderDetailProps {
   order: ManufacturingOrder;
@@ -115,11 +119,38 @@ export function ManufacturingOrderDetail({
   // Produktionsplanering: Sen (planned finish after the due date), from the
   // order's plan summary.
   const late = order.late === true;
+
+  // Pegging (#9): what covers each material row, where this TO's output goes,
+  // and the Flytta halvfabrikaten rows. Fetched on the client (derived at
+  // read); never fails the card. Refetched when the card refreshes.
+  const [coverage, setCoverage] = useState<ManufacturingOrderCoverage | null>(null);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [missingOpen, setMissingOpen] = useState(false);
+  // A request sequence: the effect and the dialogs' onMoved/onCreated can
+  // overlap, and only the LAST request may write — an older answer landing
+  // after the post-commit one would show stale Saknas/moves.
+  const coverageSeq = useRef(0);
+  const loadCoverage = useCallback(async () => {
+    const seq = ++coverageSeq.current;
+    try {
+      const res = await apiFetch<ManufacturingOrderCoverage>(`/api/v1/manufacturing-orders/${order.id}/coverage`);
+      if (seq === coverageSeq.current) setCoverage(res);
+    } catch (err) {
+      if (seq === coverageSeq.current) throw err;
+    }
+  }, [order.id]);
+  useEffect(() => {
+    loadCoverage().catch(() => setCoverage(null));
+    // The server props change with router.refresh(), so the card's own data
+    // (materials, due date, status) are the refetch triggers.
+  }, [loadCoverage, materials, order.dueDate, order.status, order.updatedAt]);
+  const componentLate = coverage?.componentLate ?? order.componentLate === true;
   // Opens the specification for the calculation that was just made.
   const [openCalculationId, setOpenCalculationId] = useState<string | null>(null);
 
   // Ändra material och operationer: only while the order is released or in
   // progress, and never in the workshop profile's read-only mode.
+  const canPegging = !readOnly && (order.status === "planned" || order.status === "released" || order.status === "in_progress");
   const canEditLines = !readOnly && (order.status === "released" || order.status === "in_progress");
   const [materialDialog, setMaterialDialog] = useState<{ editing: MOMaterialConsumption | null } | null>(null);
   const [operationDialog, setOperationDialog] = useState<{ editing: MOOperation | null } | null>(null);
@@ -220,6 +251,11 @@ export function ManufacturingOrderDetail({
             <StatusPill status="delayed" label="Sen" />
           </span>
         )}
+        {componentLate && (
+          <span title="En halvfabrikat-TO som ordern behöver blir klar efter behovet">
+            <StatusPill status="delayed" label="Halvfabrikat sent" />
+          </span>
+        )}
         <span>
           Antal: <strong>{Number(order.quantity)}</strong>
         </span>
@@ -259,6 +295,16 @@ export function ManufacturingOrderDetail({
                 : "saknas"}
             </strong>
           </span>
+        )}
+        {canPegging && (coverage?.moves.length ?? 0) > 0 && (
+          <Button type="button" variant="ghost" size="small" onClick={() => setMoveOpen(true)}>
+            Flytta halvfabrikaten…
+          </Button>
+        )}
+        {canPegging && coverage?.materials.some((m) => m.uncovered > 0 && m.articleType === "manufactured") && (
+          <Button type="button" variant="ghost" size="small" onClick={() => setMissingOpen(true)}>
+            Skapa saknade halvfabrikat…
+          </Button>
         )}
         {/* Shop-floor printout — the article's drawings are appended. */}
         <a
@@ -317,10 +363,11 @@ export function ManufacturingOrderDetail({
           columns={[
             { key: "componentArticleNumber", label: "Artikelnummer", width: "150px" },
             { key: "componentName", label: "Benämning", width: "1fr" },
-            { key: "moOperationId", label: "Operation", width: "150px" },
-            { key: "quantityPlanned", label: "Planerat", width: "100px", align: "right" },
+            { key: "moOperationId", label: "Operation", width: "130px" },
+            { key: "quantityPlanned", label: "Planerat", width: "90px", align: "right" },
             { key: "unitCode", label: "Enhet", width: "70px" },
-            { key: "quantityConsumed", label: "Förbrukat", width: "100px", align: "right" },
+            { key: "quantityConsumed", label: "Förbrukat", width: "90px", align: "right" },
+            ...((coverage?.materials.length ?? 0) > 0 ? [{ key: "coveredBy", label: "Täcks av", width: "minmax(170px, 1.2fr)" }] : []),
             ...(canEditLines ? [{ key: "id", label: "", width: "150px", align: "right" as const }] : []),
           ]}
           rows={materials}
@@ -331,6 +378,8 @@ export function ManufacturingOrderDetail({
                 // Displayed in the BOM row's unit (snapshotted at release) —
                 // stored values are in the component's base unit.
                 return toUnitQuantity(Number(row[key]), row.unitFactor);
+              case "coveredBy":
+                return <CoveredByCell row={row} material={coverageOfRow(coverage, row)} />;
               case "id":
                 return (
                   <span style={{ display: "inline-flex", gap: 2, flexWrap: "nowrap", whiteSpace: "nowrap", justifyContent: "flex-end", alignItems: "center" }}>
@@ -358,6 +407,31 @@ export function ManufacturingOrderDetail({
       ) : (
         <p>Inga materialrader (artikeln saknar struktur, eller ordern är inte frisläppt än).</p>
       )}
+
+      <GoesToSection coverage={coverage} unit={order.articleUnitCode ?? "st"} />
+
+      <MoveComponentsDialog
+        open={moveOpen}
+        onClose={() => setMoveOpen(false)}
+        orderId={order.id}
+        moves={coverage?.moves ?? []}
+        onReload={loadCoverage}
+        onMoved={() => {
+          setHistoryKey((k) => k + 1);
+          router.refresh();
+          loadCoverage().catch(() => undefined);
+        }}
+      />
+      <MissingComponentsDialog
+        open={missingOpen}
+        onClose={() => setMissingOpen(false)}
+        orderId={order.id}
+        onCreated={() => {
+          setHistoryKey((k) => k + 1);
+          router.refresh();
+          loadCoverage().catch(() => undefined);
+        }}
+      />
 
       <SectionHeading
         spaced

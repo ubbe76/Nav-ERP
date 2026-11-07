@@ -155,3 +155,42 @@ export const applyDeliveryTimeSchema = z.object({
   useAlternatives: z.boolean().optional(),
 });
 export type ApplyDeliveryTimeInput = z.infer<typeof applyDeliveryTimeSchema>;
+
+// POST /manufacturing-orders/:id/component-moves — Flytta halvfabrikaten
+// (pegging #9): the chosen TOs from GET …/coverage's `moves` with the due
+// date to set and the one the dialog showed (expectedDueDate, null = none);
+// a TO whose date changed meanwhile refuses the whole request
+// (component-move-changed). Each TO at most once.
+export const componentMovesSchema = z.object({
+  moves: z
+    .array(
+      z.object({
+        manufacturingOrderId: z.string().uuid(),
+        dueDate: businessDateSchema,
+        expectedDueDate: businessDateSchema.nullable(),
+      })
+    )
+    .min(1)
+    .refine((moves) => new Set(moves.map((m) => m.manufacturingOrderId)).size === moves.length, {
+      message: "A manufacturing order may only be listed once",
+    }),
+});
+export type ComponentMovesInput = z.infer<typeof componentMovesSchema>;
+
+// POST /manufacturing-orders/:id/missing-components — Skapa saknade
+// halvfabrikat (pegging #9): the tree the client confirmed from GET
+// …/missing-components, as (articleId, quantity, level) — the server
+// recomputes the preview under the plan lock and refuses another tree
+// (missing-components-changed) or an empty one (nothing-to-create).
+export const missingComponentsSchema = z.object({
+  expected: z
+    .array(
+      z.object({
+        articleId: z.string().uuid(),
+        quantity: z.coerce.number().positive(),
+        level: z.number().int().min(1),
+      })
+    )
+    .min(1),
+});
+export type MissingComponentsInput = z.infer<typeof missingComponentsSchema>;

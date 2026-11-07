@@ -141,6 +141,20 @@ export function subtractWorkingDays(date: string, n: number, offDays: ReadonlySe
   return day;
 }
 
+// The number of working days in (from, to] — how many working days `to`
+// lies after `from` (0 when to ≤ from). Pegging's "N dagar för sent".
+// Bounded like the other walks: a span over a year counts no further.
+export function workingDaysBetween(from: string, to: string, offDays: ReadonlySet<string>): number {
+  if (to <= from) return 0;
+  let n = 0;
+  let day = from;
+  for (let i = 0; i < MAX_STEPS && day < to; i++) {
+    day = addDays(day, 1);
+    if (isWorkingDay(day, offDays)) n++;
+  }
+  return n;
+}
+
 // No fixed days ⇒ working days. An explicitly ticked Saturday/Sunday is
 // listed, a full-day holiday never is.
 export function isListedDay(date: string, s: DeliverySettings, offDays: ReadonlySet<string>): boolean {

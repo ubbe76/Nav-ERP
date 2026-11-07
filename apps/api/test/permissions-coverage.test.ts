@@ -463,6 +463,26 @@ describe("profiles against the real app", () => {
     }
   });
 
+  it("pegging: the TO card's coverage and the missing-components preview are read like the card (MO_READ), Flytta halvfabrikaten and Skapa saknade halvfabrikat are Tillverkning writes", async () => {
+    const workshop = await sessionFor(["terminal", "artikeloversikt", "tillverkningsorder_las"]);
+    const inkop = await sessionFor(["inkop"]);
+    const production = await sessionFor(["tillverkning"]);
+    const body = { moves: [{ manufacturingOrderId: NO_ID, dueDate: "2030-03-20", expectedDueDate: null }] };
+    const missing = { expected: [{ articleId: NO_ID, quantity: 1, level: 1 }] };
+    // passes the gate (404 from the handler: no such TO)
+    expect(await status(workshop, "GET", `/manufacturing-orders/${NO_ID}/coverage`)).toBe(404);
+    expect(await status(inkop, "GET", `/manufacturing-orders/${NO_ID}/coverage`)).toBe(404);
+    expect(await status(workshop, "GET", `/manufacturing-orders/${NO_ID}/missing-components`)).toBe(404);
+    expect(await status(inkop, "GET", `/manufacturing-orders/${NO_ID}/missing-components`)).toBe(404);
+    expect(await status(production, "POST", `/manufacturing-orders/${NO_ID}/component-moves`, body)).toBe(404);
+    expect(await status(production, "POST", `/manufacturing-orders/${NO_ID}/missing-components`, missing)).toBe(404);
+    // reading the card does not let the workshop or another office menu move the dates or create TOs
+    expect(await status(workshop, "POST", `/manufacturing-orders/${NO_ID}/component-moves`, body)).toBe(403);
+    expect(await status(inkop, "POST", `/manufacturing-orders/${NO_ID}/component-moves`, body)).toBe(403);
+    expect(await status(workshop, "POST", `/manufacturing-orders/${NO_ID}/missing-components`, missing)).toBe(403);
+    expect(await status(inkop, "POST", `/manufacturing-orders/${NO_ID}/missing-components`, missing)).toBe(403);
+  });
+
   it("the employee directory carries names, numbers and Förvalda stationer only, sorted on the employee number", async () => {
     const c = await sessionFor(["terminal"]);
     const tag = crypto.randomUUID().slice(0, 8);

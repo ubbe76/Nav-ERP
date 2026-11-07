@@ -2,16 +2,23 @@ import type { FastifyInstance } from "fastify";
 import {
   applyDeliveryTimeSchema,
   capacityQuerySchema,
+  componentMovesSchema,
   createPlanningOrdersSchema,
   deliveryTimeCheckSchema,
   dueDateSuggestionQuerySchema,
   listRequirementsQuerySchema,
+  missingComponentsSchema,
   moveOperationSchema,
 } from "@navet/shared";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { requirementsExportColumns } from "../service/export-columns.js";
 import {
   ArticleNotFoundError,
+  ComponentMoveChangedError,
+  InvalidStatusTransitionError,
+  ManufacturingOrderNotFoundError,
+  MissingComponentsChangedError,
+  NothingToCreateError,
   ConfigurationNotAllowedError,
   ConfigurationRequiredError,
   CustomerNotFoundError,
@@ -41,7 +48,7 @@ import {
 import { ConfiguratorInvalidConfigurationError, ConfiguratorModeChangedError, ConfiguratorNotToOrderModeError } from "../../configurator/service/configurator.errors.js";
 import { InvalidStatusTransitionError as SalesStatusError } from "../../sales/service/sales.service.js";
 import { errorBody } from "../../system/service/error-body.js";
-import { DELIVERY_CHECK, OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
+import { DELIVERY_CHECK, MO_READ, OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
 
 export async function planningRoutes(app: FastifyInstance, opts: { service: PlanningService }) {
   const { service } = opts;
@@ -69,6 +76,87 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
       return await service.getArticleOverview(req.params.id);
     } catch (err) {
       if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Pegging (#9): the TO card's Täcks av / Går till. MO_READ like the TO
+  // card itself (the workshop profile sees it; no prices in the answer).
+  app.get<{ Params: { id: string } }>("/manufacturing-orders/:id/coverage", { config: { access: MO_READ } }, async (req, reply) => {
+    try {
+      return await service.getManufacturingOrderCoverage(req.params.id);
+    } catch (err) {
+      if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Flytta halvfabrikaten (pegging #9): the chosen TOs' due dates, all or
+  // nothing. Module default write = tillverkning. 409 component-move-changed
+  // carries which TO and the dates; 409 invalid-status-transition a TO that
+  // is no longer open; 404 for the parent or a listed TO that does not exist.
+  app.post<{ Params: { id: string } }>("/manufacturing-orders/:id/component-moves", async (req, reply) => {
+    const input = componentMovesSchema.parse(req.body);
+    try {
+      return await service.moveComponentOrders(req.params.id, input, req.user!.id);
+    } catch (err) {
+      if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof ComponentMoveChangedError) {
+        return reply
+          .code(409)
+          .send({ ...errorBody(err), orderNumber: err.orderNumber, expectedDueDate: err.expectedDueDate, currentDueDate: err.currentDueDate });
+      }
+      if (err instanceof InvalidStatusTransitionError) return reply.code(409).send({ ...errorBody(err), orderNumber: err.orderNumber });
+      throw err;
+    }
+  });
+
+  // Skapa saknade halvfabrikat (pegging #9): the preview — the TOs that
+  // would cover what the TO's material needs are left without, the whole
+  // structure down. MO_READ like the card (no prices in it).
+  app.get<{ Params: { id: string } }>("/manufacturing-orders/:id/missing-components", { config: { access: MO_READ } }, async (req, reply) => {
+    try {
+      return await service.getMissingComponents(req.params.id);
+    } catch (err) {
+      if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Skapa saknade halvfabrikat: the create, all or nothing, under the
+  // production_plan lock. Module default write = tillverkning. 409
+  // missing-components-changed carries the fresh preview in `result`; 409
+  // nothing-to-create when nothing is left; 409 invalid-status-transition for
+  // a parent that is no longer open; the manufacturing service's own
+  // refusals mapped as POST /delivery-time-check/apply maps them.
+  app.post<{ Params: { id: string } }>("/manufacturing-orders/:id/missing-components", async (req, reply) => {
+    const input = missingComponentsSchema.parse(req.body);
+    try {
+      return await service.createMissingComponents(req.params.id, input, req.user!.id);
+    } catch (err) {
+      if (err instanceof ManufacturingOrderNotFoundError || err instanceof LinkedRowNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof MissingComponentsChangedError) return reply.code(409).send({ ...errorBody(err), result: err.result });
+      if (err instanceof InvalidStatusTransitionError) return reply.code(409).send({ ...errorBody(err), orderNumber: err.orderNumber });
+      if (
+        err instanceof NothingToCreateError ||
+        err instanceof ConfiguratorModeChangedError ||
+        err instanceof LinkedOrderStatusError ||
+        err instanceof ArticleIsTemplateError ||
+        err instanceof SalesConfigurationRequiredError ||
+        err instanceof ConfiguratorNotToOrderModeError
+      ) {
+        return reply.code(409).send(errorBody(err));
+      }
+      if (
+        err instanceof SalesConfigurationNotAllowedError ||
+        err instanceof LinkedRowArticleMismatchError ||
+        err instanceof LinkedRowNotManufacturedError
+      ) {
+        return reply.code(400).send(errorBody(err));
+      }
+      if (err instanceof ConfiguratorInvalidConfigurationError) {
+        return reply.code(400).send({ ...errorBody(err), details: err.details });
+      }
       throw err;
     }
   });

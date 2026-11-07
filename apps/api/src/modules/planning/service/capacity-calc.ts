@@ -139,6 +139,9 @@ export interface CapacityCellOrder {
   plannedEndWeek: string | null;
   planLocked: boolean;
   late: boolean; // the MO's Sen — its last pending operation finishes after the due date
+  // Pegging (#9): Halvfabrikat sent — a TO that covers one of this order's
+  // material needs is late for it (the service computes the set once).
+  componentLate: boolean;
   // Alternativa resurser (#15): Vald för hand; the ordinarie's code when the
   // operation is on an alternative (null on the ordinarie or without
   // alternatives); the förslag (derived at this read, never stored).
@@ -500,7 +503,15 @@ export function computeCapacity(
   // resourceSuggestions: the förslag computed on the same input
   // (resourceSuggestions in resource-suggestions.ts) — on the cells and in
   // the summary; left out = none.
-  options: { today: string; weeks: number; offDays?: ReadonlySet<string>; resourceSuggestions?: ResourceSuggestion[] }
+  // componentLateOrders: the orders with Halvfabrikat sent (pegging #9),
+  // computed by the service in one batch; left out = none.
+  options: {
+    today: string;
+    weeks: number;
+    offDays?: ReadonlySet<string>;
+    resourceSuggestions?: ResourceSuggestion[];
+    componentLateOrders?: ReadonlySet<string>;
+  }
 ): CapacityResult {
   const offDays = options.offDays ?? new Set<string>();
   const lookups = buildScheduleLookups(input.weekScheduleDays, input.daySchedules, input.holidays);
@@ -613,6 +624,7 @@ export function computeCapacity(
         plannedEndWeek: planned ? plannedMondays[plannedMondays.length - 1]! : null,
         planLocked: operation.planLocked ?? false,
         late: statusByOrder.get(operation.manufacturingOrderId)?.late ?? false,
+        componentLate: options.componentLateOrders?.has(operation.manufacturingOrderId) ?? false,
         resourceLocked: operation.resourceLocked ?? false,
         ordinaryWorkCenterCode: ordinaryCodeOf(operation),
         suggestion: suggestionByOperation.get(operation.moOperationId) ?? null,

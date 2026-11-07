@@ -573,6 +573,11 @@ function ExpansionRow({
                 <span>{o.dueDate ? `Färdigt ${o.dueDate}` : "—"}</span>
                 {o.overdue && <StatusPill status="delayed" compact />}
                 {o.late && <StatusPill status="delayed" label="Sen" compact />}
+                {o.componentLate && (
+                  <span title="En halvfabrikat-TO som ordern behöver blir klar efter behovet">
+                    <StatusPill status="delayed" label="Halvfabrikat sent" compact />
+                  </span>
+                )}
                 {o.planLocked && (
                   <span className={styles.lockedBadge}>
                     <Lock size={12} aria-hidden="true" />

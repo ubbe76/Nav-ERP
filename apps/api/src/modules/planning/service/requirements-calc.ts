@@ -468,8 +468,12 @@ const round4 = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
 // The proposal quantity for an uncovered quantity: whole order-quantity
 // multiples first, Avrundning LAST on top (100 kg in 7.38 kg bars is 103.32
 // kg, 14 bars). Shared with the order services so a proposal and the IO/TO
-// it becomes can never disagree.
-function orderQuantityFor(rawQuantity: number, article: RequirementsArticle): number {
+// it becomes can never disagree. Exported for Skapa saknade halvfabrikat
+// (pegging #9) — one rule with the behovsberäkning's proposal.
+export function orderQuantityFor(
+  rawQuantity: number,
+  article: Pick<RequirementsArticle, "orderQuantity" | "rounding">
+): number {
   let quantity = rawQuantity;
   if (article.orderQuantity != null && article.orderQuantity > 0) {
     // toFixed(6) guards float noise (0.30000000000000004 / 0.3) from

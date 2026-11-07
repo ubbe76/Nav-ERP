@@ -156,6 +156,21 @@ function chunk<T>(list: T[], size: number): T[][] {
 // from being exploded into demand — its whole subtree is costing-only.
 const DEMAND_BOM_ROWS = eq(bomComponents.costingOnly, false);
 
+// Pegging (#9): what coverageParents loads for a set of parent TOs.
+export interface CoverageParentsLoad {
+  orders: {
+    id: string;
+    orderNumber: string;
+    status: ManufacturingOrderStatus;
+    articleId: string;
+    articleNumber: string;
+    quantity: number;
+    dueDate: string | null;
+  }[];
+  // Per released/in-progress TO: the component articles with rest.
+  materialComponents: Map<string, string[]>;
+}
+
 export function createPlanningRepository(db: Db) {
   // Pending lego (subcontract) operations on released/in_progress MOs, with
   // the already-ordered quantity per operation (Σ quantity_ordered on
@@ -1240,12 +1255,68 @@ export function createPlanningRepository(db: Db) {
 
     // Färdigdatumsförslag: the holiday register's full days off in [from, to]
     // — a holiday WITH a day schedule is a shortened working day, not off.
-    async fullDayHolidaysBetween(from: string, to: string): Promise<string[]> {
-      const rows = await db
+    // `dbc`: Skapa saknade halvfabrikat reads under the plan lock in its own
+    // transaction.
+    async fullDayHolidaysBetween(from: string, to: string, dbc: Db | Tx = db): Promise<string[]> {
+      const rows = await dbc
         .select({ date: holidays.date })
         .from(holidays)
         .where(and(gte(holidays.date, from), lte(holidays.date, to), isNull(holidays.dayScheduleId)));
       return rows.map((r) => r.date);
+    },
+
+    // Pegging (#9): the parents a coverage is computed for — the TO heads
+    // (with the article number, for the notes) and, per TO, the component
+    // articles of its material rows with rest (the overview's mo_material
+    // rows). Only a released/in-progress TO has a material table, so a
+    // planned (legacy) TO gets none — the service treats it as closed.
+    // Unknown ids are absent. Two set-based queries, never per order.
+    async coverageParents(orderIds: string[], dbc: Db | Tx = db): Promise<CoverageParentsLoad> {
+      const ids = [...new Set(orderIds)];
+      const empty: CoverageParentsLoad = { orders: [], materialComponents: new Map() };
+      if (ids.length === 0) return empty;
+      // One query at a time, like loadAll — keep the reads sequential inside
+      // the transaction (Skapa saknade halvfabrikat runs this under the plan
+      // lock).
+      const orders = await dbc
+        .select({
+          id: manufacturingOrders.id,
+          orderNumber: manufacturingOrders.orderNumber,
+          status: manufacturingOrders.status,
+          articleId: manufacturingOrders.articleId,
+          articleNumber: articles.articleNumber,
+          quantity: manufacturingOrders.quantity,
+          dueDate: manufacturingOrders.dueDate,
+        })
+        .from(manufacturingOrders)
+        .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))
+        .where(inArray(manufacturingOrders.id, ids));
+      const materials = await dbc
+        .select({
+          manufacturingOrderId: moMaterialConsumptions.manufacturingOrderId,
+          componentArticleId: moMaterialConsumptions.componentArticleId,
+        })
+        .from(moMaterialConsumptions)
+        .where(
+          and(
+            inArray(moMaterialConsumptions.manufacturingOrderId, ids),
+            sql`${moMaterialConsumptions.quantityPlanned} > ${moMaterialConsumptions.quantityConsumed}`
+          )
+        );
+      const materialComponents = new Map<string, string[]>();
+      for (const m of materials) {
+        const list = materialComponents.get(m.manufacturingOrderId) ?? [];
+        if (!list.includes(m.componentArticleId)) list.push(m.componentArticleId);
+        materialComponents.set(m.manufacturingOrderId, list);
+      }
+      return { orders: orders.map((o) => ({ ...o, quantity: Number(o.quantity) })), materialComponents };
+    },
+
+    // The phantom articles — with loadBomEdges the whole demand structure an
+    // in-memory explosion needs (Skapa saknade halvfabrikat).
+    async phantomArticleIds(dbc: Db | Tx = db): Promise<string[]> {
+      const rows = await dbc.select({ id: articles.id }).from(articles).where(eq(articles.isPhantom, true));
+      return rows.map((r) => r.id);
     },
 
     // Just the BOM edges — Skapa ordrar orders its TO proposals parents first
