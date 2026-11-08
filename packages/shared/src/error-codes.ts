@@ -593,6 +593,10 @@ export const ERROR_CODES = {
   // more than COPIED_ARTICLES_MAX articles (400, Swedish message with the
   // count; the body also carries `count` and `max`). Nothing is written.
   COPIED_ARTICLES_TOO_MANY: "copied-articles-too-many",
+  // Förkalkylera flera (#27): the selection holds more than
+  // PRE_CALCULATION_BATCH_MAX articles (400, Swedish message; the body also
+  // carries `count` and `max`). Nothing is calculated.
+  PRE_CALCULATION_BATCH_TOO_LARGE: "pre-calculation-batch-too-large",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

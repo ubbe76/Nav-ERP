@@ -272,6 +272,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "article-location-invalid": serverMessage("Lagerplatserna kunde inte sparas — kontrollera huvudplatsen och de alternativa platserna."),
   // Kopierat (#28): the server names the count and the cap (Swedish).
   "copied-articles-too-many": serverMessage("Kopierat rymmer högst 5 000 artiklar — ta bort några eller ersätt listan."),
+  // Förkalkylera flera (#27): the server names the count and the cap (Swedish).
+  "pre-calculation-batch-too-large": serverMessage("Urvalet är för stort — högst 500 artiklar kan förkalkyleras åt gången."),
   // The server names what went wrong with the key / the mailbox.
   "invoice-scan-ai-test-failed": serverMessage("AI-tjänsten svarade inte med den här nyckeln och modellen."),
   "invoice-scan-mail-test-failed": serverMessage("Kunde inte ansluta till e-postlådan."),
