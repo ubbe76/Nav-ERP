@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema, createSupplierSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { ZodError } from "zod";
@@ -22,6 +23,7 @@ import { createSystemService } from "../src/modules/system/service/system.servic
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { resolvePrice } from "../src/modules/sales/service/price-resolver.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Fasta leveransdagar against Postgres: the delivery fields on suppliers and
 // customers (normalization, null = the system default, zod's bounds), the
@@ -89,8 +91,8 @@ afterAll(async () => {
 });
 
 const PARTNERS = [
-  { kind: "suppliers", create: () => purchaseService.createSupplier({ name: "Leverantör AB", active: true }) },
-  { kind: "customers", create: () => salesService.createCustomer({ name: "Kund AB", active: true }) },
+  { kind: "suppliers", create: () => purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Leverantör AB", active: true })) },
+  { kind: "customers", create: () => salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true })) },
 ] as const;
 
 describe.each(PARTNERS)("delivery fields on /$kind", ({ kind, create }) => {
@@ -156,7 +158,7 @@ const TODAY = "2026-10-17";
 
 describe("getSupplierDeliveryDateSuggestion", () => {
   async function supplier(fields: Record<string, unknown> = {}) {
-    return purchaseService.createSupplier({ name: "Leverantör AB", active: true, ...fields });
+    return purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Leverantör AB", active: true, ...fields }));
   }
 
   it("a supplier without settings suggests nothing", async () => {
@@ -180,7 +182,7 @@ describe("getSupplierDeliveryDateSuggestion", () => {
 
   it("the row suggestion adds the catalog lead time", async () => {
     const s = await supplier({ deliveryWeekdays: [1, 4], deliveryDayMode: "arrival" });
-    const article = await articleService.createArticle({ articleNumber: "LD-1", name: "LD-1", type: "purchased", active: true });
+    const article = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "LD-1", name: "LD-1", type: "purchased", active: true }));
     await purchaseService.addArticleSupplier(article.id, { supplierId: s.id, currency: "SEK", leadTimeDays: 5, isPrimary: true });
     // Monday 19 + 5 working days = Monday 26, a listed day.
     expect(
@@ -190,7 +192,7 @@ describe("getSupplierDeliveryDateSuggestion", () => {
 
   it("an article without a catalog row and a supplier without days gives no row date", async () => {
     const s = await supplier();
-    const article = await articleService.createArticle({ articleNumber: "LD-2", name: "LD-2", type: "purchased", active: true });
+    const article = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "LD-2", name: "LD-2", type: "purchased", active: true }));
     expect(
       await purchaseService.getSupplierDeliveryDateSuggestion({ supplierId: s.id, articleId: article.id }, TODAY)
     ).toMatchObject({ date: null, leadTimeDays: null });
@@ -211,7 +213,7 @@ describe("getSupplierDeliveryDateSuggestion", () => {
 describe("getCustomerDeliveryDateSuggestion", () => {
   const KEY = "customer_transit_days";
   async function customer(fields: Record<string, unknown> = {}) {
-    return salesService.createCustomer({ name: "Kund AB", active: true, ...fields });
+    return salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true, ...fields }));
   }
 
   it("arrival mode: transit then the next receiving day", async () => {

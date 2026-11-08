@@ -1,4 +1,4 @@
-import { API_CLIENT_SCOPES, fromSek } from "@navet/shared";
+import { API_CLIENT_SCOPES, fromSek, createArticleSchema } from "@navet/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, asc, eq, sql } from "drizzle-orm";
 import {
@@ -27,6 +27,7 @@ import { resetConfigurator } from "./helpers/configurator.js";
 import { buildToOrder, buildVariants } from "./helpers/configured-rows.js";
 import { testArticleService } from "./helpers/services.js";
 import { waitForLockWaiter } from "./helpers/year-end.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Påslag på offert och order (#16 etapp 3) through the real app: the order
 // header's two price markups (order → kund → varugrupp → företaget, field by
@@ -104,12 +105,12 @@ const call = (cookie: string, method: Method, url: string, payload?: unknown) =>
   app.inject({ method, url: `/api/v1${url}`, headers: { cookie }, ...(payload === undefined ? {} : { payload: payload as never }) });
 
 async function makeArticle(opts: { salesPrice?: number } = {}) {
-  const article = await testArticleService.createArticle({
+  const article = await testArticleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `OP-${crypto.randomUUID().slice(0, 8)}`,
     name: "Diskbänk",
     type: "manufactured",
     active: true,
-  });
+  }));
   if (opts.salesPrice !== undefined) await db.update(articles).set({ salesPrice: String(opts.salesPrice) }).where(eq(articles.id, article.id));
   return article;
 }

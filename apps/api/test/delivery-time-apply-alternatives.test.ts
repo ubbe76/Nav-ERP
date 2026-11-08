@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema, createWeekScheduleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, manufacturingOrders, moOperationPlanWeeks, moOperations, salesOrders } from "@navet/db";
@@ -30,6 +31,7 @@ import {
   type ManufacturingPlanReader,
 } from "../src/modules/planning/service/planning.service.js";
 import { waitForLockWaiter } from "./helpers/year-end.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Alternativa resurser (#15, etapp 3) — Leveranstidskontrollen and the
 // reservation against Postgres. The check runs with and without the
@@ -157,17 +159,17 @@ async function salesOrderRow(id: string) {
 async function seedWorld(opts: { fill110?: boolean } = { fill110: true }) {
   const user = await authRepo.create({ email: `alt3-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "Säljare", role: "admin" });
   const day = await scheduleService.createDaySchedule({ code: "D8", name: "Dagtid 8h", startTime: "07:00", endTime: "15:00", breaks: [], active: true });
-  const week = await scheduleService.createWeekSchedule({
+  const week = await scheduleService.createWeekSchedule(parsed(createWeekScheduleSchema, {
     code: "VS40",
     name: "Veckoschema 40h",
     days: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, dayScheduleId: day.id })),
     active: true,
-  });
-  const wc = (code: string, name: string) => mfgService.createWorkCenter({ code, name, weekScheduleId: week.id, capacityFactor: 1, active: true });
+  }));
+  const wc = (code: string, name: string) => mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code, name, weekScheduleId: week.id, capacityFactor: 1, active: true }));
   const r110 = await wc("110", "Kantpress");
   const r120 = await wc("120", "Kantpress 2");
   const r130 = await wc("130", "Svets");
-  const product = await articleService.createArticle({ articleNumber: `P-${crypto.randomUUID().slice(0, 6)}`, name: "Produkt", type: "manufactured", active: true });
+  const product = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `P-${crypto.randomUUID().slice(0, 6)}`, name: "Produkt", type: "manufactured", active: true }));
   await mfgService.createRoutingOperation(product.id, {
     sequenceNo: 10,
     workCenterId: r110.id,
@@ -176,12 +178,12 @@ async function seedWorld(opts: { fill110?: boolean } = { fill110: true }) {
     alternatives: [{ workCenterId: r120.id }],
   });
   await mfgService.createRoutingOperation(product.id, { sequenceNo: 20, workCenterId: r130.id, setupTime: 0, runTimePerUnit: 6 });
-  const fillerArticle = await articleService.createArticle({ articleNumber: `F-${crypto.randomUUID().slice(0, 6)}`, name: "Fyllnad", type: "manufactured", active: true });
+  const fillerArticle = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `F-${crypto.randomUUID().slice(0, 6)}`, name: "Fyllnad", type: "manufactured", active: true }));
   await mfgService.createRoutingOperation(fillerArticle.id, { sequenceNo: 10, workCenterId: r110.id, setupTime: 2400, runTimePerUnit: 0 });
-  const filler120 = await articleService.createArticle({ articleNumber: `G-${crypto.randomUUID().slice(0, 6)}`, name: "Fyllnad 120", type: "manufactured", active: true });
+  const filler120 = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `G-${crypto.randomUUID().slice(0, 6)}`, name: "Fyllnad 120", type: "manufactured", active: true }));
   await mfgService.createRoutingOperation(filler120.id, { sequenceNo: 10, workCenterId: r120.id, setupTime: 2400, runTimePerUnit: 0 });
   if (opts.fill110) await mfgService.createManufacturingOrder({ articleId: fillerArticle.id, quantity: 1 }, user.id);
-  const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+  const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
   const { order, rows } = await salesService.createQuote(
     { customerId: customer.id, confirm: true, rows: [{ articleId: product.id, quantity: 10, unitPrice: 100 }] },
     user.id
@@ -195,7 +197,7 @@ async function madeArticle(
   prefix: string,
   operations: { workCenterId: string; setupTime?: number; runTimePerUnit?: number; alternatives?: { workCenterId: string; runTimePerUnit?: number }[] }[]
 ) {
-  const article = await articleService.createArticle({ articleNumber: `${prefix}-${crypto.randomUUID().slice(0, 6)}`, name: prefix, type: "manufactured", active: true });
+  const article = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `${prefix}-${crypto.randomUUID().slice(0, 6)}`, name: prefix, type: "manufactured", active: true }));
   for (const [i, o] of operations.entries()) {
     await mfgService.createRoutingOperation(article.id, {
       sequenceNo: (i + 1) * 10,

@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema } from "@navet/shared";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -19,6 +20,7 @@ import { createSystemRepository } from "../src/modules/system/repository/system.
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { pdfText } from "./helpers/pdf.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Kundens förfrågan (migration 0139): the customer's inquiry/RFQ reference on
 // a quote or order — set on create, edited through the header PATCH under
@@ -63,16 +65,16 @@ async function makeUser() {
 }
 
 async function makeCustomer() {
-  return salesService.createCustomer({ name: "Kund AB", active: true });
+  return salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
 }
 
 async function makeArticle() {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-FQ-${crypto.randomUUID().slice(0, 8)}`,
     name: "Diskbänk",
     type: "purchased",
     active: true,
-  });
+  }));
 }
 
 async function makeOrder(fields: { customerInquiryNumber?: string; customerOrderNumber?: string; confirm?: boolean }) {

@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -24,6 +25,7 @@ import { createReportsRepository } from "../src/modules/reports/repository/repor
 import { createReportsService } from "../src/modules/reports/service/reports.service.js";
 import { buildSalesStatisticsCsv } from "../src/modules/reports/service/reports-csv.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -73,16 +75,16 @@ async function makeUser() {
 }
 
 async function makeCustomer(name = "Kund AB") {
-  return salesService.createCustomer({ name, active: true });
+  return salesService.createCustomer(parsed(createCustomerSchema, { name, active: true }));
 }
 
 async function makeArticle(name = "Rapportartikel") {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `REP-SALES-${crypto.randomUUID()}`,
     name,
     type: "manufactured",
     active: true,
-  });
+  }));
 }
 
 const currentMonth = () => stockholmToday().slice(0, 7);

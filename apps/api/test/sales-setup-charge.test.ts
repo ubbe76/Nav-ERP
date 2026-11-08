@@ -3,7 +3,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
-import { createArticleSchema, updateSystemSettingsSchema } from "@navet/shared";
+import { createArticleSchema, updateSystemSettingsSchema, createCustomerSchema, createQuoteSchema } from "@navet/shared";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -22,6 +22,7 @@ import { createSystemService } from "../src/modules/system/service/system.servic
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { pdfText } from "./helpers/pdf.js";
 import { SetupChargeArticleNotFoundError } from "../src/modules/system/service/system.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -74,7 +75,7 @@ async function makeUser() {
 // Ställkostnadsartikel chosen in the settings.
 async function scenario(opts: { setupArticle?: boolean } = {}) {
   const user = await makeUser();
-  const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+  const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
   const a1 = await makeArticle("A-1");
   const a2 = await makeArticle("A-2");
   const setup = await makeArticle("STALL", "service");
@@ -90,13 +91,13 @@ describe("Ställkostnad som egen orderrad", () => {
   it("adds a linked Ställkostnad row per article on a new quote, even with a typed price", async () => {
     const { user, customer, a1, a2, setup } = await scenario();
     const { order } = await salesService.createQuote(
-      {
+      parsed(createQuoteSchema, {
         customerId: customer.id,
         rows: [
           { articleId: a1.id, quantity: 10 },
           { articleId: a2.id, quantity: 2, unitPrice: 450 },
         ],
-      },
+      }),
       user.id
     );
     const rows = await salesService.listRows(order.id);
@@ -117,7 +118,7 @@ describe("Ställkostnad som egen orderrad", () => {
   it("adds nothing without a Ställkostnadsartikel, and never on the article itself", async () => {
     const { user, customer, a1, setup } = await scenario({ setupArticle: false });
     const { order } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: a1.id, quantity: 1 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: a1.id, quantity: 1 }] }),
       user.id
     );
     expect(await salesService.listRows(order.id)).toHaveLength(1);
@@ -130,7 +131,7 @@ describe("Ställkostnad som egen orderrad", () => {
   it("adds the row on Lägg till rad and removes an undelivered one with its article row", async () => {
     const { user, customer, a1, a2, setup } = await scenario();
     const { order } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: a2.id, quantity: 1 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: a2.id, quantity: 1 }] }),
       user.id
     );
     const added = await salesService.addRow(order.id, { articleId: a1.id, quantity: 3 });

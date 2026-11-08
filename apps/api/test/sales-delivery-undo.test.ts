@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema, createQuoteSchema, createStockLocationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { and, eq, sql } from "drizzle-orm";
@@ -50,6 +51,7 @@ import { createSystemService } from "../src/modules/system/service/system.servic
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { pdfText } from "./helpers/pdf.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/services.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Ångra utleverans: one delivery row reversed — stock back where it was
 // taken from, the order row's delivered quantity, the order status — and the
@@ -105,17 +107,17 @@ afterAll(async () => {
 });
 
 async function makeArticle() {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-UNDO-${crypto.randomUUID().slice(0, 8)}`,
     name: "Testartikel",
     type: "purchased",
     active: true,
-  });
+  }));
 }
 
 async function makeLocation(name = "A1", fixed = true) {
   const warehouse = await stockService.createWarehouse({ name: `Lager ${name}`, active: true });
-  return stockService.createLocation({ warehouseId: warehouse!.id, name, active: true, fixed });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name, active: true, fixed }));
 }
 
 // The parts a delivery row drew (delivery_row_locations), oldest first.
@@ -152,7 +154,7 @@ async function delivered(rowId: string) {
 // Two rows (A 10 st, B 5 st), stocked with exactly the ordered quantities at
 // one location and pushed to in_production.
 async function makeOrder(stockA = 10, stockB = 5) {
-  const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+  const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
   const articleA = await makeArticle();
   const articleB = await makeArticle();
   const location = await makeLocation();
@@ -161,13 +163,13 @@ async function makeOrder(stockA = 10, stockB = 5) {
   }
   await stockService.recordTransaction({ articleId: articleB.id, locationId: location.id, quantityDelta: stockB, transactionType: "inventory_adjustment" });
   const { order, rows } = await salesService.createQuote(
-    {
+    parsed(createQuoteSchema, {
       customerId: customer.id,
       rows: [
         { articleId: articleA.id, quantity: 10, unitPrice: 10 },
         { articleId: articleB.id, quantity: 5, unitPrice: 20 },
       ],
-    },
+    }),
     user.id
   );
   // Offerter (0138): confirming gives the quote its KO- number.

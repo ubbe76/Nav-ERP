@@ -1,3 +1,4 @@
+import { createArticleSchema, createPurchaseOrderSchema, createSupplierSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { db, stockTransactions } from "@navet/db";
@@ -23,6 +24,7 @@ import { createRegisterRepository } from "../src/modules/register/repository/reg
 import { createRegisterService } from "../src/modules/register/service/register.service.js";
 import { createSalesRepository } from "../src/modules/sales/repository/sales.repository.js";
 import { markSalesOrderInProduction } from "../src/modules/sales/service/production-transition.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Etapp G — legoresurser: subcontract work centers, lego operations in the
 // routing, the release snapshot, the lego IO with auto-reporting at goods
@@ -89,11 +91,11 @@ async function makeUser() {
 }
 
 async function makeSupplier(name = "Lego AB") {
-  return purchaseService.createSupplier({ name, active: true });
+  return purchaseService.createSupplier(parsed(createSupplierSchema, { name, active: true }));
 }
 
 async function makeLegoCenter(supplierId: string | null, code = "900") {
-  return mfgService.createWorkCenter({ code, name: "Ytbehandling AB", type: "subcontract", supplierId, active: true });
+  return mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code, name: "Ytbehandling AB", type: "subcontract", supplierId, active: true }));
 }
 
 // Manufactured article with weight, one ordinary and one lego operation, and
@@ -106,22 +108,22 @@ async function makeLegoRouting(opts?: {
 }) {
   const user = await makeUser();
   const supplier = await makeSupplier();
-  const machine = await mfgService.createWorkCenter({ code: "100", name: "Svets", type: "machine", active: true });
+  const machine = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", type: "machine", active: true }));
   const lego = await makeLegoCenter(supplier.id);
 
-  const parent = await articleService.createArticle({
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `LEGO-${crypto.randomUUID()}`,
     name: "Legodetalj",
     type: "manufactured",
     weight: 2.5,
     active: true,
-  });
-  const component = await articleService.createArticle({
+  }));
+  const component = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `COMP-${crypto.randomUUID()}`,
     name: "Component",
     type: "purchased",
     active: true,
-  });
+  }));
 
   await mfgService.createRoutingOperation(parent.id, {
     sequenceNo: 10,
@@ -163,7 +165,7 @@ async function releasedMo(quantity = 4) {
 // Draft IO on the fixture's supplier with one lego row against the MO
 // operation, confirmed so it can be received.
 async function makeLegoOrder(fixture: Awaited<ReturnType<typeof releasedMo>>, quantity = 4) {
-  const ioOrder = await purchaseService.createPurchaseOrder({ supplierId: fixture.supplier.id }, fixture.user.id);
+  const ioOrder = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: fixture.supplier.id }), fixture.user.id);
   const row = await purchaseService.addRow(ioOrder.id, {
     articleId: fixture.parent.id,
     quantity,
@@ -179,12 +181,12 @@ describe("lego work centers and routing", () => {
   it("defaults the operation's supplier from the legoresurs", async () => {
     const supplier = await makeSupplier();
     const lego = await makeLegoCenter(supplier.id);
-    const article = await articleService.createArticle({
+    const article = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `A-${crypto.randomUUID()}`,
       name: "A",
       type: "manufactured",
       active: true,
-    });
+    }));
     const op = await mfgService.createRoutingOperation(article.id, {
       sequenceNo: 10,
       workCenterId: lego.id,
@@ -196,14 +198,14 @@ describe("lego work centers and routing", () => {
 
   it("refuses lego fields on a non-subcontract resource and clears them on a resource switch", async () => {
     const supplier = await makeSupplier();
-    const machine = await mfgService.createWorkCenter({ code: "101", name: "Fräs", type: "machine", active: true });
+    const machine = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "101", name: "Fräs", type: "machine", active: true }));
     const lego = await makeLegoCenter(supplier.id);
-    const article = await articleService.createArticle({
+    const article = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `A-${crypto.randomUUID()}`,
       name: "A",
       type: "manufactured",
       active: true,
-    });
+    }));
 
     await expect(
       mfgService.createRoutingOperation(article.id, {
@@ -234,7 +236,7 @@ describe("lego work centers and routing", () => {
   });
 
   it("filters the work center list by type", async () => {
-    await mfgService.createWorkCenter({ code: "100", name: "Svets", type: "machine", active: true });
+    await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", type: "machine", active: true }));
     await makeLegoCenter(null, "900");
     const legoOnly = await mfgService.listWorkCenters({ type: ["subcontract"] });
     expect(legoOnly).toHaveLength(1);
@@ -326,7 +328,7 @@ describe("goods receipt auto-reports the lego operation", () => {
 
   it("does not report anything for an ordinary row", async () => {
     const fixture = await releasedMo(4);
-    const ioOrder = await purchaseService.createPurchaseOrder({ supplierId: fixture.supplier.id }, fixture.user.id);
+    const ioOrder = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: fixture.supplier.id }), fixture.user.id);
     const row = await purchaseService.addRow(ioOrder.id, {
       articleId: fixture.component.id,
       quantity: 5,
@@ -442,7 +444,7 @@ describe("legoinköp på TO-kortet (GET /manufacturing-orders/:id/lego-purchases
     const fixture = await releasedMo(4);
     const { ioOrder } = await makeLegoOrder(fixture, 3);
     // A cancelled order neither counts nor shows.
-    const cancelled = await purchaseService.createPurchaseOrder({ supplierId: fixture.supplier.id }, fixture.user.id);
+    const cancelled = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: fixture.supplier.id }), fixture.user.id);
     await purchaseService.addRow(cancelled.id, { articleId: fixture.parent.id, quantity: 4, unitPrice: 100, moOperationId: fixture.legoOp.id });
     await purchaseService.cancel(cancelled.id);
     const { inquiry } = await purchaseService.createInquiry(
@@ -505,7 +507,7 @@ describe("pre- and post-calculation with a lego operation", () => {
 
     // With a received lego IO (90/unit, 450 ställpris) the actual cost wins:
     // 450 + 90 × 4 = 810.
-    const ioOrder = await purchaseService.createPurchaseOrder({ supplierId: fixture.supplier.id }, fixture.user.id);
+    const ioOrder = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: fixture.supplier.id }), fixture.user.id);
     const row = await purchaseService.addRow(ioOrder.id, {
       articleId: fixture.parent.id,
       quantity: 4,
@@ -545,7 +547,7 @@ describe("pre- and post-calculation with a lego operation", () => {
     await mfgService.undoReport(order.id, report!.id, fixture.user.id);
 
     // Two IO rows — 450 + 90 × 3 and 110 × 1 — received in full: the order is Klar, N = 4.
-    const ioOrder = await purchaseService.createPurchaseOrder({ supplierId: fixture.supplier.id }, fixture.user.id);
+    const ioOrder = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: fixture.supplier.id }), fixture.user.id);
     const first = await purchaseService.addRow(ioOrder.id, { articleId: fixture.parent.id, quantity: 3, unitPrice: 90, setupPrice: 450, moOperationId: legoOp.id });
     const second = await purchaseService.addRow(ioOrder.id, { articleId: fixture.parent.id, quantity: 1, unitPrice: 110, moOperationId: legoOp.id });
     await purchaseService.confirm(ioOrder.id);

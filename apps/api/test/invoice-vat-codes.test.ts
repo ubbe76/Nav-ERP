@@ -1,3 +1,4 @@
+import { createQuoteSchema, createStockLocationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { accounts, db, deliveries, deliveryRows, invoiceRows, vatCodes, verificationRows } from "@navet/db";
@@ -27,6 +28,7 @@ import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/servic
 import { resetVatCodes, vatCodeId } from "./helpers/vat-codes.js";
 import { vatRateGroupId } from "./helpers/vat-group.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Momskoder steg 2 (spec 4.1–4.5): the customer invoice rows get their
 // momskod from salesVatCode (explicit vatCodeId wins, a bare vatRate is its
@@ -129,11 +131,11 @@ async function codeOfRow(rowId: string) {
 
 // A confirmed order delivered in full, ready to invoice.
 async function deliveredOrder(customerId: string, articleId: string, quantity = 4, delivered = quantity) {
-  const location = await stockService.createLocation({
+  const location = await stockService.createLocation(parsed(createStockLocationSchema, {
     warehouseId: (await stockService.createWarehouse({ name: `Lager ${crypto.randomUUID().slice(0, 6)}`, active: true }))!.id,
     name: "A1",
     active: true,
-  });
+  }));
   await stockService.recordTransaction({ articleId, locationId: location.id, quantityDelta: 100, transactionType: "inventory_adjustment" });
   const { order, rows } = await salesService.createQuote(
     { customerId, rows: [{ articleId, quantity, unitPrice: 100 }], confirm: true },
@@ -643,7 +645,7 @@ describe("quote / order confirmation PDF — momskoder", () => {
   it("prints the EU sale's text on the quote of an EU customer", async () => {
     const de = await makeCustomer({ name: "Kunde GmbH", country: "DE", vatNumber: "DE123456789" });
     const goods = await makeArticle("purchased");
-    const { order } = await salesService.createQuote({ customerId: de.id, rows: [{ articleId: goods.id, quantity: 1, unitPrice: 100 }] }, user.id);
+    const { order } = await salesService.createQuote(parsed(createQuoteSchema, { customerId: de.id, rows: [{ articleId: goods.id, quantity: 1, unitPrice: 100 }] }), user.id);
     const text = pdfText((await salesService.getSalesOrderPdf(order.id, "quote")).content);
     expect(text).toContain("Unionsintern leverans (artikel 138 i mervärdesskattedirektivet)");
   });
@@ -651,7 +653,7 @@ describe("quote / order confirmation PDF — momskoder", () => {
   it("grosses a private person's prices up by the derived (domestic) rate and prints no text", async () => {
     const privat = await makeCustomer({ name: "Privat Person", country: "DE", privatePerson: true });
     const goods = await makeArticle("purchased", 12);
-    const { order } = await salesService.createQuote({ customerId: privat.id, rows: [{ articleId: goods.id, quantity: 1, unitPrice: 100 }] }, user.id);
+    const { order } = await salesService.createQuote(parsed(createQuoteSchema, { customerId: privat.id, rows: [{ articleId: goods.id, quantity: 1, unitPrice: 100 }] }), user.id);
     const text = pdfText((await salesService.getSalesOrderPdf(order.id, "quote")).content);
     expect(text).toContain("Priser inklusive moms");
     expect(text).toContain("112,00");

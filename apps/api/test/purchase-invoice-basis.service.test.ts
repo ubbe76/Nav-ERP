@@ -1,3 +1,4 @@
+import { createArticleSchema, createPurchaseOrderSchema, createStockLocationSchema, createSupplierInvoiceSchema, createSupplierSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, purchaseOrders } from "@navet/db";
@@ -23,6 +24,7 @@ import { createSystemRepository } from "../src/modules/system/repository/system.
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { createVerificationPoster } from "../src/modules/economy/service/verification-poster.js";
 import { DEFAULT_POSTING_SETTINGS } from "./helpers/services.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -88,32 +90,32 @@ async function makeUser() {
 }
 
 async function makeArticle(articleNumber: string) {
-  return articleService.createArticle({ articleNumber, name: articleNumber, type: "purchased", active: true });
+  return articleService.createArticle(parsed(createArticleSchema, { articleNumber, name: articleNumber, type: "purchased", active: true }));
 }
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
 }
 
 // A released MO with one lego (subcontract) operation, and a supplier to
 // order it from — minimal fixture for the 2f "pure lego IO" test below.
 async function makeLegoOperation() {
   const user = await makeUser();
-  const supplier = await purchaseService.createSupplier({ name: `Lego AB ${crypto.randomUUID()}`, active: true });
-  const lego = await mfgService.createWorkCenter({
+  const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: `Lego AB ${crypto.randomUUID()}`, active: true }));
+  const lego = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
     code: String(100 + Math.floor(Math.random() * 800)),
     name: "Ytbehandling",
     type: "subcontract",
     supplierId: supplier.id,
     active: true,
-  });
-  const parent = await articleService.createArticle({
+  }));
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `LEGO-B-${crypto.randomUUID()}`,
     name: "Legodetalj",
     type: "manufactured",
     active: true,
-  });
+  }));
   await mfgService.createRoutingOperation(parent.id, {
     sequenceNo: 10,
     workCenterId: lego.id,
@@ -129,10 +131,10 @@ async function makeLegoOperation() {
 
 async function makeReceivedOrder(opts?: { supplierName?: string; qty?: number; price?: number; received?: number }) {
   const user = await makeUser();
-  const supplier = await purchaseService.createSupplier({ name: opts?.supplierName ?? "Lev AB", active: true });
+  const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: opts?.supplierName ?? "Lev AB", active: true }));
   const article = await makeArticle(`ART-B-${crypto.randomUUID()}`);
   const location = await makeLocation();
-  const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+  const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
   const qty = opts?.qty ?? 10;
   const price = opts?.price ?? 25;
   const row = await purchaseService.addRow(order.id, { articleId: article.id, quantity: qty, unitPrice: price });
@@ -155,9 +157,9 @@ describe("purchase invoice basis (fakturaunderlag)", () => {
 
   it("excludes draft/confirmed orders (only inlevererade appear)", async () => {
     const user = await makeUser();
-    const supplier = await purchaseService.createSupplier({ name: "Ej mottaget AB", active: true });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Ej mottaget AB", active: true }));
     const article = await makeArticle(`ART-D-${crypto.randomUUID()}`);
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     await purchaseService.addRow(order.id, { articleId: article.id, quantity: 3, unitPrice: 10 });
     await purchaseService.confirm(order.id); // confirmed, not received
 
@@ -174,7 +176,7 @@ describe("purchase invoice basis (fakturaunderlag)", () => {
 
     // A cancelled linked invoice must NOT mark the order as invoiced.
     const cancelledInv = await supplierInvoiceService.create(
-      { supplierId: supplier.id, invoiceNumber: "C-1", invoiceDate: "2026-07-01", purchaseOrderId: order.id, rows: [] },
+      parsed(createSupplierInvoiceSchema, { supplierId: supplier.id, invoiceNumber: "C-1", invoiceDate: "2026-07-01", purchaseOrderId: order.id, rows: [] }),
       user.id
     );
     await supplierInvoiceService.cancel(cancelledInv!.id, user.id);
@@ -183,7 +185,7 @@ describe("purchase invoice basis (fakturaunderlag)", () => {
 
     // A live linked invoice drops the order from the worklist.
     const inv = await supplierInvoiceService.create(
-      { supplierId: supplier.id, invoiceNumber: "L-1", invoiceDate: "2026-07-02", purchaseOrderId: order.id, rows: [] },
+      parsed(createSupplierInvoiceSchema, { supplierId: supplier.id, invoiceNumber: "L-1", invoiceDate: "2026-07-02", purchaseOrderId: order.id, rows: [] }),
       user.id
     );
     uninvoiced = await purchaseService.listInvoiceBasis({ invoiced: "uninvoiced", limit: 50, offset: 0 });
@@ -212,7 +214,7 @@ describe("purchase invoice basis (fakturaunderlag)", () => {
     // Invoice a, then "all" still lists both orders.
     const user = await makeUser();
     await supplierInvoiceService.create(
-      { supplierId: a.supplier.id, invoiceNumber: "ALL-1", invoiceDate: "2026-07-01", purchaseOrderId: a.order.id, rows: [] },
+      parsed(createSupplierInvoiceSchema, { supplierId: a.supplier.id, invoiceNumber: "ALL-1", invoiceDate: "2026-07-01", purchaseOrderId: a.order.id, rows: [] }),
       user.id
     );
     const all = await purchaseService.listInvoiceBasis({ invoiced: "all", limit: 50, offset: 0 });
@@ -226,7 +228,7 @@ describe("purchase invoice basis (fakturaunderlag)", () => {
   // order's updated_at rather than showing no date at all.
   it("falls back to the order's updated_at for a pure lego receipt (no purchase_receipt to derive receivedAt from)", async () => {
     const { user, supplier, parent, legoOp } = await makeLegoOperation();
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     const row = await purchaseService.addRow(order.id, {
       articleId: parent.id,
       quantity: 2,

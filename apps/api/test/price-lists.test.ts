@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema, createPriceListSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { customers, db, type Db } from "@navet/db";
@@ -23,6 +24,7 @@ import {
   PriceListRowNotFoundError,
 } from "../src/modules/sales/service/sales.errors.js";
 import { ArticleNotFoundError } from "../src/modules/article/service/article.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -58,22 +60,22 @@ afterAll(async () => {
 // A fixed, caller-chosen suffix (rather than price-resolver.test.ts's random
 // UUID) so tests that assert row ORDER by articleNumber stay deterministic.
 async function makeArticle(numberSuffix: string) {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-PL-${numberSuffix}`,
     name: `Test Article ${numberSuffix}`,
     type: "purchased",
     active: true,
-  });
+  }));
 }
 
 async function makeCustomer() {
-  return salesService.createCustomer({ name: "Kund AB", active: true });
+  return salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
 }
 
 describe("price lists (register CRUD)", () => {
   describe("createPriceList / listPriceLists", () => {
     it("creates a price list and lists it with rowCount 0", async () => {
-      const list = await salesService.createPriceList({ code: "PL-1", name: "Standardlista" });
+      const list = await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-1", name: "Standardlista" }));
       expect(list).toMatchObject({ code: "PL-1", name: "Standardlista", description: null });
 
       const { rows, total } = await salesService.listPriceLists({ limit: 50, offset: 0 });
@@ -82,9 +84,9 @@ describe("price lists (register CRUD)", () => {
     });
 
     it("supports search (code or name) and pagination", async () => {
-      await salesService.createPriceList({ code: "PL-A", name: "Alfa" });
-      await salesService.createPriceList({ code: "PL-B", name: "Beta" });
-      await salesService.createPriceList({ code: "PL-C", name: "Gamma" });
+      await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-A", name: "Alfa" }));
+      await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-B", name: "Beta" }));
+      await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-C", name: "Gamma" }));
 
       const byCode = await salesService.listPriceLists({ search: "PL-B", limit: 50, offset: 0 });
       expect(byCode.total).toBe(1);
@@ -104,15 +106,15 @@ describe("price lists (register CRUD)", () => {
     });
 
     it("rejects a duplicate code with DuplicatePriceListError (409)", async () => {
-      await salesService.createPriceList({ code: "PL-DUP", name: "First" });
-      await expect(salesService.createPriceList({ code: "PL-DUP", name: "Second" })).rejects.toThrow(
+      await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-DUP", name: "First" }));
+      await expect(salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-DUP", name: "Second" }))).rejects.toThrow(
         DuplicatePriceListError
       );
     });
 
     it("rejects a duplicate name with DuplicatePriceListError (409)", async () => {
-      await salesService.createPriceList({ code: "PL-X", name: "Samma namn" });
-      await expect(salesService.createPriceList({ code: "PL-Y", name: "Samma namn" })).rejects.toThrow(
+      await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-X", name: "Samma namn" }));
+      await expect(salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-Y", name: "Samma namn" }))).rejects.toThrow(
         DuplicatePriceListError
       );
     });
@@ -120,7 +122,7 @@ describe("price lists (register CRUD)", () => {
 
   describe("updatePriceList", () => {
     it("updates code/name/description", async () => {
-      const list = await salesService.createPriceList({ code: "PL-E", name: "Original" });
+      const list = await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-E", name: "Original" }));
       const updated = await salesService.updatePriceList(list.id, { name: "Nytt namn", description: "En text" });
       expect(updated).toMatchObject({ code: "PL-E", name: "Nytt namn", description: "En text" });
     });
@@ -134,7 +136,7 @@ describe("price lists (register CRUD)", () => {
     // description is nullable on the update schema (unlike create) so PATCH
     // can clear it back to NULL rather than only ever being able to store "".
     it("clears description back to null", async () => {
-      const list = await salesService.createPriceList({ code: "PL-CLEAR", name: "Clear", description: "En text" });
+      const list = await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-CLEAR", name: "Clear", description: "En text" }));
       expect(list.description).toBe("En text");
 
       const cleared = await salesService.updatePriceList(list.id, { description: null });
@@ -142,8 +144,8 @@ describe("price lists (register CRUD)", () => {
     });
 
     it("rejects renaming into another list's code with DuplicatePriceListError", async () => {
-      await salesService.createPriceList({ code: "PL-TAKEN", name: "Taken" });
-      const other = await salesService.createPriceList({ code: "PL-FREE", name: "Free" });
+      await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-TAKEN", name: "Taken" }));
+      const other = await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-FREE", name: "Free" }));
       await expect(salesService.updatePriceList(other.id, { code: "PL-TAKEN" })).rejects.toThrow(
         DuplicatePriceListError
       );
@@ -152,7 +154,7 @@ describe("price lists (register CRUD)", () => {
 
   describe("getPriceList", () => {
     it("returns the list with rows joined to article number/name, sorted by article then fromQuantity", async () => {
-      const list = await salesService.createPriceList({ code: "PL-ROWS", name: "Med rader" });
+      const list = await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-ROWS", name: "Med rader" }));
       const articleA = await makeArticle("A1");
       const articleB = await makeArticle("B1");
       // Inserted out of order to prove the query sorts, not insertion order.
@@ -176,7 +178,7 @@ describe("price lists (register CRUD)", () => {
 
   describe("price list rows", () => {
     it("rejects a duplicate (list, article, fromQuantity) with DuplicatePriceListRowError (409)", async () => {
-      const list = await salesService.createPriceList({ code: "PL-DUPROW", name: "Duprow" });
+      const list = await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-DUPROW", name: "Duprow" }));
       const article = await makeArticle("DUP1");
       await salesService.addPriceListRow(list.id, { articleId: article.id, fromQuantity: 1, unitPrice: 100 });
       await expect(
@@ -194,14 +196,14 @@ describe("price lists (register CRUD)", () => {
     // C3 slutgranskning fynd 2: an unknown articleId used to fall straight
     // through to the insert and surface as a raw FK violation (23503 → 500).
     it("throws ArticleNotFoundError (not a raw 500) for an unknown articleId", async () => {
-      const list = await salesService.createPriceList({ code: "PL-NOARTICLE", name: "No article" });
+      const list = await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-NOARTICLE", name: "No article" }));
       await expect(
         salesService.addPriceListRow(list.id, { articleId: crypto.randomUUID(), fromQuantity: 1, unitPrice: 10 })
       ).rejects.toThrow(ArticleNotFoundError);
     });
 
     it("edits a row's price and from-quantity (radredigering)", async () => {
-      const list = await salesService.createPriceList({ code: "PL-EDIT", name: "Edit" });
+      const list = await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-EDIT", name: "Edit" }));
       const article = await makeArticle("EDIT1");
       const row = await salesService.addPriceListRow(list.id, { articleId: article.id, fromQuantity: 1, unitPrice: 100 });
 
@@ -210,14 +212,14 @@ describe("price lists (register CRUD)", () => {
     });
 
     it("throws PriceListRowNotFoundError when editing an unknown row", async () => {
-      const list = await salesService.createPriceList({ code: "PL-NOROW", name: "Norow" });
+      const list = await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-NOROW", name: "Norow" }));
       await expect(
         salesService.updatePriceListRow(list.id, crypto.randomUUID(), { unitPrice: 1 })
       ).rejects.toThrow(PriceListRowNotFoundError);
     });
 
     it("deletes a row", async () => {
-      const list = await salesService.createPriceList({ code: "PL-DELROW", name: "Delrow" });
+      const list = await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-DELROW", name: "Delrow" }));
       const article = await makeArticle("DEL1");
       const row = await salesService.addPriceListRow(list.id, { articleId: article.id, fromQuantity: 1, unitPrice: 10 });
 
@@ -228,7 +230,7 @@ describe("price lists (register CRUD)", () => {
     });
 
     it("throws PriceListRowNotFoundError when deleting an unknown row", async () => {
-      const list = await salesService.createPriceList({ code: "PL-NODEL", name: "Nodel" });
+      const list = await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-NODEL", name: "Nodel" }));
       await expect(salesService.deletePriceListRow(list.id, crypto.randomUUID())).rejects.toThrow(
         PriceListRowNotFoundError
       );
@@ -237,13 +239,13 @@ describe("price lists (register CRUD)", () => {
 
   describe("deletePriceList", () => {
     it("deletes an empty price list", async () => {
-      const list = await salesService.createPriceList({ code: "PL-EMPTY", name: "Empty" });
+      const list = await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-EMPTY", name: "Empty" }));
       await salesService.deletePriceList(list.id);
       await expect(salesService.getPriceList(list.id)).rejects.toThrow(PriceListNotFoundError);
     });
 
     it("throws PriceListInUseError when a customer is assigned to it", async () => {
-      const list = await salesService.createPriceList({ code: "PL-INUSE", name: "In use" });
+      const list = await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-INUSE", name: "In use" }));
       const customer = await makeCustomer();
       // customers.priceListId is not yet wired into createCustomerSchema (a
       // later C3 task) — same direct-DB-update workaround as

@@ -1,3 +1,4 @@
+import { createArticleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -12,6 +13,7 @@ import { markSalesOrderInProduction } from "../src/modules/sales/service/product
 import { createReportsRepository } from "../src/modules/reports/repository/reports.repository.js";
 import { createReportsService } from "../src/modules/reports/service/reports.service.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const authRepo = createAuthRepository(db);
@@ -47,17 +49,17 @@ async function makeUser() {
 // BOM/material required for the scrap statistics themselves).
 async function makeReleasedOperation(articleName: string, workCenterName: string, moQuantity = 10) {
   const user = await makeUser();
-  const parent = await articleService.createArticle({
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `PARENT-SCRAP-${crypto.randomUUID()}`,
     name: articleName,
     type: "manufactured",
     active: true,
-  });
-  const workCenter = await mfgService.createWorkCenter({
+  }));
+  const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
     code: String(Math.floor(Math.random() * 900) + 100),
     name: workCenterName,
     active: true,
-  });
+  }));
   await mfgService.createRoutingOperation(parent.id, {
     sequenceNo: 10,
     workCenterId: workCenter.id,

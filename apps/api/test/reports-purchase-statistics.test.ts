@@ -1,3 +1,4 @@
+import { createArticleSchema, createSupplierSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -22,6 +23,7 @@ import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/servic
 import { createReportsRepository } from "../src/modules/reports/repository/reports.repository.js";
 import { createReportsService } from "../src/modules/reports/service/reports.service.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -77,16 +79,16 @@ async function makeUser() {
 }
 
 async function makeSupplier(name = "Lev AB") {
-  return purchaseService.createSupplier({ name, active: true });
+  return purchaseService.createSupplier(parsed(createSupplierSchema, { name, active: true }));
 }
 
 async function makeArticle(name = "Rapportartikel") {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `REP-PURCH-${crypto.randomUUID()}`,
     name,
     type: "purchased",
     active: true,
-  });
+  }));
 }
 
 describe("reports service — purchase statistics: header vs rows basis", () => {

@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema, createSupplierSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db, costCalculations } from "@navet/db";
@@ -25,6 +26,7 @@ import { testArticleService, testDocumentPdfService } from "./helpers/services.j
 import { createReportsRepository } from "../src/modules/reports/repository/reports.repository.js";
 import { createReportsService, resolveReportRange } from "../src/modules/reports/service/reports.service.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const authRepo = createAuthRepository(db);
@@ -98,16 +100,16 @@ async function makeUser() {
 }
 
 async function makeArticle(type: "purchased" | "manufactured" = "purchased") {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `REP-${crypto.randomUUID().slice(0, 8)}`,
     name: "Rapportartikel",
     type,
     active: true,
-  });
+  }));
 }
 
 async function makeDeliveredSalesOrder(expectedDeliveryDate: string | null, userId: string) {
-  const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+  const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
   const article = await makeArticle();
   const { order, rows } = await salesService.createQuote(
     {
@@ -138,7 +140,7 @@ describe("reports service — delivery precision", () => {
     await db.execute(sql`DELETE FROM deliveries WHERE sales_order_id = ${preC2.id}`);
 
     // Purchase: promised yesterday, received today → late 1 day.
-    const supplier = await purchaseService.createSupplier({ name: "Leverantör AB", active: true });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Leverantör AB", active: true }));
     const poArticle = await makeArticle();
     const po = await purchaseService.createPurchaseOrder(
       { supplierId: supplier.id, exchangeRate: 1, expectedDeliveryDate: isoDate(-1) },
@@ -164,7 +166,7 @@ describe("reports service — delivery precision", () => {
 
   it("excludes unfinished orders from the measurement", async () => {
     const user = await makeUser();
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     const article = await makeArticle();
     await salesService.createQuote(
       {

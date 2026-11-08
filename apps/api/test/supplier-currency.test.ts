@@ -1,3 +1,4 @@
+import { createSupplierInvoiceSchema } from "@navet/shared";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,6 +38,7 @@ import {
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline, testSystemService } from "./helpers/services.js";
 import { vatCodeId } from "./helpers/vat-codes.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Valuta steg 1: leverantörsfaktura och leverantörsbetalning i annan valuta
 // än SEK, end to end on the real poster and the real posting settings. The
@@ -129,14 +131,14 @@ describe("leverantörsfaktura i valuta — kursen", () => {
     expect(lookups).toEqual([{ currency: "EUR", date: TODAY }]);
 
     stubRates.set("EUR", { date: "2026-10-22", rate: 11.2, source: "manual" });
-    const fromRegister = await invoices.create({ supplierId: eur.id, invoiceNumber: "R-2", invoiceDate: TODAY, rows: [] }, user.id);
+    const fromRegister = await invoices.create(parsed(createSupplierInvoiceSchema, { supplierId: eur.id, invoiceNumber: "R-2", invoiceDate: TODAY, rows: [] }), user.id);
     expect(fromRegister).toMatchObject({ exchangeRate: "11.200000", exchangeRateSource: "register", exchangeRateDate: "2026-10-22" });
   });
 
   it("takes a typed rate as manual, and falls back to the linked purchase order's rate when none can be looked up", async () => {
     const user = await makeUser();
     const eur = await makeSupplier("EUR");
-    const typed = await invoices.create({ supplierId: eur.id, invoiceNumber: "T-1", invoiceDate: TODAY, exchangeRate: 11.05, rows: [] }, user.id);
+    const typed = await invoices.create(parsed(createSupplierInvoiceSchema, { supplierId: eur.id, invoiceNumber: "T-1", invoiceDate: TODAY, exchangeRate: 11.05, rows: [] }), user.id);
     expect(typed).toMatchObject({ exchangeRate: "11.050000", exchangeRateSource: "manual", exchangeRateDate: null });
     expect(lookups).toEqual([]);
 
@@ -144,13 +146,13 @@ describe("leverantörsfaktura i valuta — kursen", () => {
       .insert(purchaseOrders)
       .values({ orderNumber: `IO-FX-${crypto.randomUUID().slice(0, 8)}`, supplierId: eur.id, currency: "EUR", exchangeRate: "11.4" })
       .returning();
-    const fromOrder = await invoices.create({ supplierId: eur.id, invoiceNumber: "T-2", invoiceDate: TODAY, purchaseOrderId: order!.id, rows: [] }, user.id);
+    const fromOrder = await invoices.create(parsed(createSupplierInvoiceSchema, { supplierId: eur.id, invoiceNumber: "T-2", invoiceDate: TODAY, purchaseOrderId: order!.id, rows: [] }), user.id);
     expect(fromOrder).toMatchObject({ exchangeRate: "11.400000", exchangeRateSource: "purchase_order" });
     // The card shows the order's rate as the fallback for a new invoice date.
     expect(await invoices.getInvoice(fromOrder!.id)).toMatchObject({ purchaseOrderCurrency: "EUR", purchaseOrderExchangeRate: "11.400000" });
 
     // No lookup, no order: 409 exchange-rate-unavailable, nothing created.
-    await expect(invoices.create({ supplierId: eur.id, invoiceNumber: "T-3", invoiceDate: TODAY, rows: [] }, user.id)).rejects.toBeInstanceOf(
+    await expect(invoices.create(parsed(createSupplierInvoiceSchema, { supplierId: eur.id, invoiceNumber: "T-3", invoiceDate: TODAY, rows: [] }), user.id)).rejects.toBeInstanceOf(
       ExchangeRateUnavailableError
     );
   });
@@ -158,9 +160,9 @@ describe("leverantörsfaktura i valuta — kursen", () => {
   it("keeps SEK at 1 without a lookup and refuses another rate on a SEK invoice", async () => {
     const user = await makeUser();
     const sek = await makeSupplier("SEK");
-    const invoice = await invoices.create({ supplierId: sek.id, invoiceNumber: "S-1", invoiceDate: TODAY, exchangeRate: 1, rows: [] }, user.id);
+    const invoice = await invoices.create(parsed(createSupplierInvoiceSchema, { supplierId: sek.id, invoiceNumber: "S-1", invoiceDate: TODAY, exchangeRate: 1, rows: [] }), user.id);
     expect(invoice).toMatchObject({ currency: "SEK", exchangeRate: "1.000000", exchangeRateSource: null, exchangeRateMissing: false });
-    await expect(invoices.create({ supplierId: sek.id, invoiceNumber: "S-2", invoiceDate: TODAY, exchangeRate: 2, rows: [] }, user.id)).rejects.toBeInstanceOf(
+    await expect(invoices.create(parsed(createSupplierInvoiceSchema, { supplierId: sek.id, invoiceNumber: "S-2", invoiceDate: TODAY, exchangeRate: 2, rows: [] }), user.id)).rejects.toBeInstanceOf(
       SupplierInvoiceExchangeRateError
     );
     expect(lookups).toEqual([]);
@@ -171,7 +173,7 @@ describe("leverantörsfaktura i valuta — kursen", () => {
     const eur = await makeSupplier("EUR");
     const sek = await makeSupplier("SEK");
     stubRates.set("EUR", { date: "2026-10-23", rate: 11.131, source: "riksbank" });
-    const invoice = await invoices.create({ supplierId: eur.id, invoiceNumber: "P-1", invoiceDate: "2026-10-24", rows: [] }, user.id);
+    const invoice = await invoices.create(parsed(createSupplierInvoiceSchema, { supplierId: eur.id, invoiceNumber: "P-1", invoiceDate: "2026-10-24", rows: [] }), user.id);
 
     stubRates.set("EUR", { date: "2026-10-20", rate: 11.123, source: "riksbank" });
     const redated = await invoices.updateHeader(invoice!.id, { invoiceDate: "2026-10-20" }, user.id);
@@ -197,7 +199,7 @@ describe("leverantörsfaktura i valuta — kursen", () => {
     const eur = await makeSupplier("EUR");
     const audited: { action: string; detail: unknown }[] = [];
     const service = createSupplierInvoiceService(createSupplierInvoiceRepository(db), poster, { log: async (e) => void audited.push(e as never) }, rates);
-    const invoice = await service.create({ supplierId: eur.id, invoiceNumber: "N-1", invoiceDate: TODAY, exchangeRate: 11.3, rows: [] }, user.id);
+    const invoice = await service.create(parsed(createSupplierInvoiceSchema, { supplierId: eur.id, invoiceNumber: "N-1", invoiceDate: TODAY, exchangeRate: 11.3, rows: [] }), user.id);
     expect(invoice).toMatchObject({ exchangeRate: "11.300000", exchangeRateSource: "manual" });
 
     stubRates.set("EUR", { date: "2026-10-23", rate: 11.131, source: "riksbank" });
@@ -245,7 +247,7 @@ describe("leverantörsfaktura i valuta — kursen", () => {
       .values({ orderNumber: `IO-FX-${crypto.randomUUID().slice(0, 8)}`, supplierId: eur.id, currency: "EUR", exchangeRate: "11.4" })
       .returning();
     const draft = await invoices.create(
-      { supplierId: eur.id, invoiceNumber: "OLD-1", invoiceDate: TODAY, purchaseOrderId: order!.id, netAmount: 1000, grossAmount: 1000, exchangeRate: 11, rows: [] },
+      parsed(createSupplierInvoiceSchema, { supplierId: eur.id, invoiceNumber: "OLD-1", invoiceDate: TODAY, purchaseOrderId: order!.id, netAmount: 1000, grossAmount: 1000, exchangeRate: 11, rows: [] }),
       user.id
     );
     // The state before 0143: rate 1, no source.
@@ -396,7 +398,7 @@ describe("leverantörsbetalning i valuta", () => {
     const user = await makeUser();
     const eur = await makeSupplier("EUR");
     const eurInvoice = await attestedEurInvoice(user.id, eur.id, 100, 11.131);
-    const sekInvoice = await invoices.create({ supplierId: eur.id, invoiceNumber: "SEK-1", invoiceDate: TODAY, exchangeRate: 11, rows: [] }, user.id);
+    const sekInvoice = await invoices.create(parsed(createSupplierInvoiceSchema, { supplierId: eur.id, invoiceNumber: "SEK-1", invoiceDate: TODAY, exchangeRate: 11, rows: [] }), user.id);
     // The supplier is EUR; a SEK invoice from it needs a SEK supplier snapshot.
     await db.update(supplierInvoices).set({ currency: "SEK", exchangeRate: "1", exchangeRateSource: null, exchangeRateDate: null, netAmount: "500", grossAmount: "500" }).where(eq(supplierInvoices.id, sekInvoice!.id));
     await invoices.approve(sekInvoice!.id, user.id);

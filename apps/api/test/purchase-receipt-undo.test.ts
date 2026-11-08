@@ -1,3 +1,4 @@
+import { createArticleSchema, createPurchaseOrderSchema, createStockLocationSchema, createSupplierSchema, createWorkCenterSchema, listGoodsReceiptsQuerySchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { auditLog, db, manufacturingOrders, moOperations, moReports, purchaseReceipts, stockLocations, stockTransactions } from "@navet/db";
@@ -28,6 +29,7 @@ import { markSalesOrderInProduction } from "../src/modules/sales/service/product
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Ångra inleverans: one receipt reversed — stock, the row's received
 // quantity and the order status; on a lego row the TO report it made, in the
@@ -77,7 +79,7 @@ async function makeUser() {
 // asserted below, and only a temporary location is retired (0179).
 async function makeLocation(name = "A1") {
   const warehouse = await stockService.createWarehouse({ name: `Lager ${crypto.randomUUID()}`, active: true });
-  return stockService.createLocation({ warehouseId: warehouse!.id, name, active: true, fixed: false });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name, active: true, fixed: false }));
 }
 
 async function balanceAt(articleId: string, locationId: string) {
@@ -91,15 +93,15 @@ async function balanceAt(articleId: string, locationId: string) {
 // A confirmed IO with one ordinary row.
 async function makeOrder(quantity = 10) {
   const user = await makeUser();
-  const supplier = await purchaseService.createSupplier({ name: "ACME AB", active: true });
-  const article = await articleService.createArticle({
+  const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "ACME AB", active: true }));
+  const article = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-${crypto.randomUUID()}`,
     name: "Plåt",
     type: "purchased",
     active: true,
-  });
+  }));
   const location = await makeLocation();
-  const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+  const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
   const row = await purchaseService.addRow(order.id, { articleId: article.id, quantity, unitPrice: 42 });
   await purchaseService.confirm(order.id);
   return { user, supplier, article, location, order, row };
@@ -154,12 +156,12 @@ describe("Ångra inleverans — ordinary row", () => {
 
   it("lets the row be received again and deleted once everything is undone", async () => {
     const { user, location, order, row } = await makeOrder(10);
-    const articleB = await articleService.createArticle({
+    const articleB = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `ART-${crypto.randomUUID()}`,
       name: "Skruv",
       type: "purchased",
       active: true,
-    });
+    }));
     await purchaseService.addRow(order.id, { articleId: articleB.id, quantity: 1, unitPrice: 1 });
     await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 10 }, user.id);
     const [receipt] = await receiptIds(order.id);
@@ -211,7 +213,7 @@ describe("Ångra inleverans — ordinary row", () => {
     const [second] = await receiptIds(order.id);
     await purchaseService.undoReceipt(order.id, second!, user.id);
 
-    const log = await purchaseService.listArticleGoodsReceipts(article.id, { limit: 50, offset: 0 });
+    const log = await purchaseService.listArticleGoodsReceipts(article.id, parsed(listGoodsReceiptsQuerySchema, { articleId: article.id, limit: 50, offset: 0 }));
     expect(log.rows.map((r) => Number(r.quantity))).toEqual([6]);
     expect(log.total).toBe(1);
   });
@@ -222,27 +224,27 @@ describe("Ångra inleverans — ordinary row", () => {
 // goods into stock — all of which Ångra inleverans must reverse.
 async function makeLegoOrder(quantity = 4) {
   const user = await makeUser();
-  const supplier = await purchaseService.createSupplier({ name: "Lego AB", active: true });
-  const machine = await mfgService.createWorkCenter({ code: "100", name: "Svets", type: "machine", active: true });
-  const lego = await mfgService.createWorkCenter({
+  const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lego AB", active: true }));
+  const machine = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", type: "machine", active: true }));
+  const lego = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
     code: "900",
     name: "Ytbehandling AB",
     type: "subcontract",
     supplierId: supplier.id,
     active: true,
-  });
-  const parent = await articleService.createArticle({
+  }));
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `LEGO-${crypto.randomUUID()}`,
     name: "Legodetalj",
     type: "manufactured",
     active: true,
-  });
-  const component = await articleService.createArticle({
+  }));
+  const component = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `COMP-${crypto.randomUUID()}`,
     name: "Komponent",
     type: "purchased",
     active: true,
-  });
+  }));
   await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: machine.id, setupTime: 0, runTimePerUnit: 1 });
   const legoRouting = await mfgService.createRoutingOperation(parent.id, {
     sequenceNo: 20,
@@ -260,7 +262,7 @@ async function makeLegoOrder(quantity = 4) {
 
   const mo = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity }, user.id);
   const legoOp = (await mfgService.listOperations(mo.id)).find((op) => op.sequenceNo === 20)!;
-  const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+  const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
   const row = await purchaseService.addRow(order.id, { articleId: parent.id, quantity, unitPrice: 100, moOperationId: legoOp.id });
   await purchaseService.confirm(order.id);
   return { user, parent, component, location, mo, legoOp, order, row };

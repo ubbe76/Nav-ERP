@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { auditLog, customerDeliveryAddresses, db, manufacturingOrders, numberSeries, salesOrders, units } from "@navet/db";
-import { createQuoteSchema, updateSalesOrderHeaderSchema } from "@navet/shared";
+import { createQuoteSchema, updateSalesOrderHeaderSchema, createArticleSchema, createCustomerSchema, createDeliveryAddressSchema, createPriceListSchema, createStockLocationSchema, sendSalesOrderEmailSchema } from "@navet/shared";
 import { PriceNotFoundError, RowHasManufacturingOrdersError } from "../src/modules/sales/service/sales.errors.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -34,6 +34,7 @@ import { createSystemService } from "../src/modules/system/service/system.servic
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { pdfText } from "./helpers/pdf.js";
 import { stampOrderInvoiced } from "./helpers/services.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -96,7 +97,7 @@ async function makeUser() {
 }
 
 async function makeCustomer() {
-  return salesService.createCustomer({ name: "Kund AB", active: true });
+  return salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
 }
 
 // salesPrice is optional and off by default: most tests send an explicit
@@ -104,18 +105,18 @@ async function makeCustomer() {
 // test needs a quantity-only PATCH to survive — C3 re-resolves the chain then
 // (see the comment in "logs row_added/row_updated/row_deleted" below).
 async function makeArticle(salesPrice?: number) {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-SO-${crypto.randomUUID()}`,
     name: "Test Article",
     type: "manufactured",
     salesPrice,
     active: true,
-  });
+  }));
 }
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
 }
 
 async function seedStock(articleId: string, locationId: string, quantity: number) {
@@ -158,7 +159,7 @@ async function makeQuoteWithRow(quantity = 10) {
   await seedStock(article.id, location.id, quantity);
 
   const { order, rows } = await salesService.createQuote(
-    { customerId: customer.id, rows: [{ articleId: article.id, quantity, unitPrice: 99 }] },
+    parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity, unitPrice: 99 }] }),
     user.id
   );
   return { user, customer, article, location, order, row: rows[0]! };
@@ -273,14 +274,14 @@ describe("sales service — order list filters", () => {
     // otherwise make the byName search match both orders.
     const user = await makeUser();
     const customer = await makeCustomer();
-    const otherArticle = await articleService.createArticle({
+    const otherArticle = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `ART-SO-OTHER-${crypto.randomUUID()}`,
       name: `Orelaterad artikel ${crypto.randomUUID()}`,
       type: "manufactured",
       active: true,
-    });
+    }));
     const unrelated = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: otherArticle.id, quantity: 1, unitPrice: 1 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: otherArticle.id, quantity: 1, unitPrice: 1 }] }),
       user.id
     );
 
@@ -362,8 +363,8 @@ describe("sales — editable customers", () => {
   });
 
   it("rejects changing a customer's number to one already taken, own unchanged number is fine", async () => {
-    const a = await salesService.createCustomer({ name: "Kund F", customerNumber: "NUM-A", active: true });
-    await salesService.createCustomer({ name: "Kund G", customerNumber: "NUM-B", active: true });
+    const a = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund F", customerNumber: "NUM-A", active: true }));
+    await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund G", customerNumber: "NUM-B", active: true }));
 
     await expect(salesService.updateCustomer(a.id, { customerNumber: "NUM-B" })).rejects.toThrow(
       DuplicateCustomerNumberError
@@ -376,8 +377,8 @@ describe("sales — editable customers", () => {
   });
 
   it("finds customers by customer number in the list search", async () => {
-    await salesService.createCustomer({ name: "Sökkund AB", customerNumber: "SOKNUM-42", active: true });
-    await salesService.createCustomer({ name: "Annan AB", active: true });
+    await salesService.createCustomer(parsed(createCustomerSchema, { name: "Sökkund AB", customerNumber: "SOKNUM-42", active: true }));
+    await salesService.createCustomer(parsed(createCustomerSchema, { name: "Annan AB", active: true }));
 
     const hit = await salesService.listCustomers({ search: "soknum", limit: 50, offset: 0 });
     expect(hit.total).toBe(1);
@@ -385,7 +386,7 @@ describe("sales — editable customers", () => {
   });
 
   it("defaults collectiveInvoicing and privatePerson to false on create", async () => {
-    const customer = await salesService.createCustomer({ name: "Ny kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Ny kund AB", active: true }));
     expect(customer.collectiveInvoicing).toBe(false);
     expect(customer.privatePerson).toBe(false);
   });
@@ -431,7 +432,7 @@ describe("sales service — customer card fields", () => {
     const term = await registerService.deliveryTerms.create({ code: "DAP", name: "Delivered at Place" });
     const carrier = await registerService.carriers.create({ code: "DHL", name: "DHL Freight" });
 
-    const customer = await salesService.createCustomer({
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, {
       name: "Kortkund AB",
       address: "Storgatan 1",
       postalCode: "981 32",
@@ -442,7 +443,7 @@ describe("sales service — customer card fields", () => {
       carrierId: carrier.id,
       carrierCustomerNumber: "K-778899",
       active: true,
-    });
+    }));
     expect(customer.postalCode).toBe("981 32");
     expect(customer.deliveryTermId).toBe(term.id);
 
@@ -456,7 +457,7 @@ describe("sales service — customer card fields", () => {
   });
 
   it("rejects an unknown delivery term reference", async () => {
-    const customer = await salesService.createCustomer({ name: "Kund utan villkor", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund utan villkor", active: true }));
     await expect(
       salesService.updateCustomer(customer.id, { deliveryTermId: "00000000-0000-0000-0000-000000000000" })
     ).rejects.toThrow(RegisterEntryNotFoundError);
@@ -472,12 +473,12 @@ describe("sales service — customer card fields", () => {
 // persist and return, not the zod parsing itself.
 describe("sales service — customer country, discount and invoice name (migration 0085)", () => {
   it("defaults country to SE when omitted on create", async () => {
-    const customer = await salesService.createCustomer({ name: "Utan land AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Utan land AB", active: true }));
     expect(customer.country).toBe("SE");
   });
 
   it("stores an explicit country on create and updates it via PATCH", async () => {
-    const customer = await salesService.createCustomer({ name: "Dansk Kund AB", active: true, country: "DK" });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Dansk Kund AB", active: true, country: "DK" }));
     expect(customer.country).toBe("DK");
 
     const updated = await salesService.updateCustomer(customer.id, { country: "NO" });
@@ -485,10 +486,10 @@ describe("sales service — customer country, discount and invoice name (migrati
   });
 
   it("defaults discountPercent to 0 and stores/updates a non-zero value", async () => {
-    const customer = await salesService.createCustomer({ name: "Nolla AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Nolla AB", active: true }));
     expect(Number(customer.discountPercent)).toBe(0);
 
-    const created = await salesService.createCustomer({ name: "Rabatt AB", active: true, discountPercent: 15 });
+    const created = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Rabatt AB", active: true, discountPercent: 15 }));
     // numeric(5,2) — same string-return shape as customer_prices.discountPercent
     // elsewhere in this file ("10.00").
     expect(created.discountPercent).toBe("15.00");
@@ -501,13 +502,13 @@ describe("sales service — customer country, discount and invoice name (migrati
   });
 
   it("stores invoiceName and invoiceCountry, and nulls them via PATCH", async () => {
-    const customer = await salesService.createCustomer({
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, {
       name: "Moderbolag AB",
       active: true,
       invoiceName: "c/o Holdingbolaget AB",
       invoiceAddress: "Box 1",
       invoiceCountry: "DK",
-    });
+    }));
     expect(customer.invoiceName).toBe("c/o Holdingbolaget AB");
     expect(customer.invoiceCountry).toBe("DK");
 
@@ -517,14 +518,14 @@ describe("sales service — customer country, discount and invoice name (migrati
   });
 
   it("leaves invoiceCountry null when not set on create — it is not defaulted like country", async () => {
-    const customer = await salesService.createCustomer({ name: "Utan fakturaland AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Utan fakturaland AB", active: true }));
     expect(customer.invoiceCountry).toBeNull();
   });
 });
 
 describe("sales service — customer contacts", () => {
   it("creates, lists (primary first), updates and deletes contacts", async () => {
-    const customer = await salesService.createCustomer({ name: "Kontaktkund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kontaktkund AB", active: true }));
 
     await salesService.createCustomerContact(customer.id, { name: "Berit Byggare", isPrimary: false });
     const anna = await salesService.createCustomerContact(customer.id, {
@@ -550,7 +551,7 @@ describe("sales service — customer contacts", () => {
   });
 
   it("moves the primary flag when another contact becomes primary", async () => {
-    const customer = await salesService.createCustomer({ name: "Primärkund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Primärkund AB", active: true }));
     const first = await salesService.createCustomerContact(customer.id, { name: "Första", isPrimary: true });
     const second = await salesService.createCustomerContact(customer.id, { name: "Andra", isPrimary: false });
 
@@ -565,8 +566,8 @@ describe("sales service — customer contacts", () => {
     const fakeId = "00000000-0000-0000-0000-000000000000";
     await expect(salesService.listCustomerContacts(fakeId)).rejects.toThrow(CustomerNotFoundError);
 
-    const a = await salesService.createCustomer({ name: "Kund A", active: true });
-    const b = await salesService.createCustomer({ name: "Kund B", active: true });
+    const a = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund A", active: true }));
+    const b = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund B", active: true }));
     const contact = await salesService.createCustomerContact(a.id, { name: "Hos A", isPrimary: false });
     await expect(salesService.updateCustomerContact(b.id, contact.id, { name: "X" })).rejects.toThrow(
       ContactNotFoundError
@@ -607,7 +608,7 @@ describe("sales service — document email", () => {
   it("emails the order confirmation on a quote and confirms it", async () => {
     const { order } = await makeQuoteWithRow(2);
 
-    const updated = await salesService.sendSalesOrderEmail(order.id, { ...sendBase, variant: "confirmation" });
+    const updated = await salesService.sendSalesOrderEmail(order.id, parsed(sendSalesOrderEmailSchema, { ...sendBase, variant: "confirmation" }));
     expect(updated?.status).toBe("confirmed");
 
     expect(sentMails).toHaveLength(1);
@@ -624,7 +625,7 @@ describe("sales service — document email", () => {
   it("emails the quote without changing status", async () => {
     const { order } = await makeQuoteWithRow(2);
 
-    const updated = await salesService.sendSalesOrderEmail(order.id, { ...sendBase, variant: "quote" });
+    const updated = await salesService.sendSalesOrderEmail(order.id, parsed(sendSalesOrderEmailSchema, { ...sendBase, variant: "quote" }));
     expect(updated?.status).toBe("quote");
     expect(sentMails[0]?.attachments?.[0]?.filename).toBe(`Offert-${order.orderNumber}.pdf`);
 
@@ -636,7 +637,7 @@ describe("sales service — document email", () => {
     const { order } = await makeQuoteWithRow(2);
     await salesService.confirm(order.id);
 
-    const updated = await salesService.sendSalesOrderEmail(order.id, { ...sendBase, variant: "confirmation" });
+    const updated = await salesService.sendSalesOrderEmail(order.id, parsed(sendSalesOrderEmailSchema, { ...sendBase, variant: "confirmation" }));
     expect(updated?.status).toBe("confirmed");
     expect(sentMails).toHaveLength(1);
   });
@@ -646,7 +647,7 @@ describe("sales service — document email", () => {
     await salesService.cancel(order.id);
 
     await expect(
-      salesService.sendSalesOrderEmail(order.id, { ...sendBase, variant: "confirmation" })
+      salesService.sendSalesOrderEmail(order.id, parsed(sendSalesOrderEmailSchema, { ...sendBase, variant: "confirmation" }))
     ).rejects.toThrow(InvalidStatusTransitionError);
     expect(sentMails).toHaveLength(0);
   });
@@ -656,7 +657,7 @@ describe("sales service — document email", () => {
     failNextSend = true;
 
     await expect(
-      salesService.sendSalesOrderEmail(order.id, { ...sendBase, variant: "confirmation" })
+      salesService.sendSalesOrderEmail(order.id, parsed(sendSalesOrderEmailSchema, { ...sendBase, variant: "confirmation" }))
     ).rejects.toThrow(MailSendError);
 
     const after = await salesService.getSalesOrder(order.id);
@@ -674,14 +675,14 @@ describe("sales service — Avrundning on rows", () => {
   // salesPrice so a quantity-only PATCH (which re-resolves the price chain,
   // C3) has a price to land on.
   async function makeRoundedArticle(rounding: number, salesPrice = 10) {
-    return articleService.createArticle({
+    return articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `ART-RND-${crypto.randomUUID()}`,
       name: "Rundad artikel",
       type: "purchased",
       rounding,
       salesPrice,
       active: true,
-    });
+    }));
   }
 
   it("rounds the row quantity up on quote creation and on a quantity PATCH", async () => {
@@ -690,7 +691,7 @@ describe("sales service — Avrundning on rows", () => {
     const article = await makeRoundedArticle(5);
 
     const { order, rows } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 12, unitPrice: 10 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 12, unitPrice: 10 }] }),
       user.id
     );
     expect(rows[0]!.quantityOrdered).toBe("15.0000");
@@ -716,7 +717,7 @@ describe("sales service — Avrundning on rows", () => {
     await articleService.addArticleUnit(article.id, { unitId: metreId, quantityPerBase: 0.89 });
 
     const { rows } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, unitId: metreId, unitPrice: 10 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, unitId: metreId, unitPrice: 10 }] }),
       user.id
     );
     // Rounded up to 5 st in the base unit — the row's display quantity in
@@ -734,7 +735,7 @@ describe("sales service — Avrundning on rows", () => {
     await salesService.addCustomerPrice(customer.id, { articleId: article.id, fromQuantity: 10, unitPrice: 80 });
 
     const { rows } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 7 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 7 }] }),
       user.id
     );
     expect(rows[0]!.quantityOrdered).toBe("10.0000");
@@ -833,12 +834,12 @@ describe("sales service — C3 kundpriser: row pricing", () => {
   // Article with no sales price and no rules — the empty chain, for the
   // "no price found" test.
   async function makeArticleNoPrice() {
-    return articleService.createArticle({
+    return articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `ART-SO-${crypto.randomUUID()}`,
       name: "Test Article",
       type: "manufactured",
       active: true,
-    });
+    }));
   }
 
   it("resolves price and discount when unitPrice is omitted", async () => {
@@ -846,7 +847,7 @@ describe("sales service — C3 kundpriser: row pricing", () => {
     const customer = await makeCustomer();
     const article = await makeArticle();
 
-    const list = await salesService.createPriceList({ code: `PL-${crypto.randomUUID().slice(0, 8)}`, name: "Lista" });
+    const list = await salesService.createPriceList(parsed(createPriceListSchema, { code: `PL-${crypto.randomUUID().slice(0, 8)}`, name: "Lista" }));
     await salesService.addPriceListRow(list.id, { articleId: article.id, fromQuantity: 1, unitPrice: 90 });
     await salesService.updateCustomer(customer.id, { priceListId: list.id });
     // A discount-form customer rule (no unitPrice) — it wins the chain but
@@ -854,7 +855,7 @@ describe("sales service — C3 kundpriser: row pricing", () => {
     await salesService.addCustomerPrice(customer.id, { articleId: article.id, fromQuantity: 1, discountPercent: 10 });
 
     const { rows } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1 }] }),
       user.id
     );
     expect(rows[0]!.unitPrice).toBe("90.0000");
@@ -867,11 +868,11 @@ describe("sales service — C3 kundpriser: row pricing", () => {
   // reaches the order row through the normal omitted-unitPrice path).
   it("resolves the customer's blanket discount onto the row when no rule matches", async () => {
     const user = await makeUser();
-    const customer = await salesService.createCustomer({ name: "Rabattkund AB", active: true, discountPercent: 15 });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Rabattkund AB", active: true, discountPercent: 15 }));
     const article = await makeArticle(100);
 
     const { rows } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1 }] }),
       user.id
     );
     expect(rows[0]!.unitPrice).toBe("100.0000");
@@ -884,7 +885,7 @@ describe("sales service — C3 kundpriser: row pricing", () => {
     const article = await makeArticle();
 
     const { rows } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 0 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 0 }] }),
       user.id
     );
     expect(rows[0]!.unitPrice).toBe("0.0000");
@@ -897,7 +898,7 @@ describe("sales service — C3 kundpriser: row pricing", () => {
     const article = await makeArticleNoPrice();
 
     await expect(
-      salesService.createQuote({ customerId: customer.id, rows: [{ articleId: article.id, quantity: 1 }] }, user.id)
+      salesService.createQuote(parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1 }] }), user.id)
     ).rejects.toThrow(PriceNotFoundError);
   });
 
@@ -907,7 +908,7 @@ describe("sales service — C3 kundpriser: row pricing", () => {
     const article = await makeArticleNoPrice();
     // Priced by hand, since the chain is empty.
     const { order, rows } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 75, discountPercent: 5 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 75, discountPercent: 5 }] }),
       user.id
     );
     // A quantity-only PATCH re-resolves the chain; with no rule at all there is
@@ -923,13 +924,13 @@ describe("sales service — C3 kundpriser: row pricing", () => {
     const customer = await makeCustomer();
     const article = await makeArticle();
 
-    const list = await salesService.createPriceList({ code: `PL-${crypto.randomUUID().slice(0, 8)}`, name: "Lista" });
+    const list = await salesService.createPriceList(parsed(createPriceListSchema, { code: `PL-${crypto.randomUUID().slice(0, 8)}`, name: "Lista" }));
     await salesService.addPriceListRow(list.id, { articleId: article.id, fromQuantity: 1, unitPrice: 90 });
     await salesService.addPriceListRow(list.id, { articleId: article.id, fromQuantity: 10, unitPrice: 80 });
     await salesService.updateCustomer(customer.id, { priceListId: list.id });
 
     const { order, rows } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1 }] }),
       user.id
     );
     expect(rows[0]!.unitPrice).toBe("90.0000");
@@ -944,7 +945,7 @@ describe("sales service — C3 kundpriser: row pricing", () => {
     const article = await makeArticle();
 
     const { order, rows } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 55, discountPercent: 5 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 55, discountPercent: 5 }] }),
       user.id
     );
 
@@ -959,7 +960,7 @@ describe("sales service — C3 kundpriser: row pricing", () => {
     const article = await makeArticle();
 
     const { rows } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 200, discountPercent: 15 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 200, discountPercent: 15 }] }),
       user.id
     );
     expect(rows[0]!.unitPrice).toBe("200.0000");
@@ -992,20 +993,20 @@ describe("sales service — delivery addresses", () => {
   it("creates, lists, updates and deletes delivery addresses on a customer", async () => {
     const customer = await makeCustomer();
 
-    const created = await salesService.createDeliveryAddress(customer.id, {
+    const created = await salesService.createDeliveryAddress(customer.id, parsed(createDeliveryAddressSchema, {
       label: "Huvudlager",
       address: "Lagervägen 1",
       postalCode: "123 45",
       city: "Göteborg",
       isDefault: true,
-    });
+    }));
     expect(created.isDefault).toBe(true);
 
-    await salesService.createDeliveryAddress(customer.id, {
+    await salesService.createDeliveryAddress(customer.id, parsed(createDeliveryAddressSchema, {
       label: "Filial Nord",
       address: "Norrvägen 2",
       isDefault: false,
-    });
+    }));
 
     const list = await salesService.listDeliveryAddresses(customer.id);
     expect(list).toHaveLength(2);
@@ -1021,16 +1022,16 @@ describe("sales service — delivery addresses", () => {
 
   it("keeps at most one default — setting a new default demotes the old one", async () => {
     const customer = await makeCustomer();
-    const first = await salesService.createDeliveryAddress(customer.id, {
+    const first = await salesService.createDeliveryAddress(customer.id, parsed(createDeliveryAddressSchema, {
       label: "A",
       address: "Gata 1",
       isDefault: true,
-    });
-    const second = await salesService.createDeliveryAddress(customer.id, {
+    }));
+    const second = await salesService.createDeliveryAddress(customer.id, parsed(createDeliveryAddressSchema, {
       label: "B",
       address: "Gata 2",
       isDefault: true,
-    });
+    }));
 
     const list = await salesService.listDeliveryAddresses(customer.id);
     expect(list.find((a) => a.id === first.id)!.isDefault).toBe(false);
@@ -1045,8 +1046,8 @@ describe("sales service — delivery addresses", () => {
 
   it("scopes addresses to their customer (404 across customers)", async () => {
     const customer = await makeCustomer();
-    const other = await salesService.createCustomer({ name: "Annan Kund AB", active: true });
-    const address = await salesService.createDeliveryAddress(customer.id, { label: "A", address: "Gata 1", isDefault: false });
+    const other = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Annan Kund AB", active: true }));
+    const address = await salesService.createDeliveryAddress(customer.id, parsed(createDeliveryAddressSchema, { label: "A", address: "Gata 1", isDefault: false }));
 
     await expect(
       salesService.updateDeliveryAddress(other.id, address.id, { city: "Fel" })
@@ -1058,14 +1059,14 @@ describe("sales service — delivery addresses", () => {
   });
 
   it("stores invoice fields on the customer", async () => {
-    const customer = await salesService.createCustomer({
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, {
       name: "Faktura AB",
       active: true,
       invoiceAddress: "Box 100",
       invoicePostalCode: "400 10",
       invoiceCity: "Göteborg",
       invoiceEmail: "faktura@example.com",
-    });
+    }));
     expect(customer.invoiceEmail).toBe("faktura@example.com");
 
     const updated = await salesService.updateCustomer(customer.id, { invoiceEmail: null, invoiceCity: "Borås" });
@@ -1076,11 +1077,11 @@ describe("sales service — delivery addresses", () => {
   it("defaults a delivery address's country to SE and updates it via PATCH", async () => {
     const customer = await makeCustomer();
 
-    const created = await salesService.createDeliveryAddress(customer.id, {
+    const created = await salesService.createDeliveryAddress(customer.id, parsed(createDeliveryAddressSchema, {
       label: "Utan land",
       address: "Gata 1",
       isDefault: false,
-    });
+    }));
     expect(created.country).toBe("SE");
 
     const withCountry = await salesService.createDeliveryAddress(customer.id, {
@@ -1101,21 +1102,21 @@ describe("sales service — order header fields", () => {
     const user = await makeUser();
     const customer = await makeCustomer();
     const article = await makeArticle();
-    const address = await salesService.createDeliveryAddress(customer.id, {
+    const address = await salesService.createDeliveryAddress(customer.id, parsed(createDeliveryAddressSchema, {
       label: "Huvudlager",
       address: "Lagervägen 1",
       postalCode: "123 45",
       city: "Göteborg",
       isDefault: true,
-    });
+    }));
     const { order } = await salesService.createQuote(
-      {
+      parsed(createQuoteSchema, {
         customerId: customer.id,
         customerOrderNumber: "PO-4711",
         customerReference: "Anna",
         deliveryAddressId: address.id,
         rows: [{ articleId: article.id, quantity: 2, unitPrice: 50 }],
-      },
+      }),
       user.id
     );
     return { user, customer, article, address, order };
@@ -1134,21 +1135,21 @@ describe("sales service — order header fields", () => {
   it("rejects a delivery address belonging to another customer", async () => {
     const user = await makeUser();
     const customer = await makeCustomer();
-    const other = await salesService.createCustomer({ name: "Annan Kund AB", active: true });
-    const foreignAddress = await salesService.createDeliveryAddress(other.id, {
+    const other = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Annan Kund AB", active: true }));
+    const foreignAddress = await salesService.createDeliveryAddress(other.id, parsed(createDeliveryAddressSchema, {
       label: "Fel kund",
       address: "Gata 1",
       isDefault: false,
-    });
+    }));
     const article = await makeArticle();
 
     await expect(
       salesService.createQuote(
-        {
+        parsed(createQuoteSchema, {
           customerId: customer.id,
           deliveryAddressId: foreignAddress.id,
           rows: [{ articleId: article.id, quantity: 1, unitPrice: 10 }],
-        },
+        }),
         user.id
       )
     ).rejects.toThrow(DeliveryAddressNotFoundError);
@@ -1175,12 +1176,12 @@ describe("sales service — order header fields", () => {
     expect(undated!.expectedDeliveryDate).toBeNull();
 
     // A foreign customer's address is rejected on PATCH as well.
-    const other = await salesService.createCustomer({ name: "Annan Kund AB", active: true });
-    const foreignAddress = await salesService.createDeliveryAddress(other.id, {
+    const other = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Annan Kund AB", active: true }));
+    const foreignAddress = await salesService.createDeliveryAddress(other.id, parsed(createDeliveryAddressSchema, {
       label: "Fel",
       address: "Gata 9",
       isDefault: false,
-    });
+    }));
     await expect(
       salesService.updateSalesOrderHeader(order.id, { deliveryAddressId: foreignAddress.id })
     ).rejects.toThrow(DeliveryAddressNotFoundError);
@@ -1197,7 +1198,7 @@ describe("sales service — order header fields", () => {
     const customer = await makeCustomer();
     const article = await makeArticle();
     const { order } = await salesService.createQuote(
-      {
+      parsed(createQuoteSchema, {
         customerId: customer.id,
         newDeliveryAddress: {
           label: "Bygget Solna",
@@ -1208,7 +1209,7 @@ describe("sales service — order header fields", () => {
           saveToCustomer: false,
         },
         rows: [{ articleId: article.id, quantity: 1, unitPrice: 10 }],
-      },
+      }),
       user.id
     );
     const fetched = await salesService.getSalesOrder(order.id);
@@ -1227,11 +1228,11 @@ describe("sales service — order header fields", () => {
     // … nor pickable on another order of the same customer.
     await expect(
       salesService.createQuote(
-        {
+        parsed(createQuoteSchema, {
           customerId: customer.id,
           deliveryAddressId: fetched!.deliveryAddressId!,
           rows: [{ articleId: article.id, quantity: 1, unitPrice: 10 }],
-        },
+        }),
         user.id
       )
     ).rejects.toThrow(DeliveryAddressNotFoundError);
@@ -1248,11 +1249,11 @@ describe("sales service — order header fields", () => {
     const customer = await makeCustomer();
     const article = await makeArticle();
     const { order } = await salesService.createQuote(
-      {
+      parsed(createQuoteSchema, {
         customerId: customer.id,
         newDeliveryAddress: { label: "Lager Väst", address: "Hamngatan 3", country: "SE", saveToCustomer: true },
         rows: [{ articleId: article.id, quantity: 1, unitPrice: 10 }],
-      },
+      }),
       user.id
     );
     const list = await salesService.listDeliveryAddresses(customer.id);
@@ -1461,7 +1462,7 @@ describe("sales service — order header fields", () => {
     const article = await makeArticle();
 
     const { order } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 2, unitPrice: 100, discountPercent: 10 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 2, unitPrice: 100, discountPercent: 10 }] }),
       user.id
     );
 
@@ -1512,14 +1513,14 @@ describe("sales service — leveransdatum per rad", () => {
     await seedStock(a.id, location.id, 10);
     await seedStock(b.id, location.id, 10);
     const { order, rows } = await salesService.createQuote(
-      {
+      parsed(createQuoteSchema, {
         customerId: customer.id,
         expectedDeliveryDate: "2030-03-20",
         rows: [
           { articleId: a.id, quantity: 2, unitPrice: 10, expectedDeliveryDate: "2030-03-06" },
           { articleId: b.id, quantity: 2, unitPrice: 10 },
         ],
-      },
+      }),
       user.id
     );
     return { user, order, location, early: rows[0]!, follows: rows[1]! };
@@ -1589,16 +1590,16 @@ describe("sales service — order terms (villkor)", () => {
     const user = await makeUser();
     const deliveryTerm = await registerService.deliveryTerms.create({ code: "DAP", name: "Delivered at Place" });
     const paymentTerm = await registerService.paymentTerms.create({ code: "N30", name: "30 dagar netto" });
-    const customer = await salesService.createCustomer({
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, {
       name: "Villkorskund AB",
       active: true,
       deliveryTermId: deliveryTerm.id,
       paymentTermId: paymentTerm.id,
-    });
+    }));
     const article = await makeArticle();
 
     const { order } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 10 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 10 }] }),
       user.id
     );
     const fetched = await salesService.getSalesOrder(order.id);
@@ -1626,8 +1627,8 @@ describe("sales service — order terms (villkor)", () => {
 
 describe("customer numbers (kundnummer)", () => {
   it("auto-allocates sequential customer numbers from the number series", async () => {
-    const a = await salesService.createCustomer({ name: "Kund A", active: true });
-    const b = await salesService.createCustomer({ name: "Kund B", active: true });
+    const a = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund A", active: true }));
+    const b = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund B", active: true }));
 
     // number_series is never truncated, so the counter survives across
     // tests — assert the relative sequence, never absolute values. (The
@@ -1638,14 +1639,14 @@ describe("customer numbers (kundnummer)", () => {
   });
 
   it("respects a manually supplied customer number", async () => {
-    const c = await salesService.createCustomer({ name: "Kund C", customerNumber: "KUND-77", active: true });
+    const c = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund C", customerNumber: "KUND-77", active: true }));
     expect(c.customerNumber).toBe("KUND-77");
   });
 
   it("rejects a duplicate customer number at create", async () => {
-    await salesService.createCustomer({ name: "Kund D", customerNumber: "DUBLETT-1", active: true });
+    await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund D", customerNumber: "DUBLETT-1", active: true }));
     await expect(
-      salesService.createCustomer({ name: "Kund E", customerNumber: "DUBLETT-1", active: true })
+      salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund E", customerNumber: "DUBLETT-1", active: true }))
     ).rejects.toThrow(DuplicateCustomerNumberError);
   });
 
@@ -1653,23 +1654,23 @@ describe("customer numbers (kundnummer)", () => {
     // Take a number by hand, then point the series straight at it: the next
     // auto-allocated create must step over it rather than fail — and keep
     // working afterwards.
-    const taken = await salesService.createCustomer({ name: "Upptagen AB", customerNumber: "8100", active: true });
+    const taken = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Upptagen AB", customerNumber: "8100", active: true }));
     await db.update(numberSeries).set({ nextNumber: 8100 }).where(eq(numberSeries.key, "customer"));
 
-    const next = await salesService.createCustomer({ name: "Nästa AB", active: true });
+    const next = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Nästa AB", active: true }));
     expect(next.customerNumber).toBe("8101");
     expect(taken.customerNumber).toBe("8100");
 
-    const after = await salesService.createCustomer({ name: "Därefter AB", active: true });
+    const after = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Därefter AB", active: true }));
     expect(after.customerNumber).toBe("8102");
   });
 
   it("still rejects a manually supplied duplicate without retrying", async () => {
-    await salesService.createCustomer({ name: "Först AB", customerNumber: "8200", active: true });
+    await salesService.createCustomer(parsed(createCustomerSchema, { name: "Först AB", customerNumber: "8200", active: true }));
     const [before] = await db.select().from(numberSeries).where(eq(numberSeries.key, "customer"));
 
     await expect(
-      salesService.createCustomer({ name: "Andra AB", customerNumber: "8200", active: true })
+      salesService.createCustomer(parsed(createCustomerSchema, { name: "Andra AB", customerNumber: "8200", active: true }))
     ).rejects.toThrow(DuplicateCustomerNumberError);
 
     // Asserting only the thrown error would also pass if the code retried
@@ -1769,7 +1770,7 @@ describe("sales service — audit trail", () => {
   it("logs price list create/row CRUD and customer price CRUD", async () => {
     const user = await makeUser();
     const article = await makeArticle();
-    const list = await salesService.createPriceList({ code: "PL-1", name: "Prislista 1" }, user.id);
+    const list = await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-1", name: "Prislista 1" }), user.id);
     const createdList = await auditRows("price_list", "created");
     expect(createdList).toHaveLength(1);
     expect(createdList[0]!.entityId).toBe("PL-1");
@@ -1803,13 +1804,13 @@ describe("sales service — customer language (Språk, #7)", () => {
     const user = await makeUser();
     const swedish = await makeCustomer();
     expect(swedish.language).toBe("sv");
-    const english = await salesService.createCustomer({ name: "Customer Ltd", active: true, country: "GB", language: "en" });
+    const english = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Customer Ltd", active: true, country: "GB", language: "en" }));
     expect(english.language).toBe("en");
     expect((await salesService.getCustomer(english.id))!.language).toBe("en");
 
     const article = await makeArticle();
     const { order } = await salesService.createQuote(
-      { customerId: english.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 99 }] },
+      parsed(createQuoteSchema, { customerId: english.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 99 }] }),
       user.id
     );
     expect((await salesService.getSalesOrder(order.id))!.customerLanguage).toBe("en");

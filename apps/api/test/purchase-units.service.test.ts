@@ -1,3 +1,4 @@
+import { createPurchaseOrderSchema, createSupplierSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db, units } from "@navet/db";
@@ -15,6 +16,7 @@ import { createMailService, type MailTransportFactory } from "../src/modules/mai
 import { createDocumentPdfService } from "../src/modules/mail/service/document-pdf.js";
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -80,8 +82,8 @@ async function makeKgArticle(articleNumber: string) {
 describe("purchase — order rows in alternative units", () => {
   async function makeOrder() {
     const user = await makeUser();
-    const supplier = await purchaseService.createSupplier({ name: "ACME AB", active: true });
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "ACME AB", active: true }));
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     return { user, order };
   }
 
@@ -150,7 +152,7 @@ describe("purchase — order rows in alternative units", () => {
 describe("purchase — inquiry rows in alternative units", () => {
   it("converts inquiry rows on create and carries the unit to the purchase order", async () => {
     const user = await makeUser();
-    const supplier = await purchaseService.createSupplier({ name: "ACME AB", active: true });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "ACME AB", active: true }));
     const article = await makeKgArticle("IN-1");
 
     const { inquiry } = await purchaseService.createInquiry(

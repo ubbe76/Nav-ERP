@@ -1,6 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
+import { createCustomerSchema } from "@navet/shared";
+import type { z } from "zod";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createSalesRepository } from "../src/modules/sales/repository/sales.repository.js";
@@ -17,6 +19,7 @@ import { createSystemRepository } from "../src/modules/system/repository/system.
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { pdfText } from "./helpers/pdf.js";
 import { stampOrderInvoiced } from "./helpers/services.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -56,8 +59,8 @@ afterAll(async () => {
 });
 
 // Order taken all the way to "delivered" so it can be invoiced.
-async function makeDeliveredOrder(customerInput: Parameters<typeof salesService.createCustomer>[0]) {
-  const customer = await salesService.createCustomer(customerInput);
+async function makeDeliveredOrder(customerInput: z.input<typeof createCustomerSchema>) {
+  const customer = await salesService.createCustomer(parsed(createCustomerSchema, customerInput));
   const article = await articleService.createArticle({
     articleNumber: `FAKT-${crypto.randomUUID().slice(0, 8)}`,
     name: "Fakturaartikel",

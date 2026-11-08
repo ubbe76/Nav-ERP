@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { eq, sql } from "drizzle-orm";
@@ -18,6 +19,7 @@ import { createSystemService } from "../src/modules/system/service/system.servic
 import { resolvePrice } from "../src/modules/sales/service/price-resolver.js";
 import { configuratorRoutes } from "../src/modules/oauth/routes/configurator.routes.js";
 import type { SalesService } from "../src/modules/sales/service/sales.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -51,16 +53,16 @@ afterAll(async () => {
 });
 
 async function makeCustomer() {
-  return salesService.createCustomer({ name: "Kund AB", active: true });
+  return salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
 }
 
 async function makeArticle(opts: { salesPrice?: number } = {}) {
-  const article = await articleService.createArticle({
+  const article = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-PQ-${crypto.randomUUID()}`,
     name: "Test Article",
     type: "purchased",
     active: true,
-  });
+  }));
   if (opts.salesPrice !== undefined) {
     await db.update(articles).set({ salesPrice: String(opts.salesPrice) }).where(eq(articles.id, article.id));
     return { ...article, salesPrice: String(opts.salesPrice) };

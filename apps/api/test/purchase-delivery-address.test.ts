@@ -4,6 +4,11 @@ import { companyInfo, db } from "@navet/db";
 import {
   updateCompanyInfoSchema,
   updatePurchaseOrderHeaderSchema,
+  createArticleSchema,
+  createCustomerSchema,
+  createPurchaseOrderSchema,
+  createSupplierSchema,
+  createWorkCenterSchema,
 } from "@navet/shared";
 import { pdfText } from "./helpers/pdf.js";
 import {
@@ -31,6 +36,7 @@ import { markSalesOrderInProduction } from "../src/modules/sales/service/product
 import { resolvePrice } from "../src/modules/sales/service/price-resolver.js";
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Leveransadress på inköpsordern (avsändning lego): the snapshot on the
 // order, the header PATCH's status guard and revision, the IO PDF's three
@@ -111,22 +117,22 @@ async function makeOrder(language: "sv" | "en" = "sv") {
     name: "Inköparen",
     role: "admin",
   });
-  const supplier = await purchaseService.createSupplier({
+  const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, {
     name: "Leverantören AB",
     active: true,
     language,
     address: "Levgatan 2",
     postalCode: "222 22",
     city: "Levstaden",
-  });
-  const article = await articleService.createArticle({
+  }));
+  const article = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-${crypto.randomUUID().slice(0, 8)}`,
     name: "Plåt",
     type: "purchased",
     active: true,
-  });
+  }));
   const order = await purchaseService.createPurchaseOrder(
-    { supplierId: supplier.id },
+    parsed(createPurchaseOrderSchema, { supplierId: supplier.id }),
     user.id,
   );
   await purchaseService.addRow(order.id, {
@@ -303,25 +309,25 @@ describe("Leveransadress on the purchase order", () => {
 
   it("linkedSalesOrders lists the sales orders behind the lego rows, once each, with the order's delivery address", async () => {
     const { user, supplier } = await makeOrder();
-    const machine = await mfgService.createWorkCenter({
+    const machine = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
       code: "100",
       name: "Svets",
       type: "machine",
       active: true,
-    });
-    const lego = await mfgService.createWorkCenter({
+    }));
+    const lego = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
       code: "900",
       name: "Lack",
       type: "subcontract",
       supplierId: supplier.id,
       active: true,
-    });
-    const parent = await articleService.createArticle({
+    }));
+    const parent = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `LEGO-${crypto.randomUUID().slice(0, 8)}`,
       name: "Legodetalj",
       type: "manufactured",
       active: true,
-    });
+    }));
     await mfgService.createRoutingOperation(parent.id, {
       sequenceNo: 10,
       workCenterId: machine.id,
@@ -335,10 +341,10 @@ describe("Leveransadress on the purchase order", () => {
       runTimePerUnit: 0,
       unitPrice: 100,
     });
-    const customer = await salesService.createCustomer({
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, {
       name: "Kund AB",
       active: true,
-    });
+    }));
     const address = await salesService.createDeliveryAddress(customer.id, {
       label: "Byggplatsen",
       address: "Byggvägen 5",
@@ -389,7 +395,7 @@ describe("Leveransadress on the purchase order", () => {
       )!.id;
 
     const order = await purchaseService.createPurchaseOrder(
-      { supplierId: supplier.id },
+      parsed(createPurchaseOrderSchema, { supplierId: supplier.id }),
       user.id,
     );
     for (const mo of [moA, moB, moC, free]) {

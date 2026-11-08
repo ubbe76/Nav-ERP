@@ -1,3 +1,4 @@
+import { createArticleSchema, createSupplierSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { sql } from "drizzle-orm";
@@ -17,6 +18,7 @@ import { createRegisterRepository } from "../src/modules/register/repository/reg
 import { createRegisterService } from "../src/modules/register/service/register.service.js";
 import { createSalesRepository } from "../src/modules/sales/repository/sales.repository.js";
 import { markSalesOrderInProduction } from "../src/modules/sales/service/production-transition.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Fix wave B: route-level coverage for the lego inquiry-row error mappings —
 // previously only the service layer was covered (test/inquiry-lego.test.ts).
@@ -73,27 +75,27 @@ async function makeUser() {
 }
 
 async function makeSupplier() {
-  return purchaseService.createSupplier({ name: "Lego AB", active: true });
+  return purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lego AB", active: true }));
 }
 
 // A manufactured article with one machine operation (10) and one lego
 // operation (20) — same shape as inquiry-lego.test.ts's makeLegoRouting.
 async function makeLegoRouting() {
   const supplier = await makeSupplier();
-  const machine = await mfgService.createWorkCenter({ code: "100", name: "Svets", type: "machine", active: true });
-  const lego = await mfgService.createWorkCenter({
+  const machine = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", type: "machine", active: true }));
+  const lego = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
     code: "900",
     name: "Ytbehandling AB",
     type: "subcontract",
     supplierId: supplier.id,
     active: true,
-  });
-  const parent = await articleService.createArticle({
+  }));
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `LEGO-ROUTE-${crypto.randomUUID()}`,
     name: "Legodetalj",
     type: "manufactured",
     active: true,
-  });
+  }));
   const machineOp = await mfgService.createRoutingOperation(parent.id, {
     sequenceNo: 10,
     workCenterId: machine.id,
@@ -150,12 +152,12 @@ describe("POST /inquiries/:id/rows", () => {
       { supplierId: f.supplier.id, rows: [{ articleId: f.parent.id, quantity: 1, routingOperationId: f.routingLegoOp.id }] },
       (await makeUser()).id
     );
-    const other = await articleService.createArticle({
+    const other = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `OTHER-ROUTE-${crypto.randomUUID()}`,
       name: "Annan",
       type: "manufactured",
       active: true,
-    });
+    }));
 
     const res = await app.inject({
       method: "POST",
@@ -174,12 +176,12 @@ describe("POST /inquiries/:id/rows", () => {
     // A different article on the inquiry so the row itself is new — the
     // machine-operation guard fires before any duplicate-article check
     // (resolveLegoRow validates before the row is ever inserted).
-    const plain = await articleService.createArticle({
+    const plain = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `PLAIN-ROUTE-${crypto.randomUUID()}`,
       name: "Vanlig",
       type: "purchased",
       active: true,
-    });
+    }));
     const { inquiry } = await purchaseService.createInquiry(
       { supplierId: f.supplier.id, rows: [{ articleId: plain.id, quantity: 1 }] },
       (await makeUser()).id
