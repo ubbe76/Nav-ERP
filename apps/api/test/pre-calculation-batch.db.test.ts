@@ -453,7 +453,7 @@ describe("Förkalkylera flera — the save", () => {
       { articleId: broken.id, articleNumber: "H-2", message: "Kalkylen kunde inte beräknas" },
       { articleId: unknownId, articleNumber: null, message: "Artikeln finns inte" },
       { articleId: template.id, articleNumber: "H-4", message: "Konfiguratormallar förkalkyleras inte" },
-      { articleId: priceFails.id, articleNumber: "H-3", message: "Kalkylen sparades men försäljningspriset sattes inte (Kalkylen kunde inte beräknas)" },
+      { articleId: priceFails.id, articleNumber: "H-3", message: "Kalkylen sparades men försäljningspriset sattes inte (priset kunde inte skrivas)" },
     ]);
     // H-3: the calculation and the standard cost are there, the sales price is as before.
     expect(await article(priceFails.id)).toMatchObject({ standardCost: "300.0000", salesPrice: "50.0000" });

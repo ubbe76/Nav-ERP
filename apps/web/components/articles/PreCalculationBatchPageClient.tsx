@@ -29,7 +29,7 @@ interface BatchRow {
   manufacturingCostPerUnit: number | null;
   selfCostPerUnit: number | null;
   salesPricePerUnit: number | null;
-  previous: { calculationId: string; calculatedAt: string; quantity: number; manufacturingCostPerUnit: number } | null;
+  previous: { calculationId: string; calculatedAt: string; quantity: number; manufacturingCostPerUnit: number | null } | null;
   change: { amount: number; percent: number } | null;
   currentStandardCost: number | null;
   currentSalesPrice: number | null;
@@ -87,7 +87,9 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
         setCopiedCount(n);
         if (n === 0) setSource((s) => (s === "copied" ? "filter" : s));
       })
-      .catch(() => setCopiedCount(0));
+      // Unknown, not empty: a failed count leaves Kopierat selectable (the
+      // preview reports its own error) instead of reading as "your list is empty".
+      .catch(() => setCopiedCount(null));
     apiFetch<ArticleGroup[]>("/api/v1/article-groups").then(setGroups).catch(() => setGroups([]));
     apiFetch<RegisterEntry[]>("/api/v1/article-codes").then(setArticleCodes).catch(() => setArticleCodes([]));
   }, []);
@@ -109,6 +111,9 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
     };
   }
 
+  // keepResult = the re-run after Spara markerade: the result stays visible and
+  // nothing is preselected, so a second click cannot save the same
+  // calculations again by accident.
   async function runPreview(ran: RanWith, keepResult: boolean) {
     setRunning(true);
     setError(null);
@@ -120,7 +125,7 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
       });
       setRows(res.rows);
       setRanWith(ran);
-      setSelected(new Set(res.rows.filter((r) => !r.error).map((r) => r.articleId)));
+      setSelected(keepResult ? new Set() : new Set(res.rows.filter((r) => !r.error).map((r) => r.articleId)));
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte förkalkylera urvalet"));
     } finally {
@@ -243,7 +248,7 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
       case "tvk":
         return money(r.manufacturingCostPerUnit);
       case "prevTvk":
-        return r.previous ? (
+        return r.previous && r.previous.manufacturingCostPerUnit !== null ? (
           <span className={styles.value}>
             {formatMoney(r.previous.manufacturingCostPerUnit)}
             <span className={styles.sub}>{dateOf(r.previous.calculatedAt)}</span>

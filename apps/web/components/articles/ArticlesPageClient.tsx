@@ -71,9 +71,9 @@ export function ArticlesPageClient({
   const router = useRouter();
   const searchParams = useSearchParams();
   const { setFilter } = useListNavigation();
-  // Kopierat (#28): the user's own list. `copiedView` = ?kopierat=1 shows only
+  // Kopierat (#28): the user's own list. `copiedView` = ?copied=true (the API's own param, so the CSV export follows it) shows only
   // those articles; the count is fetched on mount and after every action.
-  const copiedView = searchParams.get("kopierat") === "1";
+  const copiedView = searchParams.get("copied") === "true";
   const [copiedCount, setCopiedCount] = useState<number | null>(null);
   const [copyBusy, setCopyBusy] = useState(false);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
@@ -174,6 +174,12 @@ export function ArticlesPageClient({
       if (result) {
         setCopiedCount(result.count);
         setCopyNotice(copiedNotice(result.count));
+        // In the Kopierat view the list itself changed (Ersätt) — refresh the
+        // rows, as Ta bort ur Kopierat and Töm Kopierat do.
+        if (copiedView) {
+          setSelected(new Set());
+          router.refresh();
+        }
       }
     } catch (err) {
       setCopyError(apiErrorMessage(err, "Kunde inte kopiera artiklarna"));
@@ -421,7 +427,7 @@ export function ArticlesPageClient({
         <label style={{ display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}>
           <Checkbox
             checked={copiedView}
-            onChange={(e) => void setFilter("kopierat", e.target.checked ? "1" : null)}
+            onChange={(e) => void setFilter("copied", e.target.checked ? "true" : null)}
             aria-label="Visa bara Kopierat"
           />
           Kopierat{copiedCount !== null ? ` (${copiedCount.toLocaleString("sv-SE")})` : ""}
@@ -462,7 +468,7 @@ export function ArticlesPageClient({
           ]}
           rows={rows}
           highlightedRowId={highlighted === null ? null : rows[highlighted]?.id ?? null}
-          emptyText={copiedView ? "Kopierat är tomt" : "Inga artiklar matchar sökningen"}
+          emptyText={copiedView && copiedCount === 0 ? "Kopierat är tomt" : "Inga artiklar matchar sökningen"}
           renderCell={(article, key) => {
             const index = rows.indexOf(article);
             const marked = (field: EditField) => drafts[article.id]?.[field] !== undefined;

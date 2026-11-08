@@ -532,7 +532,7 @@ Innehåller **Kopierat** redan artiklar frågar systemet *Kopierat innehåller N
 
 ### Visa Kopierat
 
-I artikelregistret visar kryssrutan **Kopierat (N)** i verktygsraden bara artiklarna i din lista (adressen får `?kopierat=1`). Sökning och övriga filter fungerar som vanligt inom listan, och antalet ovanför tabellen följer.
+I artikelregistret visar kryssrutan **Kopierat (N)** i verktygsraden bara artiklarna i din lista (adressen får `?copied=true`). Sökning och övriga filter fungerar som vanligt inom listan, och antalet ovanför tabellen följer.
 
 ### Förkalkylera Kopierat
 

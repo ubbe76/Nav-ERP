@@ -139,6 +139,21 @@ describe("Kopierat — the cap", () => {
     expect((await service.listCopiedArticles(user.id)).count).toBe(COPIED_ARTICLES_MAX);
   });
 
+  it("refuses Kopiera alla träffar over the cap before the repository, with the resulting count, and writes nothing", async () => {
+    const user = await makeUser();
+    await bulkArticles(COPIED_ARTICLES_MAX + 1, "QRY");
+    const keep = await makeArticle("KEEP-Q");
+    await set(user.id, { mode: "add", articleIds: [keep!.id] });
+
+    await expect(set(user.id, { mode: "replace", query: { search: "QRY" } })).rejects.toMatchObject({
+      name: "CopiedArticlesTooManyError",
+      count: COPIED_ARTICLES_MAX + 1,
+    });
+    // add: the list's own article counts too.
+    await expect(set(user.id, { mode: "add", query: { search: "QRY" } })).rejects.toMatchObject({ count: COPIED_ARTICLES_MAX + 2 });
+    expect(await ids(user.id)).toEqual([keep!.id]);
+  });
+
   it("two concurrent adds cannot together exceed the cap (the per-user advisory lock)", async () => {
     const user = await makeUser();
     const bulk = await bulkArticles(COPIED_ARTICLES_MAX + 2);

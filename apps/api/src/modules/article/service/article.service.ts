@@ -2,7 +2,8 @@ import { renderLabelsPdf, type LabelInput } from "../../mail/service/label-pdf.j
 import type { AbcClass, ArticleLabelsInput, CopiedArticlesQuery, CopiedArticlesRemoveInput, CopiedArticlesSetInput } from "@navet/shared";
 // Kopierat (#28): the cap error is the repository leaf's (its transaction
 // throws it); re-exported so the routes import every article error from here.
-export { CopiedArticlesTooManyError } from "../repository/copied-articles.js";
+import { CopiedArticlesTooManyError } from "../repository/copied-articles.js";
+export { CopiedArticlesTooManyError };
 import {
   articleCopyPartAllowed,
   deriveLoadingMeters,
@@ -31,7 +32,7 @@ import type { ArticleRepository } from "../repository/article.repository.js";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { DEFAULT_ARTICLE_SERIES_KEY, SeriesExhaustedError } from "../../system/service/number-series.js";
-import { ERROR_CODES } from "@navet/shared";
+import { COPIED_ARTICLES_MAX, ERROR_CODES } from "@navet/shared";
 import { codeFromName, errorBody } from "../../system/service/error-body.js";
 import { assertModeAllowed } from "../../configurator/service/configurator-rules.js";
 
@@ -583,6 +584,18 @@ export function createArticleService(
       } else {
         const { onlyIds } = await restrictingIds(input.query!, userId);
         articleIds = onlyIds?.length === 0 ? [] : await repo.listIds(input.query!, { onlyIds });
+        // Every hit is a distinct, existing article, so more than the cap
+        // can never fit — refuse here, before the repository binds one
+        // parameter per id (a register of more than 65 535 articles would
+        // otherwise hit Postgres' parameter limit as a 500). Outside the
+        // lock on purpose: the result can only be over the cap.
+        if (articleIds.length > COPIED_ARTICLES_MAX) {
+          const count =
+            input.mode === "replace"
+              ? articleIds.length
+              : new Set([...(await repo.listCopiedArticleIds(userId)), ...articleIds]).size;
+          throw new CopiedArticlesTooManyError(count);
+        }
       }
       return repo.setCopiedArticles(userId, articleIds, input.mode);
     },

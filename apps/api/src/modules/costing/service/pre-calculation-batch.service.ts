@@ -249,7 +249,9 @@ export function createPreCalculationBatchService(deps: {
           } catch (err) {
             const { message, known } = batchErrorMessage(err);
             if (!known) logUnknown("apply-standard-cost", item.articleId, err);
-            partial.push(`standardpriset sattes inte (${message})`);
+            // The calculation WAS computed and saved — an unknown error here
+            // is the price write, not "Kalkylen kunde inte beräknas".
+            partial.push(`standardpriset sattes inte (${known ? message : "priset kunde inte skrivas"})`);
           }
         }
         if (input.setSalesPrice && figures?.salesPricePerUnit === 0) {
@@ -261,7 +263,9 @@ export function createPreCalculationBatchService(deps: {
           } catch (err) {
             const { message, known } = batchErrorMessage(err);
             if (!known) logUnknown("apply-sales-price", item.articleId, err);
-            partial.push(`försäljningspriset sattes inte (${message})`);
+            // The calculation WAS computed and saved — an unknown error here
+            // is the price write, not "Kalkylen kunde inte beräknas".
+            partial.push(`försäljningspriset sattes inte (${known ? message : "priset kunde inte skrivas"})`);
           }
         }
         result.saved.push({ articleId: item.articleId, articleNumber: label.articleNumber, calculationId, standardCostSet, salesPriceSet });
