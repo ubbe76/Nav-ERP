@@ -8,14 +8,43 @@
    the bottom stay put while the page scrolls. Every other sticky element
    offsets from these heights. Theme-independent, so not in tokens.css. */
 :root {
-  --app-toolbar-height: 52px;
+  --app-toolbar-base: 52px;
+  /* Flikar (punkt 5): the strip under the toolbar, only while documents are
+     open (html[data-tabs], DocumentTabsProvider). */
+  --app-tabstrip-height: 0px;
+  --app-toolbar-height: calc(var(--app-toolbar-base) + var(--app-tabstrip-height));
   --app-statusbar-height: 28px;
+  --app-sidebar-width: 0px;
+  /* Delad vy: the document's share of the content column. */
+  --app-split-pane-width: max(560px, calc((100vw - var(--app-sidebar-width)) * 0.55));
 }
 @media (max-width: 1024px) {
   :root {
-    --app-toolbar-height: 56px;
+    --app-toolbar-base: 56px;
     --app-statusbar-height: 0px;
   }
+}
+html[data-tabs] {
+  --app-tabstrip-height: 36px;
+}
+
+/* A page inside a tab (punkt 5, <html data-embedded> from the head script):
+   no sidebar, toolbar or status bar — the frame around it has them. */
+html[data-embedded] {
+  --app-toolbar-base: 0px;
+  --app-tabstrip-height: 0px;
+  --app-statusbar-height: 0px;
+}
+html[data-embedded] [data-app-chrome] {
+  display: none !important;
+}
+html[data-embedded] [data-app-frame] {
+  grid-template-columns: 1fr;
+}
+
+/* Delad vy: the page keeps the left part, the document the right. */
+html[data-split] [data-app-main] {
+  margin-right: var(--app-split-pane-width);
 }
 
 html,

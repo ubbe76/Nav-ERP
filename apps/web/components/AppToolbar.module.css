@@ -8,11 +8,19 @@
   z-index: 30;
   height: var(--app-toolbar-height);
   display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* The toolbar's own row; the tab strip (punkt 5) goes under it. */
+.row {
+  height: var(--app-toolbar-base);
+  flex-shrink: 0;
+  display: flex;
   align-items: center;
   gap: 10px;
   padding: 0 40px;
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
 }
 
 .search {
@@ -37,7 +45,7 @@
 
 @media (max-width: 1024px) {
   /* The hamburger (Nav.module.css) is fixed at the band's left edge. */
-  .toolbar {
+  .row {
     padding: 0 16px 0 68px;
   }
 }

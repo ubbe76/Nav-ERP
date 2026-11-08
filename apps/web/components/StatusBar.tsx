@@ -1,5 +1,6 @@
 "use client";
 
+import { isEmbedded } from "../lib/documentTabs";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { API_URL } from "../lib/api";
@@ -23,6 +24,8 @@ export function StatusBar({ userName, userRole }: { userName: string; userRole: 
   const [state, setState] = useState<State>("online");
 
   useEffect(() => {
+    // Inside a document tab (punkt 5) the bar is hidden: the frame checks.
+    if (isEmbedded()) return;
     let cancelled = false;
     async function check() {
       if (document.visibilityState === "hidden") return;
@@ -48,7 +51,7 @@ export function StatusBar({ userName, userRole }: { userName: string; userRole: 
   }, []);
 
   return (
-    <footer className={styles.bar}>
+    <footer className={styles.bar} data-app-chrome="">
       <span className={styles.state} data-state={state} role="status">
         <span className={styles.dot} aria-hidden="true" />
         {LABELS[state]}

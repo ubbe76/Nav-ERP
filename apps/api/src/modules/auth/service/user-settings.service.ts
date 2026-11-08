@@ -39,6 +39,8 @@ const OVERVIEW_CARDS_KEY = "overview_cards";
 // Täthet and Kolumner (Nav som program, punkt 6). list_columns is a JSON
 // object { "<list path>": { hidden, widths } }, merged per list on PATCH.
 const DENSITY_KEY = "table_density";
+// Flikar (punkt 5): absent = true.
+const DOCUMENT_TABS_KEY = "document_tabs";
 const LIST_COLUMNS_KEY = "list_columns";
 
 const LIST_PAGE_SIZE_VALUES: readonly number[] = LIST_PAGE_SIZE_OPTIONS;
@@ -167,6 +169,7 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
       overviewCards: decodeOverviewCards(byKey.get(OVERVIEW_CARDS_KEY)),
       density: decodeDensity(byKey.get(DENSITY_KEY)),
       listColumns: decodeListColumns(byKey.get(LIST_COLUMNS_KEY)),
+      documentTabs: byKey.get(DOCUMENT_TABS_KEY) !== "false",
     };
   }
 
@@ -207,6 +210,9 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
           OVERVIEW_CARDS_KEY,
           input.overviewCards === null ? "null" : JSON.stringify(input.overviewCards)
         );
+      }
+      if (input.documentTabs !== undefined) {
+        await repo.upsert(userId, DOCUMENT_TABS_KEY, String(input.documentTabs));
       }
       if (input.density !== undefined) {
         await repo.upsert(userId, DENSITY_KEY, input.density);

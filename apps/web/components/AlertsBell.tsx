@@ -1,5 +1,6 @@
 "use client";
 
+import { isEmbedded } from "../lib/documentTabs";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Bell } from "lucide-react";
@@ -20,7 +21,8 @@ export function AlertsBell() {
   const [summary, setSummary] = useState<{ count: number; red: boolean } | null>(null);
 
   useEffect(() => {
-    if (!allowed) return;
+    // Inside a document tab (punkt 5) the bell is hidden: no polling there.
+    if (!allowed || isEmbedded()) return;
     let cancelled = false;
     async function load() {
       if (document.visibilityState === "hidden") return;

@@ -21,7 +21,7 @@ export function UserMenu({ userName, userRole }: { userName: string; userRole: s
   const router = useRouter();
   const pathname = usePathname();
   const { boot } = useThemeBoot();
-  const { density, setDensity } = useUserPrefs();
+  const { density, setDensity, documentTabs, setDocumentTabs } = useUserPrefs();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -136,6 +136,24 @@ export function UserMenu({ userName, userRole }: { userName: string; userRole: s
                   onClick={() => setDensity(d)}
                 >
                   {DENSITY_LABELS[d]}
+                </button>
+              ))}
+            </div>
+          </div>
+          {/* Flikar (punkt 5): documents as tabs on a wide screen. */}
+          <div className={styles.section}>
+            <span className={styles.label}>Dokument i flikar</span>
+            <div className={segmentedStyles.segmented} role="radiogroup" aria-label="Dokument i flikar">
+              {[true, false].map((on) => (
+                <button
+                  key={String(on)}
+                  type="button"
+                  role="radio"
+                  aria-checked={documentTabs === on}
+                  data-active={documentTabs === on}
+                  onClick={() => setDocumentTabs(on)}
+                >
+                  {on ? "På" : "Av"}
                 </button>
               ))}
             </div>

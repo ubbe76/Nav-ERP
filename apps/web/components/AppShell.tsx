@@ -8,6 +8,7 @@ import { PermissionsProvider } from "./PermissionsProvider";
 import { ArticleOverviewProvider } from "./articles/ArticleOverviewProvider";
 import { ConfirmDialogHost } from "./ui/ConfirmDialogHost";
 import { NoticeHost } from "./ui/NoticeHost";
+import { EmbeddedBridge } from "./tabs/EmbeddedBridge";
 import { ReadOnlyBanner } from "./ReadOnlyBanner";
 import { FavoritesProvider } from "./FavoritesProvider";
 import { getCurrentUser } from "../lib/api";
@@ -40,12 +41,13 @@ export async function AppShell({ active, children }: AppShellProps) {
         className={styles.frame}
         initialDensity={favorites.density}
         initialListColumns={favorites.listColumns}
+        initialDocumentTabs={favorites.documentTabs}
       >
         <Nav active={active} role={user.role} permissions={user.permissions} />
         <PermissionsProvider role={user.role} permissions={user.permissions}>
           <div className={styles.column}>
             <AppToolbar userName={user.name} userRole={roleLabel} />
-            <main className={styles.main}>
+            <main className={styles.main} data-app-main="">
               <ReadOnlyBanner readOnly={user.readOnly} />
               {/* One floating Artikelöversikt panel per page, opened from any
                   row's ArticleOverviewButton. The dashboard (own inline shell)
@@ -53,6 +55,7 @@ export async function AppShell({ active, children }: AppShellProps) {
               <ArticleOverviewProvider>{children}</ArticleOverviewProvider>
               <ConfirmDialogHost />
               <NoticeHost />
+              <EmbeddedBridge />
             </main>
             <StatusBar userName={user.name} userRole={roleLabel} />
           </div>
