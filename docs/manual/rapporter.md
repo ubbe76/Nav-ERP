@@ -40,13 +40,15 @@ Definitionerna:
 
 - **Kundordrar**: ordern räknas när den är **Levererad** eller **Fakturerad**. Utlovat datum är orderns **Förväntat leveransdatum** (dagen kunden får varan — även för kunder med [transportdagar](/hjalp/forsaljning#leveransdagar)); faktiskt datum är det **sista leveranstillfällets** datum. Leverans samma dag som utlovat räknas **i tid**.
 - **Inköpsordrar**: ordern räknas när den är **Mottagen** eller **Stängd** och har minst en inleverans. Faktiskt datum är den sista inleveransens datum.
-- **Precision** = andelen ordrar i tid av de mätbara; **Snitt försening** räknas enbart över de försenade ordrarna.
+- **Marginaler**: utan inställningar är en leverans sen redan dagen efter utlovat datum, och en tidig leverans räknas som i tid. Under [System → Inställningar → Leveransprecision](/hjalp/system#leveransprecision) kan du ge kundordrar och inköpsordrar var sin marginal: **Sen efter** (sen först mer än så många dagar efter datumet) och **För tidig före** (för tidig när leveransen kommer mer än så många dagar före). Raden under varje tabell visar vilka marginaler som gäller.
+- Är marginalen för tidiga leveranser påslagen får tabellen kolumnen **För tidiga** (under **Motpart**: **Tidiga**), och den finns även i CSV-filen.
+- **Precision** = andelen ordrar i tid av de mätbara, så en för tidig leverans sänker precisionen precis som en sen. **Snitt försening** räknas enbart över de försenade ordrarna, i dagar efter utlovat datum (inte efter marginalen).
 - **Ej mätbara** redovisas separat: ordrar utan förväntat leveransdatum, och äldre kundordrar som levererades innan leveranstillfällen infördes (de saknar leveransdatum i systemet).
 - Delvis levererade ordrar syns inte förrän de är färdiglevererade — rapporten mäter hela ordern mot dess sista leverans.
 
 ### Gruppera per motpart
 
-Urvalet **Gruppera** väljer mellan **Månad** (som ovan) och **Motpart**. Med **Motpart** visas en rad per kund (under **Kundordrar**) respektive leverantör (under **Inköpsordrar**) med kolumnerna **Order**, **I tid**, **Sena**, **Precision** och **Snittförsening** samt kvalitetskolumnerna ur [avvikelserna](/hjalp/kvalitet):
+Urvalet **Gruppera** väljer mellan **Månad** (som ovan) och **Motpart**. Med **Motpart** visas en rad per kund (under **Kundordrar**) respektive leverantör (under **Inköpsordrar**) med kolumnerna **Order**, **I tid**, **Sena**, **Precision** och **Snittförsening** (med samma marginaler som månadsvyn) samt kvalitetskolumnerna ur [avvikelserna](/hjalp/kvalitet):
 
 - **Avvikelser** — antal ärenden av motsvarande typ (kundreklamationer för kunder, leverantörsavvikelser för leverantörer) med rapporteringsdatum i perioden. Makulerade räknas inte.
 - **Order med avvikelse** och **Andel felfria** — av motpartens mätta ordrar, hur många som har ett kopplat ärende och andelen som saknar ett.

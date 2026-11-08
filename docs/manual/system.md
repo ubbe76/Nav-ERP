@@ -372,6 +372,15 @@ Avsnittet **Leveransdagar** på **System → Inställningar** (`/system/installn
 
 Hjälptexten säger: "Transportdagar räknas i arbetsdagar. Gäller leverantörer och kunder som inte har en egen inställning." En leverantör eller kund som anger eget läge eller egna transportdagar på sitt kort avviker från förvalet. Själva veckodagarna har inget förval — de anges alltid per leverantör respektive kund.
 
+### Leveransprecision
+
+Avsnittet **Leveransprecision** på **System → Inställningar** sätter marginalerna som [Rapporter → Leveransprecision](/hjalp/rapporter#leveransprecision) räknar med, en rad för **Kundordrar** och en för **Inköpsordrar**. Dagarna räknas i hela kalenderdagar mot förväntat leveransdatum:
+
+- **Sen efter (dagar)** — en leverans räknas som sen först när den kommer **mer än** så många dagar efter datumet. Förval **0**, det vill säga redan dagen efter är sen. Med 2 räknas en leverans två dagar efter datumet som i tid och en leverans tre dagar efter som sen.
+- **För tidig före (dagar)** — en leverans räknas som för tidig när den kommer **mer än** så många dagar före datumet. Tomt fält (förval) = av, och då räknas alla tidiga leveranser som i tid. **0** = varje leverans före datumet är för tidig.
+
+Hela dagar 0–365. Fälten sparas när du lämnar dem; ett ogiltigt värde ger felet "… måste vara ett heltal 0–365 dagar". Ändringen gäller rapporten direkt, även för perioder bakåt i tiden — ingenting lagras per order.
+
 ### Lön, PAXml & schema
 
 Tidkoderna för löneunderlagsexporten, övertidsreglerna, ATF-intjäningen och **Tillåt ATF-uttag via schemat** ställs inte här utan under **Personal & lön → Lön, PAXml & schema** (se [Lön, PAXml & schema](/hjalp/lon#lon-paxml-schema)).

@@ -7,12 +7,14 @@ import { Card } from "../ui/Card";
 import { Field, Select } from "../ui/Field";
 import { FormError, FormHint } from "../ui/Form";
 import { Table } from "../ui/Table";
+import { GatedLink } from "../ui/GatedLink";
 import { apiFetch } from "../../lib/api";
 import { formatMoney, formatPercent } from "../../lib/format";
 import type {
   DeliveryPrecisionResponse,
   PrecisionCounterparty,
   PrecisionCounterpartyFigures,
+  PrecisionMargins,
   PrecisionMonth,
   PrecisionSection,
 } from "../../lib/types";
@@ -39,8 +41,33 @@ function precisionCell(precisionPct: number | null): ReactNode {
   );
 }
 
+const daysWord = (n: number) => `${n} ${n === 1 ? "dag" : "dagar"}`;
+
+// Marginal i leveransprecisionen (#29): the side's rule in words, under each
+// table, so the figures are never read without the margins they used.
+function MarginHint({ margins }: { margins: PrecisionMargins }) {
+  const late =
+    margins.lateDays === 0
+      ? "Sen = efter förväntat leveransdatum."
+      : `Sen = mer än ${daysWord(margins.lateDays)} efter förväntat leveransdatum.`;
+  const early =
+    margins.earlyDays === null
+      ? "Tidiga leveranser räknas som i tid."
+      : margins.earlyDays === 0
+        ? "För tidig = före förväntat leveransdatum."
+        : `För tidig = mer än ${daysWord(margins.earlyDays)} före.`;
+  return (
+    <FormHint>
+      {late} {early} Marginalerna ställs in under <GatedLink href="/system/installningar">System → Inställningar</GatedLink>.
+    </FormHint>
+  );
+}
+
 function PrecisionTable({ title, section, csvPath }: { title: string; section: PrecisionSection; csvPath: string }) {
   const rows: PrecisionRow[] = section.months.map((m) => ({ ...m, id: m.month }));
+  // För tidiga only while the side's early margin is on — off, every
+  // delivery that is not late is I tid.
+  const showEarly = section.margins.earlyDays !== null;
 
   return (
     <Card maxWidth="none" style={{ marginBottom: 20 }}>
@@ -52,6 +79,7 @@ function PrecisionTable({ title, section, csvPath }: { title: string; section: P
         columns={[
           { key: "month", label: "Månad", width: "1fr" },
           { key: "total", label: "Antal", width: "90px", align: "right" },
+          ...(showEarly ? [{ key: "early", label: "För tidiga", width: "100px", align: "right" as const }] : []),
           { key: "onTime", label: "I tid", width: "90px", align: "right" },
           { key: "late", label: "Försenade", width: "100px", align: "right" },
           { key: "precision", label: "Precision", width: "170px", align: "right" },
@@ -65,6 +93,8 @@ function PrecisionTable({ title, section, csvPath }: { title: string; section: P
               return monthLabel(row.month);
             case "total":
               return <span className="num">{row.total}</span>;
+            case "early":
+              return <span className="num">{row.early}</span>;
             case "onTime":
               return <span className="num">{row.onTime}</span>;
             case "late":
@@ -80,12 +110,14 @@ function PrecisionTable({ title, section, csvPath }: { title: string; section: P
         footer={{
           month: <strong>Totalt</strong>,
           total: <span className="num">{section.totals.total}</span>,
+          ...(showEarly ? { early: <span className="num">{section.totals.early}</span> } : {}),
           onTime: <span className="num">{section.totals.onTime}</span>,
           late: <span className="num">{section.totals.late}</span>,
           precision: precisionCell(section.totals.precisionPct),
           avgDaysLate: <span className="num">{daysText(section.totals.avgDaysLate)}</span>,
         }}
       />
+      <MarginHint margins={section.margins} />
       <FormHint>
         Ej mätbara: {section.notMeasurable.missingExpectedDate} utan förväntat leveransdatum,{" "}
         {section.notMeasurable.noDeliveryRecords} utan leveransdatum registrerat.
@@ -148,6 +180,7 @@ function CounterpartyTable({
   const totals = grouped?.totals;
   // Avvikelsekostnad is only sent to users who may see prices.
   const showCost = totals?.deviationCost !== null && totals?.deviationCost !== undefined;
+  const showEarly = section.margins.earlyDays !== null;
 
   return (
     <Card maxWidth="none" style={{ marginBottom: 20 }}>
@@ -159,6 +192,7 @@ function CounterpartyTable({
         columns={[
           { key: "counterpartyName", label, width: "minmax(140px, 1fr)" },
           { key: "total", label: "Order", width: "60px", align: "right" },
+          ...(showEarly ? [{ key: "early", label: "Tidiga", width: "60px", align: "right" as const }] : []),
           { key: "onTime", label: "I tid", width: "55px", align: "right" },
           { key: "late", label: "Sena", width: "55px", align: "right" },
           { key: "precision", label: "Precision", width: "110px", align: "right" },
@@ -177,6 +211,8 @@ function CounterpartyTable({
               return row.counterpartyName;
             case "total":
               return <span className="num">{row.total}</span>;
+            case "early":
+              return <span className="num">{row.early}</span>;
             case "onTime":
               return <span className="num">{row.onTime}</span>;
             case "late":
@@ -204,6 +240,7 @@ function CounterpartyTable({
             ? {
                 counterpartyName: <strong>Totalt</strong>,
                 total: <span className="num">{totals.total}</span>,
+                ...(showEarly ? { early: <span className="num">{totals.early}</span> } : {}),
                 onTime: <span className="num">{totals.onTime}</span>,
                 late: <span className="num">{totals.late}</span>,
                 precision: precisionCell(totals.precisionPct),
@@ -217,6 +254,7 @@ function CounterpartyTable({
             : undefined
         }
       />
+      <MarginHint margins={section.margins} />
       <FormHint>
         Avvikelser räknas per rapporteringsdatum i perioden (makulerade ej med). Andel felfria är andelen av de mätta
         ordrarna som saknar kopplad avvikelse. Ej mätbara: {section.notMeasurable.missingExpectedDate} utan förväntat

@@ -1,12 +1,13 @@
 import type { InjectOptions } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { sql } from "drizzle-orm";
-import { db } from "@navet/db";
+import { inArray, sql } from "drizzle-orm";
+import { db, systemSettings } from "@navet/db";
 import { buildApp } from "../src/app.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createAuthService } from "../src/modules/auth/service/auth.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { PRECISION_MARGIN_KEYS } from "../src/modules/system/service/precision-settings.js";
 
 // Leveransprecision — Gruppera: Motpart through the real app: per supplier
 // the precision of its received orders plus the quality columns from the
@@ -37,6 +38,7 @@ afterAll(async () => {
 
 const get = (url: string) => app.inject({ method: "GET", url: `/api/v1${url}`, headers: { cookie } });
 const post = (url: string, payload?: InjectOptions["payload"]) => app.inject({ method: "POST", url: `/api/v1${url}`, headers: { cookie }, payload });
+const patch = (url: string, payload?: InjectOptions["payload"]) => app.inject({ method: "PATCH", url: `/api/v1${url}`, headers: { cookie }, payload });
 
 const isoDate = (offsetDays: number) => {
   const d = new Date(`${stockholmToday()}T00:00:00Z`);
@@ -102,5 +104,56 @@ describe("leveransprecision per motpart", () => {
     expect(csv.body).toContain("Exempel Stål AB");
     expect(csv.body).toContain("Totalt");
     expect((await get("/reports/delivery-precision?groupBy=bogus")).statusCode).toBe(400);
+  });
+
+  // Marginal i leveransprecisionen (#29): the settings decide early / on
+  // time / late for both views and the CSV, per side.
+  it("measures with the side's margins from Inställningar; För tidiga only while the early margin is on", async () => {
+    try {
+      const article = (await post("/articles", { articleNumber: `LQ-${crypto.randomUUID().slice(0, 6)}`, name: "Plåt 2 mm", type: "purchased" })).json();
+      const steel = (await post("/suppliers", { name: "Exempel Stål AB" })).json();
+      await receivedOrder(steel.id, article.id, isoDate(-3)); // 3 days late
+      await receivedOrder(steel.id, article.id, isoDate(5)); // 5 days early
+      await receivedOrder(steel.id, article.id, isoDate(0)); // same day
+
+      const before = (await get("/reports/delivery-precision")).json();
+      expect(before.purchase.margins).toEqual({ lateDays: 0, earlyDays: null });
+      expect(before.purchase.totals).toMatchObject({ total: 3, early: 0, onTime: 2, late: 1, precisionPct: 67 });
+
+      for (const bad of [{ precisionPurchaseLateMarginDays: 366 }, { precisionPurchaseLateMarginDays: 1.5 }, { precisionPurchaseEarlyMarginDays: -1 }, { precisionPurchaseLateMarginDays: null }]) {
+        expect((await patch("/settings", bad)).statusCode).toBe(400);
+      }
+      const saved = await patch("/settings", { precisionPurchaseLateMarginDays: 3, precisionPurchaseEarlyMarginDays: 4 });
+      expect(saved.statusCode).toBe(200);
+      expect(saved.json()).toMatchObject({
+        precisionSalesLateMarginDays: 0,
+        precisionSalesEarlyMarginDays: null,
+        precisionPurchaseLateMarginDays: 3,
+        precisionPurchaseEarlyMarginDays: 4,
+      });
+
+      const month = (await get("/reports/delivery-precision")).json();
+      expect(month.purchase.margins).toEqual({ lateDays: 3, earlyDays: 4 });
+      expect(month.purchase.totals).toMatchObject({ total: 3, early: 1, onTime: 2, late: 0, precisionPct: 67, avgDaysLate: null });
+      // The other side keeps its own (default) margins.
+      expect(month.sales.margins).toEqual({ lateDays: 0, earlyDays: null });
+
+      const grouped = (await get("/reports/delivery-precision?groupBy=counterparty")).json();
+      expect(grouped.purchase.counterparties.rows[0]).toMatchObject({ total: 3, early: 1, onTime: 2, late: 0, precisionPct: 67 });
+      expect(grouped.purchase.counterparties.totals).toMatchObject({ total: 3, early: 1, onTime: 2, late: 0 });
+
+      const csv = (await get("/reports/delivery-precision/csv?kind=purchase")).body;
+      expect(csv).toContain("Månad;Antal ordrar;För tidiga;I tid;Försenade;Precision %");
+      expect((await get("/reports/delivery-precision/csv?kind=purchase&groupBy=counterparty")).body).toContain(
+        "Leverantör;Antal ordrar;För tidiga;I tid;Försenade;Precision %"
+      );
+
+      // Early margin off again: the column goes, early deliveries are on time.
+      expect((await patch("/settings", { precisionPurchaseEarlyMarginDays: null })).json().precisionPurchaseEarlyMarginDays).toBeNull();
+      expect((await get("/reports/delivery-precision")).json().purchase.totals).toMatchObject({ early: 0, onTime: 3, late: 0, precisionPct: 100 });
+      expect((await get("/reports/delivery-precision/csv?kind=purchase")).body).toContain("Månad;Antal ordrar;I tid;Försenade;Precision %");
+    } finally {
+      await db.delete(systemSettings).where(inArray(systemSettings.key, Object.values(PRECISION_MARGIN_KEYS)));
+    }
   });
 });

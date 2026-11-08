@@ -21,11 +21,13 @@ import {
   supplierInvoiceRows,
   supplierInvoices,
   suppliers,
+  systemSettings,
   workCenters,
   type Db,
   type Tx,
 } from "@navet/db";
 import type { PrecisionOrderInput } from "../service/delivery-precision-calc.js";
+import { decodePrecisionMargins, PRECISION_MARGIN_KEYS } from "../../system/service/precision-settings.js";
 import type { OrderRowConfigurationCost, SalesStatisticsQuery, PurchaseStatisticsQuery, ScrapStatisticsQuery } from "@navet/shared";
 
 // Common statistics row shape all three loaders below return — the service
@@ -186,6 +188,17 @@ async function readCalculationOutcome(ex: Db | Tx, range: { from: string; to: st
 
 export function createReportsRepository(db: Db) {
   return {
+    // Marginal i leveransprecisionen (#29): both sides' margins in ONE query;
+    // precision-settings.ts owns the keys and the defaults.
+    async loadPrecisionMargins() {
+      const rows = await db
+        .select({ key: systemSettings.key, value: systemSettings.value })
+        .from(systemSettings)
+        .where(inArray(systemSettings.key, Object.values(PRECISION_MARGIN_KEYS)));
+      const byKey = new Map(rows.map((r) => [r.key, r.value]));
+      return decodePrecisionMargins((key) => byKey.get(key));
+    },
+
     // Completed sales orders with promise + last delivery timestamp (null =
     // delivered before C2's delivery occasions existed). A följesedel whose
     // rows are all undone (Ångra utleverans) is no delivery.

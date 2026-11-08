@@ -1,15 +1,19 @@
 import {
   addMeasure,
+  emptyCounts,
   finishCounts,
   measureOrder,
   monthAxis,
+  sumCounts,
   type PrecisionCounts,
+  type PrecisionMargins,
   type PrecisionOrderInput,
 } from "./delivery-precision-calc.js";
 
 // Leveransprecision — Gruppera: Motpart (Kvalitet). Pure: per supplier
 // (inköp) or customer (försäljning) the same precision columns as the month
-// view (measured with measureOrder, the one rule) plus the quality:
+// view (measured with measureOrder and classified with the side's margins —
+// the one rule) plus the quality:
 //
 // - Avvikelser: the counterparty's cases of the matching type (leverantörs-
 //   avvikelse / kundreklamation) with Datum in the period, not cancelled.
@@ -44,6 +48,7 @@ export interface CounterpartyPrecisionRow {
   counterpartyId: string;
   counterpartyName: string;
   total: number;
+  early: number;
   onTime: number;
   late: number;
   precisionPct: number | null;
@@ -100,14 +105,14 @@ export function groupPrecisionByCounterparty(
   orders: PrecisionOrderInput[],
   range: { from: string; to: string },
   quality: { deviations: QualityDeviationInput[]; ordersWithDeviation: ReadonlySet<string> },
-  opts: { seePrices: boolean }
+  opts: { seePrices: boolean; margins: PrecisionMargins }
 ): { rows: CounterpartyPrecisionRow[]; totals: CounterpartyPrecisionTotals } {
   const months = new Set(monthAxis(range.from, range.to));
   const byParty = new Map<string, Acc>();
   const acc = (id: string, name: string | null | undefined): Acc => {
     let entry = byParty.get(id);
     if (!entry) {
-      entry = { name: name ?? "", counts: { total: 0, onTime: 0, late: 0, lateDays: 0 }, deviations: 0, ordersWithDeviation: 0, claimed: new Map(), cost: 0 };
+      entry = { name: name ?? "", counts: emptyCounts(), deviations: 0, ordersWithDeviation: 0, claimed: new Map(), cost: 0 };
       byParty.set(id, entry);
     }
     if (!entry.name && name) entry.name = name;
@@ -119,7 +124,7 @@ export function groupPrecisionByCounterparty(
     const measure = measureOrder(order, months);
     if (measure.kind !== "measured") continue;
     const entry = acc(order.counterpartyId, order.counterpartyName);
-    addMeasure(entry.counts, measure.daysLate);
+    addMeasure(entry.counts, measure.daysLate, opts.margins);
     if (order.orderId && quality.ordersWithDeviation.has(order.orderId)) entry.ordersWithDeviation += 1;
   }
 
@@ -160,16 +165,13 @@ export function groupPrecisionByCounterparty(
     })
     .sort((a, b) => a.counterpartyName.localeCompare(b.counterpartyName, "sv"));
 
-  const overall: PrecisionCounts = { total: 0, onTime: 0, late: 0, lateDays: 0 };
+  const overall: PrecisionCounts = emptyCounts();
   let deviations = 0;
   let withDeviation = 0;
   let cost = 0;
   const allClaimed: ClaimedArticle[] = [];
   for (const entry of byParty.values()) {
-    overall.total += entry.counts.total;
-    overall.onTime += entry.counts.onTime;
-    overall.late += entry.counts.late;
-    overall.lateDays += entry.counts.lateDays;
+    sumCounts(overall, entry.counts);
     deviations += entry.deviations;
     withDeviation += entry.ordersWithDeviation;
     cost += entry.cost;

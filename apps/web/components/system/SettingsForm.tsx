@@ -68,6 +68,18 @@ export function SettingsForm({
     customer: settings.customerTransitDays,
   });
   const [transitSaved, setTransitSaved] = useState(false);
+  // Marginal i leveransprecisionen (#29): whole days per side; För tidig före
+  // "" = av (null on the API). The last saved values, so a blur without a
+  // change saves nothing.
+  const precisionFromSettings = (s: SystemSettings): Record<PrecisionField, string> => ({
+    salesLate: String(s.precisionSalesLateMarginDays),
+    salesEarly: s.precisionSalesEarlyMarginDays === null ? "" : String(s.precisionSalesEarlyMarginDays),
+    purchaseLate: String(s.precisionPurchaseLateMarginDays),
+    purchaseEarly: s.precisionPurchaseEarlyMarginDays === null ? "" : String(s.precisionPurchaseEarlyMarginDays),
+  });
+  const [precision, setPrecision] = useState(() => precisionFromSettings(settings));
+  const [savedPrecision, setSavedPrecision] = useState(() => precisionFromSettings(settings));
+  const [precisionSaved, setPrecisionSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -317,6 +329,53 @@ export function SettingsForm({
     else setCustomerTransit(String(updated.customerTransitDays));
     setSavedTransit({ supplier: updated.supplierTransitDays, customer: updated.customerTransitDays });
     setTransitSaved(true);
+  }
+
+  async function savePrecision(field: PrecisionField, badInput: boolean) {
+    setPrecisionSaved(false);
+    const spec = PRECISION_FIELDS[field];
+    const text = precision[field].trim();
+    if (text === savedPrecision[field] && !badInput) return;
+    let value: number | null = null;
+    if (text !== "" || !spec.optional) {
+      value = wholeNumber(text, badInput, 0, 365);
+      if (value === null) {
+        setError(`${spec.label} måste vara ett heltal 0–365 dagar${spec.optional ? " (tomt = av)" : ""}`);
+        return;
+      }
+    }
+    const updated = await save({ [spec.apiField]: value });
+    if (!updated) return;
+    const next = precisionFromSettings(updated);
+    setPrecision((current) => ({ ...current, [field]: next[field] }));
+    setSavedPrecision(next);
+    setPrecisionSaved(true);
+  }
+
+  function precisionInput(field: PrecisionField) {
+    const spec = PRECISION_FIELDS[field];
+    return (
+      <label className={styles.transit}>
+        {spec.short}
+        <input
+          type="number"
+          min="0"
+          max={365}
+          step="1"
+          aria-label={spec.label}
+          placeholder={spec.optional ? "Av" : undefined}
+          className={styles.numberInput}
+          value={precision[field]}
+          disabled={pending}
+          onChange={(e) => {
+            setPrecisionSaved(false);
+            const value = e.target.value;
+            setPrecision((current) => ({ ...current, [field]: value }));
+          }}
+          onBlur={(e) => savePrecision(field, e.currentTarget.validity.badInput)}
+        />
+      </label>
+    );
   }
 
   return (
@@ -908,10 +967,48 @@ export function SettingsForm({
         </div>
         {transitSaved && <span className={styles.saved}>Sparat</span>}
       </div>
+      <div className={styles.section}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Leveransprecision</div>
+          <div className={styles.description}>
+            Marginalerna i Rapporter → Leveransprecision, i hela dagar mot förväntat leveransdatum. En leverans är sen
+            först när den kommer mer än <strong>Sen efter</strong> dagar efter datumet (0 = redan dagen efter), och för
+            tidig när den kommer mer än <strong>För tidig före</strong> dagar före (tomt = av, tidiga leveranser räknas
+            som i tid). För tidiga leveranser sänker precisionen precis som sena.
+          </div>
+        </div>
+        <div className={styles.sideRow}>
+          <div className={styles.sideLabel}>Kundordrar</div>
+          <div className={styles.sideControls}>
+            {precisionInput("salesLate")}
+            {precisionInput("salesEarly")}
+          </div>
+        </div>
+        <div className={styles.sideRow}>
+          <div className={styles.sideLabel}>Inköpsordrar</div>
+          <div className={styles.sideControls}>
+            {precisionInput("purchaseLate")}
+            {precisionInput("purchaseEarly")}
+          </div>
+        </div>
+        {precisionSaved && <span className={styles.saved}>Sparat</span>}
+      </div>
       {error && <p className={styles.error}>{error}</p>}
     </div>
   );
 }
+
+type PrecisionField = "salesLate" | "salesEarly" | "purchaseLate" | "purchaseEarly";
+
+const PRECISION_FIELDS: Record<
+  PrecisionField,
+  { apiField: keyof SystemSettings; label: string; short: string; optional: boolean }
+> = {
+  salesLate: { apiField: "precisionSalesLateMarginDays", label: "Kundordrar — Sen efter (dagar)", short: "Sen efter (dagar)", optional: false },
+  salesEarly: { apiField: "precisionSalesEarlyMarginDays", label: "Kundordrar — För tidig före (dagar)", short: "För tidig före (dagar)", optional: true },
+  purchaseLate: { apiField: "precisionPurchaseLateMarginDays", label: "Inköpsordrar — Sen efter (dagar)", short: "Sen efter (dagar)", optional: false },
+  purchaseEarly: { apiField: "precisionPurchaseEarlyMarginDays", label: "Inköpsordrar — För tidig före (dagar)", short: "För tidig före (dagar)", optional: true },
+};
 
 function formatPercent(value: number | null): string {
   return value === null ? "" : String(value);

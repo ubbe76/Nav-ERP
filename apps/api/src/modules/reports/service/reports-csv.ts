@@ -22,29 +22,32 @@ import type {
   ScrapStatisticsRowResponse,
 } from "./reports.service.js";
 
-const PRECISION_COLUMNS: CsvColumn<PrecisionMonth>[] = [
-  { label: "Månad", value: (r) => r.month },
-  { label: "Antal ordrar", value: (r) => r.total },
-  { label: "I tid", value: (r) => r.onTime },
-  { label: "Försenade", value: (r) => r.late },
-  { label: "Precision %", value: (r) => r.precisionPct },
-  { label: "Snitt försening (dagar)", value: (r) => r.avgDaysLate, format: "number" },
-];
-
-export function buildDeliveryPrecisionCsv(months: PrecisionMonth[]): string {
-  return buildCsv(PRECISION_COLUMNS, months);
+// För tidiga only when the side's early margin is on (#29) — the same rule
+// as the web table; off, every non-late delivery is I tid.
+export function buildDeliveryPrecisionCsv(months: PrecisionMonth[], opts: { early: boolean }): string {
+  const columns: CsvColumn<PrecisionMonth>[] = [
+    { label: "Månad", value: (r) => r.month },
+    { label: "Antal ordrar", value: (r) => r.total },
+    ...(opts.early ? [{ label: "För tidiga", value: (r: PrecisionMonth) => r.early }] : []),
+    { label: "I tid", value: (r) => r.onTime },
+    { label: "Försenade", value: (r) => r.late },
+    { label: "Precision %", value: (r) => r.precisionPct },
+    { label: "Snitt försening (dagar)", value: (r) => r.avgDaysLate, format: "number" },
+  ];
+  return buildCsv(columns, months);
 }
 
 // Gruppera: Motpart — one row per supplier/customer plus a Totalt row.
 // Reklamerat antal is blank where the units are mixed (the web shows "—").
 export function buildCounterpartyPrecisionCsv(
   grouped: { rows: CounterpartyPrecisionRow[]; totals: CounterpartyPrecisionTotals },
-  opts: { kind: "sales" | "purchase"; seePrices: boolean }
+  opts: { kind: "sales" | "purchase"; seePrices: boolean; early: boolean }
 ): string {
   type Row = Omit<CounterpartyPrecisionRow, "counterpartyId">;
   const columns: CsvColumn<Row>[] = [
     { label: opts.kind === "sales" ? "Kund" : "Leverantör", value: (r) => r.counterpartyName },
     { label: "Antal ordrar", value: (r) => r.total },
+    ...(opts.early ? [{ label: "För tidiga", value: (r: Row) => r.early }] : []),
     { label: "I tid", value: (r) => r.onTime },
     { label: "Försenade", value: (r) => r.late },
     { label: "Precision %", value: (r) => r.precisionPct },

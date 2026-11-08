@@ -9,7 +9,12 @@ import type {
   ScrapStatisticsQuery,
 } from "@navet/shared";
 import type { ReportsRepository } from "../repository/reports.repository.js";
-import { bucketDeliveryPrecision, type PrecisionOrderInput, type PrecisionSection } from "./delivery-precision-calc.js";
+import {
+  bucketDeliveryPrecision,
+  type PrecisionMargins,
+  type PrecisionOrderInput,
+  type PrecisionSection,
+} from "./delivery-precision-calc.js";
 import {
   groupPrecisionByCounterparty,
   measuredOrderIds,
@@ -142,14 +147,15 @@ export function createReportsService(repo: ReportsRepository, selfCosts: Article
     orders: PrecisionOrderInput[],
     range: { from: string; to: string },
     groupBy: DeliveryPrecisionQuery["groupBy"],
-    seePrices: boolean
+    seePrices: boolean,
+    margins: PrecisionMargins
   ): Promise<DeliveryPrecisionSide> {
-    const section = bucketDeliveryPrecision(orders, range);
+    const section = bucketDeliveryPrecision(orders, range, margins);
     if (groupBy !== "counterparty") return section;
     const q = quality
       ? await quality.precisionQuality(kind, monthRangeDates(range), measuredOrderIds(orders, range))
       : { deviations: [], ordersWithDeviation: new Set<string>() };
-    return { ...section, counterparties: groupPrecisionByCounterparty(orders, range, q, { seePrices }) };
+    return { ...section, counterparties: groupPrecisionByCounterparty(orders, range, q, { seePrices, margins }) };
   }
 
   return {
@@ -175,15 +181,16 @@ export function createReportsService(repo: ReportsRepository, selfCosts: Article
     ): Promise<DeliveryPrecisionResponse> {
       const range = resolveReportRange(query, stockholmToday());
       const groupBy = query.groupBy ?? "month";
-      const [sales, purchase] = await Promise.all([
+      const [sales, purchase, margins] = await Promise.all([
         repo.loadSalesPrecisionOrders(),
         repo.loadPurchasePrecisionOrders(),
+        repo.loadPrecisionMargins(),
       ]);
       return {
         ...range,
         groupBy,
-        sales: await precisionSide("sales", sales, range, groupBy, opts.seePrices),
-        purchase: await precisionSide("purchase", purchase, range, groupBy, opts.seePrices),
+        sales: await precisionSide("sales", sales, range, groupBy, opts.seePrices, margins.sales),
+        purchase: await precisionSide("purchase", purchase, range, groupBy, opts.seePrices, margins.purchase),
       };
     },
 
@@ -195,9 +202,14 @@ export function createReportsService(repo: ReportsRepository, selfCosts: Article
       opts: { seePrices: boolean } = { seePrices: true }
     ): Promise<{ from: string; to: string; section: DeliveryPrecisionSide }> {
       const range = resolveReportRange(query, stockholmToday());
-      const orders =
-        kind === "sales" ? await repo.loadSalesPrecisionOrders() : await repo.loadPurchasePrecisionOrders();
-      return { ...range, section: await precisionSide(kind, orders, range, query.groupBy ?? "month", opts.seePrices) };
+      const [orders, margins] = await Promise.all([
+        kind === "sales" ? repo.loadSalesPrecisionOrders() : repo.loadPurchasePrecisionOrders(),
+        repo.loadPrecisionMargins(),
+      ]);
+      return {
+        ...range,
+        section: await precisionSide(kind, orders, range, query.groupBy ?? "month", opts.seePrices, margins[kind]),
+      };
     },
 
     // Kalkylutfall: Mot förkalkyl (view pre) or Avvikelseanalys (view

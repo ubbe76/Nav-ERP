@@ -1,8 +1,11 @@
 // F1: delivery precision — pure bucketing calc, no database. The repository
 // feeds completed orders (promised date + actual completion timestamp); this
-// module owns all the semantics: Stockholm-date conversion, on-time rule
-// (same day counts as on time), month bucketing over the requested range and
-// the not-measurable counters.
+// module owns all the semantics: Stockholm-date conversion, the early /
+// on-time / late rule (classifyDelivery, with the side's margins — #29),
+// month bucketing over the requested range and the not-measurable counters.
+import type { PrecisionMargins } from "../../system/service/precision-settings.js";
+
+export type { PrecisionMargins };
 
 export interface PrecisionOrderInput {
   expectedDeliveryDate: string | null; // promised date (YYYY-MM-DD), null = never promised
@@ -14,7 +17,8 @@ export interface PrecisionOrderInput {
 }
 
 // How one order counts: measured in a month of the range (with its days
-// late, ≤ 0 = on time), completed in the range without a promised date,
+// late relative to the promise — classifyDelivery decides what that means),
+// completed in the range without a promised date,
 // without any completion record (all-time), or outside the range. The one
 // rule bucketDeliveryPrecision and the counterparty grouping share.
 export type OrderMeasure =
@@ -34,16 +38,44 @@ export function measureOrder(order: PrecisionOrderInput, months: ReadonlySet<str
   return { kind: "measured", month, daysLate: dayDiff(completedDate, order.expectedDeliveryDate) };
 }
 
+export type DeliveryOutcome = "early" | "onTime" | "late";
+
+// THE rule (#29), shared by the month view and Gruppera Motpart: late = more
+// than lateDays after the promised date, early = more than earlyDays before
+// it (only when the early margin is on), everything else on time. With
+// NO_PRECISION_MARGINS this is the rule before the setting: same day or
+// earlier is on time, the day after is late.
+export function classifyDelivery(daysLate: number, margins: PrecisionMargins): DeliveryOutcome {
+  if (daysLate > margins.lateDays) return "late";
+  if (margins.earlyDays !== null && -daysLate > margins.earlyDays) return "early";
+  return "onTime";
+}
+
 export interface PrecisionCounts {
   total: number;
+  early: number;
   onTime: number;
   late: number;
   lateDays: number;
 }
 
+export const emptyCounts = (): PrecisionCounts => ({ total: 0, early: 0, onTime: 0, late: 0, lateDays: 0 });
+
+export function sumCounts(into: PrecisionCounts, b: PrecisionCounts) {
+  into.total += b.total;
+  into.early += b.early;
+  into.onTime += b.onTime;
+  into.late += b.late;
+  into.lateDays += b.lateDays;
+}
+
+// Precision = on time of all measured, so an early delivery (when the early
+// margin is on) lowers it like a late one. Snitt försening is over the late
+// orders only, in days after the promised date (not after the margin).
 export function finishCounts(b: PrecisionCounts) {
   return {
     total: b.total,
+    early: b.early,
     onTime: b.onTime,
     late: b.late,
     precisionPct: b.total > 0 ? Math.round((b.onTime / b.total) * 100) : null,
@@ -51,9 +83,11 @@ export function finishCounts(b: PrecisionCounts) {
   };
 }
 
-export function addMeasure(b: PrecisionCounts, daysLate: number) {
+export function addMeasure(b: PrecisionCounts, daysLate: number, margins: PrecisionMargins) {
   b.total += 1;
-  if (daysLate <= 0) b.onTime += 1;
+  const outcome = classifyDelivery(daysLate, margins);
+  if (outcome === "early") b.early += 1;
+  else if (outcome === "onTime") b.onTime += 1;
   else {
     b.late += 1;
     b.lateDays += daysLate;
@@ -63,6 +97,7 @@ export function addMeasure(b: PrecisionCounts, daysLate: number) {
 export interface PrecisionMonth {
   month: string; // YYYY-MM
   total: number;
+  early: number; // always 0 while the side's early margin is off
   onTime: number;
   late: number;
   precisionPct: number | null; // whole %, null when total is 0
@@ -71,6 +106,7 @@ export interface PrecisionMonth {
 
 export interface PrecisionTotals {
   total: number;
+  early: number;
   onTime: number;
   late: number;
   precisionPct: number | null;
@@ -78,6 +114,7 @@ export interface PrecisionTotals {
 }
 
 export interface PrecisionSection {
+  margins: PrecisionMargins; // the side's margins the section was measured with
   months: PrecisionMonth[]; // every month in [from, to], empty months included
   totals: PrecisionTotals;
   notMeasurable: {
@@ -109,10 +146,10 @@ export function monthAxis(from: string, to: string): string[] {
 
 export function bucketDeliveryPrecision(
   orders: PrecisionOrderInput[],
-  range: { from: string; to: string } // YYYY-MM, inclusive
+  range: { from: string; to: string }, // YYYY-MM, inclusive
+  margins: PrecisionMargins
 ): PrecisionSection {
-  const emptyBucket = (): PrecisionCounts => ({ total: 0, onTime: 0, late: 0, lateDays: 0 });
-  const buckets = new Map<string, PrecisionCounts>(monthAxis(range.from, range.to).map((m) => [m, emptyBucket()]));
+  const buckets = new Map<string, PrecisionCounts>(monthAxis(range.from, range.to).map((m) => [m, emptyCounts()]));
   const months = new Set(buckets.keys());
   const notMeasurable = { missingExpectedDate: 0, noDeliveryRecords: 0 };
 
@@ -124,18 +161,14 @@ export function bucketDeliveryPrecision(
     // range count, so the note reconciles with the filtered table.
     if (measure.kind === "noDeliveryRecords") notMeasurable.noDeliveryRecords += 1;
     else if (measure.kind === "missingExpectedDate") notMeasurable.missingExpectedDate += 1;
-    else if (measure.kind === "measured") addMeasure(buckets.get(measure.month)!, measure.daysLate);
+    else if (measure.kind === "measured") addMeasure(buckets.get(measure.month)!, measure.daysLate, margins);
   }
 
-  const overall = emptyBucket();
-  for (const bucket of buckets.values()) {
-    overall.total += bucket.total;
-    overall.onTime += bucket.onTime;
-    overall.late += bucket.late;
-    overall.lateDays += bucket.lateDays;
-  }
+  const overall = emptyCounts();
+  for (const bucket of buckets.values()) sumCounts(overall, bucket);
 
   return {
+    margins,
     months: [...buckets.entries()].map(([month, bucket]) => ({ month, ...finishCounts(bucket) })),
     totals: finishCounts(overall),
     notMeasurable,

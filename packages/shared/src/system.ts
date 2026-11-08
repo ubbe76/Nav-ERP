@@ -251,6 +251,15 @@ const systemSettingsFieldsSchema = z.object({
     // Offertens giltighetstid (dagar): the default Giltig t.o.m. of a new
     // quote = today + N; 0 = no validity date.
     quoteValidityDays: z.number().int().min(0).max(365).optional(),
+    // Marginal i leveransprecisionen (#29), per side: Sen efter (a delivery
+    // is late only MORE than N days after the promised date; 0 = the day
+    // after, the default) and För tidig före (early when MORE than M days
+    // before it; null = off, the default). Whole days 0–365
+    // (precision-settings.ts decodes the keys).
+    precisionSalesLateMarginDays: z.number().int().min(0).max(365).optional(),
+    precisionSalesEarlyMarginDays: z.number().int().min(0).max(365).nullable().optional(),
+    precisionPurchaseLateMarginDays: z.number().int().min(0).max(365).optional(),
+    precisionPurchaseEarlyMarginDays: z.number().int().min(0).max(365).nullable().optional(),
     // Ställkostnadsartikel: the article a customer price's ställpris is
     // charged on, as its own row under the article row. Null = off.
     setupChargeArticleId: z.string().uuid().nullable().optional(),
