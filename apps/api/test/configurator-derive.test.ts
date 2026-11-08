@@ -218,7 +218,7 @@ describe("deriveStructure", () => {
     const r = derive({ HJUL: true, BREDD: 1500 }, { operations: [o] });
     expect(r.derivable).toBe(true);
     expect(r.operations.map((x) => [x.kind, x.sequenceNo])).toEqual([["base", 10], ["configurator", 20], ["base", 30]]);
-    expect(r.operations[1]).toEqual({ kind: "configurator", id: o.id, sequenceNo: 20, workCenterId: id("W3"), description: "Montera hjul", setupTime: 10, runTimePerUnit: 1.5, costingOnly: false });
+    expect(r.operations[1]).toEqual({ kind: "configurator", id: o.id, sequenceNo: 20, workCenterId: id("W3"), description: "Montera hjul", setupTime: 10, runTimePerUnit: 1.5, costingOnly: false, setupPrice: null, unitPrice: null });
     const without = derive({ HJUL: false, BREDD: 1500 }, { operations: [o] });
     expect(without.operations.map((x) => x.sequenceNo)).toEqual([10, 30]);
   });
