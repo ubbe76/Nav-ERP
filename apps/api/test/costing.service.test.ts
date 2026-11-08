@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { asc, eq, sql } from "drizzle-orm";
 import { articleGroups, articles, costCalculationMaterialRows, costCalculationOperationRows, costCalculations, db, systemSettings } from "@navet/db";
-import { preCalculateSchema, stampOutSchema, type CostVarianceOperationRow } from "@navet/shared";
+import { preCalculateSchema, stampOutSchema, type CostVarianceOperationRow, createArticleSchema, createStockLocationSchema, createSupplierSchema, createWorkCenterSchema } from "@navet/shared";
 import { manufacturingCost, selfCost } from "../src/modules/costing/service/cost-figures.js";
 import { testArticleService, testDocumentPdfService, testSystemService } from "./helpers/services.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
@@ -28,10 +28,12 @@ import { createTimeReportRepository } from "../src/modules/timereport/repository
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
 import { ExchangeRateUnavailableError } from "../src/modules/system/service/exchange-rates.js";
 import { stockholmDateOf } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const timeReportService = createTimeReportService(
   createTimeReportRepository(db),
   mfgService,
@@ -113,35 +115,32 @@ async function makeUser() {
 }
 
 async function makeParentWithBom(componentStandardCost: number | undefined, componentQtyPerParent: number) {
-  const parent = await articleService.createArticle({
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `PARENT-${crypto.randomUUID()}`,
     name: "Parent",
     type: "manufactured",
-    unit: "st",
     active: true,
-  });
-  const component = await articleService.createArticle({
+  }));
+  const component = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `COMP-${crypto.randomUUID()}`,
     name: "Component",
     type: "purchased",
-    unit: "st",
     standardCost: componentStandardCost,
     active: true,
-  });
+  }));
   await articleService.addBomComponent(parent.id, { componentArticleId: component.id, quantity: componentQtyPerParent });
   return { parent, component };
 }
 
 // A service article in the structure = subcontracted work (lego).
 async function addServiceComponent(parentId: string, standardCost: number, quantityPerParent: number) {
-  const service = await articleService.createArticle({
+  const service = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `LEGO-${crypto.randomUUID()}`,
     name: "Pulverlackering",
     type: "service",
-    unit: "st",
     standardCost,
     active: true,
-  });
+  }));
   await articleService.addBomComponent(parentId, { componentArticleId: service.id, quantity: quantityPerParent });
   return service;
 }
@@ -152,7 +151,7 @@ async function setPrimarySupplierPrice(
   priceBreaks?: { fromQuantity: number; price: number }[],
   currency = "SEK"
 ) {
-  const supplier = await purchaseService.createSupplier({ name: `Lev-${crypto.randomUUID()}`, active: true });
+  const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: `Lev-${crypto.randomUUID()}`, active: true }));
   await purchaseService.addArticleSupplier(articleId, { supplierId: supplier.id, price, currency, isPrimary: true, priceBreaks });
   return supplier;
 }
@@ -163,11 +162,11 @@ async function setPrimarySupplierPrice(
 async function makeOrderWithReportedWork() {
   const user = await makeUser();
   const { parent, component } = await makeParentWithBom(10, 2);
-  const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 100, overheadPercent: 50, active: true });
+  const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 100, overheadPercent: 50, active: true }));
   await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 1, runTimePerUnit: 1 });
 
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  const location = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
   await stockService.recordTransaction({
     articleId: component.id,
     locationId: location.id,
@@ -192,7 +191,7 @@ async function makeOrderWithReportedWork() {
 describe("costing service — pre-calculation", () => {
   it("computes material, labor, and overhead from BOM x standardCost and Routing x hourly rate", async () => {
     const { parent } = await makeParentWithBom(10, 2); // 2 units component @ 10 SEK per parent unit
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
 
     const { calculation, warnings } = await costingService.preCalculate(parent.id, 5, true);
@@ -218,7 +217,7 @@ describe("costing service — pre-calculation", () => {
 
   it("counts a Kalkyl operation in the pre-calculation's labor, self cost and sales price", async () => {
     const { parent } = await makeParentWithBom(10, 2);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
     // "Kalkyl": never released onto an MO, but its time is part of the price.
     await mfgService.createRoutingOperation(parent.id, {
@@ -259,13 +258,13 @@ describe("costing service — pre-calculation", () => {
     // identical. (The same article cannot sit twice under one parent: unique
     // (parent_article_id, component_article_id).)
     const { parent, component } = await makeParentWithBom(undefined, 2);
-    const workCenter = await mfgService.createWorkCenter({
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
       code: "200",
       name: "Montering",
       hourlyRate: 60,
       overheadPercent: 0,
       active: true,
-    });
+    }));
     const operation = await mfgService.createRoutingOperation(parent.id, {
       sequenceNo: 1,
       workCenterId: workCenter.id,
@@ -277,7 +276,6 @@ describe("costing service — pre-calculation", () => {
       name: "Phantom",
       type: "manufactured",
       isPhantom: true,
-      unit: "st",
       active: true,
     });
     await articleService.addBomComponent(parent.id, {
@@ -296,29 +294,26 @@ describe("costing service — pre-calculation", () => {
   });
 
   it("resolves a phantom component into its own components' standardCost, not the phantom's own (nonexistent) cost", async () => {
-    const parent = await articleService.createArticle({
+    const parent = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `PARENT-${crypto.randomUUID()}`,
       name: "Parent",
       type: "manufactured",
-      unit: "st",
       active: true,
-    });
+    }));
     const phantom = await articleService.createArticle({
       articleNumber: `PHANTOM-${crypto.randomUUID()}`,
       name: "Phantom",
       type: "manufactured",
       isPhantom: true,
-      unit: "st",
       active: true,
     });
-    const leaf = await articleService.createArticle({
+    const leaf = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `LEAF-${crypto.randomUUID()}`,
       name: "Leaf",
       type: "purchased",
-      unit: "st",
       standardCost: 10,
       active: true,
-    });
+    }));
     await articleService.addBomComponent(parent.id, { componentArticleId: phantom.id, quantity: 2 });
     await articleService.addBomComponent(phantom.id, { componentArticleId: leaf.id, quantity: 3 });
 
@@ -418,7 +413,7 @@ describe("costing service — markups", () => {
   it("applies MO on material, LO on lego, Affo on TVK and the general markup on SVK", async () => {
     const { parent } = await makeParentWithBom(10, 2);
     await addServiceComponent(parent.id, 40, 1);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
     Object.assign(costingSettings, {
       costingMoPercent: 10,
@@ -446,7 +441,7 @@ describe("costing service — markups", () => {
   it("puts the materialpåslag on dM + MO, towards the sales price only", async () => {
     const { parent } = await makeParentWithBom(10, 2);
     await addServiceComponent(parent.id, 40, 1);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
     Object.assign(costingSettings, {
       costingMoPercent: 10,
@@ -500,11 +495,11 @@ describe("costing service — markups", () => {
   it("applies the same markups to the post-calculation", async () => {
     const user = await makeUser();
     const { parent, component } = await makeParentWithBom(10, 2);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 100, overheadPercent: 0, active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 100, overheadPercent: 0, active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 1, runTimePerUnit: 1 });
 
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    const location = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
     await stockService.recordTransaction({
       articleId: component.id,
       locationId: location.id,
@@ -541,11 +536,11 @@ describe("costing service — post-calculation", () => {
   it("uses actual consumption and actually reported hours, not planned values", async () => {
     const user = await makeUser();
     const { parent, component } = await makeParentWithBom(10, 2);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 100, overheadPercent: 50, active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 100, overheadPercent: 50, active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 999, runTimePerUnit: 999 });
 
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    const location = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
     await stockService.recordTransaction({
       articleId: component.id,
       locationId: location.id,
@@ -582,7 +577,7 @@ describe("costing service — post-calculation", () => {
   it("warns when an operation has no reported hours", async () => {
     const user = await makeUser();
     const { parent } = await makeParentWithBom(10, 1);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 100, overheadPercent: 0, active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 100, overheadPercent: 0, active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 1, runTimePerUnit: 1 });
 
     const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 1 }, user.id);
@@ -595,7 +590,7 @@ describe("costing service — post-calculation", () => {
 describe("costing service — specification rows", () => {
   it("writes one material row per component and one operation row per routing step", async () => {
     const { parent, component } = await makeParentWithBom(10, 2);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
 
     const { calculation } = await costingService.preCalculate(parent.id, 5, true);
@@ -628,7 +623,7 @@ describe("costing service — specification rows", () => {
   it("adds the rows up to exactly the header's direct costs", async () => {
     const { parent } = await makeParentWithBom(10, 2);
     await addServiceComponent(parent.id, 40, 1);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
     Object.assign(costingSettings, { costingMoPercent: 10, costingLoPercent: 5, costingAffoPercent: 12 });
 
@@ -675,11 +670,11 @@ describe("costing service — specification rows", () => {
   it("writes operation rows from the hours actually reported on a post-calculation", async () => {
     const user = await makeUser();
     const { parent, component } = await makeParentWithBom(10, 2);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 100, overheadPercent: 50, active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 100, overheadPercent: 50, active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 999, runTimePerUnit: 999 });
 
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    const location = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
     await stockService.recordTransaction({
       articleId: component.id,
       locationId: location.id,
@@ -713,7 +708,7 @@ describe("costing service — specification rows", () => {
 
   it("deletes the specification rows with the calculation", async () => {
     const { parent } = await makeParentWithBom(10, 2);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
     const { calculation } = await costingService.preCalculate(parent.id, 5, true);
 
@@ -762,7 +757,7 @@ describe("costing service — förhandsvisning eller sparning", () => {
   it("gives a previewed and a saved pre-calculation identical numbers", async () => {
     const { parent } = await makeParentWithBom(10, 2);
     await addServiceComponent(parent.id, 40, 1);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
     Object.assign(costingSettings, {
       costingMoPercent: 10,
@@ -894,13 +889,12 @@ describe("costing service — supplier price in another currency", () => {
   it("looks a currency up once per calculation however many rows use it", async () => {
     const { parent, component } = await makeParentWithBom(10, 2);
     await setPrimarySupplierPrice(component.id, 2.5, undefined, "EUR");
-    const second = await articleService.createArticle({
+    const second = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `COMP-${crypto.randomUUID()}`,
       name: "Second",
       type: "purchased",
-      unit: "st",
       active: true,
-    });
+    }));
     await articleService.addBomComponent(parent.id, { componentArticleId: second.id, quantity: 1 });
     await setPrimarySupplierPrice(second.id, 4, undefined, "EUR");
 
@@ -941,13 +935,12 @@ describe("costing service — supplier price in another currency", () => {
   });
 
   it("converts on a sub-level of a multi-level calculation", async () => {
-    const top = await articleService.createArticle({
+    const top = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `TOP-${crypto.randomUUID()}`,
       name: "Top",
       type: "manufactured",
-      unit: "st",
       active: true,
-    });
+    }));
     const { parent: semi, component: leaf } = await makeParentWithBom(10, 3);
     await articleService.addBomComponent(top.id, { componentArticleId: semi.id, quantity: 2 });
     await setPrimarySupplierPrice(leaf.id, 1.5, undefined, "USD");
@@ -1083,17 +1076,17 @@ describe("costing service — Kalkyl structure rows", () => {
   it("counts the row in the pre-calculation and leaves it out of the post-calculation", async () => {
     const user = await makeUser();
     const { parent, component } = await makeParentWithBom(10, 2);
-    const kalkyl = await articleService.createArticle({
-      articleNumber: `KALKYL-${crypto.randomUUID()}`, name: "Kalkylmaterial", type: "purchased", unit: "st", standardCost: 5, active: true,
-    });
+    const kalkyl = await articleService.createArticle(parsed(createArticleSchema, {
+      articleNumber: `KALKYL-${crypto.randomUUID()}`, name: "Kalkylmaterial", type: "purchased", standardCost: 5, active: true,
+    }));
     await articleService.addBomComponent(parent.id, { componentArticleId: kalkyl.id, quantity: 1, costingOnly: true });
     // A phantom on a Kalkyl row: its parts are costed, flagged all the way down.
     const phantom = await articleService.createArticle({
-      articleNumber: `PH-${crypto.randomUUID()}`, name: "Fantom", type: "manufactured", isPhantom: true, unit: "st", active: true,
+      articleNumber: `PH-${crypto.randomUUID()}`, name: "Fantom", type: "manufactured", isPhantom: true, active: true,
     });
-    const underPhantom = await articleService.createArticle({
-      articleNumber: `UP-${crypto.randomUUID()}`, name: "Under fantom", type: "purchased", unit: "st", standardCost: 1, active: true,
-    });
+    const underPhantom = await articleService.createArticle(parsed(createArticleSchema, {
+      articleNumber: `UP-${crypto.randomUUID()}`, name: "Under fantom", type: "purchased", standardCost: 1, active: true,
+    }));
     await articleService.addBomComponent(phantom.id, { componentArticleId: underPhantom.id, quantity: 3 });
     await articleService.addBomComponent(parent.id, { componentArticleId: phantom.id, quantity: 1, costingOnly: true });
 
@@ -1144,13 +1137,13 @@ describe("costing service — variance analysis", () => {
     opts: { quantity?: number; linked?: boolean; secondOperation?: boolean; service?: { standardCost: number; quantity: number } } = {}
   ) {
     const user = await makeUser();
-    const parent = await articleService.createArticle({
-      articleNumber: `PARENT-${crypto.randomUUID()}`, name: "Parent", type: "manufactured", unit: "st", active: true,
-    });
-    const component = await articleService.createArticle({
-      articleNumber: `COMP-${crypto.randomUUID()}`, name: "Component", type: "purchased", unit: "st", standardCost: 10, active: true,
-    });
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 600, overheadPercent: 0, active: true });
+    const parent = await articleService.createArticle(parsed(createArticleSchema, {
+      articleNumber: `PARENT-${crypto.randomUUID()}`, name: "Parent", type: "manufactured", active: true,
+    }));
+    const component = await articleService.createArticle(parsed(createArticleSchema, {
+      articleNumber: `COMP-${crypto.randomUUID()}`, name: "Component", type: "purchased", standardCost: 10, active: true,
+    }));
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 600, overheadPercent: 0, active: true }));
     const routingOp = await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
     if (opts.secondOperation) {
       await mfgService.createRoutingOperation(parent.id, { sequenceNo: 20, workCenterId: workCenter.id, setupTime: 12, runTimePerUnit: 3 });
@@ -1163,7 +1156,7 @@ describe("costing service — variance analysis", () => {
     // A tjänst in the structure (lego under LO), unlinked.
     const service = opts.service ? await addServiceComponent(parent.id, opts.service.standardCost, opts.service.quantity) : null;
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    const location = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
     await stockService.recordTransaction({ articleId: component.id, locationId: location.id, quantityDelta: 100, transactionType: "inventory_adjustment" });
 
     const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: opts.quantity ?? 5 }, user.id);
@@ -1310,9 +1303,9 @@ describe("costing service — variance analysis", () => {
   it("gives an open order a preliminary analysis on each operation's OK, an added row as the new plan", async () => {
     const f = await makeFixture({ quantity: 10, linked: true, secondOperation: true });
     // Ändrad TO: material added after release is part of the plan (1 per unit, unlinked).
-    const extra = await articleService.createArticle({
-      articleNumber: `EXTRA-${crypto.randomUUID()}`, name: "Tillägg", type: "purchased", unit: "st", standardCost: 5, active: true,
-    });
+    const extra = await articleService.createArticle(parsed(createArticleSchema, {
+      articleNumber: `EXTRA-${crypto.randomUUID()}`, name: "Tillägg", type: "purchased", standardCost: 5, active: true,
+    }));
     await mfgService.addMaterial(f.order.id, { componentArticleId: extra.id, quantity: 10 }, f.user.id);
     await mfgService.reportOperationQuantities(f.operation.id, { quantityOk: 4, quantityScrapped: 0, markDone: false, createdBy: f.user.id });
     await reportHours(f, 1);
@@ -1439,7 +1432,7 @@ describe("costing service — variance analysis", () => {
     const f = await makeFixture({ quantity: 5, linked: true });
     await mfgService.reportOperationQuantities(f.operation.id, { quantityOk: 3, quantityScrapped: 0, markDone: false, locationId: f.location.id, createdBy: f.user.id });
     await mfgService.reportOperationQuantities(f.operation.id, { quantityOk: 2, quantityScrapped: 0, markDone: false, locationId: f.location.id, createdBy: f.user.id });
-    expect((await mfgService.getManufacturingOrder(f.order.id)).status).toBe("done");
+    expect((await mfgService.getManufacturingOrder(f.order.id))!.status).toBe("done");
     // Ångra the second report: 4 back to stock, 2 out again, the order open.
     const second = (await mfgService.listReports(f.order.id)).find((r) => r.undoneAt === null && Number(r.quantityOk) === 2)!;
     await mfgService.undoReport(f.order.id, second.id, f.user.id);
@@ -1560,7 +1553,7 @@ describe("costing service — variance analysis", () => {
   // Typed time on a lego operation is ignored: a lego operation is bought,
   // its cost is the IO (or the reserve), never hours — no Ställ or Stycke.
   it("ignores typed time reported on a lego operation", async () => {
-    const lego = await mfgService.createWorkCenter({ code: "900", name: "Lack", type: "subcontract", active: true });
+    const lego = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "900", name: "Lack", type: "subcontract", active: true }));
     const f = await makeFixture({ quantity: 5 });
     // The lego operation is added to the order's own rows (Ändra operationer would do the same).
     await mfgService.createRoutingOperation(f.parent.id, { sequenceNo: 20, workCenterId: lego.id, setupTime: 0, runTimePerUnit: 0, setupPrice: 500, unitPrice: 100 });
@@ -1764,7 +1757,7 @@ describe("costing service — markup levels (#16)", () => {
       costingMaterialMarkupPercent: 10,
     });
     const { parent, component } = await makeParentWithBom(10, 2);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 60, runTimePerUnit: 0 });
     return { parent, component };
   }
@@ -1964,9 +1957,9 @@ describe("costing service — markup levels (#16)", () => {
 
   it("prices a multi-level run's sub-levels with the sold article's materialpåslag and sums the base", async () => {
     Object.assign(costingSettings, { costingMoPercent: 10, costingMaterialMarkupPercent: 10 });
-    const raw = await articleService.createArticle({ articleNumber: `RAW-${crypto.randomUUID()}`, name: "Råmaterial", type: "purchased", unit: "st", standardCost: 50, active: true });
-    const semi = await articleService.createArticle({ articleNumber: `SEMI-${crypto.randomUUID()}`, name: "Underrede", type: "manufactured", unit: "st", active: true });
-    const top = await articleService.createArticle({ articleNumber: `TOP-${crypto.randomUUID()}`, name: "Diskbänk", type: "manufactured", unit: "st", standardCost: 0, active: true });
+    const raw = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `RAW-${crypto.randomUUID()}`, name: "Råmaterial", type: "purchased", standardCost: 50, active: true }));
+    const semi = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `SEMI-${crypto.randomUUID()}`, name: "Underrede", type: "manufactured", active: true }));
+    const top = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `TOP-${crypto.randomUUID()}`, name: "Diskbänk", type: "manufactured", standardCost: 0, active: true }));
     await articleService.addBomComponent(semi.id, { componentArticleId: raw.id, quantity: 1 });
     await articleService.addBomComponent(top.id, { componentArticleId: semi.id, quantity: 2 });
     await articleService.addBomComponent(top.id, { componentArticleId: raw.id, quantity: 1 });
@@ -2027,8 +2020,8 @@ describe("costing service — markup levels (#16)", () => {
 
   it("gives previewStructure the template's varugrupp, which moves only the materialpåslag", async () => {
     Object.assign(costingSettings, { costingMoPercent: 10, costingAffoPercent: 10, costingMaterialMarkupPercent: 10 });
-    const template = await articleService.createArticle({ articleNumber: `TPL-${crypto.randomUUID()}`, name: "Mall", type: "manufactured", unit: "st", active: true });
-    const part = await articleService.createArticle({ articleNumber: `PART-${crypto.randomUUID()}`, name: "Skiva", type: "purchased", unit: "st", standardCost: 10, active: true });
+    const template = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `TPL-${crypto.randomUUID()}`, name: "Mall", type: "manufactured", active: true }));
+    const part = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `PART-${crypto.randomUUID()}`, name: "Skiva", type: "purchased", standardCost: 10, active: true }));
     const structure = { components: [{ componentArticleId: part.id, quantity: 2, unitId: null, unitFactor: null }], operations: [] };
 
     const company = await costingService.previewStructure(template.id, 5, structure);

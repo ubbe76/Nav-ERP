@@ -1,3 +1,4 @@
+import { createVerificationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { buildFixedAssetPlan, type PlanAssetInput, type PlanCategoryInput } from "../src/modules/economy/service/fixed-asset-plan.js";
 import { buildFixedAssetPlanCsv } from "../src/modules/economy/service/fixed-asset-plan-csv.js";
@@ -7,6 +8,7 @@ import { formatNumber } from "../src/modules/mail/service/document-pdf.js";
 import { pdfText } from "./helpers/pdf.js";
 import { testEconomyRepository, testEconomyService } from "./helpers/services.js";
 import { PLAN_YEAR, accountId, resetFixedAssets, setupFixedAssets, testFixedAssetService } from "./helpers/fixed-assets.js";
+import { parsed } from "./helpers/parsed.js";
 
 const Y = PLAN_YEAR;
 const YEAR = { id: "fy", label: "2026", startDate: "2026-01-01", endDate: "2026-12-31" };
@@ -158,7 +160,7 @@ describe("avskrivningsplan (DB, PDF)", () => {
     await testEconomyService.createSeries({ code: "A", name: "Manuella verifikat" });
     const series = await testEconomyRepository.findSeriesByCode("A");
     const draft = await testEconomyService.createVerification(
-      {
+      parsed(createVerificationSchema, {
         seriesId: series!.id,
         date: `${Y}-02-14`,
         description: "Köp CNC-fräs",
@@ -166,7 +168,7 @@ describe("avskrivningsplan (DB, PDF)", () => {
           { accountId: await accountId("1220"), debit: 120000, credit: 0 },
           { accountId: await accountId("2440"), debit: 0, credit: 120000 },
         ],
-      },
+      }),
       user.id
     );
     await testEconomyService.book(draft.id, user.id);
@@ -203,7 +205,7 @@ describe("avskrivningsplan (DB, PDF)", () => {
     await testEconomyService.createSeries({ code: "A", name: "Manuella verifikat" });
     const series = await testEconomyRepository.findSeriesByCode("A");
     const draft = await testEconomyService.createVerification(
-      {
+      parsed(createVerificationSchema, {
         seriesId: series!.id,
         date: `${Y}-01-01`,
         description: "Ingående balans",
@@ -212,7 +214,7 @@ describe("avskrivningsplan (DB, PDF)", () => {
           { accountId: await accountId("1229"), debit: 0, credit: 45000 },
           { accountId: await accountId("2440"), debit: 0, credit: 75000 },
         ],
-      },
+      }),
       user.id
     );
     await testEconomyService.book(draft.id, user.id);

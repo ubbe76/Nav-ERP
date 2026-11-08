@@ -1,3 +1,4 @@
+import { createArticleSchema, createPurchaseOrderSchema, createStockLocationSchema, createSupplierSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { costCalculations, db, manufacturingOrders } from "@navet/db";
@@ -30,6 +31,8 @@ import { createAuditRepository } from "../src/modules/system/repository/audit.re
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
 import { waitForLockWaiter } from "./helpers/year-end.js";
+import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 function gate() {
   let open!: () => void;
@@ -44,7 +47,7 @@ function gate() {
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
 const authRepo = createAuthRepository(db);
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const timeReportService = createTimeReportService(
   createTimeReportRepository(db),
   mfgService,
@@ -96,24 +99,24 @@ async function makeProduct() {
     name: "Kalkyl",
     role: "admin",
   });
-  const parent = await articleService.createArticle({
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `PARENT-${crypto.randomUUID()}`,
     name: "Bänk",
     type: "manufactured",
     active: true,
-  });
-  const component = await articleService.createArticle({
+  }));
+  const component = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `COMP-${crypto.randomUUID()}`,
     name: "Skiva",
     type: "purchased",
     standardCost: 10,
     active: true,
-  });
+  }));
   await articleService.addBomComponent(parent.id, { componentArticleId: component.id, quantity: 2 });
-  const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 600, overheadPercent: 0, active: true });
+  const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 600, overheadPercent: 0, active: true }));
   await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  const location = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
   await stockService.recordTransaction({ articleId: component.id, locationId: location.id, quantityDelta: 1000, transactionType: "inventory_adjustment" });
   const employee = await timeReportService.createEmployee({ employeeNumber: `E-${crypto.randomUUID().slice(0, 6)}`, name: "Kalle", active: true });
   return { user, parent, component, workCenter, location, employee };
@@ -539,15 +542,15 @@ describe("Kalkylutfall — MO, LO och lego", () => {
   //   Pris 10 − 100, Ej uppdelad 300, Påslag 191 − 210 = −19.
   async function legoOrder() {
     const p = await makeProduct();
-    const supplier = await purchaseService.createSupplier({ name: "Lego AB", active: true });
-    const lego = await mfgService.createWorkCenter({ code: "900", name: "Ytbehandling", type: "subcontract", supplierId: supplier.id, active: true });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lego AB", active: true }));
+    const lego = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "900", name: "Ytbehandling", type: "subcontract", supplierId: supplier.id, active: true }));
     await mfgService.createRoutingOperation(p.parent.id, { sequenceNo: 20, workCenterId: lego.id, setupTime: 0, runTimePerUnit: 0, setupPrice: 500, unitPrice: 100 });
     const order = await makeOrder(p, { quantity: 5, hours: 1.5 });
     await articleService.updateStandardCost(p.component.id, 11);
     const [material] = await mfgService.listMaterialConsumptions(order.id);
     await mfgService.consumeMaterial(order.id, material!.id, { locationId: p.location.id, quantity: 10 }, p.user.id);
     const legoOperation = (await mfgService.listOperations(order.id)).find((op) => op.sequenceNo === 20)!;
-    const io = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, p.user.id);
+    const io = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), p.user.id);
     const row = await purchaseService.addRow(io.id, { articleId: p.parent.id, quantity: 5, unitPrice: 90, setupPrice: 450, moOperationId: legoOperation.id });
     await purchaseService.confirm(io.id);
     await purchaseService.receiveGoods(io.id, row.id, { quantity: 5 }, p.user.id);

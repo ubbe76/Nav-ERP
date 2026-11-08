@@ -122,12 +122,13 @@ describe.skipIf(!KEY)("B2Brouter-sandlådan — mottagning", () => {
     // The company is the buyer, so its own identifiers are filtered out of
     // the supplier matching.
     await db.update(companyInfo).set({ name: buyer.name, orgNumber: buyer.orgNumber, vatNumber: buyer.vatNumber });
-    for (const [key, value] of [
+    const settingRows: [string, string][] = [
       ["einvoice_api_key", KEY!],
       ["einvoice_account_id", account.accountId],
       ["einvoice_environment", "sandbox"],
       ["einvoice_reception_enabled", "true"],
-    ]) {
+    ];
+    for (const [key, value] of settingRows) {
       await db.insert(systemSettings).values({ key, value }).onConflictDoUpdate({ target: systemSettings.key, set: { value } });
     }
 

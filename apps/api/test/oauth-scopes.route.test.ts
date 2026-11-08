@@ -32,12 +32,15 @@ beforeEach(async () => {
   app = buildApp();
   await app.inject({ method: "POST", url: "/api/v1/auth/register", payload: { email: "admin@example.com", password: PASSWORD, name: "Admin", setupCode: app.setup.code.code } });
   admin = cookieOf(await app.inject({ method: "POST", url: "/api/v1/auth/login", payload: { email: "admin@example.com", password: PASSWORD } }));
-  [{ id: ownCustomer }] = await db.insert(customers).values({ customerNumber: "K-1", name: "Egen kund" }).returning({ id: customers.id });
-  [{ id: otherCustomer }] = await db.insert(customers).values({ customerNumber: "K-2", name: "Annan kund" }).returning({ id: customers.id });
+  const [own] = await db.insert(customers).values({ customerNumber: "K-1", name: "Egen kund" }).returning({ id: customers.id });
+  ownCustomer = own!.id;
+  const [other] = await db.insert(customers).values({ customerNumber: "K-2", name: "Annan kund" }).returning({ id: customers.id });
+  otherCustomer = other!.id;
   // Other test files may have removed the seeded unit — make sure it exists.
   await db.insert(units).values({ code: "st", name: "Styck" }).onConflictDoNothing();
   const [st] = await db.select({ id: units.id }).from(units).where(eq(units.code, "st"));
-  [{ id: articleId }] = await db.insert(articles).values({ articleNumber: "A-1", name: "Artikel", type: "purchased", unitId: st!.id, salesPrice: "100" }).returning({ id: articles.id });
+  const [article] = await db.insert(articles).values({ articleNumber: "A-1", name: "Artikel", type: "purchased", unitId: st!.id, salesPrice: "100" }).returning({ id: articles.id });
+  articleId = article!.id;
 });
 afterEach(async () => app.close());
 afterAll(async () => db.execute(TRUNCATE));

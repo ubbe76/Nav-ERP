@@ -1,3 +1,4 @@
+import { createVerificationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { sql } from "drizzle-orm";
@@ -6,6 +7,7 @@ import { createAuthRepository } from "../src/modules/auth/repository/auth.reposi
 import { createEconomyRepository } from "../src/modules/economy/repository/economy.repository.js";
 import { createEconomyService } from "../src/modules/economy/service/economy.service.js";
 import { isBookkeepingLockViolation } from "../src/modules/system/service/db-errors.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Databasspärren (migration 0095): the database itself refuses changes to
 // booked räkenskapsinformation — whoever writes. These tests go straight to
@@ -38,7 +40,7 @@ async function setup() {
   const bank = await service.createAccount({ number: "1930", name: "Bank" });
   const revenue = await service.createAccount({ number: "3001", name: "Försäljning" });
   const draft = await service.createVerification(
-    {
+    parsed(createVerificationSchema, {
       seriesId: series.id,
       date: `${YEAR}-03-15`,
       description: "Kontantförsäljning",
@@ -46,7 +48,7 @@ async function setup() {
         { accountId: bank.id, debit: 500, credit: 0 },
         { accountId: revenue.id, debit: 0, credit: 500 },
       ],
-    },
+    }),
     user.id
   );
   return { user, series, bank, revenue, draft };
@@ -86,7 +88,7 @@ describe("bookkeeping lock — verifications", () => {
     const { draft, user, bank, series, revenue } = await setup();
     await service.book(draft.id, user.id);
     const other = await service.createVerification(
-      { seriesId: series.id, date: `${YEAR}-03-16`, description: "Utkast", rows: [{ accountId: revenue.id, debit: 1, credit: 0 }] },
+      parsed(createVerificationSchema, { seriesId: series.id, date: `${YEAR}-03-16`, description: "Utkast", rows: [{ accountId: revenue.id, debit: 1, credit: 0 }] }),
       user.id
     );
 

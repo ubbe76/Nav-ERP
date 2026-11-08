@@ -1,3 +1,4 @@
+import { createVerificationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { accounts, db } from "@navet/db";
@@ -12,6 +13,7 @@ import {
   ReportFiscalYearNotFoundError,
   createFinancialReportsService,
 } from "../src/modules/economy/service/financial-reports.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 const repo = createEconomyRepository(db);
 const authRepo = createAuthRepository(db);
@@ -27,6 +29,13 @@ const POSTING_SETTINGS = {
   postingReminderFeeAccount: "3540",
   postingPaymentWriteOff: "3740",
   postingVatSettlement: "2650",
+  postingInventory: "1460",
+  postingInventoryChange: "4990",
+  postingWip: "1440",
+  postingWipChange: "4940",
+  postingFxGain: "3960",
+  postingFxLoss: "7960",
+  postingBankFees: "6570",
 };
 const settingsReader = { read: async () => POSTING_SETTINGS };
 const poster = createVerificationPoster(settingsReader);
@@ -72,7 +81,7 @@ async function bookManual(userId: string, date: string, entries: [string, number
       credit: net < 0 ? -net : 0,
     }))
   );
-  const draft = await service.createVerification({ seriesId: series!.id, date, description, rows }, userId);
+  const draft = await service.createVerification(parsed(createVerificationSchema, { seriesId: series!.id, date, description, rows }), userId);
   return service.book(draft.id, userId);
 }
 
@@ -85,7 +94,7 @@ async function draftManual(userId: string, date: string, entries: [string, numbe
       credit: net < 0 ? -net : 0,
     }))
   );
-  return service.createVerification({ seriesId: series!.id, date, description: "Utkast", rows }, userId);
+  return service.createVerification(parsed(createVerificationSchema, { seriesId: series!.id, date, description: "Utkast", rows }), userId);
 }
 
 function byNumber(balances: Awaited<ReturnType<typeof readAccountBalances>>, number: string) {
@@ -474,7 +483,7 @@ describe("utökad huvudbok", () => {
 
     // Same date, both get number 1 in their own series — series code decides.
     const draftB = await service.createVerification(
-      {
+      parsed(createVerificationSchema, {
         seriesId: seriesB!.id,
         date: `${YEAR}-04-01`,
         description: "Serie B",
@@ -482,7 +491,7 @@ describe("utökad huvudbok", () => {
           { accountId: bankId, debit: 20, credit: 0 },
           { accountId: equityId, debit: 0, credit: 20 },
         ],
-      },
+      }),
       user.id
     );
     await service.book(draftB.id, user.id);

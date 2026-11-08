@@ -1,3 +1,4 @@
+import { completeOperationSchema, createArticleSchema, createPurchaseOrderSchema, createStockLocationSchema, createSupplierSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import {
@@ -30,6 +31,7 @@ import { createStockRepository } from "../src/modules/stock/repository/stock.rep
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Materialbrist vid rapportering: the system setting
 // manufacturing_material_shortage (none | warn | block) × every path that
@@ -103,7 +105,7 @@ async function makeUser() {
 
 async function makeLocation(name = "A1") {
   const warehouse = await stockService.createWarehouse({ name: `Lager ${crypto.randomUUID()}`, active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name, active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name, active: true }));
 }
 
 async function seedStock(articleId: string, locationId: string, quantity: number) {
@@ -128,13 +130,12 @@ async function liveReports(orderId: string) {
 }
 
 async function makeComponent(name: string, type: "purchased" | "service" = "purchased") {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `${name}-${crypto.randomUUID().slice(0, 8)}`,
     name,
     type,
-    unit: "st",
     active: true,
-  });
+  }));
 }
 
 // Parent with operations 10 and 20 (the last). `linked` is drawn by reports
@@ -144,16 +145,15 @@ async function makeOrder(opts: { quantity?: number; componentPerUnit?: number; s
   const { quantity = 4, componentPerUnit = 2, stock = 3, linkedType = "purchased" } = opts;
   const user = await makeUser();
   const location = await makeLocation();
-  const parent = await articleService.createArticle({
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `PARENT-${crypto.randomUUID().slice(0, 8)}`,
     name: "Parent",
     type: "manufactured",
-    unit: "st",
     active: true,
-  });
+  }));
   const linked = await makeComponent("Plåt 2 mm", linkedType);
   const unlinked = await makeComponent("Skruv");
-  const workCenter = await mfgService.createWorkCenter({ code: String(100 + Math.floor(Math.random() * 800)), name: "Svets", active: true });
+  const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: String(100 + Math.floor(Math.random() * 800)), name: "Svets", active: true }));
   const op10 = await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 1, runTimePerUnit: 1 });
   await mfgService.createRoutingOperation(parent.id, { sequenceNo: 20, workCenterId: workCenter.id, setupTime: 1, runTimePerUnit: 1 });
   await articleService.addBomComponent(parent.id, { componentArticleId: linked.id, quantity: componentPerUnit, routingOperationId: op10.id });
@@ -169,7 +169,7 @@ async function makeOrder(opts: { quantity?: number; componentPerUnit?: number; s
 describe("Materialbrist — TO card Slutför operation", () => {
   it("none: draws into negative stock exactly as before (no check)", async () => {
     const f = await makeOrder({ quantity: 4, componentPerUnit: 2, stock: 3 });
-    await mfgService.completeOperation(f.op10.id, { quantityCompleted: 4 }, f.user.id);
+    await mfgService.completeOperation(f.op10.id, parsed(completeOperationSchema, { quantityCompleted: 4 }), f.user.id);
     expect(await consumedFor(f.order.id, f.linked.id)).toBe(8);
     expect(await totalBalance(f.linked.id)).toBe(-5);
   });
@@ -177,7 +177,7 @@ describe("Materialbrist — TO card Slutför operation", () => {
   it("warn: refuses with overridable shortages and books NOTHING", async () => {
     await setMode("warn");
     const f = await makeOrder({ quantity: 4, componentPerUnit: 2, stock: 3 });
-    const err = await mfgService.completeOperation(f.op10.id, { quantityCompleted: 4 }, f.user.id).catch((e) => e);
+    const err = await mfgService.completeOperation(f.op10.id, parsed(completeOperationSchema, { quantityCompleted: 4 }), f.user.id).catch((e) => e);
     expect(err).toBeInstanceOf(MaterialShortageError);
     expect(err.overridable).toBe(true);
     expect(err.shortages).toEqual([
@@ -204,7 +204,7 @@ describe("Materialbrist — TO card Slutför operation", () => {
   it("warn: proceeds with allowMaterialShortage", async () => {
     await setMode("warn");
     const f = await makeOrder({ quantity: 4, componentPerUnit: 2, stock: 3 });
-    await mfgService.completeOperation(f.op10.id, { quantityCompleted: 4, allowMaterialShortage: true }, f.user.id);
+    await mfgService.completeOperation(f.op10.id, parsed(completeOperationSchema, { quantityCompleted: 4, allowMaterialShortage: true }), f.user.id);
     expect(await consumedFor(f.order.id, f.linked.id)).toBe(8);
     expect(await totalBalance(f.linked.id)).toBe(-5);
     expect(await liveReports(f.order.id)).toHaveLength(1);
@@ -213,12 +213,12 @@ describe("Materialbrist — TO card Slutför operation", () => {
   it("block: refuses, not overridable, and the flag is ignored", async () => {
     await setMode("block");
     const f = await makeOrder({ quantity: 4, componentPerUnit: 2, stock: 3 });
-    const err = await mfgService.completeOperation(f.op10.id, { quantityCompleted: 4 }, f.user.id).catch((e) => e);
+    const err = await mfgService.completeOperation(f.op10.id, parsed(completeOperationSchema, { quantityCompleted: 4 }), f.user.id).catch((e) => e);
     expect(err).toBeInstanceOf(MaterialShortageError);
     expect(err.overridable).toBe(false);
 
     await expect(
-      mfgService.completeOperation(f.op10.id, { quantityCompleted: 4, allowMaterialShortage: true }, f.user.id)
+      mfgService.completeOperation(f.op10.id, parsed(completeOperationSchema, { quantityCompleted: 4, allowMaterialShortage: true }), f.user.id)
     ).rejects.toThrow(MaterialShortageError);
     expect(await consumedFor(f.order.id, f.linked.id)).toBe(0);
     expect(await totalBalance(f.linked.id)).toBe(3);
@@ -230,7 +230,7 @@ describe("Materialbrist — TO card Slutför operation", () => {
     // 2 on A1 + 6 on B2 = 8 = the draw. Total stock counts, not the location.
     const other = await makeLocation("B2");
     await seedStock(f.linked.id, other.id, 6);
-    await mfgService.completeOperation(f.op10.id, { quantityCompleted: 4, locationId: f.location.id }, f.user.id);
+    await mfgService.completeOperation(f.op10.id, parsed(completeOperationSchema, { quantityCompleted: 4, locationId: f.location.id }), f.user.id);
     expect(await consumedFor(f.order.id, f.linked.id)).toBe(8);
     expect(await totalBalance(f.linked.id)).toBe(0);
   });
@@ -256,15 +256,14 @@ describe("Materialbrist — TO card Slutför operation", () => {
     // inserted directly): 2/st + 1/st = 3/st × 4 = 12 > 10 in stock.
     const user = await makeUser();
     const location = await makeLocation();
-    const parent = await articleService.createArticle({
+    const parent = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `ONE-${crypto.randomUUID().slice(0, 8)}`,
       name: "Parent",
       type: "manufactured",
-      unit: "st",
       active: true,
-    });
+    }));
     const component = await makeComponent("Plåt 2 mm");
-    const wc = await mfgService.createWorkCenter({ code: "150", name: "Svets", active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "150", name: "Svets", active: true }));
     const op = await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: wc.id, setupTime: 1, runTimePerUnit: 1 });
     await articleService.addBomComponent(parent.id, { componentArticleId: component.id, quantity: 2, routingOperationId: op.id });
     await seedStock(component.id, location.id, 10);
@@ -277,7 +276,7 @@ describe("Materialbrist — TO card Slutför operation", () => {
     });
     const [moOp] = await mfgService.listOperations(order.id);
 
-    const err = await mfgService.completeOperation(moOp!.id, { quantityCompleted: 4 }, user.id).catch((e) => e);
+    const err = await mfgService.completeOperation(moOp!.id, parsed(completeOperationSchema, { quantityCompleted: 4 }), user.id).catch((e) => e);
     expect(err).toBeInstanceOf(MaterialShortageError);
     expect(err.shortages).toHaveLength(1);
     expect(err.shortages[0]).toMatchObject({ articleId: component.id, required: 12, available: 10 });
@@ -289,7 +288,7 @@ describe("Materialbrist — TO card Slutför operation", () => {
   it("never checks a component of type service", async () => {
     await setMode("block");
     const f = await makeOrder({ quantity: 4, componentPerUnit: 2, stock: 0, linkedType: "service" });
-    await mfgService.completeOperation(f.op10.id, { quantityCompleted: 4 }, f.user.id);
+    await mfgService.completeOperation(f.op10.id, parsed(completeOperationSchema, { quantityCompleted: 4 }), f.user.id);
     expect(await consumedFor(f.order.id, f.linked.id)).toBe(8);
     expect(await totalBalance(f.linked.id)).toBe(-8);
   });
@@ -297,10 +296,10 @@ describe("Materialbrist — TO card Slutför operation", () => {
   it("a re-report that draws nothing more passes even with negative stock", async () => {
     const f = await makeOrder({ quantity: 4, componentPerUnit: 2, stock: 3 });
     // Drawn into negative while unchecked …
-    await mfgService.completeOperation(f.op10.id, { quantityCompleted: 4 }, f.user.id);
+    await mfgService.completeOperation(f.op10.id, parsed(completeOperationSchema, { quantityCompleted: 4 }), f.user.id);
     await setMode("block");
     // … a later report of 0 more tops up nothing, so there is nothing to refuse.
-    await mfgService.completeOperation(f.op10.id, { quantityCompleted: 0 }, f.user.id);
+    await mfgService.completeOperation(f.op10.id, parsed(completeOperationSchema, { quantityCompleted: 0 }), f.user.id);
     expect(await consumedFor(f.order.id, f.linked.id)).toBe(8);
   });
 
@@ -308,14 +307,13 @@ describe("Materialbrist — TO card Slutför operation", () => {
     await setMode("block");
     const a = await makeOrder({ quantity: 4, componentPerUnit: 2, stock: 10 });
     // A second TO on the same component article (its own parent).
-    const parentB = await articleService.createArticle({
+    const parentB = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `PARENT-B-${crypto.randomUUID().slice(0, 8)}`,
       name: "Parent B",
       type: "manufactured",
-      unit: "st",
       active: true,
-    });
-    const wc = await mfgService.createWorkCenter({ code: "999", name: "Press", active: true });
+    }));
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "999", name: "Press", active: true }));
     const opB = await mfgService.createRoutingOperation(parentB.id, { sequenceNo: 10, workCenterId: wc.id, setupTime: 1, runTimePerUnit: 1 });
     await mfgService.createRoutingOperation(parentB.id, { sequenceNo: 20, workCenterId: wc.id, setupTime: 1, runTimePerUnit: 1 });
     await articleService.addBomComponent(parentB.id, { componentArticleId: a.linked.id, quantity: 2, routingOperationId: opB.id });
@@ -324,8 +322,8 @@ describe("Materialbrist — TO card Slutför operation", () => {
 
     // 10 in stock, each report draws 8.
     const results = await Promise.allSettled([
-      mfgService.completeOperation(a.op10.id, { quantityCompleted: 4 }, a.user.id),
-      mfgService.completeOperation(op10B.id, { quantityCompleted: 4 }, a.user.id),
+      mfgService.completeOperation(a.op10.id, parsed(completeOperationSchema, { quantityCompleted: 4 }), a.user.id),
+      mfgService.completeOperation(op10B.id, parsed(completeOperationSchema, { quantityCompleted: 4 }), a.user.id),
     ]);
     const fulfilled = results.filter((r) => r.status === "fulfilled");
     const rejected = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
@@ -504,16 +502,15 @@ describe("Materialbrist — lego purchase receipt", () => {
   async function makeLegoOrder(opts: { quantity?: number; stock?: number } = {}) {
     const { quantity = 4, stock = 3 } = opts;
     const user = await makeUser();
-    const supplier = await purchaseService.createSupplier({ name: "Lego AB", active: true });
-    const machine = await mfgService.createWorkCenter({ code: "100", name: "Svets", type: "machine", active: true });
-    const lego = await mfgService.createWorkCenter({ code: "900", name: "Ytbehandling AB", type: "subcontract", supplierId: supplier.id, active: true });
-    const parent = await articleService.createArticle({
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lego AB", active: true }));
+    const machine = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", type: "machine", active: true }));
+    const lego = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "900", name: "Ytbehandling AB", type: "subcontract", supplierId: supplier.id, active: true }));
+    const parent = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `LEGO-${crypto.randomUUID().slice(0, 8)}`,
       name: "Legodetalj",
       type: "manufactured",
-      unit: "st",
       active: true,
-    });
+    }));
     const component = await makeComponent("Plåt 2 mm");
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: machine.id, setupTime: 0, runTimePerUnit: 1 });
     const legoRouting = await mfgService.createRoutingOperation(parent.id, { sequenceNo: 20, workCenterId: lego.id, setupTime: 0, runTimePerUnit: 0, unitPrice: 100 });
@@ -523,7 +520,7 @@ describe("Materialbrist — lego purchase receipt", () => {
 
     const mo = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity }, user.id);
     const legoOp = (await mfgService.listOperations(mo.id)).find((op) => op.sequenceNo === 20)!;
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     const row = await purchaseService.addRow(order.id, { articleId: parent.id, quantity, unitPrice: 100, moOperationId: legoOp.id });
     await purchaseService.confirm(order.id);
     return { user, parent, component, location, mo, legoOp, order, row };

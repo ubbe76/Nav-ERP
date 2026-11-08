@@ -1,3 +1,4 @@
+import { listOpenInvoicesQuerySchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, asc, eq, sql } from "drizzle-orm";
 import {
@@ -37,6 +38,7 @@ import {
   testSystemService,
 } from "./helpers/services.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
 
 // B3 kundreskontra: registering a customer payment settles open items and
 // books the K verification inside ONE transaction. This suite drives the real
@@ -215,7 +217,7 @@ describe("kundreskontra — öppna poster", () => {
     await db.update(invoices).set({ dueDate: "2026-03-01" }).where(eq(invoices.id, invoice.id));
     await db.update(invoices).set({ dueDate: "2026-02-01" }).where(eq(invoices.id, credit.id));
 
-    const { rows, total } = await paymentService.listOpenInvoices({ limit: 50, offset: 0 });
+    const { rows, total } = await paymentService.listOpenInvoices(parsed(listOpenInvoicesQuerySchema, { limit: 50, offset: 0 }));
     expect(total).toBe(2);
     expect(rows.map((r) => r.id)).toEqual([credit.id, invoice.id]);
     expect(rows[0]!.openAmount).toBe(-1000);
@@ -240,7 +242,7 @@ describe("kundreskontra — öppna poster", () => {
       .set({ dueDate: "2026-03-01", invoiceNumber: "FA-10" })
       .where(eq(invoices.id, second.id));
 
-    const { rows } = await paymentService.listOpenInvoices({ customerId: customer.id, limit: 50, offset: 0 });
+    const { rows } = await paymentService.listOpenInvoices(parsed(listOpenInvoicesQuerySchema, { customerId: customer.id, limit: 50, offset: 0 }));
     // createdAt order (first issued first), not the text-sorted FA-10/FA-2.
     expect(rows.map((r) => r.id)).toEqual([first.id, second.id]);
   });
@@ -256,7 +258,7 @@ describe("kundreskontra — öppna poster", () => {
     await db.update(invoices).set({ dueDate: "2999-01-01" }).where(eq(invoices.id, future.id));
     await db.update(invoices).set({ dueDate: "2020-01-01" }).where(eq(invoices.id, other.id));
 
-    const forA = await paymentService.listOpenInvoices({ customerId: a.id, limit: 50, offset: 0 });
+    const forA = await paymentService.listOpenInvoices(parsed(listOpenInvoicesQuerySchema, { customerId: a.id, limit: 50, offset: 0 }));
     expect(forA.total).toBe(2);
     expect(forA.rows.every((r) => r.customerId === a.id)).toBe(true);
 
@@ -305,7 +307,7 @@ describe("kundreskontra — öppna poster", () => {
     await invoiceService.sendReminder(reminded.id, { ...MAIL, withFee: false }, user.id);
     await invoiceService.sendReminder(reminded.id, { ...MAIL, withFee: true }, user.id);
 
-    const { rows } = await paymentService.listOpenInvoices({ customerId: customer.id, limit: 50, offset: 0 });
+    const { rows } = await paymentService.listOpenInvoices(parsed(listOpenInvoicesQuerySchema, { customerId: customer.id, limit: 50, offset: 0 }));
     const remindedRow = rows.find((r) => r.id === reminded.id)!;
     const untouchedRow = rows.find((r) => r.id === untouched.id)!;
 
@@ -404,7 +406,7 @@ describe("kundreskontra — betalningsregistrering", () => {
     const status = await invoiceStatus(invoice.id);
     expect(status.status).toBe("paid");
     expect(status.paidAt).not.toBeNull();
-    expect((await paymentService.listOpenInvoices({ limit: 50, offset: 0 })).total).toBe(0);
+    expect((await paymentService.listOpenInvoices(parsed(listOpenInvoicesQuerySchema, { limit: 50, offset: 0 }))).total).toBe(0);
   });
 
   it("a partial payment leaves the rest open, writes nothing off and keeps the invoice issued", async () => {
@@ -425,7 +427,7 @@ describe("kundreskontra — betalningsregistrering", () => {
 
     expect(payment.rows[0]!.writeOffAmount).toBe("0.00");
     expect((await invoiceStatus(invoice.id)).status).toBe("issued");
-    const open = await paymentService.listOpenInvoices({ limit: 50, offset: 0 });
+    const open = await paymentService.listOpenInvoices(parsed(listOpenInvoicesQuerySchema, { limit: 50, offset: 0 }));
     expect(open.rows[0]!.openAmount).toBe(600);
 
     const verification = await loadVerification(payment.verificationId!);
@@ -566,7 +568,7 @@ describe("kundreskontra — betalningsregistrering", () => {
 
     expect((await invoiceStatus(invoice.id)).status).toBe("paid");
     expect((await invoiceStatus(credit.id)).status).toBe("paid");
-    expect((await paymentService.listOpenInvoices({ limit: 50, offset: 0 })).total).toBe(0);
+    expect((await paymentService.listOpenInvoices(parsed(listOpenInvoicesQuerySchema, { limit: 50, offset: 0 }))).total).toBe(0);
   });
 
   it("a mixed payment (bank + kvittning) nets the receivable into one row", async () => {
@@ -663,7 +665,7 @@ describe("kundreskontra — betalningsregistrering", () => {
 
     expect((await invoiceStatus(invoice.id)).status).toBe("paid");
     expect((await invoiceStatus(credit.id)).status).toBe("paid");
-    expect((await paymentService.listOpenInvoices({ limit: 50, offset: 0 })).total).toBe(0);
+    expect((await paymentService.listOpenInvoices(parsed(listOpenInvoicesQuerySchema, { limit: 50, offset: 0 }))).total).toBe(0);
   });
 
   it("refuses an invoice belonging to another customer, a draft invoice and an unknown one", async () => {
@@ -784,7 +786,7 @@ describe("kundreskontra — betalningsregistrering", () => {
 
     expect(await countPayments()).toBe(1);
     expect((await invoiceStatus(invoice.id)).status).toBe("issued");
-    const open = await paymentService.listOpenInvoices({ limit: 50, offset: 0 });
+    const open = await paymentService.listOpenInvoices(parsed(listOpenInvoicesQuerySchema, { limit: 50, offset: 0 }));
     expect(open.rows[0]!.openAmount).toBe(400);
 
     // Neither a BET number nor a K number was burned by the loser.
@@ -842,7 +844,7 @@ describe("kundreskontra — makulering", () => {
     const status = await invoiceStatus(invoice.id);
     expect(status.status).toBe("issued");
     expect(status.paidAt).toBeNull();
-    const open = await paymentService.listOpenInvoices({ limit: 50, offset: 0 });
+    const open = await paymentService.listOpenInvoices(parsed(listOpenInvoicesQuerySchema, { limit: 50, offset: 0 }));
     expect(open.rows[0]!.openAmount).toBe(1000);
   });
 
@@ -872,7 +874,7 @@ describe("kundreskontra — makulering", () => {
 
     expect((await invoiceStatus(invoice.id)).status).toBe("issued");
     expect((await invoiceStatus(credit.id)).status).toBe("issued");
-    const open = await paymentService.listOpenInvoices({ limit: 50, offset: 0 });
+    const open = await paymentService.listOpenInvoices(parsed(listOpenInvoicesQuerySchema, { limit: 50, offset: 0 }));
     expect(open.total).toBe(2);
   });
 
@@ -948,7 +950,7 @@ describe("kundreskontra — makulering", () => {
     expect(status.status).toBe("issued");
     expect(status.paidAt).toBeNull();
     expect((await invoiceService.getInvoice(invoice.id))!.openAmount).toBe(400);
-    const open = await paymentService.listOpenInvoices({ limit: 50, offset: 0 });
+    const open = await paymentService.listOpenInvoices(parsed(listOpenInvoicesQuerySchema, { limit: 50, offset: 0 }));
     expect(open.rows.map((r) => r.openAmount)).toEqual([400]);
   });
 

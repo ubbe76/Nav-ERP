@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { auditLog, db, quoteLossReasons, salesOrders } from "@navet/db";
-import { createQuoteSchema, updateSalesOrderHeaderSchema } from "@navet/shared";
+import { createQuoteSchema, updateSalesOrderHeaderSchema, createArticleSchema, createCustomerSchema } from "@navet/shared";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -29,6 +29,8 @@ import { createPlanningRepository } from "../src/modules/planning/repository/pla
 import { createPlanningService } from "../src/modules/planning/service/planning.service.js";
 import { pdfText } from "./helpers/pdf.js";
 import { testDocumentPdfService } from "./helpers/services.js";
+import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Uppföljning av offerter against Postgres: Giltig t.o.m. (default, 0
 // days, explicit, never on a direct order), the header PATCH guard, Förlorad
@@ -60,7 +62,7 @@ const salesService = createSalesService(
   (query) => resolvePrice(db, query),
   auditRepository
 );
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, articleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, articleService, unwiredSalesOrderLinks);
 const planningService = createPlanningService(createPlanningRepository(db), {
   purchase: {
     createPurchaseOrder: async () => {
@@ -98,15 +100,14 @@ async function makeReason(code = "PRIS", name = "Pris", active = true) {
 
 async function fixture() {
   const user = await makeUser();
-  const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
-  const article = await articleService.createArticle({
+  const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
+  const article = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-${crypto.randomUUID().slice(0, 8)}`,
     name: "Diskbänk",
     type: "purchased",
-    unit: "st",
     active: true,
     reorderPoint: 0,
-  });
+  }));
   return { user, customer, article };
 }
 

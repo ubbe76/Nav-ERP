@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema, createStockLocationSchema, createSupplierSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { db, stockTransactions } from "@navet/db";
@@ -9,6 +10,7 @@ import { createManufacturingRepository } from "../src/modules/manufacturing/repo
 import { createSalesRepository } from "../src/modules/sales/repository/sales.repository.js";
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Repository-level coverage for stock_transactions.unit_cost (D0): the
 // column is stamped only on the three inflow writers (purchase receipt,
@@ -47,18 +49,17 @@ async function makeUser() {
 
 async function makeLocation(name = "A1") {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name, active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name, active: true }));
 }
 
 async function makeArticle(opts: { type?: "purchased" | "manufactured"; standardCost?: number } = {}) {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-UC-${crypto.randomUUID()}`,
     name: "Test Article",
     type: opts.type ?? "purchased",
-    unit: "st",
     active: true,
     ...(opts.standardCost !== undefined ? { standardCost: opts.standardCost } : {}),
-  });
+  }));
 }
 
 async function transactionsFor(referenceId: string, transactionType?: string) {
@@ -74,15 +75,15 @@ describe("stock_transactions.unit_cost — purchase_receipt", () => {
   // defaults to 1 (SEK) unless overridden, mirroring purchase.service.test.ts.
   async function makeConfirmedOrder(opts: { currency?: string; exchangeRate?: number; unitPrice?: number } = {}) {
     const user = await makeUser();
-    const supplier = await purchaseRepo.createSupplier({
+    const supplier = await purchaseRepo.createSupplier(parsed(createSupplierSchema, {
       name: "ACME AB",
       active: true,
       currency: opts.currency ?? "SEK",
-    });
+    }));
     const article = await makeArticle();
     const location = await makeLocation();
     const order = await purchaseRepo.createPurchaseOrder(
-      { supplierId: supplier.id, exchangeRate: opts.exchangeRate },
+      { supplierId: supplier.id, exchangeRate: opts.exchangeRate ?? 1 },
       user.id,
       supplier.currency
     );
@@ -205,12 +206,12 @@ describe("stock_transactions.unit_cost — manual inventory_adjustment", () => {
 describe("stock_transactions.unit_cost — outflows and transfers stay unvalued", () => {
   it("leaves unit_cost null on a sales_delivery", async () => {
     const user = await makeUser();
-    const customer = await salesRepo.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesRepo.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     const article = await makeArticle();
     const location = await makeLocation();
 
     const { order, rows } = await salesRepo.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 10, unitPrice: 99, unitId: null, unitFactor: null }] },
+      { customerId: customer.id, confirm: false, quoteValidUntil: null, rows: [{ articleId: article.id, quantity: 10, unitPrice: 99, unitId: null, unitFactor: null }] },
       user.id
     );
     await salesRepo.updateStatus(order.id, "in_production");
@@ -219,7 +220,6 @@ describe("stock_transactions.unit_cost — outflows and transfers stay unvalued"
       locationId: location.id,
       rows: [{ rowId: rows[0]!.id, quantity: 3 }],
       createdBy: user.id,
-      overReceiptPercent: 0,
     });
 
     const [tx] = await transactionsFor(order.id, "sales_delivery");

@@ -1,3 +1,4 @@
+import { createArticleSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { eq, sql } from "drizzle-orm";
@@ -35,6 +36,7 @@ import {
 } from "../src/modules/system/service/exchange-rates.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline, testSystemService } from "./helpers/services.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Valuta steg 3 — the HTTP contract of the new fields and errors on the
 // sales routes (customers, price lists, orders, price quote, invoices,
@@ -107,7 +109,7 @@ afterAll(async () => {
 });
 
 async function article(salesPrice = 1100) {
-  const a = await articleService.createArticle({ articleNumber: `FXR-${crypto.randomUUID()}`, name: "Vara", type: "purchased", active: true });
+  const a = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `FXR-${crypto.randomUUID()}`, name: "Vara", type: "purchased", active: true }));
   await db.update(articles).set({ salesPrice: String(salesPrice) }).where(eq(articles.id, a.id));
   return a;
 }

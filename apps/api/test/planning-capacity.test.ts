@@ -1,3 +1,4 @@
+import { createArticleSchema, createWeekScheduleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -16,6 +17,7 @@ import { createPlanningRepository } from "../src/modules/planning/repository/pla
 import { createPlanningService } from "../src/modules/planning/service/planning.service.js";
 import { isoWeekOf, isoWeekRange } from "../src/modules/timereport/service/schedule.service.js";
 import { insertPlannedManufacturingOrder } from "./helpers/planned-manufacturing-order.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const authRepo = createAuthRepository(db);
@@ -45,6 +47,15 @@ const planningService = createPlanningService(createPlanningRepository(db), {
   manufacturing: {
     createManufacturingOrder: async () => {
       throw new Error("not used");
+    },
+    createFromSalesOrderRow: async () => {
+      throw new Error("not used in this test");
+    },
+    createManufacturingOrderInTx: async () => {
+      throw new Error("not used in this test");
+    },
+    setDueDatesInTx: async () => {
+      throw new Error("not used in this test");
     },
   },
 });
@@ -96,31 +107,31 @@ async function seedCapacityWorld() {
     breaks: [],
     active: true,
   });
-  const week = await scheduleService.createWeekSchedule({
+  const week = await scheduleService.createWeekSchedule(parsed(createWeekScheduleSchema, {
     code: "VS40",
     name: "Veckoschema 40h",
     days: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, dayScheduleId: day.id })),
     active: true,
-  });
+  }));
   await scheduleService.createHoliday({ date: nextWednesday, name: "Testhelgdag", dayScheduleId: null });
 
   const group = await mfgService.createProductionGroup({ code: "10", name: "Svets", active: true });
-  const scheduled = await mfgService.createWorkCenter({
+  const scheduled = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
     code: "101",
     name: "Svets A",
     productionGroupId: group.id,
     weekScheduleId: week.id,
     capacityFactor: 2,
     active: true,
-  });
-  const unscheduled = await mfgService.createWorkCenter({ code: "102", name: "Manuell", active: true });
+  }));
+  const unscheduled = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "102", name: "Manuell", active: true }));
 
-  const article = await articleService.createArticle({
+  const article = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `CAP-${crypto.randomUUID().slice(0, 8)}`,
     name: "Kapacitetsartikel",
     type: "manufactured",
     active: true,
-  });
+  }));
   await mfgService.createRoutingOperation(article.id, {
     sequenceNo: 10,
     workCenterId: scheduled.id,

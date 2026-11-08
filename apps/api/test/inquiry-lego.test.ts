@@ -1,3 +1,4 @@
+import { createArticleSchema, createInquirySchema, createPurchaseOrderSchema, createSupplierSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { auditLog, db } from "@navet/db";
@@ -24,6 +25,7 @@ import { createRegisterService } from "../src/modules/register/service/register.
 import { createSalesRepository } from "../src/modules/sales/repository/sales.repository.js";
 import { markSalesOrderInProduction } from "../src/modules/sales/service/production-transition.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Legoförfrågan: RFQ rows linked to a lego operation (TO operation from the
 // behovsberäkning, or the article's routing operation for a TO-less price
@@ -85,7 +87,7 @@ async function makeUser() {
 }
 
 async function makeSupplier(name = "Lego AB") {
-  return purchaseService.createSupplier({ name, active: true });
+  return purchaseService.createSupplier(parsed(createSupplierSchema, { name, active: true }));
 }
 
 // Manufactured article with weight, one machine operation (10) and one lego
@@ -93,23 +95,22 @@ async function makeSupplier(name = "Lego AB") {
 async function makeLegoRouting(opts?: { setupPrice?: number | null }) {
   const user = await makeUser();
   const supplier = await makeSupplier();
-  const machine = await mfgService.createWorkCenter({ code: "100", name: "Svets", type: "machine", active: true });
-  const lego = await mfgService.createWorkCenter({
+  const machine = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", type: "machine", active: true }));
+  const lego = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
     code: "900",
     name: "Ytbehandling AB",
     type: "subcontract",
     supplierId: supplier.id,
     active: true,
-  });
+  }));
 
-  const parent = await articleService.createArticle({
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `LEGO-${crypto.randomUUID()}`,
     name: "Legodetalj",
     type: "manufactured",
-    unit: "st",
     weight: 2.5,
     active: true,
-  });
+  }));
 
   const machineOp = await mfgService.createRoutingOperation(parent.id, {
     sequenceNo: 10,
@@ -200,35 +201,33 @@ describe("lego inquiry rows — creation", () => {
 
   it("refuses an unknown operation, another article's operation and a non-lego operation", async () => {
     const f = await makeLegoRouting();
-    const other = await articleService.createArticle({
+    const other = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `OTHER-${crypto.randomUUID()}`,
       name: "Annan",
       type: "manufactured",
-      unit: "st",
       active: true,
-    });
-    const rows = (row: object) => ({ supplierId: f.supplier.id, rows: [{ quantity: 1, ...row }] });
+    }));
+    const rows = (row: { articleId: string; routingOperationId: string }) => ({ supplierId: f.supplier.id, rows: [{ quantity: 1, ...row }] });
 
     await expect(
-      purchaseService.createInquiry(rows({ articleId: f.parent.id, routingOperationId: crypto.randomUUID() }), f.user.id)
+      purchaseService.createInquiry(parsed(createInquirySchema, rows({ articleId: f.parent.id, routingOperationId: crypto.randomUUID() })), f.user.id)
     ).rejects.toBeInstanceOf(LegoOperationNotFoundError);
     await expect(
-      purchaseService.createInquiry(rows({ articleId: other.id, routingOperationId: f.routingLegoOp.id }), f.user.id)
+      purchaseService.createInquiry(parsed(createInquirySchema, rows({ articleId: other.id, routingOperationId: f.routingLegoOp.id })), f.user.id)
     ).rejects.toBeInstanceOf(LegoOperationArticleMismatchError);
     await expect(
-      purchaseService.createInquiry(rows({ articleId: f.parent.id, routingOperationId: f.machineOp.id }), f.user.id)
+      purchaseService.createInquiry(parsed(createInquirySchema, rows({ articleId: f.parent.id, routingOperationId: f.machineOp.id })), f.user.id)
     ).rejects.toBeInstanceOf(NotLegoOperationError);
   });
 
   it("addInquiryRow takes the same lego link, and ställpris is only editable on lego rows", async () => {
     const f = await makeLegoRouting();
-    const plain = await articleService.createArticle({
+    const plain = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `PLAIN-${crypto.randomUUID()}`,
       name: "Vanlig",
       type: "purchased",
-      unit: "st",
       active: true,
-    });
+    }));
     const { inquiry, rows } = await purchaseService.createInquiry(
       { supplierId: f.supplier.id, rows: [{ articleId: plain.id, quantity: 1 }] },
       f.user.id
@@ -436,7 +435,7 @@ describe("lego inquiry rows — RFQ PDF", () => {
   it("the lego IO row prints Ytbehandling/Färg too (purchase order PDF)", async () => {
     const f = await releasedMo(4);
     await articleService.updateArticle(f.parent.id, { surfaceTreatment: "Pulverlack", colour: null });
-    const ioOrder = await purchaseService.createPurchaseOrder({ supplierId: f.supplier.id }, f.user.id);
+    const ioOrder = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: f.supplier.id }), f.user.id);
     await purchaseService.addRow(ioOrder.id, {
       articleId: f.parent.id,
       quantity: 4,
@@ -639,12 +638,12 @@ describe("lego inquiry rows — prisåterföring to the routing operation", () =
 describe("purchase order list — Legoinköp filter", () => {
   it("kind=lego keeps orders with at least one TO-linked row, kind=regular the rest", async () => {
     const f = await releasedMo(4);
-    const plain = await articleService.createArticle({
-      articleNumber: `SKRUV-${crypto.randomUUID()}`, name: "Skruv", type: "purchased", unit: "st", active: true,
-    });
+    const plain = await articleService.createArticle(parsed(createArticleSchema, {
+      articleNumber: `SKRUV-${crypto.randomUUID()}`, name: "Skruv", type: "purchased", active: true,
+    }));
     // createPurchaseOrder takes the header only; rows go through addRow.
     const order = async (rows: { articleId: string; quantity: number; unitPrice: number; moOperationId?: string }[]) => {
-      const o = await purchaseService.createPurchaseOrder({ supplierId: f.supplier.id }, f.user.id);
+      const o = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: f.supplier.id }), f.user.id);
       for (const r of rows) await purchaseService.addRow(o.id, r, f.user.id);
       return o;
     };

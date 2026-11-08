@@ -10,12 +10,13 @@ import { createManufacturingService } from "../src/modules/manufacturing/service
 import { makeArticle, makeVariantService, resetConfigurator, testCostingSettings } from "./helpers/configurator.js";
 import { insertTestPlugin, outboxEvents, removeTestPlugins } from "./helpers/plugins.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Delprojekt 4a: resolveVariant — fetch-or-create one variant for a selection,
 // the way the order forms' Konfigurera dialog uses it.
 
 const service = makeVariantService();
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 
 async function reset() {
   await resetConfigurator();

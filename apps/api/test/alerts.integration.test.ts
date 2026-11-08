@@ -27,6 +27,8 @@ import {
   listSalesOrdersQuerySchema,
   type AlertKind,
   type AlertsResponse,
+  createArticleSchema,
+  createWorkCenterSchema,
 } from "@navet/shared";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -41,6 +43,8 @@ import { createPurchaseRepository } from "../src/modules/purchase/repository/pur
 import { createSalesRepository } from "../src/modules/sales/repository/sales.repository.js";
 import { createAlertsService, EMAIL_FAILED_DAYS } from "../src/modules/alerts/service/alerts.service.js";
 import { vatCodeId } from "./helpers/vat-codes.js";
+import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Aviseringar against Postgres: per kind one case that gives a row and one
 // borderline case that must not. "Today" is pinned to Monday 2030-03-04 (as
@@ -55,7 +59,7 @@ const authRepo = createAuthRepository(db);
 const stockService = createStockService(createStockRepository(db));
 // No plan reader: the TOs are created unplanned, which is what makes an
 // overdue one Sen (orderPlanStatus) without a capacity world.
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const planningService = createPlanningService(createPlanningRepository(db), {
   purchase: {
     createPurchaseOrder: async () => {
@@ -102,14 +106,13 @@ async function group(kind: AlertKind) {
 const suffix = () => crypto.randomUUID().slice(0, 8);
 
 async function makeArticle(type: "purchased" | "manufactured", extra: { reorderPoint?: number; orderQuantity?: number } = {}) {
-  return testArticleService.createArticle({
+  return testArticleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `A-${suffix()}`,
     name: type === "purchased" ? "Köpt del" : "Tillverkad vara",
     type,
-    unit: "st",
     active: true,
     ...extra,
-  });
+  }));
 }
 
 async function makeCustomer() {
@@ -384,7 +387,7 @@ describe("purchase_order_late", () => {
 
 describe("manufacturing_order_late", () => {
   async function routedArticle() {
-    const wc = await mfgService.createWorkCenter({ code: `${100 + Math.floor(Math.random() * 800)}`, name: "Kap", active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: `${100 + Math.floor(Math.random() * 800)}`, name: "Kap", active: true }));
     const article = await makeArticle("manufactured");
     await mfgService.createRoutingOperation(article.id, { sequenceNo: 10, workCenterId: wc.id, setupTime: 0, runTimePerUnit: 30 });
     return article;
@@ -458,7 +461,7 @@ describe("the order lists' status filter Sen", () => {
 
   it("lists the TOs the plan calls Sen, with paging and the total in SQL", async () => {
     const user = await makeUser();
-    const wc = await mfgService.createWorkCenter({ code: "310", name: "Kap", active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "310", name: "Kap", active: true }));
     const article = await makeArticle("manufactured");
     await mfgService.createRoutingOperation(article.id, { sequenceNo: 10, workCenterId: wc.id, setupTime: 0, runTimePerUnit: 30 });
     const first = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 2, dueDate: YESTERDAY }, user.id);

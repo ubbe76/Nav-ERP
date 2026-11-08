@@ -1,3 +1,4 @@
+import { createArticleSchema, createWeekScheduleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { stockholmInstant, stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { and, eq, sql } from "drizzle-orm";
@@ -28,6 +29,8 @@ import {
 } from "../src/modules/timereport/service/schedule.service.js";
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
+import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // The whole point of this file is the integration between the payroll
 // period lock and every service that writes into the payroll basis, so all
@@ -46,7 +49,8 @@ const authRepo = createAuthRepository(db);
 const mfgService = createManufacturingService(
   createManufacturingRepository(db),
   testDocumentPdfService,
-  testArticleService
+  testArticleService,
+  unwiredSalesOrderLinks
 );
 const timeReportService = createTimeReportService(
   timeReportRepository,
@@ -154,12 +158,12 @@ async function seedPeriod() {
     active: true,
     breaks: [{ type: "unpaid", startTime: "12:00", endTime: "13:00" }],
   });
-  const weekSchedule = await scheduleService.createWeekSchedule({
+  const weekSchedule = await scheduleService.createWeekSchedule(parsed(createWeekScheduleSchema, {
     code: "VDAG",
     name: "Dagtid vecka",
     active: true,
     days: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, dayScheduleId: daySchedule.id })),
-  });
+  }));
   await timeReportRepository.updateEmployee(employee.id, { defaultWeekScheduleId: weekSchedule.id });
 
   const absenceType = await service.createAbsenceType({ code: "SJK", name: "Sjukfrånvaro", paxmlCode: "SJK" });
@@ -180,20 +184,19 @@ async function seedPeriod() {
 // Minimal released MO so manual time reports have an operation to hang on
 // (copied from timereport.service.test.ts).
 async function makeReleasedOperation(userId: string) {
-  const parent = await testArticleService.createArticle({
+  const parent = await testArticleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `PARENT-${crypto.randomUUID()}`,
     name: "Parent",
     type: "manufactured",
-    unit: "st",
     active: true,
-  });
-  const workCenter = await mfgService.createWorkCenter({
+  }));
+  const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
     code: "100", // work_centers.code is varchar(3)
     name: "Svets",
     hourlyRate: 500,
     overheadPercent: 20,
     active: true,
-  });
+  }));
   await mfgService.createRoutingOperation(parent.id, {
     sequenceNo: 1,
     workCenterId: workCenter.id,

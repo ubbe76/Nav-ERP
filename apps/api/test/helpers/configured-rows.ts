@@ -1,4 +1,5 @@
 // apps/api/test/helpers/configured-rows.ts
+import { createCustomerSchema, createStockLocationSchema } from "@navet/shared";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
 import { createAuthRepository } from "../../src/modules/auth/repository/auth.repository.js";
@@ -25,6 +26,7 @@ import {
   testDocumentPdfService,
   testSystemService,
 } from "./services.js";
+import { parsed } from "../helpers/parsed.js";
 
 // Konfigurator 4b (beställningsvara på orderraden): the sales service wired
 // with the configurator's row-configuration reader, exactly as app.ts binds
@@ -123,7 +125,7 @@ export async function resetDocuments() {
 
 export async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
 }
 
 export async function seedStock(articleId: string, locationId: string, quantity: number) {
@@ -158,7 +160,7 @@ export async function buildToOrder(opts: { salesPrice?: number | null } = {}) {
 }
 
 export const makeCustomer = (discountPercent?: number) =>
-  salesService.createCustomer({ name: "Kund AB", active: true, ...(discountPercent !== undefined ? { discountPercent } : {}) });
+  salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true, ...(discountPercent !== undefined ? { discountPercent } : {}) }));
 
 // Variant template (4a's configurator-variant-price build() without the
 // variant): base 1000, LOCK A (+0) / B (+50) required, BREDD 500–2000

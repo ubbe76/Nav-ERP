@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema, createStockLocationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { eq, sql } from "drizzle-orm";
@@ -18,6 +19,7 @@ import { createSystemRepository } from "../src/modules/system/repository/system.
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Ångra utleverans — the route's status codes and error envelope (the
 // service rules themselves are in sales-delivery-undo.test.ts).
@@ -55,16 +57,15 @@ async function setup() {
     name: "Säljare",
     role: "admin",
   });
-  const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
-  const article = await articleService.createArticle({
+  const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
+  const article = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-UNDO-R-${crypto.randomUUID().slice(0, 8)}`,
     name: "Artikel",
     type: "purchased",
-    unit: "st",
     active: true,
-  });
+  }));
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  const location = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
   await stockService.recordTransaction({ articleId: article.id, locationId: location.id, quantityDelta: 10, transactionType: "inventory_adjustment" });
   const { order, rows } = await salesService.createQuote(
     { customerId: customer.id, confirm: true, rows: [{ articleId: article.id, quantity: 10, unitPrice: 10 }] },

@@ -14,7 +14,7 @@ import {
   verificationRows,
   verifications,
 } from "@navet/db";
-import { fromSek, invoiceSekAmounts, toSek } from "@navet/shared";
+import { fromSek, invoiceSekAmounts, toSek, createArticleSchema, createQuoteSchema, createStockLocationSchema } from "@navet/shared";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -61,6 +61,7 @@ import {
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline, testSystemService } from "./helpers/services.js";
 import { pdfText } from "./helpers/pdf.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Valuta steg 3: kunder, prislistor, kundordrar, kundfakturor och
 // kundbetalningar i annan valuta än SEK — end to end on the real services,
@@ -151,12 +152,12 @@ async function makeCustomer(currency = "SEK", extra: Partial<typeof customers.$i
 }
 
 async function makeArticle(salesPrice?: number) {
-  const article = await articleService.createArticle({
+  const article = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `FX-${crypto.randomUUID()}`,
     name: "Valutaartikel",
     type: "purchased",
     active: true,
-  });
+  }));
   if (salesPrice !== undefined) await db.update(articles).set({ salesPrice: String(salesPrice) }).where(eq(articles.id, article.id));
   return article;
 }
@@ -171,7 +172,7 @@ async function makePriceList(currency: string, rows: { articleId: string; unitPr
 
 async function location() {
   const warehouse = await stockService.createWarehouse({ name: `Lager ${crypto.randomUUID()}`, active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
 }
 
 // A confirmed, fully delivered order in the customer's currency at `orderRate`.
@@ -295,7 +296,7 @@ describe("kundorder i valuta — prissättning", () => {
   it("a SEK order is priced exactly as before — the SEK price is never rounded", async () => {
     const article = await makeArticle(12.3456);
     const customer = await makeCustomer();
-    const { order, rows } = await salesService.createQuote({ customerId: customer.id, rows: [{ articleId: article.id, quantity: 1 }] }, userId);
+    const { order, rows } = await salesService.createQuote(parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1 }] }), userId);
     expect(order).toMatchObject({ currency: "SEK", exchangeRate: "1.000000" });
     expect(rows[0]!.unitPrice).toBe("12.3456");
     expect(lookups).toEqual([]);
@@ -304,11 +305,11 @@ describe("kundorder i valuta — prissättning", () => {
   it("today's rate unless one is sent; no rate ⇒ ExchangeRateUnavailableError; a SEK order takes only rate 1", async () => {
     const article = await makeArticle(1000);
     const customer = await makeCustomer("EUR");
-    await expect(salesService.createQuote({ customerId: customer.id, rows: [{ articleId: article.id, quantity: 1 }] }, userId)).rejects.toBeInstanceOf(
+    await expect(salesService.createQuote(parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1 }] }), userId)).rejects.toBeInstanceOf(
       ExchangeRateUnavailableError
     );
     rate("EUR", 11.5);
-    const { order } = await salesService.createQuote({ customerId: customer.id, rows: [{ articleId: article.id, quantity: 1 }] }, userId);
+    const { order } = await salesService.createQuote(parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1 }] }), userId);
     expect(order.exchangeRate).toBe("11.500000");
     expect(lookups.at(-1)).toEqual({ currency: "EUR", date: TODAY });
     const sekCustomer = await makeCustomer();

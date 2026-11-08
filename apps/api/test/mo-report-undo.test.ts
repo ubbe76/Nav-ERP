@@ -1,3 +1,4 @@
+import { completeOperationSchema, createArticleSchema, createStockLocationSchema, createWorkCenterSchema, stampOutSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { auditLog, db, moOperationScrap, permissionGroups, stockTransactions, timeReports } from "@navet/db";
@@ -23,6 +24,7 @@ import { createTimeReportService } from "../src/modules/timereport/service/timer
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Ångra rapportering: every reporting event on a TO is logged in mo_reports
 // with exactly what it booked, and undoing one reverses precisely that —
@@ -80,24 +82,22 @@ async function setup() {
     role: "supervisor",
   });
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
-  const component = await articleService.createArticle({
+  const location = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
+  const component = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `C-${crypto.randomUUID()}`,
     name: "Komponent",
     type: "purchased",
-    unit: "st",
     defaultLocationId: location.id,
     active: true,
-  });
-  const parent = await articleService.createArticle({
+  }));
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `P-${crypto.randomUUID()}`,
     name: "Produkt",
     type: "manufactured",
-    unit: "st",
     defaultLocationId: location.id,
     active: true,
-  });
-  const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+  }));
+  const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
   const op10 = await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
   await mfgService.createRoutingOperation(parent.id, { sequenceNo: 20, workCenterId: workCenter.id, setupTime: 5, runTimePerUnit: 1 });
   await articleService.addBomComponent(parent.id, { componentArticleId: component.id, quantity: 2, routingOperationId: op10.id });
@@ -114,7 +114,7 @@ async function orderNow(id: string) {
 
 async function stampOut(ctx: Awaited<ReturnType<typeof setup>>, operationId: string, input: object) {
   const session = await timeReportService.stampIn({ employeeId: ctx.employee.id, moOperationId: operationId }, ctx.user.id);
-  return timeReportService.stampOut(session.id, input, ctx.user.id);
+  return timeReportService.stampOut(session.id, parsed(stampOutSchema, input), ctx.user.id);
 }
 
 describe("report log", () => {
@@ -122,7 +122,7 @@ describe("report log", () => {
     const ctx = await setup();
     await stampOut(ctx, ctx.first.id, {});
     await stampOut(ctx, ctx.first.id, { quantityOk: 2, quantityScrapped: 1, scrapReason: "Repa" });
-    await mfgService.completeOperation(ctx.last.id, { quantityCompleted: 1 }, ctx.user.id);
+    await mfgService.completeOperation(ctx.last.id, parsed(completeOperationSchema, { quantityCompleted: 1 }), ctx.user.id);
     const [material] = await mfgService.listMaterialConsumptions(ctx.order.id);
     await mfgService.consumeMaterial(ctx.order.id, material!.id, { quantity: 1 }, ctx.user.id);
     await mfgService.complete(ctx.order.id, { quantity: 0 }, ctx.user.id);
@@ -179,7 +179,7 @@ describe("Ångra rapportering", () => {
   // each part back where it was taken.
   it("splits a linked draw over the component's own location and another with stock, and returns each part", async () => {
     const ctx = await setup();
-    const shelf = await stockService.createLocation({ warehouseId: (await stockService.listWarehouses())[0]!.id, name: "B2", active: true });
+    const shelf = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: (await stockService.listWarehouses())[0]!.id, name: "B2", active: true }));
     // 100 at the own location → 4 left there, 20 on the shelf.
     await stockService.recordTransaction({ articleId: ctx.component.id, locationId: ctx.location.id, quantityDelta: -96, transactionType: "inventory_adjustment" });
     await stockService.recordTransaction({ articleId: ctx.component.id, locationId: shelf.id, quantityDelta: 20, transactionType: "inventory_adjustment" });
@@ -205,8 +205,8 @@ describe("Ångra rapportering", () => {
 
   it("a chosen location takes the whole draw there, negative if need be", async () => {
     const ctx = await setup();
-    const shelf = await stockService.createLocation({ warehouseId: (await stockService.listWarehouses())[0]!.id, name: "B2", active: true });
-    await mfgService.completeOperation(ctx.first.id, { quantityCompleted: 3, locationId: shelf.id }, ctx.user.id);
+    const shelf = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: (await stockService.listWarehouses())[0]!.id, name: "B2", active: true }));
+    await mfgService.completeOperation(ctx.first.id, parsed(completeOperationSchema, { quantityCompleted: 3, locationId: shelf.id }), ctx.user.id);
     expect(await balance(ctx.component.id, ctx.location.id)).toBe(100);
     expect(await balance(ctx.component.id, shelf.id)).toBe(-6);
   });
@@ -221,8 +221,8 @@ describe("Ångra rapportering", () => {
 
   it("takes the finished goods back out and reopens an order the last operation completed", async () => {
     const ctx = await setup();
-    await mfgService.completeOperation(ctx.first.id, {}, ctx.user.id);
-    await mfgService.completeOperation(ctx.last.id, {}, ctx.user.id);
+    await mfgService.completeOperation(ctx.first.id, parsed(completeOperationSchema, {}), ctx.user.id);
+    await mfgService.completeOperation(ctx.last.id, parsed(completeOperationSchema, {}), ctx.user.id);
     expect((await orderNow(ctx.order.id)).status).toBe("done");
     expect(await balance(ctx.parent.id, ctx.location.id)).toBe(5);
 
@@ -238,8 +238,8 @@ describe("Ångra rapportering", () => {
 
   it("undoes an efterrapport on a done order and leaves the order done", async () => {
     const ctx = await setup();
-    await mfgService.completeOperation(ctx.last.id, {}, ctx.user.id);
-    await mfgService.completeOperation(ctx.first.id, {}, ctx.user.id);
+    await mfgService.completeOperation(ctx.last.id, parsed(completeOperationSchema, {}), ctx.user.id);
+    await mfgService.completeOperation(ctx.first.id, parsed(completeOperationSchema, {}), ctx.user.id);
     expect(await balance(ctx.component.id, ctx.location.id)).toBe(90);
 
     const late = (await mfgService.listReports(ctx.order.id)).find((r) => r.sequenceNo === 10)!;
@@ -255,7 +255,7 @@ describe("Ångra rapportering", () => {
 
   it("refuses when the received goods are no longer on the location", async () => {
     const ctx = await setup();
-    await mfgService.completeOperation(ctx.last.id, { quantityCompleted: 3 }, ctx.user.id);
+    await mfgService.completeOperation(ctx.last.id, parsed(completeOperationSchema, { quantityCompleted: 3 }), ctx.user.id);
     await stockService.recordTransaction({ articleId: ctx.parent.id, locationId: ctx.location.id, quantityDelta: -2, transactionType: "inventory_adjustment" });
     const [report] = await mfgService.listReports(ctx.order.id);
 
@@ -339,7 +339,7 @@ describe("Makulera order", () => {
     await expect(mfgService.cancel(ctx.order.id)).rejects.toThrow(ManufacturingOrderStampedInError);
 
     const [open] = await timeReportService.listStampSessions(true);
-    await timeReportService.stampOut(open!.id, {}, ctx.user.id);
+    await timeReportService.stampOut(open!.id, parsed(stampOutSchema, {}), ctx.user.id);
     expect((await mfgService.cancel(ctx.order.id)).status).toBe("cancelled");
   });
 });

@@ -13,18 +13,18 @@ import {
   DuplicateArticleNumberError,
   InvalidReferenceError,
 } from "../src/modules/article/service/article.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 const repo = createArticleRepository(db);
 const service = createArticleService(repo);
 
 async function makeArticle(articleNumber: string) {
-  return service.createArticle({
+  return service.createArticle(parsed(createArticleSchema, {
     articleNumber,
     name: articleNumber,
     type: "purchased",
-    unit: "st",
     active: true,
-  });
+  }));
 }
 
 beforeEach(async () => {
@@ -164,7 +164,6 @@ describe("article service — BOM tree", () => {
       name: "Fantom",
       type: "manufactured",
       isPhantom: true,
-      unit: "st",
       active: true,
     });
     const leaf = await makeArticle("TREE-LEAF");
@@ -206,11 +205,11 @@ describe("article service — general update", () => {
   });
 
   it("takes the varugrupp's VAT rate: 25 % without a group, the group's rate with one, following a change", async () => {
-    const created = await service.createArticle({
+    const created = await service.createArticle(parsed(createArticleSchema, {
       articleNumber: `VAT-${crypto.randomUUID().slice(0, 8)}`,
       name: "Momsartikel",
       type: "purchased",
-    });
+    }));
     expect(created.vatRate).toBe("25.00");
     const group = await service.createArticleGroup({ code: "7", name: `Livsmedel ${crypto.randomUUID()}`, vatRate: 12 });
     expect(group.vatRate).toBe("12.00");
@@ -225,31 +224,31 @@ describe("article service — general update", () => {
 
   it("stores the artikelkod, filters the list on it and refuses an unknown one", async () => {
     const [code] = await db.insert(articleCodes).values({ code: "100", name: "Plåt" }).returning();
-    const created = await service.createArticle({
+    const created = await service.createArticle(parsed(createArticleSchema, {
       articleNumber: `AK-${crypto.randomUUID().slice(0, 8)}`,
       name: "Kodad",
       type: "purchased",
       articleCodeId: code!.id,
-    });
+    }));
     expect(created).toMatchObject({ articleCodeId: code!.id, articleCodeCode: "100", articleCodeName: "Plåt" });
-    await service.createArticle({ articleNumber: `AK-${crypto.randomUUID().slice(0, 8)}`, name: "Okodad", type: "purchased" });
+    await service.createArticle(parsed(createArticleSchema, { articleNumber: `AK-${crypto.randomUUID().slice(0, 8)}`, name: "Okodad", type: "purchased" }));
     const list = await service.listArticles({ articleCodeId: code!.id, limit: 50, offset: 0 });
     expect(list.rows.map((r) => r.id)).toEqual([created.id]);
     expect(list.rows[0]).toMatchObject({ articleCodeName: "Plåt", vatRate: "25.00" });
     await expect(
-      service.createArticle({ articleNumber: "AK-X", name: "X", type: "purchased", articleCodeId: crypto.randomUUID() })
+      service.createArticle(parsed(createArticleSchema, { articleNumber: "AK-X", name: "X", type: "purchased", articleCodeId: crypto.randomUUID() }))
     ).rejects.toThrow(InvalidReferenceError);
     const cleared = await service.updateArticle(created.id, { articleCodeId: null });
     expect(cleared!.articleCodeId).toBeNull();
   });
 
   it("stores salesPrice on create, updates and clears it via update", async () => {
-    const created = await service.createArticle({
+    const created = await service.createArticle(parsed(createArticleSchema, {
       articleNumber: `SP-${crypto.randomUUID().slice(0, 8)}`,
       name: "Prisartikel",
       type: "purchased",
       salesPrice: 199.5,
-    });
+    }));
     expect(created.salesPrice).toBe("199.5000");
 
     const updated = await service.updateArticle(created.id, { salesPrice: 249.9 });
@@ -263,13 +262,13 @@ describe("article service — general update", () => {
   });
 
   it("stores the planning fields (reorder point + order quantity), null clears them", async () => {
-    const created = await service.createArticle({
+    const created = await service.createArticle(parsed(createArticleSchema, {
       articleNumber: `PLAN-${crypto.randomUUID().slice(0, 8)}`,
       name: "Planartikel",
       type: "purchased",
       reorderPoint: 25,
       orderQuantity: 10,
-    });
+    }));
     expect(created.reorderPoint).toBe("25.0000");
     expect(created.orderQuantity).toBe("10.0000");
 
@@ -283,12 +282,12 @@ describe("article service — general update", () => {
   });
 
   it("stores Avrundning with 3 decimals, null clears it", async () => {
-    const created = await service.createArticle({
+    const created = await service.createArticle(parsed(createArticleSchema, {
       articleNumber: `RND-${crypto.randomUUID().slice(0, 8)}`,
       name: "Rundad",
       type: "purchased",
       rounding: 7.38,
-    });
+    }));
     expect(created.rounding).toBe("7.380");
 
     const updated = await service.updateArticle(created.id, { rounding: 0.125 });
@@ -409,22 +408,20 @@ describe("article service — article group codes", () => {
 describe("article service — list search/filter/pagination", () => {
   async function seedArticles() {
     const group = await service.createArticleGroup({ code: "310", name: "Rostfritt" });
-    await service.createArticle({
+    await service.createArticle(parsed(createArticleSchema, {
       articleNumber: "DB-100",
       name: "Diskbänk 60cm",
       type: "manufactured",
-      unit: "st",
       active: true,
       groupId: group.id,
-    });
-    await service.createArticle({
+    }));
+    await service.createArticle(parsed(createArticleSchema, {
       articleNumber: "DB-200",
       name: "Diskbänk 80cm",
       type: "manufactured",
-      unit: "st",
       active: true,
-    });
-    await service.createArticle({ articleNumber: "SKRUV-1", name: "Skruv M6", type: "purchased", unit: "st", active: true });
+    }));
+    await service.createArticle(parsed(createArticleSchema, { articleNumber: "SKRUV-1", name: "Skruv M6", type: "purchased", active: true }));
     return { group };
   }
 

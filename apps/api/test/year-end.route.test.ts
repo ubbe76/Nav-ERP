@@ -1,3 +1,4 @@
+import { createVerificationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { accountingPeriods, accounts, db, fiscalYears, permissionGroups, yearEndClosings } from "@navet/db";
@@ -18,6 +19,7 @@ import {
   setupYearEnd,
   waitForLockWaiter,
 } from "./helpers/year-end.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Never TRUNCATE permission_groups: the migration's seed rows (ALLA, VERKSTAD)
 // must survive for every later test file.
@@ -122,7 +124,7 @@ describe("year-end-closings routes", () => {
     const app = buildYearEndApp(user.id);
     const created = await app.inject({ method: "POST", url: "/year-end-closings", payload: { fiscalYearId: yearId } });
     const series = await testEconomyService.createSeries({ code: "A", name: "Manuella" });
-    await testEconomyService.createVerification({ seriesId: series.id, date: `${YEAR}-04-01`, description: "Utkast", rows: [] }, user.id);
+    await testEconomyService.createVerification(parsed(createVerificationSchema, { seriesId: series.id, date: `${YEAR}-04-01`, description: "Utkast", rows: [] }), user.id);
     const res = await app.inject({ method: "POST", url: `/year-end-closings/${created.json().id}/inventory`, payload: { method: "standard" } });
     expect(res.statusCode).toBe(409);
     expect(res.json().code).toBe("year-end-blocked");

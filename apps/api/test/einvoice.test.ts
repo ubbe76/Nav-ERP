@@ -1,3 +1,4 @@
+import { createArticleSchema, createStockLocationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { auditLog, db, einvoiceTransmissions, invoices } from "@navet/db";
@@ -45,6 +46,7 @@ import {
 import { EInvoiceProviderError } from "../src/modules/einvoice/service/einvoice-provider.js";
 import { createFakeEinvoiceProvider, refused, unavailable } from "./helpers/fake-einvoice-provider.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/services.js";
+import { parsed } from "./helpers/parsed.js";
 
 // E-faktura (Peppol) — the service against Postgres with a fake access point
 // (spec §6): every guard of the send flow, the insert-before-call order, one
@@ -167,14 +169,14 @@ async function makeCustomer(over: Record<string, unknown> = {}) {
 
 // A delivered order row → draft invoice → issued (FA number, archived PDF).
 async function issuedInvoice(customer: Awaited<ReturnType<typeof makeCustomer>>, opts: { issue?: boolean; credit?: boolean } = {}) {
-  const article = await articleService.createArticle({
+  const article = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `EINV-${crypto.randomUUID().slice(0, 8)}`,
     name: "Diskbänk",
     type: "manufactured",
     active: true,
-  });
+  }));
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  const location = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
   await stockService.recordTransaction({ articleId: article.id, locationId: location.id, quantityDelta: 10, transactionType: "inventory_adjustment" });
   const { order, rows } = await salesService.createQuote(
     {
@@ -256,17 +258,17 @@ describe("pure rules", () => {
   it("blocks in the spec's order", () => {
     const company = { orgNumber: "5560000000", vatNumber: "SE556000000001" } as never;
     const ok = { privatePerson: false, country: "SE", invoiceCountry: null, peppolId: null, orgNumber: "5565555553" };
-    expect(blockedReasonFor({ status: "draft", currency: "SEK" }, ok, company)).toBe("invoice-not-issued");
-    expect(blockedReasonFor({ status: "issued", currency: "SEK" }, { ...ok, privatePerson: true }, company)).toBe("private-person");
+    expect(blockedReasonFor({ status: "draft" }, ok, company)).toBe("invoice-not-issued");
+    expect(blockedReasonFor({ status: "issued" }, { ...ok, privatePerson: true }, company)).toBe("private-person");
     // Spec 2026-11-05: a foreign customer and another currency are sendable.
-    expect(blockedReasonFor({ status: "issued", currency: "SEK" }, { ...ok, country: "NO", orgNumber: "987654325" }, company)).toBeNull();
-    expect(blockedReasonFor({ status: "issued", currency: "EUR" }, ok, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued" }, { ...ok, country: "NO", orgNumber: "987654325" }, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued" }, ok, company)).toBeNull();
     // …but a country without a derived scheme needs the id typed.
-    expect(blockedReasonFor({ status: "issued", currency: "EUR" }, { ...ok, country: "DE", orgNumber: "HRB 12345" }, company)).toBe("missing-recipient-id");
-    expect(blockedReasonFor({ status: "issued", currency: "SEK" }, ok, { orgNumber: null, vatNumber: "SE1" } as never)).toBe("missing-company-data");
-    expect(blockedReasonFor({ status: "issued", currency: "SEK" }, ok, { orgNumber: "5560000000", vatNumber: "" } as never)).toBe("missing-company-data");
-    expect(blockedReasonFor({ status: "issued", currency: "SEK" }, { ...ok, orgNumber: null }, company)).toBe("missing-recipient-id");
-    expect(blockedReasonFor({ status: "paid", currency: "SEK" }, ok, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued" }, { ...ok, country: "DE", orgNumber: "HRB 12345" }, company)).toBe("missing-recipient-id");
+    expect(blockedReasonFor({ status: "issued" }, ok, { orgNumber: null, vatNumber: "SE1" } as never)).toBe("missing-company-data");
+    expect(blockedReasonFor({ status: "issued" }, ok, { orgNumber: "5560000000", vatNumber: "" } as never)).toBe("missing-company-data");
+    expect(blockedReasonFor({ status: "issued" }, { ...ok, orgNumber: null }, company)).toBe("missing-recipient-id");
+    expect(blockedReasonFor({ status: "paid" }, ok, company)).toBeNull();
   });
 
   it("is due by the interval with a margin, never before half the interval on short ones", () => {
@@ -382,7 +384,7 @@ describe("Skicka e-faktura — the send", () => {
 
   it("derives the recipient from the organisationsnummer and falls back to the customer number as BT-10", async () => {
     const customer = await makeCustomer({ orgNumber: "556555-5553" });
-    const article = await articleService.createArticle({ articleNumber: `FREE-${crypto.randomUUID().slice(0, 6)}`, name: "Tjänst", type: "service", active: true });
+    const article = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `FREE-${crypto.randomUUID().slice(0, 6)}`, name: "Tjänst", type: "service", active: true }));
     const draft = await invoiceService.create({ customerId: customer.id, rows: [{ description: "Konsulttimme", articleId: article.id, quantity: 1, unitPrice: 100 }] }, userId);
     const issued = await invoiceService.issue(draft!.id, userId);
     const view = await einvoice.send(issued!.id, userId);
@@ -807,22 +809,22 @@ describe("momskoder (spec 4.5)", () => {
     const company = { orgNumber: "5560000000", vatNumber: "SE556000000001" } as never;
     const ok = { privatePerson: false, country: "SE", invoiceCountry: null, peppolId: null, orgNumber: "5565555553" };
     const rows = (...codes: string[]) => codes.map((code) => ({ vatCode: { code, invoiceText: null } }));
-    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("MP25", "MF", "OB") }, ok, company)).toBeNull();
-    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("MP25", "EXV") }, ok, company)).toBeNull();
-    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("EUV", "EUT") }, ok, company)).toBeNull();
-    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("EXT", "EXT") }, ok, company)).toBeNull();
-    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("UTM") }, ok, company)).toBe("vat-code-unsupported");
-    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("EXT", "EXV") }, ok, company)).toBe("vat-code-mixed");
-    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("MP25", "EXT") }, ok, company)).toBe("vat-code-mixed");
+    expect(blockedReasonFor({ status: "issued", rows: rows("MP25", "MF", "OB") }, ok, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued", rows: rows("MP25", "EXV") }, ok, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued", rows: rows("EUV", "EUT") }, ok, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued", rows: rows("EXT", "EXT") }, ok, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued", rows: rows("UTM") }, ok, company)).toBe("vat-code-unsupported");
+    expect(blockedReasonFor({ status: "issued", rows: rows("EXT", "EXV") }, ok, company)).toBe("vat-code-mixed");
+    expect(blockedReasonFor({ status: "issued", rows: rows("MP25", "EXT") }, ok, company)).toBe("vat-code-mixed");
   });
 
   it("sends omvänd betalningsskyldighet as AE with VATEX-EU-AE, the code's text and the buyer's normalized VAT number", async () => {
-    const service = await articleService.createArticle({
+    const service = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `EINV-OB-${crypto.randomUUID().slice(0, 8)}`,
       name: "Montage",
       type: "service",
       active: true,
-    });
+    }));
     // Written with spaces and a hyphen: BT-48 goes out normalized.
     const bygg = await makeCustomer({ name: "Bygg AB", reverseChargeConstruction: true, vatNumber: "se 556555-5553 01" });
     const draft = await invoiceService.create(
@@ -1013,7 +1015,7 @@ describe("Skicka e-faktura automatiskt vid Utfärda", () => {
     const customer = await makeCustomer({ invoiceDelivery: "peppol", collectiveInvoicing: true });
     const a = await article();
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    const location = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
     await stockService.recordTransaction({ articleId: a.id, locationId: location.id, quantityDelta: 10, transactionType: "inventory_adjustment" });
     const { order, rows } = await salesService.createQuote(
       { customerId: customer.id, customerOrderNumber: "PO-1", rows: [{ articleId: a.id, quantity: 1, unitPrice: 500 }], confirm: true },

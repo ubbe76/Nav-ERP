@@ -1,3 +1,4 @@
+import { createCustomerSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db, units } from "@navet/db";
@@ -15,6 +16,7 @@ import { createMailService, type MailTransportFactory } from "../src/modules/mai
 import { createDocumentPdfService } from "../src/modules/mail/service/document-pdf.js";
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -63,7 +65,7 @@ async function makeKgArticle(articleNumber: string) {
 
 describe("sales — order rows in alternative units", () => {
   it("converts quote rows to the base unit and snapshots the factor", async () => {
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     const article = await makeKgArticle("SA-1");
 
     const { order } = await salesService.createQuote(
@@ -80,7 +82,7 @@ describe("sales — order rows in alternative units", () => {
   });
 
   it("interprets a row PATCH in the row's unit and can switch back to the base unit", async () => {
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     const article = await makeKgArticle("SA-2");
     const { order } = await salesService.createQuote(
       { customerId: customer.id, rows: [{ articleId: article.id, quantity: 500, unitPrice: 12, unitId: kgId }], confirm: false },
@@ -101,7 +103,7 @@ describe("sales — order rows in alternative units", () => {
   });
 
   it("rejects a unit the article does not have", async () => {
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     const article = await articleService.createArticle({
       articleNumber: "SA-3",
       name: "SA-3",
@@ -118,7 +120,7 @@ describe("sales — order rows in alternative units", () => {
   });
 
   it("delivers in the base unit and completes the order as before", async () => {
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     const article = await makeKgArticle("SA-4");
     const { order } = await salesService.createQuote(
       { customerId: customer.id, rows: [{ articleId: article.id, quantity: 500, unitPrice: 12, unitId: kgId }], confirm: true },

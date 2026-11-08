@@ -1,3 +1,4 @@
+import { createVerificationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { accountingPeriods, bankAccounts, bankReconciliations, db, supplierInvoices, suppliers, vatSettlements } from "@navet/db";
@@ -17,6 +18,7 @@ import {
   testYearEndPoster,
 } from "./helpers/year-end.js";
 import { vatCodeId } from "./helpers/vat-codes.js";
+import { parsed } from "./helpers/parsed.js";
 
 beforeEach(resetYearEnd);
 afterAll(resetYearEnd);
@@ -41,7 +43,7 @@ describe("steg 1 — step blockers", () => {
     const { user, yearId } = await setupYearEnd();
     await createCalendarYear(PREVIOUS_YEAR);
     const series = await testEconomyService.createSeries({ code: "A", name: "Manuella" });
-    await testEconomyService.createVerification({ seriesId: series.id, date: `${YEAR}-03-01`, description: "Utkast", rows: [] }, user.id);
+    await testEconomyService.createVerification(parsed(createVerificationSchema, { seriesId: series.id, date: `${YEAR}-03-01`, description: "Utkast", rows: [] }), user.id);
     const closing = await service.startClosing({ fiscalYearId: yearId }, user.id);
     await testEconomyService.lockPeriod(closing.closingPeriod.id, user.id);
 

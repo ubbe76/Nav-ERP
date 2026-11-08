@@ -1,3 +1,4 @@
+import { createArticleSchema, createSupplierSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { asc, eq, sql } from "drizzle-orm";
 import { articleSupplierPriceHistory, articleSuppliers, articles, db } from "@navet/db";
@@ -11,6 +12,7 @@ import { createPurchaseService } from "../src/modules/purchase/service/purchase.
 import { createRegisterRepository } from "../src/modules/register/repository/register.repository.js";
 import { createRegisterService } from "../src/modules/register/service/register.service.js";
 import { overlappingTransactions } from "./helpers/overlapping-transactions.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Prishistorik (migration 0169): the försäljningspris and the supplier catalog
 // get their history from triggers, so every writer records it — the services
@@ -46,18 +48,17 @@ afterAll(async () => {
 });
 
 async function makeArticle(salesPrice?: number) {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `PH-${crypto.randomUUID()}`,
     name: "Konsol",
     type: "purchased",
-    unit: "st",
     salesPrice,
     active: true,
-  });
+  }));
 }
 
 async function makeSupplier() {
-  return purchaseService.createSupplier({ name: `Lev-${crypto.randomUUID()}`, active: true });
+  return purchaseService.createSupplier(parsed(createSupplierSchema, { name: `Lev-${crypto.randomUUID()}`, active: true }));
 }
 
 describe("prishistorik — försäljningspris", () => {
@@ -204,9 +205,9 @@ describe("prishistorik — leverantörskatalogen", () => {
     await purchaseService.addArticleSupplier(article.id, { supplierId: supplier.id, price: 10, currency: "SEK", isPrimary: true });
     await db.delete(articles).where(eq(articles.id, article.id));
 
-    const [{ n }] = (await db.execute(sql`select count(*)::int as n from article_supplier_price_history where article_id = ${article.id}`)) as unknown as {
+    const [history] = (await db.execute(sql`select count(*)::int as n from article_supplier_price_history where article_id = ${article.id}`)) as unknown as {
       n: number;
     }[];
-    expect(n).toBe(0);
+    expect(history!.n).toBe(0);
   });
 });

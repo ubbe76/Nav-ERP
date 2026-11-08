@@ -1,3 +1,4 @@
+import { createArticleSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { getTableName, sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -8,6 +9,7 @@ import { FILE_EXPORT_KINDS } from "../src/modules/system/repository/file-export.
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { readStoredZipEntries } from "../src/modules/import/service/xlsx-writer.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Lagringsutrymme: the file sizes per kind, read without fetching the bytes,
 // and a guard that every bytea column in the schema is counted.
@@ -24,11 +26,11 @@ afterAll(async () => {
 
 describe("readStorageUsage", () => {
   it("counts the stored files and their bytes per kind, and the database size", async () => {
-    const article = await articleService.createArticle({
+    const article = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `STOR-${crypto.randomUUID().slice(0, 8)}`,
       name: "Lagrad",
       type: "purchased",
-    });
+    }));
     await articleService.addFile(article.id, { filename: "a.pdf", contentType: "application/pdf", data: Buffer.alloc(3000, 1) });
     await articleService.addFile(article.id, { filename: "b.pdf", contentType: "application/pdf", data: Buffer.alloc(500, 2) });
 
@@ -59,7 +61,7 @@ describe("readStorageUsage", () => {
 
 describe("exportFiles", () => {
   it("streams every stored file into a zip under its kind and article number, numbering repeated names", async () => {
-    const article = await articleService.createArticle({ articleNumber: "EXP-1/A", name: "Exporterad", type: "purchased" });
+    const article = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "EXP-1/A", name: "Exporterad", type: "purchased" }));
     await articleService.addFile(article.id, { filename: "ritning.pdf", contentType: "application/pdf", data: Buffer.from("ett") });
     await articleService.addFile(article.id, { filename: "ritning.pdf", contentType: "application/pdf", data: Buffer.from("två") });
 

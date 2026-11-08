@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
-import { listAccountsQuerySchema, listArticlesQuerySchema, listQuerySchema, listPurchaseOrdersQuerySchema } from "@navet/shared";
+import { listAccountsQuerySchema, listArticlesQuerySchema, listQuerySchema, listPurchaseOrdersQuerySchema, createArticleSchema, createCustomerSchema, createPurchaseOrderSchema, createSupplierSchema } from "@navet/shared";
 import { registerListCsvRoute } from "../src/modules/system/routes/csv-export.js";
 import { CUSTOMER_CSV_COLUMNS } from "../src/modules/sales/service/export-columns.js";
 import { PURCHASE_ORDER_CSV_COLUMNS } from "../src/modules/purchase/service/export-columns.js";
@@ -28,6 +28,7 @@ import { createMailService, type MailTransportFactory } from "../src/modules/mai
 import { createDocumentPdfService } from "../src/modules/mail/service/document-pdf.js";
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 // F2: end-to-end coverage for two of the purchase/sales CSV export endpoints
 // (the route-helper mechanics themselves — pagination stripping, the 10k cap,
@@ -105,7 +106,11 @@ registerListCsvRoute(app, {
   querySchema: listArticlesQuerySchema,
   filenameBase: "artiklar",
   columns: articleExportColumns,
-  fetch: (q) => articleService.listArticles(q),
+  // As the route: the export always carries the ABC column.
+  fetch: async (q) => {
+    const page = await articleService.listArticles({ ...q, withAbc: true });
+    return { ...page, rows: page.rows.map((row) => ({ abcClass: null, ...row })) };
+  },
 });
 registerListCsvRoute(app, {
   path: "/accounts/csv",
@@ -137,8 +142,8 @@ async function makeUser() {
 
 describe("GET /customers/csv", () => {
   it("returns a BOM-prefixed, semicolon-separated CSV with Swedish headers and respects ?search=", async () => {
-    await salesService.createCustomer({ name: "Skruv & Mutter AB", active: true });
-    await salesService.createCustomer({ name: "Annan Kund AB", active: true });
+    await salesService.createCustomer(parsed(createCustomerSchema, { name: "Skruv & Mutter AB", active: true }));
+    await salesService.createCustomer(parsed(createCustomerSchema, { name: "Annan Kund AB", active: true }));
 
     const res = await app.inject({ url: "/customers/csv?search=Skruv" });
 
@@ -155,9 +160,9 @@ describe("GET /customers/csv", () => {
 describe("GET /purchase-orders/csv", () => {
   it("respects the ?status= filter", async () => {
     const user = await makeUser();
-    const supplier = await purchaseService.createSupplier({ name: "CSV-Leverantör AB", active: true });
-    const draftOrder = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
-    const confirmedOrder = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "CSV-Leverantör AB", active: true }));
+    const draftOrder = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
+    const confirmedOrder = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     await purchaseService.confirm(confirmedOrder.id);
 
     const res = await app.inject({ url: "/purchase-orders/csv?status=confirmed" });
@@ -171,8 +176,8 @@ describe("GET /purchase-orders/csv", () => {
 
 describe("GET /articles/csv", () => {
   it("returns a BOM-prefixed CSV with Swedish headers and respects ?search=", async () => {
-    await articleService.createArticle({ articleNumber: "A-CSV-1", name: "Skruv 8x40", type: "purchased" });
-    await articleService.createArticle({ articleNumber: "A-CSV-2", name: "Annan artikel", type: "purchased" });
+    await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "A-CSV-1", name: "Skruv 8x40", type: "purchased" }));
+    await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "A-CSV-2", name: "Annan artikel", type: "purchased" }));
 
     const res = await app.inject({ url: "/articles/csv?search=Skruv" });
 

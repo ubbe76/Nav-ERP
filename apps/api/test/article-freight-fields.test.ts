@@ -1,3 +1,4 @@
+import { createArticleSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -5,6 +6,7 @@ import { createArticleRepository } from "../src/modules/article/repository/artic
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createRegisterRepository } from "../src/modules/register/repository/register.repository.js";
 import { createRegisterService } from "../src/modules/register/service/register.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const registerService = createRegisterService(createRegisterRepository(db));
@@ -19,14 +21,14 @@ afterAll(async () => {
 
 describe("artikelns fraktfält (egna mått)", () => {
   it("derives flakmeter from pallplatser on create", async () => {
-    const a = await articleService.createArticle({
+    const a = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: "FR-A1",
       name: "Diskbänk 3 m",
       type: "manufactured",
       active: true,
       parcelKind: "pallet",
       palletSpaces: 2,
-    });
+    }));
     const found = await articleService.getArticle(a!.id);
     expect(found?.parcelKind).toBe("pallet");
     expect(Number(found?.palletSpaces)).toBe(2);
@@ -34,19 +36,19 @@ describe("artikelns fraktfält (egna mått)", () => {
   });
 
   it("an explicit flakmeter wins over pallplatser", async () => {
-    const a = await articleService.createArticle({
+    const a = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: "FR-A2",
       name: "Bänk",
       type: "manufactured",
       active: true,
       palletSpaces: 2,
       loadingMeters: 1.5,
-    });
+    }));
     expect(Number((await articleService.getArticle(a!.id))?.loadingMeters)).toBe(1.5);
   });
 
   it("derives on update when only pallplatser changes and flakmeter is empty", async () => {
-    const a = await articleService.createArticle({ articleNumber: "FR-A3", name: "Bänk", type: "manufactured", active: true });
+    const a = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "FR-A3", name: "Bänk", type: "manufactured", active: true }));
     await articleService.updateArticle(a!.id, { palletSpaces: 3, stackable: true });
     const found = await articleService.getArticle(a!.id);
     expect(Number(found?.loadingMeters)).toBe(1.2);
@@ -54,13 +56,13 @@ describe("artikelns fraktfält (egna mått)", () => {
   });
 
   it("keeps a stored flakmeter when pallplatser changes", async () => {
-    const a = await articleService.createArticle({
+    const a = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: "FR-A4",
       name: "Bänk",
       type: "manufactured",
       active: true,
       loadingMeters: 2,
-    });
+    }));
     await articleService.updateArticle(a!.id, { palletSpaces: 1 });
     expect(Number((await articleService.getArticle(a!.id))?.loadingMeters)).toBe(2);
   });

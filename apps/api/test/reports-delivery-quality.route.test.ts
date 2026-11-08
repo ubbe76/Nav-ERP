@@ -1,3 +1,4 @@
+import type { InjectOptions } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -35,7 +36,7 @@ afterAll(async () => {
 });
 
 const get = (url: string) => app.inject({ method: "GET", url: `/api/v1${url}`, headers: { cookie } });
-const post = (url: string, payload?: unknown) => app.inject({ method: "POST", url: `/api/v1${url}`, headers: { cookie }, payload });
+const post = (url: string, payload?: InjectOptions["payload"]) => app.inject({ method: "POST", url: `/api/v1${url}`, headers: { cookie }, payload });
 
 const isoDate = (offsetDays: number) => {
   const d = new Date(`${stockholmToday()}T00:00:00Z`);

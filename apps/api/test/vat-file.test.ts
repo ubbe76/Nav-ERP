@@ -90,7 +90,7 @@ const ESKD_DTD = readFileSync(new URL("./fixtures/skatteverket/eSKDUpload_6p0.dt
 function dtdSequence(element: string): string[] {
   const match = new RegExp(`<!ELEMENT ${element} \\(([^()]*)\\)>`).exec(ESKD_DTD);
   if (!match) throw new Error(`No sequence for ${element} in the DTD`);
-  return match[1].split(",").map((part) => part.trim().replace(/\?$/, ""));
+  return match[1]!.split(",").map((part) => part.trim().replace(/\?$/, ""));
 }
 
 const zeroBoxes = (): VatDeclarationBoxes =>

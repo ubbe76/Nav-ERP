@@ -1,3 +1,4 @@
+import { listOpenSupplierInvoicesQuerySchema } from "@navet/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, count, eq, sql } from "drizzle-orm";
 import { auditLog, bankFiles, db, paymentBatchItems, paymentBatches, supplierInvoices, supplierPayments, systemSettings, verifications } from "@navet/db";
@@ -31,6 +32,7 @@ import {
   testPoster,
   testSupplierPaymentService,
 } from "./helpers/banking.js";
+import { parsed } from "./helpers/parsed.js";
 
 const service = buildPaymentBatchService();
 let restoreCompany: () => Promise<void>;
@@ -206,7 +208,7 @@ describe("bekräfta, avvisa, retur och makulera", () => {
     await service.export(batch.id, userId);
     await testEconomyService.lockPeriod((await periodStarting("2024-10-01")).id, userId);
     const { results, batch: after } = await after15th.confirm(batch.id, { paymentDate: "2024-10-15" }, userId);
-    expect(results.map((r) => [r.ok, r.error?.code])).toEqual([
+    expect(results.map((r) => [r.ok, r.ok ? undefined : r.error.code])).toEqual([
       [false, "accounting-period-locked"],
       [false, "accounting-period-locked"],
     ]);
@@ -230,7 +232,7 @@ describe("bekräfta, avvisa, retur och makulera", () => {
       { paymentDate: "2024-10-15", itemIds: [foreign, batch.items[1]!.id, batch.items[0]!.id] },
       userId
     );
-    expect(results.map((r) => [r.itemId, r.ok, r.error?.code])).toEqual([
+    expect(results.map((r) => [r.itemId, r.ok, r.ok ? undefined : r.error.code])).toEqual([
       [batch.items[0]!.id, true, undefined],
       [batch.items[1]!.id, false, "payment-batch-item-not-confirmable"],
       // An id that is no row of this batch: "not found", not "no longer waiting".
@@ -371,7 +373,7 @@ describe("spec §12: reservation, inställningar och samtidighet", () => {
       await waitForLockWaiters(2);
     });
     const [first, second] = await both!;
-    const results = [...first.results, ...second.results];
+    const results = [...first!.results, ...second!.results];
     expect(results).toHaveLength(2);
     expect(results.filter((r) => r.ok)).toHaveLength(1);
     const loser = results.find((r) => !r.ok)!;
@@ -408,7 +410,7 @@ describe("öppna poster och betalningskortet", () => {
   it("open items carry the live batch and the payment method; the UTB detail names its batch row", async () => {
     const { a, b } = await threeInvoices();
     const batch = await service.create({ invoiceIds: [a.id] }, userId);
-    const open = await testSupplierPaymentService.listOpenInvoices({ limit: 50, offset: 0 });
+    const open = await testSupplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { limit: 50, offset: 0 }));
     const rowA = open.rows.find((r) => r.id === a.id)!;
     const rowB = open.rows.find((r) => r.id === b.id)!;
     expect(rowA).toMatchObject({ supplierPaymentMethod: "bankgiro", paymentBatch: { id: batch.id, batchNumber: batch.batchNumber, status: "draft" } });
@@ -423,7 +425,7 @@ describe("öppna poster och betalningskortet", () => {
     expect(results[0]!.ok).toBe(true);
     expect(detail!.paymentBatchItem).toEqual({ id: batch.items[0]!.id, batchId: batch.id, batchNumber: batch.batchNumber, endToEndId: batch.items[0]!.endToEndId });
     // A paid invoice is no open item; a rejected row no longer shows.
-    expect((await testSupplierPaymentService.listOpenInvoices({ limit: 50, offset: 0 })).rows.map((r) => r.id)).not.toContain(a.id);
+    expect((await testSupplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { limit: 50, offset: 0 }))).rows.map((r) => r.id)).not.toContain(a.id);
   });
 });
 

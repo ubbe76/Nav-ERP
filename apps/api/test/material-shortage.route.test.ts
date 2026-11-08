@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import Fastify from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 import { manufacturingRoutes } from "../src/modules/manufacturing/routes/manufacturing.routes.js";
 import { MaterialShortageError, type ManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { purchaseRoutes } from "../src/modules/purchase/routes/purchase.routes.js";
@@ -29,7 +29,7 @@ const EXPECTED_BODY = {
   shortages: [SHORTAGE],
 };
 
-function withUser(app: ReturnType<typeof Fastify>) {
+function withUser(app: FastifyInstance) {
   app.addHook("preHandler", async (req) => {
     req.user = { id: crypto.randomUUID(), role: "admin" } as any;
   });

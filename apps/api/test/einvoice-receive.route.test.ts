@@ -1,3 +1,4 @@
+import type { EinvoiceReceptionView } from "@navet/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { ZodError } from "zod";
@@ -27,7 +28,7 @@ import { FAKE_OCR } from "./helpers/invoice-pdf.js";
 
 const ID = "11111111-1111-4111-8111-111111111111";
 
-const RECEPTION_VIEW = {
+const RECEPTION_VIEW: EinvoiceReceptionView = {
   enabled: true,
   smlStatus: "published",
   directoryStatus: "processing",
@@ -390,11 +391,12 @@ describe("reception routes — rules", () => {
 
   it("the public web hook takes received_invoice.created with the same signature", async () => {
     const SECRET = "whsec_receive_route";
-    for (const [key, value] of [
+    const settingRows: [string, string][] = [
       ["einvoice_webhook_id", "1"],
       ["einvoice_webhook_secret", SECRET],
       ["einvoice_webhook_environment", "sandbox"],
-    ]) {
+    ];
+    for (const [key, value] of settingRows) {
       await db.insert(systemSettings).values({ key, value }).onConflictDoUpdate({ target: systemSettings.key, set: { value } });
     }
     const body = JSON.stringify({ code: "received_invoice.created", triggered_at: 1, data: { account_id: 1, invoice_id: 4242, state: "new" } });

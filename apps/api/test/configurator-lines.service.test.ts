@@ -12,6 +12,7 @@ import { createManufacturingRepository } from "../src/modules/manufacturing/repo
 import { createManufacturingService, WorkCenterNotFoundError } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { makeArticle, resetConfigurator, testCostingService, variantTestDeps } from "./helpers/configurator.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Delprojekt 2, Task 4: conditional structure lines and operations, the
 // alternative's article and the extended reference guards. Every save is
@@ -30,7 +31,7 @@ const service = createConfiguratorService({
   costing: testCostingService,
   ...variantTestDeps,
 });
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 
 // work_centers is not seeded by any migration and the 3-digit code space is
 // small, so this file clears it (same as the costing tests).
@@ -174,7 +175,7 @@ describe("configurator lines and operations — CRUD and enriched detail", () =>
 
     const input = await service.loadDerivationInput(s.article.id);
     expect(input.detail.articleId).toBe(s.article.id);
-    expect(input.baseBom).toEqual([{ id: bc.id, componentArticleId: s.hjulArt.id, quantity: 4, unitId: null, unitFactor: null, routingOperationId: s.op10.id, costingOnly: false }]);
+    expect(input.baseBom).toEqual([{ id: bc!.id, componentArticleId: s.hjulArt.id, quantity: 4, unitId: null, unitFactor: null, routingOperationId: s.op10.id, costingOnly: false }]);
     expect(input.baseOperations).toEqual([{ id: s.op10.id, sequenceNo: 10, workCenterId: s.wc.id, description: null, setupTime: 5, runTimePerUnit: 1, costingOnly: false, setupPrice: null, unitPrice: null }]);
     expect(input.lines.map((l) => l.label)).toEqual(["Strukturrad 1 (Plåt)", "Strukturrad 2 (Lock)"]);
     expect(input.lines[0]).toMatchObject({ source: "article", componentArticleId: s.plat.id, quantity: 2, quantityFormula: null, configuratorOperationId: op40.id });

@@ -1,9 +1,12 @@
+import { createCustomerSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, emailLog } from "@navet/db";
 import type { OrderRowConfiguration } from "@navet/shared";
 import Fastify from "fastify";
 import { mailRoutes } from "../src/modules/mail/routes/mail.routes.js";
+import { createQualityRepository } from "../src/modules/quality/repository/quality.repository.js";
+import { createQualityService } from "../src/modules/quality/service/quality.service.js";
 import { pdfText } from "./helpers/pdf.js";
 import {
   buildToOrder,
@@ -17,6 +20,8 @@ import {
   seedStock,
   sentMails,
 } from "./helpers/configured-rows.js";
+import { parsed } from "./helpers/parsed.js";
+import { testDocumentPdfService } from "./helpers/services.js";
 
 // Konfigurator 4b, Task 5: the choice lines of a configured row on every
 // customer document — offert/orderbekräftelse (Visa tilläggspriser), the
@@ -31,7 +36,7 @@ afterAll(resetDocuments);
 
 const SEL = { LOCK: "B", BREDD: 1200, AVLOPP: true };
 const makeCustomer = (showConfigurationPrices = false) =>
-  salesService.createCustomer({ name: "Kund AB", active: true, showConfigurationPrices });
+  salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true, showConfigurationPrices }));
 
 async function configuredOrder(customerId: string) {
   const { article } = await buildToOrder();
@@ -118,7 +123,9 @@ describe("quote / order confirmation", () => {
     app.addHook("preHandler", async (req) => {
       req.user = { id: user.id, email: user.email, name: user.name, role: "admin" } as never;
     });
-    await app.register(mailRoutes, { service: mailService, purchaseService, salesService, invoiceService });
+    // The deviation route is never reached here; the real service keeps the options honest.
+    const qualityService = createQualityService({ repo: createQualityRepository(db), pdf: testDocumentPdfService, mail: mailService });
+    await app.register(mailRoutes, { service: mailService, purchaseService, salesService, invoiceService, qualityService });
     const res = await app.inject({ method: "POST", url: `/email-log/${entry!.id}/resend` });
     expect(res.statusCode).toBe(200);
     expect(sentMails).toHaveLength(2);
@@ -226,7 +233,7 @@ describe("invoice", () => {
 
   it("collective invoicing carries the configuration", async () => {
     const user = await makeUser();
-    const c = await salesService.createCustomer({ name: "Samling AB", active: true, collectiveInvoicing: true });
+    const c = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Samling AB", active: true, collectiveInvoicing: true }));
     const { article } = await deliveredOrder(c.id, user.id);
     const { results } = await invoiceService.runCollectiveInvoicing({ customerIds: [c.id], issue: false }, user.id);
     expect(results[0]!.status).not.toBe("failed");

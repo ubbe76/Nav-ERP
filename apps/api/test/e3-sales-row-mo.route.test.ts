@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { eq, sql } from "drizzle-orm";
@@ -26,6 +27,7 @@ import { createStockService } from "../src/modules/stock/service/stock.service.j
 // Konfigurator 4b: the row-configuration reader the sales service needs for
 // PUT .../configuration — the same wiring as app.ts, taken from the 4b helper.
 import { configurator, rowConfiguration } from "./helpers/configured-rows.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Package 5 (uppföljningssvepet): route-level coverage for E3's KO→TO link
 // error mappings — manufacturing.routes.ts's inline mapper on
@@ -90,18 +92,17 @@ async function makeUser() {
 }
 
 async function makeCustomer() {
-  return salesService.createCustomer({ name: "Kund AB", active: true });
+  return salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
 }
 
 async function makeArticle(type: "manufactured" | "purchased" = "manufactured", salesPrice?: number) {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-E3-ROUTE-${crypto.randomUUID()}`,
     name: "Länkad artikel",
     type,
-    unit: "st",
     active: true,
     salesPrice,
-  });
+  }));
 }
 
 async function makeOrderRow(opts: { confirm: boolean; type?: "manufactured" | "purchased"; quantity?: number }) {

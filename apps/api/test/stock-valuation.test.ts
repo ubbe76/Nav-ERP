@@ -1,3 +1,4 @@
+import { createArticleSchema, createStockLocationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { articleCodes, articleStandardCostHistory, db, stockTransactions } from "@navet/db";
@@ -9,6 +10,7 @@ import { createValuationService } from "../src/modules/stock/service/valuation.s
 import { testDocumentPdfService } from "./helpers/services.js";
 import { pdfText } from "./helpers/pdf.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Service-level coverage for the lagervärdering report (D1): quantity comes
 // from stock_transactions (already historical, arkitekturprincip 1); the
@@ -36,17 +38,17 @@ afterAll(async () => {
 
 async function makeLocation(name = "A1") {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name, active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name, active: true }));
 }
 
 async function makeArticle(opts: { groupId?: string } = {}) {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-VAL-${crypto.randomUUID()}`,
     name: "Test Article",
     type: "purchased",
     active: true,
     ...(opts.groupId ? { groupId: opts.groupId } : {}),
-  });
+  }));
 }
 
 // Writes a stock_transactions row with an explicit created_at, bypassing the
@@ -315,7 +317,7 @@ describe("getValuation — fifo method (#19)", () => {
   it("takes an undone TO receipt back from its own layer and ignores transfers", async () => {
     const a1 = await makeLocation("A1");
     const warehouseB = await stockService.createWarehouse({ name: "Lager B", active: true });
-    const b1 = await stockService.createLocation({ warehouseId: warehouseB.id, name: "B1", active: true });
+    const b1 = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouseB!.id, name: "B1", active: true }));
     const article = await makeArticle();
     const order = crypto.randomUUID();
     const transfer = crypto.randomUUID();

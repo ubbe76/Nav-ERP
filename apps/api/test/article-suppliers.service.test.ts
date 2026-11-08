@@ -21,7 +21,8 @@ import { createDocumentPdfService } from "../src/modules/mail/service/document-p
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { articleSupplierPriceBreaks } from "@navet/db";
-import { createArticleSupplierSchema, updateArticleSupplierSchema } from "@navet/shared";
+import { createArticleSupplierSchema, updateArticleSupplierSchema, createArticleSchema, createSupplierSchema } from "@navet/shared";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const registerService = createRegisterService(createRegisterRepository(db));
@@ -56,11 +57,11 @@ afterAll(async () => {
 });
 
 async function makeArticle(articleNumber: string) {
-  return articleService.createArticle({ articleNumber, name: articleNumber, type: "purchased", active: true });
+  return articleService.createArticle(parsed(createArticleSchema, { articleNumber, name: articleNumber, type: "purchased", active: true }));
 }
 
 async function makeSupplier(name: string, active = true) {
-  return purchaseService.createSupplier({ name, active });
+  return purchaseService.createSupplier(parsed(createSupplierSchema, { name, active }));
 }
 
 describe("article supplier catalog", () => {
@@ -69,13 +70,13 @@ describe("article supplier catalog", () => {
     const s1 = await makeSupplier("Alfa AB");
     const s2 = await makeSupplier("Beta AB");
 
-    await purchaseService.addArticleSupplier(article.id, {
+    await purchaseService.addArticleSupplier(article.id, parsed(createArticleSupplierSchema, {
       supplierId: s1.id,
       supplierArticleNumber: "A-1",
       price: 10,
       isPrimary: true,
-    });
-    await purchaseService.addArticleSupplier(article.id, { supplierId: s2.id, price: 12, isPrimary: true });
+    }));
+    await purchaseService.addArticleSupplier(article.id, parsed(createArticleSupplierSchema, { supplierId: s2.id, price: 12, isPrimary: true }));
 
     const list = await purchaseService.listArticleSuppliers(article.id);
     expect(list).toHaveLength(2);
@@ -92,8 +93,8 @@ describe("article supplier catalog", () => {
     const article = await makeArticle(`ART-${crypto.randomUUID()}`);
     const s1 = await makeSupplier("Alfa AB");
     const s2 = await makeSupplier("Beta AB");
-    const first = await purchaseService.addArticleSupplier(article.id, { supplierId: s1.id, isPrimary: true });
-    const second = await purchaseService.addArticleSupplier(article.id, { supplierId: s2.id, isPrimary: false });
+    const first = await purchaseService.addArticleSupplier(article.id, parsed(createArticleSupplierSchema, { supplierId: s1.id, isPrimary: true }));
+    const second = await purchaseService.addArticleSupplier(article.id, parsed(createArticleSupplierSchema, { supplierId: s2.id, isPrimary: false }));
 
     await purchaseService.updateArticleSupplier(article.id, second.id, { isPrimary: true, price: 99 });
     const list = await purchaseService.listArticleSuppliers(article.id);
@@ -105,9 +106,9 @@ describe("article supplier catalog", () => {
   it("rejects a duplicate (article, supplier)", async () => {
     const article = await makeArticle(`ART-${crypto.randomUUID()}`);
     const supplier = await makeSupplier("Alfa AB");
-    await purchaseService.addArticleSupplier(article.id, { supplierId: supplier.id });
+    await purchaseService.addArticleSupplier(article.id, parsed(createArticleSupplierSchema, { supplierId: supplier.id }));
     await expect(
-      purchaseService.addArticleSupplier(article.id, { supplierId: supplier.id })
+      purchaseService.addArticleSupplier(article.id, parsed(createArticleSupplierSchema, { supplierId: supplier.id }))
     ).rejects.toThrow(DuplicateArticleSupplierError);
   });
 
@@ -115,12 +116,12 @@ describe("article supplier catalog", () => {
     const article = await makeArticle(`ART-${crypto.randomUUID()}`);
     const inactive = await makeSupplier("Nedlagd AB", false);
     await expect(
-      purchaseService.addArticleSupplier(article.id, { supplierId: inactive.id })
+      purchaseService.addArticleSupplier(article.id, parsed(createArticleSupplierSchema, { supplierId: inactive.id }))
     ).rejects.toThrow(SupplierInactiveError);
 
     const supplier = await makeSupplier("Alfa AB");
     await expect(
-      purchaseService.addArticleSupplier(crypto.randomUUID(), { supplierId: supplier.id })
+      purchaseService.addArticleSupplier(crypto.randomUUID(), parsed(createArticleSupplierSchema, { supplierId: supplier.id }))
     ).rejects.toThrow(ArticleNotFoundError);
   });
 
@@ -128,7 +129,7 @@ describe("article supplier catalog", () => {
     const a = await makeArticle(`ART-A-${crypto.randomUUID()}`);
     const b = await makeArticle(`ART-B-${crypto.randomUUID()}`);
     const supplier = await makeSupplier("Alfa AB");
-    const row = await purchaseService.addArticleSupplier(a.id, { supplierId: supplier.id });
+    const row = await purchaseService.addArticleSupplier(a.id, parsed(createArticleSupplierSchema, { supplierId: supplier.id }));
 
     await expect(
       purchaseService.updateArticleSupplier(b.id, row.id, { price: 5 })
@@ -151,14 +152,14 @@ describe("article supplier catalog — staffel (price breaks)", () => {
 
   it("stores breaks on create and lists them ascending by from-quantity", async () => {
     const { article, supplier } = await fixture();
-    const created = await purchaseService.addArticleSupplier(article.id, {
+    const created = await purchaseService.addArticleSupplier(article.id, parsed(createArticleSupplierSchema, {
       supplierId: supplier.id,
       price: 10,
       priceBreaks: [
         { fromQuantity: 100, price: 8 },
         { fromQuantity: 10, price: 9 },
       ],
-    });
+    }));
     expect(created.priceBreaks.map((b) => [b.fromQuantity, b.price])).toEqual([
       [10, 9],
       [100, 8],
@@ -173,11 +174,11 @@ describe("article supplier catalog — staffel (price breaks)", () => {
 
   it("replaces the whole set on update, clears it with [], and accepts a breaks-only PATCH", async () => {
     const { article, supplier } = await fixture();
-    const row = await purchaseService.addArticleSupplier(article.id, {
+    const row = await purchaseService.addArticleSupplier(article.id, parsed(createArticleSupplierSchema, {
       supplierId: supplier.id,
       price: 10,
       priceBreaks: [{ fromQuantity: 10, price: 9 }],
-    });
+    }));
 
     // Only priceBreaks — the empty-`set` guard in the repository.
     const replaced = await purchaseService.updateArticleSupplier(article.id, row.id, {
@@ -200,10 +201,10 @@ describe("article supplier catalog — staffel (price breaks)", () => {
 
   it("deletes the breaks with the catalog row", async () => {
     const { article, supplier } = await fixture();
-    const row = await purchaseService.addArticleSupplier(article.id, {
+    const row = await purchaseService.addArticleSupplier(article.id, parsed(createArticleSupplierSchema, {
       supplierId: supplier.id,
       priceBreaks: [{ fromQuantity: 10, price: 9 }],
-    });
+    }));
     await purchaseService.removeArticleSupplier(article.id, row.id);
     expect(await db.select().from(articleSupplierPriceBreaks)).toHaveLength(0);
   });
@@ -229,13 +230,13 @@ describe("article supplier catalog — staffel (price breaks)", () => {
   it("quotes the staffel price for the order's supplier and quantity", async () => {
     const { article, supplier } = await fixture();
     const other = await makeSupplier("Annan AB");
-    await purchaseService.addArticleSupplier(article.id, {
+    await purchaseService.addArticleSupplier(article.id, parsed(createArticleSupplierSchema, {
       supplierId: supplier.id,
       price: 10,
       currency: "EUR",
       priceBreaks: [{ fromQuantity: 10, price: 9 }],
-    });
-    await purchaseService.addArticleSupplier(article.id, { supplierId: other.id, price: 1 });
+    }));
+    await purchaseService.addArticleSupplier(article.id, parsed(createArticleSupplierSchema, { supplierId: other.id, price: 1 }));
 
     const base = await purchaseService.getSupplierPriceQuote({ supplierId: supplier.id, articleId: article.id, quantity: 9 });
     expect(base).toEqual({

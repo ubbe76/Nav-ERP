@@ -1,3 +1,4 @@
+import { createArticleSchema, createPurchaseOrderSchema, createStockLocationSchema, createSupplierSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { ZodError } from "zod";
@@ -25,6 +26,8 @@ import { createStockService } from "../src/modules/stock/service/stock.service.j
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
 import { ExchangeRateUnavailableError } from "../src/modules/system/service/exchange-rates.js";
+import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Produkter i arbete (#25) against Postgres: every source bounded to D, the
 // orders that count, avräknat at the stock price. "Before D" is made by
@@ -36,7 +39,7 @@ const BEFORE = "2025-06-15T10:00:00Z";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const timeReportService = createTimeReportService(
   createTimeReportRepository(db),
   mfgService,
@@ -97,14 +100,13 @@ async function makeUser() {
 }
 
 async function article(name: string, type: "manufactured" | "purchased" | "service", standardCost?: number) {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `PIA-${(seq += 1)}-${crypto.randomUUID().slice(0, 6)}`,
     name,
     type,
-    unit: "st",
     standardCost,
     active: true,
-  });
+  }));
 }
 
 // A manufactured article (standard cost `parentCost`, null = none) with one
@@ -114,10 +116,10 @@ async function makeProduct(parentCost: number | null) {
   const parent = await article("Diskbänk", "manufactured", parentCost ?? undefined);
   const component = await article("Plåt", "purchased", 12);
   await articleService.addBomComponent(parent.id, { componentArticleId: component.id, quantity: 2 });
-  const workCenter = await mfgService.createWorkCenter({ code: `${100 + (seq % 800)}`, name: "Svets", hourlyRate: 100, overheadPercent: 50, active: true });
+  const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: `${100 + (seq % 800)}`, name: "Svets", hourlyRate: 100, overheadPercent: 50, active: true }));
   await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 1, runTimePerUnit: 1 });
   const warehouse = await stockService.createWarehouse({ name: `Lager ${seq}`, active: true });
-  const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  const location = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
   await stockService.recordTransaction({ articleId: component.id, locationId: location.id, quantityDelta: 100, transactionType: "inventory_adjustment" });
   const employee = await timeReportService.createEmployee({ employeeNumber: `E-${seq}`, name: "Kalle", active: true });
   return { parent, component, location, employee, workCenter };
@@ -249,16 +251,16 @@ describe("Produkter i arbete per datum — the sources", () => {
 
   it("counts a lego receipt that was alive on D, also when it was undone after D", async () => {
     const user = await makeUser();
-    const supplier = await purchaseService.createSupplier({ name: `Lackering ${crypto.randomUUID().slice(0, 6)}`, active: true });
-    const machine = await mfgService.createWorkCenter({ code: "310", name: "Svets", type: "machine", hourlyRate: 100, active: true });
-    const lego = await mfgService.createWorkCenter({ code: "910", name: "Lackering AB", type: "subcontract", supplierId: supplier.id, active: true });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: `Lackering ${crypto.randomUUID().slice(0, 6)}`, active: true }));
+    const machine = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "310", name: "Svets", type: "machine", hourlyRate: 100, active: true }));
+    const lego = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "910", name: "Lackering AB", type: "subcontract", supplierId: supplier.id, active: true }));
     const parent = await article("Legodetalj", "manufactured", 200);
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: machine.id, setupTime: 0, runTimePerUnit: 1 });
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 20, workCenterId: lego.id, setupTime: 0, runTimePerUnit: 0, setupPrice: 500, unitPrice: 100 });
     const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 4 }, user.id);
     const legoOp = (await mfgService.listOperations(order.id)).find((op) => op.sequenceNo === 20)!;
 
-    const io = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const io = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     const row = await purchaseService.addRow(io.id, { articleId: parent.id, quantity: 4, unitPrice: 100, setupPrice: 500, moOperationId: legoOp.id });
     await purchaseService.confirm(io.id);
     // The lego operation is the last one: the received unit is finished goods (1 × 200).
@@ -355,12 +357,12 @@ describe("Produkter i arbete per datum — the orders", () => {
     const [first] = await mfgService.listReports(order.id);
     // 4 more on the last operation: received 10, the order is done (completed_order).
     await mfgService.reportOperationQuantities(operation.id, { quantityOk: 4, quantityScrapped: 0, markDone: false, createdBy: user.id });
-    expect((await mfgService.getManufacturingOrder(order.id)).status).toBe("done");
+    expect((await mfgService.getManufacturingOrder(order.id))!.status).toBe("done");
     await timeReportService.createTimeReport({ employeeId: product.employee.id, moOperationId: operation.id, date: "2025-06-20", hours: 3 }, user.id);
     await moveBeforeD(order.id);
     // After D the first receipt (6) is undone: received 4, the order is open again.
     await mfgService.undoReport(order.id, first!.id, user.id);
-    expect((await mfgService.getManufacturingOrder(order.id)).status).not.toBe("done");
+    expect((await mfgService.getManufacturingOrder(order.id))!.status).not.toBe("done");
 
     // Per D the receipts covered the order: done, not PIA.
     expect((await report(D, "direct")).rows).toEqual([]);

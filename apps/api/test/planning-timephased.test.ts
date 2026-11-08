@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { inArray, sql } from "drizzle-orm";
-import { buildCsv, createArticleSchema, updateArticleSchema } from "@navet/shared";
+import { buildCsv, createArticleSchema, updateArticleSchema, createCustomerSchema, createSupplierSchema, createWorkCenterSchema } from "@navet/shared";
 import { articles, db, systemSettings } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -27,6 +27,7 @@ import { createPlanningRepository } from "../src/modules/planning/repository/pla
 import { createPlanningService } from "../src/modules/planning/service/planning.service.js";
 import { requirementsExportColumns } from "../src/modules/planning/service/export-columns.js";
 import { insertPlannedManufacturingOrder } from "./helpers/planned-manufacturing-order.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Tidsfasade förslag (#13), against the database: the artikelöversikt dates a
 // TO's material with the TO's START, the behovsberäkning gives one proposal
@@ -102,20 +103,20 @@ async function makeUser() {
 }
 
 async function makeArticle(overrides: { articleNumber: string; type?: "manufactured" | "purchased"; manufacturingLeadTimeDays?: number }) {
-  return articleService.createArticle({ name: overrides.articleNumber, type: "purchased", active: true, ...overrides });
+  return articleService.createArticle(parsed(createArticleSchema, { name: overrides.articleNumber, type: "purchased", active: true, ...overrides }));
 }
 
 // A resource at 8 h/day with one operation of `minutesPerUnit` on the
 // article — the routing's lead time is quantity × minutesPerUnit / 480 days.
 let workCenterNo = 100;
 async function routingOf(articleId: string, minutesPerUnit: number) {
-  const wc = await mfgService.createWorkCenter({ code: String(workCenterNo++), name: "Svets", hoursPerDay: 8, active: true });
+  const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: String(workCenterNo++), name: "Svets", hoursPerDay: 8, active: true }));
   await mfgService.createRoutingOperation(articleId, { sequenceNo: 10, workCenterId: wc.id, setupTime: 0, runTimePerUnit: minutesPerUnit });
   return wc;
 }
 
 async function koFor(articleId: string, quantity: number, userId: string, date: string) {
-  const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+  const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
   return salesService.createQuote(
     { customerId: customer.id, confirm: true, expectedDeliveryDate: date, rows: [{ articleId, quantity, unitPrice: 100 }] },
     userId
@@ -123,7 +124,7 @@ async function koFor(articleId: string, quantity: number, userId: string, date: 
 }
 
 async function supplierFor(articleIds: string[], leadTimeDays = 0) {
-  const supplier = await purchaseService.createSupplier({ name: "Stål AB", active: true });
+  const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Stål AB", active: true }));
   for (const articleId of articleIds) {
     await purchaseService.addArticleSupplier(articleId, { supplierId: supplier.id, price: 10, currency: "SEK", leadTimeDays, isPrimary: true });
   }
@@ -409,7 +410,7 @@ describe("Standardledtid and Standardkötid (system settings)", () => {
 
   // Two operations on one resource, each `minutesPerUnit` per unit.
   async function twoOperationRoutingOf(articleId: string, minutesPerUnit: number) {
-    const wc = await mfgService.createWorkCenter({ code: String(workCenterNo++), name: "Svets", hoursPerDay: 8, active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: String(workCenterNo++), name: "Svets", hoursPerDay: 8, active: true }));
     await mfgService.createRoutingOperation(articleId, { sequenceNo: 10, workCenterId: wc.id, setupTime: 0, runTimePerUnit: minutesPerUnit });
     await mfgService.createRoutingOperation(articleId, { sequenceNo: 20, workCenterId: wc.id, setupTime: 0, runTimePerUnit: minutesPerUnit });
   }
@@ -481,9 +482,9 @@ describe("Standardledtid and Standardkötid (system settings)", () => {
 describe("lego operations dated backward from the färdigdatum", () => {
   async function legoFixture() {
     const user = await makeUser();
-    const supplier = await purchaseService.createSupplier({ name: "Passivering AB", active: true });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Passivering AB", active: true }));
     // At the supplier: Ledtid 3 + Kötid 1 = 4 working days; order 2 days ahead.
-    const lego = await mfgService.createWorkCenter({
+    const lego = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
       code: "900",
       name: "Passivering",
       type: "subcontract",
@@ -492,7 +493,7 @@ describe("lego operations dated backward from the färdigdatum", () => {
       queueTimeDays: 1,
       orderLeadTimeDays: 2,
       active: true,
-    });
+    }));
     const article = await makeArticle({ articleNumber: "TP-LEGO", type: "manufactured" });
     const own = await routingOf(article.id, 480); // op 10: one day per unit
     await mfgService.createRoutingOperation(article.id, { sequenceNo: 20, workCenterId: lego.id, setupTime: 0, runTimePerUnit: 0, unitPrice: 10 });

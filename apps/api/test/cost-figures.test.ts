@@ -35,8 +35,10 @@ describe("cost-figures — TVK and SVK", () => {
   });
 
   it("leaves TO out of both — it goes to the sales price, after the general markup", () => {
-    expect(manufacturingCost({ ...NUMERIC, overhead: 1000 })).toBe(manufacturingCost(NUMERIC));
-    expect(selfCost({ ...NUMERIC, overhead: 1000 })).toBe(selfCost(NUMERIC));
+    // A variable, not a literal: manufacturingCost's type has no `overhead` and that is the point.
+    const withOverhead = { ...NUMERIC, overhead: 1000 };
+    expect(manufacturingCost(withOverhead)).toBe(manufacturingCost(NUMERIC));
+    expect(selfCost(withOverhead)).toBe(selfCost(NUMERIC));
   });
 
   it("reads the string form the database returns identically to the numeric form", () => {

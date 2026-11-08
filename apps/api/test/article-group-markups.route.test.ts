@@ -1,3 +1,4 @@
+import { createArticleSchema } from "@navet/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { auditLog, costCalculations, db, permissionGroups } from "@navet/db";
@@ -6,6 +7,7 @@ import { createAuthRepository } from "../src/modules/auth/repository/auth.reposi
 import { createAuthService } from "../src/modules/auth/service/auth.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { testArticleService } from "./helpers/services.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Påslag per varugrupp (#16, etapp 1) through the real app: the group's two
 // price markups on /article-groups (read office, write Artiklar — the
@@ -140,14 +142,13 @@ describe("Pröva påslag — POST /articles/:id/cost-calculations/pre-calculate"
   it("answers with each price markup's level, saves only on save, and refuses a cost markup with 400", async () => {
     const { cookie } = await adminCookie();
     const group = (await call(cookie, "POST", "/article-groups", { code: "6", name: "Diskar", generalMarkupPercent: 40 })).json();
-    const article = await testArticleService.createArticle({
+    const article = await testArticleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `P-${crypto.randomUUID().slice(0, 8)}`,
       name: "Diskbänk",
       type: "manufactured",
-      unit: "st",
       groupId: group.id,
       active: true,
-    });
+    }));
     const url = `/articles/${article.id}/cost-calculations/pre-calculate`;
 
     const grouped = await call(cookie, "POST", url, { quantity: 1 });
@@ -184,13 +185,12 @@ describe("Pröva påslag — POST /articles/:id/cost-calculations/pre-calculate"
 // author typed, so writing ITS price back takes Artiklar too.
 describe("Sätt försäljningspris från en prövad kalkyl — POST /cost-calculations/:id/apply-sales-price", () => {
   it("needs Artiklar for a tried calculation; Tillverkning still applies an ordinary one and the standard cost", async () => {
-    const article = await testArticleService.createArticle({
+    const article = await testArticleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `P-${crypto.randomUUID().slice(0, 8)}`,
       name: "Diskbänk",
       type: "manufactured",
-      unit: "st",
       active: true,
-    });
+    }));
     const url = `/articles/${article.id}/cost-calculations/pre-calculate`;
     const workshop = await userCookie(["tillverkning"]);
 

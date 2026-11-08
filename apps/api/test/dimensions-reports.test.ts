@@ -1,3 +1,4 @@
+import { createArticleSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { costCenters, customers, db, projects, salesOrderRows, salesOrders } from "@navet/db";
@@ -8,10 +9,11 @@ import { createEconomyRepository } from "../src/modules/economy/repository/econo
 import { createEconomyService } from "../src/modules/economy/service/economy.service.js";
 import { BAS_STANDARD_ACCOUNTS } from "../src/modules/economy/service/bas-accounts.js";
 import { buildGroupedIncomeStatementCsv } from "../src/modules/economy/service/financial-reports-csv.js";
-import { buildGroupedIncomeStatement, createFinancialReportsService } from "../src/modules/economy/service/financial-reports.service.js";
+import { buildGroupedIncomeStatement, createFinancialReportsService, type IncomeStatementResponse } from "../src/modules/economy/service/financial-reports.service.js";
 import { createProjectReportRepository } from "../src/modules/reports/repository/project-report.repository.js";
 import { buildProjectReport } from "../src/modules/reports/service/project-report.js";
 import { createProjectReportService, ProjectNotFoundError } from "../src/modules/reports/service/project-report.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Resultaträkningen per objekt, huvudboken och verifikationslistan with the
 // object filter, and the projektrapport — against Postgres, over four booked
@@ -23,6 +25,14 @@ const economy = createEconomyService(repo, { log: async () => {} });
 const reports = createFinancialReportsService({ db, repo });
 const projectReport = createProjectReportService(createProjectReportRepository(db));
 const articleService = createArticleService(createArticleRepository(db));
+
+// getIncomeStatement answers the budgeted shape only for a query with budgetId;
+// these tests never ask for one, so narrow to the plain shape and fail loudly otherwise.
+async function plainIncomeStatement(query: Parameters<typeof reports.getIncomeStatement>[0]): Promise<IncomeStatementResponse> {
+  const statement = await reports.getIncomeStatement(query);
+  if ("budget" in statement) throw new Error("expected the plain income statement");
+  return statement;
+}
 
 const TRUNCATE = sql`TRUNCATE sales_order_rows, sales_orders, customers, articles, verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, cost_centers, projects, audit_log, users CASCADE`;
 
@@ -87,11 +97,11 @@ const RANGE = { from: `${YEAR}-01-01`, to: `${YEAR}-12-31` };
 describe("resultaträkningen", () => {
   it("filters on a cost center with the ungrouped shape", async () => {
     const { workshop } = await setup();
-    const all = await reports.getIncomeStatement(RANGE);
+    const all = await plainIncomeStatement(RANGE);
     expect(all.result).toBe(450);
     expect(all.columns).toBeUndefined();
 
-    const filtered = await reports.getIncomeStatement({ ...RANGE, costCenterId: workshop.id });
+    const filtered = await plainIncomeStatement({ ...RANGE, costCenterId: workshop.id });
     expect(filtered.result).toBe(800);
     expect(filtered.columns).toBeUndefined();
     const accounts = filtered.entries.flatMap((e) => (e.kind === "line" ? e.accounts.map((a) => [a.accountNumber, a.amount]) : []));
@@ -103,7 +113,7 @@ describe("resultaträkningen", () => {
 
   it("groups per cost center: one column per object with movement plus Utan, amounts per line, account and subtotal that sum to the total", async () => {
     const { workshop, assembly } = await setup();
-    const grouped = await reports.getIncomeStatement({ ...RANGE, groupBy: "costCenter" });
+    const grouped = await plainIncomeStatement({ ...RANGE, groupBy: "costCenter" });
     expect(grouped.columns).toEqual([
       { id: workshop.id, code: "100", name: "Verkstad" },
       { id: assembly.id, code: "200", name: "Montering" },
@@ -131,7 +141,7 @@ describe("resultaträkningen", () => {
 
   it("groups per project and combines the filter with the grouping", async () => {
     const { project, workshop } = await setup();
-    const grouped = await reports.getIncomeStatement({ ...RANGE, groupBy: "project" });
+    const grouped = await plainIncomeStatement({ ...RANGE, groupBy: "project" });
     expect(grouped.columns).toEqual([
       { id: project.id, code: "P1", name: "Storköket" },
       { id: null, code: null, name: "Utan" },
@@ -139,7 +149,7 @@ describe("resultaträkningen", () => {
     const last = [...grouped.entries].reverse().find((e) => e.kind === "subtotal")!;
     expect(last.amounts).toEqual([800, -350]);
     // Filtered to the workshop, every row carries P1 — no Utan column.
-    const both = await reports.getIncomeStatement({ ...RANGE, groupBy: "project", costCenterId: workshop.id });
+    const both = await plainIncomeStatement({ ...RANGE, groupBy: "project", costCenterId: workshop.id });
     expect(both.columns).toEqual([{ id: project.id, code: "P1", name: "Storköket" }]);
     expect(both.result).toBe(800);
   });
@@ -246,7 +256,7 @@ describe("projektrapporten", () => {
   it("sums the project's booked rows into revenue, costs and result per month and account, derives the range and lists the orders", async () => {
     const { project } = await setup();
     const [customer] = await db.insert(customers).values({ customerNumber: "K-1", name: "Storkök AB" }).returning();
-    const article = await articleService.createArticle({ articleNumber: `ART-${crypto.randomUUID()}`, name: "Diskbänk", type: "manufactured", active: true });
+    const article = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `ART-${crypto.randomUUID()}`, name: "Diskbänk", type: "manufactured", active: true }));
     const [order] = await db.insert(salesOrders).values({ orderNumber: "KO-100", customerId: customer!.id, status: "confirmed", projectId: project.id }).returning();
     await db.insert(salesOrderRows).values({ salesOrderId: order!.id, articleId: article.id, quantityOrdered: "2", unitPrice: "500", discountPercent: "10" });
     // Quotes (open, lost, cancelled as a quote) and cancelled orders are not

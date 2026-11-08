@@ -3,7 +3,7 @@
 // that moment and the day is still open for bookkeeping.
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
-import { listStockTransactionsQuerySchema } from "@navet/shared";
+import { listStockTransactionsQuerySchema, createArticleSchema, createStockLocationSchema } from "@navet/shared";
 import { accountingPeriods, articleStandardCostHistory, db, fiscalYears, stockCountSessions, stockTransactions } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -18,6 +18,7 @@ import { createValuationService } from "../src/modules/stock/service/valuation.s
 import { postingPeriodLockOn } from "../src/modules/economy/service/verification-poster.js";
 import { createUser, createCalendarYear, resetYearEnd } from "./helpers/year-end.js";
 import { testEconomyService } from "./helpers/services.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -41,18 +42,17 @@ const BEFORE_FREEZE = new Date("2025-12-30T09:00:00Z");
 
 async function makeLocation(name = "A1") {
   const warehouse = await stockService.createWarehouse({ name: `Lager ${name}`, active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name, active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name, active: true }));
 }
 
 async function makeArticle(number: string, standardCost?: number) {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: number,
     name: `Artikel ${number}`,
     type: "purchased",
-    unit: "st",
     active: true,
     ...(standardCost !== undefined ? { standardCost } : {}),
-  });
+  }));
 }
 
 // Stock on the location, registered before the freeze.

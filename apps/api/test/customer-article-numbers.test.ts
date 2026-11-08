@@ -3,7 +3,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
-import { createArticleSchema } from "@navet/shared";
+import { createArticleSchema, createCustomerSchema, createQuoteSchema } from "@navet/shared";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -25,6 +25,7 @@ import {
   CustomerArticleNumberNotFoundError,
   DuplicateCustomerArticleNumberError,
 } from "../src/modules/sales/service/sales.errors.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -64,7 +65,7 @@ async function makeArticle(articleNumber: string) {
 
 describe("Kundens artikelnummer", () => {
   it("adds, updates, refuses a duplicate and deletes on the customer card", async () => {
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     const article = await makeArticle("ART-KAN-1");
     const row = await salesService.addCustomerArticleNumber(customer.id, {
       articleId: article.id,
@@ -92,13 +93,13 @@ describe("Kundens artikelnummer", () => {
       name: "Säljare",
       role: "admin",
     });
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
-    const other = await salesService.createCustomer({ name: "Annan AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
+    const other = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Annan AB", active: true }));
     const article = await makeArticle("ART-KAN-2");
     await salesService.addCustomerArticleNumber(customer.id, { articleId: article.id, customerArticleNumber: "KND-99" });
 
     const { order } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 100 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 100 }] }),
       user.id
     );
     expect(pdfText((await salesService.getSalesOrderPdf(order.id, "quote")).content)).toContain("Ert art.nr: KND-99");
@@ -106,7 +107,7 @@ describe("Kundens artikelnummer", () => {
     expect(pdfText((await salesService.getPickListPdf(order.id)).content)).toContain("Ert art.nr: KND-99");
 
     const { order: otherOrder } = await salesService.createQuote(
-      { customerId: other.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 100 }] },
+      parsed(createQuoteSchema, { customerId: other.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 100 }] }),
       user.id
     );
     expect(pdfText((await salesService.getSalesOrderPdf(otherOrder.id, "quote")).content)).not.toContain("Ert art.nr");

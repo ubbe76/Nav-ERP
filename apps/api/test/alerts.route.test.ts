@@ -1,3 +1,4 @@
+import { createArticleSchema } from "@navet/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { customers, db, permissionGroups, salesOrderRows, salesOrders } from "@navet/db";
@@ -8,6 +9,7 @@ import { createAuthService } from "../src/modules/auth/service/auth.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { testArticleService } from "./helpers/services.js";
 import { ALERT_KIND_CATALOG } from "../src/modules/alerts/service/alert-kinds.js";
+import { parsed } from "./helpers/parsed.js";
 
 // GET /alerts through the real app: the response shape, the kinds filtered
 // by the session user's permissions, and that a read-only account may read
@@ -60,7 +62,7 @@ async function userCookie(permissions: string[], readOnly = false) {
 // A confirmed order with rest, due last year — late whatever today is.
 async function lateSalesOrder() {
   const [customer] = await db.insert(customers).values({ customerNumber: `K${crypto.randomUUID().slice(0, 6)}`, name: "Kund AB" }).returning();
-  const article = await testArticleService.createArticle({ articleNumber: `A-${crypto.randomUUID().slice(0, 8)}`, name: "Vara", type: "purchased", unit: "st", active: true });
+  const article = await testArticleService.createArticle(parsed(createArticleSchema, { articleNumber: `A-${crypto.randomUUID().slice(0, 8)}`, name: "Vara", type: "purchased", active: true }));
   const [order] = await db
     .insert(salesOrders)
     .values({ orderNumber: `KO-${crypto.randomUUID().slice(0, 6)}`, customerId: customer!.id, status: "confirmed", expectedDeliveryDate: "2020-01-01" })

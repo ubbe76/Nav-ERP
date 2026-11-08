@@ -1,3 +1,4 @@
+import { createArticleSchema } from "@navet/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { customers, db, permissionGroups, quoteLossReasons, salesOrderRows, salesOrders } from "@navet/db";
@@ -9,6 +10,7 @@ import { createAuditRepository } from "../src/modules/system/repository/audit.re
 import { createQuoteFollowupRepository, QUOTE_FOLLOWUP_MAX_ROWS } from "../src/modules/reports/repository/quote-followup.repository.js";
 import { createQuoteFollowupService, QuoteFollowupTooLargeError } from "../src/modules/reports/service/quote-followup.service.js";
 import { testArticleService } from "./helpers/services.js";
+import { parsed } from "./helpers/parsed.js";
 
 // GET /reports/quote-followup (+ /csv) against Postgres and the real app:
 // the selection (quoted only, creation day in Stockholm, customer filter),
@@ -47,7 +49,7 @@ async function makeCustomer(name: string, number = `K${suffix()}`) {
 }
 
 async function makeArticle() {
-  return testArticleService.createArticle({ articleNumber: `A-${suffix()}`, name: "Vara", type: "purchased", unit: "st", active: true });
+  return testArticleService.createArticle(parsed(createArticleSchema, { articleNumber: `A-${suffix()}`, name: "Vara", type: "purchased", active: true }));
 }
 
 async function quote(

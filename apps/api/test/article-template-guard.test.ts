@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
-import { API_CLIENT_SCOPES, listArticlesQuerySchema } from "@navet/shared";
+import { API_CLIENT_SCOPES, listArticlesQuerySchema, createCustomerSchema, createSupplierSchema } from "@navet/shared";
 import { buildApp } from "../src/app.js";
 import {
   ArticleIsTemplateError,
@@ -39,6 +39,7 @@ import { createStockService } from "../src/modules/stock/service/stock.service.j
 import { makeArticle, makeVariantService } from "./helpers/configurator.js";
 import { buildToOrder } from "./helpers/configured-rows.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Delprojekt 3, Task 6: a template in mode `variants` is never put on a new
 // order row — the variants are — and a type/phantom change on a template
@@ -131,8 +132,8 @@ async function makeUser() {
     role: "admin",
   });
 }
-const makeCustomer = () => salesService.createCustomer({ name: "Kund AB", active: true });
-const makeSupplier = () => purchaseService.createSupplier({ name: "Leverantör AB", active: true });
+const makeCustomer = () => salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
+const makeSupplier = () => purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Leverantör AB", active: true }));
 
 // A manufactured article that is a template in the given mode.
 async function template(mode: "variants" | "to_order") {

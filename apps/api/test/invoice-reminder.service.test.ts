@@ -651,7 +651,7 @@ describe("archived invoice documents (bokföringslagen: verifikationen oföränd
       expect(hash).toBe(rows[0]!.sha256);
       expect(pdfText(reprint.content)).not.toContain("Helt Nytt Företagsnamn AB");
     } finally {
-      await systemService.updateCompanyInfo({ name: original.name });
+      await systemService.updateCompanyInfo({ name: original!.name });
     }
     expect(await archivedRows(invoice.id)).toHaveLength(1);
   });

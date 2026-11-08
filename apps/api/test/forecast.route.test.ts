@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import Fastify, { type RouteOptions } from "fastify";
+import Fastify, { type HTTPMethods, type RouteOptions } from "fastify";
 import { ZodError } from "zod";
 import { planningRoutes } from "../src/modules/planning/routes/planning.routes.js";
 import {
@@ -143,7 +143,7 @@ describe("PUT /articles/:id/forecast", () => {
     const routes: RouteOptions[] = [];
     const app = appWith({}, routes);
     await app.ready();
-    const access = (method: string) =>
+    const access = (method: HTTPMethods) =>
       (routes.find((r) => r.url === "/articles/:id/forecast" && (Array.isArray(r.method) ? r.method : [r.method]).includes(method))!.config as {
         access?: unknown;
       }).access;

@@ -159,7 +159,15 @@ export const REGISTER_REFERENCES: Record<
 type BeforeReassign = (tx: Tx, id: string, replacementId: string, userId: string | null) => Promise<void>;
 
 export function createRegisterRepository(db: Db) {
-  function forTable(table: RegisterTable, references: RegisterReference[], beforeReassign?: BeforeReassign) {
+  // Every register table is driven through the delivery-terms table's type
+  // (the casts at the call sites below). `Row` gives a caller its own table's
+  // row type back — units carry codeEn, package types the freight fields —
+  // instead of the delivery-terms columns only.
+  function forTable<Row extends { id: string; code: string; name: string } = RegisterTable["$inferSelect"]>(
+    table: RegisterTable,
+    references: RegisterReference[],
+    beforeReassign?: BeforeReassign
+  ) {
     async function countReferences(executor: Db, id: string): Promise<RegisterUsage> {
       const found: RegisterUsage["references"] = [];
       for (const r of references) {
@@ -171,33 +179,33 @@ export function createRegisterRepository(db: Db) {
     }
 
     return {
-      async list() {
-        return db.select().from(table).orderBy(asc(table.code));
+      async list(): Promise<Row[]> {
+        return (await db.select().from(table).orderBy(asc(table.code))) as Row[];
       },
 
-      async findById(id: string) {
+      async findById(id: string): Promise<Row | null> {
         const [row] = await db.select().from(table).where(eq(table.id, id));
-        return row ?? null;
+        return (row as Row | undefined) ?? null;
       },
 
-      async findByCode(code: string) {
+      async findByCode(code: string): Promise<Row | null> {
         const [row] = await db.select().from(table).where(eq(table.code, code));
-        return row ?? null;
+        return (row as Row | undefined) ?? null;
       },
 
-      async findByName(name: string) {
+      async findByName(name: string): Promise<Row | null> {
         const [row] = await db.select().from(table).where(eq(table.name, name));
-        return row ?? null;
+        return (row as Row | undefined) ?? null;
       },
 
-      async create(input: RegisterWriteInput) {
+      async create(input: RegisterWriteInput): Promise<Row> {
         const [row] = await db.insert(table).values(input).returning();
-        return row!;
+        return row as unknown as Row;
       },
 
-      async update(id: string, input: RegisterWriteInput & UpdateRegisterEntryInput) {
+      async update(id: string, input: RegisterWriteInput & UpdateRegisterEntryInput): Promise<Row | null> {
         const [row] = await db.update(table).set(input).where(eq(table.id, id)).returning();
-        return row ?? null;
+        return (row as Row | undefined) ?? null;
       },
 
       // Seed helper: inserts the entry unless its code or name already
@@ -383,11 +391,11 @@ export function createRegisterRepository(db: Db) {
 
   return {
     deliveryTerms: forTable(deliveryTerms, REGISTER_REFERENCES.deliveryTerms),
-    paymentTerms: forTable(paymentTerms as unknown as RegisterTable, REGISTER_REFERENCES.paymentTerms),
-    carriers: forTable(carriers as unknown as RegisterTable, REGISTER_REFERENCES.carriers),
-    units: forTable(units as unknown as RegisterTable, REGISTER_REFERENCES.units),
-    packageTypes: forTable(packageTypes as unknown as RegisterTable, REGISTER_REFERENCES.packageTypes),
-    articleCodes: forTable(articleCodes as unknown as RegisterTable, REGISTER_REFERENCES.articleCodes),
+    paymentTerms: forTable<typeof paymentTerms.$inferSelect>(paymentTerms as unknown as RegisterTable, REGISTER_REFERENCES.paymentTerms),
+    carriers: forTable<typeof carriers.$inferSelect>(carriers as unknown as RegisterTable, REGISTER_REFERENCES.carriers),
+    units: forTable<typeof units.$inferSelect>(units as unknown as RegisterTable, REGISTER_REFERENCES.units),
+    packageTypes: forTable<typeof packageTypes.$inferSelect>(packageTypes as unknown as RegisterTable, REGISTER_REFERENCES.packageTypes),
+    articleCodes: forTable<typeof articleCodes.$inferSelect>(articleCodes as unknown as RegisterTable, REGISTER_REFERENCES.articleCodes),
     quoteLossReasons: lossReasons,
     deviationReasons: deviationReasonEntries,
     // Kollitypens fraktfält (frakt) — outside the generic code/name register.

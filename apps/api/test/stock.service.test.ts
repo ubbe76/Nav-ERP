@@ -1,3 +1,4 @@
+import { createArticleSchema, createStockLocationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -6,6 +7,7 @@ import { createArticleService } from "../src/modules/article/service/article.ser
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -25,18 +27,17 @@ afterAll(async () => {
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
 }
 
 describe("stock service — append-only transaction log", () => {
   it("derives the current balance from the sum of recorded transactions", async () => {
-    const article = await articleService.createArticle({
+    const article = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: "ART-1",
       name: "Test Article",
       type: "purchased",
-      unit: "st",
       active: true,
-    });
+    }));
     const location = await makeLocation();
 
     await stockService.recordTransaction({
@@ -66,13 +67,12 @@ describe("stock service — append-only transaction log", () => {
   });
 
   it("keeps every transaction as its own row (append-only, no mutation)", async () => {
-    const article = await articleService.createArticle({
+    const article = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: "ART-2",
       name: "Test Article 2",
       type: "purchased",
-      unit: "st",
       active: true,
-    });
+    }));
     const location = await makeLocation();
 
     await stockService.recordTransaction({
@@ -97,14 +97,13 @@ describe("stock service — append-only transaction log", () => {
 
 describe("stock service — mandatory location with *** fallback", () => {
   async function makeArticle(defaultLocationId?: string) {
-    return articleService.createArticle({
+    return articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `ART-LOC-${crypto.randomUUID()}`,
       name: "Platsartikel",
       type: "purchased",
-      unit: "st",
       active: true,
       ...(defaultLocationId ? { defaultLocationId } : {}),
-    });
+    }));
   }
 
   it("gives a new article the *** location when none is chosen, reusing it for the next article", async () => {
@@ -138,7 +137,7 @@ describe("stock service — mandatory location with *** fallback", () => {
 
     // Explicit location wins over the article default.
     const warehouse = await stockService.createWarehouse({ name: "Annat lager", active: true });
-    const other = await stockService.createLocation({ warehouseId: warehouse.id, name: "B1", active: true });
+    const other = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "B1", active: true }));
     const explicit = await stockService.recordTransaction({
       articleId: article.id,
       locationId: other.id,
@@ -180,14 +179,13 @@ describe("stock service — lagerflytt och rensning av tomma lagerplatser", () =
   }
 
   async function makeArticle(defaultLocationId?: string) {
-    return articleService.createArticle({
+    return articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `ART-FLYTT-${crypto.randomUUID()}`,
       name: "Flyttartikel",
       type: "purchased",
-      unit: "st",
       active: true,
       ...(defaultLocationId ? { defaultLocationId } : {}),
-    });
+    }));
   }
 
   // Two locations in the same warehouse — A1 (source) and B2 (target).
@@ -196,8 +194,8 @@ describe("stock service — lagerflytt och rensning av tomma lagerplatser", () =
   // "Fasta lagerplatser" at the end of this describe.
   async function makeLocationPair(fixed = false) {
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const from = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true, fixed });
-    const to = await stockService.createLocation({ warehouseId: warehouse.id, name: "B2", active: true, fixed });
+    const from = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true, fixed }));
+    const to = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "B2", active: true, fixed }));
     return { from, to };
   }
 
@@ -334,7 +332,7 @@ describe("stock service — lagerflytt och rensning av tomma lagerplatser", () =
 
   it("creates a location as fixed by default and lets Ändra make it temporary", async () => {
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const created = await stockService.createLocation({ warehouseId: warehouse.id, name: "C3", active: true });
+    const created = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "C3", active: true }));
     expect(created.fixed).toBe(true);
     const updated = await stockService.updateLocation(created.id, { fixed: false });
     expect(updated.fixed).toBe(false);
@@ -348,7 +346,7 @@ describe("stock service — lagerflytt och rensning av tomma lagerplatser", () =
     const article = await makeArticle();
     const fallbackId = article.defaultLocationId!;
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const to = await stockService.createLocation({ warehouseId: warehouse.id, name: "B2", active: true });
+    const to = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "B2", active: true }));
     await stock(article.id, fallbackId, 4);
 
     const result = await stockService.transferStock(

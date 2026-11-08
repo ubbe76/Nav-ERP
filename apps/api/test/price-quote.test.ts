@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { eq, sql } from "drizzle-orm";
@@ -18,6 +19,8 @@ import { createSystemService } from "../src/modules/system/service/system.servic
 import { resolvePrice } from "../src/modules/sales/service/price-resolver.js";
 import { configuratorRoutes } from "../src/modules/oauth/routes/configurator.routes.js";
 import type { SalesService } from "../src/modules/sales/service/sales.service.js";
+import { makeVariantService } from "./helpers/configurator.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -51,17 +54,16 @@ afterAll(async () => {
 });
 
 async function makeCustomer() {
-  return salesService.createCustomer({ name: "Kund AB", active: true });
+  return salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
 }
 
 async function makeArticle(opts: { salesPrice?: number } = {}) {
-  const article = await articleService.createArticle({
+  const article = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-PQ-${crypto.randomUUID()}`,
     name: "Test Article",
     type: "purchased",
-    unit: "st",
     active: true,
-  });
+  }));
   if (opts.salesPrice !== undefined) {
     await db.update(articles).set({ salesPrice: String(opts.salesPrice) }).where(eq(articles.id, article.id));
     return { ...article, salesPrice: String(opts.salesPrice) };
@@ -166,7 +168,7 @@ describe("getPriceQuote (service)", () => {
 describe("GET /price-quote (route, inject)", () => {
   function buildTestApp(service: Pick<SalesService, "getPriceQuote">) {
     const app = Fastify();
-    app.register(configuratorRoutes, { salesService: service as SalesService, articleService });
+    app.register(configuratorRoutes, { salesService: service as SalesService, articleService, configuratorService: makeVariantService() });
     return app;
   }
 
@@ -176,7 +178,7 @@ describe("GET /price-quote (route, inject)", () => {
     const app = buildTestApp({
       async getPriceQuote(query) {
         expect(query).toEqual({ customerId, articleId, quantity: 3 });
-        return { articleNumber: "ART-1", price: { unitPrice: 42, discountPercent: 0, source: "customer_article" } };
+        return { currency: "SEK", exchangeRate: 1, articleNumber: "ART-1", price: { unitPrice: 42, discountPercent: 0, source: "customer_article" } };
       },
     });
 
@@ -187,6 +189,8 @@ describe("GET /price-quote (route, inject)", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
+      currency: "SEK",
+      exchangeRate: 1,
       articleNumber: "ART-1",
       price: { unitPrice: 42, discountPercent: 0, source: "customer_article" },
     });
@@ -197,7 +201,7 @@ describe("GET /price-quote (route, inject)", () => {
     const articleId = crypto.randomUUID();
     const app = buildTestApp({
       async getPriceQuote() {
-        return { articleNumber: "ART-1", price: null };
+        return { currency: "SEK", exchangeRate: 1, articleNumber: "ART-1", price: null };
       },
     });
 
@@ -207,7 +211,7 @@ describe("GET /price-quote (route, inject)", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ articleNumber: "ART-1", price: null });
+    expect(res.json()).toEqual({ currency: "SEK", exchangeRate: 1, articleNumber: "ART-1", price: null });
   });
 
   it("404s for an unknown article", async () => {

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { articles, customers, db, deliveryTerms, suppliers, units, vatCodes } from "@navet/db";
-import { VAT_CODE_CATALOG } from "@navet/shared";
+import { VAT_CODE_CATALOG, createArticleSchema } from "@navet/shared";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createPurchaseRepository } from "../src/modules/purchase/repository/purchase.repository.js";
@@ -17,6 +17,7 @@ import { createMailRepository } from "../src/modules/mail/repository/mail.reposi
 import { createMailService } from "../src/modules/mail/service/mail.service.js";
 import { testDocumentPdfService, testSystemService } from "./helpers/services.js";
 import { resetVatCodes } from "./helpers/vat-codes.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Dokument på engelska (#7), the data model: the language on customers and
 // suppliers, the English texts on articles, the terms, the units and the
@@ -89,7 +90,7 @@ describe("customers and suppliers — language", () => {
 describe("articles — Benämning (engelska) and Extra benämning (engelska)", () => {
   it("stores, returns, clears and copies the English texts", async () => {
     const unit = await stUnit();
-    const created = await articleService.createArticle({
+    const created = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: "SB-1200",
       name: "Diskbänk 1200",
       nameEn: "Sink unit 1200",
@@ -97,20 +98,20 @@ describe("articles — Benämning (engelska) and Extra benämning (engelska)", (
       type: "manufactured",
       unitId: unit.id,
       active: true,
-    });
+    }));
     expect(created.nameEn).toBe("Sink unit 1200");
     expect(created.extraDescriptionEn).toBe("Brushed stainless steel");
     expect((await articleService.getArticle(created.id))!.nameEn).toBe("Sink unit 1200");
 
     // Kopiera från → Information takes both.
-    const copy = await articleService.createArticle({
+    const copy = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: "SB-1200-K",
       name: "Diskbänk 1200 kopia",
       type: "manufactured",
       unitId: unit.id,
       active: true,
       copyFrom: { articleId: created.id, parts: ["information"] },
-    });
+    }));
     expect([copy.nameEn, copy.extraDescriptionEn]).toEqual(["Sink unit 1200", "Brushed stainless steel"]);
 
     // null clears (the schema turns "" into null before the service).
@@ -120,7 +121,7 @@ describe("articles — Benämning (engelska) and Extra benämning (engelska)", (
     expect(row!.nameEn).toBeNull();
 
     // Without English texts the columns are null — the Swedish text is printed.
-    const plain = await articleService.createArticle({ articleNumber: "P-1", name: "Plåt", type: "purchased", unitId: unit.id, active: true });
+    const plain = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "P-1", name: "Plåt", type: "purchased", unitId: unit.id, active: true }));
     expect([plain.nameEn, plain.extraDescriptionEn]).toEqual([null, null]);
   });
 });

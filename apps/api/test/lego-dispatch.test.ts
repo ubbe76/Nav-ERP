@@ -12,6 +12,11 @@ import {
 import {
   createPurchaseDispatchSchema,
   dispatchPalletCardQuerySchema,
+  createArticleSchema,
+  createCustomerSchema,
+  createPurchaseOrderSchema,
+  createSupplierSchema,
+  createWorkCenterSchema,
 } from "@navet/shared";
 import {
   pdfPageCount,
@@ -55,6 +60,7 @@ import { resolvePrice } from "../src/modules/sales/service/price-resolver.js";
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Avsändning till legoleverantör: Rapportera avsändning logs what was sent
 // (no stock effect), Skickat is derived on the IO row and the TO card, Ångra
@@ -149,7 +155,7 @@ async function makeFixture(
 ) {
   const quantity = opts.quantity ?? 10;
   const user = await makeUser();
-  const supplier = await purchaseService.createSupplier({
+  const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, {
     name: "Ytbehandling AB",
     active: true,
     language: opts.language ?? "sv",
@@ -157,7 +163,7 @@ async function makeFixture(
     postalCode: "222 22",
     city: "Lackstaden",
     country: "SE",
-  });
+  }));
   if (opts.supplierDeliveryAddress) {
     await purchaseService.createSupplierDeliveryAddress(supplier.id, {
       label: "Godsmottagning",
@@ -169,36 +175,34 @@ async function makeFixture(
     });
   }
   workCenterSeq += 1;
-  const machine = await mfgService.createWorkCenter({
+  const machine = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
     code: String(100 + workCenterSeq),
     name: "Svets",
     type: "machine",
     active: true,
-  });
-  const lego = await mfgService.createWorkCenter({
+  }));
+  const lego = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
     code: String(900 + workCenterSeq),
     name: "Ytbehandling",
     type: "subcontract",
     supplierId: supplier.id,
     active: true,
-  });
-  const parent = await articleService.createArticle({
+  }));
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `LEGO-${crypto.randomUUID().slice(0, 8)}`,
     name: "Legodetalj",
     nameEn: "Subcontract part",
     type: "manufactured",
-    unit: "st",
     surfaceTreatment: "Förzinkad",
     colour: "RAL 9010",
     active: true,
-  });
-  const plain = await articleService.createArticle({
+  }));
+  const plain = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `PLAIN-${crypto.randomUUID().slice(0, 8)}`,
     name: "Skruv",
     type: "purchased",
-    unit: "st",
     active: true,
-  });
+  }));
   await mfgService.createRoutingOperation(parent.id, {
     sequenceNo: 10,
     workCenterId: machine.id,
@@ -218,10 +222,10 @@ async function makeFixture(
   let customer: { id: string; name: string } | null = null;
   let mo;
   if (opts.linkToSalesOrder) {
-    customer = await salesService.createCustomer({
+    customer = await salesService.createCustomer(parsed(createCustomerSchema, {
       name: "Kund AB",
       active: true,
-    });
+    }));
     const address = await salesService.createDeliveryAddress(customer.id, {
       label: "Byggplatsen",
       address: "Byggvägen 5",
@@ -257,7 +261,7 @@ async function makeFixture(
     (op) => op.sequenceNo === 20,
   )!;
   const order = await purchaseService.createPurchaseOrder(
-    { supplierId: supplier.id },
+    parsed(createPurchaseOrderSchema, { supplierId: supplier.id }),
     user.id,
   );
   const legoRow = await purchaseService.addRow(order.id, {
@@ -451,7 +455,7 @@ describe("Rapportera avsändning (createDispatch)", () => {
 
     // Draft and partially received are open; received/closed/cancelled are not.
     const draft = await purchaseService.createPurchaseOrder(
-      { supplierId: f.supplier.id },
+      parsed(createPurchaseOrderSchema, { supplierId: f.supplier.id }),
       f.user.id,
     );
     const draftMo = await mfgService.createManufacturingOrder(

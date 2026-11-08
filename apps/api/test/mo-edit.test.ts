@@ -1,3 +1,4 @@
+import { createArticleSchema, createStockLocationSchema, createSupplierSchema, createWeekScheduleSchema, createWorkCenterSchema, stampOutSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import {
@@ -50,6 +51,7 @@ import { createScheduleRepository } from "../src/modules/timereport/repository/s
 import { createScheduleService } from "../src/modules/timereport/service/schedule.service.js";
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Ändra material och operationer på en skapad TO against Postgres: every
 // guard, the top-up rule after a changed quantity, the unlinking of
@@ -161,22 +163,22 @@ async function stockOf(articleId: string) {
 async function seedWorld() {
   const user = await authRepo.create({ email: `edit-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "Beredare", role: "admin" });
   const day = await scheduleService.createDaySchedule({ code: "D8", name: "Dagtid 8h", startTime: "07:00", endTime: "15:00", breaks: [], active: true });
-  const week = await scheduleService.createWeekSchedule({
+  const week = await scheduleService.createWeekSchedule(parsed(createWeekScheduleSchema, {
     code: "VS40",
     name: "Veckoschema 40h",
     days: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, dayScheduleId: day.id })),
     active: true,
-  });
-  const r1 = await mfgService.createWorkCenter({ code: "101", name: "Kap", weekScheduleId: week.id, capacityFactor: 1, active: true });
-  const r2 = await mfgService.createWorkCenter({ code: "201", name: "Svets", weekScheduleId: week.id, capacityFactor: 1, active: true });
-  const supplier = await purchaseRepository.createSupplier({ name: "Lego AB", active: true });
-  const lego = await mfgService.createWorkCenter({ code: "301", name: "Ytbehandling", type: "subcontract", supplierId: supplier.id, active: true });
+  }));
+  const r1 = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "101", name: "Kap", weekScheduleId: week.id, capacityFactor: 1, active: true }));
+  const r2 = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "201", name: "Svets", weekScheduleId: week.id, capacityFactor: 1, active: true }));
+  const supplier = await purchaseRepository.createSupplier(parsed(createSupplierSchema, { name: "Lego AB", active: true }));
+  const lego = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "301", name: "Ytbehandling", type: "subcontract", supplierId: supplier.id, active: true }));
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
-  const c1 = await articleService.createArticle({ articleNumber: "C1", name: "Komponent 1", type: "purchased", unit: "st", defaultLocationId: location.id, active: true });
-  const c2 = await articleService.createArticle({ articleNumber: "C2", name: "Komponent 2", type: "purchased", unit: "st", defaultLocationId: location.id, active: true });
-  const phantom = await articleService.createArticle({ articleNumber: "F1", name: "Fantom", type: "manufactured", isPhantom: true, unit: "st", active: true });
-  const parent = await articleService.createArticle({ articleNumber: "P1", name: "Produkt", type: "manufactured", unit: "st", defaultLocationId: location.id, active: true });
+  const location = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
+  const c1 = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "C1", name: "Komponent 1", type: "purchased", defaultLocationId: location.id, active: true }));
+  const c2 = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "C2", name: "Komponent 2", type: "purchased", defaultLocationId: location.id, active: true }));
+  const phantom = await articleService.createArticle({ articleNumber: "F1", name: "Fantom", type: "manufactured", isPhantom: true, active: true });
+  const parent = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "P1", name: "Produkt", type: "manufactured", defaultLocationId: location.id, active: true }));
   const op10 = await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: r1.id, setupTime: 0, runTimePerUnit: 60 });
   await mfgService.createRoutingOperation(parent.id, { sequenceNo: 20, workCenterId: r2.id, setupTime: 0, runTimePerUnit: 60 });
   await articleService.addBomComponent(parent.id, { componentArticleId: c1.id, quantity: 2, routingOperationId: op10.id });
@@ -495,7 +497,7 @@ describe("operations", () => {
     // The times may still change.
     await mfgService.updateOperation(w.order.id, w.op10.id, { setupTime: 15 }, w.user.id);
     await timeReportService.attendanceIn({ employeeId: worker.id }, w.user.id);
-    await timeReportService.stampOut(session.id, {}, w.user.id);
+    await timeReportService.stampOut(session.id, parsed(stampOutSchema, {}), w.user.id);
     // Stamped out: a resource change among own resources is fine.
     const moved = await mfgService.updateOperation(w.order.id, w.op10.id, { workCenterId: w.r2.id }, w.user.id);
     expect(moved.operation.workCenterCode).toBe("201");
@@ -522,7 +524,7 @@ describe("operations", () => {
     // A time-only stamp counts as reported.
     const worker = await employee();
     const session = await timeReportService.stampIn({ employeeId: worker.id, moOperationId: w.op20.id }, w.user.id);
-    await timeReportService.stampOut(session.id, {}, w.user.id);
+    await timeReportService.stampOut(session.id, parsed(stampOutSchema, {}), w.user.id);
     await expect(mfgService.updateOperation(w.order.id, w.op20.id, { workCenterId: w.lego.id }, w.user.id)).rejects.toBeInstanceOf(MoOperationReportedError);
     // Own → own is still fine.
     await mfgService.updateOperation(w.order.id, w.op20.id, { workCenterId: w.r1.id }, w.user.id);

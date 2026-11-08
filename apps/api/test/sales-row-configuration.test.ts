@@ -1,3 +1,4 @@
+import { createStockLocationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { articles, auditLog, configuratorVariants, db, invoiceRows, invoices, manufacturingOrders, salesOrders } from "@navet/db";
@@ -16,6 +17,7 @@ import {
   stockService,
 } from "./helpers/configured-rows.js";
 import { vatCodeId } from "./helpers/vat-codes.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Delprojekt 4b, Ändra konfiguration: PUT /sales-orders/:id/rows/:rowId/
 // configuration replaces a beställningsvara row's choices (and price) or
@@ -100,7 +102,7 @@ describe("Ändra konfiguration — beställningsvara", () => {
     const { article, order, row } = await lockedRow();
     await salesService.startProduction(order.id);
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    const location = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
     await stockService.recordTransaction({ articleId: article.id, locationId: location.id, quantityDelta: 5, transactionType: "inventory_adjustment" });
     await salesService.deliverGoods(order.id, row.id, { locationId: location.id, quantity: 1 }, (await makeUser()).id);
     await expectLocked(order.id, row, /levererats/);

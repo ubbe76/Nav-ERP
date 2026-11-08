@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { inArray, sql } from "drizzle-orm";
-import { buildCsv } from "@navet/shared";
+import { buildCsv, createArticleSchema, createCustomerSchema, createStockLocationSchema, createSupplierSchema, listRequirementsQuerySchema } from "@navet/shared";
 import { articleForecasts, db, stockTransactions, systemSettings } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -27,6 +27,7 @@ import { createPlanningRepository } from "../src/modules/planning/repository/pla
 import { createPlanningService, ForecastMonthOutsideHorizonError, ArticleNotFoundError } from "../src/modules/planning/service/planning.service.js";
 import { requirementsExportColumns } from "../src/modules/planning/service/export-columns.js";
 import type { AuditEntry } from "../src/modules/system/repository/audit.repository.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Prognos (#10) against the database. "Today" is pinned to Monday
 // 2030-03-04: the default history window is 2029-03 … 2030-02, the horizon
@@ -107,7 +108,7 @@ async function makeUser() {
 
 async function location() {
   const warehouse = await stockService.createWarehouse({ name: `Lager ${crypto.randomUUID().slice(0, 6)}`, active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name: `A-${crypto.randomUUID().slice(0, 6)}`, active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: `A-${crypto.randomUUID().slice(0, 6)}`, active: true }));
 }
 
 type Movement = { day: string; type: "sales_delivery" | "mo_consumption" | "inventory_adjustment" | "purchase_receipt"; delta: number };
@@ -139,14 +140,14 @@ const HISTORY: Movement[] = [
 ];
 
 async function forecastArticle(articleNumber = "FC-1", forecastControlled = true, type: "purchased" | "manufactured" = "purchased") {
-  const article = await articleService.createArticle({ articleNumber, name: articleNumber, type, active: true, forecastControlled });
+  const article = await articleService.createArticle(parsed(createArticleSchema, { articleNumber, name: articleNumber, type, active: true, forecastControlled }));
   const loc = await location();
   await movements(article.id, loc.id, HISTORY);
   return { article, loc };
 }
 
 const requirementRow = async (articleId: string, search: string) => {
-  const { rows } = await planningService.listRequirements({ limit: 50, offset: 0, showAll: true, search });
+  const { rows } = await planningService.listRequirements(parsed(listRequirementsQuerySchema, { limit: 50, offset: 0, showAll: "true", search }));
   return rows.find((r) => r.articleId === articleId);
 };
 const sum = (list: number[]) => Math.round(list.reduce((s, q) => s + q, 0) * 1e4) / 1e4;
@@ -168,7 +169,7 @@ describe("förbrukningen ur lagerloggen", () => {
   });
 
   it("divides by the months since the first stock movement when it lies inside the window", async () => {
-    const article = await articleService.createArticle({ articleNumber: "FC-NEW", name: "Ny", type: "purchased", active: true, forecastControlled: true });
+    const article = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "FC-NEW", name: "Ny", type: "purchased", active: true, forecastControlled: true }));
     const loc = await location();
     await movements(article.id, loc.id, [
       { day: "2029-12-05", type: "purchase_receipt", delta: 50 },
@@ -177,7 +178,7 @@ describe("förbrukningen ur lagerloggen", () => {
     // December, January, February = 3 months.
     expect((await planningService.getArticleForecast(article.id)).average).toBe(10);
     // Not prognosstyrd: the picture is still computed, the flag says so.
-    const plain = await articleService.createArticle({ articleNumber: "FC-OFF", name: "Av", type: "purchased", active: true });
+    const plain = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "FC-OFF", name: "Av", type: "purchased", active: true }));
     expect(await planningService.getArticleForecast(plain.id)).toMatchObject({ forecastControlled: false, average: 0 });
   });
 });
@@ -222,7 +223,7 @@ describe("prognosstyrd i behovsberäkningen och artikelöversikten", () => {
   it("an order in the month consumes the forecast, in both readers", async () => {
     const { article: f } = await forecastArticle();
     const user = await makeUser();
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     await salesService.createQuote(
       { customerId: customer.id, confirm: true, expectedDeliveryDate: "2030-03-20", rows: [{ articleId: f.id, quantity: 6, unitPrice: 100 }] },
       user.id
@@ -242,7 +243,7 @@ describe("prognosstyrd i behovsberäkningen och artikelöversikten", () => {
 
   it("a manufactured prognosstyrd article cascades its forecast proposals to the components", async () => {
     const { article: p } = await forecastArticle("FC-P", true, "manufactured");
-    const c = await articleService.createArticle({ articleNumber: "FC-C", name: "Komponent", type: "purchased", active: true });
+    const c = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "FC-C", name: "Komponent", type: "purchased", active: true }));
     await articleService.addBomComponent(p.id, { componentArticleId: c.id, quantity: 2 });
 
     const parent = (await requirementRow(p.id, "FC-P"))!;
@@ -255,7 +256,7 @@ describe("prognosstyrd i behovsberäkningen och artikelöversikten", () => {
 });
 
 async function supplierFor(articleIds: string[], leadTimeDays = 0) {
-  const supplier = await purchaseService.createSupplier({ name: "Stål AB", active: true });
+  const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Stål AB", active: true }));
   for (const articleId of articleIds) {
     await purchaseService.addArticleSupplier(articleId, { supplierId: supplier.id, price: 10, currency: "SEK", leadTimeDays, isPrimary: true });
   }
@@ -263,7 +264,7 @@ async function supplierFor(articleIds: string[], leadTimeDays = 0) {
 }
 
 async function koFor(articleId: string, quantity: number, userId: string, date: string) {
-  const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+  const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
   return salesService.createQuote({ customerId: customer.id, confirm: true, expectedDeliveryDate: date, rows: [{ articleId, quantity, unitPrice: 100 }] }, userId);
 }
 
@@ -328,7 +329,7 @@ describe("prognosförslag är aldrig Passerat", () => {
 describe("härlett behov förbrukar prognosen i behovsberäkningen (användarbeslut 2026-11-07)", () => {
   it("a KO on the parent without a TO consumes the component's forecast like the released TO's material does; the overview and the card stay firm-only", async () => {
     const { article: c } = await forecastArticle("FC-COMP");
-    const parent = await articleService.createArticle({ articleNumber: "FC-PAR", name: "Förälder", type: "manufactured", active: true });
+    const parent = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "FC-PAR", name: "Förälder", type: "manufactured", active: true }));
     await articleService.addBomComponent(parent.id, { componentArticleId: c.id, quantity: 1 });
     const user = await makeUser();
     await koFor(parent.id, 5, user.id, "2030-03-20");
@@ -424,7 +425,7 @@ describe("det egna antalet (PUT /articles/:id/forecast)", () => {
 
   it("Prognosstyrd on the article card: the PATCH round-trips the flag and logs the change once", async () => {
     const user = await makeUser();
-    const article = await articleService.createArticle({ articleNumber: "FC-FLAG", name: "Flagga", type: "purchased", active: true });
+    const article = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "FC-FLAG", name: "Flagga", type: "purchased", active: true }));
     expect(article.forecastControlled).toBe(false);
     const on = await articleService.updateArticle(article.id, { forecastControlled: true }, user.id);
     expect(on!.forecastControlled).toBe(true);
@@ -456,7 +457,7 @@ describe("inte ett skarpt behov", () => {
 
     // A TO needing 3 of the article at the end of April: covered by stock,
     // although 58 of forecast demand is dated before it.
-    const parent = await articleService.createArticle({ articleNumber: "FC-PARENT", name: "Förälder", type: "manufactured", active: true });
+    const parent = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "FC-PARENT", name: "Förälder", type: "manufactured", active: true }));
     await articleService.addBomComponent(parent.id, { componentArticleId: f.id, quantity: 1 });
     const mo = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 3, dueDate: "2030-04-30" }, user.id);
     const coverage = await planningService.getManufacturingOrderCoverage(mo.id);
@@ -474,7 +475,7 @@ describe("inte ett skarpt behov", () => {
 
 describe("inställningarna", () => {
   it("the history window and the horizon follow the planning settings", async () => {
-    const article = await articleService.createArticle({ articleNumber: "FC-SET", name: "Inst", type: "purchased", active: true, forecastControlled: true });
+    const article = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "FC-SET", name: "Inst", type: "purchased", active: true, forecastControlled: true }));
     const loc = await location();
     await movements(article.id, loc.id, [
       { day: "2029-01-10", type: "purchase_receipt", delta: 150 },

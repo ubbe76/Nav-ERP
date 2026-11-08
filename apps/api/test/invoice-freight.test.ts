@@ -565,6 +565,7 @@ describe("samlingsfakturering", () => {
           vatRate: 25,
           lineAmount: 200,
           vatAmount: 50,
+          configuration: null,
         },
       ],
       biller

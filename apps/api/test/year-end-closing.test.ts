@@ -26,7 +26,7 @@ afterAll(resetYearEnd);
 const service = buildYearEndService();
 
 async function postBs(date: string, amounts: { account: string; amount: number }[], userId: string) {
-  const resolved = [];
+  const resolved: { accountId: string; amount: number }[] = [];
   for (const row of amounts) resolved.push({ accountId: await accountId(row.account), amount: row.amount });
   return db.transaction((tx) =>
     testYearEndPoster.postClosingEntry(

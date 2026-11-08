@@ -1,3 +1,4 @@
+import { createArticleSchema, createSupplierSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -22,6 +23,8 @@ import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/servic
 import { createReportsRepository } from "../src/modules/reports/repository/reports.repository.js";
 import { createReportsService } from "../src/modules/reports/service/reports.service.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
+import { unwiredSelfCosts } from "./helpers/unwired";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -48,7 +51,7 @@ const purchaseService = createPurchaseService(
 );
 const invoicePoster = createVerificationPoster({ read: async () => ({ ...DEFAULT_POSTING_SETTINGS }) });
 const supplierInvoiceService = createSupplierInvoiceService(createSupplierInvoiceRepository(db), invoicePoster);
-const reportsService = createReportsService(createReportsRepository(db));
+const reportsService = createReportsService(createReportsRepository(db), unwiredSelfCosts);
 
 const TRUNCATE = sql`TRUNCATE posting_rules, verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, supplier_invoice_rows, supplier_invoices, article_suppliers, email_log, inquiry_rows, inquiries, purchase_order_rows, purchase_orders, supplier_contacts, suppliers, stock_transactions, stock_locations, warehouses, bom_components, articles, users CASCADE`;
 
@@ -77,16 +80,16 @@ async function makeUser() {
 }
 
 async function makeSupplier(name = "Lev AB") {
-  return purchaseService.createSupplier({ name, active: true });
+  return purchaseService.createSupplier(parsed(createSupplierSchema, { name, active: true }));
 }
 
 async function makeArticle(name = "Rapportartikel") {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `REP-PURCH-${crypto.randomUUID()}`,
     name,
     type: "purchased",
     active: true,
-  });
+  }));
 }
 
 describe("reports service — purchase statistics: header vs rows basis", () => {

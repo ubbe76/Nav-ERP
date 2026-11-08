@@ -40,6 +40,11 @@ const SETTINGS = {
   postingVatSettlement: "2650",
   postingInventory: "1460",
   postingInventoryChange: "4990",
+  postingWip: "1440",
+  postingWipChange: "4940",
+  postingFxGain: "3960",
+  postingFxLoss: "7960",
+  postingBankFees: "6570",
 };
 const poster = createVerificationPoster({ read: async () => SETTINGS });
 

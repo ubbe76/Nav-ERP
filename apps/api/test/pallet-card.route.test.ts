@@ -156,7 +156,7 @@ describe("Pallkort — delivery routes", () => {
   it("GET /deliveries/:id/rows answers { deliveryNumber, rows } and 404 for an unknown delivery", async () => {
     const rows = {
       deliveryNumber: "FS-1",
-      rows: [{ id: id(), articleNumber: "A", articleName: "Modul A", quantity: 10, unit: "st" }],
+      rows: [{ id: id(), articleNumber: "A", articleName: "Modul A", quantity: 10, unit: "st", undoneAt: null, undoneByName: null, undoable: false, locations: [], baseUnit: "st" }],
     };
     const app = appWith({ sales: { deliveryRows: async () => rows } });
     const res = await app.inject({ method: "GET", url: `/deliveries/${id()}/rows` });

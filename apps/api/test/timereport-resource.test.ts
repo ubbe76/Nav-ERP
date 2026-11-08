@@ -1,3 +1,4 @@
+import { createArticleSchema, createWeekScheduleSchema, createWorkCenterSchema, stampOutSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { attendanceSessions, db, stampSessions, timeReports } from "@navet/db";
@@ -30,6 +31,7 @@ import {
   StampWorkCenterChangedError,
 } from "../src/modules/timereport/service/timereport.service.js";
 import { waitForLockWaiter } from "./helpers/year-end.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Alternativa resurser (#15), granskningen av etapp 1 — a time report keeps
 // the resource it was worked on (migration 0192), so a Byt resurs after
@@ -127,20 +129,20 @@ afterAll(async () => {
 async function seedWorld() {
   const user = await authRepo.create({ email: `tr-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "Planerare", role: "admin" });
   const day = await scheduleService.createDaySchedule({ code: "D8", name: "Dagtid 8h", startTime: "07:00", endTime: "15:00", breaks: [], active: true });
-  const week = await scheduleService.createWeekSchedule({
+  const week = await scheduleService.createWeekSchedule(parsed(createWeekScheduleSchema, {
     code: "VS40",
     name: "Veckoschema 40h",
     days: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, dayScheduleId: day.id })),
     active: true,
-  });
+  }));
   const wc = (code: string, name: string, hourlyRate: number) =>
-    mfgService.createWorkCenter({ code, name, weekScheduleId: week.id, capacityFactor: 1, hourlyRate, overheadPercent: 0, active: true });
+    mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code, name, weekScheduleId: week.id, capacityFactor: 1, hourlyRate, overheadPercent: 0, active: true }));
   const r110 = await wc("110", "Kantpress", 600);
   const r120 = await wc("120", "Kantpress 2", 300);
   const r130 = await wc("130", "Kantpress 3", 450);
   const r140 = await wc("140", "Svets", 500);
   const r150 = await wc("150", "Gammal press", 500);
-  const parent = await testArticleService.createArticle({ articleNumber: `P-${crypto.randomUUID().slice(0, 6)}`, name: "Produkt", type: "manufactured", unit: "st", active: true });
+  const parent = await testArticleService.createArticle(parsed(createArticleSchema, { articleNumber: `P-${crypto.randomUUID().slice(0, 6)}`, name: "Produkt", type: "manufactured", active: true }));
   const routing10 = await mfgService.createRoutingOperation(parent.id, {
     sequenceNo: 10,
     workCenterId: r110.id,
@@ -298,13 +300,13 @@ describe("every path that materializes a time report writes the resource", () =>
     const w = await seedWorld();
     const stamped = await timeReportService.stampIn({ employeeId: w.worker.id, moOperationId: w.op10.id }, w.user.id);
     expect(stamped.workCenterId).toBe(w.r110.id);
-    const out = await timeReportService.stampOut(stamped.id, {}, w.user.id);
+    const out = await timeReportService.stampOut(stamped.id, parsed(stampOutSchema, {}), w.user.id);
     expect(out.timeReport.workCenterId).toBe(w.r110.id);
 
     // Sluttid (a supervisor's stop time) on Op 20.
     const onOp20 = await timeReportService.stampIn({ employeeId: w.worker.id, moOperationId: w.op20.id }, w.user.id);
     await db.update(stampSessions).set({ startedAt: new Date(Date.now() - 2 * 3_600_000) }).where(eq(stampSessions.id, onOp20.id));
-    const sluttid = await timeReportService.stampOut(onOp20.id, { stoppedAt: new Date(Date.now() - 3_600_000).toISOString() }, w.user.id);
+    const sluttid = await timeReportService.stampOut(onOp20.id, parsed(stampOutSchema, { stoppedAt: new Date(Date.now() - 3_600_000).toISOString() }), w.user.id);
     expect(sluttid.timeReport).toMatchObject({ hours: "1.00", workCenterId: w.r140.id });
 
     // Manual (POST /time-reports, TO-kortets Rapportera tid) after a switch: the operation's resource now.
@@ -344,7 +346,7 @@ describe("every path that materializes a time report writes the resource", () =>
       .values({ employeeId: other.id, moOperationId: w.op20.id, createdBy: w.user.id, pausedAt: new Date() })
       .returning();
     expect([legacy10!.workCenterId, legacy20!.workCenterId]).toEqual([null, null]);
-    const out = await timeReportService.stampOut(legacy10!.id, {}, w.user.id);
+    const out = await timeReportService.stampOut(legacy10!.id, parsed(stampOutSchema, {}), w.user.id);
     expect(out.timeReport.workCenterId).toBe(w.r110.id);
     await mfgService.complete(w.order.id, { quantity: 10 }, w.user.id);
     const [stopped] = await db.select().from(stampSessions).where(eq(stampSessions.id, legacy20!.id));

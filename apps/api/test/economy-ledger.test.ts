@@ -1,3 +1,4 @@
+import { createVerificationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -5,6 +6,7 @@ import { createAuthRepository } from "../src/modules/auth/repository/auth.reposi
 import { createEconomyRepository } from "../src/modules/economy/repository/economy.repository.js";
 import { AccountNotFoundError, createEconomyService } from "../src/modules/economy/service/economy.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
+import { parsed } from "./helpers/parsed.js";
 
 const repo = createEconomyRepository(db);
 const authRepo = createAuthRepository(db);
@@ -66,7 +68,7 @@ async function bookEntry(
   description = "Kontantförsäljning"
 ) {
   const draft = await service.createVerification(
-    {
+    parsed(createVerificationSchema, {
       seriesId: series.id,
       date,
       description,
@@ -74,7 +76,7 @@ async function bookEntry(
         { accountId: bank.id, debit: amount, credit: 0 },
         { accountId: revenue.id, debit: 0, credit: amount },
       ],
-    },
+    }),
     userId
   );
   return service.book(draft.id, userId);
@@ -135,7 +137,7 @@ describe("economy service — getLedger: opening balance across months, running 
 
     // A big draft, never booked, sitting right in the middle of the range.
     await service.createVerification(
-      {
+      parsed(createVerificationSchema, {
         seriesId: series.id,
         date: "2026-03-15",
         description: "Utkast som aldrig bokförs",
@@ -143,7 +145,7 @@ describe("economy service — getLedger: opening balance across months, running 
           { accountId: bank.id, debit: 99999, credit: 0 },
           { accountId: revenue.id, debit: 0, credit: 99999 },
         ],
-      },
+      }),
       user.id
     );
 

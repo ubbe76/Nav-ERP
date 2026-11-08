@@ -1,3 +1,4 @@
+import { createArticleSchema, createWeekScheduleSchema, createWorkCenterSchema, stampOutSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { auditLog, db, moOperationResources, moOperations, moReports, stampSessions, systemSettings } from "@navet/db";
@@ -25,6 +26,7 @@ import { createScheduleService } from "../src/modules/timereport/service/schedul
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
 import { waitForLockWaiter } from "./helpers/year-end.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Alternativa resurser (#15), etapp 1 — the TO side against Postgres: the
 // snapshot at release (mo_operation_resources), Byt resurs through Ändra
@@ -148,20 +150,20 @@ async function terminalOpIds(workCenterId: string) {
 async function seedWorld(opts: { inactiveAlternative?: boolean; fill110?: boolean } = {}) {
   const user = await authRepo.create({ email: `alt-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "Planerare", role: "admin" });
   const day = await scheduleService.createDaySchedule({ code: "D8", name: "Dagtid 8h", startTime: "07:00", endTime: "15:00", breaks: [], active: true });
-  const week = await scheduleService.createWeekSchedule({
+  const week = await scheduleService.createWeekSchedule(parsed(createWeekScheduleSchema, {
     code: "VS40",
     name: "Veckoschema 40h",
     days: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, dayScheduleId: day.id })),
     active: true,
-  });
+  }));
   const wc = (code: string, name: string, hourlyRate: number) =>
-    mfgService.createWorkCenter({ code, name, weekScheduleId: week.id, capacityFactor: 1, hourlyRate, overheadPercent: 0, active: true });
+    mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code, name, weekScheduleId: week.id, capacityFactor: 1, hourlyRate, overheadPercent: 0, active: true }));
   const r110 = await wc("110", "Kantpress", 600);
   const r120 = await wc("120", "Kantpress 2", 300);
   const r130 = await wc("130", "Kantpress 3", 450);
   const r140 = await wc("140", "Svets", 500);
   const r150 = await wc("150", "Gammal press", 500);
-  const parent = await testArticleService.createArticle({ articleNumber: `P-${crypto.randomUUID().slice(0, 6)}`, name: "Produkt", type: "manufactured", unit: "st", active: true });
+  const parent = await testArticleService.createArticle(parsed(createArticleSchema, { articleNumber: `P-${crypto.randomUUID().slice(0, 6)}`, name: "Produkt", type: "manufactured", active: true }));
   const routing10 = await mfgService.createRoutingOperation(parent.id, {
     sequenceNo: 10,
     workCenterId: r110.id,
@@ -179,7 +181,7 @@ async function seedWorld(opts: { inactiveAlternative?: boolean; fill110?: boolea
   if (opts.inactiveAlternative) await mfgService.updateWorkCenter(r150.id, { active: false });
   let filler: { id: string } | null = null;
   if (opts.fill110) {
-    const fillerArticle = await testArticleService.createArticle({ articleNumber: `F-${crypto.randomUUID().slice(0, 6)}`, name: "Fyllnad", type: "manufactured", unit: "st", active: true });
+    const fillerArticle = await testArticleService.createArticle(parsed(createArticleSchema, { articleNumber: `F-${crypto.randomUUID().slice(0, 6)}`, name: "Fyllnad", type: "manufactured", active: true }));
     await mfgService.createRoutingOperation(fillerArticle.id, { sequenceNo: 10, workCenterId: r110.id, setupTime: 2400, runTimePerUnit: 0 });
     filler = await mfgService.createManufacturingOrder({ articleId: fillerArticle.id, quantity: 1 }, user.id);
   }
@@ -242,8 +244,8 @@ describe("the snapshot at release", () => {
 
   it("gives an article without alternatives exactly today's TO: no rows anywhere", async () => {
     const user = await authRepo.create({ email: `alt-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "P", role: "admin" });
-    const r = await mfgService.createWorkCenter({ code: "160", name: "Kap", active: true });
-    const parent = await testArticleService.createArticle({ articleNumber: `Q-${crypto.randomUUID().slice(0, 6)}`, name: "Q", type: "manufactured", unit: "st", active: true });
+    const r = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "160", name: "Kap", active: true }));
+    const parent = await testArticleService.createArticle(parsed(createArticleSchema, { articleNumber: `Q-${crypto.randomUUID().slice(0, 6)}`, name: "Q", type: "manufactured", active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: r.id, setupTime: 1, runTimePerUnit: 1 });
     const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 2 }, user.id);
     const [op] = await mfgService.listOperations(order.id);
@@ -338,7 +340,7 @@ describe("Byt resurs — Ändra operationer", () => {
     expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r110.id, resourceLocked: false });
     // Two hours stamped on 110.
     await db.update(stampSessions).set({ startedAt: new Date(Date.now() - 2 * 3_600_000) }).where(eq(stampSessions.id, session.id));
-    const out = await timeReportService.stampOut(session.id, {}, w.user.id);
+    const out = await timeReportService.stampOut(session.id, parsed(stampOutSchema, {}), w.user.id);
     expect(out.timeReport).toMatchObject({ hours: "2.00", workCenterId: w.r110.id });
     const moved = await mfgService.updateOperation(w.order.id, w.op10.id, { workCenterId: w.r120.id }, w.user.id);
     expect(moved.operation).toMatchObject({ workCenterCode: "120", resourceLocked: true });
@@ -656,7 +658,7 @@ describe("förslag på resurs (etapp 2)", () => {
     const w = await seedWorld();
     await mfgService.cancel(w.order.id, w.user.id); // the seed's TO is no load here
     const article = async (prefix: string) =>
-      testArticleService.createArticle({ articleNumber: `${prefix}-${crypto.randomUUID().slice(0, 6)}`, name: prefix, type: "manufactured", unit: "st", active: true });
+      testArticleService.createArticle(parsed(createArticleSchema, { articleNumber: `${prefix}-${crypto.randomUUID().slice(0, 6)}`, name: prefix, type: "manufactured", active: true }));
     // 30 h on 140 and 80 h on 110 (W1–W2) come first.
     const f140 = await article("F140");
     await mfgService.createRoutingOperation(f140.id, { sequenceNo: 10, workCenterId: w.r140.id, setupTime: 1800, runTimePerUnit: 0 });

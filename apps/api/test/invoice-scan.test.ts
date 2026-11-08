@@ -1,3 +1,4 @@
+import { createArticleSchema } from "@navet/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, like, sql } from "drizzle-orm";
 import {
@@ -38,6 +39,7 @@ import { DEFAULT_POSTING_SETTINGS, testArticleService } from "./helpers/services
 import { createAlertsRepository } from "../src/modules/alerts/repository/alerts.repository.js";
 import { createAlertsService } from "../src/modules/alerts/service/alerts.service.js";
 import { brokenPdf, FAKE_BUYER, FAKE_OCR, FAKE_SUPPLIER, imageOnlyPdf, invoicePdf, jpegImage, pngImage } from "./helpers/invoice-pdf.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Fakturaskanning — the inbox against the database (spec §6, steg 1):
 // upload, the rules on a generated PDF, the own-identifier filter, the
@@ -406,7 +408,7 @@ describe("Avvisa, Återställ, Radera", () => {
 
 describe("Matcha mot inköpsorder", () => {
   async function receivedOrder(supplierId: string, orderNumber: string) {
-    const article = await testArticleService.createArticle({ articleNumber: `ART-${crypto.randomUUID().slice(0, 6)}`, name: "Plåt", type: "purchased", active: true });
+    const article = await testArticleService.createArticle(parsed(createArticleSchema, { articleNumber: `ART-${crypto.randomUUID().slice(0, 6)}`, name: "Plåt", type: "purchased", active: true }));
     const [order] = await db.insert(purchaseOrders).values({ orderNumber, supplierId, status: "received" }).returning();
     await db.insert(purchaseOrderRows).values({ purchaseOrderId: order!.id, articleId: article.id, quantityOrdered: "4", quantityReceived: "4", unitPrice: "250" });
     return order!;

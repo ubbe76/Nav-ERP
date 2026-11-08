@@ -1,3 +1,4 @@
+import { createArticleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db, permissionGroups } from "@navet/db";
@@ -13,6 +14,8 @@ import { createTimeReportRepository } from "../src/modules/timereport/repository
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
 import { localDateOf } from "../src/modules/timereport/repository/stamp-close.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
+import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Regel 6 at the route: a stop time (Sluttid) on Stämpla ut is a
 // supervisor's correction on Pågående arbete — the shop floor's terminal
@@ -20,7 +23,7 @@ import { createAuditRepository } from "../src/modules/system/repository/audit.re
 
 const articleService = createArticleService(createArticleRepository(db));
 const authRepo = createAuthRepository(db);
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const timeReportService = createTimeReportService(
   createTimeReportRepository(db),
   mfgService,
@@ -52,14 +55,13 @@ async function setup() {
     name: "Arbetsledare",
     role: "supervisor",
   });
-  const parent = await articleService.createArticle({
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `P-${crypto.randomUUID()}`,
     name: "Produkt",
     type: "manufactured",
-    unit: "st",
     active: true,
-  });
-  const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+  }));
+  const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
   await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
   const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);
   const [operation] = await mfgService.listOperations(order.id);
@@ -67,7 +69,7 @@ async function setup() {
   const stamp = await timeReportService.stampIn({ employeeId: employee.id, moOperationId: operation!.id }, user.id);
   const startedAt = new Date(Date.now() - 2 * 3_600_000);
   await db.execute(sql`UPDATE stamp_sessions SET started_at = ${startedAt.toISOString()}::timestamptz WHERE id = ${stamp.id}`);
-  return { stamp, startedAt };
+  return { stamp, startedAt, user };
 }
 
 describe("POST /stamp-sessions/:id/stop with a stop time", () => {
@@ -161,10 +163,10 @@ describe("POST /stamp-sessions/:id/stop with a stop time", () => {
     expect(ok.json().id).not.toBe(attendance!.id);
   });
   it("marks absentToday for supervisors only (health data) and filters on employeeId", async () => {
-    const { stamp } = await setup();
+    const { stamp, user } = await setup();
     const other = await timeReportService.createEmployee({ employeeNumber: "108", name: "Annan", active: true });
     const [operation] = await db.execute(sql`SELECT mo_operation_id FROM stamp_sessions WHERE id = ${stamp.id}`) as unknown as { mo_operation_id: string }[];
-    await timeReportService.stampIn({ employeeId: other.id, moOperationId: operation!.mo_operation_id });
+    await timeReportService.stampIn({ employeeId: other.id, moOperationId: operation!.mo_operation_id }, user.id);
     const today = localDateOf(new Date());
     await db.execute(sql`INSERT INTO absence_types (code, name, paxml_code) VALUES ('SJK', 'Sjuk', '1')`);
     await db.execute(
@@ -222,8 +224,8 @@ describe("ställ och produktion — rutterna (#14 etapp 3)", () => {
 
   async function released() {
     const user = await authRepo.create({ email: `k-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "Ledare", role: "supervisor" });
-    const parent = await articleService.createArticle({ articleNumber: `P-${crypto.randomUUID()}`, name: "Produkt", type: "manufactured", unit: "st", active: true });
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const parent = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `P-${crypto.randomUUID()}`, name: "Produkt", type: "manufactured", active: true }));
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
     const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);
     const [operation] = await mfgService.listOperations(order.id);
@@ -330,9 +332,9 @@ describe("tidrapportens resurs — rutterna (#15)", () => {
 
   it("refuses a stamp on the station the list showed after a switch (409), keeps the resource on stamp, stop and manual report, and never takes one from a PATCH", async () => {
     const user = await authRepo.create({ email: `w-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "Ledare", role: "supervisor" });
-    const parent = await articleService.createArticle({ articleNumber: `P-${crypto.randomUUID()}`, name: "Produkt", type: "manufactured", unit: "st", active: true });
-    const r100 = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
-    const r200 = await mfgService.createWorkCenter({ code: "200", name: "Svets 2", active: true });
+    const parent = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `P-${crypto.randomUUID()}`, name: "Produkt", type: "manufactured", active: true }));
+    const r100 = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
+    const r200 = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "200", name: "Svets 2", active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: r100.id, setupTime: 10, runTimePerUnit: 2 });
     const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);
     const [operation] = await mfgService.listOperations(order.id);

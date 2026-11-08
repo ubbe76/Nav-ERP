@@ -1,3 +1,4 @@
+import { createArticleSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -12,6 +13,7 @@ import { appendFilesToPdf } from "../src/modules/mail/service/pdf-merge.js";
 import { createDocumentPdfService } from "../src/modules/mail/service/document-pdf.js";
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const documentPdfService = createDocumentPdfService(createSystemService(createSystemRepository(db)));
@@ -31,13 +33,12 @@ afterAll(async () => {
 });
 
 async function makeArticle() {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-FILE-${crypto.randomUUID()}`,
     name: "Ritningsartikel",
     type: "manufactured",
-    unit: "st",
     active: true,
-  });
+  }));
 }
 
 describe("article files", () => {

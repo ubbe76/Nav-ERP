@@ -21,7 +21,7 @@ interface Scripted {
   headers?: Record<string, string>;
 }
 
-function fakeFetch(script: Scripted[] | ((url: string, init: RequestInit) => Scripted | Error)) {
+function fakeFetch(script: (Scripted | Error)[] | ((url: string, init: RequestInit) => Scripted | Error)) {
   const requests: { url: string; init: RequestInit }[] = [];
   const queue = Array.isArray(script) ? [...script] : null;
   const impl: typeof fetch = async (input, init) => {

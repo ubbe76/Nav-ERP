@@ -1,3 +1,4 @@
+import { createVerificationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import Fastify from "fastify";
@@ -10,6 +11,8 @@ import { economyRoutes } from "../src/modules/economy/routes/economy.routes.js";
 import type { VatReportService } from "../src/modules/economy/service/vat-report.service.js";
 import type { FinancialReportsService } from "../src/modules/economy/service/financial-reports.service.js";
 import type { SieService } from "../src/modules/economy/service/sie.service.js";
+import { parsed } from "./helpers/parsed.js";
+import { unusedPeriodicSummary, unusedVatCodes } from "./helpers/economy-route-deps.js";
 
 // Package 5 (uppföljningssvepet): route-level coverage for B2's poster→409
 // mappings, exercised through POST /verifications/:id/reverse — previously
@@ -58,7 +61,7 @@ async function accountId(number: string) {
 async function createDraft(userId: string, date = `${YEAR}-03-05`) {
   const series = await repo.findSeriesByCode("A");
   return service.createVerification(
-    {
+    parsed(createVerificationSchema, {
       seriesId: series!.id,
       date,
       description: "Testpost",
@@ -66,7 +69,7 @@ async function createDraft(userId: string, date = `${YEAR}-03-05`) {
         { accountId: await accountId("1930"), debit: 100, credit: 0 },
         { accountId: await accountId("3001"), debit: 0, credit: 100 },
       ],
-    },
+    }),
     userId
   );
 }
@@ -82,6 +85,8 @@ function buildApp(userId: string) {
     vatReport: {} as unknown as VatReportService,
     reports: {} as unknown as FinancialReportsService,
     sie: {} as unknown as SieService,
+    vatCodes: unusedVatCodes,
+    periodicSummary: unusedPeriodicSummary,
   });
   return app;
 }

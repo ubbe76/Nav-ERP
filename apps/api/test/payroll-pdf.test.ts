@@ -1,3 +1,4 @@
+import { createWeekScheduleSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { stockholmInstant } from "../src/modules/system/service/delivery-days.js";
 import { inflateSync } from "node:zlib";
@@ -12,6 +13,7 @@ import { createAtfRepository } from "../src/modules/timereport/repository/atf.re
 import { createScheduleRepository } from "../src/modules/timereport/repository/schedule.repository.js";
 import { createScheduleService } from "../src/modules/timereport/service/schedule.service.js";
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Real repositories/services throughout, plus the real PDF renderer
 // (testDocumentPdfService) — this file is specifically about the rendered
@@ -101,12 +103,12 @@ async function seedMinimalPeriod() {
     active: true,
     breaks: [{ type: "unpaid", startTime: "12:00", endTime: "13:00" }],
   });
-  const weekSchedule = await scheduleService.createWeekSchedule({
+  const weekSchedule = await scheduleService.createWeekSchedule(parsed(createWeekScheduleSchema, {
     code: "VDAG",
     name: "Dagtid vecka",
     active: true,
     days: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, dayScheduleId: daySchedule.id })),
-  });
+  }));
 
   const absenceType = await service.createAbsenceType({ code: "SJUK", name: "Sjukfrånvaro", paxmlCode: "SJK" });
 
@@ -114,9 +116,8 @@ async function seedMinimalPeriod() {
     employeeNumber: `E-${crypto.randomUUID().slice(0, 8)}`,
     name: "Anna Andersson",
     active: true,
-    employmentType: "hourly",
   });
-  await timeReportRepository.updateEmployee(employee.id, { defaultWeekScheduleId: weekSchedule.id });
+  await timeReportRepository.updateEmployee(employee.id, { employmentType: "hourly", defaultWeekScheduleId: weekSchedule.id });
 
   // Mon 2026-05-04: exactly the schedule (07–16 less the unpaid hour) — 480
   // worked, no overtime.

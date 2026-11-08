@@ -1,3 +1,4 @@
+import { createWeekScheduleSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { stockholmInstant } from "../src/modules/system/service/delivery-days.js";
 import { sql } from "drizzle-orm";
@@ -11,6 +12,7 @@ import { EmployeeNotFoundError } from "../src/modules/timereport/service/timerep
 import { createScheduleRepository } from "../src/modules/timereport/repository/schedule.repository.js";
 import { createScheduleService } from "../src/modules/timereport/service/schedule.service.js";
 import { createAtfRepository } from "../src/modules/timereport/repository/atf.repository.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Real repositories/services throughout except the settings collaborator
 // (a mutable stub, same trick as atf.service.test.ts's systemAtfMinutesPerWeek
@@ -126,12 +128,12 @@ async function seedScenario() {
     active: true,
     breaks: [{ type: "unpaid", startTime: "12:00", endTime: "13:00" }],
   });
-  const weekSchedule = await scheduleService.createWeekSchedule({
+  const weekSchedule = await scheduleService.createWeekSchedule(parsed(createWeekScheduleSchema, {
     code: "VDAG",
     name: "Dagtid vecka",
     active: true,
     days: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, dayScheduleId: daySchedule.id })),
-  });
+  }));
   await timeReportRepository.updateEmployee(employee.id, { defaultWeekScheduleId: weekSchedule.id });
 
   await service.createObRule({

@@ -1,3 +1,4 @@
+import { createWeekScheduleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { stockholmInstant } from "../src/modules/system/service/delivery-days.js";
 import { and, eq, sql } from "drizzle-orm";
@@ -22,6 +23,8 @@ import { createAtfRepository } from "../src/modules/timereport/repository/atf.re
 import { createScheduleRepository } from "../src/modules/timereport/repository/schedule.repository.js";
 import { createScheduleService } from "../src/modules/timereport/service/schedule.service.js";
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
+import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // ---------------------------------------------------------------------------
 // Pure builders (no DB) — the PAXml/CSV knowledge lives entirely in these two
@@ -203,6 +206,8 @@ function dayFixture(overrides: Partial<PayrollDay> = {}): PayrollDay {
     unaccountedMinutes: 0,
     overtimeDisposition: "payout",
     overtimeDispositionSource: "default",
+    lateMinutes: 0,
+    earlyLeaveMinutes: 0,
     ...overrides,
   };
 }
@@ -274,8 +279,8 @@ describe("buildPayrollCsv", () => {
 
   it("treats a pre-feature snapshot row (missing comp fields) as all payout", () => {
     const employee = employeeSummary({ overtimeMinutes: 60 });
-    delete (employee as Record<string, unknown>).overtimeCompMinutes;
-    delete (employee as Record<string, unknown>).overtimeOffScheduleCompMinutes;
+    Reflect.deleteProperty(employee, "overtimeCompMinutes");
+    Reflect.deleteProperty(employee, "overtimeOffScheduleCompMinutes");
     const cells = buildPayrollCsv(periodSummary([employee])).split("\r\n")[1]!.split(";");
     expect(cells[5]).toBe("1,00");
     expect(cells[6]).toBe("0,00");
@@ -360,7 +365,8 @@ const authRepo = createAuthRepository(db);
 const mfgService = createManufacturingService(
   createManufacturingRepository(db),
   testDocumentPdfService,
-  testArticleService
+  testArticleService,
+  unwiredSalesOrderLinks
 );
 const scheduleService = createScheduleService(scheduleRepository, timeReportRepository, periodLocks);
 
@@ -453,12 +459,12 @@ async function seedPeriod() {
     active: true,
     breaks: [{ type: "unpaid", startTime: "12:00", endTime: "13:00" }],
   });
-  const weekSchedule = await scheduleService.createWeekSchedule({
+  const weekSchedule = await scheduleService.createWeekSchedule(parsed(createWeekScheduleSchema, {
     code: "VDAG",
     name: "Dagtid vecka",
     active: true,
     days: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, dayScheduleId: daySchedule.id })),
-  });
+  }));
 
   // The register code and the PAXml code deliberately differ, so a mix-up
   // between the two would fail: the XML must carry paxmlCode, the CSV code.
@@ -479,10 +485,8 @@ async function seedPeriod() {
       employeeNumber: `E-${crypto.randomUUID().slice(0, 8)}`,
       name,
       active: true,
-      employmentType,
-      personalIdentityNumber,
     });
-    await timeReportRepository.updateEmployee(employee.id, { defaultWeekScheduleId: weekSchedule.id });
+    await timeReportRepository.updateEmployee(employee.id, { employmentType, personalIdentityNumber, defaultWeekScheduleId: weekSchedule.id });
 
     async function session(from: Date, to: Date) {
       const row = await timeReportRepository.createAttendanceSession(employee.id, user.id);
@@ -587,7 +591,7 @@ describe("getPaxmlExport", () => {
     const article = await testArticleService.createArticle({
       articleNumber: `PAX-${crypto.randomUUID().slice(0, 8)}`, name: "Bänk", type: "manufactured", unit: "st", active: true,
     } as never);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 0, active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 0, active: true }));
     await mfgService.createRoutingOperation(article.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
     const order = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 5 }, seeded.user.id);
     const [operation] = await mfgService.listOperations(order.id);

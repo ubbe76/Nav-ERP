@@ -1,3 +1,4 @@
+import { createArticleSchema, createPurchaseOrderSchema, createStockLocationSchema, createSupplierSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -15,6 +16,7 @@ import { createMailService } from "../src/modules/mail/service/mail.service.js";
 import { createDocumentPdfService } from "../src/modules/mail/service/document-pdf.js";
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -60,21 +62,21 @@ async function makeUser() {
 }
 
 async function makeArticle(articleNumber: string) {
-  return articleService.createArticle({ articleNumber, name: articleNumber, type: "purchased", active: true });
+  return articleService.createArticle(parsed(createArticleSchema, { articleNumber, name: articleNumber, type: "purchased", active: true }));
 }
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
 }
 
 describe("per-article goods receipt log", () => {
   it("returns receipts joined to the IO/supplier/price/location", async () => {
     const user = await makeUser();
-    const supplier = await purchaseService.createSupplier({ name: "Lev AB", active: true });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lev AB", active: true }));
     const article = await makeArticle(`ART-R-${crypto.randomUUID()}`);
     const location = await makeLocation();
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     const row = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 10, unitPrice: 42 });
     await purchaseService.confirm(order.id);
     await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 6 }, user.id);
@@ -98,10 +100,10 @@ describe("per-article goods receipt log", () => {
   // not (order, article), which would double every line.
   it("keeps two rows of one article apart: one line per receipt with the right price", async () => {
     const user = await makeUser();
-    const supplier = await purchaseService.createSupplier({ name: "Lev AB", active: true });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lev AB", active: true }));
     const article = await makeArticle(`ART-R2-${crypto.randomUUID()}`);
     const location = await makeLocation();
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     const first = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 10, unitPrice: 42 });
     const second = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 5, unitPrice: 47, expectedDeliveryDate: "2030-04-01" });
     await purchaseService.confirm(order.id);
@@ -142,20 +144,20 @@ describe("per-article goods receipt log", () => {
 describe("per-article price history log", () => {
   it("returns rows across live orders, excludes draft/cancelled, newest first", async () => {
     const user = await makeUser();
-    const supplier = await purchaseService.createSupplier({ name: "Lev AB", active: true });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lev AB", active: true }));
     const article = await makeArticle(`ART-P-${crypto.randomUUID()}`);
 
     // Draft order — excluded.
-    const draft = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const draft = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     await purchaseService.addRow(draft.id, { articleId: article.id, quantity: 1, unitPrice: 10 });
 
     // Confirmed order — included.
-    const confirmed = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const confirmed = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     await purchaseService.addRow(confirmed.id, { articleId: article.id, quantity: 5, unitPrice: 20 });
     await purchaseService.confirm(confirmed.id);
 
     // Cancelled order — excluded.
-    const cancelled = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const cancelled = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     await purchaseService.addRow(cancelled.id, { articleId: article.id, quantity: 1, unitPrice: 99 });
     await purchaseService.cancel(cancelled.id);
 
@@ -172,9 +174,9 @@ describe("per-article price history log", () => {
 
   it("carries each row's effective delivery date so two rows of one article on an order differ", async () => {
     const user = await makeUser();
-    const supplier = await purchaseService.createSupplier({ name: "Lev AB", active: true });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lev AB", active: true }));
     const article = await makeArticle(`ART-PD-${crypto.randomUUID()}`);
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id, expectedDeliveryDate: "2030-05-06" }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id, expectedDeliveryDate: "2030-05-06" }), user.id);
     const own = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 10, unitPrice: 20, expectedDeliveryDate: "2030-05-20" });
     const follows = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 10, unitPrice: 20 });
     await purchaseService.confirm(order.id);

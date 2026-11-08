@@ -1,3 +1,4 @@
+import { createArticleSchema, type VatRate } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, asc, eq, sql } from "drizzle-orm";
 import {
@@ -33,6 +34,7 @@ import {
 } from "./helpers/services.js";
 import { vatCodeId } from "./helpers/vat-codes.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
 
 // B2: approving a supplier invoice books an L verification inside the SAME
 // transaction as the draft → approved flip, and cancelling an approved one
@@ -129,13 +131,13 @@ async function makeArticleGroup(code: string, name: string) {
 }
 
 async function makeArticle(groupId?: string) {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-AP-${crypto.randomUUID()}`,
     name: "Konteringsartikel",
     type: "purchased",
     active: true,
     ...(groupId !== undefined ? { groupId } : {}),
-  });
+  }));
 }
 
 type RowInput = {
@@ -143,7 +145,7 @@ type RowInput = {
   articleId?: string;
   quantity: number;
   unitPrice: number;
-  vatRate?: number;
+  vatRate?: VatRate;
 };
 
 async function makeInvoice(

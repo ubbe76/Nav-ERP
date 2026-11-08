@@ -1,3 +1,4 @@
+import { createVerificationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { asc, eq, inArray, sql } from "drizzle-orm";
 import { db, invoiceRows, invoices, systemSettings } from "@navet/db";
@@ -37,6 +38,7 @@ import {
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline, testEconomyRepository, testEconomyService } from "./helpers/services.js";
 import { resetVatCodes, vatCodeId } from "./helpers/vat-codes.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Periodisk sammanställning (Momskoder steg 3) against Postgres: which
 // invoices count (issued and paid invoices and credit notes in the range,
@@ -158,7 +160,7 @@ async function bookManualSale(revenueAccount: string, amount: number) {
   const series = await testEconomyService.createSeries({ code: "A", name: "Manuella verifikat" });
   const account = async (number: string) => (await testEconomyRepository.findAccountByNumber(number))!.id;
   const draft = await testEconomyService.createVerification(
-    {
+    parsed(createVerificationSchema, {
       seriesId: series.id,
       date: TODAY,
       description: "Manuell EU-försäljning",
@@ -166,7 +168,7 @@ async function bookManualSale(revenueAccount: string, amount: number) {
         { accountId: await account("1510"), debit: amount, credit: 0 },
         { accountId: await account(revenueAccount), debit: 0, credit: amount },
       ],
-    },
+    }),
     user.id
   );
   await testEconomyService.book(draft.id, user.id);
@@ -214,7 +216,7 @@ describe("GET summary — which invoices count", () => {
           { id: i1.id, invoiceNumber: i1.invoiceNumber },
           { id: i4.id, invoiceNumber: i4.invoiceNumber },
           { id: c1!.id, invoiceNumber: c1!.invoiceNumber },
-        ].sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber)),
+        ].sort((a, b) => a.invoiceNumber!.localeCompare(b.invoiceNumber!)),
       },
     ]);
     expect(summary.totals).toEqual({ goods: 1100, services: 500 });

@@ -1,3 +1,4 @@
+import { createVerificationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import Fastify from "fastify";
 import { eq } from "drizzle-orm";
@@ -12,6 +13,8 @@ import { isBookkeepingLockViolation, isClosedFiscalYearViolation } from "../src/
 import { bookFailureError } from "../src/modules/economy/service/economy.service.js";
 import { DEFAULT_POSTING_SETTINGS, testEconomyRepository, testEconomyService } from "./helpers/services.js";
 import { NEXT_YEAR, YEAR, accountId, createCalendarYear, failure, resetYearEnd, setupYearEnd } from "./helpers/year-end.js";
+import { parsed } from "./helpers/parsed.js";
+import { unusedPeriodicSummary, unusedVatCodes } from "./helpers/economy-route-deps.js";
 
 beforeEach(resetYearEnd);
 afterAll(resetYearEnd);
@@ -38,6 +41,8 @@ function buildEconomyApp(userId: string) {
     vatReport: {} as unknown as VatReportService,
     reports: {} as unknown as FinancialReportsService,
     sie: {} as unknown as SieService,
+    vatCodes: unusedVatCodes,
+    periodicSummary: unusedPeriodicSummary,
   });
   return app;
 }
@@ -45,7 +50,7 @@ function buildEconomyApp(userId: string) {
 // A balanced manual draft dated in YEAR, created while the year is still open.
 async function manualDraftInYear(userId: string) {
   return testEconomyService.createVerification(
-    {
+    parsed(createVerificationSchema, {
       seriesId: await seriesA(),
       date: `${YEAR}-06-30`,
       description: "Manuellt",
@@ -53,7 +58,7 @@ async function manualDraftInYear(userId: string) {
         { accountId: await accountId("1930"), debit: 100, credit: 0 },
         { accountId: await accountId("2091"), debit: 0, credit: 100 },
       ],
-    },
+    }),
     userId
   );
 }
@@ -120,12 +125,12 @@ describe("closed fiscal year — application guards", () => {
     await createCalendarYear(NEXT_YEAR);
     const series = await seriesA();
     const draft = await testEconomyService.createVerification(
-      { seriesId: series, date: `${NEXT_YEAR}-02-01`, description: "Utkast", rows: [] },
+      parsed(createVerificationSchema, { seriesId: series, date: `${NEXT_YEAR}-02-01`, description: "Utkast", rows: [] }),
       user.id
     );
     await closeBySql(yearId);
     await expect(
-      testEconomyService.createVerification({ seriesId: series, date: `${YEAR}-06-30`, description: "Sent", rows: [] }, user.id)
+      testEconomyService.createVerification(parsed(createVerificationSchema, { seriesId: series, date: `${YEAR}-06-30`, description: "Sent", rows: [] }), user.id)
     ).rejects.toBeInstanceOf(FiscalYearClosedError);
     await expect(testEconomyService.updateVerificationHeader(draft.id, { date: `${YEAR}-12-31` })).rejects.toBeInstanceOf(
       FiscalYearClosedError

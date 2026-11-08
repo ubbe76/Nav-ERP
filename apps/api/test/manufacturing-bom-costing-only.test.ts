@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { bomComponents, db, stockTransactions } from "@navet/db";
-import { createArticleSchema, type CreateArticleInput } from "@navet/shared";
+import { createArticleSchema, type CreateArticleInput, createStockLocationSchema, createWorkCenterSchema } from "@navet/shared";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { CostingOnlyOperationLinkError, createArticleService } from "../src/modules/article/service/article.service.js";
@@ -10,6 +10,8 @@ import { createManufacturingRepository } from "../src/modules/manufacturing/repo
 import { createManufacturingService, OperationHasLinkedMaterialError } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
+import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // "Kalkyl" on a structure row (bom_components.costing_only, Monitor's
 // "End. kal."): the row is priced in the förkalkyl like any other but never
@@ -20,7 +22,7 @@ import { createStockService } from "../src/modules/stock/service/stock.service.j
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
 const authRepo = createAuthRepository(db);
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 
 const TRUNCATE = sql`TRUNCATE mo_report_materials, mo_reports, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, stock_transactions, stock_locations, warehouses, bom_components, articles, users CASCADE`;
 
@@ -55,7 +57,7 @@ async function makeArticle(name: string, extra: Partial<CreateArticleInput> = {}
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
 }
 
 async function seedStock(articleId: string, locationId: string, quantity: number) {
@@ -82,24 +84,24 @@ async function parentWithKalkylRow() {
 describe("Kalkyl structure row — the article card's API", () => {
   it("stores the flag, returns it on every BOM read and lets it be toggled", async () => {
     const { parent, kalkylRow, ordinary } = await parentWithKalkylRow();
-    expect(kalkylRow.costingOnly).toBe(true);
+    expect(kalkylRow!.costingOnly).toBe(true);
 
     const bom = await articleService.getBom(parent.id);
     expect(bom.map((r) => [r.componentArticleId, r.costingOnly])).toEqual([
       [ordinary.id, false],
-      [kalkylRow.componentArticleId, true],
+      [kalkylRow!.componentArticleId, true],
     ]);
 
-    const cleared = await articleService.updateBomComponent(parent.id, kalkylRow.id, { costingOnly: false });
+    const cleared = await articleService.updateBomComponent(parent.id, kalkylRow!.id, { costingOnly: false });
     expect(cleared.costingOnly).toBe(false);
-    const flagged = await articleService.updateBomComponent(parent.id, kalkylRow.id, { costingOnly: true });
+    const flagged = await articleService.updateBomComponent(parent.id, kalkylRow!.id, { costingOnly: true });
     expect(flagged.costingOnly).toBe(true);
   });
 
   it("lets a Kalkyl row link to a Kalkyl operation, but not an ordinary row — and un-flagging re-checks the link", async () => {
     const parent = await makeArticle("Parent", { type: "manufactured" });
     const material = await makeArticle("Material");
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     const calcOp = await mfgService.createRoutingOperation(parent.id, {
       sequenceNo: 10, workCenterId: wc.id, setupTime: 1, runTimePerUnit: 1, costingOnly: true,
     });
@@ -114,14 +116,14 @@ describe("Kalkyl structure row — the article card's API", () => {
     const row = await articleService.addBomComponent(parent.id, {
       componentArticleId: material.id, quantity: 1, routingOperationId: calcOp.id, costingOnly: true,
     });
-    expect(row.routingOperationId).toBe(calcOp.id);
+    expect(row!.routingOperationId).toBe(calcOp.id);
 
     // Losing the flag while keeping the link is the refused combination again.
-    await expect(articleService.updateBomComponent(parent.id, row.id, { costingOnly: false })).rejects.toBeInstanceOf(
+    await expect(articleService.updateBomComponent(parent.id, row!.id, { costingOnly: false })).rejects.toBeInstanceOf(
       CostingOnlyOperationLinkError
     );
     // Dropping the link and the flag together is fine.
-    const plain = await articleService.updateBomComponent(parent.id, row.id, { costingOnly: false, routingOperationId: null });
+    const plain = await articleService.updateBomComponent(parent.id, row!.id, { costingOnly: false, routingOperationId: null });
     expect([plain.costingOnly, plain.routingOperationId]).toEqual([false, null]);
   });
 
@@ -129,7 +131,7 @@ describe("Kalkyl structure row — the article card's API", () => {
     const parent = await makeArticle("Parent", { type: "manufactured" });
     const a = await makeArticle("A");
     const b = await makeArticle("B");
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     const op = await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: wc.id, setupTime: 1, runTimePerUnit: 1 });
     await articleService.addBomComponent(parent.id, { componentArticleId: a.id, quantity: 1, routingOperationId: op.id, costingOnly: true });
     const ordinary = await articleService.addBomComponent(parent.id, { componentArticleId: b.id, quantity: 1, routingOperationId: op.id });
@@ -137,7 +139,7 @@ describe("Kalkyl structure row — the article card's API", () => {
     await expect(mfgService.updateRoutingOperation(parent.id, op.id, { costingOnly: true })).rejects.toBeInstanceOf(
       OperationHasLinkedMaterialError
     );
-    await articleService.updateBomComponent(parent.id, ordinary.id, { routingOperationId: null });
+    await articleService.updateBomComponent(parent.id, ordinary!.id, { routingOperationId: null });
     const flagged = await mfgService.updateRoutingOperation(parent.id, op.id, { costingOnly: true });
     expect(flagged.costingOnly).toBe(true);
   });
@@ -162,7 +164,7 @@ describe("Kalkyl structure row — release and reporting", () => {
     const location = await makeLocation();
     await seedStock(ordinary.id, location.id, 100);
     // Deliberately NO stock for the Kalkyl component: it must not warn either.
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: wc.id, setupTime: 1, runTimePerUnit: 1 });
 
     const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);

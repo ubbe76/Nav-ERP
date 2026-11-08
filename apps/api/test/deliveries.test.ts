@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema, createQuoteSchema, createStockLocationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, deliveries, deliveryRows, stockTransactions } from "@navet/db";
@@ -23,6 +24,7 @@ import { createMailService, type MailTransportFactory } from "../src/modules/mai
 import { createDocumentPdfService } from "../src/modules/mail/service/document-pdf.js";
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -67,22 +69,21 @@ async function makeUser() {
 }
 
 async function makeCustomer() {
-  return salesService.createCustomer({ name: "Kund AB", active: true });
+  return salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
 }
 
 async function makeArticle() {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-DEL-${crypto.randomUUID()}`,
     name: "Test Article",
     type: "manufactured",
-    unit: "st",
     active: true,
-  });
+  }));
 }
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
 }
 
 async function seedStock(articleId: string, locationId: string, quantity: number) {
@@ -106,13 +107,13 @@ async function makeOrderWithTwoRows(quantityA = 10, quantityB = 5) {
   await seedStock(articleB.id, location.id, quantityB);
 
   const { order, rows } = await salesService.createQuote(
-    {
+    parsed(createQuoteSchema, {
       customerId: customer.id,
       rows: [
         { articleId: articleA.id, quantity: quantityA, unitPrice: 10 },
         { articleId: articleB.id, quantity: quantityB, unitPrice: 20 },
       ],
-    },
+    }),
     user.id
   );
   // Offerter (0138): confirming gives the quote its KO- number.
@@ -135,7 +136,7 @@ describe("delivery occasions — batch delivery", () => {
     const location = await makeLocation();
     await seedStock(article.id, location.id, 15);
     const { order, rows } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 10, unitPrice: 10 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 10, unitPrice: 10 }] }),
       user.id
     );
     const second = await salesService.addRow(order.id, { articleId: article.id, quantity: 5, unitPrice: 10, expectedDeliveryDate: "2030-04-01" }, user.id);

@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema, createWeekScheduleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, manufacturingOrders, moOperationPlanWeeks, salesOrders } from "@navet/db";
@@ -29,8 +30,10 @@ import {
   NothingToReserveError,
   SalesOrderNotOpenError,
   type ManufacturingOrderCreator,
+  type SalesOrderDateWriter,
   type ManufacturingPlanReader,
 } from "../src/modules/planning/service/planning.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Reservationen (POST /delivery-time-check/apply) against Postgres: the
 // check run again under the production_plan lock, a TO per shortage batch
@@ -91,7 +94,7 @@ const scheduleService = createScheduleService(createScheduleRepository(db), crea
   isDateLocked: async () => false,
 });
 
-function buildPlanning(manufacturing: ManufacturingOrderCreator = mfgService, salesOrderDates = salesService) {
+function buildPlanning(manufacturing: ManufacturingOrderCreator = mfgService, salesOrderDates: SalesOrderDateWriter = salesService) {
   return createPlanningService(createPlanningRepository(db), {
     purchase: {
       createPurchaseOrder: async () => {
@@ -160,43 +163,43 @@ async function seedWorld() {
     role: "admin",
   });
   const day = await scheduleService.createDaySchedule({ code: "D8", name: "Dagtid 8h", startTime: "07:00", endTime: "15:00", breaks: [], active: true });
-  const week = await scheduleService.createWeekSchedule({
+  const week = await scheduleService.createWeekSchedule(parsed(createWeekScheduleSchema, {
     code: "VS40",
     name: "Veckoschema 40h",
     days: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, dayScheduleId: day.id })),
     active: true,
-  });
-  const r1 = await mfgService.createWorkCenter({ code: "101", name: "Kap", weekScheduleId: week.id, capacityFactor: 1, active: true });
-  const r2 = await mfgService.createWorkCenter({ code: "201", name: "Svets", weekScheduleId: week.id, capacityFactor: 1, active: true });
-  const child = await articleService.createArticle({
+  }));
+  const r1 = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "101", name: "Kap", weekScheduleId: week.id, capacityFactor: 1, active: true }));
+  const r2 = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "201", name: "Svets", weekScheduleId: week.id, capacityFactor: 1, active: true }));
+  const child = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `BARN-${crypto.randomUUID().slice(0, 8)}`,
     name: "Halvfabrikat",
     type: "manufactured",
     active: true,
-  });
+  }));
   await mfgService.createRoutingOperation(child.id, { sequenceNo: 10, workCenterId: r2.id, setupTime: 0, runTimePerUnit: 60 });
-  const parent = await articleService.createArticle({
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `FAR-${crypto.randomUUID().slice(0, 8)}`,
     name: "Slutprodukt",
     type: "manufactured",
     active: true,
-  });
+  }));
   await articleService.addBomComponent(parent.id, { componentArticleId: child.id, quantity: 1 });
   await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: r1.id, setupTime: 0, runTimePerUnit: 60 });
-  const other = await articleService.createArticle({
+  const other = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ANNAN-${crypto.randomUUID().slice(0, 8)}`,
     name: "Annan artikel",
     type: "manufactured",
     active: true,
-  });
+  }));
   await mfgService.createRoutingOperation(other.id, { sequenceNo: 10, workCenterId: r1.id, setupTime: 0, runTimePerUnit: 60 });
-  const bought = await articleService.createArticle({
+  const bought = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `KOP-${crypto.randomUUID().slice(0, 8)}`,
     name: "Köpt artikel",
     type: "purchased",
     active: true,
-  });
-  const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+  }));
+  const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
   return { user, r1, r2, child, parent, other, bought, customer };
 }
 

@@ -29,6 +29,7 @@ function wc(overrides: Partial<CapacityWorkCenter> & { workCenterId: string }): 
     type: "machine",
     productionGroupId: null,
     weekScheduleId: null,
+    hoursPerDay: null,
     capacityFactor: 1,
     active: true,
     ...overrides,

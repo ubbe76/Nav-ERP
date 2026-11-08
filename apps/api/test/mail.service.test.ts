@@ -118,6 +118,7 @@ describe("mail service", () => {
       subject: "Faktura",
       message: "",
       attachDrawings: false,
+      showConfigurationPrices: null,
       status: "sent",
       error: null,
     });
@@ -131,6 +132,7 @@ describe("mail service", () => {
       subject: "Orderbekräftelse",
       message: "",
       attachDrawings: false,
+      showConfigurationPrices: null,
       status: "sent",
       error: null,
     });
@@ -142,6 +144,7 @@ describe("mail service", () => {
       subject: "Offert",
       message: "",
       attachDrawings: false,
+      showConfigurationPrices: null,
       status: "sent",
       error: null,
     });

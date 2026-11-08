@@ -1,3 +1,4 @@
+import { createArticleSchema, createDeliveryAddressSchema, createPurchaseOrderSchema, createStockLocationSchema, createSupplierSchema, sendDocumentEmailSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { auditLog, db, numberSeries, systemSettings, vatCodes } from "@navet/db";
@@ -33,6 +34,7 @@ import { pdfText } from "./helpers/pdf.js";
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -108,16 +110,16 @@ async function makeUser() {
 }
 
 async function makeSupplier() {
-  return purchaseService.createSupplier({ name: "ACME AB", active: true });
+  return purchaseService.createSupplier(parsed(createSupplierSchema, { name: "ACME AB", active: true }));
 }
 
 async function makeArticle(articleNumber: string) {
-  return articleService.createArticle({ articleNumber, name: articleNumber, type: "purchased", unit: "st", active: true });
+  return articleService.createArticle(parsed(createArticleSchema, { articleNumber, name: articleNumber, type: "purchased", active: true }));
 }
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
 }
 
 async function makeOrderWithRow(quantity = 10) {
@@ -125,7 +127,7 @@ async function makeOrderWithRow(quantity = 10) {
   const supplier = await makeSupplier();
   const article = await makeArticle(`ART-PO-${crypto.randomUUID()}`);
   const location = await makeLocation();
-  const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+  const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
   const row = await purchaseService.addRow(order.id, { articleId: article.id, quantity, unitPrice: 42 });
   return { user, supplier, article, location, order, row };
 }
@@ -341,9 +343,9 @@ describe("purchase service — closing", () => {
 describe("purchase service — currency", () => {
   it("defaults to SEK / exchange rate 1 when the supplier doesn't specify a currency", async () => {
     const user = await makeUser();
-    const supplier = await purchaseService.createSupplier({ name: "Svensk Leverantör AB", active: true });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Svensk Leverantör AB", active: true }));
 
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
 
     expect(order.currency).toBe("SEK");
     expect(order.exchangeRate).toBe("1.000000");
@@ -351,7 +353,7 @@ describe("purchase service — currency", () => {
 
   it("snapshots the supplier's currency onto the order at creation", async () => {
     const user = await makeUser();
-    const supplier = await purchaseService.createSupplier({ name: "Deutsche Lieferant GmbH", currency: "EUR", active: true });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Deutsche Lieferant GmbH", currency: "EUR", active: true }));
 
     const order = await purchaseService.createPurchaseOrder(
       { supplierId: supplier.id, exchangeRate: 11.5 },
@@ -366,7 +368,7 @@ describe("purchase service — currency", () => {
     const user = await makeUser();
     const fakeId = "00000000-0000-0000-0000-000000000000";
 
-    await expect(purchaseService.createPurchaseOrder({ supplierId: fakeId }, user.id)).rejects.toThrow(
+    await expect(purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: fakeId }), user.id)).rejects.toThrow(
       SupplierNotFoundError
     );
   });
@@ -375,13 +377,13 @@ describe("purchase service — currency", () => {
 describe("purchase service — order list filters", () => {
   it("filters purchase orders by supplierId, combined with status", async () => {
     const user = await makeUser();
-    const s1 = await purchaseService.createSupplier({ name: "Filter S1", active: true });
-    const s2 = await purchaseService.createSupplier({ name: "Filter S2", active: true });
+    const s1 = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Filter S1", active: true }));
+    const s2 = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Filter S2", active: true }));
     const article = await makeArticle(`ART-SF-${crypto.randomUUID()}`);
-    const o1 = await purchaseService.createPurchaseOrder({ supplierId: s1.id }, user.id);
+    const o1 = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: s1.id }), user.id);
     await purchaseService.addRow(o1.id, { articleId: article.id, quantity: 1, unitPrice: 1 });
     await purchaseService.confirm(o1.id);
-    await purchaseService.createPurchaseOrder({ supplierId: s2.id }, user.id);
+    await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: s2.id }), user.id);
 
     const forS1 = await purchaseService.listPurchaseOrders({ supplierId: s1.id, limit: 50, offset: 0 });
     expect(forS1.total).toBe(1);
@@ -405,18 +407,17 @@ describe("purchase service — order list filters", () => {
 
   it("search also matches an order's article number/benämning, not just order number/leverantör", async () => {
     const user = await makeUser();
-    const supplier = await purchaseService.createSupplier({ name: "Artikelsök AB", active: true });
-    const article = await articleService.createArticle({
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Artikelsök AB", active: true }));
+    const article = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `ART-SEARCH-${crypto.randomUUID()}`,
       name: `Söktermbenämning-${crypto.randomUUID()}`,
       type: "purchased",
-      unit: "st",
       active: true,
-    });
-    const matching = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    }));
+    const matching = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     await purchaseService.addRow(matching.id, { articleId: article.id, quantity: 1, unitPrice: 1 });
     // No matching row — must not be found by an article-only search term.
-    const unrelated = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const unrelated = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
 
     const byNumber = await purchaseService.listPurchaseOrders({
       search: article.articleNumber,
@@ -481,8 +482,8 @@ describe("purchase — editable suppliers", () => {
   });
 
   it("rejects changing a supplier's number to one already taken, own unchanged number is fine", async () => {
-    const a = await purchaseService.createSupplier({ name: "Lev F", supplierNumber: "NUM-A", active: true });
-    await purchaseService.createSupplier({ name: "Lev G", supplierNumber: "NUM-B", active: true });
+    const a = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lev F", supplierNumber: "NUM-A", active: true }));
+    await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lev G", supplierNumber: "NUM-B", active: true }));
 
     await expect(purchaseService.updateSupplier(a.id, { supplierNumber: "NUM-B" })).rejects.toThrow(
       DuplicateSupplierNumberError
@@ -495,8 +496,8 @@ describe("purchase — editable suppliers", () => {
   });
 
   it("finds suppliers by supplier number in the list search", async () => {
-    await purchaseService.createSupplier({ name: "Söklev AB", supplierNumber: "SOKNUM-42", active: true });
-    await purchaseService.createSupplier({ name: "Annan AB", active: true });
+    await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Söklev AB", supplierNumber: "SOKNUM-42", active: true }));
+    await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Annan AB", active: true }));
 
     const hit = await purchaseService.listSuppliers({ search: "soknum", limit: 50, offset: 0 });
     expect(hit.total).toBe(1);
@@ -507,7 +508,7 @@ describe("purchase — editable suppliers", () => {
 describe("purchase service — supplier card fields", () => {
   it("stores address, terms and carrier references", async () => {
     const term = await registerService.paymentTerms.create({ code: "30", name: "30 dagar netto" });
-    const supplier = await purchaseService.createSupplier({
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, {
       name: "Kortleverantör AB",
       postalCode: "421 44",
       city: "Västra Frölunda",
@@ -516,7 +517,7 @@ describe("purchase service — supplier card fields", () => {
       paymentTermId: term.id,
       currency: "SEK",
       active: true,
-    });
+    }));
     expect(supplier.city).toBe("Västra Frölunda");
 
     const found = await purchaseService.getSupplier(supplier.id);
@@ -525,7 +526,7 @@ describe("purchase service — supplier card fields", () => {
   });
 
   it("rejects an unknown carrier reference", async () => {
-    const supplier = await purchaseService.createSupplier({ name: "Lev utan spedit", currency: "SEK", active: true });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lev utan spedit", currency: "SEK", active: true }));
     await expect(
       purchaseService.updateSupplier(supplier.id, { carrierId: "00000000-0000-0000-0000-000000000000" })
     ).rejects.toThrow(RegisterEntryNotFoundError);
@@ -534,7 +535,7 @@ describe("purchase service — supplier card fields", () => {
 
 describe("purchase service — supplier contacts", () => {
   it("creates, lists (primary first) and moves the primary flag", async () => {
-    const supplier = await purchaseService.createSupplier({ name: "Kontaktlev AB", currency: "SEK", active: true });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Kontaktlev AB", currency: "SEK", active: true }));
     const first = await purchaseService.createSupplierContact(supplier.id, { name: "Sune Säljare", isPrimary: true });
     const second = await purchaseService.createSupplierContact(supplier.id, {
       name: "Alva Order",
@@ -564,20 +565,20 @@ describe("purchase service — supplier delivery addresses", () => {
   it("creates, lists, updates and deletes delivery addresses on a supplier", async () => {
     const supplier = await makeSupplier();
 
-    const created = await purchaseService.createSupplierDeliveryAddress(supplier.id, {
+    const created = await purchaseService.createSupplierDeliveryAddress(supplier.id, parsed(createDeliveryAddressSchema, {
       label: "Huvudlager",
       address: "Lagervägen 1",
       postalCode: "123 45",
       city: "Göteborg",
       isDefault: true,
-    });
+    }));
     expect(created.isDefault).toBe(true);
 
-    await purchaseService.createSupplierDeliveryAddress(supplier.id, {
+    await purchaseService.createSupplierDeliveryAddress(supplier.id, parsed(createDeliveryAddressSchema, {
       label: "Filial Nord",
       address: "Norrvägen 2",
       isDefault: false,
-    });
+    }));
 
     const list = await purchaseService.listSupplierDeliveryAddresses(supplier.id);
     expect(list).toHaveLength(2);
@@ -593,16 +594,16 @@ describe("purchase service — supplier delivery addresses", () => {
 
   it("keeps at most one default — setting a new default demotes the old one", async () => {
     const supplier = await makeSupplier();
-    const first = await purchaseService.createSupplierDeliveryAddress(supplier.id, {
+    const first = await purchaseService.createSupplierDeliveryAddress(supplier.id, parsed(createDeliveryAddressSchema, {
       label: "A",
       address: "Gata 1",
       isDefault: true,
-    });
-    const second = await purchaseService.createSupplierDeliveryAddress(supplier.id, {
+    }));
+    const second = await purchaseService.createSupplierDeliveryAddress(supplier.id, parsed(createDeliveryAddressSchema, {
       label: "B",
       address: "Gata 2",
       isDefault: true,
-    });
+    }));
 
     const list = await purchaseService.listSupplierDeliveryAddresses(supplier.id);
     expect(list.find((a) => a.id === first.id)!.isDefault).toBe(false);
@@ -617,12 +618,12 @@ describe("purchase service — supplier delivery addresses", () => {
 
   it("scopes addresses to their supplier (404 across suppliers)", async () => {
     const supplier = await makeSupplier();
-    const other = await purchaseService.createSupplier({ name: "Annan Lev AB", active: true });
-    const address = await purchaseService.createSupplierDeliveryAddress(supplier.id, {
+    const other = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Annan Lev AB", active: true }));
+    const address = await purchaseService.createSupplierDeliveryAddress(supplier.id, parsed(createDeliveryAddressSchema, {
       label: "A",
       address: "Gata 1",
       isDefault: false,
-    });
+    }));
 
     await expect(
       purchaseService.updateSupplierDeliveryAddress(other.id, address.id, { city: "Fel" })
@@ -754,7 +755,7 @@ describe("purchase service — document email", () => {
   it("emails a draft inquiry with a PDF attachment and marks it sent", async () => {
     const { inquiry } = await makeInquiry();
 
-    const updated = await purchaseService.sendInquiryEmail(inquiry.id, sendInput);
+    const updated = await purchaseService.sendInquiryEmail(inquiry.id, parsed(sendDocumentEmailSchema, sendInput));
     expect(updated?.status).toBe("sent");
 
     expect(sentMails).toHaveLength(1);
@@ -770,9 +771,9 @@ describe("purchase service — document email", () => {
 
   it("resends an already-sent inquiry without a new transition", async () => {
     const { inquiry } = await makeInquiry();
-    await purchaseService.sendInquiryEmail(inquiry.id, sendInput);
+    await purchaseService.sendInquiryEmail(inquiry.id, parsed(sendDocumentEmailSchema, sendInput));
 
-    const resent = await purchaseService.sendInquiryEmail(inquiry.id, sendInput);
+    const resent = await purchaseService.sendInquiryEmail(inquiry.id, parsed(sendDocumentEmailSchema, sendInput));
     expect(resent?.status).toBe("sent");
     expect(sentMails).toHaveLength(2);
   });
@@ -781,7 +782,7 @@ describe("purchase service — document email", () => {
     const { inquiry } = await makeInquiry();
     await purchaseService.cancelInquiry(inquiry.id);
 
-    await expect(purchaseService.sendInquiryEmail(inquiry.id, sendInput)).rejects.toThrow(
+    await expect(purchaseService.sendInquiryEmail(inquiry.id, parsed(sendDocumentEmailSchema, sendInput))).rejects.toThrow(
       InvalidStatusTransitionError
     );
     expect(sentMails).toHaveLength(0);
@@ -791,7 +792,7 @@ describe("purchase service — document email", () => {
     const { inquiry } = await makeInquiry();
     failNextSend = true;
 
-    await expect(purchaseService.sendInquiryEmail(inquiry.id, sendInput)).rejects.toThrow(MailSendError);
+    await expect(purchaseService.sendInquiryEmail(inquiry.id, parsed(sendDocumentEmailSchema, sendInput))).rejects.toThrow(MailSendError);
 
     const after = await purchaseService.getInquiry(inquiry.id);
     expect(after?.status).toBe("draft");
@@ -805,11 +806,11 @@ describe("purchase service — document email", () => {
   it("emails a draft purchase order and confirms it; resends don't re-transition", async () => {
     const { order } = await makeOrderWithRow(3);
 
-    const confirmed = await purchaseService.sendPurchaseOrderEmail(order.id, sendInput);
+    const confirmed = await purchaseService.sendPurchaseOrderEmail(order.id, parsed(sendDocumentEmailSchema, sendInput));
     expect(confirmed?.status).toBe("confirmed");
     expect(sentMails[0]?.attachments?.[0]?.filename).toBe(`${order.orderNumber}.pdf`);
 
-    const resent = await purchaseService.sendPurchaseOrderEmail(order.id, sendInput);
+    const resent = await purchaseService.sendPurchaseOrderEmail(order.id, parsed(sendDocumentEmailSchema, sendInput));
     expect(resent?.status).toBe("confirmed");
     expect(sentMails).toHaveLength(2);
   });
@@ -818,7 +819,7 @@ describe("purchase service — document email", () => {
     const { order } = await makeOrderWithRow(3);
     await purchaseService.cancel(order.id);
 
-    await expect(purchaseService.sendPurchaseOrderEmail(order.id, sendInput)).rejects.toThrow(
+    await expect(purchaseService.sendPurchaseOrderEmail(order.id, parsed(sendDocumentEmailSchema, sendInput))).rejects.toThrow(
       InvalidStatusTransitionError
     );
   });
@@ -828,21 +829,20 @@ describe("purchase service — document email", () => {
 // the article's step on IO rows and RFQ rows, on create and on PATCH.
 describe("purchase service — Avrundning on rows", () => {
   async function makeRoundedArticle(rounding: number) {
-    return articleService.createArticle({
+    return articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `ART-RND-${crypto.randomUUID()}`,
       name: "Rundad artikel",
       type: "purchased",
-      unit: "st",
       rounding,
       active: true,
-    });
+    }));
   }
 
   it("rounds purchase-order row quantities up on addRow and updateRow", async () => {
     const user = await makeUser();
     const supplier = await makeSupplier();
     const article = await makeRoundedArticle(5);
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
 
     const row = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 12, unitPrice: 42 });
     expect(row.quantityOrdered).toBe("15.0000");
@@ -859,7 +859,7 @@ describe("purchase service — Avrundning on rows", () => {
     const supplier = await makeSupplier();
     // 7.38 kg bars: 100 kg → 14 bars = 103.32 kg.
     const article = await makeRoundedArticle(7.38);
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     const row = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 100, unitPrice: 20 });
     expect(row.quantityOrdered).toBe("103.3200");
   });
@@ -985,13 +985,13 @@ describe("purchase service — document terms (villkor)", () => {
     const deliveryTerm = await registerService.deliveryTerms.create({ code: "CIP", name: "CIP Göteborg" });
     const paymentTerm = await registerService.paymentTerms.create({ code: "N30", name: "30 dagar netto" });
     const carrier = await registerService.carriers.create({ code: "DHL", name: "DHL Freight" });
-    const supplier = await purchaseService.createSupplier({
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, {
       name: "Villkor AB",
       active: true,
       deliveryTermId: deliveryTerm.id,
       paymentTermId: paymentTerm.id,
       carrierId: carrier.id,
-    });
+    }));
     return { supplier, deliveryTerm, paymentTerm, carrier };
   }
 
@@ -1000,7 +1000,7 @@ describe("purchase service — document terms (villkor)", () => {
     const { supplier, deliveryTerm, paymentTerm, carrier } = await makeSupplierWithTerms();
     const article = await makeArticle(`ART-TERM-${crypto.randomUUID()}`);
 
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     const fetchedOrder = await purchaseService.getPurchaseOrder(order.id);
     expect(fetchedOrder!.deliveryTermId).toBe(deliveryTerm.id);
     expect(fetchedOrder!.paymentTermId).toBe(paymentTerm.id);
@@ -1019,7 +1019,7 @@ describe("purchase service — document terms (villkor)", () => {
   it("leaves terms null when the supplier has none", async () => {
     const user = await makeUser();
     const supplier = await makeSupplier();
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     expect(order.deliveryTermId).toBeNull();
     expect(order.paymentTermId).toBeNull();
     expect(order.carrierId).toBeNull();
@@ -1093,7 +1093,7 @@ describe("purchase service — document terms (villkor)", () => {
     const user = await makeUser();
     const supplier = await makeSupplier();
     const order = await purchaseService.createPurchaseOrder(
-      { supplierId: supplier.id, yourReference: "Anna Andersson", ourReference: "Ubbe" },
+      parsed(createPurchaseOrderSchema, { supplierId: supplier.id, yourReference: "Anna Andersson", ourReference: "Ubbe" }),
       user.id
     );
     expect(order.yourReference).toBe("Anna Andersson");
@@ -1285,7 +1285,7 @@ describe("purchase service — document terms (villkor)", () => {
     const user = await makeUser();
     const { supplier } = await makeSupplierWithTerms();
     const article = await makeArticle(`ART-TERM-${crypto.randomUUID()}`);
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     await purchaseService.addRow(order.id, { articleId: article.id, quantity: 1, unitPrice: 10 });
     const { content } = await purchaseService.getPurchaseOrderPdf(order.id);
     expect(content.subarray(0, 4).toString()).toBe("%PDF");
@@ -1295,9 +1295,9 @@ describe("purchase service — document terms (villkor)", () => {
     const user = await makeUser();
     const carrier = await registerService.carriers.create({ code: "DHLX", name: "DHL Express" });
     await systemService.addCompanyCarrier({ carrierId: carrier.id, customerNumber: "ACME-999" });
-    const supplier = await purchaseService.createSupplier({ name: "Fraktlev AB", active: true, carrierId: carrier.id });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Fraktlev AB", active: true, carrierId: carrier.id }));
     const article = await makeArticle(`ART-FR-${crypto.randomUUID()}`);
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     await purchaseService.addRow(order.id, { articleId: article.id, quantity: 1, unitPrice: 10 });
 
     // Off by default → the carrier prints but not our customer number.
@@ -1314,8 +1314,8 @@ describe("purchase service — document terms (villkor)", () => {
 
 describe("supplier numbers (leverantörsnummer)", () => {
   it("auto-allocates sequential supplier numbers from the number series", async () => {
-    const a = await purchaseService.createSupplier({ name: "Lev A", active: true });
-    const b = await purchaseService.createSupplier({ name: "Lev B", active: true });
+    const a = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lev A", active: true }));
+    const b = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lev B", active: true }));
 
     // number_series is never truncated, so the counter survives across
     // tests — assert the relative sequence, never absolute values. (The
@@ -1326,14 +1326,14 @@ describe("supplier numbers (leverantörsnummer)", () => {
   });
 
   it("respects a manually supplied supplier number", async () => {
-    const c = await purchaseService.createSupplier({ name: "Lev C", supplierNumber: "LEV-77", active: true });
+    const c = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lev C", supplierNumber: "LEV-77", active: true }));
     expect(c.supplierNumber).toBe("LEV-77");
   });
 
   it("rejects a duplicate supplier number at create", async () => {
-    await purchaseService.createSupplier({ name: "Lev D", supplierNumber: "DUBLETT-1", active: true });
+    await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lev D", supplierNumber: "DUBLETT-1", active: true }));
     await expect(
-      purchaseService.createSupplier({ name: "Lev E", supplierNumber: "DUBLETT-1", active: true })
+      purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lev E", supplierNumber: "DUBLETT-1", active: true }))
     ).rejects.toThrow(DuplicateSupplierNumberError);
   });
 
@@ -1341,23 +1341,23 @@ describe("supplier numbers (leverantörsnummer)", () => {
     // Take a number by hand, then point the series straight at it: the next
     // auto-allocated create must step over it rather than fail — and keep
     // working afterwards.
-    const taken = await purchaseService.createSupplier({ name: "Upptagen AB", supplierNumber: "9100", active: true });
+    const taken = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Upptagen AB", supplierNumber: "9100", active: true }));
     await db.update(numberSeries).set({ nextNumber: 9100 }).where(eq(numberSeries.key, "supplier"));
 
-    const next = await purchaseService.createSupplier({ name: "Nästa AB", active: true });
+    const next = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Nästa AB", active: true }));
     expect(next.supplierNumber).toBe("9101");
     expect(taken.supplierNumber).toBe("9100");
 
-    const after = await purchaseService.createSupplier({ name: "Därefter AB", active: true });
+    const after = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Därefter AB", active: true }));
     expect(after.supplierNumber).toBe("9102");
   });
 
   it("still rejects a manually supplied duplicate without retrying", async () => {
-    await purchaseService.createSupplier({ name: "Först AB", supplierNumber: "9200", active: true });
+    await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Först AB", supplierNumber: "9200", active: true }));
     const [before] = await db.select().from(numberSeries).where(eq(numberSeries.key, "supplier"));
 
     await expect(
-      purchaseService.createSupplier({ name: "Andra AB", supplierNumber: "9200", active: true })
+      purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Andra AB", supplierNumber: "9200", active: true }))
     ).rejects.toThrow(DuplicateSupplierNumberError);
 
     // Asserting only the thrown error would also pass if the code retried
@@ -1370,11 +1370,11 @@ describe("supplier numbers (leverantörsnummer)", () => {
 
 describe("our customer number at the supplier (vårt kundnummer hos leverantören)", () => {
   it("stores the number at create, updates it, and clears it with null", async () => {
-    const created = await purchaseService.createSupplier({
+    const created = await purchaseService.createSupplier(parsed(createSupplierSchema, {
       name: "Nummerlev AB",
       active: true,
       ourCustomerNumber: "KUND-4711",
-    });
+    }));
     expect(created.ourCustomerNumber).toBe("KUND-4711");
 
     const updated = await purchaseService.updateSupplier(created.id, { ourCustomerNumber: "KUND-4712" });
@@ -1385,18 +1385,18 @@ describe("our customer number at the supplier (vårt kundnummer hos leverantöre
   });
 
   it("is NOT unique — two suppliers may give us the same number", async () => {
-    await purchaseService.createSupplier({ name: "Lev X", active: true, ourCustomerNumber: "SAMMA-1" });
-    const second = await purchaseService.createSupplier({ name: "Lev Y", active: true, ourCustomerNumber: "SAMMA-1" });
+    await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lev X", active: true, ourCustomerNumber: "SAMMA-1" }));
+    const second = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lev Y", active: true, ourCustomerNumber: "SAMMA-1" }));
     expect(second.ourCustomerNumber).toBe("SAMMA-1");
   });
 
   it("prints 'Vårt kundnummer hos er' on inquiry and PO PDFs", async () => {
     const user = await makeUser();
-    const supplier = await purchaseService.createSupplier({
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, {
       name: "Nummerlev AB",
       active: true,
       ourCustomerNumber: "KUND-4711",
-    });
+    }));
     const article = await makeArticle(`ART-OCN-${crypto.randomUUID()}`);
 
     const { inquiry } = await purchaseService.createInquiry(
@@ -1407,7 +1407,7 @@ describe("our customer number at the supplier (vårt kundnummer hos leverantöre
       "Vårt kundnummer hos er: KUND-4711"
     );
 
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     await purchaseService.addRow(order.id, { articleId: article.id, quantity: 1, unitPrice: 10 });
     expect(pdfText((await purchaseService.getPurchaseOrderPdf(order.id)).content)).toContain(
       "Vårt kundnummer hos er: KUND-4711"
@@ -1562,7 +1562,7 @@ describe("purchase service — önskat leveransdatum", () => {
     const a = await makeArticle(`ART-CF-A-${crypto.randomUUID()}`);
     const b = await makeArticle(`ART-CF-B-${crypto.randomUUID()}`);
     const order = await purchaseService.createPurchaseOrder(
-      { supplierId: supplier.id, expectedDeliveryDate: "2030-03-04" },
+      parsed(createPurchaseOrderSchema, { supplierId: supplier.id, expectedDeliveryDate: "2030-03-04" }),
       user.id
     );
     const rowA = await purchaseService.addRow(order.id, { articleId: a.id, quantity: 1, unitPrice: 1 });
@@ -1608,7 +1608,7 @@ describe("purchase service — önskat leveransdatum", () => {
     const b = await makeArticle(`ART-DDB-${crypto.randomUUID()}`);
     const c = await makeArticle(`ART-DDC-${crypto.randomUUID()}`);
     const order = await purchaseService.createPurchaseOrder(
-      { supplierId: supplier.id, expectedDeliveryDate: "2030-03-04" },
+      parsed(createPurchaseOrderSchema, { supplierId: supplier.id, expectedDeliveryDate: "2030-03-04" }),
       user.id
     );
     await purchaseService.addRow(order.id, { articleId: a.id, quantity: 1, unitPrice: 1 }); // follows
@@ -1641,12 +1641,12 @@ describe("purchase service — supplier language (Språk, #7)", () => {
     const user = await makeUser();
     const swedish = await makeSupplier();
     expect(swedish.language).toBe("sv");
-    const english = await purchaseService.createSupplier({ name: "Supplier GmbH", active: true, country: "DE", language: "en" });
+    const english = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Supplier GmbH", active: true, country: "DE", language: "en" }));
     expect(english.language).toBe("en");
     expect((await purchaseService.getSupplier(english.id))!.language).toBe("en");
 
     const article = await makeArticle(`ART-LANG-${crypto.randomUUID()}`);
-    const order = await purchaseService.createPurchaseOrder({ supplierId: english.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: english.id }), user.id);
     const { inquiry } = await purchaseService.createInquiry(
       { supplierId: english.id, rows: [{ articleId: article.id, quantity: 5 }] },
       user.id

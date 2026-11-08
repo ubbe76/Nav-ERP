@@ -1,3 +1,5 @@
+import { createArticleSchema, createWorkCenterSchema } from "@navet/shared";
+import type { InjectOptions } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, deviations, moOperationScrap, permissionGroups } from "@navet/db";
@@ -16,6 +18,8 @@ import { markSalesOrderInProduction } from "../src/modules/sales/service/product
 import { createReportsRepository } from "../src/modules/reports/repository/reports.repository.js";
 import { createReportsService } from "../src/modules/reports/service/reports.service.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
+import { parsed } from "./helpers/parsed.js";
+import { unwiredSelfCosts } from "./helpers/unwired";
 
 // Avvikelseorsaker: the register (Kvalitet writes, the terminal reads, delete
 // with reassignment of the cases and the scrap rows), and the scrap reason
@@ -31,7 +35,7 @@ const mfg = createManufacturingService(createManufacturingRepository(db), testDo
   lockRowForManufacturing: salesRepository.lockRowForManufacturing,
   markInProduction: markSalesOrderInProduction,
 });
-const reports = createReportsService(createReportsRepository(db));
+const reports = createReportsService(createReportsRepository(db), unwiredSelfCosts);
 const TRUNCATE = sql`TRUNCATE deviations, deviation_reasons, mo_material_consumptions, mo_operation_scrap, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, stock_transactions, stock_locations, warehouses, bom_components, articles, user_settings, audit_log, users CASCADE`;
 const DELETE_GROUPS = sql`DELETE FROM permission_groups WHERE code LIKE 'AVR%'`;
 
@@ -66,21 +70,20 @@ async function cookieWith(permissions: string[] | "admin", name: string) {
   return {
     userId,
     get: (url: string) => app.inject({ method: "GET", url: `/api/v1${url}`, headers: { cookie } }),
-    post: (url: string, payload?: unknown) => app.inject({ method: "POST", url: `/api/v1${url}`, headers: { cookie }, payload }),
-    patch: (url: string, payload?: unknown) => app.inject({ method: "PATCH", url: `/api/v1${url}`, headers: { cookie }, payload }),
-    delete: (url: string, payload?: unknown) => app.inject({ method: "DELETE", url: `/api/v1${url}`, headers: { cookie }, payload }),
+    post: (url: string, payload?: InjectOptions["payload"]) => app.inject({ method: "POST", url: `/api/v1${url}`, headers: { cookie }, payload }),
+    patch: (url: string, payload?: InjectOptions["payload"]) => app.inject({ method: "PATCH", url: `/api/v1${url}`, headers: { cookie }, payload }),
+    delete: (url: string, payload?: InjectOptions["payload"]) => app.inject({ method: "DELETE", url: `/api/v1${url}`, headers: { cookie }, payload }),
   };
 }
 
 async function releasedOperation(userId: string) {
-  const article = await testArticleService.createArticle({
+  const article = await testArticleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `KASS-${crypto.randomUUID().slice(0, 8)}`,
     name: "Bänkskiva",
     type: "manufactured",
-    unit: "st",
     active: true,
-  });
-  const workCenter = await mfg.createWorkCenter({ code: String(Math.floor(Math.random() * 900) + 100), name: "Kantpress", active: true });
+  }));
+  const workCenter = await mfg.createWorkCenter(parsed(createWorkCenterSchema, { code: String(Math.floor(Math.random() * 900) + 100), name: "Kantpress", active: true }));
   await mfg.createRoutingOperation(article.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 1, runTimePerUnit: 0.5 });
   const order = await mfg.createManufacturingOrder({ articleId: article.id, quantity: 20 }, userId);
   const [operation] = await mfg.listOperations(order.id);

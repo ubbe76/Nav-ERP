@@ -1,3 +1,4 @@
+import { createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { bomComponents, costCalculationMaterialRows, costCalculations, db } from "@navet/db";
@@ -8,6 +9,8 @@ import { createCostingService } from "../src/modules/costing/service/costing.ser
 import { createManufacturingRepository } from "../src/modules/manufacturing/repository/manufacturing.repository.js";
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
+import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Flernivåkalkyl (Räkna om underliggande nivåer): a manufactured sub-assembly
 // is costed from its OWN structure and routing instead of from its manually
@@ -15,7 +18,7 @@ import { testArticleService, testDocumentPdfService } from "./helpers/services.j
 // regression that the flag being off changes nothing.
 
 const articleService = createArticleService(createArticleRepository(db));
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 
 const costingSettings = {
   costingMaterialSource: "standard" as "standard" | "supplier" | "actual",
@@ -60,22 +63,21 @@ async function makeArticle(opts: {
     articleNumber: nextNumber(opts.name.toUpperCase().slice(0, 6)),
     name: opts.name,
     type: opts.type,
-    unit: "st",
     standardCost: opts.standardCost,
-    isPhantom: opts.isPhantom,
+    isPhantom: opts.isPhantom ?? false,
     active: true,
   });
 }
 
 // One work center, reused: 100 kr/h, no TO unless a test asks for it.
 async function makeWorkCenter(overheadPercent = 0) {
-  return mfgService.createWorkCenter({
+  return mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
     code: String(100 + (seq % 800)),
     name: `Resurs ${(seq += 1)}`,
     hourlyRate: 100,
     overheadPercent,
     active: true,
-  });
+  }));
 }
 
 // setupTime/runTimePerUnit are MINUTES.

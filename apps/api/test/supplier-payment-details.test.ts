@@ -1,3 +1,4 @@
+import { createSupplierSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, suppliers } from "@navet/db";
@@ -16,6 +17,7 @@ import { createAuditRepository } from "../src/modules/system/repository/audit.re
 import { testArticleService, testDocumentPdfService, testSystemService } from "./helpers/services.js";
 import { failure, waitForLockWaiter } from "./helpers/year-end.js";
 import { makeApprovedSupplierInvoice, makeSupplier, resetBanking, setupBanking } from "./helpers/banking.js";
+import { parsed } from "./helpers/parsed.js";
 
 const purchaseService = createPurchaseService(
   createPurchaseRepository(db),
@@ -47,9 +49,9 @@ afterAll(resetBanking);
 
 describe("leverantörens betalningsuppgifter", () => {
   it("stores normalized details on create", async () => {
-    const supplier = await purchaseService.createSupplier({
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, {
       name: "Plåtlagret AB", currency: "SEK", active: true, paymentMethod: "bankgiro", bankgiro: "5050-1055",
-    });
+    }));
     expect(supplier).toMatchObject({ paymentMethod: "bankgiro", bankgiro: "50501055" });
   });
 
@@ -87,7 +89,7 @@ describe("leverantörens betalningsuppgifter", () => {
 
   it("rejects a bad check digit", async () => {
     const error = await failure(
-      purchaseService.createSupplier({ name: "X", currency: "SEK", active: true, paymentMethod: "bankgiro", bankgiro: "5050-1056" })
+      purchaseService.createSupplier(parsed(createSupplierSchema, { name: "X", currency: "SEK", active: true, paymentMethod: "bankgiro", bankgiro: "5050-1056" }))
     );
     expect((error as InvalidSupplierPaymentDetailsError).problems.bankgiro).toMatch(/kontrollsiffra/);
   });
@@ -115,7 +117,7 @@ describe("leverantörens uppgifter för utlandsbetalning", () => {
   };
 
   it("stores a foreign account number with its bank id, normalized; förval SHAR and 101", async () => {
-    const us = await purchaseService.createSupplier(usPayee);
+    const us = await purchaseService.createSupplier(parsed(createSupplierSchema, usPayee));
     expect(us).toMatchObject({
       paymentMethod: "foreign_account",
       foreignAccountNumber: "123456789012",
@@ -125,26 +127,26 @@ describe("leverantörens uppgifter för utlandsbetalning", () => {
       chargeBearer: "DEBT",
       paymentReportingCode: "130",
     });
-    const de = await purchaseService.createSupplier({
+    const de = await purchaseService.createSupplier(parsed(createSupplierSchema, {
       name: "Müller GmbH", currency: "EUR", active: true, country: "DE", address: "Hauptstraße 5", city: "Berlin", paymentMethod: "iban", iban: "DE89 3704 0044 0532 0130 00",
-    });
+    }));
     expect(de).toMatchObject({ paymentMethod: "iban", iban: "DE89370400440532013000", bic: null, chargeBearer: "SHAR", paymentReportingCode: "101" });
   });
 
   it("refuses a payee abroad without street and town, and a foreign account without BIC or bank id", async () => {
-    const error = await failure(purchaseService.createSupplier({ ...usPayee, address: undefined, city: undefined, clearingSystem: undefined, clearingMemberId: undefined }));
+    const error = await failure(purchaseService.createSupplier(parsed(createSupplierSchema, { ...usPayee, address: undefined, city: undefined, clearingSystem: undefined, clearingMemberId: undefined })));
     expect(error).toBeInstanceOf(InvalidSupplierPaymentDetailsError);
     expect((error as InvalidSupplierPaymentDetailsError).problems).toEqual({
       bic: "Ange BIC eller bank-id (t.ex. ABA routing number)",
       address: "Gatuadress krävs för en utländsk mottagare",
       city: "Ort krävs för en utländsk mottagare",
     });
-    const bic = await failure(purchaseService.createSupplier({ name: "Ankara AŞ", currency: "TRY", active: true, country: "TR", address: "Cad. 1", city: "Ankara", paymentMethod: "iban", iban: "TR330006100519786457841326" }));
+    const bic = await failure(purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Ankara AŞ", currency: "TRY", active: true, country: "TR", address: "Cad. 1", city: "Ankara", paymentMethod: "iban", iban: "TR330006100519786457841326" })));
     expect((bic as InvalidSupplierPaymentDetailsError).problems).toEqual({ bic: "BIC krävs för IBAN utanför SEPA-området" });
   });
 
   it("holds an address-only PATCH to the address rules, and the payment details to all of them", async () => {
-    const us = await purchaseService.createSupplier(usPayee);
+    const us = await purchaseService.createSupplier(parsed(createSupplierSchema, usPayee));
     const blank = await failure(purchaseService.updateSupplier(us.id, { address: "" }));
     expect((blank as InvalidSupplierPaymentDetailsError).problems).toEqual({ address: "Gatuadress krävs för en utländsk mottagare" });
     const sweden = await failure(purchaseService.updateSupplier(us.id, { country: "SE" }));

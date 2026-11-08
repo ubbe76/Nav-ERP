@@ -17,6 +17,7 @@ import { createTimeReportRepository } from "../src/modules/timereport/repository
 import { createScheduleService } from "../src/modules/timereport/service/schedule.service.js";
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
 import { AttendanceInputRequiredError } from "../src/modules/timereport/service/attendance-deviation.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Utjämning (etapp 2): payroll and the terminal's deviation check read the
 // resolved calendar, so a balanced week's last workday reaches them with no
@@ -57,7 +58,7 @@ const settings = { attendanceReasonRequired: true, attendanceReasonToleranceMinu
 let now = at(FRI, "07:00");
 const timeReportService = createTimeReportService(
   timeReportRepository,
-  createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService),
+  createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks),
   periodLocks,
   audit,
   {

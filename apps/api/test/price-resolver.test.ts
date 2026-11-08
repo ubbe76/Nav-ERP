@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { articles, customerPrices, customers, db, priceListRows, priceLists } from "@navet/db";
@@ -15,6 +16,7 @@ import { createDocumentPdfService } from "../src/modules/mail/service/document-p
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { resolvePrice } from "../src/modules/sales/service/price-resolver.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -48,25 +50,24 @@ afterAll(async () => {
 });
 
 async function makeCustomer(discountPercent?: number) {
-  return salesService.createCustomer({
+  return salesService.createCustomer(parsed(createCustomerSchema, {
     name: "Kund AB",
     active: true,
     ...(discountPercent !== undefined ? { discountPercent } : {}),
-  });
+  }));
 }
 
 // salesPrice is not yet wired into the article repository's create()/update()
 // (that lands in a later C3 task per task-2-report.md) — tests set it with a
 // direct DB update instead of going through the service.
 async function makeArticle(opts: { salesPrice?: number; groupId?: string } = {}) {
-  const article = await articleService.createArticle({
+  const article = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-PR-${crypto.randomUUID()}`,
     name: "Test Article",
     type: "purchased",
-    unit: "st",
     active: true,
     ...(opts.groupId !== undefined ? { groupId: opts.groupId } : {}),
-  });
+  }));
   if (opts.salesPrice !== undefined) {
     await db.update(articles).set({ salesPrice: String(opts.salesPrice) }).where(eq(articles.id, article.id));
     return { ...article, salesPrice: String(opts.salesPrice) };

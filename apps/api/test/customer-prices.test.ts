@@ -15,7 +15,7 @@ import { createMailService } from "../src/modules/mail/service/mail.service.js";
 import { createDocumentPdfService } from "../src/modules/mail/service/document-pdf.js";
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
-import { customerPriceInputSchema } from "@navet/shared";
+import { customerPriceInputSchema, createArticleSchema, createCustomerSchema, createPriceListSchema } from "@navet/shared";
 import { CustomerNotFoundError } from "../src/modules/sales/service/sales.service.js";
 import {
   CustomerPriceNotFoundError,
@@ -23,6 +23,7 @@ import {
   PriceListNotFoundError,
 } from "../src/modules/sales/service/sales.errors.js";
 import { ArticleGroupNotFoundError, ArticleNotFoundError } from "../src/modules/article/service/article.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -56,14 +57,13 @@ afterAll(async () => {
 });
 
 async function makeArticle(numberSuffix: string, groupId?: string) {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-CP-${numberSuffix}`,
     name: `Test Article ${numberSuffix}`,
     type: "purchased",
-    unit: "st",
     active: true,
     groupId,
-  });
+  }));
 }
 
 async function makeArticleGroup(code: string, name: string) {
@@ -71,7 +71,7 @@ async function makeArticleGroup(code: string, name: string) {
 }
 
 async function makeCustomer() {
-  return salesService.createCustomer({ name: "Kund AB", active: true });
+  return salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
 }
 
 describe("customer prices (subresource CRUD)", () => {
@@ -317,7 +317,7 @@ describe("customer prices (subresource CRUD)", () => {
 
 describe("customer priceListId assignment (PATCH /customers)", () => {
   it("assigns a price list to a customer and clears it with null", async () => {
-    const list = await salesService.createPriceList({ code: "PL-CUST", name: "Kundlista" });
+    const list = await salesService.createPriceList(parsed(createPriceListSchema, { code: "PL-CUST", name: "Kundlista" }));
     const customer = await makeCustomer();
 
     const assigned = await salesService.updateCustomer(customer.id, { priceListId: list.id });

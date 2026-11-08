@@ -1,3 +1,4 @@
+import { createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, moOperationPlanWeeks } from "@navet/db";
@@ -9,6 +10,7 @@ import { createPlanningService, NothingToReserveError, type ManufacturingPlanRea
 import { buildToOrderWithStructure, CONFIGURED_MFG_TRUNCATE, confirmedRow, FULL, resetCostingSettings } from "./helpers/configured-manufacturing.js";
 import { configurator, makeCustomer, makeUser, purchaseService, resetConfiguredRows, salesRepository, salesService } from "./helpers/configured-rows.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Reservationen on a configured (beställningsvara) KO row: the TO goes the
 // createFromSalesOrderRow way inside the reservation's transaction — the
@@ -16,6 +18,12 @@ import { testArticleService, testDocumentPdfService } from "./helpers/services.j
 // booked for the derived operations (10 and 20; the Kalkyl operation 30 is
 // never on a TO). The resources have no schedule, so every operation lands
 // whole in the floor's week.
+
+// The configuration columns are untyped jsonb; read the stored key without a cast.
+function configurationKey(configuration: unknown): unknown {
+  if (typeof configuration !== "object" || configuration === null || !("key" in configuration)) throw new Error("expected a stored configuration with a key");
+  return configuration.key;
+}
 
 beforeEach(async () => {
   await resetConfiguredRows();
@@ -91,7 +99,7 @@ describe("reservationen — configured row", () => {
     );
     expect(mo.salesOrderRowId).toBe(row.id);
     expect(mo.configuration).not.toBeNull();
-    expect(mo.configuration!.key).toBe(row.configuration!.key);
+    expect(configurationKey(mo.configuration)).toBe(configurationKey(row.configuration));
     const ops = await mfg.listOperations(mo.id);
     expect(ops.map((o) => o.sequenceNo)).toEqual([10, 20]);
     expect(await planRows(ops[0]!.id)).toEqual(batch.operations[0]!.weeks);
@@ -245,7 +253,7 @@ describe("reservationen — configured row on an alternative resource", () => {
     const user = await makeUser();
     const { s, order, row } = await confirmedRow(2);
     await pinnedMfg.updateWorkCenter(s.wc10.id, { hoursPerDay: 8 });
-    const alt = await pinnedMfg.createWorkCenter({ code: "640", name: "Kap 2", type: "machine", hoursPerDay: 8, capacityFactor: 1, active: true });
+    const alt = await pinnedMfg.createWorkCenter(parsed(createWorkCenterSchema, { code: "640", name: "Kap 2", type: "machine", hoursPerDay: 8, capacityFactor: 1, active: true }));
     await pinnedMfg.updateRoutingOperation(s.article.id, s.op10.id, { alternatives: [{ workCenterId: alt.id }] });
     const filler = await testArticleService.createArticle({ articleNumber: `FY-${crypto.randomUUID().slice(0, 6)}`, name: "Fyllnad", type: "manufactured", unit: "st", active: true } as never);
     await pinnedMfg.createRoutingOperation(filler.id, { sequenceNo: 10, workCenterId: s.wc10.id, setupTime: 2400, runTimePerUnit: 0 });

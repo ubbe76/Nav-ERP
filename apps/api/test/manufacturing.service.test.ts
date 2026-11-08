@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { updateWorkCenterSchema } from "@navet/shared";
+import { updateWorkCenterSchema, completeOperationSchema, createArticleSchema, createStockLocationSchema, createWorkCenterSchema } from "@navet/shared";
 import { and, eq, sql } from "drizzle-orm";
 import { auditLog, db, stockTransactions, weekSchedules } from "@navet/db";
 import { completeManufacturingOrderSchema } from "@navet/shared";
@@ -32,6 +32,7 @@ import { createStockService, LocationUnderStockCountError } from "../src/modules
 import { createSalesRepository } from "../src/modules/sales/repository/sales.repository.js";
 import { markSalesOrderInProduction } from "../src/modules/sales/service/production-transition.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -84,7 +85,7 @@ async function makeUser() {
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
 }
 
 async function seedStock(articleId: string, locationId: string, quantity: number) {
@@ -97,30 +98,27 @@ async function seedStock(articleId: string, locationId: string, quantity: number
 }
 
 async function makeComponentArticle() {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `COMP-${crypto.randomUUID()}`,
     name: "Component",
     type: "purchased",
-    unit: "st",
     active: true,
-  });
+  }));
 }
 
 async function makeParentWithBom(componentQtyPerParent = 2) {
-  const parent = await articleService.createArticle({
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `PARENT-${crypto.randomUUID()}`,
     name: "Parent",
     type: "manufactured",
-    unit: "st",
     active: true,
-  });
-  const component = await articleService.createArticle({
+  }));
+  const component = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `COMP-${crypto.randomUUID()}`,
     name: "Component",
     type: "purchased",
-    unit: "st",
     active: true,
-  });
+  }));
   await articleService.addBomComponent(parent.id, { componentArticleId: component.id, quantity: componentQtyPerParent });
   return { parent, component };
 }
@@ -141,7 +139,7 @@ describe("manufacturing service — release at creation", () => {
   it("creates the order released, with BOM and routing snapshotted, shortage warnings and a released audit row", async () => {
     const user = await makeUser();
     const { parent, component } = await makeParentWithBom(2);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
 
     const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);
@@ -177,7 +175,7 @@ describe("manufacturing service — release at creation", () => {
 describe("manufacturing service — Cykeltid on the routing", () => {
   it("stores the productive time per unit, updates and clears it", async () => {
     const { parent } = await makeParentWithBom(1);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     const op = await mfgService.createRoutingOperation(parent.id, {
       sequenceNo: 10,
       workCenterId: workCenter.id,
@@ -196,7 +194,7 @@ describe("manufacturing service — Cykeltid on the routing", () => {
 describe("manufacturing service — release", () => {
   it("snapshots BOM x MO quantity into material consumption and Routing into operations", async () => {
     const { order, component, parent, user } = await makeMO(5);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
     void user;
 
@@ -216,7 +214,7 @@ describe("manufacturing service — release", () => {
 
   it("snapshots the operation's Beskrivning so later routing edits do not reach a released order", async () => {
     const { order, parent } = await makeMO(5);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     const op = await mfgService.createRoutingOperation(parent.id, {
       sequenceNo: 1,
       workCenterId: workCenter.id,
@@ -239,7 +237,7 @@ describe("manufacturing service — release", () => {
 
   it("snapshots the operation's Kommentar so later routing edits do not reach a released order", async () => {
     const { order, parent } = await makeMO(5);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     const op = await mfgService.createRoutingOperation(parent.id, {
       sequenceNo: 1,
       workCenterId: workCenter.id,
@@ -263,7 +261,7 @@ describe("manufacturing service — release", () => {
 
   it("snapshots the operation's Packinstruktion so later routing edits do not reach a released order", async () => {
     const { order, parent } = await makeMO(5);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     const op = await mfgService.createRoutingOperation(parent.id, {
       sequenceNo: 1,
       workCenterId: workCenter.id,
@@ -285,7 +283,7 @@ describe("manufacturing service — release", () => {
 
   it("stores and returns a st/h operation as minutes, snapshots the unit at release, and lets it be flipped by PATCH", async () => {
     const { order, parent } = await makeMO(5);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     // Canonical storage is always minutes — the API accepts/returns
     // runTimePerUnit in minutes regardless of timeUnit (decision 1).
     const created = await mfgService.createRoutingOperation(parent.id, {
@@ -318,7 +316,7 @@ describe("manufacturing service — release", () => {
 
   it("stores a sek/st operation as minutes and snapshots the unit at release (0167)", async () => {
     const { order, parent } = await makeMO(5);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     // 45 s per unit — the client converts, the API stores minutes.
     const created = await mfgService.createRoutingOperation(parent.id, {
       sequenceNo: 1,
@@ -338,7 +336,7 @@ describe("manufacturing service — release", () => {
 
   it("defaults a plain operation's time unit to minutes_per_unit", async () => {
     const { parent } = await makeMO(5);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     const created = await mfgService.createRoutingOperation(parent.id, {
       sequenceNo: 1,
       workCenterId: workCenter.id,
@@ -350,7 +348,7 @@ describe("manufacturing service — release", () => {
 
   it("leaves a Kalkyl operation out of the snapshot so it never reaches the MO", async () => {
     const { order, parent } = await makeMO(5);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
     await mfgService.createRoutingOperation(parent.id, {
       sequenceNo: 2,
@@ -372,7 +370,7 @@ describe("manufacturing service — release", () => {
     // P5: the routing is created out of order (30, 10, 20) — listOperations
     // must sort by sequence_no, not by insertion/creation order.
     const { order, parent } = await makeMO(5);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 30, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 5, runTimePerUnit: 1 });
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 20, workCenterId: workCenter.id, setupTime: 3, runTimePerUnit: 1 });
@@ -385,7 +383,7 @@ describe("manufacturing service — release", () => {
 
   it("releases with no operations at all when the whole routing is Kalkyl", async () => {
     const { order, parent } = await makeMO(5);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     await mfgService.createRoutingOperation(parent.id, {
       sequenceNo: 1,
       workCenterId: workCenter.id,
@@ -419,28 +417,25 @@ describe("manufacturing service — release", () => {
 describe("manufacturing service — release with phantom BOM components", () => {
   it("resolves a phantom component past into its own components, multiplying quantities down the chain", async () => {
     const user = await makeUser();
-    const parent = await articleService.createArticle({
+    const parent = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `PARENT-${crypto.randomUUID()}`,
       name: "Parent",
       type: "manufactured",
-      unit: "st",
       active: true,
-    });
+    }));
     const phantom = await articleService.createArticle({
       articleNumber: `PHANTOM-${crypto.randomUUID()}`,
       name: "Phantom",
       type: "manufactured",
       isPhantom: true,
-      unit: "st",
       active: true,
     });
-    const leaf = await articleService.createArticle({
+    const leaf = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `LEAF-${crypto.randomUUID()}`,
       name: "Leaf",
       type: "purchased",
-      unit: "st",
       active: true,
-    });
+    }));
     await articleService.addBomComponent(parent.id, { componentArticleId: phantom.id, quantity: 2 });
     await articleService.addBomComponent(phantom.id, { componentArticleId: leaf.id, quantity: 3 });
 
@@ -455,19 +450,17 @@ describe("manufacturing service — release with phantom BOM components", () => 
 
   it("merges the same leaf reached via two sibling phantom branches (diamond BOM), not a false cycle", async () => {
     const user = await makeUser();
-    const parent = await articleService.createArticle({
+    const parent = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `PARENT-${crypto.randomUUID()}`,
       name: "Parent",
       type: "manufactured",
-      unit: "st",
       active: true,
-    });
+    }));
     const phantomA = await articleService.createArticle({
       articleNumber: `PHA-${crypto.randomUUID()}`,
       name: "Phantom A",
       type: "manufactured",
       isPhantom: true,
-      unit: "st",
       active: true,
     });
     const phantomB = await articleService.createArticle({
@@ -475,16 +468,14 @@ describe("manufacturing service — release with phantom BOM components", () => 
       name: "Phantom B",
       type: "manufactured",
       isPhantom: true,
-      unit: "st",
       active: true,
     });
-    const leaf = await articleService.createArticle({
+    const leaf = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `LEAF-${crypto.randomUUID()}`,
       name: "Leaf",
       type: "purchased",
-      unit: "st",
       active: true,
-    });
+    }));
     await articleService.addBomComponent(parent.id, { componentArticleId: phantomA.id, quantity: 1 });
     await articleService.addBomComponent(parent.id, { componentArticleId: phantomB.id, quantity: 1 });
     await articleService.addBomComponent(phantomA.id, { componentArticleId: leaf.id, quantity: 2 });
@@ -505,14 +496,13 @@ describe("manufacturing service — order lifecycle", () => {
   // article's step at creation (KO→TO delegates to the same path).
   it("rounds the order quantity up to the article's Avrundning", async () => {
     const user = await makeUser();
-    const article = await articleService.createArticle({
+    const article = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `RND-${crypto.randomUUID()}`,
       name: "Rundad",
       type: "manufactured",
-      unit: "st",
       rounding: 10,
       active: true,
-    });
+    }));
     const order = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 12 }, user.id);
     expect(order.quantity).toBe("20.0000");
 
@@ -590,14 +580,14 @@ describe("manufacturing service — material consumption", () => {
 describe("manufacturing service — operations and completion", () => {
   it("marks an operation done", async () => {
     const { order, parent } = await makeMO(5);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
     await mfgService.release(order.id);
     const [operation] = await mfgService.listOperations(order.id);
 
     const { operation: completed } = await mfgService.completeOperation(
       operation!.id,
-      { actualTime: 42 },
+      parsed(completeOperationSchema, { actualTime: 42 }),
       order.createdBy!
     );
     expect(completed.status).toBe("done");
@@ -611,7 +601,7 @@ describe("manufacturing service — operations and completion", () => {
   // stays stampable in the terminal.
   it("leaves the operation pending on a partial report and marks it done once the order quantity is covered", async () => {
     const { order, parent } = await makeMO(5);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 2, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
     await mfgService.release(order.id);
@@ -620,7 +610,7 @@ describe("manufacturing service — operations and completion", () => {
     const partial = await mfgService.completeOperation(operation!.id, { quantityCompleted: 2, quantityScrapped: 3, scrapReason: "Repa" }, order.createdBy!);
     expect([partial.operation.status, partial.operation.quantityCompleted]).toEqual(["pending", "2.0000"]);
 
-    const rest = await mfgService.completeOperation(operation!.id, {}, order.createdBy!);
+    const rest = await mfgService.completeOperation(operation!.id, parsed(completeOperationSchema, {}), order.createdBy!);
     // Defaults to what remains (5 − 2 OK) and covers the order quantity.
     expect([rest.operation.status, rest.operation.quantityCompleted]).toEqual(["done", "5.0000"]);
   });
@@ -671,7 +661,7 @@ describe("manufacturing service — full lifecycle", () => {
     const { parent, component } = await makeParentWithBom(2);
     const location = await makeLocation();
     await seedStock(component.id, location.id, 100);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
 
     const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);
@@ -681,7 +671,7 @@ describe("manufacturing service — full lifecycle", () => {
     await mfgService.consumeMaterial(order.id, materialRow!.id, { locationId: location.id, quantity: 10 }, user.id);
 
     const [operation] = await mfgService.listOperations(order.id);
-    const reported = await mfgService.completeOperation(operation!.id, { actualTime: 20 }, order.createdBy!);
+    const reported = await mfgService.completeOperation(operation!.id, parsed(completeOperationSchema, { actualTime: 20 }), order.createdBy!);
     // The only operation is the last one: its 5 OK are received and the order is done.
     expect([reported.received, reported.orderCompleted]).toEqual([5, true]);
 
@@ -698,7 +688,7 @@ describe("manufacturing service — full lifecycle", () => {
 
 describe("manufacturing — editable work centers and routing", () => {
   it("updates a work center and 404s on unknown ids", async () => {
-    const wc = await mfgService.createWorkCenter({ code: "200", name: "Press", hourlyRate: 500, overheadPercent: 10, active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "200", name: "Press", hourlyRate: 500, overheadPercent: 10, active: true }));
     const updated = await mfgService.updateWorkCenter(wc.id, { name: "Kantpress", hourlyRate: 620 });
     expect(updated.name).toBe("Kantpress");
     expect(updated.hourlyRate).toBe("620.00");
@@ -711,7 +701,7 @@ describe("manufacturing — editable work centers and routing", () => {
   it("refuses the Kalkyl flag while a BOM row still points at the operation", async () => {
     const { parent } = await makeParentWithBom(2);
     const extra = await makeComponentArticle();
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     const op = await mfgService.createRoutingOperation(parent.id, {
       sequenceNo: 10,
       workCenterId: wc.id,
@@ -730,14 +720,14 @@ describe("manufacturing — editable work centers and routing", () => {
       OperationHasLinkedMaterialError
     );
 
-    await articleService.removeBomComponent(parent.id, linked.id);
+    await articleService.removeBomComponent(parent.id, linked!.id);
     const flagged = await mfgService.updateRoutingOperation(parent.id, op.id, { costingOnly: true });
     expect(flagged.costingOnly).toBe(true);
   });
 
   it("creates a Kalkyl operation and lets the flag be cleared again", async () => {
     const { parent } = await makeParentWithBom(2);
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     const op = await mfgService.createRoutingOperation(parent.id, {
       sequenceNo: 10,
       workCenterId: wc.id,
@@ -756,7 +746,7 @@ describe("manufacturing — editable work centers and routing", () => {
     // already consumed `component`, so these rows need their own article.
     const { parent } = await makeParentWithBom(2);
     const extra = await makeComponentArticle();
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     const calcOp = await mfgService.createRoutingOperation(parent.id, {
       sequenceNo: 10,
       workCenterId: wc.id,
@@ -771,20 +761,19 @@ describe("manufacturing — editable work centers and routing", () => {
 
     const row = await articleService.addBomComponent(parent.id, { componentArticleId: extra.id, quantity: 1 });
     await expect(
-      articleService.updateBomComponent(parent.id, row.id, { routingOperationId: calcOp.id })
+      articleService.updateBomComponent(parent.id, row!.id, { routingOperationId: calcOp.id })
     ).rejects.toBeInstanceOf(CostingOnlyOperationLinkError);
   });
 
   it("edits and removes routing operations, rejecting duplicate sequence numbers", async () => {
     const user = await makeUser();
-    const article = await articleService.createArticle({
+    const article = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `RUT-${crypto.randomUUID()}`,
       name: "Ruttartikel",
       type: "manufactured",
-      unit: "st",
       active: true,
-    });
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 600, overheadPercent: 20, active: true });
+    }));
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 600, overheadPercent: 20, active: true }));
     const op1 = await mfgService.createRoutingOperation(article.id, {
       sequenceNo: 1,
       workCenterId: wc.id,
@@ -815,14 +804,13 @@ describe("manufacturing — editable work centers and routing", () => {
   });
 
   it("stores, edits and clears the operation's Beskrivning", async () => {
-    const article = await articleService.createArticle({
+    const article = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `RUT-${crypto.randomUUID()}`,
       name: "Ruttartikel",
       type: "manufactured",
-      unit: "st",
       active: true,
-    });
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    }));
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
 
     const created = await mfgService.createRoutingOperation(article.id, {
       sequenceNo: 10,
@@ -850,14 +838,13 @@ describe("manufacturing — editable work centers and routing", () => {
   });
 
   it("stores, edits and clears the operation's Kommentar and its print flag", async () => {
-    const article = await articleService.createArticle({
+    const article = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `RUT-${crypto.randomUUID()}`,
       name: "Ruttartikel",
       type: "manufactured",
-      unit: "st",
       active: true,
-    });
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    }));
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
 
     const created = await mfgService.createRoutingOperation(article.id, {
       sequenceNo: 10,
@@ -892,14 +879,13 @@ describe("manufacturing — editable work centers and routing", () => {
   });
 
   it("stores, edits and clears the operation's Packinstruktion", async () => {
-    const article = await articleService.createArticle({
+    const article = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `RUT-${crypto.randomUUID()}`,
       name: "Ruttartikel",
       type: "manufactured",
-      unit: "st",
       active: true,
-    });
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    }));
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
 
     const created = await mfgService.createRoutingOperation(article.id, {
       sequenceNo: 10,
@@ -934,42 +920,42 @@ describe("manufacturing — editable work centers and routing", () => {
 
 describe("manufacturing — work center resource numbers", () => {
   it("creates a work center with a 3-digit number", async () => {
-    const wc = await mfgService.createWorkCenter({ code: "310", name: "Svets", active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "310", name: "Svets", active: true }));
     expect(wc.code).toBe("310");
   });
 
   it("rejects a duplicate number on create", async () => {
-    await mfgService.createWorkCenter({ code: "310", name: "Svets", active: true });
-    await expect(mfgService.createWorkCenter({ code: "310", name: "Press", active: true })).rejects.toBeInstanceOf(
+    await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "310", name: "Svets", active: true }));
+    await expect(mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "310", name: "Press", active: true }))).rejects.toBeInstanceOf(
       DuplicateWorkCenterCodeError
     );
   });
 
   it("updates the number", async () => {
-    const wc = await mfgService.createWorkCenter({ code: "310", name: "Svets", active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "310", name: "Svets", active: true }));
     const updated = await mfgService.updateWorkCenter(wc.id, { code: "320" });
     expect(updated.code).toBe("320");
   });
 
   it("allows saving a work center with its own unchanged number", async () => {
-    const wc = await mfgService.createWorkCenter({ code: "310", name: "Svets", active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "310", name: "Svets", active: true }));
     const updated = await mfgService.updateWorkCenter(wc.id, { code: "310", name: "Svetsstation" });
     expect(updated.id).toBe(wc.id);
     expect(updated.name).toBe("Svetsstation");
   });
 
   it("rejects a number change that collides with another work center", async () => {
-    await mfgService.createWorkCenter({ code: "310", name: "Svets", active: true });
-    const other = await mfgService.createWorkCenter({ code: "320", name: "Press", active: true });
+    await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "310", name: "Svets", active: true }));
+    const other = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "320", name: "Press", active: true }));
     await expect(mfgService.updateWorkCenter(other.id, { code: "310" })).rejects.toBeInstanceOf(
       DuplicateWorkCenterCodeError
     );
   });
 
   it("lists work centers sorted by number", async () => {
-    await mfgService.createWorkCenter({ code: "320", name: "B", active: true });
-    await mfgService.createWorkCenter({ code: "100", name: "C", active: true });
-    await mfgService.createWorkCenter({ code: "310", name: "A", active: true });
+    await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "320", name: "B", active: true }));
+    await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "C", active: true }));
+    await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "310", name: "A", active: true }));
 
     const list = await mfgService.listWorkCenters();
     expect(list.map((wc) => wc.code)).toEqual(["100", "310", "320"]);
@@ -978,10 +964,10 @@ describe("manufacturing — work center resource numbers", () => {
 
 describe("manufacturing — work center type and production groups", () => {
   it("defaults a work center to machine, accepts personnel explicitly", async () => {
-    const machine = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const machine = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     expect(machine.type).toBe("machine");
 
-    const person = await mfgService.createWorkCenter({ code: "200", name: "Montör", type: "personnel", active: true });
+    const person = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "200", name: "Montör", type: "personnel", active: true }));
     expect(person.type).toBe("personnel");
 
     const updated = await mfgService.updateWorkCenter(machine.id, { type: "personnel" });
@@ -990,7 +976,7 @@ describe("manufacturing — work center type and production groups", () => {
 
   it("creates a work center directly into a production group", async () => {
     const group = await mfgService.createProductionGroup({ code: "500", name: "Svetsning", active: true });
-    const wc = await mfgService.createWorkCenter({ code: "510", name: "MIG", productionGroupId: group.id, active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "510", name: "MIG", productionGroupId: group.id, active: true }));
     expect(wc.productionGroupId).toBe(group.id);
 
     const list = await mfgService.listWorkCenters();
@@ -1001,10 +987,10 @@ describe("manufacturing — work center type and production groups", () => {
 
   it("rejects an unknown production group on create and update", async () => {
     await expect(
-      mfgService.createWorkCenter({ code: "100", name: "Svets", productionGroupId: crypto.randomUUID(), active: true })
+      mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", productionGroupId: crypto.randomUUID(), active: true }))
     ).rejects.toBeInstanceOf(ProductionGroupNotFoundError);
 
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     await expect(
       mfgService.updateWorkCenter(wc.id, { productionGroupId: crypto.randomUUID() })
     ).rejects.toBeInstanceOf(ProductionGroupNotFoundError);
@@ -1012,7 +998,7 @@ describe("manufacturing — work center type and production groups", () => {
 
   it("clears the group with productionGroupId null on update", async () => {
     const group = await mfgService.createProductionGroup({ code: "500", name: "Svetsning", active: true });
-    const wc = await mfgService.createWorkCenter({ code: "510", name: "MIG", productionGroupId: group.id, active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "510", name: "MIG", productionGroupId: group.id, active: true }));
 
     const updated = await mfgService.updateWorkCenter(wc.id, { productionGroupId: null });
     expect(updated.productionGroupId).toBeNull();
@@ -1028,8 +1014,8 @@ describe("manufacturing — work center type and production groups", () => {
   it("replace-the-set from the group side moves and clears resources", async () => {
     const groupA = await mfgService.createProductionGroup({ code: "500", name: "Svetsning", active: true });
     const groupB = await mfgService.createProductionGroup({ code: "600", name: "Svarv", active: true });
-    const wc1 = await mfgService.createWorkCenter({ code: "510", name: "MIG", productionGroupId: groupA.id, active: true });
-    const wc2 = await mfgService.createWorkCenter({ code: "520", name: "TIG", productionGroupId: groupA.id, active: true });
+    const wc1 = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "510", name: "MIG", productionGroupId: groupA.id, active: true }));
+    const wc2 = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "520", name: "TIG", productionGroupId: groupA.id, active: true }));
 
     // Checking wc1 in group B steals it from A; unchecking wc2 in A clears it.
     const inB = await mfgService.setProductionGroupWorkCenters(groupB.id, { workCenterIds: [wc1.id] });
@@ -1063,8 +1049,8 @@ describe("manufacturing service — listManufacturingOrders withOperations", () 
   it("adds an operations summary with work center and production group only when asked", async () => {
     const { order, parent } = await makeMO(5);
     const group = await mfgService.createProductionGroup({ code: "500", name: "Svetsning", active: true });
-    const mig = await mfgService.createWorkCenter({ code: "510", name: "MIG", productionGroupId: group.id, active: true });
-    const saw = await mfgService.createWorkCenter({ code: "520", name: "Kapning", active: true });
+    const mig = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "510", name: "MIG", productionGroupId: group.id, active: true }));
+    const saw = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "520", name: "Kapning", active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 20, workCenterId: mig.id, setupTime: 10, runTimePerUnit: 2 });
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: saw.id, setupTime: 5, runTimePerUnit: 1 });
     await mfgService.release(order.id);
@@ -1077,8 +1063,9 @@ describe("manufacturing service — listManufacturingOrders withOperations", () 
     const withOps = await mfgService.listManufacturingOrders({ limit: 50, offset: 0, withOperations: true });
     const row = withOps.rows.find((r) => r.id === order.id)!;
     expect(row.operations).toHaveLength(2);
-    expect(row.operations.map((op) => op.sequenceNo)).toEqual([10, 20]);
-    expect(row.operations[0]).toMatchObject({
+    const operations = row.operations!;
+    expect(operations.map((op) => op.sequenceNo)).toEqual([10, 20]);
+    expect(operations[0]).toMatchObject({
       status: "pending",
       workCenterCode: "520",
       workCenterName: "Kapning",
@@ -1086,7 +1073,7 @@ describe("manufacturing service — listManufacturingOrders withOperations", () 
       productionGroupCode: null,
       productionGroupName: null,
     });
-    expect(row.operations[1]).toMatchObject({
+    expect(operations[1]).toMatchObject({
       workCenterCode: "510",
       workCenterName: "MIG",
       productionGroupCode: "500",
@@ -1100,7 +1087,7 @@ describe("manufacturing service — listManufacturingOrders withOperations", () 
 describe("manufacturing service — batch TO printout (NOTES.md #9)", () => {
   it("merges several orders into one PDF in the given order, unknown id fails the batch", async () => {
     const { order: first, parent } = await makeMO(5);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
     await mfgService.release(first.id);
     const { order: second } = await makeMO(2);
@@ -1146,13 +1133,12 @@ describe("manufacturing service — TO printout", () => {
   // under its last line instead of being printed on top of it.
   it("wraps a long article heading and pushes the lines below it down", async () => {
     const user = await makeUser();
-    const article = await articleService.createArticle({
+    const article = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: "63000-IN-SI-INKAST",
       name: "Papperskorg Stabil 48L, Inkast, Silver, RAL 9006, Inkastlock",
       type: "manufactured",
-      unit: "st",
       active: true,
-    });
+    }));
     const order = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 1, note: "Skapad från behovsberäkning" }, user.id);
 
     const runs = pdfTextRuns((await mfgService.getManufacturingOrderPdf(order.id)).content);
@@ -1165,13 +1151,12 @@ describe("manufacturing service — TO printout", () => {
   });
 
   it("prints a planned order too and 404s for an unknown id", async () => {
-    const article = await articleService.createArticle({
+    const article = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `ART-TO-PDF-${crypto.randomUUID()}`,
       name: "Oreleased",
       type: "manufactured",
-      unit: "st",
       active: true,
-    });
+    }));
     const order = await insertPlannedManufacturingOrder({ articleId: article.id, quantity: 3 });
 
     const { content } = await mfgService.getManufacturingOrderPdf(order.id);
@@ -1188,28 +1173,25 @@ describe("manufacturing service — operation-linked material", () => {
   async function makeLinkedMo(moQuantity = 10, componentPerUnit = 2) {
     const user = await makeUser();
     const location = await makeLocation();
-    const parent = await articleService.createArticle({
+    const parent = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `PARENT-${crypto.randomUUID()}`,
       name: "Parent",
       type: "manufactured",
-      unit: "st",
       active: true,
-    });
-    const linked = await articleService.createArticle({
+    }));
+    const linked = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `LINKED-${crypto.randomUUID()}`,
       name: "Linked component",
       type: "purchased",
-      unit: "st",
       active: true,
-    });
-    const unlinked = await articleService.createArticle({
+    }));
+    const unlinked = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `FREE-${crypto.randomUUID()}`,
       name: "Unlinked component",
       type: "purchased",
-      unit: "st",
       active: true,
-    });
-    const workCenter = await mfgService.createWorkCenter({ code: String(Math.floor(Math.random() * 900) + 100), name: "Svets", active: true });
+    }));
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: String(Math.floor(Math.random() * 900) + 100), name: "Svets", active: true }));
     const op10 = await mfgService.createRoutingOperation(parent.id, {
       sequenceNo: 10,
       workCenterId: workCenter.id,
@@ -1258,7 +1240,7 @@ describe("manufacturing service — operation-linked material", () => {
 
     const { consumed } = await mfgService.completeOperation(
       operation.id,
-      { quantityCompleted: 10, locationId: location.id },
+      parsed(completeOperationSchema, { quantityCompleted: 10, locationId: location.id }),
       user.id
     );
     expect(consumed).toHaveLength(1);
@@ -1269,7 +1251,7 @@ describe("manufacturing service — operation-linked material", () => {
   it("draws MORE material when more than the order quantity is reported", async () => {
     const { order, linked, location, operation, user } = await makeLinkedMo(10, 2);
 
-    await mfgService.completeOperation(operation.id, { quantityCompleted: 12, locationId: location.id }, user.id);
+    await mfgService.completeOperation(operation.id, parsed(completeOperationSchema, { quantityCompleted: 12, locationId: location.id }), user.id);
     // 2 per unit × 12 reported = 24, above the planned 20.
     expect(await consumedFor(order.id, linked.id)).toBe(24);
   });
@@ -1277,7 +1259,7 @@ describe("manufacturing service — operation-linked material", () => {
   it("draws proportionally when fewer than the order quantity are reported", async () => {
     const { order, linked, location, operation, user } = await makeLinkedMo(10, 2);
 
-    await mfgService.completeOperation(operation.id, { quantityCompleted: 4, locationId: location.id }, user.id);
+    await mfgService.completeOperation(operation.id, parsed(completeOperationSchema, { quantityCompleted: 4, locationId: location.id }), user.id);
     expect(await consumedFor(order.id, linked.id)).toBe(8);
   });
 
@@ -1287,7 +1269,7 @@ describe("manufacturing service — operation-linked material", () => {
     const linkedRow = materials.find((m) => m.componentArticleId === linked.id)!;
     await mfgService.consumeMaterial(order.id, linkedRow.id, { locationId: location.id, quantity: 6 }, user.id);
 
-    await mfgService.completeOperation(operation.id, { quantityCompleted: 10, locationId: location.id }, user.id);
+    await mfgService.completeOperation(operation.id, parsed(completeOperationSchema, { quantityCompleted: 10, locationId: location.id }), user.id);
     // Target is 20; 6 was already taken, so only 14 more is booked.
     expect(await consumedFor(order.id, linked.id)).toBe(20);
   });
@@ -1297,7 +1279,7 @@ describe("manufacturing service — operation-linked material", () => {
     // Give the linked component a default location of its own.
     await articleService.updateArticle(linked.id, { defaultLocationId: location.id });
 
-    await mfgService.completeOperation(operation.id, { quantityCompleted: 10 }, user.id);
+    await mfgService.completeOperation(operation.id, parsed(completeOperationSchema, { quantityCompleted: 10 }), user.id);
 
     const transactions = await stockService.listTransactions({ search: "LINKED", limit: 50, offset: 0 });
     const draw = transactions.rows.find((t) => t.transactionType === "mo_consumption");
@@ -1318,7 +1300,7 @@ describe("manufacturing service — operation-linked material", () => {
     // 1000 seeded at `location` — leave 5, so 20 needs 15 more from ***.
     await stockService.recordTransaction({ articleId: linked.id, locationId: location.id, quantityDelta: -995, transactionType: "inventory_adjustment" });
 
-    await mfgService.completeOperation(operation.id, { quantityCompleted: 10 }, user.id);
+    await mfgService.completeOperation(operation.id, parsed(completeOperationSchema, { quantityCompleted: 10 }), user.id);
 
     const locations = await stockService.listLocations();
     const fallback = locations.find((l) => l.name === "***");
@@ -1334,7 +1316,7 @@ describe("manufacturing service — operation-linked material", () => {
 
   it("draws unlinked material at final reporting", async () => {
     const { order, unlinked, location, operation, user } = await makeLinkedMo(10, 2);
-    await mfgService.completeOperation(operation.id, { quantityCompleted: 10, locationId: location.id }, user.id);
+    await mfgService.completeOperation(operation.id, parsed(completeOperationSchema, { quantityCompleted: 10, locationId: location.id }), user.id);
     await mfgService.start(order.id);
 
     expect(await consumedFor(order.id, unlinked.id)).toBe(0);
@@ -1349,21 +1331,19 @@ describe("manufacturing service — scrap reporting", () => {
   async function makeLinkedMo(moQuantity = 10, componentPerUnit = 2) {
     const user = await makeUser();
     const location = await makeLocation();
-    const parent = await articleService.createArticle({
+    const parent = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `PARENT-${crypto.randomUUID()}`,
       name: "Parent",
       type: "manufactured",
-      unit: "st",
       active: true,
-    });
-    const linked = await articleService.createArticle({
+    }));
+    const linked = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `LINKED-${crypto.randomUUID()}`,
       name: "Linked component",
       type: "purchased",
-      unit: "st",
       active: true,
-    });
-    const workCenter = await mfgService.createWorkCenter({ code: String(Math.floor(Math.random() * 900) + 100), name: "Svets", active: true });
+    }));
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: String(Math.floor(Math.random() * 900) + 100), name: "Svets", active: true }));
     const op10 = await mfgService.createRoutingOperation(parent.id, {
       sequenceNo: 10,
       workCenterId: workCenter.id,
@@ -1491,17 +1471,16 @@ describe("manufacturing service — receipt from the last operation", () => {
   async function makeTwoOpMo(moQuantity = 10) {
     const user = await makeUser();
     const location = await makeLocation();
-    const parent = await articleService.createArticle({
+    const parent = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `PARENT-${crypto.randomUUID()}`,
       name: "Parent",
       type: "manufactured",
-      unit: "st",
       standardCost: 250,
       active: true,
-    });
+    }));
     const linked = await makeComponentArticle();
     const unlinked = await makeComponentArticle();
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     const op10 = await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 1, runTimePerUnit: 1 });
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 20, workCenterId: workCenter.id, setupTime: 1, runTimePerUnit: 1 });
     await articleService.addBomComponent(parent.id, { componentArticleId: linked.id, quantity: 2, routingOperationId: op10.id });
@@ -1677,13 +1656,13 @@ describe("manufacturing service — receipt from the last operation", () => {
 describe("work center capacity fields (E2)", () => {
   it("stores week schedule + capacity factor and lists the joined schedule code", async () => {
     const schedule = await makeWeekSchedule();
-    const workCenter = await mfgService.createWorkCenter({
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
       code: "150",
       name: "Svets",
       weekScheduleId: schedule.id,
       capacityFactor: 2,
       active: true,
-    });
+    }));
     expect(workCenter.weekScheduleId).toBe(schedule.id);
     expect(Number(workCenter.capacityFactor)).toBe(2);
 
@@ -1695,31 +1674,31 @@ describe("work center capacity fields (E2)", () => {
 
   it("rejects an unknown week schedule id with a domain error", async () => {
     await expect(
-      mfgService.createWorkCenter({
+      mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
         code: "151",
         name: "Press",
         weekScheduleId: crypto.randomUUID(),
         capacityFactor: 1,
         active: true,
-      })
+      }))
     ).rejects.toBeInstanceOf(WeekScheduleNotFoundError);
   });
 
   it("clears the schedule with null on update", async () => {
     const schedule = await makeWeekSchedule();
-    const workCenter = await mfgService.createWorkCenter({
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
       code: "152",
       name: "Kant",
       weekScheduleId: schedule.id,
       capacityFactor: 1,
       active: true,
-    });
+    }));
     const updated = await mfgService.updateWorkCenter(workCenter.id, { weekScheduleId: null });
     expect(updated.weekScheduleId).toBeNull();
   });
 
   it("stores Kapacitet (timmar per dag), clears it with null and the schema keeps it within 0–24", async () => {
-    const workCenter = await mfgService.createWorkCenter({ code: "153", name: "Borr", capacityFactor: 1, hoursPerDay: 7.5, active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "153", name: "Borr", capacityFactor: 1, hoursPerDay: 7.5, active: true }));
     expect(Number(workCenter.hoursPerDay)).toBe(7.5);
     const changed = await mfgService.updateWorkCenter(workCenter.id, { hoursPerDay: 16 });
     expect(Number(changed.hoursPerDay)).toBe(16);
@@ -1830,12 +1809,12 @@ describe("manufacturing service — audit log", () => {
 
   it("does NOT log completeOperation / reportOperationQuantities (shop-floor noise)", async () => {
     const { order, parent, user } = await makeMO(5);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
     await mfgService.release(order.id, user.id);
     await mfgService.start(order.id, user.id);
     const operations = await mfgService.listOperations(order.id);
-    await mfgService.completeOperation(operations[0]!.id, { quantityCompleted: 5 }, user.id);
+    await mfgService.completeOperation(operations[0]!.id, parsed(completeOperationSchema, { quantityCompleted: 5 }), user.id);
 
     expect(await auditRows("mo_operation", "completed")).toHaveLength(0);
     expect(await auditRows("mo_operation", "reported")).toHaveLength(0);

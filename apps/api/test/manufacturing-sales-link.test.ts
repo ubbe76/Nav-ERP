@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
-import { createManufacturingOrderSchema } from "@navet/shared";
+import { createManufacturingOrderSchema, createArticleSchema, createCustomerSchema, createQuoteSchema } from "@navet/shared";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { pdfText } from "./helpers/pdf.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
@@ -31,6 +31,7 @@ import { createSystemService } from "../src/modules/system/service/system.servic
 import { resolvePrice } from "../src/modules/sales/service/price-resolver.js";
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const authRepo = createAuthRepository(db);
@@ -106,17 +107,16 @@ async function makeUser() {
 }
 
 async function makeCustomer() {
-  return salesService.createCustomer({ name: "Kund AB", active: true });
+  return salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
 }
 
 async function makeArticle(type: "manufactured" | "purchased" = "manufactured") {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-LINK-${crypto.randomUUID()}`,
     name: "Länkad artikel",
     type,
-    unit: "st",
     active: true,
-  });
+  }));
 }
 
 // A confirmed KO with one row for a manufactured article — the normal case
@@ -192,7 +192,7 @@ describe("manufacturing service — creating a TO linked to a KO row", () => {
     const article = await makeArticle("manufactured");
     // No confirm flag — order stays "quote".
     const { order, rows } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 5, unitPrice: 10 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 5, unitPrice: 10 }] }),
       user.id
     );
     expect(order.status).toBe("quote");
@@ -223,7 +223,7 @@ describe("manufacturing service — creating a TO linked to a KO row", () => {
     );
     const linked = await db.execute(sql`SELECT id FROM manufacturing_orders WHERE sales_order_row_id = ${row.id}`);
     expect(linked).toHaveLength(0);
-    expect((await salesService.getSalesOrder(order.id)).status).toBe("cancelled");
+    expect((await salesService.getSalesOrder(order.id))!.status).toBe("cancelled");
   });
 
   // The other way round: Makulera read "confirmed", a TO moved the order to
@@ -250,7 +250,7 @@ describe("manufacturing service — creating a TO linked to a KO row", () => {
     );
 
     await expect(racingSales.cancel(order.id)).rejects.toBeInstanceOf(InvalidStatusTransitionError);
-    expect((await salesService.getSalesOrder(order.id)).status).toBe("in_production");
+    expect((await salesService.getSalesOrder(order.id))!.status).toBe("in_production");
   });
 
   it("allows creating a TO without a link, unaffected by the new validation", async () => {
@@ -411,7 +411,7 @@ describe("Task 6: TO detail GET + printout carry the linked KO's customer", () =
 describe("Task 5: sales listRows — quantityInProduction and manufacturingOrders", () => {
   it("sums only non-cancelled linked MOs and lists only the non-cancelled ones", async () => {
     const user = await makeUser();
-    const customer = await salesServiceWithCoverage.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesServiceWithCoverage.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     const article = await makeArticle("manufactured");
     const { order, rows } = await salesServiceWithCoverage.createQuote(
       { customerId: customer.id, confirm: true, rows: [{ articleId: article.id, quantity: 10, unitPrice: 100 }] },
@@ -435,7 +435,7 @@ describe("Task 5: sales listRows — quantityInProduction and manufacturingOrder
 
   it("reports 0 / empty list for a row with no linked MOs", async () => {
     const user = await makeUser();
-    const customer = await salesServiceWithCoverage.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesServiceWithCoverage.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     const article = await makeArticle("manufactured");
     const { order } = await salesServiceWithCoverage.createQuote(
       { customerId: customer.id, confirm: true, rows: [{ articleId: article.id, quantity: 5, unitPrice: 50 }] },
@@ -451,7 +451,7 @@ describe("Task 5: sales listRows — quantityInProduction and manufacturingOrder
 
   it("falls back to 0 / empty list when manufacturingCoverage is omitted (most test-built services)", async () => {
     const user = await makeUser();
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     const article = await makeArticle("manufactured");
     const { order, rows } = await salesService.createQuote(
       { customerId: customer.id, confirm: true, rows: [{ articleId: article.id, quantity: 10, unitPrice: 100 }] },

@@ -1,3 +1,4 @@
+import type { InjectOptions } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { sql } from "drizzle-orm";
@@ -58,9 +59,9 @@ function api(cookie: string) {
   return {
     cookie,
     get: (url: string) => app.inject({ method: "GET", url: `/api/v1${url}`, headers: { cookie } }),
-    post: (url: string, payload?: unknown) => app.inject({ method: "POST", url: `/api/v1${url}`, headers: { cookie }, payload }),
-    patch: (url: string, payload?: unknown) => app.inject({ method: "PATCH", url: `/api/v1${url}`, headers: { cookie }, payload }),
-    delete: (url: string, payload?: unknown) => app.inject({ method: "DELETE", url: `/api/v1${url}`, headers: { cookie }, payload }),
+    post: (url: string, payload?: InjectOptions["payload"]) => app.inject({ method: "POST", url: `/api/v1${url}`, headers: { cookie }, payload }),
+    patch: (url: string, payload?: InjectOptions["payload"]) => app.inject({ method: "PATCH", url: `/api/v1${url}`, headers: { cookie }, payload }),
+    delete: (url: string, payload?: InjectOptions["payload"]) => app.inject({ method: "DELETE", url: `/api/v1${url}`, headers: { cookie }, payload }),
   };
 }
 

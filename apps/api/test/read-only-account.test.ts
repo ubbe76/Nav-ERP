@@ -1,3 +1,4 @@
+import { createArticleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { RouteOptions } from "fastify";
 import { sql } from "drizzle-orm";
@@ -13,6 +14,8 @@ import { createTimeReportService } from "../src/modules/timereport/service/timer
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { makeVariantService } from "./helpers/configurator.js";
 import { multipartFile } from "./helpers/banking.js";
+import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Endast läsning: a read-only account (users.read_only) may open everything
 // its permission group gives but change nothing. requireAuth (and the
@@ -22,7 +25,7 @@ import { multipartFile } from "./helpers/banking.js";
 // settings. Everything goes through the real app.
 
 const authService = createAuthService(createAuthRepository(db), "unused", createAuditRepository(db));
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const timeReportService = createTimeReportService(
   createTimeReportRepository(db),
   mfgService,
@@ -124,13 +127,12 @@ async function readOnlySession(adminCookie: string) {
 // A released TO with one operation, an employee to stamp with, a variants
 // template with one choice and a purchased part.
 async function fixtures(adminId: string) {
-  const product = await testArticleService.createArticle({
+  const product = await testArticleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `P-${crypto.randomUUID().slice(0, 8)}`,
     name: "Diskbänk",
     type: "manufactured",
-    unit: "st",
     active: true,
-  });
+  }));
   const part = await testArticleService.createArticle({
     articleNumber: `K-${crypto.randomUUID().slice(0, 8)}`,
     name: "Skruv",
@@ -138,19 +140,18 @@ async function fixtures(adminId: string) {
     unit: "st",
     active: true,
   } as never);
-  const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+  const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
   const routing = await mfgService.createRoutingOperation(product.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
   const order = await mfgService.createManufacturingOrder({ articleId: product.id, quantity: 5 }, adminId);
   const [operation] = await mfgService.listOperations(order.id);
   const employee = await timeReportService.createEmployee({ employeeNumber: "107", name: "Urban", active: true });
 
-  const template = await testArticleService.createArticle({
+  const template = await testArticleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `T-${crypto.randomUUID().slice(0, 8)}`,
     name: "Papperskorg",
     type: "manufactured",
-    unit: "st",
     active: true,
-  });
+  }));
   await configurator.createTemplate(template.id, { mode: "variants" });
   const lock = await configurator.createGroup(template.id, { code: "LOCK", name: "Lås", kind: "choice", required: true });
   await configurator.createValue(template.id, lock.id, { code: "A", name: "Lås A", priceAdd: 0, active: true });
@@ -339,7 +340,7 @@ describe("Endast läsning — reads and side-effect-free POSTs work", () => {
     expect(res.json()).toMatchObject({ listPageSize: 25, favorites: [{ href: "/forsaljning/ordrar", title: "Kundorder" }] });
     expect((await app.inject({ method: "GET", url: "/api/v1/me/settings", headers: { cookie } })).json().favorites).toHaveLength(1);
 
-    expect(await counts()).toEqual({ ...before, user_settings: before.user_settings + 2 });
+    expect(await counts()).toEqual({ ...before, user_settings: before.user_settings! + 2 });
   });
 
   it("can always log out", async () => {

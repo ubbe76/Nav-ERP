@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, numberSeries, quoteLossReasons, salesOrders } from "@navet/db";
-import { salesDocumentKind } from "@navet/shared";
+import { salesDocumentKind, createArticleSchema, createCustomerSchema } from "@navet/shared";
 import { buildApp } from "../src/app.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -20,6 +20,7 @@ import { createSystemRepository } from "../src/modules/system/repository/system.
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { pdfText } from "./helpers/pdf.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Offerter (migration 0138): a quote is numbered from the OF- series and
 // takes the next KO- number when it becomes an order, through every path
@@ -89,17 +90,16 @@ async function makeUser() {
 }
 
 async function makeCustomer() {
-  return salesService.createCustomer({ name: "Kund AB", active: true });
+  return salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
 }
 
 async function makeArticle() {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-OF-${crypto.randomUUID().slice(0, 8)}`,
     name: "Diskbänk",
     type: "purchased",
-    unit: "st",
     active: true,
-  });
+  }));
 }
 
 async function makeQuote(confirm = false) {

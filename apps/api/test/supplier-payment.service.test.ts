@@ -13,7 +13,7 @@ import {
   verifications,
   verificationSeries,
 } from "@navet/db";
-import { round2 } from "@navet/shared";
+import { round2, listOpenSupplierInvoicesQuerySchema } from "@navet/shared";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import {
   createVerificationPoster,
@@ -45,6 +45,7 @@ import {
   testSystemService,
 } from "./helpers/services.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
 
 // B4 leverantörsreskontra: registering a supplier payment settles open items
 // and books the U verification inside ONE transaction. This suite drives the
@@ -243,7 +244,7 @@ describe("leverantörsreskontra — öppna poster", () => {
       .set({ status: "paid", paidAt: new Date() })
       .where(eq(supplierInvoices.id, legacyPaid.id));
 
-    const { rows, total } = await supplierPaymentService.listOpenInvoices({ limit: 50, offset: 0 });
+    const { rows, total } = await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { limit: 50, offset: 0 }));
     expect(total).toBe(2);
     expect(rows.map((row) => row.id)).toEqual([credit.id, invoice.id]);
     expect(rows[0]!.openAmount).toBe(-125);
@@ -265,7 +266,7 @@ describe("leverantörsreskontra — öppna poster", () => {
     await db.update(supplierInvoices).set({ registrationNumber: "LF-2" }).where(eq(supplierInvoices.id, first.id));
     await db.update(supplierInvoices).set({ registrationNumber: "LF-10" }).where(eq(supplierInvoices.id, second.id));
 
-    const { rows } = await supplierPaymentService.listOpenInvoices({ supplierId: supplier.id, limit: 50, offset: 0 });
+    const { rows } = await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { supplierId: supplier.id, limit: 50, offset: 0 }));
     // createdAt order (first created first), not the text-sorted LF-10/LF-2.
     expect(rows.map((row) => row.id)).toEqual([first.id, second.id]);
   });
@@ -281,7 +282,7 @@ describe("leverantörsreskontra — öppna poster", () => {
     const undated = await makeApprovedInvoice(a.id, user.id, 500);
     const other = await makeApprovedInvoice(b.id, user.id, 500, { dueDate: "2020-01-01" });
 
-    const forA = await supplierPaymentService.listOpenInvoices({ supplierId: a.id, limit: 50, offset: 0 });
+    const forA = await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { supplierId: a.id, limit: 50, offset: 0 }));
     expect(forA.total).toBe(3);
     expect(forA.rows.every((row) => row.supplierId === a.id)).toBe(true);
     // NULLS LAST: no due date is not "oldest".
@@ -333,7 +334,7 @@ describe("leverantörsreskontra — öppna poster", () => {
     // components, never an ISO parse — that lands on UTC midnight).
     const [y, m, d] = TODAY.split("-").map(Number);
     const expectedDue = new Date(y!, m! - 1, d! + 45).toLocaleDateString("sv-SE");
-    const all = await supplierPaymentService.listOpenInvoices({ limit: 50, offset: 0 });
+    const all = await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { limit: 50, offset: 0 }));
     expect(all.rows.find((row) => row.id === invoice.id)!.dueDate).toBe(expectedDue);
     // "AP-KONTANT" is no number of days, so the invoice carries no due date at
     // all — and an open item without one is never förfallen (NULL <
@@ -342,21 +343,21 @@ describe("leverantörsreskontra — öppna poster", () => {
     const overdue = await supplierPaymentService.listOpenInvoices({ overdueOnly: true, limit: 50, offset: 0 });
     expect(overdue.rows).toHaveLength(0);
 
-    const byRegistration = await supplierPaymentService.listOpenInvoices({
+    const byRegistration = await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, {
       search: invoice.registrationNumber,
       limit: 50,
       offset: 0,
-    });
+    }));
     expect(byRegistration.rows.map((row) => row.id)).toEqual([invoice.id]);
 
-    const byInvoiceNumber = await supplierPaymentService.listOpenInvoices({
+    const byInvoiceNumber = await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, {
       search: invoice.invoiceNumber,
       limit: 50,
       offset: 0,
-    });
+    }));
     expect(byInvoiceNumber.rows.map((row) => row.id)).toEqual([invoice.id]);
 
-    const bySupplier = await supplierPaymentService.listOpenInvoices({ search: "Termin", limit: 50, offset: 0 });
+    const bySupplier = await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { search: "Termin", limit: 50, offset: 0 }));
     expect(bySupplier.rows.map((row) => row.id)).toEqual([invoice.id]);
   });
 
@@ -375,7 +376,7 @@ describe("leverantörsreskontra — öppna poster", () => {
       },
       user.id
     );
-    const afterPart = await supplierPaymentService.listOpenInvoices({ limit: 50, offset: 0 });
+    const afterPart = await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { limit: 50, offset: 0 }));
     expect(afterPart.rows[0]!.openAmount).toBe(600);
     expect(afterPart.rows[0]!.grossAmount).toBe(1000);
 
@@ -390,7 +391,7 @@ describe("leverantörsreskontra — öppna poster", () => {
       },
       user.id
     );
-    expect((await supplierPaymentService.listOpenInvoices({ limit: 50, offset: 0 })).total).toBe(0);
+    expect((await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { limit: 50, offset: 0 }))).total).toBe(0);
     expect((await invoiceStatus(invoice.id)).status).toBe("paid");
   });
 });
@@ -441,7 +442,7 @@ describe("leverantörsreskontra — betalningsregistrering", () => {
     const status = await invoiceStatus(invoice.id);
     expect(status.status).toBe("paid");
     expect(status.paidAt).not.toBeNull();
-    expect((await supplierPaymentService.listOpenInvoices({ limit: 50, offset: 0 })).total).toBe(0);
+    expect((await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { limit: 50, offset: 0 }))).total).toBe(0);
   });
 
   it("a partial payment leaves the rest open, writes nothing off and keeps the invoice approved", async () => {
@@ -464,7 +465,7 @@ describe("leverantörsreskontra — betalningsregistrering", () => {
     const status = await invoiceStatus(invoice.id);
     expect(status.status).toBe("approved");
     expect(status.paidAt).toBeNull();
-    const open = await supplierPaymentService.listOpenInvoices({ limit: 50, offset: 0 });
+    const open = await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { limit: 50, offset: 0 }));
     expect(open.rows[0]!.openAmount).toBe(600);
 
     const verification = await loadVerification(payment.verificationId!);
@@ -803,7 +804,7 @@ describe("leverantörsreskontra — betalningsregistrering", () => {
 
     expect((await invoiceStatus(invoice.id)).status).toBe("paid");
     expect((await invoiceStatus(credit.id)).status).toBe("paid");
-    expect((await supplierPaymentService.listOpenInvoices({ limit: 50, offset: 0 })).total).toBe(0);
+    expect((await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { limit: 50, offset: 0 }))).total).toBe(0);
   });
 
   it("a kvittning WITH a write-off still books — at bank 0", async () => {
@@ -843,7 +844,7 @@ describe("leverantörsreskontra — betalningsregistrering", () => {
 
     expect((await invoiceStatus(invoice.id)).status).toBe("paid");
     expect((await invoiceStatus(credit.id)).status).toBe("paid");
-    expect((await supplierPaymentService.listOpenInvoices({ limit: 50, offset: 0 })).total).toBe(0);
+    expect((await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { limit: 50, offset: 0 }))).total).toBe(0);
   });
 
   it("a mixed payment (bank + kvittning) nets the payable into one row", async () => {
@@ -902,7 +903,7 @@ describe("leverantörsreskontra — betalningsregistrering", () => {
 
     expect(await countPayments()).toBe(1);
     expect((await invoiceStatus(invoice.id)).status).toBe("approved");
-    const open = await supplierPaymentService.listOpenInvoices({ limit: 50, offset: 0 });
+    const open = await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { limit: 50, offset: 0 }));
     expect(open.rows[0]!.openAmount).toBe(400);
 
     // Neither a UTB number nor a U number was burned by the loser.
@@ -1049,7 +1050,7 @@ describe("leverantörsreskontra — makulering", () => {
     const status = await invoiceStatus(invoice.id);
     expect(status.status).toBe("approved");
     expect(status.paidAt).toBeNull();
-    const open = await supplierPaymentService.listOpenInvoices({ limit: 50, offset: 0 });
+    const open = await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { limit: 50, offset: 0 }));
     expect(open.rows[0]!.openAmount).toBe(1250);
   });
 
@@ -1073,7 +1074,7 @@ describe("leverantörsreskontra — makulering", () => {
 
     await supplierPaymentService.cancel(payment.id, user.id);
     expect((await invoiceStatus(invoice.id)).status).toBe("approved");
-    const open = await supplierPaymentService.listOpenInvoices({ limit: 50, offset: 0 });
+    const open = await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { limit: 50, offset: 0 }));
     expect(open.rows.map((row) => row.openAmount)).toEqual([1000]);
 
     // The whole amount is payable again — the cancelled rows are still in the
@@ -1090,7 +1091,7 @@ describe("leverantörsreskontra — makulering", () => {
     );
     expect(redone.verificationId).not.toBeNull();
     expect((await invoiceStatus(invoice.id)).status).toBe("paid");
-    expect((await supplierPaymentService.listOpenInvoices({ limit: 50, offset: 0 })).total).toBe(0);
+    expect((await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { limit: 50, offset: 0 }))).total).toBe(0);
   });
 
   it("cancelling the closing payment reopens the invoice for the rest only — the earlier part payment still counts", async () => {
@@ -1126,7 +1127,7 @@ describe("leverantörsreskontra — makulering", () => {
     expect(status.status).toBe("approved");
     expect(status.paidAt).toBeNull();
     expect((await supplierInvoiceService.getInvoice(invoice.id))!.openAmount).toBe(400);
-    const open = await supplierPaymentService.listOpenInvoices({ limit: 50, offset: 0 });
+    const open = await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { limit: 50, offset: 0 }));
     expect(open.rows.map((row) => row.openAmount)).toEqual([400]);
   });
 
@@ -1158,7 +1159,7 @@ describe("leverantörsreskontra — makulering", () => {
 
     expect((await invoiceStatus(invoice.id)).status).toBe("approved");
     expect((await invoiceStatus(credit.id)).status).toBe("approved");
-    expect((await supplierPaymentService.listOpenInvoices({ limit: 50, offset: 0 })).total).toBe(2);
+    expect((await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { limit: 50, offset: 0 }))).total).toBe(2);
   });
 
   it("a cancellation of another payment leaves the invoice that payment never touched alone", async () => {
@@ -1404,7 +1405,7 @@ describe("leverantörsreskontra — betalningslista och fakturakort", () => {
     await supplierPaymentService.cancel(payment.id, user.id);
     const cancelled = await supplierInvoiceService.cancel(invoice.id, user.id);
     expect(cancelled!.status).toBe("cancelled");
-    expect((await supplierPaymentService.listOpenInvoices({ limit: 50, offset: 0 })).total).toBe(0);
+    expect((await supplierPaymentService.listOpenInvoices(parsed(listOpenSupplierInvoicesQuerySchema, { limit: 50, offset: 0 }))).total).toBe(0);
   });
 
   it("paid is terminal: neither attest nor makulering is offered on a settled invoice", async () => {
