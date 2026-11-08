@@ -214,6 +214,12 @@ describe("Endast läsning — writes are refused", () => {
       // Varugruppens påslag
       { method: "PATCH", url: `/api/v1/article-groups/${crypto.randomUUID()}`, payload: { code: "3", name: "Diskbänkar", generalMarkupPercent: 40 } },
       { method: "POST", url: `/api/v1/manufacturing-orders/${f.order.id}/cost-calculations/post-calculate`, payload: { save: true } },
+      // Förkalkylera flera (#27): the save writes calculations (and prices)
+      {
+        method: "POST",
+        url: "/api/v1/costing/pre-calculations/batch/save",
+        payload: { items: [{ articleId: f.product.id, quantity: 1 }], setStandardCost: true, setSalesPrice: true },
+      },
       // Reservationen after the delivery-time check
       { method: "POST", url: "/api/v1/delivery-time-check/apply", payload: { salesOrderId: crypto.randomUUID(), deliveryDate: "2030-01-01" } },
     ] as const;
@@ -307,6 +313,9 @@ describe("Endast läsning — reads and side-effect-free POSTs work", () => {
         url: `/api/v1/articles/${f.product.id}/cost-calculations/pre-calculate`,
         payload: { quantity: 1, markups: { generalMarkupPercent: 35, materialMarkupPercent: 0 } },
       },
+      // Förkalkylera flera (#27): the preview over a selection is a preview.
+      { url: "/api/v1/costing/pre-calculations/batch", payload: { selection: { activeOnly: true }, fallbackQuantity: 1 } },
+      { url: "/api/v1/costing/pre-calculations/batch", payload: { selection: { copied: true }, fallbackQuantity: 2, multiLevel: true } },
       { url: `/api/v1/manufacturing-orders/${f.order.id}/cost-calculations/post-calculate`, payload: undefined },
       { url: `/api/v1/manufacturing-orders/${f.order.id}/cost-calculations/post-calculate`, payload: { save: false } },
       { url: `/api/v1/articles/${f.template.id}/configurator/variants/preview`, payload: { sets: { LOCK: ["A"] }, calcQuantity: 1 } },
@@ -436,8 +445,21 @@ describe("Endast läsning — the allowlist", () => {
         // Påslag på offert och order (#16 etapp 3): the header's repricing
         // preview — the save is the header PATCH.
         "POST /api/v1/sales-orders/:id/markups/preview",
+        // Förkalkylera flera (#27): the preview runs the card's preCalculate
+        // without save over the selection — computed and answered, nothing
+        // written; the save is its own route and is refused. costing.md.
+        "POST /api/v1/costing/pre-calculations/batch",
         // The one route that writes: the account's own preferences.
         "PATCH /api/v1/me/settings",
+        // Kopierat (#28): the three writes to the user's own working list of
+        // articles. They DO write — a deliberate exception like /me/settings:
+        // the list is personal (user_copied_articles, cascades with the
+        // user), never business data, and a read-only account that cannot
+        // keep a working list cannot use Förkalkylera flera or the register's
+        // Kopierat filter. article.md, copied-articles.route.test.ts.
+        "POST /api/v1/articles/copied",
+        "POST /api/v1/articles/copied/remove",
+        "DELETE /api/v1/articles/copied",
       ].sort()
     );
   });

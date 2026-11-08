@@ -30,6 +30,9 @@ const ENTRIES: readonly Entry[] = [
   { path: "/rapporter", rule: ["rapporter"] },
   { path: "/artiklar", exact: true, rule: ["artiklar", "artikeloversikt"] },
   { path: "/artiklar/oversikt", rule: ["artikeloversikt"] },
+  // Förkalkylera flera follows the card's pre-calculation routes (Artiklar or
+  // Tillverkning), so a Tillverkning-only user reaches it too.
+  { path: "/artiklar/forkalkylera", rule: ["artiklar", "tillverkning"] },
   { path: "/artiklar", rule: ["artiklar"] },
   { path: "/varugrupper", rule: ["artiklar"] },
   { path: "/grunddata", rule: SHARED_REGISTERS },

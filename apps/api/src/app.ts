@@ -30,6 +30,7 @@ import { createCostingRepository } from "./modules/costing/repository/costing.re
 import { createCostingService } from "./modules/costing/service/costing.service.js";
 import { createWorkInProgressService } from "./modules/costing/service/work-in-progress.service.js";
 import { costingRoutes } from "./modules/costing/routes/costing.routes.js";
+import { createPreCalculationBatchService } from "./modules/costing/service/pre-calculation-batch.service.js";
 import { createImportRepository, runImportDryRun } from "./modules/import/repository/import.repository.js";
 import { createImportService } from "./modules/import/service/import.service.js";
 import { importRoutes } from "./modules/import/routes/import.routes.js";
@@ -517,6 +518,15 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   // travels the same path the article card uses and gets its history row.
   // exchangeRateService converts a supplier price in another currency to SEK.
   const costingService = createCostingService(createCostingRepository(database), systemService, articleService, exchangeRateService);
+  // Förkalkylera flera (#27): the batch over the card's preCalculate and
+  // the two apply functions; the Kopierat selection reads the user's list
+  // through the article service (injected, never imported across modules).
+  const preCalculationBatchService = createPreCalculationBatchService({
+    db: database,
+    costing: costingService,
+    copied: { listCopiedArticleIds: async (userId) => (await articleService.listCopiedArticles(userId)).articleIds },
+    log: (msg, extra) => app.log.error(extra ?? {}, msg),
+  });
   // Produkter i arbete (#25): the efterkalkyl per a day for the open TOs —
   // the report (admin) and the year-end step's value, read before its
   // transaction since the supplier source may look rates up.
@@ -1101,7 +1111,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
         await registerModule(
           protectedRoutes,
           costingRoutes,
-          { service: costingService, workInProgress: workInProgressService },
+          { service: costingService, workInProgress: workInProgressService, batch: preCalculationBatchService },
           { read: office, write: ["tillverkning"] }
         );
         await registerModule(protectedRoutes, apiClientRoutes, { service: oauthService }, adminOnly);

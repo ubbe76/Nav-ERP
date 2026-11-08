@@ -13,6 +13,8 @@ import { BomComponentModal } from "./BomComponentModal";
 import { LegoInquiryModal } from "./LegoInquiryModal";
 import { useCan } from "../PermissionsProvider";
 import { apiFetch } from "../../lib/api";
+import { copiedNotice, copyArticles } from "../../lib/copiedArticles";
+import { apiErrorMessage } from "../../lib/errorMessages";
 import { OPERATION_TIME_UNIT_LABELS, minutesPerUnitToSecondsPerUnit, minutesPerUnitToUnitsPerHour, toUnitQuantity } from "../../lib/units";
 import { operationLabel } from "./operation-label";
 import { bomDuplicateText, bomDuplicates } from "../../lib/bomDuplicates";
@@ -91,6 +93,23 @@ export function BeredningView({
   // Errors from the delete buttons — the modals carry their own.
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // Kopierat (#28): a personal list, so no write permission is needed.
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
+
+  async function copyComponents() {
+    setError(null);
+    setCopyNotice(null);
+    setPending(true);
+    try {
+      const ids = Array.from(new Set(bom.map((row) => row.componentArticleId)));
+      const copied = await copyArticles({ articleIds: ids });
+      if (copied) setCopyNotice(copiedNotice(copied.count));
+    } catch (err) {
+      setError(apiErrorMessage(err, "Kunde inte kopiera komponenterna"));
+    } finally {
+      setPending(false);
+    }
+  }
 
   async function removeOperation(op: RoutingOperation) {
     if (!(await confirmDelete(`Ta bort operation ${op.sequenceNo} (${op.description ?? op.workCenterName})?`))) return;
@@ -194,6 +213,11 @@ export function BeredningView({
       <SectionHeading
         actions={
           <span className={styles.headingActions}>
+            {bom.length > 0 && (
+              <Button type="button" size="small" variant="secondary" disabled={pending} onClick={() => void copyComponents()}>
+                Kopiera komponenterna
+              </Button>
+            )}
             <Button type="button" size="small" variant="secondary" onClick={() => setOpModal({ open: true, editing: null })}>
               + Ny operation
             </Button>
@@ -212,6 +236,7 @@ export function BeredningView({
       </SectionHeading>
 
       <FormError>{error}</FormError>
+      {copyNotice && <FormNotice>{copyNotice}</FormNotice>}
 
       {duplicates.length > 0 && (
         <FormNotice className={styles.duplicateNotice}>

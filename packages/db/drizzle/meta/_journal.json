@@ -1394,6 +1394,13 @@
       "when": 1794077096557,
       "tag": "0198_prognos",
       "breakpoints": true
+    },
+    {
+      "idx": 199,
+      "version": "7",
+      "when": 1794127169961,
+      "tag": "0199_kopierat",
+      "breakpoints": true
     }
   ]
 }

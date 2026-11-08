@@ -27,7 +27,7 @@ import { createTimeReportRepository } from "../src/modules/timereport/repository
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
 import { ExchangeRateUnavailableError } from "../src/modules/system/service/exchange-rates.js";
 import { parsed } from "./helpers/parsed.js";
-import { unwiredSalesOrderLinks } from "./helpers/unwired";
+import { unwiredPreCalculationBatch, unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Produkter i arbete (#25) against Postgres: every source bounded to D, the
 // orders that count, avräknat at the stock price. "Before D" is made by
@@ -460,6 +460,7 @@ describe("Produkter i arbete — the routes", () => {
     app.register(costingRoutes, {
       service: createCostingService(createCostingRepository(db), { getSettings: async () => costingSettings }),
       workInProgress: wipService,
+      batch: unwiredPreCalculationBatch,
     });
     return app;
   }

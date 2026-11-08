@@ -406,3 +406,29 @@ export const articleForecasts = pgTable(
     check("article_forecasts_quantity_nonnegative", sql`${table.quantity} >= 0`),
   ]
 );
+
+// Kopierat (#28, migration 0199): the user's own working list of articles —
+// filled from the register, the behovsberäkning and an article's structure,
+// read back by the register's `copied=true` filter and by Förkalkylera
+// flera. Personal, never business data: one row per (user, article), in the
+// order the articles were copied (`position`, dense per user; appended after
+// the user's max). Capped at COPIED_ARTICLES_MAX (@navet/shared) in the
+// article repository, under a per-user advisory lock. Cascades with both the
+// user and the article.
+export const userCopiedArticles = pgTable(
+  "user_copied_articles",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    articleId: uuid("article_id")
+      .notNull()
+      .references(() => articles.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.articleId] }),
+    index("user_copied_articles_user_position_idx").on(table.userId, table.position),
+  ]
+);

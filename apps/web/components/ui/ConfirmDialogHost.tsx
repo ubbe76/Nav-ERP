@@ -3,12 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
-import { registerConfirmOpener, type ConfirmOptions } from "../../lib/confirm";
+import { registerChooseOpener, registerConfirmOpener, type ChooseChoice } from "../../lib/confirm";
 import styles from "./ConfirmDialogHost.module.css";
 
-interface Pending extends ConfirmOptions {
+// One shape for both questions: confirmDialog is a single choice (true),
+// chooseDialog carries its own. Avbryt is always added and answers null.
+interface Pending {
   message: string;
-  resolve: (ok: boolean) => void;
+  choices: ChooseChoice<unknown>[];
+  resolve: (value: unknown) => void;
 }
 
 // The one in-app confirmation dialog (see lib/confirm.ts). Mounted once in
@@ -19,52 +22,58 @@ export function ConfirmDialogHost() {
   const actionsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    function open(message: string, choices: ChooseChoice<unknown>[]): Promise<unknown> {
+      return new Promise<unknown>((resolve) => {
+        pendingRef.current?.resolve(null);
+        const next = { message, choices, resolve };
+        pendingRef.current = next;
+        setPending(next);
+      });
+    }
     registerConfirmOpener(
-      (message, options) =>
-        new Promise<boolean>((resolve) => {
-          pendingRef.current?.resolve(false);
-          const next = { ...options, message, resolve };
-          pendingRef.current = next;
-          setPending(next);
-        })
+      async (message, options) =>
+        (await open(message, [
+          { label: options.confirmLabel ?? "OK", value: true, variant: options.danger ? "danger" : "primary" },
+        ])) === true
     );
+    registerChooseOpener(open);
     return () => {
       registerConfirmOpener(null);
-      pendingRef.current?.resolve(false);
+      registerChooseOpener(null);
+      pendingRef.current?.resolve(null);
       pendingRef.current = null;
     };
   }, []);
 
   // Focus the confirming button rather than the dialog's ✕, so Enter
-  // confirms like the native dialog did. Modal's effect (showModal) runs
-  // before this one, since it is the child.
+  // confirms like the native dialog did: the first choice, since Avbryt comes
+  // first in the DOM. Modal's effect (showModal) runs before this one, since
+  // it is the child.
   useEffect(() => {
-    if (pending) actionsRef.current?.querySelector<HTMLButtonElement>("button:last-child")?.focus();
+    if (pending) actionsRef.current?.querySelector<HTMLButtonElement>("button:nth-child(2)")?.focus();
   }, [pending]);
 
-  function answer(ok: boolean) {
+  function answer(value: unknown) {
     const current = pendingRef.current;
     pendingRef.current = null;
     setPending(null);
-    current?.resolve(ok);
+    current?.resolve(value);
   }
 
   return (
-    <Modal open={pending !== null} onClose={() => answer(false)} title="Bekräfta" compact>
+    <Modal open={pending !== null} onClose={() => answer(null)} title="Bekräfta" compact>
       {pending && (
         <>
           <p className={styles.message}>{pending.message}</p>
           <div ref={actionsRef} className={styles.actions}>
-            <Button type="button" variant="ghost" onClick={() => answer(false)}>
+            <Button type="button" variant="ghost" onClick={() => answer(null)}>
               Avbryt
             </Button>
-            <Button
-              type="button"
-              variant={pending.danger ? "danger" : "primary"}
-              onClick={() => answer(true)}
-            >
-              {pending.confirmLabel ?? "OK"}
-            </Button>
+            {pending.choices.map((choice) => (
+              <Button key={choice.label} type="button" variant={choice.variant ?? "primary"} onClick={() => answer(choice.value)}>
+                {choice.label}
+              </Button>
+            ))}
           </div>
         </>
       )}

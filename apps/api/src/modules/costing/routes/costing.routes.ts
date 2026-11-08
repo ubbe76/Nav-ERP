@@ -3,8 +3,16 @@ import type { ZodType } from "zod";
 import { articleCardWrite } from "../../auth/middleware/access-rules.js";
 import { requireRole } from "../../auth/middleware/auth.middleware.js";
 import { ForbiddenError } from "../../auth/middleware/permission.middleware.js";
-import { postCalculateSchema, preCalculateSchema, satisfiesRule, workInProgressQuerySchema } from "@navet/shared";
+import {
+  postCalculateSchema,
+  preCalculateSchema,
+  preCalculationBatchSaveSchema,
+  preCalculationBatchSchema,
+  satisfiesRule,
+  workInProgressQuerySchema,
+} from "@navet/shared";
 import type { CostingService } from "../service/costing.service.js";
+import { PreCalculationBatchTooLargeError, type PreCalculationBatchService } from "../service/pre-calculation-batch.service.js";
 import type { WorkInProgressService } from "../service/work-in-progress.service.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
 import { errorBody } from "../../system/service/error-body.js";
@@ -29,9 +37,9 @@ function isPreview(schema: ZodType<{ save?: boolean }>, body: unknown): boolean 
 // requireAuth has already run and req.user is guaranteed to be set.
 export async function costingRoutes(
   app: FastifyInstance,
-  opts: { service: CostingService; workInProgress: WorkInProgressService }
+  opts: { service: CostingService; workInProgress: WorkInProgressService; batch: PreCalculationBatchService }
 ) {
-  const { service, workInProgress } = opts;
+  const { service, workInProgress, batch } = opts;
 
   // Without `save` this only computes and returns the numbers (200, id null);
   // with it the calculation is written and answered exactly as before (201).
@@ -144,6 +152,39 @@ export async function costingRoutes(
         throw err;
       }
     }
+  );
+
+  // Förkalkylera flera (#27). The preview computes and answers, nothing is
+  // written — readOnlySafe like the card's preview. Access as the card's
+  // pre-calculate route: Artiklar or Tillverkning (a menu, so the workshop
+  // profile — terminal, TO i läsläge, artikelöversikt — never reaches the
+  // prices in the answer). The cap is a domain error, 400 with count/max,
+  // raised before any calculation. The Kopierat selection is the user's own
+  // list, hence req.user.
+  app.post(
+    "/costing/pre-calculations/batch",
+    { config: { access: articleCardWrite(["tillverkning"]), readOnlySafe: true } },
+    async (req, reply) => {
+      const input = preCalculationBatchSchema.parse(req.body);
+      try {
+        return await batch.preview(req.user!.id, input);
+      } catch (err) {
+        if (err instanceof PreCalculationBatchTooLargeError) {
+          return reply.code(400).send({ ...errorBody(err), count: err.count, max: err.max });
+        }
+        throw err;
+      }
+    }
+  );
+
+  // The save: per ticked article the card's Spara kalkyl, then Sätt
+  // standardpris / Sätt försäljningspris with the card's own functions —
+  // the same access rule as those three routes. Partial success is answered
+  // honestly (saved + errors), never as a 4xx.
+  app.post(
+    "/costing/pre-calculations/batch/save",
+    { config: { access: articleCardWrite(["tillverkning"]) } },
+    async (req) => batch.save(preCalculationBatchSaveSchema.parse(req.body))
   );
 
   // The self cost an order row's margin is measured against. Needed as its own

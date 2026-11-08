@@ -43,8 +43,48 @@ export const listArticlesQuerySchema = listQuerySchema.extend({
   // ArticlePicker searches this list on every keystroke. The register page
   // and its CSV ask for it; the abcClass filter implies it.
   withAbc: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
+  // Kopierat (#28): only the articles in the user's own copied list. Resolved
+  // like abcClass — the list's ids go to the repository as an id list, so
+  // `total` and paging follow; both filters together intersect. The list
+  // belongs to the session user, so the route passes the user id along.
+  copied: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
 });
 export type ListArticlesQuery = z.infer<typeof listArticlesQuerySchema>;
+
+// Kopierat (#28): the user's own working list of articles, at most this many.
+// Checked against the resulting count in the article repository (400
+// copied-articles-too-many, nothing written).
+export const COPIED_ARTICLES_MAX = 5000;
+
+// POST /articles/copied `query`: the register's search and filters, without
+// paging — every hit is copied, resolved on the server with the SAME where
+// as GET /articles (repo.list / repo.listIds). `withAbc` is harmless here and
+// `copied=true` resolves against the user's own list like the GET does.
+export const copiedArticlesQuerySchema = listArticlesQuerySchema.omit({ limit: true, offset: true });
+export type CopiedArticlesQuery = z.infer<typeof copiedArticlesQuerySchema>;
+
+// POST /articles/copied — exactly one of `articleIds` (in the order to keep)
+// and `query`. `add` appends what is new after the user's last position and
+// leaves what is already copied where it was; `replace` empties the list
+// first, in the same transaction. Unknown or deleted ids are ignored. No zod
+// cap on articleIds: the 5 000 limit is the domain error with the count, not
+// a validation failure.
+export const copiedArticlesSetSchema = z
+  .object({
+    mode: z.enum(["add", "replace"]),
+    articleIds: z.array(z.string().uuid()).min(1).optional(),
+    query: copiedArticlesQuerySchema.optional(),
+  })
+  .refine((v) => (v.articleIds === undefined) !== (v.query === undefined), {
+    message: "Exactly one of articleIds and query must be given",
+  });
+export type CopiedArticlesSetInput = z.infer<typeof copiedArticlesSetSchema>;
+
+// POST /articles/copied/remove — the ids to take out of the list.
+export const copiedArticlesRemoveSchema = z.object({
+  articleIds: z.array(z.string().uuid()).min(1),
+});
+export type CopiedArticlesRemoveInput = z.infer<typeof copiedArticlesRemoveSchema>;
 
 // GET /articles/:id?withAbc=true — the card's ABC class (opt-in for the same
 // reason; the configurator and other readers call getArticle without it).

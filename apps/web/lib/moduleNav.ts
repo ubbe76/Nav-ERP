@@ -71,6 +71,12 @@ export const ARTIKLAR_SECTIONS: ModuleNavSection[] = [
           "Alla öppna behov och inkommande för en artikel, rad för rad i datumordning med löpande disponibelt antal.",
       },
       {
+        href: "/artiklar/forkalkylera",
+        title: "Förkalkylera flera",
+        description:
+          "Förkalkylera Kopierat eller ett filtrerat urval i ett svep, jämför mot förra förkalkylen och spara — med möjlighet att sätta standardpris och försäljningspris.",
+      },
+      {
         href: "/artiklar/import",
         title: "Importera artiklar",
         description: "Läs in artiklar, strukturer, operationer och priser från CSV- eller Excel-filer.",

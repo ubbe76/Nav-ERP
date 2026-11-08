@@ -1,3 +1,4 @@
+import type { PreCalculationBatchService } from "../../src/modules/costing/service/pre-calculation-batch.service";
 import type { EinvoiceReceiveService } from "../../src/modules/einvoice/service/einvoice-receive.service";
 import type { SalesOrderLinkReader } from "../../src/modules/manufacturing/service/manufacturing.service";
 import type { ArticleSelfCostReader } from "../../src/modules/reports/service/reports.service";
@@ -37,4 +38,11 @@ export const unwiredEinvoiceReceive: EinvoiceReceiveService = {
   forScan: () => unwired("EinvoiceReceiveService.forScan"),
   originalXml: () => unwired("EinvoiceReceiveService.originalXml"),
   attachment: () => unwired("EinvoiceReceiveService.attachment"),
+};
+
+// Förkalkylera flera (#27). Tests that register costingRoutes for something
+// else (Produkter i arbete) pass this.
+export const unwiredPreCalculationBatch: PreCalculationBatchService = {
+  preview: () => unwired("PreCalculationBatchService.preview"),
+  save: () => unwired("PreCalculationBatchService.save"),
 };

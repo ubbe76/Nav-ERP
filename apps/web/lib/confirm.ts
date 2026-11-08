@@ -29,3 +29,31 @@ export function confirmDialog(message: string, options: ConfirmOptions = {}): Pr
 export function confirmDelete(message: string): Promise<boolean> {
   return confirmDialog(message, { confirmLabel: "Ta bort", danger: true });
 }
+
+// A question with more than two answers (Kopierat: Lägg till / Ersätt).
+// Resolves the chosen value, or null for Avbryt/Esc/backdrop. The Avbryt
+// button is always added by the dialog itself. Without a mounted host
+// nothing can be asked, so it resolves null (no native fallback — a native
+// confirm cannot offer three choices).
+export interface ChooseChoice<T> {
+  label: string;
+  value: T;
+  variant?: "primary" | "secondary" | "danger";
+}
+
+export interface ChooseOptions<T> {
+  choices: ChooseChoice<T>[];
+}
+
+type ChooseOpener = (message: string, choices: ChooseChoice<unknown>[]) => Promise<unknown>;
+
+let chooseOpener: ChooseOpener | null = null;
+
+export function registerChooseOpener(next: ChooseOpener | null): void {
+  chooseOpener = next;
+}
+
+export function chooseDialog<T>(message: string, options: ChooseOptions<T>): Promise<T | null> {
+  if (!chooseOpener) return Promise.resolve(null);
+  return chooseOpener(message, options.choices) as Promise<T | null>;
+}

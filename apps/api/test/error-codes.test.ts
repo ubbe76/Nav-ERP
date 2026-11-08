@@ -55,6 +55,7 @@ import {
   UnknownThemeError,
 } from "../src/modules/system/service/themes.errors.js";
 import { errorBody } from "../src/modules/system/service/error-body.js";
+import { PreCalculationBatchTooLargeError } from "../src/modules/costing/service/pre-calculation-batch.service.js";
 import { SetupChargeArticleNotFoundError } from "../src/modules/system/service/system.service.js";
 import {
   CustomerArticleNumberNotFoundError,
@@ -393,6 +394,7 @@ import {
   ArticleCopyPartNotAllowedError,
   ArticleIsTemplateError,
   DefaultLocationBlockedError,
+  CopiedArticlesTooManyError,
 } from "../src/modules/article/service/article.service.js";
 import {
   InvalidCredentialsError,
@@ -923,6 +925,10 @@ const cases: Array<[Error, string]> = [
   [new ForecastMonthOutsideHorizonError("2031-01"), ERROR_CODES.FORECAST_MONTH_OUTSIDE_HORIZON],
   // Flera lagerplatser per artikel
   [new ArticleLocationInvalidError("Lagerplatsen Huvudlager — K1 är spärrad"), ERROR_CODES.ARTICLE_LOCATION_INVALID],
+  // Kopierat (#28)
+  [new CopiedArticlesTooManyError(5001), ERROR_CODES.COPIED_ARTICLES_TOO_MANY],
+  // Förkalkylera flera (#27)
+  [new PreCalculationBatchTooLargeError(501), ERROR_CODES.PRE_CALCULATION_BATCH_TOO_LARGE],
 ];
 
 describe("error class name -> ERROR_CODES derivation", () => {

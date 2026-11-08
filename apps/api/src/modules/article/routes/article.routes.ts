@@ -2,6 +2,8 @@ import { articleLabelsSchema } from "@navet/shared";
 import type { FastifyInstance } from "fastify";
 import { SeriesExhaustedError } from "../../system/service/number-series.js";
 import {
+  copiedArticlesRemoveSchema,
+  copiedArticlesSetSchema,
   createArticleDrawingSchema,
   createArticleGroupSchema,
   createArticleRevisionSchema,
@@ -26,7 +28,7 @@ import { contentDisposition } from "../../system/service/content-disposition.js"
 import { CostCenterInactiveError, CostCenterNotFoundError } from "../../economy/service/dimension-check.js";
 import { errorBody } from "../../system/service/error-body.js";
 import { ConfiguratorModeNotAllowedError } from "../../configurator/service/configurator.errors.js";
-import { canSeePrices, LABEL_PRINT, OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
+import { canSeePrices, COPIED_ARTICLES, LABEL_PRINT, OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
 import { articleExportColumns } from "../service/export-columns.js";
 import type { ArticleService } from "../service/article.service.js";
 import {
@@ -47,6 +49,7 @@ import {
   BomComponentNotFoundError,
   BomCycleError,
   CostingOnlyOperationLinkError,
+  CopiedArticlesTooManyError,
   DuplicateArticleBarcodeError,
   DuplicateArticleNumberError,
   InvalidFileTypeError,
@@ -60,8 +63,9 @@ import {
 export async function articleRoutes(app: FastifyInstance, opts: { service: ArticleService }) {
   const { service } = opts;
 
+  // `copied=true` (#28) is the session user's own Kopierat — hence the user id.
   app.get("/articles", { config: { access: OVERVIEW_READ } }, async (req) => {
-    const page = await service.listArticles(listArticlesQuerySchema.parse(req.query));
+    const page = await service.listArticles(listArticlesQuerySchema.parse(req.query), req.user!.id);
     if (canSeePrices(req.user!)) return page;
     return { ...page, rows: page.rows.map((row) => ({ ...row, standardCost: null, salesPrice: null })) };
   });
@@ -72,11 +76,37 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
     filenameBase: "artiklar",
     columns: articleExportColumns,
     // The export has the ABC column — always with the classification.
-    fetch: async (query) => {
-      const page = await service.listArticles({ ...query, withAbc: true });
+    fetch: async (query, req) => {
+      const page = await service.listArticles({ ...query, withAbc: true }, req.user!.id);
       return { ...page, rows: page.rows.map((row) => ({ abcClass: null, ...row })) };
     },
   });
+
+  // Kopierat (#28): the user's own working list of articles. Static
+  // segments win over /articles/:id in find-my-way (like /articles/batch
+  // and /articles/csv), so rejectMalformedIds never sees "copied" as an id.
+  // Read and write for any menu (COPIED_ARTICLES); the three writes are
+  // readOnlySafe on purpose — the list is personal, never business data
+  // (read-only-account.test.ts pins the list, article.md has the why).
+  app.get("/articles/copied", { config: { access: COPIED_ARTICLES } }, async (req) => service.listCopiedArticles(req.user!.id));
+
+  app.post("/articles/copied", { config: { access: COPIED_ARTICLES, readOnlySafe: true } }, async (req, reply) => {
+    const input = copiedArticlesSetSchema.parse(req.body);
+    try {
+      return await service.setCopiedArticles(req.user!.id, input);
+    } catch (err) {
+      if (err instanceof CopiedArticlesTooManyError) return reply.code(400).send({ ...errorBody(err), count: err.count, max: err.max });
+      throw err;
+    }
+  });
+
+  app.post("/articles/copied/remove", { config: { access: COPIED_ARTICLES, readOnlySafe: true } }, async (req) =>
+    service.removeCopiedArticles(req.user!.id, copiedArticlesRemoveSchema.parse(req.body))
+  );
+
+  app.delete("/articles/copied", { config: { access: COPIED_ARTICLES, readOnlySafe: true } }, async (req) =>
+    service.clearCopiedArticles(req.user!.id)
+  );
 
   app.get<{ Params: { id: string } }>("/articles/:id", async (req, reply) => {
     const { withAbc } = getArticleQuerySchema.parse(req.query);

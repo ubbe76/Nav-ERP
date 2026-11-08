@@ -432,6 +432,8 @@ Som standard visar listan bara rader med förslag; kryssa i **Visa alla artiklar
 
 Vill du se **när** behoven infaller finns ikonknappen **Artikelöversikt** efter artikelnumret på varje rad. Den öppnar artikelns planeringsbild i en flyttbar panel — alla öppna behov och inkommande i datumordning med löpande disponibelt antal, se [Artikelöversikt](/hjalp/artiklar#artikeloversikt). Panelen ligger kvar medan du arbetar vidare i listan och byter artikel när du klickar på en annan rads knapp.
 
+Med rader markerade finns knappen **Kopiera artiklar (N)** bredvid **Skapa ordrar**: den lägger artiklarna på de markerade raderna, en gång var, i din personliga lista **Kopierat** — se [Kopierat](/hjalp/artiklar#kopierat).
+
 Filtret **Alla / Artiklar / Lego** i verktygsraden begränsar listan till antingen vanliga artikelrader eller lego-rader (operationsbehov, se nedan) — praktiskt eftersom lego-raderna alltid sorteras sist i listan.
 
 I tabellhuvudet finns en kryssruta som markerar **alla valbara rader på den sida som visas** (rader märkta **Saknar huvudleverantör**/**Saknar leverantör** eller utan förslag går fortfarande inte att välja). Den visar ett mellanläge när bara några rader på sidan är valda, och avmarkerar allt vid nästa klick. Val på andra sidor påverkas inte — statusraden under tabellen fortsätter räkna dem ("varav X på annan sida"). På en smal skärm (mobil i stående läge) visas listan som staplade kort utan rubrikrad; då ligger kryssrutan **Välj alla på sidan** samt **Skapa förfrågan** och **Skapa ordrar** i stället i en rad ovanför listan som följer med när du skrollar.

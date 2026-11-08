@@ -102,6 +102,7 @@ import {
 export const HUB_ICONS: Record<string, LucideIcon> = {
   "/artiklar/register": Boxes,
   "/artiklar/oversikt": ScanSearch,
+  "/artiklar/forkalkylera": Calculator,
   "/artiklar/import": FileUp,
   "/varugrupper": FolderTree,
   "/grunddata": Library,
