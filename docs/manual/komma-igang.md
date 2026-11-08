@@ -35,7 +35,7 @@ Efter 10 misslyckade inloggningsförsök på samma konto spärras kontot i 15 mi
 Startsidan visar materialflödet i fyra stationer — Inköp, Lager, Tillverkning, Försäljning — med antal öppna ordrar och varningar (försenade ordrar, negativa saldon). Varje station är klickbar: Inköp, Tillverkning och Försäljning öppnar modulens sida, och Lager landar direkt på saldolistan som stationens siffror beskriver. Under den finns:
 
 - **Att bevaka** — de sju första raderna ur [Aviseringar](/hjalp/aviseringar): negativa saldon, försenade ordrar, förfallna fakturor och annat som behöver åtgärdas, röda före gula. **Visa alla (N)** öppnar sidan Aviseringar, och finns inget att bevaka står det "Inget att bevaka just nu." Raderna du ser beror på din behörighetsgrupp. Signalerna under stationerna ("2 försenade", "3 med negativt saldo") räknas ur samma aviseringar, så kortet och stationerna visar alltid samma sak. Saknar du behörighet till en typ står det "Se Aviseringar" i stället för en siffra. En order räknas som försenad när någon av raderna som inte är fullt mottagen/levererad har passerat sitt leveransdatum; offerter och levererade ordrar räknas aldrig.
-- **Aktiva tillverkningsordrar** och de senaste lagertransaktionerna.
+- **Pågående tillverkning** och **Senaste lagerhändelser**.
 
 Stationerna, raderna och knappen **+ Ny order** följer din behörighetsgrupp: det du inte får öppna visas som vanlig text i stället för som länk, och **+ Ny order** visas bara för den som kan öppna tillverkningsorderlistan.
 
@@ -49,12 +49,12 @@ Det finns fyra kort:
 |---|---|
 | **Materialflöde** | De fyra stationerna Inköp, Lager, Tillverkning och Försäljning |
 | **Att bevaka** | De första raderna ur [Aviseringar](/hjalp/aviseringar) |
-| **Aktiva tillverkningsordrar** | Pågående och frisläppta tillverkningsordrar |
-| **Senaste lagertransaktioner** | De sex senaste lagerrörelserna |
+| **Pågående tillverkning** | De första pågående och frisläppta tillverkningsordrarna |
+| **Senaste lagerhändelser** | De sex senaste lagerrörelserna |
 
 Dialogen har en rad per kort. Kryssrutan **Visa** bestämmer om kortet visas, och knapparna ↑ och ↓ flyttar det i ordningen. **Spara** sparar valet, **Avbryt** stänger utan att spara och **Återställ standard** tar bort ditt val, så att alla fyra kort visas i den ordning de har ovan. Är inget kort valt står det "Inga kort valda." tillsammans med knappen **Anpassa**.
 
-**Materialflöde** och **Senaste lagertransaktioner** tar hela sidans bredd. **Att bevaka** och **Aktiva tillverkningsordrar** är halva kort: står två sådana efter varandra delar de en rad, och ett ensamt halvt kort tar hela bredden. Checklistan **Kom igång** (för administratörer) ligger kvar överst och styrs av sin egen knapp **Dölj**.
+**Materialflöde** och **Senaste lagerhändelser** tar hela sidans bredd. **Att bevaka** och **Pågående tillverkning** är halva kort: står två sådana efter varandra delar de en rad, och ett ensamt halvt kort tar hela bredden. Checklistan **Kom igång** (för administratörer) ligger kvar överst och styrs av sin egen knapp **Dölj**.
 
 Översikten hämtar bara det korten du valt behöver. Dölj du **Materialflöde** och **Att bevaka** räknar sidan därför inte fram några aviseringar, vilket gör den snabbare att öppna. Konton med **Endast läsning** kan också anpassa sin egen Översikt.
 

@@ -7,8 +7,8 @@ export type OverviewCard = (typeof OVERVIEW_CARDS)[number];
 export const OVERVIEW_CARD_LABELS: Record<OverviewCard, string> = {
   flow: "Materialflöde",
   attention: "Att bevaka",
-  orders: "Aktiva tillverkningsordrar",
-  stock: "Senaste lagertransaktioner",
+  orders: "Pågående tillverkning",
+  stock: "Senaste lagerhändelser",
 };
 
 // Flow and stock run the full width; attention and orders are half cards that

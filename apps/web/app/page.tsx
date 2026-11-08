@@ -50,7 +50,7 @@ export default async function OverviewPage() {
   const has = (card: OverviewCard) => cards.includes(card);
 
   // Open orders are a naturally bounded set: the flow counts come from `total`
-  // of a one-row page. The two TO calls of "Aktiva tillverkningsordrar" (six
+  // of a one-row page. The two TO calls of "Pågående tillverkning" (six
   // rows each, oldest first) double as the flow's TO counts when both show.
   const [
     openPurchaseOrdersPage,
