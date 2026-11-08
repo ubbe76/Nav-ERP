@@ -107,7 +107,7 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
     <div className={cardStyles.card}>
       <Form onSubmit={handleSave}>
         <div>
-          <div className={cardStyles.label}>Lön &amp; PAXml</div>
+          <div className={cardStyles.label}>Lön, PAXml &amp; schema</div>
           <div className={cardStyles.description}>
             Tidkoder och övertidsregler som används av löneunderlagsexporten (PAXml).
           </div>

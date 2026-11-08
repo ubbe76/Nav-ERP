@@ -42,7 +42,7 @@ export default async function SettingsPage() {
       </div>
 
       <p style={{ marginTop: 0 }}>
-        Lön &amp; PAXml ställs in under <GatedLink href="/personal/lon-paxml">Personal &amp; lön → Lön &amp; PAXml</GatedLink>.
+        Lönens tidkoder, övertidsregler och ATF ställs in under <GatedLink href="/personal/lon-paxml">Personal &amp; lön → Lön, PAXml &amp; schema</GatedLink>.
       </p>
 
       <SettingsForm

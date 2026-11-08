@@ -390,8 +390,8 @@ export const PERSONAL_SECTIONS: ModuleNavSection[] = [
       },
       {
         href: "/personal/lon-paxml",
-        title: "Lön & PAXml",
-        description: "Tidkoder för PAXml-exporten, övertidsregler, ATF-intjäning och anledning vid sen ankomst.",
+        title: "Lön, PAXml & schema",
+        description: "Tidkoder för PAXml-exporten, övertidsregler, ATF och anledning vid sen ankomst.",
         roles: ["admin"],
       },
     ],

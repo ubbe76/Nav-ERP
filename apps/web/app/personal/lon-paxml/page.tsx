@@ -6,7 +6,7 @@ import type { SystemSettings } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
 import { HelpLink } from "../../../components/ui/HelpLink";
 
-// Lön & PAXml: PAXml time codes, the overtime threshold, the ATF accrual and
+// Lön, PAXml & schema: PAXml time codes, the overtime threshold, the ATF accrual and
 // the terminal's deviation/overtime questions. Admin-only, same gate as Lönekoder.
 // GET /settings is readable by every logged-in user (the terminal needs it),
 // so the admin gate lives here in the page.
@@ -28,10 +28,10 @@ export default async function LonPaxmlPage() {
     <AppShell active="Personal & lön">
       <div className={shellStyles.topbar}>
         <div>
-          <div className={shellStyles.title}>Lön &amp; PAXml</div>
-          <div className={shellStyles.meta}>Tidkoder, övertidsregler, ATF-intjäning och terminalens frågor</div>
+          <div className={shellStyles.title}>Lön, PAXml &amp; schema</div>
+          <div className={shellStyles.meta}>Tidkoder, övertidsregler, ATF och terminalens frågor</div>
         </div>
-        <HelpLink chapter="lon" anchor="lon-paxml" label="Hjälp om Lön & PAXml" />
+        <HelpLink chapter="lon" anchor="lon-paxml-schema" label="Hjälp om Lön, PAXml & schema" />
       </div>
 
       <PayrollSettingsForm settings={settings} />

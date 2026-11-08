@@ -372,9 +372,9 @@ Avsnittet **Leveransdagar** på **System → Inställningar** (`/system/installn
 
 Hjälptexten säger: "Transportdagar räknas i arbetsdagar. Gäller leverantörer och kunder som inte har en egen inställning." En leverantör eller kund som anger eget läge eller egna transportdagar på sitt kort avviker från förvalet. Själva veckodagarna har inget förval — de anges alltid per leverantör respektive kund.
 
-### Lön & PAXml
+### Lön, PAXml & schema
 
-Tidkoderna för löneunderlagsexporten och övertidsreglerna ställs inte här utan under **Personal & lön → Lön & PAXml** (se [Lön & PAXml](/hjalp/lon#lon-paxml)).
+Tidkoderna för löneunderlagsexporten, övertidsreglerna, ATF-intjäningen och **Tillåt ATF-uttag via schemat** ställs inte här utan under **Personal & lön → Lön, PAXml & schema** (se [Lön, PAXml & schema](/hjalp/lon#lon-paxml-schema)).
 
 ## Teman
 

@@ -8,7 +8,7 @@ import { getCurrentUser } from "../../lib/api";
 import shellStyles from "../../components/AppShell.module.css";
 
 // Module menu for Personal & lön. Filtered both by role (Anställda, Attestering
-// and Löneunderlag need arbetsledare, Lönekoder and Lön & PAXml admin) and by
+// and Löneunderlag need arbetsledare, Lönekoder and Lön, PAXml & schema admin) and by
 // permission group (pageAccess.ts) in sectionsForUser.
 export default async function PersonalPage() {
   const cookieHeader = (await headers()).get("cookie") ?? undefined;

@@ -1,6 +1,6 @@
 # Personal & lön
 
-Menyn **Personal & lön** samlar personalregistret och lönen. Menyvalet öppnar en sida med tre grupper: **Personal** (**Anställda**), **Löneperiod** (**Attestering** och **Löneunderlag**) och **Inställningar** (**Lönekoder** samt **Lön & PAXml**, som öppnar sidan [Lön & PAXml](#lon-paxml) och bara visas för administratörer). Menyn kräver rättigheten **Personal & lön** i behörighetsgruppen (se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper)); **Anställda**, **Attestering** och **Löneunderlag** är dessutom bara för administratörer och arbetsledare, **Lönekoder** bara för administratörer.
+Menyn **Personal & lön** samlar personalregistret och lönen. Menyvalet öppnar en sida med tre grupper: **Personal** (**Anställda**), **Löneperiod** (**Attestering** och **Löneunderlag**) och **Inställningar** (**Lönekoder** samt **Lön, PAXml & schema**, som öppnar sidan [Lön, PAXml & schema](#lon-paxml-schema) och bara visas för administratörer). Menyn kräver rättigheten **Personal & lön** i behörighetsgruppen (se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper)); **Anställda**, **Attestering** och **Löneunderlag** är dessutom bara för administratörer och arbetsledare, **Lönekoder** bara för administratörer.
 
 Löneblocket i Nav|ERP täcker flödet frånvaro → attestering → låsning → export: frånvaro och OB registreras löpande, varje anställds underlag attesteras för en löneperiod, perioden låses och löneunderlaget exporteras till lönesystemet (PAXml). Kapitlet byggs ut i takt med att rutinerna färdigställs — hittills finns personalregistret (**Anställda**), grundregistren löneunderlaget bygger på (**Lönekoder**), frånvaroregistreringen på personalkortet, arbetsledarens månadsvy **Attestering** och rapportsidan **Löneunderlag** med export till PAXml.
 
@@ -39,7 +39,7 @@ Båda åtgärderna bekräftas och går inte att ångra. De loggas i händelselog
 
 Frånvarokoder är de typer av frånvaro som kan registreras (t.ex. sjukfrånvaro eller semester) och vilken PAXml-tidkod respektive typ exporteras med. Varje kod har **Kod**, **Namn**, **PAXml-kod** och **Aktiv**. Klicka på en rad för att öppna den för redigering.
 
-När **Tillåt ATF-uttag via schemat** är på (under [Lön & PAXml](#lon-paxml)) har koden också **Tjänar in ATF**. Är den av tjänar en arbetsdag med den frånvaron inte in sin ATF-andel, och veckans sista arbetsdag i ett veckoschema med utjämning blir så mycket längre (se [ATF och inarbetning i veckoschemat](/hjalp/personal-tid#atf-och-inarbetning-i-veckoschemat)). Som förval är den av för sjukfrånvaro, vård av barn, föräldraledighet och tjänstledighet och på för övriga koder.
+När **Tillåt ATF-uttag via schemat** är på (under [Lön, PAXml & schema](#lon-paxml-schema)) har koden också **Tjänar in ATF**. Är den av tjänar en arbetsdag med den frånvaron inte in sin ATF-andel, och veckans sista arbetsdag i ett veckoschema med utjämning blir så mycket längre (se [ATF och inarbetning i veckoschemat](/hjalp/personal-tid#atf-och-inarbetning-i-veckoschemat)). Som förval är den av för sjukfrånvaro, vård av barn, föräldraledighet och tjänstledighet och på för övriga koder.
 
 **Förifyll standardkoder** lägger in en uppsättning vanliga svenska frånvarokoder (sjukfrånvaro, semester, vård av barn, föräldraledighet, tjänstledighet, permission, utbildning och kompledighet) med en förslags-PAXml-kod var. Knappen är säker att köra flera gånger — koder vars kod eller namn redan finns hoppas över, och resultatet visas som "X skapade, Y fanns redan".
 
@@ -61,9 +61,9 @@ Orsaker kan inte raderas, eftersom stämplingar som redan sparats pekar på dem.
 
 > Lås perioden innan du ändrar OB-tillägg eller scheman — olåsta perioder räknas alltid om med nuvarande regler.
 
-## Lön & PAXml
+## Lön, PAXml & schema
 
-**Personal & lön → Lön & PAXml** (bara för administratörer) ställer tidkoderna som skrivs ut i löneunderlagsexporten (PAXml), den dagliga övertidströskeln, ATF-intjäningen, ATF-uttaget via schemat och terminalens frågor om anledning och övertid:
+**Personal & lön → Lön, PAXml & schema** (bara för administratörer) ställer tidkoderna som skrivs ut i löneunderlagsexporten (PAXml), den dagliga övertidströskeln, ATF-intjäningen, ATF-uttaget via schemat och terminalens frågor om anledning och övertid:
 
 - **Tidkod arbetad tid** — löneartskoden för vanlig arbetad tid. Standard: **TID**.
 - **Tidkod övertid** — löneartskoden för övertid på schemalagd arbetsdag. Standard: **ÖT1**.
@@ -136,7 +136,7 @@ Vid låsningen fryses underlaget i en kopia som alla senare läsningar och expor
 
 ## Övertid
 
-Övertid beräknas per dag genom att jämföra arbetad tid mot schemalagd tid. Den överskjutande tiden räknas bara som övertid när den överstiger inställningen **Övertidströskel (minuter per dag)** under **Personal & lön → Lön & PAXml** — annars ingår den i den vanliga arbetade tiden.
+Övertid beräknas per dag genom att jämföra arbetad tid mot schemalagd tid. Den överskjutande tiden räknas bara som övertid när den överstiger inställningen **Övertidströskel (minuter per dag)** under **Personal & lön → Lön, PAXml & schema** — annars ingår den i den vanliga arbetade tiden.
 
 På dagar utan schema (t.ex. arbete en helt ledig dag) räknas i stället all arbetad tid som **övertid helg**, oavsett tröskeln.
 
@@ -173,7 +173,7 @@ PAXml-filen är importfilen till lönesystemet och kan bara exporteras för en *
 
 Vilka PAXml-tidkoder som används styrs av flera register:
 
-- De fasta tidkoderna för arbetad tid, övertid, övertid helg, ATF och de två komptidskoderna (övertid – komptid, övertid helg – komptid) ställs in under **Personal & lön → Lön & PAXml**.
+- De fasta tidkoderna för arbetad tid, övertid, övertid helg, ATF och de två komptidskoderna (övertid – komptid, övertid helg – komptid) ställs in under **Personal & lön → Lön, PAXml & schema**.
 - Varje frånvarokod har en egen PAXml-kod, satt i registret **Lönekoder → Frånvarokoder** (se [Lönekoder](#lonekoder) ovan).
 - Varje OB-tillägg har en egen PAXml-kod, satt i registret **Lönekoder → OB-tillägg**.
 
