@@ -10,6 +10,11 @@ export const UNSAVED_MESSAGE = "Du har osparade ändringar — lämna ändå?";
 
 let hasDrafts: (() => boolean) | null = null;
 
+// A document tab's frame (punkt 5) asks the page inside before closing it.
+if (typeof window !== "undefined") {
+  (window as Window & { __navHasDrafts?: () => boolean }).__navHasDrafts = () => hasDrafts?.() === true;
+}
+
 // Resolves true when there is nothing to lose or the user chose to leave.
 export function confirmLeave(): Promise<boolean> {
   if (!hasDrafts || !hasDrafts()) return Promise.resolve(true);

@@ -1,5 +1,6 @@
 "use client";
 
+import { navigateTo } from "../lib/tabNavigation";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -164,9 +165,11 @@ export function CommandPalette() {
     triggerRef.current?.focus();
   }
 
+  // A document opens as a tab when the tabs are on, and from inside a tab
+  // the frame around it opens what was chosen (punkt 5, lib/tabNavigation.ts).
   function go(entry: Entry) {
     setOpen(false);
-    router.push(entry.href);
+    navigateTo(entry.href, entry.title, (href) => router.push(href));
   }
 
   function onKeyDown(e: ReactKeyboardEvent) {

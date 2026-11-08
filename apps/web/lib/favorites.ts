@@ -40,10 +40,12 @@ export interface FavoritesState {
 export interface ShellSettings extends FavoritesState {
   density: TableDensity;
   listColumns: ListColumns;
+  // Flikar (punkt 5): documents as tabs on a wide screen; default on.
+  documentTabs: boolean;
 }
 
 export async function loadShellSettings(cookieHeader: string | undefined): Promise<ShellSettings> {
-  const fallback: ShellSettings = { favorites: null, inSidebar: true, density: "normal", listColumns: {} };
+  const fallback: ShellSettings = { favorites: null, inSidebar: true, density: "normal", listColumns: {}, documentTabs: true };
   if (!cookieHeader) return fallback;
   try {
     const settings = await apiGet<{
@@ -51,12 +53,14 @@ export async function loadShellSettings(cookieHeader: string | undefined): Promi
       favoritesInSidebar?: boolean;
       density?: string;
       listColumns?: ListColumns;
+      documentTabs?: boolean;
     }>("/api/v1/me/settings", cookieHeader);
     return {
       favorites: settings.favorites ?? null,
       inSidebar: settings.favoritesInSidebar !== false,
       density: settings.density === "compact" ? "compact" : "normal",
       listColumns: settings.listColumns ?? {},
+      documentTabs: settings.documentTabs !== false,
     };
   } catch {
     return fallback;

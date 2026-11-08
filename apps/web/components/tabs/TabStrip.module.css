@@ -1,0 +1,121 @@
+/* The tab strip (Nav som program, punkt 5): a row at the bottom of the
+   toolbar, --app-tabstrip-height high (globals.css). */
+.strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: var(--app-tabstrip-height);
+  padding: 0 40px;
+  min-width: 0;
+}
+
+.tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tabWrap {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 220px;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius-control-sm) var(--radius-control-sm) 0 0;
+  background: var(--color-divider);
+}
+.tabWrap[data-active] {
+  background: var(--color-bg);
+  border-color: var(--color-border);
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: calc(var(--app-tabstrip-height) - 6px);
+  padding: 0 10px 0 12px;
+  border: none;
+  background: none;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.tab[aria-selected="true"] {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+.tab:focus-visible,
+.close:focus-visible,
+.split:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* The page itself: the first tab, never closed. */
+.pageTab {
+  flex-shrink: 0;
+  max-width: 220px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius-control-sm) var(--radius-control-sm) 0 0;
+  background: var(--color-divider);
+}
+.pageTab[aria-selected="true"] {
+  background: var(--color-bg);
+  border-color: var(--color-border);
+}
+
+.title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.close {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-right: 4px;
+  border: none;
+  border-radius: var(--radius-control-sm);
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.close:hover {
+  background: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+.split {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control-sm);
+  background: var(--color-surface);
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.split[aria-pressed="true"] {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}

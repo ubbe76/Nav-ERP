@@ -1,0 +1,35 @@
+/* Flikar och delad vy (Nav som program, punkt 5): the layer of live tab
+   pages over the content column — between the toolbar (with the strip) and
+   the status bar, right of the sidebar (--app-sidebar-width is measured by
+   DocumentTabsProvider). Delad vy keeps the page visible on the left. */
+.layer {
+  position: fixed;
+  top: var(--app-toolbar-height);
+  bottom: var(--app-statusbar-height);
+  left: var(--app-sidebar-width);
+  right: 0;
+  z-index: 25;
+  display: none;
+  background: var(--color-bg);
+}
+.layer[data-shown] {
+  display: block;
+}
+:global(html[data-split]) .layer {
+  left: auto;
+  width: var(--app-split-pane-width);
+  border-left: 1px solid var(--color-border);
+  box-shadow: -6px 0 16px -12px var(--color-overlay);
+}
+
+/* Hidden tabs stay loaded (display: none keeps the page and its scroll). */
+.frame {
+  display: none;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--color-bg);
+}
+.frame[data-active] {
+  display: block;
+}

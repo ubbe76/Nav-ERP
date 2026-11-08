@@ -132,6 +132,9 @@ export const userSettingsSchema = z.object({
   density: tableDensitySchema,
   // Kolumner per list page; {} = every list as built.
   listColumns: listColumnsSchema,
+  // Flikar (Nav som program, punkt 5): documents open as tabs on a wide
+  // screen. Default true.
+  documentTabs: z.boolean(),
 });
 export type UserSettings = z.infer<typeof userSettingsSchema>;
 

@@ -5,6 +5,8 @@ import { headers } from "next/headers";
 import { fetchThemeBoot, themeBootScript } from "../lib/themes";
 import { ThemeBootProvider } from "../components/ThemeBootProvider";
 import { installPromptBootScript } from "../lib/installApp";
+import { embeddedBootScript } from "../lib/documentTabs";
+import { DocumentTabsProvider } from "../components/tabs/DocumentTabs";
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
@@ -49,6 +51,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <script dangerouslySetInnerHTML={{ __html: themeBootScript(boot) }} />
         {/* Keeps the browser's install offer for the user menu (lib/installApp.ts). */}
         <script dangerouslySetInnerHTML={{ __html: installPromptBootScript }} />
+        {/* A page inside a document tab drops the app frame before first paint (lib/documentTabs.ts). */}
+        <script dangerouslySetInnerHTML={{ __html: embeddedBootScript }} />
       </head>
       {/* Browser extensions inject attributes on <body> before React hydrates
           (ColorZilla's cz-shortcut-listen, for one), which otherwise reports a
@@ -59,7 +63,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <ThemeBootProvider
           boot={{ themes: boot.themes, defaultTheme: boot.defaultTheme, locked: boot.locked, userTheme: boot.userTheme }}
         >
-          {children}
+          {/* The document tabs (punkt 5) live here, so they survive navigation. */}
+          <DocumentTabsProvider>{children}</DocumentTabsProvider>
         </ThemeBootProvider>
       </body>
     </html>

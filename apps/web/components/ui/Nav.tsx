@@ -145,9 +145,12 @@ export function Nav({ active, role, permissions }: NavProps) {
 
   return (
     <>
+      {/* data-app-chrome: hidden inside a tab (punkt 5); data-app-sidebar:
+          the tab layer's left edge is measured from it. */}
       <button
         type="button"
         className={styles.menuButton}
+        data-app-chrome=""
         data-open={open}
         onClick={() => setOpen(true)}
         aria-label="Öppna meny"
@@ -159,7 +162,14 @@ export function Nav({ active, role, permissions }: NavProps) {
 
       {open && <div className={styles.backdrop} onClick={() => setOpen(false)} />}
 
-      <nav className={styles.sidebar} data-open={open} data-collapsed={collapsed} data-animated={animated}>
+      <nav
+        className={styles.sidebar}
+        data-open={open}
+        data-collapsed={collapsed}
+        data-animated={animated}
+        data-app-chrome=""
+        data-app-sidebar=""
+      >
         <div className={styles.header}>
           <span className={styles.wordmarkFull}>
             <Wordmark />

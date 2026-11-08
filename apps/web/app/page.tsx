@@ -20,6 +20,7 @@ import { FavoritesCard } from "../components/dashboard/FavoritesCard";
 import { OnboardingCard } from "../components/onboarding/OnboardingCard";
 import { ConfirmDialogHost } from "../components/ui/ConfirmDialogHost";
 import { NoticeHost } from "../components/ui/NoticeHost";
+import { EmbeddedBridge } from "../components/tabs/EmbeddedBridge";
 import { FavoritesProvider } from "../components/FavoritesProvider";
 import { getCurrentUser, apiGet } from "../lib/api";
 import { loadShellSettings } from "../lib/favorites";
@@ -350,13 +351,14 @@ export default async function OverviewPage() {
       className={shellStyles.frame}
       initialDensity={favorites.density}
       initialListColumns={favorites.listColumns}
+        initialDocumentTabs={favorites.documentTabs}
     >
       <Nav active="Översikt" role={user.role} permissions={user.permissions} />
 
       <PermissionsProvider role={user.role} permissions={user.permissions}>
       <div className={shellStyles.column}>
       <AppToolbar userName={user.name} userRole={roleLabel} />
-      <main className={shellStyles.main}>
+      <main className={shellStyles.main} data-app-main="">
         <ReadOnlyBanner readOnly={user.readOnly} />
 
         <div className={styles.topbar}>
@@ -400,6 +402,7 @@ export default async function OverviewPage() {
         )}
         <ConfirmDialogHost />
         <NoticeHost />
+        <EmbeddedBridge />
       </main>
       <StatusBar userName={user.name} userRole={roleLabel} />
       </div>
