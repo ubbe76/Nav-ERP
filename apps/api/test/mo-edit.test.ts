@@ -603,6 +603,7 @@ describe("operations", () => {
     await mfgService.removeOperation(w.order.id, operation.id, w.user.id);
     const rows = await db.select().from(auditLog).where(eq(auditLog.entityType, "manufacturing_order")).orderBy(auditLog.createdAt);
     expect(rows.map((r) => r.action)).toEqual([
+      "created",
       "released",
       "material_added",
       "material_changed",
@@ -612,7 +613,7 @@ describe("operations", () => {
       "operation_removed",
     ]);
     expect(rows.every((r) => r.entityId === w.order.orderNumber && r.userId === w.user.id)).toBe(true);
-    expect(rows[5]!.detail).toMatchObject({
+    expect(rows[6]!.detail).toMatchObject({
       sequenceNo: 30,
       workCenterCode: "201",
       before: { setupTime: 0, workCenterCode: "101" },

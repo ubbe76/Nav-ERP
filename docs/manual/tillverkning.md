@@ -386,7 +386,7 @@ Ordern måste ha operationer: en äldre, ännu inte frisläppt order som står k
 
 Även utleveransen skriver pallkort — se [Utleverans](/hjalp/forsaljning#utleverans).
 
-Sektionen **Historik** längst ner på orderkortet visar orderns egna händelser (statusövergångar och ändringar av leveransdatum/produktionsgrupp) — se [Händelselogg](/hjalp/system#handelselogg).
+Sektionen **Historik** längst ner på orderkortet visar orderns egna händelser (statusövergångar och ändringar av leveransdatum/produktionsgrupp) — se [Händelselogg](/hjalp/system#handelselogg). Första raden är **Skapad**, med artikelnummer, antal, planerat färdigdatum och kundordern ordern skapades för. Den följs direkt av **Frisläppt**, eftersom en ny tillverkningsorder frisläpps när den skapas. Det gäller alla sätt att skapa en order: **Ny tillverkningsorder**, **Skapa TO** på kundorderraden, **Skapa ordrar** i behovsberäkningen, Leveranstidskontrollens reservation och **Skapa saknade halvfabrikat**. Ordrar som skapades före 2026-11-08 har bara raden **Frisläppt**.
 
 ## Behovsberäkning
 

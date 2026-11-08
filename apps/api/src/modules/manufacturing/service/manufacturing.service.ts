@@ -57,7 +57,7 @@ import type { Tx } from "@navet/db";
 // and the header PATCH are logged; completeOperation/the stamp-terminal path
 // is deliberately NOT logged (shop-floor noise — the quantities already live
 // on the operation itself, see reportOperationQuantities below).
-import type { AuditWriter } from "../../system/repository/audit.repository.js";
+import type { AuditEntry, AuditWriter } from "../../system/repository/audit.repository.js";
 // Konfigurator 4c: a beställningsvara's TO carries its derived structure from
 // creation. The derivation itself is the configurator's (injected as a reader,
 // bound late in app.ts like VariantPriceReader); the errors are the sales
@@ -814,6 +814,31 @@ export function createManufacturingService(
     return new RowConfigurationChangedError();
   }
 
+  // Händelseloggen: a new TO's `created` entry — the article, quantity,
+  // planned finish date and the KO it was made for. EVERY path that creates
+  // a TO writes it after the commit, right before the `released` entry (a
+  // new TO is released in its own create transaction): createManufacturingOrder
+  // itself, and createManufacturingOrderInTx's callers (the reservation,
+  // Skapa saknade halvfabrikat) from its `createdAudit`.
+  function createdAuditEntry(
+    order: { orderNumber: string; quantity: string | number; dueDate: string | null },
+    facts: { articleNumber: string | null; salesOrderNumber: string | null },
+    userId: string | null
+  ): AuditEntry {
+    return {
+      entityType: "manufacturing_order",
+      entityId: order.orderNumber,
+      action: "created",
+      detail: {
+        articleNumber: facts.articleNumber,
+        quantity: Number(order.quantity),
+        dueDate: order.dueDate,
+        ...(facts.salesOrderNumber ? { salesOrderNumber: facts.salesOrderNumber } : {}),
+      },
+      userId,
+    };
+  }
+
   async function prepareCreate(input: CreateManufacturingOrderInput, opts: { onlyUncovered?: boolean } = {}) {
     let articleId = input.articleId;
     let linkedSalesOrderId: string | undefined;
@@ -900,6 +925,8 @@ export function createManufacturingService(
     return {
       articleId: articleId!,
       quantity,
+      // For the new TO's `created` entry in Händelseloggen (createdAuditEntry).
+      auditFacts: { articleNumber: article?.articleNumber ?? null, salesOrderNumber: linkedRow?.orderNumber ?? null },
       // Re-checked FOR SHARE in the create transaction (ConfiguratorModeChangedError).
       templateMode: article?.configuratorMode ?? null,
       linkedSalesOrder: linkedSalesOrderId
@@ -1527,6 +1554,7 @@ export function createManufacturingService(
         planAndLink
       );
       if (!result.ok) throw createOutcomeError(result);
+      await audit.log(createdAuditEntry(result.order, prepared.auditFacts, createdBy));
       await audit.log({ entityType: "manufacturing_order", entityId: result.order.orderNumber, action: "released", userId: createdBy });
       // releaseWarnings: the same shortage warnings Släpp returns, plus the
       // plan's (horizon, Sen).
@@ -1559,7 +1587,9 @@ export function createManufacturingService(
         planning ? (t, moId) => planning.planNewOrderInTx(t, moId, opts.plannedWeeks, { refuseMismatch: opts.refuseMismatch }) : undefined
       );
       if (!result.ok) throw createOutcomeError(result);
-      return { ...result.order, releaseWarnings: result.warnings };
+      // The caller logs after its commit: `createdAudit`, then its own
+      // `released` — the same pair createManufacturingOrder writes.
+      return { ...result.order, releaseWarnings: result.warnings, createdAudit: createdAuditEntry(result.order, prepared.auditFacts, createdBy) };
     },
 
     // E3 (KO→TO-koppling): thin passthrough used only by the route to

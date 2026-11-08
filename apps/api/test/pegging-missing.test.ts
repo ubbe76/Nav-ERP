@@ -152,7 +152,7 @@ const auditRows = () =>
   db
     .select()
     .from(auditLog)
-    .where(and(eq(auditLog.entityType, "manufacturing_order"), inArray(auditLog.action, ["released", "component_orders_created"])))
+    .where(and(eq(auditLog.entityType, "manufacturing_order"), inArray(auditLog.action, ["created", "released", "component_orders_created"])))
     .orderBy(auditLog.createdAt);
 const slim = (o: { articleId: string; level: number; quantity: number; dueDate: string | null; late: boolean; needDate: string | null; parentKey: string | null }) => ({
   articleId: o.articleId,
@@ -273,7 +273,7 @@ describe("GET /manufacturing-orders/:id/missing-components (getMissingComponents
 });
 
 describe("POST /manufacturing-orders/:id/missing-components (createMissingComponents)", () => {
-  it("creates the TOs deepest level first with the preview's quantities, dates and note; the parent is then covered; released + component_orders_created are logged", async () => {
+  it("creates the TOs deepest level first with the preview's quantities, dates and note; the parent is then covered; created + released + component_orders_created are logged", async () => {
     const world = await seedWorld();
     const parent = await mfgService.createManufacturingOrder({ articleId: world.product.id, quantity: 2, dueDate: "2030-03-29" }, world.user.id);
     await db.execute(sql`DELETE FROM audit_log`);
@@ -313,7 +313,9 @@ describe("POST /manufacturing-orders/:id/missing-components (createMissingCompon
     expect(await planningService.getMissingComponents(parent.id)).toEqual({ orders: [], notes: [] });
 
     expect((await auditRows()).map((r) => [r.action, r.entityId, r.detail, r.userId])).toEqual([
+      ["created", subOrder!.orderNumber, { articleNumber: world.sub.articleNumber, quantity: 2, dueDate: "2030-03-19" }, world.user.id],
       ["released", subOrder!.orderNumber, null, world.user.id],
+      ["created", semiOrder!.orderNumber, { articleNumber: world.semi.articleNumber, quantity: 2, dueDate: "2030-03-21" }, world.user.id],
       ["released", semiOrder!.orderNumber, null, world.user.id],
       [
         "component_orders_created",

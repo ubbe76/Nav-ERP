@@ -111,7 +111,7 @@ import {
   type ResourceSuggestion,
 } from "./resource-suggestions.js";
 import { lockProductionPlan } from "../repository/plan-lock.js";
-import type { AuditWriter } from "../../system/repository/audit.repository.js";
+import type { AuditEntry, AuditWriter } from "../../system/repository/audit.repository.js";
 import {
   deliveryTimeAnswer,
   runDeliveryTimeChecks,
@@ -564,7 +564,7 @@ export interface ManufacturingOrderCreator {
     input: { articleId?: string; salesOrderRowId?: string; quantity: number; note?: string; dueDate?: string | null },
     createdBy: string | null,
     opts?: { plannedWeeks?: GivenOperationPlan[] } & GivenPlanOptions
-  ): Promise<{ id: string; orderNumber: string; quantity: string | number; releaseWarnings: string[] }>;
+  ): Promise<{ id: string; orderNumber: string; quantity: string | number; releaseWarnings: string[]; createdAudit: AuditEntry }>;
   // Flytta halvfabrikaten (pegging #9): the TOs' due dates set inside the
   // planning transaction — the manufacturing module owns manufacturing_orders
   // (the lock, the status guard and the expected-date check live there).
@@ -2413,6 +2413,8 @@ export function createPlanningService(
           result.batches.filter((b) => b.level === 1).map((b) => b.rowKey)
         );
         const manufacturingOrders: ApplyDeliveryTimeResult["manufacturingOrders"] = [];
+        // Each new TO's `created` entry, logged after the commit (never part of the answer).
+        const createdAudits = new Map<string, AuditEntry>();
         const warnings: string[] = [];
         // batches is already children-before-parents.
         for (const batch of result.batches) {
@@ -2447,6 +2449,7 @@ export function createPlanningService(
           // whose operations no longer matched the check was planned on the
           // ordinarie instead).
           const resourceSwitches = result.usesAlternatives ? await repo.orderResourceSwitches(tx, created.id) : [];
+          createdAudits.set(created.orderNumber, created.createdAudit);
           manufacturingOrders.push({
             id: created.id,
             orderNumber: created.orderNumber,
@@ -2464,6 +2467,7 @@ export function createPlanningService(
         return {
           orderNumber,
           previousDeliveryDate: dateWrite.previous,
+          createdAudits,
           result: {
             deliveryDate: input.deliveryDate,
             shipDate: result.shipDate,
@@ -2482,6 +2486,8 @@ export function createPlanningService(
         throw new DeliveryTimeChangedError(deliveryTimeAnswer(runs, input.useAlternatives).deliveryDate, deliveryTimeAnswer(runs));
       });
       for (const mo of applied.result.manufacturingOrders) {
+        const createdAudit = applied.createdAudits.get(mo.orderNumber);
+        if (createdAudit) await audit.log(createdAudit);
         await audit.log({
           entityType: "manufacturing_order",
           entityId: mo.orderNumber,
@@ -2836,6 +2842,8 @@ export function createPlanningService(
         if (preview.orders.length === 0) throw new NothingToCreateError();
         if (!sameMissingOrders(preview.orders, input.expected)) throw new MissingComponentsChangedError(preview);
         const manufacturingOrders: CreateMissingComponentsResult["manufacturingOrders"] = [];
+        // Each new TO's `created` entry, logged after the commit (never part of the answer).
+        const createdAudits = new Map<string, AuditEntry>();
         const warnings: string[] = preview.orders.filter((o) => o.late).map(lateWarning);
         for (const row of creationOrder(preview.orders)) {
           const made = await deps.manufacturing.createManufacturingOrderInTx(
@@ -2857,11 +2865,14 @@ export function createPlanningService(
             quantity: Number(made.quantity),
             level: row.level,
           });
+          createdAudits.set(made.orderNumber, made.createdAudit);
           warnings.push(...made.releaseWarnings.map((w) => `${made.orderNumber}: ${w}`));
         }
-        return { orderNumber: computed.head.orderNumber, manufacturingOrders, warnings };
+        return { orderNumber: computed.head.orderNumber, manufacturingOrders, warnings, createdAudits };
       });
       for (const mo of created.manufacturingOrders) {
+        const createdAudit = created.createdAudits.get(mo.orderNumber);
+        if (createdAudit) await audit.log(createdAudit);
         await audit.log({ entityType: "manufacturing_order", entityId: mo.orderNumber, action: "released", userId });
       }
       await audit.log({

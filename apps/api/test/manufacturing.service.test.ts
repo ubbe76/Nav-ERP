@@ -136,7 +136,7 @@ async function makeMO(moQuantity = 5) {
 // A new TO is released in the same transaction that creates it, so it can be
 // stamped in the terminal straight away — no separate Släpp step.
 describe("manufacturing service — release at creation", () => {
-  it("creates the order released, with BOM and routing snapshotted, shortage warnings and a released audit row", async () => {
+  it("creates the order released, with BOM and routing snapshotted, shortage warnings and created and released audit rows", async () => {
     const user = await makeUser();
     const { parent, component } = await makeParentWithBom(2);
     const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
@@ -152,6 +152,12 @@ describe("manufacturing service — release at creation", () => {
     expect(operations.map((op) => [op.sequenceNo, op.status])).toEqual([[10, "pending"]]);
     const released = await auditRows("manufacturing_order", "released");
     expect(released.map((r) => [r.entityId, r.userId])).toEqual([[order.orderNumber, user.id]]);
+    // Händelseloggen: the TO's `created` entry, before `released`.
+    const created = await auditRows("manufacturing_order", "created");
+    expect(created.map((r) => [r.entityId, r.userId, r.detail])).toEqual([
+      [order.orderNumber, user.id, { articleNumber: parent.articleNumber, quantity: 5, dueDate: null }],
+    ]);
+    expect(created[0]!.createdAt.getTime()).toBeLessThanOrEqual(released[0]!.createdAt.getTime());
   });
 
   it("has no release warnings when stock covers the need", async () => {
