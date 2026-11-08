@@ -40,12 +40,12 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
-- [ ] **Förkalkylera flera artiklar på en gång** — i dag förkalkyleras en artikel i taget på Kalkyl-fliken. Välj artikelnummer från och till och filtrera (t.ex. varugrupp, artikeltyp, artikelkod, aktiva), förkalkylera alla träffar i ett svep med valt antal och visa resultatet med ändringen mot senaste förkalkyl. Användarens önskan 2026-11-07.
-- [ ] **Listan Kopierat** — kopiera artiklar till en lista som heter **Kopierat** och använd den i andra funktioner i appen i stället för att filtrera (t.ex. när flera artiklar förkalkyleras på en gång). Läggs artiklar till när listan redan har innehåll frågar appen om de ska läggas till eller ersätta innehållet. Användarens önskan 2026-11-07.
+- [ ] **Förkalkylera flera artiklar på en gång** (användarens önskan 2026-11-07) → [#27](https://github.com/ubbe76/Nav-ERP/issues/27)
+- [ ] **Listan Kopierat** (användarens önskan 2026-11-07) → [#28](https://github.com/ubbe76/Nav-ERP/issues/28)
 - [ ] **Löneperioden:** upplåsning nollar snapshotten utan spår av vad som exporterats — spara den i upplåsningens audit-rad.
 - [ ] **Händelseloggen:** ingen `created`-händelse för TO.
 - [ ] **Välj vad Översikten visar** → [#17](https://github.com/ubbe76/Nav-ERP/issues/17)
-- [ ] **Leveransprecision:** inställbar marginal i antal dagar för vad som räknas som fel. I dag är varje leverans efter bekräftat datum sen (`daysLate > 0` i `delivery-precision-calc.ts`) och en för tidig leverans räknas som i tid — t.ex. "sen först efter N dagar" och eventuellt "för tidig mer än M dagar före", gärna olika för kund- och leverantörssidan.
+- [ ] **Marginal i leveransprecisionen** → [#29](https://github.com/ubbe76/Nav-ERP/issues/29). I dag är varje leverans efter bekräftat datum sen (`daysLate > 0` i `delivery-precision-calc.ts`).
 - [ ] **Huvudboken:** kontoväljaren utesluter inaktiva konton med historik ("inkl. inaktiva"-val); IB/UB döljs när intervallet saknar rader (IB = UB ≠ 0 vore informativt); sorteringen ordnar över serier på nummer före serie (tie-breaken otestad).
 - [ ] **Prestanda vid tillväxt:** `openAmountSql` evalueras två gånger i SELECT + WHERE (fullscan); verifikatens `seriesId` och `inquiry_rows.routing_operation_id` saknar index; Översikten driver behovsberäkningen (60 s-cache) och `orderPlanSummaries`; bankfilernas namnmatchning är O(kunder × poster). Pegging (#9) peggar sidans TO:er vid varje läsning av TO-listan och alla öppna TO:er i Beläggning (300 TO:er 2026-11-07: Beläggning 31 → 99 ms, listan 15 → 53 ms); Beläggning laddar kapacitetsunderlaget två gånger (`orderPlanSummaries` i `pegParents`) och kunde återanvända sin egen laddning, annars en kort cache.
 
@@ -131,10 +131,10 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Planering och beställningspunkt per lager** (vid behov, senare — användarens beslut 2026-11-07) → [#11](https://github.com/ubbe76/Nav-ERP/issues/11) *(hemsidan)*
 - [ ] **Detaljplanering per dag eller timme och köberäkning** (medvetet utanför v1) → [#18](https://github.com/ubbe76/Nav-ERP/issues/18) *(hemsidan)*
 - [ ] **Bakdaterade lagerrörelser** → [#19](https://github.com/ubbe76/Nav-ERP/issues/19) *(hemsidan)*. FIFO-värderingen och inventering per underlagets datum (#26) är klara sedan 2026-11-04. Kvar är att registrera andra lagerrörelser med ett tidigare värderingsdatum, eftersom kolumnen `valued_at` redan finns. Hemsidans text ("Det finns ingen FIFO-värdering …" och metodlistorna i `areas.ts`) ändras vid nästa version.
-- [ ] **Färdiga kollektivavtal att välja** — OB-fönster, övertidströskel och tidkoder läggs upp av företaget självt. *(hemsidan)*
-- [ ] **Mobilapp** — Nav|ERP och stämpelterminalen används i webbläsaren. *(hemsidan)*
-- [ ] **Aktivitetsbaserad kalkyl** — omkostnaderna fördelas med procentuella påslag. *(hemsidan)*
-- [ ] **Flera bolag och koncernredovisning** — en installation hanterar ett företag. *(hemsidan)*
+- [ ] **Färdiga kollektivavtal att välja** → [#30](https://github.com/ubbe76/Nav-ERP/issues/30) *(hemsidan)*
+- [ ] **Mobilapp** → [#31](https://github.com/ubbe76/Nav-ERP/issues/31) *(hemsidan)*
+- [ ] **Aktivitetsbaserad kalkyl** → [#32](https://github.com/ubbe76/Nav-ERP/issues/32) *(hemsidan)*
+- [ ] **Flera bolag och koncernredovisning** → [#33](https://github.com/ubbe76/Nav-ERP/issues/33) *(hemsidan)*
 
 ### Medvetet utanför
 
