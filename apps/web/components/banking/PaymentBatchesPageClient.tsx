@@ -4,6 +4,7 @@ import Link from "next/link";
 import { GatedLink } from "../ui/GatedLink";
 import { HelpLink } from "../ui/HelpLink";
 import { ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { StatusPill } from "../ui/StatusPill";
 import { Table } from "../ui/Table";
 import { PAYMENT_BATCH_STATUS } from "../../lib/banking";
@@ -15,6 +16,16 @@ import shellStyles from "../AppShell.module.css";
 import listStyles from "../../app/inkop/ordrar/page.module.css";
 
 export function PaymentBatchesPageClient({ batches, pageSize }: { batches: Paged<PaymentBatchListRow>; pageSize: number }) {
+  const view = useListColumns([
+    { key: "batchNumber", label: "Nummer", width: "110px" },
+    { key: "status", label: "Status", width: "140px" },
+    { key: "itemCount", label: "Poster", width: "80px", align: "right" as const },
+    { key: "totalAmount", label: "Belopp", width: "170px", align: "right" as const },
+    { key: "earliestExecutionDate", label: "Betalningsdag", width: "130px" },
+    { key: "exportedAt", label: "Exporterad", width: "130px" },
+    { key: "confirmedCount", label: "Bekräftade", width: "1fr" },
+  ]);
+
   return (
     <>
       <div className={shellStyles.topbar}>
@@ -32,17 +43,11 @@ export function PaymentBatchesPageClient({ batches, pageSize }: { batches: Paged
           options={Object.entries(PAYMENT_BATCH_STATUS).map(([value, s]) => ({ value, label: s.label }))}
         />
         <GatedLink href="/inkop/bankfiler">Läs in bankfil</GatedLink>
+        {view.chooser}
       </ListToolbar>
       <Table<PaymentBatchListRow>
-        columns={[
-          { key: "batchNumber", label: "Nummer", width: "110px" },
-          { key: "status", label: "Status", width: "140px" },
-          { key: "itemCount", label: "Poster", width: "80px", align: "right" },
-          { key: "totalAmount", label: "Belopp", width: "170px", align: "right" },
-          { key: "earliestExecutionDate", label: "Betalningsdag", width: "130px" },
-          { key: "exportedAt", label: "Exporterad", width: "130px" },
-          { key: "confirmedCount", label: "Bekräftade", width: "1fr" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={batches.rows}
         emptyText="Inga betalfiler än — skapa en från Öppna poster"
         renderCell={(row, key) => {

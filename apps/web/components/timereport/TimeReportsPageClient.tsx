@@ -7,6 +7,7 @@ import { Table } from "../ui/Table";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { ListExportLink, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import buttonStyles from "../ui/Button.module.css";
 import { NewTimeReportForm } from "./NewTimeReportForm";
 import { TIME_KIND_LABELS, type EmployeeDirectoryEntry, type Paged, type TimeReport } from "../../lib/types";
@@ -31,6 +32,17 @@ export function TimeReportsPageClient({
   const canOpenPersonal = useCanOpenPersonal();
   const [modalOpen, setModalOpen] = useState(false);
 
+  const view = useListColumns([
+    { key: "employeeName", label: "Anställd", width: "1fr" },
+    { key: "manufacturingOrderNumber", label: "Tillverkningsorder", width: "160px" },
+    { key: "operationSequenceNo", label: "Operation", width: "160px" },
+    { key: "date", label: "Datum", width: "120px" },
+    { key: "hours", label: "Timmar", width: "100px", align: "right" as const },
+    { key: "kind", label: "Typ", width: "110px" },
+    { key: "source", label: "Källa", width: "110px" },
+    { key: "note", label: "Anteckning", width: "1fr" },
+  ]);
+
   return (
     <>
       <div className={shellStyles.topbar}>
@@ -53,19 +65,12 @@ export function TimeReportsPageClient({
 
       <ListToolbar placeholder="Sök anställd eller ordernummer…">
         <ListExportLink endpoint="/api/v1/time-reports/csv" />
+        {view.chooser}
       </ListToolbar>
 
       <Table<TimeReport>
-        columns={[
-          { key: "employeeName", label: "Anställd", width: "1fr" },
-          { key: "manufacturingOrderNumber", label: "Tillverkningsorder", width: "160px" },
-          { key: "operationSequenceNo", label: "Operation", width: "160px" },
-          { key: "date", label: "Datum", width: "120px" },
-          { key: "hours", label: "Timmar", width: "100px", align: "right" },
-          { key: "kind", label: "Typ", width: "110px" },
-          { key: "source", label: "Källa", width: "110px" },
-          { key: "note", label: "Anteckning", width: "1fr" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={reports.rows}
         emptyText="Inga tidrapporter matchar sökningen"
         renderCell={(row, key) => {

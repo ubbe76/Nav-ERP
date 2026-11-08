@@ -1,6 +1,7 @@
 "use client";
 
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination, useListNavigation } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { ArticlePicker } from "../ui/ArticlePicker";
 import { GatedLink } from "../ui/GatedLink";
 import { Field, Input } from "../ui/Field";
@@ -75,6 +76,8 @@ export function StockTransactionsView({ transactions, locations, article, pageSi
     { key: "note", label: "Anteckning", width: "minmax(120px, 1fr)" },
   ];
 
+  const view = useListColumns(columns);
+
   return (
     <>
       <ListToolbar placeholder="Sök artikelnummer eller benämning…">
@@ -131,10 +134,12 @@ export function StockTransactionsView({ transactions, locations, article, pageSi
           endpoint="/api/v1/stock/transactions/csv"
           renameParams={{ article: "articleId", location: "locationId" }}
         />
+        {view.chooser}
       </ListToolbar>
 
       <Table<StockTransaction>
-        columns={columns}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={transactions.rows}
         emptyText="Inga transaktioner matchar filtren"
         renderCell={(row, key) => {

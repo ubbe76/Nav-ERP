@@ -9,6 +9,7 @@ import { Button } from "../ui/Button";
 import buttonStyles from "../ui/Button.module.css";
 import { NewPurchaseOrderForm } from "./NewPurchaseOrderForm";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { PURCHASE_ORDER_STATUS_PILL, type Paged, type PurchaseOrder } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import styles from "../../app/inkop/ordrar/page.module.css";
@@ -16,6 +17,14 @@ import { HelpLink } from "../ui/HelpLink";
 
 export function PurchaseOrdersPageClient({ orders, pageSize }: { orders: Paged<PurchaseOrder>; pageSize: number }) {
   const [modalOpen, setModalOpen] = useState(false);
+
+  const view = useListColumns([
+    { key: "orderNumber", label: "Ordernummer", width: "140px" },
+    { key: "supplierName", label: "Leverantör", width: "1fr" },
+    { key: "status", label: "Status", width: "160px" },
+    { key: "currency", label: "Valuta", width: "90px" },
+    { key: "expectedDeliveryDate", label: "Leveransdatum", width: "170px" },
+  ]);
 
   return (
     <>
@@ -57,16 +66,12 @@ export function PurchaseOrdersPageClient({ orders, pageSize }: { orders: Paged<P
           ]}
         />
         <ListExportLink endpoint="/api/v1/purchase-orders/csv" />
+        {view.chooser}
       </ListToolbar>
 
       <Table<PurchaseOrder>
-        columns={[
-          { key: "orderNumber", label: "Ordernummer", width: "140px" },
-          { key: "supplierName", label: "Leverantör", width: "1fr" },
-          { key: "status", label: "Status", width: "160px" },
-          { key: "currency", label: "Valuta", width: "90px" },
-          { key: "expectedDeliveryDate", label: "Leveransdatum", width: "170px" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={orders.rows}
         emptyText="Inga ordrar matchar sökningen"
         renderCell={(order, key) => {

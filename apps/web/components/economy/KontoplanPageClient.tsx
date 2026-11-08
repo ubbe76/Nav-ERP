@@ -7,6 +7,7 @@ import { StatusPill } from "../ui/StatusPill";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { Checkbox, Field, Input, Select, Toggle } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
@@ -58,6 +59,14 @@ export function KontoplanPageClient({ accounts, pageSize }: { accounts: Paged<Ac
     }
   }
 
+  const view = useListColumns([
+    { key: "number", label: "Nummer", width: "140px" },
+    { key: "name", label: "Namn", width: "1fr" },
+    { key: "vatBox", label: "Momsruta", width: "220px" },
+    { key: "costCenter", label: "Kräver kostnadsställe", width: "130px" },
+    { key: "active", label: "Status", width: "120px" },
+  ]);
+
   return (
     <>
       <div className={shellStyles.topbar}>
@@ -89,16 +98,12 @@ export function KontoplanPageClient({ accounts, pageSize }: { accounts: Paged<Ac
           options={[{ value: "true", label: "Visa alla (inkl. inaktiva)" }]}
         />
         <ListExportLink endpoint="/api/v1/accounts/csv" />
+        {view.chooser}
       </ListToolbar>
 
       <Table<Account>
-        columns={[
-          { key: "number", label: "Nummer", width: "140px" },
-          { key: "name", label: "Namn", width: "1fr" },
-          { key: "vatBox", label: "Momsruta", width: "220px" },
-          { key: "costCenter", label: "Kräver kostnadsställe", width: "130px" },
-          { key: "active", label: "Status", width: "120px" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={accounts.rows}
         emptyText="Inga konton matchar sökningen"
         renderCell={(account, key) => {

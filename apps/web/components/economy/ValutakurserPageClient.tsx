@@ -11,6 +11,7 @@ import { Field, Input, Select } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormSaved } from "../ui/Form";
 import { HelpLink } from "../ui/HelpLink";
 import { ListFilterSelect, ListToolbar, Pagination, useListNavigation } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import { COMMON_CURRENCIES, formatRate } from "../../lib/currency";
@@ -65,6 +66,15 @@ export function ValutakurserPageClient({
   const [notice, setNotice] = useState<string | null>(null);
   const hasRiksbankRates = rates.rows.some((rate) => rate.source === "riksbank");
 
+  const view = useListColumns([
+    { key: "date", label: "Datum", width: "120px" },
+    { key: "currency", label: "Valuta", width: "90px" },
+    { key: "rate", label: "Kurs (SEK per enhet)", width: "170px", align: "right" as const },
+    { key: "source", label: "Källa", width: "120px" },
+    { key: "createdByName", label: "Inlagd av", width: "1fr" },
+    { key: "updatedAt", label: "Ändrad", width: "120px" },
+  ]);
+
   return (
     <>
       <datalist id="currencySuggestions">
@@ -99,17 +109,12 @@ export function ValutakurserPageClient({
           options={Object.entries(SOURCE_LABELS).map(([value, label]) => ({ value, label }))}
         />
         <DateRangeFilter />
+        {view.chooser}
       </ListToolbar>
 
       <Table<ExchangeRateEntry>
-        columns={[
-          { key: "date", label: "Datum", width: "120px" },
-          { key: "currency", label: "Valuta", width: "90px" },
-          { key: "rate", label: "Kurs (SEK per enhet)", width: "170px", align: "right" },
-          { key: "source", label: "Källa", width: "120px" },
-          { key: "createdByName", label: "Inlagd av", width: "1fr" },
-          { key: "updatedAt", label: "Ändrad", width: "120px" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={rates.rows}
         emptyText="Inga kurser matchar sökningen — hämta kurser från Riksbanken eller lägg in en egen kurs."
         renderCell={(rate, key) => {

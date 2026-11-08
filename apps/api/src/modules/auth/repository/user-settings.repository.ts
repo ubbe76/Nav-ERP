@@ -19,6 +19,25 @@ export function createUserSettingsRepository(db: Db) {
         .onConflictDoUpdate({ target: [userSettings.userId, userSettings.key], set: { value } });
     },
 
+    // A JSON setting changed in place (Kolumner, merged per list): the row is
+    // created if missing and locked, so two tabs' changes to different lists
+    // both land. `change` gets the stored text (undefined = none) and returns
+    // the new text.
+    async updateValue(userId: string, key: string, change: (raw: string | undefined) => string) {
+      await db.transaction(async (tx) => {
+        await tx.insert(userSettings).values({ userId, key, value: "" }).onConflictDoNothing();
+        const [row] = await tx
+          .select({ value: userSettings.value })
+          .from(userSettings)
+          .where(and(eq(userSettings.userId, userId), eq(userSettings.key, key)))
+          .for("update");
+        await tx
+          .update(userSettings)
+          .set({ value: change(row?.value || undefined) })
+          .where(and(eq(userSettings.userId, userId), eq(userSettings.key, key)));
+      });
+    },
+
     // Egna teman: the user's theme, stored only while the theme exists (the
     // theme row is locked against a concurrent delete — see
     // lockThemeForSetting); null removes the choice (= the company default).

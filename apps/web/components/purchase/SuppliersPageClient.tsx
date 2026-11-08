@@ -10,6 +10,7 @@ import { Button } from "../ui/Button";
 import buttonStyles from "../ui/Button.module.css";
 import { NewSupplierForm } from "./NewSupplierForm";
 import { ListExportLink, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import type { Paged, Supplier } from "../../lib/types";
 import { safeReturnTo, SUPPLIER_PREFILL_KEYS, type SupplierPrefill } from "../../lib/invoiceScan";
 import shellStyles from "../../components/AppShell.module.css";
@@ -33,6 +34,14 @@ export function SuppliersPageClient({ suppliers, pageSize }: { suppliers: Paged<
   const [returnTo] = useState(() => safeReturnTo(searchParams.get("returnTo")));
   const [modalOpen, setModalOpen] = useState(prefill !== null);
   const [usePrefill, setUsePrefill] = useState(prefill !== null);
+
+  const view = useListColumns([
+    { key: "supplierNumber", label: "Lev.nr", width: "110px" },
+    { key: "name", label: "Namn", width: "1fr" },
+    { key: "city", label: "Postort", width: "180px" },
+    { key: "currency", label: "Valuta", width: "90px" },
+    { key: "active", label: "Status", width: "120px" },
+  ]);
 
   return (
     <>
@@ -64,16 +73,12 @@ export function SuppliersPageClient({ suppliers, pageSize }: { suppliers: Paged<
 
       <ListToolbar placeholder="Sök leverantörsnummer eller namn…">
         <ListExportLink endpoint="/api/v1/suppliers/csv" />
+        {view.chooser}
       </ListToolbar>
 
       <Table<Supplier>
-        columns={[
-          { key: "supplierNumber", label: "Lev.nr", width: "110px" },
-          { key: "name", label: "Namn", width: "1fr" },
-          { key: "city", label: "Postort", width: "180px" },
-          { key: "currency", label: "Valuta", width: "90px" },
-          { key: "active", label: "Status", width: "120px" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={suppliers.rows}
         emptyText="Inga leverantörer matchar sökningen"
         renderCell={(supplier, key) => {

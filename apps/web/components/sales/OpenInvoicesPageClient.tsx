@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Table } from "../ui/Table";
 import { ListExportLink, ListFilterSelect, ListToggleFilter, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { HelpLink } from "../ui/HelpLink";
 import { currencyLabel, formatRate, SEK } from "../../lib/currency";
 import { formatMoney } from "../../lib/format";
@@ -30,6 +31,18 @@ export function OpenInvoicesPageClient({
   // Valuta: the SEK column only when the page has an item in another currency;
   // for SEK it would repeat Öppet belopp.
   const anyForeign = openInvoices.rows.some((r) => r.currency !== SEK);
+  const view = useListColumns([
+    { key: "invoiceNumber", label: "Faktura", width: "130px" },
+    { key: "customerName", label: "Kund", width: "1.4fr" },
+    { key: "type", label: "Typ", width: "130px" },
+    { key: "dueDate", label: "Förfallodatum", width: "150px" },
+    { key: "grossAmount", label: "Belopp", width: "130px", align: "right" as const },
+    { key: "openAmount", label: "Öppet belopp", width: "130px", align: "right" as const },
+    // Valuta: the open amount's booked SEK value — the column to add up.
+    ...(anyForeign ? [{ key: "openAmountSek", label: "Öppet i SEK", width: "130px", align: "right" as const }] : []),
+    { key: "reminders", label: "Påminnelser", width: "150px" },
+  ]);
+
   return (
     <>
       <div className={shellStyles.topbar}>
@@ -49,20 +62,12 @@ export function OpenInvoicesPageClient({
         />
         <ListToggleFilter param="overdueOnly" label="Endast förfallna" />
         <ListExportLink endpoint="/api/v1/open-invoices/csv" />
+        {view.chooser}
       </ListToolbar>
 
       <Table<OpenInvoiceRow>
-        columns={[
-          { key: "invoiceNumber", label: "Faktura", width: "130px" },
-          { key: "customerName", label: "Kund", width: "1.4fr" },
-          { key: "type", label: "Typ", width: "130px" },
-          { key: "dueDate", label: "Förfallodatum", width: "150px" },
-          { key: "grossAmount", label: "Belopp", width: "130px", align: "right" },
-          { key: "openAmount", label: "Öppet belopp", width: "130px", align: "right" },
-          // Valuta: the open amount's booked SEK value — the column to add up.
-          ...(anyForeign ? [{ key: "openAmountSek", label: "Öppet i SEK", width: "130px", align: "right" as const }] : []),
-          { key: "reminders", label: "Påminnelser", width: "150px" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={openInvoices.rows}
         emptyText="Inga öppna poster matchar sökningen"
         renderCell={(row, key) => {

@@ -7,6 +7,7 @@ import { Button } from "../ui/Button";
 import { FormError, FormNotice } from "../ui/Form";
 import { HelpLink } from "../ui/HelpLink";
 import { ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { Table } from "../ui/Table";
 import { GatedLink } from "../ui/GatedLink";
 import { API_URL, ApiError } from "../../lib/api";
@@ -79,6 +80,15 @@ export function BankFilesPageClient({ direction, files, pageSize }: { direction:
     }
   }
 
+  const view = useListColumns([
+    { key: "filename", label: "Fil", width: "1.5fr" },
+    { key: "bankCreatedAt", label: "Skapad i banken", width: "160px" },
+    { key: "createdAt", label: "Inläst", width: "120px" },
+    { key: "entries", label: "Poster", width: "80px", align: "right" as const },
+    { key: "booked", label: "Hanterade", width: "100px", align: "right" as const },
+    { key: "unhandled", label: "Ohanterade", width: "100px", align: "right" as const },
+  ]);
+
   return (
     <>
       <div className={shellStyles.topbar}>
@@ -102,6 +112,7 @@ export function BankFilesPageClient({ direction, files, pageSize }: { direction:
         <Button onClick={() => input.current?.click()} disabled={pending}>
           Läs in bankfil
         </Button>
+        {view.chooser}
       </ListToolbar>
       {error && <FormError>{error}</FormError>}
       {notice && (
@@ -120,14 +131,8 @@ export function BankFilesPageClient({ direction, files, pageSize }: { direction:
         </FormNotice>
       )}
       <Table<BankFileListRow>
-        columns={[
-          { key: "filename", label: "Fil", width: "1.5fr" },
-          { key: "bankCreatedAt", label: "Skapad i banken", width: "160px" },
-          { key: "createdAt", label: "Inläst", width: "120px" },
-          { key: "entries", label: "Poster", width: "80px", align: "right" },
-          { key: "booked", label: "Hanterade", width: "100px", align: "right" },
-          { key: "unhandled", label: "Ohanterade", width: "100px", align: "right" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={files.rows}
         emptyText="Inga bankfiler inlästa än"
         renderCell={(row, key) => {

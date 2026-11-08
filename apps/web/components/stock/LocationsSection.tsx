@@ -21,6 +21,7 @@ import { SectionHeading } from "../ui/SectionHeading";
 import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
 import { LabelPrintDialog } from "./LabelPrintDialog";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 
 type StockLocation = StockLocationRegisterRow;
 
@@ -152,6 +153,31 @@ export function LocationsSection({
     }
   }
 
+  const view = useListColumns([
+    {
+      key: "select",
+      label: "Välj",
+      width: "24px",
+      header: (
+        <SelectAllCheckbox
+          checked={allSelected}
+          indeterminate={selectedIds.length > 0 && !allSelected}
+          ariaLabel="Markera alla lagerplatser"
+          onChange={(on) => setSelected(on ? new Set(visibleLocations.map((l) => l.id)) : new Set())}
+        />
+      ),
+    },
+    { key: "warehouseName", label: "Lager", width: "minmax(84px, 1fr)" },
+    { key: "name", label: "Namn", width: "minmax(44px, 0.5fr)" },
+    { key: "labelCode", label: "Etikettkod", width: "74px" },
+    { key: "fixed", label: "Fast", width: "40px" },
+    { key: "active", label: "Status", width: "80px" },
+    { key: "articleCount", label: "Artiklar", width: "52px", align: "right" as const },
+    { key: "balances", label: "Saldo", width: "minmax(106px, 1fr)", align: "right" as const },
+    { key: "blocked", label: "Spärrad", width: "minmax(84px, 0.6fr)" },
+    { key: "id", label: "", width: "max-content", align: "right" as const },
+  ]);
+
   return (
     <div>
       <SectionHeading
@@ -195,33 +221,12 @@ export function LocationsSection({
           ]}
         />
         <ListExportLink endpoint="/api/v1/stock/locations/register/csv" />
+        {view.chooser}
       </ListToolbar>
       {visibleLocations.length > 0 ? (
         <Table<StockLocation>
-          columns={[
-            {
-              key: "select",
-              label: "Välj",
-              width: "24px",
-              header: (
-                <SelectAllCheckbox
-                  checked={allSelected}
-                  indeterminate={selectedIds.length > 0 && !allSelected}
-                  ariaLabel="Markera alla lagerplatser"
-                  onChange={(on) => setSelected(on ? new Set(visibleLocations.map((l) => l.id)) : new Set())}
-                />
-              ),
-            },
-            { key: "warehouseName", label: "Lager", width: "minmax(84px, 1fr)" },
-            { key: "name", label: "Namn", width: "minmax(44px, 0.5fr)" },
-            { key: "labelCode", label: "Etikettkod", width: "74px" },
-            { key: "fixed", label: "Fast", width: "40px" },
-            { key: "active", label: "Status", width: "80px" },
-            { key: "articleCount", label: "Artiklar", width: "52px", align: "right" },
-            { key: "balances", label: "Saldo", width: "minmax(106px, 1fr)", align: "right" },
-            { key: "blocked", label: "Spärrad", width: "minmax(84px, 0.6fr)" },
-            { key: "id", label: "", width: "max-content", align: "right" },
-          ]}
+          columns={view.columns}
+          onColumnResize={view.onColumnResize}
           rows={visibleLocations}
           renderCell={(row, key) => {
             switch (key) {

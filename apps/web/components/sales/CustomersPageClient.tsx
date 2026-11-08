@@ -10,6 +10,7 @@ import { Button } from "../ui/Button";
 import buttonStyles from "../ui/Button.module.css";
 import { NewCustomerForm } from "./NewCustomerForm";
 import { ListExportLink, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import type { Customer, Paged } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
@@ -17,6 +18,14 @@ import { HelpLink } from "../ui/HelpLink";
 export function CustomersPageClient({ customers, pageSize }: { customers: Paged<Customer>; pageSize: number }) {
   const router = useRouter();
   const [modalOpen, setModalOpen] = useState(false);
+
+  const view = useListColumns([
+    { key: "customerNumber", label: "Kundnr", width: "110px" },
+    { key: "name", label: "Namn", width: "1fr" },
+    { key: "city", label: "Postort", width: "180px" },
+    { key: "currency", label: "Valuta", width: "90px" },
+    { key: "active", label: "Status", width: "120px" },
+  ]);
 
   return (
     <>
@@ -41,16 +50,12 @@ export function CustomersPageClient({ customers, pageSize }: { customers: Paged<
 
       <ListToolbar placeholder="Sök kundnummer eller namn…">
         <ListExportLink endpoint="/api/v1/customers/csv" />
+        {view.chooser}
       </ListToolbar>
 
       <Table<Customer>
-        columns={[
-          { key: "customerNumber", label: "Kundnr", width: "110px" },
-          { key: "name", label: "Namn", width: "1fr" },
-          { key: "city", label: "Postort", width: "180px" },
-          { key: "currency", label: "Valuta", width: "90px" },
-          { key: "active", label: "Status", width: "120px" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={customers.rows}
         emptyText="Inga kunder matchar sökningen"
         renderCell={(customer, key) => {

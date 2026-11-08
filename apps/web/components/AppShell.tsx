@@ -10,7 +10,8 @@ import { ConfirmDialogHost } from "./ui/ConfirmDialogHost";
 import { ReadOnlyBanner } from "./ReadOnlyBanner";
 import { FavoritesProvider } from "./FavoritesProvider";
 import { getCurrentUser } from "../lib/api";
-import { loadFavorites } from "../lib/favorites";
+import { loadShellSettings } from "../lib/favorites";
+import { UserPrefsProvider } from "./UserPrefsProvider";
 import styles from "./AppShell.module.css";
 
 const ROLE_LABELS: Record<string, string> = { admin: "Administratör", supervisor: "Arbetsledare", user: "Användare" };
@@ -28,13 +29,17 @@ interface AppShellProps {
 // keeps its own inline copy with the same parts.
 export async function AppShell({ active, children }: AppShellProps) {
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
-  const [user, favorites] = await Promise.all([getCurrentUser(cookieHeader), loadFavorites(cookieHeader)]);
+  const [user, favorites] = await Promise.all([getCurrentUser(cookieHeader), loadShellSettings(cookieHeader)]);
   if (!user) redirect("/login");
   const roleLabel = ROLE_LABELS[user.role] ?? user.role;
 
   return (
     <FavoritesProvider initial={favorites.favorites} initialInSidebar={favorites.inSidebar}>
-      <div className={styles.frame}>
+      <UserPrefsProvider
+        className={styles.frame}
+        initialDensity={favorites.density}
+        initialListColumns={favorites.listColumns}
+      >
         <Nav active={active} role={user.role} permissions={user.permissions} />
         <PermissionsProvider role={user.role} permissions={user.permissions}>
           <div className={styles.column}>
@@ -50,7 +55,7 @@ export async function AppShell({ active, children }: AppShellProps) {
             <StatusBar userName={user.name} userRole={roleLabel} />
           </div>
         </PermissionsProvider>
-      </div>
+      </UserPrefsProvider>
     </FavoritesProvider>
   );
 }

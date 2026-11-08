@@ -1,4 +1,5 @@
 import { apiGet } from "./api";
+import type { ListColumns, TableDensity } from "./listColumns";
 
 // Favoriter: the user's own shortcuts at the top of the sidebar, stored as
 // the personal setting `favorites` (GET/PATCH /me/settings, replaced as a
@@ -32,12 +33,32 @@ export interface FavoritesState {
   inSidebar: boolean;
 }
 
-export async function loadFavorites(cookieHeader: string | undefined): Promise<FavoritesState> {
-  if (!cookieHeader) return { favorites: null, inSidebar: true };
+// The frame's personal settings in one read (AppShell and Översikten): the
+// favourites, plus Täthet and Kolumner (Nav som program, punkt 6) — those
+// fall back to normal and none, so a failed read only costs the user's own
+// layout.
+export interface ShellSettings extends FavoritesState {
+  density: TableDensity;
+  listColumns: ListColumns;
+}
+
+export async function loadShellSettings(cookieHeader: string | undefined): Promise<ShellSettings> {
+  const fallback: ShellSettings = { favorites: null, inSidebar: true, density: "normal", listColumns: {} };
+  if (!cookieHeader) return fallback;
   try {
-    const settings = await apiGet<{ favorites?: Favorite[]; favoritesInSidebar?: boolean }>("/api/v1/me/settings", cookieHeader);
-    return { favorites: settings.favorites ?? null, inSidebar: settings.favoritesInSidebar !== false };
+    const settings = await apiGet<{
+      favorites?: Favorite[];
+      favoritesInSidebar?: boolean;
+      density?: string;
+      listColumns?: ListColumns;
+    }>("/api/v1/me/settings", cookieHeader);
+    return {
+      favorites: settings.favorites ?? null,
+      inSidebar: settings.favoritesInSidebar !== false,
+      density: settings.density === "compact" ? "compact" : "normal",
+      listColumns: settings.listColumns ?? {},
+    };
   } catch {
-    return { favorites: null, inSidebar: true };
+    return fallback;
   }
 }

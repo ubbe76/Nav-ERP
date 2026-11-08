@@ -14,6 +14,7 @@ import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
 import { FormError, FormNotice } from "../ui/Form";
 import { NewManufacturingOrderForm } from "./NewManufacturingOrderForm";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { MANUFACTURING_ORDER_STATUS_PILL, type ManufacturingOrder, type Paged } from "../../lib/types";
 import {
   ACTION_LABELS,
@@ -156,6 +157,30 @@ export function ManufacturingOrdersPageClient({
     </span>
   );
 
+  const view = useListColumns([
+    {
+      key: "select",
+      label: "",
+      width: "36px",
+      header: (
+        <SelectAllCheckbox
+          checked={allSelectedOnPage}
+          indeterminate={selectedOnPage > 0 && !allSelectedOnPage}
+          disabled={selectableRows.length === 0 || busy}
+          onChange={toggleAll}
+          ariaLabel="Välj alla ordrar på sidan"
+        />
+      ),
+    },
+    { key: "orderNumber", label: "Ordernummer", width: "130px" },
+    { key: "articleNumber", label: "Artikel", width: "minmax(160px, 1fr)" },
+    { key: "quantity", label: "Antal", width: "90px", align: "right" as const },
+    { key: "dueDate", label: "Färdigt", width: "110px" },
+    { key: "planned", label: "Planerad", width: "150px" },
+    { key: "status", label: "Status", width: "120px" },
+    { key: "actions", label: "Åtgärder", width: "210px", align: "right" as const },
+  ].filter((c) => !readOnly || (c.key !== "actions" && c.key !== "select")));
+
   return (
     <>
       <div className={shellStyles.topbar}>
@@ -192,6 +217,7 @@ export function ManufacturingOrdersPageClient({
           ]}
         />
         {!readOnly && <ListExportLink endpoint="/api/v1/manufacturing-orders/csv" />}
+        {view.chooser}
       </ListToolbar>
 
       {warnings.length > 0 && (
@@ -244,29 +270,8 @@ export function ManufacturingOrdersPageClient({
       )}
 
       <Table<ManufacturingOrder>
-        columns={[
-          {
-            key: "select",
-            label: "",
-            width: "36px",
-            header: (
-              <SelectAllCheckbox
-                checked={allSelectedOnPage}
-                indeterminate={selectedOnPage > 0 && !allSelectedOnPage}
-                disabled={selectableRows.length === 0 || busy}
-                onChange={toggleAll}
-                ariaLabel="Välj alla ordrar på sidan"
-              />
-            ),
-          },
-          { key: "orderNumber", label: "Ordernummer", width: "130px" },
-          { key: "articleNumber", label: "Artikel", width: "minmax(160px, 1fr)" },
-          { key: "quantity", label: "Antal", width: "90px", align: "right" as const },
-          { key: "dueDate", label: "Färdigt", width: "110px" },
-          { key: "planned", label: "Planerad", width: "150px" },
-          { key: "status", label: "Status", width: "120px" },
-          { key: "actions", label: "Åtgärder", width: "210px", align: "right" as const },
-        ].filter((c) => !readOnly || (c.key !== "actions" && c.key !== "select"))}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={orders.rows}
         emptyText="Inga ordrar matchar sökningen"
         renderCell={(order, key) => {

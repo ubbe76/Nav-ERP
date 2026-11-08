@@ -7,6 +7,7 @@ import { StatusPill } from "../ui/StatusPill";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import buttonStyles from "../ui/Button.module.css";
 import { NewInquiryForm } from "./NewInquiryForm";
 import { INQUIRY_STATUS_PILL, type Inquiry, type Paged } from "../../lib/types";
@@ -16,6 +17,13 @@ import { HelpLink } from "../ui/HelpLink";
 
 export function InquiriesPageClient({ inquiries, pageSize }: { inquiries: Paged<Inquiry>; pageSize: number }) {
   const [modalOpen, setModalOpen] = useState(false);
+
+  const view = useListColumns([
+    { key: "inquiryNumber", label: "Nummer", width: "140px" },
+    { key: "supplierName", label: "Leverantör", width: "1fr" },
+    { key: "status", label: "Status", width: "160px" },
+    { key: "expectedDeliveryDate", label: "Önskat leveransdatum", width: "180px" },
+  ]);
 
   return (
     <>
@@ -43,15 +51,12 @@ export function InquiriesPageClient({ inquiries, pageSize }: { inquiries: Paged<
           options={Object.entries(INQUIRY_STATUS_PILL).map(([value, pill]) => ({ value, label: pill.label }))}
         />
         <ListExportLink endpoint="/api/v1/inquiries/csv" />
+        {view.chooser}
       </ListToolbar>
 
       <Table<Inquiry>
-        columns={[
-          { key: "inquiryNumber", label: "Nummer", width: "140px" },
-          { key: "supplierName", label: "Leverantör", width: "1fr" },
-          { key: "status", label: "Status", width: "160px" },
-          { key: "expectedDeliveryDate", label: "Önskat leveransdatum", width: "180px" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={inquiries.rows}
         emptyText="Inga förfrågningar matchar sökningen"
         renderCell={(inquiry, key) => {

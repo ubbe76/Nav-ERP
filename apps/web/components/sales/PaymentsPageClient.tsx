@@ -7,6 +7,7 @@ import { Table } from "../ui/Table";
 import { Button } from "../ui/Button";
 import { StatusPill } from "../ui/StatusPill";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { HelpLink } from "../ui/HelpLink";
 import { FormNotice } from "../ui/Form";
 import { PaymentRegistrationForm } from "./PaymentRegistrationForm";
@@ -61,6 +62,17 @@ export function PaymentsPageClient({
     router.refresh();
   }
 
+  const view = useListColumns([
+    { key: "paymentNumber", label: "BET-nr", width: "110px" },
+    { key: "paymentDate", label: "Datum", width: "120px" },
+    { key: "customerName", label: "Kund", width: "1.4fr" },
+    { key: "amount", label: "Belopp", width: "130px", align: "right" as const },
+    ...(anyForeign ? [{ key: "amountSek", label: "Insatt i SEK", width: "130px", align: "right" as const }] : []),
+    { key: "bankAccountNumber", label: "Konto", width: "110px" },
+    { key: "verificationDisplayNumber", label: "Verifikat", width: "120px" },
+    { key: "status", label: "Status", width: "130px" },
+  ]);
+
   return (
     <>
       <div className={shellStyles.topbar}>
@@ -97,19 +109,12 @@ export function PaymentsPageClient({
           options={customers.map((c) => ({ value: c.id, label: c.name }))}
         />
         <ListExportLink endpoint="/api/v1/payments/csv" />
+        {view.chooser}
       </ListToolbar>
 
       <Table<PaymentHeader>
-        columns={[
-          { key: "paymentNumber", label: "BET-nr", width: "110px" },
-          { key: "paymentDate", label: "Datum", width: "120px" },
-          { key: "customerName", label: "Kund", width: "1.4fr" },
-          { key: "amount", label: "Belopp", width: "130px", align: "right" },
-          ...(anyForeign ? [{ key: "amountSek", label: "Insatt i SEK", width: "130px", align: "right" as const }] : []),
-          { key: "bankAccountNumber", label: "Konto", width: "110px" },
-          { key: "verificationDisplayNumber", label: "Verifikat", width: "120px" },
-          { key: "status", label: "Status", width: "130px" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={payments.rows}
         emptyText="Inga betalningar matchar sökningen"
         renderCell={(payment, key) => {
