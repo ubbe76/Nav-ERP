@@ -33,7 +33,7 @@ export async function AppShell({ active, children }: AppShellProps) {
   const roleLabel = ROLE_LABELS[user.role] ?? user.role;
 
   return (
-    <FavoritesProvider initial={favorites}>
+    <FavoritesProvider initial={favorites.favorites} initialInSidebar={favorites.inSidebar}>
       <div className={styles.frame}>
         <Nav active={active} role={user.role} permissions={user.permissions} />
         <PermissionsProvider role={user.role} permissions={user.permissions}>

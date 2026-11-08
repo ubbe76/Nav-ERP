@@ -57,6 +57,7 @@ export const OVERVIEW_CARDS = [
   "attention",
   "orders",
   "stock",
+  "favorites",
   "deliveries",
   "arrivals",
   "capacity",
@@ -93,6 +94,9 @@ export const userSettingsSchema = z.object({
   theme: themeIdSchema.nullable(),
   // Favoriter (see favoriteSchema); [] = none yet.
   favorites: favoritesSchema,
+  // Where the favourites show: false hides the sidebar's Favoriter group (the
+  // Översikten card "favorites" shows them instead). Default true.
+  favoritesInSidebar: z.boolean(),
   // Översikten's cards (see overviewCardsSchema); null = standard.
   overviewCards: overviewCardsSchema.nullable(),
 });

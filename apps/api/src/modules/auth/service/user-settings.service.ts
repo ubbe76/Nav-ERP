@@ -17,6 +17,8 @@ import { UnknownThemeError } from "../../system/service/themes.errors.js";
 
 const LIST_PAGE_SIZE_KEY = "list_page_size";
 const HIDE_ONBOARDING_KEY = "hide_onboarding";
+// Favoriter i sidomenyn — absent = true (the menu shows them, as before).
+const FAVORITES_IN_SIDEBAR_KEY = "favorites_in_sidebar";
 // Aviseringar: the daily digest opt-in and its kind filter (a JSON array of
 // kind keys; absent or "null" = every kind the user may see).
 const ALERT_DIGEST_KEY = "alert_digest";
@@ -106,6 +108,7 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
       alertDigestKinds: decodeAlertDigestKinds(byKey.get(ALERT_DIGEST_KINDS_KEY)),
       theme: decodeUserTheme(byKey.get(USER_THEME_SETTING_KEY)),
       favorites: decodeFavorites(byKey.get(FAVORITES_KEY)),
+      favoritesInSidebar: byKey.get(FAVORITES_IN_SIDEBAR_KEY) !== "false",
       overviewCards: decodeOverviewCards(byKey.get(OVERVIEW_CARDS_KEY)),
     };
   }
@@ -137,6 +140,9 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
       }
       if (input.favorites !== undefined) {
         await repo.upsert(userId, FAVORITES_KEY, JSON.stringify(input.favorites));
+      }
+      if (input.favoritesInSidebar !== undefined) {
+        await repo.upsert(userId, FAVORITES_IN_SIDEBAR_KEY, String(input.favoritesInSidebar));
       }
       if (input.overviewCards !== undefined) {
         await repo.upsert(
