@@ -35,8 +35,8 @@
     align-items: center;
     gap: var(--space-2) var(--space-3);
     position: sticky;
-    /* Below the fixed hamburger (Nav.module.css: 38px at top/left 20px). */
-    top: 66px;
+    /* Right below the app toolbar (AppToolbar.module.css), which stays at the top. */
+    top: var(--app-toolbar-height);
     z-index: 1;
     padding: 10px 0;
     margin-bottom: 8px;

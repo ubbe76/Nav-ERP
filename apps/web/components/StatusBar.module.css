@@ -1,0 +1,62 @@
+/* The status bar (Nav som program, punkt 1): stays at the bottom of the
+   window on a computer, hidden on a phone. Height --app-statusbar-height. */
+.bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+  height: var(--app-statusbar-height);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 40px;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--status-running);
+}
+.state[data-state="expired"] .dot {
+  background: var(--status-delayed);
+}
+.state[data-state="offline"] .dot {
+  background: var(--status-stopped);
+}
+.state[data-state="offline"] {
+  color: var(--status-stopped-text);
+}
+.state[data-state="expired"] {
+  color: var(--status-delayed-text);
+}
+
+.link {
+  color: inherit;
+}
+
+.version {
+  margin-left: auto;
+  color: inherit;
+  text-decoration: none;
+}
+.version:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 1024px) {
+  .bar {
+    display: none;
+  }
+}

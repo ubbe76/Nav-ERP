@@ -3,7 +3,8 @@
 .toast {
   position: fixed;
   right: 20px;
-  bottom: 20px;
+  /* Clear of the status bar (0 on a phone). */
+  bottom: calc(var(--app-statusbar-height) + 20px);
   z-index: 55;
   display: flex;
   align-items: flex-start;

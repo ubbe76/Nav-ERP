@@ -81,13 +81,21 @@
     width: 38px;
     height: 38px;
     position: fixed;
-    top: 20px;
-    left: 20px;
+    /* Centred in the toolbar band (AppToolbar.module.css keeps its left
+       side clear). */
+    top: calc((var(--app-toolbar-height) - 38px) / 2);
+    left: 16px;
     z-index: 50;
     border-radius: var(--radius-control-sm);
     border: 1px solid var(--color-border);
     background: var(--color-surface);
     cursor: pointer;
+  }
+
+  /* Hidden while the drawer is open — it would cover the drawer's logo; a
+     tap outside the drawer closes it. */
+  .menuButton[data-open="true"] {
+    display: none;
   }
 
   .backdrop {
@@ -137,6 +145,8 @@
   font-family: var(--font-body);
   font-size: 13.5px;
   color: var(--color-text-secondary);
+  /* A menu entry, not a link in running text (Nav som program, punkt 1). */
+  text-decoration: none;
   cursor: pointer;
   transition: background 150ms ease, color 150ms ease;
 }
@@ -270,61 +280,4 @@
     display: none;
   }
 
-  .sidebar[data-collapsed="true"] .footer {
-    justify-content: center;
-  }
-  .sidebar[data-collapsed="true"] .userText {
-    display: none;
-  }
-}
-
-.footer {
-  margin-top: auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-top: 16px;
-  border-top: 1px solid var(--color-border);
-}
-
-.avatar {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background: var(--color-track);
-  color: var(--color-text-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-body);
-  font-size: 12px;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.userName {
-  font-family: var(--font-body);
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.userRole {
-  font-family: var(--font-body);
-  font-size: 11.5px;
-  color: var(--color-text-muted);
-}
-
-/* The app version under the user — small and quiet, links to the release
-   notes. Hidden with the rest of the user text when collapsed. */
-.version {
-  display: block;
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  text-decoration: none;
-}
-
-.version:hover {
-  text-decoration: underline;
 }

@@ -8,6 +8,13 @@ paths:
   - "apps/web/components/Favorite*"
   - "apps/web/lib/favorites.ts"
   - "apps/web/app/page.tsx"
+  - "apps/web/components/AppShell*"
+  - "apps/web/components/AppToolbar*"
+  - "apps/web/components/StatusBar*"
+  - "apps/web/components/UserMenu*"
+  - "apps/web/components/AlertsBell*"
+  - "apps/web/components/ui/Nav*"
+  - "apps/web/app/globals.css"
   - "apps/web/components/dashboard/**"
   - "apps/web/lib/overviewCard*"
   - "apps/api/test/overview*"
@@ -45,6 +52,17 @@ Spec `private/superpowers/specs/2026-11-08-oversikten-per-anvandare-design.md`.
 - **Grinden:** ett nyare kort har en `OVERVIEW_CARD_HREF` (kortets **Se alla**) och erbjuds i **Anpassa** och visas bara när `canOpen(user, href)` (`overviewCardAvailable`) — samma regel som `GatedLink`, så ett kort visar aldrig data som dess lista nekar. De fyra ursprungliga är ogrindade. Ett nytt kort = nyckel i båda registren, etikett, bredd, `href`, en hämtning i `app/page.tsx` som bara görs när kortet visas (`orNull`: ett fel ger "Kunde inte läsa … just nu." i kortet, aldrig en trasig sida) och rader ur rena `lib/overviewCardRows.ts` (typimporter bara — API-sviten laddar den; `ListCardRow` bor där, inte i komponenten, så API:ts typkontroll aldrig når JSX).
 - **Hämtningarna:** aviseringskorten (Förfallna kundfakturor, Leverantörsfakturor att betala, Offerter att följa upp) läser `GET /alerts?kinds=` (`alertsQuerySchema`, smalnar av `visibleKinds`, vidgar aldrig) — bara när varken Materialflöde eller Att bevaka visas, annars delar de det fulla svaret (behovsberäkningen körs bara för de två). Leveranser/Inleveranser läser KO-/IO-listan med `deliveryTo` (Nästa leveransdatum ≤ söndagen i ISO-veckan, `endOfIsoWeek`; sena med, odaterade aldrig) och `sort=delivery` (tidigast först, odaterat sist, sedan ordernumret) — samma `nextDeliveryDateSql` som listans kolumn. Beläggning läser `GET /planning/capacity?weeks=1`; Öppna avvikelser två anrop (`overdue=true` först, sedan `status=open`, varje ärende en gång).
 - Tester: `overview-cards-mirror.test.ts` (registret, standarden, grinden, layouten, radbyggarna), `overview-cards.route.test.ts` (`?kinds=`, `deliveryTo`/`sort` på båda listorna), `user-settings.route.test.ts`.
+
+## Programramen (Nav som program, punkt 1)
+
+TODO-posten "Nav som program (UI/UX)"; skisserna är privata.
+
+- **Ramen:** sidomenyn (redan `sticky`) + innehållskolumnen `.column` i `AppShell.module.css` = `AppToolbar` (sticky top) → `main` (växer) → `StatusBar` (sticky bottom, dold ≤ 1024 px). Översikten (`app/page.tsx`) använder samma klasser. **Dokumentet scrollar som förut** — ingen inre scrollcontainer (iOS-fällor, alla sidors sticky-element); ramen står still för att den är sticky.
+- **Höjderna** `--app-toolbar-height`/`--app-statusbar-height` står i `globals.css` (temaoberoende, inte i `tokens.css`). **Varje klistrigt element på sidan utgår från dem:** `top: var(--app-toolbar-height)` (eller `calc(… + var(--space-4))`), `bottom: var(--app-statusbar-height)` — annars glider det in under remsan. Klistriga huvuden i en egen `overflow: auto`-container (Beläggning, Budget) berörs inte. Mobilens hamburgare (fast) centreras i remsan, remsan håller vänsterkanten fri, och knappen döljs medan menyn är öppen.
+- **Remsan:** `FavoriteToggle`, `AlertsBell` (`GET /alerts` efter renderingen och var femte minut när fliken syns; summan av gruppernas `count`, röd om någon rad är röd; dold utan `canOpen("/aviseringar")`; ett fel ger ingen siffra) och `UserMenu` (namn, roll, `ThemeToggle` — dold när temat är låst —, version, Logga ut). Allt ligger inne i `PermissionsProvider`. Sidomenyns sidfot (namn, roll, version) är borta.
+- **Statusraden** frågar `GET /auth/me` en gång i minuten (och vid online/offline/synlighet): 200 Ansluten, 401 Sessionen har gått ut (länk Logga in), annat/nätfel Ingen kontakt med servern.
+- **Understrykning:** menyposter (`Nav .item`), knapplänkar (`Button.module.css .button`) och kortlänkar (`DashboardCard .link`, understrykning vid hovring) är kontroller och understryks inte; länkar i löptext behåller understrykningen.
+- Test: webbtesterna i API-sviten (`theme-tokens`, `page-access` m.fl.) + Playwright; ingen egen enhetstest — komponenterna har ingen logik utöver hämtningen.
 
 ## Extern backup
 

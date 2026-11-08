@@ -14,7 +14,7 @@
 
 .previewColumn {
   position: sticky;
-  top: var(--space-4);
+  top: calc(var(--app-toolbar-height) + var(--space-4));
   min-width: 0;
 }
 

@@ -1,0 +1,33 @@
+/* The app's toolbar (Nav som program, punkt 1): a slim band that stays at the
+   top of the content column while the page scrolls — the sidebar already
+   does. Its height is --app-toolbar-height (globals.css), which every other
+   sticky element offsets from. */
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  height: var(--app-toolbar-height);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 40px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+@media (max-width: 1024px) {
+  /* The hamburger (Nav.module.css) is fixed at the band's left edge. */
+  .toolbar {
+    padding: 0 16px 0 68px;
+  }
+}
