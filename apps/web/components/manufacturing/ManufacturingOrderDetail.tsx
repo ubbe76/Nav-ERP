@@ -66,6 +66,7 @@ import { plannedWeekLabel } from "../../lib/planning";
 import { CoveredByCell, GoesToSection, coverageOfRow } from "./CoverageSections";
 import { MoveComponentsDialog } from "./MoveComponentsDialog";
 import { MissingComponentsDialog } from "./MissingComponentsDialog";
+import { DocumentActionBar } from "../documents/DocumentActionBar";
 
 interface ManufacturingOrderDetailProps {
   order: ManufacturingOrder;
@@ -147,6 +148,31 @@ export function ManufacturingOrderDetail({
   const componentLate = coverage?.componentLate ?? order.componentLate === true;
   // Opens the specification for the calculation that was just made.
   const [openCalculationId, setOpenCalculationId] = useState<string | null>(null);
+  // The toolbar's status actions (Frisläpp, Stäng order, Makulera order) —
+  // labels and endpoints shared with the TO list.
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionPending, setActionPending] = useState<OrderAction | null>(null);
+  const statusActions = readOnly ? [] : actionsForStatus(order.status);
+  async function runStatusAction(action: OrderAction) {
+    if (action === "cancel" && !(await confirmCancel([order.orderNumber]))) return;
+    setActionError(null);
+    setActionPending(action);
+    try {
+      const warnings = await runOrderAction(order.id, action);
+      if (action === "release") setReleaseWarnings(warnings);
+      router.refresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Åtgärden misslyckades");
+    } finally {
+      // One state for all the buttons: a pending flag left over from Frisläpp
+      // would keep Makulera order disabled on the released order.
+      setActionPending(null);
+    }
+  }
+  const postCalc = usePostCalculate(order.id, (calculationId) => {
+    setOpenCalculationId(calculationId);
+    router.refresh();
+  });
 
   // Ändra material och operationer: only while the order is released or in
   // progress, and never in the workshop profile's read-only mode.
@@ -244,6 +270,69 @@ export function ManufacturingOrderDetail({
 
   return (
     <div>
+      <DocumentActionBar label={order.orderNumber} pill={pill} error={actionError ?? postCalc.error}>
+        {statusActions
+          .filter((action) => ACTION_LABELS[action].variant !== "danger")
+          .map((action) => (
+            <Button
+              key={action}
+              type="button"
+              variant={ACTION_LABELS[action].variant}
+              disabled={actionPending !== null}
+              onClick={() => runStatusAction(action)}
+            >
+              {actionPending === action ? "Arbetar…" : ACTION_LABELS[action].label}
+            </Button>
+          ))}
+        {/* Efterkalkyl: no status gate in the backend, so always offered. */}
+        {!readOnly && (
+          <Button type="button" variant="secondary" disabled={postCalc.pending} onClick={postCalc.run}>
+            {postCalc.pending ? "Beräknar…" : "Efterkalkylera"}
+          </Button>
+        )}
+        {canPegging && (coverage?.moves.length ?? 0) > 0 && (
+          <Button type="button" variant="ghost" onClick={() => setMoveOpen(true)}>
+            Flytta halvfabrikaten…
+          </Button>
+        )}
+        {canPegging && coverage?.materials.some((m) => m.uncovered > 0 && m.articleType === "manufactured") && (
+          <Button type="button" variant="ghost" onClick={() => setMissingOpen(true)}>
+            Skapa saknade halvfabrikat…
+          </Button>
+        )}
+        {/* Shop-floor printout — the article's drawings are appended. */}
+        <a
+          href={`/api/v1/manufacturing-orders/${order.id}/pdf`}
+          className={`${buttonStyles.button} ${buttonStyles.ghost}`}
+          download
+        >
+          Skriv ut TO (PDF)
+        </a>
+        {statusActions
+          .filter((action) => ACTION_LABELS[action].variant === "danger")
+          .map((action) => (
+            <Button
+              key={action}
+              type="button"
+              variant="danger"
+              disabled={actionPending !== null}
+              onClick={() => runStatusAction(action)}
+            >
+              {actionPending === action ? "Arbetar…" : ACTION_LABELS[action].label}
+            </Button>
+          ))}
+      </DocumentActionBar>
+
+      {postCalc.preview && (
+        <PostCalculatePreview
+          preview={postCalc.preview}
+          saving={postCalc.saving}
+          error={postCalc.saveError}
+          onSave={postCalc.save}
+          onClose={postCalc.close}
+        />
+      )}
+
       <div style={{ display: "flex", flexWrap: "wrap", gap: 24, marginBottom: 20, alignItems: "center" }}>
         <StatusPill status={pill.status} label={pill.label} />
         {late && (
@@ -296,24 +385,6 @@ export function ManufacturingOrderDetail({
             </strong>
           </span>
         )}
-        {canPegging && (coverage?.moves.length ?? 0) > 0 && (
-          <Button type="button" variant="ghost" size="small" onClick={() => setMoveOpen(true)}>
-            Flytta halvfabrikaten…
-          </Button>
-        )}
-        {canPegging && coverage?.materials.some((m) => m.uncovered > 0 && m.articleType === "manufactured") && (
-          <Button type="button" variant="ghost" size="small" onClick={() => setMissingOpen(true)}>
-            Skapa saknade halvfabrikat…
-          </Button>
-        )}
-        {/* Shop-floor printout — the article's drawings are appended. */}
-        <a
-          href={`/api/v1/manufacturing-orders/${order.id}/pdf`}
-          className={`${buttonStyles.button} ${buttonStyles.ghost}`}
-          download
-        >
-          Skriv ut TO (PDF)
-        </a>
       </div>
       {order.configuration && (
         <div style={{ marginBottom: "var(--space-6)" }}>
@@ -857,48 +928,6 @@ export function ManufacturingOrderDetail({
         </>
       )}
 
-      {!readOnly && (
-      <div style={{ marginTop: 20, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
-        {order.status === "planned" && (
-          <StatusActions
-            orderId={order.id}
-            orderNumber={order.orderNumber}
-            actions={actionsForStatus("planned")}
-            onDone={(warnings) => {
-              setReleaseWarnings(warnings);
-              router.refresh();
-            }}
-          />
-        )}
-
-        {(order.status === "released" || order.status === "in_progress") && (
-          <StatusActions
-            orderId={order.id}
-            orderNumber={order.orderNumber}
-            actions={actionsForStatus(order.status)}
-            onDone={() => router.refresh()}
-          />
-        )}
-
-        {order.status === "done" && (
-          <StatusActions
-            orderId={order.id}
-            orderNumber={order.orderNumber}
-            actions={actionsForStatus("done")}
-            onDone={() => router.refresh()}
-          />
-        )}
-
-        <PostCalculateAction
-          orderId={order.id}
-          onDone={(calculationId) => {
-            setOpenCalculationId(calculationId);
-            router.refresh();
-          }}
-        />
-      </div>
-      )}
-
       {/* The audit-log API is admin-only. */}
       {isAdmin && <AuditTrailSection key={historyKey} entityType="manufacturing_order" entityId={order.orderNumber} />}
     </div>
@@ -957,78 +986,35 @@ function DueDateField({
   );
 }
 
-// --- Release / Makulera / close (no body, just an action call) ---
-// Labels/endpoints live in lib/manufacturingOrderActions.ts, shared with the
-// TO list's row and bulk actions.
-
-function StatusActions({
-  orderId,
-  orderNumber,
-  actions,
-  onDone,
-}: {
-  orderId: string;
-  orderNumber: string;
-  actions: OrderAction[];
-  onDone: (warnings: string[]) => void;
-}) {
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState<string | null>(null);
-
-  async function run(action: OrderAction) {
-    if (action === "cancel" && !(await confirmCancel([orderNumber]))) return;
-    setError(null);
-    setPending(action);
-    try {
-      onDone(await runOrderAction(orderId, action));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Åtgärden misslyckades");
-      setPending(null);
-    }
-  }
-
-  return (
-    <>
-      {error && <FormError>{error}</FormError>}
-      {actions.map((action) => (
-          <Button
-            key={action}
-            type="button"
-            variant={ACTION_LABELS[action].variant}
-            disabled={pending !== null}
-            onClick={() => run(action)}
-          >
-            {pending === action ? "Arbetar…" : ACTION_LABELS[action].label}
-          </Button>
-      ))}
-    </>
-  );
-}
-
 // --- Efterkalkyl — shown first, saved only on request. No status gate in the
-// backend, so the button is always available. ---
+// backend, so the toolbar always offers it. The button sits in the toolbar
+// and the preview right under it, so the state lives in a hook. ---
 
-function PostCalculateAction({ orderId, onDone }: { orderId: string; onDone: (calculationId: string) => void }) {
+type PostCalculateResult = {
+  calculation: CostCalculationDraft;
+  warnings: string[];
+  analysis: CostVarianceAnalysis | null;
+};
+
+function usePostCalculate(orderId: string, onSaved: (calculationId: string) => void) {
   // The computed but unsaved calculation, warnings included — they belong to
   // the figures on screen, not to a past run.
-  const [preview, setPreview] = useState<{
-    calculation: CostCalculationDraft;
-    warnings: string[];
-    analysis: CostVarianceAnalysis | null;
-  } | null>(null);
+  const [preview, setPreview] = useState<PostCalculateResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [saving, setSaving] = useState(false);
 
   async function run() {
     setError(null);
+    setSaveError(null);
     setPending(true);
     try {
-      const result = await apiFetch<{ calculation: CostCalculationDraft; warnings: string[]; analysis: CostVarianceAnalysis | null }>(
-        `/api/v1/manufacturing-orders/${orderId}/cost-calculations/post-calculate`,
-        { method: "POST" }
+      setPreview(
+        await apiFetch<PostCalculateResult>(`/api/v1/manufacturing-orders/${orderId}/cost-calculations/post-calculate`, {
+          method: "POST",
+        })
       );
-      setPreview(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Kunde inte efterkalkylera");
     } finally {
@@ -1039,7 +1025,7 @@ function PostCalculateAction({ orderId, onDone }: { orderId: string; onDone: (ca
   // Recomputed server-side rather than posting the previewed figures back —
   // the API never trusts numbers from the browser.
   async function save() {
-    setError(null);
+    setSaveError(null);
     setSaving(true);
     try {
       const result = await apiFetch<{ calculation: CostCalculation; warnings: string[] }>(
@@ -1049,47 +1035,66 @@ function PostCalculateAction({ orderId, onDone }: { orderId: string; onDone: (ca
       setPreview(null);
       // Hand the saved calculation up so its specification opens right away
       // instead of making the user hunt for it in the history.
-      onDone(result.calculation.id);
+      onSaved(result.calculation.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara kalkylen");
+      setSaveError(err instanceof Error ? err.message : "Kunde inte spara kalkylen");
     } finally {
       setSaving(false);
     }
   }
 
-  return (
-    <>
-      {error && <FormError>{error}</FormError>}
-      <Button type="button" variant="secondary" disabled={pending} onClick={run}>
-        {pending ? "Beräknar…" : "Efterkalkylera"}
-      </Button>
+  function close() {
+    setPreview(null);
+    setSaveError(null);
+  }
 
-      {preview && (
-        <Card maxWidth={360} style={{ flexBasis: "100%" }}>
-          <FormStack>
-            <FormHint>Beräkningen sparas först när du klickar Spara kalkyl.</FormHint>
-            {preview.warnings.length > 0 && (
-              <FormError>
-                <strong>Varning:</strong>
-                <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
-                  {preview.warnings.map((w, i) => (
-                    <li key={i}>{w}</li>
-                  ))}
-                </ul>
-              </FormError>
-            )}
-            {/* Number(quantity) comes from the calculation itself, not any
-                live input — the panel has none, but this keeps the call
-                sited the same way as the Kalkyl tab's. */}
-            <CostChain lines={chainLines(preview.calculation, Number(preview.calculation.quantity))} />
-            {preview.analysis && <VarianceSummary analysis={preview.analysis} />}
-            <Button type="button" variant="primary" disabled={saving} onClick={save}>
-              {saving ? "Sparar…" : "Spara kalkyl"}
-            </Button>
-          </FormStack>
-        </Card>
-      )}
-    </>
+  return { run, pending, error, preview, save, saving, saveError, close };
+}
+
+function PostCalculatePreview({
+  preview,
+  saving,
+  error,
+  onSave,
+  onClose,
+}: {
+  preview: PostCalculateResult;
+  saving: boolean;
+  error: string | null;
+  onSave: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <Card maxWidth={360} style={{ marginBottom: 20 }}>
+      <FormStack>
+        <strong>Efterkalkyl</strong>
+        <FormHint>Beräkningen sparas först när du klickar Spara kalkyl.</FormHint>
+        {preview.warnings.length > 0 && (
+          <FormError>
+            <strong>Varning:</strong>
+            <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+              {preview.warnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+          </FormError>
+        )}
+        {/* Number(quantity) comes from the calculation itself, not any
+            live input — the panel has none, but this keeps the call
+            sited the same way as the Kalkyl tab's. */}
+        <CostChain lines={chainLines(preview.calculation, Number(preview.calculation.quantity))} />
+        {preview.analysis && <VarianceSummary analysis={preview.analysis} />}
+        <FormError>{error}</FormError>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Button type="button" variant="primary" disabled={saving} onClick={onSave}>
+            {saving ? "Sparar…" : "Spara kalkyl"}
+          </Button>
+          <Button type="button" variant="ghost" disabled={saving} onClick={onClose}>
+            Stäng
+          </Button>
+        </div>
+      </FormStack>
+    </Card>
   );
 }
 
