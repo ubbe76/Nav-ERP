@@ -4,6 +4,20 @@
   box-sizing: border-box;
 }
 
+/* Nav som program (punkt 1): the toolbar at the top and the status bar at
+   the bottom stay put while the page scrolls. Every other sticky element
+   offsets from these heights. Theme-independent, so not in tokens.css. */
+:root {
+  --app-toolbar-height: 52px;
+  --app-statusbar-height: 28px;
+}
+@media (max-width: 1024px) {
+  :root {
+    --app-toolbar-height: 56px;
+    --app-statusbar-height: 0px;
+  }
+}
+
 html,
 body {
   padding: 0;

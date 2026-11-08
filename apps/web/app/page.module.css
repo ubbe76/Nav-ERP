@@ -1,31 +1,5 @@
-.themeRow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  justify-content: flex-end;
-  margin-bottom: 24px;
-}
-
-/* Full-height app shell: the sidebar column runs edge-to-edge from the
-   viewport's top-left (no floating-island padding around it), and the
-   content column carries all the whitespace itself. */
-.frame {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  min-height: 100vh;
-}
-
-.main {
-  padding: 28px 40px 48px;
-  background: var(--color-bg);
-  /* The content column is the 1fr grid item, and a grid item's floor is its
-     min-content width. Without this, a wide child — the row tables build their
-     grid from fixed px columns — pushes the track past the viewport and the
-     whole page scrolls sideways, instead of the child scrolling inside its own
-     card. Kept in sync with AppShell.module.css, which carries the same shell. */
-  min-width: 0;
-}
-
+/* Översikten's own parts; the frame (sidebar, toolbar, content, status bar)
+   is AppShell.module.css's, shared with every other page. */
 .topbar {
   display: flex;
   align-items: flex-end;
@@ -80,20 +54,7 @@
   margin: 0 0 var(--space-dashboard-grid-gap);
 }
 
-@media (max-width: 1024px) {
-  .frame {
-    grid-template-columns: 1fr;
-  }
-  .main {
-    padding: 26px 20px 32px;
-    padding-top: 20px; /* the theme row inside .main clears the hamburger */
-  }
-}
-
 @media (max-width: 640px) {
-  .main {
-    padding: 16px 16px 40px;
-  }
   .title {
     font-size: 22px;
   }

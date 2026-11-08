@@ -56,9 +56,9 @@
     align-items: center;
     gap: var(--space-2) var(--space-3);
     position: sticky;
-    /* Below the fixed hamburger (Nav.module.css: 38px at top/left 20px),
-       which would otherwise cover the checkbox once the page has scrolled. */
-    top: 66px;
+    /* Right below the app toolbar (AppToolbar.module.css), which stays at
+       the top while the page scrolls. */
+    top: var(--app-toolbar-height);
     z-index: 1;
     padding: 10px 0;
     margin-bottom: 8px;

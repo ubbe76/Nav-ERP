@@ -104,15 +104,15 @@ function favoriteIcon(href: string): ReactNode {
 // renders expanded, then the stored preference is applied on hydration.
 const COLLAPSED_STORAGE_KEY = "nav-erp-sidebar-collapsed";
 
+// Who is logged in, the version and Logga ut live in the toolbar's user menu
+// and the status bar (Nav som program, punkt 1), not at the menu's foot.
 interface NavProps {
   active: NavItem;
-  userName: string;
-  userRole: string;
   role: "admin" | "supervisor" | "user";
   permissions: readonly Permission[];
 }
 
-export function Nav({ active, userName, userRole, role, permissions }: NavProps) {
+export function Nav({ active, role, permissions }: NavProps) {
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [editingFavorites, setEditingFavorites] = useState(false);
@@ -133,13 +133,6 @@ export function Nav({ active, userName, userRole, role, permissions }: NavProps)
     window.localStorage.setItem(COLLAPSED_STORAGE_KEY, String(next));
   }
 
-  const initials = userName
-    .split(" ")
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-
   // Behörighetsgrupper: an entry shows when its hub page is openable
   // (pageAccess.ts — the same table the proxy guards pages with).
   const visibleItems = NAV_ITEMS.filter((item) => {
@@ -152,7 +145,13 @@ export function Nav({ active, userName, userRole, role, permissions }: NavProps)
 
   return (
     <>
-      <button type="button" className={styles.menuButton} onClick={() => setOpen(true)} aria-label="Öppna meny">
+      <button
+        type="button"
+        className={styles.menuButton}
+        data-open={open}
+        onClick={() => setOpen(true)}
+        aria-label="Öppna meny"
+      >
         <span className={styles.menuBar} />
         <span className={styles.menuBar} />
         <span className={styles.menuBar} />
@@ -243,24 +242,6 @@ export function Nav({ active, userName, userRole, role, permissions }: NavProps)
           })}
         </ul>
 
-        <div className={styles.footer}>
-          <div className={styles.avatar} title={collapsed ? `${userName} · ${userRole}` : undefined}>
-            {initials}
-          </div>
-          <div className={styles.userText}>
-            <div className={styles.userName}>{userName}</div>
-            <div className={styles.userRole}>{userRole}</div>
-            <a
-              className={styles.version}
-              href="https://naverp.se/versioner/"
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Vad är nytt i versionerna"
-            >
-              Version {process.env.NEXT_PUBLIC_APP_VERSION}
-            </a>
-          </div>
-        </div>
       </nav>
 
       <Modal open={editingFavorites} onClose={() => setEditingFavorites(false)} title="Ändra favoriter">

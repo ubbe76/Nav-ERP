@@ -3,8 +3,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import styles from "./page.module.css";
-import { ThemeToggle } from "../components/ThemeToggle";
-import { LogoutButton } from "../components/LogoutButton";
+import shellStyles from "../components/AppShell.module.css";
+import { AppToolbar } from "../components/AppToolbar";
+import { StatusBar } from "../components/StatusBar";
 import { ReadOnlyBanner } from "../components/ReadOnlyBanner";
 import { Nav } from "../components/ui/Nav";
 import { PermissionsProvider } from "../components/PermissionsProvider";
@@ -60,6 +61,7 @@ export default async function OverviewPage() {
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const user = await getCurrentUser(cookieHeader);
   if (!user) redirect("/login");
+  const roleLabel = ROLE_LABELS[user.role] ?? user.role;
 
   // The user's own choice of cards (null = the standard). Fetched first: the
   // page only loads what the visible cards need.
@@ -340,22 +342,14 @@ export default async function OverviewPage() {
 
   return (
     <FavoritesProvider initial={favorites}>
-    <div className={styles.frame}>
-      <Nav
-        active="Översikt"
-        userName={user.name}
-        userRole={ROLE_LABELS[user.role] ?? user.role}
-        role={user.role}
-        permissions={user.permissions}
-      />
+    <div className={shellStyles.frame}>
+      <Nav active="Översikt" role={user.role} permissions={user.permissions} />
 
-      <main className={styles.main}>
-        <PermissionsProvider role={user.role} permissions={user.permissions}>
+      <PermissionsProvider role={user.role} permissions={user.permissions}>
+      <div className={shellStyles.column}>
+      <AppToolbar userName={user.name} userRole={roleLabel} />
+      <main className={shellStyles.main}>
         <ReadOnlyBanner readOnly={user.readOnly} />
-        <div className={styles.themeRow}>
-          <LogoutButton />
-          <ThemeToggle />
-        </div>
 
         <div className={styles.topbar}>
           <div>
@@ -396,9 +390,11 @@ export default async function OverviewPage() {
             </div>
           )
         )}
-        </PermissionsProvider>
         <ConfirmDialogHost />
       </main>
+      <StatusBar userName={user.name} userRole={roleLabel} />
+      </div>
+      </PermissionsProvider>
     </div>
     </FavoritesProvider>
   );
