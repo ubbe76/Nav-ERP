@@ -513,7 +513,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.8.3-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.8.4-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -642,9 +642,14 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   **legoinköp och förfrågningar** direkt från orderns legooperation (dagen
   godset ska vara tillbaka räknas bakåt från färdigdatumet); **föreslaget färdigdatum** på ny
   tillverkningsorder (arbetsdagen före artikelns första otäckta behov);
+  härledd **koppling till halvfabrikatens ordrar** (**Täcks av** och
+  **Går till** på TO-kortet, märket **Halvfabrikat sent**, **Flytta
+  halvfabrikaten** och **Skapa saknade halvfabrikat**);
   **behovsberäkning** med **tidsfasade** orderförslag (ett förslag per
   behovsvecka med senaste dag att beställa eller starta utifrån
-  **ledtiden**) och **Skapa ordrar** (resultatet
+  **ledtiden**), **prognos** för prognosstyrda artiklar (snittet av
+  förbrukningen eller ett eget antal per månad, förbrukad av order) och
+  **Skapa ordrar** (resultatet
   återanvänds en minut, **Uppdatera** räknar om), **artikelöversikt**
   med lagersaldo och löpande disponibelt antal, beläggning per
   resurs och vecka och **produktionsplanering** (operationerna planeras
@@ -691,7 +696,7 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   dagen då underlaget skapades), **skanning** med
   handskanner eller mobilens kamera (Lager → Skanna, och räkning av
   artiklarna i inleverans, plock/utleverans och inventering), **import av
-  lagersaldon** samt
+  lagersaldon**, **ABC-analys** på förbrukningsvärde samt
   **lagervärdering** (`/lager/vardering`, administratörer): lagrets värde
   per valfritt datum med fyra metoder — standardpris, senaste inköp,
   vägt snitt eller FIFO — uppdelat per varugrupp eller artikelkod och nedladdningsbart som PDF
