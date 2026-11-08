@@ -118,7 +118,7 @@ async function makeArticle(articleNumber: string) {
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  return stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
 }
 
 // A draft invoice with one article row, for the transition/edit tests.

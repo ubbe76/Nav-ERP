@@ -36,7 +36,7 @@ afterAll(async () => {
 
 async function makeLocation(name = "A1") {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name, active: true });
+  return stockService.createLocation({ warehouseId: warehouse!.id, name, active: true });
 }
 
 async function makeArticle(opts: { groupId?: string } = {}) {
@@ -315,7 +315,7 @@ describe("getValuation — fifo method (#19)", () => {
   it("takes an undone TO receipt back from its own layer and ignores transfers", async () => {
     const a1 = await makeLocation("A1");
     const warehouseB = await stockService.createWarehouse({ name: "Lager B", active: true });
-    const b1 = await stockService.createLocation({ warehouseId: warehouseB.id, name: "B1", active: true });
+    const b1 = await stockService.createLocation({ warehouseId: warehouseB!.id, name: "B1", active: true });
     const article = await makeArticle();
     const order = crypto.randomUUID();
     const transfer = crypto.randomUUID();

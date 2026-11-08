@@ -222,7 +222,7 @@ describe("manufacturing service — creating a TO linked to a KO row", () => {
     );
     const linked = await db.execute(sql`SELECT id FROM manufacturing_orders WHERE sales_order_row_id = ${row.id}`);
     expect(linked).toHaveLength(0);
-    expect((await salesService.getSalesOrder(order.id)).status).toBe("cancelled");
+    expect((await salesService.getSalesOrder(order.id))!.status).toBe("cancelled");
   });
 
   // The other way round: Makulera read "confirmed", a TO moved the order to
@@ -249,7 +249,7 @@ describe("manufacturing service — creating a TO linked to a KO row", () => {
     );
 
     await expect(racingSales.cancel(order.id)).rejects.toBeInstanceOf(InvalidStatusTransitionError);
-    expect((await salesService.getSalesOrder(order.id)).status).toBe("in_production");
+    expect((await salesService.getSalesOrder(order.id))!.status).toBe("in_production");
   });
 
   it("allows creating a TO without a link, unaffected by the new validation", async () => {

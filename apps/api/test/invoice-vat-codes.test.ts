@@ -130,7 +130,7 @@ async function codeOfRow(rowId: string) {
 // A confirmed order delivered in full, ready to invoice.
 async function deliveredOrder(customerId: string, articleId: string, quantity = 4, delivered = quantity) {
   const location = await stockService.createLocation({
-    warehouseId: (await stockService.createWarehouse({ name: `Lager ${crypto.randomUUID().slice(0, 6)}`, active: true })).id,
+    warehouseId: (await stockService.createWarehouse({ name: `Lager ${crypto.randomUUID().slice(0, 6)}`, active: true }))!.id,
     name: "A1",
     active: true,
   });

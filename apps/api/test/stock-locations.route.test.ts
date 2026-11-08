@@ -47,14 +47,14 @@ describe("/stock/locations — fixed", () => {
     const app = buildApp();
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
 
-    const fixed = await app.inject({ method: "POST", url: "/stock/locations", payload: { warehouseId: warehouse.id, name: "A1" } });
+    const fixed = await app.inject({ method: "POST", url: "/stock/locations", payload: { warehouseId: warehouse!.id, name: "A1" } });
     expect(fixed.statusCode).toBe(201);
     expect(fixed.json()).toMatchObject({ name: "A1", active: true, fixed: true });
 
     const temporary = await app.inject({
       method: "POST",
       url: "/stock/locations",
-      payload: { warehouseId: warehouse.id, name: "TMP", fixed: false },
+      payload: { warehouseId: warehouse!.id, name: "TMP", fixed: false },
     });
     expect(temporary.json()).toMatchObject({ name: "TMP", fixed: false });
 
@@ -74,8 +74,8 @@ describe("GET /stock/balances?articleIds=", () => {
   it("answers with every listed article's locations and balances in one call", async () => {
     const app = buildApp();
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const a1 = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
-    const b2 = await stockService.createLocation({ warehouseId: warehouse.id, name: "B2", active: true });
+    const a1 = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
+    const b2 = await stockService.createLocation({ warehouseId: warehouse!.id, name: "B2", active: true });
     const make = (n: string) => articleService.createArticle({ articleNumber: n, name: n, type: "purchased", active: true });
     const [x, y, z] = [await make("X-1"), await make("Y-1"), await make("Z-1")];
     const stock = (articleId: string, locationId: string, quantityDelta: number) =>
@@ -161,7 +161,7 @@ describe("Spärra / Släpp spärr — routes", () => {
   it("blocks and unblocks with lager, answers 404/409 with codes, and lists the flags", async () => {
     const cookie = await userCookie(["lager"]);
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const k = await stockService.createLocation({ warehouseId: warehouse.id, name: "K1", active: true });
+    const k = await stockService.createLocation({ warehouseId: warehouse!.id, name: "K1", active: true });
     const x = await articleService.createArticle({ articleNumber: "X-1", name: "X-1", type: "purchased", active: true, defaultLocationId: k.id });
     await stockService.recordTransaction({ articleId: x.id, locationId: k.id, quantityDelta: 3, transactionType: "inventory_adjustment" });
 
@@ -198,17 +198,17 @@ describe("Spärra / Släpp spärr — routes", () => {
     expect([noteOnOpen.statusCode, noteOnOpen.json().code]).toEqual([409, "stock-location-not-blocked"]);
 
     // *** can never be blocked; a Karantän can be created blocked.
-    const created = await post(cookie, "/stock/locations", { warehouseId: warehouse.id, name: "Karantän", blocked: true, blockedNote: "Inkommande" });
+    const created = await post(cookie, "/stock/locations", { warehouseId: warehouse!.id, name: "Karantän", blocked: true, blockedNote: "Inkommande" });
     expect([created.statusCode, created.json().blocked, created.json().blockedNote]).toEqual([201, true, "Inkommande"]);
-    const noteWithoutBlock = await post(cookie, "/stock/locations", { warehouseId: warehouse.id, name: "B2", blockedNote: "x" });
+    const noteWithoutBlock = await post(cookie, "/stock/locations", { warehouseId: warehouse!.id, name: "B2", blockedNote: "x" });
     expect(noteWithoutBlock.statusCode).toBe(400);
-    const star = await post(cookie, "/stock/locations", { warehouseId: warehouse.id, name: "***", blocked: true });
+    const star = await post(cookie, "/stock/locations", { warehouseId: warehouse!.id, name: "***", blocked: true });
     expect([star.statusCode, star.json().code]).toEqual([409, "fallback-location-not-blockable"]);
   });
 
   it("refuses without lager (403) and for a read-only account (403 read-only-account)", async () => {
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const k = await stockService.createLocation({ warehouseId: warehouse.id, name: "K1", active: true });
+    const k = await stockService.createLocation({ warehouseId: warehouse!.id, name: "K1", active: true });
 
     const buyer = await userCookie(["inkop"]);
     expect((await post(buyer, `/stock/locations/${k.id}/block`)).statusCode).toBe(403);

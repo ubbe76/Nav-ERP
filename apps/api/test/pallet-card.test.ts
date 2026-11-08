@@ -497,7 +497,7 @@ describe("pallkort — delivery (GET /deliveries/:id/pallet-card)", () => {
       active: true,
     });
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
     for (const article of [articleA, articleB]) {
       await stockService.recordTransaction({
         articleId: article.id,

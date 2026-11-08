@@ -113,7 +113,7 @@ async function makeProduct() {
   const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 600, overheadPercent: 0, active: true });
   await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
   await stockService.recordTransaction({ articleId: component.id, locationId: location.id, quantityDelta: 1000, transactionType: "inventory_adjustment" });
   const employee = await timeReportService.createEmployee({ employeeNumber: `E-${crypto.randomUUID().slice(0, 6)}`, name: "Kalle", active: true });
   return { user, parent, component, workCenter, location, employee };

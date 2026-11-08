@@ -77,7 +77,7 @@ async function makeUser() {
 // asserted below, and only a temporary location is retired (0179).
 async function makeLocation(name = "A1") {
   const warehouse = await stockService.createWarehouse({ name: `Lager ${crypto.randomUUID()}`, active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name, active: true, fixed: false });
+  return stockService.createLocation({ warehouseId: warehouse!.id, name, active: true, fixed: false });
 }
 
 async function balanceAt(articleId: string, locationId: string) {

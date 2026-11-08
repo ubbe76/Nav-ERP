@@ -55,7 +55,7 @@ async function makeArticle(name: string, extra: Partial<CreateArticleInput> = {}
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  return stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
 }
 
 async function seedStock(articleId: string, locationId: string, quantity: number) {
@@ -82,17 +82,17 @@ async function parentWithKalkylRow() {
 describe("Kalkyl structure row — the article card's API", () => {
   it("stores the flag, returns it on every BOM read and lets it be toggled", async () => {
     const { parent, kalkylRow, ordinary } = await parentWithKalkylRow();
-    expect(kalkylRow.costingOnly).toBe(true);
+    expect(kalkylRow!.costingOnly).toBe(true);
 
     const bom = await articleService.getBom(parent.id);
     expect(bom.map((r) => [r.componentArticleId, r.costingOnly])).toEqual([
       [ordinary.id, false],
-      [kalkylRow.componentArticleId, true],
+      [kalkylRow!.componentArticleId, true],
     ]);
 
-    const cleared = await articleService.updateBomComponent(parent.id, kalkylRow.id, { costingOnly: false });
+    const cleared = await articleService.updateBomComponent(parent.id, kalkylRow!.id, { costingOnly: false });
     expect(cleared.costingOnly).toBe(false);
-    const flagged = await articleService.updateBomComponent(parent.id, kalkylRow.id, { costingOnly: true });
+    const flagged = await articleService.updateBomComponent(parent.id, kalkylRow!.id, { costingOnly: true });
     expect(flagged.costingOnly).toBe(true);
   });
 
@@ -114,14 +114,14 @@ describe("Kalkyl structure row — the article card's API", () => {
     const row = await articleService.addBomComponent(parent.id, {
       componentArticleId: material.id, quantity: 1, routingOperationId: calcOp.id, costingOnly: true,
     });
-    expect(row.routingOperationId).toBe(calcOp.id);
+    expect(row!.routingOperationId).toBe(calcOp.id);
 
     // Losing the flag while keeping the link is the refused combination again.
-    await expect(articleService.updateBomComponent(parent.id, row.id, { costingOnly: false })).rejects.toBeInstanceOf(
+    await expect(articleService.updateBomComponent(parent.id, row!.id, { costingOnly: false })).rejects.toBeInstanceOf(
       CostingOnlyOperationLinkError
     );
     // Dropping the link and the flag together is fine.
-    const plain = await articleService.updateBomComponent(parent.id, row.id, { costingOnly: false, routingOperationId: null });
+    const plain = await articleService.updateBomComponent(parent.id, row!.id, { costingOnly: false, routingOperationId: null });
     expect([plain.costingOnly, plain.routingOperationId]).toEqual([false, null]);
   });
 
@@ -137,7 +137,7 @@ describe("Kalkyl structure row — the article card's API", () => {
     await expect(mfgService.updateRoutingOperation(parent.id, op.id, { costingOnly: true })).rejects.toBeInstanceOf(
       OperationHasLinkedMaterialError
     );
-    await articleService.updateBomComponent(parent.id, ordinary.id, { routingOperationId: null });
+    await articleService.updateBomComponent(parent.id, ordinary!.id, { routingOperationId: null });
     const flagged = await mfgService.updateRoutingOperation(parent.id, op.id, { costingOnly: true });
     expect(flagged.costingOnly).toBe(true);
   });

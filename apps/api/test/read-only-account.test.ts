@@ -337,7 +337,7 @@ describe("Endast läsning — reads and side-effect-free POSTs work", () => {
     expect(res.json()).toMatchObject({ listPageSize: 25, favorites: [{ href: "/forsaljning/ordrar", title: "Kundorder" }] });
     expect((await app.inject({ method: "GET", url: "/api/v1/me/settings", headers: { cookie } })).json().favorites).toHaveLength(1);
 
-    expect(await counts()).toEqual({ ...before, user_settings: before.user_settings + 2 });
+    expect(await counts()).toEqual({ ...before, user_settings: before.user_settings! + 2 });
   });
 
   it("can always log out", async () => {

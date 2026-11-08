@@ -577,8 +577,8 @@ describe("Skapa räntefakturor", () => {
 
     // The prefill copies it…
     const prefilled = await invoiceService.createCredit(interest.id, {}, user.id);
-    expect(prefilled.rows.map((r) => r.revenueAccount)).toEqual(["8313"]);
-    await invoiceService.cancel(prefilled.id, user.id);
+    expect(prefilled!.rows.map((r) => r.revenueAccount)).toEqual(["8313"]);
+    await invoiceService.cancel(prefilled!.id, user.id);
 
     // …and so does a row given explicitly, naming its source row (a free
     // row has no order row to match on).
@@ -587,7 +587,7 @@ describe("Skapa räntefakturor", () => {
       { rows: [{ sourceRowId: source.id, description: "Ränta, delkredit", quantity: 1, unitPrice: 100 }] },
       user.id
     );
-    expect(partial.rows.map((r) => r.revenueAccount)).toEqual(["8313"]);
+    expect(partial!.rows.map((r) => r.revenueAccount)).toEqual(["8313"]);
 
     // A source row that is not on the credited invoice is refused.
     await expect(

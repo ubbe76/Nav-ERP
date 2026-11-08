@@ -103,7 +103,7 @@ describe("behovsberäkning — beställningsvara", () => {
     expect(created.manufacturingOrders).toHaveLength(1);
     expect(created.manufacturingOrders[0]!.articleNumber).toBe(s.article.articleNumber);
     const mo = await mfg.getManufacturingOrder(created.manufacturingOrders[0]!.id);
-    expect([mo.status, mo.salesOrderRowId, Number(mo.quantity)]).toEqual(["released", row.id, 2]);
+    expect([mo!.status, mo!.salesOrderRowId, Number(mo!.quantity)]).toEqual(["released", row.id, 2]);
 
     const rows = await list();
     expect(rows.some((r) => r.proposalKind === "configured")).toBe(false);
@@ -315,7 +315,7 @@ describe("behovsberäkning — beställningsvara", () => {
     );
     expect(created.errors).toEqual([]);
     const mo = await mfg.getManufacturingOrder(created.manufacturingOrders[0]!.id);
-    expect(mo.dueDate).toBe(previousWorkingDay(date, new Set()));
+    expect(mo!.dueDate).toBe(previousWorkingDay(date, new Set()));
   });
 
   it("the date suggestion for a configured row counts only what is left to deliver — a delivered row gives nothing to plan by", async () => {

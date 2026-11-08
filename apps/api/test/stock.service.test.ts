@@ -25,7 +25,7 @@ afterAll(async () => {
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  return stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
 }
 
 describe("stock service — append-only transaction log", () => {
@@ -135,7 +135,7 @@ describe("stock service — mandatory location with *** fallback", () => {
 
     // Explicit location wins over the article default.
     const warehouse = await stockService.createWarehouse({ name: "Annat lager", active: true });
-    const other = await stockService.createLocation({ warehouseId: warehouse.id, name: "B1", active: true });
+    const other = await stockService.createLocation({ warehouseId: warehouse!.id, name: "B1", active: true });
     const explicit = await stockService.recordTransaction({
       articleId: article.id,
       locationId: other.id,
@@ -192,8 +192,8 @@ describe("stock service — lagerflytt och rensning av tomma lagerplatser", () =
   // "Fasta lagerplatser" at the end of this describe.
   async function makeLocationPair(fixed = false) {
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const from = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true, fixed });
-    const to = await stockService.createLocation({ warehouseId: warehouse.id, name: "B2", active: true, fixed });
+    const from = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true, fixed });
+    const to = await stockService.createLocation({ warehouseId: warehouse!.id, name: "B2", active: true, fixed });
     return { from, to };
   }
 
@@ -330,7 +330,7 @@ describe("stock service — lagerflytt och rensning av tomma lagerplatser", () =
 
   it("creates a location as fixed by default and lets Ändra make it temporary", async () => {
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const created = await stockService.createLocation({ warehouseId: warehouse.id, name: "C3", active: true });
+    const created = await stockService.createLocation({ warehouseId: warehouse!.id, name: "C3", active: true });
     expect(created.fixed).toBe(true);
     const updated = await stockService.updateLocation(created.id, { fixed: false });
     expect(updated.fixed).toBe(false);
@@ -344,7 +344,7 @@ describe("stock service — lagerflytt och rensning av tomma lagerplatser", () =
     const article = await makeArticle();
     const fallbackId = article.defaultLocationId!;
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const to = await stockService.createLocation({ warehouseId: warehouse.id, name: "B2", active: true });
+    const to = await stockService.createLocation({ warehouseId: warehouse!.id, name: "B2", active: true });
     await stock(article.id, fallbackId, 4);
 
     const result = await stockService.transferStock(

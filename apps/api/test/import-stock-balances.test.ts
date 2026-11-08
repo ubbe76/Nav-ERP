@@ -90,7 +90,7 @@ describe("Importera lagersaldon", () => {
 
   it("values an increase at the standard cost without À-pris, on the article's own location without a place", async () => {
     const warehouse = await stockService.createWarehouse({ name: "Lager 2", active: true });
-    const own = await stockService.createLocation({ warehouseId: warehouse.id, name: "B7", active: true });
+    const own = await stockService.createLocation({ warehouseId: warehouse!.id, name: "B7", active: true });
     const article = await makeArticle("PL-3", { standardCost: 7, defaultLocationId: own.id });
 
     await imports.commit("stockBalances", input([["PL-3", "", "", "5", ""]]));
@@ -109,9 +109,9 @@ describe("Importera lagersaldon", () => {
   it("resolves a location name alone when it is unique and refuses it when it is not", async () => {
     const a = await stockService.createWarehouse({ name: "Norr", active: true });
     const b = await stockService.createWarehouse({ name: "Syd", active: true });
-    const unique = await stockService.createLocation({ warehouseId: a.id, name: "Unik", active: true });
-    await stockService.createLocation({ warehouseId: a.id, name: "Dubbel", active: true });
-    await stockService.createLocation({ warehouseId: b.id, name: "Dubbel", active: true });
+    const unique = await stockService.createLocation({ warehouseId: a!.id, name: "Unik", active: true });
+    await stockService.createLocation({ warehouseId: a!.id, name: "Dubbel", active: true });
+    await stockService.createLocation({ warehouseId: b!.id, name: "Dubbel", active: true });
     const article = await makeArticle("PL-5", { standardCost: 1 });
 
     const preview = await imports.preview(
@@ -174,7 +174,7 @@ describe("Importera lagersaldon", () => {
   it("refuses a location under a stock count that blocks transactions", async () => {
     await makeArticle("PL-8", { standardCost: 1 });
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
     await db.insert(stockCountSessions).values({ countNumber: "INV-1", locationId: location.id, blocksTransactions: true } as never);
     const preview = await imports.preview("stockBalances", input([["PL-8", "Huvudlager", "A1", "1", ""]]));
     expect(preview.rows[0]!.errors).toEqual(["Lagerplatsen inventeras just nu och är spärrad för lagerhändelser"]);
@@ -185,8 +185,8 @@ describe("Importera lagersaldon", () => {
   // names the balance the commit then writes on.
   it("previews what the commit books when the huvudplats is blocked and there is an alternative place", async () => {
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const main = await stockService.createLocation({ warehouseId: warehouse.id, name: "K1", active: true });
-    const alt = await stockService.createLocation({ warehouseId: warehouse.id, name: "B1", active: true });
+    const main = await stockService.createLocation({ warehouseId: warehouse!.id, name: "K1", active: true });
+    const alt = await stockService.createLocation({ warehouseId: warehouse!.id, name: "B1", active: true });
     const article = await makeArticle("PL-9", { standardCost: 1, defaultLocationId: main.id });
     await stockService.setArticleLocations(article.id, { primaryLocationId: main.id, alternativeLocationIds: [alt.id] });
     await stockService.recordTransaction({ articleId: article.id, locationId: main.id, quantityDelta: 4, transactionType: "inventory_adjustment" });
@@ -202,8 +202,8 @@ describe("Importera lagersaldon", () => {
 
   it("previews what the commit books when the huvudplats is inactive but not blocked", async () => {
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const main = await stockService.createLocation({ warehouseId: warehouse.id, name: "K1", active: true });
-    const alt = await stockService.createLocation({ warehouseId: warehouse.id, name: "B1", active: true });
+    const main = await stockService.createLocation({ warehouseId: warehouse!.id, name: "K1", active: true });
+    const alt = await stockService.createLocation({ warehouseId: warehouse!.id, name: "B1", active: true });
     const article = await makeArticle("PL-10", { standardCost: 1, defaultLocationId: main.id });
     await stockService.setArticleLocations(article.id, { primaryLocationId: main.id, alternativeLocationIds: [alt.id] });
     await stockService.recordTransaction({ articleId: article.id, locationId: alt.id, quantityDelta: 3, transactionType: "inventory_adjustment" });
@@ -221,7 +221,7 @@ describe("Importera lagersaldon", () => {
   // without a place has it): the alternative place, not ***.
   it("previews what the commit books when the huvudplats is *** and there is an alternative place", async () => {
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const alt = await stockService.createLocation({ warehouseId: warehouse.id, name: "B1", active: true });
+    const alt = await stockService.createLocation({ warehouseId: warehouse!.id, name: "B1", active: true });
     const article = await makeArticle("PL-11", { standardCost: 1 });
     const fallback = article.defaultLocationId!;
     await stockService.setArticleLocations(article.id, { primaryLocationId: fallback, alternativeLocationIds: [alt.id] });

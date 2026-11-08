@@ -41,7 +41,7 @@ const BEFORE_FREEZE = new Date("2025-12-30T09:00:00Z");
 
 async function makeLocation(name = "A1") {
   const warehouse = await stockService.createWarehouse({ name: `Lager ${name}`, active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name, active: true });
+  return stockService.createLocation({ warehouseId: warehouse!.id, name, active: true });
 }
 
 async function makeArticle(number: string, standardCost?: number) {

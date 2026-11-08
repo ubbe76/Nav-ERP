@@ -371,7 +371,7 @@ describe("spec §12: reservation, inställningar och samtidighet", () => {
       await waitForLockWaiters(2);
     });
     const [first, second] = await both!;
-    const results = [...first.results, ...second.results];
+    const results = [...first!.results, ...second!.results];
     expect(results).toHaveLength(2);
     expect(results.filter((r) => r.ok)).toHaveLength(1);
     const loser = results.find((r) => !r.ok)!;

@@ -113,7 +113,7 @@ async function makeArticle(type: "purchased" | "manufactured" = "purchased") {
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: `Lager ${crypto.randomUUID()}`, active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  return stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
 }
 
 beforeEach(async () => {

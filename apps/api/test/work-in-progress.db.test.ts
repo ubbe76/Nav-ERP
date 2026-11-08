@@ -116,7 +116,7 @@ async function makeProduct(parentCost: number | null) {
   const workCenter = await mfgService.createWorkCenter({ code: `${100 + (seq % 800)}`, name: "Svets", hourlyRate: 100, overheadPercent: 50, active: true });
   await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 1, runTimePerUnit: 1 });
   const warehouse = await stockService.createWarehouse({ name: `Lager ${seq}`, active: true });
-  const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
   await stockService.recordTransaction({ articleId: component.id, locationId: location.id, quantityDelta: 100, transactionType: "inventory_adjustment" });
   const employee = await timeReportService.createEmployee({ employeeNumber: `E-${seq}`, name: "Kalle", active: true });
   return { parent, component, location, employee, workCenter };
@@ -354,12 +354,12 @@ describe("Produkter i arbete per datum — the orders", () => {
     const [first] = await mfgService.listReports(order.id);
     // 4 more on the last operation: received 10, the order is done (completed_order).
     await mfgService.reportOperationQuantities(operation.id, { quantityOk: 4, quantityScrapped: 0, markDone: false, createdBy: user.id });
-    expect((await mfgService.getManufacturingOrder(order.id)).status).toBe("done");
+    expect((await mfgService.getManufacturingOrder(order.id))!.status).toBe("done");
     await timeReportService.createTimeReport({ employeeId: product.employee.id, moOperationId: operation.id, date: "2025-06-20", hours: 3 }, user.id);
     await moveBeforeD(order.id);
     // After D the first receipt (6) is undone: received 4, the order is open again.
     await mfgService.undoReport(order.id, first!.id, user.id);
-    expect((await mfgService.getManufacturingOrder(order.id)).status).not.toBe("done");
+    expect((await mfgService.getManufacturingOrder(order.id))!.status).not.toBe("done");
 
     // Per D the receipts covered the order: done, not PIA.
     expect((await report(D, "direct")).rows).toEqual([]);

@@ -171,7 +171,7 @@ async function makePriceList(currency: string, rows: { articleId: string; unitPr
 
 async function location() {
   const warehouse = await stockService.createWarehouse({ name: `Lager ${crypto.randomUUID()}`, active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  return stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
 }
 
 // A confirmed, fully delivered order in the customer's currency at `orderRate`.

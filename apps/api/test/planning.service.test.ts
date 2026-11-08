@@ -893,7 +893,7 @@ describe("planning service — getArticleOverview", () => {
 describe("planning service — Spärrade lagerplatser", () => {
   async function blockedPlace() {
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    return stockService.createLocation({ warehouseId: warehouse.id, name: "Karantän", active: true, blocked: true });
+    return stockService.createLocation({ warehouseId: warehouse!.id, name: "Karantän", active: true, blocked: true });
   }
   async function addBlockedStock(articleId: string, quantity: number) {
     const k = await blockedPlace();

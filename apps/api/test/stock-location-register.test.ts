@@ -67,10 +67,10 @@ const names = (page: Page) => page.rows.map((r) => `${r.warehouseName}/${r.name}
 async function fixture() {
   const main = await stockService.createWarehouse({ name: "Huvudlager", active: true });
   const reserve = await stockService.createWarehouse({ name: "Reservlager", active: true });
-  const a1 = await stockService.createLocation({ warehouseId: main.id, name: "A1", active: true });
-  const a2 = await stockService.createLocation({ warehouseId: main.id, name: "A2", active: true, blocked: true, blockedNote: "Karantän" });
-  const b1 = await stockService.createLocation({ warehouseId: main.id, name: "B1", active: false, fixed: false });
-  const r1 = await stockService.createLocation({ warehouseId: reserve.id, name: "R1", active: true });
+  const a1 = await stockService.createLocation({ warehouseId: main!.id, name: "A1", active: true });
+  const a2 = await stockService.createLocation({ warehouseId: main!.id, name: "A2", active: true, blocked: true, blockedNote: "Karantän" });
+  const b1 = await stockService.createLocation({ warehouseId: main!.id, name: "B1", active: false, fixed: false });
+  const r1 = await stockService.createLocation({ warehouseId: reserve!.id, name: "R1", active: true });
   const article = (articleNumber: string, unitId: string) =>
     articleService.createArticle({ articleNumber, name: articleNumber, type: "purchased", unitId, active: true, defaultLocationId: a1.id } as never);
   const stock = (articleId: string, locationId: string, quantityDelta: number) =>
@@ -124,7 +124,7 @@ describe("GET /stock/locations/register — search, filters, pages", () => {
     const app = buildApp();
     const { reserve } = await fixture();
 
-    expect(names(await register(app, `?warehouseId=${reserve.id}`))).toEqual(["Reservlager/R1"]);
+    expect(names(await register(app, `?warehouseId=${reserve!.id}`))).toEqual(["Reservlager/R1"]);
     expect(names(await register(app, "?status=inactive"))).toEqual(["Huvudlager/B1"]);
     const all = await register(app, "?status=all");
     expect([names(all), all.total]).toEqual([["Huvudlager/A1", "Huvudlager/A2", "Huvudlager/B1", "Reservlager/R1"], 4]);

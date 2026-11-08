@@ -80,7 +80,7 @@ async function setup() {
     role: "supervisor",
   });
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
   const component = await articleService.createArticle({
     articleNumber: `C-${crypto.randomUUID()}`,
     name: "Komponent",

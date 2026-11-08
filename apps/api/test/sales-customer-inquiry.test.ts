@@ -105,15 +105,15 @@ describe("Kundens förfrågan on the order", () => {
   it("the header PATCH sets and clears it while quote/confirmed, and refuses it after cancel", async () => {
     const order = await makeOrder({});
     const set = await salesService.updateSalesOrderHeader(order.id, { customerInquiryNumber: "FRF-88" });
-    expect(set.customerInquiryNumber).toBe("FRF-88");
+    expect(set!.customerInquiryNumber).toBe("FRF-88");
 
     await salesService.confirm(order.id);
     // Omitted leaves it untouched; another field changes alone.
     const untouched = await salesService.updateSalesOrderHeader(order.id, { customerOrderNumber: "PO-1" });
     expect(untouched).toMatchObject({ customerInquiryNumber: "FRF-88", customerOrderNumber: "PO-1" });
     const cleared = await salesService.updateSalesOrderHeader(order.id, { customerInquiryNumber: null });
-    expect(cleared.customerInquiryNumber).toBeNull();
-    expect(cleared.customerOrderNumber).toBe("PO-1");
+    expect(cleared!.customerInquiryNumber).toBeNull();
+    expect(cleared!.customerOrderNumber).toBe("PO-1");
 
     await salesService.cancel(order.id);
     await expect(salesService.updateSalesOrderHeader(order.id, { customerInquiryNumber: "X" })).rejects.toThrow(

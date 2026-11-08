@@ -115,7 +115,7 @@ async function makeArticle(salesPrice?: number) {
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  return stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
 }
 
 async function seedStock(articleId: string, locationId: string, quantity: number) {
@@ -1158,21 +1158,21 @@ describe("sales service — order header fields", () => {
     const { order, customer } = await makeOrderWithAddress();
 
     const updated = await salesService.updateSalesOrderHeader(order.id, { customerOrderNumber: "PO-9999" });
-    expect(updated.customerOrderNumber).toBe("PO-9999");
+    expect(updated!.customerOrderNumber).toBe("PO-9999");
 
     await salesService.confirm(order.id);
     const inConfirmed = await salesService.updateSalesOrderHeader(order.id, { customerReference: "Bertil" });
-    expect(inConfirmed.customerReference).toBe("Bertil");
+    expect(inConfirmed!.customerReference).toBe("Bertil");
 
     // Clearing the address works too.
     const cleared = await salesService.updateSalesOrderHeader(order.id, { deliveryAddressId: null });
-    expect(cleared.deliveryAddressId).toBeNull();
+    expect(cleared!.deliveryAddressId).toBeNull();
 
     // Förväntat leveransdatum (Leveranstidskontrollens Använd datumet): set and cleared.
     const dated = await salesService.updateSalesOrderHeader(order.id, { expectedDeliveryDate: "2030-03-25" });
-    expect(dated.expectedDeliveryDate).toBe("2030-03-25");
+    expect(dated!.expectedDeliveryDate).toBe("2030-03-25");
     const undated = await salesService.updateSalesOrderHeader(order.id, { expectedDeliveryDate: null });
-    expect(undated.expectedDeliveryDate).toBeNull();
+    expect(undated!.expectedDeliveryDate).toBeNull();
 
     // A foreign customer's address is rejected on PATCH as well.
     const other = await salesService.createCustomer({ name: "Annan Kund AB", active: true });
@@ -1240,7 +1240,7 @@ describe("sales service — order header fields", () => {
       deliveryAddressId: fetched!.deliveryAddressId!,
       customerReference: "Kalle",
     });
-    expect(same.deliveryAddressId).toBe(fetched!.deliveryAddressId);
+    expect(same!.deliveryAddressId).toBe(fetched!.deliveryAddressId);
   });
 
   it("saves a Ny leveransadress on the customer when Spara på kunden is ticked", async () => {
@@ -1271,20 +1271,20 @@ describe("sales service — order header fields", () => {
     const first = await salesService.updateSalesOrderHeader(order.id, {
       newDeliveryAddress: { label: "Engång 1", address: "Gata 1", country: "SE", saveToCustomer: false },
     });
-    const firstId = first.deliveryAddressId!;
-    expect(first.deliveryAddressLabel).toBe("Engång 1");
+    const firstId = first!.deliveryAddressId!;
+    expect(first!.deliveryAddressLabel).toBe("Engång 1");
     // The customer's saved address is left alone.
     expect(await exists(address.id)).toBe(true);
 
     const second = await salesService.updateSalesOrderHeader(order.id, {
       newDeliveryAddress: { label: "Engång 2", address: "Gata 2", country: "SE", saveToCustomer: false },
     });
-    expect(second.deliveryAddressLabel).toBe("Engång 2");
+    expect(second!.deliveryAddressLabel).toBe("Engång 2");
     expect(await exists(firstId)).toBe(false);
 
     const back = await salesService.updateSalesOrderHeader(order.id, { deliveryAddressId: address.id });
-    expect(back.deliveryAddressId).toBe(address.id);
-    expect(await exists(second.deliveryAddressId!)).toBe(false);
+    expect(back!.deliveryAddressId).toBe(address.id);
+    expect(await exists(second!.deliveryAddressId!)).toBe(false);
     expect((await salesService.listDeliveryAddresses(customer.id)).map((a) => a.id)).toEqual([address.id]);
 
     // A saved address the order stops using stays on the customer.
@@ -1292,7 +1292,7 @@ describe("sales service — order header fields", () => {
       newDeliveryAddress: { label: "Sparad", address: "Gata 3", country: "SE", saveToCustomer: true },
     });
     await salesService.updateSalesOrderHeader(order.id, { deliveryAddressId: null });
-    expect(await exists(saved.deliveryAddressId!)).toBe(true);
+    expect(await exists(saved!.deliveryAddressId!)).toBe(true);
   });
 
   it("refuses a Ny leveransadress outside the editable statuses", async () => {

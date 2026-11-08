@@ -69,7 +69,7 @@ afterAll(async () => {
 });
 
 async function place(name: string, opts: { fixed?: boolean; active?: boolean; blocked?: boolean } = {}) {
-  warehouseId ??= (await stockService.createWarehouse({ name: "Huvudlager", active: true })).id;
+  warehouseId ??= (await stockService.createWarehouse({ name: "Huvudlager", active: true }))!.id;
   return stockService.createLocation({
     warehouseId,
     name,

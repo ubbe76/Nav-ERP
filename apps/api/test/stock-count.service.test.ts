@@ -51,7 +51,7 @@ afterAll(async () => {
 
 async function makeLocation(name = "A1") {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name, active: true });
+  return stockService.createLocation({ warehouseId: warehouse!.id, name, active: true });
 }
 
 // Bypasses authService.register (bootstrap-only) since transferStock only
@@ -185,7 +185,7 @@ describe("stock count sessions — create/list/get", () => {
     ).rejects.toBeInstanceOf(StockLocationNotFoundError);
 
     const warehouse = await stockService.createWarehouse({ name: "H", active: true });
-    const inactive = await stockService.createLocation({ warehouseId: warehouse.id, name: "X1", active: true });
+    const inactive = await stockService.createLocation({ warehouseId: warehouse!.id, name: "X1", active: true });
     await stockService.updateLocation(inactive.id, { active: false });
     await expect(
       countRepo.createSession({ locationId: inactive.id, blocksTransactions: false }, null)

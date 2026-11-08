@@ -51,7 +51,7 @@ let locationId: string | null = null;
 async function location() {
   if (locationId) return locationId;
   const warehouse = await stockService.createWarehouse({ name: `Lager ${crypto.randomUUID().slice(0, 6)}`, active: true });
-  const loc = await stockService.createLocation({ warehouseId: warehouse.id, name: `A-${crypto.randomUUID().slice(0, 6)}`, active: true });
+  const loc = await stockService.createLocation({ warehouseId: warehouse!.id, name: `A-${crypto.randomUUID().slice(0, 6)}`, active: true });
   locationId = loc.id;
   return loc.id;
 }

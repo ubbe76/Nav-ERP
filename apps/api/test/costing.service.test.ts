@@ -164,7 +164,7 @@ async function makeOrderWithReportedWork() {
   await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 1, runTimePerUnit: 1 });
 
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
   await stockService.recordTransaction({
     articleId: component.id,
     locationId: location.id,
@@ -497,7 +497,7 @@ describe("costing service — markups", () => {
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 1, runTimePerUnit: 1 });
 
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
     await stockService.recordTransaction({
       articleId: component.id,
       locationId: location.id,
@@ -538,7 +538,7 @@ describe("costing service — post-calculation", () => {
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 999, runTimePerUnit: 999 });
 
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
     await stockService.recordTransaction({
       articleId: component.id,
       locationId: location.id,
@@ -672,7 +672,7 @@ describe("costing service — specification rows", () => {
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 999, runTimePerUnit: 999 });
 
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
     await stockService.recordTransaction({
       articleId: component.id,
       locationId: location.id,
@@ -1154,7 +1154,7 @@ describe("costing service — variance analysis", () => {
     // A tjänst in the structure (lego under LO), unlinked.
     const service = opts.service ? await addServiceComponent(parent.id, opts.service.standardCost, opts.service.quantity) : null;
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
     await stockService.recordTransaction({ articleId: component.id, locationId: location.id, quantityDelta: 100, transactionType: "inventory_adjustment" });
 
     const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: opts.quantity ?? 5 }, user.id);
@@ -1430,7 +1430,7 @@ describe("costing service — variance analysis", () => {
     const f = await makeFixture({ quantity: 5, linked: true });
     await mfgService.reportOperationQuantities(f.operation.id, { quantityOk: 3, quantityScrapped: 0, markDone: false, locationId: f.location.id, createdBy: f.user.id });
     await mfgService.reportOperationQuantities(f.operation.id, { quantityOk: 2, quantityScrapped: 0, markDone: false, locationId: f.location.id, createdBy: f.user.id });
-    expect((await mfgService.getManufacturingOrder(f.order.id)).status).toBe("done");
+    expect((await mfgService.getManufacturingOrder(f.order.id))!.status).toBe("done");
     // Ångra the second report: 4 back to stock, 2 out again, the order open.
     const second = (await mfgService.listReports(f.order.id)).find((r) => r.undoneAt === null && Number(r.quantityOk) === 2)!;
     await mfgService.undoReport(f.order.id, second.id, f.user.id);

@@ -547,7 +547,7 @@ describe("delivery note and the customer's pallet card in English", () => {
     const base = await makeBaseData();
     const customer = await makeCustomer(language, base);
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
     for (const article of [base.article, base.plain]) {
       await stockService.recordTransaction({ articleId: article.id, locationId: location.id, quantityDelta: 10, transactionType: "inventory_adjustment" });
     }

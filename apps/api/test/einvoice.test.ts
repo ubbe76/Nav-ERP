@@ -174,7 +174,7 @@ async function issuedInvoice(customer: Awaited<ReturnType<typeof makeCustomer>>,
     active: true,
   });
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
   await stockService.recordTransaction({ articleId: article.id, locationId: location.id, quantityDelta: 10, transactionType: "inventory_adjustment" });
   const { order, rows } = await salesService.createQuote(
     {
@@ -1013,7 +1013,7 @@ describe("Skicka e-faktura automatiskt vid Utfärda", () => {
     const customer = await makeCustomer({ invoiceDelivery: "peppol", collectiveInvoicing: true });
     const a = await article();
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
     await stockService.recordTransaction({ articleId: a.id, locationId: location.id, quantityDelta: 10, transactionType: "inventory_adjustment" });
     const { order, rows } = await salesService.createQuote(
       { customerId: customer.id, customerOrderNumber: "PO-1", rows: [{ articleId: a.id, quantity: 1, unitPrice: 500 }], confirm: true },

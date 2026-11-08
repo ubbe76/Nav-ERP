@@ -172,7 +172,7 @@ async function seedWorld() {
   const supplier = await purchaseRepository.createSupplier({ name: "Lego AB", active: true });
   const lego = await mfgService.createWorkCenter({ code: "301", name: "Ytbehandling", type: "subcontract", supplierId: supplier.id, active: true });
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
   const c1 = await articleService.createArticle({ articleNumber: "C1", name: "Komponent 1", type: "purchased", defaultLocationId: location.id, active: true });
   const c2 = await articleService.createArticle({ articleNumber: "C2", name: "Komponent 2", type: "purchased", defaultLocationId: location.id, active: true });
   const phantom = await articleService.createArticle({ articleNumber: "F1", name: "Fantom", type: "manufactured", isPhantom: true, active: true });

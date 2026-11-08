@@ -123,7 +123,7 @@ afterAll(async () => {
 // One Huvudlager per test (the saldoimport resolves the warehouse by name).
 let warehouseId: string | null = null;
 async function place(name: string, opts: { fixed?: boolean; blocked?: boolean; note?: string } = {}) {
-  warehouseId ??= (await stockService.createWarehouse({ name: "Huvudlager", active: true })).id;
+  warehouseId ??= (await stockService.createWarehouse({ name: "Huvudlager", active: true }))!.id;
   return stockService.createLocation({
     warehouseId,
     name,

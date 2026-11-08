@@ -84,7 +84,7 @@ async function makeUser() {
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+  return stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
 }
 
 async function seedStock(articleId: string, locationId: string, quantity: number) {
@@ -719,7 +719,7 @@ describe("manufacturing — editable work centers and routing", () => {
       OperationHasLinkedMaterialError
     );
 
-    await articleService.removeBomComponent(parent.id, linked.id);
+    await articleService.removeBomComponent(parent.id, linked!.id);
     const flagged = await mfgService.updateRoutingOperation(parent.id, op.id, { costingOnly: true });
     expect(flagged.costingOnly).toBe(true);
   });
@@ -760,7 +760,7 @@ describe("manufacturing — editable work centers and routing", () => {
 
     const row = await articleService.addBomComponent(parent.id, { componentArticleId: extra.id, quantity: 1 });
     await expect(
-      articleService.updateBomComponent(parent.id, row.id, { routingOperationId: calcOp.id })
+      articleService.updateBomComponent(parent.id, row!.id, { routingOperationId: calcOp.id })
     ).rejects.toBeInstanceOf(CostingOnlyOperationLinkError);
   });
 

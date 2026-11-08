@@ -100,7 +100,7 @@ describe("Ändra konfiguration — beställningsvara", () => {
     const { article, order, row } = await lockedRow();
     await salesService.startProduction(order.id);
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
     await stockService.recordTransaction({ articleId: article.id, locationId: location.id, quantityDelta: 5, transactionType: "inventory_adjustment" });
     await salesService.deliverGoods(order.id, row.id, { locationId: location.id, quantity: 1 }, (await makeUser()).id);
     await expectLocked(order.id, row, /levererats/);

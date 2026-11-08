@@ -115,7 +115,7 @@ async function makeArticle() {
 
 async function makeLocation(name = "A1", fixed = true) {
   const warehouse = await stockService.createWarehouse({ name: `Lager ${name}`, active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name, active: true, fixed });
+  return stockService.createLocation({ warehouseId: warehouse!.id, name, active: true, fixed });
 }
 
 // The parts a delivery row drew (delivery_row_locations), oldest first.

@@ -426,8 +426,8 @@ describe("guards once variants exist", () => {
     const s = await build();
     const [row] = await withStock.createVariants(s.article.id, ONE, null);
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const open = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
-    const blocked = await stockService.createLocation({ warehouseId: warehouse.id, name: "Karantän", active: true, blocked: true });
+    const open = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
+    const blocked = await stockService.createLocation({ warehouseId: warehouse!.id, name: "Karantän", active: true, blocked: true });
     await stockService.recordTransaction({ articleId: row!.articleId!, locationId: open.id, quantityDelta: 3, transactionType: "inventory_adjustment" });
     await stockService.recordTransaction({ articleId: row!.articleId!, locationId: blocked.id, quantityDelta: 4, transactionType: "inventory_adjustment" });
     expect((await withStock.listVariants(s.article.id))[0]!.onHand).toBe("7");
@@ -439,8 +439,8 @@ describe("guards once variants exist", () => {
     const stockService = createStockService(createStockRepository(db));
     const s = await build();
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const main = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
-    const alt = await stockService.createLocation({ warehouseId: warehouse.id, name: "B1", active: true });
+    const main = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
+    const alt = await stockService.createLocation({ warehouseId: warehouse!.id, name: "B1", active: true });
     await stockService.setArticleLocations(s.article.id, { primaryLocationId: main.id, alternativeLocationIds: [alt.id] });
     const [row] = await service.createVariants(s.article.id, ONE, null);
     expect(await stockService.getArticleLocations(row!.articleId!)).toMatchObject({ primary: { locationId: main.id }, alternatives: [] });

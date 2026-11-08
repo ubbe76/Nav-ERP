@@ -45,7 +45,7 @@ async function makeArticle(tag = "A") {
 async function makeLocation(name: string) {
   const existing = (await stockService.listWarehouses()).find((w) => w.name === "Huvudlager");
   const wh = existing ?? (await stockService.createWarehouse({ name: "Huvudlager", active: true }));
-  return stockService.createLocation({ warehouseId: wh.id, name, active: true });
+  return stockService.createLocation({ warehouseId: wh!.id, name, active: true });
 }
 async function makeUser(name = "Kalle Kula") {
   return authRepo.create({

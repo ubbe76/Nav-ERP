@@ -47,7 +47,7 @@ async function makeUser() {
 
 async function makeLocation(name = "A1") {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name, active: true });
+  return stockService.createLocation({ warehouseId: warehouse!.id, name, active: true });
 }
 
 async function makeArticle(opts: { type?: "purchased" | "manufactured"; standardCost?: number } = {}) {

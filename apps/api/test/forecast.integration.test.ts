@@ -107,7 +107,7 @@ async function makeUser() {
 
 async function location() {
   const warehouse = await stockService.createWarehouse({ name: `Lager ${crypto.randomUUID().slice(0, 6)}`, active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name: `A-${crypto.randomUUID().slice(0, 6)}`, active: true });
+  return stockService.createLocation({ warehouseId: warehouse!.id, name: `A-${crypto.randomUUID().slice(0, 6)}`, active: true });
 }
 
 type Movement = { day: string; type: "sales_delivery" | "mo_consumption" | "inventory_adjustment" | "purchase_receipt"; delta: number };

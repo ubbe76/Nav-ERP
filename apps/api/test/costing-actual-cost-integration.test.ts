@@ -70,7 +70,7 @@ async function makeOrderConsumingAt(prices: number[], consumeQuantity: number, s
   await articleService.addBomComponent(parent.id, { componentArticleId: component.id, quantity: 1 });
 
   const warehouse = await stockService.createWarehouse({ name: nextNumber("Lager"), active: true });
-  const location = await stockService.createLocation({ warehouseId: warehouse.id, name: nextNumber("A"), active: true });
+  const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: nextNumber("A"), active: true });
 
   // createTransaction stamps unit_cost from the article's CURRENT standard
   // cost on an inflow, so moving the standard cost between receipts is how a
