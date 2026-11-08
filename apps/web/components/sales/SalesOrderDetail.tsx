@@ -503,6 +503,109 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
 
   return (
     <div>
+      <DocumentActionBar
+        label={order.orderNumber}
+        pill={pill}
+        error={actionError}
+        trailing={
+          <ManualStatusChange
+            endpoint={`/api/v1/sales-orders/${order.id}`}
+            statuses={SALES_ORDER_STATUS_PILL}
+            current={order.status}
+            onDone={() => router.refresh()}
+          />
+        }
+      >
+        {rowsEditable && (
+          <Button type="button" variant="secondary" onClick={() => setModal("addRow")}>
+            Lägg till rad
+          </Button>
+        )}
+
+        {freightEnabled && canSell && rowsEditable && (
+          <Button type="button" variant="secondary" onClick={() => setFreightOpen(true)}>
+            Kontrollera fraktpris
+          </Button>
+        )}
+
+        {canCheckDelivery && rowsEditable && (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              setDtcError(null);
+              setDtcOpen(true);
+            }}
+          >
+            Leveranstidskontroll
+          </Button>
+        )}
+
+        {order.status === "quote" && (
+          <Button type="button" variant="primary" disabled={actionPending !== null} onClick={() => runAction("confirm")}>
+            {actionPending === "confirm" ? "Arbetar…" : "Bekräfta"}
+          </Button>
+        )}
+
+        {order.status === "confirmed" && (
+          <Button
+            type="button"
+            variant="primary"
+            disabled={actionPending !== null}
+            onClick={() => runAction("start-production")}
+          >
+            {actionPending === "start-production" ? "Arbetar…" : "Starta tillverkning"}
+          </Button>
+        )}
+
+        {order.status === "in_production" && (
+          <>
+            {deliverable.length > 0 && (
+              <Button type="button" variant="primary" onClick={() => setModal("deliver")}>
+                Leverera
+              </Button>
+            )}
+            <Link
+              href={`/forsaljning/utleverans?order=${order.id}`}
+              className={`${buttonStyles.button} ${buttonStyles.ghost}`}
+            >
+              Utleveransrutinen
+            </Link>
+          </>
+        )}
+
+        {order.status === "delivered" && (
+          <Link
+            href={
+              order.customerCollectiveInvoicing
+                ? `/forsaljning/samlingsfakturering?customerId=${order.customerId}`
+                : `/forsaljning/fakturor?orderId=${order.id}`
+            }
+            className={`${buttonStyles.button} ${buttonStyles.ghost}`}
+          >
+            Fakturera
+          </Link>
+        )}
+
+        {order.status === "quote" && canSell && (
+          <Button type="button" variant="secondary" disabled={actionPending !== null} onClick={() => setModal("lose")}>
+            Förlorad…
+          </Button>
+        )}
+
+        {order.status === "lost" && canSell && (
+          <Button type="button" variant="primary" disabled={actionPending !== null} onClick={reopenQuote}>
+            {actionPending === "reopen" ? "Arbetar…" : "Öppna igen"}
+          </Button>
+        )}
+
+        {(order.status === "quote" || order.status === "confirmed") && (
+          <Button type="button" variant="danger" disabled={actionPending !== null} onClick={() => runAction("cancel")}>
+            {actionPending === "cancel" ? "Arbetar…" : "Avbryt order"}
+          </Button>
+        )}
+      </DocumentActionBar>
+
       <DocumentHeaderCard
         pill={pill}
         meta={
@@ -871,106 +974,6 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         onCancel={() => setReconfigure(null)}
       />
 
-      <DocumentActionBar
-        error={actionError}
-        trailing={
-          <ManualStatusChange
-            endpoint={`/api/v1/sales-orders/${order.id}`}
-            statuses={SALES_ORDER_STATUS_PILL}
-            current={order.status}
-            onDone={() => router.refresh()}
-          />
-        }
-      >
-        {rowsEditable && (
-          <Button type="button" variant="secondary" onClick={() => setModal("addRow")}>
-            Lägg till rad
-          </Button>
-        )}
-
-        {freightEnabled && canSell && rowsEditable && (
-          <Button type="button" variant="secondary" onClick={() => setFreightOpen(true)}>
-            Kontrollera fraktpris
-          </Button>
-        )}
-
-        {canCheckDelivery && rowsEditable && (
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => {
-              setDtcError(null);
-              setDtcOpen(true);
-            }}
-          >
-            Leveranstidskontroll
-          </Button>
-        )}
-
-        {order.status === "quote" && (
-          <Button type="button" variant="primary" disabled={actionPending !== null} onClick={() => runAction("confirm")}>
-            {actionPending === "confirm" ? "Arbetar…" : "Bekräfta"}
-          </Button>
-        )}
-
-        {order.status === "confirmed" && (
-          <Button
-            type="button"
-            variant="primary"
-            disabled={actionPending !== null}
-            onClick={() => runAction("start-production")}
-          >
-            {actionPending === "start-production" ? "Arbetar…" : "Starta tillverkning"}
-          </Button>
-        )}
-
-        {order.status === "in_production" && (
-          <>
-            {deliverable.length > 0 && (
-              <Button type="button" variant="primary" onClick={() => setModal("deliver")}>
-                Leverera
-              </Button>
-            )}
-            <Link
-              href={`/forsaljning/utleverans?order=${order.id}`}
-              className={`${buttonStyles.button} ${buttonStyles.ghost}`}
-            >
-              Utleveransrutinen
-            </Link>
-          </>
-        )}
-
-        {order.status === "delivered" && (
-          <Link
-            href={
-              order.customerCollectiveInvoicing
-                ? `/forsaljning/samlingsfakturering?customerId=${order.customerId}`
-                : `/forsaljning/fakturor?orderId=${order.id}`
-            }
-            className={`${buttonStyles.button} ${buttonStyles.ghost}`}
-          >
-            Fakturera
-          </Link>
-        )}
-
-        {order.status === "quote" && canSell && (
-          <Button type="button" variant="secondary" disabled={actionPending !== null} onClick={() => setModal("lose")}>
-            Förlorad…
-          </Button>
-        )}
-
-        {order.status === "lost" && canSell && (
-          <Button type="button" variant="primary" disabled={actionPending !== null} onClick={reopenQuote}>
-            {actionPending === "reopen" ? "Arbetar…" : "Öppna igen"}
-          </Button>
-        )}
-
-        {(order.status === "quote" || order.status === "confirmed") && (
-          <Button type="button" variant="danger" disabled={actionPending !== null} onClick={() => runAction("cancel")}>
-            {actionPending === "cancel" ? "Arbetar…" : "Avbryt order"}
-          </Button>
-        )}
-      </DocumentActionBar>
 
       {freight?.freightProduct && (
         <FormHint>
