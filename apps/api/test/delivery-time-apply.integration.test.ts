@@ -282,8 +282,21 @@ describe("reservationen — Skapa tillverkningsordrar för det som saknas", () =
     const rows = await salesService.listRows(order.id);
     expect(rows[0]).toMatchObject({ quantityInProduction: 10 });
 
+    // Each new TO: `created` (article, quantity, date, the KO for level 1), then `released`.
     expect(auditEntries).toEqual([
+      {
+        entityType: "manufacturing_order",
+        entityId: childMo!.orderNumber,
+        action: "created",
+        detail: { articleNumber: world.child.articleNumber, quantity: 10, dueDate: childOrder.dueDate },
+      },
       { entityType: "manufacturing_order", entityId: childMo!.orderNumber, action: "released", detail: undefined },
+      {
+        entityType: "manufacturing_order",
+        entityId: parentMo!.orderNumber,
+        action: "created",
+        detail: { articleNumber: world.parent.articleNumber, quantity: 10, dueDate: "2030-03-15", salesOrderNumber: order.orderNumber },
+      },
       { entityType: "manufacturing_order", entityId: parentMo!.orderNumber, action: "released", detail: undefined },
       {
         entityType: "sales_order",
