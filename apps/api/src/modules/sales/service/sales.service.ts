@@ -2265,7 +2265,7 @@ export function createSalesService(
     // a 1-row batch so it too creates a delivery occasion (deliveryId/
     // deliveryNumber), while keeping the original row/orderStatus response
     // shape callers already depend on.
-    async deliverGoods(orderId: string, rowId: string, input: DeliverGoodsInput, createdBy: string) {
+    async deliverGoods(orderId: string, rowId: string, input: DeliverGoodsInput, createdBy: string | null) {
       const overDeliveryPercent = await overDeliveryPercentForOrder(orderId);
       const result = await repo.deliverBatch(orderId, {
         locationId: input.locationId,
@@ -2297,7 +2297,7 @@ export function createSalesService(
 
     // Leveranstillfälle (delivery occasion) — C2: delivers several rows in
     // one go, creating a single delivery record for them.
-    async deliverBatch(orderId: string, input: DeliverBatchInput, createdBy: string) {
+    async deliverBatch(orderId: string, input: DeliverBatchInput, createdBy: string | null) {
       const overDeliveryPercent = await overDeliveryPercentForOrder(orderId);
       const result = await repo.deliverBatch(orderId, { ...input, createdBy, overDeliveryPercent });
       if (result.ok) {

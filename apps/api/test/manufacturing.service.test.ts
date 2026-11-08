@@ -1063,8 +1063,9 @@ describe("manufacturing service — listManufacturingOrders withOperations", () 
     const withOps = await mfgService.listManufacturingOrders({ limit: 50, offset: 0, withOperations: true });
     const row = withOps.rows.find((r) => r.id === order.id)!;
     expect(row.operations).toHaveLength(2);
-    expect(row.operations.map((op) => op.sequenceNo)).toEqual([10, 20]);
-    expect(row.operations[0]).toMatchObject({
+    const operations = row.operations!;
+    expect(operations.map((op) => op.sequenceNo)).toEqual([10, 20]);
+    expect(operations[0]).toMatchObject({
       status: "pending",
       workCenterCode: "520",
       workCenterName: "Kapning",
@@ -1072,7 +1073,7 @@ describe("manufacturing service — listManufacturingOrders withOperations", () 
       productionGroupCode: null,
       productionGroupName: null,
     });
-    expect(row.operations[1]).toMatchObject({
+    expect(operations[1]).toMatchObject({
       workCenterCode: "510",
       workCenterName: "MIG",
       productionGroupCode: "500",

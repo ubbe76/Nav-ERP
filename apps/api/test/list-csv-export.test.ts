@@ -106,7 +106,11 @@ registerListCsvRoute(app, {
   querySchema: listArticlesQuerySchema,
   filenameBase: "artiklar",
   columns: articleExportColumns,
-  fetch: (q) => articleService.listArticles(q),
+  // As the route: the export always carries the ABC column.
+  fetch: async (q) => {
+    const page = await articleService.listArticles({ ...q, withAbc: true });
+    return { ...page, rows: page.rows.map((row) => ({ abcClass: null, ...row })) };
+  },
 });
 registerListCsvRoute(app, {
   path: "/accounts/csv",

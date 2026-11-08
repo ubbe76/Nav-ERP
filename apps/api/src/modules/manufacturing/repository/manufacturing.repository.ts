@@ -1751,13 +1751,19 @@ export function createManufacturingRepository(db: Db) {
           .where(where),
       ]);
       const total = totalRows[0]!.total;
-      if (!query.withOperations) return { rows, total };
+      // One row shape for both branches: `operations` is there only when
+      // asked for, so it is optional rather than a union the caller narrows.
+      type ListedOrder = (typeof rows)[number] & { operations?: OperationSummary[] };
+      if (!query.withOperations) {
+        const plain: ListedOrder[] = rows;
+        return { rows: plain, total };
+      }
 
       // Opt-in (withOperations): each order's operation summaries, e.g. for
       // integrations. One batched query for the page, merged in JS — same shape as
       // coverageForSalesOrderRows — so the plain register list never pays.
       const summaries = await operationSummariesForOrders(db, rows.map((row) => row.id));
-      return { rows: rows.map((row) => ({ ...row, operations: summaries.get(row.id) ?? [] })), total };
+      return { rows: rows.map((row): ListedOrder => ({ ...row, operations: summaries.get(row.id) ?? [] })), total };
     },
 
     async updateStatus(id: string, status: (typeof manufacturingOrders.$inferSelect)["status"]) {

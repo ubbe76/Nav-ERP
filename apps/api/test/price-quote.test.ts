@@ -178,7 +178,7 @@ describe("GET /price-quote (route, inject)", () => {
     const app = buildTestApp({
       async getPriceQuote(query) {
         expect(query).toEqual({ customerId, articleId, quantity: 3 });
-        return { articleNumber: "ART-1", price: { unitPrice: 42, discountPercent: 0, source: "customer_article" } };
+        return { currency: "SEK", exchangeRate: 1, articleNumber: "ART-1", price: { unitPrice: 42, discountPercent: 0, source: "customer_article" } };
       },
     });
 
@@ -189,6 +189,8 @@ describe("GET /price-quote (route, inject)", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
+      currency: "SEK",
+      exchangeRate: 1,
       articleNumber: "ART-1",
       price: { unitPrice: 42, discountPercent: 0, source: "customer_article" },
     });
@@ -199,7 +201,7 @@ describe("GET /price-quote (route, inject)", () => {
     const articleId = crypto.randomUUID();
     const app = buildTestApp({
       async getPriceQuote() {
-        return { articleNumber: "ART-1", price: null };
+        return { currency: "SEK", exchangeRate: 1, articleNumber: "ART-1", price: null };
       },
     });
 
@@ -209,7 +211,7 @@ describe("GET /price-quote (route, inject)", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ articleNumber: "ART-1", price: null });
+    expect(res.json()).toEqual({ currency: "SEK", exchangeRate: 1, articleNumber: "ART-1", price: null });
   });
 
   it("404s for an unknown article", async () => {

@@ -328,6 +328,14 @@ function groupMarkups(row: { generalMarkupPercent: string | null; materialMarkup
 // register by the planning module (abc.ts) and bound late in app.ts — the
 // article module must not depend on planning. Absent (the fixtures) ⇒ every
 // article's abcClass is null and the abcClass filter matches nothing.
+// The article as getArticle/listArticles return it: abcClass is only there
+// when it was asked for (withAbc or the abcClass filter), so it is optional
+// in the type — one shape for both branches instead of a union a caller has
+// to narrow.
+type ArticleRow = NonNullable<Awaited<ReturnType<ArticleRepository["findById"]>>>;
+type ArticleListRow = Awaited<ReturnType<ArticleRepository["list"]>>["rows"][number];
+type WithAbc<T> = T & { abcClass?: AbcClass | null };
+
 export interface AbcClassReader {
   abcClassByArticle(): Promise<ReadonlyMap<string, AbcClass>>;
 }
@@ -497,7 +505,7 @@ export function createArticleService(
     // too (null outside the classification's selection or without a reader)
     // — one whole classification per read, so it is opt-in: the
     // configurator and other modules call getArticle many times per request.
-    async getArticle(id: string, opts: { withAbc?: boolean } = {}) {
+    async getArticle(id: string, opts: { withAbc?: boolean } = {}): Promise<WithAbc<ArticleRow> | null> {
       const article = await repo.findById(id);
       if (!article) return null;
       if (!opts.withAbc) return article;
@@ -509,7 +517,7 @@ export function createArticleService(
     // asked for (`withAbc`, or the abcClass filter, which needs it) — the
     // ArticlePicker searches this list on every keystroke. The filter
     // becomes an id list for the repository so `total` follows it.
-    async listArticles(query: ListArticlesQuery) {
+    async listArticles(query: ListArticlesQuery): Promise<{ rows: WithAbc<ArticleListRow>[]; total: number }> {
       const filtering = (query.abcClass?.length ?? 0) > 0;
       if (!filtering && query.withAbc !== true) return repo.list(query);
       const classes = await abcClasses();

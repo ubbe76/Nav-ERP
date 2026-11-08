@@ -1754,7 +1754,7 @@ export function createSalesRepository(db: Db) {
       input: {
         locationId?: string;
         rows: { rowId: string; quantity: number; locationId?: string }[];
-        createdBy: string;
+        createdBy: string | null;
         overDeliveryPercent?: number | null;
       }
     ): Promise<DeliverBatchResult> {
