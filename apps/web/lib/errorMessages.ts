@@ -88,7 +88,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "attendance-reason-invalid": "Anledningen finns inte eller är inaktiv — välj en annan.",
   "atf-transaction-mismatch": "ATF-uttaget hör inte till den här medarbetaren i dag.",
   "schedule-balancing-off":
-    "Ordinarie arbetstid och ATF på veckoschemat kräver att Tillåt ATF-uttag via schemat är på under System → Inställningar.",
+    "Ordinarie arbetstid och ATF på veckoschemat kräver att Tillåt ATF-uttag via schemat är på under Personal & lön → Lön & PAXml.",
   "attendance-session-changed":
     "Närvaron ändrades under tiden (till exempel stämplades den ut i terminalen). Öppna den igen och gör om ändringen.",
   "invalid-stop-time": "Sluttiden måste vara efter instämplingen och inte i framtiden.",

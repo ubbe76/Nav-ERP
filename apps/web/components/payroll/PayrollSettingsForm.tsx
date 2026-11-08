@@ -23,6 +23,8 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
   );
   const [codeAtf, setCodeAtf] = useState(settings.paxmlCodeAtf);
   const [thresholdMinutes, setThresholdMinutes] = useState(String(settings.payrollOvertimeThresholdMinutes));
+  const [atfMinutesPerWeek, setAtfMinutesPerWeek] = useState(String(settings.atfMinutesPerWeek));
+  const [scheduleBalancing, setScheduleBalancing] = useState(settings.scheduleBalancing);
 
   const [reasonRequired, setReasonRequired] = useState(settings.attendanceReasonRequired);
   const [toleranceMinutes, setToleranceMinutes] = useState(String(settings.attendanceReasonToleranceMinutes));
@@ -58,6 +60,12 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
       return;
     }
 
+    const atfMinutes = atfMinutesPerWeek.trim() === "" ? 0 : Number(atfMinutesPerWeek);
+    if (!Number.isInteger(atfMinutes) || atfMinutes < 0 || atfMinutes > 600) {
+      setError("ATF-intjäningen måste vara ett heltal 0–600 minuter");
+      return;
+    }
+
     const tolerance = toleranceMinutes.trim() === "" ? 0 : Number(toleranceMinutes);
     if (!Number.isInteger(tolerance) || tolerance < 0 || tolerance > 120) {
       setError("Marginalen måste vara ett heltal 0–120 minuter");
@@ -72,6 +80,8 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
       paxmlCodeOvertimeOffScheduleComp: codeOvertimeOffScheduleComp,
       paxmlCodeAtf: codeAtf,
       payrollOvertimeThresholdMinutes: minutes,
+      atfMinutesPerWeek: atfMinutes,
+      scheduleBalancing,
       attendanceReasonRequired: reasonRequired,
       attendanceReasonToleranceMinutes: tolerance,
       terminalOvertimeChoice: overtimeChoice,
@@ -84,6 +94,8 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
       setCodeOvertimeOffScheduleComp(updated.paxmlCodeOvertimeOffScheduleComp);
       setCodeAtf(updated.paxmlCodeAtf);
       setThresholdMinutes(String(updated.payrollOvertimeThresholdMinutes));
+      setAtfMinutesPerWeek(String(updated.atfMinutesPerWeek));
+      setScheduleBalancing(updated.scheduleBalancing);
       setReasonRequired(updated.attendanceReasonRequired);
       setToleranceMinutes(String(updated.attendanceReasonToleranceMinutes));
       setOvertimeChoice(updated.terminalOvertimeChoice);
@@ -171,6 +183,45 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
             onChange={(e) => setThresholdMinutes(e.target.value)}
           />
         </Field>
+
+        <Field label="ATF-intjäning (minuter per vecka)" htmlFor="atfMinutesPerWeek">
+          <Input
+            id="atfMinutesPerWeek"
+            type="number"
+            min={0}
+            max={600}
+            size="sm"
+            value={atfMinutesPerWeek}
+            onChange={(e) => setAtfMinutesPerWeek(e.target.value)}
+          />
+        </Field>
+        <FormHint attached>
+          Arbetstidsförkortning som tjänas in per fullgjord arbetsvecka, t.ex. 82. 0 = ATF används inte. Kan avvikas
+          per anställd på personalkortet.
+        </FormHint>
+
+        <div className={cardStyles.row}>
+          <div className={cardStyles.texts}>
+            <div className={cardStyles.label}>Tillåt ATF-uttag via schemat</div>
+            <div className={cardStyles.description}>
+              På: veckoscheman kan få ordinarie arbetstid och ATF per vecka. ATF och inarbetning räknas per arbetsdag,
+              och veckans sista arbetsdag blir kortare — är den röd blir dagen före kortare. Av: veckoscheman följer
+              bara sina dagsscheman.
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={scheduleBalancing}
+            aria-label="Tillåt ATF-uttag via schemat"
+            className={cardStyles.switch}
+            data-on={scheduleBalancing}
+            disabled={pending}
+            onClick={() => setScheduleBalancing(!scheduleBalancing)}
+          >
+            <span className={cardStyles.knob} aria-hidden="true" />
+          </button>
+        </div>
 
         <div className={cardStyles.row}>
           <div className={cardStyles.texts}>
