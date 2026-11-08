@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, useTransition, type KeyboardEvent, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Checkbox, Input } from "./Field";
 import { LIST_PAGE_SIZE, LIST_PAGE_SIZE_OPTIONS } from "../../lib/listQuery";
@@ -9,6 +9,22 @@ import { confirmLeave } from "../../lib/unsavedGuard";
 import styles from "./ListControls.module.css";
 import buttonStyles from "./Button.module.css";
 
+// Återkoppling (Nav som program, punkt 7): while a list's new search, filter
+// or page is on its way, <html data-list-pending> fades the table
+// (Table.module.css). Several controls navigate, so it is a count.
+let pendingNavigations = 0;
+function usePendingFlag(pending: boolean) {
+  useEffect(() => {
+    if (!pending) return;
+    pendingNavigations++;
+    document.documentElement.setAttribute("data-list-pending", "");
+    return () => {
+      pendingNavigations = Math.max(pendingNavigations - 1, 0);
+      if (pendingNavigations === 0) document.documentElement.removeAttribute("data-list-pending");
+    };
+  }, [pending]);
+}
+
 // The list pages are URL-driven: search, filters and page live in the query
 // string, the server component refetches on every change. Filter and search
 // changes reset the page.
@@ -16,6 +32,9 @@ export function useListNavigation() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  // The navigation as a transition: pending until the new rows have arrived.
+  const [pending, startTransition] = useTransition();
+  usePendingFlag(pending);
 
   // Resolves false when the unsaved-changes prompt was declined (nothing
   // navigated). skipGuard: the caller has already asked.
@@ -28,7 +47,7 @@ export function useListNavigation() {
     }
     if (resetPage) next.delete("page");
     const qs = next.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    startTransition(() => router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false }));
     return true;
   }
 

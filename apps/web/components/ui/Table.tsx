@@ -28,7 +28,15 @@ interface TableProps<T extends { id: string }> {
   // edge; the new content width (null = reset) goes here. Only from a client
   // component — useListColumns hands it out.
   onColumnResize?: (key: string, width: number | null) => void;
+  // Återkoppling (Nav som program, punkt 7): while the rows are on their way
+  // the table shows grey placeholder rows in its own shape instead of a
+  // "Hämtar …" line. Only while there are no rows to show yet.
+  loading?: boolean;
+  loadingRows?: number;
 }
+
+// Placeholder widths, varied so the rows don't read as a solid block.
+const SKELETON_WIDTHS = ["70%", "55%", "85%", "60%", "75%"];
 
 // Horizontal spacing lives inside the cells (see Table.module.css): 20px at
 // the table's edges and 12px between columns. The whole table is ONE grid,
@@ -69,13 +77,21 @@ export function Table<T extends { id: string }>({
   footer,
   highlightedRowId,
   onColumnResize,
+  loading = false,
+  loadingRows = 5,
 }: TableProps<T>) {
   const gridTemplate = columns.map((c, i) => trackWidth(c.width, i, columns.length)).join(" ");
+  const skeleton = loading && rows.length === 0;
 
   return (
     // data-table / data-row: the keyboard shortcuts' handles (KeyboardShortcuts —
     // ↑/↓ and Enter in a list, right-click opens the row's ⋯ menu).
-    <div className={styles.table} style={{ gridTemplateColumns: gridTemplate }} data-table="">
+    <div
+      className={styles.table}
+      style={{ gridTemplateColumns: gridTemplate }}
+      data-table=""
+      aria-busy={skeleton || undefined}
+    >
       <div className={styles.headerRow}>
         {columns.map((col, i) => (
           <div key={col.key} className={styles.headerCell} data-align={col.align ?? "left"}>
@@ -90,7 +106,20 @@ export function Table<T extends { id: string }>({
           </div>
         ))}
       </div>
-      {rows.length === 0 && <div className={styles.empty}>{emptyText}</div>}
+      {skeleton &&
+        Array.from({ length: loadingRows }, (_, r) => (
+          <div className={styles.row} key={`skeleton-${r}`} aria-hidden="true">
+            {columns.map((col, c) => (
+              <div key={col.key} className={styles.cell} data-align={col.align ?? "left"} data-label={col.label}>
+                {col.label.trim() !== "" && col.header === undefined && (
+                  <span className={styles.skeleton} style={{ width: SKELETON_WIDTHS[(r + c) % SKELETON_WIDTHS.length] }} />
+                )}
+              </div>
+            ))}
+          </div>
+        ))}
+      {skeleton && <span className={styles.srOnly}>Hämtar …</span>}
+      {rows.length === 0 && !skeleton && <div className={styles.empty}>{emptyText}</div>}
       {rows.map((row) => (
         <div className={styles.row} key={row.id} data-row="" data-highlighted={row.id === highlightedRowId || undefined}>
           {columns.map((col) => (
@@ -116,6 +145,35 @@ export function Table<T extends { id: string }>({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// Återkoppling (Nav som program, punkt 7): a table-shaped placeholder for a
+// view whose table (and its columns) only exist once the data has arrived —
+// the reports, the open items. The text is read out to screen readers only.
+export function TableSkeleton({ label, columns = 5, rows = 5 }: { label: string; columns?: number; rows?: number }) {
+  const template = Array.from({ length: columns }, (_, i) => (i === 0 ? "minmax(140px, 2fr)" : "minmax(80px, 1fr)")).join(" ");
+  const cells = Array.from({ length: columns }, (_, i) => i);
+  return (
+    <div className={`${styles.table} ${styles.skeletonTable}`} style={{ gridTemplateColumns: template }} role="status" aria-busy="true">
+      <span className={styles.srOnly}>{label}</span>
+      <div className={styles.headerRow} aria-hidden="true">
+        {cells.map((c) => (
+          <div key={c} className={styles.headerCell}>
+            <span className={styles.skeleton} style={{ width: "45%" }} />
+          </div>
+        ))}
+      </div>
+      {Array.from({ length: rows }, (_, r) => (
+        <div key={r} className={styles.row} aria-hidden="true">
+          {cells.map((c) => (
+            <div key={c} className={styles.cell} data-align={c === 0 ? "left" : "right"}>
+              <span className={styles.skeleton} style={{ width: SKELETON_WIDTHS[(r + c) % SKELETON_WIDTHS.length] }} />
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }

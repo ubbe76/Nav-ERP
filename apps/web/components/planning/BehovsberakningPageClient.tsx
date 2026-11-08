@@ -780,7 +780,8 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
         columns={view.columns}
         onColumnResize={view.onColumnResize}
         rows={articleRows}
-        emptyText={loading ? "Hämtar…" : "Inga artiklar matchar filtren"}
+        loading={loading}
+        emptyText="Inga artiklar matchar filtren"
         renderCell={(row, key) => {
           const state = rowStates[row.id] ?? makeRowState(row);
           const demandForecast = row.demandForecast ?? 0;

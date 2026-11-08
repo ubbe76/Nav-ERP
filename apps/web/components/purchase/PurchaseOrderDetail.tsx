@@ -1,6 +1,7 @@
 "use client";
 
 import { confirmDelete } from "../../lib/confirm";
+import { notify } from "../../lib/notice";
 import { locationOptionLabel } from "../../lib/stockLocations";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
@@ -982,6 +983,7 @@ function ReceiveGoodsForm({
   onDone: () => void;
   onCancel: () => void;
 }) {
+  const router = useRouter();
   const [rowId, setRowId] = useState(rows[0]?.id ?? "");
   const [locationId, setLocationId] = useState(""); // "" = artikelns lagerplats
   const [quantity, setQuantity] = useState("1");
@@ -997,7 +999,7 @@ function ReceiveGoodsForm({
     setPending(true);
     try {
       const result = await runWithShortageConfirm((allowMaterialShortage) =>
-        apiFetch<{ operationReport?: { ok: boolean; message?: string } }>(
+        apiFetch<{ operationReport?: { ok: boolean; message?: string }; receiptId?: string }>(
           `/api/v1/purchase-orders/${orderId}/rows/${rowId}/receive`,
           {
             method: "POST",
@@ -1010,12 +1012,28 @@ function ReceiveGoodsForm({
         )
       );
       if (result === null) return;
-      // Lego row: the receipt auto-reports the linked TO operation; a failed
-      // report leaves the receipt standing, so warn instead of failing.
+      // Återkoppling (punkt 7): what was received, with Ångra on exactly this
+      // receipt. A lego row's failed TO report leaves the receipt standing —
+      // said in a notice of its own.
+      const receiptId = result.receiptId;
+      notify({
+        message: `Inlevererat ${quantity} ${selectedRow?.unitCode ?? ""} ${selectedRow?.articleNumber ?? ""}.`.replace(/\s+\./, "."),
+        action: receiptId
+          ? {
+              label: "Ångra",
+              run: async () => {
+                await apiFetch(`/api/v1/purchase-orders/${orderId}/receipts/${receiptId}/undo`, { method: "POST" });
+                router.refresh();
+                return "Inleveransen är ångrad.";
+              },
+            }
+          : undefined,
+      });
       if (result.operationReport && !result.operationReport.ok) {
-        window.alert(
-          `Inleveransen är bokförd, men legooperationen kunde inte avrapporteras: ${result.operationReport.message ?? "okänt fel"}`
-        );
+        notify({
+          tone: "error",
+          message: `Inleveransen är bokförd, men legooperationen kunde inte avrapporteras: ${result.operationReport.message ?? "okänt fel"}`,
+        });
       }
       onDone();
     } catch (err) {

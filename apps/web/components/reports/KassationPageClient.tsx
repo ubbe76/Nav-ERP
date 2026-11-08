@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Card } from "../ui/Card";
 import { Field, Select } from "../ui/Field";
 import { FormError, FormHint } from "../ui/Form";
-import { Table } from "../ui/Table";
+import { Table, TableSkeleton } from "../ui/Table";
 import { apiFetch } from "../../lib/api";
 import type { ScrapStatisticsResponse } from "../../lib/types";
 import { MonthRangeFields } from "./MonthRangeFields";
@@ -96,7 +96,7 @@ export function KassationPageClient({
       </Card>
 
       <FormError margin="below">{error}</FormError>
-      {loading && <FormHint>Hämtar kassationsstatistiken…</FormHint>}
+      {loading && <TableSkeleton label="Hämtar kassationsstatistiken…" />}
 
       {data && !loading && (
         <>

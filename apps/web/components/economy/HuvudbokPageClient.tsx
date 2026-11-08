@@ -3,10 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Table } from "../ui/Table";
+import { Table, TableSkeleton } from "../ui/Table";
 import { Card } from "../ui/Card";
 import { Field, Input, Select } from "../ui/Field";
-import { FormError, FormHint, FormRow } from "../ui/Form";
+import { FormError, FormRow } from "../ui/Form";
 import { API_URL, apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney } from "../../lib/format";
@@ -330,7 +330,7 @@ export function HuvudbokPageClient({
       </Card>
 
       <FormError margin="below">{error}</FormError>
-      {loading && <FormHint>Hämtar huvudboken…</FormHint>}
+      {loading && <TableSkeleton label="Hämtar huvudboken…" />}
 
       {mode === "single" && !accountId && <p>Välj ett konto för att visa huvudboken.</p>}
 

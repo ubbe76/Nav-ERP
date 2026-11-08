@@ -12,6 +12,8 @@ import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import { confirmDialog } from "../../lib/confirm";
+import { notify } from "../../lib/notice";
+import { formatQuantity } from "../../lib/format";
 import { defaultReportKind, suggestedConsumeQuantity, suggestedReportHours } from "../../lib/moSuggestions";
 import { groupReportRows, moOperationLabel } from "../../lib/moReportRows";
 import { stockholmToday } from "../../lib/date";
@@ -43,6 +45,9 @@ interface ReportPanelProps {
   timeReports: TimeReport[];
   // Dela tid i ställ och produktion: Rapportera tid gets a Typ field.
   timeKindSplit?: boolean;
+  // Ångra rapportering (admin/arbetsledare): the notice after Slutför
+  // operation offers Ångra on exactly that report.
+  canUndoReports?: boolean;
   onDone: () => void;
 }
 
@@ -89,6 +94,7 @@ export function ReportPanel({
   employees,
   timeReports,
   timeKindSplit = false,
+  canUndoReports = false,
   onDone,
 }: ReportPanelProps) {
   const orderDone = orderStatus === "done";
@@ -145,6 +151,7 @@ export function ReportPanel({
               operation={operation}
               locationId={locationId}
               scrapReasonOptions={scrapReasonOptions}
+              canUndo={canUndoReports}
               onDone={onDone}
             />
             {linked.map((m) => (
@@ -194,6 +201,7 @@ function OperationRow({
   operation: op,
   locationId,
   scrapReasonOptions,
+  canUndo,
   onDone,
 }: {
   orderId: string;
@@ -201,6 +209,7 @@ function OperationRow({
   operation: MOOperation;
   locationId: string;
   scrapReasonOptions: ReturnType<typeof useScrapReasons>;
+  canUndo: boolean;
   onDone: () => void;
 }) {
   // Prefilled with what REMAINS of the order quantity (terminal partials
@@ -263,6 +272,21 @@ function OperationRow({
         "_blank",
         "noopener"
       );
+      // Återkoppling (punkt 7): what was booked, with Ångra on this report.
+      notify({
+        message: `Rapporterat ${formatQuantity(reported)} OK${scrapQty > 0 ? ` och ${formatQuantity(scrapQty)} kasserat` : ""} på ${moOperationLabel(op)}.`,
+        action:
+          canUndo && reportId
+            ? {
+                label: "Ångra",
+                run: async () => {
+                  await apiFetch(`/api/v1/manufacturing-orders/${orderId}/reports/${reportId}/undo`, { method: "POST" });
+                  onDone();
+                  return "Rapporteringen är ångrad.";
+                },
+              }
+            : undefined,
+      });
       // router.refresh keeps this row's state, and a partial report leaves
       // the operation pending — start over from the new remainder.
       setQuantity(null);

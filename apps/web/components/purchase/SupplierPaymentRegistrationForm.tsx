@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { Table } from "../ui/Table";
+import { Table, TableSkeleton } from "../ui/Table";
 import { Button } from "../ui/Button";
 import { Checkbox, Field, Input, Select } from "../ui/Field";
 import { Card } from "../ui/Card";
@@ -295,7 +295,7 @@ export function SupplierPaymentRegistrationForm({
           </Field>
         </FormRow>
 
-        {supplierId && rowsLoading && <p>Hämtar öppna poster…</p>}
+        {supplierId && rowsLoading && <TableSkeleton label="Hämtar öppna poster…" rows={3} />}
         {supplierId && !rowsLoading && rows.length === 0 && <p>Leverantören har inga öppna poster.</p>}
 
         {rows.length > 0 && (

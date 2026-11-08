@@ -15,6 +15,7 @@ import { useCountState, useScanFeedback, useScanQueue } from "../ui/useOrderScan
 import { apiFetch } from "../../lib/api";
 import { outflowLocationChoices } from "../../lib/stockLocations";
 import { confirmDialog } from "../../lib/confirm";
+import { notify } from "../../lib/notice";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { configuredDeliveryWarning } from "../../lib/configuredDelivery";
 import { toBaseQuantity, toUnitQuantity } from "../../lib/units";
@@ -43,6 +44,7 @@ import { HelpLink } from "../ui/HelpLink";
 import { FormError, FormHint, FormNotice } from "../ui/Form";
 import { BookTransportButton } from "../shipping/BookTransportButton";
 import { PalletCardDialog } from "../documents/PalletCardDialog";
+import { UndoDeliveryDialog } from "./UndoDeliveryDialog";
 import styles from "./DeliveryPageClient.module.css";
 
 const NO_COUNT: OrderCountState = { counting: false, quantities: {} };
@@ -130,7 +132,12 @@ export function DeliveryPageClient({
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [palletCardDeliveryId, setPalletCardDeliveryId] = useState<string | null>(null);
-  const [done, setDone] = useState<{ message: string; deliveryId: string; deliveryNumber: string } | null>(null);
+  const [done, setDone] = useState<{ message: string; orderId: string; deliveryId: string; deliveryNumber: string } | null>(
+    null
+  );
+  // Ångra… from the result block or the notice: the order card's own dialog,
+  // row by row (Ångra utleverans is per delivery row).
+  const [undoDelivery, setUndoDelivery] = useState<{ orderId: string; deliveryId: string } | null>(null);
   const scanField = useRef<HTMLInputElement>(null);
   // The props the queued scan handlers read — a handler may run after a
   // navigation it did not see.
@@ -311,7 +318,8 @@ export function DeliveryPageClient({
     const toDeliver = openRows
       .map((row) => ({ row, quantity: Number(enteredQuantity(scanRowOf(row), count)) }))
       .filter(({ quantity }) => quantity > 0);
-    if (toDeliver.length === 0) return;
+    if (toDeliver.length === 0 || !selectedId) return;
+    const deliveredOrderId = selectedId;
 
     setPending(true);
     try {
@@ -332,8 +340,19 @@ export function DeliveryPageClient({
       );
       setDone({
         message: `${toDeliver.length} rad${toDeliver.length === 1 ? "" : "er"} utlevererade`,
+        orderId: deliveredOrderId,
         deliveryId: result.deliveryId,
         deliveryNumber: result.deliveryNumber,
+      });
+      notify({
+        message: `Utlevererat ${toDeliver.length} rad${toDeliver.length === 1 ? "" : "er"} på ${order?.orderNumber ?? ""} — följesedel ${result.deliveryNumber}.`,
+        action: {
+          label: "Ångra…",
+          run: async () => {
+            setUndoDelivery({ orderId: deliveredOrderId, deliveryId: result.deliveryId });
+            return null;
+          },
+        },
       });
       setCount(NO_COUNT);
       setLastRowId(null);
@@ -458,7 +477,22 @@ export function DeliveryPageClient({
             onClose={() => setPalletCardDeliveryId(null)}
           />
           <BookTransportButton deliveryId={done.deliveryId} shipment={null} enabled={freightEnabled} />
+          <button
+            type="button"
+            className={`${buttonStyles.button} ${buttonStyles.ghost}`}
+            onClick={() => setUndoDelivery({ orderId: done.orderId, deliveryId: done.deliveryId })}
+          >
+            Ångra…
+          </button>
         </div>
+      )}
+      {undoDelivery && (
+        <UndoDeliveryDialog
+          orderId={undoDelivery.orderId}
+          deliveryId={undoDelivery.deliveryId}
+          open
+          onClose={() => setUndoDelivery(null)}
+        />
       )}
 
       <FormError margin="below">{formError}</FormError>

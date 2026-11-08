@@ -8,7 +8,7 @@ import { ArticlePicker, type ArticlePickerValue } from "../ui/ArticlePicker";
 import { Checkbox, Field, Input, Select } from "../ui/Field";
 import { FormError, FormHint, FormRow, FormStack } from "../ui/Form";
 import { GatedLink } from "../ui/GatedLink";
-import { Table } from "../ui/Table";
+import { Table, TableSkeleton } from "../ui/Table";
 import { StatusPill } from "../ui/StatusPill";
 import { API_URL, apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
@@ -302,7 +302,7 @@ export function OrderRegisterPageClient({
       </Card>
 
       <FormError margin="below">{error}</FormError>
-      {loading && <FormHint>Hämtar orderförteckningen…</FormHint>}
+      {loading && <TableSkeleton label="Hämtar orderförteckningen…" />}
 
       {data && !loading && (
         <>

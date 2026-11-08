@@ -896,6 +896,7 @@ export function ManufacturingOrderDetail({
             employees={employees}
             timeReports={timeReports}
             timeKindSplit={timeKindSplit}
+            canUndoReports={canUndoReports}
             onDone={() => router.refresh()}
           />
         </>

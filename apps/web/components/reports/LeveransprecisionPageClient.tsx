@@ -6,7 +6,7 @@ import { KpiRow, KpiTile } from "../dashboard/KpiTile";
 import { Card } from "../ui/Card";
 import { Field, Select } from "../ui/Field";
 import { FormError, FormHint } from "../ui/Form";
-import { Table } from "../ui/Table";
+import { Table, TableSkeleton } from "../ui/Table";
 import { GatedLink } from "../ui/GatedLink";
 import { apiFetch } from "../../lib/api";
 import { formatMoney, formatPercent } from "../../lib/format";
@@ -341,7 +341,7 @@ export function LeveransprecisionPageClient({
       </Card>
 
       <FormError margin="below">{error}</FormError>
-      {loading && <FormHint>Hämtar leveransprecision…</FormHint>}
+      {loading && <TableSkeleton label="Hämtar leveransprecision…" />}
 
       {data && !loading && (
         <>

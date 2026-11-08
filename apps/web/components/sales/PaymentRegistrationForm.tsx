@@ -3,7 +3,7 @@
 import { confirmDialog } from "../../lib/confirm";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { Table } from "../ui/Table";
+import { Table, TableSkeleton } from "../ui/Table";
 import { Button } from "../ui/Button";
 import { Checkbox, Field, Input, Select } from "../ui/Field";
 import { Card } from "../ui/Card";
@@ -365,7 +365,7 @@ export function PaymentRegistrationForm({
         </FormRow>
         <FormError>{ocrError}</FormError>
 
-        {customerId && rowsLoading && <p>Hämtar öppna poster…</p>}
+        {customerId && rowsLoading && <TableSkeleton label="Hämtar öppna poster…" rows={3} />}
         {customerId && !rowsLoading && rows.length === 0 && <p>Kunden har inga öppna poster.</p>}
 
         {rows.length > 0 && (

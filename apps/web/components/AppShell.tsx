@@ -7,6 +7,7 @@ import { StatusBar } from "./StatusBar";
 import { PermissionsProvider } from "./PermissionsProvider";
 import { ArticleOverviewProvider } from "./articles/ArticleOverviewProvider";
 import { ConfirmDialogHost } from "./ui/ConfirmDialogHost";
+import { NoticeHost } from "./ui/NoticeHost";
 import { ReadOnlyBanner } from "./ReadOnlyBanner";
 import { FavoritesProvider } from "./FavoritesProvider";
 import { getCurrentUser } from "../lib/api";
@@ -51,6 +52,7 @@ export async function AppShell({ active, children }: AppShellProps) {
                   deliberately has none. */}
               <ArticleOverviewProvider>{children}</ArticleOverviewProvider>
               <ConfirmDialogHost />
+              <NoticeHost />
             </main>
             <StatusBar userName={user.name} userRole={roleLabel} />
           </div>

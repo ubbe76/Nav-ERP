@@ -153,6 +153,47 @@
   font-weight: 600;
 }
 
+/* Återkoppling (Nav som program, punkt 7): the placeholder rows while the
+   rows are on their way. */
+.skeleton {
+  display: inline-block;
+  height: 10px;
+  max-width: 100%;
+  border-radius: 5px;
+  background: var(--color-divider);
+  vertical-align: middle;
+  animation: skeleton-pulse 1.2s ease-in-out infinite;
+}
+@keyframes skeleton-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+/* TableSkeleton: margin like the report tables it stands in for. */
+.skeletonTable {
+  margin: 12px 0;
+}
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* While a list's search, filter or page is on its way (useListNavigation),
+   the rows that are about to be replaced fade. */
+:global(html[data-list-pending]) main .table {
+  opacity: 0.55;
+  transition: opacity 120ms ease 150ms;
+}
+
 .empty {
   grid-column: 1 / -1;
   padding: 36px 20px;
