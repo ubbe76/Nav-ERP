@@ -131,7 +131,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Planering och beställningspunkt per lager** (vid behov, senare — användarens beslut 2026-11-07) → [#11](https://github.com/ubbe76/Nav-ERP/issues/11) *(hemsidan)*
 - [ ] **Detaljplanering per dag eller timme och köberäkning** (medvetet utanför v1) → [#18](https://github.com/ubbe76/Nav-ERP/issues/18) *(hemsidan)*
 - [ ] **Bakdaterade lagerrörelser** → [#19](https://github.com/ubbe76/Nav-ERP/issues/19) *(hemsidan)*. FIFO-värderingen och inventering per underlagets datum (#26) är klara sedan 2026-11-04. Kvar är att registrera andra lagerrörelser med ett tidigare värderingsdatum, eftersom kolumnen `valued_at` redan finns. Hemsidans text ("Det finns ingen FIFO-värdering …" och metodlistorna i `areas.ts`) ändras vid nästa version.
-- [ ] **Färdig koppling till en webbutik** → [#21](https://github.com/ubbe76/Nav-ERP/issues/21) *(hemsidan)*
 - [ ] **Färdiga kollektivavtal att välja** — OB-fönster, övertidströskel och tidkoder läggs upp av företaget självt. *(hemsidan)*
 - [ ] **Mobilapp** — Nav|ERP och stämpelterminalen används i webbläsaren. *(hemsidan)*
 - [ ] **Aktivitetsbaserad kalkyl** — omkostnaderna fördelas med procentuella påslag. *(hemsidan)*
@@ -143,6 +142,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - Semester- och kompsaldo — förs i lönesystemet; Nav|ERP registrerar semester och kompledighet som frånvaro i timmar (beslut 2026-11-07, #12 stängt). *(hemsidan)*
 - Lämna momsdeklarationen direkt till Skatteverket — filen från Momsrapporten laddas upp i Skatteverkets e-tjänst (beslut 2026-11-08, #20 stängt). *(hemsidan)*
 - Passerkort eller RFID-brickor i stämpelterminalen — personalen identifierar sig med anställningsnumret (beslut 2026-11-08, #22 stängt). *(hemsidan)*
+- Färdig koppling till en webbutik — externa system lägger offerter och ordrar via API:t, och tillägg får händelser som webhooks (beslut 2026-11-08, #21 stängt). *(hemsidan)*
 - Lönesystem — Nav|ERP räknar inte ut lön, skatteavdrag eller arbetsgivaravgifter; PAXml-filen innehåller timmar per tidkod och dag, inte belopp (se Beslut). *(hemsidan)*
 
 ## Beslut
