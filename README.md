@@ -513,7 +513,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.8.4-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.8.5-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -527,7 +527,9 @@ PDF-generering) samt ett publikt OAuth2 client-credentials-API för en extern
 konfigurator. Frontend har in-/utloggning
 (inkl. engångsregistrering av första admin-kontot på `/register`), en
 Översikt-dashboard byggd kring materialflödet (inköp → lager → tillverkning →
-försäljning) med bevakningslista, sidan **Aviseringar** (negativa saldon,
+försäljning) med bevakningslista, där varje användare väljer sina egna kort
+(veckans leveranser och inleveranser, beläggning, fakturor, offerter,
+avvikelser m.fl.), sidan **Aviseringar** (negativa saldon,
 försenade ordrar, förfallna fakturor, offerter att följa upp m.fl., med
 valfri daglig sammanställning per e-post), sidomeny med undermenyer per modul,
 modulhubbar med grupperade listkort, och modul-UI för hela byggordningen.
