@@ -26,6 +26,7 @@ import {
   InvalidObWindowError,
   ObRuleNotFoundError,
   OvertimeDispositionNotFoundError,
+  PayrollSnapshotNotFoundError,
   PeriodNotEndedError,
   PeriodNotLockedError,
   UnattestedEmployeesError,
@@ -63,7 +64,8 @@ function isNotFound(err: unknown): err is Error {
     err instanceof AbsenceNotFoundError ||
     err instanceof AttestationNotFoundError ||
     err instanceof EmployeeNotFoundError ||
-    err instanceof OvertimeDispositionNotFoundError
+    err instanceof OvertimeDispositionNotFoundError ||
+    err instanceof PayrollSnapshotNotFoundError
   );
 }
 
@@ -287,6 +289,32 @@ export async function payrollRoutes(app: FastifyInstance, opts: { service: Payro
       const { year, month } = periodParamsSchema.parse(req.params);
       return handle(reply, async () => {
         const { filename, content } = await service.getCsvExport(year, month);
+        reply.header("Content-Type", "text/csv; charset=utf-8");
+        reply.header("Content-Disposition", contentDisposition(filename));
+        return reply.send(content);
+      });
+    }
+  );
+
+  // Tidigare låsta underlag: the bases earlier unlocks dropped (kept in the
+  // unlock's audit entry), and each as the same CSV — same audience as the
+  // CSV above.
+  app.get<{ Params: { year: string; month: string } }>(
+    "/periods/:year/:month/snapshots",
+    { preHandler: requireRole("admin", "supervisor") },
+    async (req) => {
+      const { year, month } = periodParamsSchema.parse(req.params);
+      return service.listPreviousSnapshots(year, month);
+    }
+  );
+
+  app.get<{ Params: { year: string; month: string; snapshotId: string } }>(
+    "/periods/:year/:month/snapshots/:snapshotId/csv",
+    { preHandler: requireRole("admin", "supervisor") },
+    async (req, reply) => {
+      const { year, month } = periodParamsSchema.parse(req.params);
+      return handle(reply, async () => {
+        const { filename, content } = await service.getPreviousSnapshotCsv(year, month, req.params.snapshotId);
         reply.header("Content-Type", "text/csv; charset=utf-8");
         reply.header("Content-Disposition", contentDisposition(filename));
         return reply.send(content);

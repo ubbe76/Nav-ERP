@@ -3804,6 +3804,18 @@ export interface PeriodEmployeeSummary {
   missingReasonDays?: number;
 }
 
+// GET /periods/:year/:month/snapshots — Tidigare låsta underlag: the bases
+// earlier unlocks of the period dropped (kept in the unlock's audit entry),
+// newest first. CSV per basis: /periods/:year/:month/snapshots/:id/csv.
+export interface PreviousPayrollSnapshot {
+  id: string;
+  lockedAt: string | null;
+  lockedByName: string | null;
+  unlockedAt: string;
+  unlockedByName: string | null;
+  employeeCount: number;
+}
+
 // Mirrors PeriodSummary in payroll.service.ts — GET /periods/:year/:month.
 export interface PeriodSummary {
   year: number;

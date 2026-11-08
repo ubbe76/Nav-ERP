@@ -38,12 +38,23 @@ function historyMonthsSql(employeeId: string) {
     order by 1`;
 }
 
-// A locked period's frozen basis that lists the employee.
+// A locked period's frozen basis that lists the employee — or a basis an
+// unlock dropped and kept in its audit entry (Tidigare låsta underlag).
 function inFrozenSummarySql(employeeId: string) {
-  return sql`exists (
+  return sql`(exists (
     select 1 from payroll_periods
     where summary is not null and summary->'employees' @> jsonb_build_array(jsonb_build_object('employeeId', ${employeeId}::text))
-  )`;
+  ) or exists (
+    select 1 from audit_log
+    where ${unlockedSnapshotNamingSql(employeeId)}
+  ))`;
+}
+
+// An unlock entry whose kept basis lists the employee.
+function unlockedSnapshotNamingSql(employeeId: string) {
+  return sql`entity_type = 'payroll_period' and action = 'unlocked'
+    and jsonb_typeof(detail->'snapshot') = 'object'
+    and detail->'snapshot'->'employees' @> jsonb_build_array(jsonb_build_object('employeeId', ${employeeId}::text))`;
 }
 
 export interface ErasureFacts {
@@ -148,6 +159,14 @@ export async function anonymizeEmployeeInTx(tx: Tx, employeeId: string) {
         order by ord)
       from jsonb_array_elements(summary->'employees') with ordinality as t(e, ord)))
     where summary is not null and summary->'employees' @> jsonb_build_array(jsonb_build_object('employeeId', ${employeeId}::text))`);
+  // …and so do the bases earlier unlocks kept in their audit entries.
+  await tx.execute(sql`
+    update audit_log set detail = jsonb_set(detail, '{snapshot,employees}', (
+      select jsonb_agg(
+        case when e->>'employeeId' = ${employeeId}::text then jsonb_set(e, '{name}', to_jsonb(${ANONYMIZED_NAME}::text)) else e end
+        order by ord)
+      from jsonb_array_elements(detail->'snapshot'->'employees') with ordinality as t(e, ord)))
+    where ${unlockedSnapshotNamingSql(employeeId)}`);
 
   // The audit trail keeps what happened, not what was written in free text.
   const entries = await tx

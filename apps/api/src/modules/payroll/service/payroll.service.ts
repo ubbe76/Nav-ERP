@@ -467,6 +467,13 @@ export class UnattestedEmployeesError extends Error {
   }
 }
 
+export class PayrollSnapshotNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Previous payroll basis ${id} not found`);
+    this.name = "PayrollSnapshotNotFoundError";
+  }
+}
+
 export class PeriodNotLockedError extends Error {
   constructor(year: number, month: number) {
     super(`Payroll period ${periodKey(year, month)} is not locked`);
@@ -1209,19 +1216,41 @@ export function createPayrollService(
     },
 
     // Reopen a locked period: drops the snapshot (the summary is computed
-    // live again) and lets writes back in. Attestations are kept.
+    // live again) and lets writes back in. Attestations are kept. The
+    // dropped snapshot goes into the unlock's audit entry in the same
+    // transaction (the repository writes it) — Tidigare låsta underlag.
     async unlockPeriod(year: number, month: number, userId: string) {
       const period = await repo.findPayrollPeriod(year, month);
       if (!period || period.status !== "locked") throw new PeriodNotLockedError(year, month);
+      const unlocked = await repo.unlockPayrollPeriod(period.id, { entityId: periodKey(year, month), userId });
+      if (!unlocked) throw new PeriodNotLockedError(year, month);
+    },
 
-      await repo.unlockPayrollPeriod(period.id);
-      await audit.log({
-        entityType: "payroll_period",
-        entityId: periodKey(year, month),
-        action: "unlocked",
-        detail: { year, month },
-        userId,
-      });
+    // Tidigare låsta underlag: every basis an unlock of the period dropped,
+    // newest first (when it was locked and unlocked, by whom, how many
+    // employees) — the trace of what could have been exported.
+    async listPreviousSnapshots(year: number, month: number) {
+      const rows = await repo.listUnlockedSnapshots(periodKey(year, month));
+      return rows.map((r) => ({
+        id: r.id,
+        lockedAt: r.lockedAt,
+        lockedByName: r.lockedByName,
+        unlockedAt: r.unlockedAt.toISOString(),
+        unlockedByName: r.unlockedByName,
+        employeeCount: Number(r.employeeCount),
+      }));
+    },
+
+    // One dropped basis as the same CSV as Löneunderlag (CSV). An old
+    // snapshot is read like the period's own (findSnapshot's cast).
+    async getPreviousSnapshotCsv(year: number, month: number, snapshotId: string) {
+      const snapshot = (await repo.findUnlockedSnapshot(periodKey(year, month), snapshotId)) as PeriodSummary | null;
+      if (!snapshot) throw new PayrollSnapshotNotFoundError(snapshotId);
+      const lockedDate = snapshot.lockedAt ? stockholmDateOf(new Date(snapshot.lockedAt)) : "okant";
+      return {
+        filename: `loneunderlag-${periodKey(year, month)}-lasning-${lockedDate}.csv`,
+        content: buildPayrollCsv(snapshot),
+      };
     },
 
     // Per-employee day detail plus the raw session/absence rows the

@@ -85,7 +85,13 @@ export function createAuditRepository(db: Db) {
             entityType: auditLog.entityType,
             entityId: auditLog.entityId,
             action: auditLog.action,
-            detail: auditLog.detail,
+            // A stored document under `snapshot` (Löneperiodens upplåsning
+            // keeps the dropped basis there — hundreds of kB) is never sent
+            // in the list or its CSV: `snapshotSaved: true` says it exists,
+            // and the owning module serves it (Tidigare låsta underlag).
+            detail: sql<unknown>`case when jsonb_typeof(${auditLog.detail}) = 'object' and ${auditLog.detail} ? 'snapshot'
+              then (${auditLog.detail} - 'snapshot') || jsonb_build_object('snapshotSaved', jsonb_typeof(${auditLog.detail}->'snapshot') = 'object')
+              else ${auditLog.detail} end`,
             userId: auditLog.userId,
             userName: users.name,
             createdAt: auditLog.createdAt,

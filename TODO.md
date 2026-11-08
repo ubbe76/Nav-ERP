@@ -40,7 +40,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
-- [ ] **Löneperioden:** upplåsning nollar snapshotten utan spår av vad som exporterats — spara den i upplåsningens audit-rad.
 - [ ] **Händelseloggen:** ingen `created`-händelse för TO.
 - [ ] **Fler kort att välja på Översikten** — **Anpassa Översikten** (#17) har i dag fyra kort (Materialflöde, Att bevaka, Pågående tillverkning, Senaste lagerhändelser). Fler att välja mellan, t.ex. dagens och veckans leveranser, beläggningen denna vecka, materialbrist, förfallna kund- och leverantörsfakturor, offerter att följa upp och öppna reklamationer. Ett nytt kort = en nyckel i `OVERVIEW_CARDS` (shared + webbspegeln `lib/overviewCards.ts`), bredd hel/halv, och en egen hämtning som bara görs när kortet visas. Användarens önskan 2026-11-08.
 - [ ] **Huvudboken:** kontoväljaren utesluter inaktiva konton med historik ("inkl. inaktiva"-val); IB/UB döljs när intervallet saknar rader (IB = UB ≠ 0 vore informativt); sorteringen ordnar över serier på nummer före serie (tie-breaken otestad).

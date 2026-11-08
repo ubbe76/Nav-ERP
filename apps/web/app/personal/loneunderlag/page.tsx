@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { AppShell } from "../../../components/AppShell";
 import { PayrollReportPageClient } from "../../../components/payroll/PayrollReportPageClient";
 import { apiGet, getCurrentUser } from "../../../lib/api";
-import { MONTH_NAMES_SV, type PeriodSummary } from "../../../lib/types";
+import { MONTH_NAMES_SV, type PeriodSummary, type PreviousPayrollSnapshot } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
 import { HelpLink } from "../../../components/ui/HelpLink";
 
@@ -46,7 +46,10 @@ export default async function PayrollReportPage(props: {
   }
 
   const { year, month } = resolvePeriod(searchParams);
-  const summary = await apiGet<PeriodSummary>(`/api/v1/periods/${year}/${month}`, cookieHeader);
+  const [summary, previousSnapshots] = await Promise.all([
+    apiGet<PeriodSummary>(`/api/v1/periods/${year}/${month}`, cookieHeader),
+    apiGet<PreviousPayrollSnapshot[]>(`/api/v1/periods/${year}/${month}/snapshots`, cookieHeader),
+  ]);
   const monthName = MONTH_NAMES_SV[month - 1]!;
   const monthLabel = `${monthName.charAt(0).toUpperCase()}${monthName.slice(1)}`;
 
@@ -62,7 +65,7 @@ export default async function PayrollReportPage(props: {
         <HelpLink chapter="lon" anchor="loneunderlag" label="Hjälp om löneunderlag" />
       </div>
 
-      <PayrollReportPageClient summary={summary} year={year} month={month} />
+      <PayrollReportPageClient summary={summary} previousSnapshots={previousSnapshots} year={year} month={month} />
     </AppShell>
   );
 }

@@ -132,7 +132,7 @@ När alla anställda är attesterade kan en administratör låsa perioden med **
 
 Vid låsningen fryses underlaget i en kopia som alla senare läsningar och exporter utgår från, och alla ändringar bakåt i perioden blockeras: närvarostämplingar, tidrapporter, frånvaro, ATF-transaktioner och schemaändringar för datum i perioden avvisas med att perioden är låst. Under tabellen visas då när perioden låstes.
 
-**Lås upp period** (endast administratör) öppnar perioden igen: den frysta kopian raderas, underlaget räknas om live med nuvarande regler och ändringar släpps in på nytt. Attesteringarna behålls. Arbetsledare ser status och låstidpunkt men har inte knapparna **Lås period** och **Lås upp period**.
+**Lås upp period** (endast administratör) öppnar perioden igen: underlaget räknas om live med nuvarande regler och ändringar släpps in på nytt. Attesteringarna behålls. Den frysta kopian försvinner inte spårlöst — den sparas tillsammans med upplåsningen i händelseloggen och kan laddas ner under [Tidigare låsta underlag](#tidigare-lasta-underlag) på **Löneunderlag**, så det går att se i efterhand vad som var låst (och kan ha exporterats som PAXml) innan perioden öppnades. Arbetsledare ser status och låstidpunkt men har inte knapparna **Lås period** och **Lås upp period**.
 
 ## Övertid
 
@@ -166,6 +166,12 @@ Tabellen delas upp i två grupper efter anställningsformen på personalkortet:
 Anställda utan angiven anställningsform hamnar i en egen grupp, **Ej angiven anställningsform**, med en varning om att anställningsformen behöver kompletteras på personalkortet innan löneunderlaget blir korrekt. Varje grupp har en summeringsrad längst ned med gruppens totala timmar per kolumn.
 
 Till skillnad från Attesteringens tabell, där övertid och övertid helg visas ihopslagna i en kolumn, delas övertiden här upp i **Övertid utbet.** och **Övertid komp** — samma dagvisa val (se [Utbetalning eller komptid](#utbetalning-eller-komptid) ovan) avgör vilken av de två en dags övertid hamnar i. **Ladda ner CSV** och **Ladda ner PDF** ger underlaget som en kalkylarksfil respektive en utskriftsvänlig rapport och delar upp övertiden på samma sätt (CSV:n och PDF:n särredovisar dessutom övertid och övertid helg var för sig), oavsett om perioden är låst. **Exportera PAXml** är inaktiv med texten "Perioden måste vara låst innan PAXml kan exporteras" tills perioden är låst — se nästa avsnitt.
+
+### Tidigare låsta underlag
+
+Har perioden låsts upp någon gång visas avsnittet **Tidigare låsta underlag** under tabellerna, med en rad per upplåsning: **Låst** (när och av vem underlaget låstes), **Upplåst** (när och av vem perioden låstes upp), **Anställda** och **Ladda ner CSV**. CSV-filen har samma kolumner som periodens egen **Ladda ner CSV**, men innehåller underlaget som det såg ut när det var låst — oavsett vad som har ändrats i perioden efteråt. Filen heter `loneunderlag-<period>-lasning-<datum>.csv` efter dagen då underlaget låstes. Upplåsningar från tiden innan funktionen fanns sparade inget underlag och visas inte.
+
+I **System → Händelselogg** visar upplåsningens rad bara att underlaget är sparat (`snapshotSaved: true`), inte själva underlaget. Anonymiseras en anställd byts namnet ut även i de sparade underlagen.
 
 ## PAXml-export
 
