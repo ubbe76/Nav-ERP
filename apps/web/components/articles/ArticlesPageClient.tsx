@@ -24,6 +24,7 @@ import { ARTICLE_TYPE_LABELS, type Article, type ArticleGroup, type ArticleType,
 import shellStyles from "../../components/AppShell.module.css";
 import styles from "../../app/artiklar/page.module.css";
 import editStyles from "./ArticleRegister.module.css";
+import { GatedLink } from "../ui/GatedLink";
 import { HelpLink } from "../ui/HelpLink";
 import { Checkbox } from "../ui/Field";
 import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
@@ -357,6 +358,11 @@ export function ArticlesPageClient({
             <Button type="button" variant="secondary" disabled={copyBusy} onClick={() => void removeFromCopied()}>
               Ta bort ur Kopierat ({selectedIds.length})
             </Button>
+          )}
+          {copiedView && articles.total > 0 && (
+            <GatedLink href="/artiklar/forkalkylera?urval=kopierat" className={`${buttonStyles.button} ${buttonStyles.secondary}`}>
+              Förkalkylera Kopierat
+            </GatedLink>
           )}
           {copiedView && articles.total > 0 && (
             <Button type="button" variant="ghost" disabled={copyBusy} onClick={() => void clearCopied()}>

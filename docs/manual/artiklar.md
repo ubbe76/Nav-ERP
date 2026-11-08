@@ -514,7 +514,7 @@ Ritningar och andra dokument som hör till artikeln. Välj fil med filväljaren 
 
 ## Kopierat
 
-**Kopierat** är din egen arbetslista med artiklar. Du fyller den från de ställen där du hittar artiklar och använder den sedan där ett urval behövs — den kommande rutinen **Förkalkylera flera** läser listan som urval.
+**Kopierat** är din egen arbetslista med artiklar. Du fyller den från de ställen där du hittar artiklar och använder den sedan där ett urval behövs — rutinen [Förkalkylera flera](#forkalkylera-flera) kan läsa listan som urval.
 
 - Listan är **personlig**: ingen annan ser den, och den ligger kvar tills du tömmer den eller ersätter den — även efter utloggning. Den rymmer högst 5 000 artiklar; blir det fler avvisas kopieringen och ingenting läggs till.
 - Artiklarna ligger i den ordning de kopierades. En artikel som redan finns i listan behåller sin plats.
@@ -534,6 +534,10 @@ Innehåller **Kopierat** redan artiklar frågar systemet *Kopierat innehåller N
 
 I artikelregistret visar kryssrutan **Kopierat (N)** i verktygsraden bara artiklarna i din lista (adressen får `?kopierat=1`). Sökning och övriga filter fungerar som vanligt inom listan, och antalet ovanför tabellen följer.
 
+### Förkalkylera Kopierat
+
+När filtret **Kopierat (N)** är på visas länken **Förkalkylera Kopierat**. Den öppnar [Förkalkylera flera](#forkalkylera-flera) med **Kopierat** som urval.
+
 ### Ta bort och tömma
 
 När filtret **Kopierat (N)** är på:
@@ -542,6 +546,49 @@ När filtret **Kopierat (N)** är på:
 - **Töm Kopierat** tar bort alla artiklar ur listan, efter en bekräftelse. Artiklarna i sig påverkas inte.
 
 Raderas en artikel försvinner den också ur alla listor.
+
+## Förkalkylera flera
+
+**Artiklar → Förkalkylera flera** (`/artiklar/forkalkylera`) förkalkylerar många artiklar i ett svep: du väljer ett urval, tittar på siffrorna och sparar de rader du vill behålla. Sidan kräver behörigheten **Artiklar** eller **Tillverkning**. Varje artikel räknas exakt som med **Förkalkylera** på artikelns flik [Kalkyl](#kalkyl).
+
+### Urval
+
+Välj mellan två urval:
+
+- **Kopierat (N)** — artiklarna i din egen lista [Kopierat](#kopierat), i den ordning de kopierades. Valet är avstängt när listan är tom; texten *Kopierat är tomt* länkar då till artikelregistret. Länken **Förkalkylera Kopierat** i artikelregistret öppnar sidan med Kopierat valt.
+- **Filter** med fälten **Artikelnummer från** och **Artikelnummer till** (båda inklusive; jämförelsen sker tecken för tecken, så "A-10" sorteras före "A-9", precis som i listan), **Varugrupp**, **Typ** (**Alla**, **Tillverkad**, **Köpt** eller **Tjänst**, förvalt **Tillverkad**), **Artikelkod** och kryssrutan **Bara aktiva** (förvalt på). Konfiguratormallar ingår aldrig.
+
+Högst 500 artiklar kan förkalkyleras åt gången. Blir urvalet större visas ett felmeddelande och ingenting beräknas — snäva in det med artikelnummerintervall, varugrupp eller artikelkod.
+
+### Antal
+
+Varje artikel räknas med antalet i **sin senaste sparade förkalkyl**. Har artikeln ingen förkalkyl används **Antal när förkalkyl saknas** (förvalt 1). Kryssrutan **Räkna om underliggande nivåer** fungerar som på kortet.
+
+### Tabellen
+
+Klicka **Förkalkylera** (knappen visar **Beräknar…** medan det pågår). Inget sparas ännu. Tabellen har en rad per artikel:
+
+- **Artikelnummer** (länk till artikelkortet) och **Benämning**. Eventuella varningar från kalkylen står under benämningen.
+- **Antal**, med anmärkningen *senaste förkalkyl* eller *valt antal* som visar var antalet kom ifrån.
+- **TVK/st** — tillverkningskostnaden per styck.
+- **Förra TVK/st** med datum, och **Ändring** i kronor och procent. Ändringen visas bara när det finns en tidigare förkalkyl; en höjd kostnad är röd och en sänkt grön.
+- **Standardpris** och **Försäljningspris** — artikelns nuvarande värden.
+- **Pris/st** — förkalkylens försäljningspris per styck.
+
+En artikel som inte går att kalkylera visar felet under benämningen och kan inte markeras. Alla övriga rader är markerade från början; rubrikens kryssruta markerar eller avmarkerar alla. Ovanför tabellen står en sammanfattning, till exempel *12 artiklar, varav 1 med fel*.
+
+### Spara markerade
+
+**Spara markerade (N)** sparar en ny **Förkalkyl** på varje markerad artikel, med antalet som visas i tabellen och samma inställning för underliggande nivåer som förhandsvisningen. Knappen syns bara för dig som får spara kalkyler. Kalkylerna räknas om vid sparandet, så ändrade priser sedan förhandsvisningen kommer med.
+
+Två kryssrutor, båda av från början, gör mer i samma svep:
+
+- **Sätt standardpris** — artikelns standardpris sätts till den sparade kalkylens TVK per styck, som **Sätt standardpris** på kortet.
+- **Sätt försäljningspris** — artikelns försäljningspris sätts till kalkylens pris per styck, som **Sätt försäljningspris** på kortet.
+
+Är någon av dem ikryssad frågar systemet först, till exempel *Spara 12 förkalkyler och sätta standardpris och försäljningspris för 12 artiklar?*.
+
+Efteråt visas *N förkalkyler sparade.* tillsammans med hur många standardpriser och försäljningspriser som sattes. Misslyckas en artikel listas den med orsak; de övriga påverkas inte. En artikel vars kalkyl sparades men vars pris inte kunde sättas finns både bland de sparade och i felen. Därefter räknas tabellen om automatiskt, så **Förra TVK/st**, **Standardpris** och **Försäljningspris** visar det nya läget.
 
 ## Artikelöversikt
 
