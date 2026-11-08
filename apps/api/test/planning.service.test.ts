@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema, createQuoteSchema, createStockLocationSchema, createSupplierSchema, createWeekScheduleSchema, createWorkCenterSchema, listRequirementsQuerySchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -29,6 +30,7 @@ import { createScheduleRepository } from "../src/modules/timereport/repository/s
 import { createScheduleService } from "../src/modules/timereport/service/schedule.service.js";
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
 import { CustomerNotFoundError, SalesOrderNotOpenError } from "../src/modules/planning/service/planning.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const authRepo = createAuthRepository(db);
@@ -110,12 +112,12 @@ async function makeArticle(overrides: {
   rounding?: number;
   active?: boolean;
 }) {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     name: overrides.articleNumber,
     type: "purchased",
     active: true,
     ...overrides,
-  });
+  }));
 }
 
 async function makeSupplierWithCatalog(
@@ -125,7 +127,7 @@ async function makeSupplierWithCatalog(
   leadTimeDays = 7,
   priceBreaks?: { fromQuantity: number; price: number }[]
 ) {
-  const supplier = await purchaseService.createSupplier({ name, active: true });
+  const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name, active: true }));
   for (const articleId of articleIds) {
     await purchaseService.addArticleSupplier(articleId, {
       supplierId: supplier.id,
@@ -140,7 +142,7 @@ async function makeSupplierWithCatalog(
 }
 
 async function makeConfirmedSalesOrder(articleId: string, quantity: number, userId: string) {
-  const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+  const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
   return salesService.createQuote(
     { customerId: customer.id, confirm: true, rows: [{ articleId, quantity, unitPrice: 100 }] },
     userId
@@ -161,20 +163,20 @@ async function addStock(articleId: string, quantity: number) {
 // inquiry-lego.test.ts's makeLegoRouting/releasedMo.
 async function releasedLegoMo(quantity = 4) {
   const user = await makeUser();
-  const supplier = await purchaseService.createSupplier({ name: "Lego AB", active: true });
-  const lego = await mfgService.createWorkCenter({
+  const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lego AB", active: true }));
+  const lego = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
     code: "900",
     name: "Ytbehandling AB",
     type: "subcontract",
     supplierId: supplier.id,
     active: true,
-  });
-  const parent = await articleService.createArticle({
+  }));
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `LEGO-${crypto.randomUUID()}`,
     name: "Legodetalj",
     type: "manufactured",
     active: true,
-  });
+  }));
   await mfgService.createRoutingOperation(parent.id, {
     sequenceNo: 20,
     description: "Ytbehandling",
@@ -202,7 +204,7 @@ describe("planning service — listRequirements", () => {
     await purchaseService.addRow(po.id, { articleId: a.id, quantity: 2, unitPrice: 12.5 });
     await purchaseService.confirm(po.id);
 
-    const { rows, total } = await planningService.listRequirements({ limit: 50, offset: 0 });
+    const { rows, total } = await planningService.listRequirements(parsed(listRequirementsQuerySchema, { limit: 50, offset: 0 }));
 
     expect(total).toBe(1);
     const row = rows[0]!;
@@ -224,10 +226,10 @@ describe("planning service — listRequirements", () => {
     const b = await makeArticle({ articleNumber: "PLAN-B" });
     await addStock(b.id, 8);
 
-    const withoutFlag = await planningService.listRequirements({ limit: 50, offset: 0 });
+    const withoutFlag = await planningService.listRequirements(parsed(listRequirementsQuerySchema, { limit: 50, offset: 0 }));
     expect(withoutFlag.total).toBe(0);
 
-    const withFlag = await planningService.listRequirements({ limit: 50, offset: 0, showAll: true });
+    const withFlag = await planningService.listRequirements(parsed(listRequirementsQuerySchema, { limit: 50, offset: 0, showAll: "true" }));
     expect(withFlag.total).toBe(1);
     expect(withFlag.rows[0]!.articleNumber).toBe("PLAN-B");
     expect(withFlag.rows[0]!.proposalQuantity).toBe(0);
@@ -235,23 +237,23 @@ describe("planning service — listRequirements", () => {
 
   it("filters on search, type and group", async () => {
     const group = await articleService.createArticleGroup({ code: "310", name: "Plåt" });
-    const purchased = await articleService.createArticle({
+    const purchased = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: "FILT-P",
       name: "Filterartikel",
       type: "purchased",
       active: true,
       reorderPoint: 5,
       groupId: group.id,
-    });
+    }));
     await makeArticle({ articleNumber: "FILT-M", type: "manufactured", reorderPoint: 5 });
 
-    const byType = await planningService.listRequirements({ limit: 50, offset: 0, type: "purchased" });
+    const byType = await planningService.listRequirements(parsed(listRequirementsQuerySchema, { limit: 50, offset: 0, type: "purchased" }));
     expect(byType.rows.map((r) => r.articleNumber)).toEqual(["FILT-P"]);
 
-    const byGroup = await planningService.listRequirements({ limit: 50, offset: 0, groupId: group.id });
+    const byGroup = await planningService.listRequirements(parsed(listRequirementsQuerySchema, { limit: 50, offset: 0, groupId: group.id }));
     expect(byGroup.rows.map((r) => r.articleNumber)).toEqual(["FILT-P"]);
 
-    const bySearch = await planningService.listRequirements({ limit: 50, offset: 0, search: "filt-m" });
+    const bySearch = await planningService.listRequirements(parsed(listRequirementsQuerySchema, { limit: 50, offset: 0, search: "filt-m" }));
     expect(bySearch.rows.map((r) => r.articleNumber)).toEqual(["FILT-M"]);
     expect(purchased.id).toBeTruthy();
   });
@@ -265,7 +267,7 @@ describe("planning service — lego operations: open inquiries", () => {
       f.user.id
     );
 
-    const { rows } = await planningService.listRequirements({ limit: 50, offset: 0 });
+    const { rows } = await planningService.listRequirements(parsed(listRequirementsQuerySchema, { limit: 50, offset: 0 }));
     const legoRow = rows.find((r) => r.moOperationId === f.moLegoOp.id)!;
     expect(legoRow).toBeDefined();
     expect(legoRow.proposalQuantity).toBe(4);
@@ -289,7 +291,7 @@ describe("planning service — lego operations: open inquiries", () => {
     await purchaseService.sendInquiry(ordered.inquiry.id, f.user.id);
     await purchaseService.convertInquiryToOrder(ordered.inquiry.id, f.user.id);
 
-    const { rows } = await planningService.listRequirements({ limit: 50, offset: 0 });
+    const { rows } = await planningService.listRequirements(parsed(listRequirementsQuerySchema, { limit: 50, offset: 0 }));
     const legoRow = rows.find((r) => r.moOperationId === f.moLegoOp.id)!;
     expect(legoRow).toBeDefined();
     // The ordered inquiry's PO row books 3 already-ordered, so the
@@ -301,7 +303,7 @@ describe("planning service — lego operations: open inquiries", () => {
 
   it("is an empty array for an operation with no inquiries", async () => {
     const f = await releasedLegoMo(4);
-    const { rows } = await planningService.listRequirements({ limit: 50, offset: 0 });
+    const { rows } = await planningService.listRequirements(parsed(listRequirementsQuerySchema, { limit: 50, offset: 0 }));
     const legoRow = rows.find((r) => r.moOperationId === f.moLegoOp.id)!;
     expect(legoRow).toBeDefined();
     expect(legoRow.openInquiries).toEqual([]);
@@ -415,7 +417,7 @@ describe("planning service — createOrdersFromProposals", () => {
     const a = await makeArticle({ articleNumber: "RND-REQ", rounding: 5 });
     await makeConfirmedSalesOrder(a.id, 12, user.id);
 
-    const { rows } = await planningService.listRequirements({ limit: 50, offset: 0 });
+    const { rows } = await planningService.listRequirements(parsed(listRequirementsQuerySchema, { limit: 50, offset: 0 }));
     const row = rows.find((r) => r.articleId === a.id)!;
     expect(row.rounding).toBe(5);
     expect(row.proposalQuantity).toBe(15);
@@ -451,7 +453,7 @@ describe("planning service — createOrdersFromProposals", () => {
     await articleService.addBomComponent(fg.id, { componentArticleId: c.id, quantity: 2 });
     await makeConfirmedSalesOrder(fg.id, 5, user.id);
 
-    const first = await planningService.listRequirements({ limit: 50, offset: 0 });
+    const first = await planningService.listRequirements(parsed(listRequirementsQuerySchema, { limit: 50, offset: 0 }));
     const fgRow = first.rows.find((r) => r.articleNumber === "CONV-FG")!;
     const cRow = first.rows.find((r) => r.articleNumber === "CONV-C")!;
     expect(fgRow.proposalQuantity).toBe(5);
@@ -470,7 +472,7 @@ describe("planning service — createOrdersFromProposals", () => {
 
     // The planned TO now supplies fg AND (via one-level explosion) demands c;
     // the draft IO supplies c. Nothing left to propose.
-    const second = await planningService.listRequirements({ limit: 50, offset: 0, showAll: true });
+    const second = await planningService.listRequirements(parsed(listRequirementsQuerySchema, { limit: 50, offset: 0, showAll: "true" }));
     for (const row of second.rows) {
       expect(row.proposalQuantity).toBe(0);
     }
@@ -484,7 +486,7 @@ describe("planning service — createOrdersFromProposals", () => {
 // 2030-03-04 is a Monday: the working day before is Friday 2030-03-01.
 describe("planning service — färdigdatumsförslag", () => {
   async function koFor(articleId: string, quantity: number, userId: string, date = "2030-03-04") {
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     return salesService.createQuote(
       { customerId: customer.id, confirm: true, expectedDeliveryDate: date, rows: [{ articleId, quantity, unitPrice: 100 }] },
       userId
@@ -704,7 +706,7 @@ describe("planning service — färdigdatumsförslag", () => {
     const user = await makeUser();
     const a = await makeArticle({ articleNumber: "DD-KO-A" });
     const b = await makeArticle({ articleNumber: "DD-KO-B" });
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     const ko = await salesService.createQuote(
       {
         customerId: customer.id,
@@ -750,7 +752,7 @@ describe("planning service — getArticleOverview", () => {
     const supplier = await makeSupplierWithCatalog("Stål AB", [c.id], 10, 14);
     await addStock(c.id, 10);
 
-    const customer = await salesService.createCustomer({ name: "Bygg AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Bygg AB", active: true }));
     const ko = await salesService.createQuote(
       {
         customerId: customer.id,
@@ -835,7 +837,7 @@ describe("planning service — getArticleOverview", () => {
     const f = await overviewFixture();
 
     const overview = await planningService.getArticleOverview(f.c.id);
-    const { rows } = await planningService.listRequirements({ limit: 50, offset: 0, showAll: true, search: "OV-C" });
+    const { rows } = await planningService.listRequirements(parsed(listRequirementsQuerySchema, { limit: 50, offset: 0, showAll: "true", search: "OV-C" }));
     const mrpRow = rows.find((r) => r.articleId === f.c.id)!;
 
     expect(mrpRow).toBeDefined();
@@ -847,7 +849,7 @@ describe("planning service — getArticleOverview", () => {
   it("counts only an open TO's unreceived remainder as supply, in the overview and the behovsberäkning alike", async () => {
     const user = await makeUser();
     const p = await makeArticle({ articleNumber: "DEL-P", type: "manufactured" });
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     await mfgService.createRoutingOperation(p.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 1, runTimePerUnit: 1 });
     await makeConfirmedSalesOrder(p.id, 12, user.id);
     const mo = await mfgService.createManufacturingOrder({ articleId: p.id, quantity: 10, dueDate: "2026-09-15" }, user.id);
@@ -859,7 +861,7 @@ describe("planning service — getArticleOverview", () => {
     expect(overview.rows.filter((r) => r.kind === "manufacturing_order").map((r) => r.quantity)).toEqual([6]);
     expect(overview.closingBalance).toBe(-2); // 4 on hand + 6 to come − 12 ordered
 
-    const { rows } = await planningService.listRequirements({ limit: 50, offset: 0, showAll: true, search: "DEL-P", refresh: true });
+    const { rows } = await planningService.listRequirements(parsed(listRequirementsQuerySchema, { limit: 50, offset: 0, showAll: "true", search: "DEL-P", refresh: "true" }));
     const row = rows.find((r) => r.articleId === p.id)!;
     expect([row.supplyMo, row.projected, row.proposalQuantity]).toEqual([6, -2, 2]);
   });
@@ -893,7 +895,7 @@ describe("planning service — getArticleOverview", () => {
 describe("planning service — Spärrade lagerplatser", () => {
   async function blockedPlace() {
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    return stockService.createLocation({ warehouseId: warehouse!.id, name: "Karantän", active: true, blocked: true });
+    return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "Karantän", active: true, blocked: true }));
   }
   async function addBlockedStock(articleId: string, quantity: number) {
     const k = await blockedPlace();
@@ -909,7 +911,7 @@ describe("planning service — Spärrade lagerplatser", () => {
     await addStock(a.id, 4);
     await addBlockedStock(a.id, 20);
 
-    const { rows } = await planningService.listRequirements({ limit: 50, offset: 0, showAll: true, search: "SP-A" });
+    const { rows } = await planningService.listRequirements(parsed(listRequirementsQuerySchema, { limit: 50, offset: 0, showAll: "true", search: "SP-A" }));
     const row = rows.find((r) => r.articleId === a.id)!;
     expect([row.onHand, row.projected, row.proposalQuantity]).toEqual([4, -6, 6]);
 
@@ -922,7 +924,7 @@ describe("planning service — Spärrade lagerplatser", () => {
   it("the färdigdatumsförslag finds the firm demand although blocked stock would cover it", async () => {
     const user = await makeUser();
     const m = await makeArticle({ articleNumber: "SP-M", type: "manufactured" });
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     await salesService.createQuote(
       { customerId: customer.id, confirm: true, expectedDeliveryDate: "2030-03-04", rows: [{ articleId: m.id, quantity: 5, unitPrice: 100 }] },
       user.id
@@ -964,12 +966,12 @@ describe("planning service — getArticleOverviews (batch)", () => {
 
     // KO at a customer with 2 transit days: Thursday 2026-10-01 ⇒ ships
     // Tuesday 2026-09-29. Two rows (component and parent) on one order.
-    const customer = await salesService.createCustomer({
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, {
       name: "Bygg AB",
       active: true,
       deliveryDayMode: "dispatch",
       transitDays: 2,
-    });
+    }));
     await salesService.createQuote(
       {
         customerId: customer.id,
@@ -1030,7 +1032,7 @@ describe("planning service — getArticleOverviews (batch)", () => {
 // 2030-03-04 is a Monday, 2030-03-06 a Wednesday.
 describe("planning service — kundorderns behov på avsändningsdagen", () => {
   async function koWith(articleId: string, userId: string, date: string, customerFields: Record<string, unknown> = {}) {
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true, ...customerFields });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true, ...customerFields }));
     return salesService.createQuote(
       { customerId: customer.id, confirm: true, expectedDeliveryDate: date, rows: [{ articleId, quantity: 5, unitPrice: 100 }] },
       userId
@@ -1115,13 +1117,13 @@ describe("planning service — leveranstidskontroll", () => {
       breaks: [],
       active: true,
     });
-    const week = await scheduleService.createWeekSchedule({
+    const week = await scheduleService.createWeekSchedule(parsed(createWeekScheduleSchema, {
       code: "VS40",
       name: "Veckoschema 40h",
       days: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, dayScheduleId: day.id })),
       active: true,
-    });
-    const press = await mfgService.createWorkCenter({ code: "110", name: "Kantpress", weekScheduleId: week.id, active: true });
+    }));
+    const press = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "110", name: "Kantpress", weekScheduleId: week.id, active: true }));
     const p = await makeArticle({ articleNumber: "DTC-P" });
     await makeSupplierWithCatalog("Stål AB", [p.id], 10, 5);
     const m = await makeArticle({ articleNumber: "DTC-M", type: "manufactured" });
@@ -1133,7 +1135,7 @@ describe("planning service — leveranstidskontroll", () => {
     await mfgService.createManufacturingOrder({ articleId: x.id, quantity: 1, dueDate: "2030-03-13" }, user.id);
     // Three in stock, already promised to a KO.
     await addStock(m.id, 3);
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     const ko = await salesService.createQuote(
       { customerId: customer.id, confirm: true, expectedDeliveryDate: "2030-03-20", rows: [{ articleId: m.id, quantity: 3, unitPrice: 100 }] },
       user.id
@@ -1160,7 +1162,7 @@ describe("planning service — leveranstidskontroll", () => {
 
   it("the customer's transit days follow the ship date", async () => {
     const { m } = await world();
-    const customer = await salesService.createCustomer({ name: "Långt bort AB", active: true, deliveryDayMode: "dispatch", transitDays: 2 });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Långt bort AB", active: true, deliveryDayMode: "dispatch", transitDays: 2 }));
     const result = await pinned.checkDeliveryTime({ customerId: customer.id, rows: [{ articleId: m.id, quantity: 3 }] });
     expect(result).toMatchObject({ shipDate: "2030-03-25", deliveryDate: "2030-03-27" });
   });
@@ -1168,9 +1170,9 @@ describe("planning service — leveranstidskontroll", () => {
   it("a quote is checked, a cancelled order is refused", async () => {
     const user = await makeUser();
     const m = await makeArticle({ articleNumber: "DTC-Q", type: "manufactured" });
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     const quote = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: m.id, quantity: 1, unitPrice: 100 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: m.id, quantity: 1, unitPrice: 100 }] }),
       user.id
     );
     expect((await pinned.checkDeliveryTime({ salesOrderId: quote.order.id })).rows).toHaveLength(1);
@@ -1208,7 +1210,7 @@ describe("planning service — Kalkyl structure rows create no demand", () => {
     await articleService.addBomComponent(phantom.id, { componentArticleId: underPhantom.id, quantity: 4 });
     await makeConfirmedSalesOrder(fg.id, 5, user.id);
 
-    const { rows } = await planningService.listRequirements({ limit: 50, offset: 0, showAll: true });
+    const { rows } = await planningService.listRequirements(parsed(listRequirementsQuerySchema, { limit: 50, offset: 0, showAll: "true" }));
     const byNumber = new Map(rows.map((r) => [r.articleNumber, r]));
     expect(byNumber.get("KAL-FG")!.proposalQuantity).toBe(5);
     expect(byNumber.get("KAL-C")!.demandDerived).toBe(10);
@@ -1224,7 +1226,7 @@ describe("planning service — Kalkyl structure rows create no demand", () => {
       user.id
     );
     expect(result.errors).toEqual([]);
-    const after = await planningService.listRequirements({ limit: 50, offset: 0, showAll: true });
+    const after = await planningService.listRequirements(parsed(listRequirementsQuerySchema, { limit: 50, offset: 0, showAll: "true" }));
     const afterByNumber = new Map(after.rows.map((r) => [r.articleNumber, r]));
     expect(afterByNumber.get("KAL-C")!.demandMo).toBe(10);
     expect(afterByNumber.has("KAL-K")).toBe(false);

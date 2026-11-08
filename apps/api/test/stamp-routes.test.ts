@@ -1,3 +1,4 @@
+import { createArticleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db, permissionGroups } from "@navet/db";
@@ -13,6 +14,7 @@ import { createTimeReportRepository } from "../src/modules/timereport/repository
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
 import { localDateOf } from "../src/modules/timereport/repository/stamp-close.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Regel 6 at the route: a stop time (Sluttid) on Stämpla ut is a
 // supervisor's correction on Pågående arbete — the shop floor's terminal
@@ -52,13 +54,13 @@ async function setup() {
     name: "Arbetsledare",
     role: "supervisor",
   });
-  const parent = await articleService.createArticle({
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `P-${crypto.randomUUID()}`,
     name: "Produkt",
     type: "manufactured",
     active: true,
-  });
-  const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+  }));
+  const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
   await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
   const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);
   const [operation] = await mfgService.listOperations(order.id);
@@ -221,8 +223,8 @@ describe("ställ och produktion — rutterna (#14 etapp 3)", () => {
 
   async function released() {
     const user = await authRepo.create({ email: `k-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "Ledare", role: "supervisor" });
-    const parent = await articleService.createArticle({ articleNumber: `P-${crypto.randomUUID()}`, name: "Produkt", type: "manufactured", active: true });
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const parent = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `P-${crypto.randomUUID()}`, name: "Produkt", type: "manufactured", active: true }));
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
     const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);
     const [operation] = await mfgService.listOperations(order.id);
@@ -329,9 +331,9 @@ describe("tidrapportens resurs — rutterna (#15)", () => {
 
   it("refuses a stamp on the station the list showed after a switch (409), keeps the resource on stamp, stop and manual report, and never takes one from a PATCH", async () => {
     const user = await authRepo.create({ email: `w-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "Ledare", role: "supervisor" });
-    const parent = await articleService.createArticle({ articleNumber: `P-${crypto.randomUUID()}`, name: "Produkt", type: "manufactured", active: true });
-    const r100 = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
-    const r200 = await mfgService.createWorkCenter({ code: "200", name: "Svets 2", active: true });
+    const parent = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `P-${crypto.randomUUID()}`, name: "Produkt", type: "manufactured", active: true }));
+    const r100 = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
+    const r200 = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "200", name: "Svets 2", active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: r100.id, setupTime: 10, runTimePerUnit: 2 });
     const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);
     const [operation] = await mfgService.listOperations(order.id);

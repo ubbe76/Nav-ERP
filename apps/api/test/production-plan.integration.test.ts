@@ -1,3 +1,4 @@
+import { createArticleSchema, createWeekScheduleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, count, eq, gt, sql } from "drizzle-orm";
 import { db, moOperationPlanWeeks, moOperations, systemSettings } from "@navet/db";
@@ -20,6 +21,7 @@ import {
   PlanWeekInPastError,
   type ManufacturingPlanReader,
 } from "../src/modules/planning/service/planning.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Produktionsplanering against Postgres: a new TO is planned in its own
 // create transaction, Planera/Flytta/Lås upp write the allocations under the
@@ -153,30 +155,30 @@ async function seedWorld() {
     breaks: [],
     active: true,
   });
-  const week = await scheduleService.createWeekSchedule({
+  const week = await scheduleService.createWeekSchedule(parsed(createWeekScheduleSchema, {
     code: "VS40",
     name: "Veckoschema 40h",
     days: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, dayScheduleId: day.id })),
     active: true,
-  });
-  const r1 = await mfgService.createWorkCenter({ code: "101", name: "Kap", weekScheduleId: week.id, capacityFactor: 1, active: true });
-  const r2 = await mfgService.createWorkCenter({ code: "201", name: "Svets", weekScheduleId: week.id, capacityFactor: 1, active: true });
-  const article = await articleService.createArticle({
+  }));
+  const r1 = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "101", name: "Kap", weekScheduleId: week.id, capacityFactor: 1, active: true }));
+  const r2 = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "201", name: "Svets", weekScheduleId: week.id, capacityFactor: 1, active: true }));
+  const article = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `PLAN-${crypto.randomUUID().slice(0, 8)}`,
     name: "Planeringsartikel",
     type: "manufactured",
     active: true,
-  });
+  }));
   await mfgService.createRoutingOperation(article.id, { sequenceNo: 10, workCenterId: r1.id, setupTime: 0, runTimePerUnit: 60 });
   await mfgService.createRoutingOperation(article.id, { sequenceNo: 20, workCenterId: r2.id, setupTime: 0, runTimePerUnit: 60 });
   // A second article with the same route — load on the resources that is
   // not supply of the first article (Leveranstidskontrollen).
-  const other = await articleService.createArticle({
+  const other = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ANNAN-${crypto.randomUUID().slice(0, 8)}`,
     name: "Annan artikel",
     type: "manufactured",
     active: true,
-  });
+  }));
   await mfgService.createRoutingOperation(other.id, { sequenceNo: 10, workCenterId: r1.id, setupTime: 0, runTimePerUnit: 60 });
   await mfgService.createRoutingOperation(other.id, { sequenceNo: 20, workCenterId: r2.id, setupTime: 0, runTimePerUnit: 60 });
   return { user, r1, r2, article, other };
@@ -473,12 +475,12 @@ describe("the written allocation", () => {
   // rest under 0.01 min used to become a row the CHECK (minutes > 0, two
   // decimals) refused — a 500 in Planera, Flytta and every TO creation.
   async function tinyArticle(world: Awaited<ReturnType<typeof seedWorld>>, runTimePerUnit: number) {
-    const article = await articleService.createArticle({
+    const article = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `TINY-${crypto.randomUUID().slice(0, 8)}`,
       name: "Små minuter",
       type: "manufactured",
       active: true,
-    });
+    }));
     await mfgService.createRoutingOperation(article.id, { sequenceNo: 10, workCenterId: world.r1.id, setupTime: 0, runTimePerUnit });
     await mfgService.createRoutingOperation(article.id, { sequenceNo: 20, workCenterId: world.r2.id, setupTime: 0, runTimePerUnit });
     return article;

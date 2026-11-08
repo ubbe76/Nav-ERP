@@ -1,3 +1,4 @@
+import { createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { asc, eq, sql } from "drizzle-orm";
 import { db, workCenterRateHistory, workCenters } from "@navet/db";
@@ -7,6 +8,7 @@ import { createManufacturingService } from "../src/modules/manufacturing/service
 import { createImportRepository } from "../src/modules/import/repository/import.repository.js";
 import { planWorkCenterImport } from "../src/modules/import/service/work-centers.js";
 import { overlappingTransactions } from "./helpers/overlapping-transactions.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Timkostnad per datum (#14 etapp 4, migration 0189): the resource's hourly
 // rate gets its history from a trigger, so every writer records it — the
@@ -37,7 +39,7 @@ async function history(workCenterId: string) {
 
 describe("work_center_rate_history — the trigger", () => {
   it("records the rate at creation and every change, from any writer", async () => {
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 20, active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 20, active: true }));
     await mfgService.updateWorkCenter(wc.id, { hourlyRate: 550 });
     // A writer the application does not know about.
     await db.update(workCenters).set({ hourlyRate: "600" }).where(eq(workCenters.id, wc.id));
@@ -46,7 +48,7 @@ describe("work_center_rate_history — the trigger", () => {
   });
 
   it("records nothing when the rate did not change", async () => {
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 500, active: true }));
     await mfgService.updateWorkCenter(wc.id, { hourlyRate: 500 });
     await mfgService.updateWorkCenter(wc.id, { name: "Svetsstation", overheadPercent: 30 });
     // The TO percentage has no history of its own.
@@ -54,7 +56,7 @@ describe("work_center_rate_history — the trigger", () => {
   });
 
   it("keeps one row per transaction, and none when the transaction ends where it began", async () => {
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 500, active: true }));
     await db.transaction(async (tx) => {
       await tx.update(workCenters).set({ hourlyRate: "550" }).where(eq(workCenters.id, wc.id));
       await tx.update(workCenters).set({ hourlyRate: "575" }).where(eq(workCenters.id, wc.id));
@@ -70,7 +72,7 @@ describe("work_center_rate_history — the trigger", () => {
   // T2 begins later, sets 700 and commits, then T1 sets 600 — the latest row
   // must be 600, as on the resource, not T2's 700.
   it("orders overlapping transactions by when they changed the rate, not when they began", async () => {
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 500, active: true }));
     await overlappingTransactions(
       async (tx) => {
         await tx.update(workCenters).set({ hourlyRate: "600" }).where(eq(workCenters.id, wc.id));
@@ -90,7 +92,7 @@ describe("work_center_rate_history — the trigger", () => {
   });
 
   it("still replaces its own row on a second change after an overlapping commit", async () => {
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 500, active: true }));
     await overlappingTransactions(
       async (tx) => {
         // Both after T2's row: the own row lies after now() and is still found.
@@ -103,7 +105,7 @@ describe("work_center_rate_history — the trigger", () => {
   });
 
   it("goes with a deleted resource", async () => {
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 500, active: true }));
     await db.delete(workCenters).where(eq(workCenters.id, wc.id));
     expect(await history(wc.id)).toEqual([]);
   });

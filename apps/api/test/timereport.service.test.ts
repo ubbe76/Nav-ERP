@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { attendanceSessions, db } from "@navet/db";
-import { createTimeReportSchema, stampInSchema, stampOutSchema, updateTimeReportSchema } from "@navet/shared";
+import { createTimeReportSchema, stampInSchema, stampOutSchema, updateTimeReportSchema, completeOperationSchema, createArticleSchema, createWorkCenterSchema } from "@navet/shared";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -29,6 +29,7 @@ import { InvalidStatusTransitionError } from "../src/modules/manufacturing/servi
 import { PayrollPeriodLockedError } from "../src/modules/payroll/service/period-lock.js";
 import { localDateOf } from "../src/modules/timereport/repository/stamp-close.js";
 import { failure, waitForLockWaiter } from "./helpers/year-end.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
@@ -76,13 +77,13 @@ async function makeUser() {
 
 async function makeReleasedMoWithOperation() {
   const user = await makeUser();
-  const parent = await articleService.createArticle({
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `PARENT-${crypto.randomUUID()}`,
     name: "Parent",
     type: "manufactured",
     active: true,
-  });
-  const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 20, active: true });
+  }));
+  const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 20, active: true }));
   await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
   const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);
   const [operation] = await mfgService.listOperations(order.id);
@@ -93,13 +94,13 @@ async function makeReleasedMoWithOperation() {
 // simultaneous-stamps tests can pick two distinct moOperationIds.
 async function makeReleasedMoWithTwoOperations() {
   const user = await makeUser();
-  const parent = await articleService.createArticle({
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `PARENT-${crypto.randomUUID()}`,
     name: "Parent",
     type: "manufactured",
     active: true,
-  });
-  const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 20, active: true });
+  }));
+  const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 20, active: true }));
   await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
   await mfgService.createRoutingOperation(parent.id, { sequenceNo: 2, workCenterId: workCenter.id, setupTime: 5, runTimePerUnit: 1 });
   const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);
@@ -208,7 +209,7 @@ describe("stamp sessions (stämpelterminal)", () => {
 
   it("rejects stamping in on an operation that is already done", async () => {
     const { user, operation } = await makeReleasedMoWithOperation();
-    await mfgService.completeOperation(operation.id, { actualTime: 2 }, user.id);
+    await mfgService.completeOperation(operation.id, parsed(completeOperationSchema, { actualTime: 2 }), user.id);
     const employee = await makeEmployee();
 
     await expect(
@@ -258,7 +259,7 @@ describe("stamp sessions (stämpelterminal)", () => {
       user.id
     );
 
-    await timeReportService.stampOut(sessionA.id, {}, user.id);
+    await timeReportService.stampOut(sessionA.id, parsed(stampOutSchema, {}), user.id);
 
     const open = await timeReportService.listStampSessions(true);
     const openIds = open.map((s) => s.id);
@@ -289,7 +290,7 @@ describe("stamp sessions (stämpelterminal)", () => {
 
     const { session: closed, timeReport } = await timeReportService.stampOut(
       session.id,
-      { note: "Klart för idag" },
+      parsed(stampOutSchema, { note: "Klart för idag" }),
       user.id
     );
 
@@ -302,7 +303,7 @@ describe("stamp sessions (stämpelterminal)", () => {
     expect(reports).toHaveLength(1);
     expect(reports[0]!.source).toBe("terminal");
 
-    await expect(timeReportService.stampOut(session.id, {}, user.id)).rejects.toBeInstanceOf(
+    await expect(timeReportService.stampOut(session.id, parsed(stampOutSchema, {}), user.id)).rejects.toBeInstanceOf(
       StampSessionAlreadyStoppedError
     );
   });
@@ -321,7 +322,7 @@ describe("stamp sessions (stämpelterminal)", () => {
       { employeeId: employee.id, moOperationId: operation.id },
       user.id
     );
-    await timeReportService.stampOut(session.id, { markOperationDone: true }, user.id);
+    await timeReportService.stampOut(session.id, parsed(stampOutSchema, { markOperationDone: true }), user.id);
 
     const [refreshedOp] = await mfgService.listOperations(order.id);
     expect(refreshedOp!.status).toBe("done");
@@ -469,7 +470,7 @@ describe("stamp sessions (stämpelterminal)", () => {
       { employeeId: employee.id, moOperationId: operation.id },
       user.id
     );
-    await timeReportService.stampOut(session.id, {}, user.id);
+    await timeReportService.stampOut(session.id, parsed(stampOutSchema, {}), user.id);
 
     const reports = await timeReportService.listTimeReports({ limit: 50, offset: 0 });
     const sources = reports.rows.map((r) => r.source).sort();
@@ -768,7 +769,7 @@ describe("supervisor corrections — attendance sessions and time reports", () =
       { employeeId: employee.id, moOperationId: operation.id },
       user.id
     );
-    const { timeReport } = await timeReportService.stampOut(session.id, {}, user.id);
+    const { timeReport } = await timeReportService.stampOut(session.id, parsed(stampOutSchema, {}), user.id);
 
     await timeReportService.deleteTimeReport(timeReport.id, user.id);
 
@@ -1190,13 +1191,13 @@ describe("ställ och produktion (#14 etapp 3)", () => {
   // one without must not.
   async function linkedFixture() {
     const user = await makeUser();
-    const parent = await articleService.createArticle({
+    const parent = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `PARENT-${crypto.randomUUID()}`, name: "Parent", type: "manufactured", active: true,
-    });
-    const component = await articleService.createArticle({
+    }));
+    const component = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `COMP-${crypto.randomUUID()}`, name: "Komponent", type: "purchased", active: true,
-    });
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 0, active: true });
+    }));
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 0, active: true }));
     const routingOp = await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
     await articleService.addBomComponent(parent.id, { componentArticleId: component.id, quantity: 2, routingOperationId: routingOp.id });
     const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);

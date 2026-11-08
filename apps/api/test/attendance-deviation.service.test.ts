@@ -1,3 +1,4 @@
+import { createArticleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import {
@@ -36,6 +37,7 @@ import {
   AttendanceInputRequiredError,
   AttendanceReasonInvalidError,
 } from "../src/modules/timereport/service/attendance-deviation.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Närvaroavvikelser against Postgres: the reason / overtime guards on
 // Stämpla in närvaro, Stämpla in (regel 5) and Gå hem, wired with the real
@@ -124,13 +126,13 @@ async function setup(opts: { schedule?: boolean } = {}) {
 
 // A released TO with one operation, for Stämpla in.
 async function makeOperation(userId: string) {
-  const parent = await articleService.createArticle({
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `P-${crypto.randomUUID()}`,
     name: "Produkt",
     type: "manufactured",
     active: true,
-  });
-  const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+  }));
+  const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
   await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
   const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, userId);
   const [operation] = await mfgService.listOperations(order.id);

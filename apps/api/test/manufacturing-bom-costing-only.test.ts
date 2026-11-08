@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { bomComponents, db, stockTransactions } from "@navet/db";
-import { createArticleSchema, type CreateArticleInput } from "@navet/shared";
+import { createArticleSchema, type CreateArticleInput, createStockLocationSchema, createWorkCenterSchema } from "@navet/shared";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { CostingOnlyOperationLinkError, createArticleService } from "../src/modules/article/service/article.service.js";
@@ -10,6 +10,7 @@ import { createManufacturingRepository } from "../src/modules/manufacturing/repo
 import { createManufacturingService, OperationHasLinkedMaterialError } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 // "Kalkyl" on a structure row (bom_components.costing_only, Monitor's
 // "End. kal."): the row is priced in the förkalkyl like any other but never
@@ -55,7 +56,7 @@ async function makeArticle(name: string, extra: Partial<CreateArticleInput> = {}
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
 }
 
 async function seedStock(articleId: string, locationId: string, quantity: number) {
@@ -99,7 +100,7 @@ describe("Kalkyl structure row — the article card's API", () => {
   it("lets a Kalkyl row link to a Kalkyl operation, but not an ordinary row — and un-flagging re-checks the link", async () => {
     const parent = await makeArticle("Parent", { type: "manufactured" });
     const material = await makeArticle("Material");
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     const calcOp = await mfgService.createRoutingOperation(parent.id, {
       sequenceNo: 10, workCenterId: wc.id, setupTime: 1, runTimePerUnit: 1, costingOnly: true,
     });
@@ -129,7 +130,7 @@ describe("Kalkyl structure row — the article card's API", () => {
     const parent = await makeArticle("Parent", { type: "manufactured" });
     const a = await makeArticle("A");
     const b = await makeArticle("B");
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     const op = await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: wc.id, setupTime: 1, runTimePerUnit: 1 });
     await articleService.addBomComponent(parent.id, { componentArticleId: a.id, quantity: 1, routingOperationId: op.id, costingOnly: true });
     const ordinary = await articleService.addBomComponent(parent.id, { componentArticleId: b.id, quantity: 1, routingOperationId: op.id });
@@ -162,7 +163,7 @@ describe("Kalkyl structure row — release and reporting", () => {
     const location = await makeLocation();
     await seedStock(ordinary.id, location.id, 100);
     // Deliberately NO stock for the Kalkyl component: it must not warn either.
-    const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: wc.id, setupTime: 1, runTimePerUnit: 1 });
 
     const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);

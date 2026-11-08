@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { db } from "@navet/db";
-import { round2 } from "@navet/shared";
+import { round2, createVerificationSchema } from "@navet/shared";
 import { AccountingPeriodLockedError } from "../src/modules/economy/service/accounting-period-lock.js";
 import { readAccountBalances } from "../src/modules/economy/service/account-balances.js";
 import { missingMonths } from "../src/modules/economy/service/depreciation-schedule.js";
@@ -16,6 +16,7 @@ import { readVatAccountMovements } from "../src/modules/economy/service/vat-acco
 import { createVatReportService } from "../src/modules/economy/service/vat-report.service.js";
 import { DEFAULT_POSTING_SETTINGS, testEconomyRepository, testEconomyService } from "./helpers/services.js";
 import { PLAN_YEAR, accountId, resetFixedAssets, setupFixedAssets, testFixedAssetService, testPoster } from "./helpers/fixed-assets.js";
+import { parsed } from "./helpers/parsed.js";
 
 const service = testFixedAssetService;
 const Y = PLAN_YEAR;
@@ -231,7 +232,7 @@ describe("avyttring", () => {
     await testEconomyService.createSeries({ code: "A", name: "Manuella verifikat" });
     const series = await testEconomyRepository.findSeriesByCode("A");
     const draft = await testEconomyService.createVerification(
-      {
+      parsed(createVerificationSchema, {
         seriesId: series!.id,
         date: `${Y}-09-20`,
         description: "Faktura CNC-fräs",
@@ -240,7 +241,7 @@ describe("avyttring", () => {
           { accountId: gain!.id, debit: 0, credit: 95000 },
           { accountId: await accountId("2610"), debit: 0, credit: 23750 },
         ],
-      },
+      }),
       user.id
     );
     await testEconomyService.book(draft.id, user.id);

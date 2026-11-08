@@ -1,3 +1,4 @@
+import { createArticleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db, permissionGroups } from "@navet/db";
@@ -10,6 +11,7 @@ import { createAuthRepository } from "../src/modules/auth/repository/auth.reposi
 import { createManufacturingRepository } from "../src/modules/manufacturing/repository/manufacturing.repository.js";
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Stämpelterminalens operationslista: GET /terminal/operations lists every
 // stampable operation (released/in-progress order, pending, never lego) with
@@ -36,7 +38,7 @@ afterAll(async () => {
 });
 
 async function makeArticle(articleNumber: string, name: string, type: "manufactured" | "purchased") {
-  return articleService.createArticle({ articleNumber, name, type, active: true });
+  return articleService.createArticle(parsed(createArticleSchema, { articleNumber, name, type, active: true }));
 }
 
 // Rutt 10 Kap(100) → 20 Lego(900) → 30 Svets(200); PLÅT-2 linked to op 10,
@@ -51,11 +53,11 @@ async function setup() {
   // Created out of order so the station sort is exercised. The database
   // holds codes to exactly three digits (work_center_code_three_digits), so
   // "090" stands in for the spec's "90".
-  const svets = await mfgService.createWorkCenter({ code: "200", name: "Svets", active: true });
-  const kap = await mfgService.createWorkCenter({ code: "100", name: "Kap", active: true });
-  const gradning = await mfgService.createWorkCenter({ code: "090", name: "Gradning", active: true });
-  const lego = await mfgService.createWorkCenter({ code: "900", name: "Ytbehandling AB", type: "subcontract", active: true });
-  await mfgService.createWorkCenter({ code: "300", name: "Gammal", active: false });
+  const svets = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "200", name: "Svets", active: true }));
+  const kap = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Kap", active: true }));
+  const gradning = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "090", name: "Gradning", active: true }));
+  const lego = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "900", name: "Ytbehandling AB", type: "subcontract", active: true }));
+  await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "300", name: "Gammal", active: false }));
 
   const parent = await makeArticle(`STOL-${crypto.randomUUID().slice(0, 8)}`, "Stol", "manufactured");
   const plat = await makeArticle("PLÅT-2", "Plåt 2 mm", "purchased");

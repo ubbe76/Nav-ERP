@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, stampSessions } from "@navet/db";
-import { completeOperationSchema, stampOutSchema } from "@navet/shared";
+import { completeOperationSchema, stampOutSchema, createArticleSchema, createWorkCenterSchema } from "@navet/shared";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -10,6 +10,7 @@ import { createManufacturingRepository } from "../src/modules/manufacturing/repo
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Regel 10: an operation (or the whole order) turning done stamps out
 // everyone still stamped in on it, inside the report's own transaction, and
@@ -39,13 +40,13 @@ async function setup() {
     name: "Ledare",
     role: "admin",
   });
-  const article = await articleService.createArticle({
+  const article = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `SAC-${crypto.randomUUID()}`,
     name: "Stol",
     type: "manufactured",
     active: true,
-  });
-  const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 20, active: true });
+  }));
+  const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 20, active: true }));
   await mfgService.createRoutingOperation(article.id, { sequenceNo: 1, workCenterId: wc.id, setupTime: 10, runTimePerUnit: 2 });
   const order = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 5 }, user.id);
   const [operation] = await mfgService.listOperations(order.id);
@@ -126,13 +127,13 @@ describe("regel 10: a done operation stamps out everyone else", () => {
     const { user, employee } = await setup();
     // Own two-operation order: the first operation is not the last, so
     // finishing it completes no order and must leave operation 2's stamp open.
-    const article = await articleService.createArticle({
+    const article = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `SAC2-${crypto.randomUUID()}`,
       name: "Bord",
       type: "manufactured",
       active: true,
-    });
-    const wc = await mfgService.createWorkCenter({ code: "200", name: "Måla", hourlyRate: 400, overheadPercent: 10, active: true });
+    }));
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "200", name: "Måla", hourlyRate: 400, overheadPercent: 10, active: true }));
     await mfgService.createRoutingOperation(article.id, { sequenceNo: 1, workCenterId: wc.id, setupTime: 5, runTimePerUnit: 1 });
     await mfgService.createRoutingOperation(article.id, { sequenceNo: 2, workCenterId: wc.id, setupTime: 5, runTimePerUnit: 1 });
     const order = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 3 }, user.id);

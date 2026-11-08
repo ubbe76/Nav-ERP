@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { asc, sql } from "drizzle-orm";
 import { db, pluginDeliveries, pluginEvents as pluginEventsTable } from "@navet/db";
-import { PLUGIN_EVENT_TYPES, type PluginEventType } from "@navet/shared";
+import { PLUGIN_EVENT_TYPES, type PluginEventType, completeOperationSchema, createArticleSchema, createCustomerSchema, createPurchaseOrderSchema, createQuoteSchema, createStockLocationSchema, createSupplierSchema, createWorkCenterSchema } from "@navet/shared";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -36,6 +36,7 @@ import {
 } from "./helpers/services.js";
 import { insertTestPlugin } from "./helpers/plugins.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Tillägg — every event in the catalogue is sent by its own path through the
 // REAL services (wired as app.ts does), in the change's own transaction: one
@@ -108,12 +109,12 @@ const typesOf = async () => (await events()).map((e) => e.type);
 const clear = () => db.execute(sql`TRUNCATE plugin_deliveries, plugin_events`);
 
 async function makeArticle(type: "purchased" | "manufactured" = "purchased") {
-  return articleService.createArticle({ articleNumber: `ART-${crypto.randomUUID().slice(0, 8)}`, name: "Plåt", type, active: true });
+  return articleService.createArticle(parsed(createArticleSchema, { articleNumber: `ART-${crypto.randomUUID().slice(0, 8)}`, name: "Plåt", type, active: true }));
 }
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: `Lager ${crypto.randomUUID()}`, active: true });
-  return stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
 }
 
 beforeEach(async () => {
@@ -163,7 +164,7 @@ describe("every catalogue event is sent by its path", () => {
   });
 
   it("customer.created and customer.updated", async () => {
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     await salesService.updateCustomer(customer.id, { name: "Kund AB (ny)" });
     await expectEvents([
       { type: "customer.created", entityId: customer.id, entityNumber: customer.customerNumber },
@@ -172,7 +173,7 @@ describe("every catalogue event is sent by its path", () => {
   });
 
   it("supplier.created and supplier.updated", async () => {
-    const supplier = await purchaseService.createSupplier({ name: "ACME AB", active: true });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "ACME AB", active: true }));
     await purchaseService.updateSupplier(supplier.id, { name: "ACME AB (ny)" });
     await expectEvents([
       { type: "supplier.created", entityId: supplier.id, entityNumber: supplier.supplierNumber },
@@ -181,10 +182,10 @@ describe("every catalogue event is sent by its path", () => {
   });
 
   it("quote.created, sales_order.confirmed (Bekräfta and Ny kundorder) and sales_order.cancelled", async () => {
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     const article = await makeArticle();
     await clear();
-    const quote = await salesService.createQuote({ customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 10 }] }, userId);
+    const quote = await salesService.createQuote(parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 10 }] }), userId);
     await salesService.confirm(quote.order.id, userId);
     const confirmed = await salesService.getSalesOrder(quote.order.id);
     const direct = await salesService.createQuote(
@@ -203,24 +204,24 @@ describe("every catalogue event is sent by its path", () => {
   });
 
   it("sales_order.confirmed from Förlorad too; sales_order.cancelled only for an order, once — never for an offert or a stale transition", async () => {
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     const article = await makeArticle();
     const rows = [{ articleId: article.id, quantity: 1, unitPrice: 10 }];
     await clear();
 
     // Förlorad → an order status (the manual status) is a confirmation.
-    const lost = (await salesService.createQuote({ customerId: customer.id, rows }, userId)).order;
+    const lost = (await salesService.createQuote(parsed(createQuoteSchema, { customerId: customer.id, rows }), userId)).order;
     await salesService.setStatus(lost.id, "lost", userId);
     await salesService.setStatus(lost.id, "confirmed", userId);
     const lostConfirmed = (await salesService.getSalesOrder(lost.id))!;
 
     // Bekräfta racing Förlorad: the stale fromStatus writes nothing and sends nothing.
-    const raced = (await salesService.createQuote({ customerId: customer.id, rows }, userId)).order;
+    const raced = (await salesService.createQuote(parsed(createQuoteSchema, { customerId: customer.id, rows }), userId)).order;
     await salesService.setStatus(raced.id, "lost", userId);
     expect(await salesRepository.updateStatus(raced.id, "confirmed", null, "quote")).toBeNull();
 
     // A cancelled offert is not a cancelled order.
-    const quote = (await salesService.createQuote({ customerId: customer.id, rows }, userId)).order;
+    const quote = (await salesService.createQuote(parsed(createQuoteSchema, { customerId: customer.id, rows }), userId)).order;
     await salesService.cancel(quote.id, userId);
 
     // An order cancelled twice (Makulera, then the manual status) sends once.
@@ -240,7 +241,7 @@ describe("every catalogue event is sent by its path", () => {
   });
 
   it("sales_order.delivered per följesedel, with the delivery as data — and nothing for a delivery that was rolled back", async () => {
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     const article = await makeArticle();
     const location = await makeLocation();
     await stockService.recordTransaction({ articleId: article.id, locationId: location.id, quantityDelta: 10, transactionType: "inventory_adjustment" });
@@ -265,7 +266,7 @@ describe("every catalogue event is sent by its path", () => {
   it("invoice.issued and invoice.paid", async () => {
     await setupPostingBaseline();
     await testSystemService.updateSettings({ ...DEFAULT_POSTING_SETTINGS, paymentTolerance: 5 });
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     await clear();
     const draft = await invoiceService.create(
       { customerId: customer.id, rows: [{ description: "Leverans", quantity: 1, unitPrice: 800, vatRate: 25 }] },
@@ -283,11 +284,11 @@ describe("every catalogue event is sent by its path", () => {
   });
 
   it("purchase_order.created and purchase_order.received per received row", async () => {
-    const supplier = await purchaseService.createSupplier({ name: "ACME AB", active: true });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "ACME AB", active: true }));
     const article = await makeArticle();
     const location = await makeLocation();
     await clear();
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, userId);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), userId);
     const row = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 10, unitPrice: 42 });
     await purchaseService.confirm(order.id);
     await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 6 }, userId);
@@ -312,14 +313,14 @@ describe("every catalogue event is sent by its path", () => {
 
   it("manufacturing_order.completed when the last operation's report finishes the order (Slutför operation, the terminal's path)", async () => {
     const article = await makeArticle("manufactured");
-    const machine = await mfgService.createWorkCenter({ code: "100", name: "Svets", type: "machine", active: true });
+    const machine = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", type: "machine", active: true }));
     await mfgService.createRoutingOperation(article.id, { sequenceNo: 10, workCenterId: machine.id, setupTime: 0, runTimePerUnit: 1 });
     await mfgService.createRoutingOperation(article.id, { sequenceNo: 20, workCenterId: machine.id, setupTime: 0, runTimePerUnit: 1 });
     await makeLocation();
     await clear();
     const mo = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 2 }, userId);
     const [first, last] = (await mfgService.listOperations(mo.id)).sort((a, b) => a.sequenceNo - b.sequenceNo);
-    await mfgService.completeOperation(first!.id, {}, userId);
+    await mfgService.completeOperation(first!.id, parsed(completeOperationSchema, {}), userId);
     // A partial report on the last operation receives goods but doesn't finish.
     await mfgService.completeOperation(last!.id, { quantityCompleted: 1, quantityScrapped: 0 }, userId);
     await mfgService.completeOperation(last!.id, { quantityCompleted: 1, quantityScrapped: 0 }, userId);
@@ -330,16 +331,16 @@ describe("every catalogue event is sent by its path", () => {
   });
 
   it("manufacturing_order.completed when a lego receipt reports the last operation", async () => {
-    const supplier = await purchaseService.createSupplier({ name: "Lego AB", active: true });
-    const machine = await mfgService.createWorkCenter({ code: "100", name: "Svets", type: "machine", active: true });
-    const lego = await mfgService.createWorkCenter({ code: "900", name: "Ytbehandling AB", type: "subcontract", supplierId: supplier.id, active: true });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lego AB", active: true }));
+    const machine = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", type: "machine", active: true }));
+    const lego = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "900", name: "Ytbehandling AB", type: "subcontract", supplierId: supplier.id, active: true }));
     const article = await makeArticle("manufactured");
     await mfgService.createRoutingOperation(article.id, { sequenceNo: 10, workCenterId: machine.id, setupTime: 0, runTimePerUnit: 1 });
     await mfgService.createRoutingOperation(article.id, { sequenceNo: 20, workCenterId: lego.id, setupTime: 0, runTimePerUnit: 0, unitPrice: 100 });
     const location = await makeLocation();
     const mo = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 4 }, userId);
     const legoOp = (await mfgService.listOperations(mo.id)).find((op) => op.sequenceNo === 20)!;
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, userId);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), userId);
     const row = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 4, unitPrice: 100, moOperationId: legoOp.id });
     await purchaseService.confirm(order.id);
     await clear();

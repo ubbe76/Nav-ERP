@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema, createQuoteSchema, createStockLocationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, salesOrders } from "@navet/db";
@@ -26,6 +27,7 @@ import { createAuditRepository } from "../src/modules/system/repository/audit.re
 import { pdfText } from "./helpers/pdf.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/services.js";
 import { vatRateGroupId } from "./helpers/vat-group.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Samlingsfakturering: customers flagged collective_invoicing are billed by
 // the routine (one invoice per customer across all delivered orders) and
@@ -96,29 +98,29 @@ async function makeCustomer(
     ourSupplierNumber?: string;
   } = {}
 ) {
-  return salesService.createCustomer({
+  return salesService.createCustomer(parsed(createCustomerSchema, {
     name: opts.name ?? "Kund AB",
     active: true,
     collectiveInvoicing: opts.collectiveInvoicing ?? false,
     invoiceOnHold: opts.invoiceOnHold ?? false,
     privatePerson: opts.privatePerson ?? false,
     ...(opts.ourSupplierNumber ? { ourSupplierNumber: opts.ourSupplierNumber } : {}),
-  });
+  }));
 }
 
 async function makeArticle(vatRate?: number) {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-COLL-${crypto.randomUUID()}`,
     name: "Fakturaartikel",
     type: "manufactured",
     active: true,
     ...(vatRate !== undefined ? { groupId: await vatRateGroupId(vatRate) } : {}),
-  });
+  }));
 }
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
 }
 
 async function makeDeliveredOrderRow(opts: {
@@ -328,7 +330,7 @@ describe("privatperson — documents print prices including VAT", () => {
     const article = await makeArticle(25);
     const user = await makeUser();
     const { order } = await salesService.createQuote(
-      { customerId: person.id, rows: [{ articleId: article.id, quantity: 2, unitPrice: 100 }] },
+      parsed(createQuoteSchema, { customerId: person.id, rows: [{ articleId: article.id, quantity: 2, unitPrice: 100 }] }),
       user.id
     );
     const { content } = await salesService.getSalesOrderPdf(order.id, "quote");
@@ -347,7 +349,7 @@ describe("privatperson — documents print prices including VAT", () => {
     const article = await makeArticle(25);
     const user = await makeUser();
     const { order } = await salesService.createQuote(
-      { customerId: company.id, rows: [{ articleId: article.id, quantity: 2, unitPrice: 100 }] },
+      parsed(createQuoteSchema, { customerId: company.id, rows: [{ articleId: article.id, quantity: 2, unitPrice: 100 }] }),
       user.id
     );
     const text = pdfText((await salesService.getSalesOrderPdf(order.id, "quote")).content);

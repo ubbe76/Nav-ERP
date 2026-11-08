@@ -1,3 +1,4 @@
+import { createArticleSchema, createWeekScheduleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { auditLog, db, manufacturingOrders } from "@navet/db";
@@ -25,6 +26,7 @@ import {
   type ManufacturingOrderCreator,
   type ManufacturingPlanReader,
 } from "../src/modules/planning/service/planning.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Skapa saknade halvfabrikat (pegging #9, etapp 3) against Postgres: the
 // chain product P → halvfabrikat H → sub-halvfabrikat S → raw material R.
@@ -103,31 +105,31 @@ async function seedWorld(opts: { semiOrderQuantity?: number; productNeedsRaw?: b
     role: "admin",
   });
   const day = await scheduleService.createDaySchedule({ code: "D8", name: "Dagtid 8h", startTime: "07:00", endTime: "15:00", breaks: [], active: true });
-  const week = await scheduleService.createWeekSchedule({
+  const week = await scheduleService.createWeekSchedule(parsed(createWeekScheduleSchema, {
     code: "VS40",
     name: "Veckoschema 40h",
     days: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, dayScheduleId: day.id })),
     active: true,
-  });
-  const r1 = await mfgService.createWorkCenter({ code: "101", name: "Kap", weekScheduleId: week.id, capacityFactor: 1, active: true });
-  const r2 = await mfgService.createWorkCenter({ code: "201", name: "Montering", weekScheduleId: week.id, capacityFactor: 1, active: true });
+  }));
+  const r1 = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "101", name: "Kap", weekScheduleId: week.id, capacityFactor: 1, active: true }));
+  const r2 = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "201", name: "Montering", weekScheduleId: week.id, capacityFactor: 1, active: true }));
   const suffix = crypto.randomUUID().slice(0, 8);
-  const raw = await articleService.createArticle({ articleNumber: `R-${suffix}`, name: "Råvara", type: "purchased", active: true });
-  const sub = await articleService.createArticle({ articleNumber: `S-${suffix}`, name: "Delhalvfabrikat", type: "manufactured", active: true });
-  const semi = await articleService.createArticle({
+  const raw = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `R-${suffix}`, name: "Råvara", type: "purchased", active: true }));
+  const sub = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `S-${suffix}`, name: "Delhalvfabrikat", type: "manufactured", active: true }));
+  const semi = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `H-${suffix}`,
     name: "Halvfabrikat",
     type: "manufactured",
     active: true,
     ...(opts.semiOrderQuantity !== undefined ? { orderQuantity: opts.semiOrderQuantity } : {}),
-  });
-  const product = await articleService.createArticle({
+  }));
+  const product = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `P-${suffix}`,
     name: "Produkt",
     type: "manufactured",
     active: true,
     manufacturingLeadTimeDays: 5,
-  });
+  }));
   await mfgService.createRoutingOperation(sub.id, { sequenceNo: 10, workCenterId: r1.id, setupTime: 0, runTimePerUnit: 60 });
   await mfgService.createRoutingOperation(semi.id, { sequenceNo: 10, workCenterId: r1.id, setupTime: 0, runTimePerUnit: 60 });
   await mfgService.createRoutingOperation(product.id, { sequenceNo: 10, workCenterId: r2.id, setupTime: 0, runTimePerUnit: 60 });

@@ -1,3 +1,4 @@
+import { createArticleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, stampSessions, timeReports } from "@navet/db";
@@ -14,6 +15,7 @@ import {
   localDateOf,
   stampedHours,
 } from "../src/modules/timereport/repository/stamp-close.js";
+import { parsed } from "./helpers/parsed.js";
 
 const HOUR = 3_600_000;
 const t0 = new Date("2026-10-14T06:00:00Z");
@@ -82,13 +84,13 @@ async function setup() {
     name: "Ledare",
     role: "admin",
   });
-  const article = await articleService.createArticle({
+  const article = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `SC-${crypto.randomUUID()}`,
     name: "Stol",
     type: "manufactured",
     active: true,
-  });
-  const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 20, active: true });
+  }));
+  const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 20, active: true }));
   await mfgService.createRoutingOperation(article.id, { sequenceNo: 1, workCenterId: wc.id, setupTime: 10, runTimePerUnit: 2 });
   const order = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 5 }, user.id);
   const [operation] = await mfgService.listOperations(order.id);

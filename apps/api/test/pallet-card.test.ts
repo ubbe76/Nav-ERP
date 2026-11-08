@@ -7,6 +7,11 @@ import {
   deliveryPalletCardQuerySchema,
   palletCardQuerySchema,
   type PalletCardCode,
+  completeOperationSchema,
+  createArticleSchema,
+  createCustomerSchema,
+  createStockLocationSchema,
+  stampOutSchema,
 } from "@navet/shared";
 import { pdfPageCount, pdfRectCount, pdfText } from "./helpers/pdf.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
@@ -37,6 +42,7 @@ import { createTimeReportRepository } from "../src/modules/timereport/repository
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
 import { testArticleService } from "./helpers/services.js";
 import { insertPlannedManufacturingOrder } from "./helpers/planned-manufacturing-order.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Pallkort (Etapp F + ny design/omutskrift): the card placed on the pallet
 // when an operation is reported (manufacturing) or a delivery leaves
@@ -120,12 +126,12 @@ async function makeUser(name = "Operator") {
 let workCenterSeq = 100;
 async function makeRoutedArticle(articleNumber: string) {
   const workCenter = await mfgService.createWorkCenter(createWorkCenterSchema.parse({ code: String(workCenterSeq++), name: "Svets" }));
-  const article = await articleService.createArticle({
+  const article = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber,
     name: "Diskbänk 1200",
     type: "manufactured",
     active: true,
-  });
+  }));
   await mfgService.createRoutingOperation(
     article.id,
     createRoutingOperationSchema.parse({
@@ -153,7 +159,7 @@ async function makeRoutedArticle(articleNumber: string) {
 // the last operation" case this feature exists for.
 async function makeLinkedReleasedMo(opts: { customerOrderNumber?: string; customerCode?: PalletCardCode | null; withAddress?: boolean } = {}) {
   const user = await makeUser();
-  const customer = await salesService.createCustomer({ name: "Kund AB", active: true, palletCardCode: opts.customerCode ?? null });
+  const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true, palletCardCode: opts.customerCode ?? null }));
   const address = opts.withAddress
     ? await salesService.createDeliveryAddress(customer.id, {
         label: "Lagret",
@@ -401,7 +407,7 @@ describe("pallkort — per rapport (GET .../reports/:reportId/pallet-card)", () 
 
   it("Slutför operation and the terminal's stamp-out both answer with the report's id", async () => {
     const { user, mo, op10 } = await makeLinkedReleasedMo();
-    const completed = await mfgService.completeOperation(op10.id, { quantityCompleted: 2 }, user.id);
+    const completed = await mfgService.completeOperation(op10.id, parsed(completeOperationSchema, { quantityCompleted: 2 }), user.id);
     expect(completed.reportId).toEqual(expect.any(String));
     expect((await mfgService.getReportPalletCardPdf(mo.id, completed.reportId)).filename).toBe(`pallkort-${mo.orderNumber}-op10.pdf`);
 
@@ -416,7 +422,7 @@ describe("pallkort — per rapport (GET .../reports/:reportId/pallet-card)", () 
 
     // A stamp-out with nothing to report still writes a (time-only) report row.
     const second = await timeReportService.stampIn({ employeeId: employee.id, moOperationId: op10.id }, user.id);
-    const idle = await timeReportService.stampOut(second.id, {}, user.id);
+    const idle = await timeReportService.stampOut(second.id, parsed(stampOutSchema, {}), user.id);
     expect(idle.reportId).toEqual(expect.any(String));
   });
 });
@@ -459,13 +465,13 @@ describe("pallkort — Kod på pallkort", () => {
   });
 
   it("round-trips the customer's palletCardCode (null = follow the system)", async () => {
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     expect((await salesService.getCustomer(customer.id))!.palletCardCode).toBeNull();
     await salesService.updateCustomer(customer.id, { palletCardCode: "qr" });
     expect((await salesService.getCustomer(customer.id))!.palletCardCode).toBe("qr");
     await salesService.updateCustomer(customer.id, { palletCardCode: null });
     expect((await salesService.getCustomer(customer.id))!.palletCardCode).toBeNull();
-    const withCode = await salesService.createCustomer({ name: "Kund 2 AB", active: true, palletCardCode: "barcode" });
+    const withCode = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund 2 AB", active: true, palletCardCode: "barcode" }));
     expect(withCode.palletCardCode).toBe("barcode");
   });
 });
@@ -473,7 +479,7 @@ describe("pallkort — Kod på pallkort", () => {
 describe("pallkort — delivery (GET /deliveries/:id/pallet-card)", () => {
   async function makeDelivery(opts: { customerCode?: PalletCardCode | null; withAddress?: boolean } = {}) {
     const user = await makeUser("Leif Leverans");
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true, palletCardCode: opts.customerCode ?? null });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true, palletCardCode: opts.customerCode ?? null }));
     const address = opts.withAddress
       ? await salesService.createDeliveryAddress(customer.id, {
           label: "Lagret",
@@ -484,20 +490,20 @@ describe("pallkort — delivery (GET /deliveries/:id/pallet-card)", () => {
           isDefault: false,
         })
       : null;
-    const articleA = await articleService.createArticle({
+    const articleA = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: "PALL-A",
       name: "Modul A",
       type: "manufactured",
       active: true,
-    });
-    const articleB = await articleService.createArticle({
+    }));
+    const articleB = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: "PALL-B",
       name: "Modul B",
       type: "manufactured",
       active: true,
-    });
+    }));
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
+    const location = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
     for (const article of [articleA, articleB]) {
       await stockService.recordTransaction({
         articleId: article.id,

@@ -1,3 +1,4 @@
+import { createArticleSchema, createSupplierSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -11,6 +12,7 @@ import { createPurchaseRepository } from "../src/modules/purchase/repository/pur
 import { createSalesRepository } from "../src/modules/sales/repository/sales.repository.js";
 import { markSalesOrderInProduction } from "../src/modules/sales/service/production-transition.js";
 import { insertPlannedManufacturingOrder } from "./helpers/planned-manufacturing-order.js";
+import { parsed } from "./helpers/parsed.js";
 
 // GET /articles/:id/lego-operations — feeds the inquiry row form's
 // "Legooperation" select with the article's own lego routing operations
@@ -48,7 +50,7 @@ async function makeUser() {
 }
 
 async function makeSupplier(name = "Lego AB") {
-  return purchaseRepository.createSupplier({ name, active: true });
+  return purchaseRepository.createSupplier(parsed(createSupplierSchema, { name, active: true }));
 }
 
 // Manufactured article with one machine operation (10) and one lego
@@ -57,21 +59,21 @@ async function makeSupplier(name = "Lego AB") {
 async function makeLegoRouting() {
   const user = await makeUser();
   const supplier = await makeSupplier();
-  const machine = await mfgService.createWorkCenter({ code: "100", name: "Svets", type: "machine", active: true });
-  const lego = await mfgService.createWorkCenter({
+  const machine = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", type: "machine", active: true }));
+  const lego = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
     code: "900",
     name: "Ytbehandling AB",
     type: "subcontract",
     supplierId: supplier.id,
     active: true,
-  });
+  }));
 
-  const parent = await articleService.createArticle({
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `LEGO-${crypto.randomUUID()}`,
     name: "Legodetalj",
     type: "manufactured",
     active: true,
-  });
+  }));
 
   const machineOp = await mfgService.createRoutingOperation(parent.id, {
     sequenceNo: 10,
@@ -160,12 +162,12 @@ describe("GET /articles/:id/lego-operations", () => {
   });
 
   it("returns [] for an article without lego operations", async () => {
-    const plain = await articleService.createArticle({
+    const plain = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: `PLAIN-${crypto.randomUUID()}`,
       name: "Vanlig",
       type: "manufactured",
       active: true,
-    });
+    }));
     expect(await mfgService.listLegoOperationOptions(plain.id)).toEqual([]);
   });
 });

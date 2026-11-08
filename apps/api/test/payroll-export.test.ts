@@ -1,3 +1,4 @@
+import { createWeekScheduleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { stockholmInstant } from "../src/modules/system/service/delivery-days.js";
 import { and, eq, sql } from "drizzle-orm";
@@ -22,6 +23,7 @@ import { createAtfRepository } from "../src/modules/timereport/repository/atf.re
 import { createScheduleRepository } from "../src/modules/timereport/repository/schedule.repository.js";
 import { createScheduleService } from "../src/modules/timereport/service/schedule.service.js";
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
+import { parsed } from "./helpers/parsed.js";
 
 // ---------------------------------------------------------------------------
 // Pure builders (no DB) — the PAXml/CSV knowledge lives entirely in these two
@@ -453,12 +455,12 @@ async function seedPeriod() {
     active: true,
     breaks: [{ type: "unpaid", startTime: "12:00", endTime: "13:00" }],
   });
-  const weekSchedule = await scheduleService.createWeekSchedule({
+  const weekSchedule = await scheduleService.createWeekSchedule(parsed(createWeekScheduleSchema, {
     code: "VDAG",
     name: "Dagtid vecka",
     active: true,
     days: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, dayScheduleId: daySchedule.id })),
-  });
+  }));
 
   // The register code and the PAXml code deliberately differ, so a mix-up
   // between the two would fail: the XML must carry paxmlCode, the CSV code.
@@ -587,7 +589,7 @@ describe("getPaxmlExport", () => {
     const article = await testArticleService.createArticle({
       articleNumber: `PAX-${crypto.randomUUID().slice(0, 8)}`, name: "Bänk", type: "manufactured", unit: "st", active: true,
     } as never);
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 0, active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 0, active: true }));
     await mfgService.createRoutingOperation(article.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
     const order = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 5 }, seeded.user.id);
     const [operation] = await mfgService.listOperations(order.id);

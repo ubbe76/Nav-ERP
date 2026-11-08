@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { asc, eq, sql } from "drizzle-orm";
 import { db, routingOperationAlternatives, routingOperations, workCenters } from "@navet/db";
-import { createArticleSchema, type CreateArticleInput } from "@navet/shared";
+import { createArticleSchema, type CreateArticleInput, createSupplierSchema } from "@navet/shared";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -14,6 +14,7 @@ import {
 } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { routingAlternativesProblem, routingOperationHasAlternativesProblem } from "../src/modules/manufacturing/service/routing-alternatives.js";
 import { createPurchaseRepository } from "../src/modules/purchase/repository/purchase.repository.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Alternativa resurser (#15), etapp 1 — the beredning: the rules for an own
 // operation's alternatives (400 routing-alternative-invalid, 409
@@ -56,7 +57,7 @@ async function storedAlternatives(routingOperationId: string) {
 // 110 Kantpress (the ordinarie), 120 Kantpress 2 with a week of 8 h/day,
 // 130 Kantpress 3 without capacity, 140 Svets, and a legoresurs 900.
 async function resources() {
-  const supplier = await purchaseRepository.createSupplier({ name: `Lego ${crypto.randomUUID().slice(0, 6)}`, active: true });
+  const supplier = await purchaseRepository.createSupplier(parsed(createSupplierSchema, { name: `Lego ${crypto.randomUUID().slice(0, 6)}`, active: true }));
   const wc = (code: string, name: string, extra: Record<string, unknown> = {}) =>
     mfgService.createWorkCenter({ code, name, active: true, ...extra } as never);
   return {

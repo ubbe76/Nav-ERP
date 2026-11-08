@@ -1,3 +1,4 @@
+import { createCustomerSchema, createSupplierSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { sql } from "drizzle-orm";
@@ -20,6 +21,7 @@ import { createSystemService } from "../src/modules/system/service/system.servic
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { resolvePrice } from "../src/modules/sales/service/price-resolver.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Package 5 (uppföljningssvepet): route-level coverage for the customer/
 // supplier duplicate-number 409s (sales.routes.ts / purchase.routes.ts POST
@@ -87,7 +89,7 @@ afterAll(async () => {
 
 describe("POST /customers", () => {
   it("409s duplicate-customer-number when the explicit customerNumber already exists", async () => {
-    await salesService.createCustomer({ name: "Första Kund AB", customerNumber: "K-DUP-1", active: true });
+    await salesService.createCustomer(parsed(createCustomerSchema, { name: "Första Kund AB", customerNumber: "K-DUP-1", active: true }));
 
     const res = await app.inject({
       method: "POST",
@@ -102,7 +104,7 @@ describe("POST /customers", () => {
 
 describe("POST /suppliers", () => {
   it("409s duplicate-supplier-number when the explicit supplierNumber already exists", async () => {
-    await purchaseService.createSupplier({ name: "Första Leverantör AB", supplierNumber: "L-DUP-1", active: true });
+    await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Första Leverantör AB", supplierNumber: "L-DUP-1", active: true }));
 
     const res = await app.inject({
       method: "POST",

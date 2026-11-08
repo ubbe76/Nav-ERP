@@ -1,3 +1,4 @@
+import { createWeekScheduleSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -24,6 +25,7 @@ import {
   swedishHolidays,
 } from "../src/modules/timereport/service/schedule.service.js";
 import { PayrollPeriodLockedError } from "../src/modules/payroll/service/period-lock.js";
+import { parsed } from "./helpers/parsed.js";
 
 const timeReportRepo = createTimeReportRepository(db);
 // Mutable period-lock stub — the real payroll_periods-backed checker is
@@ -141,12 +143,12 @@ describe("day schedules (dagsscheman)", () => {
 describe("week schedules (veckoscheman)", () => {
   it("creates a mon–fri schedule with joined day schedule info", async () => {
     const day = await makeDaySchedule();
-    const week = await service.createWeekSchedule({
+    const week = await service.createWeekSchedule(parsed(createWeekScheduleSchema, {
       code: "VDAG",
       name: "Dagtid vecka",
       active: true,
       days: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, dayScheduleId: day.id })),
-    });
+    }));
 
     expect(week.days).toHaveLength(5);
     expect(week.days[0]).toMatchObject({ weekday: 1, dayScheduleCode: day.code, dayScheduleName: "Dagtid" });
@@ -155,7 +157,7 @@ describe("week schedules (veckoscheman)", () => {
   it("rejects duplicate weekdays and unknown day schedules", async () => {
     const day = await makeDaySchedule();
     await expect(
-      service.createWeekSchedule({
+      service.createWeekSchedule(parsed(createWeekScheduleSchema, {
         code: nextCode(),
         name: "Dubbel måndag",
         active: true,
@@ -163,29 +165,29 @@ describe("week schedules (veckoscheman)", () => {
           { weekday: 1, dayScheduleId: day.id },
           { weekday: 1, dayScheduleId: day.id },
         ],
-      })
+      }))
     ).rejects.toBeInstanceOf(InvalidScheduleError);
 
     await expect(
-      service.createWeekSchedule({
+      service.createWeekSchedule(parsed(createWeekScheduleSchema, {
         code: nextCode(),
         name: "Okänt dagsschema",
         active: true,
         days: [{ weekday: 1, dayScheduleId: crypto.randomUUID() }],
-      })
+      }))
     ).rejects.toBeInstanceOf(DayScheduleNotFoundError);
   });
 
   it("rejects a duplicate code and replaces days wholesale on update", async () => {
     const day = await makeDaySchedule();
-    const week = await service.createWeekSchedule({
+    const week = await service.createWeekSchedule(parsed(createWeekScheduleSchema, {
       code: "VDAG",
       name: "Vecka",
       active: true,
       days: [{ weekday: 1, dayScheduleId: day.id }],
-    });
+    }));
     await expect(
-      service.createWeekSchedule({ code: "VDAG", name: "Kopia", active: true, days: [] })
+      service.createWeekSchedule(parsed(createWeekScheduleSchema, { code: "VDAG", name: "Kopia", active: true, days: [] }))
     ).rejects.toBeInstanceOf(DuplicateScheduleCodeError);
 
     const updated = await service.updateWeekSchedule(week.id, {
@@ -276,12 +278,12 @@ describe("employee default week schedule (standardschema)", () => {
   it("sets, validates and clears defaultWeekScheduleId via employee PATCH", async () => {
     const employee = await makeEmployee();
     const day = await makeDaySchedule();
-    const week = await service.createWeekSchedule({
+    const week = await service.createWeekSchedule(parsed(createWeekScheduleSchema, {
       code: "VDAG",
       name: "Vecka",
       active: true,
       days: [{ weekday: 1, dayScheduleId: day.id }],
-    });
+    }));
 
     await expect(
       timeReportService.updateEmployee(employee.id, { defaultWeekScheduleId: crypto.randomUUID() })
@@ -299,13 +301,13 @@ describe("calendar overrides (kalenderavvikelser)", () => {
   it("upserts week overrides on (year, week) and deletes them", async () => {
     const employee = await makeEmployee();
     const day = await makeDaySchedule();
-    const weekA = await service.createWeekSchedule({ code: "A", name: "A", active: true, days: [] });
-    const weekB = await service.createWeekSchedule({
+    const weekA = await service.createWeekSchedule(parsed(createWeekScheduleSchema, { code: "A", name: "A", active: true, days: [] }));
+    const weekB = await service.createWeekSchedule(parsed(createWeekScheduleSchema, {
       code: "B",
       name: "B",
       active: true,
       days: [{ weekday: 1, dayScheduleId: day.id }],
-    });
+    }));
 
     await service.setWeekOverride(employee.id, { isoYear: 2026, isoWeek: 30, weekScheduleId: weekA.id });
     await service.setWeekOverride(employee.id, { isoYear: 2026, isoWeek: 30, weekScheduleId: weekB.id });
@@ -346,7 +348,7 @@ describe("calendar overrides (kalenderavvikelser)", () => {
   it("rejects every schedule write that touches a locked payroll period", async () => {
     const employee = await makeEmployee();
     const day = await makeDaySchedule();
-    const week = await service.createWeekSchedule({ code: "L", name: "Låst", active: true, days: [] });
+    const week = await service.createWeekSchedule(parsed(createWeekScheduleSchema, { code: "L", name: "Låst", active: true, days: [] }));
     const dayOverride = await service.setDayOverride(employee.id, { date: "2026-07-21", dayScheduleId: day.id });
     const weekOverride = await service.setWeekOverride(employee.id, {
       isoYear: 2026,
@@ -431,18 +433,18 @@ describe("resolveEmployeeCalendar (upplösning)", () => {
     });
     const halv = await makeDaySchedule({ code: "HALV", name: "Halvdag", endTime: "12:00", breaks: [] });
 
-    const standardWeek = await service.createWeekSchedule({
+    const standardWeek = await service.createWeekSchedule(parsed(createWeekScheduleSchema, {
       code: "VDAG",
       name: "Dagtid vecka",
       active: true,
       days: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, dayScheduleId: dag.id })),
-    });
-    const eveningWeek = await service.createWeekSchedule({
+    }));
+    const eveningWeek = await service.createWeekSchedule(parsed(createWeekScheduleSchema, {
       code: "VKVALL",
       name: "Kvällsvecka",
       active: true,
       days: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, dayScheduleId: kvall.id })),
-    });
+    }));
 
     await timeReportService.updateEmployee(employee.id, { defaultWeekScheduleId: standardWeek.id });
     // Week 31 of 2026 (Mon 2026-07-27 … Sun 2026-08-02) runs the evening schedule.
@@ -514,12 +516,12 @@ describe("resolveEmployeeCalendar (upplösning)", () => {
         { type: "paid", startTime: "09:00", endTime: "09:15" },
       ],
     });
-    const week = await service.createWeekSchedule({
+    const week = await service.createWeekSchedule(parsed(createWeekScheduleSchema, {
       code: nextCode(),
       name: "Vecka",
       active: true,
       days: [{ weekday: 1, dayScheduleId: day.id }],
-    });
+    }));
     await timeReportService.updateEmployee(employee.id, { defaultWeekScheduleId: week.id });
 
     // 2026-07-20 is a Monday (weekday 1).
@@ -536,12 +538,12 @@ describe("resolveEmployeeCalendar (upplösning)", () => {
   it("exposes an empty breaks array for a day schedule with no breaks", async () => {
     const employee = await makeEmployee();
     const day = await makeDaySchedule({ code: nextCode(), breaks: [] });
-    const week = await service.createWeekSchedule({
+    const week = await service.createWeekSchedule(parsed(createWeekScheduleSchema, {
       code: nextCode(),
       name: "Vecka",
       active: true,
       days: [{ weekday: 1, dayScheduleId: day.id }],
-    });
+    }));
     await timeReportService.updateEmployee(employee.id, { defaultWeekScheduleId: week.id });
 
     const days = await service.resolveEmployeeCalendar(employee.id, "2026-07-20", "2026-07-20");

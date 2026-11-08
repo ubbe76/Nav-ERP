@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, vatCodes } from "@navet/db";
-import { createRoutingOperationSchema, createWorkCenterSchema } from "@navet/shared";
+import { createRoutingOperationSchema, createWorkCenterSchema, createArticleSchema, createPurchaseOrderSchema, createStockLocationSchema } from "@navet/shared";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -33,6 +33,7 @@ import { createAuditRepository } from "../src/modules/system/repository/audit.re
 import { pdfText } from "./helpers/pdf.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline, testArticleService } from "./helpers/services.js";
 import { resetVatCodes } from "./helpers/vat-codes.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Dokument på engelska (#7), step 2: the customer- and supplier-facing PDFs
 // in English. One English customer/supplier per case; the Swedish documents
@@ -208,7 +209,7 @@ async function makeBaseData() {
   const unit = (await registerService.units.list())[0]!;
   const deliveryTerm = await registerService.deliveryTerms.create({ code: "EXW", name: "Från fabrik", nameEn: "Ex Works" } as never);
   const paymentTerm = await registerService.paymentTerms.create({ code: "30", name: "30 dagar netto", nameEn: "30 days net" } as never);
-  const article = await articleService.createArticle({
+  const article = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: "SB-1200",
     name: "Diskbänk 1200",
     nameEn: "Sink unit 1200",
@@ -217,15 +218,15 @@ async function makeBaseData() {
     type: "manufactured",
     unitId: unit.id,
     active: true,
-  });
+  }));
   // An article WITHOUT English texts — the fallback to Swedish data.
-  const plain = await articleService.createArticle({
+  const plain = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: "UND-600",
     name: "Underrede 600",
     type: "manufactured",
     unitId: unit.id,
     active: true,
-  });
+  }));
   return { unit, deliveryTerm, paymentTerm, article, plain };
 }
 
@@ -547,7 +548,7 @@ describe("delivery note and the customer's pallet card in English", () => {
     const base = await makeBaseData();
     const customer = await makeCustomer(language, base);
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
+    const location = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
     for (const article of [base.article, base.plain]) {
       await stockService.recordTransaction({ articleId: article.id, locationId: location.id, quantityDelta: 10, transactionType: "inventory_adjustment" });
     }
@@ -781,7 +782,7 @@ describe("request for quotation and purchase order in English", () => {
     expect(pdfText(rfq.content)).toContain("Diskbänk 1200");
     expect(pdfText(rfq.content)).toContain("Leveransvillkor: EXW · Från fabrik");
     expect(pdfText(rfq.content)).not.toContain("Sink unit");
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, userId);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), userId);
     await purchaseService.addRow(order.id, { articleId: base.article.id, quantity: 3, unitPrice: 10 });
     const po = await purchaseService.getPurchaseOrderPdf(order.id);
     expect(po.filename).toBe(`${order.orderNumber}.pdf`);
