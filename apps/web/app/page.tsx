@@ -19,6 +19,7 @@ import { ListCard } from "../components/dashboard/ListCard";
 import { FavoritesCard } from "../components/dashboard/FavoritesCard";
 import { OnboardingCard } from "../components/onboarding/OnboardingCard";
 import { ConfirmDialogHost } from "../components/ui/ConfirmDialogHost";
+import { NoticeHost } from "../components/ui/NoticeHost";
 import { FavoritesProvider } from "../components/FavoritesProvider";
 import { getCurrentUser, apiGet } from "../lib/api";
 import { loadShellSettings } from "../lib/favorites";
@@ -398,6 +399,7 @@ export default async function OverviewPage() {
           )
         )}
         <ConfirmDialogHost />
+        <NoticeHost />
       </main>
       <StatusBar userName={user.name} userRole={roleLabel} />
       </div>

@@ -76,7 +76,9 @@ export function VariantSection({ articleId, groups, defaultQuantity, canEdit }: 
           { key: "active", label: "Aktiv", width: "60px" },
         ]}
         rows={(rows ?? []).map((r) => ({ ...r, id: r.articleId }))}
-        emptyText={rows === null ? "Hämtar…" : "Inga varianter ännu"}
+        loading={rows === null}
+        loadingRows={3}
+        emptyText="Inga varianter ännu"
         renderCell={(r, key) => {
           switch (key) {
             case "number":

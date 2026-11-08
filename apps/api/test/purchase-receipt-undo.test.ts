@@ -115,9 +115,11 @@ async function receiptIds(orderId: string) {
 describe("Ångra inleverans — ordinary row", () => {
   it("takes the goods out again, lowers the row and re-derives the order status per receipt", async () => {
     const { user, article, location, order, row } = await makeOrder(10);
-    await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 6 }, user.id);
-    await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 4 }, user.id);
+    const receivedFirst = await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 6 }, user.id);
+    const receivedSecond = await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 4 }, user.id);
     const [second, first] = await receiptIds(order.id);
+    // The answer names the receipt it booked — the web's notice undoes exactly it.
+    expect([receivedFirst.receiptId, receivedSecond.receiptId]).toEqual([first, second]);
 
     const undoneSecond = await purchaseService.undoReceipt(order.id, second!, user.id);
     expect(undoneSecond.orderStatus).toBe("partially_received");

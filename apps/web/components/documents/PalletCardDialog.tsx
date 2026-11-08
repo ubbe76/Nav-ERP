@@ -1,5 +1,6 @@
 "use client";
 
+import { TableSkeleton } from "../ui/Table";
 import { useEffect, useState } from "react";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
@@ -291,7 +292,7 @@ function DeliveryForm({ deliveryId, onClose }: { deliveryId: string; onClose: ()
   return (
     <>
       <FormError margin="below">{error}</FormError>
-      {!data && !error && <p>Hämtar rader…</p>}
+      {!data && !error && <TableSkeleton label="Hämtar rader…" columns={4} rows={3} />}
       {data && (
         <>
           <p style={{ marginTop: 0 }}>Följesedel {data.deliveryNumber}. Antal kolli 0 hoppar över raden.</p>
@@ -363,7 +364,7 @@ function DispatchForm({ orderId, dispatchId, onClose }: { orderId: string; dispa
   return (
     <>
       <FormError margin="below">{error}</FormError>
-      {!data && !error && <p>Hämtar rader…</p>}
+      {!data && !error && <TableSkeleton label="Hämtar rader…" columns={4} rows={3} />}
       {data && (
         <>
           <p style={{ marginTop: 0 }}>Avsändning mot {data.orderNumber}. Antal kolli 0 hoppar över raden.</p>

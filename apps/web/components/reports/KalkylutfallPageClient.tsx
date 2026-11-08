@@ -8,7 +8,7 @@ import { Card } from "../ui/Card";
 import { Field, Select } from "../ui/Field";
 import { FormError, FormHint } from "../ui/Form";
 import { SegmentedToggle } from "../ui/SegmentedToggle";
-import { Table } from "../ui/Table";
+import { Table, TableSkeleton } from "../ui/Table";
 import { apiFetch } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import type {
@@ -139,7 +139,7 @@ export function KalkylutfallPageClient({
       </Card>
 
       <FormError margin="below">{error}</FormError>
-      {loading && <FormHint>Hämtar kalkylutfallet…</FormHint>}
+      {loading && <TableSkeleton label="Hämtar kalkylutfallet…" />}
 
       {data && !loading && data.view === "analysis" && (
         <KalkylutfallAnalysis data={data} csvPath={`/api/v1/reports/calculation-outcome/csv?${csvQs.toString()}`} />

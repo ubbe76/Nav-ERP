@@ -1,5 +1,6 @@
 "use client";
 
+import { TableSkeleton } from "../ui/Table";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Modal } from "../ui/Modal";
@@ -34,7 +35,8 @@ function putBackText(row: DeliveryRowsResponse["rows"][number]): string | null {
 
 const mutedText = { color: "var(--color-text-muted)" } as const;
 
-function UndoDeliveryDialog({
+// Also opened by Utleverans' notice (Ångra…, Nav som program punkt 7).
+export function UndoDeliveryDialog({
   orderId,
   deliveryId,
   open,
@@ -85,7 +87,7 @@ function UndoDeliveryDialog({
   return (
     <Modal open={open} onClose={onClose} title={`Ångra utleverans${data ? ` — ${data.deliveryNumber}` : ""}`}>
       <FormError margin="below">{error}</FormError>
-      {data === null && !error && <p style={mutedText}>Hämtar rader…</p>}
+      {data === null && !error && <TableSkeleton label="Hämtar rader…" columns={4} rows={3} />}
       {data && (
         <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 10 }}>
           {data.rows.map((row) => {

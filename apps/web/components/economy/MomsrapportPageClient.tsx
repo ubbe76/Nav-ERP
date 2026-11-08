@@ -9,7 +9,7 @@ import { Field, Select } from "../ui/Field";
 import { FormActions, FormError, FormHint, FormNotice, FormRow, FormSaved } from "../ui/Form";
 import { Modal } from "../ui/Modal";
 import { StatusPill } from "../ui/StatusPill";
-import { Table } from "../ui/Table";
+import { Table, TableSkeleton } from "../ui/Table";
 import { API_URL, ApiError, apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney, round2 } from "../../lib/format";
@@ -493,7 +493,7 @@ export function MomsrapportPageClient({
       </Card>
 
       <FormError margin="below">{error}</FormError>
-      {loading && <FormHint>Hämtar momsrapporten…</FormHint>}
+      {loading && <TableSkeleton label="Hämtar momsrapporten…" />}
       {fiscalYears.length === 0 && <p>Skapa ett räkenskapsår under Ekonomi → Räkenskapsår först.</p>}
 
       {report && !loading && (

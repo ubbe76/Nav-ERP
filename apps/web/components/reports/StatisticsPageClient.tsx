@@ -6,7 +6,7 @@ import { KpiRow, KpiTile } from "../dashboard/KpiTile";
 import { Card } from "../ui/Card";
 import { Field, Select } from "../ui/Field";
 import { FormError, FormHint } from "../ui/Form";
-import { Table } from "../ui/Table";
+import { Table, TableSkeleton } from "../ui/Table";
 import { apiFetch } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import type { StatisticsRow } from "../../lib/types";
@@ -121,7 +121,7 @@ export function StatisticsPageClient({
       </Card>
 
       <FormError margin="below">{error}</FormError>
-      {loading && <FormHint>Hämtar statistiken…</FormHint>}
+      {loading && <TableSkeleton label="Hämtar statistiken…" />}
 
       {data && !loading && (
         <>

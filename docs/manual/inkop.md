@@ -273,7 +273,7 @@ På en lego-rad står under benämningen *Lego för TO-… · Op …* och, när 
 
 Sektionen **Inleveranser** på inköpsorderkortet listar varje inleverans som gjorts på ordern — med **Ta emot leverans** eller i rutinen [Inleverans](#inleverans) — senaste först: **Tid**, **Artikel**, **Antal** (i radens enhet), **Lagerplats** och vem som tog emot (**Av**).
 
-**Ångra** backar exakt den inleveransen, efter en bekräftelse:
+**Ångra** backar exakt den inleveransen, efter en bekräftelse. Direkt efter en inleverans — **Ta emot leverans** på kortet eller **Rapportera inleverans** i rutinen — visar Nav också en notis nere till höger, t.ex. *Inlevererat 4 st 1001.*, med **Ångra**: den backar just den inleveransen (i rutinen alla rader som togs emot, den sista först) utan någon extra fråga. Kan en av dem inte ångras står det i notisen hur många som hann ångras. Ångrandet går till så här:
 
 - Varorna tas ut ur lager igen från den lagerplats de togs emot på. Finns de inte kvar där (de har förbrukats, flyttats eller levererats) vägras ångra och felmeddelandet visar hur mycket som finns kvar. Blir en tillfällig lagerplats tom städas den bort som efter vilket annat uttag som helst.
 - Radens mottagna antal minskar och orderstatusen räknas om: **Mottagen** blir **Delvis mottagen**, och när inget längre är mottaget blir ordern **Bekräftad** igen.

@@ -1691,7 +1691,8 @@ export function createPurchaseService(
         // the link is written reverses only the IO side — a window of one
         // report call.)
         if (reportId !== null) await repo.linkReceiptReport(result.receiptId, reportId);
-        return { row: result.row, orderStatus: result.orderStatus, operationReport };
+        // receiptId: the webb's notice offers Ångra on exactly this receipt.
+        return { row: result.row, orderStatus: result.orderStatus, operationReport, receiptId: result.receiptId };
       }
 
       switch (result.reason) {

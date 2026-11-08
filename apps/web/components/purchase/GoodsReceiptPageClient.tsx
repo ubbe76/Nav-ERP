@@ -14,6 +14,7 @@ import { useCountState, useScanFeedback, useScanQueue } from "../ui/useOrderScan
 import { apiFetch } from "../../lib/api";
 import { locationOptionLabel } from "../../lib/stockLocations";
 import { confirmDialog } from "../../lib/confirm";
+import { notify } from "../../lib/notice";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import { toBaseQuantity, toUnitQuantity } from "../../lib/units";
@@ -271,13 +272,17 @@ export function GoodsReceiptPageClient({
     const errors: Record<string, string> = {};
     let booked = 0;
     let reportedOperations = 0;
+    // The receipts this run booked — the notice's Ångra takes them back.
+    const receiptIds: string[] = [];
+    const orderId = selectedId;
+    const orderNumber = order?.orderNumber ?? "";
     for (const row of openRows) {
       const scanRow = scanRows.find((r) => r.id === row.id)!;
       const quantity = Number(enteredQuantity(scanRow, count));
       if (!quantity) continue;
       try {
         const result = await runWithShortageConfirm((allowMaterialShortage) =>
-          apiFetch<{ operationReport?: { ok: boolean; message?: string } }>(
+          apiFetch<{ operationReport?: { ok: boolean; message?: string }; receiptId?: string }>(
             `/api/v1/purchase-orders/${selectedId}/rows/${row.id}/receive`,
             {
               method: "POST",
@@ -296,6 +301,7 @@ export function GoodsReceiptPageClient({
           continue;
         }
         booked += 1;
+        if (result.receiptId) receiptIds.push(result.receiptId);
         // Lego row: the receipt auto-reports the linked TO operation. The
         // receipt itself stands even when the report fails (e.g. the TO is
         // already done) — surface that as a row warning, not a failure.
@@ -323,6 +329,38 @@ export function GoodsReceiptPageClient({
       clearFeedback();
     }
     setPending(false);
+    // Återkoppling (punkt 7): Ångra takes back every receipt of this run, last
+    // first — each is its own transaction, so a refusal part-way says how far
+    // it got.
+    if (booked > 0) {
+      notify({
+        message: `Inlevererat ${booked} rad${booked === 1 ? "" : "er"} på ${orderNumber}.`,
+        action:
+          receiptIds.length > 0
+            ? {
+                label: "Ångra",
+                run: async () => {
+                  let undone = 0;
+                  try {
+                    for (const receiptId of [...receiptIds].reverse()) {
+                      await apiFetch(`/api/v1/purchase-orders/${orderId}/receipts/${receiptId}/undo`, { method: "POST" });
+                      undone += 1;
+                    }
+                  } catch (err) {
+                    router.refresh();
+                    if (undone === 0) throw err;
+                    throw new Error(
+                      `${undone} av ${receiptIds.length} inleveranser ångrades: ${apiErrorMessage(err, "resten kunde inte ångras")}`
+                    );
+                  }
+                  setDone(null);
+                  router.refresh();
+                  return receiptIds.length === 1 ? "Inleveransen är ångrad." : `${receiptIds.length} inleveranser är ångrade.`;
+                },
+              }
+            : undefined,
+      });
+    }
     router.refresh();
   }
 

@@ -6,7 +6,7 @@ import { KpiRow, KpiTile } from "../dashboard/KpiTile";
 import { Card } from "../ui/Card";
 import { Field, Select } from "../ui/Field";
 import { FormError, FormHint } from "../ui/Form";
-import { Table } from "../ui/Table";
+import { Table, TableSkeleton } from "../ui/Table";
 import { apiFetch } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import type { OrderMarginResponse, MarginGroup } from "../../lib/types";
@@ -104,7 +104,7 @@ export function MarginalPageClient({
       </Card>
 
       <FormError margin="below">{error}</FormError>
-      {loading && <FormHint>Hämtar marginalen…</FormHint>}
+      {loading && <TableSkeleton label="Hämtar marginalen…" />}
 
       {data && !loading && (
         <>

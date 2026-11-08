@@ -7,7 +7,7 @@ import { Card } from "../ui/Card";
 import { Field, Input, Select } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormSaved } from "../ui/Form";
 import { GatedLink } from "../ui/GatedLink";
-import { Table } from "../ui/Table";
+import { Table, TableSkeleton } from "../ui/Table";
 import { API_URL, ApiError, apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import {
@@ -242,7 +242,7 @@ export function PeriodiskSammanstallningPageClient({
       </Card>
 
       <FormError margin="below">{error}</FormError>
-      {loading && <FormHint>Hämtar sammanställningen…</FormHint>}
+      {loading && <TableSkeleton label="Hämtar sammanställningen…" />}
 
       {summary && !loading && (
         <>
