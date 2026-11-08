@@ -62,6 +62,24 @@
   margin-bottom: var(--space-dashboard-grid-gap);
 }
 
+.fullRow {
+  margin-bottom: var(--space-dashboard-grid-gap);
+}
+
+.topbarActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.noCards {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-dashboard-grid-gap);
+}
+
 @media (max-width: 1024px) {
   .frame {
     grid-template-columns: 1fr;

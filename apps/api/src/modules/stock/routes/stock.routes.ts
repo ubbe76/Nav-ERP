@@ -225,6 +225,9 @@ export async function stockRoutes(
     }
   });
 
+  // Översikten's Lager station: articles with physical stock, in one query.
+  app.get("/stock/summary", async () => service.getStockSummary());
+
   app.get("/stock/balances", async (req) => service.getBalances(listStockBalancesQuerySchema.parse(req.query)));
 
   registerListCsvRoute(app, {

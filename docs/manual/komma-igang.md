@@ -39,6 +39,25 @@ Startsidan visar materialflödet i fyra stationer — Inköp, Lager, Tillverknin
 
 Stationerna, raderna och knappen **+ Ny order** följer din behörighetsgrupp: det du inte får öppna visas som vanlig text i stället för som länk, och **+ Ny order** visas bara för den som kan öppna tillverkningsorderlistan.
 
+### Anpassa Översikten
+
+Knappen **Anpassa** i Översiktens sidhuvud, bredvid **+ Ny order**, öppnar dialogen **Anpassa Översikten**. Där väljer du själv vilka kort startsidan visar och i vilken ordning. Valet sparas på ditt konto och gäller bara dig — andra användare, även i samma behörighetsgrupp, behåller sin egen Översikt.
+
+Det finns fyra kort:
+
+| Kort | Innehåll |
+|---|---|
+| **Materialflöde** | De fyra stationerna Inköp, Lager, Tillverkning och Försäljning |
+| **Att bevaka** | De första raderna ur [Aviseringar](/hjalp/aviseringar) |
+| **Aktiva tillverkningsordrar** | Pågående och frisläppta tillverkningsordrar |
+| **Senaste lagertransaktioner** | De sex senaste lagerrörelserna |
+
+Dialogen har en rad per kort. Kryssrutan **Visa** bestämmer om kortet visas, och knapparna ↑ och ↓ flyttar det i ordningen. **Spara** sparar valet, **Avbryt** stänger utan att spara och **Återställ standard** tar bort ditt val, så att alla fyra kort visas i den ordning de har ovan. Är inget kort valt står det "Inga kort valda." tillsammans med knappen **Anpassa**.
+
+**Materialflöde** och **Senaste lagertransaktioner** tar hela sidans bredd. **Att bevaka** och **Aktiva tillverkningsordrar** är halva kort: står två sådana efter varandra delar de en rad, och ett ensamt halvt kort tar hela bredden. Checklistan **Kom igång** (för administratörer) ligger kvar överst och styrs av sin egen knapp **Dölj**.
+
+Översikten hämtar bara det korten du valt behöver. Dölj du **Materialflöde** och **Att bevaka** räknar sidan därför inte fram några aviseringar, vilket gör den snabbare att öppna. Konton med **Endast läsning** kan också anpassa sin egen Översikt.
+
 ## Listor: sök, filter och bläddring
 
 Alla registerlistor (artiklar, kunder, leverantörer, ordrar, saldon, transaktioner, tidrapporter…) fungerar likadant:

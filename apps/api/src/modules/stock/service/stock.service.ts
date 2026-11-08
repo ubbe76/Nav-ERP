@@ -156,6 +156,10 @@ export function createStockService(repo: StockRepository, audit: AuditWriter = {
       return repo.transferStock(input, createdBy);
     },
 
+    async getStockSummary() {
+      return { articlesInStock: await repo.countArticlesInStock() };
+    },
+
     async getBalances(query: ListStockBalancesQuery) {
       return repo.getBalances(query);
     },

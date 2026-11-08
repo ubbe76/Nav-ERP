@@ -485,6 +485,20 @@ export function createStockRepository(db: Db) {
       });
     },
 
+    // Översikten's "artiklar i lager": articles whose PHYSICAL balance, summed
+    // over every place including blocked ones, is above 0 — one query, so it is
+    // right beyond any page of balance rows.
+    async countArticlesInStock(): Promise<number> {
+      const result = await db.execute<{ total: string }>(sql`
+        select count(*)::text as total from (
+          select article_id from ${stockBalances}
+          group by article_id
+          having sum(quantity_on_hand) > 0
+        ) in_stock
+      `);
+      return Number([...result][0]?.total ?? 0);
+    },
+
     async getBalances(query: ListStockBalancesQuery) {
       // A netted-out article/location pair carries no information — the history
       // lives in the transaction log, and its location is usually deactivated.

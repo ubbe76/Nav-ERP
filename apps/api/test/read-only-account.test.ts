@@ -343,13 +343,14 @@ describe("Endast läsning — reads and side-effect-free POSTs work", () => {
       method: "PATCH",
       url: "/api/v1/me/settings",
       headers: { cookie },
-      payload: { listPageSize: 25, favorites: [{ href: "/forsaljning/ordrar", title: "Kundorder" }] },
+      payload: { listPageSize: 25, favorites: [{ href: "/forsaljning/ordrar", title: "Kundorder" }], overviewCards: ["stock"] },
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ listPageSize: 25, favorites: [{ href: "/forsaljning/ordrar", title: "Kundorder" }] });
     expect((await app.inject({ method: "GET", url: "/api/v1/me/settings", headers: { cookie } })).json().favorites).toHaveLength(1);
+    expect((await app.inject({ method: "GET", url: "/api/v1/me/settings", headers: { cookie } })).json().overviewCards).toEqual(["stock"]);
 
-    expect(await counts()).toEqual({ ...before, user_settings: before.user_settings! + 2 });
+    expect(await counts()).toEqual({ ...before, user_settings: before.user_settings! + 3 });
   });
 
   it("can always log out", async () => {

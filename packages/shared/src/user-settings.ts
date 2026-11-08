@@ -48,6 +48,18 @@ export const favoritesSchema = z
     message: "Samma sida kan bara vara favorit en gång",
   });
 
+// Översikten: which cards the user's start page shows and in what order.
+// null = the standard (all four, in this order); [] = none.
+export const OVERVIEW_CARDS = ["flow", "attention", "orders", "stock"] as const;
+export type OverviewCard = (typeof OVERVIEW_CARDS)[number];
+
+export const overviewCardsSchema = z
+  .array(z.enum(OVERVIEW_CARDS))
+  .max(OVERVIEW_CARDS.length)
+  .refine((list) => new Set(list).size === list.length, {
+    message: "Samma kort kan bara väljas en gång",
+  });
+
 // GET /me/settings — always returns every known key, defaults filled in.
 export const userSettingsSchema = z.object({
   listPageSize: listPageSizeSchema,
@@ -64,6 +76,8 @@ export const userSettingsSchema = z.object({
   theme: themeIdSchema.nullable(),
   // Favoriter (see favoriteSchema); [] = none yet.
   favorites: favoritesSchema,
+  // Översikten's cards (see overviewCardsSchema); null = standard.
+  overviewCards: overviewCardsSchema.nullable(),
 });
 export type UserSettings = z.infer<typeof userSettingsSchema>;
 

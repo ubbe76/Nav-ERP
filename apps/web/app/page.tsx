@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import type { ReactNode } from "react";
 import styles from "./page.module.css";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { LogoutButton } from "../components/LogoutButton";
@@ -12,12 +13,14 @@ import { FlowStrip, type FlowStation } from "../components/dashboard/FlowStrip";
 import { AttentionCard, type AttentionItem } from "../components/dashboard/AttentionCard";
 import { OrdersCard } from "../components/dashboard/OrdersCard";
 import { StockActivityCard } from "../components/dashboard/StockActivityCard";
+import { CustomizeOverview } from "../components/dashboard/CustomizeOverview";
 import { OnboardingCard } from "../components/onboarding/OnboardingCard";
 import { ConfirmDialogHost } from "../components/ui/ConfirmDialogHost";
 import { FavoritesProvider } from "../components/FavoritesProvider";
 import { getCurrentUser, apiGet } from "../lib/api";
 import { loadFavorites } from "../lib/favorites";
 import type { AlertKind, AlertsResponse } from "../lib/alerts";
+import { OVERVIEW_CARDS, overviewRows, resolveOverviewCards, type OverviewCard } from "../lib/overviewCards";
 import { satisfiesRule } from "../lib/permissions";
 import type {
   ManufacturingOrder,
@@ -25,7 +28,6 @@ import type {
   Paged,
   PurchaseOrder,
   SalesOrder,
-  StockBalance,
   StockTransaction,
 } from "../lib/types";
 
@@ -38,54 +40,68 @@ export default async function OverviewPage() {
   const user = await getCurrentUser(cookieHeader);
   if (!user) redirect("/login");
 
-  // Open orders are a naturally bounded set, so the dashboard fetches them via
-  // status filters instead of pulling the full registers.
+  // The user's own choice of cards (null = the standard). Fetched first: the
+  // page only loads what the visible cards need.
+  const settings = await apiGet<{ overviewCards?: unknown; hideOnboarding?: boolean }>(
+    "/api/v1/me/settings",
+    cookieHeader
+  ).catch((): { overviewCards?: unknown; hideOnboarding?: boolean } => ({}));
+  const cards: OverviewCard[] = settings.overviewCards == null ? [...OVERVIEW_CARDS] : resolveOverviewCards(settings.overviewCards);
+  const has = (card: OverviewCard) => cards.includes(card);
+
+  // Open orders are a naturally bounded set: the flow counts come from `total`
+  // of a one-row page. The two TO calls of "Aktiva tillverkningsordrar" (six
+  // rows each, oldest first) double as the flow's TO counts when both show.
   const [
     openPurchaseOrdersPage,
     openSalesOrdersPage,
-    activeManufacturingOrdersPage,
-    balancesPage,
+    inProgressOrdersPage,
+    releasedOrdersPage,
+    articlesInStockSummary,
     recentTransactionsPage,
     alerts,
     favorites,
   ] = await Promise.all([
-      apiGet<Paged<PurchaseOrder>>(
-        "/api/v1/purchase-orders?status=draft,confirmed,partially_received&limit=1000",
-        cookieHeader
-      ),
-      apiGet<Paged<SalesOrder>>(
-        "/api/v1/sales-orders?status=quote,confirmed,in_production,delivered&limit=1000",
-        cookieHeader
-      ),
-      apiGet<Paged<ManufacturingOrder>>(
-        "/api/v1/manufacturing-orders?status=released,in_progress&limit=1000",
-        cookieHeader
-      ),
-      apiGet<Paged<StockBalance>>("/api/v1/stock/balances?limit=1000", cookieHeader),
-      apiGet<Paged<StockTransaction>>("/api/v1/stock/transactions?limit=6", cookieHeader),
-      // Aviseringar feed both the flow strip's signals and "Att bevaka"; a
-      // failing call must not take Översikten down.
-      apiGet<AlertsResponse>("/api/v1/alerts", cookieHeader).catch((): AlertsResponse | null => null),
-      // The sidebar's Favoriter (null on failure — the group then stays hidden).
-      loadFavorites(cookieHeader),
-    ]);
+    has("flow")
+      ? apiGet<Paged<PurchaseOrder>>("/api/v1/purchase-orders?status=draft,confirmed,partially_received&limit=1", cookieHeader)
+      : null,
+    has("flow")
+      ? apiGet<Paged<SalesOrder>>("/api/v1/sales-orders?status=quote,confirmed,in_production,delivered&limit=1", cookieHeader)
+      : null,
+    has("orders") || has("flow")
+      ? apiGet<Paged<ManufacturingOrder>>(
+          `/api/v1/manufacturing-orders?status=in_progress&order=asc&limit=${has("orders") ? 6 : 1}`,
+          cookieHeader
+        )
+      : null,
+    has("orders")
+      ? apiGet<Paged<ManufacturingOrder>>("/api/v1/manufacturing-orders?status=released&order=asc&limit=6", cookieHeader)
+      : has("flow")
+        ? apiGet<Paged<ManufacturingOrder>>("/api/v1/manufacturing-orders?status=released&limit=1", cookieHeader)
+        : null,
+    has("flow") ? apiGet<{ articlesInStock: number }>("/api/v1/stock/summary", cookieHeader) : null,
+    has("stock") ? apiGet<Paged<StockTransaction>>("/api/v1/stock/transactions?limit=6", cookieHeader) : null,
+    // Aviseringar feed both the flow strip's signals and "Att bevaka" — and
+    // drive the behovsberäkning, so they are fetched only when one of those
+    // shows; a failing call must not take Översikten down.
+    has("flow") || has("attention")
+      ? apiGet<AlertsResponse>("/api/v1/alerts", cookieHeader).catch((): AlertsResponse | null => null)
+      : null,
+    // The sidebar's Favoriter (null on failure — the group then stays hidden).
+    loadFavorites(cookieHeader),
+  ]);
   // System → Kom igång: administrators see the setup checklist until it is
   // complete or hidden. Never lets a failing call take Översikten down, and
   // other users never call the admin-only route.
   let onboarding: OnboardingView | null = null;
   if (user.role === "admin") {
     try {
-      const [view, settings] = await Promise.all([
-        apiGet<OnboardingView>("/api/v1/onboarding", cookieHeader),
-        apiGet<{ hideOnboarding?: boolean }>("/api/v1/me/settings", cookieHeader),
-      ]);
+      const view = await apiGet<OnboardingView>("/api/v1/onboarding", cookieHeader);
       if (!view.complete && !settings.hideOnboarding) onboarding = view;
     } catch {
       onboarding = null;
     }
   }
-
-  const balances = balancesPage.rows;
 
   // A group is missing from the response when the user may not see that kind;
   // its signal is then neutral rather than a (false) "all clear".
@@ -97,36 +113,22 @@ export default async function OverviewPage() {
   const lateSignal = (count: number | null) =>
     count === null ? "Se Aviseringar" : count === 0 ? "Inga försenade" : count === 1 ? "1 försenad" : `${count} försenade`;
 
-  const openPurchaseOrders = openPurchaseOrdersPage.rows;
+  const openPurchaseOrdersCount = openPurchaseOrdersPage?.total ?? 0;
+  const openSalesOrdersCount = openSalesOrdersPage?.total ?? 0;
+  const inProgressCount = inProgressOrdersPage?.total ?? 0;
+  const activeManufacturingCount = inProgressCount + (releasedOrdersPage?.total ?? 0);
 
-  const openSalesOrders = openSalesOrdersPage.rows;
+  // In progress first, then order number (the list is asked oldest-first).
+  const activeManufacturingOrders = [...(inProgressOrdersPage?.rows ?? []), ...(releasedOrdersPage?.rows ?? [])].slice(0, 6);
 
-  const activeManufacturingOrders = [...activeManufacturingOrdersPage.rows]
-    .sort((a, b) =>
-      a.status === b.status ? a.orderNumber.localeCompare(b.orderNumber) : a.status === "in_progress" ? -1 : 1,
-    );
-  const inProgressCount = activeManufacturingOrders.filter((o) => o.status === "in_progress").length;
-
-  // Aggregate per article across locations; the balances endpoint is already
-  // the aggregation of the append-only stock_transactions log.
-  const byArticle = new Map<string, { articleNumber: string; articleName: string; quantity: number }>();
-  for (const b of balances) {
-    const entry = byArticle.get(b.articleId) ?? {
-      articleNumber: b.articleNumber,
-      articleName: b.articleName,
-      quantity: 0,
-    };
-    entry.quantity += Number(b.quantityOnHand);
-    byArticle.set(b.articleId, entry);
-  }
-  const articlesInStock = [...byArticle.values()].filter((a) => a.quantity > 0).length;
+  const articlesInStock = articlesInStockSummary?.articlesInStock ?? 0;
 
   const stations: FlowStation[] = [
     {
       label: "Inköp",
       href: "/inkop",
-      value: openPurchaseOrders.length,
-      unit: openPurchaseOrders.length === 1 ? "öppen order" : "öppna ordrar",
+      value: openPurchaseOrdersCount,
+      unit: openPurchaseOrdersCount === 1 ? "öppen order" : "öppna ordrar",
       signal: lateSignal(purchaseLate),
       tone: purchaseLate ? "warn" : "neutral",
     },
@@ -150,16 +152,16 @@ export default async function OverviewPage() {
     {
       label: "Tillverkning",
       href: "/tillverkning",
-      value: activeManufacturingOrders.length,
-      unit: activeManufacturingOrders.length === 1 ? "aktiv order" : "aktiva ordrar",
+      value: activeManufacturingCount,
+      unit: activeManufacturingCount === 1 ? "aktiv order" : "aktiva ordrar",
       signal: inProgressCount === 0 ? "Ingen pågår" : `${inProgressCount} pågår`,
       tone: inProgressCount > 0 ? "ok" : "neutral",
     },
     {
       label: "Försäljning",
       href: "/forsaljning",
-      value: openSalesOrders.length,
-      unit: openSalesOrders.length === 1 ? "öppen order" : "öppna ordrar",
+      value: openSalesOrdersCount,
+      unit: openSalesOrdersCount === 1 ? "öppen order" : "öppna ordrar",
       signal: lateSignal(salesLate),
       tone: salesLate ? "warn" : "neutral",
     },
@@ -181,7 +183,21 @@ export default async function OverviewPage() {
 
   // The transactions endpoint is sorted newest-first, so the six rows are
   // already the most recent.
-  const recentTransactions = recentTransactionsPage.rows;
+  const recentTransactions = recentTransactionsPage?.rows ?? [];
+
+  const cardNodes: Record<OverviewCard, ReactNode> = {
+    flow: <FlowStrip key="flow" stations={stations} />,
+    attention: (
+      <AttentionCard
+        key="attention"
+        items={attentionItems}
+        totalCount={attentionTotal}
+        emptyText={alerts === null ? "Kunde inte läsa aviseringarna just nu." : undefined}
+      />
+    ),
+    orders: <OrdersCard key="orders" orders={activeManufacturingOrders} />,
+    stock: <StockActivityCard key="stock" transactions={recentTransactions} />,
+  };
 
   const todayLabel = new Date().toLocaleDateString("sv-SE", { weekday: "long", day: "numeric", month: "long" });
 
@@ -213,31 +229,36 @@ export default async function OverviewPage() {
           </div>
           {/* Creating an order needs Tillverkning itself — the list page also
               opens in read-only mode (Tillverkningsorder (läsläge)). */}
-          {satisfiesRule(user, ["tillverkning"]) && (
-            <Link href="/tillverkning/ordrar">
-              <Button variant="primary">+ Ny order</Button>
-            </Link>
-          )}
+          <div className={styles.topbarActions}>
+            <CustomizeOverview shown={cards} />
+            {satisfiesRule(user, ["tillverkning"]) && (
+              <Link href="/tillverkning/ordrar">
+                <Button variant="primary">+ Ny order</Button>
+              </Link>
+            )}
+          </div>
         </div>
 
         {onboarding && <OnboardingCard initial={onboarding} />}
 
-        <FlowStrip stations={stations} />
+        {cards.length === 0 && (
+          <p className={styles.noCards}>
+            Inga kort valda. Använd <strong>Anpassa</strong> för att välja vad Översikten visar.
+          </p>
+        )}
 
-        {/* Three cards do not divide evenly into two columns, so the two that
-            answer "what needs me now" pair up on top and the log runs full
-            width underneath — where the extra room goes to the article names
-            it would otherwise ellipsise. */}
-        <div className={styles.topRow}>
-          <AttentionCard
-            items={attentionItems}
-            totalCount={attentionTotal}
-            emptyText={alerts === null ? "Kunde inte läsa aviseringarna just nu." : undefined}
-          />
-          <OrdersCard orders={activeManufacturingOrders.slice(0, 6)} />
-        </div>
-
-        <StockActivityCard transactions={recentTransactions} />
+        {overviewRows(cards).map((row) =>
+          row.length === 2 ? (
+            // Two half cards share a row; a lone one takes the full width.
+            <div className={styles.topRow} key={row.join("-")}>
+              {row.map((card) => cardNodes[card])}
+            </div>
+          ) : (
+            <div className={styles.fullRow} key={row[0]}>
+              {cardNodes[row[0]!]}
+            </div>
+          )
+        )}
         </PermissionsProvider>
         <ConfirmDialogHost />
       </main>

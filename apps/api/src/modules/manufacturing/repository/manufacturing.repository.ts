@@ -1741,7 +1741,7 @@ export function createManufacturingRepository(db: Db) {
           .from(manufacturingOrders)
           .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))
           .where(where)
-          .orderBy(desc(manufacturingOrders.orderNumber))
+          .orderBy(query.order === "asc" ? asc(manufacturingOrders.orderNumber) : desc(manufacturingOrders.orderNumber))
           .limit(query.limit)
           .offset(query.offset),
         db

@@ -4,6 +4,8 @@ import {
   favoriteSchema,
   LIST_PAGE_SIZE_OPTIONS,
   MAX_FAVORITES,
+  OVERVIEW_CARDS,
+  type OverviewCard,
   type AlertKind,
   type Favorite,
   type UpdateUserSettingsInput,
@@ -21,6 +23,10 @@ const ALERT_DIGEST_KEY = "alert_digest";
 const ALERT_DIGEST_KINDS_KEY = "alert_digest_kinds";
 // Favoriter: a JSON array of { href, title }, in the order shown.
 const FAVORITES_KEY = "favorites";
+
+// Översikten: a JSON array of card keys in display order; absent or "null" =
+// the standard.
+const OVERVIEW_CARDS_KEY = "overview_cards";
 
 const LIST_PAGE_SIZE_VALUES: readonly number[] = LIST_PAGE_SIZE_OPTIONS;
 const KNOWN_ALERT_KINDS: ReadonlySet<string> = new Set(ALERT_KINDS);
@@ -67,6 +73,21 @@ export function decodeFavorites(raw: string | undefined): Favorite[] {
   }
 }
 
+// Unknown keys (a card removed in a later version) are dropped and repeats
+// kept once; unparseable or absent = null = standard. Never fails the read.
+export function decodeOverviewCards(raw: string | undefined): OverviewCard[] | null {
+  if (raw === undefined || raw === "null") return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const known: ReadonlySet<string> = new Set(OVERVIEW_CARDS);
+    const cards = parsed.filter((k): k is OverviewCard => typeof k === "string" && known.has(k));
+    return [...new Set(cards)];
+  } catch {
+    return null;
+  }
+}
+
 export function createUserSettingsService(repo: UserSettingsRepository) {
   // Typed view over the user_settings KV rows for one user — mirrors
   // system.service.ts's getSettings() pattern, just per-user instead of
@@ -85,6 +106,7 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
       alertDigestKinds: decodeAlertDigestKinds(byKey.get(ALERT_DIGEST_KINDS_KEY)),
       theme: decodeUserTheme(byKey.get(USER_THEME_SETTING_KEY)),
       favorites: decodeFavorites(byKey.get(FAVORITES_KEY)),
+      overviewCards: decodeOverviewCards(byKey.get(OVERVIEW_CARDS_KEY)),
     };
   }
 
@@ -115,6 +137,13 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
       }
       if (input.favorites !== undefined) {
         await repo.upsert(userId, FAVORITES_KEY, JSON.stringify(input.favorites));
+      }
+      if (input.overviewCards !== undefined) {
+        await repo.upsert(
+          userId,
+          OVERVIEW_CARDS_KEY,
+          input.overviewCards === null ? "null" : JSON.stringify(input.overviewCards)
+        );
       }
       return getSettings(userId);
     },
