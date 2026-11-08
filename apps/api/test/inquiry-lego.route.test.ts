@@ -92,7 +92,6 @@ async function makeLegoRouting() {
     articleNumber: `LEGO-ROUTE-${crypto.randomUUID()}`,
     name: "Legodetalj",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   const machineOp = await mfgService.createRoutingOperation(parent.id, {
@@ -155,7 +154,6 @@ describe("POST /inquiries/:id/rows", () => {
       articleNumber: `OTHER-ROUTE-${crypto.randomUUID()}`,
       name: "Annan",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
 
@@ -180,7 +178,6 @@ describe("POST /inquiries/:id/rows", () => {
       articleNumber: `PLAIN-ROUTE-${crypto.randomUUID()}`,
       name: "Vanlig",
       type: "purchased",
-      unit: "st",
       active: true,
     });
     const { inquiry } = await purchaseService.createInquiry(

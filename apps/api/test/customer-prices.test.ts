@@ -60,7 +60,6 @@ async function makeArticle(numberSuffix: string, groupId?: string) {
     articleNumber: `ART-CP-${numberSuffix}`,
     name: `Test Article ${numberSuffix}`,
     type: "purchased",
-    unit: "st",
     active: true,
     groupId,
   });

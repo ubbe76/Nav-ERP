@@ -39,7 +39,6 @@ async function makeArticle(tag = "A") {
     articleNumber: `LOG-${tag}-${crypto.randomUUID().slice(0, 6)}`,
     name: `Artikel ${tag}`,
     type: "purchased",
-    unit: "st",
     active: true,
   });
 }

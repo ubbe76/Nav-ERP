@@ -117,14 +117,12 @@ async function makeParentWithBom(componentStandardCost: number | undefined, comp
     articleNumber: `PARENT-${crypto.randomUUID()}`,
     name: "Parent",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   const component = await articleService.createArticle({
     articleNumber: `COMP-${crypto.randomUUID()}`,
     name: "Component",
     type: "purchased",
-    unit: "st",
     standardCost: componentStandardCost,
     active: true,
   });
@@ -138,7 +136,6 @@ async function addServiceComponent(parentId: string, standardCost: number, quant
     articleNumber: `LEGO-${crypto.randomUUID()}`,
     name: "Pulverlackering",
     type: "service",
-    unit: "st",
     standardCost,
     active: true,
   });
@@ -277,7 +274,6 @@ describe("costing service — pre-calculation", () => {
       name: "Phantom",
       type: "manufactured",
       isPhantom: true,
-      unit: "st",
       active: true,
     });
     await articleService.addBomComponent(parent.id, {
@@ -300,7 +296,6 @@ describe("costing service — pre-calculation", () => {
       articleNumber: `PARENT-${crypto.randomUUID()}`,
       name: "Parent",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const phantom = await articleService.createArticle({
@@ -308,14 +303,12 @@ describe("costing service — pre-calculation", () => {
       name: "Phantom",
       type: "manufactured",
       isPhantom: true,
-      unit: "st",
       active: true,
     });
     const leaf = await articleService.createArticle({
       articleNumber: `LEAF-${crypto.randomUUID()}`,
       name: "Leaf",
       type: "purchased",
-      unit: "st",
       standardCost: 10,
       active: true,
     });
@@ -898,7 +891,6 @@ describe("costing service — supplier price in another currency", () => {
       articleNumber: `COMP-${crypto.randomUUID()}`,
       name: "Second",
       type: "purchased",
-      unit: "st",
       active: true,
     });
     await articleService.addBomComponent(parent.id, { componentArticleId: second.id, quantity: 1 });
@@ -945,7 +937,6 @@ describe("costing service — supplier price in another currency", () => {
       articleNumber: `TOP-${crypto.randomUUID()}`,
       name: "Top",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const { parent: semi, component: leaf } = await makeParentWithBom(10, 3);
@@ -1084,15 +1075,15 @@ describe("costing service — Kalkyl structure rows", () => {
     const user = await makeUser();
     const { parent, component } = await makeParentWithBom(10, 2);
     const kalkyl = await articleService.createArticle({
-      articleNumber: `KALKYL-${crypto.randomUUID()}`, name: "Kalkylmaterial", type: "purchased", unit: "st", standardCost: 5, active: true,
+      articleNumber: `KALKYL-${crypto.randomUUID()}`, name: "Kalkylmaterial", type: "purchased", standardCost: 5, active: true,
     });
     await articleService.addBomComponent(parent.id, { componentArticleId: kalkyl.id, quantity: 1, costingOnly: true });
     // A phantom on a Kalkyl row: its parts are costed, flagged all the way down.
     const phantom = await articleService.createArticle({
-      articleNumber: `PH-${crypto.randomUUID()}`, name: "Fantom", type: "manufactured", isPhantom: true, unit: "st", active: true,
+      articleNumber: `PH-${crypto.randomUUID()}`, name: "Fantom", type: "manufactured", isPhantom: true, active: true,
     });
     const underPhantom = await articleService.createArticle({
-      articleNumber: `UP-${crypto.randomUUID()}`, name: "Under fantom", type: "purchased", unit: "st", standardCost: 1, active: true,
+      articleNumber: `UP-${crypto.randomUUID()}`, name: "Under fantom", type: "purchased", standardCost: 1, active: true,
     });
     await articleService.addBomComponent(phantom.id, { componentArticleId: underPhantom.id, quantity: 3 });
     await articleService.addBomComponent(parent.id, { componentArticleId: phantom.id, quantity: 1, costingOnly: true });
@@ -1145,10 +1136,10 @@ describe("costing service — variance analysis", () => {
   ) {
     const user = await makeUser();
     const parent = await articleService.createArticle({
-      articleNumber: `PARENT-${crypto.randomUUID()}`, name: "Parent", type: "manufactured", unit: "st", active: true,
+      articleNumber: `PARENT-${crypto.randomUUID()}`, name: "Parent", type: "manufactured", active: true,
     });
     const component = await articleService.createArticle({
-      articleNumber: `COMP-${crypto.randomUUID()}`, name: "Component", type: "purchased", unit: "st", standardCost: 10, active: true,
+      articleNumber: `COMP-${crypto.randomUUID()}`, name: "Component", type: "purchased", standardCost: 10, active: true,
     });
     const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 600, overheadPercent: 0, active: true });
     const routingOp = await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
@@ -1311,7 +1302,7 @@ describe("costing service — variance analysis", () => {
     const f = await makeFixture({ quantity: 10, linked: true, secondOperation: true });
     // Ändrad TO: material added after release is part of the plan (1 per unit, unlinked).
     const extra = await articleService.createArticle({
-      articleNumber: `EXTRA-${crypto.randomUUID()}`, name: "Tillägg", type: "purchased", unit: "st", standardCost: 5, active: true,
+      articleNumber: `EXTRA-${crypto.randomUUID()}`, name: "Tillägg", type: "purchased", standardCost: 5, active: true,
     });
     await mfgService.addMaterial(f.order.id, { componentArticleId: extra.id, quantity: 10 }, f.user.id);
     await mfgService.reportOperationQuantities(f.operation.id, { quantityOk: 4, quantityScrapped: 0, markDone: false, createdBy: f.user.id });
@@ -1964,9 +1955,9 @@ describe("costing service — markup levels (#16)", () => {
 
   it("prices a multi-level run's sub-levels with the sold article's materialpåslag and sums the base", async () => {
     Object.assign(costingSettings, { costingMoPercent: 10, costingMaterialMarkupPercent: 10 });
-    const raw = await articleService.createArticle({ articleNumber: `RAW-${crypto.randomUUID()}`, name: "Råmaterial", type: "purchased", unit: "st", standardCost: 50, active: true });
-    const semi = await articleService.createArticle({ articleNumber: `SEMI-${crypto.randomUUID()}`, name: "Underrede", type: "manufactured", unit: "st", active: true });
-    const top = await articleService.createArticle({ articleNumber: `TOP-${crypto.randomUUID()}`, name: "Diskbänk", type: "manufactured", unit: "st", standardCost: 0, active: true });
+    const raw = await articleService.createArticle({ articleNumber: `RAW-${crypto.randomUUID()}`, name: "Råmaterial", type: "purchased", standardCost: 50, active: true });
+    const semi = await articleService.createArticle({ articleNumber: `SEMI-${crypto.randomUUID()}`, name: "Underrede", type: "manufactured", active: true });
+    const top = await articleService.createArticle({ articleNumber: `TOP-${crypto.randomUUID()}`, name: "Diskbänk", type: "manufactured", standardCost: 0, active: true });
     await articleService.addBomComponent(semi.id, { componentArticleId: raw.id, quantity: 1 });
     await articleService.addBomComponent(top.id, { componentArticleId: semi.id, quantity: 2 });
     await articleService.addBomComponent(top.id, { componentArticleId: raw.id, quantity: 1 });
@@ -2027,8 +2018,8 @@ describe("costing service — markup levels (#16)", () => {
 
   it("gives previewStructure the template's varugrupp, which moves only the materialpåslag", async () => {
     Object.assign(costingSettings, { costingMoPercent: 10, costingAffoPercent: 10, costingMaterialMarkupPercent: 10 });
-    const template = await articleService.createArticle({ articleNumber: `TPL-${crypto.randomUUID()}`, name: "Mall", type: "manufactured", unit: "st", active: true });
-    const part = await articleService.createArticle({ articleNumber: `PART-${crypto.randomUUID()}`, name: "Skiva", type: "purchased", unit: "st", standardCost: 10, active: true });
+    const template = await articleService.createArticle({ articleNumber: `TPL-${crypto.randomUUID()}`, name: "Mall", type: "manufactured", active: true });
+    const part = await articleService.createArticle({ articleNumber: `PART-${crypto.randomUUID()}`, name: "Skiva", type: "purchased", standardCost: 10, active: true });
     const structure = { components: [{ componentArticleId: part.id, quantity: 2, unitId: null, unitFactor: null }], operations: [] };
 
     const company = await costingService.previewStructure(template.id, 5, structure);

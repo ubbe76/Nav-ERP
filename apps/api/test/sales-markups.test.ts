@@ -111,7 +111,6 @@ async function makeArticle(opts: { salesPrice?: number; groupId?: string } = {})
     articleNumber: `KP-${crypto.randomUUID().slice(0, 8)}`,
     name: "Diskbänk",
     type: "manufactured",
-    unit: "st",
     active: true,
     ...(opts.groupId ? { groupId: opts.groupId } : {}),
   });
@@ -640,13 +639,13 @@ describe("granskningen av etapp 2", () => {
     await setSetting("costing_general_markup_percent", "25");
     await setSetting("costing_material_markup_percent", "10");
     const raw = await testArticleService.createArticle({
-      articleNumber: `RAW-${crypto.randomUUID().slice(0, 8)}`, name: "Plåt", type: "purchased", unit: "st", standardCost: 50, active: true,
+      articleNumber: `RAW-${crypto.randomUUID().slice(0, 8)}`, name: "Plåt", type: "purchased", standardCost: 50, active: true,
     });
     const lego = await testArticleService.createArticle({
-      articleNumber: `LEGO-${crypto.randomUUID().slice(0, 8)}`, name: "Pulverlack", type: "service", unit: "st", standardCost: 20, active: true,
+      articleNumber: `LEGO-${crypto.randomUUID().slice(0, 8)}`, name: "Pulverlack", type: "service", standardCost: 20, active: true,
     });
     const semi = await testArticleService.createArticle({
-      articleNumber: `SEMI-${crypto.randomUUID().slice(0, 8)}`, name: "Underrede", type: "manufactured", unit: "st", active: true,
+      articleNumber: `SEMI-${crypto.randomUUID().slice(0, 8)}`, name: "Underrede", type: "manufactured", active: true,
     });
     const top = await makeArticle({ salesPrice: 300 });
     await testArticleService.addBomComponent(semi.id, { componentArticleId: raw.id, quantity: 1 });

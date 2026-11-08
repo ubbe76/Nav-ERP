@@ -108,7 +108,6 @@ async function makeArticle(salesPrice?: number) {
     articleNumber: `ART-SO-${crypto.randomUUID()}`,
     name: "Test Article",
     type: "manufactured",
-    unit: "st",
     salesPrice,
     active: true,
   });
@@ -278,7 +277,6 @@ describe("sales service — order list filters", () => {
       articleNumber: `ART-SO-OTHER-${crypto.randomUUID()}`,
       name: `Orelaterad artikel ${crypto.randomUUID()}`,
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const unrelated = await salesService.createQuote(
@@ -680,7 +678,6 @@ describe("sales service — Avrundning on rows", () => {
       articleNumber: `ART-RND-${crypto.randomUUID()}`,
       name: "Rundad artikel",
       type: "purchased",
-      unit: "st",
       rounding,
       salesPrice,
       active: true,
@@ -840,7 +837,6 @@ describe("sales service — C3 kundpriser: row pricing", () => {
       articleNumber: `ART-SO-${crypto.randomUUID()}`,
       name: "Test Article",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
   }

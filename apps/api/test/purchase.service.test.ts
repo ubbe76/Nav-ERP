@@ -112,7 +112,7 @@ async function makeSupplier() {
 }
 
 async function makeArticle(articleNumber: string) {
-  return articleService.createArticle({ articleNumber, name: articleNumber, type: "purchased", unit: "st", active: true });
+  return articleService.createArticle({ articleNumber, name: articleNumber, type: "purchased", active: true });
 }
 
 async function makeLocation() {
@@ -410,7 +410,6 @@ describe("purchase service — order list filters", () => {
       articleNumber: `ART-SEARCH-${crypto.randomUUID()}`,
       name: `Söktermbenämning-${crypto.randomUUID()}`,
       type: "purchased",
-      unit: "st",
       active: true,
     });
     const matching = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
@@ -832,7 +831,6 @@ describe("purchase service — Avrundning on rows", () => {
       articleNumber: `ART-RND-${crypto.randomUUID()}`,
       name: "Rundad artikel",
       type: "purchased",
-      unit: "st",
       rounding,
       active: true,
     });

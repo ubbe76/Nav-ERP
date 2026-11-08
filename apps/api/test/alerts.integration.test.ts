@@ -106,7 +106,6 @@ async function makeArticle(type: "purchased" | "manufactured", extra: { reorderP
     articleNumber: `A-${suffix()}`,
     name: type === "purchased" ? "Köpt del" : "Tillverkad vara",
     type,
-    unit: "st",
     active: true,
     ...extra,
   });

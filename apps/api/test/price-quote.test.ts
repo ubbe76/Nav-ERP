@@ -59,7 +59,6 @@ async function makeArticle(opts: { salesPrice?: number } = {}) {
     articleNumber: `ART-PQ-${crypto.randomUUID()}`,
     name: "Test Article",
     type: "purchased",
-    unit: "st",
     active: true,
   });
   if (opts.salesPrice !== undefined) {

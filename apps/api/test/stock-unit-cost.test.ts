@@ -55,7 +55,6 @@ async function makeArticle(opts: { type?: "purchased" | "manufactured"; standard
     articleNumber: `ART-UC-${crypto.randomUUID()}`,
     name: "Test Article",
     type: opts.type ?? "purchased",
-    unit: "st",
     active: true,
     ...(opts.standardCost !== undefined ? { standardCost: opts.standardCost } : {}),
   });

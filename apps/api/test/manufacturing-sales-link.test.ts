@@ -114,7 +114,6 @@ async function makeArticle(type: "manufactured" | "purchased" = "manufactured") 
     articleNumber: `ART-LINK-${crypto.randomUUID()}`,
     name: "Länkad artikel",
     type,
-    unit: "st",
     active: true,
   });
 }

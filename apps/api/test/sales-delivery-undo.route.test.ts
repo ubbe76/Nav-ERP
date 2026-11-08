@@ -60,7 +60,6 @@ async function setup() {
     articleNumber: `ART-UNDO-R-${crypto.randomUUID().slice(0, 8)}`,
     name: "Artikel",
     type: "purchased",
-    unit: "st",
     active: true,
   });
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });

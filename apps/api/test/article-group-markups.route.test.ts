@@ -144,7 +144,6 @@ describe("Pröva påslag — POST /articles/:id/cost-calculations/pre-calculate"
       articleNumber: `P-${crypto.randomUUID().slice(0, 8)}`,
       name: "Diskbänk",
       type: "manufactured",
-      unit: "st",
       groupId: group.id,
       active: true,
     });
@@ -188,7 +187,6 @@ describe("Sätt försäljningspris från en prövad kalkyl — POST /cost-calcul
       articleNumber: `P-${crypto.randomUUID().slice(0, 8)}`,
       name: "Diskbänk",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const url = `/articles/${article.id}/cost-calculations/pre-calculate`;

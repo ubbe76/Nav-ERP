@@ -106,7 +106,6 @@ async function makeLegoRouting(opts?: { setupPrice?: number | null }) {
     articleNumber: `LEGO-${crypto.randomUUID()}`,
     name: "Legodetalj",
     type: "manufactured",
-    unit: "st",
     weight: 2.5,
     active: true,
   });
@@ -204,7 +203,6 @@ describe("lego inquiry rows — creation", () => {
       articleNumber: `OTHER-${crypto.randomUUID()}`,
       name: "Annan",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const rows = (row: object) => ({ supplierId: f.supplier.id, rows: [{ quantity: 1, ...row }] });
@@ -226,7 +224,6 @@ describe("lego inquiry rows — creation", () => {
       articleNumber: `PLAIN-${crypto.randomUUID()}`,
       name: "Vanlig",
       type: "purchased",
-      unit: "st",
       active: true,
     });
     const { inquiry, rows } = await purchaseService.createInquiry(
@@ -640,7 +637,7 @@ describe("purchase order list — Legoinköp filter", () => {
   it("kind=lego keeps orders with at least one TO-linked row, kind=regular the rest", async () => {
     const f = await releasedMo(4);
     const plain = await articleService.createArticle({
-      articleNumber: `SKRUV-${crypto.randomUUID()}`, name: "Skruv", type: "purchased", unit: "st", active: true,
+      articleNumber: `SKRUV-${crypto.randomUUID()}`, name: "Skruv", type: "purchased", active: true,
     });
     // createPurchaseOrder takes the header only; rows go through addRow.
     const order = async (rows: { articleId: string; quantity: number; unitPrice: number; moOperationId?: string }[]) => {

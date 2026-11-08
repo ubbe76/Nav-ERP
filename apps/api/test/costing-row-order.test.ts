@@ -28,7 +28,6 @@ async function makeArticle(name: string, type: "manufactured" | "purchased") {
     articleNumber: `${name}-${crypto.randomUUID().slice(0, 8)}`,
     name,
     type,
-    unit: "st",
     active: true,
   });
 }

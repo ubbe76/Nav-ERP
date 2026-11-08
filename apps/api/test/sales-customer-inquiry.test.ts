@@ -71,7 +71,6 @@ async function makeArticle() {
     articleNumber: `ART-FQ-${crypto.randomUUID().slice(0, 8)}`,
     name: "Diskbänk",
     type: "purchased",
-    unit: "st",
     active: true,
   });
 }

@@ -59,14 +59,12 @@ async function makeOrderConsumingAt(prices: number[], consumeQuantity: number, s
     articleNumber: nextNumber("COMP"),
     name: "Komponent",
     type: "purchased",
-    unit: "st",
     active: true,
   });
   const parent = await articleService.createArticle({
     articleNumber: nextNumber("PARENT"),
     name: "Slutprodukt",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   await articleService.addBomComponent(parent.id, { componentArticleId: component.id, quantity: 1 });
@@ -148,7 +146,6 @@ describe("förkalkyl med Verklig kostnad", () => {
       articleNumber: nextNumber("COMP"),
       name: "Komponent",
       type: "purchased",
-      unit: "st",
       standardCost: 25,
       active: true,
     });
@@ -156,7 +153,6 @@ describe("förkalkyl med Verklig kostnad", () => {
       articleNumber: nextNumber("PARENT"),
       name: "Slutprodukt",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     await articleService.addBomComponent(parent.id, { componentArticleId: component.id, quantity: 2 });

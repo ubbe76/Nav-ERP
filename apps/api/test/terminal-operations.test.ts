@@ -36,7 +36,7 @@ afterAll(async () => {
 });
 
 async function makeArticle(articleNumber: string, name: string, type: "manufactured" | "purchased") {
-  return articleService.createArticle({ articleNumber, name, type, unit: "st", active: true });
+  return articleService.createArticle({ articleNumber, name, type, active: true });
 }
 
 // Rutt 10 Kap(100) → 20 Lego(900) → 30 Svets(200); PLÅT-2 linked to op 10,

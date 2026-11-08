@@ -63,7 +63,6 @@ async function makeArticle(opts: { salesPrice?: number; groupId?: string } = {})
     articleNumber: `ART-PR-${crypto.randomUUID()}`,
     name: "Test Article",
     type: "purchased",
-    unit: "st",
     active: true,
     ...(opts.groupId !== undefined ? { groupId: opts.groupId } : {}),
   });

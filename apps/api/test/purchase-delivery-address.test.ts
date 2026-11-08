@@ -123,7 +123,6 @@ async function makeOrder(language: "sv" | "en" = "sv") {
     articleNumber: `ART-${crypto.randomUUID().slice(0, 8)}`,
     name: "Plåt",
     type: "purchased",
-    unit: "st",
     active: true,
   });
   const order = await purchaseService.createPurchaseOrder(
@@ -321,7 +320,6 @@ describe("Leveransadress on the purchase order", () => {
       articleNumber: `LEGO-${crypto.randomUUID().slice(0, 8)}`,
       name: "Legodetalj",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     await mfgService.createRoutingOperation(parent.id, {

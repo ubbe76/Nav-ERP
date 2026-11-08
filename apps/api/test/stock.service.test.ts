@@ -34,7 +34,6 @@ describe("stock service — append-only transaction log", () => {
       articleNumber: "ART-1",
       name: "Test Article",
       type: "purchased",
-      unit: "st",
       active: true,
     });
     const location = await makeLocation();
@@ -70,7 +69,6 @@ describe("stock service — append-only transaction log", () => {
       articleNumber: "ART-2",
       name: "Test Article 2",
       type: "purchased",
-      unit: "st",
       active: true,
     });
     const location = await makeLocation();
@@ -101,7 +99,6 @@ describe("stock service — mandatory location with *** fallback", () => {
       articleNumber: `ART-LOC-${crypto.randomUUID()}`,
       name: "Platsartikel",
       type: "purchased",
-      unit: "st",
       active: true,
       ...(defaultLocationId ? { defaultLocationId } : {}),
     });
@@ -184,7 +181,6 @@ describe("stock service — lagerflytt och rensning av tomma lagerplatser", () =
       articleNumber: `ART-FLYTT-${crypto.randomUUID()}`,
       name: "Flyttartikel",
       type: "purchased",
-      unit: "st",
       active: true,
       ...(defaultLocationId ? { defaultLocationId } : {}),
     });

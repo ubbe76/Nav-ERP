@@ -49,7 +49,6 @@ async function makeArticle(number: string, standardCost?: number) {
     articleNumber: number,
     name: `Artikel ${number}`,
     type: "purchased",
-    unit: "st",
     active: true,
     ...(standardCost !== undefined ? { standardCost } : {}),
   });

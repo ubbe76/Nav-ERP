@@ -22,7 +22,6 @@ async function makeArticle(articleNumber: string) {
     articleNumber,
     name: articleNumber,
     type: "purchased",
-    unit: "st",
     active: true,
   });
 }
@@ -164,7 +163,6 @@ describe("article service — BOM tree", () => {
       name: "Fantom",
       type: "manufactured",
       isPhantom: true,
-      unit: "st",
       active: true,
     });
     const leaf = await makeArticle("TREE-LEAF");
@@ -413,7 +411,6 @@ describe("article service — list search/filter/pagination", () => {
       articleNumber: "DB-100",
       name: "Diskbänk 60cm",
       type: "manufactured",
-      unit: "st",
       active: true,
       groupId: group.id,
     });
@@ -421,10 +418,9 @@ describe("article service — list search/filter/pagination", () => {
       articleNumber: "DB-200",
       name: "Diskbänk 80cm",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
-    await service.createArticle({ articleNumber: "SKRUV-1", name: "Skruv M6", type: "purchased", unit: "st", active: true });
+    await service.createArticle({ articleNumber: "SKRUV-1", name: "Skruv M6", type: "purchased", active: true });
     return { group };
   }
 

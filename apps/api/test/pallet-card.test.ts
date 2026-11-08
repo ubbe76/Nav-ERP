@@ -124,7 +124,6 @@ async function makeRoutedArticle(articleNumber: string) {
     articleNumber,
     name: "Diskbänk 1200",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   await mfgService.createRoutingOperation(
@@ -489,14 +488,12 @@ describe("pallkort — delivery (GET /deliveries/:id/pallet-card)", () => {
       articleNumber: "PALL-A",
       name: "Modul A",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const articleB = await articleService.createArticle({
       articleNumber: "PALL-B",
       name: "Modul B",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });

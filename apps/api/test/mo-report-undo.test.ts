@@ -85,7 +85,6 @@ async function setup() {
     articleNumber: `C-${crypto.randomUUID()}`,
     name: "Komponent",
     type: "purchased",
-    unit: "st",
     defaultLocationId: location.id,
     active: true,
   });
@@ -93,7 +92,6 @@ async function setup() {
     articleNumber: `P-${crypto.randomUUID()}`,
     name: "Produkt",
     type: "manufactured",
-    unit: "st",
     defaultLocationId: location.id,
     active: true,
   });

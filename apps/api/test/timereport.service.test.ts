@@ -80,7 +80,6 @@ async function makeReleasedMoWithOperation() {
     articleNumber: `PARENT-${crypto.randomUUID()}`,
     name: "Parent",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 20, active: true });
@@ -98,7 +97,6 @@ async function makeReleasedMoWithTwoOperations() {
     articleNumber: `PARENT-${crypto.randomUUID()}`,
     name: "Parent",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 20, active: true });
@@ -1193,10 +1191,10 @@ describe("ställ och produktion (#14 etapp 3)", () => {
   async function linkedFixture() {
     const user = await makeUser();
     const parent = await articleService.createArticle({
-      articleNumber: `PARENT-${crypto.randomUUID()}`, name: "Parent", type: "manufactured", unit: "st", active: true,
+      articleNumber: `PARENT-${crypto.randomUUID()}`, name: "Parent", type: "manufactured", active: true,
     });
     const component = await articleService.createArticle({
-      articleNumber: `COMP-${crypto.randomUUID()}`, name: "Komponent", type: "purchased", unit: "st", active: true,
+      articleNumber: `COMP-${crypto.randomUUID()}`, name: "Komponent", type: "purchased", active: true,
     });
     const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 0, active: true });
     const routingOp = await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });

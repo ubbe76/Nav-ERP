@@ -80,7 +80,7 @@ async function place(name: string, opts: { fixed?: boolean; active?: boolean; bl
 }
 
 async function article(number: string, defaultLocationId?: string) {
-  return articleService.createArticle({ articleNumber: number, name: number, type: "purchased", unit: "st", active: true, defaultLocationId });
+  return articleService.createArticle({ articleNumber: number, name: number, type: "purchased", active: true, defaultLocationId });
 }
 
 const set = (articleId: string, primaryLocationId: string | null, alternativeLocationIds: string[]) =>
@@ -523,7 +523,6 @@ describe("Kopiera från", () => {
       articleNumber: "NEW-1",
       name: "Kopia",
       type: "purchased",
-      unit: "st",
       active: true,
       defaultLocationId: a1.id,
       copyFrom: { articleId: source.id, parts: ["information", "inkop", "filer"] },

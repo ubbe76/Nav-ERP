@@ -108,7 +108,6 @@ async function makeArticle(opts: { salesPrice?: number } = {}) {
     articleNumber: `OP-${crypto.randomUUID().slice(0, 8)}`,
     name: "Diskbänk",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   if (opts.salesPrice !== undefined) await db.update(articles).set({ salesPrice: String(opts.salesPrice) }).where(eq(articles.id, article.id));

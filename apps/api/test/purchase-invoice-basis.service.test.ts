@@ -112,7 +112,6 @@ async function makeLegoOperation() {
     articleNumber: `LEGO-B-${crypto.randomUUID()}`,
     name: "Legodetalj",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   await mfgService.createRoutingOperation(parent.id, {

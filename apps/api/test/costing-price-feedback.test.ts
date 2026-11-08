@@ -58,7 +58,6 @@ async function makeCalculation(quantity: number) {
     articleNumber: nextNumber("COMP"),
     name: "Komponent",
     type: "purchased",
-    unit: "st",
     standardCost: 100,
     active: true,
   });
@@ -66,7 +65,6 @@ async function makeCalculation(quantity: number) {
     articleNumber: nextNumber("PARENT"),
     name: "Slutprodukt",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   await articleService.addBomComponent(parent.id, { componentArticleId: component.id, quantity: 3 });
@@ -114,7 +112,6 @@ describe("Sätt standardpris", () => {
       articleNumber: nextNumber("PARENT"),
       name: "Slutprodukt",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const wc = await mfgService.createWorkCenter({
@@ -146,7 +143,6 @@ describe("Sätt standardpris", () => {
       articleNumber: nextNumber("RAW"),
       name: "Ramaterial",
       type: "purchased",
-      unit: "st",
       standardCost: 50,
       active: true,
     });
@@ -154,7 +150,6 @@ describe("Sätt standardpris", () => {
       articleNumber: nextNumber("SEMI"),
       name: "Underrede",
       type: "manufactured",
-      unit: "st",
       standardCost: 999,
       active: true,
     });
@@ -162,7 +157,6 @@ describe("Sätt standardpris", () => {
       articleNumber: nextNumber("TOP"),
       name: "Slutprodukt",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     await articleService.addBomComponent(semi.id, { componentArticleId: raw.id, quantity: 2 });

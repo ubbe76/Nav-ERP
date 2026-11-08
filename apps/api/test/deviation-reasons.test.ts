@@ -78,7 +78,6 @@ async function releasedOperation(userId: string) {
     articleNumber: `KASS-${crypto.randomUUID().slice(0, 8)}`,
     name: "Bänkskiva",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   const workCenter = await mfg.createWorkCenter({ code: String(Math.floor(Math.random() * 900) + 100), name: "Kantpress", active: true });

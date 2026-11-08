@@ -70,7 +70,6 @@ async function makeLegoRouting() {
     articleNumber: `LEGO-${crypto.randomUUID()}`,
     name: "Legodetalj",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
 
@@ -165,7 +164,6 @@ describe("GET /articles/:id/lego-operations", () => {
       articleNumber: `PLAIN-${crypto.randomUUID()}`,
       name: "Vanlig",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     expect(await mfgService.listLegoOperationOptions(plain.id)).toEqual([]);

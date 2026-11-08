@@ -56,7 +56,6 @@ async function setup() {
     articleNumber: `P-${crypto.randomUUID()}`,
     name: "Produkt",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
@@ -222,7 +221,7 @@ describe("ställ och produktion — rutterna (#14 etapp 3)", () => {
 
   async function released() {
     const user = await authRepo.create({ email: `k-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "Ledare", role: "supervisor" });
-    const parent = await articleService.createArticle({ articleNumber: `P-${crypto.randomUUID()}`, name: "Produkt", type: "manufactured", unit: "st", active: true });
+    const parent = await articleService.createArticle({ articleNumber: `P-${crypto.randomUUID()}`, name: "Produkt", type: "manufactured", active: true });
     const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
     const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);
@@ -330,7 +329,7 @@ describe("tidrapportens resurs — rutterna (#15)", () => {
 
   it("refuses a stamp on the station the list showed after a switch (409), keeps the resource on stamp, stop and manual report, and never takes one from a PATCH", async () => {
     const user = await authRepo.create({ email: `w-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "Ledare", role: "supervisor" });
-    const parent = await articleService.createArticle({ articleNumber: `P-${crypto.randomUUID()}`, name: "Produkt", type: "manufactured", unit: "st", active: true });
+    const parent = await articleService.createArticle({ articleNumber: `P-${crypto.randomUUID()}`, name: "Produkt", type: "manufactured", active: true });
     const r100 = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
     const r200 = await mfgService.createWorkCenter({ code: "200", name: "Svets 2", active: true });
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: r100.id, setupTime: 10, runTimePerUnit: 2 });

@@ -86,7 +86,6 @@ async function setup() {
     articleNumber: `SC-${crypto.randomUUID()}`,
     name: "Stol",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 20, active: true });

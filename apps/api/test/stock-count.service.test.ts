@@ -70,7 +70,6 @@ async function makeArticle(number = "ART-1", standardCost?: string) {
     articleNumber: number,
     name: "Test Article",
     type: "purchased",
-    unit: "st",
     active: true,
     ...(standardCost ? { standardCost: Number(standardCost) } : {}),
   });

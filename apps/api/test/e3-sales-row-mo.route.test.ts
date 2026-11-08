@@ -98,7 +98,6 @@ async function makeArticle(type: "manufactured" | "purchased" = "manufactured", 
     articleNumber: `ART-E3-ROUTE-${crypto.randomUUID()}`,
     name: "Länkad artikel",
     type,
-    unit: "st",
     active: true,
     salesPrice,
   });

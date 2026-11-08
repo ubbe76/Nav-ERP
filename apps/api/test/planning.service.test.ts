@@ -173,7 +173,6 @@ async function releasedLegoMo(quantity = 4) {
     articleNumber: `LEGO-${crypto.randomUUID()}`,
     name: "Legodetalj",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   await mfgService.createRoutingOperation(parent.id, {

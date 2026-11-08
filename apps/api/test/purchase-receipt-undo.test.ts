@@ -96,7 +96,6 @@ async function makeOrder(quantity = 10) {
     articleNumber: `ART-${crypto.randomUUID()}`,
     name: "Plåt",
     type: "purchased",
-    unit: "st",
     active: true,
   });
   const location = await makeLocation();
@@ -159,7 +158,6 @@ describe("Ångra inleverans — ordinary row", () => {
       articleNumber: `ART-${crypto.randomUUID()}`,
       name: "Skruv",
       type: "purchased",
-      unit: "st",
       active: true,
     });
     await purchaseService.addRow(order.id, { articleId: articleB.id, quantity: 1, unitPrice: 1 });
@@ -237,14 +235,12 @@ async function makeLegoOrder(quantity = 4) {
     articleNumber: `LEGO-${crypto.randomUUID()}`,
     name: "Legodetalj",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   const component = await articleService.createArticle({
     articleNumber: `COMP-${crypto.randomUUID()}`,
     name: "Komponent",
     type: "purchased",
-    unit: "st",
     active: true,
   });
   await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: machine.id, setupTime: 0, runTimePerUnit: 1 });

@@ -128,7 +128,6 @@ async function fixtures(adminId: string) {
     articleNumber: `P-${crypto.randomUUID().slice(0, 8)}`,
     name: "Diskbänk",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   const part = await testArticleService.createArticle({
@@ -148,7 +147,6 @@ async function fixtures(adminId: string) {
     articleNumber: `T-${crypto.randomUUID().slice(0, 8)}`,
     name: "Papperskorg",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   await configurator.createTemplate(template.id, { mode: "variants" });

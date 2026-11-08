@@ -140,7 +140,7 @@ async function seedWorld() {
   const r130 = await wc("130", "Kantpress 3", 450);
   const r140 = await wc("140", "Svets", 500);
   const r150 = await wc("150", "Gammal press", 500);
-  const parent = await testArticleService.createArticle({ articleNumber: `P-${crypto.randomUUID().slice(0, 6)}`, name: "Produkt", type: "manufactured", unit: "st", active: true });
+  const parent = await testArticleService.createArticle({ articleNumber: `P-${crypto.randomUUID().slice(0, 6)}`, name: "Produkt", type: "manufactured", active: true });
   const routing10 = await mfgService.createRoutingOperation(parent.id, {
     sequenceNo: 10,
     workCenterId: r110.id,

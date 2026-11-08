@@ -184,7 +184,6 @@ async function makeReleasedOperation(userId: string) {
     articleNumber: `PARENT-${crypto.randomUUID()}`,
     name: "Parent",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   const workCenter = await mfgService.createWorkCenter({

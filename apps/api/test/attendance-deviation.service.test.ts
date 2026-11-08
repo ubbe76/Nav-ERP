@@ -128,7 +128,6 @@ async function makeOperation(userId: string) {
     articleNumber: `P-${crypto.randomUUID()}`,
     name: "Produkt",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });

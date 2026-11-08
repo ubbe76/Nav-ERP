@@ -135,7 +135,7 @@ async function place(name: string, opts: { fixed?: boolean; blocked?: boolean; n
 }
 
 async function article(number: string, defaultLocationId?: string, type: "purchased" | "manufactured" = "purchased") {
-  return articleService.createArticle({ articleNumber: number, name: number, type, unit: "st", active: true, defaultLocationId });
+  return articleService.createArticle({ articleNumber: number, name: number, type, active: true, defaultLocationId });
 }
 
 async function stock(articleId: string, locationId: string | undefined, quantityDelta: number) {
@@ -655,7 +655,7 @@ describe("readers", () => {
   it("values the blocked balance as usual, and Negativt saldo stays physical", async () => {
     const a1 = await place("A1");
     const k = await place("K1");
-    const x = await articleService.createArticle({ articleNumber: "X-1", name: "X-1", type: "purchased", unit: "st", active: true, standardCost: 10, defaultLocationId: a1.id });
+    const x = await articleService.createArticle({ articleNumber: "X-1", name: "X-1", type: "purchased", active: true, standardCost: 10, defaultLocationId: a1.id });
     await stock(x.id, k.id, 10);
     await stock(x.id, a1.id, -4);
     await stockService.blockLocation(k.id, null, user.id);

@@ -101,7 +101,6 @@ async function article(name: string, type: "manufactured" | "purchased" | "servi
     articleNumber: `PIA-${(seq += 1)}-${crypto.randomUUID().slice(0, 6)}`,
     name,
     type,
-    unit: "st",
     standardCost,
     active: true,
   });

@@ -161,7 +161,7 @@ async function seedWorld(opts: { inactiveAlternative?: boolean; fill110?: boolea
   const r130 = await wc("130", "Kantpress 3", 450);
   const r140 = await wc("140", "Svets", 500);
   const r150 = await wc("150", "Gammal press", 500);
-  const parent = await testArticleService.createArticle({ articleNumber: `P-${crypto.randomUUID().slice(0, 6)}`, name: "Produkt", type: "manufactured", unit: "st", active: true });
+  const parent = await testArticleService.createArticle({ articleNumber: `P-${crypto.randomUUID().slice(0, 6)}`, name: "Produkt", type: "manufactured", active: true });
   const routing10 = await mfgService.createRoutingOperation(parent.id, {
     sequenceNo: 10,
     workCenterId: r110.id,
@@ -179,7 +179,7 @@ async function seedWorld(opts: { inactiveAlternative?: boolean; fill110?: boolea
   if (opts.inactiveAlternative) await mfgService.updateWorkCenter(r150.id, { active: false });
   let filler: { id: string } | null = null;
   if (opts.fill110) {
-    const fillerArticle = await testArticleService.createArticle({ articleNumber: `F-${crypto.randomUUID().slice(0, 6)}`, name: "Fyllnad", type: "manufactured", unit: "st", active: true });
+    const fillerArticle = await testArticleService.createArticle({ articleNumber: `F-${crypto.randomUUID().slice(0, 6)}`, name: "Fyllnad", type: "manufactured", active: true });
     await mfgService.createRoutingOperation(fillerArticle.id, { sequenceNo: 10, workCenterId: r110.id, setupTime: 2400, runTimePerUnit: 0 });
     filler = await mfgService.createManufacturingOrder({ articleId: fillerArticle.id, quantity: 1 }, user.id);
   }
@@ -243,7 +243,7 @@ describe("the snapshot at release", () => {
   it("gives an article without alternatives exactly today's TO: no rows anywhere", async () => {
     const user = await authRepo.create({ email: `alt-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "P", role: "admin" });
     const r = await mfgService.createWorkCenter({ code: "160", name: "Kap", active: true });
-    const parent = await testArticleService.createArticle({ articleNumber: `Q-${crypto.randomUUID().slice(0, 6)}`, name: "Q", type: "manufactured", unit: "st", active: true });
+    const parent = await testArticleService.createArticle({ articleNumber: `Q-${crypto.randomUUID().slice(0, 6)}`, name: "Q", type: "manufactured", active: true });
     await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: r.id, setupTime: 1, runTimePerUnit: 1 });
     const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 2 }, user.id);
     const [op] = await mfgService.listOperations(order.id);
@@ -656,7 +656,7 @@ describe("förslag på resurs (etapp 2)", () => {
     const w = await seedWorld();
     await mfgService.cancel(w.order.id, w.user.id); // the seed's TO is no load here
     const article = async (prefix: string) =>
-      testArticleService.createArticle({ articleNumber: `${prefix}-${crypto.randomUUID().slice(0, 6)}`, name: prefix, type: "manufactured", unit: "st", active: true });
+      testArticleService.createArticle({ articleNumber: `${prefix}-${crypto.randomUUID().slice(0, 6)}`, name: prefix, type: "manufactured", active: true });
     // 30 h on 140 and 80 h on 110 (W1–W2) come first.
     const f140 = await article("F140");
     await mfgService.createRoutingOperation(f140.id, { sequenceNo: 10, workCenterId: w.r140.id, setupTime: 1800, runTimePerUnit: 0 });

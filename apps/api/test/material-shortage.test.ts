@@ -132,7 +132,6 @@ async function makeComponent(name: string, type: "purchased" | "service" = "purc
     articleNumber: `${name}-${crypto.randomUUID().slice(0, 8)}`,
     name,
     type,
-    unit: "st",
     active: true,
   });
 }
@@ -148,7 +147,6 @@ async function makeOrder(opts: { quantity?: number; componentPerUnit?: number; s
     articleNumber: `PARENT-${crypto.randomUUID().slice(0, 8)}`,
     name: "Parent",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   const linked = await makeComponent("Plåt 2 mm", linkedType);
@@ -260,7 +258,6 @@ describe("Materialbrist — TO card Slutför operation", () => {
       articleNumber: `ONE-${crypto.randomUUID().slice(0, 8)}`,
       name: "Parent",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const component = await makeComponent("Plåt 2 mm");
@@ -312,7 +309,6 @@ describe("Materialbrist — TO card Slutför operation", () => {
       articleNumber: `PARENT-B-${crypto.randomUUID().slice(0, 8)}`,
       name: "Parent B",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const wc = await mfgService.createWorkCenter({ code: "999", name: "Press", active: true });
@@ -511,7 +507,6 @@ describe("Materialbrist — lego purchase receipt", () => {
       articleNumber: `LEGO-${crypto.randomUUID().slice(0, 8)}`,
       name: "Legodetalj",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const component = await makeComponent("Plåt 2 mm");

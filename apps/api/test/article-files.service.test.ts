@@ -35,7 +35,6 @@ async function makeArticle() {
     articleNumber: `ART-FILE-${crypto.randomUUID()}`,
     name: "Ritningsartikel",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
 }

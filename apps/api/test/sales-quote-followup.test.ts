@@ -103,7 +103,6 @@ async function fixture() {
     articleNumber: `ART-${crypto.randomUUID().slice(0, 8)}`,
     name: "Diskbänk",
     type: "purchased",
-    unit: "st",
     active: true,
     reorderPoint: 0,
   });

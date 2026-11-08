@@ -76,7 +76,7 @@ describe("GET /stock/balances?articleIds=", () => {
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
     const a1 = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
     const b2 = await stockService.createLocation({ warehouseId: warehouse.id, name: "B2", active: true });
-    const make = (n: string) => articleService.createArticle({ articleNumber: n, name: n, type: "purchased", unit: "st", active: true });
+    const make = (n: string) => articleService.createArticle({ articleNumber: n, name: n, type: "purchased", active: true });
     const [x, y, z] = [await make("X-1"), await make("Y-1"), await make("Z-1")];
     const stock = (articleId: string, locationId: string, quantityDelta: number) =>
       stockService.recordTransaction({ articleId, locationId, quantityDelta, transactionType: "inventory_adjustment" });
@@ -162,7 +162,7 @@ describe("Spärra / Släpp spärr — routes", () => {
     const cookie = await userCookie(["lager"]);
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
     const k = await stockService.createLocation({ warehouseId: warehouse.id, name: "K1", active: true });
-    const x = await articleService.createArticle({ articleNumber: "X-1", name: "X-1", type: "purchased", unit: "st", active: true, defaultLocationId: k.id });
+    const x = await articleService.createArticle({ articleNumber: "X-1", name: "X-1", type: "purchased", active: true, defaultLocationId: k.id });
     await stockService.recordTransaction({ articleId: x.id, locationId: k.id, quantityDelta: 3, transactionType: "inventory_adjustment" });
 
     const blocked = await post(cookie, `/stock/locations/${k.id}/block`, { note: "  Karantän  " });

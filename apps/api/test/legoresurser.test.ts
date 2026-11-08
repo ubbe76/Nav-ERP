@@ -113,7 +113,6 @@ async function makeLegoRouting(opts?: {
     articleNumber: `LEGO-${crypto.randomUUID()}`,
     name: "Legodetalj",
     type: "manufactured",
-    unit: "st",
     weight: 2.5,
     active: true,
   });
@@ -121,7 +120,6 @@ async function makeLegoRouting(opts?: {
     articleNumber: `COMP-${crypto.randomUUID()}`,
     name: "Component",
     type: "purchased",
-    unit: "st",
     active: true,
   });
 
@@ -185,7 +183,6 @@ describe("lego work centers and routing", () => {
       articleNumber: `A-${crypto.randomUUID()}`,
       name: "A",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const op = await mfgService.createRoutingOperation(article.id, {
@@ -205,7 +202,6 @@ describe("lego work centers and routing", () => {
       articleNumber: `A-${crypto.randomUUID()}`,
       name: "A",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
 

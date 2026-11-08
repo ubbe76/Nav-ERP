@@ -75,7 +75,6 @@ async function makeArticle() {
     articleNumber: `ART-DEL-${crypto.randomUUID()}`,
     name: "Test Article",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
 }

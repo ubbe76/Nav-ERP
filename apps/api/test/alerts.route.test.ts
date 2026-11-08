@@ -60,7 +60,7 @@ async function userCookie(permissions: string[], readOnly = false) {
 // A confirmed order with rest, due last year — late whatever today is.
 async function lateSalesOrder() {
   const [customer] = await db.insert(customers).values({ customerNumber: `K${crypto.randomUUID().slice(0, 6)}`, name: "Kund AB" }).returning();
-  const article = await testArticleService.createArticle({ articleNumber: `A-${crypto.randomUUID().slice(0, 8)}`, name: "Vara", type: "purchased", unit: "st", active: true });
+  const article = await testArticleService.createArticle({ articleNumber: `A-${crypto.randomUUID().slice(0, 8)}`, name: "Vara", type: "purchased", active: true });
   const [order] = await db
     .insert(salesOrders)
     .values({ orderNumber: `KO-${crypto.randomUUID().slice(0, 6)}`, customerId: customer!.id, status: "confirmed", expectedDeliveryDate: "2020-01-01" })

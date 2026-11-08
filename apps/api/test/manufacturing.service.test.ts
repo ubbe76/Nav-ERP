@@ -101,7 +101,6 @@ async function makeComponentArticle() {
     articleNumber: `COMP-${crypto.randomUUID()}`,
     name: "Component",
     type: "purchased",
-    unit: "st",
     active: true,
   });
 }
@@ -111,14 +110,12 @@ async function makeParentWithBom(componentQtyPerParent = 2) {
     articleNumber: `PARENT-${crypto.randomUUID()}`,
     name: "Parent",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   const component = await articleService.createArticle({
     articleNumber: `COMP-${crypto.randomUUID()}`,
     name: "Component",
     type: "purchased",
-    unit: "st",
     active: true,
   });
   await articleService.addBomComponent(parent.id, { componentArticleId: component.id, quantity: componentQtyPerParent });
@@ -423,7 +420,6 @@ describe("manufacturing service — release with phantom BOM components", () => 
       articleNumber: `PARENT-${crypto.randomUUID()}`,
       name: "Parent",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const phantom = await articleService.createArticle({
@@ -431,14 +427,12 @@ describe("manufacturing service — release with phantom BOM components", () => 
       name: "Phantom",
       type: "manufactured",
       isPhantom: true,
-      unit: "st",
       active: true,
     });
     const leaf = await articleService.createArticle({
       articleNumber: `LEAF-${crypto.randomUUID()}`,
       name: "Leaf",
       type: "purchased",
-      unit: "st",
       active: true,
     });
     await articleService.addBomComponent(parent.id, { componentArticleId: phantom.id, quantity: 2 });
@@ -459,7 +453,6 @@ describe("manufacturing service — release with phantom BOM components", () => 
       articleNumber: `PARENT-${crypto.randomUUID()}`,
       name: "Parent",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const phantomA = await articleService.createArticle({
@@ -467,7 +460,6 @@ describe("manufacturing service — release with phantom BOM components", () => 
       name: "Phantom A",
       type: "manufactured",
       isPhantom: true,
-      unit: "st",
       active: true,
     });
     const phantomB = await articleService.createArticle({
@@ -475,14 +467,12 @@ describe("manufacturing service — release with phantom BOM components", () => 
       name: "Phantom B",
       type: "manufactured",
       isPhantom: true,
-      unit: "st",
       active: true,
     });
     const leaf = await articleService.createArticle({
       articleNumber: `LEAF-${crypto.randomUUID()}`,
       name: "Leaf",
       type: "purchased",
-      unit: "st",
       active: true,
     });
     await articleService.addBomComponent(parent.id, { componentArticleId: phantomA.id, quantity: 1 });
@@ -509,7 +499,6 @@ describe("manufacturing service — order lifecycle", () => {
       articleNumber: `RND-${crypto.randomUUID()}`,
       name: "Rundad",
       type: "manufactured",
-      unit: "st",
       rounding: 10,
       active: true,
     });
@@ -781,7 +770,6 @@ describe("manufacturing — editable work centers and routing", () => {
       articleNumber: `RUT-${crypto.randomUUID()}`,
       name: "Ruttartikel",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 600, overheadPercent: 20, active: true });
@@ -819,7 +807,6 @@ describe("manufacturing — editable work centers and routing", () => {
       articleNumber: `RUT-${crypto.randomUUID()}`,
       name: "Ruttartikel",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
@@ -854,7 +841,6 @@ describe("manufacturing — editable work centers and routing", () => {
       articleNumber: `RUT-${crypto.randomUUID()}`,
       name: "Ruttartikel",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
@@ -896,7 +882,6 @@ describe("manufacturing — editable work centers and routing", () => {
       articleNumber: `RUT-${crypto.randomUUID()}`,
       name: "Ruttartikel",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
@@ -1150,7 +1135,6 @@ describe("manufacturing service — TO printout", () => {
       articleNumber: "63000-IN-SI-INKAST",
       name: "Papperskorg Stabil 48L, Inkast, Silver, RAL 9006, Inkastlock",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const order = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 1, note: "Skapad från behovsberäkning" }, user.id);
@@ -1169,7 +1153,6 @@ describe("manufacturing service — TO printout", () => {
       articleNumber: `ART-TO-PDF-${crypto.randomUUID()}`,
       name: "Oreleased",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const order = await insertPlannedManufacturingOrder({ articleId: article.id, quantity: 3 });
@@ -1192,21 +1175,18 @@ describe("manufacturing service — operation-linked material", () => {
       articleNumber: `PARENT-${crypto.randomUUID()}`,
       name: "Parent",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const linked = await articleService.createArticle({
       articleNumber: `LINKED-${crypto.randomUUID()}`,
       name: "Linked component",
       type: "purchased",
-      unit: "st",
       active: true,
     });
     const unlinked = await articleService.createArticle({
       articleNumber: `FREE-${crypto.randomUUID()}`,
       name: "Unlinked component",
       type: "purchased",
-      unit: "st",
       active: true,
     });
     const workCenter = await mfgService.createWorkCenter({ code: String(Math.floor(Math.random() * 900) + 100), name: "Svets", active: true });
@@ -1353,14 +1333,12 @@ describe("manufacturing service — scrap reporting", () => {
       articleNumber: `PARENT-${crypto.randomUUID()}`,
       name: "Parent",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const linked = await articleService.createArticle({
       articleNumber: `LINKED-${crypto.randomUUID()}`,
       name: "Linked component",
       type: "purchased",
-      unit: "st",
       active: true,
     });
     const workCenter = await mfgService.createWorkCenter({ code: String(Math.floor(Math.random() * 900) + 100), name: "Svets", active: true });
@@ -1495,7 +1473,6 @@ describe("manufacturing service — receipt from the last operation", () => {
       articleNumber: `PARENT-${crypto.randomUUID()}`,
       name: "Parent",
       type: "manufactured",
-      unit: "st",
       standardCost: 250,
       active: true,
     });

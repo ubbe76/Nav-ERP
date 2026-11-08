@@ -50,7 +50,6 @@ async function makeArticle(salesPrice?: number) {
     articleNumber: `PH-${crypto.randomUUID()}`,
     name: "Konsol",
     type: "purchased",
-    unit: "st",
     salesPrice,
     active: true,
   });

@@ -109,7 +109,6 @@ async function makeArticle() {
     articleNumber: `ART-UNDO-${crypto.randomUUID().slice(0, 8)}`,
     name: "Testartikel",
     type: "purchased",
-    unit: "st",
     active: true,
   });
 }

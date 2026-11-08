@@ -62,7 +62,6 @@ async function makeArticle(numberSuffix: string) {
     articleNumber: `ART-PL-${numberSuffix}`,
     name: `Test Article ${numberSuffix}`,
     type: "purchased",
-    unit: "st",
     active: true,
   });
 }

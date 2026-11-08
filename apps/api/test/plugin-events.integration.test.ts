@@ -108,7 +108,7 @@ const typesOf = async () => (await events()).map((e) => e.type);
 const clear = () => db.execute(sql`TRUNCATE plugin_deliveries, plugin_events`);
 
 async function makeArticle(type: "purchased" | "manufactured" = "purchased") {
-  return articleService.createArticle({ articleNumber: `ART-${crypto.randomUUID().slice(0, 8)}`, name: "Plåt", type, unit: "st", active: true });
+  return articleService.createArticle({ articleNumber: `ART-${crypto.randomUUID().slice(0, 8)}`, name: "Plåt", type, active: true });
 }
 
 async function makeLocation() {

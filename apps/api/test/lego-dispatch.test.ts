@@ -187,7 +187,6 @@ async function makeFixture(
     name: "Legodetalj",
     nameEn: "Subcontract part",
     type: "manufactured",
-    unit: "st",
     surfaceTreatment: "Förzinkad",
     colour: "RAL 9010",
     active: true,
@@ -196,7 +195,6 @@ async function makeFixture(
     articleNumber: `PLAIN-${crypto.randomUUID().slice(0, 8)}`,
     name: "Skruv",
     type: "purchased",
-    unit: "st",
     active: true,
   });
   await mfgService.createRoutingOperation(parent.id, {

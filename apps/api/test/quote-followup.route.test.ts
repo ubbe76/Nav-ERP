@@ -47,7 +47,7 @@ async function makeCustomer(name: string, number = `K${suffix()}`) {
 }
 
 async function makeArticle() {
-  return testArticleService.createArticle({ articleNumber: `A-${suffix()}`, name: "Vara", type: "purchased", unit: "st", active: true });
+  return testArticleService.createArticle({ articleNumber: `A-${suffix()}`, name: "Vara", type: "purchased", active: true });
 }
 
 async function quote(

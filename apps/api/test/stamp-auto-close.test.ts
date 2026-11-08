@@ -43,7 +43,6 @@ async function setup() {
     articleNumber: `SAC-${crypto.randomUUID()}`,
     name: "Stol",
     type: "manufactured",
-    unit: "st",
     active: true,
   });
   const wc = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 500, overheadPercent: 20, active: true });
@@ -131,7 +130,6 @@ describe("regel 10: a done operation stamps out everyone else", () => {
       articleNumber: `SAC2-${crypto.randomUUID()}`,
       name: "Bord",
       type: "manufactured",
-      unit: "st",
       active: true,
     });
     const wc = await mfgService.createWorkCenter({ code: "200", name: "Måla", hourlyRate: 400, overheadPercent: 10, active: true });
