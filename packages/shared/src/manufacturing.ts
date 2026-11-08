@@ -20,6 +20,9 @@ export const listManufacturingOrdersQuerySchema = listQuerySchema.extend({
   // Adds an `operations` summary (sequence, status, work center, production
   // group) to each row, e.g. for integrations. An extra batched query, so
   // it's opt-in. Same "true"/"false" string pattern as withOpenRows in sales.ts.
+  // Sort on order number: newest first by default; "asc" lets Översikten take
+  // the oldest active orders (limit=6) the way it always listed them.
+  order: z.enum(["asc", "desc"]).optional(),
   withOperations: z
     .enum(["true", "false"])
     .transform((value) => value === "true")

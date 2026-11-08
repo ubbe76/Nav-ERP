@@ -32,8 +32,8 @@ const READS = [
 const ALLOWED: Record<string, { reads: number; why: string }> = {
   "modules/stock/repository/on-hand.ts": { reads: 1, why: "THE usable reader (onHandByArticle)" },
   "modules/stock/repository/stock.repository.ts": {
-    reads: 7,
-    why: "physical: getBalances (rows + count, with locationBlocked), balancesForArticles (with blocked), the transfer's overdraw check on one place, the log's running balance, the block response's articles with stock on the place, the lagerplatsregister's sums per place and unit",
+    reads: 8,
+    why: "physical: countArticlesInStock (Översiktens artiklar i lager, over every place incl. blocked), getBalances (rows + count, with locationBlocked), balancesForArticles (with blocked), the transfer's overdraw check on one place, the log's running balance, the block response's articles with stock on the place, the lagerplatsregister's sums per place and unit",
   },
   "modules/stock/repository/article-locations.ts": {
     reads: 1,
