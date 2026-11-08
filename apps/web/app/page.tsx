@@ -14,15 +14,36 @@ import { AttentionCard, type AttentionItem } from "../components/dashboard/Atten
 import { OrdersCard } from "../components/dashboard/OrdersCard";
 import { StockActivityCard } from "../components/dashboard/StockActivityCard";
 import { CustomizeOverview } from "../components/dashboard/CustomizeOverview";
+import { ListCard } from "../components/dashboard/ListCard";
 import { OnboardingCard } from "../components/onboarding/OnboardingCard";
 import { ConfirmDialogHost } from "../components/ui/ConfirmDialogHost";
 import { FavoritesProvider } from "../components/FavoritesProvider";
 import { getCurrentUser, apiGet } from "../lib/api";
 import { loadFavorites } from "../lib/favorites";
 import type { AlertKind, AlertsResponse } from "../lib/alerts";
-import { OVERVIEW_CARDS, overviewRows, resolveOverviewCards, type OverviewCard } from "../lib/overviewCards";
+import {
+  OVERVIEW_CARDS,
+  OVERVIEW_CARD_ALERT_KIND,
+  OVERVIEW_CARD_HREF,
+  OVERVIEW_CARD_LABELS,
+  overviewCardAvailable,
+  overviewRows,
+  resolveOverviewCards,
+  type OverviewCard,
+} from "../lib/overviewCards";
+import {
+  OVERVIEW_CARD_ROWS,
+  alertRows,
+  capacityRows,
+  deliveryRows,
+  deviationRows,
+  endOfIsoWeek,
+} from "../lib/overviewCardRows";
+import { DEVIATION_TYPE_LABELS, type DeviationListRow } from "../lib/quality";
+import { stockholmToday } from "../lib/date";
 import { satisfiesRule } from "../lib/permissions";
 import type {
+  CapacityResult,
   ManufacturingOrder,
   OnboardingView,
   Paged,
@@ -46,8 +67,22 @@ export default async function OverviewPage() {
     "/api/v1/me/settings",
     cookieHeader
   ).catch((): { overviewCards?: unknown; hideOnboarding?: boolean } => ({}));
-  const cards: OverviewCard[] = settings.overviewCards == null ? [...OVERVIEW_CARDS] : resolveOverviewCards(settings.overviewCards);
+  // A newer card is offered and shown only to a user who may open its list
+  // (overviewCardAvailable); a card the user lost access to just drops out.
+  const available = OVERVIEW_CARDS.filter((card) => overviewCardAvailable(user, card));
+  const cards: OverviewCard[] = resolveOverviewCards(settings.overviewCards).filter((card) => available.includes(card));
   const has = (card: OverviewCard) => cards.includes(card);
+  const today = stockholmToday();
+  const weekEnd = endOfIsoWeek(today);
+  // The single-kind alert cards ask only for their kinds — unless Materialflöde
+  // or Att bevaka already fetch every kind (which runs the behovsberäkning).
+  const needAllAlerts = has("flow") || has("attention");
+  const alertCardKinds = (Object.keys(OVERVIEW_CARD_ALERT_KIND) as (keyof typeof OVERVIEW_CARD_ALERT_KIND)[])
+    .filter((card) => has(card))
+    .map((card) => OVERVIEW_CARD_ALERT_KIND[card]);
+  const alertsUrl = needAllAlerts ? "/api/v1/alerts" : alertCardKinds.length > 0 ? `/api/v1/alerts?kinds=${alertCardKinds.join(",")}` : null;
+  // The newer cards never take Översikten down: a failing read shows a line.
+  const orNull = <T,>(promise: Promise<T>) => promise.catch((): null => null);
 
   // Open orders are a naturally bounded set: the flow counts come from `total`
   // of a one-row page. The two TO calls of "Pågående tillverkning" (six
@@ -61,6 +96,11 @@ export default async function OverviewPage() {
     recentTransactionsPage,
     alerts,
     favorites,
+    deliveriesPage,
+    arrivalsPage,
+    capacity,
+    overdueDeviationsPage,
+    openDeviationsPage,
   ] = await Promise.all([
     has("flow")
       ? apiGet<Paged<PurchaseOrder>>("/api/v1/purchase-orders?status=draft,confirmed,partially_received&limit=1", cookieHeader)
@@ -84,11 +124,34 @@ export default async function OverviewPage() {
     // Aviseringar feed both the flow strip's signals and "Att bevaka" — and
     // drive the behovsberäkning, so they are fetched only when one of those
     // shows; a failing call must not take Översikten down.
-    has("flow") || has("attention")
-      ? apiGet<AlertsResponse>("/api/v1/alerts", cookieHeader).catch((): AlertsResponse | null => null)
-      : null,
+    alertsUrl ? apiGet<AlertsResponse>(alertsUrl, cookieHeader).catch((): AlertsResponse | null => null) : null,
     // The sidebar's Favoriter (null on failure — the group then stays hidden).
     loadFavorites(cookieHeader),
+    // Leveranser / Inleveranser denna vecka: open orders whose Nästa
+    // leveransdatum is on or before Sunday, earliest (late) first.
+    has("deliveries")
+      ? orNull(
+          apiGet<Paged<SalesOrder>>(
+            `/api/v1/sales-orders?status=confirmed,in_production&deliveryTo=${weekEnd}&sort=delivery&limit=${OVERVIEW_CARD_ROWS}`,
+            cookieHeader
+          )
+        )
+      : null,
+    has("arrivals")
+      ? orNull(
+          apiGet<Paged<PurchaseOrder>>(
+            `/api/v1/purchase-orders?status=confirmed,partially_received&deliveryTo=${weekEnd}&sort=delivery&limit=${OVERVIEW_CARD_ROWS}`,
+            cookieHeader
+          )
+        )
+      : null,
+    has("capacity") ? orNull(apiGet<CapacityResult>("/api/v1/planning/capacity?weeks=1", cookieHeader)) : null,
+    has("deviations")
+      ? orNull(apiGet<Paged<DeviationListRow>>(`/api/v1/deviations?overdue=true&limit=${OVERVIEW_CARD_ROWS}`, cookieHeader))
+      : null,
+    has("deviations")
+      ? orNull(apiGet<Paged<DeviationListRow>>(`/api/v1/deviations?status=open&limit=${OVERVIEW_CARD_ROWS}`, cookieHeader))
+      : null,
   ]);
   // System → Kom igång: administrators see the setup checklist until it is
   // complete or hidden. Never lets a failing call take Översikten down, and
@@ -185,6 +248,25 @@ export default async function OverviewPage() {
   // already the most recent.
   const recentTransactions = recentTransactionsPage?.rows ?? [];
 
+  const unreadable = (card: OverviewCard) => `Kunde inte läsa ${OVERVIEW_CARD_LABELS[card].toLowerCase()} just nu.`;
+  const alertGroup = (card: keyof typeof OVERVIEW_CARD_ALERT_KIND) =>
+    alerts?.groups.find((g) => g.kind === OVERVIEW_CARD_ALERT_KIND[card]);
+  const alertCard = (card: keyof typeof OVERVIEW_CARD_ALERT_KIND, emptyText: string) => {
+    const group = alertGroup(card);
+    return (
+      <ListCard
+        key={card}
+        title={OVERVIEW_CARD_LABELS[card]}
+        rows={alertRows(group)}
+        total={group?.count ?? 0}
+        allHref={group?.listHref ?? OVERVIEW_CARD_HREF[card]!}
+        emptyText={emptyText}
+        errorText={alerts === null || group?.error ? unreadable(card) : null}
+      />
+    );
+  };
+  const capacityCard = capacity ? capacityRows(capacity, OVERVIEW_CARD_HREF.capacity!) : null;
+
   const cardNodes: Record<OverviewCard, ReactNode> = {
     flow: <FlowStrip key="flow" stations={stations} />,
     attention: (
@@ -197,6 +279,61 @@ export default async function OverviewPage() {
     ),
     orders: <OrdersCard key="orders" orders={activeManufacturingOrders} />,
     stock: <StockActivityCard key="stock" transactions={recentTransactions} />,
+    deliveries: (
+      <ListCard
+        key="deliveries"
+        title={OVERVIEW_CARD_LABELS.deliveries}
+        rows={deliveryRows(
+          (deliveriesPage?.rows ?? []).map((o) => ({ ...o, counterpartyName: o.customerName, nextDeliveryDate: o.nextDeliveryDate ?? null })),
+          today,
+          "/forsaljning/ordrar"
+        )}
+        total={deliveriesPage?.total ?? 0}
+        allHref={OVERVIEW_CARD_HREF.deliveries!}
+        emptyText="Inga kundordrar att leverera denna vecka."
+        errorText={has("deliveries") && deliveriesPage === null ? unreadable("deliveries") : null}
+      />
+    ),
+    arrivals: (
+      <ListCard
+        key="arrivals"
+        title={OVERVIEW_CARD_LABELS.arrivals}
+        rows={deliveryRows(
+          (arrivalsPage?.rows ?? []).map((o) => ({ ...o, counterpartyName: o.supplierName, nextDeliveryDate: o.nextDeliveryDate ?? null })),
+          today,
+          "/inkop/ordrar"
+        )}
+        total={arrivalsPage?.total ?? 0}
+        allHref={OVERVIEW_CARD_HREF.arrivals!}
+        emptyText="Inga inköpsordrar väntas in denna vecka."
+        errorText={has("arrivals") && arrivalsPage === null ? unreadable("arrivals") : null}
+      />
+    ),
+    capacity: (
+      <ListCard
+        key="capacity"
+        title={OVERVIEW_CARD_LABELS.capacity}
+        rows={capacityCard?.rows ?? []}
+        total={capacityCard?.total ?? 0}
+        allHref={OVERVIEW_CARD_HREF.capacity!}
+        emptyText="Ingen planerad beläggning denna vecka."
+        errorText={has("capacity") && capacity === null ? unreadable("capacity") : null}
+      />
+    ),
+    receivables: alertCard("receivables", "Inga förfallna kundfakturor."),
+    payables: alertCard("payables", "Inga leverantörsfakturor att betala just nu."),
+    quotes: alertCard("quotes", "Inga offerter att följa upp."),
+    deviations: (
+      <ListCard
+        key="deviations"
+        title={OVERVIEW_CARD_LABELS.deviations}
+        rows={deviationRows(overdueDeviationsPage?.rows ?? [], openDeviationsPage?.rows ?? [], DEVIATION_TYPE_LABELS)}
+        total={openDeviationsPage?.total ?? 0}
+        allHref={OVERVIEW_CARD_HREF.deviations!}
+        emptyText="Inga öppna avvikelser."
+        errorText={has("deviations") && (openDeviationsPage === null || overdueDeviationsPage === null) ? unreadable("deviations") : null}
+      />
+    ),
   };
 
   const todayLabel = new Date().toLocaleDateString("sv-SE", { weekday: "long", day: "numeric", month: "long" });
@@ -230,7 +367,7 @@ export default async function OverviewPage() {
           {/* Creating an order needs Tillverkning itself — the list page also
               opens in read-only mode (Tillverkningsorder (läsläge)). */}
           <div className={styles.topbarActions}>
-            <CustomizeOverview shown={cards} />
+            <CustomizeOverview shown={cards} available={available} />
             {satisfiesRule(user, ["tillverkning"]) && (
               <Link href="/tillverkning/ordrar">
                 <Button variant="primary">+ Ny order</Button>

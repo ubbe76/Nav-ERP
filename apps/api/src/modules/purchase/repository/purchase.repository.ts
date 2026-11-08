@@ -839,6 +839,11 @@ export function createPurchaseRepository(db: Db) {
 
     // `today` (Stockholm) dates the status filter Sen (late-orders.ts).
     async listPurchaseOrders(query: ListPurchaseOrdersQuery, today: string) {
+      // Nästa leveransdatum: the earliest effective arrival date among rows
+      // not fully received (a confirmation always wins over a requested
+      // date), else the order's own — so one early row shows the order late.
+      // Also the deliveryTo filter's and sort=delivery's date.
+      const nextDeliveryDateSql = sql<string | null>`coalesce((select min(coalesce(r.confirmed_delivery_date, ${purchaseOrders.confirmedDeliveryDate}, r.expected_delivery_date, ${purchaseOrders.expectedDeliveryDate})) from ${purchaseOrderRows} r where r.purchase_order_id = ${purchaseOrders}.id and r.quantity_received < r.quantity_ordered), ${purchaseOrders.confirmedDeliveryDate}, ${purchaseOrders.expectedDeliveryDate})`;
       const conditions = [];
       if (query.search) {
         const pattern = ilikePattern(query.search);
@@ -893,15 +898,12 @@ export function createPurchaseRepository(db: Db) {
           )
         );
       }
+      if (query.deliveryTo) conditions.push(sql`${nextDeliveryDateSql} <= ${query.deliveryTo}::date`);
       const where = conditions.length > 0 ? and(...conditions) : undefined;
 
       // Correlated-subquery shape as listPriceLists' rowCount — opt-in
       // (withOpenRows) so the plain register list doesn't pay for it.
       const openRowCountSql = sql<number>`(select count(*)::int from ${purchaseOrderRows} r where r.purchase_order_id = ${purchaseOrders}.id and r.quantity_received < r.quantity_ordered)`;
-      // Nästa leveransdatum: the earliest effective arrival date among rows
-      // not fully received (a confirmation always wins over a requested
-      // date), else the order's own — so one early row shows the order late.
-      const nextDeliveryDateSql = sql<string | null>`coalesce((select min(coalesce(r.confirmed_delivery_date, ${purchaseOrders.confirmedDeliveryDate}, r.expected_delivery_date, ${purchaseOrders.expectedDeliveryDate})) from ${purchaseOrderRows} r where r.purchase_order_id = ${purchaseOrders}.id and r.quantity_received < r.quantity_ordered), ${purchaseOrders.confirmedDeliveryDate}, ${purchaseOrders.expectedDeliveryDate})`;
 
       const [rows, totalRows] = await Promise.all([
         db
@@ -914,7 +916,11 @@ export function createPurchaseRepository(db: Db) {
           .from(purchaseOrders)
           .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
           .where(where)
-          .orderBy(desc(purchaseOrders.orderNumber))
+          .orderBy(
+            ...(query.sort === "delivery"
+              ? [sql`${nextDeliveryDateSql} asc nulls last`, asc(purchaseOrders.orderNumber)]
+              : [desc(purchaseOrders.orderNumber)])
+          )
           .limit(query.limit)
           .offset(query.offset),
         db

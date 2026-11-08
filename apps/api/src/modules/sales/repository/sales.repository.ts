@@ -1113,6 +1113,11 @@ export function createSalesRepository(db: Db) {
 
     // `today` (Stockholm) dates the status filter Sen (late-orders.ts).
     async listSalesOrders(query: ListSalesOrdersQuery, today: string) {
+      // Nästa leveransdatum: the earliest effective date among rows not
+      // fully delivered, else the order's own — same rule as
+      // listPurchaseOrders, so one early row shows the order late. Also the
+      // deliveryTo filter's and sort=delivery's date.
+      const nextDeliveryDateSql = sql<string | null>`coalesce((select min(coalesce(r.expected_delivery_date, ${salesOrders.expectedDeliveryDate})) from ${salesOrderRows} r where r.sales_order_id = ${salesOrders}.id and r.quantity_delivered < r.quantity_ordered), ${salesOrders.expectedDeliveryDate})`;
       const conditions = [];
       if (query.search) {
         const pattern = ilikePattern(query.search);
@@ -1144,15 +1149,12 @@ export function createSalesRepository(db: Db) {
       if (statuses) conditions.push(inArray(salesOrders.status, statuses));
       if (late) conditions.push(salesOrderLate(today));
       if (query.kind) conditions.push(sql`${documentKindSql} = ${query.kind}`);
+      if (query.deliveryTo) conditions.push(sql`${nextDeliveryDateSql} <= ${query.deliveryTo}::date`);
       const where = conditions.length > 0 ? and(...conditions) : undefined;
 
       // Correlated-subquery shape as listPurchaseOrders' openRowCount —
       // opt-in (withOpenRows) so the plain register list doesn't pay for it.
       const openRowCountSql = sql<number>`(select count(*)::int from ${salesOrderRows} r where r.sales_order_id = ${salesOrders}.id and r.quantity_delivered < r.quantity_ordered)`;
-      // Nästa leveransdatum: the earliest effective date among rows not
-      // fully delivered, else the order's own — same rule as
-      // listPurchaseOrders, so one early row shows the order late.
-      const nextDeliveryDateSql = sql<string | null>`coalesce((select min(coalesce(r.expected_delivery_date, ${salesOrders.expectedDeliveryDate})) from ${salesOrderRows} r where r.sales_order_id = ${salesOrders}.id and r.quantity_delivered < r.quantity_ordered), ${salesOrders.expectedDeliveryDate})`;
 
       // The stored Sendify answer (freight_quote jsonb) is detail-only —
       // the register list would otherwise ship it on every row.
@@ -1175,7 +1177,11 @@ export function createSalesRepository(db: Db) {
           .leftJoin(quoteLossReasons, eq(quoteLossReasons.id, salesOrders.lostReasonId))
           .leftJoin(lostByUser, eq(lostByUser.id, salesOrders.lostBy))
           .where(where)
-          .orderBy(desc(salesOrders.orderNumber))
+          .orderBy(
+            ...(query.sort === "delivery"
+              ? [sql`${nextDeliveryDateSql} asc nulls last`, asc(salesOrders.orderNumber)]
+              : [desc(salesOrders.orderNumber)])
+          )
           .limit(query.limit)
           .offset(query.offset),
         db
