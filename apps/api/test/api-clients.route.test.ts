@@ -1,3 +1,4 @@
+import type { InjectOptions } from "fastify";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { db, auditLog, customers } from "@navet/db";
@@ -10,8 +11,8 @@ let cookie: string;
 let customerId: string;
 
 const cookieOf = (res: { cookies: { name: string; value: string }[] }) => res.cookies.map((c) => `${c.name}=${c.value}`).join("; ");
-const create = (payload: unknown) => app.inject({ method: "POST", url: "/api/v1/api-clients", headers: { cookie }, payload });
-const patch = (id: string, payload: unknown) => app.inject({ method: "PATCH", url: `/api/v1/api-clients/${id}`, headers: { cookie }, payload });
+const create = (payload: InjectOptions["payload"]) => app.inject({ method: "POST", url: "/api/v1/api-clients", headers: { cookie }, payload });
+const patch = (id: string, payload: InjectOptions["payload"]) => app.inject({ method: "PATCH", url: `/api/v1/api-clients/${id}`, headers: { cookie }, payload });
 
 beforeEach(async () => {
   await db.execute(TRUNCATE);

@@ -1,3 +1,4 @@
+import type { InjectOptions } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { costCenters, db, permissionGroups } from "@navet/db";
@@ -56,9 +57,9 @@ async function cookieWith(permissions: string[], name: string) {
 function api(cookie: string) {
   return {
     get: (url: string) => app.inject({ method: "GET", url: `/api/v1${url}`, headers: { cookie } }),
-    post: (url: string, payload?: unknown, headers: Record<string, string> = {}) => app.inject({ method: "POST", url: `/api/v1${url}`, headers: { cookie, ...headers }, payload }),
-    put: (url: string, payload?: unknown) => app.inject({ method: "PUT", url: `/api/v1${url}`, headers: { cookie }, payload }),
-    patch: (url: string, payload?: unknown) => app.inject({ method: "PATCH", url: `/api/v1${url}`, headers: { cookie }, payload }),
+    post: (url: string, payload?: InjectOptions["payload"], headers: Record<string, string> = {}) => app.inject({ method: "POST", url: `/api/v1${url}`, headers: { cookie, ...headers }, payload }),
+    put: (url: string, payload?: InjectOptions["payload"]) => app.inject({ method: "PUT", url: `/api/v1${url}`, headers: { cookie }, payload }),
+    patch: (url: string, payload?: InjectOptions["payload"]) => app.inject({ method: "PATCH", url: `/api/v1${url}`, headers: { cookie }, payload }),
     delete: (url: string) => app.inject({ method: "DELETE", url: `/api/v1${url}`, headers: { cookie } }),
   };
 }

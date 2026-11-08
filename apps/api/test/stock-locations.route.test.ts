@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import Fastify from "fastify";
+import Fastify, { type InjectOptions } from "fastify";
 import { sql } from "drizzle-orm";
 import { db, permissionGroups } from "@navet/db";
 import { buildApp as buildRealApp } from "../src/app.js";
@@ -154,7 +154,7 @@ describe("Spärra / Släpp spärr — routes", () => {
     await authService.createUser({ email, password: PASSWORD, name: "Användare", role: "user", permissionGroupId: group!.id, readOnly });
     return login(email);
   }
-  const post = (cookie: string, url: string, payload?: unknown) =>
+  const post = (cookie: string, url: string, payload?: InjectOptions["payload"]) =>
     app.inject({ method: "POST", url: `/api/v1${url}`, headers: { cookie }, ...(payload === undefined ? {} : { payload }) });
   const get = (cookie: string, url: string) => app.inject({ method: "GET", url: `/api/v1${url}`, headers: { cookie } });
 
