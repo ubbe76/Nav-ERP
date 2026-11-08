@@ -4,7 +4,7 @@ Artikelregistret är grunden för allt annat i Nav|ERP — lager, inköp, förs�
 
 ## Artikelregistret
 
-Menyvalet **Artiklar** öppnar modulens sida med artikelregistret, importen och grunddata i ett rutnät. **Artiklar → Artikelregister** (`/artiklar/register`) listar alla artiklar med nummer, benämning, typ, **ABC** (klassen i [ABC-analysen](/hjalp/lager#abc-analys), **–** utanför klassningen), varugrupp, artikelkod, standardenhet, standardkostnad och status. Filtret **Alla ABC-klasser** begränsar listan till klass A, B eller C. Sök på artikelnummer/benämning och filtrera på **artikeltyp**, **varugrupp** eller **artikelkod** (se [Artikelkoder](#artikelkoder)).
+Menyvalet **Artiklar** öppnar modulens sida med artikelregistret, importen och grunddata i ett rutnät. **Artiklar → Artikelregister** (`/artiklar/register`) listar alla artiklar med nummer, benämning, typ, **ABC** (klassen i [ABC-analysen](/hjalp/lager#abc-analys), **–** utanför klassningen), varugrupp, artikelkod, standardenhet, standardkostnad och status. Filtret **Alla ABC-klasser** begränsar listan till klass A, B eller C. Med rader markerade kan du lägga dem i din personliga lista med **Kopiera (N)**, och **Kopiera alla träffar** tar hela sökningen — se [Kopierat](#kopierat). Sök på artikelnummer/benämning och filtrera på **artikeltyp**, **varugrupp** eller **artikelkod** (se [Artikelkoder](#artikelkoder)).
 
 Sökfältet går att använda helt från tangentbordet:
 
@@ -284,6 +284,8 @@ Beredningsvyn visar hela **strukturträdet** (BOM) till vänster; klicka på en 
 - **Komponentraden** visar längst till vänster **Pos.** (ritningspositionen, "—" när den saknas), därefter artikelnummer, namn (med tillägget "· Fantom" för fantomartiklar) och antal + enhet i kolumnen **Antal**. Rader med kryssrutan **Kalkyl** får märket **Kalkyl** efter namnet (och även i trädet till vänster), se [Kalkylrader i strukturen](#kalkylrader-i-strukturen). Under varje operations komponenter finns knappen **+ Komponent**, som öppnar **Lägg till komponent** med den operationen förvald i fältet **Operation (valfritt)** — kalkyloperationer saknar knappen, eftersom vanligt material inte kan kopplas till dem. **+ Lägg till komponent** i rubriken öppnar samma dialog utan förvald operation: artikelväljaren **Komponent** (kortets egen artikel kan inte väljas — cirkulära strukturer stoppas), **Antal**, **Enhet** och **Operation (valfritt)** (**— ingen —** för okopplad). Samma artikel kan läggas till flera gånger, t.ex. på två ritningspositioner eller till två operationer. Dialogen varnar när den valda artikeln redan finns i strukturen ("Artikeln finns redan i strukturen … — den läggs till som en ny rad."), och i vyn får sådana rader märket **Flera rader** och en notis ovanför listan räknar upp dem. **Ändra** på en komponentrad öppnar **Ändra komponent NNN** — artikeln ligger fast, men **Antal**, **Enhet** och **Operation (valfritt)** kan ändras, och byts operationen flyttas raden till den gruppen. **+ Ny artikel** i komponentdialogen öppnar **Ny artikel i strukturen**, som skapar en ny artikel och kopplar in den i strukturen direkt. **Ta bort** tar bort komponenten (bekräftas först). Antalet kan anges i en av **komponentens** enheter — t.ex. stål i kg per tillverkad styck; lagrat antal räknas alltid om till komponentens grundenhet, och raden visas i den valda enheten.
 - **Pos.** är en fri text på strukturraden (högst 20 tecken) som motsvarar positionsnumret på ritningen. Den anges i fältet **Pos. (valfritt)** i dialogerna **Lägg till komponent** och **Ändra komponent …**; ett tomt fält betyder ingen position. Positionen påverkar inte materialuttaget och kan läsas in från fil, se [Importera artikelstruktur](#importera-artikelstruktur).
 
+Knappen **Kopiera komponenterna** i rubrikraden lägger strukturens komponentartiklar, en gång var och i strukturens ordning, i din personliga lista **Kopierat** — se [Kopierat](#kopierat). Den kräver ingen skrivbehörighet.
+
 Struktur och operationer kan också läsas in från fil i stället för att matas in för hand — se [Importera artikelstruktur](#importera-artikelstruktur) och [Importera operationer](#importera-operationer).
 
 #### Beskrivning på operationen
@@ -509,6 +511,37 @@ Ritningar och andra dokument som hör till artikeln. Välj fil med filväljaren 
 - Tillåtna format: **PDF, JPEG och PNG**, max **20 MB** per fil.
 - Filerna följer automatiskt med när tillverkningsordern skrivs ut (se [Tillverkning](/hjalp/tillverkning)) — PDF:er läggs som extra sidor, bilder som en sida var.
 - När en förfrågan, inköpsorder, offert eller orderbekräftelse mejlas kan artiklarnas ritningar bifogas (se [Inköp](/hjalp/inkop) och [Försäljning](/hjalp/forsaljning)).
+
+## Kopierat
+
+**Kopierat** är din egen arbetslista med artiklar. Du fyller den från de ställen där du hittar artiklar och använder den sedan där ett urval behövs — den kommande rutinen **Förkalkylera flera** läser listan som urval.
+
+- Listan är **personlig**: ingen annan ser den, och den ligger kvar tills du tömmer den eller ersätter den — även efter utloggning. Den rymmer högst 5 000 artiklar; blir det fler avvisas kopieringen och ingenting läggs till.
+- Artiklarna ligger i den ordning de kopierades. En artikel som redan finns i listan behåller sin plats.
+- Du behöver ingen skrivbehörighet för att använda listan, och även ett konto som är **Endast läsning** kan kopiera.
+
+### Kopiera artiklar
+
+Det finns tre ställen:
+
+- **Artikelregistret** — markera rader och klicka **Kopiera (N)**, eller klicka **Kopiera alla träffar (N)** för att kopiera hela den aktuella sökningen med dess filter (alla sidor, inte bara de rader som visas).
+- **Behovsberäkningen** — markera rader och klicka **Kopiera artiklar (N)**. Artiklarna på de markerade raderna kopieras en gång var; se [Orderförslag och Skapa ordrar](/hjalp/tillverkning#orderforslag-och-skapa-ordrar).
+- **Artikelns struktur** (fliken Beredning) — **Kopiera komponenterna** kopierar strukturens komponenter, se [Beredning](#beredning).
+
+Innehåller **Kopierat** redan artiklar frågar systemet *Kopierat innehåller N artiklar.* med tre val: **Lägg till** (de nya läggs sist), **Ersätt** (listan töms och fylls med de nya) och **Avbryt**. Är listan tom läggs artiklarna till direkt. Efteråt visas beskedet *N artiklar i Kopierat.* (eller *1 artikel i Kopierat.*) med det nya antalet.
+
+### Visa Kopierat
+
+I artikelregistret visar kryssrutan **Kopierat (N)** i verktygsraden bara artiklarna i din lista (adressen får `?kopierat=1`). Sökning och övriga filter fungerar som vanligt inom listan, och antalet ovanför tabellen följer.
+
+### Ta bort och tömma
+
+När filtret **Kopierat (N)** är på:
+
+- Markera rader och klicka **Ta bort ur Kopierat (N)** för att ta bort dem ur listan.
+- **Töm Kopierat** tar bort alla artiklar ur listan, efter en bekräftelse. Artiklarna i sig påverkas inte.
+
+Raderas en artikel försvinner den också ur alla listor.
 
 ## Artikelöversikt
 

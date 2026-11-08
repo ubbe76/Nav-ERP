@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArticleOverviewButton } from "./ArticleOverviewButton";
 import { Table } from "../ui/Table";
 import { StatusPill } from "../ui/StatusPill";
@@ -10,13 +10,15 @@ import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { Input, Select } from "../ui/Field";
 import { FormError, FormNotice } from "../ui/Form";
-import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { ListExportLink, ListFilterSelect, ListToolbar, Pagination, useListNavigation } from "../ui/ListControls";
 import buttonStyles from "../ui/Button.module.css";
 import { NewArticleForm } from "./NewArticleForm";
 import { useCan } from "../PermissionsProvider";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { confirmLeave, useUnsavedGuard } from "../../lib/unsavedGuard";
+import { confirmDialog } from "../../lib/confirm";
+import { copiedNotice, copyArticles, fetchCopiedCount } from "../../lib/copiedArticles";
 import { moveRowHighlight } from "../../lib/listKeyboard";
 import { ARTICLE_TYPE_LABELS, type Article, type ArticleGroup, type ArticleType, type Paged, type RegisterEntry } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
@@ -66,6 +68,15 @@ export function ArticlesPageClient({
   const [unitsFailed, setUnitsFailed] = useState(false);
   const tableRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const { setFilter } = useListNavigation();
+  // Kopierat (#28): the user's own list. `copiedView` = ?kopierat=1 shows only
+  // those articles; the count is fetched on mount and after every action.
+  const copiedView = searchParams.get("kopierat") === "1";
+  const [copiedCount, setCopiedCount] = useState<number | null>(null);
+  const [copyBusy, setCopyBusy] = useState(false);
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
   // Row marked with the arrow keys from the search field (index into rows);
   // Enter opens it. null = none marked, Enter then just searches.
   const [highlighted, setHighlighted] = useState<number | null>(null);
@@ -134,6 +145,77 @@ export function ArticlesPageClient({
         setUnitsFailed(true);
       });
   }, [editable]);
+
+  useEffect(() => {
+    fetchCopiedCount()
+      .then(setCopiedCount)
+      .catch(() => setCopiedCount(null));
+  }, []);
+
+  // The register's current search and filters, as the list sends them to the
+  // API (the same keys listApiQuery passes) — "Kopiera alla träffar" resolves
+  // them on the server.
+  function currentQuery() {
+    const query: Record<string, string> = {};
+    for (const key of ["search", "type", "groupId", "articleCodeId", "abcClass"]) {
+      const value = searchParams.get(key);
+      if (value) query[key] = value;
+    }
+    return query;
+  }
+
+  async function copyFrom(source: Parameters<typeof copyArticles>[0]) {
+    setCopyBusy(true);
+    setCopyNotice(null);
+    setCopyError(null);
+    try {
+      const result = await copyArticles(source);
+      if (result) {
+        setCopiedCount(result.count);
+        setCopyNotice(copiedNotice(result.count));
+      }
+    } catch (err) {
+      setCopyError(apiErrorMessage(err, "Kunde inte kopiera artiklarna"));
+    } finally {
+      setCopyBusy(false);
+    }
+  }
+
+  async function removeFromCopied() {
+    setCopyBusy(true);
+    setCopyNotice(null);
+    setCopyError(null);
+    try {
+      const { count } = await apiFetch<{ count: number }>("/api/v1/articles/copied/remove", {
+        method: "POST",
+        body: JSON.stringify({ articleIds: selectedIds }),
+      });
+      setCopiedCount(count);
+      setCopyNotice(copiedNotice(count));
+      router.refresh();
+    } catch (err) {
+      setCopyError(apiErrorMessage(err, "Kunde inte ta bort artiklarna ur Kopierat"));
+    } finally {
+      setCopyBusy(false);
+    }
+  }
+
+  async function clearCopied() {
+    if (!(await confirmDialog("Töm Kopierat? Alla kopierade artiklar tas bort ur listan.", { confirmLabel: "Töm Kopierat", danger: true }))) return;
+    setCopyBusy(true);
+    setCopyNotice(null);
+    setCopyError(null);
+    try {
+      await apiFetch("/api/v1/articles/copied", { method: "DELETE" });
+      setCopiedCount(0);
+      setCopyNotice("Kopierat är tömt.");
+      router.refresh();
+    } catch (err) {
+      setCopyError(apiErrorMessage(err, "Kunde inte tömma Kopierat"));
+    } finally {
+      setCopyBusy(false);
+    }
+  }
 
   const draftCount = Object.keys(drafts).length;
 
@@ -261,6 +343,26 @@ export function ArticlesPageClient({
               Skriv ut etiketter ({selectedIds.length})
             </Button>
           )}
+          {selectedIds.length > 0 && (
+            <Button type="button" variant="secondary" disabled={copyBusy} onClick={() => void copyFrom({ articleIds: selectedIds })}>
+              Kopiera ({selectedIds.length})
+            </Button>
+          )}
+          {!copiedView && articles.total > 0 && (
+            <Button type="button" variant="secondary" disabled={copyBusy} onClick={() => void copyFrom({ query: currentQuery() })}>
+              Kopiera alla träffar ({articles.total.toLocaleString("sv-SE")})
+            </Button>
+          )}
+          {copiedView && selectedIds.length > 0 && (
+            <Button type="button" variant="secondary" disabled={copyBusy} onClick={() => void removeFromCopied()}>
+              Ta bort ur Kopierat ({selectedIds.length})
+            </Button>
+          )}
+          {copiedView && articles.total > 0 && (
+            <Button type="button" variant="ghost" disabled={copyBusy} onClick={() => void clearCopied()}>
+              Töm Kopierat
+            </Button>
+          )}
           <Link href="/artiklar/import" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
             Importera
           </Link>
@@ -310,8 +412,19 @@ export function ArticlesPageClient({
             { value: "C", label: "ABC-klass C" },
           ]}
         />
+        <label style={{ display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}>
+          <Checkbox
+            checked={copiedView}
+            onChange={(e) => void setFilter("kopierat", e.target.checked ? "1" : null)}
+            aria-label="Visa bara Kopierat"
+          />
+          Kopierat{copiedCount !== null ? ` (${copiedCount.toLocaleString("sv-SE")})` : ""}
+        </label>
         <ListExportLink endpoint="/api/v1/articles/csv" />
       </ListToolbar>
+
+      <FormError>{copyError}</FormError>
+      {copyNotice && <FormNotice>{copyNotice}</FormNotice>}
 
       {editable && unitsFailed && <FormNotice>Kunde inte hämta enheter — standardenhet kan inte ändras</FormNotice>}
 
@@ -343,7 +456,7 @@ export function ArticlesPageClient({
           ]}
           rows={rows}
           highlightedRowId={highlighted === null ? null : rows[highlighted]?.id ?? null}
-          emptyText="Inga artiklar matchar sökningen"
+          emptyText={copiedView ? "Kopierat är tomt" : "Inga artiklar matchar sökningen"}
           renderCell={(article, key) => {
             const index = rows.indexOf(article);
             const marked = (field: EditField) => drafts[article.id]?.[field] !== undefined;

@@ -19,6 +19,8 @@ import { fetchDefaultRecipientAndLanguage } from "../../lib/mail";
 import { documentMailTexts } from "../../lib/documentMailTexts";
 import type { DocumentLanguage } from "../../lib/documentLanguage";
 import { createLegoInquiries } from "../../lib/legoInquiries";
+import { copiedNotice, copyArticles } from "../../lib/copiedArticles";
+import { apiErrorMessage } from "../../lib/errorMessages";
 import { SendEmailModal } from "../mail/MailSection";
 import { useCan } from "../PermissionsProvider";
 import { PdfActions } from "../documents/PdfActions";
@@ -226,6 +228,10 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
   // suppliers for the selected lego rows — separate from "Skapa ordrar",
   // which always books to the operation's own primary supplier.
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  // Kopierat (#28): the distinct articles of the selected rows.
+  const [copyBusy, setCopyBusy] = useState(false);
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const [legoModalOpen, setLegoModalOpen] = useState(false);
   const [legoSupplierIds, setLegoSupplierIds] = useState<string[]>([]);
   const [legoSubmitting, setLegoSubmitting] = useState(false);
@@ -524,6 +530,25 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
     }
   }
 
+  const selectedArticleIds = useMemo(
+    () => Array.from(new Set(selectedEntries.map(([, s]) => s.articleId).filter((id) => Boolean(id)))),
+    [selectedEntries]
+  );
+
+  async function copySelectedArticles() {
+    setCopyBusy(true);
+    setCopyNotice(null);
+    setCopyError(null);
+    try {
+      const copied = await copyArticles({ articleIds: selectedArticleIds });
+      if (copied) setCopyNotice(copiedNotice(copied.count));
+    } catch (err) {
+      setCopyError(apiErrorMessage(err, "Kunde inte kopiera artiklarna"));
+    } finally {
+      setCopyBusy(false);
+    }
+  }
+
   // The selection summary and the two action buttons render twice — under
   // the table on desktop, above it in the mobile stack — so build them once.
   const selectedSummary =
@@ -532,6 +557,11 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
       : `${selectedCount} av ${stateLines.length} rader valda`;
   const actionButtons = (
     <span className={styles.selectionActions}>
+      {selectedArticleIds.length > 0 && (
+        <Button type="button" variant="secondary" disabled={copyBusy} onClick={() => void copySelectedArticles()}>
+          Kopiera artiklar ({selectedArticleIds.length})
+        </Button>
+      )}
       {canInkop && (
         <Button
           type="button"
@@ -589,6 +619,8 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
       <FormHint>Saldo räknar inte lagerplatser som är spärrade.</FormHint>
 
       <FormError margin="below">{loadError}</FormError>
+      <FormError margin="below">{copyError}</FormError>
+      {copyNotice && <FormNotice style={{ marginBottom: "var(--space-4)" }}>{copyNotice}</FormNotice>}
 
       {result && (
         <Card maxWidth="none" style={{ marginBottom: 20 }}>

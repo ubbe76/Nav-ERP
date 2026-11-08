@@ -11,7 +11,7 @@ export default async function ArticlesPage(props: { searchParams: Promise<PageSe
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const pageSize = await getListPageSize();
   const [articles, groups, articleCodes] = await Promise.all([
-    apiGet<Paged<Article>>(`/api/v1/articles${listApiQuery(searchParams, ["type", "groupId", "articleCodeId", "abcClass"], pageSize)}&withAbc=true`, cookieHeader),
+    apiGet<Paged<Article>>(`/api/v1/articles${listApiQuery(searchParams, ["type", "groupId", "articleCodeId", "abcClass"], pageSize)}&withAbc=true${searchParams.kopierat === "1" ? "&copied=true" : ""}`, cookieHeader),
     apiGet<ArticleGroup[]>("/api/v1/article-groups", cookieHeader),
     apiGet<RegisterEntry[]>("/api/v1/article-codes", cookieHeader),
   ]);

@@ -6801,3 +6801,28 @@ export interface CreateMissingComponentsResult {
   manufacturingOrders: { id: string; orderNumber: string; articleNumber: string; quantity: number; level: number }[];
   warnings: string[];
 }
+
+// Kopierat (#28) — the user's own list of copied articles. Mirrors
+// @navet/shared's article.ts (copiedArticlesSetSchema and friends).
+export interface CopiedArticles {
+  count: number;
+  articleIds: string[];
+}
+
+// The register's search and filters without paging; resolved on the server
+// with the same where as GET /articles.
+export interface CopiedArticlesQuery {
+  search?: string;
+  type?: string;
+  groupId?: string;
+  articleCodeId?: string;
+  abcClass?: string;
+  copied?: boolean;
+}
+
+export type CopyArticlesSource = { articleIds: string[] } | { query: CopiedArticlesQuery };
+
+export interface CopyArticlesResult {
+  count: number;
+  added: number;
+}
