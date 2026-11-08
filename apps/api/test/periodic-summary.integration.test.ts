@@ -216,7 +216,7 @@ describe("GET summary — which invoices count", () => {
           { id: i1.id, invoiceNumber: i1.invoiceNumber },
           { id: i4.id, invoiceNumber: i4.invoiceNumber },
           { id: c1!.id, invoiceNumber: c1!.invoiceNumber },
-        ].sort((a, b) => a.invoiceNumber!.localeCompare(b.invoiceNumber)),
+        ].sort((a, b) => a.invoiceNumber!.localeCompare(b.invoiceNumber!)),
       },
     ]);
     expect(summary.totals).toEqual({ goods: 1100, services: 500 });

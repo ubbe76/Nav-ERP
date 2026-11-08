@@ -19,6 +19,12 @@ import { parsed } from "./helpers/parsed.js";
 // never on a TO). The resources have no schedule, so every operation lands
 // whole in the floor's week.
 
+// The configuration columns are untyped jsonb; read the stored key without a cast.
+function configurationKey(configuration: unknown): unknown {
+  if (typeof configuration !== "object" || configuration === null || !("key" in configuration)) throw new Error("expected a stored configuration with a key");
+  return configuration.key;
+}
+
 beforeEach(async () => {
   await resetConfiguredRows();
   await db.execute(CONFIGURED_MFG_TRUNCATE);
@@ -93,7 +99,7 @@ describe("reservationen — configured row", () => {
     );
     expect(mo.salesOrderRowId).toBe(row.id);
     expect(mo.configuration).not.toBeNull();
-    expect(mo.configuration!.key).toBe(row.configuration!.key);
+    expect(configurationKey(mo.configuration)).toBe(configurationKey(row.configuration));
     const ops = await mfg.listOperations(mo.id);
     expect(ops.map((o) => o.sequenceNo)).toEqual([10, 20]);
     expect(await planRows(ops[0]!.id)).toEqual(batch.operations[0]!.weeks);

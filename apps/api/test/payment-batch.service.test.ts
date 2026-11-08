@@ -208,7 +208,7 @@ describe("bekräfta, avvisa, retur och makulera", () => {
     await service.export(batch.id, userId);
     await testEconomyService.lockPeriod((await periodStarting("2024-10-01")).id, userId);
     const { results, batch: after } = await after15th.confirm(batch.id, { paymentDate: "2024-10-15" }, userId);
-    expect(results.map((r) => [r.ok, r.error?.code])).toEqual([
+    expect(results.map((r) => [r.ok, r.ok ? undefined : r.error.code])).toEqual([
       [false, "accounting-period-locked"],
       [false, "accounting-period-locked"],
     ]);
@@ -232,7 +232,7 @@ describe("bekräfta, avvisa, retur och makulera", () => {
       { paymentDate: "2024-10-15", itemIds: [foreign, batch.items[1]!.id, batch.items[0]!.id] },
       userId
     );
-    expect(results.map((r) => [r.itemId, r.ok, r.error?.code])).toEqual([
+    expect(results.map((r) => [r.itemId, r.ok, r.ok ? undefined : r.error.code])).toEqual([
       [batch.items[0]!.id, true, undefined],
       [batch.items[1]!.id, false, "payment-batch-item-not-confirmable"],
       // An id that is no row of this batch: "not found", not "no longer waiting".

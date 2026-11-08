@@ -64,6 +64,10 @@ const costingService = createCostingService(createCostingRepository(db), {
   getSettings: async () => costingSettings,
 });
 
+// postCalculate is overloaded: a preview is a draft, `save: true` a stored row.
+type PostCalculation = Awaited<ReturnType<typeof costingService.postCalculate>> | Awaited<ReturnType<typeof savedPostCalculate>>;
+const savedPostCalculate = (manufacturingOrderId: string) => costingService.postCalculate(manufacturingOrderId, true);
+
 const TABLES = sql`TRUNCATE inquiry_rows, inquiries, cost_calculation_material_rows, cost_calculation_operation_rows, cost_calculations, purchase_order_rows, purchase_orders, routing_operation_files, mo_material_consumptions, mo_operation_scrap, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, suppliers, stock_transactions, stock_locations, warehouses, bom_components, articles, users CASCADE`;
 
 beforeEach(async () => {
@@ -527,12 +531,12 @@ describe("pre- and post-calculation with a lego operation", () => {
     const fixture = await makeLegoRouting({ setupPrice: 500, unitPrice: 100, transportPrice: 50 });
     const order = await mfgService.createManufacturingOrder({ articleId: fixture.parent.id, quantity: 4 }, fixture.user.id);
     const legoOp = (await mfgService.listOperations(order.id)).find((op) => op.sequenceNo === 20)!;
-    const legoRow = (r: Awaited<ReturnType<typeof costingService.postCalculate>>) =>
+    const legoRow = (r: PostCalculation) =>
       r.analysis!.operationRows.find((row) => row.kind === "subcontract")!;
 
     // Not worked yet and no IO: the reserve takes no one-off (it never arose),
     // and neither does the base — nothing on an unworked operation.
-    let result = await costingService.postCalculate(order.id);
+    let result: PostCalculation = await costingService.postCalculate(order.id);
     expect(result.calculation.subcontractCost).toBe("0.0000");
     expect(legoRow(result)).toMatchObject({ baseQuantity: 0, baseOneOff: 0, baseUnitPrice: 100, base: 0, actual: 0, deviation: 0 });
     expect(legoRow(result).parts).toMatchObject({ price: 0, quantity: 0 });
@@ -569,7 +573,7 @@ describe("pre- and post-calculation with a lego operation", () => {
   // stay 0 instead of carrying a one-off that never arose.
   it("takes no reserve one-off for an unworked lego operation on an order closed at 0 or cancelled, but does with N > 0", async () => {
     const fixture = await makeLegoRouting({ setupPrice: 500, unitPrice: 100, transportPrice: 50 });
-    const legoOf = (r: Awaited<ReturnType<typeof costingService.postCalculate>>) =>
+    const legoOf = (r: PostCalculation) =>
       r.analysis!.operationRows.find((row) => row.kind === "subcontract")!;
 
     const closedAtZero = await mfgService.createManufacturingOrder({ articleId: fixture.parent.id, quantity: 4 }, fixture.user.id);

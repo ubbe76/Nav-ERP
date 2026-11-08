@@ -213,6 +213,7 @@ describe("reports service — calculation outcome", () => {
     ]);
 
     const result = await reportsService.getCalculationOutcome({});
+    if (result.view !== "pre") throw new Error("expected the pre/post view");
     expect(result.rows).toHaveLength(1);
     const row = result.rows[0]!;
     expect(row.orderNumber).toBe(mo.orderNumber);

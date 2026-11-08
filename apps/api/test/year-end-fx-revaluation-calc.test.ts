@@ -217,7 +217,7 @@ describe("checks", () => {
 
   it("reconciles the ledger against the reskontra plus the revaluation", () => {
     expect(evaluateWarnings(clean)).toEqual([]);
-    const [warning] = evaluateWarnings({ ...clean, receivables: { ...clean.receivables, ledger: 11440 } });
+    const [warning] = evaluateWarnings({ ...clean, receivables: { ...clean.receivables!, ledger: 11440 } });
     expect(warning).toEqual({
       code: "receivables-mismatch",
       message: `Kundreskontran stämmer inte mot konto 1510: huvudbok ${formatNumber(11440)}, reskontra ${formatNumber(11000)} + valutaomvärdering ${formatNumber(500)} (skillnad ${formatNumber(-60)})`,

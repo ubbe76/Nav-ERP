@@ -206,6 +206,8 @@ function dayFixture(overrides: Partial<PayrollDay> = {}): PayrollDay {
     unaccountedMinutes: 0,
     overtimeDisposition: "payout",
     overtimeDispositionSource: "default",
+    lateMinutes: 0,
+    earlyLeaveMinutes: 0,
     ...overrides,
   };
 }
@@ -277,8 +279,8 @@ describe("buildPayrollCsv", () => {
 
   it("treats a pre-feature snapshot row (missing comp fields) as all payout", () => {
     const employee = employeeSummary({ overtimeMinutes: 60 });
-    delete (employee as Record<string, unknown>).overtimeCompMinutes;
-    delete (employee as Record<string, unknown>).overtimeOffScheduleCompMinutes;
+    Reflect.deleteProperty(employee, "overtimeCompMinutes");
+    Reflect.deleteProperty(employee, "overtimeOffScheduleCompMinutes");
     const cells = buildPayrollCsv(periodSummary([employee])).split("\r\n")[1]!.split(";");
     expect(cells[5]).toBe("1,00");
     expect(cells[6]).toBe("0,00");
@@ -483,10 +485,8 @@ async function seedPeriod() {
       employeeNumber: `E-${crypto.randomUUID().slice(0, 8)}`,
       name,
       active: true,
-      employmentType,
-      personalIdentityNumber,
     });
-    await timeReportRepository.updateEmployee(employee.id, { defaultWeekScheduleId: weekSchedule.id });
+    await timeReportRepository.updateEmployee(employee.id, { employmentType, personalIdentityNumber, defaultWeekScheduleId: weekSchedule.id });
 
     async function session(from: Date, to: Date) {
       const row = await timeReportRepository.createAttendanceSession(employee.id, user.id);

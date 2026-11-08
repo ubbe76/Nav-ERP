@@ -31,11 +31,13 @@ describe("fresh install", () => {
 
       const fresh = postgres(freshUrl.toString(), { max: 1, onnotice: () => {} });
       try {
-        const [{ count: applied }] = await fresh<{ count: string }[]>`select count(*) from drizzle.__drizzle_migrations`;
+        const [appliedRow] = await fresh<{ count: string }[]>`select count(*) from drizzle.__drizzle_migrations`;
+        const applied = appliedRow!.count;
         expect(Number(applied)).toBeGreaterThan(190);
 
         await runMigrations(freshUrl.toString());
-        const [{ count: again }] = await fresh<{ count: string }[]>`select count(*) from drizzle.__drizzle_migrations`;
+        const [againRow] = await fresh<{ count: string }[]>`select count(*) from drizzle.__drizzle_migrations`;
+        const again = againRow!.count;
         expect(again).toBe(applied);
 
         // The enum value 0084 added and 0187 uses is really there.

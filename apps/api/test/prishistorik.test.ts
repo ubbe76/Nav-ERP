@@ -205,9 +205,9 @@ describe("prishistorik — leverantörskatalogen", () => {
     await purchaseService.addArticleSupplier(article.id, { supplierId: supplier.id, price: 10, currency: "SEK", isPrimary: true });
     await db.delete(articles).where(eq(articles.id, article.id));
 
-    const [{ n }] = (await db.execute(sql`select count(*)::int as n from article_supplier_price_history where article_id = ${article.id}`)) as unknown as {
+    const [history] = (await db.execute(sql`select count(*)::int as n from article_supplier_price_history where article_id = ${article.id}`)) as unknown as {
       n: number;
     }[];
-    expect(n).toBe(0);
+    expect(history!.n).toBe(0);
   });
 });

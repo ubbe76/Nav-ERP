@@ -19,7 +19,8 @@ beforeEach(async () => {
   app = buildApp();
   await app.inject({ method: "POST", url: "/api/v1/auth/register", payload: { email: "admin@example.com", password: PASSWORD, name: "Admin", setupCode: app.setup.code.code } });
   cookie = cookieOf(await app.inject({ method: "POST", url: "/api/v1/auth/login", payload: { email: "admin@example.com", password: PASSWORD } }));
-  [{ id: customerId }] = await db.insert(customers).values({ customerNumber: "K-WEB", name: "Webbförfrågningar" }).returning({ id: customers.id });
+  const [customer] = await db.insert(customers).values({ customerNumber: "K-WEB", name: "Webbförfrågningar" }).returning({ id: customers.id });
+  customerId = customer!.id;
 });
 afterEach(async () => app.close());
 afterAll(async () => db.execute(TRUNCATE));

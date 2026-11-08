@@ -575,6 +575,7 @@ describe("customer invoice — repository: conditional status/row guards close p
       articleId: null,
       salesOrderRowId: null,
       description: "Should never land",
+      shipmentId: null,
       quantity: 9,
       unitPrice: 9,
       discountPercent: 0,
@@ -583,6 +584,7 @@ describe("customer invoice — repository: conditional status/row guards close p
       vatRate: 25,
       lineAmount: 81,
       vatAmount: 20.25,
+      configuration: null,
     };
 
     expect(await invoiceRepo.addRow(issued!.id, attemptedRow)).toBeNull();
@@ -888,11 +890,15 @@ describe("customer invoice — issue", () => {
         invoiceDate: "2020-01-01",
         dueDate: null,
         customerName: "Should never be written",
+        customerNumber: "Should never be written",
         invoiceAddress: null,
         invoicePostalCode: null,
         invoiceCity: null,
+        invoiceCountry: null,
         orgNumber: null,
         vatNumber: null,
+        privatePerson: false,
+        language: "sv",
         paymentTermCode: null,
         paymentTermName: null,
       },
@@ -997,6 +1003,7 @@ describe("customer invoice — issue: committed re-validation (closes over-invoi
           vatRate: 25,
           lineAmount: 30,
           vatAmount: 7.5,
+          configuration: null,
         },
       ],
       biller.id
@@ -1033,6 +1040,7 @@ describe("customer invoice — issue: TRUE concurrency race (Task 3, closes C1's
       vatRate: 25,
       lineAmount: 60,
       vatAmount: 15,
+      configuration: null,
     });
     const a = await invoiceRepo.create(
       { customerId: customer.id, paymentTermId: null, note: null },
@@ -1045,7 +1053,8 @@ describe("customer invoice — issue: TRUE concurrency race (Task 3, closes C1's
       biller.id
     );
 
-    const [{ n: verificationsBefore }] = await db.select({ n: count() }).from(verifications);
+    const [before] = await db.select({ n: count() }).from(verifications);
+    const verificationsBefore = before!.n;
 
     // TRUE concurrency: both issue() calls are fired without awaiting
     // between them, so their transactions genuinely interleave — this is
@@ -1070,7 +1079,8 @@ describe("customer invoice — issue: TRUE concurrency race (Task 3, closes C1's
     // Only one F-verifikat was booked — the loser's transaction rolled back
     // before ever reaching the poster (validateCommittedQuantities throws
     // before the posting call in issueInvoice).
-    const [{ n: verificationsAfter }] = await db.select({ n: count() }).from(verifications);
+    const [after] = await db.select({ n: count() }).from(verifications);
+    const verificationsAfter = after!.n;
     expect(Number(verificationsAfter) - Number(verificationsBefore)).toBe(1);
 
     // The winner burned an FA number; the loser burned none — asserted the

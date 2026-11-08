@@ -103,6 +103,9 @@ function fakeDeps(
         existing.filter((a) => numbers.includes(a.articleNumber)).map((a) => [a.articleNumber, a])
       );
     },
+    async articlesByBarcode() {
+      throw new Error("not used in this test");
+    },
     async unitsByCode() {
       return new Map(unitCodes.map((code) => [code.toLowerCase(), { id: `unit-${code}`, code }]));
     },
@@ -119,6 +122,11 @@ function fakeDeps(
       return { unitId: "unit-st", locationId: "loc-fallback" };
     },
   };
+}
+
+async function articleCount() {
+  const [row] = await db.select({ value: count() }).from(articles);
+  return row!.value;
 }
 
 // Key order = column order (JSON objects preserve insertion order).
@@ -846,6 +854,9 @@ describe("import repository — executeArticlePlan", () => {
         surfaceTreatment: null,
         colour: null,
         active: true,
+        reorderPoint: null,
+        orderQuantity: null,
+        rounding: null,
       },
       {
         articleNumber: "EXEC-3",
@@ -859,6 +870,9 @@ describe("import repository — executeArticlePlan", () => {
         surfaceTreatment: null,
         colour: null,
         active: false,
+        reorderPoint: null,
+        orderQuantity: null,
+        rounding: null,
       },
     ];
     plan.updates = [{ id: existing.id, patch: { name: "Efter", standardCost: 99.5 } }];
@@ -895,7 +909,7 @@ describe("import repository — executeArticlePlan", () => {
   it("resolves a differently-cased unit code to the existing unit instead of creating a duplicate", async () => {
     const plan = await emptyPlan();
     plan.creates = [
-      { articleNumber: "CASE-1", name: "x", type: "purchased", unitCode: "ST", groupCode: null, standardCost: null, weight: null, surfaceTreatment: null, colour: null, active: true },
+      { articleNumber: "CASE-1", name: "x", type: "purchased", unitCode: "ST", groupCode: null, standardCost: null, weight: null, surfaceTreatment: null, colour: null, active: true, isPhantom: false, reorderPoint: null, orderQuantity: null, rounding: null },
     ];
     await importRepo.executeArticlePlan(plan);
     const created = await importRepo.articlesByNumber(["CASE-1"]);
@@ -906,19 +920,19 @@ describe("import repository — executeArticlePlan", () => {
 
   it("rolls back EVERYTHING when any insert fails (atomicity)", async () => {
     await makeArticle("ATOM-1");
-    const [{ value: before }] = await db.select({ value: count() }).from(articles);
+    const before = await articleCount();
 
     const plan = await emptyPlan();
     plan.willCreate = { units: ["kartong9"], articleGroups: [], articleCodes: [] };
     plan.creates = [
-      { articleNumber: "ATOM-2", name: "Går in", type: "purchased", unitCode: "kartong9", groupCode: null, standardCost: null, weight: null, surfaceTreatment: null, colour: null, active: true },
+      { articleNumber: "ATOM-2", name: "Går in", type: "purchased", unitCode: "kartong9", groupCode: null, standardCost: null, weight: null, surfaceTreatment: null, colour: null, active: true, isPhantom: false, reorderPoint: null, orderQuantity: null, rounding: null },
       // Collides with ATOM-1 -> unique violation -> whole tx rolls back.
-      { articleNumber: "ATOM-1", name: "Krockar", type: "purchased", unitCode: null, groupCode: null, standardCost: null, weight: null, surfaceTreatment: null, colour: null, active: true },
+      { articleNumber: "ATOM-1", name: "Krockar", type: "purchased", unitCode: null, groupCode: null, standardCost: null, weight: null, surfaceTreatment: null, colour: null, active: true, isPhantom: false, reorderPoint: null, orderQuantity: null, rounding: null },
     ];
 
     await expect(importRepo.executeArticlePlan(plan)).rejects.toThrow();
 
-    const [{ value: after }] = await db.select({ value: count() }).from(articles);
+    const after = await articleCount();
     expect(after).toBe(before);
     // The register auto-creation rolled back too — it ran INSIDE the tx.
     const leaked = await db.select().from(units).where(eq(units.code, "kartong9"));
@@ -931,6 +945,7 @@ describe("import repository — executeArticlePlan", () => {
       articleNumber: `BULK-${i}`,
       name: `Bulk ${i}`,
       type: "purchased" as const,
+      isPhantom: false,
       unitCode: null,
       groupCode: null,
       standardCost: null,
@@ -944,7 +959,7 @@ describe("import repository — executeArticlePlan", () => {
     }));
     const result = await importRepo.executeArticlePlan(plan);
     expect(result.created).toBe(750);
-    const [{ value: total }] = await db.select({ value: count() }).from(articles);
+    const total = await articleCount();
     expect(total).toBe(750);
   });
 });
@@ -986,7 +1001,7 @@ describe("import service — preview & commit", () => {
 
   it("previews creates/updates/errors with willCreate, writing nothing", async () => {
     await makeArticle("PRE-1", "Finns redan");
-    const [{ value: before }] = await db.select({ value: count() }).from(articles);
+    const before = await articleCount();
 
     const preview = await importService.preview("articles", {
       mapping,
@@ -1000,7 +1015,7 @@ describe("import service — preview & commit", () => {
     expect(preview.rows.map((r) => r.action)).toEqual(["update", "create", "create"]);
     expect(preview.willCreate.units).toEqual(["pall"]);
 
-    const [{ value: after }] = await db.select({ value: count() }).from(articles);
+    const after = await articleCount();
     expect(after).toBe(before); // preview never writes
   });
 
@@ -1067,7 +1082,7 @@ describe("import service — preview & commit", () => {
   });
 
   it("aborts the whole commit on any row error with the preview payload (nothing written)", async () => {
-    const [{ value: before }] = await db.select({ value: count() }).from(articles);
+    const before = await articleCount();
     try {
       await importService.commit("articles", {
         mapping,
@@ -1083,7 +1098,7 @@ describe("import service — preview & commit", () => {
       expect(payload.summary.error).toBe(1);
       expect(payload.rows).toHaveLength(2);
     }
-    const [{ value: after }] = await db.select({ value: count() }).from(articles);
+    const after = await articleCount();
     expect(after).toBe(before);
   });
 });

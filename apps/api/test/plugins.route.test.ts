@@ -499,7 +499,8 @@ describe("GET /plugin-ui and the context token", () => {
     const lager = await addUser("lager@example.com", ["lager", "artiklar"]);
     const open = (headers: Record<string, string>) => call("POST", `/plugins/${plugin.id}/context`, { cookie: lager.cookie, ...headers }, { page: "oversikt" });
     // The plugin runs on 127.0.0.1 (another port): Nav reached on 127.0.0.1 too.
-    for (const headers of [{ origin: "http://127.0.0.1:3000" }, { "x-forwarded-host": "127.0.0.1:3100" }, { host: "127.0.0.1:4000" }]) {
+    const sameHostHeaders: Record<string, string>[] = [{ origin: "http://127.0.0.1:3000" }, { "x-forwarded-host": "127.0.0.1:3100" }, { host: "127.0.0.1:4000" }];
+    for (const headers of sameHostHeaders) {
       const res = await open(headers);
       expect({ headers, status: res.statusCode, code: res.json().code }).toEqual({ headers, status: 409, code: "plugin-same-host" });
     }
