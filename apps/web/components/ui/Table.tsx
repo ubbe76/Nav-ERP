@@ -64,7 +64,9 @@ export function Table<T extends { id: string }>({
   const gridTemplate = columns.map((c, i) => trackWidth(c.width, i, columns.length)).join(" ");
 
   return (
-    <div className={styles.table} style={{ gridTemplateColumns: gridTemplate }}>
+    // data-table / data-row: the keyboard shortcuts' handles (KeyboardShortcuts —
+    // ↑/↓ and Enter in a list, right-click opens the row's ⋯ menu).
+    <div className={styles.table} style={{ gridTemplateColumns: gridTemplate }} data-table="">
       <div className={styles.headerRow}>
         {columns.map((col) => (
           <div key={col.key} className={styles.headerCell} data-align={col.align ?? "left"}>
@@ -74,7 +76,7 @@ export function Table<T extends { id: string }>({
       </div>
       {rows.length === 0 && <div className={styles.empty}>{emptyText}</div>}
       {rows.map((row) => (
-        <div className={styles.row} key={row.id} data-highlighted={row.id === highlightedRowId || undefined}>
+        <div className={styles.row} key={row.id} data-row="" data-highlighted={row.id === highlightedRowId || undefined}>
           {columns.map((col) => (
             <div key={col.key} className={styles.cell} data-align={col.align ?? "left"} data-label={col.label}>
               {renderCell(row, col.key)}

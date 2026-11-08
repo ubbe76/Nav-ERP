@@ -82,7 +82,9 @@ export function ListToolbar({ placeholder = "Sök…", onSearchKeyDown, children
   }
 
   return (
-    <div className={styles.toolbar}>
+    // data-list-toolbar marks a list page: ↑/↓ move through the table after
+    // it (KeyboardShortcuts); elsewhere the arrow keys scroll as usual.
+    <div className={styles.toolbar} data-list-toolbar="">
       <div className={styles.search}>
         <Input
           type="search"

@@ -92,6 +92,20 @@
   box-shadow: inset -2px 0 0 var(--accent), inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent);
 }
 
+/* The row ↑/↓ moved to in a list (KeyboardShortcuts); clear of the sticky
+   toolbar when it is scrolled into view. */
+.row > .cell {
+  scroll-margin-top: calc(var(--app-toolbar-height) + 48px);
+  scroll-margin-bottom: calc(var(--app-statusbar-height) + 16px);
+}
+.row[data-kbd-focus] > .cell {
+  background: var(--color-divider);
+  box-shadow: inset 0 1px 0 var(--accent), inset 0 -1px 0 var(--accent);
+}
+.row[data-kbd-focus] > .cell:first-child {
+  box-shadow: inset 3px 0 0 var(--accent), inset 0 1px 0 var(--accent), inset 0 -1px 0 var(--accent);
+}
+
 /* Summary row (order total) — sits below the last row, outside the hover
    treatment so it doesn't read as another data row. */
 .footerRow > .cell {

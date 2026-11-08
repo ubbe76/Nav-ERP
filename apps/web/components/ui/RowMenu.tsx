@@ -121,6 +121,8 @@ export function RowMenu({ items, label = "Fler åtgärder" }: { items: (RowMenuI
         aria-controls={id}
         aria-label={label}
         title={label}
+        // Right-click on the row opens this menu (KeyboardShortcuts).
+        data-row-menu=""
       >
         <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
           <circle cx="3" cy="8" r="1.5" fill="currentColor" />
