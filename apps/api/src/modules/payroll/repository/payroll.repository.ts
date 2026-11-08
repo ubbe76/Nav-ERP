@@ -3,6 +3,7 @@ import {
   absences,
   absenceTypes,
   attendanceDeviationReasons,
+  auditLog,
   obRules,
   overtimeDispositions,
   payrollAttestations,
@@ -332,15 +333,73 @@ export function createPayrollRepository(db: Db) {
       return row ?? null;
     },
 
-    // Upplåsning: back to open and the snapshot is dropped, so the summary is
-    // computed live again (attestations are deliberately kept).
-    async unlockPayrollPeriod(periodId: string) {
+    // Upplåsning: back to open and the snapshot is dropped from the period,
+    // so the summary is computed live again (attestations are deliberately
+    // kept). The dropped basis — what was locked and could have been
+    // exported — is kept in the unlock's audit entry (`detail.snapshot`, with
+    // when and by whom it was locked), written in the SAME transaction so a
+    // basis never disappears without a trace. Conditional on the locked
+    // status under FOR UPDATE: a concurrent unlock gets null.
+    async unlockPayrollPeriod(periodId: string, entry: { entityId: string; userId: string }) {
+      return db.transaction(async (tx) => {
+        const [old] = await tx
+          .select()
+          .from(payrollPeriods)
+          .where(and(eq(payrollPeriods.id, periodId), eq(payrollPeriods.status, "locked")))
+          .for("update");
+        if (!old) return null;
+        await tx
+          .update(payrollPeriods)
+          .set({ status: "open", summary: null, lockedAt: null, lockedBy: null })
+          .where(eq(payrollPeriods.id, periodId));
+        const employees = (old.summary as { employees?: unknown } | null)?.employees;
+        await tx.insert(auditLog).values({
+          entityType: "payroll_period",
+          entityId: entry.entityId,
+          action: "unlocked",
+          detail: {
+            year: old.year,
+            month: old.month,
+            lockedAt: old.lockedAt?.toISOString() ?? null,
+            lockedBy: old.lockedBy,
+            employeeCount: Array.isArray(employees) ? employees.length : 0,
+            snapshot: old.summary ?? null,
+          },
+          userId: entry.userId,
+        });
+        return old;
+      });
+    },
+
+    // Tidigare låsta underlag: the period's unlock entries that kept their
+    // basis (older unlocks, before the basis was saved, have none), newest
+    // first, without the snapshot itself.
+    async listUnlockedSnapshots(entityId: string) {
+      const lockedByUser = sql<string | null>`(select ${users.name} from ${users} where ${users.id}::text = ${auditLog.detail}->>'lockedBy')`;
+      const rows = await db
+        .select({
+          id: auditLog.id,
+          unlockedAt: auditLog.createdAt,
+          unlockedByName: users.name,
+          lockedAt: sql<string | null>`${auditLog.detail}->>'lockedAt'`,
+          lockedByName: lockedByUser,
+          employeeCount: sql<number>`coalesce((${auditLog.detail}->>'employeeCount')::int, 0)`,
+        })
+        .from(auditLog)
+        .leftJoin(users, eq(users.id, auditLog.userId))
+        .where(and(unlockedSnapshotWhere(entityId)))
+        .orderBy(desc(auditLog.createdAt), desc(auditLog.id));
+      return rows;
+    },
+
+    // One kept basis, null when the entry is not this period's unlock with a
+    // saved snapshot.
+    async findUnlockedSnapshot(entityId: string, auditId: string): Promise<unknown | null> {
       const [row] = await db
-        .update(payrollPeriods)
-        .set({ status: "open", summary: null, lockedAt: null, lockedBy: null })
-        .where(eq(payrollPeriods.id, periodId))
-        .returning();
-      return row ?? null;
+        .select({ snapshot: sql<unknown>`${auditLog.detail}->'snapshot'` })
+        .from(auditLog)
+        .where(and(eq(auditLog.id, auditId), unlockedSnapshotWhere(entityId)));
+      return row?.snapshot ?? null;
     },
 
     // Per-employee attestation rows for one period, joined with the
@@ -360,3 +419,13 @@ export function createPayrollRepository(db: Db) {
 }
 
 export type PayrollRepository = ReturnType<typeof createPayrollRepository>;
+
+// An unlock entry of the period that kept its basis as an object.
+function unlockedSnapshotWhere(entityId: string) {
+  return and(
+    eq(auditLog.entityType, "payroll_period"),
+    eq(auditLog.entityId, entityId),
+    eq(auditLog.action, "unlocked"),
+    sql`jsonb_typeof(${auditLog.detail}->'snapshot') = 'object'`
+  );
+}

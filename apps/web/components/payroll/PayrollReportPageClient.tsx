@@ -9,7 +9,8 @@ import { FormHint, FormNotice } from "../ui/Form";
 import buttonStyles from "../ui/Button.module.css";
 import { formatHours } from "../timereport/SchedulesPageClient";
 import { shiftMonth } from "./AttestationPageClient";
-import type { PeriodEmployeeSummary, PeriodSummary } from "../../lib/types";
+import type { PeriodEmployeeSummary, PeriodSummary, PreviousPayrollSnapshot } from "../../lib/types";
+import { formatStockholmDateTime } from "../../lib/date";
 import { SectionHeading } from "../ui/SectionHeading";
 
 // The Table needs an `id`; the summary rows are keyed by employeeId.
@@ -170,10 +171,12 @@ function Section({
 // mainly about deviations (frånvaro/övertid/OB) from the fixed salary.
 export function PayrollReportPageClient({
   summary,
+  previousSnapshots,
   year,
   month,
 }: {
   summary: PeriodSummary;
+  previousSnapshots: PreviousPayrollSnapshot[];
   year: number;
   month: number;
 }) {
@@ -270,6 +273,62 @@ export function PayrollReportPageClient({
           )}
         </>
       )}
+
+      {previousSnapshots.length > 0 && <PreviousSnapshots snapshots={previousSnapshots} year={year} month={month} />}
     </>
+  );
+}
+
+const byName = (name: string | null) => (name ? ` av ${name}` : "");
+
+// Tidigare låsta underlag: what each earlier lock froze (and could have been
+// exported as PAXml) before an unlock dropped it — the same CSV as above.
+function PreviousSnapshots({
+  snapshots,
+  year,
+  month,
+}: {
+  snapshots: PreviousPayrollSnapshot[];
+  year: number;
+  month: number;
+}) {
+  return (
+    <div style={{ marginTop: 32 }}>
+      <SectionHeading>Tidigare låsta underlag ({snapshots.length})</SectionHeading>
+      <FormNotice style={{ marginBottom: 10 }}>
+        Perioden har låsts upp. Underlaget som var fryst före varje upplåsning sparades och kan laddas ner här.
+      </FormNotice>
+      <Table<PreviousPayrollSnapshot>
+        columns={[
+          { key: "lockedAt", label: "Låst", width: "1fr" },
+          { key: "unlockedAt", label: "Upplåst", width: "1fr" },
+          { key: "employeeCount", label: "Anställda", width: "100px", align: "right" },
+          { key: "csv", label: "", width: "max-content", align: "right" },
+        ]}
+        rows={snapshots}
+        renderCell={(snapshot, key) => {
+          switch (key) {
+            case "lockedAt":
+              return `${formatStockholmDateTime(snapshot.lockedAt)}${byName(snapshot.lockedByName)}`;
+            case "unlockedAt":
+              return `${formatStockholmDateTime(snapshot.unlockedAt)}${byName(snapshot.unlockedByName)}`;
+            case "employeeCount":
+              return <span className="num">{snapshot.employeeCount}</span>;
+            case "csv":
+              return (
+                <a
+                  className={`${buttonStyles.button} ${buttonStyles.ghost}`}
+                  href={`${API_URL}/api/v1/periods/${year}/${month}/snapshots/${snapshot.id}/csv`}
+                  download
+                >
+                  Ladda ner CSV
+                </a>
+              );
+            default:
+              return null;
+          }
+        }}
+      />
+    </div>
   );
 }

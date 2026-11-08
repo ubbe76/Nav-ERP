@@ -37,6 +37,14 @@ Behörigheterna för Personal & lön: `permissions.md`. TO-rapporteringen som st
 - Terminalens glömd-utstämpling-vy visar **Gå hem nu** bara när närvaron började Stockholmsdagen före i dag (`forgottenStopNowAllowed` i `lib/terminalOperations.ts`: kalenderns dag före, `addDaysIso(i dag, −1)`, aldrig nu − 24 h — natten efter våromställningen blev det i förrgår); äldre kräver en tid. Arbetsledarens **Sluttid** på Pågående (`StampOutForm`) skickas bara när fältet rörts — orört skickas **inget** (servern stämplar vid pausens start eller nu, med reserven i dag för en låst pausdag), aldrig förifyllnadens nedrundade minut.
 - **Dagarna är Stockholmsdagar** (`localDateOf`), och lönemotorns `clockToMs`/`dayBounds` läser schemaklockslagen som svensk väggtid (`stockholmInstant` i `delivery-days.ts`, omställningsdagarna som en `Date` i zonen: dubbla höstklockslag = sommartid, överhoppade vårklockslag med vintertidens offset) — oberoende av processens zon. Avvikelse- och utjämningstesterna kör därför i sviten UTC utan egen TZ.
 
+## Löneperiodens låsning och upplåsning
+
+- **Upplåsningen tappar aldrig underlaget spårlöst:** `repo.unlockPayrollPeriod` låser periodraden `FOR UPDATE` villkorat på `locked` (en samtidig upplåsning får null ⇒ `PeriodNotLockedError`, 409), nollar den och skriver upplåsningens `audit_log`-rad (`payroll_period`/`unlocked`) **i samma transaktion** med `detail.snapshot` = den tappade `summary` plus `lockedAt`/`lockedBy`/`employeeCount` — inte via `AuditWriter`, som har egen anslutning. Upplåsningar före detta har ingen `snapshot` och listas inte.
+- **Tidigare låsta underlag:** `GET /periods/:year/:month/snapshots` (lista utan underlaget) och `…/snapshots/:snapshotId/csv` (samma `buildPayrollCsv` som periodens CSV, filnamnet `loneunderlag-<period>-lasning-<låsdag>.csv`), admin/arbetsledare som CSV:n. Webben: avsnittet på **Löneunderlag** (`PayrollReportPageClient`).
+- **Händelseloggen skickar aldrig ett lagrat underlag:** `listAuditLog` (listan, kortens Historik och CSV:n) byter `detail.snapshot` mot `snapshotSaved: true` i SQL. En ny modul som lagrar ett dokument i en audit-rad lägger det under `snapshot`.
+- **GDPR:** ett sparat underlag räknas som historik (`inFrozenSummarySql` i `employee-erasure.ts` — annars raderades en anställd vars namn står kvar i loggen), och anonymiseringen byter namnet i `detail.snapshot.employees` som i `payroll_periods.summary`. En ny plats som lagrar underlaget behöver båda.
+- Tester: `payroll-attest.test.ts` (underlaget i raden, listan, CSV:n lika med den låsta, händelseloggens lista, två upplåsningar, samtidiga upplåsningar), `employee-erasure.route.test.ts` (sparat underlag som historik och anonymiserat), `permissions-coverage.test.ts`.
+
 ## Ställ och produktion (#14 etapp 3, migration 0188)
 
 Spec `private/superpowers/specs/2026-11-06-avvikelseanalys-efterkalkyl-design.md` (alternativ (a)); efterkalkylen som läser typen: `costing.md`.

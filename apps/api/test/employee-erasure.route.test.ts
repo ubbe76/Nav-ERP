@@ -218,6 +218,39 @@ describe("Anonymisera — an employee with history", () => {
     expect(entries.find((e) => e.action === "anonymized")).toMatchObject({ entityType: "employee", detail: { employeeNumber: "502" } });
   });
 
+  // Tidigare låsta underlag: a basis an unlock dropped is kept in the
+  // unlock's audit entry — it counts as history and loses the name too.
+  it("treats a basis kept by an unlock as history and anonymizes the name in it", async () => {
+    const id = await makeEmployee("502");
+    const other = (await call("POST", "/employees", { employeeNumber: "503", name: "Bo Berg" })).json().id as string;
+    const entry = (employeeId: string, number: string, name: string) => ({ employeeId, employeeNumber: number, name, employmentType: "hourly", days: [] });
+    await db.insert(auditLog).values({
+      entityType: "payroll_period",
+      entityId: "2026-02",
+      action: "unlocked",
+      detail: {
+        year: 2026,
+        month: 2,
+        lockedAt: "2026-03-02T08:00:00.000Z",
+        lockedBy: null,
+        employeeCount: 2,
+        snapshot: { year: 2026, month: 2, employees: [entry(id, "502", "Anna Andersson"), entry(other, "503", "Bo Berg")] },
+      },
+    });
+
+    // Without the kept basis this employee has no history and would be deleted.
+    expect((await call("GET", `/employees/${id}/erasure`)).json()).toEqual({ action: "anonymize", blockers: [] });
+    expect((await call("DELETE", `/employees/${id}`)).statusCode).toBe(409);
+    expect((await call("POST", `/employees/${id}/anonymize`)).statusCode).toBe(200);
+
+    const [kept] = await db.select().from(auditLog).where(eq(auditLog.action, "unlocked"));
+    const employeesInBasis = (kept!.detail as { snapshot: { employees: { employeeNumber: string; name: string }[] } }).snapshot.employees;
+    expect(employeesInBasis.map((e) => [e.employeeNumber, e.name])).toEqual([
+      ["502", "Anonymiserad anställd"],
+      ["503", "Bo Berg"],
+    ]);
+  });
+
   it("freezes the employee afterwards", async () => {
     const id = await employeeWithHistory();
     await lockFebruary(id);

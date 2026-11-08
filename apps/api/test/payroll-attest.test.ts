@@ -1,4 +1,4 @@
-import { createArticleSchema, createWeekScheduleSchema, createWorkCenterSchema } from "@navet/shared";
+import { createArticleSchema, createWeekScheduleSchema, createWorkCenterSchema, listAuditLogQuerySchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { stockholmInstant, stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { and, eq, sql } from "drizzle-orm";
@@ -410,6 +410,82 @@ describe("payroll period locking", () => {
     expect(summary.generatedAt).not.toBe(locked.generatedAt);
     // The attestation survives the unlock.
     expect(summary.employees.find((e) => e.employeeId === employee.id)!.attested).toBe(true);
+  });
+
+  // Tidigare låsta underlag: the unlock keeps the dropped basis in its audit
+  // entry (same transaction), and the basis comes back as the same CSV.
+  it("keeps the dropped basis in the unlock's audit entry, lists it and serves it as the locked CSV", async () => {
+    const { user, employee } = await seedPeriod();
+    await service.attest(YEAR, MONTH, employee.id, user.id);
+    const locked = await service.lockPeriod(YEAR, MONTH, user.id);
+    const lockedCsv = await service.getCsvExport(YEAR, MONTH);
+
+    await service.unlockPeriod(YEAR, MONTH, user.id);
+
+    const [entry] = await auditRows("payroll_period", "unlocked");
+    expect(entry!.userId).toBe(user.id);
+    expect(entry!.detail).toMatchObject({
+      year: YEAR,
+      month: MONTH,
+      lockedAt: locked.lockedAt,
+      lockedBy: user.id,
+      employeeCount: locked.employees.length,
+      snapshot: { status: "locked", lockedAt: locked.lockedAt, generatedAt: locked.generatedAt },
+    });
+    expect((entry!.detail as { snapshot: { employees: unknown[] } }).snapshot.employees).toEqual(
+      JSON.parse(JSON.stringify(locked.employees))
+    );
+
+    const list = await service.listPreviousSnapshots(YEAR, MONTH);
+    expect(list).toEqual([
+      {
+        id: entry!.id,
+        lockedAt: locked.lockedAt,
+        lockedByName: user.name,
+        unlockedAt: entry!.createdAt.toISOString(),
+        unlockedByName: user.name,
+        employeeCount: locked.employees.length,
+      },
+    ]);
+    const csv = await service.getPreviousSnapshotCsv(YEAR, MONTH, entry!.id);
+    expect(csv.content).toBe(lockedCsv.content);
+    expect(csv.filename).toBe(`loneunderlag-2026-05-lasning-${stockholmToday()}.csv`);
+    // Another period, or an id that is not a kept basis: not found.
+    await expect(service.getPreviousSnapshotCsv(YEAR, MONTH + 1, entry!.id)).rejects.toMatchObject({ name: "PayrollSnapshotNotFoundError" });
+    const [lockEntry] = await auditRows("payroll_period", "locked");
+    await expect(service.getPreviousSnapshotCsv(YEAR, MONTH, lockEntry!.id)).rejects.toMatchObject({ name: "PayrollSnapshotNotFoundError" });
+
+    // Händelseloggen never ships the stored basis — only that it exists.
+    const { rows } = await auditRepository.listAuditLog(parsed(listAuditLogQuerySchema, { entityType: "payroll_period" }));
+    const listed = rows.find((r) => r.action === "unlocked")!;
+    expect(listed.detail).toEqual({
+      year: YEAR,
+      month: MONTH,
+      lockedAt: locked.lockedAt,
+      lockedBy: user.id,
+      employeeCount: locked.employees.length,
+      snapshotSaved: true,
+    });
+
+    // A second lock and unlock keeps a second basis, newest first.
+    await service.lockPeriod(YEAR, MONTH, user.id);
+    await service.unlockPeriod(YEAR, MONTH, user.id);
+    const twice = await service.listPreviousSnapshots(YEAR, MONTH);
+    expect(twice).toHaveLength(2);
+    expect(twice[1]!.id).toBe(entry!.id);
+  });
+
+  it("lets only one of two concurrent unlocks through, with one kept basis", async () => {
+    const { user, employee } = await seedPeriod();
+    await service.attest(YEAR, MONTH, employee.id, user.id);
+    await service.lockPeriod(YEAR, MONTH, user.id);
+
+    const results = await Promise.allSettled([service.unlockPeriod(YEAR, MONTH, user.id), service.unlockPeriod(YEAR, MONTH, user.id)]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((r) => r.status === "rejected") as PromiseRejectedResult;
+    expect(rejected.reason).toBeInstanceOf(PeriodNotLockedError);
+    expect(await auditRows("payroll_period", "unlocked")).toHaveLength(1);
+    expect(await service.listPreviousSnapshots(YEAR, MONTH)).toHaveLength(1);
   });
 });
 

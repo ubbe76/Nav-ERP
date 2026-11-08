@@ -123,7 +123,11 @@ export function AttestationPageClient({
   }
 
   async function unlockPeriod() {
-    if (!(await confirmDialog("Låser upp perioden — snapshotten raderas och underlaget räknas om live. Fortsätt?"))) {
+    if (
+      !(await confirmDialog(
+        "Låser upp perioden — underlaget räknas om live och ändringar släpps in igen. Det frysta underlaget sparas under Tidigare låsta underlag på Löneunderlag. Fortsätt?"
+      ))
+    ) {
       return;
     }
     setError(null);
