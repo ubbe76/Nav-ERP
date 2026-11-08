@@ -40,8 +40,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
-- [ ] **Förkalkylera flera artiklar på en gång** (användarens önskan 2026-11-07) → [#27](https://github.com/ubbe76/Nav-ERP/issues/27)
-- [ ] **Listan Kopierat** (användarens önskan 2026-11-07) → [#28](https://github.com/ubbe76/Nav-ERP/issues/28)
 - [ ] **Löneperioden:** upplåsning nollar snapshotten utan spår av vad som exporterats — spara den i upplåsningens audit-rad.
 - [ ] **Händelseloggen:** ingen `created`-händelse för TO.
 - [ ] **Välj vad Översikten visar** → [#17](https://github.com/ubbe76/Nav-ERP/issues/17)
