@@ -1,3 +1,4 @@
+import { createArticleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { articleStandardCostHistory, articles, db } from "@navet/db";
@@ -12,6 +13,7 @@ import {
 import { createManufacturingRepository } from "../src/modules/manufacturing/repository/manufacturing.repository.js";
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Prisåterföring: writing a saved calculation's figures back onto the article.
 
@@ -54,19 +56,19 @@ const nextNumber = (p: string) => `${p}-${(seq += 1)}-${crypto.randomUUID().slic
 // Parent with 3 x a 100 kr component = 300 material per unit, no routing, no
 // markups but a 20 % general markup → TVK 300/unit, sales price 360/unit.
 async function makeCalculation(quantity: number) {
-  const component = await articleService.createArticle({
+  const component = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: nextNumber("COMP"),
     name: "Komponent",
     type: "purchased",
     standardCost: 100,
     active: true,
-  });
-  const parent = await articleService.createArticle({
+  }));
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: nextNumber("PARENT"),
     name: "Slutprodukt",
     type: "manufactured",
     active: true,
-  });
+  }));
   await articleService.addBomComponent(parent.id, { componentArticleId: component.id, quantity: 3 });
   const { calculation } = await costingService.preCalculate(parent.id, quantity, true);
   return { parent, calculation };
@@ -108,19 +110,19 @@ describe("Sätt standardpris", () => {
     // Number("55.5556") against whatever it is handed, so passing the
     // unrounded float would report "changed" forever and append a duplicate
     // history row on every single click.
-    const parent = await articleService.createArticle({
+    const parent = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: nextNumber("PARENT"),
       name: "Slutprodukt",
       type: "manufactured",
       active: true,
-    });
-    const wc = await mfgService.createWorkCenter({
+    }));
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
       code: String(300 + (seq % 600)),
       name: nextNumber("Resurs"),
       hourlyRate: 100,
       overheadPercent: 0,
       active: true,
-    });
+    }));
     await mfgService.createRoutingOperation(parent.id, {
       sequenceNo: 10,
       workCenterId: wc.id,
@@ -139,26 +141,26 @@ describe("Sätt standardpris", () => {
   });
 
   it("includes the halvfabrikat bucket, so a multi-level calculation sets the right cost", async () => {
-    const raw = await articleService.createArticle({
+    const raw = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: nextNumber("RAW"),
       name: "Ramaterial",
       type: "purchased",
       standardCost: 50,
       active: true,
-    });
-    const semi = await articleService.createArticle({
+    }));
+    const semi = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: nextNumber("SEMI"),
       name: "Underrede",
       type: "manufactured",
       standardCost: 999,
       active: true,
-    });
-    const top = await articleService.createArticle({
+    }));
+    const top = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: nextNumber("TOP"),
       name: "Slutprodukt",
       type: "manufactured",
       active: true,
-    });
+    }));
     await articleService.addBomComponent(semi.id, { componentArticleId: raw.id, quantity: 2 });
     await articleService.addBomComponent(top.id, { componentArticleId: semi.id, quantity: 1 });
 

@@ -1,3 +1,4 @@
+import { createArticleSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { costCenters, customers, db, projects, salesOrderRows, salesOrders } from "@navet/db";
@@ -12,6 +13,7 @@ import { buildGroupedIncomeStatement, createFinancialReportsService } from "../s
 import { createProjectReportRepository } from "../src/modules/reports/repository/project-report.repository.js";
 import { buildProjectReport } from "../src/modules/reports/service/project-report.js";
 import { createProjectReportService, ProjectNotFoundError } from "../src/modules/reports/service/project-report.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Resultaträkningen per objekt, huvudboken och verifikationslistan with the
 // object filter, and the projektrapport — against Postgres, over four booked
@@ -246,7 +248,7 @@ describe("projektrapporten", () => {
   it("sums the project's booked rows into revenue, costs and result per month and account, derives the range and lists the orders", async () => {
     const { project } = await setup();
     const [customer] = await db.insert(customers).values({ customerNumber: "K-1", name: "Storkök AB" }).returning();
-    const article = await articleService.createArticle({ articleNumber: `ART-${crypto.randomUUID()}`, name: "Diskbänk", type: "manufactured", active: true });
+    const article = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `ART-${crypto.randomUUID()}`, name: "Diskbänk", type: "manufactured", active: true }));
     const [order] = await db.insert(salesOrders).values({ orderNumber: "KO-100", customerId: customer!.id, status: "confirmed", projectId: project.id }).returning();
     await db.insert(salesOrderRows).values({ salesOrderId: order!.id, articleId: article.id, quantityOrdered: "2", unitPrice: "500", discountPercent: "10" });
     // Quotes (open, lost, cancelled as a quote) and cancelled orders are not

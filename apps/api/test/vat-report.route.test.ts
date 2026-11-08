@@ -1,3 +1,4 @@
+import { createVerificationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import Fastify from "fastify";
@@ -12,6 +13,7 @@ import { createVatReportService } from "../src/modules/economy/service/vat-repor
 import { createFinancialReportsService } from "../src/modules/economy/service/financial-reports.service.js";
 import { economyRoutes } from "../src/modules/economy/routes/economy.routes.js";
 import type { SieService } from "../src/modules/economy/service/sie.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Package 5 (uppföljningssvepet): route-level coverage for B5's vat-report
 // error mappings (economy.routes.ts's vatReportError), previously only
@@ -74,7 +76,7 @@ async function accountId(number: string) {
 async function bookSale(userId: string, date: string, net: number, vat: number) {
   const series = await repo.findSeriesByCode("A");
   const draft = await service.createVerification(
-    {
+    parsed(createVerificationSchema, {
       seriesId: series!.id,
       date,
       description: "Momstestpost",
@@ -83,7 +85,7 @@ async function bookSale(userId: string, date: string, net: number, vat: number) 
         { accountId: await accountId("3001"), debit: 0, credit: net },
         { accountId: await accountId("2610"), debit: 0, credit: vat },
       ],
-    },
+    }),
     userId
   );
   return service.book(draft.id, userId);

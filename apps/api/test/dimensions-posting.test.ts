@@ -1,3 +1,4 @@
+import { createArticleSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { asc, eq, sql } from "drizzle-orm";
 import { accounts, articleGroups, costCenters, customers, db, projects, salesOrderRows, salesOrders, suppliers, verificationRows, verifications } from "@navet/db";
@@ -16,6 +17,7 @@ import { createSupplierInvoiceService } from "../src/modules/purchase/service/su
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline, testEconomyService, testSystemService } from "./helpers/services.js";
 import { FIXED_ASSET_TRUNCATE, RESET_ASSET_SERIES, PLAN_YEAR, accountId as basAccountId, setupFixedAssets, testFixedAssetService } from "./helpers/fixed-assets.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Kostnadsställen och projekt in the bookkeeping (etapp 5 del A), against
 // Postgres: the poster puts the objects on the revenue row of a customer
@@ -80,7 +82,7 @@ async function makeSupplier(defaultCostCenterId: string | null = null) {
 }
 
 async function makeArticle(groupId?: string, type: "manufactured" | "purchased" = "manufactured") {
-  return articleService.createArticle({ articleNumber: `ART-${crypto.randomUUID()}`, name: "Artikel", type, active: true, ...(groupId ? { groupId } : {}) });
+  return articleService.createArticle(parsed(createArticleSchema, { articleNumber: `ART-${crypto.randomUUID()}`, name: "Artikel", type, active: true, ...(groupId ? { groupId } : {}) }));
 }
 
 // The booked verification's rows with account numbers and object codes.

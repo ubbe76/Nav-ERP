@@ -4,7 +4,7 @@ import Fastify from "fastify";
 import { eq, inArray, sql } from "drizzle-orm";
 import { ZodError } from "zod";
 import { db, systemSettings, vatCodes } from "@navet/db";
-import { VAT_CODES, VAT_CODE_CATALOG } from "@navet/shared";
+import { VAT_CODES, VAT_CODE_CATALOG, createVerificationSchema } from "@navet/shared";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { testEconomyRepository, testEconomyService } from "./helpers/services.js";
 import { BAS_STANDARD_ACCOUNTS } from "../src/modules/economy/service/bas-accounts.js";
@@ -22,6 +22,7 @@ import {
   VAT_REPORTING_PERIOD_KEY,
 } from "../src/modules/system/service/vat-reporting-settings.js";
 import { resetVatCodes, vatCodeId } from "./helpers/vat-codes.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Momskoder's routes: the register (GET/PATCH /vat-codes), the importmoms
 // posting, the declaration file and the VAT reporting settings — contract
@@ -337,7 +338,7 @@ describe("GET /vat-report/file", () => {
     const { user } = await setupEconomy();
     const series = await repo.findSeriesByCode("A");
     const draft = await service.createVerification(
-      {
+      parsed(createVerificationSchema, {
         seriesId: series!.id,
         date: `${YEAR}-03-05`,
         description: "Försäljning",
@@ -346,7 +347,7 @@ describe("GET /vat-report/file", () => {
           { accountId: (await repo.findAccountByNumber("3001"))!.id, debit: 0, credit: 1000.5 },
           { accountId: (await repo.findAccountByNumber("2610"))!.id, debit: 0, credit: 250.1 },
         ],
-      },
+      }),
       user.id
     );
     await service.book(draft.id, user.id);

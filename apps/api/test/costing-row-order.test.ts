@@ -1,9 +1,11 @@
+import { createArticleSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createCostingRepository, type MaterialRowWrite } from "../src/modules/costing/repository/costing.repository.js";
+import { parsed } from "./helpers/parsed.js";
 
 // The specification rows are written in ONE multi-row INSERT, so a
 // now()-default would give every row the same created_at and the
@@ -24,12 +26,12 @@ afterAll(async () => {
 });
 
 async function makeArticle(name: string, type: "manufactured" | "purchased") {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `${name}-${crypto.randomUUID().slice(0, 8)}`,
     name,
     type,
     active: true,
-  });
+  }));
 }
 
 function materialRow(componentArticleId: string, amount: number): MaterialRowWrite {

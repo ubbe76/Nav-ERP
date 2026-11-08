@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema, createStockLocationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, count, eq, sql } from "drizzle-orm";
 import { auditLog, db, invoices, salesOrderRows, units, verifications } from "@navet/db";
@@ -35,6 +36,7 @@ import { createAuditRepository } from "../src/modules/system/repository/audit.re
 import { pdfText } from "./helpers/pdf.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/services.js";
 import { vatRateGroupId } from "./helpers/vat-group.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -115,22 +117,22 @@ async function makeUser() {
 }
 
 async function makeCustomer(name = "Kund AB") {
-  return salesService.createCustomer({ name, active: true });
+  return salesService.createCustomer(parsed(createCustomerSchema, { name, active: true }));
 }
 
 async function makeArticle(vatRate?: number) {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-INV-${crypto.randomUUID()}`,
     name: "Fakturaartikel",
     type: "manufactured",
     active: true,
     ...(vatRate !== undefined ? { groupId: await vatRateGroupId(vatRate) } : {}),
-  });
+  }));
 }
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
 }
 
 async function seedStock(articleId: string, locationId: string, quantity: number) {
@@ -716,7 +718,7 @@ describe("customer invoice — issue", () => {
 
   it("falls back to the customer's own payment term when the invoice has none", async () => {
     const term = await registerService.paymentTerms.create({ code: "10", name: "10 dagar netto" });
-    const customer = await salesService.createCustomer({ name: "Kund med villkor", paymentTermId: term.id, active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund med villkor", paymentTermId: term.id, active: true }));
     const biller = await makeUser();
     const draft = await invoiceService.create(
       { customerId: customer.id, rows: [{ description: "x", quantity: 1, unitPrice: 10 }] },
@@ -728,13 +730,13 @@ describe("customer invoice — issue", () => {
   });
 
   it("freezes the customer snapshot at issue — later edits to the customer don't change getInvoice", async () => {
-    const customer = await salesService.createCustomer({
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, {
       name: "Ursprungsnamn AB",
       invoiceAddress: "Gamla vägen 1",
       invoicePostalCode: "111 11",
       invoiceCity: "Gamlastad",
       active: true,
-    });
+    }));
     const biller = await makeUser();
     const draft = await invoiceService.create(
       { customerId: customer.id, rows: [{ description: "x", quantity: 1, unitPrice: 10 }] },
@@ -759,7 +761,7 @@ describe("customer invoice — issue", () => {
   // address — same rule invoice.service.ts's issue() and sales.service.ts's
   // renderInvoicePdf apply, see the comment at issue()'s useInvoiceAddress.
   it("snapshots invoiceName as customerName and invoiceCountry when the customer has a separate invoice address", async () => {
-    const customer = await salesService.createCustomer({
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, {
       name: "Kundens Juridiska Namn AB",
       active: true,
       invoiceName: "c/o Holdingbolaget AB",
@@ -767,7 +769,7 @@ describe("customer invoice — issue", () => {
       invoicePostalCode: "400 10",
       invoiceCity: "Göteborg",
       invoiceCountry: "DK",
-    });
+    }));
     const biller = await makeUser();
     const draft = await invoiceService.create(
       { customerId: customer.id, rows: [{ description: "x", quantity: 1, unitPrice: 10 }] },
@@ -783,12 +785,12 @@ describe("customer invoice — issue", () => {
     // invoiceName set but no invoiceAddress — the invoiceName is inert
     // until the customer also has a separate invoice address (matches
     // Monitor: fakturanamn lives on the invoice-address block).
-    const customer = await salesService.createCustomer({
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, {
       name: "Kundens Juridiska Namn AB",
       active: true,
       invoiceName: "c/o Holdingbolaget AB",
       country: "NO",
-    });
+    }));
     const biller = await makeUser();
     const draft = await invoiceService.create(
       { customerId: customer.id, rows: [{ description: "x", quantity: 1, unitPrice: 10 }] },
@@ -802,7 +804,7 @@ describe("customer invoice — issue", () => {
   });
 
   it("invoice PDF prints the fakturanamn and the invoice address's country", async () => {
-    const customer = await salesService.createCustomer({
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, {
       name: "Kundens Juridiska Namn AB",
       active: true,
       invoiceName: "c/o Holdingbolaget AB",
@@ -810,7 +812,7 @@ describe("customer invoice — issue", () => {
       invoicePostalCode: "400 10",
       invoiceCity: "Göteborg",
       invoiceCountry: "DK",
-    });
+    }));
     const biller = await makeUser();
     const draft = await invoiceService.create(
       { customerId: customer.id, rows: [{ description: "x", quantity: 1, unitPrice: 10 }] },
@@ -1647,13 +1649,13 @@ describe("customer invoice — PDF and email", () => {
   });
 
   it("prints the snapshot address, not the live customer, after the customer is edited", async () => {
-    const customer = await salesService.createCustomer({
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, {
       name: "Ursprungsnamn AB",
       invoiceAddress: "Gamla vägen 1",
       invoicePostalCode: "111 11",
       invoiceCity: "Gamlastad",
       active: true,
-    });
+    }));
     const user = await makeUser();
     const draft = await invoiceService.create(
       { customerId: customer.id, rows: [{ description: "x", quantity: 1, unitPrice: 10 }] },
@@ -1848,7 +1850,7 @@ describe("customer invoice — audit trail", () => {
 // follows the customer (its preview and mail defaults use the live value).
 describe("invoice language (Språk, #7)", () => {
   it("stamps the customer's language at issue; a later change on the customer does not reach the invoice", async () => {
-    const customer = await salesService.createCustomer({ name: "Customer Ltd", active: true, country: "GB", language: "en" });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Customer Ltd", active: true, country: "GB", language: "en" }));
     const biller = await makeUser();
     const draft = await invoiceService.create(
       { customerId: customer.id, rows: [{ description: "x", quantity: 1, unitPrice: 10 }] },

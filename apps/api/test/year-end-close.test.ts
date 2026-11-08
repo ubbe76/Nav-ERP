@@ -1,3 +1,4 @@
+import { createVerificationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { accountingPeriods, auditLog, db, fiscalYears, profitDispositions, yearEndClosings } from "@navet/db";
@@ -30,6 +31,7 @@ import {
   verificationLines,
   waitForLockWaiter,
 } from "./helpers/year-end.js";
+import { parsed } from "./helpers/parsed.js";
 
 beforeEach(resetYearEnd);
 afterAll(resetYearEnd);
@@ -292,7 +294,7 @@ describe("steg 6 — stäng året", () => {
     await createCalendarYear(NEXT_YEAR);
     const series = await testEconomyService.createSeries({ code: "I", name: "Ingående balanser" });
     const draft = await testEconomyService.createVerification(
-      {
+      parsed(createVerificationSchema, {
         seriesId: series.id,
         date: `${NEXT_YEAR}-03-01`,
         description: "Felbokad i serie I",
@@ -300,7 +302,7 @@ describe("steg 6 — stäng året", () => {
           { accountId: await accountId("4010"), debit: 500, credit: 0 },
           { accountId: await accountId("3001"), debit: 0, credit: 500 },
         ],
-      },
+      }),
       user.id
     );
     await testEconomyService.book(draft.id, user.id);

@@ -1,3 +1,4 @@
+import { createVerificationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -10,6 +11,7 @@ import {
   VerificationSeriesNotFoundError,
 } from "../src/modules/economy/service/economy.service.js";
 import { allocateVerificationNumber } from "../src/modules/economy/service/verification-number.js";
+import { parsed } from "./helpers/parsed.js";
 
 // audit is unused by every series/allocator method exercised here — a no-op
 // stub, same as economy-accounts.test.ts.
@@ -104,7 +106,7 @@ describe("economy service — verification series: code locked once used", () =>
     const revenue = await makeAccount("3001", "Försäljning");
 
     const draft = await service.createVerification(
-      {
+      parsed(createVerificationSchema, {
         seriesId: series.id,
         date: "2026-03-15",
         description: "Test",
@@ -112,7 +114,7 @@ describe("economy service — verification series: code locked once used", () =>
           { accountId: bank.id, debit: 100, credit: 0 },
           { accountId: revenue.id, debit: 0, credit: 100 },
         ],
-      },
+      }),
       user.id
     );
     await service.book(draft.id, user.id);

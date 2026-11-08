@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, vatCodes, vatSettlements, verifications } from "@navet/db";
-import { round2 } from "@navet/shared";
+import { round2, createVerificationSchema } from "@navet/shared";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createEconomyRepository } from "../src/modules/economy/repository/economy.repository.js";
 import { createEconomyService } from "../src/modules/economy/service/economy.service.js";
@@ -17,6 +17,7 @@ import {
 
 import { postingVatCode, resetVatCodes } from "./helpers/vat-codes.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
 
 const repo = createEconomyRepository(db);
 const authRepo = createAuthRepository(db);
@@ -90,7 +91,7 @@ async function bookManual(userId: string, date: string, entries: [string, number
       credit: net < 0 ? -net : 0,
     }))
   );
-  const draft = await service.createVerification({ seriesId: series!.id, date, description, rows }, userId);
+  const draft = await service.createVerification(parsed(createVerificationSchema, { seriesId: series!.id, date, description, rows }), userId);
   return service.book(draft.id, userId);
 }
 
@@ -249,7 +250,7 @@ describe("vat report — box computation", () => {
     const { user } = await setupEconomy();
     const series = await repo.findSeriesByCode("A");
     await service.createVerification(
-      {
+      parsed(createVerificationSchema, {
         seriesId: series!.id,
         date: `${CURRENT_YEAR}-03-05`,
         description: "Utkast",
@@ -258,7 +259,7 @@ describe("vat report — box computation", () => {
           { accountId: await accountId("2610"), debit: 0, credit: 25 },
           { accountId: await accountId("3001"), debit: 0, credit: 100 },
         ],
-      },
+      }),
       user.id
     );
 

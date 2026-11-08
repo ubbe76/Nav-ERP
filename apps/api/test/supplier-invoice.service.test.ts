@@ -1,3 +1,4 @@
+import { createArticleSchema, createPurchaseOrderSchema, createStockLocationSchema, createSupplierInvoiceSchema, createSupplierSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { auditLog, db } from "@navet/db";
@@ -33,6 +34,7 @@ import { createVerificationPoster } from "../src/modules/economy/service/verific
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/services.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -101,7 +103,7 @@ async function makeUser() {
 }
 
 async function makeSupplier(name = "Lev AB", currency = "SEK") {
-  return purchaseService.createSupplier({ name, currency, active: true });
+  return purchaseService.createSupplier(parsed(createSupplierSchema, { name, currency, active: true }));
 }
 
 // payment_terms is shared base data and is deliberately NOT in the TRUNCATE
@@ -113,12 +115,12 @@ async function makePaymentTerm(code: string, name: string) {
 }
 
 async function makeArticle(articleNumber: string) {
-  return articleService.createArticle({ articleNumber, name: articleNumber, type: "purchased", active: true });
+  return articleService.createArticle(parsed(createArticleSchema, { articleNumber, name: articleNumber, type: "purchased", active: true }));
 }
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
 }
 
 // A draft invoice with one article row, for the transition/edit tests.
@@ -174,7 +176,7 @@ describe("supplier invoice — creation", () => {
     const user = await makeUser();
     await expect(
       supplierInvoiceService.create(
-        { supplierId: crypto.randomUUID(), invoiceNumber: "X", invoiceDate: "2026-07-01", rows: [] },
+        parsed(createSupplierInvoiceSchema, { supplierId: crypto.randomUUID(), invoiceNumber: "X", invoiceDate: "2026-07-01", rows: [] }),
         user.id
       )
     ).rejects.toThrow(SupplierNotFoundError);
@@ -185,17 +187,17 @@ describe("supplier invoice — creation", () => {
     const s1 = await makeSupplier("S1");
     const s2 = await makeSupplier("S2");
     await supplierInvoiceService.create(
-      { supplierId: s1.id, invoiceNumber: "DUP-1", invoiceDate: "2026-07-01", rows: [] },
+      parsed(createSupplierInvoiceSchema, { supplierId: s1.id, invoiceNumber: "DUP-1", invoiceDate: "2026-07-01", rows: [] }),
       user.id
     );
     await expect(
       supplierInvoiceService.create(
-        { supplierId: s1.id, invoiceNumber: "DUP-1", invoiceDate: "2026-07-02", rows: [] },
+        parsed(createSupplierInvoiceSchema, { supplierId: s1.id, invoiceNumber: "DUP-1", invoiceDate: "2026-07-02", rows: [] }),
         user.id
       )
     ).rejects.toThrow(DuplicateSupplierInvoiceNumberError);
     const ok = await supplierInvoiceService.create(
-      { supplierId: s2.id, invoiceNumber: "DUP-1", invoiceDate: "2026-07-02", rows: [] },
+      parsed(createSupplierInvoiceSchema, { supplierId: s2.id, invoiceNumber: "DUP-1", invoiceDate: "2026-07-02", rows: [] }),
       user.id
     );
     expect(ok!.registrationNumber).toMatch(/^LF-\d+$/);
@@ -208,14 +210,14 @@ describe("supplier invoice — creation", () => {
 describe("supplier invoice — förfallodatum", () => {
   async function makeSupplierWithTerm(name: string, code: string, termName: string) {
     const term = await makePaymentTerm(code, termName);
-    return purchaseService.createSupplier({ name, currency: "SEK", active: true, paymentTermId: term.id });
+    return purchaseService.createSupplier(parsed(createSupplierSchema, { name, currency: "SEK", active: true, paymentTermId: term.id }));
   }
 
   it("derives the due date from the supplier's payment term when none is given", async () => {
     const user = await makeUser();
     const supplier = await makeSupplierWithTerm("Villkor AB", "30", "30 dagar netto");
     const invoice = await supplierInvoiceService.create(
-      { supplierId: supplier.id, invoiceNumber: "DD-1", invoiceDate: "2026-07-01", rows: [] },
+      parsed(createSupplierInvoiceSchema, { supplierId: supplier.id, invoiceNumber: "DD-1", invoiceDate: "2026-07-01", rows: [] }),
       user.id
     );
     expect(invoice!.dueDate).toBe("2026-07-31");
@@ -225,7 +227,7 @@ describe("supplier invoice — förfallodatum", () => {
     const user = await makeUser();
     const supplier = await makeSupplierWithTerm("Kontant AB", "KONTANT", "Kontant");
     const invoice = await supplierInvoiceService.create(
-      { supplierId: supplier.id, invoiceNumber: "DD-2", invoiceDate: "2026-07-01", rows: [] },
+      parsed(createSupplierInvoiceSchema, { supplierId: supplier.id, invoiceNumber: "DD-2", invoiceDate: "2026-07-01", rows: [] }),
       user.id
     );
     expect(invoice!.dueDate).toBeNull();
@@ -235,13 +237,13 @@ describe("supplier invoice — förfallodatum", () => {
     const user = await makeUser();
     const supplier = await makeSupplierWithTerm("Villkor AB", "30", "30 dagar netto");
     const invoice = await supplierInvoiceService.create(
-      {
+      parsed(createSupplierInvoiceSchema, {
         supplierId: supplier.id,
         invoiceNumber: "DD-3",
         invoiceDate: "2026-07-01",
         dueDate: "2026-08-15",
         rows: [],
-      },
+      }),
       user.id
     );
     expect(invoice!.dueDate).toBe("2026-08-15");
@@ -312,14 +314,14 @@ describe("supplier invoice — rows and PO matching", () => {
     const article = await makeArticle(`ART-M-${crypto.randomUUID()}`);
     const article2 = await makeArticle(`ART-M2-${crypto.randomUUID()}`);
     const location = await makeLocation();
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     const poRow = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 10, unitPrice: 42 });
     await purchaseService.confirm(order.id);
     await purchaseService.receiveGoods(order.id, poRow.id, { locationId: location.id, quantity: 8 }, user.id);
 
     // Another supplier to pay → the match against the order still stands
     const otherInvoice = await supplierInvoiceService.create(
-      { supplierId: otherSupplier.id, invoiceNumber: "M-1", invoiceDate: "2026-07-01", rows: [] },
+      parsed(createSupplierInvoiceSchema, { supplierId: otherSupplier.id, invoiceNumber: "M-1", invoiceDate: "2026-07-01", rows: [] }),
       user.id
     );
     const otherRow = await supplierInvoiceService.addRow(otherInvoice!.id, {
@@ -344,7 +346,7 @@ describe("supplier invoice — rows and PO matching", () => {
 
     // Wrong article → mismatch
     const invoice = await supplierInvoiceService.create(
-      { supplierId: supplier.id, invoiceNumber: "M-2", invoiceDate: "2026-07-01", rows: [] },
+      parsed(createSupplierInvoiceSchema, { supplierId: supplier.id, invoiceNumber: "M-2", invoiceDate: "2026-07-01", rows: [] }),
       user.id
     );
     await expect(
@@ -380,13 +382,13 @@ describe("supplier invoice — basis from purchase order", () => {
     const supplier = await makeSupplier("UnderlagLev");
     const article = await makeArticle(`ART-U-${crypto.randomUUID()}`);
     const location = await makeLocation();
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     const poRow = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 10, unitPrice: 40 });
     await purchaseService.confirm(order.id);
     await purchaseService.receiveGoods(order.id, poRow.id, { locationId: location.id, quantity: 7 }, user.id);
 
     const invoice = await supplierInvoiceService.create(
-      {
+      parsed(createSupplierInvoiceSchema, {
         supplierId: supplier.id,
         invoiceNumber: "U-1",
         invoiceDate: "2026-07-01",
@@ -394,7 +396,7 @@ describe("supplier invoice — basis from purchase order", () => {
         rows: [
           { description: "Material", articleId: article.id, quantity: 7, unitPrice: 42, purchaseOrderRowId: poRow.id },
         ],
-      },
+      }),
       user.id
     );
 
@@ -411,11 +413,11 @@ describe("supplier invoice — basis from purchase order", () => {
     const payee = await makeSupplier("Factoring AB");
     const orderedFrom = await makeSupplier("B");
     const article = await makeArticle(`ART-X-${crypto.randomUUID()}`);
-    const order = await purchaseService.createPurchaseOrder({ supplierId: orderedFrom.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: orderedFrom.id }), user.id);
     const poRow = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 5, unitPrice: 10 });
 
     const invoice = await supplierInvoiceService.create(
-      {
+      parsed(createSupplierInvoiceSchema, {
         supplierId: payee.id,
         invoiceNumber: "X-1",
         invoiceDate: "2026-07-01",
@@ -423,7 +425,7 @@ describe("supplier invoice — basis from purchase order", () => {
         rows: [
           { description: "m", articleId: article.id, quantity: 5, unitPrice: 12, purchaseOrderRowId: poRow.id },
         ],
-      },
+      }),
       user.id
     );
     expect(invoice!.supplierId).toBe(payee.id);
@@ -440,18 +442,18 @@ describe("supplier invoice — byte av leverantör", () => {
     const payee = await makeSupplier("Betalas till AB", "EUR");
     const article = await makeArticle(`ART-B-${crypto.randomUUID()}`);
     const location = await makeLocation();
-    const order = await purchaseService.createPurchaseOrder({ supplierId: orderedFrom.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: orderedFrom.id }), user.id);
     const poRow = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 4, unitPrice: 25 });
     await purchaseService.confirm(order.id);
     await purchaseService.receiveGoods(order.id, poRow.id, { locationId: location.id, quantity: 4 }, user.id);
     const invoice = await supplierInvoiceService.create(
-      {
+      parsed(createSupplierInvoiceSchema, {
         supplierId: orderedFrom.id,
         invoiceNumber: "B-1",
         invoiceDate: "2026-07-01",
         purchaseOrderId: order.id,
         rows: [{ description: "m", articleId: article.id, quantity: 4, unitPrice: 25, purchaseOrderRowId: poRow.id }],
-      },
+      }),
       user.id
     );
     expect(invoice!.currency).toBe("SEK");
@@ -505,7 +507,7 @@ describe("supplier invoice — byte av leverantör", () => {
 
     const other = await makeSupplier("Annan AB");
     await supplierInvoiceService.create(
-      { supplierId: other.id, invoiceNumber: invoice.invoiceNumber, invoiceDate: "2026-07-01", rows: [] },
+      parsed(createSupplierInvoiceSchema, { supplierId: other.id, invoiceNumber: invoice.invoiceNumber, invoiceDate: "2026-07-01", rows: [] }),
       user.id
     );
     await expect(supplierInvoiceService.updateHeader(invoice.id, { supplierId: other.id }, user.id)).rejects.toThrow(
@@ -529,22 +531,22 @@ describe("supplier invoice — list filters", () => {
     const supplier = await makeSupplier("FilterLev");
     const article = await makeArticle(`ART-F-${crypto.randomUUID()}`);
     const withArticle = await supplierInvoiceService.create(
-      {
+      parsed(createSupplierInvoiceSchema, {
         supplierId: supplier.id,
         invoiceNumber: "F-1",
         invoiceDate: "2026-07-01",
         rows: [{ description: "Material", articleId: article.id, quantity: 1, unitPrice: 10 }],
-      },
+      }),
       user.id
     );
     // Freight-only invoice (no article on the row).
     await supplierInvoiceService.create(
-      {
+      parsed(createSupplierInvoiceSchema, {
         supplierId: supplier.id,
         invoiceNumber: "F-2",
         invoiceDate: "2026-07-01",
         rows: [{ description: "Frakt", quantity: 1, unitPrice: 99 }],
-      },
+      }),
       user.id
     );
 

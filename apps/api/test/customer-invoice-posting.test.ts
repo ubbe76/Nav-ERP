@@ -1,3 +1,4 @@
+import { createArticleSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { asc, eq, sql } from "drizzle-orm";
 import {
@@ -33,6 +34,7 @@ import {
 } from "./helpers/services.js";
 import { resetVatCodes, vatCodeId } from "./helpers/vat-codes.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { parsed } from "./helpers/parsed.js";
 
 // B2: issuing a customer invoice books an F verification inside the SAME
 // transaction as the FA-number allocation. This suite drives the real wiring
@@ -105,13 +107,13 @@ async function makeArticleGroup(code: string, name: string) {
 }
 
 async function makeArticle(opts: { groupId?: string } = {}) {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `ART-POST-${crypto.randomUUID()}`,
     name: "Konteringsartikel",
     type: "manufactured",
     active: true,
     ...(opts.groupId !== undefined ? { groupId: opts.groupId } : {}),
-  });
+  }));
 }
 
 type RowInput = {

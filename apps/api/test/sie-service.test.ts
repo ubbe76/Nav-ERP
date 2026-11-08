@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
-import { round2 } from "@navet/shared";
+import { round2, createVerificationSchema } from "@navet/shared";
 import { db } from "@navet/db";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createEconomyRepository } from "../src/modules/economy/repository/economy.repository.js";
@@ -17,6 +17,7 @@ import {
 import { createVerificationPoster } from "../src/modules/economy/service/verification-poster.js";
 import { decodeCp437, encodeCp437 } from "../src/modules/economy/service/sie-encoding.js";
 import { parseSieFile } from "../src/modules/economy/service/sie-parse.js";
+import { parsed } from "./helpers/parsed.js";
 
 const repo = createEconomyRepository(db);
 const authRepo = createAuthRepository(db);
@@ -75,7 +76,7 @@ async function bookManual(userId: string, date: string, entries: [string, number
       return { accountId: account!.id, debit: net > 0 ? net : 0, credit: net < 0 ? -net : 0 };
     })
   );
-  const draft = await service.createVerification({ seriesId: series!.id, date, description, rows }, userId);
+  const draft = await service.createVerification(parsed(createVerificationSchema, { seriesId: series!.id, date, description, rows }), userId);
   return service.book(draft.id, userId);
 }
 
@@ -143,7 +144,7 @@ describe("SIE-export", () => {
     const account = await repo.findAccountByNumber("1930");
     const other = await repo.findAccountByNumber("2081");
     await service.createVerification(
-      {
+      parsed(createVerificationSchema, {
         seriesId: series!.id,
         date: `${YEAR}-03-01`,
         description: "Utkast",
@@ -151,7 +152,7 @@ describe("SIE-export", () => {
           { accountId: account!.id, debit: 999, credit: 0 },
           { accountId: other!.id, debit: 0, credit: 999 },
         ],
-      },
+      }),
       user.id
     );
 

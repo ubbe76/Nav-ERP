@@ -1,3 +1,4 @@
+import { createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { bomComponents, costCalculationMaterialRows, costCalculations, db } from "@navet/db";
@@ -8,6 +9,7 @@ import { createCostingService } from "../src/modules/costing/service/costing.ser
 import { createManufacturingRepository } from "../src/modules/manufacturing/repository/manufacturing.repository.js";
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Flernivåkalkyl (Räkna om underliggande nivåer): a manufactured sub-assembly
 // is costed from its OWN structure and routing instead of from its manually
@@ -69,13 +71,13 @@ async function makeArticle(opts: {
 
 // One work center, reused: 100 kr/h, no TO unless a test asks for it.
 async function makeWorkCenter(overheadPercent = 0) {
-  return mfgService.createWorkCenter({
+  return mfgService.createWorkCenter(parsed(createWorkCenterSchema, {
     code: String(100 + (seq % 800)),
     name: `Resurs ${(seq += 1)}`,
     hourlyRate: 100,
     overheadPercent,
     active: true,
-  });
+  }));
 }
 
 // setupTime/runTimePerUnit are MINUTES.

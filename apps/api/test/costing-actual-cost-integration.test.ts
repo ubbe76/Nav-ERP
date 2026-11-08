@@ -1,3 +1,4 @@
+import { createArticleSchema, createStockLocationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -11,6 +12,7 @@ import { createManufacturingService } from "../src/modules/manufacturing/service
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Verklig kostnad end to end: real stock_transactions, a real manufacturing
 // order, and the moving average derived from the log rather than read off the
@@ -55,22 +57,22 @@ async function makeOrderConsumingAt(prices: number[], consumeQuantity: number, s
     name: "Cost Clerk",
     role: "admin",
   });
-  const component = await articleService.createArticle({
+  const component = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: nextNumber("COMP"),
     name: "Komponent",
     type: "purchased",
     active: true,
-  });
-  const parent = await articleService.createArticle({
+  }));
+  const parent = await articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: nextNumber("PARENT"),
     name: "Slutprodukt",
     type: "manufactured",
     active: true,
-  });
+  }));
   await articleService.addBomComponent(parent.id, { componentArticleId: component.id, quantity: 1 });
 
   const warehouse = await stockService.createWarehouse({ name: nextNumber("Lager"), active: true });
-  const location = await stockService.createLocation({ warehouseId: warehouse!.id, name: nextNumber("A"), active: true });
+  const location = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: nextNumber("A"), active: true }));
 
   // createTransaction stamps unit_cost from the article's CURRENT standard
   // cost on an inflow, so moving the standard cost between receipts is how a
@@ -142,19 +144,19 @@ describe("efterkalkyl med Verklig kostnad", () => {
 
 describe("förkalkyl med Verklig kostnad", () => {
   it("uses the standard cost and says so, while still snapshotting the configured source", async () => {
-    const component = await articleService.createArticle({
+    const component = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: nextNumber("COMP"),
       name: "Komponent",
       type: "purchased",
       standardCost: 25,
       active: true,
-    });
-    const parent = await articleService.createArticle({
+    }));
+    const parent = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: nextNumber("PARENT"),
       name: "Slutprodukt",
       type: "manufactured",
       active: true,
-    });
+    }));
     await articleService.addBomComponent(parent.id, { componentArticleId: component.id, quantity: 2 });
 
     const { calculation, warnings } = await costingService.preCalculate(parent.id, 3);

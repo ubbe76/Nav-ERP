@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { and, eq, sql } from "drizzle-orm";
 import { accountingPeriods, auditLog, db, users, verificationRows, verifications } from "@navet/db";
-import { verificationRowInputSchema } from "@navet/shared";
+import { verificationRowInputSchema, createVerificationSchema } from "@navet/shared";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createEconomyRepository } from "../src/modules/economy/repository/economy.repository.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
@@ -24,6 +24,7 @@ import {
   VerificationSeriesNotFoundError,
   createEconomyService,
 } from "../src/modules/economy/service/economy.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 const repo = createEconomyRepository(db);
 const authRepo = createAuthRepository(db);
@@ -103,7 +104,7 @@ async function makeBalancedDraft(
 ) {
   const amount = overrides?.amount ?? 500;
   return service.createVerification(
-    {
+    parsed(createVerificationSchema, {
       seriesId: series.id,
       date: overrides?.date ?? DEFAULT_VERIFICATION_DATE,
       description: overrides?.description ?? "Kontantförsäljning",
@@ -111,7 +112,7 @@ async function makeBalancedDraft(
         { accountId: bank.id, debit: amount, credit: 0 },
         { accountId: revenue.id, debit: 0, credit: amount },
       ],
-    },
+    }),
     userId
   );
 }
@@ -125,7 +126,7 @@ describe("economy service — verifications: create", () => {
     const revenue = await makeAccount("3001", "Försäljning");
 
     const created = await service.createVerification(
-      {
+      parsed(createVerificationSchema, {
         seriesId: series.id,
         date: "2026-03-15",
         description: "Kontantförsäljning",
@@ -133,7 +134,7 @@ describe("economy service — verifications: create", () => {
           { accountId: bank.id, debit: 100.005, credit: 0 },
           { accountId: revenue.id, debit: 0, credit: 100.005 },
         ],
-      },
+      }),
       user.id
     );
 
@@ -154,7 +155,7 @@ describe("economy service — verifications: create", () => {
     const series = await makeSeries();
 
     const created = await service.createVerification(
-      { seriesId: series.id, date: "2026-03-15", description: "Tom utkast", rows: [] },
+      parsed(createVerificationSchema, { seriesId: series.id, date: "2026-03-15", description: "Tom utkast", rows: [] }),
       user.id
     );
 
@@ -166,7 +167,7 @@ describe("economy service — verifications: create", () => {
     const series = await makeSeries();
 
     await expect(
-      service.createVerification({ seriesId: series.id, date: "2025-06-15", description: "X", rows: [] }, user.id)
+      service.createVerification(parsed(createVerificationSchema, { seriesId: series.id, date: "2025-06-15", description: "X", rows: [] }), user.id)
     ).rejects.toBeInstanceOf(NoFiscalYearForDateError);
   });
 
@@ -176,7 +177,7 @@ describe("economy service — verifications: create", () => {
 
     await expect(
       service.createVerification(
-        { seriesId: "00000000-0000-0000-0000-000000000000", date: "2026-03-15", description: "X", rows: [] },
+        parsed(createVerificationSchema, { seriesId: "00000000-0000-0000-0000-000000000000", date: "2026-03-15", description: "X", rows: [] }),
         user.id
       )
     ).rejects.toBeInstanceOf(VerificationSeriesNotFoundError);
@@ -189,12 +190,12 @@ describe("economy service — verifications: create", () => {
 
     await expect(
       service.createVerification(
-        {
+        parsed(createVerificationSchema, {
           seriesId: series.id,
           date: "2026-03-15",
           description: "X",
           rows: [{ accountId: "00000000-0000-0000-0000-000000000000", debit: 100, credit: 0 }],
-        },
+        }),
         user.id
       )
     ).rejects.toBeInstanceOf(AccountNotFoundError);
@@ -209,7 +210,7 @@ describe("economy service — verifications: create", () => {
 
     await expect(
       service.createVerification(
-        { seriesId: series.id, date: "2026-03-15", description: "X", rows: [{ accountId: bank.id, debit: 100, credit: 0 }] },
+        parsed(createVerificationSchema, { seriesId: series.id, date: "2026-03-15", description: "X", rows: [{ accountId: bank.id, debit: 100, credit: 0 }] }),
         user.id
       )
     ).rejects.toBeInstanceOf(InactiveAccountError);
@@ -260,15 +261,15 @@ describe("economy service — verifications: list, filter, search", () => {
     const revenue = await makeAccount("3001", "Försäljning");
 
     const v1 = await service.createVerification(
-      { seriesId: seriesA.id, date: "2026-03-15", description: "Hyra lokal mars", rows: [] },
+      parsed(createVerificationSchema, { seriesId: seriesA.id, date: "2026-03-15", description: "Hyra lokal mars", rows: [] }),
       user.id
     );
     const v2 = await service.createVerification(
-      { seriesId: seriesB.id, date: "2026-04-01", description: "Kontorsmaterial", rows: [] },
+      parsed(createVerificationSchema, { seriesId: seriesB.id, date: "2026-04-01", description: "Kontorsmaterial", rows: [] }),
       user.id
     );
     const v3 = await service.createVerification(
-      { seriesId: seriesA.id, date: "2027-01-10", description: "Hyra lokal januari", rows: [] },
+      parsed(createVerificationSchema, { seriesId: seriesA.id, date: "2027-01-10", description: "Hyra lokal januari", rows: [] }),
       user.id
     );
 
@@ -321,7 +322,7 @@ describe("economy service — verifications: list, filter, search", () => {
     await makeFiscalYear("2026", "2026-01-01", "2026-12-31");
     const series = await makeSeries();
     for (let i = 0; i < 3; i++) {
-      await service.createVerification({ seriesId: series.id, date: "2026-03-15", description: `V${i}`, rows: [] }, user.id);
+      await service.createVerification(parsed(createVerificationSchema, { seriesId: series.id, date: "2026-03-15", description: `V${i}`, rows: [] }), user.id);
     }
 
     const page1 = await service.listVerifications({ limit: 2, offset: 0 });
@@ -343,7 +344,7 @@ describe("economy service — verifications: row editing on a draft", () => {
     const other = await makeAccount("3002", "Övrig försäljning");
 
     const created = await service.createVerification(
-      { seriesId: series.id, date: "2026-03-15", description: "Test", rows: [] },
+      parsed(createVerificationSchema, { seriesId: series.id, date: "2026-03-15", description: "Test", rows: [] }),
       user.id
     );
 
@@ -369,11 +370,11 @@ describe("economy service — verifications: row editing on a draft", () => {
     const bank = await makeAccount("1930", "Företagskonto/checkkonto");
 
     const v1 = await service.createVerification(
-      { seriesId: series.id, date: "2026-03-15", description: "V1", rows: [] },
+      parsed(createVerificationSchema, { seriesId: series.id, date: "2026-03-15", description: "V1", rows: [] }),
       user.id
     );
     const v2 = await service.createVerification(
-      { seriesId: series.id, date: "2026-03-16", description: "V2", rows: [] },
+      parsed(createVerificationSchema, { seriesId: series.id, date: "2026-03-16", description: "V2", rows: [] }),
       user.id
     );
     const rowOnV1 = await service.addRow(v1.id, { accountId: bank.id, debit: 100, credit: 0 });
@@ -391,7 +392,7 @@ describe("economy service — verifications: row editing on a draft", () => {
     const seriesB = await makeSeries("B", "Andra verifikat");
 
     const created = await service.createVerification(
-      { seriesId: seriesA.id, date: "2026-03-15", description: "Original", rows: [] },
+      parsed(createVerificationSchema, { seriesId: seriesA.id, date: "2026-03-15", description: "Original", rows: [] }),
       user.id
     );
 
@@ -406,7 +407,7 @@ describe("economy service — verifications: row editing on a draft", () => {
     const series = await makeSeries();
 
     const created = await service.createVerification(
-      { seriesId: series.id, date: "2026-03-15", description: "Original", rows: [] },
+      parsed(createVerificationSchema, { seriesId: series.id, date: "2026-03-15", description: "Original", rows: [] }),
       user.id
     );
 
@@ -422,7 +423,7 @@ describe("economy service — verifications: row editing on a draft", () => {
     const bank = await makeAccount("1930", "Företagskonto/checkkonto");
 
     const created = await service.createVerification(
-      { seriesId: series.id, date: "2026-03-15", description: "X", rows: [{ accountId: bank.id, debit: 10, credit: 0 }] },
+      parsed(createVerificationSchema, { seriesId: series.id, date: "2026-03-15", description: "X", rows: [{ accountId: bank.id, debit: 10, credit: 0 }] }),
       user.id
     );
 
@@ -439,7 +440,7 @@ describe("economy service — verifications: date change across a fiscal year bo
     const series = await makeSeries();
 
     const created = await service.createVerification(
-      { seriesId: series.id, date: "2026-12-20", description: "Årsskifte", rows: [] },
+      parsed(createVerificationSchema, { seriesId: series.id, date: "2026-12-20", description: "Årsskifte", rows: [] }),
       user.id
     );
     expect(created.fiscalYearId).toBe(year2026.id);
@@ -455,7 +456,7 @@ describe("economy service — verifications: date change across a fiscal year bo
     const series = await makeSeries();
 
     const created = await service.createVerification(
-      { seriesId: series.id, date: "2026-06-15", description: "X", rows: [] },
+      parsed(createVerificationSchema, { seriesId: series.id, date: "2026-06-15", description: "X", rows: [] }),
       user.id
     );
 
@@ -472,7 +473,7 @@ describe("economy repository — draft status required for every write path", ()
     const series = await makeSeries();
     const bank = await makeAccount("1930", "Företagskonto/checkkonto");
     const created = await service.createVerification(
-      { seriesId: series.id, date: "2026-03-15", description: "X", rows: [{ accountId: bank.id, debit: 10, credit: 0 }] },
+      parsed(createVerificationSchema, { seriesId: series.id, date: "2026-03-15", description: "X", rows: [{ accountId: bank.id, debit: 10, credit: 0 }] }),
       user.id
     );
     // Booking itself is Task 7 — flip the status directly to simulate an
@@ -579,12 +580,12 @@ describe("economy service — booking (book): guards and success", () => {
   it("rejects a verification with fewer than 2 rows (TooFewVerificationRowsError)", async () => {
     const { user, series, bank } = await setupEconomy();
     const draft = await service.createVerification(
-      {
+      parsed(createVerificationSchema, {
         seriesId: series.id,
         date: DEFAULT_VERIFICATION_DATE,
         description: "En rad",
         rows: [{ accountId: bank.id, debit: 100, credit: 0 }],
-      },
+      }),
       user.id
     );
 
@@ -594,7 +595,7 @@ describe("economy service — booking (book): guards and success", () => {
   it("rejects an unbalanced verification by 1 öre, with the difference in the error message", async () => {
     const { user, series, bank, revenue } = await setupEconomy();
     const draft = await service.createVerification(
-      {
+      parsed(createVerificationSchema, {
         seriesId: series.id,
         date: DEFAULT_VERIFICATION_DATE,
         description: "Obalans",
@@ -602,7 +603,7 @@ describe("economy service — booking (book): guards and success", () => {
           { accountId: bank.id, debit: 100, credit: 0 },
           { accountId: revenue.id, debit: 0, credit: 99.99 },
         ],
-      },
+      }),
       user.id
     );
 
@@ -615,7 +616,7 @@ describe("economy service — booking (book): guards and success", () => {
     const other1 = await makeAccount("1940", "Övrigt bankkonto 1");
     const other2 = await makeAccount("1950", "Övrigt bankkonto 2");
     const draft = await service.createVerification(
-      {
+      parsed(createVerificationSchema, {
         seriesId: series.id,
         date: DEFAULT_VERIFICATION_DATE,
         description: "Öressummering",
@@ -625,7 +626,7 @@ describe("economy service — booking (book): guards and success", () => {
           { accountId: other2.id, debit: 0.1, credit: 0 },
           { accountId: revenue.id, debit: 0, credit: 0.3 },
         ],
-      },
+      }),
       user.id
     );
 
@@ -882,7 +883,7 @@ describe("economy service — reverse (Omför)", () => {
     const { user, series, bank, revenue } = await setupEconomy();
     const other = await makeAccount("1940", "Övrigt bankkonto");
     const source = await service.createVerification(
-      {
+      parsed(createVerificationSchema, {
         seriesId: series.id,
         date: DEFAULT_VERIFICATION_DATE,
         description: "Hyra",
@@ -891,7 +892,7 @@ describe("economy service — reverse (Omför)", () => {
           { accountId: other.id, debit: 200, credit: 0 },
           { accountId: revenue.id, debit: 0, credit: 500 },
         ],
-      },
+      }),
       user.id
     );
     const booked = await service.book(source.id, user.id);
