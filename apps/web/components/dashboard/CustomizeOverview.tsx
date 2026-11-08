@@ -6,7 +6,7 @@ import { Button } from "../ui/Button";
 import { Modal } from "../ui/Modal";
 import { apiFetch } from "../../lib/api";
 import { moveInList } from "../../lib/stockLocations";
-import { OVERVIEW_CARDS, OVERVIEW_CARD_LABELS, type OverviewCard } from "../../lib/overviewCards";
+import { OVERVIEW_CARD_LABELS, type OverviewCard } from "../../lib/overviewCards";
 import styles from "./CustomizeOverview.module.css";
 
 interface Entry {
@@ -14,26 +14,29 @@ interface Entry {
   shown: boolean;
 }
 
-// The shown cards in their order first, then the hidden ones in the standard
-// order — so ticking Visa brings a card back where it was listed.
-function startEntries(shown: readonly OverviewCard[]): Entry[] {
+// The shown cards in their order first, then the hidden ones the user may
+// pick in the registry's order — so ticking Visa brings a card back where it
+// was listed.
+function startEntries(shown: readonly OverviewCard[], available: readonly OverviewCard[]): Entry[] {
   return [
     ...shown.map((key) => ({ key, shown: true })),
-    ...OVERVIEW_CARDS.filter((key) => !shown.includes(key)).map((key) => ({ key, shown: false })),
+    ...available.filter((key) => !shown.includes(key)).map((key) => ({ key, shown: false })),
   ];
 }
 
 // Anpassa: each user picks the cards on Översikten and their order. Also used
 // by read-only accounts (their own settings are not business data).
-export function CustomizeOverview({ shown }: { shown: OverviewCard[] }) {
+// `available` = the cards this user may pick (a newer card needs access to
+// its list, overviewCardAvailable).
+export function CustomizeOverview({ shown, available }: { shown: OverviewCard[]; available: OverviewCard[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [entries, setEntries] = useState<Entry[]>(() => startEntries(shown));
+  const [entries, setEntries] = useState<Entry[]>(() => startEntries(shown, available));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function openDialog() {
-    setEntries(startEntries(shown));
+    setEntries(startEntries(shown, available));
     setError(null);
     setOpen(true);
   }

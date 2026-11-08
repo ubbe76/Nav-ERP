@@ -53,6 +53,12 @@ export const listSalesOrdersQuerySchema = listQuerySchema.extend({
   // Offerter vs Kundorder — filters on the derived document kind; the
   // status filter still applies on top.
   kind: salesDocumentKindSchema.optional(),
+  // Översikten's Leveranser/Inleveranser denna vecka: deliveryTo keeps the
+  // orders whose Nästa leveransdatum (the list's nextDeliveryDate) is on or
+  // before that day (inclusive — late ones too; undated never), and
+  // sort=delivery lists them earliest first (then the order number).
+  deliveryTo: z.string().date().optional(),
+  sort: z.enum(["delivery"]).optional(),
   // Adds openRowCount (rows still short of their ordered quantity) to each
   // row — an extra correlated subquery, so it's opt-in. Mirrors
   // listPurchaseOrdersQuerySchema's withOpenRows (see its comment for the

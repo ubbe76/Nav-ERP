@@ -7,6 +7,10 @@ paths:
   - "apps/web/components/onboarding/**"
   - "apps/web/components/Favorite*"
   - "apps/web/lib/favorites.ts"
+  - "apps/web/app/page.tsx"
+  - "apps/web/components/dashboard/**"
+  - "apps/web/lib/overviewCard*"
+  - "apps/api/test/overview*"
   - "packages/shared/src/user-settings.ts"
   - "scripts/**"
   - "apps/api/test/demo*"
@@ -32,6 +36,15 @@ paths:
 
 - Användarinställningen `favorites` (`user_settings`, `favoriteSchema` i `packages/shared/src/user-settings.ts`, webbspegel `apps/web/lib/favorites.ts`): ordnad lista `{ href, title }`, högst 20, titel ≤ 60, `href` en sökväg inne i Nav (inledande `/`, aldrig `//`/`/\`, inga blanksteg/kontrolltecken), unik per href. `PATCH /me/settings` ersätter hela listan; läsningen (`decodeFavorites`) släpper poster som inte längre klarar schemat.
 - Webben: `FavoritesProvider` (AppShell och Översiktens egen ram; listan läses serverside med `loadFavorites`, null vid fel ⇒ allt dolt) köar ändringarna och läser om listan före varje stjärnklick. Gruppen **Favoriter** överst i `Nav.tsx` (ikon ur `hubIconFor`, dold — inte raderad — när `canOpen` säger nej, **Ändra** = `FavoritesEditor`), stjärnan på varje `HubSections`-rad (`favorites={false}` på `/hjalp`) och **Favorit** i ramens övre rad (`FavoriteToggle`, sparar sidan med filter men utan `page`, namnet förifyllt från sidans rubrik).
+
+## Översikten (#17 och fler kort)
+
+Spec `private/superpowers/specs/2026-11-08-oversikten-per-anvandare-design.md`.
+
+- **Korten per användare:** `overviewCards` i `user_settings` (`OVERVIEW_CARDS`/`DEFAULT_OVERVIEW_CARDS` i `packages/shared/src/user-settings.ts`, webbspegel `lib/overviewCards.ts`, `overview-cards-mirror.test.ts`). **null = `DEFAULT_OVERVIEW_CARDS`** (de fyra ursprungliga) — aldrig hela registret, så ett nytt kort syns bara för den som väljer det. Okända nycklar tappas vid läsning.
+- **Grinden:** ett nyare kort har en `OVERVIEW_CARD_HREF` (kortets **Se alla**) och erbjuds i **Anpassa** och visas bara när `canOpen(user, href)` (`overviewCardAvailable`) — samma regel som `GatedLink`, så ett kort visar aldrig data som dess lista nekar. De fyra ursprungliga är ogrindade. Ett nytt kort = nyckel i båda registren, etikett, bredd, `href`, en hämtning i `app/page.tsx` som bara görs när kortet visas (`orNull`: ett fel ger "Kunde inte läsa … just nu." i kortet, aldrig en trasig sida) och rader ur rena `lib/overviewCardRows.ts` (typimporter bara — API-sviten laddar den; `ListCardRow` bor där, inte i komponenten, så API:ts typkontroll aldrig når JSX).
+- **Hämtningarna:** aviseringskorten (Förfallna kundfakturor, Leverantörsfakturor att betala, Offerter att följa upp) läser `GET /alerts?kinds=` (`alertsQuerySchema`, smalnar av `visibleKinds`, vidgar aldrig) — bara när varken Materialflöde eller Att bevaka visas, annars delar de det fulla svaret (behovsberäkningen körs bara för de två). Leveranser/Inleveranser läser KO-/IO-listan med `deliveryTo` (Nästa leveransdatum ≤ söndagen i ISO-veckan, `endOfIsoWeek`; sena med, odaterade aldrig) och `sort=delivery` (tidigast först, odaterat sist, sedan ordernumret) — samma `nextDeliveryDateSql` som listans kolumn. Beläggning läser `GET /planning/capacity?weeks=1`; Öppna avvikelser två anrop (`overdue=true` först, sedan `status=open`, varje ärende en gång).
+- Tester: `overview-cards-mirror.test.ts` (registret, standarden, grinden, layouten, radbyggarna), `overview-cards.route.test.ts` (`?kinds=`, `deliveryTo`/`sort` på båda listorna), `user-settings.route.test.ts`.
 
 ## Extern backup
 

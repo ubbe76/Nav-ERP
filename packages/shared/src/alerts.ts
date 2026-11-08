@@ -30,6 +30,26 @@ export const ALERT_KINDS = [
 export type AlertKind = (typeof ALERT_KINDS)[number];
 export const alertKindSchema = z.enum(ALERT_KINDS);
 
+// GET /alerts?kinds=a,b — only these kinds (still narrowed to what the user
+// may see); absent = every visible kind. Översikten's single-kind cards ask
+// for theirs so the behovsberäkning only runs when a card needs it.
+export const alertsQuerySchema = z.object({
+  kinds: z
+    .string()
+    .optional()
+    .transform((raw, ctx) => {
+      if (raw === undefined || raw.trim() === "") return undefined;
+      const parts = raw.split(",").map((p) => p.trim()).filter((p) => p !== "");
+      const invalid = parts.filter((p) => !(ALERT_KINDS as readonly string[]).includes(p));
+      if (invalid.length > 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Invalid alert kind: ${invalid.join(", ")}` });
+        return z.NEVER;
+      }
+      return parts as AlertKind[];
+    }),
+});
+export type AlertsQuery = z.infer<typeof alertsQuerySchema>;
+
 // Red before yellow in the fixed order; a supplier invoice is red once it is
 // overdue and yellow while it is only due soon.
 export type AlertSeverity = "red" | "yellow";

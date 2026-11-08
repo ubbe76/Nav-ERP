@@ -49,9 +49,26 @@ export const favoritesSchema = z
   });
 
 // Översikten: which cards the user's start page shows and in what order.
-// null = the standard (all four, in this order); [] = none.
-export const OVERVIEW_CARDS = ["flow", "attention", "orders", "stock"] as const;
+// null = the standard (DEFAULT_OVERVIEW_CARDS); [] = none. The web mirror
+// (apps/web/lib/overviewCards.ts) has the labels, widths and the page each
+// card's Se alla opens — the card is offered to those who may open it.
+export const OVERVIEW_CARDS = [
+  "flow",
+  "attention",
+  "orders",
+  "stock",
+  "deliveries",
+  "arrivals",
+  "capacity",
+  "receivables",
+  "payables",
+  "quotes",
+  "deviations",
+] as const;
 export type OverviewCard = (typeof OVERVIEW_CARDS)[number];
+// The standard (overviewCards null): the four cards Översikten has always
+// had — a card added later never appears for someone who did not pick it.
+export const DEFAULT_OVERVIEW_CARDS: readonly OverviewCard[] = ["flow", "attention", "orders", "stock"];
 
 export const overviewCardsSchema = z
   .array(z.enum(OVERVIEW_CARDS))

@@ -43,7 +43,7 @@ Stationerna, raderna och knappen **+ Ny order** följer din behörighetsgrupp: d
 
 Knappen **Anpassa** i Översiktens sidhuvud, bredvid **+ Ny order**, öppnar dialogen **Anpassa Översikten**. Där väljer du själv vilka kort startsidan visar och i vilken ordning. Valet sparas på ditt konto och gäller bara dig — andra användare, även i samma behörighetsgrupp, behåller sin egen Översikt.
 
-Det finns fyra kort:
+Standardvyn har fyra kort:
 
 | Kort | Innehåll |
 |---|---|
@@ -52,11 +52,25 @@ Det finns fyra kort:
 | **Pågående tillverkning** | De första pågående och frisläppta tillverkningsordrarna |
 | **Senaste lagerhändelser** | De sex senaste lagerrörelserna |
 
-Dialogen har en rad per kort. Kryssrutan **Visa** bestämmer om kortet visas, och knapparna ↑ och ↓ flyttar det i ordningen. **Spara** sparar valet, **Avbryt** stänger utan att spara och **Återställ standard** tar bort ditt val, så att alla fyra kort visas i den ordning de har ovan. Är inget kort valt står det "Inga kort valda." tillsammans med knappen **Anpassa**.
+Utöver dem kan du lägga till följande kort. Varje kort finns bara med i dialogen om du får öppna listan som kortets **Se alla** leder till, till exempel kundorderlistan för **Leveranser denna vecka**:
 
-**Materialflöde** och **Senaste lagerhändelser** tar hela sidans bredd. **Att bevaka** och **Pågående tillverkning** är halva kort: står två sådana efter varandra delar de en rad, och ett ensamt halvt kort tar hela bredden. Checklistan **Kom igång** (för administratörer) ligger kvar överst och styrs av sin egen knapp **Dölj**.
+| Kort | Innehåll | Se alla |
+|---|---|---|
+| **Leveranser denna vecka** | Bekräftade kundordrar och kundordrar under tillverkning vars nästa leveransdatum infaller senast på söndag, sena först | Kundorder |
+| **Inleveranser denna vecka** | Bekräftade och dellevererade inköpsordrar vars nästa leveransdatum infaller senast på söndag (ett bekräftat datum går före det önskade), sena först | Inköpsorder |
+| **Beläggning denna vecka** | Resurserna med planerad tid den här veckan, mest belastade först, med timmar mot kapacitet och procent | Beläggning |
+| **Förfallna kundfakturor** | Samma rader som aviseringen med samma namn | Försäljning → Öppna poster |
+| **Leverantörsfakturor att betala** | Samma rader som aviseringen med samma namn | Inköp → Öppna poster |
+| **Offerter att följa upp** | Samma rader som aviseringen med samma namn | Offerter |
+| **Öppna avvikelser** | Öppna reklamationer och avvikelser, de vars **Åtgärd senast** har passerat först | Avvikelser |
 
-Översikten hämtar bara det korten du valt behöver. Dölj du **Materialflöde** och **Att bevaka** räknar sidan därför inte fram några aviseringar, vilket gör den snabbare att öppna. Konton med **Endast läsning** kan också anpassa sin egen Översikt.
+Korten visar högst sex rader, och **Visa alla (N)** när listan är längre. En röd prick betyder försenad: leveransdatumet har passerat, fakturan har förfallit, ärendets **Åtgärd senast** har passerat eller resursen är belagd över 100 %. En gul prick betyder i dag, snart eller minst 90 % beläggning. En resurs utan veckoschema visar timmarna utan procent ("inget schema"). Kan ett korts uppgifter inte läsas står det "Kunde inte läsa … just nu." i kortet, och resten av Översikten visas som vanligt.
+
+Dialogen har en rad per kort. Kryssrutan **Visa** bestämmer om kortet visas, och knapparna ↑ och ↓ flyttar det i ordningen. **Spara** sparar valet, **Avbryt** stänger utan att spara och **Återställ standard** tar bort ditt val, så att de fyra korten i standardvyn visas i den ordning de har ovan. Ett nytt kort visas aldrig av sig självt — bara om du väljer det. Är inget kort valt står det "Inga kort valda." tillsammans med knappen **Anpassa**.
+
+**Materialflöde** och **Senaste lagerhändelser** tar hela sidans bredd. Alla andra kort är halva kort: står två sådana efter varandra delar de en rad, och ett ensamt halvt kort tar hela bredden. Checklistan **Kom igång** (för administratörer) ligger kvar överst och styrs av sin egen knapp **Dölj**.
+
+Översikten hämtar bara det korten du valt behöver. Döljer du **Materialflöde** och **Att bevaka** räknar sidan därför inte fram alla aviseringar, vilket gör den snabbare att öppna — korten för fakturor och offerter hämtar då bara sina egna. Konton med **Endast läsning** kan också anpassa sin egen Översikt.
 
 ## Listor: sök, filter och bläddring
 

@@ -34,6 +34,12 @@ export const listPurchaseOrdersQuerySchema = listQuerySchema.extend({
   // the goods receipt's answer to an article scanned before an order is
   // chosen (skanning, #4).
   openArticleId: z.string().uuid().optional(),
+  // Översikten's Leveranser/Inleveranser denna vecka: deliveryTo keeps the
+  // orders whose Nästa leveransdatum (the list's nextDeliveryDate) is on or
+  // before that day (inclusive — late ones too; undated never), and
+  // sort=delivery lists them earliest first (then the order number).
+  deliveryTo: z.string().date().optional(),
+  sort: z.enum(["delivery"]).optional(),
   // Adds openRowCount (rows still short of their ordered quantity) to each
   // row — an extra correlated subquery, so it's opt-in. NOT z.coerce.boolean()
   // — see listUsersQuerySchema's includeDeleted for the "false" string pitfall.

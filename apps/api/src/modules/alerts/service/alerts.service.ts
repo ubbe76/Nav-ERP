@@ -492,8 +492,11 @@ export function createAlertsService(deps: {
 
   return {
     computeAlerts,
-    async alertsForUser(user: AlertUser): Promise<AlertsResponse> {
-      return computeAlerts(visibleKinds(user));
+    // `only` (GET /alerts?kinds=) narrows the user's visible kinds; a kind
+    // the user may not see is left out, never computed.
+    async alertsForUser(user: AlertUser, only?: readonly AlertKind[]): Promise<AlertsResponse> {
+      const visible = visibleKinds(user);
+      return computeAlerts(only ? visible.filter((kind) => only.includes(kind)) : visible);
     },
   };
 }

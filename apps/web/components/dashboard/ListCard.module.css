@@ -1,0 +1,115 @@
+/* Översiktens listkort (the newer cards): the Att bevaka row with an
+   optional right-hand figure. Colours are theme tokens only. */
+.row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--color-divider);
+  text-decoration: none;
+}
+.row:last-of-type {
+  border-bottom: none;
+}
+.row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.marker {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.marker[data-tone="yellow"] {
+  background: var(--status-delayed);
+}
+.marker[data-tone="red"] {
+  background: var(--status-stopped);
+}
+
+.texts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.primary {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.secondary {
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aside {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+.aside[data-tone="red"] {
+  color: var(--status-stopped-text);
+}
+.aside[data-tone="yellow"] {
+  color: var(--status-delayed-text);
+}
+
+.chevron {
+  font-size: 16px;
+  color: var(--color-text-muted);
+  transition: transform 120ms ease;
+}
+a.row:hover .chevron {
+  transform: translateX(2px);
+}
+span.row .chevron {
+  visibility: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+  a.row:hover .chevron {
+    transform: none;
+  }
+}
+
+.empty {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.all {
+  display: inline-block;
+  padding-top: 10px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-fg);
+  text-decoration: none;
+}
+a.all:hover {
+  text-decoration: underline;
+}
+span.all {
+  color: var(--color-text-muted);
+}
