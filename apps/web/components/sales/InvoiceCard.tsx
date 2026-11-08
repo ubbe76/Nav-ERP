@@ -43,6 +43,7 @@ import {
   type RegisterEntry,
 } from "../../lib/types";
 import { Card } from "../ui/Card";
+import { DocumentActionBar } from "../documents/DocumentActionBar";
 import { GatedLink } from "../ui/GatedLink";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormStack } from "../ui/Form";
 import { documentMailTexts } from "../../lib/documentMailTexts";
@@ -229,8 +230,56 @@ export function InvoiceCard({
     }
   }
 
+  // The toolbar's buttons (Nav som program, punkt 3) — a paid or cancelled
+  // invoice has none, and then there is no toolbar.
+  const canIssue = invoice.status === "draft";
+  // "Markera som betald" no longer exists (B3) — betald is set by registering
+  // a payment against the open amount instead.
+  const canRegisterPayment = invoice.status === "issued" && invoice.openAmount !== 0;
+  const canRemind = invoice.status === "issued" && invoice.openAmount > 0;
+  // A credit note may only be raised against an issued/paid ORIGINAL invoice
+  // — never against another credit note (no credit-of-credit, mirrors
+  // NotCreditableError in invoice.service.ts).
+  const canCredit = (invoice.status === "issued" || invoice.status === "paid") && !isCredit;
+  const hasActions = canIssue || canRegisterPayment || canRemind || canCredit;
+
   return (
     <div>
+      {hasActions ? (
+        <DocumentActionBar label={invoice.invoiceNumber ?? "Utkast"} pill={pill} error={error}>
+          {canIssue && (
+            <Button type="button" variant="primary" disabled={pending} onClick={() => statusAction("issue")}>
+              Utfärda
+            </Button>
+          )}
+          {canRegisterPayment && (
+            <Link
+              href={`/forsaljning/betalningar?invoice=${invoice.id}`}
+              className={`${buttonStyles.button} ${buttonStyles.primary}`}
+            >
+              Registrera betalning
+            </Link>
+          )}
+          {canRemind && (
+            <Button type="button" variant="secondary" disabled={pending} onClick={() => setReminderOpen(true)}>
+              Skicka påminnelse
+            </Button>
+          )}
+          {canCredit && (
+            <Button type="button" variant="secondary" disabled={pending} onClick={createCredit}>
+              Skapa kreditfaktura
+            </Button>
+          )}
+          {canIssue && (
+            <Button type="button" variant="danger" disabled={pending} onClick={() => statusAction("cancel")}>
+              Avbryt
+            </Button>
+          )}
+        </DocumentActionBar>
+      ) : (
+        <FormError margin="below">{error}</FormError>
+      )}
+
       <div style={{ display: "flex", gap: 24, marginBottom: 20, alignItems: "center", flexWrap: "wrap" }}>
         <StatusPill status={pill.status} label={pill.label} />
         <span>{INVOICE_TYPE_LABELS[invoice.type]}</span>
@@ -303,7 +352,6 @@ export function InvoiceCard({
         )}
       </div>
 
-      <FormError>{error}</FormError>
       {autoSend &&
         (isEInvoiceAutoSendProblem(autoSend) ? (
           <FormNotice style={{ marginBottom: 20 }}>{autoSend.message}</FormNotice>
@@ -714,8 +762,8 @@ export function InvoiceCard({
         </>
       )}
 
-      <div style={{ marginTop: 20, display: "flex", gap: 16, flexWrap: "wrap" }}>
-        {editable && (
+      {editable && (
+        <div style={{ marginTop: 20 }}>
           <AddRowForm
             invoiceId={invoice.id}
             currency={invoice.currency}
@@ -723,48 +771,8 @@ export function InvoiceCard({
             customerVat={customerVat}
             onDone={() => router.refresh()}
           />
-        )}
-
-        <Card maxWidth={320}>
-          <FormStack>
-            <strong>Åtgärder</strong>
-            {invoice.status === "draft" && (
-              <Button type="button" variant="primary" disabled={pending} onClick={() => statusAction("issue")}>
-                Utfärda
-              </Button>
-            )}
-            {/* "Markera som betald" no longer exists (B3) — betald is set by
-                registering a payment against the open amount instead. */}
-            {invoice.status === "issued" && invoice.openAmount !== 0 && (
-              <Link
-                href={`/forsaljning/betalningar?invoice=${invoice.id}`}
-                className={`${buttonStyles.button} ${buttonStyles.primary}`}
-              >
-                Registrera betalning
-              </Link>
-            )}
-            {invoice.status === "issued" && invoice.openAmount > 0 && (
-              <Button type="button" variant="secondary" disabled={pending} onClick={() => setReminderOpen(true)}>
-                Skicka påminnelse
-              </Button>
-            )}
-            {invoice.status === "draft" && (
-              <Button type="button" variant="danger" disabled={pending} onClick={() => statusAction("cancel")}>
-                Avbryt
-              </Button>
-            )}
-            {/* A credit note may only be raised against an issued/paid ORIGINAL
-                invoice — never against another credit note (no credit-of-credit,
-                mirrors NotCreditableError in invoice.service.ts). */}
-            {(invoice.status === "issued" || invoice.status === "paid") && !isCredit && (
-              <Button type="button" variant="secondary" disabled={pending} onClick={createCredit}>
-                Skapa kreditfaktura
-              </Button>
-            )}
-            {(invoice.status === "paid" || invoice.status === "cancelled") && <span>Inga fler åtgärder tillgängliga.</span>}
-          </FormStack>
-        </Card>
-      </div>
+        </div>
+      )}
 
       {reminderOpen && (
         <ReminderDialog

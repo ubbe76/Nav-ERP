@@ -9,7 +9,7 @@ import styles from "./KeyboardShortcuts.module.css";
 // while no field has the focus and no dialog is open, so typing is never
 // taken over; the browser's own shortcuts are left alone:
 // - ? shows the shortcuts,
-// - N clicks the page's "+ Ny …",
+// - N clicks the page's "+ Ny …" (its tooltip says so),
 // - ↑/↓ move a marked row in a list (a page with ListControls' toolbar —
 //   elsewhere the arrows scroll as usual), Enter opens it, Esc unmarks it,
 // - a right-click on a table row opens its ⋯ menu (a right-click on a link
@@ -137,11 +137,27 @@ export function KeyboardShortcuts() {
       trigger.click();
     }
 
+    // The shortcut in the tooltip: the button N would click gets "(N)" in
+    // its title when the pointer or the focus reaches it — marked then
+    // rather than on render, since the pages draw their "+ Ny …" themselves
+    // and some only after their data has arrived. A title of its own is kept.
+    function onPointOrFocus(e: Event) {
+      const el = (e.target as HTMLElement | null)?.closest?.<HTMLElement>("a[href], button");
+      if (!el || el.hasAttribute("data-kbd-hint") || el !== newButton()) return;
+      el.setAttribute("data-kbd-hint", "");
+      el.setAttribute("aria-keyshortcuts", "N");
+      if (!el.title) el.title = `${el.textContent?.trim().replace(/^\+\s*/, "") ?? "Ny"} (N)`;
+    }
+
     document.addEventListener("keydown", onKey);
     document.addEventListener("contextmenu", onContextMenu);
+    document.addEventListener("mouseover", onPointOrFocus);
+    document.addEventListener("focusin", onPointOrFocus);
     return () => {
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("contextmenu", onContextMenu);
+      document.removeEventListener("mouseover", onPointOrFocus);
+      document.removeEventListener("focusin", onPointOrFocus);
     };
   }, []);
 
