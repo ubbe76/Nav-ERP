@@ -134,7 +134,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Färdiga kollektivavtal att välja** → [#30](https://github.com/ubbe76/Nav-ERP/issues/30) *(hemsidan)*
 - [ ] **Mobilapp** → [#31](https://github.com/ubbe76/Nav-ERP/issues/31) *(hemsidan)*
 - [ ] **Aktivitetsbaserad kalkyl** → [#32](https://github.com/ubbe76/Nav-ERP/issues/32) *(hemsidan)*
-- [ ] **Flera bolag och koncernredovisning** → [#33](https://github.com/ubbe76/Nav-ERP/issues/33) *(hemsidan)*
 
 ### Medvetet utanför
 
@@ -143,6 +142,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - Lämna momsdeklarationen direkt till Skatteverket — filen från Momsrapporten laddas upp i Skatteverkets e-tjänst (beslut 2026-11-08, #20 stängt). *(hemsidan)*
 - Passerkort eller RFID-brickor i stämpelterminalen — personalen identifierar sig med anställningsnumret (beslut 2026-11-08, #22 stängt). *(hemsidan)*
 - Färdig koppling till en webbutik — externa system lägger offerter och ordrar via API:t, och tillägg får händelser som webhooks (beslut 2026-11-08, #21 stängt). *(hemsidan)*
+- Flera bolag och koncernredovisning — en installation hanterar ett företag (beslut 2026-11-08, #33 stängt). *(hemsidan)*
 - Lönesystem — Nav|ERP räknar inte ut lön, skatteavdrag eller arbetsgivaravgifter; PAXml-filen innehåller timmar per tidkod och dag, inte belopp (se Beslut). *(hemsidan)*
 
 ## Beslut
