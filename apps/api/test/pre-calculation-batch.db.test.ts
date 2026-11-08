@@ -11,6 +11,7 @@ import { ArticleNotFoundError, createCostingService, type CostingService } from 
 import {
   PreCalculationBatchTooLargeError,
   createPreCalculationBatchService,
+  ZERO_COST_WARNING,
 } from "../src/modules/costing/service/pre-calculation-batch.service.js";
 import { parsed } from "./helpers/parsed.js";
 
@@ -380,6 +381,32 @@ describe("Förkalkylera flera — the save", () => {
     seen.length = 0;
     await spying.preview(user.id, parsed(preCalculationBatchSchema, { selection: { activeOnly: true }, fallbackQuantity: 2, multiLevel: true }));
     expect(seen).toEqual([[product.id, 4, false, true, null]]);
+  });
+
+  it("never writes a price of 0: a purchased article without a structure has TVK/st 0 — warned in the preview, reported on save", async () => {
+    const purchased = await makeProduct({ articleNumber: "Z-1", type: "purchased", standardCost: 80, salesPrice: 120 });
+    const user = await makeUser();
+
+    const preview = await batch.preview(user.id, filter({ type: "purchased" }));
+    expect(preview.rows).toEqual([
+      expect.objectContaining({ articleNumber: "Z-1", manufacturingCostPerUnit: 0, salesPricePerUnit: 0, warnings: [ZERO_COST_WARNING], error: null }),
+    ]);
+
+    const result = await batch.save(
+      parsed(preCalculationBatchSaveSchema, { items: [{ articleId: purchased.id, quantity: 1 }], setStandardCost: true, setSalesPrice: true })
+    );
+    expect(result).toEqual({
+      saved: [{ articleId: purchased.id, articleNumber: "Z-1", calculationId: expect.any(String), standardCostSet: false, salesPriceSet: false }],
+      errors: [
+        {
+          articleId: purchased.id,
+          articleNumber: "Z-1",
+          message: "Kalkylen sparades men standardpriset sattes inte (TVK/st är 0) och försäljningspriset sattes inte (pris/st är 0)",
+        },
+      ],
+    });
+    // The calculation is saved; the prices are untouched.
+    expect(await article(purchased.id)).toMatchObject({ standardCost: "80.0000", salesPrice: "120.0000" });
   });
 
   it("answers partial success honestly: a failed article, an unknown id, a template, and a saved calculation whose price step failed", async () => {

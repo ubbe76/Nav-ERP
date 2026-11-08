@@ -117,6 +117,10 @@ function previousOf(latest: LatestPreCalculation | undefined): PreCalculationBat
   };
 }
 
+// Shown on a preview row whose TVK/st is 0 — the save leaves that article's
+// prices alone (see save).
+export const ZERO_COST_WARNING = "TVK/st är 0 — standardpris och försäljningspris sätts inte vid Spara";
+
 export function createPreCalculationBatchService(deps: {
   db: Db;
   costing: Pick<CostingService, "preCalculate" | "applyStandardCostFromCalculation" | "applySalesPriceFromCalculation">;
@@ -175,7 +179,7 @@ export function createPreCalculationBatchService(deps: {
             ...base,
             ...figures,
             change: manufacturingCostChange(figures.manufacturingCostPerUnit, previous?.manufacturingCostPerUnit),
-            warnings,
+            warnings: figures.manufacturingCostPerUnit === 0 ? [...warnings, ZERO_COST_WARNING] : warnings,
             error: null,
           });
         } catch (err) {
@@ -216,9 +220,11 @@ export function createPreCalculationBatchService(deps: {
         }
 
         let calculationId: string;
+        let figures: ReturnType<typeof perUnitFigures>;
         try {
           const { calculation } = await costing.preCalculate(item.articleId, item.quantity, true, input.multiLevel, null);
           calculationId = calculation.id;
+          figures = perUnitFigures(calculation);
         } catch (err) {
           const { message, known } = batchErrorMessage(err);
           if (!known) logUnknown("save", item.articleId, err);
@@ -229,7 +235,14 @@ export function createPreCalculationBatchService(deps: {
         let standardCostSet = false;
         let salesPriceSet = false;
         const partial: string[] = [];
-        if (input.setStandardCost) {
+        // A price of 0 is never written from a sweep: a purchased article
+        // without a structure (or one whose components lack prices) has
+        // TVK/st 0, and one tick on Sätt standardpris would zero its price
+        // among hundreds of rows. The card writes it on purpose; the sweep
+        // reports it instead (the preview already warned, ZERO_COST_WARNING).
+        if (input.setStandardCost && figures?.manufacturingCostPerUnit === 0) {
+          partial.push("standardpriset sattes inte (TVK/st är 0)");
+        } else if (input.setStandardCost) {
           try {
             await costing.applyStandardCostFromCalculation(calculationId);
             standardCostSet = true;
@@ -239,7 +252,9 @@ export function createPreCalculationBatchService(deps: {
             partial.push(`standardpriset sattes inte (${message})`);
           }
         }
-        if (input.setSalesPrice) {
+        if (input.setSalesPrice && figures?.salesPricePerUnit === 0) {
+          partial.push("försäljningspriset sattes inte (pris/st är 0)");
+        } else if (input.setSalesPrice) {
           try {
             await costing.applySalesPriceFromCalculation(calculationId, { mayApplyTrial: false });
             salesPriceSet = true;

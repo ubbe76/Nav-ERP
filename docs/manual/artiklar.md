@@ -586,6 +586,8 @@ Två kryssrutor, båda av från början, gör mer i samma svep:
 - **Sätt standardpris** — artikelns standardpris sätts till den sparade kalkylens TVK per styck, som **Sätt standardpris** på kortet.
 - **Sätt försäljningspris** — artikelns försäljningspris sätts till kalkylens pris per styck, som **Sätt försäljningspris** på kortet.
 
+Ett pris på 0 skrivs aldrig härifrån. En köpt artikel utan struktur, eller en vars komponenter saknar pris, får TVK/st 0 — raden varnar redan i förhandsvisningen (*TVK/st är 0 — standardpris och försäljningspris sätts inte vid Spara*), och vid sparandet sparas kalkylen men priserna lämnas orörda och artikeln listas bland felen. Vill du ändå sätta 0 gör du det på artikelkortet.
+
 Är någon av dem ikryssad frågar systemet först, till exempel *Spara 12 förkalkyler och sätta standardpris och försäljningspris för 12 artiklar?*.
 
 Efteråt visas *N förkalkyler sparade.* tillsammans med hur många standardpriser och försäljningspriser som sattes. Misslyckas en artikel listas den med orsak; de övriga påverkas inte. En artikel vars kalkyl sparades men vars pris inte kunde sättas finns både bland de sparade och i felen. Därefter räknas tabellen om automatiskt, så **Förra TVK/st**, **Standardpris** och **Försäljningspris** visar det nya läget.
