@@ -63,9 +63,8 @@ async function makeArticle(opts: {
     articleNumber: nextNumber(opts.name.toUpperCase().slice(0, 6)),
     name: opts.name,
     type: opts.type,
-    unit: "st",
     standardCost: opts.standardCost,
-    isPhantom: opts.isPhantom,
+    isPhantom: opts.isPhantom ?? false,
     active: true,
   });
 }

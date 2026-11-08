@@ -116,9 +116,8 @@ async function seedMinimalPeriod() {
     employeeNumber: `E-${crypto.randomUUID().slice(0, 8)}`,
     name: "Anna Andersson",
     active: true,
-    employmentType: "hourly",
   });
-  await timeReportRepository.updateEmployee(employee.id, { defaultWeekScheduleId: weekSchedule.id });
+  await timeReportRepository.updateEmployee(employee.id, { employmentType: "hourly", defaultWeekScheduleId: weekSchedule.id });
 
   // Mon 2026-05-04: exactly the schedule (07–16 less the unpaid hour) — 480
   // worked, no overtime.

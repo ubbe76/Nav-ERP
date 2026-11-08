@@ -599,7 +599,7 @@ describe("låsordningen — rad → order", () => {
       priceOrigin: row!.priceOrigin,
       after: { unitPrice: 270, discountPercent: 0, priceOrigin: "calculated" },
     });
-    const expected = { currency: "SEK", exchangeRate: "1.000000", generalMarkupPercent: null, materialMarkupPercent: null };
+    const expected: { currency: string; exchangeRate: string; generalMarkupPercent: string | null; materialMarkupPercent: string | null } = { currency: "SEK", exchangeRate: "1.000000", generalMarkupPercent: null, materialMarkupPercent: null };
     const attempt = (reprice: Map<string, PlannedRowReprice>, exp = expected) =>
       salesRepository.updateSalesOrderHeaderWithAddress(order.id, { generalMarkupPercent: 30 }, { expected: exp, reprice });
 

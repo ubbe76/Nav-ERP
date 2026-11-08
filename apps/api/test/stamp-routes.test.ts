@@ -69,7 +69,7 @@ async function setup() {
   const stamp = await timeReportService.stampIn({ employeeId: employee.id, moOperationId: operation!.id }, user.id);
   const startedAt = new Date(Date.now() - 2 * 3_600_000);
   await db.execute(sql`UPDATE stamp_sessions SET started_at = ${startedAt.toISOString()}::timestamptz WHERE id = ${stamp.id}`);
-  return { stamp, startedAt };
+  return { stamp, startedAt, user };
 }
 
 describe("POST /stamp-sessions/:id/stop with a stop time", () => {
@@ -163,10 +163,10 @@ describe("POST /stamp-sessions/:id/stop with a stop time", () => {
     expect(ok.json().id).not.toBe(attendance!.id);
   });
   it("marks absentToday for supervisors only (health data) and filters on employeeId", async () => {
-    const { stamp } = await setup();
+    const { stamp, user } = await setup();
     const other = await timeReportService.createEmployee({ employeeNumber: "108", name: "Annan", active: true });
     const [operation] = await db.execute(sql`SELECT mo_operation_id FROM stamp_sessions WHERE id = ${stamp.id}`) as unknown as { mo_operation_id: string }[];
-    await timeReportService.stampIn({ employeeId: other.id, moOperationId: operation!.mo_operation_id });
+    await timeReportService.stampIn({ employeeId: other.id, moOperationId: operation!.mo_operation_id }, user.id);
     const today = localDateOf(new Date());
     await db.execute(sql`INSERT INTO absence_types (code, name, paxml_code) VALUES ('SJK', 'Sjuk', '1')`);
     await db.execute(

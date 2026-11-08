@@ -42,8 +42,8 @@ const isLock = (code: string): ConfiguratorCondition => ({ groupId: id("LOCK"), 
 const hjulSelected: ConfiguratorCondition = { groupId: id("HJUL"), op: "selected" };
 
 const BASE_OPS: BaseOperation[] = [
-  { id: id("O10"), sequenceNo: 10, workCenterId: id("W1"), description: "Klipp", setupTime: 15, runTimePerUnit: 2, costingOnly: false },
-  { id: id("O30"), sequenceNo: 30, workCenterId: id("W2"), description: "Bocka", setupTime: 10, runTimePerUnit: 1.5, costingOnly: false },
+  { id: id("O10"), sequenceNo: 10, workCenterId: id("W1"), description: "Klipp", setupTime: 15, runTimePerUnit: 2, costingOnly: false, setupPrice: null, unitPrice: null },
+  { id: id("O30"), sequenceNo: 30, workCenterId: id("W2"), description: "Bocka", setupTime: 10, runTimePerUnit: 1.5, costingOnly: false, setupPrice: null, unitPrice: null },
 ];
 const BASE_BOM: BaseBomRow[] = [
   { id: id("B1"), componentArticleId: ART.plat, quantity: 2.5, unitId: id("U1"), unitFactor: "0.5", routingOperationId: id("O10"), costingOnly: false },
@@ -62,7 +62,7 @@ function line(l: Partial<DeriveBomLine>): DeriveBomLine {
 function op(o: Partial<DeriveOperation> & Pick<DeriveOperation, "sequenceNo">): DeriveOperation {
   return {
     id: id(`C${o.sequenceNo}`), conditions: [], workCenterId: id("W3"), description: null,
-    setupTime: 5, setupFormula: null, runTimePerUnit: 1, runFormula: null, ...o,
+    setupTime: 5, setupFormula: null, runTimePerUnit: 1, runFormula: null, setupPrice: null, unitPrice: null, ...o,
   };
 }
 
@@ -143,8 +143,8 @@ describe("deriveStructure", () => {
       { source: "base", lineId: null, baseRowId: id("B2"), componentArticleId: ART.skruv, quantity: 8, unitId: null, unitFactor: null, operation: null, costingOnly: false },
     ]);
     expect(r.operations).toEqual([
-      { kind: "base", id: id("O10"), sequenceNo: 10, workCenterId: id("W1"), description: "Klipp", setupTime: 15, runTimePerUnit: 2, costingOnly: false },
-      { kind: "base", id: id("O30"), sequenceNo: 30, workCenterId: id("W2"), description: "Bocka", setupTime: 10, runTimePerUnit: 1.5, costingOnly: false },
+      { kind: "base", id: id("O10"), sequenceNo: 10, workCenterId: id("W1"), description: "Klipp", setupTime: 15, runTimePerUnit: 2, costingOnly: false, setupPrice: null, unitPrice: null },
+      { kind: "base", id: id("O30"), sequenceNo: 30, workCenterId: id("W2"), description: "Bocka", setupTime: 10, runTimePerUnit: 1.5, costingOnly: false, setupPrice: null, unitPrice: null },
     ]);
   });
 

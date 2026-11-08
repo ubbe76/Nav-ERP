@@ -258,17 +258,17 @@ describe("pure rules", () => {
   it("blocks in the spec's order", () => {
     const company = { orgNumber: "5560000000", vatNumber: "SE556000000001" } as never;
     const ok = { privatePerson: false, country: "SE", invoiceCountry: null, peppolId: null, orgNumber: "5565555553" };
-    expect(blockedReasonFor({ status: "draft", currency: "SEK" }, ok, company)).toBe("invoice-not-issued");
-    expect(blockedReasonFor({ status: "issued", currency: "SEK" }, { ...ok, privatePerson: true }, company)).toBe("private-person");
+    expect(blockedReasonFor({ status: "draft" }, ok, company)).toBe("invoice-not-issued");
+    expect(blockedReasonFor({ status: "issued" }, { ...ok, privatePerson: true }, company)).toBe("private-person");
     // Spec 2026-11-05: a foreign customer and another currency are sendable.
-    expect(blockedReasonFor({ status: "issued", currency: "SEK" }, { ...ok, country: "NO", orgNumber: "987654325" }, company)).toBeNull();
-    expect(blockedReasonFor({ status: "issued", currency: "EUR" }, ok, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued" }, { ...ok, country: "NO", orgNumber: "987654325" }, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued" }, ok, company)).toBeNull();
     // …but a country without a derived scheme needs the id typed.
-    expect(blockedReasonFor({ status: "issued", currency: "EUR" }, { ...ok, country: "DE", orgNumber: "HRB 12345" }, company)).toBe("missing-recipient-id");
-    expect(blockedReasonFor({ status: "issued", currency: "SEK" }, ok, { orgNumber: null, vatNumber: "SE1" } as never)).toBe("missing-company-data");
-    expect(blockedReasonFor({ status: "issued", currency: "SEK" }, ok, { orgNumber: "5560000000", vatNumber: "" } as never)).toBe("missing-company-data");
-    expect(blockedReasonFor({ status: "issued", currency: "SEK" }, { ...ok, orgNumber: null }, company)).toBe("missing-recipient-id");
-    expect(blockedReasonFor({ status: "paid", currency: "SEK" }, ok, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued" }, { ...ok, country: "DE", orgNumber: "HRB 12345" }, company)).toBe("missing-recipient-id");
+    expect(blockedReasonFor({ status: "issued" }, ok, { orgNumber: null, vatNumber: "SE1" } as never)).toBe("missing-company-data");
+    expect(blockedReasonFor({ status: "issued" }, ok, { orgNumber: "5560000000", vatNumber: "" } as never)).toBe("missing-company-data");
+    expect(blockedReasonFor({ status: "issued" }, { ...ok, orgNumber: null }, company)).toBe("missing-recipient-id");
+    expect(blockedReasonFor({ status: "paid" }, ok, company)).toBeNull();
   });
 
   it("is due by the interval with a margin, never before half the interval on short ones", () => {
@@ -809,13 +809,13 @@ describe("momskoder (spec 4.5)", () => {
     const company = { orgNumber: "5560000000", vatNumber: "SE556000000001" } as never;
     const ok = { privatePerson: false, country: "SE", invoiceCountry: null, peppolId: null, orgNumber: "5565555553" };
     const rows = (...codes: string[]) => codes.map((code) => ({ vatCode: { code, invoiceText: null } }));
-    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("MP25", "MF", "OB") }, ok, company)).toBeNull();
-    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("MP25", "EXV") }, ok, company)).toBeNull();
-    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("EUV", "EUT") }, ok, company)).toBeNull();
-    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("EXT", "EXT") }, ok, company)).toBeNull();
-    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("UTM") }, ok, company)).toBe("vat-code-unsupported");
-    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("EXT", "EXV") }, ok, company)).toBe("vat-code-mixed");
-    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("MP25", "EXT") }, ok, company)).toBe("vat-code-mixed");
+    expect(blockedReasonFor({ status: "issued", rows: rows("MP25", "MF", "OB") }, ok, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued", rows: rows("MP25", "EXV") }, ok, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued", rows: rows("EUV", "EUT") }, ok, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued", rows: rows("EXT", "EXT") }, ok, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued", rows: rows("UTM") }, ok, company)).toBe("vat-code-unsupported");
+    expect(blockedReasonFor({ status: "issued", rows: rows("EXT", "EXV") }, ok, company)).toBe("vat-code-mixed");
+    expect(blockedReasonFor({ status: "issued", rows: rows("MP25", "EXT") }, ok, company)).toBe("vat-code-mixed");
   });
 
   it("sends omvänd betalningsskyldighet as AE with VATEX-EU-AE, the code's text and the buyer's normalized VAT number", async () => {

@@ -25,6 +25,8 @@ function row(over: Partial<QuoteFollowupSourceRow> = {}): QuoteFollowupSourceRow
     lostReasonName: null,
     lostNote: null,
     value: 1000,
+    currency: "SEK",
+    currencyValue: over.value ?? 1000,
     ...over,
   };
 }

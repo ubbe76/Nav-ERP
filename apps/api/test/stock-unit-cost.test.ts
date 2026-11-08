@@ -83,7 +83,7 @@ describe("stock_transactions.unit_cost — purchase_receipt", () => {
     const article = await makeArticle();
     const location = await makeLocation();
     const order = await purchaseRepo.createPurchaseOrder(
-      { supplierId: supplier.id, exchangeRate: opts.exchangeRate },
+      { supplierId: supplier.id, exchangeRate: opts.exchangeRate ?? 1 },
       user.id,
       supplier.currency
     );
@@ -211,7 +211,7 @@ describe("stock_transactions.unit_cost — outflows and transfers stay unvalued"
     const location = await makeLocation();
 
     const { order, rows } = await salesRepo.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 10, unitPrice: 99, unitId: null, unitFactor: null }] },
+      { customerId: customer.id, confirm: false, quoteValidUntil: null, rows: [{ articleId: article.id, quantity: 10, unitPrice: 99, unitId: null, unitFactor: null }] },
       user.id
     );
     await salesRepo.updateStatus(order.id, "in_production");
@@ -220,7 +220,6 @@ describe("stock_transactions.unit_cost — outflows and transfers stay unvalued"
       locationId: location.id,
       rows: [{ rowId: rows[0]!.id, quantity: 3 }],
       createdBy: user.id,
-      overReceiptPercent: 0,
     });
 
     const [tx] = await transactionsFor(order.id, "sales_delivery");

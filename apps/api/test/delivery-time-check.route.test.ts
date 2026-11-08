@@ -28,7 +28,7 @@ function buildApp(check: PlanningService["checkDeliveryTime"]) {
 }
 
 const id = () => crypto.randomUUID();
-const result = { shipDate: "2026-10-26", deliveryDate: "2026-10-28", rows: [], notes: [] };
+const result = { shipDate: "2026-10-26", deliveryDate: "2026-10-28", rows: [], notes: [], batches: [], usesAlternatives: false, ordinaryShipDate: null, ordinaryDeliveryDate: null };
 
 describe("POST /delivery-time-check (route, inject)", () => {
   it("200s with the result and passes the request through", async () => {

@@ -14,6 +14,7 @@ import * as web from "../../web/lib/banking.js";
 
 const NONE: SupplierPaymentDetails = {
   paymentMethod: null, bankgiro: null, plusgiro: null, bankClearing: null, bankAccountNumber: null, iban: null, bic: null,
+  foreignAccountNumber: null, clearingSystem: null, clearingMemberId: null, bankName: null, chargeBearer: "SHAR", paymentReportingCode: "101",
 };
 
 describe("kontrollsiffror", () => {

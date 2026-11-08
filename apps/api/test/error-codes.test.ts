@@ -527,7 +527,7 @@ const cases: Array<[Error, string]> = [
   [new InactiveAccountError("acc-1"), ERROR_CODES.INACTIVE_ACCOUNT],
   [new AlreadyReversedError("ver-1"), ERROR_CODES.ALREADY_REVERSED],
   [new InvalidVerificationStateError("bad state"), ERROR_CODES.INVALID_VERIFICATION_STATE],
-  [new DuplicatePostingRuleError("grp-1", 25), ERROR_CODES.DUPLICATE_POSTING_RULE],
+  [new DuplicatePostingRuleError("grp-1", "25"), ERROR_CODES.DUPLICATE_POSTING_RULE],
   [new PostingRuleNoAccountsError("rule-1"), ERROR_CODES.POSTING_RULE_NO_ACCOUNTS],
   // momskoder
   [new VatCodeNotFoundError("vc-1"), ERROR_CODES.VAT_CODE_NOT_FOUND],
@@ -820,7 +820,7 @@ const cases: Array<[Error, string]> = [
   [new OperationNotPlannableError("done"), ERROR_CODES.OPERATION_NOT_PLANNABLE],
   [new PlanWeekInPastError("2030-02-25", "2030-03-04"), ERROR_CODES.PLAN_WEEK_IN_PAST],
   [
-    new DeliveryTimeChangedError("2030-03-20", { shipDate: null, deliveryDate: null, rows: [], notes: [], batches: [] }),
+    new DeliveryTimeChangedError("2030-03-20", { shipDate: null, deliveryDate: null, rows: [], notes: [], batches: [], usesAlternatives: false, ordinaryShipDate: null, ordinaryDeliveryDate: null }),
     ERROR_CODES.DELIVERY_TIME_CHANGED,
   ],
   [new NothingToReserveError(), ERROR_CODES.NOTHING_TO_RESERVE],

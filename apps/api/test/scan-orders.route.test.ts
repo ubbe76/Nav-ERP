@@ -144,6 +144,7 @@ describe("Streckkoden på inköpsordern och plocklistan", () => {
     const pdf = createDocumentPdfService({ getCompanyInfo: async () => ({ name: "Navet Verkstad AB" }) as never, getLogo: async () => null });
     const document = {
       title: "Inköpsorder",
+      language: "sv" as const,
       documentNumber: "IO2600123",
       date: new Date("2026-10-29T12:00:00Z"),
       partnerLabel: "Leverantör",

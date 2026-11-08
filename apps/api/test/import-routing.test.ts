@@ -47,6 +47,8 @@ function article(articleNumber: string, id: string, type: ExistingArticle["type"
     groupCode: null,
     standardCost: null,
     weight: null,
+    surfaceTreatment: null,
+    colour: null,
     active: true,
   };
 }

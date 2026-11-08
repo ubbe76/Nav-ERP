@@ -226,6 +226,7 @@ describe("insertArticle", () => {
             copyFrom: { articleId: parent.id, parts: ["information"] },
           }),
           unitId: stId,
+          articleNumber: "V-1",
         }),
       { isolationLevel: "repeatable read" }
     );
@@ -262,6 +263,7 @@ describe("insertArticle", () => {
           copyFrom: { articleId: "00000000-0000-0000-0000-000000000000", parts: ["information"] },
         }),
         unitId: stId,
+        articleNumber: "V-2",
       })
     );
     expect(row).toBeNull();
@@ -275,6 +277,7 @@ describe("insertArticle", () => {
         const row = await insertArticle(tx, {
           ...parse({ articleNumber: "V-3", name: "Variant", type: "manufactured", unitId: stId, standardCost: 1 }),
           unitId: stId,
+          articleNumber: "V-3",
         });
         expect(row).not.toBeNull();
         throw new Error("boom");

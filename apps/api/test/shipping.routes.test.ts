@@ -141,7 +141,9 @@ describe("frakt på offert — error envelope", () => {
         fetchRates: async () => {
           throw new FreightOrderStatusError();
         },
-        addFreight: async () => [],
+        addFreight: async () => {
+          throw new Error("not used in this test");
+        },
       }
     );
     const res = await app.inject({ method: "POST", url: `/sales-orders/${ID}/freight-rates`, payload: { parcels: [] } });

@@ -1,4 +1,4 @@
-import { createArticleSchema } from "@navet/shared";
+import { createArticleSchema, type VatRate } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { asc, eq, sql } from "drizzle-orm";
 import {
@@ -121,7 +121,7 @@ type RowInput = {
   articleId?: string;
   quantity: number;
   unitPrice: number;
-  vatRate?: number;
+  vatRate?: VatRate;
   discountPercent?: number;
 };
 

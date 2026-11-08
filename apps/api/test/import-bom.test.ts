@@ -44,6 +44,8 @@ function article(
     groupCode: null,
     standardCost: null,
     weight: null,
+    surfaceTreatment: null,
+    colour: null,
     active: true,
     ...overrides,
   };
