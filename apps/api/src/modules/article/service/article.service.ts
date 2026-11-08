@@ -1,5 +1,8 @@
 import { renderLabelsPdf, type LabelInput } from "../../mail/service/label-pdf.js";
-import type { AbcClass, ArticleLabelsInput } from "@navet/shared";
+import type { AbcClass, ArticleLabelsInput, CopiedArticlesQuery, CopiedArticlesRemoveInput, CopiedArticlesSetInput } from "@navet/shared";
+// Kopierat (#28): the cap error is the repository leaf's (its transaction
+// throws it); re-exported so the routes import every article error from here.
+export { CopiedArticlesTooManyError } from "../repository/copied-articles.js";
 import {
   articleCopyPartAllowed,
   deriveLoadingMeters,
@@ -389,6 +392,39 @@ export function createArticleService(
     if (!(await repo.findArticleUnit(articleId, unitId))) throw new InvalidUnitError();
   }
 
+  // The register filters that are not columns — ABC-klassning (#10) and
+  // Kopierat (#28) — as the id list `repo.list`/`repo.listIds` restrict to,
+  // so `total` follows them. Both given: the intersection, in Kopierat's
+  // order (listIds re-orders by article number anyway). `onlyIds`
+  // undefined = no restriction; [] = nothing matches (the caller short-
+  // circuits). `classes` is undefined when the rows need no abcClass, null
+  // when asked for but no reader is wired. The ONE place both filters are
+  // resolved — listArticles and setCopiedArticles(query) share it.
+  async function restrictingIds(
+    query: CopiedArticlesQuery,
+    userId: string | undefined
+  ): Promise<{ onlyIds: string[] | undefined; classes: ReadonlyMap<string, AbcClass> | null | undefined }> {
+    const byAbc = (query.abcClass?.length ?? 0) > 0;
+    const classes = byAbc || query.withAbc === true ? await abcClasses() : undefined;
+    let onlyIds: string[] | undefined;
+    if (byAbc) {
+      const wanted = new Set<AbcClass>(query.abcClass);
+      onlyIds = classes ? [...classes].filter(([, c]) => wanted.has(c)).map(([id]) => id) : [];
+    }
+    if (query.copied) {
+      // The list is the session user's; without one (a caller outside a
+      // request) nothing is copied.
+      const copied = userId ? await repo.listCopiedArticleIds(userId) : [];
+      if (onlyIds === undefined) {
+        onlyIds = copied;
+      } else {
+        const abc = new Set(onlyIds);
+        onlyIds = copied.filter((id) => abc.has(id));
+      }
+    }
+    return { onlyIds, classes };
+  }
+
   return {
     async createArticle(input: CreateArticleInput) {
       // "Kopiera från": the type rules first (no database needed), then the
@@ -515,20 +551,48 @@ export function createArticleService(
 
     // ABC-klassning: the class per row from ONE classification, only when
     // asked for (`withAbc`, or the abcClass filter, which needs it) — the
-    // ArticlePicker searches this list on every keystroke. The filter
-    // becomes an id list for the repository so `total` follows it.
-    async listArticles(query: ListArticlesQuery): Promise<{ rows: WithAbc<ArticleListRow>[]; total: number }> {
-      const filtering = (query.abcClass?.length ?? 0) > 0;
-      if (!filtering && query.withAbc !== true) return repo.list(query);
-      const classes = await abcClasses();
-      let onlyIds: string[] | undefined;
-      if (filtering) {
-        const wanted = new Set<AbcClass>(query.abcClass);
-        onlyIds = classes ? [...classes].filter(([, c]) => wanted.has(c)).map(([id]) => id) : [];
-        if (onlyIds.length === 0) return { rows: [], total: 0 };
-      }
+    // ArticlePicker searches this list on every keystroke. The abcClass and
+    // Kopierat (`copied=true`, #28) filters become an id list for the
+    // repository so `total` follows them; see restrictingIds. `userId` is
+    // the session user whose Kopierat applies — the routes pass it, the
+    // other callers (fixtures, tests without the filter) leave it out.
+    async listArticles(query: ListArticlesQuery, userId?: string): Promise<{ rows: WithAbc<ArticleListRow>[]; total: number }> {
+      const { onlyIds, classes } = await restrictingIds(query, userId);
+      if (onlyIds?.length === 0) return { rows: [], total: 0 };
       const page = await repo.list(query, { onlyIds });
+      if (classes === undefined) return page;
       return { ...page, rows: page.rows.map((row) => ({ ...row, abcClass: classes?.get(row.id) ?? null })) };
+    },
+
+    // --- Kopierat (#28): the user's own working list of articles ---
+
+    async listCopiedArticles(userId: string): Promise<{ count: number; articleIds: string[] }> {
+      const articleIds = await repo.listCopiedArticleIds(userId);
+      return { count: articleIds.length, articleIds };
+    },
+
+    // `articleIds` in the order to keep, or `query` = every hit of the
+    // register's search and filters (the SAME where as listArticles, via
+    // restrictingIds + repo.listIds — never a copy of the conditions). The
+    // cap, the ordering and the add/replace semantics are the repository's
+    // (copied-articles.ts); over the cap nothing is written.
+    async setCopiedArticles(userId: string, input: CopiedArticlesSetInput): Promise<{ count: number; added: number }> {
+      let articleIds: readonly string[];
+      if (input.articleIds !== undefined) {
+        articleIds = input.articleIds;
+      } else {
+        const { onlyIds } = await restrictingIds(input.query!, userId);
+        articleIds = onlyIds?.length === 0 ? [] : await repo.listIds(input.query!, { onlyIds });
+      }
+      return repo.setCopiedArticles(userId, articleIds, input.mode);
+    },
+
+    async removeCopiedArticles(userId: string, input: CopiedArticlesRemoveInput): Promise<{ count: number }> {
+      return repo.removeCopiedArticles(userId, input.articleIds);
+    },
+
+    async clearCopiedArticles(userId: string): Promise<{ count: 0 }> {
+      return repo.clearCopiedArticles(userId);
     },
 
     // `userId` is only read by the händelselogg below (Prognosstyrd); the

@@ -43,6 +43,13 @@ export const DELIVERY_CHECK: AccessRule = ["forsaljning", "tillverkning"];
 // anyone who may read the registers may print them — not only the menu that
 // edits them (the warehouse staff print article labels).
 export const LABEL_PRINT: AccessRule = ["office"];
+// Kopierat (#28): the user's own working list of articles — read AND the
+// three writes. Any menu: a Tillverkning-only user copies from the
+// behovsberäkning, so the Artiklar menu is not required; the workshop
+// profile (terminal only) has no register to copy from and stays out. The
+// writes are also readOnlySafe — the list is personal, never business data
+// (article.md).
+export const COPIED_ARTICLES: AccessRule = ["office"];
 
 // Prices (standard cost, sales price, lego setup/unit prices) are office data.
 // A user without any menu permission — the verkstad profile — reaches a few

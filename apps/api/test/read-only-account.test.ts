@@ -438,6 +438,15 @@ describe("Endast läsning — the allowlist", () => {
         "POST /api/v1/sales-orders/:id/markups/preview",
         // The one route that writes: the account's own preferences.
         "PATCH /api/v1/me/settings",
+        // Kopierat (#28): the three writes to the user's own working list of
+        // articles. They DO write — a deliberate exception like /me/settings:
+        // the list is personal (user_copied_articles, cascades with the
+        // user), never business data, and a read-only account that cannot
+        // keep a working list cannot use Förkalkylera flera or the register's
+        // Kopierat filter. article.md, copied-articles.route.test.ts.
+        "POST /api/v1/articles/copied",
+        "POST /api/v1/articles/copied/remove",
+        "DELETE /api/v1/articles/copied",
       ].sort()
     );
   });

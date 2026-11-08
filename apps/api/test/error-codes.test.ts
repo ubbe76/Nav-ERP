@@ -393,6 +393,7 @@ import {
   ArticleCopyPartNotAllowedError,
   ArticleIsTemplateError,
   DefaultLocationBlockedError,
+  CopiedArticlesTooManyError,
 } from "../src/modules/article/service/article.service.js";
 import {
   InvalidCredentialsError,
@@ -923,6 +924,8 @@ const cases: Array<[Error, string]> = [
   [new ForecastMonthOutsideHorizonError("2031-01"), ERROR_CODES.FORECAST_MONTH_OUTSIDE_HORIZON],
   // Flera lagerplatser per artikel
   [new ArticleLocationInvalidError("Lagerplatsen Huvudlager — K1 är spärrad"), ERROR_CODES.ARTICLE_LOCATION_INVALID],
+  // Kopierat (#28)
+  [new CopiedArticlesTooManyError(5001), ERROR_CODES.COPIED_ARTICLES_TOO_MANY],
 ];
 
 describe("error class name -> ERROR_CODES derivation", () => {

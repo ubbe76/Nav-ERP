@@ -47,6 +47,7 @@ import {
 import { getOrCreateFallbackLocation } from "../../stock/service/location-resolver.js";
 import { applyInformation, copyArticleParts, readCopySource } from "./article-copy.js";
 import { articleVatRateSql } from "./article-vat-rate.js";
+import { clearCopiedArticles, listCopiedArticleIds, removeCopiedArticles, setCopiedArticles } from "./copied-articles.js";
 
 // Append-only write for article_standard_cost_history (D1) — called by the
 // three standard-cost writers (create, updateStandardCost, CSV import) in
@@ -208,7 +209,42 @@ function markupColumn(value: number | null | undefined): string | null | undefin
   return value === undefined || value === null ? value : String(value);
 }
 
+// The register's filters without paging — what the where is built from.
+// GET /articles passes its full query; Kopierat's `query` has no limit/offset.
+type ArticleListFilter = Omit<ListArticlesQuery, "limit" | "offset">;
+
 export function createArticleRepository(db: Db) {
+  // The register's where — the ONE implementation behind list (page +
+  // count) and listIds (Kopierat's query). A new filter goes here and
+  // nowhere else.
+  function listWhere(query: ArticleListFilter, opts: { onlyIds?: string[] }) {
+    const conditions = [];
+    if (opts.onlyIds) conditions.push(inArray(articles.id, opts.onlyIds));
+    if (query.search) {
+      const pattern = ilikePattern(query.search);
+      conditions.push(or(ilike(articles.articleNumber, pattern), ilike(articles.name, pattern)));
+    }
+    if (query.type) conditions.push(eq(articles.type, query.type));
+    if (query.groupId) conditions.push(eq(articles.groupId, query.groupId));
+    if (query.articleCodeId) conditions.push(eq(articles.articleCodeId, query.articleCodeId));
+    // ?orderable=true: the pickers on order forms — a template in EITHER mode
+    // is excluded (variants: its variants are what gets ordered; to_order: it
+    // needs a configuration, and purchase can never buy it) unless the form
+    // can open Konfigurera on it (?configurable=true: the sales forms and
+    // Ny tillverkningsorder). Without the parameter the list is unchanged.
+    if (query.orderable && !query.configurable) {
+      conditions.push(
+        notExists(
+          db
+            .select({ one: sql`1` })
+            .from(configuratorTemplates)
+            .where(eq(configuratorTemplates.articleId, articles.id))
+        )
+      );
+    }
+    return conditions.length > 0 ? and(...conditions) : undefined;
+  }
+
   return {
     // New articles get the "***" fallback location unless one is chosen.
     async getOrCreateFallbackLocationId() {
@@ -365,33 +401,11 @@ export function createArticleRepository(db: Db) {
     // `onlyIds`: the ABC-klassning filter (#10) — the class is derived for
     // the whole register by the planning module, so the service passes the
     // matching ids and `total` follows the filter (the TO list's
-    // component_late works the same way).
+    // component_late works the same way). Kopierat (#28) is passed the same
+    // way. The where is built ONCE here for the page, the count and
+    // listIds (Kopiera alla träffar) — never copy the conditions.
     async list(query: ListArticlesQuery, opts: { onlyIds?: string[] } = {}) {
-      const conditions = [];
-      if (opts.onlyIds) conditions.push(inArray(articles.id, opts.onlyIds));
-      if (query.search) {
-        const pattern = ilikePattern(query.search);
-        conditions.push(or(ilike(articles.articleNumber, pattern), ilike(articles.name, pattern)));
-      }
-      if (query.type) conditions.push(eq(articles.type, query.type));
-      if (query.groupId) conditions.push(eq(articles.groupId, query.groupId));
-      if (query.articleCodeId) conditions.push(eq(articles.articleCodeId, query.articleCodeId));
-      // ?orderable=true: the pickers on order forms — a template in EITHER mode
-      // is excluded (variants: its variants are what gets ordered; to_order: it
-      // needs a configuration, and purchase can never buy it) unless the form
-      // can open Konfigurera on it (?configurable=true: the sales forms and
-      // Ny tillverkningsorder). Without the parameter the list is unchanged.
-      if (query.orderable && !query.configurable) {
-        conditions.push(
-          notExists(
-            db
-              .select({ one: sql`1` })
-              .from(configuratorTemplates)
-              .where(eq(configuratorTemplates.articleId, articles.id))
-          )
-        );
-      }
-      const where = conditions.length > 0 ? and(...conditions) : undefined;
+      const where = listWhere(query, opts);
 
       const [rows, totalRows] = await Promise.all([
         db
@@ -417,6 +431,21 @@ export function createArticleRepository(db: Db) {
       ]);
       return { rows, total: totalRows[0]!.total };
     },
+
+    // Every id the list would show for the query, in the list's order and
+    // without paging — Kopierat's `query` (Kopiera alla träffar). Same where
+    // as list, so the copied set is exactly the register's hits.
+    async listIds(query: ArticleListFilter, opts: { onlyIds?: string[] } = {}): Promise<string[]> {
+      const rows = await db.select({ id: articles.id }).from(articles).where(listWhere(query, opts)).orderBy(asc(articles.articleNumber));
+      return rows.map((row) => row.id);
+    },
+
+    // --- Kopierat (#28, copied-articles.ts) ---
+    listCopiedArticleIds: (userId: string) => listCopiedArticleIds(db, userId),
+    setCopiedArticles: (userId: string, articleIds: readonly string[], mode: "add" | "replace") =>
+      setCopiedArticles(db, userId, articleIds, mode),
+    removeCopiedArticles: (userId: string, articleIds: readonly string[]) => removeCopiedArticles(db, userId, articleIds),
+    clearCopiedArticles: (userId: string) => clearCopiedArticles(db, userId),
 
     // --- Units (enheter) ---
 

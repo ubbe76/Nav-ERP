@@ -270,6 +270,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "default-location-blocked": "Lagerplatsen är spärrad och kan inte väljas som artikelns lagerplats — välj en annan.",
   // Lager-flikens Lagerplatser: the server names the place and the rule (Swedish).
   "article-location-invalid": serverMessage("Lagerplatserna kunde inte sparas — kontrollera huvudplatsen och de alternativa platserna."),
+  // Kopierat (#28): the server names the count and the cap (Swedish).
+  "copied-articles-too-many": serverMessage("Kopierat rymmer högst 5 000 artiklar — ta bort några eller ersätt listan."),
   // The server names what went wrong with the key / the mailbox.
   "invoice-scan-ai-test-failed": serverMessage("AI-tjänsten svarade inte med den här nyckeln och modellen."),
   "invoice-scan-mail-test-failed": serverMessage("Kunde inte ansluta till e-postlådan."),

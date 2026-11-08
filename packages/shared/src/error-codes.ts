@@ -589,6 +589,10 @@ export const ERROR_CODES = {
   // "***" as an alternative, or an inactive or blocked place that is new
   // in its role
   ARTICLE_LOCATION_INVALID: "article-location-invalid",
+  // Kopierat (#28): POST /articles/copied would leave the user's list with
+  // more than COPIED_ARTICLES_MAX articles (400, Swedish message with the
+  // count; the body also carries `count` and `max`). Nothing is written.
+  COPIED_ARTICLES_TOO_MANY: "copied-articles-too-many",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
