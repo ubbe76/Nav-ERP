@@ -162,6 +162,53 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
 
   return (
     <div>
+      <DocumentActionBar
+        label={inquiry.inquiryNumber}
+        pill={pill}
+      >
+        {editable && (
+          <Button type="button" variant="secondary" onClick={() => setModal("addRow")}>
+            Lägg till rad
+          </Button>
+        )}
+
+        {inquiry.status === "draft" && (
+          <Button type="button" variant="primary" disabled={pending} onClick={() => action("send")}>
+            Skicka förfrågan
+          </Button>
+        )}
+
+        {inquiry.status === "sent" && (
+          <Button type="button" variant="primary" disabled={pending} onClick={() => action("mark-answered")}>
+            Markera besvarad
+          </Button>
+        )}
+
+        {(inquiry.status === "sent" || inquiry.status === "answered") && (
+          <Button
+            type="button"
+            variant="primary"
+            disabled={pending}
+            onClick={() =>
+              action("convert-to-order", (result) => {
+                const order = result as PurchaseOrder;
+                router.push(`/inkop/ordrar/${order.id}`);
+              })
+            }
+          >
+            Gör till inköpsorder
+          </Button>
+        )}
+
+        {editable && (
+          <Button type="button" variant="danger" disabled={pending} onClick={() => action("cancel")}>
+            Avbryt förfrågan
+          </Button>
+        )}
+
+        {!editable && !inquiry.purchaseOrderId && <FormHint>Inga åtgärder tillgängliga.</FormHint>}
+      </DocumentActionBar>
+
       <DocumentHeaderCard
         pill={pill}
         meta={
@@ -337,49 +384,6 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
         <p>Inga rader tillagda än.</p>
       )}
 
-      <DocumentActionBar>
-        {editable && (
-          <Button type="button" variant="secondary" onClick={() => setModal("addRow")}>
-            Lägg till rad
-          </Button>
-        )}
-
-        {inquiry.status === "draft" && (
-          <Button type="button" variant="primary" disabled={pending} onClick={() => action("send")}>
-            Skicka förfrågan
-          </Button>
-        )}
-
-        {inquiry.status === "sent" && (
-          <Button type="button" variant="primary" disabled={pending} onClick={() => action("mark-answered")}>
-            Markera besvarad
-          </Button>
-        )}
-
-        {(inquiry.status === "sent" || inquiry.status === "answered") && (
-          <Button
-            type="button"
-            variant="primary"
-            disabled={pending}
-            onClick={() =>
-              action("convert-to-order", (result) => {
-                const order = result as PurchaseOrder;
-                router.push(`/inkop/ordrar/${order.id}`);
-              })
-            }
-          >
-            Gör till inköpsorder
-          </Button>
-        )}
-
-        {editable && (
-          <Button type="button" variant="danger" disabled={pending} onClick={() => action("cancel")}>
-            Avbryt förfrågan
-          </Button>
-        )}
-
-        {!editable && !inquiry.purchaseOrderId && <FormHint>Inga åtgärder tillgängliga.</FormHint>}
-      </DocumentActionBar>
 
       <Modal open={modal === "header"} onClose={() => setModal(null)} title="Ändra villkor och frakt">
         <EditHeaderForm inquiry={inquiry} registers={registers} onDone={refresh} onCancel={() => setModal(null)} />

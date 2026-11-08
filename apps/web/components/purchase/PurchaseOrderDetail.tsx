@@ -250,6 +250,63 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
 
   return (
     <div>
+      <DocumentActionBar
+        label={order.orderNumber}
+        pill={pill}
+        error={actionError}
+        trailing={
+          <ManualStatusChange
+            endpoint={`/api/v1/purchase-orders/${order.id}`}
+            statuses={PURCHASE_ORDER_STATUS_PILL}
+            current={order.status}
+            onDone={() => router.refresh()}
+          />
+        }
+      >
+        {rowsEditable && (
+          <Button type="button" variant="secondary" onClick={() => setModal("addRow")}>
+            Lägg till rad
+          </Button>
+        )}
+
+        {order.status === "draft" && (
+          <Button type="button" variant="primary" disabled={actionPending !== null} onClick={() => runAction("confirm")}>
+            {actionPending === "confirm" ? "Arbetar…" : "Bekräfta"}
+          </Button>
+        )}
+
+        {hasLego && rowsEditable && canInkop && (
+          <Link href={`/inkop/avsandning?order=${order.id}`} className={`${buttonStyles.button} ${buttonStyles.secondary}`}>
+            Avsändning
+          </Link>
+        )}
+
+        {(order.status === "confirmed" || order.status === "partially_received") && (
+          <>
+            {receivable.length > 0 && (
+              <Button type="button" variant="primary" onClick={() => setModal("receive")}>
+                Ta emot leverans
+              </Button>
+            )}
+            <Link href={`/inkop/inleverans?order=${order.id}`} className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
+              Inleveransrutinen
+            </Link>
+          </>
+        )}
+
+        {order.status === "received" && (
+          <Button type="button" variant="primary" disabled={actionPending !== null} onClick={() => runAction("close")}>
+            {actionPending === "close" ? "Arbetar…" : "Stäng order"}
+          </Button>
+        )}
+
+        {(order.status === "draft" || order.status === "confirmed") && (
+          <Button type="button" variant="danger" disabled={actionPending !== null} onClick={() => runAction("cancel")}>
+            {actionPending === "cancel" ? "Arbetar…" : "Avbryt order"}
+          </Button>
+        )}
+      </DocumentActionBar>
+
       <DocumentHeaderCard
         pill={pill}
         meta={`Rev ${order.revision} · ${order.currency}`}
@@ -522,60 +579,6 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
         </div>
       )}
 
-      <DocumentActionBar
-        error={actionError}
-        trailing={
-          <ManualStatusChange
-            endpoint={`/api/v1/purchase-orders/${order.id}`}
-            statuses={PURCHASE_ORDER_STATUS_PILL}
-            current={order.status}
-            onDone={() => router.refresh()}
-          />
-        }
-      >
-        {rowsEditable && (
-          <Button type="button" variant="secondary" onClick={() => setModal("addRow")}>
-            Lägg till rad
-          </Button>
-        )}
-
-        {order.status === "draft" && (
-          <Button type="button" variant="primary" disabled={actionPending !== null} onClick={() => runAction("confirm")}>
-            {actionPending === "confirm" ? "Arbetar…" : "Bekräfta"}
-          </Button>
-        )}
-
-        {hasLego && rowsEditable && canInkop && (
-          <Link href={`/inkop/avsandning?order=${order.id}`} className={`${buttonStyles.button} ${buttonStyles.secondary}`}>
-            Avsändning
-          </Link>
-        )}
-
-        {(order.status === "confirmed" || order.status === "partially_received") && (
-          <>
-            {receivable.length > 0 && (
-              <Button type="button" variant="primary" onClick={() => setModal("receive")}>
-                Ta emot leverans
-              </Button>
-            )}
-            <Link href={`/inkop/inleverans?order=${order.id}`} className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
-              Inleveransrutinen
-            </Link>
-          </>
-        )}
-
-        {order.status === "received" && (
-          <Button type="button" variant="primary" disabled={actionPending !== null} onClick={() => runAction("close")}>
-            {actionPending === "close" ? "Arbetar…" : "Stäng order"}
-          </Button>
-        )}
-
-        {(order.status === "draft" || order.status === "confirmed") && (
-          <Button type="button" variant="danger" disabled={actionPending !== null} onClick={() => runAction("cancel")}>
-            {actionPending === "cancel" ? "Arbetar…" : "Avbryt order"}
-          </Button>
-        )}
-      </DocumentActionBar>
 
       <Modal open={modal === "header"} onClose={() => setModal(null)} title="Ändra orderhuvud">
         <EditHeaderForm order={order} registers={registers} onDone={refresh} onCancel={() => setModal(null)} />
