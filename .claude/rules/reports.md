@@ -8,6 +8,9 @@ paths:
   - "apps/api/test/order-register*"
   - "apps/api/test/quote-followup*"
   - "apps/api/test/margin*"
+  - "apps/api/test/delivery-precision*"
+  - "apps/api/test/delivery-quality*"
+  - "apps/api/src/modules/system/service/precision-settings.ts"
 ---
 
 # Rapporter
@@ -28,6 +31,7 @@ Rapporter-modulen och dess `rapporter`-rättighet; alla filter i URL:en.
 ## Leveransprecision per motpart (Kvalitet, 0153)
 
 - `GET /reports/delivery-precision?groupBy=month|counterparty` (+ `/csv?kind&groupBy`): förvalet `month` är oförändrat; `counterparty` lägger `counterparties: { rows, totals }` på varje sida. Precisionen mäts med samma `measureOrder` som månadsvyn (`delivery-precision-calc.ts`); rena `delivery-quality-calc.ts` lägger till Avvikelser (ärenden av sidans typ med Datum i perioden, ej makulerade), Order med avvikelse/Andel felfria (av de mätta ordrarna, via ärendets `purchase_order_id`/`sales_order_id`, oavsett datum), Reklamerat antal (per artikel; total bara när alla har samma enhet, annars null) och Avvikelsekostnad (nettokostnaden ur `deviation-costs.ts`, null utan `canSeePrices`). Kvalitetsdata läses genom `PrecisionQualityReader` (quality-servicen, injicerad i `createReportsService`).
+- **Marginalerna (#29):** fyra nycklar i `system_settings` (`PRECISION_MARGIN_KEYS` i lövet `system/service/precision-settings.ts`, `decodePrecisionMargins`, skräp ⇒ förval) — per sida **Sen efter** (förval 0) och **För tidig före** (null = av, lagras som ""), i `/settings` som `precision{Sales,Purchase}{Late,Early}MarginDays`. Rapporten läser dem med EN fråga (`repo.loadPrecisionMargins`) vid varje anrop; inget stämplas på ordern, så en ändring gäller även bakåt. **EN regel** `classifyDelivery` (sen = `daysLate > lateDays`, tidig = `earlyDays !== null && -daysLate > earlyDays`, annars i tid) går via `addMeasure` i både månadsvyn och `groupPrecisionByCounterparty` — marginalerna är obligatoriska argument, aldrig ett förval, så en ny läsare kan inte glömma dem. Varje sida ekar `margins`; Precision = I tid ÷ alla mätta (tidiga sänker den); Snitt försening räknas från utlovat datum, inte från marginalen. Kolumnen För tidiga (webben, båda CSV:erna) bara när `earlyDays !== null`. Tester: `delivery-precision-calc.test.ts`, `delivery-quality-calc.test.ts`, `reports-delivery-quality.route.test.ts` (inställningarna → båda vyerna och CSV:n).
 - Kassationsrapportens `groupBy=reason` grupperar på Avvikelseorsaken (`key` = orsakens id); äldre fritextrader på texten med `key` `text:<text>` och etiketten "… (fritext)".
 
 ## Kalkylutfall (#14 etapp 2)

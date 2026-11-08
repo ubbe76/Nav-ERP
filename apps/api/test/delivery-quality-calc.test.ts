@@ -6,6 +6,7 @@ import {
   type QualityDeviationInput,
 } from "../src/modules/reports/service/delivery-quality-calc.js";
 import type { PrecisionOrderInput } from "../src/modules/reports/service/delivery-precision-calc.js";
+import { NO_PRECISION_MARGINS } from "../src/modules/system/service/precision-settings.js";
 
 // Leveransprecision, Gruppera: Motpart — the pure quality calc.
 
@@ -58,7 +59,7 @@ describe("delivery-quality-calc", () => {
         ],
         ordersWithDeviation: new Set(["o2", "o5"]),
       },
-      { seePrices: true }
+      { seePrices: true, margins: NO_PRECISION_MARGINS }
     );
     expect(result.rows.map((r) => r.counterpartyName)).toEqual(["Fäste AB", "Ny AB", "Stål AB"]);
     const steel = result.rows.find((r) => r.counterpartyId === "s1")!;
@@ -98,8 +99,25 @@ describe("delivery-quality-calc", () => {
   });
 
   it("hides the cost without prices", () => {
-    const result = groupPrecisionByCounterparty(orders, RANGE, { deviations: [dev("s1")], ordersWithDeviation: new Set() }, { seePrices: false });
+    const result = groupPrecisionByCounterparty(orders, RANGE, { deviations: [dev("s1")], ordersWithDeviation: new Set() }, { seePrices: false, margins: NO_PRECISION_MARGINS });
     expect(result.rows.every((r) => r.deviationCost === null)).toBe(true);
     expect(result.totals.deviationCost).toBeNull();
+  });
+
+  it("classifies with the side's margins — the same rule as the month view (#29)", () => {
+    // o2 is 3 days late: on time with a 3-day margin; o1/o3 same day stay on time.
+    const lenient = groupPrecisionByCounterparty(orders, RANGE, { deviations: [], ordersWithDeviation: new Set() }, {
+      seePrices: true,
+      margins: { lateDays: 3, earlyDays: null },
+    });
+    expect(lenient.rows.find((r) => r.counterpartyId === "s1")).toMatchObject({ total: 2, early: 0, onTime: 2, late: 0, precisionPct: 100, avgDaysLate: null });
+    const early = groupPrecisionByCounterparty(
+      [order("e1", "s1", "2026-03-20", "2026-03-10T08:00:00Z"), order("e2", "s1", "2026-03-20", "2026-03-20T08:00:00Z")],
+      RANGE,
+      { deviations: [], ordersWithDeviation: new Set() },
+      { seePrices: true, margins: { lateDays: 0, earlyDays: 5 } }
+    );
+    expect(early.rows[0]).toMatchObject({ total: 2, early: 1, onTime: 1, late: 0, precisionPct: 50 });
+    expect(early.totals).toMatchObject({ total: 2, early: 1, onTime: 1, late: 0, precisionPct: 50 });
   });
 });

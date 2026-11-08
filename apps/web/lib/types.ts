@@ -3368,6 +3368,12 @@ export interface SystemSettings {
   alertQuoteFollowupDays: number;
   // Offertens giltighetstid (dagar), 0–365; 0 = ingen giltighetstid.
   quoteValidityDays: number;
+  // Marginal i leveransprecisionen (#29), whole days 0–365 per side: Sen
+  // efter (0 = the day after is late) and För tidig före (null = off).
+  precisionSalesLateMarginDays: number;
+  precisionSalesEarlyMarginDays: number | null;
+  precisionPurchaseLateMarginDays: number;
+  precisionPurchaseEarlyMarginDays: number | null;
   // Ställkostnadsartikel: the article a customer price's ställpris is charged
   // on as its own order row; null = off.
   setupChargeArticleId: string | null;
@@ -5009,6 +5015,8 @@ export interface LegoInquiryRowInput {
 export interface PrecisionMonth {
   month: string;
   total: number;
+  // För tidiga (#29) — always 0 while the side's early margin is off.
+  early: number;
   onTime: number;
   late: number;
   precisionPct: number | null;
@@ -5020,6 +5028,7 @@ export interface PrecisionMonth {
 // without prices; claimedQuantity is null for mixed units (see claimedByArticle).
 export interface PrecisionCounterpartyFigures {
   total: number;
+  early: number;
   onTime: number;
   late: number;
   precisionPct: number | null;
@@ -5044,12 +5053,21 @@ export interface PrecisionCounterparty extends PrecisionCounterpartyFigures {
   counterpartyName: string;
 }
 
+// The side's margins from Inställningar (#29): late = more than lateDays
+// after the promised date, early = more than earlyDays before it (null = off).
+export interface PrecisionMargins {
+  lateDays: number;
+  earlyDays: number | null;
+}
+
 export interface PrecisionSection {
+  margins: PrecisionMargins;
   months: PrecisionMonth[];
   // Only with groupBy=counterparty.
   counterparties?: { rows: PrecisionCounterparty[]; totals: PrecisionCounterpartyFigures };
   totals: {
     total: number;
+    early: number;
     onTime: number;
     late: number;
     precisionPct: number | null;

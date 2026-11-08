@@ -63,12 +63,17 @@ export async function reportsRoutes(
     const query = deliveryPrecisionCsvQuerySchema.parse(req.query);
     const seePrices = canSeePrices(req.user!);
     const result = await service.getDeliveryPrecisionSection(query.kind, query, { seePrices });
+    const early = result.section.margins.earlyDays !== null;
     if (query.groupBy === "counterparty") {
       const filename = `leveransprecision-${query.kind}-motpart-${result.from}-${result.to}.csv`;
-      return sendCsv(reply, filename, buildCounterpartyPrecisionCsv(result.section.counterparties!, { kind: query.kind, seePrices }));
+      return sendCsv(
+        reply,
+        filename,
+        buildCounterpartyPrecisionCsv(result.section.counterparties!, { kind: query.kind, seePrices, early })
+      );
     }
     const filename = `leveransprecision-${query.kind}-${result.from}-${result.to}.csv`;
-    return sendCsv(reply, filename, buildDeliveryPrecisionCsv(result.section.months));
+    return sendCsv(reply, filename, buildDeliveryPrecisionCsv(result.section.months, { early }));
   });
 
   // Kalkylutfall: ?view=pre (Mot förkalkyl, default) | analysis

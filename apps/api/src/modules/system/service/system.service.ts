@@ -71,6 +71,7 @@ import {
   PUBLIC_BASE_URL_KEY,
 } from "./alert-settings.js";
 import { decodeQuoteValidityDays, QUOTE_VALIDITY_DAYS_KEY } from "./quote-settings.js";
+import { decodePrecisionMargins, PRECISION_MARGIN_KEYS } from "./precision-settings.js";
 
 // Ställkostnadsartikel (sales): "" (cleared) and absent both read as off.
 const SETUP_CHARGE_ARTICLE_KEY = "setup_charge_article_id";
@@ -319,6 +320,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
     const leadTimeDefaults = decodeLeadTimeDefaults(get);
     const forecastSettings = decodeForecastSettings(get);
     const abcSettings = decodeAbcSettings(get);
+    const precisionMargins = decodePrecisionMargins(get);
 
     return {
       allowMultipleStamps: get(ALLOW_MULTIPLE_STAMPS_KEY) === "true",
@@ -392,6 +394,12 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       publicBaseUrl: decodePublicBaseUrl(get(PUBLIC_BASE_URL_KEY)),
       // Uppföljning av offerter — quote-settings.ts owns the key and default.
       quoteValidityDays: decodeQuoteValidityDays(get(QUOTE_VALIDITY_DAYS_KEY)),
+      // Marginal i leveransprecisionen (#29) — precision-settings.ts owns
+      // the keys and the defaults (late 0, early off = null).
+      precisionSalesLateMarginDays: precisionMargins.sales.lateDays,
+      precisionSalesEarlyMarginDays: precisionMargins.sales.earlyDays,
+      precisionPurchaseLateMarginDays: precisionMargins.purchase.lateDays,
+      precisionPurchaseEarlyMarginDays: precisionMargins.purchase.earlyDays,
       setupChargeArticleId: get(SETUP_CHARGE_ARTICLE_KEY) || null,
       // Egna teman — theme-settings.ts owns the keys and defaults.
       defaultTheme: decodeDefaultTheme(get(DEFAULT_THEME_KEY)),
@@ -778,6 +786,25 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
         await set(ALERT_QUOTE_FOLLOWUP_DAYS_KEY, String(input.alertQuoteFollowupDays));
       }
       if (input.quoteValidityDays !== undefined) await set(QUOTE_VALIDITY_DAYS_KEY, String(input.quoteValidityDays));
+      if (input.precisionSalesLateMarginDays !== undefined) {
+        await set(PRECISION_MARGIN_KEYS.salesLate, String(input.precisionSalesLateMarginDays));
+      }
+      if (input.precisionPurchaseLateMarginDays !== undefined) {
+        await set(PRECISION_MARGIN_KEYS.purchaseLate, String(input.precisionPurchaseLateMarginDays));
+      }
+      // null = off, stored as "" (the over-receipt convention).
+      if (input.precisionSalesEarlyMarginDays !== undefined) {
+        await set(
+          PRECISION_MARGIN_KEYS.salesEarly,
+          input.precisionSalesEarlyMarginDays === null ? "" : String(input.precisionSalesEarlyMarginDays)
+        );
+      }
+      if (input.precisionPurchaseEarlyMarginDays !== undefined) {
+        await set(
+          PRECISION_MARGIN_KEYS.purchaseEarly,
+          input.precisionPurchaseEarlyMarginDays === null ? "" : String(input.precisionPurchaseEarlyMarginDays)
+        );
+      }
       if (input.setupChargeArticleId !== undefined) {
         if (input.setupChargeArticleId !== null && !(await repo.articleExists(input.setupChargeArticleId))) {
           throw new SetupChargeArticleNotFoundError(input.setupChargeArticleId);
