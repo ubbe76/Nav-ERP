@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { updateWorkCenterSchema, completeOperationSchema, createArticleSchema, createStockLocationSchema, createWorkCenterSchema } from "@navet/shared";
+import { updateWorkCenterSchema, completeOperationSchema, createArticleSchema, createStockLocationSchema, createWorkCenterSchema, listManufacturingOrdersQuerySchema } from "@navet/shared";
 import { and, eq, sql } from "drizzle-orm";
 import { auditLog, db, stockTransactions, weekSchedules } from "@navet/db";
 import { completeManufacturingOrderSchema } from "@navet/shared";
@@ -1039,6 +1039,23 @@ describe("manufacturing — work center type and production groups", () => {
     await expect(
       mfgService.setProductionGroupWorkCenters(crypto.randomUUID(), { workCenterIds: [] })
     ).rejects.toBeInstanceOf(ProductionGroupNotFoundError);
+  });
+});
+
+describe("manufacturing service — listManufacturingOrders order", () => {
+  // Översikten takes the OLDEST active orders (order=asc, limit=6); every
+  // other list keeps the newest first.
+  it("sorts on order number, newest first unless order=asc", async () => {
+    const { order: first } = await makeMO(1);
+    const { order: second } = await makeMO(1);
+    const { order: third } = await makeMO(1);
+    const numbers = [first, second, third].map((o) => o.orderNumber).sort();
+
+    const newest = await mfgService.listManufacturingOrders(parsed(listManufacturingOrdersQuerySchema, { limit: 2 }));
+    expect(newest.rows.map((r) => r.orderNumber)).toEqual([numbers[2], numbers[1]]);
+    const oldest = await mfgService.listManufacturingOrders(parsed(listManufacturingOrdersQuerySchema, { limit: 2, order: "asc" }));
+    expect(oldest.rows.map((r) => r.orderNumber)).toEqual([numbers[0], numbers[1]]);
+    expect(oldest.total).toBe(3);
   });
 });
 
