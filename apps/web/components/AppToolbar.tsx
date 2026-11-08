@@ -5,6 +5,7 @@ import { AlertsBell } from "./AlertsBell";
 import { UserMenu } from "./UserMenu";
 import { CommandPalette } from "./CommandPalette";
 import { SaveShortcut } from "./SaveShortcut";
+import { KeyboardShortcuts } from "./KeyboardShortcuts";
 import styles from "./AppToolbar.module.css";
 
 // The fixed band above every page (Nav som program, punkt 1): the search
@@ -19,6 +20,7 @@ export function AppToolbar({ userName, userRole }: { userName: string; userRole:
         <CommandPalette />
       </div>
       <SaveShortcut />
+      <KeyboardShortcuts />
       <div className={styles.actions}>
         <FavoriteToggle />
         <AlertsBell />
