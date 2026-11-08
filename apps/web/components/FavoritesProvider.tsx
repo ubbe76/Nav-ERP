@@ -10,6 +10,10 @@ interface FavoritesValue {
   // null = no list (no provider, or it couldn't be read): the sidebar group
   // and every star stay hidden.
   favorites: Favorite[] | null;
+  // Favoriter i sidomenyn (user setting favoritesInSidebar): false hides the
+  // sidebar's group — Översikten's Favoriter card shows them instead.
+  inSidebar: boolean;
+  setInSidebar: (value: boolean) => Promise<boolean>;
   has: (href: string) => boolean;
   add: (favorite: Favorite) => Promise<boolean>;
   remove: (href: string) => Promise<boolean>;
@@ -19,6 +23,8 @@ interface FavoritesValue {
 
 const FavoritesContext = createContext<FavoritesValue>({
   favorites: null,
+  inSidebar: true,
+  setInSidebar: async () => false,
   has: () => false,
   add: async () => false,
   remove: async () => false,
@@ -34,8 +40,18 @@ type Settings = { favorites: Favorite[] };
 // with the page (AppShell); every change is a PATCH of the whole list, so a
 // star click first re-reads it — another tab may have changed it since this
 // page loaded — and the changes run one at a time.
-export function FavoritesProvider({ initial, children }: { initial: Favorite[] | null; children: ReactNode }) {
+export function FavoritesProvider({
+  initial,
+  initialInSidebar = true,
+  children,
+}: {
+  initial: Favorite[] | null;
+  initialInSidebar?: boolean;
+  children: ReactNode;
+}) {
   const [favorites, setFavorites] = useState(initial);
+  const [inSidebar, setInSidebarState] = useState(initialInSidebar);
+  useEffect(() => setInSidebarState(initialInSidebar), [initialInSidebar]);
   const [error, setError] = useState<string | null>(null);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   // The list as shown, kept beside the state for the queued saves: they run
@@ -95,16 +111,32 @@ export function FavoritesProvider({ initial, children }: { initial: Favorite[] |
     [show]
   );
 
+  const setInSidebar = useCallback(async (next: boolean): Promise<boolean> => {
+    try {
+      const saved = await apiFetch<{ favoritesInSidebar: boolean }>("/api/v1/me/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ favoritesInSidebar: next }),
+      });
+      setInSidebarState(saved.favoritesInSidebar);
+      return true;
+    } catch (err) {
+      setError(apiErrorMessage(err, "Valet kunde inte sparas."));
+      return false;
+    }
+  }, []);
+
   const value = useMemo<FavoritesValue>(
     () => ({
       favorites,
+      inSidebar,
+      setInSidebar,
       has: (href) => favorites?.some((f) => f.href === href) ?? false,
       add: (favorite) =>
         save((current) => (current.some((f) => f.href === favorite.href) ? current : [...current, favorite]), true),
       remove: (href) => save((current) => current.filter((f) => f.href !== href), true),
       replace: (list) => save(() => list, false),
     }),
-    [favorites, save]
+    [favorites, save, inSidebar, setInSidebar]
   );
 
   return (

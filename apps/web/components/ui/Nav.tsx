@@ -116,7 +116,7 @@ export function Nav({ active, role, permissions }: NavProps) {
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [editingFavorites, setEditingFavorites] = useState(false);
-  const { favorites } = useFavorites();
+  const { favorites, inSidebar } = useFavorites();
   const currentHref = favoriteHref(usePathname(), useSearchParams());
   // Width animates only after the stored state has painted, so restoring a
   // collapsed sidebar on page load snaps instead of sliding.
@@ -177,7 +177,8 @@ export function Nav({ active, role, permissions }: NavProps) {
           </button>
         </div>
 
-        {visibleFavorites !== null && (
+        {/* Hidden when the user shows the favourites on Översikten instead. */}
+        {visibleFavorites !== null && inSidebar && (
           <div className={styles.favorites} aria-label="Favoriter" role="group">
             <div className={styles.groupHeader}>
               <span>Favoriter</span>

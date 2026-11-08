@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { Button } from "./ui/Button";
-import { Input } from "./ui/Field";
+import { Checkbox, Input } from "./ui/Field";
 import { Form, FormActions, FormError, FormHint } from "./ui/Form";
 import { useFavorites } from "./FavoritesProvider";
 import { FAVORITE_TITLE_MAX, type Favorite } from "../lib/favorites";
@@ -12,8 +12,9 @@ import styles from "./FavoritesEditor.module.css";
 // Favoriter → Ändra: rename, reorder and remove, saved together as the new
 // list. Rendered inside a Modal, which mounts it afresh on every open.
 export function FavoritesEditor({ onDone }: { onDone: () => void }) {
-  const { favorites, replace } = useFavorites();
+  const { favorites, replace, inSidebar, setInSidebar } = useFavorites();
   const [rows, setRows] = useState<Favorite[]>(favorites ?? []);
+  const [showInSidebar, setShowInSidebar] = useState(inSidebar);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -35,7 +36,7 @@ export function FavoritesEditor({ onDone }: { onDone: () => void }) {
     }
     setPending(true);
     setError(null);
-    const saved = await replace(list);
+    const saved = (await replace(list)) && (showInSidebar === inSidebar || (await setInSidebar(showInSidebar)));
     setPending(false);
     // The provider's own message lands behind this dialog, so say it here too.
     if (saved) onDone();
@@ -95,6 +96,11 @@ export function FavoritesEditor({ onDone }: { onDone: () => void }) {
           ))}
         </ol>
       )}
+      <label className={styles.placement}>
+        <Checkbox checked={showInSidebar} onChange={(e) => setShowInSidebar(e.target.checked)} />
+        Visa favoriterna i sidomenyn
+      </label>
+      <FormHint>Utan bocken visas favoriterna bara på Översikten, om kortet Favoriter är valt under Anpassa.</FormHint>
       <FormError>{error}</FormError>
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>

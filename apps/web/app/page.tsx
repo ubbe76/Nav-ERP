@@ -16,6 +16,7 @@ import { OrdersCard } from "../components/dashboard/OrdersCard";
 import { StockActivityCard } from "../components/dashboard/StockActivityCard";
 import { CustomizeOverview } from "../components/dashboard/CustomizeOverview";
 import { ListCard } from "../components/dashboard/ListCard";
+import { FavoritesCard } from "../components/dashboard/FavoritesCard";
 import { OnboardingCard } from "../components/onboarding/OnboardingCard";
 import { ConfirmDialogHost } from "../components/ui/ConfirmDialogHost";
 import { FavoritesProvider } from "../components/FavoritesProvider";
@@ -281,6 +282,7 @@ export default async function OverviewPage() {
     ),
     orders: <OrdersCard key="orders" orders={activeManufacturingOrders} />,
     stock: <StockActivityCard key="stock" transactions={recentTransactions} />,
+    favorites: <FavoritesCard key="favorites" />,
     deliveries: (
       <ListCard
         key="deliveries"
@@ -341,7 +343,7 @@ export default async function OverviewPage() {
   const todayLabel = new Date().toLocaleDateString("sv-SE", { weekday: "long", day: "numeric", month: "long" });
 
   return (
-    <FavoritesProvider initial={favorites}>
+    <FavoritesProvider initial={favorites.favorites} initialInSidebar={favorites.inSidebar}>
     <div className={shellStyles.frame}>
       <Nav active="Översikt" role={user.role} permissions={user.permissions} />
 

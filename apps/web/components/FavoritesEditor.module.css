@@ -39,3 +39,14 @@
   gap: 4px;
   padding-top: 2px;
 }
+
+/* Visa favoriterna i sidomenyn. */
+.placement {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-primary);
+}

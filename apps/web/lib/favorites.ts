@@ -24,12 +24,20 @@ export function favoriteHref(pathname: string, searchParams: URLSearchParams | {
 // Server Components: the signed-in user's list, or null when it couldn't be
 // read — the sidebar group and the stars then stay hidden instead of
 // offering to overwrite a list nobody has seen.
-export async function loadFavorites(cookieHeader: string | undefined): Promise<Favorite[] | null> {
-  if (!cookieHeader) return null;
+// The favourites and where they show (`favoritesInSidebar`, default true —
+// false leaves them to Översikten's Favoriter card). `favorites` null on a
+// failed read: the group then stays hidden.
+export interface FavoritesState {
+  favorites: Favorite[] | null;
+  inSidebar: boolean;
+}
+
+export async function loadFavorites(cookieHeader: string | undefined): Promise<FavoritesState> {
+  if (!cookieHeader) return { favorites: null, inSidebar: true };
   try {
-    const settings = await apiGet<{ favorites?: Favorite[] }>("/api/v1/me/settings", cookieHeader);
-    return settings.favorites ?? null;
+    const settings = await apiGet<{ favorites?: Favorite[]; favoritesInSidebar?: boolean }>("/api/v1/me/settings", cookieHeader);
+    return { favorites: settings.favorites ?? null, inSidebar: settings.favoritesInSidebar !== false };
   } catch {
-    return null;
+    return { favorites: null, inSidebar: true };
   }
 }

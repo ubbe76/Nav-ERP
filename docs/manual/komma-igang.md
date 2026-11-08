@@ -31,6 +31,7 @@ Efter 10 misslyckade inloggningsförsök på samma konto spärras kontot i 15 mi
 - Du kan ha högst 20 favoriter, och ett namn får vara högst 60 tecken.
 - När sidomenyn är ihopfälld visas favoriterna som ikoner — för musen över en ikon för att se namnet.
 - En favorit till en sida som din behörighetsgrupp inte längre ger dig visas inte, men den finns kvar och kommer tillbaka om du får behörigheten igen. Under **Ändra** syns alla dina favoriter.
+- **Var favoriterna visas:** högst upp i sidomenyn, som kortet **Favoriter** på Översikten, eller båda. Kortet väljer du under [Anpassa Översikten](#anpassa-oversikten); där visas favoriterna som rutor med samma ikoner som i menyn, och kortet har en egen **Ändra**. Tar du bort bocken **Visa favoriterna i sidomenyn** under **Ändra** (och sparar) försvinner gruppen ur sidomenyn, och favoriterna syns bara på kortet. Valet sparas på användaren.
 
 ## Översikten
 
@@ -54,7 +55,7 @@ Standardvyn har fyra kort:
 | **Pågående tillverkning** | De första pågående och frisläppta tillverkningsordrarna |
 | **Senaste lagerhändelser** | De sex senaste lagerrörelserna |
 
-Utöver dem kan du lägga till följande kort. Varje kort finns bara med i dialogen om du får öppna listan som kortets **Se alla** leder till, till exempel kundorderlistan för **Leveranser denna vecka**:
+Utöver dem kan du lägga till kortet **Favoriter** (dina [favoriter](#favoriter) som rutor, hela bredden) och följande kort. Varje kort finns bara med i dialogen om du får öppna listan som kortets **Se alla** leder till, till exempel kundorderlistan för **Leveranser denna vecka**:
 
 | Kort | Innehåll | Se alla |
 |---|---|---|
