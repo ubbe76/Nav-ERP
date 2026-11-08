@@ -70,7 +70,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Kodkvalitet
 
-- [ ] `apps/api/test` typkontrolleras inte (CI typkontrollerar bara `src` via bygget).
 - [ ] **Kopiera från befintlig artikel** skriver tillverknings- och inköpstabeller direkt från artikelmodulen — borde vara Tx-löv i ägarmodulerna; `informationIsNew` dubblerad i `CopyFromModal`/`NewArticleForm`.
 - [ ] **Anläggningsregister:** `fixed-asset.service.ts` är ~1 300 rader — körningsblocket kan bli egen fil; `previewRows` återimplementerar ackumulatorns nettning; `stockholmToday` duplicerar `currentMonthStockholm`; `reverse()` anropar `findFixedAssetLink` två gånger; `assertOpeningDepreciation` körs vid varje PATCH; typputs på `OpeningDepreciationCheck`; kommentar om varför `disposeAsset` anropar `assertPostablePeriod`; aritmetiken i en kommentar i `depreciation-schedule.test.ts` (100000/36, månad 22) och `missingMonths`-dokumentationen om var resten hamnar.
 - [ ] **Årsbokslut:** `year-end-checks.ts` importerar `formatNumber` från `document-pdf` (drar in pdfkit); `inventoryStepView` räknas två gånger; `unlockPeriod` hämtar året två gånger; `getPlan` går på egen `db`; `closingPeriodStatus` förvalt `locked`; periodspärren täcker bara UPDATE; ingen CHECK `reversal_verification_id <> verification_id` på `profit_dispositions`.

@@ -37,6 +37,11 @@ jobs:
       - name: Typkontrollera och bygg API:t
         run: npm run build --workspace apps/api
 
+      # The api's tests with src (tsconfig.test.json). Needs a 4 GB heap —
+      # the script sets it; Node's default 2 GB runs out.
+      - name: Typkontrollera API-testerna
+        run: npm run typecheck:test --workspace apps/api
+
       # Run from apps/web: from the repo root tsc would check the wrong project.
       - name: Typkontrollera webben
         working-directory: apps/web
