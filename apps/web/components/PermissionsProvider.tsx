@@ -38,3 +38,9 @@ export function useRole(): Role {
   const user = useContext(Ctx);
   return user ? user.role : "user";
 }
+
+// The whole access profile, for code that filters a catalogue by it (the
+// command palette's pages and searches). Null outside a provider.
+export function useAccessUser(): { role: Role; permissions: readonly Permission[] } | null {
+  return useContext(Ctx);
+}

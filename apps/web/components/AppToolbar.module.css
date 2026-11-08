@@ -15,8 +15,18 @@
   border-bottom: 1px solid var(--color-border);
 }
 
-.spacer {
+.search {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+}
+
+@media (max-width: 640px) {
+  /* On a phone the search is an icon beside the bell. */
+  .search {
+    justify-content: flex-end;
+  }
 }
 
 .actions {
