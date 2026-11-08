@@ -103,3 +103,11 @@
 .version:hover {
   text-decoration: underline;
 }
+
+/* Installera som app in Safari: the browser's own command, as text. */
+.hint {
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+}

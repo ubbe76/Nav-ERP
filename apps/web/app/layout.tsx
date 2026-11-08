@@ -4,6 +4,7 @@ import "./globals.css";
 import { headers } from "next/headers";
 import { fetchThemeBoot, themeBootScript } from "../lib/themes";
 import { ThemeBootProvider } from "../components/ThemeBootProvider";
+import { installPromptBootScript } from "../lib/installApp";
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
@@ -46,6 +47,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {/* Server-built CSS for the custom themes (validated tokens only). */}
         {boot.css && <style id="nav-themes" dangerouslySetInnerHTML={{ __html: boot.css }} />}
         <script dangerouslySetInnerHTML={{ __html: themeBootScript(boot) }} />
+        {/* Keeps the browser's install offer for the user menu (lib/installApp.ts). */}
+        <script dangerouslySetInnerHTML={{ __html: installPromptBootScript }} />
       </head>
       {/* Browser extensions inject attributes on <body> before React hydrates
           (ColorZilla's cz-shortcut-listen, for one), which otherwise reports a

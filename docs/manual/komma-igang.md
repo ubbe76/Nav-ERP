@@ -25,8 +25,19 @@ Efter 10 misslyckade inloggningsförsök på samma konto spärras kontot i 15 mi
   - I en lista flyttar **↑** och **↓** en markerad rad, **Enter** öppnar den och **Esc** tar bort markeringen.
   - **Högerklick** på en rad öppnar radens ⋯-meny, där en sådan finns. Högerklickar du på en länk får du webbläsarens vanliga meny, till exempel för att öppna i en ny flik.
   - På sidor som inte är listor, och när en dialog är öppen, fungerar piltangenterna som vanligt.
-- **Användarmenyn** (knappen med dina initialer) visar ditt namn och din roll, väljaren för färgtema — **Ljust**, **Mörkt** och **Dracula** (ett mörkt tema i lila och rosa efter [Dracula](https://draculatheme.com), som används under MIT-licensen) —, vilken version av Nav|ERP du använder, t.ex. **Version 0.8.5-alpha**, och **Logga ut**. Klickar du på versionen öppnas versionssidan på naverp.se med vad som är nytt i varje version; versionen syns också i API:ets `GET /health`. Temavalet sparas på användaren och följer med mellan datorer, och gäller på alla sidor, även stämpelterminalen och inloggningen. Administratören kan välja ett förvalt tema för företaget, låsa valet (då döljs väljaren) och installera egna teman under **System → Teman** — de syns i väljaren bredvid de tre inbyggda.
+- **Användarmenyn** (knappen med dina initialer) visar ditt namn och din roll, **Installera Nav** när webbläsaren kan installera Nav som program (se [Installera som app](#installera-som-app)), väljaren för färgtema — **Ljust**, **Mörkt** och **Dracula** (ett mörkt tema i lila och rosa efter [Dracula](https://draculatheme.com), som används under MIT-licensen) —, vilken version av Nav|ERP du använder, t.ex. **Version 0.8.5-alpha**, och **Logga ut**. Klickar du på versionen öppnas versionssidan på naverp.se med vad som är nytt i varje version; versionen syns också i API:ets `GET /health`. Temavalet sparas på användaren och följer med mellan datorer, och gäller på alla sidor, även stämpelterminalen och inloggningen. Administratören kan välja ett förvalt tema för företaget, låsa valet (då döljs väljaren) och installera egna teman under **System → Teman** — de syns i väljaren bredvid de tre inbyggda.
 - **Statusraden** längst ned (på datorn) visar om Nav har kontakt med servern — **Ansluten**, **Sessionen har gått ut** (med en länk till **Logga in**) eller **Ingen kontakt med servern** —, vem som är inloggad med vilken roll, och versionen. Den kontrollerar kontakten en gång i minuten.
+
+## Installera som app
+
+Nav är en webbsida och fungerar i alla moderna webbläsare. Vill du kan du dessutom installera Nav som ett program på datorn: det får då ett eget fönster utan webbläsarens adressfält och flikar, en egen ikon i Start-menyn, Dock eller programlistan, och öppnas alltid på **Översikten**. Det är fortfarande samma Nav — inget laddas ned, och programmet uppdateras när servern uppdateras.
+
+- **Chrome och Edge** (Windows, Mac och Linux, även Chromium på Linux): välj **Installera Nav** i användarmenyn. Knappen visas bara när webbläsaren erbjuder installationen.
+- **Safari på Mac** (Safari 17 eller senare): användarmenyn säger hur — välj **Arkiv → Lägg till i Dock**.
+- **iPhone och iPad**: tryck på **Dela** och välj **Lägg till på hemskärmen**.
+- **Firefox** på datorn kan inte installera webbprogram; använd Nav i en flik som vanligt.
+
+Installationen kräver att Nav nås över **https** — en installation som öppnas med `http://` i det lokala nätet kan bara läggas som ett vanligt bokmärke, och då visas ingen knapp. Programfönstrets namnlist följer ditt färgtema.
 
 ## Favoriter
 
