@@ -67,6 +67,10 @@ const DEFAULT_POSTING_SETTINGS = {
   postingFxGain: "3960",
   postingFxLoss: "7960",
   postingBankFees: "6570",
+  postingInventory: "1460",
+  postingInventoryChange: "4990",
+  postingWip: "1440",
+  postingWipChange: "4940",
 };
 let postingSettings = { ...DEFAULT_POSTING_SETTINGS };
 const poster = createVerificationPoster({ read: async () => postingSettings });

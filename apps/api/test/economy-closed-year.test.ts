@@ -14,6 +14,7 @@ import { bookFailureError } from "../src/modules/economy/service/economy.service
 import { DEFAULT_POSTING_SETTINGS, testEconomyRepository, testEconomyService } from "./helpers/services.js";
 import { NEXT_YEAR, YEAR, accountId, createCalendarYear, failure, resetYearEnd, setupYearEnd } from "./helpers/year-end.js";
 import { parsed } from "./helpers/parsed.js";
+import { unusedPeriodicSummary, unusedVatCodes } from "./helpers/economy-route-deps.js";
 
 beforeEach(resetYearEnd);
 afterAll(resetYearEnd);
@@ -40,6 +41,8 @@ function buildEconomyApp(userId: string) {
     vatReport: {} as unknown as VatReportService,
     reports: {} as unknown as FinancialReportsService,
     sie: {} as unknown as SieService,
+    vatCodes: unusedVatCodes,
+    periodicSummary: unusedPeriodicSummary,
   });
   return app;
 }

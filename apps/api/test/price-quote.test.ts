@@ -19,6 +19,7 @@ import { createSystemService } from "../src/modules/system/service/system.servic
 import { resolvePrice } from "../src/modules/sales/service/price-resolver.js";
 import { configuratorRoutes } from "../src/modules/oauth/routes/configurator.routes.js";
 import type { SalesService } from "../src/modules/sales/service/sales.service.js";
+import { makeVariantService } from "./helpers/configurator.js";
 import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
@@ -167,7 +168,7 @@ describe("getPriceQuote (service)", () => {
 describe("GET /price-quote (route, inject)", () => {
   function buildTestApp(service: Pick<SalesService, "getPriceQuote">) {
     const app = Fastify();
-    app.register(configuratorRoutes, { salesService: service as SalesService, articleService });
+    app.register(configuratorRoutes, { salesService: service as SalesService, articleService, configuratorService: makeVariantService() });
     return app;
   }
 

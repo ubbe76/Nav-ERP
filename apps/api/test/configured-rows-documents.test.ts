@@ -5,6 +5,8 @@ import { db, emailLog } from "@navet/db";
 import type { OrderRowConfiguration } from "@navet/shared";
 import Fastify from "fastify";
 import { mailRoutes } from "../src/modules/mail/routes/mail.routes.js";
+import { createQualityRepository } from "../src/modules/quality/repository/quality.repository.js";
+import { createQualityService } from "../src/modules/quality/service/quality.service.js";
 import { pdfText } from "./helpers/pdf.js";
 import {
   buildToOrder,
@@ -19,6 +21,7 @@ import {
   sentMails,
 } from "./helpers/configured-rows.js";
 import { parsed } from "./helpers/parsed.js";
+import { testDocumentPdfService } from "./helpers/services.js";
 
 // Konfigurator 4b, Task 5: the choice lines of a configured row on every
 // customer document — offert/orderbekräftelse (Visa tilläggspriser), the
@@ -120,7 +123,9 @@ describe("quote / order confirmation", () => {
     app.addHook("preHandler", async (req) => {
       req.user = { id: user.id, email: user.email, name: user.name, role: "admin" } as never;
     });
-    await app.register(mailRoutes, { service: mailService, purchaseService, salesService, invoiceService });
+    // The deviation route is never reached here; the real service keeps the options honest.
+    const qualityService = createQualityService({ repo: createQualityRepository(db), pdf: testDocumentPdfService, mail: mailService });
+    await app.register(mailRoutes, { service: mailService, purchaseService, salesService, invoiceService, qualityService });
     const res = await app.inject({ method: "POST", url: `/email-log/${entry!.id}/resend` });
     expect(res.statusCode).toBe(200);
     expect(sentMails).toHaveLength(2);

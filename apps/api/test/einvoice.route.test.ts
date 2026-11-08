@@ -22,6 +22,7 @@ import {
 import { InvoiceNotFoundError } from "../src/modules/sales/service/invoice.service.js";
 import { EinvoiceWebhookPublicUrlError } from "../src/modules/einvoice/service/einvoice-settings.service.js";
 import { createHmac } from "node:crypto";
+import { unwiredEinvoiceReceive } from "./helpers/unwired.js";
 
 const ID = "11111111-1111-4111-8111-111111111111";
 
@@ -41,6 +42,7 @@ function routesApp(service: Partial<EinvoiceService>, status: Partial<EinvoiceSt
     settings: settings as EinvoiceSettingsService,
     service: service as EinvoiceService,
     status: status as EinvoiceStatusService,
+    receive: unwiredEinvoiceReceive,
   });
   return app;
 }

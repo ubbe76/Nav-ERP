@@ -48,6 +48,15 @@ const planningService = createPlanningService(createPlanningRepository(db), {
     createManufacturingOrder: async () => {
       throw new Error("not used");
     },
+    createFromSalesOrderRow: async () => {
+      throw new Error("not used in this test");
+    },
+    createManufacturingOrderInTx: async () => {
+      throw new Error("not used in this test");
+    },
+    setDueDatesInTx: async () => {
+      throw new Error("not used in this test");
+    },
   },
 });
 

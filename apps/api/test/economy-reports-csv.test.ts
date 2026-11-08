@@ -11,6 +11,7 @@ import { economyRoutes } from "../src/modules/economy/routes/economy.routes.js";
 import type { VatReportService } from "../src/modules/economy/service/vat-report.service.js";
 import type { SieService } from "../src/modules/economy/service/sie.service.js";
 import { parsed } from "./helpers/parsed.js";
+import { unusedPeriodicSummary, unusedVatCodes } from "./helpers/economy-route-deps.js";
 
 // F2: CSV siblings of the B6a report routes (balance-sheet/csv,
 // income-statement/csv, general-ledger/csv, verification-list/csv) plus the
@@ -81,6 +82,8 @@ function buildApp(role: "admin" | "user" = "admin") {
     vatReport: {} as unknown as VatReportService,
     reports,
     sie: {} as unknown as SieService,
+    vatCodes: unusedVatCodes,
+    periodicSummary: unusedPeriodicSummary,
   });
   return app;
 }

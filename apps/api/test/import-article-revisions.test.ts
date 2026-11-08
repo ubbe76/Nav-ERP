@@ -46,6 +46,12 @@ function fakeDeps(existing: ExistingArticle[] = []): ArticleImportDeps {
     async articlesByNumber(numbers) {
       return new Map(existing.filter((a) => numbers.includes(a.articleNumber)).map((a) => [a.articleNumber, a]));
     },
+    async articlesByBarcode() {
+      throw new Error("not used in this test");
+    },
+    async suppliersByNumber() {
+      throw new Error("not used in this test");
+    },
     async unitsByCode() {
       return new Map([["st", { id: "unit-st", code: "st" }]]);
     },

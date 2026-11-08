@@ -35,6 +35,13 @@ const DEFAULT_POSTING_SETTINGS = {
   postingReminderFeeAccount: "3540",
   postingPaymentWriteOff: "3740",
   postingVatSettlement: "2650",
+  postingInventory: "1460",
+  postingInventoryChange: "4990",
+  postingWip: "1440",
+  postingWipChange: "4940",
+  postingFxGain: "3960",
+  postingFxLoss: "7960",
+  postingBankFees: "6570",
 };
 let postingSettings = { ...DEFAULT_POSTING_SETTINGS };
 const settingsReader = { read: async () => postingSettings };
@@ -418,10 +425,11 @@ describe("vat report — box computation", () => {
     await service.createAccount({ number: "3011", name: "Försäljning Diskbänkar EU", vatBox: "35" });
     await service.createAccount({ number: "4012", name: "Inköp Diskbänkar", vatBox: "20" });
     const groups: Record<string, string> = {};
-    for (const [code, name] of [
+    const groupRows: [string, string][] = [
       ["310", "Diskbänkar"],
       ["320", "Underreden"],
-    ]) {
+    ];
+    for (const [code, name] of groupRows) {
       const [group] = await db.execute<{ id: string }>(sql`INSERT INTO article_groups (code, name) VALUES (${code}, ${name}) RETURNING id`);
       groups[code] = group!.id;
     }

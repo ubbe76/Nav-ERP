@@ -12,6 +12,7 @@ import type { VatReportService } from "../src/modules/economy/service/vat-report
 import type { FinancialReportsService } from "../src/modules/economy/service/financial-reports.service.js";
 import type { SieService } from "../src/modules/economy/service/sie.service.js";
 import { parsed } from "./helpers/parsed.js";
+import { unusedPeriodicSummary, unusedVatCodes } from "./helpers/economy-route-deps.js";
 
 // Package 5 (uppföljningssvepet): route-level coverage for B2's poster→409
 // mappings, exercised through POST /verifications/:id/reverse — previously
@@ -84,6 +85,8 @@ function buildApp(userId: string) {
     vatReport: {} as unknown as VatReportService,
     reports: {} as unknown as FinancialReportsService,
     sie: {} as unknown as SieService,
+    vatCodes: unusedVatCodes,
+    periodicSummary: unusedPeriodicSummary,
   });
   return app;
 }

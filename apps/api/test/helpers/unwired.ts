@@ -1,3 +1,4 @@
+import type { EinvoiceReceiveService } from "../../src/modules/einvoice/service/einvoice-receive.service";
 import type { SalesOrderLinkReader } from "../../src/modules/manufacturing/service/manufacturing.service";
 import type { ArticleSelfCostReader } from "../../src/modules/reports/service/reports.service";
 
@@ -21,4 +22,19 @@ export const unwiredSalesOrderLinks: SalesOrderLinkReader = {
 // that never read a self cost pass this.
 export const unwiredSelfCosts: ArticleSelfCostReader = {
   latestPreCalculationSelfCost: () => unwired("ArticleSelfCostReader.latestPreCalculationSelfCost"),
+};
+
+// The reception service of e-invoicing (the inbox). Tests of the sending
+// routes never reach it and pass this to einvoiceRoutes.
+export const unwiredEinvoiceReceive: EinvoiceReceiveService = {
+  runReceive: () => unwired("EinvoiceReceiveService.runReceive"),
+  runReceiveIfDue: () => unwired("EinvoiceReceiveService.runReceiveIfDue"),
+  receiveNow: () => unwired("EinvoiceReceiveService.receiveNow"),
+  kick: () => unwired("EinvoiceReceiveService.kick"),
+  receptionLog: () => unwired("EinvoiceReceiveService.receptionLog"),
+  dismiss: () => unwired("EinvoiceReceiveService.dismiss"),
+  infoForScan: () => unwired("EinvoiceReceiveService.infoForScan"),
+  forScan: () => unwired("EinvoiceReceiveService.forScan"),
+  originalXml: () => unwired("EinvoiceReceiveService.originalXml"),
+  attachment: () => unwired("EinvoiceReceiveService.attachment"),
 };

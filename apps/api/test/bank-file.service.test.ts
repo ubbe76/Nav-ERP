@@ -256,6 +256,11 @@ describe("inbetalningar (camt.054 kredit)", () => {
     const fake = createBankFileService({
       db,
       repo: createBankFileRepository(db),
+      company: {
+        readCompany: async () => {
+          throw new Error("not used in this test");
+        },
+      },
       batches: buildPaymentBatchService(),
       customerPayments: {
         createInTx: async () => {

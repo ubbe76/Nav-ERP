@@ -30,6 +30,7 @@ const poster = createVerificationPoster({
     postingAccountsReceivable: "1510", postingAccountsPayable: "2440",
     postingDefaultCost: "4010", postingBank: "1930",
     postingReminderFeeAccount: "3540", postingPaymentWriteOff: "3740", postingVatSettlement: "2650",
+    postingInventory: "1460", postingInventoryChange: "4990", postingWip: "1440", postingWipChange: "4940", postingFxGain: "3960", postingFxLoss: "7960", postingBankFees: "6570",
   }),
 });
 

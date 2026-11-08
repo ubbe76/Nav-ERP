@@ -1,8 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { createPlanningService } from "../src/modules/planning/service/planning.service.js";
+import { createPlanningService, type ManufacturingOrderCreator } from "../src/modules/planning/service/planning.service.js";
 import type { PlanningRepository } from "../src/modules/planning/repository/planning.repository.js";
 import type { ArticleOverviewInput } from "../src/modules/planning/service/article-overview.js";
 import type { PartnerDeliveryFields } from "../src/modules/system/service/delivery-days.js";
+
+// A creator the test never reaches: every member throws if a test starts to.
+const unusedManufacturing: ManufacturingOrderCreator = {
+  async createManufacturingOrder() {
+    throw new Error("not used in this test");
+  },
+  async createFromSalesOrderRow() {
+    throw new Error("not used in this test");
+  },
+  async createManufacturingOrderInTx() {
+    throw new Error("not used in this test");
+  },
+  async setDueDatesInTx() {
+    throw new Error("not used in this test");
+  },
+};
 
 // Pure unit tests with faked deps — no database. Covers the order-creation
 // failure branches that are impractical to provoke through the real services.
@@ -86,14 +102,7 @@ describe("planning service — stafflat leverantörspris on created rows", () =>
           },
           async cancel() {},
         },
-        manufacturing: {
-          async createManufacturingOrder() {
-            throw new Error("not used in this test");
-          },
-          async createManufacturingOrderInTx() {
-            throw new Error("not used in this test");
-          },
-        },
+        manufacturing: unusedManufacturing,
       }
     );
 
@@ -131,14 +140,7 @@ describe("planning service — order creation failure branches", () => {
           cancelled.push(id);
         },
       },
-      manufacturing: {
-        async createManufacturingOrder() {
-          throw new Error("not used");
-        },
-        async createManufacturingOrderInTx() {
-          throw new Error("not used");
-        },
-      },
+      manufacturing: unusedManufacturing,
     });
 
     const result = await service.createOrdersFromProposals(
@@ -166,14 +168,7 @@ describe("planning service — order creation failure branches", () => {
           throw new Error("must not cancel a partially successful order");
         },
       },
-      manufacturing: {
-        async createManufacturingOrder() {
-          throw new Error("not used");
-        },
-        async createManufacturingOrderInTx() {
-          throw new Error("not used");
-        },
-      },
+      manufacturing: unusedManufacturing,
     });
 
     const result = await service.createOrdersFromProposals(
@@ -212,14 +207,7 @@ describe("planning service — order creation failure branches", () => {
             throw new Error("not used");
           },
         },
-        manufacturing: {
-          async createManufacturingOrder() {
-            throw new Error("not used");
-          },
-          async createManufacturingOrderInTx() {
-            throw new Error("not used");
-          },
-        },
+        manufacturing: unusedManufacturing,
       }
     );
 
@@ -296,14 +284,7 @@ describe("planning service — subcontract (lego) proposals", () => {
             throw new Error("must not cancel");
           },
         },
-        manufacturing: {
-          async createManufacturingOrder() {
-            throw new Error("not used");
-          },
-          async createManufacturingOrderInTx() {
-            throw new Error("not used");
-          },
-        },
+        manufacturing: unusedManufacturing,
       }
     );
 
@@ -354,14 +335,7 @@ describe("planning service — subcontract (lego) proposals", () => {
             throw new Error("must not cancel");
           },
         },
-        manufacturing: {
-          async createManufacturingOrder() {
-            throw new Error("not used");
-          },
-          async createManufacturingOrderInTx() {
-            throw new Error("not used");
-          },
-        },
+        manufacturing: unusedManufacturing,
       }
     );
 
@@ -400,14 +374,7 @@ describe("planning service — subcontract (lego) proposals", () => {
             throw new Error("must not cancel");
           },
         },
-        manufacturing: {
-          async createManufacturingOrder() {
-            throw new Error("not used");
-          },
-          async createManufacturingOrderInTx() {
-            throw new Error("not used");
-          },
-        },
+        manufacturing: unusedManufacturing,
       }
     );
 
@@ -459,9 +426,19 @@ describe("planning service — behovsberäkning result cache", () => {
               orderQuantity: null,
               rounding: null,
               configuratorMode: null,
+              manufacturingLeadTimeDays: null,
             },
           ],
-          salesRows: [{ articleId: "a", orderStatus: "confirmed", quantityOrdered: 5, quantityDelivered: 0 }],
+          salesRows: [
+            {
+              articleId: "a",
+              orderStatus: "confirmed",
+              quantityOrdered: 5,
+              quantityDelivered: 0,
+              expectedDeliveryDate: null,
+              customerDelivery: { deliveryWeekdays: [], deliveryDayMode: null, transitDays: null },
+            },
+          ],
           purchaseRows: [],
           manufacturingOrders: [],
           moMaterialRows: [],
@@ -483,7 +460,7 @@ describe("planning service — behovsberäkning result cache", () => {
       addRow: async () => ({}),
       cancel: async () => ({}),
     },
-    manufacturing: { createManufacturingOrder: async () => ({ id: "mo", orderNumber: "TO-1" }) },
+    manufacturing: { ...unusedManufacturing, createManufacturingOrder: async () => ({ id: "mo", orderNumber: "TO-1" }) },
   };
 
   it("reuses the computed result for paging/search within the TTL and stamps computedAt", async () => {
@@ -561,6 +538,8 @@ describe("planning service — behovsberäkning result cache", () => {
       bomEdges: [],
       primarySuppliers: [],
       legoOperationRows: [],
+      configuredRows: [],
+      configuredCascade: new Map(),
       dating: emptyDating,
     };
   }
@@ -577,6 +556,7 @@ describe("planning service — configured rows: one derivation per configuration
       cancel: async () => ({}),
     },
     manufacturing: {
+      ...unusedManufacturing,
       createManufacturingOrder: async () => ({ id: "mo", orderNumber: "TO-1" }),
       createFromSalesOrderRow: async () => ({ id: "mo", orderNumber: "TO-1" }),
     },
@@ -787,17 +767,7 @@ describe("planning service — leveransdagar on created purchase orders", () => 
           },
           async cancel() {},
         },
-        manufacturing: {
-          async createManufacturingOrder() {
-            throw new Error("not used in this test");
-          },
-          async createManufacturingOrderInTx() {
-            throw new Error("not used in this test");
-          },
-          async createFromSalesOrderRow() {
-            throw new Error("not used in this test");
-          },
-        },
+        manufacturing: unusedManufacturing,
         today: () => "2026-10-17",
       }
     );
@@ -908,14 +878,7 @@ describe("planning service — leveransdagar on created purchase orders", () => 
               throw new Error("must not cancel");
             },
           },
-          manufacturing: {
-            async createManufacturingOrder() {
-              throw new Error("not used in this test");
-            },
-            async createFromSalesOrderRow() {
-              throw new Error("not used in this test");
-            },
-          },
+          manufacturing: unusedManufacturing,
           today: () => "2026-10-17",
         }
       );

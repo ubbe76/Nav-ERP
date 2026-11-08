@@ -14,6 +14,7 @@ import { createFinancialReportsService } from "../src/modules/economy/service/fi
 import { economyRoutes } from "../src/modules/economy/routes/economy.routes.js";
 import type { SieService } from "../src/modules/economy/service/sie.service.js";
 import { parsed } from "./helpers/parsed.js";
+import { unusedPeriodicSummary, unusedVatCodes } from "./helpers/economy-route-deps.js";
 
 // Package 5 (uppföljningssvepet): route-level coverage for B5's vat-report
 // error mappings (economy.routes.ts's vatReportError), previously only
@@ -33,6 +34,13 @@ const DEFAULT_POSTING_SETTINGS = {
   postingReminderFeeAccount: "3540",
   postingPaymentWriteOff: "3740",
   postingVatSettlement: "2650",
+  postingInventory: "1460",
+  postingInventoryChange: "4990",
+  postingWip: "1440",
+  postingWipChange: "4940",
+  postingFxGain: "3960",
+  postingFxLoss: "7960",
+  postingBankFees: "6570",
 };
 const settingsReader = { read: async () => DEFAULT_POSTING_SETTINGS };
 const poster = createVerificationPoster(settingsReader);
@@ -111,6 +119,8 @@ function buildApp(userId: string) {
     vatReport: vatReportService,
     reports,
     sie: {} as unknown as SieService,
+    vatCodes: unusedVatCodes,
+    periodicSummary: unusedPeriodicSummary,
   });
   return app;
 }

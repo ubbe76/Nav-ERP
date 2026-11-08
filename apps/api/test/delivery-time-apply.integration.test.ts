@@ -30,6 +30,7 @@ import {
   NothingToReserveError,
   SalesOrderNotOpenError,
   type ManufacturingOrderCreator,
+  type SalesOrderDateWriter,
   type ManufacturingPlanReader,
 } from "../src/modules/planning/service/planning.service.js";
 import { parsed } from "./helpers/parsed.js";
@@ -93,7 +94,7 @@ const scheduleService = createScheduleService(createScheduleRepository(db), crea
   isDateLocked: async () => false,
 });
 
-function buildPlanning(manufacturing: ManufacturingOrderCreator = mfgService, salesOrderDates = salesService) {
+function buildPlanning(manufacturing: ManufacturingOrderCreator = mfgService, salesOrderDates: SalesOrderDateWriter = salesService) {
   return createPlanningService(createPlanningRepository(db), {
     purchase: {
       createPurchaseOrder: async () => {
