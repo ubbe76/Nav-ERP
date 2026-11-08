@@ -20,6 +20,23 @@ const ThemeBootContext = createContext<ThemeBootValue>({ boot: FALLBACK_THEME_BO
 
 function applyTheme(id: string) {
   if (document.documentElement.getAttribute("data-theme") !== id) document.documentElement.setAttribute("data-theme", id);
+  syncThemeColor();
+}
+
+// The window colour of the installed app (and of the browser's toolbar on a
+// phone) follows the theme: <meta name="theme-color"> gets the app toolbar's
+// surface token, read from the applied theme — never a colour of its own.
+// Until the first effect the manifest's theme_color holds.
+function syncThemeColor() {
+  const color = getComputedStyle(document.documentElement).getPropertyValue("--color-surface").trim();
+  if (!color) return;
+  let meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (!meta) {
+    meta = document.createElement("meta");
+    meta.name = "theme-color";
+    document.head.appendChild(meta);
+  }
+  if (meta.content !== color) meta.content = color;
 }
 
 export function ThemeBootProvider({ boot, children }: { boot: ThemeBootClient; children: ReactNode }) {
