@@ -25,7 +25,6 @@ export function SettingsForm({
   const [allowMultipleStamps, setAllowMultipleStamps] = useState(settings.allowMultipleStamps);
   const [timeKindSplit, setTimeKindSplit] = useState(settings.timeKindSplit ?? false);
   const [showRevisionsOnDocuments, setShowRevisionsOnDocuments] = useState(settings.showRevisionsOnDocuments);
-  const [scheduleBalancing, setScheduleBalancing] = useState(settings.scheduleBalancing);
   const [showOrderRevisionOnDocuments, setShowOrderRevisionOnDocuments] = useState(
     settings.showOrderRevisionOnDocuments
   );
@@ -33,8 +32,6 @@ export function SettingsForm({
   const [extraDescriptionDocuments, setExtraDescriptionDocuments] = useState<ExtraDescriptionDocument[]>(
     settings.extraDescriptionDocuments
   );
-  const [atfMinutesPerWeek, setAtfMinutesPerWeek] = useState(String(settings.atfMinutesPerWeek));
-  const [atfSaved, setAtfSaved] = useState(false);
   // "" = ingen gräns (null on the API).
   const [overReceiptPercent, setOverReceiptPercent] = useState(formatPercent(settings.purchaseOverReceiptPercent));
   const [overDeliveryPercent, setOverDeliveryPercent] = useState(formatPercent(settings.salesOverDeliveryPercent));
@@ -105,11 +102,6 @@ export function SettingsForm({
     if (updated) setShowRevisionsOnDocuments(updated.showRevisionsOnDocuments);
   }
 
-  async function toggleScheduleBalancing() {
-    const updated = await save({ scheduleBalancing: !scheduleBalancing });
-    if (updated) setScheduleBalancing(updated.scheduleBalancing);
-  }
-
   async function toggleShowOrderRevision() {
     const updated = await save({ showOrderRevisionOnDocuments: !showOrderRevisionOnDocuments });
     if (updated) setShowOrderRevisionOnDocuments(updated.showOrderRevisionOnDocuments);
@@ -127,20 +119,6 @@ export function SettingsForm({
     );
     const updated = await save({ extraDescriptionDocuments: next });
     if (updated) setExtraDescriptionDocuments(updated.extraDescriptionDocuments);
-  }
-
-  async function saveAtf() {
-    setAtfSaved(false);
-    const minutes = Number(atfMinutesPerWeek);
-    if (!Number.isInteger(minutes) || minutes < 0 || minutes > 600) {
-      setError("ATF-intjäningen måste vara ett heltal 0–600 minuter");
-      return;
-    }
-    const updated = await save({ atfMinutesPerWeek: minutes });
-    if (updated) {
-      setAtfMinutesPerWeek(String(updated.atfMinutesPerWeek));
-      setAtfSaved(true);
-    }
   }
 
   // badInput: Firefox lets letters into a number field and then reports the
@@ -472,54 +450,6 @@ export function SettingsForm({
             </label>
           ))}
         </div>
-      </div>
-      <div className={styles.row}>
-        <div className={styles.texts}>
-          <div className={styles.label}>ATF-intjäning (minuter per vecka)</div>
-          <div className={styles.description}>
-            Arbetstidsförkortning som tjänas in per fullgjord arbetsvecka, t.ex. 82. 0 = ATF används inte. Kan
-            avvikas per anställd på personalkortet.
-          </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            type="number"
-            min={0}
-            max={600}
-            aria-label="ATF-intjäning (minuter per vecka)"
-            className={styles.numberInput}
-            value={atfMinutesPerWeek}
-            disabled={pending}
-            onChange={(e) => {
-              setAtfSaved(false);
-              setAtfMinutesPerWeek(e.target.value);
-            }}
-            onBlur={saveAtf}
-          />
-          {atfSaved && <span className={styles.saved}>Sparat</span>}
-        </div>
-      </div>
-      <div className={styles.row}>
-        <div className={styles.texts}>
-          <div className={styles.label}>Tillåt ATF-uttag via schemat</div>
-          <div className={styles.description}>
-            På: veckoscheman kan få ordinarie arbetstid och ATF per vecka. ATF och inarbetning räknas per
-            arbetsdag, och veckans sista arbetsdag blir kortare — är den röd blir dagen före kortare. Av:
-            veckoscheman följer bara sina dagsscheman.
-          </div>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={scheduleBalancing}
-          aria-label="Tillåt ATF-uttag via schemat"
-          className={styles.switch}
-          data-on={scheduleBalancing}
-          disabled={pending}
-          onClick={toggleScheduleBalancing}
-        >
-          <span className={styles.knob} aria-hidden="true" />
-        </button>
       </div>
       <div className={styles.row}>
         <div className={styles.texts}>

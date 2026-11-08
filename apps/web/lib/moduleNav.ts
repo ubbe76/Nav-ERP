@@ -390,8 +390,8 @@ export const PERSONAL_SECTIONS: ModuleNavSection[] = [
       },
       {
         href: "/personal/lon-paxml",
-        title: "Lön & PAXml",
-        description: "Tidkoder för PAXml-exporten, övertidsregler och anledning vid sen ankomst.",
+        title: "Lön, PAXml & schema",
+        description: "Tidkoder för PAXml-exporten, övertidsregler, ATF och anledning vid sen ankomst.",
         roles: ["admin"],
       },
     ],
@@ -803,7 +803,7 @@ export const SYSTEM_SECTIONS: ModuleNavSection[] = [
       {
         href: "/system/installningar",
         title: "Inställningar",
-        description: "Systembeteenden, t.ex. parallella stämplingar, ATF-intjäning och e-post (SMTP).",
+        description: "Systembeteenden, t.ex. parallella stämplingar och e-post (SMTP).",
       },
       {
         href: "/system/teman",

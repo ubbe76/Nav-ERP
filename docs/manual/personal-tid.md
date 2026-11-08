@@ -25,7 +25,7 @@ Ett veckoschema kopplar ett dagsschema till varje veckodag (måndag–söndag); 
 
 ### ATF och inarbetning i veckoschemat
 
-När inställningen **Tillåt ATF-uttag via schemat** är på (under **System → Inställningar**, se [System](/hjalp/system)) får veckoschemat två fält till:
+När inställningen **Tillåt ATF-uttag via schemat** är på (under **Personal & lön → Lön, PAXml & schema**, se [Lön, PAXml & schema](/hjalp/lon#lon-paxml-schema)) får veckoschemat två fält till:
 
 - **Ordinarie arbetstid per vecka (timmar)** — till exempel 40. Tomt = ingen utjämning: veckan följer då bara sina dagsscheman.
 - **ATF per vecka (minuter)** — till exempel 82. Med 0 jämnas bara inarbetningen ut.
@@ -79,7 +79,7 @@ Prioritetsordning när en dag avgörs: dagöverstyrning → helgdag → veckoöv
 
 ATF tjänas in med ett schablonvärde i **minuter per vecka** för varje fullbordad arbetsvecka:
 
-- Systemstandarden sätts under **System → Inställningar** ("ATF-intjäning (minuter per vecka)"); på personalkortets **ATF**-flik kan den överstyras per anställd.
+- Systemstandarden sätts under **Personal & lön → Lön, PAXml & schema** ("ATF-intjäning (minuter per vecka)"); på personalkortets **ATF**-flik kan den överstyras per anställd.
 - **Intjäning från** anger från vilket datum intjäningen räknas.
 - **Uttagsläge**: **Tidbank** (uttag dras från saldot) eller **Veckouttag** (den anställde tar ut sin ATF varje vecka — ingen bank byggs upp). För ATF som tas ut som kortare arbetstid i veckoschemat, se [ATF och inarbetning i veckoschemat](#atf-och-inarbetning-i-veckoschemat).
 - Fliken visar saldot och alla transaktioner (Uttag/Justering). Uttag registreras här eller av den anställde själv i [stämpelterminalen](/hjalp/terminal); justeringar (± timmar) används för korrigeringar. Negativt saldo tillåts men visas rött.
