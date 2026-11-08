@@ -1,3 +1,4 @@
+import { createStockLocationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { articleCodes, articleFiles, articleUnits, articles, bomComponents, configuratorVariants, customers, db, routingOperations, salesOrderRows, salesOrders, units } from "@navet/db";
@@ -13,6 +14,7 @@ import { createStockService } from "../src/modules/stock/service/stock.service.j
 import { makeArticle, makeVariantService, resetConfigurator, testCostingSettings, variantWriters } from "./helpers/configurator.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { vatRateGroupId } from "./helpers/vat-group.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Delprojekt 3, Task 4: stocked variants — preview, creation in ONE
 // transaction (article + route + structure + link), the code lock and the
@@ -426,8 +428,8 @@ describe("guards once variants exist", () => {
     const s = await build();
     const [row] = await withStock.createVariants(s.article.id, ONE, null);
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const open = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
-    const blocked = await stockService.createLocation({ warehouseId: warehouse!.id, name: "Karantän", active: true, blocked: true });
+    const open = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
+    const blocked = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "Karantän", active: true, blocked: true }));
     await stockService.recordTransaction({ articleId: row!.articleId!, locationId: open.id, quantityDelta: 3, transactionType: "inventory_adjustment" });
     await stockService.recordTransaction({ articleId: row!.articleId!, locationId: blocked.id, quantityDelta: 4, transactionType: "inventory_adjustment" });
     expect((await withStock.listVariants(s.article.id))[0]!.onHand).toBe("7");
@@ -439,8 +441,8 @@ describe("guards once variants exist", () => {
     const stockService = createStockService(createStockRepository(db));
     const s = await build();
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const main = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
-    const alt = await stockService.createLocation({ warehouseId: warehouse!.id, name: "B1", active: true });
+    const main = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
+    const alt = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "B1", active: true }));
     await stockService.setArticleLocations(s.article.id, { primaryLocationId: main.id, alternativeLocationIds: [alt.id] });
     const [row] = await service.createVariants(s.article.id, ONE, null);
     expect(await stockService.getArticleLocations(row!.articleId!)).toMatchObject({ primary: { locationId: main.id }, alternatives: [] });

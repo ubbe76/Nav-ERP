@@ -4,7 +4,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
-import { createArticleSchema, updateArticleSchema, updateSystemSettingsSchema } from "@navet/shared";
+import { createArticleSchema, updateArticleSchema, updateSystemSettingsSchema, createCustomerSchema, createQuoteSchema } from "@navet/shared";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -22,6 +22,7 @@ import { createSystemRepository } from "../src/modules/system/repository/system.
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { pdfText } from "./helpers/pdf.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -132,10 +133,10 @@ describe("Extra benämning — documents", () => {
       name: "Säljare",
       role: "admin",
     });
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     const article = await makeArticle(text);
     const { order } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 2, unitPrice: 100 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 2, unitPrice: 100 }] }),
       user.id
     );
     return order;

@@ -1,3 +1,4 @@
+import { createCustomerSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { sql } from "drizzle-orm";
@@ -14,6 +15,7 @@ import { resolvePrice } from "../src/modules/sales/service/price-resolver.js";
 import { configuratorRoutes as oauthConfiguratorRoutes } from "../src/modules/oauth/routes/configurator.routes.js";
 import { makeArticle, makeVariantService, resetConfigurator } from "./helpers/configurator.js";
 import { testArticleService, testDocumentPdfService, testSystemService } from "./helpers/services.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Delprojekt 4a, beslut C: a variant without agreements of its own is priced
 // through the template's customer chain plus the configuration's additions.
@@ -53,7 +55,7 @@ async function build() {
   return { template: article, variant, bredd };
 }
 const makeCustomer = (discountPercent?: number) =>
-  salesService.createCustomer({ name: "Kund AB", active: true, ...(discountPercent !== undefined ? { discountPercent } : {}) });
+  salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true, ...(discountPercent !== undefined ? { discountPercent } : {}) }));
 async function priceList(customerId: string, rows: [articleId: string, fromQuantity: number, unitPrice: number][]) {
   const [list] = await db.insert(priceLists).values({ code: `PL-${crypto.randomUUID().slice(0, 8)}`, name: "Lista" }).returning();
   await db.update(customers).set({ priceListId: list!.id }).where(sql`${customers.id} = ${customerId}`);

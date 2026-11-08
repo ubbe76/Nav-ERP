@@ -1,3 +1,4 @@
+import { completeOperationSchema, createArticleSchema, createCustomerSchema, createPurchaseOrderSchema, createQuoteSchema, createSupplierSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { and, eq, sql } from "drizzle-orm";
@@ -43,6 +44,7 @@ import {
 } from "../src/modules/stock/service/stock.service.js";
 import { createValuationService } from "../src/modules/stock/service/valuation.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Spärrade lagerplatser (etapp 1, migration 0185): spärra/släpp as a
 // whitelisted transition with audit, the flows against a blocked place
@@ -135,7 +137,7 @@ async function place(name: string, opts: { fixed?: boolean; blocked?: boolean; n
 }
 
 async function article(number: string, defaultLocationId?: string, type: "purchased" | "manufactured" = "purchased") {
-  return articleService.createArticle({ articleNumber: number, name: number, type, active: true, defaultLocationId });
+  return articleService.createArticle(parsed(createArticleSchema, { articleNumber: number, name: number, type, active: true, defaultLocationId }));
 }
 
 async function stock(articleId: string, locationId: string | undefined, quantityDelta: number) {
@@ -161,8 +163,8 @@ async function locationRow(id: string) {
 }
 
 async function salesOrder(articleId: string, quantity: number) {
-  const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
-  const { order, rows } = await salesService.createQuote({ customerId: customer.id, rows: [{ articleId, quantity, unitPrice: 10 }] }, user.id);
+  const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
+  const { order, rows } = await salesService.createQuote(parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId, quantity, unitPrice: 10 }] }), user.id);
   await salesService.confirm(order.id);
   await salesService.startProduction(order.id);
   return { order, row: rows[0]! };
@@ -320,8 +322,8 @@ describe("inflows", () => {
   it("a purchase receipt into a blocked place lands there, and Ångra takes it back out", async () => {
     const k = await place("Karantän", { blocked: true });
     const x = await article("X-1");
-    const supplier = await purchaseService.createSupplier({ name: "Leverantör AB", active: true });
-    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Leverantör AB", active: true }));
+    const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     const row = await purchaseService.addRow(order.id, { articleId: x.id, quantity: 5, unitPrice: 10 });
     await purchaseService.confirm(order.id);
     await purchaseService.receiveGoods(order.id, row.id, { locationId: k.id, quantity: 5 }, user.id);
@@ -437,7 +439,7 @@ describe("the TO card: a chosen blocked place only takes the finished goods", ()
     const c = await article("C-1", a1.id);
     const u = await article("U-1", a1.id);
     const p = await article("P-1", a1.id, "manufactured");
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     const op10 = await mfgService.createRoutingOperation(p.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
     await mfgService.createRoutingOperation(p.id, { sequenceNo: 20, workCenterId: workCenter.id, setupTime: 5, runTimePerUnit: 1 });
     await articleService.addBomComponent(p.id, { componentArticleId: c.id, quantity: 2, routingOperationId: op10.id });
@@ -453,10 +455,10 @@ describe("the TO card: a chosen blocked place only takes the finished goods", ()
 
   it("Slutför operation: the material by Automatiskt, the last operation's goods onto the blocked place", async () => {
     const f = await fixture();
-    await mfgService.completeOperation(f.first.id, { quantityCompleted: 5, locationId: f.k.id }, user.id);
+    await mfgService.completeOperation(f.first.id, parsed(completeOperationSchema, { quantityCompleted: 5, locationId: f.k.id }), user.id);
     expect([await balance(f.c.id, f.a1.id), await balance(f.c.id, f.k.id)]).toEqual([90, 10]);
 
-    await mfgService.completeOperation(f.last.id, { quantityCompleted: 5, locationId: f.k.id }, user.id);
+    await mfgService.completeOperation(f.last.id, parsed(completeOperationSchema, { quantityCompleted: 5, locationId: f.k.id }), user.id);
     expect(await balance(f.p.id, f.k.id)).toBe(5);
     expect(await balance(f.p.id, f.a1.id)).toBe(0);
     expect([await balance(f.u.id, f.a1.id), await balance(f.u.id, f.k.id)]).toEqual([45, 0]);
@@ -477,7 +479,7 @@ describe("the TO card: a chosen blocked place only takes the finished goods", ()
   it("an open place chosen on the card takes the material and, on the last operation, the goods", async () => {
     const f = await fixture();
     const b = await place("B2");
-    await mfgService.completeOperation(f.last.id, { quantityCompleted: 5, locationId: b.id }, user.id);
+    await mfgService.completeOperation(f.last.id, parsed(completeOperationSchema, { quantityCompleted: 5, locationId: b.id }), user.id);
     expect(await balance(f.p.id, b.id)).toBe(5);
     // The unlinked material follows the receipt there, as with Slutför order.
     expect(await balance(f.u.id, b.id)).toBe(-5);
@@ -655,7 +657,7 @@ describe("readers", () => {
   it("values the blocked balance as usual, and Negativt saldo stays physical", async () => {
     const a1 = await place("A1");
     const k = await place("K1");
-    const x = await articleService.createArticle({ articleNumber: "X-1", name: "X-1", type: "purchased", active: true, standardCost: 10, defaultLocationId: a1.id });
+    const x = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "X-1", name: "X-1", type: "purchased", active: true, standardCost: 10, defaultLocationId: a1.id }));
     await stock(x.id, k.id, 10);
     await stock(x.id, a1.id, -4);
     await stockService.blockLocation(k.id, null, user.id);
@@ -673,7 +675,7 @@ describe("readers", () => {
     const k = await place("K1");
     const c = await article("C-1", a1.id);
     const p = await article("P-1", a1.id, "manufactured");
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     const op10 = await mfgService.createRoutingOperation(p.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 1, runTimePerUnit: 1 });
     await articleService.addBomComponent(p.id, { componentArticleId: c.id, quantity: 2, routingOperationId: op10.id });
     await stock(c.id, a1.id, 5);
@@ -685,7 +687,7 @@ describe("readers", () => {
     expect(order.releaseWarnings).toEqual(["C-1: behöver 10, tillgängligt 5"]);
     const [op] = await mfgService.listOperations(order.id);
 
-    const err = await mfgService.completeOperation(op!.id, { quantityCompleted: 4 }, user.id).catch((e: unknown) => e);
+    const err = await mfgService.completeOperation(op!.id, parsed(completeOperationSchema, { quantityCompleted: 4 }), user.id).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(MaterialShortageError);
     expect((err as MaterialShortageError).shortages).toMatchObject([{ articleId: c.id, required: 8, available: 5 }]);
     // Rolled back: nothing drawn anywhere.
@@ -765,7 +767,7 @@ describe("lock order on a temporary place", () => {
   // P (5 st) with one operation and one unlinked component, 2 per unit.
   async function orderFor(componentId: string, perUnit = 2) {
     const p = await article(`P-${crypto.randomUUID().slice(0, 6)}`, undefined, "manufactured");
-    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
     await mfgService.createRoutingOperation(p.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 1, runTimePerUnit: 1 });
     await articleService.addBomComponent(p.id, { componentArticleId: componentId, quantity: perUnit });
     const order = await mfgService.createManufacturingOrder({ articleId: p.id, quantity: 5 }, user.id);

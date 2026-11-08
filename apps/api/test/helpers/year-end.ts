@@ -1,3 +1,4 @@
+import { createVerificationSchema } from "@navet/shared";
 import { asc, count, eq, sql } from "drizzle-orm";
 import Fastify from "fastify";
 import { ZodError } from "zod";
@@ -17,6 +18,7 @@ import { ExchangeRateUnavailableError } from "../../src/modules/system/service/e
 import { rejectMalformedIds } from "../../src/modules/system/middleware/reject-malformed-ids.js";
 import { testFixedAssetService } from "./fixed-assets.js";
 import { DEFAULT_POSTING_SETTINGS, testEconomyRepository, testEconomyService } from "./services.js";
+import { parsed } from "../helpers/parsed.js";
 
 // Fixed, long-past years: every date in them is before "today" forever, so
 // no year-end test depends on the calendar (month boundaries, Stockholm vs
@@ -146,7 +148,7 @@ export async function bookManual(
   for (const row of rows) {
     resolved.push({ accountId: await accountId(row.account), debit: row.debit ?? 0, credit: row.credit ?? 0 });
   }
-  const draft = await testEconomyService.createVerification({ seriesId: series.id, date, description: "Testverifikat", rows: resolved }, userId);
+  const draft = await testEconomyService.createVerification(parsed(createVerificationSchema, { seriesId: series.id, date, description: "Testverifikat", rows: resolved }), userId);
   return testEconomyService.book(draft.id, userId);
 }
 

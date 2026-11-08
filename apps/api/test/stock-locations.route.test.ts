@@ -6,12 +6,13 @@ import { buildApp as buildRealApp } from "../src/app.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createAuthService } from "../src/modules/auth/service/auth.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
-import { deliverBatchSchema, listStockBalancesQuerySchema } from "@navet/shared";
+import { deliverBatchSchema, listStockBalancesQuerySchema, createArticleSchema, createStockLocationSchema } from "@navet/shared";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { stockRoutes } from "../src/modules/stock/routes/stock.routes.js";
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Fasta lagerplatser (0179) on the location routes, and the balances read
 // the Utleverans page uses for its per-row location pickers.
@@ -74,9 +75,9 @@ describe("GET /stock/balances?articleIds=", () => {
   it("answers with every listed article's locations and balances in one call", async () => {
     const app = buildApp();
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const a1 = await stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
-    const b2 = await stockService.createLocation({ warehouseId: warehouse!.id, name: "B2", active: true });
-    const make = (n: string) => articleService.createArticle({ articleNumber: n, name: n, type: "purchased", active: true });
+    const a1 = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
+    const b2 = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "B2", active: true }));
+    const make = (n: string) => articleService.createArticle(parsed(createArticleSchema, { articleNumber: n, name: n, type: "purchased", active: true }));
     const [x, y, z] = [await make("X-1"), await make("Y-1"), await make("Z-1")];
     const stock = (articleId: string, locationId: string, quantityDelta: number) =>
       stockService.recordTransaction({ articleId, locationId, quantityDelta, transactionType: "inventory_adjustment" });
@@ -161,8 +162,8 @@ describe("Spärra / Släpp spärr — routes", () => {
   it("blocks and unblocks with lager, answers 404/409 with codes, and lists the flags", async () => {
     const cookie = await userCookie(["lager"]);
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const k = await stockService.createLocation({ warehouseId: warehouse!.id, name: "K1", active: true });
-    const x = await articleService.createArticle({ articleNumber: "X-1", name: "X-1", type: "purchased", active: true, defaultLocationId: k.id });
+    const k = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "K1", active: true }));
+    const x = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "X-1", name: "X-1", type: "purchased", active: true, defaultLocationId: k.id }));
     await stockService.recordTransaction({ articleId: x.id, locationId: k.id, quantityDelta: 3, transactionType: "inventory_adjustment" });
 
     const blocked = await post(cookie, `/stock/locations/${k.id}/block`, { note: "  Karantän  " });
@@ -208,7 +209,7 @@ describe("Spärra / Släpp spärr — routes", () => {
 
   it("refuses without lager (403) and for a read-only account (403 read-only-account)", async () => {
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const k = await stockService.createLocation({ warehouseId: warehouse!.id, name: "K1", active: true });
+    const k = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "K1", active: true }));
 
     const buyer = await userCookie(["inkop"]);
     expect((await post(buyer, `/stock/locations/${k.id}/block`)).statusCode).toBe(403);

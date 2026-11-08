@@ -1,3 +1,4 @@
+import { createArticleSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -5,6 +6,7 @@ import { createArticleRepository } from "../src/modules/article/repository/artic
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createRegisterRepository } from "../src/modules/register/repository/register.repository.js";
 import { createRegisterService } from "../src/modules/register/service/register.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const registerService = createRegisterService(createRegisterRepository(db));
@@ -21,7 +23,7 @@ afterAll(async () => {
 });
 
 async function makeArticle(articleNumber: string) {
-  return articleService.createArticle({ articleNumber, name: articleNumber, type: "purchased", active: true });
+  return articleService.createArticle(parsed(createArticleSchema, { articleNumber, name: articleNumber, type: "purchased", active: true }));
 }
 
 describe("article packaging (antal per kolli + kollityp)", () => {

@@ -10,12 +10,13 @@ import {
   stockTransactions,
   suppliers,
 } from "@navet/db";
-import { listStockTransactionsQuerySchema } from "@navet/shared";
+import { listStockTransactionsQuerySchema, createArticleSchema, createStockLocationSchema } from "@navet/shared";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Förbättrad lagerlogg: filters, running balance, source document, who and
 // value on GET /stock/transactions (repository-level, real database).
@@ -35,17 +36,17 @@ afterAll(async () => {
 const q = (over: Record<string, unknown> = {}) => listStockTransactionsQuerySchema.parse({ ...over });
 
 async function makeArticle(tag = "A") {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `LOG-${tag}-${crypto.randomUUID().slice(0, 6)}`,
     name: `Artikel ${tag}`,
     type: "purchased",
     active: true,
-  });
+  }));
 }
 async function makeLocation(name: string) {
   const existing = (await stockService.listWarehouses()).find((w) => w.name === "Huvudlager");
   const wh = existing ?? (await stockService.createWarehouse({ name: "Huvudlager", active: true }));
-  return stockService.createLocation({ warehouseId: wh!.id, name, active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: wh!.id, name, active: true }));
 }
 async function makeUser(name = "Kalle Kula") {
   return authRepo.create({

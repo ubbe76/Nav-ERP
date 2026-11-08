@@ -1,7 +1,9 @@
+import { createArticleSchema } from "@navet/shared";
 import { sql } from "drizzle-orm";
 import { companyInfo, customers, db, deliveries, deliveryRows, salesOrderRows, salesOrders } from "@navet/db";
-import type { CreateArticleInput } from "@navet/shared";
+import type { z } from "zod";
 import { testArticleService } from "./services.js";
+import { parsed } from "../helpers/parsed.js";
 
 // Shared fixtures for the shipping suites. number_series is never truncated
 // (FR-/FS- counters survive across suites, same as the other series).
@@ -59,9 +61,9 @@ export async function makeCustomer(over: Partial<typeof customers.$inferInsert> 
   return row!;
 }
 
-export async function makeArticle(over: Partial<CreateArticleInput> = {}) {
+export async function makeArticle(over: Partial<z.input<typeof createArticleSchema>> = {}) {
   seq++;
-  const article = await testArticleService.createArticle({
+  const article = await testArticleService.createArticle(parsed(createArticleSchema, {
     articleNumber: `FRK-ART-${Date.now()}-${seq}`,
     name: `Artikel ${seq}`,
     type: "manufactured",
@@ -71,7 +73,7 @@ export async function makeArticle(over: Partial<CreateArticleInput> = {}) {
     width: 300,
     height: 200,
     ...over,
-  });
+  }));
   return article!;
 }
 

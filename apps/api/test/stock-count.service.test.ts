@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
-import { updateStockCountRowSchema } from "@navet/shared";
+import { updateStockCountRowSchema, createArticleSchema, createStockLocationSchema } from "@navet/shared";
 import { auditLog, db, stockCountSessions, stockTransactions } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -22,6 +22,7 @@ import { createStockCountService } from "../src/modules/stock/service/stock-coun
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { testDocumentPdfService } from "./helpers/services.js";
 import { pdfText } from "./helpers/pdf.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -51,7 +52,7 @@ afterAll(async () => {
 
 async function makeLocation(name = "A1") {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse!.id, name, active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name, active: true }));
 }
 
 // Bypasses authService.register (bootstrap-only) since transferStock only
@@ -66,13 +67,13 @@ async function makeUser() {
 }
 
 async function makeArticle(number = "ART-1", standardCost?: string) {
-  return articleService.createArticle({
+  return articleService.createArticle(parsed(createArticleSchema, {
     articleNumber: number,
     name: "Test Article",
     type: "purchased",
     active: true,
     ...(standardCost ? { standardCost: Number(standardCost) } : {}),
-  });
+  }));
 }
 
 // Raw session insert — used only by the guard tests below, which predate the
@@ -185,7 +186,7 @@ describe("stock count sessions — create/list/get", () => {
     ).rejects.toBeInstanceOf(StockLocationNotFoundError);
 
     const warehouse = await stockService.createWarehouse({ name: "H", active: true });
-    const inactive = await stockService.createLocation({ warehouseId: warehouse!.id, name: "X1", active: true });
+    const inactive = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "X1", active: true }));
     await stockService.updateLocation(inactive.id, { active: false });
     await expect(
       countRepo.createSession({ locationId: inactive.id, blocksTransactions: false }, null)

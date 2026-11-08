@@ -1,3 +1,4 @@
+import { createStockLocationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { inArray, sql } from "drizzle-orm";
 import { configuratorTemplates, db, stockTransactions, systemSettings } from "@navet/db";
@@ -9,6 +10,7 @@ import { createSystemRepository } from "../src/modules/system/repository/system.
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { createPlanningRepository } from "../src/modules/planning/repository/planning.repository.js";
 import { createPlanningService } from "../src/modules/planning/service/planning.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 // ABC-klassning (#10, etapp 2) against the database. "Today" is pinned to
 // 2030-03-04 like forecast.integration.test.ts: the default period is the
@@ -51,7 +53,7 @@ let locationId: string | null = null;
 async function location() {
   if (locationId) return locationId;
   const warehouse = await stockService.createWarehouse({ name: `Lager ${crypto.randomUUID().slice(0, 6)}`, active: true });
-  const loc = await stockService.createLocation({ warehouseId: warehouse!.id, name: `A-${crypto.randomUUID().slice(0, 6)}`, active: true });
+  const loc = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: `A-${crypto.randomUUID().slice(0, 6)}`, active: true }));
   locationId = loc.id;
   return loc.id;
 }

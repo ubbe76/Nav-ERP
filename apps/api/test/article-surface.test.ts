@@ -4,7 +4,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
-import { createArticleSchema, updateArticleSchema } from "@navet/shared";
+import { createArticleSchema, updateArticleSchema, createCustomerSchema, createQuoteSchema, createStockLocationSchema } from "@navet/shared";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -23,6 +23,7 @@ import { createSystemService } from "../src/modules/system/service/system.servic
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { pdfText } from "./helpers/pdf.js";
 import { stampOrderInvoiced } from "./helpers/services.js";
+import { parsed } from "./helpers/parsed.js";
 
 const articleRepo = createArticleRepository(db);
 const articleService = createArticleService(articleRepo);
@@ -74,12 +75,12 @@ async function makeUser() {
 }
 
 async function makeCustomer() {
-  return salesService.createCustomer({ name: "Kund AB", active: true });
+  return salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
 }
 
 async function makeLocation() {
   const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-  return stockService.createLocation({ warehouseId: warehouse!.id, name: "A1", active: true });
+  return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name: "A1", active: true }));
 }
 
 async function seedStock(articleId: string, locationId: string, quantity: number) {
@@ -168,7 +169,7 @@ describe("article surface treatment / colour — sales PDFs", () => {
     );
     await seedStock(article.id, location.id, 5);
     const { order, rows } = await salesService.createQuote(
-      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 2, unitPrice: 100 }] },
+      parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: article.id, quantity: 2, unitPrice: 100 }] }),
       user.id
     );
     return { user, customer, article, location, order, row: rows[0]! };

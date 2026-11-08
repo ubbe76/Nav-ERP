@@ -1,3 +1,4 @@
+import { createArticleSchema, createCustomerSchema, createQuoteSchema } from "@navet/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { articleAlternativeLocations, articles, db, permissionGroups, stockLocations, stockTransactions } from "@navet/db";
@@ -23,6 +24,7 @@ import { getOrCreateFallbackLocation, usableArticleLocations } from "../src/modu
 import { allocateOutflowLocations } from "../src/modules/stock/service/outflow-locations.js";
 import { ArticleLocationInvalidError, ArticleNotFoundError, createStockService } from "../src/modules/stock/service/stock.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Flera lagerplatser per artikel (etapp 3, migration 0186): the huvudplats
 // and the alternative places in order — PUT's rules, the resolver's order
@@ -80,7 +82,7 @@ async function place(name: string, opts: { fixed?: boolean; active?: boolean; bl
 }
 
 async function article(number: string, defaultLocationId?: string) {
-  return articleService.createArticle({ articleNumber: number, name: number, type: "purchased", active: true, defaultLocationId });
+  return articleService.createArticle(parsed(createArticleSchema, { articleNumber: number, name: number, type: "purchased", active: true, defaultLocationId }));
 }
 
 const set = (articleId: string, primaryLocationId: string | null, alternativeLocationIds: string[]) =>
@@ -125,8 +127,8 @@ function gate() {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function salesOrder(rows: { articleId: string; quantity: number }[]) {
-  const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
-  const created = await salesService.createQuote({ customerId: customer.id, rows: rows.map((r) => ({ ...r, unitPrice: 10 })) }, user.id);
+  const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
+  const created = await salesService.createQuote(parsed(createQuoteSchema, { customerId: customer.id, rows: rows.map((r) => ({ ...r, unitPrice: 10 })) }), user.id);
   await salesService.confirm(created.order.id);
   await salesService.startProduction(created.order.id);
   return created;
@@ -308,8 +310,8 @@ describe("the order of the article's places", () => {
 
     // The paper itself, and a blocked alternative skipped on both.
     await stockService.blockLocation(alt1.id, null, user.id);
-    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
-    const { order } = await salesService.createQuote({ customerId: customer.id, rows: [{ articleId: x.id, quantity: 5, unitPrice: 10 }] }, user.id);
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
+    const { order } = await salesService.createQuote(parsed(createQuoteSchema, { customerId: customer.id, rows: [{ articleId: x.id, quantity: 5, unitPrice: 10 }] }), user.id);
     await salesService.confirm(order.id);
     const text = pdfText((await salesService.getPickListPdf(order.id)).content);
     const at = (s: string) => text.indexOf(s);
@@ -519,14 +521,14 @@ describe("Kopiera från", () => {
     const source = await article("SRC-1", a1.id);
     await set(source.id, a1.id, [b1.id]);
 
-    const copy = await articleService.createArticle({
+    const copy = await articleService.createArticle(parsed(createArticleSchema, {
       articleNumber: "NEW-1",
       name: "Kopia",
       type: "purchased",
       active: true,
       defaultLocationId: a1.id,
       copyFrom: { articleId: source.id, parts: ["information", "inkop", "filer"] },
-    });
+    }));
     expect(await stockService.getArticleLocations(copy.id)).toMatchObject({ primary: { locationId: a1.id }, alternatives: [] });
     expect(await assignments(copy.id)).toEqual([]);
   });

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { sql } from "drizzle-orm";
 import { db, permissionGroups, units } from "@navet/db";
-import { formatLocationLabelCode, listStockLocationRegisterQuerySchema, type StockLocationRegisterRow } from "@navet/shared";
+import { formatLocationLabelCode, listStockLocationRegisterQuerySchema, type StockLocationRegisterRow, createStockLocationSchema } from "@navet/shared";
 import { buildApp as buildRealApp } from "../src/app.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createAuthService } from "../src/modules/auth/service/auth.service.js";
@@ -12,6 +12,7 @@ import { createArticleService } from "../src/modules/article/service/article.ser
 import { stockRoutes } from "../src/modules/stock/routes/stock.routes.js";
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 // Lagerplatsregistret (spec 2026-11-06 del 2): GET /stock/locations/register
 // and its CSV — search on place, warehouse and etikettkod, the filters, the
@@ -67,10 +68,10 @@ const names = (page: Page) => page.rows.map((r) => `${r.warehouseName}/${r.name}
 async function fixture() {
   const main = await stockService.createWarehouse({ name: "Huvudlager", active: true });
   const reserve = await stockService.createWarehouse({ name: "Reservlager", active: true });
-  const a1 = await stockService.createLocation({ warehouseId: main!.id, name: "A1", active: true });
-  const a2 = await stockService.createLocation({ warehouseId: main!.id, name: "A2", active: true, blocked: true, blockedNote: "Karantän" });
-  const b1 = await stockService.createLocation({ warehouseId: main!.id, name: "B1", active: false, fixed: false });
-  const r1 = await stockService.createLocation({ warehouseId: reserve!.id, name: "R1", active: true });
+  const a1 = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: main!.id, name: "A1", active: true }));
+  const a2 = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: main!.id, name: "A2", active: true, blocked: true, blockedNote: "Karantän" }));
+  const b1 = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: main!.id, name: "B1", active: false, fixed: false }));
+  const r1 = await stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: reserve!.id, name: "R1", active: true }));
   const article = (articleNumber: string, unitId: string) =>
     articleService.createArticle({ articleNumber, name: articleNumber, type: "purchased", unitId, active: true, defaultLocationId: a1.id } as never);
   const stock = (articleId: string, locationId: string, quantityDelta: number) =>
