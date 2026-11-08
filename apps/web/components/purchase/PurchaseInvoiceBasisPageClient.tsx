@@ -7,6 +7,7 @@ import { StatusPill } from "../ui/StatusPill";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination, useListNavigation } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { HelpLink } from "../ui/HelpLink";
 import { NewSupplierInvoiceForm } from "./SupplierInvoicesPageClient";
 import { formatMoney } from "../../lib/format";
@@ -27,6 +28,15 @@ export function PurchaseInvoiceBasisPageClient({
   // The order to create an invoice for (opens the create dialog prefilled).
   const [createFor, setCreateFor] = useState<PurchaseInvoiceBasisEntry | null>(null);
 
+  const view = useListColumns([
+    { key: "orderNumber", label: "Ordernr", width: "140px" },
+    { key: "supplierName", label: "Leverantör", width: "1.4fr" },
+    { key: "receivedAt", label: "Mottaget", width: "130px" },
+    { key: "receivedValue", label: "Mottaget värde", width: "160px", align: "right" as const },
+    { key: "invoiceStatus", label: "Fakturastatus", width: "1fr" },
+    { key: "id", label: "", width: "150px", align: "right" as const },
+  ]);
+
   return (
     <>
       <div className={shellStyles.topbar}>
@@ -46,17 +56,12 @@ export function PurchaseInvoiceBasisPageClient({
         />
         <InvoicedFilter />
         <ListExportLink endpoint="/api/v1/purchase-invoice-basis/csv" />
+        {view.chooser}
       </ListToolbar>
 
       <Table<PurchaseInvoiceBasisEntry>
-        columns={[
-          { key: "orderNumber", label: "Ordernr", width: "140px" },
-          { key: "supplierName", label: "Leverantör", width: "1.4fr" },
-          { key: "receivedAt", label: "Mottaget", width: "130px" },
-          { key: "receivedValue", label: "Mottaget värde", width: "160px", align: "right" },
-          { key: "invoiceStatus", label: "Fakturastatus", width: "1fr" },
-          { key: "id", label: "", width: "150px", align: "right" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={basis.rows}
         emptyText="Inga inlevererade order matchar urvalet"
         renderCell={(row, key) => {

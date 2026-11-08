@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { HelpLink } from "../ui/HelpLink";
 import { ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { StatusPill } from "../ui/StatusPill";
 import { Table } from "../ui/Table";
 import shellStyles from "../AppShell.module.css";
@@ -19,6 +20,17 @@ export function ShipmentsPageClient({
   customers: Customer[];
   pageSize: number;
 }) {
+  const view = useListColumns([
+    { key: "shipmentNumber", label: "Försändelse", width: "120px" },
+    { key: "customerName", label: "Kund", width: "1.4fr" },
+    { key: "deliveryNumbers", label: "Följesedlar", width: "1fr" },
+    { key: "carrier", label: "Transportör", width: "1.2fr" },
+    { key: "trackingNumber", label: "Fraktsedelsnr", width: "1fr" },
+    { key: "pickupDate", label: "Upphämtning", width: "120px" },
+    { key: "status", label: "Status", width: "120px" },
+    { key: "tracking", label: "Spårning", width: "1.2fr" },
+  ]);
+
   return (
     <>
       <div className={shellStyles.topbar}>
@@ -42,19 +54,12 @@ export function ShipmentsPageClient({
           ariaLabel="Filtrera på kund"
           options={customers.map((c) => ({ value: c.id, label: `${c.customerNumber} ${c.name}` }))}
         />
+        {view.chooser}
       </ListToolbar>
 
       <Table<ShipmentListRow>
-        columns={[
-          { key: "shipmentNumber", label: "Försändelse", width: "120px" },
-          { key: "customerName", label: "Kund", width: "1.4fr" },
-          { key: "deliveryNumbers", label: "Följesedlar", width: "1fr" },
-          { key: "carrier", label: "Transportör", width: "1.2fr" },
-          { key: "trackingNumber", label: "Fraktsedelsnr", width: "1fr" },
-          { key: "pickupDate", label: "Upphämtning", width: "120px" },
-          { key: "status", label: "Status", width: "120px" },
-          { key: "tracking", label: "Spårning", width: "1.2fr" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={shipments.rows}
         emptyText="Inga försändelser matchar sökningen"
         renderCell={(s, key) => {

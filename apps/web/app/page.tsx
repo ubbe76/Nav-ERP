@@ -21,7 +21,8 @@ import { OnboardingCard } from "../components/onboarding/OnboardingCard";
 import { ConfirmDialogHost } from "../components/ui/ConfirmDialogHost";
 import { FavoritesProvider } from "../components/FavoritesProvider";
 import { getCurrentUser, apiGet } from "../lib/api";
-import { loadFavorites } from "../lib/favorites";
+import { loadShellSettings } from "../lib/favorites";
+import { UserPrefsProvider } from "../components/UserPrefsProvider";
 import type { AlertKind, AlertsResponse } from "../lib/alerts";
 import {
   OVERVIEW_CARDS,
@@ -129,7 +130,7 @@ export default async function OverviewPage() {
     // shows; a failing call must not take Översikten down.
     alertsUrl ? apiGet<AlertsResponse>(alertsUrl, cookieHeader).catch((): AlertsResponse | null => null) : null,
     // The sidebar's Favoriter (null on failure — the group then stays hidden).
-    loadFavorites(cookieHeader),
+    loadShellSettings(cookieHeader),
     // Leveranser / Inleveranser denna vecka: open orders whose Nästa
     // leveransdatum is on or before Sunday, earliest (late) first.
     has("deliveries")
@@ -344,7 +345,11 @@ export default async function OverviewPage() {
 
   return (
     <FavoritesProvider initial={favorites.favorites} initialInSidebar={favorites.inSidebar}>
-    <div className={shellStyles.frame}>
+    <UserPrefsProvider
+      className={shellStyles.frame}
+      initialDensity={favorites.density}
+      initialListColumns={favorites.listColumns}
+    >
       <Nav active="Översikt" role={user.role} permissions={user.permissions} />
 
       <PermissionsProvider role={user.role} permissions={user.permissions}>
@@ -397,7 +402,7 @@ export default async function OverviewPage() {
       <StatusBar userName={user.name} userRole={roleLabel} />
       </div>
       </PermissionsProvider>
-    </div>
+    </UserPrefsProvider>
     </FavoritesProvider>
   );
 }

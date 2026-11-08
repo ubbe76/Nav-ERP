@@ -11,6 +11,7 @@ import { Button } from "../ui/Button";
 import { Input, Select } from "../ui/Field";
 import { FormError, FormNotice } from "../ui/Form";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination, useListNavigation } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import buttonStyles from "../ui/Button.module.css";
 import { NewArticleForm } from "./NewArticleForm";
 import { useCan } from "../PermissionsProvider";
@@ -334,6 +335,31 @@ export function ArticlesPageClient({
 
   const unitOptions = useMemo(() => units.slice().sort((a, b) => a.code.localeCompare(b.code, "sv")), [units]);
 
+  const view = useListColumns([
+    {
+      key: "select",
+      label: "Välj",
+      width: "24px",
+      header: (
+        <SelectAllCheckbox
+          checked={allSelected}
+          indeterminate={selectedIds.length > 0 && !allSelected}
+          ariaLabel="Markera alla artiklar på sidan"
+          onChange={(on) => setSelected(on ? new Set(rows.map((r) => r.id)) : new Set())}
+        />
+      ),
+    },
+    { key: "articleNumber", label: "Artikelnummer", width: "160px" },
+    { key: "name", label: "Benämning", width: "minmax(200px, 1fr)" },
+    { key: "type", label: "Typ", width: editable ? "170px" : "160px" },
+    { key: "abcClass", label: "ABC", width: "60px" },
+    { key: "groupName", label: "Varugrupp", width: editable ? "190px" : "140px" },
+    { key: "articleCodeName", label: "Artikelkod", width: "140px" },
+    { key: "unit", label: "Standardenhet", width: editable ? "140px" : "130px" },
+    { key: "standardCost", label: "Standardkostnad", width: "160px", align: "right" as const },
+    { key: "active", label: "Status", width: "120px" },
+  ]);
+
   return (
     <>
       <div className={shellStyles.topbar}>
@@ -433,6 +459,7 @@ export function ArticlesPageClient({
           Kopierat{copiedCount !== null ? ` (${copiedCount.toLocaleString("sv-SE")})` : ""}
         </label>
         <ListExportLink endpoint="/api/v1/articles/csv" />
+        {view.chooser}
       </ListToolbar>
 
       <FormError>{copyError}</FormError>
@@ -442,30 +469,8 @@ export function ArticlesPageClient({
 
       <div ref={tableRef}>
         <Table<Article>
-          columns={[
-            {
-              key: "select",
-              label: "Välj",
-              width: "24px",
-              header: (
-                <SelectAllCheckbox
-                  checked={allSelected}
-                  indeterminate={selectedIds.length > 0 && !allSelected}
-                  ariaLabel="Markera alla artiklar på sidan"
-                  onChange={(on) => setSelected(on ? new Set(rows.map((r) => r.id)) : new Set())}
-                />
-              ),
-            },
-            { key: "articleNumber", label: "Artikelnummer", width: "160px" },
-            { key: "name", label: "Benämning", width: "minmax(200px, 1fr)" },
-            { key: "type", label: "Typ", width: editable ? "170px" : "160px" },
-            { key: "abcClass", label: "ABC", width: "60px" },
-            { key: "groupName", label: "Varugrupp", width: editable ? "190px" : "140px" },
-            { key: "articleCodeName", label: "Artikelkod", width: "140px" },
-            { key: "unit", label: "Standardenhet", width: editable ? "140px" : "130px" },
-            { key: "standardCost", label: "Standardkostnad", width: "160px", align: "right" },
-            { key: "active", label: "Status", width: "120px" },
-          ]}
+          columns={view.columns}
+          onColumnResize={view.onColumnResize}
           rows={rows}
           highlightedRowId={highlighted === null ? null : rows[highlighted]?.id ?? null}
           emptyText={copiedView && copiedCount === 0 ? "Kopierat är tomt" : "Inga artiklar matchar sökningen"}

@@ -43,6 +43,43 @@
   text-align: right;
 }
 
+/* Kolumnbredd (Nav som program, punkt 6): the drag edge at the right of a
+   header cell — on the column boundary, since the cell's right padding is
+   the gap to the next column. */
+.headerCell {
+  position: relative;
+}
+.resizeHandle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 9px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.resizeHandle::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  bottom: 6px;
+  right: 4px;
+  width: 1px;
+  background: transparent;
+}
+.headerRow:hover .resizeHandle::after {
+  background: var(--color-border);
+}
+.resizeHandle:hover::after,
+.resizeHandle:focus-visible::after {
+  width: 2px;
+  right: 3px;
+  background: var(--accent);
+}
+.resizeHandle:focus-visible {
+  outline: none;
+}
+
 .cell {
   padding: 9px 12px 9px 0;
   border-bottom: 1px solid var(--color-divider);
@@ -123,6 +160,23 @@
   font-family: var(--font-body);
   font-size: 13.5px;
   color: var(--color-text-muted);
+}
+
+/* Täthet (Nav som program, punkt 6): Kompakt on the app frame tightens the
+   rows; the phone's stacked cards keep their own spacing. */
+@media (min-width: 641px) {
+  :global([data-density="compact"]) .cell {
+    padding-top: 5px;
+    padding-bottom: 5px;
+  }
+  :global([data-density="compact"]) .headerCell {
+    padding-top: 7px;
+    padding-bottom: 5px;
+  }
+  :global([data-density="compact"]) .footerRow > .cell {
+    padding-top: 9px;
+    padding-bottom: 9px;
+  }
 }
 
 /* Below phone width the grid becomes a stack of labeled cards: the table

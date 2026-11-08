@@ -8,6 +8,7 @@ import { GatedLink } from "../ui/GatedLink";
 import buttonStyles from "../ui/Button.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination, useListNavigation } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { useCan } from "../PermissionsProvider";
 import shellStyles from "../AppShell.module.css";
 import { formatMoney } from "../../lib/format";
@@ -53,6 +54,20 @@ export function DeviationsPageClient({
   const can = useCan();
   const canWrite = can(["kvalitet"]);
   const showCost = can(["office"]);
+
+  const view = useListColumns([
+    { key: "deviationNumber", label: "Nr", width: "70px" },
+    { key: "reportedDate", label: "Datum", width: "90px" },
+    { key: "type", label: "Typ", width: "110px" },
+    { key: "title", label: "Rubrik", width: "minmax(140px, 2fr)" },
+    { key: "counterpartyName", label: "Motpart", width: "minmax(110px, 1.2fr)" },
+    { key: "article", label: "Artikel", width: "minmax(80px, 0.8fr)" },
+    { key: "reasonName", label: "Orsak", width: "minmax(80px, 1fr)" },
+    { key: "responsibleUserName", label: "Ansvarig", width: "minmax(80px, 1fr)" },
+    { key: "dueDate", label: "Åtgärd senast", width: "100px" },
+    { key: "status", label: "Status", width: "110px" },
+    ...(showCost ? [{ key: "netCost", label: "Nettokostnad", width: "100px", align: "right" as const }] : []),
+  ]);
 
   return (
     <>
@@ -103,22 +118,12 @@ export function DeviationsPageClient({
         />
         <OverdueFilter />
         <ListExportLink endpoint="/api/v1/deviations/csv" />
+        {view.chooser}
       </ListToolbar>
 
       <Table<DeviationListRow>
-        columns={[
-          { key: "deviationNumber", label: "Nr", width: "70px" },
-          { key: "reportedDate", label: "Datum", width: "90px" },
-          { key: "type", label: "Typ", width: "110px" },
-          { key: "title", label: "Rubrik", width: "minmax(140px, 2fr)" },
-          { key: "counterpartyName", label: "Motpart", width: "minmax(110px, 1.2fr)" },
-          { key: "article", label: "Artikel", width: "minmax(80px, 0.8fr)" },
-          { key: "reasonName", label: "Orsak", width: "minmax(80px, 1fr)" },
-          { key: "responsibleUserName", label: "Ansvarig", width: "minmax(80px, 1fr)" },
-          { key: "dueDate", label: "Åtgärd senast", width: "100px" },
-          { key: "status", label: "Status", width: "110px" },
-          ...(showCost ? [{ key: "netCost", label: "Nettokostnad", width: "100px", align: "right" as const }] : []),
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={deviations.rows}
         emptyText="Inga avvikelser matchar urvalet"
         renderCell={(row, key) => {

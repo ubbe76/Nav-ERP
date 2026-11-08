@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Table } from "../ui/Table";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination, useListNavigation } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { Field, Input } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
 import { AUDIT_ENTITY_TYPE_LABELS, auditActionLabel, auditEntityTypeLabel, type AdminUser, type AuditLogEntry, type Paged } from "../../lib/types";
@@ -65,6 +66,15 @@ function UserFilter() {
 }
 
 export function AuditLogPageClient({ log, pageSize }: { log: Paged<AuditLogEntry>; pageSize: number }) {
+  const view = useListColumns([
+    { key: "createdAt", label: "Tid", width: "140px" },
+    { key: "userName", label: "Användare", width: "160px" },
+    { key: "entityType", label: "Typ", width: "160px" },
+    { key: "entityId", label: "Id", width: "150px" },
+    { key: "action", label: "Händelse", width: "160px" },
+    { key: "detail", label: "Detalj", width: "1fr" },
+  ]);
+
   return (
     <>
       <div className={shellStyles.topbar}>
@@ -85,17 +95,12 @@ export function AuditLogPageClient({ log, pageSize }: { log: Paged<AuditLogEntry
         <UserFilter />
         <DateRangeFilter />
         <ListExportLink endpoint="/api/v1/audit-log/csv" />
+        {view.chooser}
       </ListToolbar>
 
       <Table<AuditLogEntry>
-        columns={[
-          { key: "createdAt", label: "Tid", width: "140px" },
-          { key: "userName", label: "Användare", width: "160px" },
-          { key: "entityType", label: "Typ", width: "160px" },
-          { key: "entityId", label: "Id", width: "150px" },
-          { key: "action", label: "Händelse", width: "160px" },
-          { key: "detail", label: "Detalj", width: "1fr" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={log.rows}
         emptyText="Inga händelser matchar sökningen"
         renderCell={(entry, key) => {

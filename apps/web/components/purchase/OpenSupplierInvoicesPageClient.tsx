@@ -12,6 +12,7 @@ import { useCan } from "../PermissionsProvider";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { ListExportLink, ListFilterSelect, ListToggleFilter, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { HelpLink } from "../ui/HelpLink";
 import { currencyLabel, formatRate, SEK } from "../../lib/currency";
 import { formatCurrencyAmounts, sumByCurrency } from "../../lib/currencyTotals";
@@ -89,6 +90,20 @@ export function OpenSupplierInvoicesPageClient({
     }
   }
 
+  const view = useListColumns([
+    { key: "select", label: "", width: "40px" },
+    { key: "registrationNumber", label: "Faktura", width: "1fr" },
+    { key: "supplierName", label: "Leverantör", width: "1.4fr" },
+    { key: "dueDate", label: "Förfallodatum", width: "150px" },
+    { key: "grossAmount", label: "Belopp", width: "130px", align: "right" as const },
+    { key: "openAmount", label: "Öppet belopp", width: "130px", align: "right" as const },
+    // Valuta: the open amount's booked SEK value — the column to add up.
+    // Only when the page has an invoice in another currency; for SEK it
+    // would repeat Öppet belopp.
+    ...(anyForeign ? [{ key: "openAmountSek", label: "Öppet i SEK", width: "130px", align: "right" as const }] : []),
+    { key: "paymentBatch", label: "Betalfil", width: "110px" },
+  ]);
+
   return (
     <>
       <div className={shellStyles.topbar}>
@@ -108,6 +123,7 @@ export function OpenSupplierInvoicesPageClient({
         />
         <ListToggleFilter param="overdueOnly" label="Endast förfallna" />
         <ListExportLink endpoint="/api/v1/open-supplier-invoices/csv" />
+        {view.chooser}
       </ListToolbar>
 
       {can(["inkop"]) && bankMissing.length > 0 && (
@@ -130,19 +146,8 @@ export function OpenSupplierInvoicesPageClient({
       {error && <FormError>{error}</FormError>}
 
       <Table<OpenSupplierInvoiceRow>
-        columns={[
-          { key: "select", label: "", width: "40px" },
-          { key: "registrationNumber", label: "Faktura", width: "1fr" },
-          { key: "supplierName", label: "Leverantör", width: "1.4fr" },
-          { key: "dueDate", label: "Förfallodatum", width: "150px" },
-          { key: "grossAmount", label: "Belopp", width: "130px", align: "right" },
-          { key: "openAmount", label: "Öppet belopp", width: "130px", align: "right" },
-          // Valuta: the open amount's booked SEK value — the column to add up.
-          // Only when the page has an invoice in another currency; for SEK it
-          // would repeat Öppet belopp.
-          ...(anyForeign ? [{ key: "openAmountSek", label: "Öppet i SEK", width: "130px", align: "right" as const }] : []),
-          { key: "paymentBatch", label: "Betalfil", width: "110px" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={openInvoices.rows}
         emptyText="Inga öppna poster matchar sökningen"
         renderCell={(row, key) => {

@@ -8,6 +8,7 @@ import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { Field, Input } from "../ui/Field";
 import { ListExportLink, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { apiFetch } from "../../lib/api";
 import type { Paged, PriceList } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
@@ -21,6 +22,14 @@ import { CurrencyInput } from "../ui/CurrencyInput";
 export function PriceListsPageClient({ priceLists, pageSize }: { priceLists: Paged<PriceList>; pageSize: number }) {
   const router = useRouter();
   const [modalOpen, setModalOpen] = useState(false);
+
+  const view = useListColumns([
+    { key: "code", label: "Kod", width: "140px" },
+    { key: "name", label: "Namn", width: "1fr" },
+    { key: "description", label: "Beskrivning", width: "1.6fr" },
+    { key: "currency", label: "Valuta", width: "90px" },
+    { key: "rowCount", label: "Antal rader", width: "120px", align: "right" as const },
+  ]);
 
   return (
     <>
@@ -39,16 +48,12 @@ export function PriceListsPageClient({ priceLists, pageSize }: { priceLists: Pag
 
       <ListToolbar placeholder="Sök kod eller namn…">
         <ListExportLink endpoint="/api/v1/price-lists/csv" />
+        {view.chooser}
       </ListToolbar>
 
       <Table<PriceList>
-        columns={[
-          { key: "code", label: "Kod", width: "140px" },
-          { key: "name", label: "Namn", width: "1fr" },
-          { key: "description", label: "Beskrivning", width: "1.6fr" },
-          { key: "currency", label: "Valuta", width: "90px" },
-          { key: "rowCount", label: "Antal rader", width: "120px", align: "right" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={priceLists.rows}
         emptyText="Inga prislistor matchar sökningen"
         renderCell={(list, key) => {

@@ -10,6 +10,7 @@ import { Button } from "../ui/Button";
 import { Checkbox, Field, Input, Select } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { HelpLink } from "../ui/HelpLink";
 import { apiFetch } from "../../lib/api";
 import { documentSekAmounts, SEK } from "../../lib/currency";
@@ -52,6 +53,15 @@ export function SupplierInvoicesPageClient({
 }) {
   const [modalOpen, setModalOpen] = useState(false);
 
+  const view = useListColumns([
+    { key: "registrationNumber", label: "Reg.nr", width: "120px" },
+    { key: "invoiceNumber", label: "Leverantörens fakturanr", width: "1fr" },
+    { key: "supplierName", label: "Leverantör", width: "1.4fr" },
+    { key: "invoiceDate", label: "Fakturadatum", width: "130px" },
+    { key: "status", label: "Status", width: "140px" },
+    { key: "grossAmount", label: "Belopp", width: "140px", align: "right" as const },
+  ]);
+
   return (
     <>
       <div className={shellStyles.topbar}>
@@ -75,17 +85,12 @@ export function SupplierInvoicesPageClient({
           options={Object.entries(SUPPLIER_INVOICE_STATUS_PILL).map(([value, pill]) => ({ value, label: pill.label }))}
         />
         <ListExportLink endpoint="/api/v1/supplier-invoices/csv" />
+        {view.chooser}
       </ListToolbar>
 
       <Table<SupplierInvoice>
-        columns={[
-          { key: "registrationNumber", label: "Reg.nr", width: "120px" },
-          { key: "invoiceNumber", label: "Leverantörens fakturanr", width: "1fr" },
-          { key: "supplierName", label: "Leverantör", width: "1.4fr" },
-          { key: "invoiceDate", label: "Fakturadatum", width: "130px" },
-          { key: "status", label: "Status", width: "140px" },
-          { key: "grossAmount", label: "Belopp", width: "140px", align: "right" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={invoices.rows}
         emptyText="Inga leverantörsfakturor matchar sökningen"
         renderCell={(invoice, key) => {

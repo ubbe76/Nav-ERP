@@ -13,6 +13,7 @@ import { Card } from "../ui/Card";
 import { Checkbox, Input } from "../ui/Field";
 import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
 import { ListExportLink, ListFilterSelect, ListToggleFilter, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { FormActions, FormError, FormHint, FormNotice } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import { fetchDefaultRecipientAndLanguage } from "../../lib/mail";
@@ -590,6 +591,41 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
     </span>
   );
 
+  const view = useListColumns([
+    {
+      key: "select",
+      label: "",
+      width: "36px",
+      header: (
+        <SelectAllCheckbox
+          checked={allSelectedOnPage}
+          indeterminate={selectedOnPage > 0 && !allSelectedOnPage}
+          disabled={selectableRows.length === 0}
+          onChange={toggleAll}
+          ariaLabel="Välj alla rader på sidan"
+        />
+      ),
+    },
+    // Thirteen columns have to share ~1100px next to the sidebar, so the
+    // numeric columns are kept tight and Artikel takes the slack (with
+    // a floor so a long name wraps to two lines, not five). Källa is
+    // fixed at the width of its widest pill ("Saknar huvudleverantör"
+    // wraps to two lines) instead of competing with Artikel for `fr`.
+    { key: "article", label: "Artikel", width: "minmax(180px, 2fr)" },
+    { key: "onHand", label: "Saldo", width: "70px", align: "right" as const },
+    { key: "demand", label: "Behov", width: "70px", align: "right" as const },
+    { key: "incoming", label: "Inkommande", width: "80px", align: "right" as const },
+    { key: "projected", label: "Netto", width: "70px", align: "right" as const },
+    { key: "reorderPoint", label: "BP / SL", width: "60px", align: "right" as const },
+    // Behovsdatum and senaste datum share one column (two lines) and the
+    // type rides in the article cell: with a column each the table no
+    // longer fitted 1500 px once #13 added the dates.
+    { key: "dates", label: "Behov / senast", width: "150px" },
+    { key: "proposal", label: "Förslag", width: "96px", align: "right" as const },
+    { key: "leadTime", label: "Ledtid", width: "60px", align: "right" as const },
+    { key: "source", label: "Källa", width: "140px" },
+  ]);
+
   return (
     <>
       <ListToolbar placeholder="Sök artikelnummer eller benämning…">
@@ -615,6 +651,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
             Uppdatera
           </Button>
         </span>
+        {view.chooser}
       </ListToolbar>
       <FormHint>Saldo räknar inte lagerplatser som är spärrade.</FormHint>
 
@@ -740,40 +777,8 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
 
       {(articleRows.length > 0 || configuredRows.length === 0) && (
       <Table<DisplayRow>
-        columns={[
-          {
-            key: "select",
-            label: "",
-            width: "36px",
-            header: (
-              <SelectAllCheckbox
-                checked={allSelectedOnPage}
-                indeterminate={selectedOnPage > 0 && !allSelectedOnPage}
-                disabled={selectableRows.length === 0}
-                onChange={toggleAll}
-                ariaLabel="Välj alla rader på sidan"
-              />
-            ),
-          },
-          // Thirteen columns have to share ~1100px next to the sidebar, so the
-          // numeric columns are kept tight and Artikel takes the slack (with
-          // a floor so a long name wraps to two lines, not five). Källa is
-          // fixed at the width of its widest pill ("Saknar huvudleverantör"
-          // wraps to two lines) instead of competing with Artikel for `fr`.
-          { key: "article", label: "Artikel", width: "minmax(180px, 2fr)" },
-          { key: "onHand", label: "Saldo", width: "70px", align: "right" },
-          { key: "demand", label: "Behov", width: "70px", align: "right" },
-          { key: "incoming", label: "Inkommande", width: "80px", align: "right" },
-          { key: "projected", label: "Netto", width: "70px", align: "right" },
-          { key: "reorderPoint", label: "BP / SL", width: "60px", align: "right" },
-          // Behovsdatum and senaste datum share one column (two lines) and the
-          // type rides in the article cell: with a column each the table no
-          // longer fitted 1500 px once #13 added the dates.
-          { key: "dates", label: "Behov / senast", width: "150px" },
-          { key: "proposal", label: "Förslag", width: "96px", align: "right" },
-          { key: "leadTime", label: "Ledtid", width: "60px", align: "right" },
-          { key: "source", label: "Källa", width: "140px" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={articleRows}
         emptyText={loading ? "Hämtar…" : "Inga artiklar matchar filtren"}
         renderCell={(row, key) => {

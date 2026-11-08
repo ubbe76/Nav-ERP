@@ -3,7 +3,13 @@ import {
   DEFAULT_LIST_PAGE_SIZE,
   favoriteSchema,
   LIST_PAGE_SIZE_OPTIONS,
+  listColumnsEntrySchema,
+  listColumnsKeySchema,
   MAX_FAVORITES,
+  MAX_LIST_COLUMN_LISTS,
+  TABLE_DENSITIES,
+  type ListColumnsEntry,
+  type TableDensity,
   OVERVIEW_CARDS,
   type OverviewCard,
   type AlertKind,
@@ -29,6 +35,11 @@ const FAVORITES_KEY = "favorites";
 // Översikten: a JSON array of card keys in display order; absent or "null" =
 // the standard.
 const OVERVIEW_CARDS_KEY = "overview_cards";
+
+// Täthet and Kolumner (Nav som program, punkt 6). list_columns is a JSON
+// object { "<list path>": { hidden, widths } }, merged per list on PATCH.
+const DENSITY_KEY = "table_density";
+const LIST_COLUMNS_KEY = "list_columns";
 
 const LIST_PAGE_SIZE_VALUES: readonly number[] = LIST_PAGE_SIZE_OPTIONS;
 const KNOWN_ALERT_KINDS: ReadonlySet<string> = new Set(ALERT_KINDS);
@@ -90,6 +101,50 @@ export function decodeOverviewCards(raw: string | undefined): OverviewCard[] | n
   }
 }
 
+// Entry by entry, like the favourites: a list or a width that no longer
+// passes the schema is dropped, repeats in `hidden` kept once, and an empty
+// entry is the same as none. Unparseable = {}.
+export function decodeListColumns(raw: string | undefined): Record<string, ListColumnsEntry> {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const lists: Record<string, ListColumnsEntry> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (!listColumnsKeySchema.safeParse(key).success) continue;
+      const entry = listColumnsEntrySchema.safeParse(value);
+      if (!entry.success) continue;
+      const hidden = [...new Set(entry.data.hidden)];
+      if (hidden.length === 0 && Object.keys(entry.data.widths).length === 0) continue;
+      lists[key] = { hidden, widths: entry.data.widths };
+    }
+    return Object.fromEntries(Object.entries(lists).slice(-MAX_LIST_COLUMN_LISTS));
+  } catch {
+    return {};
+  }
+}
+
+// The PATCH's lists over the stored ones: null (or an empty entry) removes
+// the list, anything else replaces it and moves it last — past the cap the
+// lists changed longest ago go first.
+export function mergeListColumns(
+  stored: Record<string, ListColumnsEntry>,
+  patch: Record<string, ListColumnsEntry | null>
+): Record<string, ListColumnsEntry> {
+  const next = { ...stored };
+  for (const [key, entry] of Object.entries(patch)) {
+    delete next[key];
+    if (entry && (entry.hidden.length > 0 || Object.keys(entry.widths).length > 0)) {
+      next[key] = { hidden: [...new Set(entry.hidden)], widths: entry.widths };
+    }
+  }
+  return Object.fromEntries(Object.entries(next).slice(-MAX_LIST_COLUMN_LISTS));
+}
+
+function decodeDensity(raw: string | undefined): TableDensity {
+  return (TABLE_DENSITIES as readonly string[]).includes(raw ?? "") ? (raw as TableDensity) : "normal";
+}
+
 export function createUserSettingsService(repo: UserSettingsRepository) {
   // Typed view over the user_settings KV rows for one user — mirrors
   // system.service.ts's getSettings() pattern, just per-user instead of
@@ -110,6 +165,8 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
       favorites: decodeFavorites(byKey.get(FAVORITES_KEY)),
       favoritesInSidebar: byKey.get(FAVORITES_IN_SIDEBAR_KEY) !== "false",
       overviewCards: decodeOverviewCards(byKey.get(OVERVIEW_CARDS_KEY)),
+      density: decodeDensity(byKey.get(DENSITY_KEY)),
+      listColumns: decodeListColumns(byKey.get(LIST_COLUMNS_KEY)),
     };
   }
 
@@ -149,6 +206,15 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
           userId,
           OVERVIEW_CARDS_KEY,
           input.overviewCards === null ? "null" : JSON.stringify(input.overviewCards)
+        );
+      }
+      if (input.density !== undefined) {
+        await repo.upsert(userId, DENSITY_KEY, input.density);
+      }
+      if (input.listColumns !== undefined) {
+        const patch = input.listColumns;
+        await repo.updateValue(userId, LIST_COLUMNS_KEY, (raw) =>
+          JSON.stringify(mergeListColumns(decodeListColumns(raw), patch))
         );
       }
       return getSettings(userId);

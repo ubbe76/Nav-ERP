@@ -10,6 +10,7 @@ import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { StatusPill } from "../ui/StatusPill";
 import { ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { Field, Input, Select, Textarea } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow } from "../ui/Form";
 import { HelpLink } from "../ui/HelpLink";
@@ -62,6 +63,8 @@ export function AnlaggningarPageClient({
     { key: "status", label: "Status", width: "110px" },
   ];
 
+  const view = useListColumns(columns);
+
   return (
     <>
       <div className={shellStyles.topbar}>
@@ -95,10 +98,12 @@ export function AnlaggningarPageClient({
           ariaLabel="Grupp"
           options={categories.map((category) => ({ value: category.id, label: category.name }))}
         />
+        {view.chooser}
       </ListToolbar>
 
       <Table
-        columns={columns}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={assets.rows}
         emptyText="Inga anläggningar."
         renderCell={(asset, key) => {

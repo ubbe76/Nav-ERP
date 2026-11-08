@@ -7,6 +7,7 @@ import { Table } from "../ui/Table";
 import { StatusPill } from "../ui/StatusPill";
 import { Button } from "../ui/Button";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { apiFetch } from "../../lib/api";
 import {
   EMAIL_DOCUMENT_TYPE_LABELS,
@@ -65,6 +66,15 @@ export function EmailLogPageClient({ log, pageSize }: { log: Paged<EmailLogEntry
     }
   }
 
+  const view = useListColumns([
+    { key: "createdAt", label: "Tid", width: "140px" },
+    { key: "documentType", label: "Dokument", width: "160px" },
+    { key: "recipient", label: "Mottagare", width: "1fr" },
+    { key: "subject", label: "Ämne", width: "1fr" },
+    { key: "status", label: "Status", width: "120px" },
+    { key: "id", label: "", width: "120px", align: "right" as const },
+  ]);
+
   return (
     <>
       <div className={shellStyles.topbar}>
@@ -89,19 +99,14 @@ export function EmailLogPageClient({ log, pageSize }: { log: Paged<EmailLogEntry
           options={Object.entries(EMAIL_STATUS_PILL).map(([value, pill]) => ({ value, label: pill.label }))}
         />
         <ListExportLink endpoint="/api/v1/email-log/csv" />
+        {view.chooser}
       </ListToolbar>
 
       <FormError>{error}</FormError>
 
       <Table<EmailLogEntry>
-        columns={[
-          { key: "createdAt", label: "Tid", width: "140px" },
-          { key: "documentType", label: "Dokument", width: "160px" },
-          { key: "recipient", label: "Mottagare", width: "1fr" },
-          { key: "subject", label: "Ämne", width: "1fr" },
-          { key: "status", label: "Status", width: "120px" },
-          { key: "id", label: "", width: "120px", align: "right" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={log.rows}
         emptyText="Inga utskick matchar sökningen"
         renderCell={(entry, key) => {

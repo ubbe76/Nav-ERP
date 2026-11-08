@@ -9,6 +9,7 @@ import { Button } from "../ui/Button";
 import { GatedLink } from "../ui/GatedLink";
 import { FormError } from "../ui/Form";
 import { ListFilterSelect, ListToolbar, Pagination, useListNavigation } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { HelpLink } from "../ui/HelpLink";
 import { useCan } from "../PermissionsProvider";
 import { API_URL } from "../../lib/api";
@@ -90,6 +91,17 @@ export function InvoiceInboxPageClient({ scans, pageSize }: { scans: Paged<Invoi
   }
 
   const waiting = tab === "pending";
+
+  const view = useListColumns([
+    { key: "scanNumber", label: "Nr", width: "90px" },
+    { key: "received", label: "Inkommen", width: "110px" },
+    { key: "source", label: "Källa", width: "minmax(0, 1fr)" },
+    { key: "filename", label: "Fil", width: "minmax(0, 1.2fr)" },
+    { key: "supplierName", label: "Leverantör", width: "minmax(0, 1.2fr)" },
+    { key: "invoiceNumber", label: "Fakturanr", width: "120px" },
+    { key: "grossAmount", label: "Att betala", width: "130px", align: "right" as const },
+    { key: "status", label: "Status", width: "minmax(130px, 1fr)" },
+  ]);
 
   return (
     <>
@@ -209,19 +221,12 @@ export function InvoiceInboxPageClient({ scans, pageSize }: { scans: Paged<Invoi
           ariaLabel="Filtrera på källa"
           options={Object.entries(INVOICE_SCAN_SOURCE_LABELS).map(([value, label]) => ({ value, label }))}
         />
+        {view.chooser}
       </ListToolbar>
 
       <Table<InvoiceScanListRow>
-        columns={[
-          { key: "scanNumber", label: "Nr", width: "90px" },
-          { key: "received", label: "Inkommen", width: "110px" },
-          { key: "source", label: "Källa", width: "minmax(0, 1fr)" },
-          { key: "filename", label: "Fil", width: "minmax(0, 1.2fr)" },
-          { key: "supplierName", label: "Leverantör", width: "minmax(0, 1.2fr)" },
-          { key: "invoiceNumber", label: "Fakturanr", width: "120px" },
-          { key: "grossAmount", label: "Att betala", width: "130px", align: "right" },
-          { key: "status", label: "Status", width: "minmax(130px, 1fr)" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={scans.rows}
         emptyText={
           waiting ? "Inga fakturor att granska — ladda upp en faktura ovan" : "Inga fakturor matchar sökningen"

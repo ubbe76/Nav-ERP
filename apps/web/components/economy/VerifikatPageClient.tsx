@@ -10,6 +10,7 @@ import { Button } from "../ui/Button";
 import { Field, Select } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { HelpLink } from "../ui/HelpLink";
 import { API_URL, apiFetch } from "../../lib/api";
 import { AllocateDialog } from "./AllocateDialog";
@@ -50,6 +51,15 @@ export function VerifikatPageClient({
     const value = searchParams.get(key);
     if (value) printParams.set(key, value);
   }
+
+  const view = useListColumns([
+    { key: "displayNumber", label: "Nummer", width: "140px" },
+    { key: "date", label: "Datum", width: "110px" },
+    { key: "description", label: "Beskrivning", width: "1.4fr" },
+    { key: "seriesCode", label: "Serie", width: "90px" },
+    { key: "yearLabel", label: "Räkenskapsår", width: "130px" },
+    { key: "status", label: "Status", width: "120px" },
+  ]);
 
   return (
     <>
@@ -122,17 +132,12 @@ export function VerifikatPageClient({
           />
         )}
         <ListExportLink endpoint="/api/v1/verifications/csv" />
+        {view.chooser}
       </ListToolbar>
 
       <Table<VerificationListRow>
-        columns={[
-          { key: "displayNumber", label: "Nummer", width: "140px" },
-          { key: "date", label: "Datum", width: "110px" },
-          { key: "description", label: "Beskrivning", width: "1.4fr" },
-          { key: "seriesCode", label: "Serie", width: "90px" },
-          { key: "yearLabel", label: "Räkenskapsår", width: "130px" },
-          { key: "status", label: "Status", width: "120px" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={verifications.rows}
         emptyText="Inga verifikat matchar sökningen"
         renderCell={(v, key) => {

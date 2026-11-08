@@ -10,6 +10,7 @@ import { Button } from "../ui/Button";
 import { Checkbox, Field, Input, Select } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { HelpLink } from "../ui/HelpLink";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
@@ -59,6 +60,17 @@ export function InvoicesPageClient({
   // sales order's "Fakturera" action, Task 9).
   const [modalOpen, setModalOpen] = useState(Boolean(initialOrderId));
 
+  const view = useListColumns([
+    { key: "invoiceNumber", label: "Nummer", width: "130px" },
+    { key: "type", label: "Typ", width: "130px" },
+    { key: "customerName", label: "Kund", width: "1.4fr" },
+    { key: "invoiceDate", label: "Fakturadatum", width: "130px" },
+    { key: "dueDate", label: "Förfallodatum", width: "130px" },
+    { key: "netAmount", label: "Belopp", width: "150px", align: "right" as const },
+    { key: "status", label: "Status", width: "130px" },
+    { key: "einvoiceStatus", label: "E-faktura", width: "100px" },
+  ]);
+
   return (
     <>
       <div className={shellStyles.topbar}>
@@ -82,19 +94,12 @@ export function InvoicesPageClient({
           options={Object.entries(INVOICE_STATUS_PILL).map(([value, pill]) => ({ value, label: pill.label }))}
         />
         <ListExportLink endpoint="/api/v1/invoices/csv" />
+        {view.chooser}
       </ListToolbar>
 
       <Table<Invoice>
-        columns={[
-          { key: "invoiceNumber", label: "Nummer", width: "130px" },
-          { key: "type", label: "Typ", width: "130px" },
-          { key: "customerName", label: "Kund", width: "1.4fr" },
-          { key: "invoiceDate", label: "Fakturadatum", width: "130px" },
-          { key: "dueDate", label: "Förfallodatum", width: "130px" },
-          { key: "netAmount", label: "Belopp", width: "150px", align: "right" },
-          { key: "status", label: "Status", width: "130px" },
-          { key: "einvoiceStatus", label: "E-faktura", width: "100px" },
-        ]}
+        columns={view.columns}
+        onColumnResize={view.onColumnResize}
         rows={invoices.rows}
         emptyText="Inga fakturor matchar sökningen"
         renderCell={(invoice, key) => {

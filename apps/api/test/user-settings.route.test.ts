@@ -90,7 +90,7 @@ describe("GET /me/settings", () => {
 
     const res = await app.inject({ url: "/me/settings", headers: { cookie } });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ listPageSize: 50, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesInSidebar: true, overviewCards: null });
+    expect(res.json()).toEqual({ listPageSize: 50, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesInSidebar: true, overviewCards: null, density: "normal", listColumns: {} });
     await app.close();
   });
 });
@@ -114,10 +114,10 @@ describe("PATCH /me/settings", () => {
       payload: { listPageSize: 100 },
     });
     expect(patchRes.statusCode).toBe(200);
-    expect(patchRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesInSidebar: true, overviewCards: null });
+    expect(patchRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesInSidebar: true, overviewCards: null, density: "normal", listColumns: {} });
 
     const getRes = await app.inject({ url: "/me/settings", headers: { cookie } });
-    expect(getRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesInSidebar: true, overviewCards: null });
+    expect(getRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesInSidebar: true, overviewCards: null, density: "normal", listColumns: {} });
 
     // Upsert, not insert-only: a second PATCH overwrites the first value
     // rather than erroring on the composite PK.
@@ -128,7 +128,7 @@ describe("PATCH /me/settings", () => {
       payload: { listPageSize: 25 },
     });
     expect(secondPatch.statusCode).toBe(200);
-    expect(secondPatch.json()).toEqual({ listPageSize: 25, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesInSidebar: true, overviewCards: null });
+    expect(secondPatch.json()).toEqual({ listPageSize: 25, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesInSidebar: true, overviewCards: null, density: "normal", listColumns: {} });
     await app.close();
   });
 
@@ -166,7 +166,7 @@ describe("PATCH /me/settings", () => {
     const cookieB = await registerAndLogin(app);
 
     const patch = await app.inject({ method: "PATCH", url: "/me/settings", headers: { cookie: cookieA }, payload: { hideOnboarding: true } });
-    expect(patch.json()).toEqual({ listPageSize: 50, hideOnboarding: true, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesInSidebar: true, overviewCards: null });
+    expect(patch.json()).toEqual({ listPageSize: 50, hideOnboarding: true, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesInSidebar: true, overviewCards: null, density: "normal", listColumns: {} });
     const other = await app.inject({ url: "/me/settings", headers: { cookie: cookieB } });
     expect(other.json().hideOnboarding).toBe(false);
     await app.close();
@@ -309,6 +309,97 @@ describe("PATCH /me/settings", () => {
     await app.close();
   });
 
+  // Nav som program, punkt 6.
+  it("stores Täthet and refuses an unknown density", async () => {
+    const app = buildApp();
+    const cookie = await registerAndLogin(app);
+    const patch = (density: unknown) =>
+      app.inject({ method: "PATCH", url: "/me/settings", headers: { cookie }, payload: { density } });
+    expect((await patch("compact")).json().density).toBe("compact");
+    expect((await app.inject({ url: "/me/settings", headers: { cookie } })).json().density).toBe("compact");
+    expect((await patch("tight")).statusCode).toBe(400);
+    expect((await patch("normal")).json().density).toBe("normal");
+    await app.close();
+  });
+
+  it("merges Kolumner per list, resets a list with null and drops what no longer passes on read", async () => {
+    const app = buildApp();
+    const cookie = await registerAndLogin(app);
+    const patch = (listColumns: unknown) =>
+      app.inject({ method: "PATCH", url: "/me/settings", headers: { cookie }, payload: { listColumns } });
+    const get = async () => (await app.inject({ url: "/me/settings", headers: { cookie } })).json().listColumns;
+
+    expect((await patch({ "/forsaljning/ordrar": { hidden: ["customer"], widths: { number: 120 } } })).statusCode).toBe(200);
+    // Another list from another tab: the first one stays.
+    await patch({ "/inkop/ordrar": { hidden: ["supplier", "supplier"], widths: {} } });
+    expect(await get()).toEqual({
+      "/forsaljning/ordrar": { hidden: ["customer"], widths: { number: 120 } },
+      "/inkop/ordrar": { hidden: ["supplier"], widths: {} },
+    });
+    // Återställ: null, and an empty entry is the same as none.
+    await patch({ "/forsaljning/ordrar": null, "/inkop/ordrar": { hidden: [], widths: {} } });
+    expect(await get()).toEqual({});
+
+    for (const bad of [
+      { "forsaljning/ordrar": { hidden: [], widths: {} } }, // not a path
+      { "/Forsaljning": { hidden: [], widths: {} } }, // upper case
+      { "/a": { hidden: [], widths: { number: 10 } } }, // below the minimum width
+      { "/a": { hidden: [], widths: { number: 120.5 } } },
+      { "/a": { hidden: [] } },
+      { "/a": { hidden: [], widths: {}, extra: 1 } },
+      { "/a": { hidden: Array.from({ length: 41 }, (_, i) => `c${i}`), widths: {} } },
+    ]) {
+      expect([JSON.stringify(bad), (await patch(bad)).statusCode]).toEqual([JSON.stringify(bad), 400]);
+    }
+
+    // Stored garbage: the bad lists and entries are dropped, the read never fails.
+    const me = (await app.inject({ url: "/auth/me", headers: { cookie } })).json();
+    await settingsRepo.upsert(
+      me.id,
+      "list_columns",
+      JSON.stringify({ "/ok": { hidden: ["a", "a"], widths: {} }, "not-a-path": { hidden: ["b"], widths: {} }, "/bad": { hidden: "x" } })
+    );
+    expect(await get()).toEqual({ "/ok": { hidden: ["a"], widths: {} } });
+    await settingsRepo.upsert(me.id, "list_columns", "{inte json");
+    expect(await get()).toEqual({});
+    await app.close();
+  });
+
+  it("keeps the 100 lists changed most recently", async () => {
+    const app = buildApp();
+    const cookie = await registerAndLogin(app);
+    for (let batch = 0; batch < 3; batch++) {
+      const lists = Object.fromEntries(
+        Array.from({ length: 40 }, (_, i) => [`/lista-${batch * 40 + i}`, { hidden: ["x"], widths: {} }])
+      );
+      expect((await app.inject({ method: "PATCH", url: "/me/settings", headers: { cookie }, payload: { listColumns: lists } })).statusCode).toBe(200);
+    }
+    const stored = (await app.inject({ url: "/me/settings", headers: { cookie } })).json().listColumns;
+    expect(Object.keys(stored)).toHaveLength(100);
+    expect(stored["/lista-19"]).toBeUndefined();
+    expect(stored["/lista-20"]).toBeDefined();
+    expect(stored["/lista-119"]).toBeDefined();
+    await app.close();
+  });
+
+  it("lands two concurrent Kolumner changes to different lists", async () => {
+    const app = buildApp();
+    const cookie = await registerAndLogin(app);
+    await Promise.all(
+      Array.from({ length: 6 }, (_, i) =>
+        app.inject({
+          method: "PATCH",
+          url: "/me/settings",
+          headers: { cookie },
+          payload: { listColumns: { [`/lista-${i}`]: { hidden: ["x"], widths: {} } } },
+        })
+      )
+    );
+    const stored = (await app.inject({ url: "/me/settings", headers: { cookie } })).json().listColumns;
+    expect(Object.keys(stored).sort()).toEqual(["/lista-0", "/lista-1", "/lista-2", "/lista-3", "/lista-4", "/lista-5"]);
+    await app.close();
+  });
+
   it("keeps each user's setting isolated from another user's", async () => {
     const app = buildApp();
     const cookieA = await registerAndLogin(app);
@@ -322,7 +413,7 @@ describe("PATCH /me/settings", () => {
     });
 
     const resB = await app.inject({ url: "/me/settings", headers: { cookie: cookieB } });
-    expect(resB.json()).toEqual({ listPageSize: 50, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesInSidebar: true, overviewCards: null });
+    expect(resB.json()).toEqual({ listPageSize: 50, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesInSidebar: true, overviewCards: null, density: "normal", listColumns: {} });
     await app.close();
   });
 });

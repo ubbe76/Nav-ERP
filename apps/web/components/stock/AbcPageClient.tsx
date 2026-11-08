@@ -8,6 +8,7 @@ import {
   ListToolbar,
   Pagination,
 } from "../ui/ListControls";
+import { useListColumns } from "../ui/ListColumns";
 import { Table } from "../ui/Table";
 import { formatMoney, formatPercent, formatQuantity } from "../../lib/format";
 import type { AbcResponse, AbcRow } from "../../lib/types";
@@ -77,6 +78,8 @@ export function AbcPageClient({
   ];
 
   const rows = data.rows.map((r) => ({ ...r, id: r.articleId }));
+
+  const view = useListColumns(columns);
 
   return (
     <>
@@ -155,13 +158,15 @@ export function AbcPageClient({
           ]}
         />
         <ListExportLink endpoint="/api/v1/planning/abc/csv" />
+        {view.chooser}
       </ListToolbar>
 
       {/* Eleven columns: scroll the table inside its own box on mid-width
           screens instead of widening the page (phones stack the rows). */}
       <div style={{ overflowX: "auto" }}>
         <Table<AbcRow & { id: string }>
-          columns={columns}
+          columns={view.columns}
+          onColumnResize={view.onColumnResize}
           rows={rows}
           emptyText="Inga artiklar matchar filtren"
           renderCell={(row, key) => {

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ColumnResizeHandle } from "./ColumnResizeHandle";
 import styles from "./Table.module.css";
 
 interface Column {
@@ -23,6 +24,10 @@ interface TableProps<T extends { id: string }> {
   // A row marked from the keyboard (artikelregistret's search field walks it
   // with the arrow keys) — styled like a hovered row with an accent edge.
   highlightedRowId?: string | null;
+  // Kolumnbredd (Nav som program, punkt 6): every header cell gets a drag
+  // edge; the new content width (null = reset) goes here. Only from a client
+  // component — useListColumns hands it out.
+  onColumnResize?: (key: string, width: number | null) => void;
 }
 
 // Horizontal spacing lives inside the cells (see Table.module.css): 20px at
@@ -37,11 +42,14 @@ const COLUMN_GAP = 12;
 // "minmax(220px, 2fr)"). Fixed px tracks are widened by the padding their
 // cell carries so a "70px" column still shows 70px of content; flexible
 // tracks absorb the padding the way they absorbed the old gap.
+function trackExtra(index: number, count: number): number {
+  return (index === 0 ? EDGE_PADDING : 0) + (index === count - 1 ? EDGE_PADDING : COLUMN_GAP);
+}
+
 function trackWidth(width: string, index: number, count: number): string {
   const px = /^(\d+(?:\.\d+)?)px$/.exec(width.trim());
   if (!px) return width;
-  const extra = (index === 0 ? EDGE_PADDING : 0) + (index === count - 1 ? EDGE_PADDING : COLUMN_GAP);
-  return `${Number(px[1]) + extra}px`;
+  return `${Number(px[1]) + trackExtra(index, count)}px`;
 }
 
 // A flexible track with a content floor: "minmax(<floor + gap>px, <fr>fr)".
@@ -60,6 +68,7 @@ export function Table<T extends { id: string }>({
   emptyText = "Inga rader att visa",
   footer,
   highlightedRowId,
+  onColumnResize,
 }: TableProps<T>) {
   const gridTemplate = columns.map((c, i) => trackWidth(c.width, i, columns.length)).join(" ");
 
@@ -68,9 +77,16 @@ export function Table<T extends { id: string }>({
     // ↑/↓ and Enter in a list, right-click opens the row's ⋯ menu).
     <div className={styles.table} style={{ gridTemplateColumns: gridTemplate }} data-table="">
       <div className={styles.headerRow}>
-        {columns.map((col) => (
+        {columns.map((col, i) => (
           <div key={col.key} className={styles.headerCell} data-align={col.align ?? "left"}>
             {col.header ?? col.label}
+            {onColumnResize && (
+              <ColumnResizeHandle
+                label={col.label}
+                extra={trackExtra(i, columns.length)}
+                onResize={(width) => onColumnResize(col.key, width)}
+              />
+            )}
           </div>
         ))}
       </div>

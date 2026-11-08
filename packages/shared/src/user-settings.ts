@@ -78,6 +78,35 @@ export const overviewCardsSchema = z
     message: "Samma kort kan bara väljas en gång",
   });
 
+// Täthet (Nav som program, punkt 6): the row height of every table.
+export const TABLE_DENSITIES = ["normal", "compact"] as const;
+export type TableDensity = (typeof TABLE_DENSITIES)[number];
+export const tableDensitySchema = z.enum(TABLE_DENSITIES);
+
+// Kolumner (punkt 6): per list page (keyed by its path, e.g.
+// "/forsaljning/ordrar") the columns the user hid and the widths they dragged
+// (content px). Column keys are the web table's own `key`s; one that no
+// longer exists is simply never matched. The web mirror is
+// apps/web/lib/listColumns.ts.
+export const MAX_LIST_COLUMN_LISTS = 100;
+export const MAX_LIST_COLUMNS = 40;
+export const LIST_COLUMN_MIN_WIDTH = 40;
+export const LIST_COLUMN_MAX_WIDTH = 1600;
+export const listColumnsKeySchema = z.string().regex(/^\/[a-z0-9/_-]{0,79}$/);
+const columnKeySchema = z.string().min(1).max(60);
+export const listColumnsEntrySchema = z
+  .object({
+    hidden: z.array(columnKeySchema).max(MAX_LIST_COLUMNS),
+    widths: z
+      .record(columnKeySchema, z.number().int().min(LIST_COLUMN_MIN_WIDTH).max(LIST_COLUMN_MAX_WIDTH))
+      .refine((widths) => Object.keys(widths).length <= MAX_LIST_COLUMNS, { message: "För många kolumnbredder" }),
+  })
+  .strict();
+export type ListColumnsEntry = z.infer<typeof listColumnsEntrySchema>;
+export const listColumnsSchema = z
+  .record(listColumnsKeySchema, listColumnsEntrySchema)
+  .refine((lists) => Object.keys(lists).length <= MAX_LIST_COLUMN_LISTS, { message: "För många listor" });
+
 // GET /me/settings — always returns every known key, defaults filled in.
 export const userSettingsSchema = z.object({
   listPageSize: listPageSizeSchema,
@@ -99,10 +128,24 @@ export const userSettingsSchema = z.object({
   favoritesInSidebar: z.boolean(),
   // Översikten's cards (see overviewCardsSchema); null = standard.
   overviewCards: overviewCardsSchema.nullable(),
+  // Täthet; default normal.
+  density: tableDensitySchema,
+  // Kolumner per list page; {} = every list as built.
+  listColumns: listColumnsSchema,
 });
 export type UserSettings = z.infer<typeof userSettingsSchema>;
 
 // PATCH /me/settings — partial update, upsert per provided key. `.strict()`
 // rejects unknown keys (400) rather than silently dropping them.
-export const updateUserSettingsSchema = userSettingsSchema.partial().strict();
+// listColumns is merged per list instead of replaced — two tabs adjusting
+// two lists must not undo each other — and null resets that list.
+export const updateUserSettingsSchema = userSettingsSchema
+  .partial()
+  .extend({
+    listColumns: z
+      .record(listColumnsKeySchema, listColumnsEntrySchema.nullable())
+      .refine((lists) => Object.keys(lists).length <= MAX_LIST_COLUMN_LISTS, { message: "För många listor" })
+      .optional(),
+  })
+  .strict();
 export type UpdateUserSettingsInput = z.infer<typeof updateUserSettingsSchema>;
