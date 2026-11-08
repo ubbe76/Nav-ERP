@@ -9,6 +9,7 @@ import { createImportRepository } from "../src/modules/import/repository/import.
 import { planWorkCenterImport } from "../src/modules/import/service/work-centers.js";
 import { overlappingTransactions } from "./helpers/overlapping-transactions.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Timkostnad per datum (#14 etapp 4, migration 0189): the resource's hourly
 // rate gets its history from a trigger, so every writer records it — the
@@ -16,7 +17,7 @@ import { parsed } from "./helpers/parsed.js";
 // import and a plain SQL UPDATE alike. One row per transaction that changes
 // the value, as 0169's försäljningspris.
 
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const importRepo = createImportRepository(db);
 
 const TRUNCATE = sql`TRUNCATE work_centers, production_groups CASCADE`;

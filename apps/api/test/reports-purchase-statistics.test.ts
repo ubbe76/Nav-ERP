@@ -24,6 +24,7 @@ import { createReportsRepository } from "../src/modules/reports/repository/repor
 import { createReportsService } from "../src/modules/reports/service/reports.service.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSelfCosts } from "./helpers/unwired";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -50,7 +51,7 @@ const purchaseService = createPurchaseService(
 );
 const invoicePoster = createVerificationPoster({ read: async () => ({ ...DEFAULT_POSTING_SETTINGS }) });
 const supplierInvoiceService = createSupplierInvoiceService(createSupplierInvoiceRepository(db), invoicePoster);
-const reportsService = createReportsService(createReportsRepository(db));
+const reportsService = createReportsService(createReportsRepository(db), unwiredSelfCosts);
 
 const TRUNCATE = sql`TRUNCATE posting_rules, verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, supplier_invoice_rows, supplier_invoices, article_suppliers, email_log, inquiry_rows, inquiries, purchase_order_rows, purchase_orders, supplier_contacts, suppliers, stock_transactions, stock_locations, warehouses, bom_components, articles, users CASCADE`;
 

@@ -15,6 +15,7 @@ import {
 import { routingAlternativesProblem, routingOperationHasAlternativesProblem } from "../src/modules/manufacturing/service/routing-alternatives.js";
 import { createPurchaseRepository } from "../src/modules/purchase/repository/purchase.repository.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Alternativa resurser (#15), etapp 1 — the beredning: the rules for an own
 // operation's alternatives (400 routing-alternative-invalid, 409
@@ -24,7 +25,7 @@ import { parsed } from "./helpers/parsed.js";
 // configurator-variants.service.test.ts, the import in import-routing.test.ts.
 
 const articleService = createArticleService(createArticleRepository(db));
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const purchaseRepository = createPurchaseRepository(db);
 
 const TRUNCATE = sql`TRUNCATE mo_operations, manufacturing_orders, routing_operations, work_centers, bom_components, articles, suppliers CASCADE`;

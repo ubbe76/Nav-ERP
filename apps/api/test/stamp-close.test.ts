@@ -16,6 +16,7 @@ import {
   stampedHours,
 } from "../src/modules/timereport/repository/stamp-close.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 const HOUR = 3_600_000;
 const t0 = new Date("2026-10-14T06:00:00Z");
@@ -65,7 +66,7 @@ describe("localDateOf", () => {
 });
 
 const articleService = createArticleService(createArticleRepository(db));
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const authRepo = createAuthRepository(db);
 const trRepo = createTimeReportRepository(db);
 

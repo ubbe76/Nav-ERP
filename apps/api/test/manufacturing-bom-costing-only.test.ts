@@ -11,6 +11,7 @@ import { createManufacturingService, OperationHasLinkedMaterialError } from "../
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // "Kalkyl" on a structure row (bom_components.costing_only, Monitor's
 // "End. kal."): the row is priced in the förkalkyl like any other but never
@@ -21,7 +22,7 @@ import { parsed } from "./helpers/parsed.js";
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
 const authRepo = createAuthRepository(db);
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 
 const TRUNCATE = sql`TRUNCATE mo_report_materials, mo_reports, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, stock_transactions, stock_locations, warehouses, bom_components, articles, users CASCADE`;
 

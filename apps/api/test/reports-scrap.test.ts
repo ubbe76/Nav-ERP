@@ -14,6 +14,7 @@ import { createReportsRepository } from "../src/modules/reports/repository/repor
 import { createReportsService } from "../src/modules/reports/service/reports.service.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSelfCosts } from "./helpers/unwired";
 
 const articleService = createArticleService(createArticleRepository(db));
 const authRepo = createAuthRepository(db);
@@ -23,7 +24,7 @@ const mfgService = createManufacturingService(createManufacturingRepository(db),
   lockRowForManufacturing: salesRepository.lockRowForManufacturing,
   markInProduction: markSalesOrderInProduction,
 });
-const reportsService = createReportsService(createReportsRepository(db));
+const reportsService = createReportsService(createReportsRepository(db), unwiredSelfCosts);
 
 const TRUNCATE = sql`TRUNCATE mo_material_consumptions, mo_operation_scrap, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, stock_transactions, stock_locations, warehouses, bom_components, articles, users CASCADE`;
 

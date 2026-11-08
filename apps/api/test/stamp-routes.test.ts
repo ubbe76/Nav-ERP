@@ -15,6 +15,7 @@ import { createTimeReportService } from "../src/modules/timereport/service/timer
 import { localDateOf } from "../src/modules/timereport/repository/stamp-close.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Regel 6 at the route: a stop time (Sluttid) on Stämpla ut is a
 // supervisor's correction on Pågående arbete — the shop floor's terminal
@@ -22,7 +23,7 @@ import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const authRepo = createAuthRepository(db);
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const timeReportService = createTimeReportService(
   createTimeReportRepository(db),
   mfgService,

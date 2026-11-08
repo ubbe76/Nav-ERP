@@ -12,6 +12,7 @@ import { testArticleService, testDocumentPdfService } from "./helpers/services.j
 import { createManufacturingRepository } from "../src/modules/manufacturing/repository/manufacturing.repository.js";
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { sql } from "drizzle-orm";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 const service = createConfiguratorService({
   db,
@@ -193,7 +194,7 @@ describe("configurator routes", () => {
   });
 
   describe("structure lines, operations and derive", () => {
-    const mfg = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+    const mfg = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 
     async function withWorkCenter() {
       await db.execute(sql`TRUNCATE work_centers CASCADE`);

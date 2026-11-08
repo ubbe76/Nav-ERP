@@ -30,9 +30,10 @@ import { PayrollPeriodLockedError } from "../src/modules/payroll/service/period-
 import { localDateOf } from "../src/modules/timereport/repository/stamp-close.js";
 import { failure, waitForLockWaiter } from "./helpers/year-end.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 const articleService = createArticleService(createArticleRepository(db));
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const authRepo = createAuthRepository(db);
 const timeReportRepository = createTimeReportRepository(db);
 

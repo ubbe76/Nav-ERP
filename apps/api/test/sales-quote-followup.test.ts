@@ -30,6 +30,7 @@ import { createPlanningService } from "../src/modules/planning/service/planning.
 import { pdfText } from "./helpers/pdf.js";
 import { testDocumentPdfService } from "./helpers/services.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Uppföljning av offerter against Postgres: Giltig t.o.m. (default, 0
 // days, explicit, never on a direct order), the header PATCH guard, Förlorad
@@ -61,7 +62,7 @@ const salesService = createSalesService(
   (query) => resolvePrice(db, query),
   auditRepository
 );
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, articleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, articleService, unwiredSalesOrderLinks);
 const planningService = createPlanningService(createPlanningRepository(db), {
   purchase: {
     createPurchaseOrder: async () => {

@@ -15,6 +15,7 @@ import { testArticleService, testDocumentPdfService } from "./helpers/services.j
 import { makeVariantService } from "./helpers/configurator.js";
 import { multipartFile } from "./helpers/banking.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Endast läsning: a read-only account (users.read_only) may open everything
 // its permission group gives but change nothing. requireAuth (and the
@@ -24,7 +25,7 @@ import { parsed } from "./helpers/parsed.js";
 // settings. Everything goes through the real app.
 
 const authService = createAuthService(createAuthRepository(db), "unused", createAuditRepository(db));
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const timeReportService = createTimeReportService(
   createTimeReportRepository(db),
   mfgService,

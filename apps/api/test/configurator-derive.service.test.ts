@@ -7,6 +7,7 @@ import { createManufacturingRepository } from "../src/modules/manufacturing/repo
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { makeArticle, resetConfigurator, testCostingService, testCostingSettings, variantTestDeps } from "./helpers/configurator.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Delprojekt 2, Task 5: derive = evaluate → deriveStructure → enrichment →
 // the Kalkyl tab's multi-level pre-costing of exactly the derived structure.
@@ -23,7 +24,7 @@ const service = createConfiguratorService({
   costing: testCostingService,
   ...variantTestDeps,
 });
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 
 async function reset() {
   await resetConfigurator();

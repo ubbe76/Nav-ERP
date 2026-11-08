@@ -30,6 +30,7 @@ import {
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // The whole point of this file is the integration between the payroll
 // period lock and every service that writes into the payroll basis, so all
@@ -48,7 +49,8 @@ const authRepo = createAuthRepository(db);
 const mfgService = createManufacturingService(
   createManufacturingRepository(db),
   testDocumentPdfService,
-  testArticleService
+  testArticleService,
+  unwiredSalesOrderLinks
 );
 const timeReportService = createTimeReportService(
   timeReportRepository,

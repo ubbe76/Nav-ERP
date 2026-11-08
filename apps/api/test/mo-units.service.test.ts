@@ -5,10 +5,11 @@ import { testArticleService, testDocumentPdfService } from "./helpers/services.j
 import { createManufacturingRepository } from "../src/modules/manufacturing/repository/manufacturing.repository.js";
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 const articleService = testArticleService;
 const authRepo = createAuthRepository(db);
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 
 const TABLES = sql`TRUNCATE mo_material_consumptions, mo_operations, manufacturing_orders, stock_transactions, stock_locations, warehouses, bom_components, article_units, articles, units, users CASCADE`;
 

@@ -23,6 +23,7 @@ import {
   type ManufacturingPlanReader,
 } from "../src/modules/planning/service/planning.service.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Pegging (#9) against Postgres: a chain product → halvfabrikat → raw
 // material, the halvfabrikat's TO covering the product TO's material need,
@@ -62,7 +63,7 @@ const mfgService = createManufacturingService(
 );
 // Without a plan reader: its TOs are unplanned (ready on their due date) and
 // its list/card never say Halvfabrikat sent.
-const unplannedMfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const unplannedMfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const scheduleService = createScheduleService(createScheduleRepository(db), createTimeReportRepository(db), {
   isDateLocked: async () => false,
 });

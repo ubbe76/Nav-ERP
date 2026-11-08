@@ -24,6 +24,7 @@ import {
   type ManufacturingPlanReader,
 } from "../src/modules/planning/service/planning.service.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Flytta halvfabrikaten (pegging #9, etapp 2) against Postgres: the chain
 // product P → halvfabrikat H → sub-halvfabrikat S → raw material R, the
@@ -60,7 +61,7 @@ const mfgService = createManufacturingService(
 );
 // Without a plan reader: its TOs are unplanned, so they are ready on their
 // due date — the dates in the tests below are then exact.
-const unplannedMfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const unplannedMfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const scheduleService = createScheduleService(createScheduleRepository(db), createTimeReportRepository(db), {
   isDateLocked: async () => false,
 });

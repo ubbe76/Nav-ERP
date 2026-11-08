@@ -11,6 +11,7 @@ import { createManufacturingService } from "../src/modules/manufacturing/service
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Regel 10: an operation (or the whole order) turning done stamps out
 // everyone still stamped in on it, inside the report's own transaction, and
@@ -20,7 +21,7 @@ const HOUR = 3_600_000;
 
 const articleService = createArticleService(createArticleRepository(db));
 const mfgRepo = createManufacturingRepository(db);
-const mfgService = createManufacturingService(mfgRepo, testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(mfgRepo, testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const authRepo = createAuthRepository(db);
 const trRepo = createTimeReportRepository(db);
 const trService = createTimeReportService(trRepo, mfgService, { isDateLocked: async () => false }, { log: async () => {} });

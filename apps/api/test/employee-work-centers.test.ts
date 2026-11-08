@@ -15,11 +15,12 @@ import {
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Förvalda stationer: the work centers an employee usually works at, stored
 // in employee_work_centers and replaced as a whole set by PATCH /employees/:id.
 
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const service = createTimeReportService(
   createTimeReportRepository(db),
   mfgService,

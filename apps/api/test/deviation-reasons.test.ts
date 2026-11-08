@@ -19,6 +19,7 @@ import { createReportsRepository } from "../src/modules/reports/repository/repor
 import { createReportsService } from "../src/modules/reports/service/reports.service.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSelfCosts } from "./helpers/unwired";
 
 // Avvikelseorsaker: the register (Kvalitet writes, the terminal reads, delete
 // with reassignment of the cases and the scrap rows), and the scrap reason
@@ -34,7 +35,7 @@ const mfg = createManufacturingService(createManufacturingRepository(db), testDo
   lockRowForManufacturing: salesRepository.lockRowForManufacturing,
   markInProduction: markSalesOrderInProduction,
 });
-const reports = createReportsService(createReportsRepository(db));
+const reports = createReportsService(createReportsRepository(db), unwiredSelfCosts);
 const TRUNCATE = sql`TRUNCATE deviations, deviation_reasons, mo_material_consumptions, mo_operation_scrap, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, stock_transactions, stock_locations, warehouses, bom_components, articles, user_settings, audit_log, users CASCADE`;
 const DELETE_GROUPS = sql`DELETE FROM permission_groups WHERE code LIKE 'AVR%'`;
 

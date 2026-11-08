@@ -22,6 +22,7 @@ import {
   type ManufacturingPlanReader,
 } from "../src/modules/planning/service/planning.service.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Produktionsplanering against Postgres: a new TO is planned in its own
 // create transaction, Planera/Flytta/Lås upp write the allocations under the
@@ -64,7 +65,7 @@ const mfgService = createManufacturingService(
 );
 // A service WITHOUT a plan reader: its TOs are created unplanned (older
 // orders, fixtures) and must count exactly as before the plan existed.
-const unplannedMfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const unplannedMfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const scheduleService = createScheduleService(createScheduleRepository(db), createTimeReportRepository(db), {
   isDateLocked: async () => false,
 });

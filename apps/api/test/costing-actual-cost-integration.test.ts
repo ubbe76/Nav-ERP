@@ -13,6 +13,7 @@ import { createStockRepository } from "../src/modules/stock/repository/stock.rep
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Verklig kostnad end to end: real stock_transactions, a real manufacturing
 // order, and the moving average derived from the log rather than read off the
@@ -20,7 +21,7 @@ import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const authRepo = createAuthRepository(db);
 
 const costingSettings = {

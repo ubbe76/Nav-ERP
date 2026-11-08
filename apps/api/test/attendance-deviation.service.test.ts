@@ -38,6 +38,7 @@ import {
   AttendanceReasonInvalidError,
 } from "../src/modules/timereport/service/attendance-deviation.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Närvaroavvikelser against Postgres: the reason / overtime guards on
 // Stämpla in närvaro, Stämpla in (regel 5) and Gå hem, wired with the real
@@ -51,7 +52,7 @@ const at = (clock: string, date = DAY) => new Date(`${date}T${clock}+02:00`);
 
 const authRepo = createAuthRepository(db);
 const articleService = createArticleService(createArticleRepository(db));
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const timeReportRepository = createTimeReportRepository(db);
 const atfRepository = createAtfRepository(db);
 const payrollRepository = createPayrollRepository(db);

@@ -44,6 +44,7 @@ import { createSalesRepository } from "../src/modules/sales/repository/sales.rep
 import { createAlertsService, EMAIL_FAILED_DAYS } from "../src/modules/alerts/service/alerts.service.js";
 import { vatCodeId } from "./helpers/vat-codes.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Aviseringar against Postgres: per kind one case that gives a row and one
 // borderline case that must not. "Today" is pinned to Monday 2030-03-04 (as
@@ -58,7 +59,7 @@ const authRepo = createAuthRepository(db);
 const stockService = createStockService(createStockRepository(db));
 // No plan reader: the TOs are created unplanned, which is what makes an
 // overdue one Sen (orderPlanStatus) without a capacity world.
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const planningService = createPlanningService(createPlanningRepository(db), {
   purchase: {
     createPurchaseOrder: async () => {

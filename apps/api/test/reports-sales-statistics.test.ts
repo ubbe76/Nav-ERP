@@ -26,6 +26,7 @@ import { createReportsService } from "../src/modules/reports/service/reports.ser
 import { buildSalesStatisticsCsv } from "../src/modules/reports/service/reports-csv.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSelfCosts } from "./helpers/unwired";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -49,7 +50,7 @@ const invoiceRepo = createInvoiceRepository(db);
 // about the reports aggregation, not about posting configuration.
 const invoicePoster = createVerificationPoster({ read: async () => ({ ...DEFAULT_POSTING_SETTINGS }) });
 const invoiceService = createInvoiceService(invoiceRepo, mailService, documentPdfService, invoicePoster);
-const reportsService = createReportsService(createReportsRepository(db));
+const reportsService = createReportsService(createReportsRepository(db), unwiredSelfCosts);
 
 const TRUNCATE = sql`TRUNCATE posting_rules, verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, invoice_rows, invoices, sales_order_rows, sales_orders, customers, payment_terms, stock_transactions, stock_locations, warehouses, bom_components, articles, users CASCADE`;
 

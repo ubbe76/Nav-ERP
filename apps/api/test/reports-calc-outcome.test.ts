@@ -32,6 +32,7 @@ import { createTimeReportRepository } from "../src/modules/timereport/repository
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
 import { waitForLockWaiter } from "./helpers/year-end.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 function gate() {
   let open!: () => void;
@@ -46,7 +47,7 @@ function gate() {
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
 const authRepo = createAuthRepository(db);
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const timeReportService = createTimeReportService(
   createTimeReportRepository(db),
   mfgService,

@@ -29,10 +29,11 @@ import { createTimeReportService } from "../src/modules/timereport/service/timer
 import { ExchangeRateUnavailableError } from "../src/modules/system/service/exchange-rates.js";
 import { stockholmDateOf } from "../src/modules/system/service/delivery-days.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const timeReportService = createTimeReportService(
   createTimeReportRepository(db),
   mfgService,

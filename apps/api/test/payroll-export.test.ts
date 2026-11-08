@@ -24,6 +24,7 @@ import { createScheduleRepository } from "../src/modules/timereport/repository/s
 import { createScheduleService } from "../src/modules/timereport/service/schedule.service.js";
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // ---------------------------------------------------------------------------
 // Pure builders (no DB) — the PAXml/CSV knowledge lives entirely in these two
@@ -362,7 +363,8 @@ const authRepo = createAuthRepository(db);
 const mfgService = createManufacturingService(
   createManufacturingRepository(db),
   testDocumentPdfService,
-  testArticleService
+  testArticleService,
+  unwiredSalesOrderLinks
 );
 const scheduleService = createScheduleService(scheduleRepository, timeReportRepository, periodLocks);
 

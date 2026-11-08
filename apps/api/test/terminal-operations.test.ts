@@ -12,6 +12,7 @@ import { createManufacturingRepository } from "../src/modules/manufacturing/repo
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Stämpelterminalens operationslista: GET /terminal/operations lists every
 // stampable operation (released/in-progress order, pending, never lego) with
@@ -21,7 +22,7 @@ import { parsed } from "./helpers/parsed.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const authRepo = createAuthRepository(db);
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 
 const TABLES = sql`TRUNCATE stamp_sessions, time_reports, employees, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, stock_transactions, stock_locations, warehouses, bom_components, articles, audit_log, user_settings, users CASCADE`;
 // Only the groups this file creates — the migration's seeded groups belong

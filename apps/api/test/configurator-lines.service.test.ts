@@ -12,6 +12,7 @@ import { createManufacturingRepository } from "../src/modules/manufacturing/repo
 import { createManufacturingService, WorkCenterNotFoundError } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { makeArticle, resetConfigurator, testCostingService, variantTestDeps } from "./helpers/configurator.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Delprojekt 2, Task 4: conditional structure lines and operations, the
 // alternative's article and the extended reference guards. Every save is
@@ -30,7 +31,7 @@ const service = createConfiguratorService({
   costing: testCostingService,
   ...variantTestDeps,
 });
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 
 // work_centers is not seeded by any migration and the 3-digit code space is
 // small, so this file clears it (same as the costing tests).

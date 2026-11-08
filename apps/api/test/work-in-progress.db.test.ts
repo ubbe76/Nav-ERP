@@ -27,6 +27,7 @@ import { createTimeReportRepository } from "../src/modules/timereport/repository
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
 import { ExchangeRateUnavailableError } from "../src/modules/system/service/exchange-rates.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Produkter i arbete (#25) against Postgres: every source bounded to D, the
 // orders that count, avräknat at the stock price. "Before D" is made by
@@ -38,7 +39,7 @@ const BEFORE = "2025-06-15T10:00:00Z";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const timeReportService = createTimeReportService(
   createTimeReportRepository(db),
   mfgService,

@@ -15,6 +15,7 @@ import { makeArticle, makeVariantService, resetConfigurator, testCostingSettings
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { vatRateGroupId } from "./helpers/vat-group.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Delprojekt 3, Task 4: stocked variants — preview, creation in ONE
 // transaction (article + route + structure + link), the code lock and the
@@ -24,7 +25,7 @@ import { parsed } from "./helpers/parsed.js";
 // a costing-only base operation.
 
 const service = makeVariantService();
-const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
+const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 
 async function reset() {
   await resetConfigurator();

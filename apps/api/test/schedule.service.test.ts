@@ -26,6 +26,7 @@ import {
 } from "../src/modules/timereport/service/schedule.service.js";
 import { PayrollPeriodLockedError } from "../src/modules/payroll/service/period-lock.js";
 import { parsed } from "./helpers/parsed.js";
+import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 const timeReportRepo = createTimeReportRepository(db);
 // Mutable period-lock stub — the real payroll_periods-backed checker is
@@ -33,7 +34,7 @@ const timeReportRepo = createTimeReportRepository(db);
 let dateLocked = false;
 const timeReportService = createTimeReportService(
   timeReportRepo,
-  createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService),
+  createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks),
   { isDateLocked: async () => dateLocked },
   // Schedule tests don't exercise corrections/audit — no-op writer.
   { log: async () => {} }
