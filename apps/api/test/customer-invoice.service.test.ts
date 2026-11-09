@@ -3,7 +3,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, count, eq, sql } from "drizzle-orm";
 import { auditLog, db, invoices, salesOrderRows, units, verifications } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
-import { createArticleService } from "../src/modules/article/service/article.service.js";
+import { createArticleService, InvalidUnitError } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createSalesRepository } from "../src/modules/sales/repository/sales.repository.js";
 import {
@@ -1912,5 +1912,98 @@ describe("invoice language (Språk, #7)", () => {
     expect(issuedCredit!.language).toBe("en");
     // The source invoice keeps its stamp.
     expect((await invoiceService.getInvoice(issued!.id))!.language).toBe("sv");
+  });
+});
+
+// Enhet on a free row: the display unit only — quantity and price stay in
+// the base unit, as on a linked row.
+describe("customer invoice — Enhet on a free row", () => {
+  async function unit(code: string, name: string) {
+    let [found] = await db.select().from(units).where(eq(units.code, code));
+    if (!found) [found] = await db.insert(units).values({ code, name }).returning();
+    return found!;
+  }
+  async function rowsOf(invoiceId: string) {
+    return (await invoiceService.getInvoice(invoiceId))!.rows;
+  }
+
+  it("takes one of the article's units, keeps it on a PATCH and goes back to the base unit on null", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const article = await makeArticle();
+    const kg = await unit("kg", "Kilogram");
+    await articleService.addArticleUnit(article.id, { unitId: kg.id, quantityPerBase: 5 });
+    const invoice = await invoiceService.create(
+      { customerId: customer.id, rows: [{ articleId: article.id, description: "Plåt", quantity: 2, unitPrice: 100, unitId: kg.id }] },
+      user.id
+    );
+    const [row] = await rowsOf(invoice!.id);
+    expect(row).toMatchObject({ unitId: kg.id, quantity: "2.0000", unitPrice: "100.0000" });
+    expect(Number(row!.unitFactor)).toBe(5);
+
+    await invoiceService.updateRow(invoice!.id, row!.id, { quantity: 3 });
+    expect((await rowsOf(invoice!.id))[0]).toMatchObject({ unitId: kg.id, quantity: "3.0000" });
+
+    await invoiceService.updateRow(invoice!.id, row!.id, { unitId: null });
+    expect((await rowsOf(invoice!.id))[0]).toMatchObject({ unitId: null, unitFactor: null });
+  });
+
+  it("refuses a unit that is not the article's, and a unit on a row without an article", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const article = await makeArticle();
+    const m = await unit("m", "Meter");
+    const invoice = await invoiceService.create({ customerId: customer.id, rows: [{ description: "x", quantity: 1, unitPrice: 1 }] }, user.id);
+    await expect(
+      invoiceService.addRow(invoice!.id, { articleId: article.id, description: "y", quantity: 1, unitPrice: 1, unitId: m.id })
+    ).rejects.toThrow(InvalidUnitError);
+    await expect(invoiceService.addRow(invoice!.id, { description: "fri", quantity: 1, unitPrice: 1, unitId: m.id })).rejects.toThrow(
+      InvalidUnitError
+    );
+  });
+
+  it("a linked row follows its order row, and a credit copies a free row's unit", async () => {
+    const { user, customer, row: orderRow } = await makeDeliveredOrderRow({ delivered: 2 });
+    const article = await makeArticle();
+    const kg = await unit("kg", "Kilogram");
+    await articleService.addArticleUnit(article.id, { unitId: kg.id, quantityPerBase: 5 });
+    await articleService.addArticleUnit(orderRow.articleId!, { unitId: kg.id, quantityPerBase: 2 });
+    const invoice = await invoiceService.create(
+      {
+        customerId: customer.id,
+        rows: [
+          // The order row is in the base unit — the field is ignored here.
+          { articleId: orderRow.articleId, salesOrderRowId: orderRow.id, description: "Kopplad", quantity: 2, unitPrice: 100, unitId: kg.id },
+          { articleId: article.id, description: "Fri", quantity: 1, unitPrice: 50, unitId: kg.id },
+        ],
+      },
+      user.id
+    );
+    const rows = await rowsOf(invoice!.id);
+    expect(rows.find((r) => r.description === "Kopplad")).toMatchObject({ unitId: null, unitFactor: null });
+    expect(rows.find((r) => r.description === "Fri")).toMatchObject({ unitId: kg.id });
+
+    await invoiceService.issue(invoice!.id, issuedBy);
+    const credit = await invoiceService.createCredit(invoice!.id, {}, user.id);
+    const creditRows = await rowsOf(credit!.id);
+    expect(creditRows.find((r) => r.description === "Fri")).toMatchObject({ unitId: kg.id });
+    expect(creditRows.find((r) => r.description === "Kopplad")).toMatchObject({ unitId: null });
+  });
+});
+
+// Fakturalistans sökning: the name the list shows (the snapshot from
+// Utfärda) and the customer's current name both find the invoice.
+describe("customer invoice — list search after a rename", () => {
+  it("finds an issued invoice on the name it was issued to and on the new one", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer("Gamla Namnet AB");
+    const invoice = await invoiceService.create({ customerId: customer.id, rows: [{ description: "x", quantity: 1, unitPrice: 10 }] }, user.id);
+    await invoiceService.issue(invoice!.id, issuedBy);
+    await salesService.updateCustomer(customer.id, { name: "Nya Namnet AB" });
+
+    const search = async (term: string) => (await invoiceService.list({ search: term, limit: 50, offset: 0 })).rows.map((r) => r.id);
+    expect(await search("Gamla Namnet")).toEqual([invoice!.id]);
+    expect(await search("Nya Namnet")).toEqual([invoice!.id]);
+    expect((await invoiceService.list({ search: "Gamla Namnet", limit: 50, offset: 0 })).rows[0]!.customerName).toBe("Gamla Namnet AB");
   });
 });

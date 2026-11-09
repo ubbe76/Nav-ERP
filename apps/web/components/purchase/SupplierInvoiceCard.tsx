@@ -1,6 +1,7 @@
 "use client";
 
 import { CostCenterSelect, ProjectSelect, DimensionFields, NO_OBJECT } from "../economy/DimensionSelect";
+import { VerificationRef } from "../economy/VerificationRef";
 import { dimensionText, headerDimensionFields, useDimensions } from "../../lib/dimensions";
 import { confirmDelete } from "../../lib/confirm";
 import { useState, type FormEvent } from "react";
@@ -139,13 +140,7 @@ export function SupplierInvoiceCard({
         {invoice.verificationId && (
           <span>
             Verifikat{" "}
-            {canOpenVerifications ? (
-              <Link href={`/ekonomi/verifikat/${invoice.verificationId}`}>
-                {invoice.verificationDisplayNumber ?? "–"}
-              </Link>
-            ) : (
-              invoice.verificationDisplayNumber ?? "–"
-            )}
+            <VerificationRef id={invoice.verificationId} displayNumber={invoice.verificationDisplayNumber} canOpen={canOpenVerifications} />
           </span>
         )}
       </div>
@@ -347,11 +342,7 @@ export function SupplierInvoiceCard({
                   if (row.verificationId === null) {
                     return <span title="Kvittning (inget verifikat)">– (kvittning)</span>;
                   }
-                  return canOpenVerifications ? (
-                    <Link href={`/ekonomi/verifikat/${row.verificationId}`}>{row.verificationDisplayNumber ?? "–"}</Link>
-                  ) : (
-                    "–"
-                  );
+                  return <VerificationRef id={row.verificationId} displayNumber={row.verificationDisplayNumber} canOpen={canOpenVerifications} />;
                 default:
                   return null;
               }

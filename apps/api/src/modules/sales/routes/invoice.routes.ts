@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { deviationLinkForbidden } from "../../quality/service/deviation-link-access.js";
 import { DeviationLinkNotAllowedError } from "../../quality/service/deviation-errors.js";
+import { InvalidUnitError } from "../../article/service/article.service.js";
 import { z } from "zod";
 import {
   createCreditInvoiceSchema,
@@ -145,7 +146,8 @@ export async function invoiceRoutes(app: FastifyInstance, opts: { service: Invoi
       return reply.code(409).send(errorBody(err as Error));
     }
     if (err instanceof MailSendError) return reply.code(502).send(errorBody(err));
-    if (err instanceof SalesOrderRowMismatchError || err instanceof InvalidShipmentInvoiceRowError) {
+    // InvalidUnitError: a free row's Enhet that is not one of its article's.
+    if (err instanceof SalesOrderRowMismatchError || err instanceof InvalidShipmentInvoiceRowError || err instanceof InvalidUnitError) {
       return reply.code(400).send(errorBody(err));
     }
     throw err;
