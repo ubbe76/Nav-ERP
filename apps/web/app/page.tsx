@@ -346,7 +346,7 @@ export default async function OverviewPage() {
   const todayLabel = new Date().toLocaleDateString("sv-SE", { weekday: "long", day: "numeric", month: "long" });
 
   return (
-    <FavoritesProvider initial={favorites.favorites} initialInSidebar={favorites.inSidebar}>
+    <FavoritesProvider initial={favorites.favorites} initialInSidebar={favorites.inSidebar} initialOnOverview={favorites.onOverview}>
     <UserPrefsProvider
       className={shellStyles.frame}
       initialDensity={favorites.density}

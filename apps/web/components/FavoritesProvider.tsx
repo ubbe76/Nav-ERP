@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { apiFetch } from "../lib/api";
 import { apiErrorMessage } from "../lib/errorMessages";
 import { MAX_FAVORITES, type Favorite } from "../lib/favorites";
+import { hasFavoritesCard, overviewCardsWithFavorites, type FavoritesPlacement } from "../lib/overviewCards";
 import styles from "./FavoritesProvider.module.css";
 
 interface FavoritesValue {
@@ -14,6 +15,10 @@ interface FavoritesValue {
   // sidebar's group — Översikten's Favoriter card shows them instead.
   inSidebar: boolean;
   setInSidebar: (value: boolean) => Promise<boolean>;
+  // Översikten's Favoriter card is chosen (`overviewCards`).
+  onOverview: boolean;
+  // Favoriter in the user menu: both settings in one save.
+  setPlacement: (placement: FavoritesPlacement) => Promise<boolean>;
   has: (href: string) => boolean;
   add: (favorite: Favorite) => Promise<boolean>;
   remove: (href: string) => Promise<boolean>;
@@ -25,6 +30,8 @@ const FavoritesContext = createContext<FavoritesValue>({
   favorites: null,
   inSidebar: true,
   setInSidebar: async () => false,
+  onOverview: false,
+  setPlacement: async () => false,
   has: () => false,
   add: async () => false,
   remove: async () => false,
@@ -43,15 +50,20 @@ type Settings = { favorites: Favorite[] };
 export function FavoritesProvider({
   initial,
   initialInSidebar = true,
+  initialOnOverview = false,
   children,
 }: {
   initial: Favorite[] | null;
   initialInSidebar?: boolean;
+  initialOnOverview?: boolean;
   children: ReactNode;
 }) {
   const [favorites, setFavorites] = useState(initial);
   const [inSidebar, setInSidebarState] = useState(initialInSidebar);
   useEffect(() => setInSidebarState(initialInSidebar), [initialInSidebar]);
+  // Anpassa on Översikten changes the card list and re-renders the page.
+  const [onOverview, setOnOverviewState] = useState(initialOnOverview);
+  useEffect(() => setOnOverviewState(initialOnOverview), [initialOnOverview]);
   const [error, setError] = useState<string | null>(null);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   // The list as shown, kept beside the state for the queued saves: they run
@@ -125,18 +137,47 @@ export function FavoritesProvider({
     }
   }, []);
 
+  // The card list is read first — Anpassa may have changed it since this page
+  // loaded — and only sent when the Favoriter card comes or goes. Queued with
+  // the list's saves.
+  const setPlacement = useCallback((placement: FavoritesPlacement): Promise<boolean> => {
+    const run = async (): Promise<boolean> => {
+      const sidebar = placement !== "overview";
+      const card = placement !== "sidebar";
+      try {
+        const current = await apiFetch<{ overviewCards: unknown }>("/api/v1/me/settings");
+        const overviewCards = overviewCardsWithFavorites(current.overviewCards, card);
+        const saved = await apiFetch<{ favoritesInSidebar: boolean; overviewCards: unknown }>("/api/v1/me/settings", {
+          method: "PATCH",
+          body: JSON.stringify(overviewCards ? { favoritesInSidebar: sidebar, overviewCards } : { favoritesInSidebar: sidebar }),
+        });
+        setInSidebarState(saved.favoritesInSidebar);
+        setOnOverviewState(hasFavoritesCard(saved.overviewCards));
+        return true;
+      } catch (err) {
+        setError(apiErrorMessage(err, "Valet kunde inte sparas."));
+        return false;
+      }
+    };
+    const result = queue.current.then(run);
+    queue.current = result;
+    return result;
+  }, []);
+
   const value = useMemo<FavoritesValue>(
     () => ({
       favorites,
       inSidebar,
       setInSidebar,
+      onOverview,
+      setPlacement,
       has: (href) => favorites?.some((f) => f.href === href) ?? false,
       add: (favorite) =>
         save((current) => (current.some((f) => f.href === favorite.href) ? current : [...current, favorite]), true),
       remove: (href) => save((current) => current.filter((f) => f.href !== href), true),
       replace: (list) => save(() => list, false),
     }),
-    [favorites, save, inSidebar, setInSidebar]
+    [favorites, save, inSidebar, setInSidebar, onOverview, setPlacement]
   );
 
   return (
