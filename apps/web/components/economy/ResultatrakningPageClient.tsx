@@ -9,6 +9,7 @@ import { FormError, FormHint, FormRow } from "../ui/Form";
 import { Table } from "../ui/Table";
 import { API_URL, apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { stockholmYear } from "../../lib/date";
 import { formatMoney, formatPercent } from "../../lib/format";
 import buttonStyles from "../ui/Button.module.css";
 import { useDimensions } from "../../lib/dimensions";
@@ -88,7 +89,7 @@ export function ResultatrakningPageClient({
 
   // Same default as the huvudbok page: the latest fiscal year's bounds,
   // falling back to the current calendar year when none exists yet.
-  const fallbackYear = new Date().getFullYear();
+  const fallbackYear = stockholmYear();
   const initial = useMemo(
     () => ({
       from: defaultFrom ?? fiscalYears[0]?.startDate ?? `${fallbackYear}-01-01`,

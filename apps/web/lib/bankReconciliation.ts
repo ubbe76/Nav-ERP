@@ -6,6 +6,7 @@ import { splitVat, splitVatApplies } from "./splitVat";
 import { emptyRow, type EditorRow } from "./verificationRows";
 import type { BankAccount, BankCsvMapping, BankMatchKind, BankStatementEntry } from "./types";
 import type { VatCodeView } from "./vatCodes";
+import { stockholmToday } from "./date";
 
 export const BANK_MATCH_KIND_LABELS: Record<BankMatchKind, string> = {
   auto: "Automatisk",
@@ -22,7 +23,7 @@ export function sumAmounts(items: readonly { amount: number }[]): number {
 
 // "yyyy-mm-dd" of the current day in Swedish local time.
 export function todayIso(): string {
-  return new Date().toLocaleDateString("sv-SE");
+  return stockholmToday();
 }
 
 // The default period of the reconciliation page: the current calendar year up

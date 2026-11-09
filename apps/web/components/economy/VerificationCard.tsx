@@ -40,9 +40,10 @@ import {
   type VerificationSeries,
   type VerificationTemplate,
 } from "../../lib/types";
+import { formatStockholmDateTime } from "../../lib/date";
 
 function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
+  return formatStockholmDateTime(iso);
 }
 
 // Translates the economy service's errors via the shared error-code

@@ -6,6 +6,7 @@ import { apiFetch } from "../../lib/api";
 import { auditActionLabel, type AuditLogEntry, type Paged } from "../../lib/types";
 import { AuditDetail } from "./AuditDetail";
 import { useCan } from "../PermissionsProvider";
+import { formatStockholmDateTime } from "../../lib/date";
 
 // Shared "Historik"-section for the document cards (kundorder, inköpsorder,
 // tillverkningsorder, faktura, leverantörsfaktura) — G1's read side. Mounted
@@ -78,7 +79,7 @@ export function AuditTrailSection({
             renderCell={(row, key) => {
               switch (key) {
                 case "createdAt":
-                  return new Date(row.createdAt).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
+                  return formatStockholmDateTime(row.createdAt);
                 case "userName":
                   return row.userName ?? "System";
                 case "action":

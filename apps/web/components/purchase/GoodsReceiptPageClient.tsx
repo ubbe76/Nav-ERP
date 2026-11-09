@@ -41,6 +41,7 @@ import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { FormError } from "../ui/Form";
 import styles from "./GoodsReceiptPageClient.module.css";
+import { formatStockholmDate } from "../../lib/date";
 
 const RECEIVABLE: PurchaseOrderStatus[] = ["confirmed", "partially_received"];
 const NO_COUNT: OrderCountState = { counting: false, quantities: {} };
@@ -400,7 +401,7 @@ export function GoodsReceiptPageClient({
                   {o.orderNumber} — {o.supplierName}
                 </span>
                 <span className={styles.optionMeta}>
-                  {new Date(o.createdAt).toLocaleDateString("sv-SE")} · {PURCHASE_ORDER_STATUS_PILL[o.status].label}
+                  {formatStockholmDate(o.createdAt)} · {PURCHASE_ORDER_STATUS_PILL[o.status].label}
                   {o.openRowCount != null ? ` · ${o.openRowCount} restrad${o.openRowCount === 1 ? "" : "er"}` : ""}
                 </span>
               </span>
@@ -469,7 +470,7 @@ export function GoodsReceiptPageClient({
                 case "supplierName":
                   return o.supplierName;
                 case "createdAt":
-                  return new Date(o.createdAt).toLocaleDateString("sv-SE");
+                  return formatStockholmDate(o.createdAt);
                 case "status": {
                   const p = PURCHASE_ORDER_STATUS_PILL[o.status];
                   return <StatusPill status={p.status} label={p.label} compact />;

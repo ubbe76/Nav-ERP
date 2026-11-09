@@ -15,6 +15,7 @@ import type { Paged, PurchaseInvoiceBasisEntry, Supplier } from "../../lib/types
 import shellStyles from "../../components/AppShell.module.css";
 import listStyles from "../../app/inkop/ordrar/page.module.css";
 import controlStyles from "../ui/ListControls.module.css";
+import { formatStockholmDate } from "../../lib/date";
 
 export function PurchaseInvoiceBasisPageClient({
   basis,
@@ -76,7 +77,7 @@ export function PurchaseInvoiceBasisPageClient({
             case "supplierName":
               return row.supplierName;
             case "receivedAt":
-              return row.receivedAt ? new Date(row.receivedAt).toLocaleDateString("sv-SE") : "–";
+              return row.receivedAt ? formatStockholmDate(row.receivedAt) : "–";
             case "receivedValue":
               return `${formatMoney(row.receivedValue)} ${row.currency}`;
             case "invoiceStatus":

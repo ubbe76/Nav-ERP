@@ -9,6 +9,7 @@
 // the API side (class name -> code derivation) so a class rename fails loudly
 // there rather than silently breaking the mapping this file relies on.
 import type { ApiError } from "./api";
+import { formatStockholmDateTime } from "./date";
 
 // Which registers keep System → Exempeldata from running, in prose.
 export const DEMO_BLOCKER_LABELS: Record<string, string> = {
@@ -688,7 +689,7 @@ const MESSAGES: Record<string, MessageEntry> = {
     const body = err.body as { importedAt?: unknown; importedBy?: unknown } | undefined;
     const when =
       typeof body?.importedAt === "string" && !Number.isNaN(Date.parse(body.importedAt))
-        ? new Date(body.importedAt).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" })
+        ? formatStockholmDateTime(body.importedAt)
         : null;
     const who = typeof body?.importedBy === "string" && body.importedBy ? body.importedBy : null;
     return `Filen har redan importerats${when ? ` ${when}` : ""}${who ? ` av ${who}` : ""}.`;

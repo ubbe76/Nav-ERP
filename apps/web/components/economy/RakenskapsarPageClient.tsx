@@ -17,18 +17,19 @@ import { MONTH_NAMES_SV, type AccountingPeriod, type FiscalYear, type FiscalYear
 import shellStyles from "../AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { UnlockPeriodForm } from "./UnlockPeriodForm";
+import { formatStockholmDate, stockholmYear } from "../../lib/date";
 
 // Next 1 Jan – 31 Dec, prefilled in the create form: brutna räkenskapsår are
 // supported by the API (arbitrary start/end), but the common case is a
 // calendar year, and the next one (not the current) is what a bookkeeper
 // sets up ahead of time.
 function nextCalendarYearBounds(): { label: string; start: string; end: string } {
-  const year = new Date().getFullYear() + 1;
+  const year = stockholmYear() + 1;
   return { label: String(year), start: `${year}-01-01`, end: `${year}-12-31` };
 }
 
 function formatDate(date: string): string {
-  return new Date(date).toLocaleDateString("sv-SE");
+  return formatStockholmDate(date);
 }
 
 // "2026-01" -> "Januari 2026" — same capitalize-the-lowercase-name idiom as

@@ -25,6 +25,7 @@ import formStyles from "./EmployeeTabs.module.css";
 import styles from "../../app/tillverkning/tidrapporter/page.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { useCanOpenPersonal } from "../PermissionsProvider";
+import { stockholmYear } from "../../lib/date";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 
 const TABS = ["Dagsscheman", "Veckoscheman", "Helgdagar"] as const;
@@ -773,7 +774,7 @@ function PreviewTable({ title, week }: { title: string; week: PreviewWeek }) {
 
 function HolidaysTab({ holidays, daySchedules }: { holidays: Holiday[]; daySchedules: DaySchedule[] }) {
   const router = useRouter();
-  const currentYear = new Date().getFullYear();
+  const currentYear = stockholmYear();
   const years = useMemo(() => {
     const set = new Set(holidays.map((h) => Number(h.date.slice(0, 4))));
     set.add(currentYear);

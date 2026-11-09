@@ -14,6 +14,7 @@ import { CostCalculationList } from "../costing/CostCalculationList";
 import { SectionHeading } from "../ui/SectionHeading";
 import { computeLineMargin } from "../../lib/margin";
 import styles from "./KalkylTab.module.css";
+import { formatStockholmDate } from "../../lib/date";
 
 // The markups Pröva påslag sends; absent key = the ones that apply.
 type TryMarkups = { generalMarkupPercent?: number; materialMarkupPercent?: number };
@@ -341,7 +342,7 @@ function MarginCard({ calculations, salesPrice }: { calculations: CostCalculatio
             {margin!.marginPercent === null
               ? "—"
               : `${margin!.marginPercent.toLocaleString("sv-SE", { maximumFractionDigits: 1 })} %`}
-            . Mot förkalkylen från {new Date(latestPre!.calculatedAt).toLocaleDateString("sv-SE")} på{" "}
+            . Mot förkalkylen från {formatStockholmDate(latestPre!.calculatedAt)} på{" "}
             {Number(latestPre!.quantity).toLocaleString("sv-SE")} st.
           </FormHint>
         </>

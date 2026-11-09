@@ -11,13 +11,14 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import { allocationAmounts, allocationMonths } from "../../lib/allocation";
 import { formatMoney } from "../../lib/format";
 import type { Account, Paged, RecurringVerification } from "../../lib/types";
+import { stockholmToday } from "../../lib/date";
 
 type Kind = "cost" | "revenue";
 
 const DEFAULT_BALANCE_ACCOUNT: Record<Kind, string> = { cost: "1790", revenue: "2990" };
 
 function currentMonth(): string {
-  return new Date().toLocaleDateString("sv-SE").slice(0, 7);
+  return stockholmToday().slice(0, 7);
 }
 
 // Fördela över perioder: one amount spread over several months as a recurring

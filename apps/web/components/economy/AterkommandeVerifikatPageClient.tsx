@@ -25,6 +25,7 @@ import type {
 } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
 import { AllocateDialog } from "./AllocateDialog";
+import { stockholmToday } from "../../lib/date";
 
 const MODE_LABELS = { draft: "Utkast", book: "Bokför direkt" } as const;
 
@@ -329,7 +330,7 @@ function RunHistory({ post, onClose }: { post: RecurringVerificationDetail; onCl
 }
 
 function currentMonth(): string {
-  return new Date().toLocaleDateString("sv-SE").slice(0, 7);
+  return stockholmToday().slice(0, 7);
 }
 
 function NewRecurringForm({ templates, onCreated }: { templates: VerificationTemplate[]; onCreated: () => void }) {

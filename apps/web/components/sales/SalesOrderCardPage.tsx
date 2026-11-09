@@ -28,6 +28,7 @@ import { documentMailTexts } from "../../lib/documentMailTexts";
 import { documentLanguageOf } from "../../lib/documentLanguage";
 import { SectionHeading } from "../ui/SectionHeading";
 import { DeviationsSection } from "../quality/DeviationsSection";
+import { formatStockholmDateTime } from "../../lib/date";
 
 // Ångra utleverans: a följesedel whose rows are all undone.
 function isUndone(delivery: SalesDelivery) {
@@ -181,7 +182,7 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
                     row.deliveryNumber
                   );
                 case "deliveredAt":
-                  return new Date(row.deliveredAt).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
+                  return formatStockholmDateTime(row.deliveredAt);
                 case "rowCount":
                   return row.rowCount;
                 case "shipment":

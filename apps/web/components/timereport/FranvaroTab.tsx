@@ -12,6 +12,7 @@ import { GatedLink } from "../ui/GatedLink";
 import type { Absence, AbsenceType, ResolvedCalendarDay, StampSession, UserRole } from "../../lib/types";
 import { formatHours } from "./SchedulesPageClient";
 import styles from "./EmployeeTabs.module.css";
+import { stockholmToday } from "../../lib/date";
 
 interface FranvaroTabProps {
   employeeId: string;
@@ -40,7 +41,7 @@ export function FranvaroTab({ employeeId, employeeName, absenceTypes, initialAbs
   const [pending, setPending] = useState(false);
 
   const [absenceTypeId, setAbsenceTypeId] = useState("");
-  const [date, setDate] = useState(new Date().toLocaleDateString("sv-SE"));
+  const [date, setDate] = useState(stockholmToday());
   const [hours, setHours] = useState("");
   const [note, setNote] = useState("");
 
@@ -99,7 +100,7 @@ export function FranvaroTab({ employeeId, employeeName, absenceTypes, initialAbs
         }),
       });
       setAbsenceTypeId("");
-      setDate(new Date().toLocaleDateString("sv-SE"));
+      setDate(stockholmToday());
       setHours("");
       setNote("");
       router.refresh();

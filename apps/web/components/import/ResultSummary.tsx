@@ -14,6 +14,7 @@ import {
   type CommitResponse,
 } from "./importTypes";
 import styles from "./ImportWizard.module.css";
+import { stockholmToday } from "../../lib/date";
 
 interface ResultSummaryProps {
   entity: string;
@@ -62,7 +63,7 @@ export function ResultSummary({ entity, title, fields, mapping, result, onError,
     const stem = ENTITY_FILE_STEMS[entity] ?? entity;
     // Local date, not toISOString — a late-evening export must not be stamped
     // with tomorrow's date.
-    const stamp = new Date().toLocaleDateString("sv-SE");
+    const stamp = stockholmToday();
     downloadTextFile(`overhoppade-${stem}-${stamp}.csv`, buildCsv(headers, rows), "text/csv;charset=utf-8");
   }
 
@@ -89,7 +90,7 @@ export function ResultSummary({ entity, title, fields, mapping, result, onError,
   @page { size: A4; margin: 15mm; }
 </style></head><body>
 <h1>${escapeHtml(heading)}</h1>
-<p>${rows.length} rader · ${escapeHtml(new Date().toLocaleString("sv-SE"))}</p>
+<p>${rows.length} rader · ${escapeHtml(new Date().toLocaleString("sv-SE", { timeZone: "Europe/Stockholm" }))}</p>
 <table><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
 <tbody>${rows
       .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`)

@@ -46,6 +46,7 @@ import { BookTransportButton } from "../shipping/BookTransportButton";
 import { PalletCardDialog } from "../documents/PalletCardDialog";
 import { UndoDeliveryDialog } from "./UndoDeliveryDialog";
 import styles from "./DeliveryPageClient.module.css";
+import { formatStockholmDate } from "../../lib/date";
 
 const NO_COUNT: OrderCountState = { counting: false, quantities: {} };
 
@@ -417,7 +418,7 @@ export function DeliveryPageClient({
                   {o.orderNumber} — {o.customerName}
                 </span>
                 <span className={styles.optionMeta}>
-                  {new Date(o.createdAt).toLocaleDateString("sv-SE")} · {SALES_ORDER_STATUS_PILL[o.status].label}
+                  {formatStockholmDate(o.createdAt)} · {SALES_ORDER_STATUS_PILL[o.status].label}
                   {o.openRowCount != null ? ` · ${o.openRowCount} restrad${o.openRowCount === 1 ? "" : "er"}` : ""}
                 </span>
               </span>
@@ -521,7 +522,7 @@ export function DeliveryPageClient({
                 case "customerName":
                   return o.customerName;
                 case "createdAt":
-                  return new Date(o.createdAt).toLocaleDateString("sv-SE");
+                  return formatStockholmDate(o.createdAt);
                 case "status": {
                   const p = SALES_ORDER_STATUS_PILL[o.status];
                   return <StatusPill status={p.status} label={p.label} compact />;

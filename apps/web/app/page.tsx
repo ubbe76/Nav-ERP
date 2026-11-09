@@ -343,7 +343,7 @@ export default async function OverviewPage() {
     ),
   };
 
-  const todayLabel = new Date().toLocaleDateString("sv-SE", { weekday: "long", day: "numeric", month: "long" });
+  const todayLabel = new Date().toLocaleDateString("sv-SE", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/Stockholm" });
 
   return (
     <FavoritesProvider initial={favorites.favorites} initialInSidebar={favorites.inSidebar} initialOnOverview={favorites.onOverview}>

@@ -11,13 +11,14 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import { confirmDialog } from "../../lib/confirm";
 import { useCan } from "../PermissionsProvider";
 import type { DeliveryRowsResponse, SalesOrderStatus } from "../../lib/types";
+import { formatStockholmDateTime } from "../../lib/date";
 
 // Ångra utleverans: lists a följesedel's rows; Ångra on a row puts exactly
 // that row's goods back in stock and lowers the order row's delivered
 // quantity. Undone rows stay in the list, greyed out.
 
 function when(iso: string) {
-  return new Date(iso).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
+  return formatStockholmDateTime(iso);
 }
 
 const fmtQty = (n: number) => n.toLocaleString("sv-SE");

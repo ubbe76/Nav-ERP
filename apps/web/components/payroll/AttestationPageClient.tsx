@@ -15,6 +15,7 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import { MONTH_NAMES_SV, type PeriodEmployeeSummary, type PeriodSummary, type UserRole } from "../../lib/types";
 import { formatHours } from "../timereport/SchedulesPageClient";
 import { EmployeePeriodModal } from "./EmployeePeriodModal";
+import { formatStockholmDate, formatStockholmDateTime } from "../../lib/date";
 
 // The Table needs an `id`; the summary rows are keyed by employeeId.
 type EmployeeRow = PeriodEmployeeSummary & { id: string };
@@ -151,7 +152,7 @@ export function AttestationPageClient({
         {employee.attestedByName && (
           <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
             {employee.attestedByName}
-            {employee.attestedAt && ` · ${new Date(employee.attestedAt).toLocaleDateString("sv-SE")}`}
+            {employee.attestedAt && ` · ${formatStockholmDate(employee.attestedAt)}`}
           </span>
         )}
       </span>
@@ -296,7 +297,7 @@ export function AttestationPageClient({
               Perioden låstes{" "}
               <span className="num">
                 {summary.lockedAt
-                  ? new Date(summary.lockedAt).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" })
+                  ? formatStockholmDateTime(summary.lockedAt)
                   : "–"}
               </span>
             </span>

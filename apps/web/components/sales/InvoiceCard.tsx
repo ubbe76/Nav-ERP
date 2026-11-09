@@ -51,6 +51,7 @@ import { documentMailTexts } from "../../lib/documentMailTexts";
 import { documentLanguageOf } from "../../lib/documentLanguage";
 import buttonStyles from "../ui/Button.module.css";
 import fieldStyles from "../ui/Field.module.css";
+import { formatStockholmDateTime } from "../../lib/date";
 
 // A cancelled (makulerad) payment reads as struck through, like an undone
 // receipt or report elsewhere — the Makulerad pill alone is just another colour.
@@ -695,7 +696,7 @@ export function InvoiceCard({
                 case "level":
                   return row.level;
                 case "sentAt":
-                  return new Date(row.sentAt).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
+                  return formatStockholmDateTime(row.sentAt);
                 case "fee":
                   return Number(row.fee) > 0 ? `${formatMoney(row.fee)} ${invoice.currency}` : "–";
                 case "feeVerificationId":

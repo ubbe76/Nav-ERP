@@ -1130,5 +1130,5 @@ function LatestCell({ row, proposal }: { row: RequirementRow; proposal: Requirem
 
 // "Beräknad 08:12:03" — when the server computed the cached result.
 function formatComputedAt(iso: string): string {
-  return new Date(iso).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return new Date(iso).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Europe/Stockholm" });
 }

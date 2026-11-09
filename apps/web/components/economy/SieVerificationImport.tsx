@@ -16,6 +16,7 @@ import type {
   VerificationSeries,
 } from "../../lib/types";
 import styles from "./Sie.module.css";
+import { formatStockholmDateTime } from "../../lib/date";
 
 // Multipart POST that keeps the API's error code/body (apiFetch sends JSON).
 async function postMultipart<T>(path: string, body: FormData): Promise<T> {
@@ -28,7 +29,7 @@ async function postMultipart<T>(path: string, body: FormData): Promise<T> {
 }
 
 function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
+  return formatStockholmDateTime(iso);
 }
 
 // "Importera verifikat": the vouchers (#VER/#TRANS) of a SIE file — typically

@@ -10,6 +10,7 @@ import { AUDIT_ENTITY_TYPE_LABELS, auditActionLabel, auditEntityTypeLabel, type 
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { AuditDetail } from "./AuditDetail";
+import { formatStockholmDateTime } from "../../lib/date";
 
 // Date-range filter — plain <input type="date"> bound to the ?from=&to=
 // query params (same useListNavigation the URL-driven list pages already
@@ -107,7 +108,7 @@ export function AuditLogPageClient({ log, pageSize }: { log: Paged<AuditLogEntry
         renderCell={(entry, key) => {
           switch (key) {
             case "createdAt":
-              return new Date(entry.createdAt).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
+              return formatStockholmDateTime(entry.createdAt);
             case "userName":
               return entry.userName ?? "System";
             case "entityType":

@@ -631,7 +631,7 @@ export function StampTerminal({
   async function openAtf(employee: EmployeeDirectoryEntry) {
     setBusy(true);
     try {
-      const today = new Date().toLocaleDateString("sv-SE");
+      const today = stockholmToday();
       const [atf, calendar] = await Promise.all([
         apiFetch<AtfStatus>(`/api/v1/employees/${employee.id}/atf`),
         apiFetch<ResolvedCalendarDay[]>(
@@ -660,7 +660,7 @@ export function StampTerminal({
       const transaction = await apiFetch<{ id: string }>(`/api/v1/employees/${employee.id}/atf-transactions`, {
         method: "POST",
         body: JSON.stringify({
-          date: new Date().toLocaleDateString("sv-SE"),
+          date: stockholmToday(),
           type: "withdrawal",
           minutes: Math.round(hours * 60),
           note: "ATF via stämpelterminalen",
@@ -885,7 +885,7 @@ export function StampTerminal({
     }
   }
 
-  const clock = new Date(now).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+  const clock = new Date(now).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Stockholm" });
   const visibleRows =
     step.name === "pickOperations"
       ? sortTerminalOperations(filterTerminalOperations(rows, { onlyReady, search }), sort)
@@ -1348,7 +1348,7 @@ function HomeStep({
             <>
               Närvarande sedan{" "}
               <span className="num">
-                {new Date(attendance.startedAt).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })}
+                {new Date(attendance.startedAt).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Stockholm" })}
               </span>
             </>
           ) : (

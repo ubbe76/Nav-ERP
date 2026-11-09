@@ -3,7 +3,7 @@ import { AppShell } from "../../../components/AppShell";
 import { HuvudbokPageClient } from "../../../components/economy/HuvudbokPageClient";
 import { HelpLink } from "../../../components/ui/HelpLink";
 import { apiGet, getCurrentUser } from "../../../lib/api";
-import { stockholmToday } from "../../../lib/date";
+import { stockholmToday, stockholmYear } from "../../../lib/date";
 import type { PageSearchParams } from "../../../lib/listQuery";
 import type { Account, FiscalYear, Paged } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
@@ -13,7 +13,7 @@ import { canOpen } from "../../../lib/pageAccess";
 // same "1 Jan – 31 Dec" convention as RakenskapsarPageClient's
 // nextCalendarYearBounds (this one is the CURRENT year, not next).
 function currentCalendarYearBounds(): { start: string; end: string } {
-  const year = new Date().getFullYear();
+  const year = stockholmYear();
   return { start: `${year}-01-01`, end: `${year}-12-31` };
 }
 

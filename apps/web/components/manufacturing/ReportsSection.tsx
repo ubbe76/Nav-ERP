@@ -8,6 +8,7 @@ import { SectionHeading } from "../ui/SectionHeading";
 import { apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import type { MOReport } from "../../lib/types";
+import { formatStockholmDateTime } from "../../lib/date";
 
 // Rapporteringar on the TO card: every stamp-out, Slutför operation, lego
 // receipt, Slutför order and manual material draw, newest first. Ångra
@@ -15,7 +16,7 @@ import type { MOReport } from "../../lib/types";
 // it removes the stamp's time too); an undone row stays, greyed out.
 
 function when(iso: string) {
-  return new Date(iso).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
+  return formatStockholmDateTime(iso);
 }
 
 function reportLabel(r: MOReport): string {

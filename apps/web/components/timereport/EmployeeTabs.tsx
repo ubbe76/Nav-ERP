@@ -29,7 +29,7 @@ import {
 import { formatHours } from "./SchedulesPageClient";
 import { FranvaroTab } from "./FranvaroTab";
 import { EmployeeErasureSection } from "./EmployeeErasureSection";
-import { formatStockholmDate } from "../../lib/date";
+import { formatStockholmDate, stockholmToday, stockholmYear } from "../../lib/date";
 import styles from "./EmployeeTabs.module.css";
 import { Card } from "../ui/Card";
 import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../ui/Form";
@@ -423,7 +423,7 @@ function SchemaTab({
   const [pending, setPending] = useState(false);
 
   // Ny veckoavvikelse
-  const currentYear = new Date().getFullYear();
+  const currentYear = stockholmYear();
   const [overrideYear, setOverrideYear] = useState(String(currentYear));
   const [overrideWeek, setOverrideWeek] = useState("");
   const [overrideWeekScheduleId, setOverrideWeekScheduleId] = useState("");
@@ -734,7 +734,7 @@ function AtfTab({
   const [pending, setPending] = useState(false);
 
   // Ny transaktion
-  const [txDate, setTxDate] = useState(new Date().toLocaleDateString("sv-SE"));
+  const [txDate, setTxDate] = useState(stockholmToday());
   const [txType, setTxType] = useState<AtfTransactionType>("withdrawal");
   const [txHours, setTxHours] = useState("");
   const [txNote, setTxNote] = useState("");

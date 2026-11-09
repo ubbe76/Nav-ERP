@@ -26,11 +26,11 @@ import {
 import { formatHours } from "../timereport/SchedulesPageClient";
 
 function toClock(iso: string): string {
-  return new Date(iso).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+  return new Date(iso).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Stockholm" });
 }
 
 function weekdayShort(date: string): string {
-  return new Date(`${date}T00:00:00`).toLocaleDateString("sv-SE", { weekday: "short" });
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString("sv-SE", { weekday: "short", timeZone: "UTC" });
 }
 
 // Minutes → comma-decimal hours for the Timmar field (same as the
