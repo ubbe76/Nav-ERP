@@ -37,7 +37,10 @@ På en bred skärm öppnas dokument — kundorder, offerter, inköpsorder, tillv
 - **Klicka på ett dokument** i en lista, på ett kort eller i **Sök eller gå till** (Ctrl+K) så öppnas det i en ny flik. Är det redan öppet visas den fliken i stället.
 - En flik **står kvar** när du byter till en annan: var du har scrollat och det du har skrivit men inte sparat finns kvar när du kommer tillbaka.
 - **Länkar inne i en flik:** ett annat dokument öppnas i en egen flik, och en lista eller annan sida (till exempel **Kunder**) öppnas som sidan längst till vänster.
-- **Stäng** en flik med **✕** eller med mittenknappen på musen. Har fliken osparade ändringar frågar Nav först. Med **←** och **→** flyttar du mellan flikarna när flikraden har fokus.
+- **Ett dokument som skapas från ett annat** — **Skapa TO** på en kundorderrad, **Skapa kreditfaktura**, en förfrågan som blir inköpsorder, en försändelse, ett motverifikat, en leverantörsfaktura ur Fakturainkorgen — öppnas i en ny flik, och dokumentet du stod på ligger kvar. Det du skapar från en lista eller ett formulär **Ny …** öppnas däremot där du står, som förut.
+- **Byt flik** med siffertangenterna **1**–**9** när inget fält har fokus: **1** är sidan, **2** det första dokumentet och så vidare — det fungerar även inifrån en flik. (Ctrl+Tab och Ctrl+1–9 är webbläsarens egna och lämnas orörda.) Med **←** och **→** flyttar du mellan flikarna när flikraden har fokus.
+- **Dra** en dokumentflik till en ny plats i raden; ett streck visar var den hamnar.
+- **Stäng** en flik med **✕** eller med mittenknappen på musen. Har fliken osparade ändringar frågar Nav först.
 - Högst **8** dokument kan vara öppna. Öppnar du fler stängs den flik du använde för längst sedan, men aldrig en med osparade ändringar.
 - **Delad vy** längst till höger i flikraden visar sidan till vänster och dokumentet till höger, så att du kan klicka dig genom en lista och se varje dokument utan att lämna listan. Valet sparas i webbläsaren.
 - Flikarna finns kvar om du laddar om sidan, men det du inte hade sparat finns då inte kvar. De gäller det webbläsarfönstret; ett nytt fönster börjar utan flikar.

@@ -1,6 +1,7 @@
 "use client";
 
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
+import { openDocument } from "../../lib/tabNavigation";
 import { outflowLocationChoices } from "../../lib/stockLocations";
 import { QuoteExpiredBadge, isQuoteExpired } from "./QuoteExpiredBadge";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
@@ -1051,7 +1052,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
 
       <Modal open={modal === "createMo"} onClose={() => setModal(null)} title="Skapa tillverkningsorder">
         {moRow && (
-          <CreateMoForm orderId={order.id} row={moRow} onCancel={() => setModal(null)} />
+          <CreateMoForm orderId={order.id} row={moRow} onCancel={() => setModal(null)} onOpenedInTab={() => setModal(null)} />
         )}
       </Modal>
     </div>
@@ -1842,10 +1843,13 @@ function CreateMoForm({
   orderId,
   row,
   onCancel,
+  onOpenedInTab,
 }: {
   orderId: string;
   row: SalesOrderRow;
   onCancel: () => void;
+  // The new TO went to a tab: the order stays, the dialog closes.
+  onOpenedInTab: () => void;
 }) {
   const router = useRouter();
   // toUnitQuantity(diff, null) is exactly round4(diff) (factor null → ×1) —
@@ -1872,7 +1876,11 @@ function CreateMoForm({
         body: JSON.stringify({ quantity: Number(quantity), dueDate: dueDate || undefined }),
       });
       stashReleaseWarnings(mo.id, mo.releaseWarnings);
-      router.push(`/tillverkning/ordrar/${mo.id}`);
+      if (openDocument(`/tillverkning/ordrar/${mo.id}`, (href) => router.push(href), mo.orderNumber)) {
+        setPending(false);
+        onOpenedInTab();
+        router.refresh();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Kunde inte skapa tillverkningsordern");
       setPending(false);

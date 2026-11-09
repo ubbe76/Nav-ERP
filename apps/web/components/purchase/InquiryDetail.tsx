@@ -1,6 +1,7 @@
 "use client";
 
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
+import { openDocument } from "../../lib/tabNavigation";
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -192,7 +193,7 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
             onClick={() =>
               action("convert-to-order", (result) => {
                 const order = result as PurchaseOrder;
-                router.push(`/inkop/ordrar/${order.id}`);
+                if (openDocument(`/inkop/ordrar/${order.id}`, (href) => router.push(href), order.orderNumber)) router.refresh();
               })
             }
           >

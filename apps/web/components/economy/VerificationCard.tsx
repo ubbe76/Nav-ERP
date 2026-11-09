@@ -1,6 +1,7 @@
 "use client";
 
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
+import { openDocument } from "../../lib/tabNavigation";
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -198,7 +199,10 @@ export function VerificationCard({
       const draft = await apiFetch<VerificationDetail>(`/api/v1/verifications/${verification.id}/reverse`, {
         method: "POST",
       });
-      router.push(`/ekonomi/verifikat/${draft.id}`);
+      if (openDocument(`/ekonomi/verifikat/${draft.id}`, (href) => router.push(href), "Verifikat")) {
+        setPending(false);
+        router.refresh();
+      }
     } catch (err) {
       setError(formatVerificationError(err));
       setPending(false);
@@ -219,7 +223,10 @@ export function VerificationCard({
           // The warnings are a courtesy only.
         }
       }
-      router.push(`/ekonomi/verifikat/${result.verification.id}`);
+      if (openDocument(`/ekonomi/verifikat/${result.verification.id}`, (href) => router.push(href), "Verifikat")) {
+        setPending(false);
+        router.refresh();
+      }
     } catch (err) {
       setError(formatVerificationError(err));
       setPending(false);

@@ -16,6 +16,7 @@ import buttonStyles from "../ui/Button.module.css";
 import { NewArticleForm } from "./NewArticleForm";
 import { useCan } from "../PermissionsProvider";
 import { apiFetch } from "../../lib/api";
+import { navigateTo } from "../../lib/tabNavigation";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { confirmLeave, useUnsavedGuard } from "../../lib/unsavedGuard";
 import { confirmDialog } from "../../lib/confirm";
@@ -124,7 +125,11 @@ export function ArticlesPageClient({
       const article = highlighted === null ? undefined : rows[highlighted];
       if (!article) return;
       e.preventDefault();
-      void confirmLeave().then((leave) => leave && router.push(`/artiklar/${article.id}`));
+      // A tab leaves the list (and anything unsaved on it) open; only a real
+      // navigation asks first.
+      navigateTo(`/artiklar/${article.id}`, article.articleNumber, (href) => {
+        void confirmLeave().then((leave) => leave && router.push(href));
+      });
     } else if (e.key === "Escape") {
       if (highlighted === null) return;
       // Unmark only — the browser would otherwise also clear the search.

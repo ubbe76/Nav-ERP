@@ -4,6 +4,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { usePathname, useRouter } from "next/navigation";
 import {
   closeTab as closeTabRule,
+  moveTab,
+  tabForDigit,
   documentHref,
   isEmbedded,
   openTab as openTabRule,
@@ -36,6 +38,10 @@ interface TabsValue {
   split: boolean;
   pageTitle: string;
   activate: (id: string | null) => void;
+  // 1–9: 1 = the page, 2.. the documents; nothing when there is no such tab.
+  activateDigit: (digit: number) => void;
+  // Dra en flik: the document tab moved to toIndex among the documents.
+  move: (id: string, toIndex: number) => void;
   close: (id: string) => void;
   setSplit: (on: boolean) => void;
   setEnabled: (on: boolean) => void;
@@ -49,6 +55,8 @@ const TabsContext = createContext<TabsValue>({
   split: false,
   pageTitle: "",
   activate: () => {},
+  activateDigit: () => {},
+  move: () => {},
   close: () => {},
   setSplit: () => {},
   setEnabled: () => {},
@@ -140,6 +148,19 @@ export function DocumentTabsProvider({ children }: { children: ReactNode }) {
   const activate = useCallback((id: string | null) => {
     setActiveId(id);
     if (id) setTabs((list) => list.map((t) => (t.id === id ? { ...t, lastUsed: Date.now() } : t)));
+  }, []);
+
+  const activateDigit = useCallback(
+    (digit: number) => {
+      if (!available) return;
+      const id = tabForDigit(tabsRef.current, digit);
+      if (id !== undefined) activate(id);
+    },
+    [available, activate]
+  );
+
+  const move = useCallback((id: string, toIndex: number) => {
+    setTabs((list) => moveTab(list, id, toIndex));
   }, []);
 
   const open = useCallback(
@@ -244,11 +265,13 @@ export function DocumentTabsProvider({ children }: { children: ReactNode }) {
       } else if (message.type === "nav-tab-navigate") {
         setActiveId(null);
         router.push(message.href);
+      } else if (message.type === "nav-tab-activate") {
+        activateDigit(message.digit);
       }
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [open, router]);
+  }, [open, router, activateDigit]);
 
   // The frame's state for the CSS (globals.css): the strip's row, the
   // shown document, Delad vy and the sidebar's width for the tab layer.
@@ -292,8 +315,8 @@ export function DocumentTabsProvider({ children }: { children: ReactNode }) {
   }, [showLayer, activeId]);
 
   const value = useMemo(
-    () => ({ available, tabs, activeId, split, pageTitle, activate, close, setSplit, setEnabled, registerShell }),
-    [available, tabs, activeId, split, pageTitle, activate, close, setSplit, registerShell]
+    () => ({ available, tabs, activeId, split, pageTitle, activate, activateDigit, move, close, setSplit, setEnabled, registerShell }),
+    [available, tabs, activeId, split, pageTitle, activate, activateDigit, move, close, setSplit, registerShell]
   );
 
   return (

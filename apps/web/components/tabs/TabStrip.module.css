@@ -37,6 +37,28 @@
   background: var(--color-bg);
   border-color: var(--color-border);
 }
+/* Dra en flik: the dragged tab dims, a line marks where it lands. */
+.tabWrap {
+  position: relative;
+}
+.tabWrap[data-dragging] {
+  opacity: 0.5;
+}
+.tabWrap[data-drop]::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 0;
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+}
+.tabWrap[data-drop="before"]::before {
+  left: -2px;
+}
+.tabWrap[data-drop="after"]::before {
+  right: -2px;
+}
 
 .tab {
   display: flex;

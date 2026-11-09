@@ -2,6 +2,7 @@
 
 import { ConfigurationLines } from "../configurator/ConfigurationLines";
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
+import { openDocument } from "../../lib/tabNavigation";
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -170,7 +171,10 @@ export function InvoiceCard({
         method: "POST",
         body: JSON.stringify({}),
       });
-      router.push(`/forsaljning/fakturor/${credit.id}`);
+      if (openDocument(`/forsaljning/fakturor/${credit.id}`, (href) => router.push(href), "Kreditfaktura")) {
+        setPending(false);
+        router.refresh();
+      }
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte skapa kreditfakturan"));
       setPending(false);

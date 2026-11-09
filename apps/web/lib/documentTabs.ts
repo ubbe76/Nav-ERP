@@ -102,6 +102,25 @@ export function closeTab(
   return { tabs: next, activeId: neighbour?.id ?? null };
 }
 
+// Dra en flik: the tab moved to `toIndex` among the documents (clamped);
+// the others keep their order.
+export function moveTab(tabs: readonly DocumentTab[], id: string, toIndex: number): DocumentTab[] {
+  const from = tabs.findIndex((t) => t.id === id);
+  if (from === -1) return [...tabs];
+  const next = tabs.filter((t) => t.id !== id);
+  const at = Math.max(0, Math.min(toIndex, next.length));
+  next.splice(at, 0, tabs[from]!);
+  return next;
+}
+
+// Byt flik med 1–9: 1 is the page (null), 2.. the documents in order;
+// undefined when there is no such tab.
+export function tabForDigit(tabs: readonly DocumentTab[], digit: number): string | null | undefined {
+  if (!Number.isInteger(digit) || digit < 1 || digit > 9) return undefined;
+  if (digit === 1) return null;
+  return tabs[digit - 2]?.id;
+}
+
 // What sessionStorage gives back after a reload, entry by entry: anything
 // that is no longer a document tab is dropped.
 export function restoreTabs(raw: string | null, origin: string): { tabs: DocumentTab[]; activeId: string | null } {
@@ -139,4 +158,6 @@ export function isEmbedded(): boolean {
 export type TabMessage =
   | { type: "nav-tab-state"; href: string; title: string }
   | { type: "nav-tab-open"; href: string; title: string }
-  | { type: "nav-tab-navigate"; href: string };
+  | { type: "nav-tab-navigate"; href: string }
+  // 1–9 pressed inside a tab: show tab n of the frame around it.
+  | { type: "nav-tab-activate"; digit: number };
