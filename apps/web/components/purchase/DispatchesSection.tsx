@@ -22,6 +22,7 @@ import type { PurchaseDispatch } from "../../lib/types";
 function when(iso: string) {
   return new Date(iso).toLocaleString("sv-SE", {
     dateStyle: "short",
+    timeZone: "Europe/Stockholm",
     timeStyle: "short",
   });
 }

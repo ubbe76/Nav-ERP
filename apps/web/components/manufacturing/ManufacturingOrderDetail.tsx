@@ -69,6 +69,7 @@ import { CoveredByCell, GoesToSection, coverageOfRow } from "./CoverageSections"
 import { MoveComponentsDialog } from "./MoveComponentsDialog";
 import { MissingComponentsDialog } from "./MissingComponentsDialog";
 import { DocumentActionBar } from "../documents/DocumentActionBar";
+import { formatStockholmDateTime } from "../../lib/date";
 
 interface ManufacturingOrderDetailProps {
   order: ManufacturingOrder;
@@ -790,7 +791,7 @@ export function ManufacturingOrderDetail({
             renderCell={(row, key) => {
               switch (key) {
                 case "createdAt":
-                  return new Date(row.createdAt).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
+                  return formatStockholmDateTime(row.createdAt);
                 case "sequenceNo":
                   return `${row.sequenceNo} — ${row.workCenterName}`;
                 case "quantity":

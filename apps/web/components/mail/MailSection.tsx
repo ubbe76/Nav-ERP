@@ -13,6 +13,7 @@ import { EMAIL_DOCUMENT_TYPE_LABELS, EMAIL_STATUS_PILL, type EmailLogEntry } fro
 import buttonStyles from "../ui/Button.module.css";
 import fieldStyles from "../ui/Field.module.css";
 import { Form, FormActions, FormError } from "../ui/Form";
+import { formatStockholmDateTime } from "../../lib/date";
 
 export interface SendButtonConfig {
   label: string; // e.g. "Skicka via e-post", "Skicka offert"
@@ -119,7 +120,7 @@ export function MailSection({
             renderCell={(row, key) => {
               switch (key) {
                 case "createdAt":
-                  return new Date(row.createdAt).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
+                  return formatStockholmDateTime(row.createdAt);
                 case "documentType":
                   return EMAIL_DOCUMENT_TYPE_LABELS[row.documentType];
                 case "status": {

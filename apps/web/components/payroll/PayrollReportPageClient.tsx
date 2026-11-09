@@ -10,7 +10,7 @@ import buttonStyles from "../ui/Button.module.css";
 import { formatHours } from "../timereport/SchedulesPageClient";
 import { shiftMonth } from "./AttestationPageClient";
 import type { PeriodEmployeeSummary, PeriodSummary, PreviousPayrollSnapshot } from "../../lib/types";
-import { formatStockholmDateTime } from "../../lib/date";
+import { formatStockholmDate, formatStockholmDateTime } from "../../lib/date";
 import { SectionHeading } from "../ui/SectionHeading";
 
 // The Table needs an `id`; the summary rows are keyed by employeeId.
@@ -87,7 +87,7 @@ function renderCell(employee: EmployeeRow, key: string, locked: boolean) {
           {employee.attestedByName && (
             <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
               {employee.attestedByName}
-              {employee.attestedAt && ` · ${new Date(employee.attestedAt).toLocaleDateString("sv-SE")}`}
+              {employee.attestedAt && ` · ${formatStockholmDate(employee.attestedAt)}`}
             </span>
           )}
         </span>

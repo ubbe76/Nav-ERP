@@ -11,6 +11,7 @@ import { API_URL, apiFetch } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import buttonStyles from "../ui/Button.module.css";
 import type { BalanceSheetResponse, FiscalYear } from "../../lib/types";
+import { stockholmToday } from "../../lib/date";
 
 // One flat row per printed line — the same discriminated-row technique the
 // momsrapport uses, except the labels come from the API because the lines are
@@ -75,7 +76,7 @@ export function BalansrakningPageClient({
   // The API derives the fiscal year from the date, so the date is the only
   // control. Default to the latest fiscal year's end, falling back to today.
   const initialAsOf = useMemo(
-    () => defaultAsOf ?? fiscalYears[0]?.endDate ?? new Date().toLocaleDateString("sv-SE"),
+    () => defaultAsOf ?? fiscalYears[0]?.endDate ?? stockholmToday(),
     [defaultAsOf, fiscalYears]
   );
   const [asOf, setAsOf] = useState(initialAsOf);

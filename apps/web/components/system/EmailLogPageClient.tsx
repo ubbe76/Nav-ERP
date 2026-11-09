@@ -19,6 +19,7 @@ import {
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { FormError } from "../ui/Form";
+import { formatStockholmDateTime } from "../../lib/date";
 
 // Where each document type's card lives — for the Dokument column link.
 // "invoice" rows are ambiguous (old pre-C1 rows point at a sales order id
@@ -113,7 +114,7 @@ export function EmailLogPageClient({ log, pageSize }: { log: Paged<EmailLogEntry
         renderCell={(entry, key) => {
           switch (key) {
             case "createdAt":
-              return new Date(entry.createdAt).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
+              return formatStockholmDateTime(entry.createdAt);
             case "documentType": {
               const label = EMAIL_DOCUMENT_TYPE_LABELS[entry.documentType as EmailDocumentType];
               const href = documentHref(entry);

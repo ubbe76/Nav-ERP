@@ -26,6 +26,7 @@ import {
 } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import styles from "./GoodsReceiptPageClient.module.css";
+import { formatStockholmDate } from "../../lib/date";
 
 const OPEN: PurchaseOrderStatus[] = [
   "draft",
@@ -228,7 +229,7 @@ export function DispatchPageClient({
                 case "supplierName":
                   return o.supplierName;
                 case "createdAt":
-                  return new Date(o.createdAt).toLocaleDateString("sv-SE");
+                  return formatStockholmDate(o.createdAt);
                 case "status": {
                   const p = PURCHASE_ORDER_STATUS_PILL[o.status];
                   return (

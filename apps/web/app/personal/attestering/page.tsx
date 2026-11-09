@@ -4,16 +4,12 @@ import { AttestationPageClient } from "../../../components/payroll/AttestationPa
 import { apiGet, getCurrentUser } from "../../../lib/api";
 import { MONTH_NAMES_SV, type PeriodSummary } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
+import { previousStockholmMonth } from "../../../lib/date";
 import { HelpLink } from "../../../components/ui/HelpLink";
 
-// The month before the current one, in the server's local time — the period a
+// The month before the current one (Swedish calendar) — the period a
 // supervisor normally attests (the running month isn't finished yet).
-function previousMonth(): { year: number; month: number } {
-  const now = new Date();
-  // getMonth() is 0-indexed, so it already *is* the previous month's number.
-  const month = now.getMonth();
-  return month === 0 ? { year: now.getFullYear() - 1, month: 12 } : { year: now.getFullYear(), month };
-}
+const previousMonth = previousStockholmMonth;
 
 // ?year=&month= drive the page; anything missing or out of range falls back to
 // the default period rather than erroring (the API's own params schema uses

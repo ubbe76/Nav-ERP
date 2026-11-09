@@ -23,9 +23,10 @@ import {
 } from "../../lib/verificationRows";
 import type { Account, VerificationDetail, VerificationSeries, VerificationTemplate } from "../../lib/types";
 import { VerificationRowsEditor } from "./VerificationRowsEditor";
+import { stockholmToday } from "../../lib/date";
 
 function today(): string {
-  return new Date().toLocaleDateString("sv-SE");
+  return stockholmToday();
 }
 
 // /ekonomi/verifikat/nytt — header + the rows table on one page. The first

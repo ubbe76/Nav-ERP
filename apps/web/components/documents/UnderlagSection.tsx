@@ -8,6 +8,7 @@ import { Button } from "../ui/Button";
 import { SectionHeading } from "../ui/SectionHeading";
 import { FormError, FormHint } from "../ui/Form";
 import { API_URL, apiFetch } from "../../lib/api";
+import { formatStockholmDateTime } from "../../lib/date";
 
 // Same shape for every underlag table (supplier_invoice_files,
 // verification_files) — the listing never carries the bytes.
@@ -142,7 +143,7 @@ export function UnderlagSection({
               case "sizeBytes":
                 return formatSize(file.sizeBytes);
               case "createdAt":
-                return new Date(file.createdAt).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
+                return formatStockholmDateTime(file.createdAt);
               case "id":
                 return (
                   <Button type="button" size="small" variant="danger" disabled={pending} onClick={() => remove(file)}>

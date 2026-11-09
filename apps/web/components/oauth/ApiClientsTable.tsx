@@ -8,6 +8,7 @@ import { StatusPill } from "../ui/StatusPill";
 import { apiFetch } from "../../lib/api";
 import type { ApiClient } from "../../lib/types";
 import { API_CLIENT_SCOPE_LABELS, API_CLIENT_SCOPES } from "../../lib/apiClientScopes";
+import { formatStockholmDate } from "../../lib/date";
 
 // All rights and no customer — what clients created before 4.9 got.
 function hasFullAccess(client: ApiClient) {
@@ -52,7 +53,7 @@ export function ApiClientsTable({ clients, onEdit }: { clients: ApiClient[]; onE
               <StatusPill status="draft" label="Återkallad" compact />
             );
           case "createdAt":
-            return new Date(client.createdAt).toLocaleDateString("sv-SE");
+            return formatStockholmDate(client.createdAt);
           case "actions":
             return client.active ? (
               <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>

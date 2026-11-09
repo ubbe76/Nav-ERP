@@ -31,7 +31,7 @@ export function StockActivityCard({ transactions }: { transactions: StockTransac
                 <span className={styles.type}>{STOCK_TRANSACTION_TYPE_LABELS[tx.transactionType]}</span>
               </span>
               <span className={styles.date}>
-                {new Date(tx.createdAt).toLocaleDateString("sv-SE", { day: "numeric", month: "short" })}
+                {new Date(tx.createdAt).toLocaleDateString("sv-SE", { day: "numeric", month: "short", timeZone: "Europe/Stockholm" })}
               </span>
             </div>
           ))

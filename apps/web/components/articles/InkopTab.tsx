@@ -12,7 +12,7 @@ import { Field, Input, Toggle } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
 import { apiFetch } from "../../lib/api";
 import { formatMoney, formatQuantity } from "../../lib/format";
-import { formatStockholmDateTime } from "../../lib/date";
+import { formatStockholmDate, formatStockholmDateTime } from "../../lib/date";
 import {
   SUPPLIER_INVOICE_STATUS_PILL,
   type ArticleSupplier,
@@ -542,5 +542,5 @@ function ArticleSupplierForm({
 }
 
 function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString("sv-SE");
+  return formatStockholmDate(value);
 }

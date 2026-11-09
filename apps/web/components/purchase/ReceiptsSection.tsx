@@ -12,6 +12,7 @@ import { confirmDialog } from "../../lib/confirm";
 import { toUnitQuantity } from "../../lib/units";
 import { useCan } from "../PermissionsProvider";
 import type { PurchaseOrderRow, PurchaseOrderStatus, PurchaseReceipt } from "../../lib/types";
+import { formatStockholmDateTime } from "../../lib/date";
 
 // Inleveranser on the IO card: every receipt (Ta emot leverans / the
 // Inleverans routine), newest first. Ångra inleverans reverses exactly that
@@ -20,7 +21,7 @@ import type { PurchaseOrderRow, PurchaseOrderStatus, PurchaseReceipt } from "../
 // stays, greyed out. Quantities are shown in the row's unit.
 
 function when(iso: string) {
-  return new Date(iso).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
+  return formatStockholmDateTime(iso);
 }
 
 function rowQuantity(receipt: PurchaseReceipt, row: PurchaseOrderRow | undefined) {
