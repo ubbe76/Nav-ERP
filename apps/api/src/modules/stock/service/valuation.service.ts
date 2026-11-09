@@ -5,13 +5,13 @@
 // answer "what was the price". See TODO.md's D1 entry for the full rationale.
 //
 // Dates: every bound on stock_transactions is the värderingsdatum (#26,
-// stockValuedDate — valued_at when a stock count was registered per
+// stockValuedOnOrBefore — valued_at when a stock count was registered per
 // underlagets datum, else created_at) as a Stockholm calendar day: "as of
 // {asOf}" means "valued by the end of {asOf} in Stockholm". Only a stock count
 // can be valued earlier than it was registered (the rest of #19 is not
 // built); the standard cost history's valid_from is still compared as the
 // database session's date.
-import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import {
   articleCodes,
   articleGroups,
@@ -25,7 +25,7 @@ import {
 import { round2, type ValuationGroupBy, type ValuationMethod, type ValuationQuery } from "@navet/shared";
 import { computeMovingAverage, type MovingAverageRow } from "./moving-average.js";
 import { computeFifo, type FifoRow } from "./fifo.js";
-import { stockValuedAt, stockValuedDate } from "../repository/valued-at.js";
+import { stockValuedAt, stockValuedOnOrBefore } from "../repository/valued-at.js";
 import { stockholmToday } from "../../system/service/delivery-days.js";
 import { formatNumber, type FinancialStatementPdfInput } from "../../mail/service/document-pdf.js";
 
@@ -85,7 +85,9 @@ export interface ValuationPdfRenderer {
   renderFinancialStatement(input: FinancialStatementPdfInput): Promise<Buffer>;
 }
 
-export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRenderer }) {
+// `inListMax` is a test seam: the suite has far fewer than 1 000 articles,
+// so it lowers the bound to run the unfiltered path too (stock-valuation.test.ts).
+export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRenderer; inListMax?: number }) {
   const { db } = deps;
   // The PDF renderer is optional so unit tests can build the service without
   // dragging pdfkit in (financial-reports.service.ts's pattern) — the routes
@@ -94,6 +96,19 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
   function renderer(): ValuationPdfRenderer {
     if (!pdf) throw new Error("valuation service was created without a PDF renderer");
     return pdf;
+  }
+
+  // The price readers' article filter. A report over the whole register asks
+  // for every article with stock — 25 000 ids as 25 000 bind parameters cost
+  // more to plan and hash than reading the rows of the few articles netted to
+  // 0 (perf run 2026-11-09) — so a large list reads unfiltered and the caller
+  // keeps only its own articles (`wanted`). A small list (a group, an article
+  // code) stays an IN list.
+  const IN_LIST_MAX = deps.inListMax ?? 1000;
+  function articleFilter(column: AnyColumn, articleIds: string[]): { where: SQL | undefined; wanted: (articleId: string) => boolean } {
+    if (articleIds.length <= IN_LIST_MAX) return { where: inArray(column, articleIds), wanted: () => true };
+    const ids = new Set(articleIds);
+    return { where: undefined, wanted: (articleId) => ids.has(articleId) };
   }
 
   // Latest article_standard_cost_history row with valid_from <= asOf, per
@@ -106,6 +121,7 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
     const prices = new Map<string, number | null>();
     if (articleIds.length === 0) return prices;
 
+    const filter = articleFilter(articleStandardCostHistory.articleId, articleIds);
     const rows = await db
       .select({
         articleId: articleStandardCostHistory.articleId,
@@ -113,11 +129,12 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
         withinBound: sql<boolean>`(${articleStandardCostHistory.validFrom} AT TIME ZONE 'Europe/Stockholm')::date <= ${asOf}::date`,
       })
       .from(articleStandardCostHistory)
-      .where(inArray(articleStandardCostHistory.articleId, articleIds))
+      .where(filter.where)
       .orderBy(asc(articleStandardCostHistory.articleId), asc(articleStandardCostHistory.validFrom));
 
     const byArticle = new Map<string, typeof rows>();
     for (const row of rows) {
+      if (!filter.wanted(row.articleId)) continue;
       const list = byArticle.get(row.articleId) ?? [];
       list.push(row);
       byArticle.set(row.articleId, list);
@@ -142,6 +159,7 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
     const prices = new Map<string, number | null>();
     if (articleIds.length === 0) return prices;
 
+    const filter = articleFilter(stockTransactions.articleId, articleIds);
     const rows = await db
       .select({
         articleId: stockTransactions.articleId,
@@ -150,12 +168,12 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
       .from(stockTransactions)
       .where(
         and(
-          inArray(stockTransactions.articleId, articleIds),
+          filter.where,
           eq(stockTransactions.transactionType, "purchase_receipt"),
           isNotNull(stockTransactions.unitCost),
           // An undone receipt is no purchase price (its reversal has no cost).
           sql`NOT EXISTS (SELECT 1 FROM ${purchaseReceipts} pr WHERE pr.stock_transaction_id = ${stockTransactions.id} AND pr.undone_at IS NOT NULL)`,
-          sql`${stockValuedDate} <= ${asOf}::date`
+          stockValuedOnOrBefore(asOf)
         )
       )
       .orderBy(
@@ -166,6 +184,7 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
 
     // Ascending order per article — the last row seen is the latest receipt.
     for (const row of rows) {
+      if (!filter.wanted(row.articleId)) continue;
       prices.set(row.articleId, row.unitCost !== null ? Number(row.unitCost) : null);
     }
     return prices;
@@ -180,6 +199,7 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
     const prices = new Map<string, number | null>();
     if (articleIds.length === 0) return prices;
 
+    const filter = articleFilter(stockTransactions.articleId, articleIds);
     const rows = await db
       .select({
         articleId: stockTransactions.articleId,
@@ -187,12 +207,7 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
         unitCost: stockTransactions.unitCost,
       })
       .from(stockTransactions)
-      .where(
-        and(
-          inArray(stockTransactions.articleId, articleIds),
-          sql`${stockValuedDate} <= ${asOf}::date`
-        )
-      )
+      .where(and(filter.where, stockValuedOnOrBefore(asOf)))
       .orderBy(
         asc(stockTransactions.articleId),
         asc(stockValuedAt),
@@ -201,6 +216,7 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
 
     const byArticle = new Map<string, MovingAverageRow[]>();
     for (const row of rows) {
+      if (!filter.wanted(row.articleId)) continue;
       const list = byArticle.get(row.articleId) ?? [];
       list.push({
         quantityDelta: Number(row.quantityDelta),
@@ -226,6 +242,7 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
     const prices = new Map<string, number | null>();
     if (articleIds.length === 0) return prices;
 
+    const filter = articleFilter(stockTransactions.articleId, articleIds);
     const rows = await db
       .select({
         articleId: stockTransactions.articleId,
@@ -236,11 +253,12 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
         undoneReceipt: sql<boolean>`EXISTS (SELECT 1 FROM ${purchaseReceipts} pr WHERE pr.stock_transaction_id = ${stockTransactions.id} AND pr.undone_at IS NOT NULL)`,
       })
       .from(stockTransactions)
-      .where(and(inArray(stockTransactions.articleId, articleIds), sql`${stockValuedDate} <= ${asOf}::date`))
+      .where(and(filter.where, stockValuedOnOrBefore(asOf)))
       .orderBy(asc(stockTransactions.articleId), asc(stockValuedAt), asc(stockTransactions.id));
 
     const byArticle = new Map<string, FifoRow[]>();
     for (const row of rows) {
+      if (!filter.wanted(row.articleId)) continue;
       const delta = Number(row.quantityDelta);
       let kind: FifoRow["kind"] = "other";
       if (delta > 0) {
@@ -286,12 +304,23 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
       // Direct service callers (tests, the year-end closing) may omit it.
       const groupBy: ValuationGroupBy = query.groupBy ?? "group";
 
-      // One sweep: net quantity per article within the bound, joined to
-      // every field the report/grouping needs. unitId is NOT NULL (inner
-      // join is safe); groupId is nullable (left join).
-      const quantityRows = await db
+      // One sweep: net quantity per article within the bound, then joined to
+      // every field the report/grouping needs. Aggregated per article FIRST:
+      // grouping the joined rows on nine keys sorted all 49 000 log rows
+      // (148 ms → 67 ms at 25 000 articles, perf run 2026-11-09). unitId is
+      // NOT NULL (inner join is safe); groupId is nullable (left join).
+      const valued = db
         .select({
           articleId: stockTransactions.articleId,
+          quantity: sql<string>`sum(${stockTransactions.quantityDelta})`.as("quantity"),
+        })
+        .from(stockTransactions)
+        .where(stockValuedOnOrBefore(asOf))
+        .groupBy(stockTransactions.articleId)
+        .as("valued");
+      const quantityRows = await db
+        .select({
+          articleId: valued.articleId,
           articleNumber: articles.articleNumber,
           articleName: articles.name,
           active: articles.active,
@@ -300,30 +329,18 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
           groupName: articleGroups.name,
           articleCodeId: articles.articleCodeId,
           articleCodeName: articleCodes.name,
-          quantity: sql<string>`sum(${stockTransactions.quantityDelta})`,
+          quantity: valued.quantity,
         })
-        .from(stockTransactions)
-        .innerJoin(articles, eq(articles.id, stockTransactions.articleId))
+        .from(valued)
+        .innerJoin(articles, eq(articles.id, valued.articleId))
         .innerJoin(units, eq(units.id, articles.unitId))
         .leftJoin(articleGroups, eq(articleGroups.id, articles.groupId))
         .leftJoin(articleCodes, eq(articleCodes.id, articles.articleCodeId))
         .where(
           and(
-            sql`${stockValuedDate} <= ${asOf}::date`,
             query.groupId ? eq(articles.groupId, query.groupId) : undefined,
             query.articleCodeId ? eq(articles.articleCodeId, query.articleCodeId) : undefined
           )
-        )
-        .groupBy(
-          stockTransactions.articleId,
-          articles.articleNumber,
-          articles.name,
-          articles.active,
-          units.code,
-          articles.groupId,
-          articleGroups.name,
-          articles.articleCodeId,
-          articleCodes.name
         );
 
       // Drop articles netting to 0 — a netted-out article carries no

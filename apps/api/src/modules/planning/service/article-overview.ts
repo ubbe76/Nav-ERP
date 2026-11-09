@@ -231,6 +231,22 @@ function round4(n: number): number {
   return Math.round((n + Number.EPSILON) * 1e4) / 1e4;
 }
 
+// One BOM index per edge list. A batch of overviews (pegParents behind the
+// TO list and Beläggning, Leveranstidskontrollen, Skapa saknade halvfabrikat)
+// shares ONE bomEdges array across every article's input; building the
+// index per article made a batch O(articles × BOM edges) — Beläggning took
+// ~1.7 s at 25 000 articles and 23 500 edges (perf run 2026-11-09). Keyed on
+// the array itself, so a new load gets a new index and nothing outlives it.
+const bomIndexByEdges = new WeakMap<BomEdge[], Map<string, BomEdge[]>>();
+function bomIndexFor(edges: BomEdge[]): Map<string, BomEdge[]> {
+  let index = bomIndexByEdges.get(edges);
+  if (!index) {
+    index = buildBomIndex(edges);
+    bomIndexByEdges.set(edges, index);
+  }
+  return index;
+}
+
 export function buildArticleOverview(input: ArticleOverviewInput): ArticleOverview {
   const articleId = input.article.articleId;
   const rows: ArticleOverviewRow[] = [];
@@ -317,9 +333,10 @@ export function buildArticleOverview(input: ArticleOverviewInput): ArticleOvervi
 
   // Exploding per MO (rather than the MRP's summed-per-parent shortcut)
   // gives one row per order; explosion is linear, so the totals agree.
-  // The BOM index is built once per request, not once per planned MO.
+  // The BOM index is built once per edge list, not once per article or
+  // planned MO (bomIndexFor).
   const phantomIds = new Set(input.phantomIds);
-  const bomIndex = buildBomIndex(input.bomEdges);
+  const bomIndex = bomIndexFor(input.bomEdges);
   for (const mo of input.plannedMos) {
     const need = explodeFromIndex(bomIndex, phantomIds, mo.parentArticleId, mo.quantity).get(articleId) ?? 0;
     if (need <= 0) continue;
