@@ -111,6 +111,9 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
   // does come back to the 10-tier. A sequence counter drops out-of-order
   // responses.
   const [editPriceTouched, setEditPriceTouched] = useState(false);
+  // The staffel step behind a re-quoted price (Från antal, base unit) —
+  // null for the row's own price and for a grundpris.
+  const [editPriceTier, setEditPriceTier] = useState<number | null>(null);
   // Osparade ändringar: the row's values when Ändra was opened (price
   // counts through editPriceTouched — the catalog may refill it).
   const [editStart, setEditStart] = useState<{ quantity: string; unitId: string; setup: string; date: string; confirmed: string } | null>(null);
@@ -164,8 +167,12 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
         if (seq !== editRequestSeq.current || editPriceTouchedNow.current) return;
         // No catalog price, or a catalog currency other than the order's:
         // leave the field as it is rather than guess.
-        if (!quote.price || quote.price.currency !== order.currency) return;
+        if (!quote.price || quote.price.currency !== order.currency) {
+          setEditPriceTier(null);
+          return;
+        }
         setEditPrice(String(toUnitPrice(quote.price.unitPrice, factor)));
+        setEditPriceTier(quote.price.source === "break" ? quote.price.fromQuantity : null);
       })
       .catch(() => {});
   }, [editingRowId, editQuantity, editUnitId, editUnitOptions, editPriceTouched, rows, order.supplierId, order.currency]);
@@ -190,6 +197,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
   function startEditRow(row: PurchaseOrderRow) {
     setEditingRowId(row.id);
     setEditPriceTouched(false);
+    setEditPriceTier(null);
     editPricedBaseQuantityRef.current = Number(row.quantityOrdered);
     setEditQuantity(String(toUnitQuantity(Number(row.quantityOrdered), row.unitFactor)));
     setEditPrice(String(toUnitPrice(Number(row.unitPrice), row.unitFactor)));
@@ -424,17 +432,24 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
                 return toUnitQuantity(Number(row.quantityReceived), row.unitFactor);
               case "unitPrice":
                 return editingRowId === row.id ? (
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    size="sm"
-                    value={editPrice}
-                    onChange={(e) => {
-                      setEditPriceTouched(true);
-                      setEditPrice(e.target.value);
-                    }}
-                  />
+                  <>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      size="sm"
+                      value={editPrice}
+                      onChange={(e) => {
+                        setEditPriceTouched(true);
+                        setEditPrice(e.target.value);
+                      }}
+                    />
+                    {editPriceTier !== null && !editPriceTouched && (
+                      <FormHint attached>
+                        Staffel från {formatQuantity(editPriceTier)} {editArticle?.unit}
+                      </FormHint>
+                    )}
+                  </>
                 ) : (
                   `${formatMoney(toUnitPrice(Number(row.unitPrice), row.unitFactor))} ${order.currency}`
                 );
@@ -838,6 +853,9 @@ function AddRowForm({
   // price it is never overwritten. Same shape as the sales order card's
   // /price-quote prefill (touched flag + request sequence).
   const [priceTouched, setPriceTouched] = useState(false);
+  // The staffel step behind the prefilled à-pris (its Från antal, base unit),
+  // null when the price is the catalog's grundpris or none was found.
+  const [priceTier, setPriceTier] = useState<number | null>(null);
   const requestSeq = useRef(0);
   // The touched flag as it is when a prefill response LANDS — the effect's
   // closure holds it as it was when the request left, so a price typed while
@@ -861,8 +879,12 @@ function AddRowForm({
         if (seq !== requestSeq.current || priceTouchedNow.current) return;
         // No catalog price, or a catalog currency other than the order's:
         // leave the field alone rather than guess.
-        if (!quote.price || quote.price.currency !== currency) return;
+        if (!quote.price || quote.price.currency !== currency) {
+          setPriceTier(null);
+          return;
+        }
         setUnitPrice(String(toUnitPrice(quote.price.unitPrice, currentFactor)));
+        setPriceTier(quote.price.source === "break" ? quote.price.fromQuantity : null);
       })
       .catch(() => {});
   }, [articleId, baseQuantity, supplierId, currency, priceTouched, currentFactor]);
@@ -874,6 +896,7 @@ function AddRowForm({
     setUnitId(next?.purchaseUnitId ?? "");
     // "Manuellt vinner" is per article — a new pick gets its own prefill.
     setPriceTouched(false);
+    setPriceTier(null);
     setDateTouched(false);
   }
 
@@ -943,6 +966,12 @@ function AddRowForm({
               setUnitPrice(e.target.value);
             }}
           />
+          {/* The step's quantity is in the article's base unit, like the staffel itself. */}
+          {priceTier !== null && !priceTouched && (
+            <FormHint attached>
+              Staffelpris från {formatQuantity(priceTier)} {article?.unit}
+            </FormHint>
+          )}
         </Field>
       </FormRow>
 

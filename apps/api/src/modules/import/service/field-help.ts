@@ -215,6 +215,14 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       example: "Lagerstyrd",
     },
     {
+      field: "forecastControlled",
+      label: "Prognosstyrd",
+      required: false,
+      header: "Prognosstyrd",
+      description: `Ja eller Nej (även 1/0). Ja gör att behovsberäkningen planerar artikeln mot en prognos — snittförbrukningen eller de egna antalen på kortet Prognos — utöver de skarpa behoven. Gäller aktiva köpta och tillverkade artiklar. En ny artikel utan värde blir Nej. ${UNTOUCHED}`,
+      example: "Ja",
+    },
+    {
       field: "leadTimeDays",
       label: "Ledtid (dagar)",
       required: false,

@@ -1039,3 +1039,25 @@ export function proposalSummary(proposals: RequirementProposal[]): Pick<Requirem
   }
   return { earliestLatestDate: earliest, anyLate: proposals.some((p) => p.late) };
 }
+
+// A dated purchase that can no longer arrive in time at all (Passerat with
+// no senaste datum) — more urgent than any dated proposal.
+function hasNoPossibleArrival(row: RequirementRow): boolean {
+  return row.proposals.some((p) => p.late && p.latestDate === null);
+}
+
+// Sortering Senaste datum (the service's sort=latest): a row that can no
+// longer arrive in time first, then the earliest latest date, undated last,
+// article number as the tie-break so two loads render identically. Without
+// the first step such a row (latestDate null) sorted with the undated, last.
+export function compareByLatest(a: RequirementRow, b: RequirementRow): number {
+  const aNone = hasNoPossibleArrival(a);
+  const bNone = hasNoPossibleArrival(b);
+  if (aNone !== bNone) return aNone ? -1 : 1;
+  if (!aNone && a.earliestLatestDate !== b.earliestLatestDate) {
+    if (a.earliestLatestDate === null) return 1;
+    if (b.earliestLatestDate === null) return -1;
+    return a.earliestLatestDate < b.earliestLatestDate ? -1 : 1;
+  }
+  return a.articleNumber < b.articleNumber ? -1 : a.articleNumber > b.articleNumber ? 1 : 0;
+}

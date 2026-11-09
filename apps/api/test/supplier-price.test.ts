@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { SUPPLIER_PRICE_BREAKS_MAX, createArticleSupplierSchema } from "@navet/shared";
 import { resolveSupplierPrice } from "../src/modules/purchase/service/supplier-price.js";
+// The web helper has no imports, so vitest loads it directly.
+import { SUPPLIER_PRICE_BREAKS_MAX as WEB_SUPPLIER_PRICE_BREAKS_MAX } from "../../web/lib/supplierPriceBreaks.js";
 
 // Pure — no database. The spec for stafflade leverantörspriser: grundpris
 // for quantity 1, absolute break prices from their from_quantity, highest
@@ -70,5 +73,16 @@ describe("resolveSupplierPrice", () => {
   it("falls back to the grundpris for a non-positive or non-finite quantity", () => {
     expect(resolveSupplierPrice({ price: 10, priceBreaks: breaks }, 0).source).toBe("base");
     expect(resolveSupplierPrice({ price: 10, priceBreaks: breaks }, Number.NaN).source).toBe("base");
+  });
+});
+
+// The catalog editor stops at the API's limit instead of letting zod answer 400.
+describe("staffel step limit", () => {
+  it("the web mirror equals the API's limit, and the schema refuses one more", () => {
+    expect(WEB_SUPPLIER_PRICE_BREAKS_MAX).toBe(SUPPLIER_PRICE_BREAKS_MAX);
+    const steps = (n: number) => Array.from({ length: n }, (_, i) => ({ fromQuantity: i + 2, price: 1 }));
+    const supplierId = "00000000-0000-4000-8000-000000000001";
+    expect(createArticleSupplierSchema.safeParse({ supplierId, priceBreaks: steps(SUPPLIER_PRICE_BREAKS_MAX) }).success).toBe(true);
+    expect(createArticleSupplierSchema.safeParse({ supplierId, priceBreaks: steps(SUPPLIER_PRICE_BREAKS_MAX + 1) }).success).toBe(false);
   });
 });

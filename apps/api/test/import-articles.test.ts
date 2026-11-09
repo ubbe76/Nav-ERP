@@ -1222,6 +1222,48 @@ describe("article import — Säkerhetslager and Styrning", () => {
   });
 });
 
+// Prognosstyrd (#10): Ja/Nej like Aktiv, an empty cell leaves it untouched.
+describe("article import — Prognosstyrd", () => {
+  const forecastMapping = { Artikelnummer: "articleNumber", Benämning: "name", Prognosstyrd: "forecastControlled" };
+
+  it("suggests the column, plans Ja/Nej and refuses anything else", async () => {
+    expect(suggestArticleMapping(Object.keys(forecastMapping))).toEqual(forecastMapping);
+    const plan = await planArticleImport(
+      {
+        mapping: forecastMapping,
+        rows: [
+          ["P-1", "Ett", "Ja"],
+          ["P-2", "Två", "nej"],
+          ["P-3", "Tre", ""],
+          ["P-4", "Fyra", "Kanske"],
+        ],
+      },
+      fakeDeps()
+    );
+    expect(plan.creates[0]).toMatchObject({ forecastControlled: true });
+    expect(plan.creates[1]).toMatchObject({ forecastControlled: false });
+    expect(plan.creates[2]).not.toHaveProperty("forecastControlled");
+    expect(plan.rows[3]!.errors).toEqual(['Ogiltigt värde för Prognosstyrd: "Kanske" (Ja/Nej/1/0/true/false)']);
+  });
+
+  it("the commit stores it on create, changes it on update and leaves it on an empty cell", async () => {
+    const flag = async () =>
+      (await db.select({ f: articles.forecastControlled }).from(articles).where(eq(articles.articleNumber, "P-10")))[0]?.f;
+    const commit = (cell: string) =>
+      importService.commit("articles", {
+        mapping: forecastMapping,
+        rows: [["P-10", "Prognosartikel", cell]],
+        defaults: { articleType: "purchased" },
+      });
+    await commit("Ja");
+    expect(await flag()).toBe(true);
+    await commit("");
+    expect(await flag()).toBe(true);
+    await commit("0");
+    expect(await flag()).toBe(false);
+  });
+});
+
 // Dokument på engelska (#7): Benämning engelska / Extra benämning engelska.
 describe("planArticleImport — the English texts (#7)", () => {
   const mapping = {
