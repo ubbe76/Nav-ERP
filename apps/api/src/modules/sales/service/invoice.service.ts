@@ -375,6 +375,10 @@ type RowInput = {
   salesOrderRowId?: string | null;
   // Enhet of a free row with an article (see invoiceRowInputSchema).
   unitId?: string | null;
+  // A credit note's copy of a free source row's unit, as it was invoiced —
+  // taken as is (never re-resolved: the unit may since have been removed
+  // from the article, or its factor changed). Never client input.
+  unitSnapshot?: { unitId: string | null; unitFactor: number | null };
   // Frakt etapp 2: the booked shipment a freight row bills.
   shipmentId?: string | null;
   description: string;
@@ -917,7 +921,9 @@ export function createInvoiceService(
     let unitFactor: number | null = null;
     if (!salesOrderRowId && !shipmentId) {
       if (input.unitId && !articleId) throw new InvalidUnitError("A row without an article has no unit of its own");
-      if (articleId && input.unitId !== undefined) {
+      if (input.unitSnapshot && input.unitId === undefined) {
+        ({ unitId, unitFactor } = input.unitSnapshot);
+      } else if (articleId && input.unitId !== undefined) {
         if (!articleReader.resolveUnitSelection) {
           if (input.unitId !== null) throw new Error("ArticleNumberReader.resolveUnitSelection not wired");
         } else {
@@ -1309,7 +1315,11 @@ export function createInvoiceService(
             ...(r.projectId !== undefined ? {} : { projectId: source.projectId }),
             // Enhet: a free source row's display unit (a linked row follows
             // its order row in resolveRow).
-            ...(r.unitId !== undefined || source.salesOrderRowId ? {} : { unitId: source.unitId }),
+            // Only onto the same article — an override with another article
+            // starts in its base unit.
+            ...(r.unitId !== undefined || source.salesOrderRowId || (r.articleId ?? null) !== source.articleId
+              ? {}
+              : { unitSnapshot: { unitId: source.unitId, unitFactor: source.unitFactor !== null ? Number(source.unitFactor) : null } }),
             sourceDimensions: { costCenterId: source.costCenterId, projectId: source.projectId },
             // The credit nets the account the source row was booked on (a
             // räntefaktura's 8313) — never client input, so always copied.
@@ -1341,7 +1351,9 @@ export function createInvoiceService(
           // Dröjsmålsränta: a credit of a räntefaktura nets the same account.
           revenueAccount: r.revenueAccount,
           // Enhet: a free row's display unit (a linked row follows its order row).
-          ...(r.salesOrderRowId ? {} : { unitId: r.unitId }),
+          ...(r.salesOrderRowId
+            ? {}
+            : { unitSnapshot: { unitId: r.unitId, unitFactor: r.unitFactor !== null ? Number(r.unitFactor) : null } }),
         }));
       }
 

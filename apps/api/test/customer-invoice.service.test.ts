@@ -1991,6 +1991,31 @@ describe("customer invoice — Enhet on a free row", () => {
   });
 });
 
+// Granskningen före 0.8.7: the credit copies the free row's unit as it was
+// invoiced, even after the unit has left the article (re-resolving it gave
+// 400 invalid-unit and no credit could be made).
+describe("customer invoice — credit of a free row whose unit was removed since", () => {
+  it("keeps the invoiced unit and factor on the credit", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const article = await makeArticle();
+    let [kg] = await db.select().from(units).where(eq(units.code, "kg"));
+    if (!kg) [kg] = await db.insert(units).values({ code: "kg", name: "Kilogram" }).returning();
+    const altUnit = await articleService.addArticleUnit(article.id, { unitId: kg!.id, quantityPerBase: 5 });
+    const invoice = await invoiceService.create(
+      { customerId: customer.id, rows: [{ articleId: article.id, description: "Fri", quantity: 1, unitPrice: 50, unitId: kg!.id }] },
+      user.id
+    );
+    await invoiceService.issue(invoice!.id, issuedBy);
+    await articleService.removeArticleUnit(article.id, altUnit.id);
+
+    const credit = await invoiceService.createCredit(invoice!.id, {}, user.id);
+    const [row] = (await invoiceService.getInvoice(credit!.id))!.rows;
+    expect(row).toMatchObject({ unitId: kg!.id, quantity: "1.0000", unitPrice: "50.0000" });
+    expect(Number(row!.unitFactor)).toBe(5);
+  });
+});
+
 // Fakturalistans sökning: the name the list shows (the snapshot from
 // Utfärda) and the customer's current name both find the invoice.
 describe("customer invoice — list search after a rename", () => {

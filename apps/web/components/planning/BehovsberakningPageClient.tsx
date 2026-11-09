@@ -371,7 +371,11 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
       let fresh: DisplayRow[] | null = null;
       if (recomputed && !filterChanged) {
         const pageKeys = new Set(lines.map((l) => l.id));
-        const offPage = Object.keys(rowStatesRef.current).some((key) => !pageKeys.has(key));
+        // Only a state that can be sent counts: selected, or touched (an
+        // unselected untouched one is rebuilt when its page is shown).
+        const offPage = Object.entries(rowStatesRef.current).some(
+          ([key, state]) => !pageKeys.has(key) && (state.selected || state.touched)
+        );
         if (!offPage) fresh = lines;
         else if (kind) fresh = res.rows.flatMap(toLines).filter((l) => !l.header);
         else fresh = await fetchAllLines(sp).catch(() => lines);
