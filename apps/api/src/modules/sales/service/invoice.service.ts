@@ -50,6 +50,7 @@ import {
 } from "../../economy/service/document-vat-code.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { CustomerNotFoundError, InvalidStatusTransitionError } from "./sales.service.js";
+import { InvalidUnitError } from "../../article/service/article.service.js";
 // G1: append-only audit trail — optional with a no-op default (see
 // sales.service.ts's identical comment) so the many pre-existing test call
 // sites keep compiling; app.ts wires the real one.
@@ -96,6 +97,10 @@ export interface ArticleNumberReader {
   // `name` is what listInvoiceableShipments labels the freight article with;
   // the audit detail only ever uses articleNumber.
   getArticle(id: string): Promise<{ articleNumber: string; name?: string } | null>;
+  // Enhet on a free row (the article module's rule, as on order rows):
+  // null/base unit ⇒ no snapshot, an alternative unit ⇒ its factor, anything
+  // else ⇒ InvalidUnitError. Optional: the fixtures never choose a unit.
+  resolveUnitSelection?(articleId: string, unitId: string | null | undefined): Promise<{ unitId: string | null; unitFactor: number | null }>;
 }
 
 // Frakt etapp 2 — which article is the freight article (shipping settings),
@@ -368,6 +373,8 @@ export class ReminderFeeAlreadyChargedError extends Error {
 type RowInput = {
   articleId?: string | null;
   salesOrderRowId?: string | null;
+  // Enhet of a free row with an article (see invoiceRowInputSchema).
+  unitId?: string | null;
   // Frakt etapp 2: the booked shipment a freight row bills.
   shipmentId?: string | null;
   description: string;
@@ -423,6 +430,10 @@ type RowContext = {
 type ExistingRowState = {
   salesOrderRowId: string | null;
   quantity: number;
+  // Enhet: a free row keeps its unit on a PATCH while the article stays.
+  articleId?: string | null;
+  unitId?: string | null;
+  unitFactor?: number | null;
   shipmentId?: string | null;
   vatCodeId?: string;
   deliveryDate?: string | null;
@@ -897,13 +908,26 @@ export function createInvoiceService(
       }
     }
 
-    // Unit snapshot: a linked row copies the order row's unit/factor. A free
-    // row (no link) has no unitId of its own to resolve against the
-    // article's alternative units — the invoice row input carries no unitId
-    // — so it is always stored in the base unit (null/null), whether or not
-    // it carries an articleId.
+    // Unit snapshot: a linked row copies the order row's unit/factor (below);
+    // a free row with an article takes the unit the input names, else keeps
+    // its own on a PATCH of the same article, else the base unit; a freight
+    // row and a row without an article are always in the base unit. The
+    // amounts are in the base unit either way.
     let unitId: string | null = null;
     let unitFactor: number | null = null;
+    if (!salesOrderRowId && !shipmentId) {
+      if (input.unitId && !articleId) throw new InvalidUnitError("A row without an article has no unit of its own");
+      if (articleId && input.unitId !== undefined) {
+        if (!articleReader.resolveUnitSelection) {
+          if (input.unitId !== null) throw new Error("ArticleNumberReader.resolveUnitSelection not wired");
+        } else {
+          ({ unitId, unitFactor } = await articleReader.resolveUnitSelection(articleId, input.unitId));
+        }
+      } else if (articleId && existingRow && !existingRow.salesOrderRowId && existingRow.articleId === articleId) {
+        unitId = existingRow.unitId ?? null;
+        unitFactor = existingRow.unitFactor ?? null;
+      }
+    }
     let quantityDelivered = 0;
     // Kostnadsställen och projekt: the default for a new row without its own.
     let dimensionFallback: { costCenterId: string | null; projectId: string | null } | null = null;
@@ -1283,6 +1307,9 @@ export function createInvoiceService(
             // differing override is held to the rule (sourceDimensions).
             ...(r.costCenterId !== undefined ? {} : { costCenterId: source.costCenterId }),
             ...(r.projectId !== undefined ? {} : { projectId: source.projectId }),
+            // Enhet: a free source row's display unit (a linked row follows
+            // its order row in resolveRow).
+            ...(r.unitId !== undefined || source.salesOrderRowId ? {} : { unitId: source.unitId }),
             sourceDimensions: { costCenterId: source.costCenterId, projectId: source.projectId },
             // The credit nets the account the source row was booked on (a
             // räntefaktura's 8313) — never client input, so always copied.
@@ -1313,6 +1340,8 @@ export function createInvoiceService(
           sourceDimensions: { costCenterId: r.costCenterId, projectId: r.projectId },
           // Dröjsmålsränta: a credit of a räntefaktura nets the same account.
           revenueAccount: r.revenueAccount,
+          // Enhet: a free row's display unit (a linked row follows its order row).
+          ...(r.salesOrderRowId ? {} : { unitId: r.unitId }),
         }));
       }
 
@@ -1473,6 +1502,8 @@ export function createInvoiceService(
         // Kostnadsställen och projekt: undefined keeps the row's, null clears.
         costCenterId: input.costCenterId,
         projectId: input.projectId,
+        // Enhet: undefined keeps a free row's unit (resolveRow).
+        unitId: input.unitId,
       };
       const row = await repo.updateRow(
         invoiceId,
@@ -1483,6 +1514,9 @@ export function createInvoiceService(
           {
             salesOrderRowId: existing.salesOrderRowId,
             quantity: Number(existing.quantity),
+            articleId: existing.articleId,
+            unitId: existing.unitId,
+            unitFactor: existing.unitFactor !== null ? Number(existing.unitFactor) : null,
             shipmentId: existing.shipmentId,
             vatCodeId: existing.vatCodeId,
             deliveryDate: existing.deliveryDate,

@@ -1,6 +1,7 @@
 "use client";
 
 import { confirmDialog } from "../../lib/confirm";
+import { VerificationRef } from "../economy/VerificationRef";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -87,21 +88,19 @@ export function SupplierPaymentCard({
           // sensitive, shown regardless of role (mirrors the list's own tooltip).
           <span title="Kvittning (inget verifikat)">Verifikat: — (kvittning)</span>
         ) : (
-          canOpenVerifications && (
-            <span>
-              Verifikat{" "}
-              <Link href={`/ekonomi/verifikat/${payment.verificationId}`}>
-                {payment.verificationDisplayNumber ?? "–"}
-              </Link>
-            </span>
-          )
+          <span>
+            Verifikat{" "}
+            <VerificationRef id={payment.verificationId} displayNumber={payment.verificationDisplayNumber} canOpen={canOpenVerifications} />
+          </span>
         )}
-        {cancelled && canOpenVerifications && payment.cancellationVerificationId && (
+        {cancelled && payment.cancellationVerificationId && (
           <span>
             Makuleringsverifikat{" "}
-            <Link href={`/ekonomi/verifikat/${payment.cancellationVerificationId}`}>
-              {payment.cancellationDisplayNumber ?? "–"}
-            </Link>
+            <VerificationRef
+              id={payment.cancellationVerificationId}
+              displayNumber={payment.cancellationDisplayNumber}
+              canOpen={canOpenVerifications}
+            />
           </span>
         )}
       </div>

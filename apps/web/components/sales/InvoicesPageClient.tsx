@@ -276,6 +276,10 @@ export function NewInvoiceForm({
   // Consumed once the matching order shows up in the fetched invoiceable
   // orders (same "pending order" pattern as NewSupplierInvoiceForm).
   const pendingOrderRef = useRef<string | null>(initialOrderId ?? null);
+  // The prefilled order's number (from the mount fetch below), for the notice
+  // when it turns out to have nothing left to invoice.
+  const pendingOrderNumberRef = useRef<string | null>(null);
+  const [prefillNotice, setPrefillNotice] = useState<string | null>(null);
   const freeRowSeqRef = useRef(0);
 
   // Resolve initialOrderId's customer once on mount — the invoiceable-orders
@@ -285,7 +289,10 @@ export function NewInvoiceForm({
   useEffect(() => {
     if (!initialOrderId) return;
     apiFetch<SalesOrder>(`/api/v1/sales-orders/${initialOrderId}`)
-      .then((order) => apiFetch<Customer>(`/api/v1/customers/${order.customerId}`))
+      .then((order) => {
+        pendingOrderNumberRef.current = order.orderNumber;
+        return apiFetch<Customer>(`/api/v1/customers/${order.customerId}`);
+      })
       .then((c) => setCustomer(c))
       .catch(() => {
         pendingOrderRef.current = null;
@@ -299,6 +306,7 @@ export function NewInvoiceForm({
     setOrders([]);
     setShipments([]);
     setOrdersLoaded(false);
+    setPrefillNotice(null);
     autoTickedRef.current = new Set();
     setCurrencyChoice(null);
     setSelectedOrderIds(new Set());
@@ -319,6 +327,13 @@ export function NewInvoiceForm({
         if (pending) {
           const order = res.find((o) => o.orderId === pending);
           if (order) selectOrder(order);
+          // Nothing delivered is left to invoice — typically the rest is
+          // already on a draft (drafts count as invoiced). Say so rather
+          // than open an empty dialog.
+          else
+            setPrefillNotice(
+              `Ordern ${pendingOrderNumberRef.current ?? ""} har inget levererat kvar att fakturera — resten kan redan ligga på ett fakturautkast.`
+            );
         }
         pendingOrderRef.current = null;
         setOrdersLoaded(true);
@@ -649,6 +664,7 @@ export function NewInvoiceForm({
   return (
     <Form onSubmit={submit}>
       <FormError>{error}</FormError>
+      {prefillNotice && <FormNotice>{prefillNotice}</FormNotice>}
 
       <Field label="Kund" htmlFor="invoiceCustomer">
         <SearchPicker

@@ -571,6 +571,13 @@ export const invoiceRowInputSchema = z.object({
   vatRate: vatRateSchema.optional(),
   vatCodeId: z.string().uuid().optional(),
   deliveryDate: businessDateSchema.nullable().optional(),
+  // Enhet: the display unit of a FREE row with an article (one of its
+  // alternative units; null/the base unit = the base unit). quantity and
+  // unitPrice are still sent and stored in the base unit — the unit only
+  // decides how the row is shown and printed. A row linked to an order row
+  // (or a freight row) follows its order row and ignores the field; omitted
+  // on a PATCH keeps the row's unit while its article stays the same.
+  unitId: z.string().uuid().nullable().optional(),
   // Kostnadsställen och projekt: omitted on a new row = the linked order's
   // header dimensions, else the article group's Kostnadsställe (förval);
   // omitted on a PATCH keeps the row's; null = none.

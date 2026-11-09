@@ -1,6 +1,7 @@
 "use client";
 
 import { ConfigurationLines } from "../configurator/ConfigurationLines";
+import { VerificationRef } from "../economy/VerificationRef";
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
 import { openDocument } from "../../lib/tabNavigation";
 import { useState, type FormEvent } from "react";
@@ -12,6 +13,7 @@ import { Button } from "../ui/Button";
 import { StatusPill } from "../ui/StatusPill";
 import { Field, Input, Select } from "../ui/Field";
 import { ArticlePicker } from "../ui/ArticlePicker";
+import { UnitSelect, convertPriceInput, convertQuantityInput, useUnitOptions, type UnitOption } from "../ui/UnitSelect";
 import { Modal } from "../ui/Modal";
 import { CostCenterSelect, NO_OBJECT, ProjectSelect } from "../economy/DimensionSelect";
 import { dimensionText, useDimensions } from "../../lib/dimensions";
@@ -346,13 +348,7 @@ export function InvoiceCard({
         {invoice.verificationId && (
           <span>
             Verifikat{" "}
-            {canOpenVerifications ? (
-              <Link href={`/ekonomi/verifikat/${invoice.verificationId}`}>
-                {invoice.verificationDisplayNumber ?? "–"}
-              </Link>
-            ) : (
-              invoice.verificationDisplayNumber ?? "–"
-            )}
+            <VerificationRef id={invoice.verificationId} displayNumber={invoice.verificationDisplayNumber} canOpen={canOpenVerifications} />
           </span>
         )}
       </div>
@@ -666,11 +662,7 @@ export function InvoiceCard({
                   if (row.verificationId === null) {
                     return <span title="Kvittning (inget verifikat)">– (kvittning)</span>;
                   }
-                  return canOpenVerifications ? (
-                    <Link href={`/ekonomi/verifikat/${row.verificationId}`}>{row.verificationDisplayNumber ?? "–"}</Link>
-                  ) : (
-                    "–"
-                  );
+                  return <VerificationRef id={row.verificationId} displayNumber={row.verificationDisplayNumber} canOpen={canOpenVerifications} />;
                 default:
                   return null;
               }
@@ -701,12 +693,8 @@ export function InvoiceCard({
                   return Number(row.fee) > 0 ? `${formatMoney(row.fee)} ${invoice.currency}` : "–";
                 case "feeVerificationId":
                   if (row.feeVerificationId === null) return "–";
-                  return canOpenVerifications ? (
-                    <Link href={`/ekonomi/verifikat/${row.feeVerificationId}`}>
-                      {row.feeVerificationDisplayNumber ?? "–"}
-                    </Link>
-                  ) : (
-                    "–"
+                  return (
+                    <VerificationRef id={row.feeVerificationId} displayNumber={row.feeVerificationDisplayNumber} canOpen={canOpenVerifications} />
                   );
                 case "documentId":
                   // The påminnelse exactly as it was sent (archived copy).
@@ -1067,6 +1055,13 @@ function AddRowForm({
   const [article, setArticle] = useState<Article | null>(null);
   const [quantity, setQuantity] = useState("1");
   const [unitPrice, setUnitPrice] = useState("");
+  // Enhet: "" = the article's base unit. Antal and À-pris are typed in the
+  // chosen unit and sent in the base unit (the API stores the row there);
+  // unitId only sets how the row is shown and printed.
+  const [unitId, setUnitId] = useState("");
+  const unitOptions = useUnitOptions(article);
+  const currentFactor = unitOptions.find((o) => o.value === unitId)?.factor ?? 1;
+  const unitCode = unitOptions.find((o) => o.value === unitId)?.code;
   // "" = Automatisk: the API derives the code from the customer and the
   // article (salesVatCode) — what the first option names below. Picking one
   // sends that vatCodeId; the bare vatRate is never sent.
@@ -1080,7 +1075,16 @@ function AddRowForm({
 
   function handleArticleChange(next: Article | null) {
     setArticle(next);
+    // The article's Försäljningsenhet, as on the order row.
+    setUnitId(next?.salesUnitId ?? "");
     if (next && !description.trim()) setDescription(`${next.articleNumber} — ${next.name}`);
+  }
+
+  // Switching unit re-expresses what is typed (10 st ⇄ 2 kg).
+  function handleUnitChange(option: UnitOption) {
+    setQuantity((q) => convertQuantityInput(q, currentFactor, option.factor));
+    setUnitPrice((p) => convertPriceInput(p, currentFactor, option.factor));
+    setUnitId(option.value);
   }
 
   // The code Automatisk gives this row: the picked article's rate and type
@@ -1109,8 +1113,10 @@ function AddRowForm({
         body: JSON.stringify({
           description: description.trim(),
           articleId: article?.id ?? undefined,
-          quantity: Number(quantity),
-          unitPrice: unitPrice.trim() ? Number(unitPrice) : 0,
+          quantity: toBaseQuantity(Number(quantity), currentFactor),
+          unitPrice: unitPrice.trim() ? toBasePrice(Number(unitPrice), currentFactor) : 0,
+          // A free row without an article has no unit of its own.
+          ...(article ? { unitId: unitId || null } : {}),
           vatCodeId: vatCodeId || undefined,
           deliveryDate: deliveryDate.trim() || undefined,
           // Omitted = Förval (the order header's, else the article group's
@@ -1123,6 +1129,7 @@ function AddRowForm({
       setProjectId("");
       setDescription("");
       setArticle(null);
+      setUnitId("");
       setQuantity("1");
       setUnitPrice("");
       setVatCodeId("");
@@ -1149,11 +1156,19 @@ function AddRowForm({
           <Input id="rowDescription" required maxLength={255} value={description} onChange={(e) => setDescription(e.target.value)} />
         </Field>
 
-        <FormRow>
+        <FormRow columns={article ? 3 : 2}>
           <Field label="Antal" htmlFor="rowQuantity">
             <Input id="rowQuantity" type="number" min="0" step="any" size="sm" required value={quantity} onChange={(e) => setQuantity(e.target.value)} />
           </Field>
-          <Field label={currency === SEK ? "À-pris" : `À-pris (${currency})`} htmlFor="rowUnitPrice">
+          {article && (
+            <Field label="Enhet" htmlFor="rowUnit">
+              <UnitSelect id="rowUnit" options={unitOptions} value={unitId} onChange={handleUnitChange} />
+            </Field>
+          )}
+          <Field
+            label={`${currency === SEK ? "À-pris" : `À-pris (${currency})`}${article && unitCode ? ` per ${unitCode}` : ""}`}
+            htmlFor="rowUnitPrice"
+          >
             <Input id="rowUnitPrice" type="number" step="0.01" size="sm" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
           </Field>
         </FormRow>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { VerificationRef } from "../economy/VerificationRef";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
@@ -139,18 +140,14 @@ export function SupplierPaymentsPageClient({
               return payment.bankAccountNumber;
             case "verificationDisplayNumber":
               // A pure kvittning never booked a verification — that absence
-              // is meaningful, not sensitive, so it's shown regardless of
-              // role. A real verifikat's number is admin-only, same gate as
-              // InvoiceCard/SupplierInvoiceCard's own Verifikat span (the
-              // whole /ekonomi/verifikat surface is admin-only).
+              // is meaningful, so it's shown as such. A real verifikat's
+              // number is shown to everyone, linked only for those who may
+              // open Ekonomi → Verifikat (VerificationRef).
               if (payment.verificationId === null) {
                 return <span title="Kvittning (inget verifikat)">—</span>;
               }
-              if (!canOpenVerifications) return null;
               return (
-                <Link href={`/ekonomi/verifikat/${payment.verificationId}`}>
-                  {payment.verificationDisplayNumber ?? "–"}
-                </Link>
+                <VerificationRef id={payment.verificationId} displayNumber={payment.verificationDisplayNumber} canOpen={canOpenVerifications} />
               );
             case "status":
               return payment.cancelledAt === null ? (

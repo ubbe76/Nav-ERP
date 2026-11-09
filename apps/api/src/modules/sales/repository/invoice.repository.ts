@@ -927,7 +927,11 @@ export function createInvoiceRepository(db: Db) {
       const conditions = [];
       if (query.search) {
         const pattern = ilikePattern(query.search);
-        conditions.push(or(ilike(invoices.invoiceNumber, pattern), ilike(customers.name, pattern)));
+        // The name the list shows (the invoice's snapshot from Utfärda) and
+        // the customer's current one — a renamed customer is found by both.
+        conditions.push(
+          or(ilike(invoices.invoiceNumber, pattern), ilike(invoices.customerName, pattern), ilike(customers.name, pattern))
+        );
       }
       if (query.status) conditions.push(inArray(invoices.status, query.status));
       if (query.type) conditions.push(eq(invoices.type, query.type));
