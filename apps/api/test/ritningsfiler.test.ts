@@ -13,6 +13,7 @@ import {
   createManufacturingService,
   ManufacturingOrderNotEditableError,
   RoutingDrawingInvalidError,
+  RoutingFileInvalidError,
 } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { createSalesRepository } from "../src/modules/sales/repository/sales.repository.js";
 import { markSalesOrderInProduction } from "../src/modules/sales/service/production-transition.js";
@@ -39,7 +40,7 @@ const mfg = createManufacturingService(
   createAuditRepository(db)
 );
 
-const TRUNCATE = sql`TRUNCATE mo_drawing_revisions, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operation_drawings, routing_operations, work_centers, article_files, article_drawing_revisions, article_drawings, article_revisions, bom_components, articles, audit_log, users CASCADE`;
+const TRUNCATE = sql`TRUNCATE routing_operation_article_files, mo_drawing_revisions, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operation_drawings, routing_operations, work_centers, article_files, article_drawing_revisions, article_drawings, article_revisions, bom_components, articles, audit_log, users CASCADE`;
 
 beforeEach(async () => {
   await db.execute(TRUNCATE);
@@ -264,6 +265,75 @@ describe("ritningar per operation", () => {
     // The page itself, then a.png, svets.png and lös.png — never b.png.
     const { PDFDocument } = await import("pdf-lib");
     expect((await PDFDocument.load(content)).getPageCount()).toBe(4);
+  });
+});
+
+describe("filer per operation", () => {
+  it("gives an operation exactly its chosen drawings and files, refuses a revision's or another article's file", async () => {
+    const user = await makeUser();
+    const f = await makeDrawingArticle();
+    const manual = await articleService.addFile(f.article.id, png("montering.png"));
+    const wc = await mfg.createWorkCenter(parsed(createWorkCenterSchema, { code: "200", name: "Montering", active: true }));
+    const onlyFile = await mfg.createRoutingOperation(
+      f.article.id,
+      parsed(createRoutingOperationSchema, { sequenceNo: 10, workCenterId: wc.id, setupTime: 5, runTimePerUnit: 1, fileIds: [manual.id] })
+    );
+    expect(onlyFile.files).toEqual([{ id: manual.id, filename: "montering.png" }]);
+    const both = await mfg.createRoutingOperation(
+      f.article.id,
+      parsed(createRoutingOperationSchema, {
+        sequenceNo: 20,
+        workCenterId: wc.id,
+        setupTime: 5,
+        runTimePerUnit: 1,
+        drawingIds: [f.drawing.id],
+        fileIds: [manual.id],
+      })
+    );
+    await expect(mfg.updateRoutingOperation(f.article.id, both.id, { fileIds: [f.fileA.id] })).rejects.toBeInstanceOf(RoutingFileInvalidError);
+    const other = await makeArticle();
+    const foreign = await articleService.addFile(other.id, png("annan.png"));
+    await expect(mfg.updateRoutingOperation(f.article.id, both.id, { fileIds: [foreign.id] })).rejects.toBeInstanceOf(
+      RoutingFileInvalidError
+    );
+
+    const order = await mfg.createManufacturingOrder({ articleId: f.article.id, quantity: 1 }, user.id);
+    const ops = await mfg.listOperations(order.id);
+    const files = async (seq: number) =>
+      (await mfg.listOperationDrawingFiles(order.id, ops.find((op) => op.sequenceNo === seq)!.id))!.map((x) => x.filename);
+    expect(await files(10)).toEqual(["montering.png"]);
+    expect(await files(20)).toEqual(["a.png", "montering.png"]);
+
+    const text = pdfText((await mfg.getManufacturingOrderPdf(order.id)).content);
+    expect(text).toContain("Fil: montering.png");
+    expect(text).toContain("Ritning: R-1 rev A · Fil: montering.png");
+
+    // A chosen file that becomes a drawing revision's no longer counts as the
+    // operation's file.
+    await articleService.linkDrawingRevisionFile(f.article.id, f.drawing.id, f.revB.id, manual.id);
+    const [listed] = (await mfg.listRoutingOperations(f.article.id)).filter((op) => op.sequenceNo === 10);
+    expect(listed!.files).toEqual([]);
+  });
+
+  it("copies the operation's files by name with Kopiera från", async () => {
+    const f = await makeDrawingArticle();
+    const wc = await mfg.createWorkCenter(parsed(createWorkCenterSchema, { code: "200", name: "Montering", active: true }));
+    await mfg.createRoutingOperation(
+      f.article.id,
+      parsed(createRoutingOperationSchema, { sequenceNo: 10, workCenterId: wc.id, setupTime: 5, runTimePerUnit: 1, fileIds: [f.loose.id] })
+    );
+    const copy = await articleService.createArticle(
+      createArticleSchema.parse({
+        articleNumber: `KOPIA-${crypto.randomUUID().slice(0, 8)}`,
+        name: "Kopia",
+        type: "manufactured",
+        active: true,
+        copyFrom: { articleId: f.article.id, parts: ["beredning", "filer"] },
+      }) as CreateArticleInput
+    );
+    const [op] = await mfg.listRoutingOperations(copy.id);
+    expect(op!.files.map((x) => x.filename)).toEqual(["lös.png"]);
+    expect(op!.files[0]!.id).not.toBe(f.loose.id);
   });
 });
 

@@ -2475,6 +2475,8 @@ export interface RoutingOperation {
   alternatives?: RoutingAlternative[];
   // Ritningar (0200): the article's drawings the operation is worked from.
   drawings?: { id: string; drawingNumber: string }[];
+  // Filer (0201): the article's loose files the operation is worked from.
+  files?: { id: string; filename: string }[];
 }
 
 export type ManufacturingOrderStatus =

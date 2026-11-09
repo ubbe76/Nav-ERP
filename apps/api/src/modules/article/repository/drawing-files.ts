@@ -11,9 +11,10 @@ import { articleFiles, type Db, type Tx } from "@navet/db";
 //     snapshot's revision of each drawing;
 //   - otherwise (no order, or an order without a snapshot): the drawing's
 //     active revision.
-// An operation with chosen drawings (routing_operation_drawings) narrows the
-// set to those drawings, and then no loose files. Files on other revisions
-// are never sent or printed by themselves — the Revisioner tab opens them.
+// An operation with chosen documents — drawings (routing_operation_drawings)
+// and/or loose files (routing_operation_article_files) — gets exactly those;
+// with none chosen, all. Files on other revisions are never sent or printed
+// by themselves — the Revisioner tab opens them.
 
 type Conn = Db | Tx;
 
@@ -21,7 +22,7 @@ export interface DrawingFileRef {
   articleId: string;
   // The order whose snapshot decides the revisions; null = the current ones.
   moId?: string | null;
-  // The operation whose chosen drawings narrow the set; null = all.
+  // The operation whose chosen drawings and files narrow the set; null = all.
   routingOperationId?: string | null;
 }
 
@@ -70,14 +71,21 @@ function revisionsInForceSql(ref: DrawingFileRef): SQL {
 
 async function selectFiles<T>(db: Conn, ref: DrawingFileRef, withData: boolean): Promise<T[]> {
   const data = withData ? sql`, f.data` : sql``;
-  const chosen = ref.routingOperationId
-    ? sql`(SELECT drawing_id FROM routing_operation_drawings WHERE routing_operation_id = ${ref.routingOperationId})`
-    : null;
-  // Narrowed only when the operation has chosen drawings at all.
-  const narrowed = chosen
-    ? sql`AND (NOT EXISTS (SELECT 1 FROM ${chosen} c0) OR EXISTS (SELECT 1 FROM ${chosen} c WHERE c.drawing_id = rf.drawing_id))`
-    : sql``;
-  const loose = chosen ? sql`AND NOT EXISTS (SELECT 1 FROM ${chosen} c2)` : sql``;
+  // An operation's chosen documents: drawings (routing_operation_drawings)
+  // and loose files (routing_operation_article_files — only while the file is
+  // still loose). With any chosen, the operation gets exactly them; with none,
+  // everything.
+  let narrowed = sql``;
+  let loose = sql``;
+  if (ref.routingOperationId) {
+    const chosenDrawings = sql`(SELECT cd.drawing_id FROM routing_operation_drawings cd WHERE cd.routing_operation_id = ${ref.routingOperationId})`;
+    const chosenFiles = sql`(SELECT cf.article_file_id FROM routing_operation_article_files cf
+      JOIN article_files lf ON lf.id = cf.article_file_id AND lf.drawing_revision_id IS NULL
+      WHERE cf.routing_operation_id = ${ref.routingOperationId})`;
+    const anyChosen = sql`(EXISTS ${chosenDrawings} OR EXISTS ${chosenFiles})`;
+    narrowed = sql`AND (NOT ${anyChosen} OR rf.drawing_id IN ${chosenDrawings})`;
+    loose = sql`AND (NOT ${anyChosen} OR f.id IN ${chosenFiles})`;
+  }
   const result = await db.execute(sql`
     WITH rf AS (${revisionsInForceSql(ref)})
     SELECT f.id, f.filename, f.content_type AS "contentType", f.size_bytes AS "sizeBytes",

@@ -14,7 +14,7 @@ import styles from "./OperationModal.module.css";
 import { API_URL, apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { OPERATION_TIME_UNIT_LABELS, runTimeInUnit, runTimeToMinutes, type OperationTimeUnit } from "../../lib/units";
-import type { ArticleDrawing, MOOperation, MOOperationResource, Paged, RoutingOperation, Supplier, WorkCenter } from "../../lib/types";
+import type { ArticleDrawing, ArticleFile, MOOperation, MOOperationResource, Paged, RoutingOperation, Supplier, WorkCenter } from "../../lib/types";
 import { Form, FormActions, FormError, FormHint, FormLineRow, FormNotice, FormRow } from "../ui/Form";
 import { MAX_ROUTING_ALTERNATIVES, moveItem, workCenterHasCapacity } from "../../lib/routingAlternatives";
 
@@ -60,9 +60,10 @@ export interface OperationPayload {
   transportPrice: number | null;
   showNetWeight: boolean;
   useArticleDrawing?: boolean;
-  // Ritningar (routing mode): the article's drawings the operation is
-  // worked from — the whole set.
+  // Ritningar och filer (routing mode): the article's drawings and loose
+  // files the operation is worked from — each the whole set.
   drawingIds?: string[];
+  fileIds?: string[];
   // Routing only — Alternativa resurser, the whole set in rank order (sent
   // always, so it replaces the operation's set; [] removes it). Times are
   // minutes, null = Som ordinarie.
@@ -214,15 +215,23 @@ function OperationForm({
   );
   const [showNetWeight, setShowNetWeight] = useState(editing?.showNetWeight ?? false);
   const [useArticleDrawing, setUseArticleDrawing] = useState(routingEditing?.useArticleDrawing ?? true);
-  // --- Ritningar (routing mode): the article's drawings to choose among. ---
+  // --- Ritningar och filer (routing mode): the article's drawings and loose
+  // files to choose among. ---
   const [articleDrawings, setArticleDrawings] = useState<ArticleDrawing[]>([]);
+  const [looseFiles, setLooseFiles] = useState<ArticleFile[]>([]);
   const [drawingIds, setDrawingIds] = useState<string[]>(() => (routingEditing?.drawings ?? []).map((d) => d.id));
+  const [fileIds, setFileIds] = useState<string[]>(() => (routingEditing?.files ?? []).map((f) => f.id));
   useEffect(() => {
     if (moMode || !articleId) return;
     let cancelled = false;
-    apiFetch<ArticleDrawing[]>(`/api/v1/articles/${articleId}/drawings`)
-      .then((list) => {
-        if (!cancelled) setArticleDrawings(list);
+    Promise.all([
+      apiFetch<ArticleDrawing[]>(`/api/v1/articles/${articleId}/drawings`),
+      apiFetch<ArticleFile[]>(`/api/v1/articles/${articleId}/files`),
+    ])
+      .then(([drawings, files]) => {
+        if (cancelled) return;
+        setArticleDrawings(drawings);
+        setLooseFiles(files.filter((f) => !f.drawingRevisionId));
       })
       .catch(() => undefined);
     return () => {
@@ -364,7 +373,7 @@ function OperationForm({
         unitPrice: isLego && unitPrice !== "" ? Number(unitPrice) : null,
         transportPrice: isLego && transportPrice !== "" ? Number(transportPrice) : null,
         showNetWeight: isLego ? showNetWeight : false,
-        ...(moMode ? {} : { costingOnly, useArticleDrawing: isLego ? useArticleDrawing : true, drawingIds }),
+        ...(moMode ? {} : { costingOnly, useArticleDrawing: isLego ? useArticleDrawing : true, drawingIds, fileIds }),
         // The whole set, so a swap of ordinarie and alternative passes; a lego or
         // Kalkyl operation carries none.
         ...(moMode
@@ -715,12 +724,12 @@ function OperationForm({
         />
       )}
 
-      {/* Ritningar: which of the article's drawings the operation is worked
-          from — the terminal and the printout show them, a lego operation's
-          mail sends only them. None chosen = all the article's. */}
-      {!moMode && articleDrawings.length > 0 && (
+      {/* Ritningar och filer: which of the article's drawings and files the
+          operation is worked from — the terminal and the printout show them,
+          a lego operation's mail sends only them. None chosen = all. */}
+      {!moMode && (articleDrawings.length > 0 || looseFiles.length > 0) && (
         <fieldset className={styles.drawings}>
-          <legend className={fieldStyles.label}>Ritningar (valfritt)</legend>
+          <legend className={fieldStyles.label}>Ritningar och filer (valfritt)</legend>
           {articleDrawings.map((drawing) => {
             const active = drawing.revisions.find((r) => r.isActive);
             return (
@@ -736,9 +745,19 @@ function OperationForm({
               </label>
             );
           })}
+          {looseFiles.map((file) => (
+            <label key={file.id} style={checkboxRowStyle}>
+              <Checkbox
+                checked={fileIds.includes(file.id)}
+                onChange={(e) => setFileIds((ids) => (e.target.checked ? [...ids, file.id] : ids.filter((id) => id !== file.id)))}
+              />
+              {file.filename}
+            </label>
+          ))}
           <FormHint attached>
-            Terminalen och tillverkningsorderns utskrift visar de valda ritningarna vid operationen, och en legooperation
-            som använder artikelns ritningar mejlar bara dem. Utan val gäller alla artikelns ritningar och filer.
+            Terminalen och tillverkningsorderns utskrift visar de valda ritningarna och filerna vid operationen, och en
+            legooperation som använder artikelns ritningar mejlar bara dem. Utan val gäller alla artikelns ritningar och
+            filer.
           </FormHint>
         </fieldset>
       )}

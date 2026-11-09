@@ -21,7 +21,7 @@ import {
 
 // Same pattern as article_files/system.ts — no built-in bytea helper.
 const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
-import { articleDrawingRevisions, articleDrawings, articles } from "./article";
+import { articleDrawingRevisions, articleDrawings, articleFiles, articles } from "./article";
 import { users } from "./auth";
 // Safe import direction: purchase.ts does not import from this file (the
 // purchase_order_rows → mo_operations FK is declared by hand in its
@@ -276,6 +276,28 @@ export const routingOperationDrawings = pgTable(
   (table) => [
     primaryKey({ columns: [table.routingOperationId, table.drawingId] }),
     index("idx_routing_operation_drawings_drawing").on(table.drawingId),
+  ]
+);
+
+// Filer per operation (0201): which of the article's loose files (fliken
+// Filer, article_files without a drawing revision) an operation is worked
+// from — together with its chosen drawings. A file that later becomes a
+// drawing revision's no longer counts (drawing-files.ts reads only loose
+// ones). Not to be confused with routing_operation_files below: the lego
+// operation's own uploaded file.
+export const routingOperationArticleFiles = pgTable(
+  "routing_operation_article_files",
+  {
+    routingOperationId: uuid("routing_operation_id")
+      .notNull()
+      .references(() => routingOperations.id, { onDelete: "cascade" }),
+    articleFileId: uuid("article_file_id")
+      .notNull()
+      .references(() => articleFiles.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.routingOperationId, table.articleFileId] }),
+    index("idx_routing_operation_article_files_file").on(table.articleFileId),
   ]
 );
 
