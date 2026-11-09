@@ -5,6 +5,7 @@ import { db } from "@navet/db";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createEconomyRepository } from "../src/modules/economy/repository/economy.repository.js";
 import { AccountNotFoundError, createEconomyService } from "../src/modules/economy/service/economy.service.js";
+import { createFinancialReportsService } from "../src/modules/economy/service/financial-reports.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { parsed } from "./helpers/parsed.js";
 
@@ -207,5 +208,30 @@ describe("economy service — getLedger: interval filtering exact on boundary da
     expect(ledger.rows[0]?.yearLabel).toBe("2026");
     expect(ledger.rows[0]?.displayNumber).toBe(first.displayNumber);
     expect(ledger.rows[1]?.displayNumber).toBe(second.displayNumber);
+  });
+
+  // Within a day: series first, then the number. A-3 sorts before F-1 and
+  // F-2 although its number is higher — sorting on the number first would
+  // interleave the series. The multi-account huvudbok (and so its PDF/CSV)
+  // uses the same order.
+  it("orders the rows of a day by series before verification number, in both ledgers", async () => {
+    const { user, series, bank, revenue } = await setupEconomy();
+    const invoiceSeries = await makeSeries("F", "Kundfakturor");
+    await bookEntry(series, bank, revenue, user.id, "2026-06-01", 1, "A-1");
+    await bookEntry(series, bank, revenue, user.id, "2026-06-01", 2, "A-2");
+    await bookEntry(invoiceSeries, bank, revenue, user.id, "2026-06-02", 10, "F-1");
+    await bookEntry(series, bank, revenue, user.id, "2026-06-02", 30, "A-3");
+    await bookEntry(invoiceSeries, bank, revenue, user.id, "2026-06-02", 20, "F-2");
+
+    const range = { from: "2026-06-02", to: "2026-06-02" };
+    const single = await service.getLedger({ accountId: bank.id, ...range });
+    expect(single.rows.map((r) => `${r.seriesCode}-${r.verificationNumber}`)).toEqual(["A-3", "F-1", "F-2"]);
+    expect(single.rows.map((r) => r.balance)).toEqual([33, 43, 63]);
+
+    const reports = createFinancialReportsService({ db, repo });
+    const multi = await reports.getGeneralLedger({ ...range, onlyWithMovement: true });
+    const bankAccount = multi.accounts.find((a) => a.accountNumber === "1930")!;
+    expect(bankAccount.rows.map((r) => `${r.seriesCode}-${r.verificationNumber}`)).toEqual(["A-3", "F-1", "F-2"]);
+    expect(bankAccount.rows.map((r) => r.balance)).toEqual(single.rows.map((r) => r.balance));
   });
 });

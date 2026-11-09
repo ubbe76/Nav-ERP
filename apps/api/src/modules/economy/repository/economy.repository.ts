@@ -1164,10 +1164,10 @@ export function createEconomyRepository(db: Db) {
       if (from) rowConditions.push(gte(verifications.date, from));
       if (to) rowConditions.push(lte(verifications.date, to));
 
-      // seriesCode is a third sort key (tie-break within the same
-      // (date, verificationNumber) across series — verificationNumber is
-      // only unique per series×year, so two series can share a number on
-      // the same day) for a deterministic order.
+      // Within a day the rows follow the verifications: series first, then
+      // the number (A-12 before F-3) — verificationNumber is only unique per
+      // series×year, so sorting on it before the series would interleave the
+      // series (F-3, A-12, F-13). Pinned in economy-ledger.test.ts.
       const rows = await db
         .select({
           date: verifications.date,
@@ -1189,7 +1189,7 @@ export function createEconomyRepository(db: Db) {
         .leftJoin(rowCostCenters, eq(rowCostCenters.id, verificationRows.costCenterId))
         .leftJoin(rowProjects, eq(rowProjects.id, verificationRows.projectId))
         .where(and(...rowConditions))
-        .orderBy(asc(verifications.date), asc(verifications.verificationNumber), asc(verificationSeries.code));
+        .orderBy(asc(verifications.date), asc(verificationSeries.code), asc(verifications.verificationNumber));
 
       return { openingBalance, rows };
     },
@@ -1197,8 +1197,8 @@ export function createEconomyRepository(db: Db) {
     // Multi-account sibling of getLedger (B6a printout). Returns ROWS only —
     // opening balances come from readAccountBalances, so this stays a single
     // flat query. Account order comes first in the sort so the printout
-    // groups per account; the (date, verificationNumber, seriesCode) trio
-    // after it is getLedger's tie-break, kept identical on purpose.
+    // groups per account; the (date, seriesCode, verificationNumber) trio
+    // after it is getLedger's order, kept identical on purpose.
     // Kostnadsställen och projekt: `filter` keeps only the rows carrying the
     // object(s) — the opening balances come from readAccountBalances with
     // the same filter, so the two never disagree.
@@ -1243,8 +1243,8 @@ export function createEconomyRepository(db: Db) {
         .orderBy(
           asc(accounts.number),
           asc(verifications.date),
-          asc(verifications.verificationNumber),
-          asc(verificationSeries.code)
+          asc(verificationSeries.code),
+          asc(verifications.verificationNumber)
         );
       return rows;
     },
