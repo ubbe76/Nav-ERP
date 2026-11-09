@@ -314,10 +314,19 @@ export function BeredningView({
                           {op.showNetWeight ? " · nettovikt på IO" : ""}
                         </span>
                       )}
-                      {(op.drawings?.length ?? 0) > 0 && (
-                        // Ritningar: the drawings the operation is worked from.
+                      {((op.drawings?.length ?? 0) > 0 || (op.files?.length ?? 0) > 0) && (
+                        // Ritningar och filer: what the operation is worked from.
                         <span className={styles.opComment}>
-                          {op.drawings!.length > 1 ? "Ritningar" : "Ritning"} {op.drawings!.map((d) => d.drawingNumber).join(", ")}
+                          {[
+                            (op.drawings?.length ?? 0) > 0
+                              ? `${op.drawings!.length > 1 ? "Ritningar" : "Ritning"} ${op.drawings!.map((d) => d.drawingNumber).join(", ")}`
+                              : null,
+                            (op.files?.length ?? 0) > 0
+                              ? `${op.files!.length > 1 ? "Filer" : "Fil"} ${op.files!.map((f) => f.filename).join(", ")}`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
                         </span>
                       )}
                       {(op.alternatives?.length ?? 0) > 0 && (

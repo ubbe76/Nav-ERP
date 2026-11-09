@@ -75,6 +75,7 @@ import {
   ProductionGroupNotFoundError,
   RoutingAlternativeInvalidError,
   RoutingDrawingInvalidError,
+  RoutingFileInvalidError,
   RoutingOperationHasAlternativesError,
   WorkCenterInAlternativesError,
   RoutingOperationNotFoundError,
@@ -224,6 +225,7 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
         if (err instanceof WorkCenterSupplierNotFoundError) return reply.code(400).send(errorBody(err));
         if (err instanceof RoutingAlternativeInvalidError) return reply.code(400).send(errorBody(err));
         if (err instanceof RoutingDrawingInvalidError) return reply.code(400).send(errorBody(err));
+        if (err instanceof RoutingFileInvalidError) return reply.code(400).send(errorBody(err));
         throw err;
       }
     }
@@ -245,6 +247,7 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
         if (err instanceof WorkCenterSupplierNotFoundError) return reply.code(400).send(errorBody(err));
         if (err instanceof RoutingAlternativeInvalidError) return reply.code(400).send(errorBody(err));
         if (err instanceof RoutingDrawingInvalidError) return reply.code(400).send(errorBody(err));
+        if (err instanceof RoutingFileInvalidError) return reply.code(400).send(errorBody(err));
         if (err instanceof RoutingOperationHasAlternativesError) return reply.code(409).send(errorBody(err));
         throw err;
       }

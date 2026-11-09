@@ -1,5 +1,5 @@
 import { asc, eq, sql } from "drizzle-orm";
-import { routingOperationAlternatives, routingOperationDrawings, routingOperations, type Tx } from "@navet/db";
+import { routingOperationAlternatives, routingOperationArticleFiles, routingOperationDrawings, routingOperations, type Tx } from "@navet/db";
 
 // Tx-only routing writers — the manufacturing module owns routing_operations,
 // so every caller that writes a routing inside a larger transaction (Kopiera
@@ -54,6 +54,7 @@ export async function copyRouting(tx: Tx, sourceArticleId: string, targetArticle
   const pairs = [...operationMap].map(([from, to]) => ({ from, to }));
   await copyRoutingAlternatives(tx, pairs);
   await copyRoutingDrawingLinks(tx, pairs, targetArticleId);
+  await copyRoutingFileLinks(tx, pairs, targetArticleId);
   return operationMap;
 }
 
@@ -78,6 +79,26 @@ export async function replaceRoutingDrawings(
     WHERE d.article_id = ${articleId} AND d.id IN (${ids})`);
 }
 
+// Filer per operation (0201): the operation's chosen loose files as a set —
+// only the article's own loose files are written.
+export async function replaceRoutingFiles(
+  tx: Tx,
+  routingOperationId: string,
+  articleId: string,
+  fileIds: string[]
+): Promise<void> {
+  await tx.delete(routingOperationArticleFiles).where(eq(routingOperationArticleFiles.routingOperationId, routingOperationId));
+  if (fileIds.length === 0) return;
+  const ids = sql.join(
+    fileIds.map((id) => sql`${id}::uuid`),
+    sql`, `
+  );
+  await tx.execute(sql`
+    INSERT INTO routing_operation_article_files (routing_operation_id, article_file_id)
+    SELECT ${routingOperationId}, f.id FROM article_files f
+    WHERE f.article_id = ${articleId} AND f.drawing_revision_id IS NULL AND f.id IN (${ids})`);
+}
+
 // Ritningar per operation (0200): an operation's chosen drawings follow to
 // the copy where the target article has a drawing with the same number
 // (Kopiera från copies the drawing numbers first); otherwise the link is
@@ -99,6 +120,29 @@ export async function copyRoutingDrawingLinks(
     JOIN routing_operation_drawings l ON l.routing_operation_id = v.from_id
     JOIN article_drawings sd ON sd.id = l.drawing_id
     JOIN article_drawings td ON td.article_id = ${targetArticleId} AND td.drawing_number = sd.drawing_number
+    ON CONFLICT DO NOTHING`);
+}
+
+// Filer per operation (0201): a chosen loose file follows to the copy where
+// the target article has a loose file with the same name (Kopiera från
+// copies the files first); otherwise the link is dropped.
+export async function copyRoutingFileLinks(
+  tx: Tx,
+  pairs: { from: string; to: string }[],
+  targetArticleId: string
+): Promise<void> {
+  if (pairs.length === 0) return;
+  const values = sql.join(
+    pairs.map((p) => sql`(${p.from}::uuid, ${p.to}::uuid)`),
+    sql`, `
+  );
+  await tx.execute(sql`
+    INSERT INTO routing_operation_article_files (routing_operation_id, article_file_id)
+    SELECT v.to_id, tf.id
+    FROM (VALUES ${values}) AS v(from_id, to_id)
+    JOIN routing_operation_article_files l ON l.routing_operation_id = v.from_id
+    JOIN article_files sf ON sf.id = l.article_file_id AND sf.drawing_revision_id IS NULL
+    JOIN article_files tf ON tf.article_id = ${targetArticleId} AND tf.drawing_revision_id IS NULL AND tf.filename = sf.filename
     ON CONFLICT DO NOTHING`);
 }
 

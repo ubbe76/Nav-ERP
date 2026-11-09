@@ -192,8 +192,13 @@ export function revisionLine(view: OrderRevisions): string | null {
 
 // The order's operations' chosen drawings (routing_operation_drawings, read
 // live through mo_operations.routing_operation_id) with the revision the
-// order is built from: moOperationId → "R-1002 rev A", in drawing order.
-export async function operationDrawingLabels(db: Conn, moId: string, view: OrderRevisions): Promise<Map<string, string[]>> {
+// order is built from — "R-1002 rev A", in drawing order — and their chosen
+// loose files by name (routing_operation_article_files, 0201).
+export async function operationDrawingLabels(
+  db: Conn,
+  moId: string,
+  view: OrderRevisions
+): Promise<Map<string, { drawings: string[]; files: string[] }>> {
   const rows = [
     ...(await db.execute(sql`
       SELECT o.id AS mo_operation_id, l.drawing_id, d.drawing_number
@@ -203,15 +208,30 @@ export async function operationDrawingLabels(db: Conn, moId: string, view: Order
       WHERE o.manufacturing_order_id = ${moId}
       ORDER BY d.drawing_number`)),
   ] as unknown as { mo_operation_id: string; drawing_id: string; drawing_number: string }[];
+  const fileRows = [
+    ...(await db.execute(sql`
+      SELECT o.id AS mo_operation_id, f.filename
+      FROM mo_operations o
+      JOIN routing_operation_article_files l ON l.routing_operation_id = o.routing_operation_id
+      JOIN article_files f ON f.id = l.article_file_id AND f.drawing_revision_id IS NULL
+      WHERE o.manufacturing_order_id = ${moId}
+      ORDER BY f.filename, f.id`)),
+  ] as unknown as { mo_operation_id: string; filename: string }[];
   const byDrawing = new Map(view.drawings.filter((d) => d.drawingId).map((d) => [d.drawingId!, d]));
-  const map = new Map<string, string[]>();
+  const map = new Map<string, { drawings: string[]; files: string[] }>();
+  const entry = (id: string) => {
+    const existing = map.get(id);
+    if (existing) return existing;
+    const created = { drawings: [] as string[], files: [] as string[] };
+    map.set(id, created);
+    return created;
+  };
   for (const row of rows) {
     const d = byDrawing.get(row.drawing_id);
     // A drawing added after the snapshot is printed as today's number only.
     const revision = d && !d.added ? d.revision : null;
-    const list = map.get(row.mo_operation_id) ?? [];
-    list.push(revision ? `${row.drawing_number} rev ${revision}` : row.drawing_number);
-    map.set(row.mo_operation_id, list);
+    entry(row.mo_operation_id).drawings.push(revision ? `${row.drawing_number} rev ${revision}` : row.drawing_number);
   }
+  for (const row of fileRows) entry(row.mo_operation_id).files.push(row.filename);
   return map;
 }

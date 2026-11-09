@@ -649,8 +649,10 @@ export interface ManufacturingOrderPdfInput {
     // information, unlike the comment it is not gated by printOnWorkCard).
     packingInstructions?: string | null;
     // The operation's chosen drawings with the order's revision ("R-1002 rev
-    // A") — an indented "Ritning:" line under the operation.
+    // A") and its chosen files by name — one indented line under the
+    // operation ("Ritning: … · Fil: …").
     drawings?: string[];
+    files?: string[];
   }[];
   materials: {
     articleNumber: string;
@@ -2224,12 +2226,16 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
           y += height + 8;
         }
 
-        // Ritning — the drawings the operation is worked from, with the
-        // revision the order is built from (the files follow at the end).
-        if (op.drawings && op.drawings.length > 0) {
+        // Ritning/Fil — the drawings (with the revision the order is built
+        // from) and files the operation is worked from (they follow at the end).
+        const documentParts = [
+          op.drawings && op.drawings.length > 0 ? `${op.drawings.length > 1 ? "Ritningar" : "Ritning"}: ${op.drawings.join(", ")}` : null,
+          op.files && op.files.length > 0 ? `${op.files.length > 1 ? "Filer" : "Fil"}: ${op.files.join(", ")}` : null,
+        ].filter((part): part is string => part !== null);
+        if (documentParts.length > 0) {
           const indent = MO_OP_COLS.workCenter.x;
           const width = CONTENT_WIDTH - indent;
-          const text = `${op.drawings.length > 1 ? "Ritningar" : "Ritning"}: ${op.drawings.join(", ")}`;
+          const text = documentParts.join(" · ");
           const height = doc.heightOfString(text, { width });
           if (y + height > TABLE_BOTTOM) {
             doc.addPage();

@@ -16,6 +16,7 @@ import {
   productionGroups,
   purchaseOrders,
   routingOperationAlternatives,
+  routingOperationArticleFiles,
   routingOperationDrawings,
   routingOperationFiles,
   routingOperations,
@@ -78,7 +79,7 @@ import {
 } from "../service/material-shortage.js";
 import { shortageWarnings } from "./shortage-warnings.js";
 import { snapshotOperationResourcesInTx, workCenterInAlternativesInTx } from "./operation-resources.js";
-import { replaceRoutingAlternatives, replaceRoutingDrawings } from "./routing-write.js";
+import { replaceRoutingAlternatives, replaceRoutingDrawings, replaceRoutingFiles } from "./routing-write.js";
 import { operationDrawingLabels, orderRevisions, snapshotOrderRevisionsInTx, type OrderRevisions } from "./drawing-snapshot.js";
 import { drawingFiles } from "../../article/repository/drawing-files.js";
 // Ändra material och operationer: the edit transactions and the row
@@ -1256,6 +1257,7 @@ export function createManufacturingRepository(db: Db) {
           .returning();
         if (input.alternatives && input.alternatives.length > 0) await replaceRoutingAlternatives(tx, row!.id, input.alternatives);
         if (input.drawingIds && input.drawingIds.length > 0) await replaceRoutingDrawings(tx, row!.id, articleId, input.drawingIds);
+        if (input.fileIds && input.fileIds.length > 0) await replaceRoutingFiles(tx, row!.id, articleId, input.fileIds);
         return row!;
       });
     },
@@ -1300,8 +1302,9 @@ export function createManufacturingRepository(db: Db) {
           const [row] = await tx.select().from(workCenters).where(eq(workCenters.id, id)).for("share");
           return row ?? null;
         };
-        const { alternatives, drawingIds, ...input } = await prepare(current, currentAlternatives, workCenter);
+        const { alternatives, drawingIds, fileIds, ...input } = await prepare(current, currentAlternatives, workCenter);
         if (drawingIds !== undefined) await replaceRoutingDrawings(tx, operationId, articleId, drawingIds);
+        if (fileIds !== undefined) await replaceRoutingFiles(tx, operationId, articleId, fileIds);
         // Only the alternatives or drawings (e.g. [] on a lego operation,
         // whose patch keeps no cleared lego fields): no column to set —
         // drizzle refuses an empty SET.
@@ -1381,11 +1384,46 @@ export function createManufacturingRepository(db: Db) {
         .where(eq(routingOperations.articleId, articleId));
       const alternatives = await listRoutingAlternatives(db, operations.map((op) => op.id));
       const drawings = await this.listRoutingDrawings(operations.map((op) => op.id));
+      const files = await this.listRoutingFiles(operations.map((op) => op.id));
       return operations.map((op) => ({
         ...op,
         alternatives: alternatives.get(op.id) ?? [],
         drawings: drawings.get(op.id) ?? [],
+        files: files.get(op.id) ?? [],
       }));
+    },
+
+    // Filer per operation: id and name of the chosen loose files (a file
+    // that has since become a drawing revision's no longer counts).
+    async listRoutingFiles(operationIds: string[]) {
+      const map = new Map<string, { id: string; filename: string }[]>();
+      if (operationIds.length === 0) return map;
+      const rows = await db
+        .select({
+          routingOperationId: routingOperationArticleFiles.routingOperationId,
+          id: articleFiles.id,
+          filename: articleFiles.filename,
+        })
+        .from(routingOperationArticleFiles)
+        .innerJoin(articleFiles, eq(articleFiles.id, routingOperationArticleFiles.articleFileId))
+        .where(and(inArray(routingOperationArticleFiles.routingOperationId, operationIds), isNull(articleFiles.drawingRevisionId)))
+        .orderBy(asc(articleFiles.filename), asc(articleFiles.id));
+      for (const row of rows) {
+        const list = map.get(row.routingOperationId) ?? [];
+        list.push({ id: row.id, filename: row.filename });
+        map.set(row.routingOperationId, list);
+      }
+      return map;
+    },
+
+    // How many of the ids are the article's loose files.
+    async countArticleLooseFiles(articleId: string, fileIds: string[]) {
+      if (fileIds.length === 0) return 0;
+      const [row] = await db
+        .select({ value: count() })
+        .from(articleFiles)
+        .where(and(eq(articleFiles.articleId, articleId), isNull(articleFiles.drawingRevisionId), inArray(articleFiles.id, fileIds)));
+      return row?.value ?? 0;
     },
 
     // Ritningar per operation: id and number, in drawing-number order.

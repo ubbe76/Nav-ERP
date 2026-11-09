@@ -484,7 +484,8 @@ export function DrawingsPanel({ articleId }: { articleId: string }) {
         </ul>
       )}
       {/* The article's other files (fliken Filer): they ride along on the TO
-          printout and with operations that have no chosen drawings. */}
+          printout, with operations that chose them and with operations that
+          chose nothing. */}
       {looseFiles.length > 0 && (
         <ul className={styles.panelList} aria-label="Filer">
           {looseFiles.map((file) => (

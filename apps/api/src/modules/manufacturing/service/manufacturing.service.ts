@@ -219,6 +219,14 @@ export class OperationHasLinkedMaterialError extends Error {
 // rule — the ordinarie or a legoresurs as alternative, a duplicate, too
 // many, an inactive resource added, or alternatives on a lego or Kalkyl
 // operation (400; Swedish text from routing-alternatives.ts).
+// Filer per operation: a file that is not one of the article's loose files.
+export class RoutingFileInvalidError extends Error {
+  constructor() {
+    super("En vald fil hör inte till artikeln eller är en ritningsrevisions fil");
+    this.name = "RoutingFileInvalidError";
+  }
+}
+
 // Ritningar per operation: a drawing that is not the operation's article's.
 export class RoutingDrawingInvalidError extends Error {
   constructor() {
@@ -1099,14 +1107,28 @@ export function createManufacturingService(
     }
   }
 
+  // Filer per operation: every sent file must be one of the article's loose files.
+  async function assertRoutingFiles(articleId: string, fileIds: string[] | undefined) {
+    if (!fileIds || fileIds.length === 0) return;
+    if ((await repo.countArticleLooseFiles(articleId, fileIds)) !== fileIds.length) {
+      throw new RoutingFileInvalidError();
+    }
+  }
+
   // A routing operation as the routes answer it: with its alternatives and
-  // its chosen drawings.
+  // its chosen drawings and files.
   async function withRoutingExtras<T extends { id: string }>(row: T) {
-    const [alternatives, drawings] = await Promise.all([
+    const [alternatives, drawings, files] = await Promise.all([
       repo.listRoutingAlternatives([row.id]),
       repo.listRoutingDrawings([row.id]),
+      repo.listRoutingFiles([row.id]),
     ]);
-    return { ...row, alternatives: alternatives.get(row.id) ?? [], drawings: drawings.get(row.id) ?? [] };
+    return {
+      ...row,
+      alternatives: alternatives.get(row.id) ?? [],
+      drawings: drawings.get(row.id) ?? [],
+      files: files.get(row.id) ?? [],
+    };
   }
 
   // The order's operations are replanned inside the edit's transaction by
@@ -1412,6 +1434,7 @@ export function createManufacturingService(
         if (problem) throw new RoutingAlternativeInvalidError(problem);
       }
       await assertRoutingDrawings(articleId, input.drawingIds);
+      await assertRoutingFiles(articleId, input.fileIds);
       try {
         const row = await repo.createRoutingOperation(articleId, withDefaults);
         return withRoutingExtras(row);
@@ -1464,6 +1487,7 @@ export function createManufacturingService(
         throw new OperationHasLinkedMaterialError();
       }
       await assertRoutingDrawings(articleId, input.drawingIds);
+      await assertRoutingFiles(articleId, input.fileIds);
       try {
         // The rules run on the operation as locked in the transaction
         // (repo.updateRoutingOperation): the effective ordinarie and Kalkyl
@@ -2386,7 +2410,9 @@ export function createManufacturingService(
         order.salesOrderRowId ? salesOrders.findRowForManufacturing(order.salesOrderRowId) : Promise.resolve(null),
         repo.orderRevisions(moId),
       ]);
-      const operationDrawings = revisions ? await repo.operationDrawingLabels(moId, revisions) : new Map<string, string[]>();
+      const operationDrawings = revisions
+        ? await repo.operationDrawingLabels(moId, revisions)
+        : new Map<string, { drawings: string[]; files: string[] }>();
 
       const quantity = Number(order.quantity);
       const extraDescription = extraDescriptionFor(
@@ -2430,7 +2456,8 @@ export function createManufacturingService(
           comment: op.comment,
           printOnWorkCard: op.printOnWorkCard,
           packingInstructions: op.packingInstructions,
-          drawings: operationDrawings.get(op.id) ?? [],
+          drawings: operationDrawings.get(op.id)?.drawings ?? [],
+          files: operationDrawings.get(op.id)?.files ?? [],
         })),
         // Printed in the row's unit (quantities are stored in the base unit).
         // Grouped by the operation the material is consumed at (unlinked

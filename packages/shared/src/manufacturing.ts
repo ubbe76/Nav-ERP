@@ -197,6 +197,13 @@ export const routingDrawingIdsSchema = z
   .max(50)
   .refine((ids) => new Set(ids).size === ids.length, "Samma ritning kan bara väljas en gång");
 
+// Filer per operation (0201): ids of the article's loose files (article_files
+// without a drawing revision), unique.
+export const routingFileIdsSchema = z
+  .array(z.string().uuid())
+  .max(50)
+  .refine((ids) => new Set(ids).size === ids.length, "Samma fil kan bara väljas en gång");
+
 export const createRoutingOperationSchema = z.object({
   sequenceNo: z.coerce.number().int().positive(),
   // Optional — every surface falls back to the resource name when it is
@@ -230,6 +237,9 @@ export const createRoutingOperationSchema = z.object({
   // Ritningar (0200): the article's drawings the operation is worked from —
   // sent = the whole set, omitted = unchanged (none on a new operation).
   drawingIds: routingDrawingIdsSchema.optional(),
+  // Filer (0201): the article's loose files the operation is worked from —
+  // sent = the whole set, omitted = unchanged.
+  fileIds: routingFileIdsSchema.optional(),
 });
 export type CreateRoutingOperationInput = z.infer<typeof createRoutingOperationSchema>;
 
@@ -260,6 +270,7 @@ export const updateRoutingOperationSchema = z
     // Alternativa resurser — sent = the whole new set, omitted = unchanged.
     alternatives: routingAlternativesSchema.optional(),
     drawingIds: routingDrawingIdsSchema.optional(),
+    fileIds: routingFileIdsSchema.optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateRoutingOperationInput = z.infer<typeof updateRoutingOperationSchema>;
