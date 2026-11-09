@@ -1,6 +1,7 @@
 "use client";
 
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { openDocument } from "../../lib/tabNavigation";
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
@@ -63,6 +64,16 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
   // Ställpris — only edited on lego rows, see the setupPrice column below.
   const [editSetupPrice, setEditSetupPrice] = useState("");
   const [editArticle, setEditArticle] = useState<Article | null>(null);
+  // Osparade ändringar: the row's values when Ändra was opened.
+  const [editStart, setEditStart] = useState<{ quantity: string; price: string; unitId: string; setup: string } | null>(null);
+  const rowEditDirty =
+    editingRowId !== null &&
+    editStart !== null &&
+    (editQuantity !== editStart.quantity ||
+      editPrice !== editStart.price ||
+      editUnitId !== editStart.unitId ||
+      editSetupPrice !== editStart.setup);
+  useUnsavedGuard(rowEditDirty);
   const editUnitOptions = useUnitOptions(editArticle);
   const editFactor = editUnitOptions.find((o) => o.value === editUnitId)?.factor ?? 1;
 
@@ -88,6 +99,12 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
     setEditPrice(row.unitPrice !== null ? String(toUnitPrice(Number(row.unitPrice), row.unitFactor)) : "");
     setEditUnitId(row.unitId ?? "");
     setEditSetupPrice(row.setupPrice !== null ? String(Number(row.setupPrice)) : "");
+    setEditStart({
+      quantity: String(toUnitQuantity(Number(row.quantity), row.unitFactor)),
+      price: row.unitPrice !== null ? String(toUnitPrice(Number(row.unitPrice), row.unitFactor)) : "",
+      unitId: row.unitId ?? "",
+      setup: row.setupPrice !== null ? String(Number(row.setupPrice)) : "",
+    });
     setEditArticle(null);
     apiFetch<Article>(`/api/v1/articles/${row.articleId}`).then(setEditArticle).catch(() => {});
   }

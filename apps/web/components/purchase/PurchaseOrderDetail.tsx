@@ -1,6 +1,7 @@
 "use client";
 
 import { confirmDelete } from "../../lib/confirm";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { notify } from "../../lib/notice";
 import { locationOptionLabel } from "../../lib/stockLocations";
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -110,6 +111,19 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
   // does come back to the 10-tier. A sequence counter drops out-of-order
   // responses.
   const [editPriceTouched, setEditPriceTouched] = useState(false);
+  // Osparade ändringar: the row's values when Ändra was opened (price
+  // counts through editPriceTouched — the catalog may refill it).
+  const [editStart, setEditStart] = useState<{ quantity: string; unitId: string; setup: string; date: string; confirmed: string } | null>(null);
+  const rowEditDirty =
+    editingRowId !== null &&
+    editStart !== null &&
+    (editPriceTouched ||
+      editQuantity !== editStart.quantity ||
+      editUnitId !== editStart.unitId ||
+      editSetupPrice !== editStart.setup ||
+      editDeliveryDate !== editStart.date ||
+      editConfirmedDate !== editStart.confirmed);
+  useUnsavedGuard(rowEditDirty);
   const editPricedBaseQuantityRef = useRef(0);
   const editRequestSeq = useRef(0);
   // The touched flag as it is when a prefill response LANDS — the effect's
@@ -183,6 +197,13 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
     setEditSetupPrice(row.setupPrice != null ? String(Number(row.setupPrice)) : "");
     setEditDeliveryDate(row.expectedDeliveryDate ?? "");
     setEditConfirmedDate(row.confirmedDeliveryDate ?? "");
+    setEditStart({
+      quantity: String(toUnitQuantity(Number(row.quantityOrdered), row.unitFactor)),
+      unitId: row.unitId ?? "",
+      setup: row.setupPrice != null ? String(Number(row.setupPrice)) : "",
+      date: row.expectedDeliveryDate ?? "",
+      confirmed: row.confirmedDeliveryDate ?? "",
+    });
     setEditArticle(null);
     apiFetch<Article>(`/api/v1/articles/${row.articleId}`).then(setEditArticle).catch(() => {});
   }

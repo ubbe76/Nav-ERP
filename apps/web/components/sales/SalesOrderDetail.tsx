@@ -1,6 +1,7 @@
 "use client";
 
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { openDocument } from "../../lib/tabNavigation";
 import { outflowLocationChoices } from "../../lib/stockLocations";
 import { QuoteExpiredBadge, isQuoteExpired } from "./QuoteExpiredBadge";
@@ -154,6 +155,14 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   // afterwards never silently overwrites it ("manuellt vinner"). Reset
   // whenever edit mode is (re)opened.
   const [editPriceTouched, setEditPriceTouched] = useState(false);
+  // Osparade ändringar: the row's values when Ändra was opened. Price and
+  // discount count through editPriceTouched (the quote may refill them).
+  const [editStart, setEditStart] = useState<{ quantity: string; unitId: string; date: string } | null>(null);
+  const rowEditDirty =
+    editingRowId !== null &&
+    editStart !== null &&
+    (editPriceTouched || editQuantity !== editStart.quantity || editUnitId !== editStart.unitId || editDeliveryDate !== editStart.date);
+  useUnsavedGuard(rowEditDirty);
   // The latest price-quote answer that filled the edit fields (Kalkylpris source and text).
   const [editQuote, setEditQuote] = useState<PriceQuote | null>(null);
   // The article behind the row being edited — fetched so the unit dropdown
@@ -343,6 +352,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     setEditQuote(null);
     setEditUnitId(row.unitId ?? "");
     setEditDeliveryDate(row.expectedDeliveryDate ?? "");
+    setEditStart({ quantity: initialQuantity, unitId: row.unitId ?? "", date: row.expectedDeliveryDate ?? "" });
     setEditArticle(null);
     apiFetch<Article>(`/api/v1/articles/${row.articleId}`).then(setEditArticle).catch(() => {});
   }
