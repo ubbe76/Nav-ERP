@@ -62,6 +62,7 @@ export function PurchaseInvoiceBasisPageClient({
       <Table<PurchaseInvoiceBasisEntry>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={basis.rows}
         emptyText="Inga inlevererade order matchar urvalet"
         renderCell={(row, key) => {

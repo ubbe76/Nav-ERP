@@ -148,6 +148,7 @@ export function OpenSupplierInvoicesPageClient({
       <Table<OpenSupplierInvoiceRow>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={openInvoices.rows}
         emptyText="Inga öppna poster matchar sökningen"
         renderCell={(row, key) => {

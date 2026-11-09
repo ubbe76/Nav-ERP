@@ -133,6 +133,7 @@ export function BankFilesPageClient({ direction, files, pageSize }: { direction:
       <Table<BankFileListRow>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={files.rows}
         emptyText="Inga bankfiler inlästa än"
         renderCell={(row, key) => {

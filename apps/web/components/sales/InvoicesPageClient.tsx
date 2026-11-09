@@ -100,6 +100,7 @@ export function InvoicesPageClient({
       <Table<Invoice>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={invoices.rows}
         emptyText="Inga fakturor matchar sökningen"
         renderCell={(invoice, key) => {

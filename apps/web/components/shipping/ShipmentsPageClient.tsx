@@ -60,6 +60,7 @@ export function ShipmentsPageClient({
       <Table<ShipmentListRow>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={shipments.rows}
         emptyText="Inga försändelser matchar sökningen"
         renderCell={(s, key) => {

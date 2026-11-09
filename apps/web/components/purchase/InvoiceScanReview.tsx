@@ -16,6 +16,7 @@ import { DimensionFields } from "../economy/DimensionSelect";
 import { InvoiceRateField, SekAmountsLine } from "./InvoiceRateField";
 import { useCan } from "../PermissionsProvider";
 import { API_URL, apiFetch } from "../../lib/api";
+import { openDocument } from "../../lib/tabNavigation";
 import { documentSekAmounts, SEK } from "../../lib/currency";
 import { confirmDelete } from "../../lib/confirm";
 import { formatStockholmDate, formatStockholmDateTime } from "../../lib/date";
@@ -796,7 +797,11 @@ function ReviewForm({
         }),
       });
       setNavigating(true);
-      router.push(`/inkop/leverantorsfakturor/${invoice.id}`);
+      if (openDocument(`/inkop/leverantorsfakturor/${invoice.id}`, (href) => router.push(href), "Leverantörsfaktura")) {
+        setNavigating(false);
+        setSubmitting(false);
+        router.refresh();
+      }
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte skapa leverantörsfakturan"));
       setSubmitting(false);

@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Modal } from "./ui/Modal";
+import { useDocumentTabs } from "./tabs/DocumentTabs";
+import { isEmbedded } from "../lib/documentTabs";
+import { postToFrame } from "../lib/tabNavigation";
 import styles from "./KeyboardShortcuts.module.css";
 
 // Tangentbordet först (Nav som program, punkt 4). Only plain keys, and only
@@ -13,7 +16,10 @@ import styles from "./KeyboardShortcuts.module.css";
 // - ↑/↓ move a marked row in a list (a page with ListControls' toolbar —
 //   elsewhere the arrows scroll as usual), Enter opens it, Esc unmarks it,
 // - a right-click on a table row opens its ⋯ menu (a right-click on a link
-//   keeps the browser's menu, e.g. Öppna i ny flik).
+//   keeps the browser's menu, e.g. Öppna i ny flik),
+// - 1–9 switch tab (punkt 5): 1 the page, 2.. the documents — from inside a
+//   tab too (the page there asks the frame around it). Ctrl+Tab and
+//   Ctrl+1–9 stay the browser's.
 export const SHORTCUTS: { keys: string[]; text: string }[] = [
   { keys: ["Ctrl", "K"], text: "Sök eller gå till" },
   { keys: ["N"], text: "Ny (sidans + Ny …)" },
@@ -21,6 +27,7 @@ export const SHORTCUTS: { keys: string[]; text: string }[] = [
   { keys: ["Enter"], text: "Öppna den markerade raden" },
   { keys: ["Ctrl", "S"], text: "Spara formuläret du står i" },
   { keys: ["Esc"], text: "Stäng dialogen eller avmarkera raden" },
+  { keys: ["1", "–", "9"], text: "Byt flik (1 = sidan, 2 = första dokumentet …)" },
   { keys: ["?"], text: "Visa kortkommandon" },
 ];
 
@@ -66,6 +73,8 @@ export function KeyboardShortcuts() {
   const searchParams = useSearchParams();
   const [sheetOpen, setSheetOpen] = useState(false);
   const focused = useRef<HTMLElement | null>(null);
+  const tabs = useDocumentTabs();
+  const activateDigit = tabs.activateDigit;
 
   function mark(row: HTMLElement | null) {
     focused.current?.removeAttribute("data-kbd-focus");
@@ -91,6 +100,17 @@ export function KeyboardShortcuts() {
       if (e.key === "?") {
         e.preventDefault();
         setSheetOpen(true);
+        return;
+      }
+      if (/^[1-9]$/.test(e.key)) {
+        const digit = Number(e.key);
+        if (isEmbedded()) {
+          e.preventDefault();
+          postToFrame({ type: "nav-tab-activate", digit });
+        } else if (tabs.available && tabs.tabs.length > 0) {
+          e.preventDefault();
+          activateDigit(digit);
+        }
         return;
       }
       if (e.key === "n" || e.key === "N") {
@@ -159,7 +179,7 @@ export function KeyboardShortcuts() {
       document.removeEventListener("mouseover", onPointOrFocus);
       document.removeEventListener("focusin", onPointOrFocus);
     };
-  }, []);
+  }, [tabs.available, tabs.tabs.length, activateDigit]);
 
   return (
     <Modal open={sheetOpen} onClose={() => setSheetOpen(false)} title="Kortkommandon" compact>

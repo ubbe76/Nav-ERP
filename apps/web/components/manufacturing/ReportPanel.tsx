@@ -155,7 +155,7 @@ export function ReportPanel({
               onDone={onDone}
             />
             {linked.map((m) => (
-              <MaterialRow key={m.id} orderId={orderId} material={m} locationId={locationId} onDone={onDone} />
+              <MaterialRow key={m.id} orderId={orderId} material={m} locationId={locationId} canUndo={canUndoReports} onDone={onDone} />
             ))}
           </div>
         ))}
@@ -164,7 +164,7 @@ export function ReportPanel({
           <div className={styles.section}>
             <div className={styles.groupTitle}>Vid slutrapportering</div>
             {unlinked.map((m) => (
-              <MaterialRow key={m.id} orderId={orderId} material={m} locationId={locationId} onDone={onDone} />
+              <MaterialRow key={m.id} orderId={orderId} material={m} locationId={locationId} canUndo={canUndoReports} onDone={onDone} />
             ))}
           </div>
         )}
@@ -175,6 +175,7 @@ export function ReportPanel({
           orderQuantity={orderQuantity}
           timeReports={timeReports}
           timeKindSplit={timeKindSplit}
+          canUndo={canUndoReports}
           onDone={onDone}
         />
 
@@ -185,6 +186,7 @@ export function ReportPanel({
             orderQuantity={orderQuantity}
             quantityReceived={quantityReceived}
             locations={locations}
+            canUndo={canUndoReports}
             onDone={onDone}
           />
         )}
@@ -384,17 +386,32 @@ function OperationRow({
   );
 }
 
+// Ångra in a notice: undoes exactly that report (POST …/reports/:id/undo,
+// the same route as Ångra under Rapporteringar).
+function undoReportAction(orderId: string, reportId: string, onDone: () => void, doneText: string) {
+  return {
+    label: "Ångra",
+    run: async () => {
+      await apiFetch(`/api/v1/manufacturing-orders/${orderId}/reports/${reportId}/undo`, { method: "POST" });
+      onDone();
+      return doneText;
+    },
+  };
+}
+
 // --- One material row: numbers, and Förbruka while something remains ---
 
 function MaterialRow({
   orderId,
   material: m,
   locationId,
+  canUndo,
   onDone,
 }: {
   orderId: string;
   material: MOMaterialConsumption;
   locationId: string;
+  canUndo: boolean;
   onDone: () => void;
 }) {
   // Antal is prefilled with what remains of the row's planned quantity; a
@@ -422,6 +439,12 @@ function MaterialRow({
         })
       );
       if (consumed === null) return;
+      // Återkoppling: what was drawn, with Ångra on exactly this draw.
+      const reportId = (consumed as { reportId?: string }).reportId ?? null;
+      notify({
+        message: `Förbrukat ${formatQuantity(Number(quantity))} ${m.unitCode} ${m.componentArticleNumber}.`,
+        action: canUndo && reportId ? undoReportAction(orderId, reportId, onDone, "Förbrukningen är ångrad.") : undefined,
+      });
       setTypedQuantity(null);
       onDone();
     } catch (err) {
@@ -479,6 +502,7 @@ function ReportTimeRow({
   orderQuantity,
   timeReports,
   timeKindSplit,
+  canUndo,
   onDone,
 }: {
   employees: EmployeeDirectoryEntry[];
@@ -486,6 +510,7 @@ function ReportTimeRow({
   orderQuantity: string;
   timeReports: TimeReport[];
   timeKindSplit: boolean;
+  canUndo: boolean;
   onDone: () => void;
 }) {
   const [employeeId, setEmployeeId] = useState(employees[0]?.id ?? "");
@@ -513,7 +538,7 @@ function ReportTimeRow({
     setError(null);
     setPending(true);
     try {
-      await apiFetch("/api/v1/time-reports", {
+      const created = await apiFetch<{ id: string }>("/api/v1/time-reports", {
         method: "POST",
         body: JSON.stringify({
           employeeId,
@@ -523,6 +548,24 @@ function ReportTimeRow({
           note: note || undefined,
           ...(timeKindSplit && kind ? { kind } : {}),
         }),
+      });
+      // Återkoppling: Ångra takes this time report away again (a locked
+      // payroll period refuses, and the notice says so).
+      const operation = operations.find((op) => op.id === operationId);
+      const employee = employees.find((emp) => emp.id === employeeId);
+      notify({
+        message: `Rapporterat ${formatQuantity(Number(hours))} h${employee ? ` för ${employee.name}` : ""}${operation ? ` på ${moOperationLabel(operation)}` : ""}.`,
+        action:
+          canUndo && created?.id
+            ? {
+                label: "Ångra",
+                run: async () => {
+                  await apiFetch(`/api/v1/time-reports/${created.id}`, { method: "DELETE" });
+                  onDone();
+                  return "Tidrapporten är borttagen.";
+                },
+              }
+            : undefined,
       });
       setNote("");
       setTypedHours(null);
@@ -600,12 +643,14 @@ function CompleteOrderRow({
   orderQuantity,
   quantityReceived,
   locations,
+  canUndo,
   onDone,
 }: {
   orderId: string;
   orderQuantity: string;
   quantityReceived: string;
   locations: StockLocation[];
+  canUndo: boolean;
   onDone: () => void;
 }) {
   const received = Number(quantityReceived);
@@ -639,6 +684,13 @@ function CompleteOrderRow({
         })
       );
       if (closed === null) return;
+      // Återkoppling: the order is done; Ångra opens it again and takes back
+      // what this Slutför order received and drew.
+      const reportId = (closed as { reportId?: string }).reportId ?? null;
+      notify({
+        message: `Ordern är slutförd${Number(quantity) > 0 ? ` — ${formatQuantity(Number(quantity))} st inlevererade` : ""}.`,
+        action: canUndo && reportId ? undoReportAction(orderId, reportId, onDone, "Slutför order är ångrad — ordern är öppen igen.") : undefined,
+      });
       onDone();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte slutföra ordern"));

@@ -99,11 +99,11 @@ import {
 } from "./order-edit.js";
 
 export type ConsumeMaterialResult =
-  | { ok: true; row: typeof moMaterialConsumptions.$inferSelect }
+  | { ok: true; row: typeof moMaterialConsumptions.$inferSelect; reportId: string }
   | { ok: false; reason: "order_not_found" | "row_not_found" | "invalid_status" | "over_consumption" };
 
 export type CompleteResult =
-  | { ok: true; order: typeof manufacturingOrders.$inferSelect; consumed: ConsumedMaterialLine[]; received: number }
+  | { ok: true; order: typeof manufacturingOrders.$inferSelect; consumed: ConsumedMaterialLine[]; received: number; reportId: string }
   | { ok: false; reason: "order_not_found" | "invalid_status" };
 
 // What an automatic draw actually booked, per material row AND location —
@@ -2007,7 +2007,7 @@ export function createManufacturingRepository(db: Db) {
         // Materialbrist: a throw here rolls the draw back.
         await assertMaterialAvailable(tx, lines, input.materialShortage ?? NO_MATERIAL_SHORTAGE_CHECK);
 
-        await insertReport(
+        const report = await insertReport(
           tx,
           {
             manufacturingOrderId: moId,
@@ -2018,7 +2018,8 @@ export function createManufacturingRepository(db: Db) {
           lines
         );
 
-        return { ok: true, row: updatedRow! };
+        // reportId: the TO card's notice offers Ångra on exactly this draw.
+        return { ok: true, row: updatedRow!, reportId: report.id };
       });
     },
 
@@ -2324,7 +2325,7 @@ export function createManufacturingRepository(db: Db) {
         // Tillägg: Slutför order.
         await pluginEvents.emit(tx, { type: "manufacturing_order.completed", entityId: moId, entityNumber: order.orderNumber });
 
-        await insertReport(
+        const report = await insertReport(
           tx,
           {
             manufacturingOrderId: moId,
@@ -2338,7 +2339,7 @@ export function createManufacturingRepository(db: Db) {
           goods.consumed
         );
 
-        return { ok: true, order: updatedOrder!, consumed: goods.consumed, received: goods.delta };
+        return { ok: true, order: updatedOrder!, consumed: goods.consumed, received: goods.delta, reportId: report.id };
       });
     },
   };

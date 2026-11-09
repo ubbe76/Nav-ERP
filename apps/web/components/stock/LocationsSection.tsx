@@ -227,6 +227,7 @@ export function LocationsSection({
         <Table<StockLocation>
           columns={view.columns}
           onColumnResize={view.onColumnResize}
+          {...view.reorder}
           rows={visibleLocations}
           renderCell={(row, key) => {
             switch (key) {

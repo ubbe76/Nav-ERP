@@ -312,3 +312,25 @@
     background: var(--color-divider);
   }
 }
+
+/* Kolumnordning: the grip in a movable column's heading (shown on hover and
+   focus within the header row) and the line where a dragged column lands. */
+.dragGrip {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 2px;
+  vertical-align: -1px;
+  color: var(--color-text-muted);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.headerRow:hover .dragGrip {
+  opacity: 1;
+}
+.headerCell[data-drop="before"] {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.headerCell[data-drop="after"] {
+  box-shadow: inset -2px 0 0 var(--accent);
+}

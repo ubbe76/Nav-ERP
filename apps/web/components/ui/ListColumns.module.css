@@ -102,3 +102,38 @@
   color: var(--color-text-muted);
   cursor: default;
 }
+
+/* Kolumnordning: ↑/↓ beside each column in the panel. */
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.move {
+  display: inline-flex;
+  gap: 2px;
+}
+.move button {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-control-sm);
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.move button:hover:not(:disabled) {
+  background: var(--color-divider);
+  color: var(--color-text-primary);
+}
+.move button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.move button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

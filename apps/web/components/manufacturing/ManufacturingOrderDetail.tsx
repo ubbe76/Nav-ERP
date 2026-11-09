@@ -10,6 +10,7 @@ import buttonStyles from "../ui/Button.module.css";
 import { StatusPill } from "../ui/StatusPill";
 import { Input } from "../ui/Field";
 import { minutesPerUnitToSecondsPerUnit, minutesPerUnitToUnitsPerHour, toUnitQuantity } from "../../lib/units";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { takeReleaseWarnings } from "../../lib/releaseWarnings";
@@ -957,6 +958,8 @@ function DueDateField({
   const [value, setValue] = useState(dueDate ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // Osparade ändringar: a typed date not yet saved.
+  useUnsavedGuard(value !== (dueDate ?? ""));
 
   // Resync when the server value changes underneath us (router.refresh()
   // after any other action on the card) — otherwise a stale unsaved draft

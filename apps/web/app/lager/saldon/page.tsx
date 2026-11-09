@@ -1,10 +1,8 @@
 import { headers } from "next/headers";
 import Link from "next/link";
-import { ArticleOverviewButton } from "../../../components/articles/ArticleOverviewButton";
 import { AppShell } from "../../../components/AppShell";
-import { Table } from "../../../components/ui/Table";
-import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../../../components/ui/ListControls";
-import { StatusPill } from "../../../components/ui/StatusPill";
+import { Pagination } from "../../../components/ui/ListControls";
+import { StockBalancesList, type StockBalanceRow } from "../../../components/stock/StockBalancesList";
 import buttonStyles from "../../../components/ui/Button.module.css";
 import { apiGet } from "../../../lib/api";
 import { listApiQuery, type PageSearchParams } from "../../../lib/listQuery";
@@ -12,11 +10,7 @@ import { getListPageSize } from "../../../lib/listPageSize";
 import type { Paged, StockBalance } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
 import { HelpLink } from "../../../components/ui/HelpLink";
-import { formatQuantity } from "../../../lib/format";
 
-interface RowWithId extends StockBalance {
-  id: string;
-}
 
 export default async function StockPage(props: { searchParams: Promise<PageSearchParams> }) {
   const searchParams = await props.searchParams;
@@ -26,7 +20,7 @@ export default async function StockPage(props: { searchParams: Promise<PageSearc
     `/api/v1/stock/balances${listApiQuery(searchParams, ["blocked", "locationId"], pageSize)}`,
     cookieHeader
   );
-  const balances: RowWithId[] = balancesPage.rows.map((b) => ({ ...b, id: `${b.articleId}-${b.locationId}` }));
+  const balances: StockBalanceRow[] = balancesPage.rows.map((b) => ({ ...b, id: `${b.articleId}-${b.locationId}` }));
 
   // ?locationId= (from Visa saldon in Lagerplatser): say which place is shown.
   const locationId = typeof searchParams.locationId === "string" ? searchParams.locationId : undefined;
@@ -67,64 +61,7 @@ export default async function StockPage(props: { searchParams: Promise<PageSearc
         </p>
       )}
 
-      <ListToolbar placeholder="Sök artikelnummer eller benämning…">
-        <ListFilterSelect
-          param="blocked"
-          allLabel="Alla lagerplatser"
-          ariaLabel="Filtrera på spärrade lagerplatser"
-          options={[
-            { value: "true", label: "Bara spärrade" },
-            { value: "false", label: "Utan spärrade" },
-          ]}
-        />
-        <ListExportLink endpoint="/api/v1/stock/balances/csv" />
-      </ListToolbar>
-
-      <Table<RowWithId>
-        columns={[
-          { key: "articleNumber", label: "Artikelnummer", width: "160px" },
-          { key: "articleName", label: "Benämning", width: "1fr" },
-          { key: "warehouseName", label: "Lager", width: "160px" },
-          { key: "locationName", label: "Lagerplats", width: "160px" },
-          { key: "quantityOnHand", label: "Saldo", width: "110px", align: "right" },
-          { key: "id", label: "", width: "90px", align: "right" },
-        ]}
-        rows={balances}
-        emptyText="Inga saldorader matchar sökningen"
-        renderCell={(row, key) => {
-          switch (key) {
-            case "articleNumber":
-              return (
-                <>
-                  {row.articleNumber}
-                  <ArticleOverviewButton articleId={row.articleId} articleNumber={row.articleNumber} />
-                </>
-              );
-            case "quantityOnHand":
-              return formatQuantity(row.quantityOnHand);
-            // Stock can be tracked without locations — those rows show "—".
-            case "locationName":
-              return (
-                <span>
-                  {row.locationName ?? "—"}
-                  {row.locationBlocked && (
-                    <span style={{ marginLeft: 8 }}>
-                      <StatusPill status="stopped" label="Spärrad" compact />
-                    </span>
-                  )}
-                </span>
-              );
-            case "warehouseName":
-              return row[key as keyof RowWithId] ?? "—";
-            case "id":
-              return row.locationId ? (
-                <Link href={`/lager/flytta?from=${row.locationId}&article=${row.articleId}`}>Flytta</Link>
-              ) : null;
-            default:
-              return row[key as keyof RowWithId];
-          }
-        }}
-      />
+      <StockBalancesList rows={balances} />
 
       <Pagination total={balancesPage.total} pageSize={pageSize} />
     </AppShell>

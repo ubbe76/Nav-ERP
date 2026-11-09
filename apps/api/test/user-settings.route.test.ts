@@ -336,8 +336,17 @@ describe("PATCH /me/settings", () => {
       "/forsaljning/ordrar": { hidden: ["customer"], widths: { number: 120 } },
       "/inkop/ordrar": { hidden: ["supplier"], widths: {} },
     });
+    // Kolumnordning: an order alone is a setting; duplicates dropped, an
+    // empty order left out.
+    await patch({ "/inkop/ordrar": { hidden: [], widths: {}, order: ["date", "supplier", "date"] } });
+    await patch({ "/lager/saldon": { hidden: ["x"], widths: {}, order: [] } });
+    expect(await get()).toEqual({
+      "/forsaljning/ordrar": { hidden: ["customer"], widths: { number: 120 } },
+      "/inkop/ordrar": { hidden: [], widths: {}, order: ["date", "supplier"] },
+      "/lager/saldon": { hidden: ["x"], widths: {} },
+    });
     // Återställ: null, and an empty entry is the same as none.
-    await patch({ "/forsaljning/ordrar": null, "/inkop/ordrar": { hidden: [], widths: {} } });
+    await patch({ "/forsaljning/ordrar": null, "/inkop/ordrar": { hidden: [], widths: {} }, "/lager/saldon": null });
     expect(await get()).toEqual({});
 
     for (const bad of [
@@ -348,6 +357,7 @@ describe("PATCH /me/settings", () => {
       { "/a": { hidden: [] } },
       { "/a": { hidden: [], widths: {}, extra: 1 } },
       { "/a": { hidden: Array.from({ length: 41 }, (_, i) => `c${i}`), widths: {} } },
+      { "/a": { hidden: [], widths: {}, order: "date" } },
     ]) {
       expect([JSON.stringify(bad), (await patch(bad)).statusCode]).toEqual([JSON.stringify(bad), 400]);
     }

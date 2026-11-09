@@ -147,6 +147,25 @@ describe("report log", () => {
   });
 });
 
+describe("the report ids the TO card's notices undo", () => {
+  it("returns the draw's and Slutför order's report, and undoing them takes the draw back and opens the order", async () => {
+    const ctx = await setup();
+    const [material] = await mfgService.listMaterialConsumptions(ctx.order.id);
+    const drawn = await mfgService.consumeMaterial(ctx.order.id, material!.id, { quantity: 1 }, ctx.user.id);
+    const reports = await mfgService.listReports(ctx.order.id);
+    expect(drawn.reportId).toBe(reports.find((r) => r.kind === "material")!.id);
+    expect(Number(drawn.quantityConsumed)).toBe(1);
+    await mfgService.undoReport(ctx.order.id, drawn.reportId, ctx.user.id);
+    expect(Number((await mfgService.listMaterialConsumptions(ctx.order.id))[0]!.quantityConsumed)).toBe(0);
+
+    const completed = await mfgService.complete(ctx.order.id, { quantity: 0 }, ctx.user.id);
+    expect(completed.status).toBe("done");
+    expect(completed.reportId).toBe((await mfgService.listReports(ctx.order.id)).find((r) => r.completedOrder)!.id);
+    await mfgService.undoReport(ctx.order.id, completed.reportId, ctx.user.id);
+    expect((await mfgService.getManufacturingOrder(ctx.order.id))!.status).not.toBe("done");
+  });
+});
+
 describe("Ångra rapportering", () => {
   it("reverses a stamp-out exactly: quantities, scrap row, material back to its location and the time report", async () => {
     const ctx = await setup();

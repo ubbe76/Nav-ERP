@@ -57,6 +57,7 @@ export function InquiriesPageClient({ inquiries, pageSize }: { inquiries: Paged<
       <Table<Inquiry>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={inquiries.rows}
         emptyText="Inga förfrågningar matchar sökningen"
         renderCell={(inquiry, key) => {

@@ -140,6 +140,7 @@ export function StockTransactionsView({ transactions, locations, article, pageSi
       <Table<StockTransaction>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={transactions.rows}
         emptyText="Inga transaktioner matchar filtren"
         renderCell={(row, key) => {

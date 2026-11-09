@@ -115,6 +115,7 @@ export function PaymentsPageClient({
       <Table<PaymentHeader>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={payments.rows}
         emptyText="Inga betalningar matchar sökningen"
         renderCell={(payment, key) => {

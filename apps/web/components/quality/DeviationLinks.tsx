@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
+import { openDocument } from "../../lib/tabNavigation";
 import { Table } from "../ui/Table";
 import { Button } from "../ui/Button";
 import { Modal } from "../ui/Modal";
@@ -139,7 +140,10 @@ export function DeviationLinksSection({ deviation, canEdit }: { deviation: Devia
         method: "POST",
         body: JSON.stringify({ deviationId: deviation.id }),
       });
-      router.push(`/forsaljning/fakturor/${credit.id}`);
+      if (openDocument(`/forsaljning/fakturor/${credit.id}`, (href) => router.push(href), "Kreditfaktura")) {
+        setPending(false);
+        router.refresh();
+      }
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte skapa kreditfakturan"));
       setPending(false);

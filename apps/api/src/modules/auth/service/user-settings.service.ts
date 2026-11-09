@@ -106,6 +106,15 @@ export function decodeOverviewCards(raw: string | undefined): OverviewCard[] | n
 // Entry by entry, like the favourites: a list or a width that no longer
 // passes the schema is dropped, repeats in `hidden` kept once, and an empty
 // entry is the same as none. Unparseable = {}.
+// One list's entry as stored: duplicates dropped, an empty order left out,
+// nothing at all (null) when it says nothing — that is the list as built.
+function normalizeEntry(entry: ListColumnsEntry): ListColumnsEntry | null {
+  const hidden = [...new Set(entry.hidden)];
+  const order = [...new Set(entry.order ?? [])];
+  if (hidden.length === 0 && Object.keys(entry.widths).length === 0 && order.length === 0) return null;
+  return order.length > 0 ? { hidden, widths: entry.widths, order } : { hidden, widths: entry.widths };
+}
+
 export function decodeListColumns(raw: string | undefined): Record<string, ListColumnsEntry> {
   if (!raw) return {};
   try {
@@ -116,9 +125,8 @@ export function decodeListColumns(raw: string | undefined): Record<string, ListC
       if (!listColumnsKeySchema.safeParse(key).success) continue;
       const entry = listColumnsEntrySchema.safeParse(value);
       if (!entry.success) continue;
-      const hidden = [...new Set(entry.data.hidden)];
-      if (hidden.length === 0 && Object.keys(entry.data.widths).length === 0) continue;
-      lists[key] = { hidden, widths: entry.data.widths };
+      const normalized = normalizeEntry(entry.data);
+      if (normalized) lists[key] = normalized;
     }
     return Object.fromEntries(Object.entries(lists).slice(-MAX_LIST_COLUMN_LISTS));
   } catch {
@@ -136,9 +144,8 @@ export function mergeListColumns(
   const next = { ...stored };
   for (const [key, entry] of Object.entries(patch)) {
     delete next[key];
-    if (entry && (entry.hidden.length > 0 || Object.keys(entry.widths).length > 0)) {
-      next[key] = { hidden: [...new Set(entry.hidden)], widths: entry.widths };
-    }
+    const normalized = entry ? normalizeEntry(entry) : null;
+    if (normalized) next[key] = normalized;
   }
   return Object.fromEntries(Object.entries(next).slice(-MAX_LIST_COLUMN_LISTS));
 }

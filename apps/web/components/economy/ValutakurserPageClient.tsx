@@ -115,6 +115,7 @@ export function ValutakurserPageClient({
       <Table<ExchangeRateEntry>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={rates.rows}
         emptyText="Inga kurser matchar sökningen — hämta kurser från Riksbanken eller lägg in en egen kurs."
         renderCell={(rate, key) => {

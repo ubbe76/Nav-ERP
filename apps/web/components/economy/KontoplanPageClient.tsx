@@ -104,6 +104,7 @@ export function KontoplanPageClient({ accounts, pageSize }: { accounts: Paged<Ac
       <Table<Account>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={accounts.rows}
         emptyText="Inga konton matchar sökningen"
         renderCell={(account, key) => {

@@ -71,6 +71,7 @@ export function TimeReportsPageClient({
       <Table<TimeReport>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={reports.rows}
         emptyText="Inga tidrapporter matchar sökningen"
         renderCell={(row, key) => {

@@ -276,7 +276,11 @@ En order blir **Klar** så snart hela antalet är inlevererat — även om tidig
 
 Sektionen **Rapporteringar** på detaljsidan listar allt som rapporterats på ordern, senaste först: **Utstämpling** (varje utstämpling i terminalen, även en utan antal), **Slutför operation**, **Inleverans IO-…** (en lego-operation som avrapporterats av inköpsorderns inleverans), **Materialuttag** (**Förbruka** för hand), **Slutför order** och **Automatisk utstämpling** — tiden för någon som stämplades ut när operationen eller ordern blev klar (se [Pågående arbete](#pagaende-arbete)); den kan ångras som en vanlig utstämpling. Varje rad visar operation, **OK**, **Kasserat**, **Inlevererat**, stämplingens **Timmar**, vem som rapporterade och vilket material som drogs, med lagerplats.
 
-Direkt efter **Slutför** på en operation i kortet **Rapportera** visar Nav en notis nere till höger, t.ex. *Rapporterat 5 OK på 10 — Laserskärning.* För administratörer och arbetsledare har den **Ångra**, som backar just den rapporteringen utan någon extra fråga.
+Direkt efter **Slutför** på en operation i kortet **Rapportera** visar Nav en notis nere till höger, t.ex. *Rapporterat 5 OK på 10 — Laserskärning.* För administratörer och arbetsledare har den **Ångra**, som backar just den rapporteringen utan någon extra fråga. Samma sak gäller de andra raderna i kortet:
+
+- **Förbruka** — *Förbrukat 2 st 1002.*; **Ångra** lägger tillbaka materialet där det togs.
+- **Slutför order** — *Ordern är slutförd — 5 st inlevererade.*; **Ångra** tar ut det som lades in, lägger tillbaka materialet och öppnar ordern igen.
+- **Rapportera tid** — *Rapporterat 1,5 h för Anna på 10 — Laserskärning.*; **Ångra** tar bort tidrapporten (inte i en låst löneperiod — då står det i notisen).
 
 **Ångra** backar exakt det den raden bokförde, i ett svep — Nav visar först vad som kommer att hända:
 

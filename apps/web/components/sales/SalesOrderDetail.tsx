@@ -1,6 +1,8 @@
 "use client";
 
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
+import { openDocument } from "../../lib/tabNavigation";
 import { outflowLocationChoices } from "../../lib/stockLocations";
 import { QuoteExpiredBadge, isQuoteExpired } from "./QuoteExpiredBadge";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
@@ -153,6 +155,14 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   // afterwards never silently overwrites it ("manuellt vinner"). Reset
   // whenever edit mode is (re)opened.
   const [editPriceTouched, setEditPriceTouched] = useState(false);
+  // Osparade ändringar: the row's values when Ändra was opened. Price and
+  // discount count through editPriceTouched (the quote may refill them).
+  const [editStart, setEditStart] = useState<{ quantity: string; unitId: string; date: string } | null>(null);
+  const rowEditDirty =
+    editingRowId !== null &&
+    editStart !== null &&
+    (editPriceTouched || editQuantity !== editStart.quantity || editUnitId !== editStart.unitId || editDeliveryDate !== editStart.date);
+  useUnsavedGuard(rowEditDirty);
   // The latest price-quote answer that filled the edit fields (Kalkylpris source and text).
   const [editQuote, setEditQuote] = useState<PriceQuote | null>(null);
   // The article behind the row being edited — fetched so the unit dropdown
@@ -342,6 +352,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     setEditQuote(null);
     setEditUnitId(row.unitId ?? "");
     setEditDeliveryDate(row.expectedDeliveryDate ?? "");
+    setEditStart({ quantity: initialQuantity, unitId: row.unitId ?? "", date: row.expectedDeliveryDate ?? "" });
     setEditArticle(null);
     apiFetch<Article>(`/api/v1/articles/${row.articleId}`).then(setEditArticle).catch(() => {});
   }
@@ -1051,7 +1062,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
 
       <Modal open={modal === "createMo"} onClose={() => setModal(null)} title="Skapa tillverkningsorder">
         {moRow && (
-          <CreateMoForm orderId={order.id} row={moRow} onCancel={() => setModal(null)} />
+          <CreateMoForm orderId={order.id} row={moRow} onCancel={() => setModal(null)} onOpenedInTab={() => setModal(null)} />
         )}
       </Modal>
     </div>
@@ -1842,10 +1853,13 @@ function CreateMoForm({
   orderId,
   row,
   onCancel,
+  onOpenedInTab,
 }: {
   orderId: string;
   row: SalesOrderRow;
   onCancel: () => void;
+  // The new TO went to a tab: the order stays, the dialog closes.
+  onOpenedInTab: () => void;
 }) {
   const router = useRouter();
   // toUnitQuantity(diff, null) is exactly round4(diff) (factor null → ×1) —
@@ -1872,7 +1886,11 @@ function CreateMoForm({
         body: JSON.stringify({ quantity: Number(quantity), dueDate: dueDate || undefined }),
       });
       stashReleaseWarnings(mo.id, mo.releaseWarnings);
-      router.push(`/tillverkning/ordrar/${mo.id}`);
+      if (openDocument(`/tillverkning/ordrar/${mo.id}`, (href) => router.push(href), mo.orderNumber)) {
+        setPending(false);
+        onOpenedInTab();
+        router.refresh();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Kunde inte skapa tillverkningsordern");
       setPending(false);

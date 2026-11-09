@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
 import { useCan } from "../PermissionsProvider";
 import { apiFetch } from "../../lib/api";
+import { openDocument } from "../../lib/tabNavigation";
 import { shippingErrorText, SHIPMENT_STATUS_LABELS } from "../../lib/shipping";
 import type { DeliveryShipmentInfo, ShipmentDetail } from "../../lib/types";
 
@@ -46,7 +47,10 @@ export function BookTransportButton({
           body: JSON.stringify({ deliveryIds: [deliveryId] }),
         }
       );
-      router.push(`/forsaljning/forsandelser/${created.id}`);
+      if (openDocument(`/forsaljning/forsandelser/${created.id}`, (href) => router.push(href), "Försändelse")) {
+        setPending(false);
+        router.refresh();
+      }
     } catch (err) {
       setError(shippingErrorText(err, "Kunde inte skapa försändelsen"));
       setPending(false);

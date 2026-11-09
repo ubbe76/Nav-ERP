@@ -54,6 +54,7 @@ export function PriceListsPageClient({ priceLists, pageSize }: { priceLists: Pag
       <Table<PriceList>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={priceLists.rows}
         emptyText="Inga prislistor matchar sökningen"
         renderCell={(list, key) => {

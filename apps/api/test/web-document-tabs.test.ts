@@ -4,10 +4,12 @@ import {
   documentHref,
   embeddedBootScript,
   MAX_DOCUMENT_TABS,
+  moveTab,
   openTab,
   provisionalTitle,
   restoreTabs,
   sameDocument,
+  tabForDigit,
   type DocumentTab,
 } from "../../web/lib/documentTabs";
 
@@ -89,6 +91,25 @@ describe("closeTab", () => {
     expect(closeTab([tab(1)], "t1", "t1")).toEqual({ tabs: [], activeId: null });
     expect(closeTab(three, "t1", "t3")).toMatchObject({ activeId: "t3" });
     expect(closeTab(three, "t1", null).tabs.map((t) => t.id)).toEqual(["t2", "t3"]);
+  });
+});
+
+describe("moveTab / tabForDigit", () => {
+  it("moves a dragged tab to its new place, the others keep their order", () => {
+    const four = [tab(1), tab(2), tab(3), tab(4)];
+    expect(moveTab(four, "t1", 2).map((t) => t.id)).toEqual(["t2", "t3", "t1", "t4"]);
+    expect(moveTab(four, "t4", 0).map((t) => t.id)).toEqual(["t4", "t1", "t2", "t3"]);
+    expect(moveTab(four, "t2", 99).map((t) => t.id)).toEqual(["t1", "t3", "t4", "t2"]);
+    expect(moveTab(four, "nope", 0)).toEqual(four);
+  });
+
+  it("maps 1 to the page and 2–9 to the documents in order", () => {
+    const two = [tab(1), tab(2)];
+    expect(tabForDigit(two, 1)).toBeNull();
+    expect(tabForDigit(two, 2)).toBe("t1");
+    expect(tabForDigit(two, 3)).toBe("t2");
+    expect(tabForDigit(two, 4)).toBeUndefined();
+    expect(tabForDigit(two, 0)).toBeUndefined();
   });
 });
 

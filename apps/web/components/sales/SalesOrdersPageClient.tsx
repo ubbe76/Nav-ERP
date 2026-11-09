@@ -86,6 +86,7 @@ export function SalesOrdersPageClient({
       <Table<SalesOrder>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={orders.rows}
         emptyText={isQuote ? "Inga offerter matchar sökningen" : "Inga ordrar matchar sökningen"}
         renderCell={(order, key) => {

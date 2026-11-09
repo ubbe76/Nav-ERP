@@ -227,6 +227,7 @@ export function InvoiceInboxPageClient({ scans, pageSize }: { scans: Paged<Invoi
       <Table<InvoiceScanListRow>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={scans.rows}
         emptyText={
           waiting ? "Inga fakturor att granska — ladda upp en faktura ovan" : "Inga fakturor matchar sökningen"

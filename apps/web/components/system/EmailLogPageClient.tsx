@@ -107,6 +107,7 @@ export function EmailLogPageClient({ log, pageSize }: { log: Paged<EmailLogEntry
       <Table<EmailLogEntry>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={log.rows}
         emptyText="Inga utskick matchar sökningen"
         renderCell={(entry, key) => {
