@@ -13,5 +13,7 @@ export function Button({ variant = "primary", size = "default", className, ...pr
   const classes = [styles.button, styles[variant], size === "small" ? styles.small : "", className]
     .filter(Boolean)
     .join(" ");
-  return <button className={classes} {...props} />;
+  // data-variant: the document toolbar keeps the primary action in view and
+  // marks a danger action in its ⋯ menu (documents/DocumentActionBar.tsx).
+  return <button className={classes} data-variant={variant} {...props} />;
 }

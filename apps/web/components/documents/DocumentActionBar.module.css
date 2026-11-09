@@ -44,11 +44,25 @@
   white-space: nowrap;
 }
 
+/* One line: what does not fit goes into the ⋯ menu (DocumentActionBar). */
 .actions {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: var(--space-3);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.actions > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.actions > [data-overflow] {
+  display: none;
+}
+.more[hidden] {
+  display: none;
 }
 
 /* The escape hatch (manuell statusändring) sits apart from the flow actions. */
