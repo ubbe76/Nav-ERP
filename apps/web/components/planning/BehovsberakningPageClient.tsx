@@ -811,9 +811,12 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
               );
             case "article":
               if (!row.head) {
+                // The article number, dimmed, so a proposal line never reads
+                // as an empty row when the header has scrolled away.
                 return (
                   <span style={{ color: "var(--color-text-muted)", fontSize: 12 }}>
-                    Förslag{p?.reason === "demand" && p.needWeek ? ` vecka ${isoWeekNumber(p.needWeek)}` : ""}
+                    <span aria-hidden="true">↳ </span>
+                    {row.articleNumber} · Förslag{p?.reason === "demand" && p.needWeek ? ` vecka ${isoWeekNumber(p.needWeek)}` : ""}
                   </span>
                 );
               }
