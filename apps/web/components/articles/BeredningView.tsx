@@ -18,6 +18,7 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import { OPERATION_TIME_UNIT_LABELS, minutesPerUnitToSecondsPerUnit, minutesPerUnitToUnitsPerHour, toUnitQuantity } from "../../lib/units";
 import { operationLabel } from "./operation-label";
 import { bomDuplicateText, bomDuplicates } from "../../lib/bomDuplicates";
+import { articleFileHref } from "../../lib/articleFiles";
 import type { ArticleGroup, BomComponent, RoutingOperation, WorkCenter } from "../../lib/types";
 import styles from "./Beredning.module.css";
 
@@ -172,6 +173,33 @@ export function BeredningView({
             </span>
             {row.costingOnly && <span className={styles.kalkylBadge}>Kalkyl</span>}
           </span>
+          {/* The component's drawings with today's active revision — the
+              file opens from the link. */}
+          {(row.componentDrawings?.length ?? 0) > 0 && (
+            <span className={styles.compDrawings}>
+              {row.componentDrawings!.map((d, i) => (
+                <span key={d.drawingNumber}>
+                  {i > 0 && ", "}
+                  {d.fileId ? (
+                    <a
+                      href={articleFileHref(row.componentArticleId, d.fileId)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={d.filename ?? undefined}
+                    >
+                      {d.drawingNumber}
+                      {d.revision ? ` rev ${d.revision}` : ""}
+                    </a>
+                  ) : (
+                    <>
+                      {d.drawingNumber}
+                      {d.revision ? ` rev ${d.revision}` : ""}
+                    </>
+                  )}
+                </span>
+              ))}
+            </span>
+          )}
         </span>
         {/* The Ställtid column is unused on a component row — the badge sits
             there so it never squeezes the benämning out of the name cell. */}
@@ -284,6 +312,12 @@ export function BeredningView({
                           {op.subcontractSupplierName ?? "Ingen leverantör"}
                           {op.useArticleDrawing ? " · artikelns ritningar" : op.hasFile ? " · egen ritning" : " · ingen ritning"}
                           {op.showNetWeight ? " · nettovikt på IO" : ""}
+                        </span>
+                      )}
+                      {(op.drawings?.length ?? 0) > 0 && (
+                        // Ritningar: the drawings the operation is worked from.
+                        <span className={styles.opComment}>
+                          {op.drawings!.length > 1 ? "Ritningar" : "Ritning"} {op.drawings!.map((d) => d.drawingNumber).join(", ")}
                         </span>
                       )}
                       {(op.alternatives?.length ?? 0) > 0 && (

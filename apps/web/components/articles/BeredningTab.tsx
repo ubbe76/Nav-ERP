@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "../../lib/api";
+import { DrawingsPanel } from "./RevisionerTab";
 import { SectionHeading } from "../ui/SectionHeading";
 import { BeredningView } from "./BeredningView";
 import type {
@@ -154,6 +155,9 @@ export function BeredningTab({
         <div className={styles.activeArticle}>
           Aktiv artikel: <strong>{selected.articleNumber}</strong> — {selected.name}
         </div>
+
+        {/* The selected article's drawings (Ritningar i Beredningen). */}
+        <DrawingsPanel key={`drawings-${selected.articleId}`} articleId={selected.articleId} />
 
         {data ? (
           <BeredningView

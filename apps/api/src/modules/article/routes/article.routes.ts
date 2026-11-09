@@ -22,6 +22,8 @@ import {
   updateBomComponentSchema,
   updateDrawingRevisionSchema,
   updateStandardCostSchema,
+  articleFileUploadQuerySchema,
+  linkDrawingRevisionFileSchema,
 } from "@navet/shared";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
@@ -35,6 +37,7 @@ import {
   ArticleCopyPartNotAllowedError,
   ArticleDrawingNotFoundError,
   ArticleFileNotFoundError,
+  DrawingFileNotLooseError,
   ArticleGroupNotFoundError,
   ArticleRevisionNotFoundError,
   ArticleUnitInUseError,
@@ -346,7 +349,10 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
     }
   });
 
-  app.post<{ Params: { id: string } }>("/articles/:id/files", async (req, reply) => {
+  // ?drawingRevisionId= makes the upload that drawing revision's file
+  // (replacing one it had); without it the file is loose (fliken Filer).
+  app.post<{ Params: { id: string }; Querystring: { drawingRevisionId?: string } }>("/articles/:id/files", async (req, reply) => {
+    const { drawingRevisionId } = articleFileUploadQuerySchema.parse(req.query);
     const file = await req.file({ limits: { fileSize: MAX_FILE_BYTES } });
     if (!file) return reply.code(400).send({ error: "No file provided" });
     const data = await file.toBuffer();
@@ -355,14 +361,19 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
       return reply.code(400).send({ error: "Filen är för stor — max 20 MB" });
     }
     try {
-      const row = await service.addFile(req.params.id, {
-        filename: file.filename,
-        contentType: file.mimetype,
-        data,
-      });
+      const row = await service.addFile(
+        req.params.id,
+        {
+          filename: file.filename,
+          contentType: file.mimetype,
+          data,
+        },
+        drawingRevisionId ?? null
+      );
       return reply.code(201).send(row);
     } catch (err) {
       if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof ArticleRevisionNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof InvalidFileTypeError) return reply.code(400).send(errorBody(err));
       throw err;
     }
@@ -399,6 +410,8 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
     if (err instanceof ArticleRevisionNotFoundError) return reply.code(404).send(errorBody(err));
     if (err instanceof DuplicateRevisionError) return reply.code(409).send(errorBody(err));
     if (err instanceof DuplicateDrawingNumberError) return reply.code(409).send(errorBody(err));
+    if (err instanceof ArticleFileNotFoundError) return reply.code(404).send(errorBody(err));
+    if (err instanceof DrawingFileNotLooseError) return reply.code(409).send(errorBody(err));
     throw err;
   };
 
@@ -492,6 +505,22 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
       const input = createDrawingRevisionSchema.parse(req.body);
       try {
         return reply.code(201).send(await service.createDrawingRevision(req.params.id, req.params.drawingId, input));
+      } catch (err) {
+        return revisionErrors(err, reply);
+      }
+    }
+  );
+
+  // One of the article's loose files becomes the revision's file (a file it
+  // had is deleted). A new file is uploaded with POST /articles/:id/files
+  // ?drawingRevisionId=.
+  app.put<{ Params: { id: string; drawingId: string; revisionId: string } }>(
+    "/articles/:id/drawings/:drawingId/revisions/:revisionId/file",
+    async (req, reply) => {
+      const { fileId } = linkDrawingRevisionFileSchema.parse(req.body);
+      try {
+        await service.linkDrawingRevisionFile(req.params.id, req.params.drawingId, req.params.revisionId, fileId);
+        return reply.code(204).send();
       } catch (err) {
         return revisionErrors(err, reply);
       }

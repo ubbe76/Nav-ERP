@@ -190,6 +190,13 @@ const routingAlternativesSchema = z
   .refine((rows) => new Set(rows.map((r) => r.workCenterId)).size === rows.length, "En resurs kan bara vara alternativ en gång");
 
 // articleId comes from the URL (/articles/:id/routing), matching createBomComponentSchema.
+// Ritningar per operation (0200): ids of the operation's own article's
+// drawings (article_drawings), unique.
+export const routingDrawingIdsSchema = z
+  .array(z.string().uuid())
+  .max(50)
+  .refine((ids) => new Set(ids).size === ids.length, "Samma ritning kan bara väljas en gång");
+
 export const createRoutingOperationSchema = z.object({
   sequenceNo: z.coerce.number().int().positive(),
   // Optional — every surface falls back to the resource name when it is
@@ -220,6 +227,9 @@ export const createRoutingOperationSchema = z.object({
   useArticleDrawing: z.boolean().optional(),
   // Alternativa resurser — see routingAlternativesSchema.
   alternatives: routingAlternativesSchema.optional(),
+  // Ritningar (0200): the article's drawings the operation is worked from —
+  // sent = the whole set, omitted = unchanged (none on a new operation).
+  drawingIds: routingDrawingIdsSchema.optional(),
 });
 export type CreateRoutingOperationInput = z.infer<typeof createRoutingOperationSchema>;
 
@@ -249,6 +259,7 @@ export const updateRoutingOperationSchema = z
     useArticleDrawing: z.boolean().optional(),
     // Alternativa resurser — sent = the whole new set, omitted = unchanged.
     alternatives: routingAlternativesSchema.optional(),
+    drawingIds: routingDrawingIdsSchema.optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateRoutingOperationInput = z.infer<typeof updateRoutingOperationSchema>;

@@ -70,6 +70,9 @@ const MESSAGES: Record<string, MessageEntry> = {
   // Fliken Revisioner (artikelrevisioner, ritningsnummer och ritningsrevisioner).
   "duplicate-revision": "Den revisionen finns redan.",
   "duplicate-drawing-number": "Artikeln har redan det ritningsnumret.",
+  "drawing-file-not-loose": "Filen hör redan till en annan ritningsrevision.",
+  "routing-drawing-invalid": "En vald ritning hör inte till artikeln.",
+  "manufacturing-order-file-not-found": "Filen finns inte längre.",
   // The server names the template ("63000 är en mall — välj en variant").
   "article-is-template": serverMessage("Artikeln är en mall — välj en variant."),
   "payroll-period-locked": "Perioden är låst.",

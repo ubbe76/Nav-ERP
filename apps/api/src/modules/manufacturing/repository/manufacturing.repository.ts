@@ -2,6 +2,8 @@ import { and, asc, count, desc, eq, getTableColumns, ilike, inArray, isNull, ne,
 import { alias } from "drizzle-orm/pg-core";
 import {
   articles,
+  articleDrawings,
+  articleFiles,
   bomComponents,
   deviationReasons,
   employees,
@@ -14,6 +16,7 @@ import {
   productionGroups,
   purchaseOrders,
   routingOperationAlternatives,
+  routingOperationDrawings,
   routingOperationFiles,
   routingOperations,
   stampSessions,
@@ -75,7 +78,9 @@ import {
 } from "../service/material-shortage.js";
 import { shortageWarnings } from "./shortage-warnings.js";
 import { snapshotOperationResourcesInTx, workCenterInAlternativesInTx } from "./operation-resources.js";
-import { replaceRoutingAlternatives } from "./routing-write.js";
+import { replaceRoutingAlternatives, replaceRoutingDrawings } from "./routing-write.js";
+import { operationDrawingLabels, orderRevisions, snapshotOrderRevisionsInTx, type OrderRevisions } from "./drawing-snapshot.js";
+import { drawingFiles } from "../../article/repository/drawing-files.js";
 // Ändra material och operationer: the edit transactions and the row
 // selects they share with the list endpoints.
 import {
@@ -783,6 +788,10 @@ async function releaseInTx(tx: Tx, moId: string) {
     warnings = await shortageWarnings(tx, materialRows, new Map(exploded.map((c) => [c.componentArticleId, c.componentName])));
   }
 
+  // Revisionerna TO:n byggs efter (0200) — a configured TO too: its
+  // drawings are the beställningsvara's.
+  await snapshotOrderRevisionsInTx(tx, moId);
+
   const [updatedOrder] = await tx
     .update(manufacturingOrders)
     .set({ status: "released", updatedAt: new Date() })
@@ -1246,6 +1255,7 @@ export function createManufacturingRepository(db: Db) {
           })
           .returning();
         if (input.alternatives && input.alternatives.length > 0) await replaceRoutingAlternatives(tx, row!.id, input.alternatives);
+        if (input.drawingIds && input.drawingIds.length > 0) await replaceRoutingDrawings(tx, row!.id, articleId, input.drawingIds);
         return row!;
       });
     },
@@ -1290,10 +1300,11 @@ export function createManufacturingRepository(db: Db) {
           const [row] = await tx.select().from(workCenters).where(eq(workCenters.id, id)).for("share");
           return row ?? null;
         };
-        const { alternatives, ...input } = await prepare(current, currentAlternatives, workCenter);
-        // Only the alternatives (e.g. [] on a lego operation, whose patch
-        // keeps no cleared lego fields): no column to set — drizzle refuses
-        // an empty SET.
+        const { alternatives, drawingIds, ...input } = await prepare(current, currentAlternatives, workCenter);
+        if (drawingIds !== undefined) await replaceRoutingDrawings(tx, operationId, articleId, drawingIds);
+        // Only the alternatives or drawings (e.g. [] on a lego operation,
+        // whose patch keeps no cleared lego fields): no column to set —
+        // drizzle refuses an empty SET.
         if (!Object.values(input).some((value) => value !== undefined)) {
           if (alternatives !== undefined) await replaceRoutingAlternatives(tx, operationId, alternatives);
           return current;
@@ -1369,7 +1380,45 @@ export function createManufacturingRepository(db: Db) {
         .leftJoin(suppliers, eq(suppliers.id, routingOperations.subcontractSupplierId))
         .where(eq(routingOperations.articleId, articleId));
       const alternatives = await listRoutingAlternatives(db, operations.map((op) => op.id));
-      return operations.map((op) => ({ ...op, alternatives: alternatives.get(op.id) ?? [] }));
+      const drawings = await this.listRoutingDrawings(operations.map((op) => op.id));
+      return operations.map((op) => ({
+        ...op,
+        alternatives: alternatives.get(op.id) ?? [],
+        drawings: drawings.get(op.id) ?? [],
+      }));
+    },
+
+    // Ritningar per operation: id and number, in drawing-number order.
+    async listRoutingDrawings(operationIds: string[]) {
+      const map = new Map<string, { id: string; drawingNumber: string }[]>();
+      if (operationIds.length === 0) return map;
+      const rows = await db
+        .select({
+          routingOperationId: routingOperationDrawings.routingOperationId,
+          id: articleDrawings.id,
+          drawingNumber: articleDrawings.drawingNumber,
+        })
+        .from(routingOperationDrawings)
+        .innerJoin(articleDrawings, eq(articleDrawings.id, routingOperationDrawings.drawingId))
+        .where(inArray(routingOperationDrawings.routingOperationId, operationIds))
+        .orderBy(asc(articleDrawings.drawingNumber));
+      for (const row of rows) {
+        const list = map.get(row.routingOperationId) ?? [];
+        list.push({ id: row.id, drawingNumber: row.drawingNumber });
+        map.set(row.routingOperationId, list);
+      }
+      return map;
+    },
+
+    // How many of the ids are the article's drawings (the service refuses
+    // an operation's drawing that is another article's).
+    async countArticleDrawings(articleId: string, drawingIds: string[]) {
+      if (drawingIds.length === 0) return 0;
+      const [row] = await db
+        .select({ value: count() })
+        .from(articleDrawings)
+        .where(and(eq(articleDrawings.articleId, articleId), inArray(articleDrawings.id, drawingIds)));
+      return row?.value ?? 0;
     },
 
     // Feeds the inquiry row form's Legooperation select — the article's own
@@ -1647,6 +1696,57 @@ export function createManufacturingRepository(db: Db) {
         coverage.set(row.salesOrderRowId, entry);
       }
       return coverage;
+    },
+
+    // --- Revisionerna TO:n byggs efter (drawing-snapshot.ts) ---
+
+    async orderRevisions(moId: string) {
+      return orderRevisions(db, moId);
+    },
+
+    async operationDrawingLabels(moId: string, view: OrderRevisions) {
+      return operationDrawingLabels(db, moId, view);
+    },
+
+    // Uppdatera: the snapshot taken again from today's revisions, under the
+    // order's row lock (the UPDATE's own mode). Returns the status it ran
+    // on — the service refuses anything but an open order — or null.
+    async refreshOrderRevisions(moId: string, allowed: readonly string[]) {
+      return db.transaction(async (tx) => {
+        const [order] = await tx
+          .select({ status: manufacturingOrders.status })
+          .from(manufacturingOrders)
+          .where(eq(manufacturingOrders.id, moId))
+          .for("no key update");
+        if (!order) return null;
+        if (!allowed.includes(order.status)) return { refreshed: false as const, status: order.status };
+        await snapshotOrderRevisionsInTx(tx, moId);
+        return { refreshed: true as const, status: order.status };
+      });
+    },
+
+    // The files an operation is worked from (drawing-files.ts): its chosen
+    // drawings, otherwise the order's; null when the operation is not the
+    // order's.
+    async operationDrawingFiles(moId: string, moOperationId: string) {
+      const [op] = await db
+        .select({ routingOperationId: moOperations.routingOperationId, articleId: manufacturingOrders.articleId })
+        .from(moOperations)
+        .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+        .where(and(eq(moOperations.id, moOperationId), eq(moOperations.manufacturingOrderId, moId)));
+      if (!op) return null;
+      return drawingFiles(db, { articleId: op.articleId, moId, routingOperationId: op.routingOperationId });
+    },
+
+    // One of the order's article's files — any revision's or a loose one
+    // (open/print on demand from the TO card).
+    async findOrderArticleFile(moId: string, fileId: string) {
+      const [row] = await db
+        .select({ filename: articleFiles.filename, contentType: articleFiles.contentType, data: articleFiles.data })
+        .from(articleFiles)
+        .innerJoin(manufacturingOrders, eq(manufacturingOrders.articleId, articleFiles.articleId))
+        .where(and(eq(manufacturingOrders.id, moId), eq(articleFiles.id, fileId)));
+      return row ?? null;
     },
 
     async findManufacturingOrderById(id: string) {

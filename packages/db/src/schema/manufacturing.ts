@@ -21,7 +21,7 @@ import {
 
 // Same pattern as article_files/system.ts — no built-in bytea helper.
 const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
-import { articles } from "./article";
+import { articleDrawingRevisions, articleDrawings, articles } from "./article";
 import { users } from "./auth";
 // Safe import direction: purchase.ts does not import from this file (the
 // purchase_order_rows → mo_operations FK is declared by hand in its
@@ -259,6 +259,26 @@ export const routingOperationAlternatives = pgTable(
   ]
 );
 
+// Ritningar per operation (0200): which of the article's drawings an
+// operation is worked from — the terminal and the TO printout show them, a
+// lego operation's mail sends only them. Same article as the operation (the
+// service checks). Read live via mo_operations.routingOperationId.
+export const routingOperationDrawings = pgTable(
+  "routing_operation_drawings",
+  {
+    routingOperationId: uuid("routing_operation_id")
+      .notNull()
+      .references(() => routingOperations.id, { onDelete: "cascade" }),
+    drawingId: uuid("drawing_id")
+      .notNull()
+      .references(() => articleDrawings.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.routingOperationId, table.drawingId] }),
+    index("idx_routing_operation_drawings_drawing").on(table.drawingId),
+  ]
+);
+
 // One optional drawing per lego operation (routing_operations UNIQUE) — used
 // when the operation's useArticleDrawing is off. Stored in Postgres like
 // article_files (PDF/JPEG/PNG, max 20 MB); list queries must never select
@@ -312,11 +332,42 @@ export const manufacturingOrders = pgTable(
     // structure is written into mo_operations/mo_material_consumptions at
     // CREATION, so release snapshots nothing for it. null = ordinary TO.
     configuration: jsonb("configuration"),
+    // Revisionerna TO:n byggs efter (0200): the article's active revision at
+    // release (text — article revisions carry no file) and when the drawing
+    // snapshot (mo_drawing_revisions) was taken — at release or by Uppdatera.
+    // null = no snapshot (an order from before 0200 that was not open): its
+    // drawings are read as the current ones.
+    articleRevision: varchar("article_revision", { length: 20 }),
+    revisionsSnapshotAt: timestamp("revisions_snapshot_at", { withTimezone: true }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("idx_manufacturing_orders_sales_order_row").on(table.salesOrderRowId)]
+);
+
+// Ritningarna TO:n byggs efter (0200): the drawings' active revisions when
+// the order was released (or Uppdatera was used), as text and as links. A
+// deleted drawing or revision keeps the text (set null); the file goes with
+// the revision. revision null = the drawing had no active revision.
+export const moDrawingRevisions = pgTable(
+  "mo_drawing_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    manufacturingOrderId: uuid("manufacturing_order_id")
+      .notNull()
+      .references(() => manufacturingOrders.id, { onDelete: "cascade" }),
+    drawingId: uuid("drawing_id").references(() => articleDrawings.id, { onDelete: "set null" }),
+    drawingNumber: varchar("drawing_number", { length: 50 }).notNull(),
+    drawingRevisionId: uuid("drawing_revision_id").references(() => articleDrawingRevisions.id, {
+      onDelete: "set null",
+    }),
+    revision: varchar("revision", { length: 20 }),
+  },
+  (table) => [
+    index("idx_mo_drawing_revisions_order").on(table.manufacturingOrderId),
+    unique("mo_drawing_revisions_order_drawing").on(table.manufacturingOrderId, table.drawingId),
+  ]
 );
 
 // Snapshot of the article's routing, taken at release — later Routing edits

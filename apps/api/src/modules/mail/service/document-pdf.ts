@@ -615,6 +615,9 @@ export interface ManufacturingOrderPdfInput {
   // The article's Extra benämning (multi-line) — printed under the article
   // line when the setting lists the manufacturing order.
   extraDescription?: string | null;
+  // Revisionerna TO:n byggs efter (0200): "Revision B · Ritningar: R-1001
+  // rev 2, …" under the article line; omitted when null/undefined.
+  revisionLine?: string | null;
   operations: {
     sequenceNo: number;
     workCenterName: string;
@@ -645,6 +648,9 @@ export interface ManufacturingOrderPdfInput {
     // line under the operation row, ALWAYS when set (shop-floor
     // information, unlike the comment it is not gated by printOnWorkCard).
     packingInstructions?: string | null;
+    // The operation's chosen drawings with the order's revision ("R-1002 rev
+    // A") — an indented "Ritning:" line under the operation.
+    drawings?: string[];
   }[];
   materials: {
     articleNumber: string;
@@ -2108,6 +2114,12 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.fillColor("#000000");
       y += 4;
     }
+    if (input.revisionLine) {
+      doc.font("Helvetica").fontSize(9).fillColor("#444444");
+      doc.text(input.revisionLine, left, y, { width: CONTENT_WIDTH });
+      y += doc.heightOfString(input.revisionLine, { width: CONTENT_WIDTH }) + 6;
+      doc.fillColor("#000000");
+    }
     doc.font("Helvetica").fontSize(11).text(`Antal att tillverka: ${formatQuantity(input.quantity)}`, left, y);
     y += 18;
     if (input.note) {
@@ -2202,6 +2214,22 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
           const indent = MO_OP_COLS.workCenter.x;
           const width = CONTENT_WIDTH - indent;
           const text = `Packning: ${packingInstructions}`;
+          const height = doc.heightOfString(text, { width });
+          if (y + height > TABLE_BOTTOM) {
+            doc.addPage();
+            y = PAGE_MARGIN;
+          }
+          doc.fillColor("#444444").text(text, left + indent, y, { width });
+          doc.fillColor("#000000");
+          y += height + 8;
+        }
+
+        // Ritning — the drawings the operation is worked from, with the
+        // revision the order is built from (the files follow at the end).
+        if (op.drawings && op.drawings.length > 0) {
+          const indent = MO_OP_COLS.workCenter.x;
+          const width = CONTENT_WIDTH - indent;
+          const text = `${op.drawings.length > 1 ? "Ritningar" : "Ritning"}: ${op.drawings.join(", ")}`;
           const height = doc.heightOfString(text, { width });
           if (y + height > TABLE_BOTTOM) {
             doc.addPage();

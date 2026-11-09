@@ -233,6 +233,9 @@ export interface BomComponent {
   // "Kalkyl" — priced into the pre-calculation but never snapshotted to an MO
   // and no demand in the behovsberäkning.
   costingOnly: boolean;
+  // The component's drawings with today's active revision and its file
+  // (GET /articles/:id/bom only).
+  componentDrawings?: { drawingNumber: string; revision: string | null; fileId: string | null; filename: string | null }[];
 }
 
 // Node in GET /articles/:id/bom-tree — the structure as authored (phantoms
@@ -2470,6 +2473,8 @@ export interface RoutingOperation {
   hasFile: boolean;
   // Alternativa resurser, in rank order. [] / absent = none.
   alternatives?: RoutingAlternative[];
+  // Ritningar (0200): the article's drawings the operation is worked from.
+  drawings?: { id: string; drawingNumber: string }[];
 }
 
 export type ManufacturingOrderStatus =
@@ -3487,6 +3492,49 @@ export interface ArticleFile {
   contentType: string;
   sizeBytes: number;
   createdAt: string;
+  // The drawing revision the file belongs to (0200); null = a loose file.
+  drawingRevisionId?: string | null;
+  drawingNumber?: string | null;
+  revision?: string | null;
+  revisionActive?: boolean | null;
+}
+
+// A drawing revision's file (one at most).
+export interface RevisionFile {
+  id: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+}
+
+// GET /manufacturing-orders/:id/revisions — what the order is built from
+// beside today's revisions (manufacturing/repository/drawing-snapshot.ts).
+export interface OrderDrawingRevision {
+  drawingId: string | null;
+  drawingNumber: string;
+  revision: string | null;
+  file: RevisionFile | null;
+  current: { revision: string | null; file: RevisionFile | null } | null;
+  changed: boolean;
+  added: boolean;
+}
+export interface OrderRevisions {
+  snapshotAt: string | null;
+  articleRevision: string | null;
+  currentArticleRevision: string | null;
+  drawings: OrderDrawingRevision[];
+  looseFiles: RevisionFile[];
+  changed: boolean;
+}
+
+// GET /manufacturing-orders/:id/operations/:opId/drawings (the terminal).
+export interface DrawingFileMeta {
+  id: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  drawingNumber: string | null;
+  revision: string | null;
 }
 
 // Artikelrevisioner & ritningar (fliken Revisioner) — at most one active
@@ -3507,6 +3555,8 @@ export interface ArticleDrawingRevision {
   comment: string | null;
   isActive: boolean;
   createdAt: string;
+  // The revision's file (0200) — also an older revision's, opened on demand.
+  file?: RevisionFile | null;
 }
 
 export interface ArticleDrawing {
@@ -5379,6 +5429,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   operation_added: "Operation tillagd",
   operation_changed: "Operation ändrad",
   operation_removed: "Operation borttagen",
+  revisions_updated: "Revisioner uppdaterade",
   row_configuration_changed: "Konfiguration ändrad",
   file_added: "Underlag uppladdat",
   file_deleted: "Underlag borttaget",

@@ -227,6 +227,10 @@ export const articleUnits = pgTable(
 // Postgres like the company logo (self-hosted, backup follows the database).
 // Used by the article card's Filer tab, appended to the TO printout and
 // optionally attached to outgoing order emails.
+// drawing_revision_id (0200): the file is that drawing revision's (at most
+// one per revision); null = a loose file. Only the active revisions' files
+// and the loose ones ride along on their own — see
+// article/repository/drawing-files.ts.
 export const articleFiles = pgTable(
   "article_files",
   {
@@ -238,9 +242,15 @@ export const articleFiles = pgTable(
     contentType: varchar("content_type", { length: 100 }).notNull(),
     sizeBytes: integer("size_bytes").notNull(),
     data: bytea("data").notNull(),
+    drawingRevisionId: uuid("drawing_revision_id").references(() => articleDrawingRevisions.id, {
+      onDelete: "cascade",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("idx_article_files_article").on(table.articleId)]
+  (table) => [
+    index("idx_article_files_article").on(table.articleId),
+    uniqueIndex("article_files_one_per_drawing_revision").on(table.drawingRevisionId),
+  ]
 );
 
 // Artikelrevisioner — a manual revision register on the article (rev A, B,
