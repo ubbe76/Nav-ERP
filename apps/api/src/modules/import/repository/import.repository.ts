@@ -601,6 +601,7 @@ export function createImportRepository(db: Db | Tx) {
                 quantityPerPackage: create.quantityPerPackage != null ? String(create.quantityPerPackage) : undefined,
                 safetyStock: create.safetyStock != null ? String(create.safetyStock) : undefined,
                 stockControlled: create.stockControlled ?? false,
+                forecastControlled: create.forecastControlled ?? false,
                 manufacturingLeadTimeDays: create.manufacturingLeadTimeDays ?? null,
               }))
             )
@@ -676,6 +677,9 @@ export function createImportRepository(db: Db | Tx) {
                 ? { safetyStock: update.patch.safetyStock === null ? null : String(update.patch.safetyStock) }
                 : {}),
               ...(update.patch.stockControlled !== undefined ? { stockControlled: update.patch.stockControlled } : {}),
+              ...(update.patch.forecastControlled !== undefined
+                ? { forecastControlled: update.patch.forecastControlled }
+                : {}),
               ...(update.patch.manufacturingLeadTimeDays !== undefined
                 ? { manufacturingLeadTimeDays: update.patch.manufacturingLeadTimeDays }
                 : {}),

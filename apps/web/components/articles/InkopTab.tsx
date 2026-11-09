@@ -12,6 +12,7 @@ import { Field, Input, Toggle } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
 import { apiFetch } from "../../lib/api";
 import { formatMoney, formatQuantity } from "../../lib/format";
+import { SUPPLIER_PRICE_BREAKS_MAX } from "../../lib/supplierPriceBreaks";
 import { formatStockholmDate, formatStockholmDateTime } from "../../lib/date";
 import {
   SUPPLIER_INVOICE_STATUS_PILL,
@@ -23,7 +24,7 @@ import {
   type Supplier,
   type SupplierInvoice,
 } from "../../lib/types";
-import { Form, FormActions, FormError, FormRow } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 
 // Inköp-fliken (Monitor G5 "Inköp"-flik): one tab, five stacked sections —
 // the editable leverantörskatalog on top, then the read-only katalogpris-
@@ -369,6 +370,10 @@ function ArticleSupplierForm({
       setError("Från antal i staffeln måste vara större än 1 och unikt, och priset ett tal");
       return;
     }
+    if (priceBreaks.length > SUPPLIER_PRICE_BREAKS_MAX) {
+      setError(`Staffeln kan ha högst ${SUPPLIER_PRICE_BREAKS_MAX} steg`);
+      return;
+    }
     setError(null);
     setPending(true);
     try {
@@ -498,16 +503,20 @@ function ArticleSupplierForm({
               </Button>
             </div>
           ))}
-          <div>
-            <Button
-              type="button"
-              size="small"
-              variant="ghost"
-              onClick={() => setBreaks((list) => [...list, { fromQuantity: "", price: "" }])}
-            >
-              + Lägg till steg
-            </Button>
-          </div>
+          {breaks.length < SUPPLIER_PRICE_BREAKS_MAX ? (
+            <div>
+              <Button
+                type="button"
+                size="small"
+                variant="ghost"
+                onClick={() => setBreaks((list) => [...list, { fromQuantity: "", price: "" }])}
+              >
+                + Lägg till steg
+              </Button>
+            </div>
+          ) : (
+            <FormHint attached>Staffeln kan ha högst {SUPPLIER_PRICE_BREAKS_MAX} steg.</FormHint>
+          )}
         </div>
       </Field>
 

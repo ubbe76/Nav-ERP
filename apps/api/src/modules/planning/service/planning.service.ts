@@ -43,6 +43,7 @@ import {
   explodeFromIndex,
   latestStartFor,
   proposalSummary,
+  compareByLatest,
   type ConfiguredRowNeed,
   type LegoOperationRow,
   type DerivedDemand,
@@ -707,17 +708,6 @@ function filterByLatest(rows: RequirementRow[], latest: NonNullable<ListRequirem
     });
   }
   return out;
-}
-
-// Sortering Senaste datum: the earliest latest date first, undated last,
-// article number as the tie-break so two loads render identically.
-function compareByLatest(a: RequirementRow, b: RequirementRow): number {
-  if (a.earliestLatestDate !== b.earliestLatestDate) {
-    if (a.earliestLatestDate === null) return 1;
-    if (b.earliestLatestDate === null) return -1;
-    return a.earliestLatestDate < b.earliestLatestDate ? -1 : 1;
-  }
-  return a.articleNumber < b.articleNumber ? -1 : a.articleNumber > b.articleNumber ? 1 : 0;
 }
 
 // Domain errors carry user-readable messages and pass through; anything that
@@ -3032,14 +3022,17 @@ export function createPlanningService(
 
       // The raw demand date per purchase proposal: its own needDate, else the
       // article's first firm demand (the TO färdigdatum rule's demand — a
-      // KO's ship date or a TO's start), looked up once per article. A failed
-      // suggestion is just no date — it must not stop the order (a real
-      // problem fails addRow).
-      const firstDemandByArticle = new Map<string, Promise<DueDateSuggestion | null>>();
-      const firstDemandFor = (articleId: string) => {
+      // KO's ship date or a TO's start), looked up once per article. Only the
+      // demand: a purchased article has no manufacturing lead time to load
+      // (its arrival is the supplier's, below). A failed lookup is just no
+      // date — it must not stop the order (a real problem fails addRow).
+      const firstDemandByArticle = new Map<string, Promise<string | null>>();
+      const firstDemandDateFor = (articleId: string) => {
         let pending = firstDemandByArticle.get(articleId);
         if (!pending) {
-          pending = this.suggestManufacturingDueDate(articleId).catch(() => null);
+          pending = firmDemandFor(articleId, today, undefined)
+            .then(({ demand }) => demand?.date ?? null)
+            .catch(() => null);
           firstDemandByArticle.set(articleId, pending);
         }
         return pending;
@@ -3065,19 +3058,11 @@ export function createPlanningService(
           pushError(proposal.articleId, "Artikeln saknar huvudleverantör");
           continue;
         }
-        let demandDate: string | null;
-        let fallbackDate: string | null;
-        if (proposal.needDate) {
-          demandDate = proposal.needDate;
-          // The working day before the need, today at the earliest (no
-          // holidays without the context).
-          const before = previousWorkingDay(demandDate, new Set<string>());
-          fallbackDate = before < today ? today : before;
-        } else {
-          const first = await firstDemandFor(proposal.articleId);
-          demandDate = first?.demandDate ?? null;
-          fallbackDate = first?.dueDate ?? null;
-        }
+        const demandDate = proposal.needDate ?? (await firstDemandDateFor(proposal.articleId));
+        // The working day before the need, today at the earliest (no
+        // holidays without the context).
+        const before = demandDate ? previousWorkingDay(demandDate, new Set<string>()) : null;
+        const fallbackDate = before === null ? null : before < today ? today : before;
         const group = bySupplier.get(supplier.supplierId) ?? { supplierName: supplier.supplierName, rows: [] };
         group.rows.push({
           articleId: proposal.articleId,

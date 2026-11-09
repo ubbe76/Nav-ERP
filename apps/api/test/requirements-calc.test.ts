@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  compareByLatest,
   computeLowLevelCodes,
   computeRequirements,
+  proposalSummary,
+  type RequirementProposal,
   explodeOneLevel,
   type ConfiguredRowNeed,
   type RequirementsArticle,
@@ -1473,5 +1476,55 @@ describe("time-phased proposals — configured and lego rows get their dates", (
     expect(byOp.get("op-2")!.proposals[0]).toMatchObject({ latestDate: "2026-10-30", late: true });
     expect(byOp.get("op-2")!.anyLate).toBe(true);
     expect(byOp.get("op-3")!.proposals[0]).toMatchObject({ needDate: null, latestDate: null, late: false, reason: "undated" });
+  });
+});
+
+// Sortering Senaste datum. A dated purchase with no possible arrival
+// (Passerat, latestDate null) is the most urgent row — it used to sort with
+// the undated ones, last.
+describe("compareByLatest", () => {
+  const base = rowFor(
+    computeRequirements(
+      calcInput({
+        articles: [art({ articleId: "a" })],
+        salesRows: [{ articleId: "a", orderStatus: "confirmed", quantityOrdered: 1, quantityDelivered: 0 }],
+      })
+    ),
+    "a"
+  );
+  function withProposals(articleNumber: string, proposals: Partial<RequirementProposal>[]): RequirementRow {
+    const full = proposals.map(
+      (p, i): RequirementProposal => ({
+        key: `purchase:${articleNumber}:${i}`,
+        needDate: null,
+        needWeek: null,
+        latestDate: null,
+        late: false,
+        quantity: 1,
+        reason: "demand",
+        ...p,
+      })
+    );
+    return { ...base, articleNumber, proposals: full, ...proposalSummary(full) };
+  }
+
+  it("puts a row that can no longer arrive first, then the earliest latest date, undated last", () => {
+    const rows = [
+      withProposals("UNDATED", [{ reason: "undated" }]),
+      withProposals("LATER", [{ needDate: "2030-03-20", latestDate: "2030-03-15" }]),
+      withProposals("NO-ARRIVAL", [{ needDate: "2030-03-11", latestDate: null, late: true }]),
+      withProposals("PASSED", [{ needDate: "2030-03-01", latestDate: "2030-02-28", late: true }]),
+      withProposals("NO-ARRIVAL-B", [
+        { needDate: "2030-03-25", latestDate: "2030-03-20" },
+        { needDate: "2030-03-04", latestDate: null, late: true },
+      ]),
+    ];
+    expect([...rows].sort(compareByLatest).map((r) => r.articleNumber)).toEqual([
+      "NO-ARRIVAL",
+      "NO-ARRIVAL-B",
+      "PASSED",
+      "LATER",
+      "UNDATED",
+    ]);
   });
 });

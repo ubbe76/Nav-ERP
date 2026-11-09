@@ -48,6 +48,8 @@ export const ARTICLE_IMPORT_FIELDS = [
   // Säkerhetslager (0 = none) and Styrning (Lagerstyrd/Orderstyrd).
   "safetyStock",
   "stockControlled",
+  // Prognosstyrd (#10): Ja/Nej — no Monitor export has it.
+  "forecastControlled",
   // Ledtid (dagar), 0 = none: a manufactured article's own lead time, a
   // purchased article's primary supplier's (see planArticleImport).
   "leadTimeDays",
@@ -83,6 +85,8 @@ export const ARTICLE_HEADER_ALIASES: Record<string, string> = {
   partiformningsregel: "lotSizingRule",
   sakerhetslager: "safetyStock",
   styrning: "stockControlled",
+  prognosstyrd: "forecastControlled",
+  prognosstyrning: "forecastControlled",
   ledtid: "leadTimeDays",
   // The template's heading "Ledtid (dagar)".
   ledtiddagar: "leadTimeDays",
@@ -237,6 +241,7 @@ export interface ArticleCreatePlan {
   // Optional: the bom import's article creates carry none of these.
   safetyStock?: number | null;
   stockControlled?: boolean;
+  forecastControlled?: boolean;
   quantityPerPackage?: number | null;
   primarySupplierId?: string | null;
   // Ledtid: a manufactured article's manufacturing_lead_time_days; for a
@@ -270,6 +275,7 @@ export interface ArticleUpdatePlan {
     quantityPerPackage?: number | null;
     safetyStock?: number | null;
     stockControlled?: boolean;
+    forecastControlled?: boolean;
     manufacturingLeadTimeDays?: number | null;
   };
   revisions?: ArticleRevisionPlan;
@@ -672,6 +678,21 @@ export async function planArticleImport(
       else errors.push(`Okänd styrning: "${stockControlledCell}" (Lagerstyrd eller Orderstyrd)`);
       if (stockControlled !== undefined) values["stockControlled"] = stockControlled;
     }
+    // Prognosstyrd (#10): Ja/Nej like Aktiv; an empty cell leaves it as it
+    // is (a new article: Nej). The behovsberäkning only plans it with a
+    // forecast on an active purchased/manufactured article (isForecastArticle)
+    // — on a service or phantom the flag is stored but never read.
+    const forecastControlledCell = record["forecastControlled"] ?? "";
+    let forecastControlled: boolean | undefined;
+    if (forecastControlledCell !== "") {
+      const parsedFlag = parseActive(forecastControlledCell);
+      if (parsedFlag === null) {
+        errors.push(`Ogiltigt värde för Prognosstyrd: "${forecastControlledCell}" (Ja/Nej/1/0/true/false)`);
+      } else {
+        forecastControlled = parsedFlag;
+        values["forecastControlled"] = forecastControlled;
+      }
+    }
 
     // Ledtid (dagar) — whole days, 0 is "none" like the other planning
     // fields. Where it lands depends on the article type (the stored one on
@@ -811,6 +832,7 @@ export async function planArticleImport(
         ...(quantityPerPackage != null ? { quantityPerPackage } : {}),
         ...(safetyStock != null ? { safetyStock } : {}),
         ...(stockControlled !== undefined ? { stockControlled } : {}),
+        ...(forecastControlled !== undefined ? { forecastControlled } : {}),
         ...(primarySupplierId !== null ? { primarySupplierId } : {}),
         ...(manufacturingLeadTimeDays != null ? { manufacturingLeadTimeDays } : {}),
         ...(primarySupplierLeadTimeDays != null ? { primarySupplierLeadTimeDays } : {}),
@@ -852,6 +874,7 @@ export async function planArticleImport(
       if (quantityPerPackage !== undefined) patch.quantityPerPackage = quantityPerPackage;
       if (safetyStock !== undefined) patch.safetyStock = safetyStock;
       if (stockControlled !== undefined) patch.stockControlled = stockControlled;
+      if (forecastControlled !== undefined) patch.forecastControlled = forecastControlled;
       if (manufacturingLeadTimeDays !== undefined) patch.manufacturingLeadTimeDays = manufacturingLeadTimeDays;
       updates.push({
         id: existing.id,

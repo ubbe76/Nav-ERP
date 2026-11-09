@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { mergeUntouched } from "../../lib/rowStateMerge";
+import { mergeUntouched, reconcileWithRecomputed } from "../../lib/rowStateMerge";
 import { GatedLink } from "../ui/GatedLink";
 import { ArticleOverviewButton } from "../articles/ArticleOverviewButton";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -159,6 +159,33 @@ function isSelectable(row: DisplayRow): boolean {
   return quantity > 0 && !(needsSupplier && !row.primarySupplier);
 }
 
+// A touched state after a recomputation: the user's selection and quantity
+// on top of the new proposal (its behovsdatum, reason, supplier) — and no
+// longer selected when the new proposal can't be ordered.
+function keepChoice(old: RowState, rebuilt: RowState): RowState {
+  return { ...rebuilt, selected: old.selected && rebuilt.selected, quantity: old.quantity, touched: true };
+}
+
+// The server-side filters of the list (the Alla/Artiklar/Lego filter is
+// client-side, see KIND_OPTIONS).
+const SERVER_FILTER_KEYS = ["type", "groupId", "showAll", "latest", "sort"];
+
+// Every line of the current filter, page by page (the list schema's max is
+// 1000) — the server's cache was just recomputed, so these read it.
+async function fetchAllLines(sp: Record<string, string>): Promise<DisplayRow[]> {
+  const lines: DisplayRow[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const params = new URLSearchParams();
+    if (sp.search) params.set("search", sp.search);
+    for (const key of SERVER_FILTER_KEYS) if (sp[key]) params.set(key, sp[key]);
+    params.set("limit", "1000");
+    params.set("offset", String(offset));
+    const res = await apiFetch<Paged<RequirementRow>>(`/api/v1/planning/requirements?${params.toString()}`);
+    lines.push(...res.rows.flatMap(toLines).filter((l) => !l.header));
+    if (res.rows.length === 0 || offset + res.rows.length >= res.total) return lines;
+  }
+}
+
 // Preselected when there's actually a proposal; an unselectable row starts
 // unchecked and disabled.
 function makeRowState(row: DisplayRow): RowState {
@@ -208,6 +235,11 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
   // sets this before bumping reloadKey and the next fetch sends refresh=true.
   const forceRefresh = useRef(false);
   const lastFilterKey = useRef<string | null>(null);
+  // The computedAt of the last answer: a new one means the server recomputed.
+  const lastComputedAt = useRef<string | null>(null);
+  // The saved states as of the last render, for the fetch effect (it must
+  // know, before its extra fetch, whether a choice lies on another page).
+  const rowStatesRef = useRef<Record<string, RowState>>({});
   const [computedAt, setComputedAt] = useState<string | null>(null);
   const reload = () => {
     forceRefresh.current = true;
@@ -296,7 +328,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
           params.set("offset", "0");
           return `?${params.toString()}`;
         })()
-      : listApiQuery(sp, ["type", "groupId", "showAll", "latest", "sort"], pageSize);
+      : listApiQuery(sp, SERVER_FILTER_KEYS, pageSize);
 
     const refreshing = forceRefresh.current;
     const refresh = refreshing ? "&refresh=true" : "";
@@ -311,42 +343,54 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
     const filterChanged = lastFilterKey.current !== filterKey;
     lastFilterKey.current = filterKey;
 
-    apiFetch<Paged<RequirementRow> & { computedAt: string }>(`/api/v1/planning/requirements${query}${refresh}`)
-      .then((res) => {
+    const load = async () => {
+      const res = await apiFetch<Paged<RequirementRow> & { computedAt: string }>(
+        `/api/v1/planning/requirements${query}${refresh}`
+      );
+      if (cancelled) return;
+      setComputedAt(res.computedAt);
+      const recomputed = lastComputedAt.current !== null && lastComputedAt.current !== res.computedAt;
+      lastComputedAt.current = res.computedAt;
+      let paged: Paged<RequirementRow> = res;
+      if (kind) {
+        const filtered = res.rows.filter((r) =>
+          kind === "lego" ? r.proposalKind === "subcontract" : r.proposalKind !== "subcontract"
+        );
+        const page = pageFromSearchParams(sp);
+        const offset = (page - 1) * pageSize;
+        paged = { rows: filtered.slice(offset, offset + pageSize), total: filtered.length };
+      }
+      setData(paged);
+      const lines = paged.rows.flatMap(toLines).filter((l) => !l.header);
+      // After a recomputation (Uppdatera, or the server's minute-cache ran
+      // out) every saved state is checked against the new result: a
+      // proposal can have moved to another week or changed its behovsdatum,
+      // and a choice on another page would otherwise be sent with the old
+      // one. Only when such a choice exists is the whole result fetched; if
+      // that fails, the choices that can't be checked are dropped.
+      let fresh: DisplayRow[] | null = null;
+      if (recomputed && !filterChanged) {
+        const pageKeys = new Set(lines.map((l) => l.id));
+        const offPage = Object.keys(rowStatesRef.current).some((key) => !pageKeys.has(key));
+        if (!offPage) fresh = lines;
+        else if (kind) fresh = res.rows.flatMap(toLines).filter((l) => !l.header);
+        else fresh = await fetchAllLines(sp).catch(() => lines);
         if (cancelled) return;
-        setComputedAt(res.computedAt);
-        let paged: Paged<RequirementRow> = res;
-        if (kind) {
-          const filtered = res.rows.filter((r) =>
-            kind === "lego" ? r.proposalKind === "subcontract" : r.proposalKind !== "subcontract"
-          );
-          const page = pageFromSearchParams(sp);
-          const offset = (page - 1) * pageSize;
-          paged = { rows: filtered.slice(offset, offset + pageSize), total: filtered.length };
-        }
-        setData(paged);
-        // Merge: a row the user touched (selection or quantity) keeps its
-        // state, every other loaded row is rebuilt from the fresh proposal —
-        // so Uppdatera shows recomputed quantities. Entries for rows on other
-        // pages stay as they are. confirmCreate clears rowStates first, so
-        // that path is a full rebuild.
-        const lines = paged.rows.flatMap(toLines).filter((l) => !l.header);
-        setRowStates((prev) => {
-          let base = filterChanged ? {} : prev;
-          if (refreshing && !filterChanged) {
-            // After Uppdatera a proposal can move to another week (its key
-            // carries the week): drop states for keys of articles shown on
-            // this page that no longer exist, so a stale touched one is never
-            // sent with its old behovsdatum. Other pages are left alone.
-            const shownArticles = new Set(lines.map((l) => l.articleId));
-            const shownKeys = new Set(lines.map((l) => l.id));
-            base = Object.fromEntries(
-              Object.entries(prev).filter(([key, state]) => shownKeys.has(key) || !shownArticles.has(state.articleId))
-            );
-          }
-          return mergeUntouched(base, lines, (l) => l.id, makeRowState);
-        });
-      })
+      }
+      // Merge: a row the user touched (selection or quantity) keeps its
+      // state, every other loaded row is rebuilt from the fresh proposal —
+      // so Uppdatera shows recomputed quantities. confirmCreate clears
+      // rowStates first, so that path is a full rebuild.
+      setRowStates((prev) => {
+        const base = filterChanged
+          ? {}
+          : fresh
+            ? reconcileWithRecomputed(prev, fresh, (l) => l.id, makeRowState, keepChoice)
+            : prev;
+        return mergeUntouched(base, lines, (l) => l.id, makeRowState);
+      });
+    };
+    load()
       .catch((err: Error) => {
         if (cancelled) return;
         setData(null);
@@ -370,6 +414,10 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
 
   // Selection spans every page the user has touched, not just the currently
   // loaded one.
+  useEffect(() => {
+    rowStatesRef.current = rowStates;
+  }, [rowStates]);
+
   const selectedEntries = useMemo(
     () => Object.entries(rowStates).filter(([, s]) => s.selected),
     [rowStates]

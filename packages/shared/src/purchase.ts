@@ -381,9 +381,13 @@ export const supplierPriceBreakSchema = z.object({
 });
 export type SupplierPriceBreakInput = z.infer<typeof supplierPriceBreakSchema>;
 
+// The most staffel steps one catalog row may carry. Webbspegel in
+// apps/web/lib/supplierPriceBreaks.ts (guarded by supplier-price.test.ts).
+export const SUPPLIER_PRICE_BREAKS_MAX = 50;
+
 const priceBreaksField = z
   .array(supplierPriceBreakSchema)
-  .max(50)
+  .max(SUPPLIER_PRICE_BREAKS_MAX)
   .superRefine((rows, ctx) => {
     const seen = new Set<number>();
     rows.forEach((row, index) => {

@@ -734,11 +734,13 @@ describe("planning service — leveransdagar on created purchase orders", () => 
     demands: Record<string, string | null>;
     leadTimeDays?: number | null;
     supplierDelivery?: PartnerDeliveryFields;
+    repo?: Partial<PlanningRepository>;
   }) {
     const orders: { expectedDeliveryDate?: string }[] = [];
     const rows: { articleId: string; expectedDeliveryDate?: string }[] = [];
     const service = createPlanningService(
       makeRepo({
+        ...opts.repo,
         async loadArticleOverviewInput(articleId: string) {
           return overviewInput(articleId, opts.demands[articleId] ?? null);
         },
@@ -818,6 +820,29 @@ describe("planning service — leveransdagar on created purchase orders", () => 
       { articleId: "a1", expectedDeliveryDate: undefined },
       { articleId: "a2", expectedDeliveryDate: "2026-11-03" },
     ]);
+  });
+
+  // Without a needDate (integrations) only the article's first firm demand
+  // is read: a purchased article has no manufacturing lead time, so neither
+  // the routings/Standardledtid nor the färdigdatum's holiday window load.
+  it("a proposal without needDate reads only the demand, no manufacturing lead time", async () => {
+    const loaded: string[] = [];
+    const { result, orders } = await run({
+      demands: { a1: "2026-10-28" },
+      repo: {
+        async loadMoDatingInputs() {
+          loaded.push("loadMoDatingInputs");
+          throw new Error("must not load the manufacturing lead time");
+        },
+        async fullDayHolidaysBetween() {
+          loaded.push("fullDayHolidaysBetween");
+          return [];
+        },
+      },
+    });
+    expect(loaded).toEqual([]);
+    expect(result.errors).toEqual([]);
+    expect(orders[0]?.expectedDeliveryDate).toBe("2026-10-27");
   });
 
   it("a proposal without demand (reorder point) at a supplier without settings gets no date", async () => {
