@@ -389,7 +389,7 @@ export function BeredningView({
                       // > 0 (0 st/h has no meaning), same rule as the dialog.
                       <span className={styles.timeStack}>
                       <span className={styles.timeCell}>
-                        {formatMinutesPerUnit(op.runTimePerUnit, op.timeUnit)}
+                        <span className={styles.timeValue}>{formatMinutesPerUnit(op.runTimePerUnit, op.timeUnit)}</span>
                         <SegmentedToggle
                           size="small"
                           value={op.timeUnit}

@@ -30,8 +30,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — layout
 
-- [ ] **Beredningen:** kolumnen **Tid/enhet** i operationsraden är för smal när knapparna **min/st**, **sek/st** och **st/h** står bredvid, så "20 min" bryts på två rader (artikel 3002 i 1440 px, sett 2026-11-09).
-- [ ] **Lager → Transaktioner:** datumfälten **Från** och **Till** är för smala för platshållaren "åååå-mm-dd", som klipps till "åååå-mm-d" (1440 px, sett 2026-11-09).
 
 
 ### Låga — fel i manualen

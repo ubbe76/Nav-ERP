@@ -45,6 +45,11 @@
 .sizeMd {
   max-width: 22ch;
 }
+/* An empty date field shows the placeholder "åååå-mm-dd" (plus the picker
+   icon), wider than a date's digits — 14ch clipped it to "åååå-mm-d". */
+.input[type="date"].sizeSm {
+  max-width: 16ch;
+}
 
 .select {
   appearance: none;
