@@ -47,7 +47,9 @@ function ReferenceCell({ reference, quantityDelta }: { reference: StockTransacti
   }
 }
 
-const signed = (n: number) => (n > 0 ? `+${n}` : String(n));
+// Swedish number format (decimal comma) — String(n) gave "-0.4".
+const quantity = (n: number) => n.toLocaleString("sv-SE", { maximumFractionDigits: 4 });
+const signed = (n: number) => n.toLocaleString("sv-SE", { maximumFractionDigits: 4, signDisplay: "exceptZero" });
 const money = (value: string | null) =>
   value === null ? "—" : Number(value).toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -174,7 +176,7 @@ export function StockTransactionsView({ transactions, locations, article, pageSi
             case "quantityDelta":
               return signed(Number(row.quantityDelta));
             case "balance":
-              return row.balance === null ? "—" : String(Number(row.balance));
+              return row.balance === null ? "—" : quantity(Number(row.balance));
             case "reference":
               return <ReferenceCell reference={row.reference} quantityDelta={row.quantityDelta} />;
             case "createdByName":
