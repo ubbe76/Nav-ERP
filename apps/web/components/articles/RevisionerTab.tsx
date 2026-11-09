@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { confirmDelete } from "../../lib/confirm";
 import { Table } from "../ui/Table";
 import { Button } from "../ui/Button";
@@ -385,30 +385,54 @@ function dialogTitle(dialog: Dialog | null): string {
   }
 }
 
-// Ritningar i Beredningen: the article's drawings with the active revision
-// and its file, + Ny ritning and + Ny revision with the same dialogs as the
-// Revisioner tab (which keeps the history and the older revisions' files).
+// Ritningar och filer i Beredningen: the article's drawings with the active
+// revision and its file (+ Ny ritning / + Ny revision with the same dialogs
+// as the Revisioner tab, which keeps the history and the older revisions'
+// files), and the article's other files — the Filer tab's, uploaded and
+// removed here too.
 export function DrawingsPanel({ articleId }: { articleId: string }) {
   const canEdit = useCan()(["artiklar"]);
-  const { drawings, error, pending, setDialog, dialogs } = useRevisionRegisters(articleId);
+  const { drawings, looseFiles, error, pending, setDialog, run, base, dialogs } = useRevisionRegisters(articleId);
+  const uploadRef = useRef<HTMLInputElement>(null);
   if (drawings === null) return error ? <FormError>{error}</FormError> : null;
   return (
-    <section className={styles.panel} aria-label="Ritningar">
+    <section className={styles.panel} aria-label="Ritningar och filer">
       <SectionHeading
         actions={
           canEdit && (
-            <Button type="button" size="small" variant="ghost" onClick={() => setDialog({ kind: "newDrawing" })}>
-              + Ny ritning
-            </Button>
+            <>
+              <Button type="button" size="small" variant="ghost" onClick={() => setDialog({ kind: "newDrawing" })}>
+                + Ny ritning
+              </Button>
+              <Button type="button" size="small" variant="ghost" disabled={pending} onClick={() => uploadRef.current?.click()}>
+                + Ladda upp fil
+              </Button>
+              <input
+                ref={uploadRef}
+                type="file"
+                accept={ARTICLE_FILE_ACCEPT}
+                hidden
+                aria-label="Välj fil att ladda upp"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) void run(() => uploadArticleFile(articleId, file), "Uppladdningen misslyckades");
+                }}
+              />
+            </>
           )
         }
       >
-        Ritningar
+        Ritningar och filer
       </SectionHeading>
       <FormError>{error}</FormError>
-      {drawings.length === 0 ? (
-        <p className={styles.empty}>Inga ritningar. Ritningar med revisioner och filer läggs till här eller under fliken Revisioner.</p>
-      ) : (
+      {drawings.length === 0 && looseFiles.length === 0 && (
+        <p className={styles.empty}>
+          Inga ritningar eller filer. Ritningar med revisioner läggs till med + Ny ritning (eller under fliken Revisioner), andra
+          filer — PDF, JPEG eller PNG, högst 20 MB — med + Ladda upp fil.
+        </p>
+      )}
+      {drawings.length > 0 && (
         <ul className={styles.panelList}>
           {drawings.map((drawing) => {
             const active = drawing.revisions.find((r) => r.isActive);
@@ -457,6 +481,39 @@ export function DrawingsPanel({ articleId }: { articleId: string }) {
               </li>
             );
           })}
+        </ul>
+      )}
+      {/* The article's other files (fliken Filer): they ride along on the TO
+          printout and with operations that have no chosen drawings. */}
+      {looseFiles.length > 0 && (
+        <ul className={styles.panelList} aria-label="Filer">
+          {looseFiles.map((file) => (
+            <li key={file.id} className={styles.panelRow}>
+              <span className={styles.panelTitle}>
+                <span className={styles.drawingMeta}>Fil</span>
+                <a className={styles.fileLink} href={articleFileHref(articleId, file.id)} target="_blank" rel="noopener noreferrer">
+                  {file.filename}
+                </a>
+                <span className={styles.none}>{formatFileSize(file.sizeBytes)}</span>
+              </span>
+              {canEdit && (
+                <span className={styles.drawingActions}>
+                  <Button
+                    type="button"
+                    size="small"
+                    variant="ghost"
+                    disabled={pending}
+                    onClick={async () => {
+                      if (!(await confirmDelete(`Ta bort ${file.filename}?`))) return;
+                      void run(() => apiFetch(`${base}/files/${file.id}`, { method: "DELETE" }), "Kunde inte ta bort filen");
+                    }}
+                  >
+                    Ta bort
+                  </Button>
+                </span>
+              )}
+            </li>
+          ))}
         </ul>
       )}
       {dialogs}

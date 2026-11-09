@@ -291,7 +291,9 @@ Struktur och operationer kan också läsas in från fil i stället för att mata
 
 #### Ritningar i beredningen
 
-Ovanför strukturen visar panelen **Ritningar** den aktiva artikelns ritningsnummer med den aktiva revisionen och dess fil (länken öppnar filen). **+ Ny ritning**, **+ Ny revision** och **Lägg till fil** (när den aktiva revisionen saknar fil) öppnar samma dialoger som under fliken [Revisioner](#revisioner), där också historiken och äldre revisioners filer finns.
+Ovanför strukturen visar panelen **Ritningar och filer** den aktiva artikelns ritningsnummer med den aktiva revisionen och dess fil (länken öppnar filen). **+ Ny ritning**, **+ Ny revision** och **Lägg till fil** (när den aktiva revisionen saknar fil) öppnar samma dialoger som under fliken [Revisioner](#revisioner), där också historiken och äldre revisioners filer finns.
+
+Under ritningarna listas artikelns övriga filer — samma som under fliken [Filer](#filer). **+ Ladda upp fil** lägger till en (PDF, JPEG eller PNG, högst 20 MB), filnamnet öppnar den och **Ta bort** tar bort den (bekräftas först). En sådan fil kan sedan bli en ritningsrevisions fil med **eller välj bland artikelns filer** i dialogen **Ny revision** eller **Lägg till fil**.
 
 I operationsdialogen väljer du under **Ritningar (valfritt)** vilka av artikelns ritningar operationen arbetar efter — till exempel svetsritningen till svetsoperationen. Operationsraden visar då *Ritning R-1002-SVETS*, och valet styr:
 
