@@ -71,6 +71,13 @@
   color: var(--color-text-muted);
 }
 
+/* Antal per rad: a narrow field right-aligned in the column. */
+.quantityInput {
+  display: block;
+  margin-left: auto;
+  text-align: right;
+}
+
 .up {
   color: var(--status-stopped-text);
 }

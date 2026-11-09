@@ -147,6 +147,43 @@ describe("Förkalkylera flera — the quantity", () => {
   });
 });
 
+describe("Förkalkylera flera — Antal per rad (2026-11-09)", () => {
+  it("an own quantity wins over the latest and the fallback, and onlyArticleIds recalculates just that row", async () => {
+    const user = await makeUser();
+    const withCalc = await makeProduct({ articleNumber: "M-1", componentCost: 100 });
+    const withoutCalc = await makeProduct({ articleNumber: "M-2", componentCost: 100 });
+    await costingService.preCalculate(withCalc.id, 5, true);
+    const body = { selection: { activeOnly: true }, fallbackQuantity: 7 };
+
+    const all = await batch.preview(
+      user.id,
+      parsed(preCalculationBatchSchema, { ...body, quantities: [{ articleId: withCalc.id, quantity: 20 }, { articleId: withoutCalc.id, quantity: 3 }] })
+    );
+    expect(all.rows.map((r) => [r.articleNumber, r.quantity, r.quantitySource])).toEqual([
+      ["M-1", 20, "manual"],
+      ["M-2", 3, "manual"],
+    ]);
+    // The per-unit figures are the calculation's at that quantity (3 × 100 per unit here).
+    expect(all.rows[0]!.manufacturingCostPerUnit).toBe(300);
+    // "Förra" is still the saved calculation, at its own quantity.
+    expect(all.rows[0]!.previous?.quantity).toBe(5);
+
+    const one = await batch.preview(
+      user.id,
+      parsed(preCalculationBatchSchema, { ...body, quantities: [{ articleId: withoutCalc.id, quantity: 12 }], onlyArticleIds: [withoutCalc.id] })
+    );
+    expect(one.rows.map((r) => [r.articleNumber, r.quantity, r.quantitySource])).toEqual([["M-2", 12, "manual"]]);
+
+    // An id outside the selection gives no row; an own quantity outside it is ignored.
+    const outside = crypto.randomUUID();
+    const none = await batch.preview(
+      user.id,
+      parsed(preCalculationBatchSchema, { ...body, quantities: [{ articleId: outside, quantity: 2 }], onlyArticleIds: [outside] })
+    );
+    expect(none.rows).toEqual([]);
+  });
+});
+
 describe("Förkalkylera flera — the selection", () => {
   it("from/to are inclusive and in byte order", async () => {
     const user = await makeUser();

@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { fetchCopiedCount } from "../../lib/copiedArticles";
 import { confirmDialog } from "../../lib/confirm";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { formatMoney, formatPercent, formatQuantity, formatSignedMoney } from "../../lib/format";
+import { formatMoney, formatPercent, formatSignedMoney } from "../../lib/format";
 import { ARTICLE_TYPE_LABELS, type ArticleGroup, type ArticleType, type RegisterEntry } from "../../lib/types";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
@@ -26,7 +26,7 @@ interface BatchRow {
   name: string;
   type: ArticleType;
   quantity: number;
-  quantitySource: "latest" | "fallback";
+  quantitySource: "latest" | "fallback" | "manual";
   manufacturingCostPerUnit: number | null;
   selfCostPerUnit: number | null;
   salesPricePerUnit: number | null;
@@ -64,6 +64,11 @@ const MAX_RANGES = 20;
 const emptyRange = (): RangeRow => ({ from: "", to: "" });
 
 const money = (v: number | null) => (v === null ? "—" : formatMoney(v));
+const QUANTITY_SOURCE_LABELS: Record<BatchRow["quantitySource"], string> = {
+  latest: "senaste förkalkyl",
+  fallback: "valt antal",
+  manual: "eget antal",
+};
 const dateOf = (iso: string) => new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Europe/Stockholm" });
 
 export function PreCalculationBatchPageClient({ initialSource }: { initialSource: Source }) {
@@ -91,6 +96,28 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [result, setResult] = useState<SaveResult | null>(null);
+
+  // Antal per rad (2026-11-09): what the user typed in a row's Antal. The
+  // own quantities live in a ref (every request reads the current ones, also
+  // the re-run after Spara) and are sent with every preview, so a re-run
+  // keeps them; drafts are the fields being edited. A changed row is
+  // recalculated alone (onlyArticleIds) with a sequence per row, so a late
+  // answer never overwrites a newer Antal; Spara waits for those in flight.
+  const manualQuantities = useRef(new Map<string, number>());
+  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
+  const [recalculating, setRecalculating] = useState<Set<string>>(new Set());
+  const rowSeq = useRef(new Map<string, number>());
+  const lastSent = useRef(new Map<string, number>());
+  const inFlight = useRef(new Map<string, Promise<void>>());
+  // The rows as of the last answer, written in the same step as the state:
+  // Spara reads them right after awaiting a row's recalculation, before
+  // React has re-rendered (a ref assigned during render was still the old
+  // list there, and the row was saved with its previous quantity).
+  const rowsRef = useRef<BatchRow[] | null>(null);
+  function putRows(next: BatchRow[] | null) {
+    rowsRef.current = next;
+    setRows(next);
+  }
 
   useEffect(() => {
     fetchCopiedCount()
@@ -141,11 +168,13 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
     setError(null);
     if (!keepResult) setResult(null);
     try {
+      const quantities = [...manualQuantities.current].slice(-500).map(([articleId, quantity]) => ({ articleId, quantity }));
       const res = await apiFetch<{ rows: BatchRow[] }>("/api/v1/costing/pre-calculations/batch", {
         method: "POST",
-        body: JSON.stringify({ ...ran.body, multiLevel: ran.multiLevel }),
+        body: JSON.stringify({ ...ran.body, multiLevel: ran.multiLevel, ...(quantities.length > 0 ? { quantities } : {}) }),
       });
-      setRows(res.rows);
+      putRows(res.rows);
+      setQuantityDrafts({});
       setRanWith(ran);
       setSelected(keepResult ? new Set() : new Set(res.rows.filter((r) => !r.error).map((r) => r.articleId)));
     } catch (err) {
@@ -153,6 +182,62 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
     } finally {
       setRunning(false);
     }
+  }
+
+  function dropDraft(id: string) {
+    setQuantityDrafts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }
+
+  // Leaving a row's Antal (or Enter): recalculate that row alone with the
+  // typed quantity. An empty, non-positive or unchanged value just goes back.
+  function commitQuantity(row: BatchRow) {
+    const id = row.articleId;
+    const draft = quantityDrafts[id];
+    if (draft === undefined || !ranWith) return;
+    const quantity = Number(draft.replace(",", "."));
+    if (!(quantity > 0) || (quantity === row.quantity && !recalculating.has(id))) {
+      dropDraft(id);
+      lastSent.current.delete(id);
+      return;
+    }
+    if (lastSent.current.get(id) === quantity) return; // Enter, then the blur
+    lastSent.current.set(id, quantity);
+    manualQuantities.current.delete(id);
+    manualQuantities.current.set(id, quantity);
+    const seq = (rowSeq.current.get(id) ?? 0) + 1;
+    rowSeq.current.set(id, seq);
+    setRecalculating((prev) => new Set(prev).add(id));
+    const ran = ranWith;
+    const work = (async () => {
+      try {
+        const res = await apiFetch<{ rows: BatchRow[] }>("/api/v1/costing/pre-calculations/batch", {
+          method: "POST",
+          body: JSON.stringify({ ...ran.body, multiLevel: ran.multiLevel, quantities: [{ articleId: id, quantity }], onlyArticleIds: [id] }),
+        });
+        if (rowSeq.current.get(id) !== seq) return;
+        const fresh = res.rows[0] ?? { ...row, quantity, quantitySource: "manual" as const, error: "Artikeln finns inte längre i urvalet" };
+        putRows(rowsRef.current?.map((r) => (r.articleId === id ? fresh : r)) ?? null);
+        dropDraft(id);
+      } catch (err) {
+        if (rowSeq.current.get(id) !== seq) return;
+        putRows(rowsRef.current?.map((r) => (r.articleId === id ? { ...r, error: apiErrorMessage(err, "Kunde inte räkna om raden") } : r)) ?? null);
+      } finally {
+        if (rowSeq.current.get(id) === seq) {
+          lastSent.current.delete(id);
+          inFlight.current.delete(id);
+          setRecalculating((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+        }
+      }
+    })();
+    inFlight.current.set(id, work);
   }
 
   function onPreview() {
@@ -186,10 +271,15 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
     setSaveError(null);
     setResult(null);
     try {
+      // A row whose Antal was just changed (the click on Spara blurred its
+      // field) is saved with the recalculated quantity, never the old one.
+      if (inFlight.current.size > 0) await Promise.all(inFlight.current.values());
+      const current = (rowsRef.current ?? []).filter((r) => !r.error && selected.has(r.articleId));
+      if (current.length === 0) return;
       const res = await apiFetch<SaveResult>("/api/v1/costing/pre-calculations/batch/save", {
         method: "POST",
         body: JSON.stringify({
-          items: selectable.filter((r) => selected.has(r.articleId)).map((r) => ({ articleId: r.articleId, quantity: r.quantity })),
+          items: current.map((r) => ({ articleId: r.articleId, quantity: r.quantity })),
           multiLevel: ranWith.multiLevel,
           setStandardCost,
           setSalesPrice,
@@ -235,7 +325,7 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
   const tableRows = (rows ?? []).map((r) => ({ ...r, id: r.articleId }));
 
   function renderCell(r: (typeof tableRows)[number], key: string) {
-    if (r.error && key !== "select" && key !== "articleNumber" && key !== "name") return null;
+    if (r.error && key !== "select" && key !== "articleNumber" && key !== "name" && key !== "quantity") return null;
     switch (key) {
       case "select":
         return (
@@ -263,8 +353,28 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
       case "quantity":
         return (
           <span className={styles.value}>
-            {formatQuantity(r.quantity)}
-            <span className={styles.sub}>{r.quantitySource === "latest" ? "senaste förkalkyl" : "valt antal"}</span>
+            <Input
+              type="number"
+              size="xs"
+              min="0"
+              step="any"
+              inputMode="decimal"
+              className={styles.quantityInput}
+              value={quantityDrafts[r.id] ?? String(r.quantity)}
+              disabled={running || saving}
+              aria-label={`Antal för ${r.articleNumber}`}
+              onChange={(e) => setQuantityDrafts((prev) => ({ ...prev, [r.id]: e.target.value }))}
+              onBlur={() => commitQuantity(r)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commitQuantity(r);
+                } else if (e.key === "Escape") {
+                  dropDraft(r.id);
+                }
+              }}
+            />
+            <span className={styles.sub}>{recalculating.has(r.id) ? "räknar om…" : QUANTITY_SOURCE_LABELS[r.quantitySource]}</span>
           </span>
         );
       case "tvk":
@@ -420,7 +530,7 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
               Räkna om underliggande nivåer
             </label>
           </div>
-          <FormHint>Varje artikel räknas med antalet i sin senaste förkalkyl.</FormHint>
+          <FormHint>Varje artikel räknas med antalet i sin senaste förkalkyl. Ändra Antal på en rad för att räkna om just den.</FormHint>
           <div>
             <Button type="button" onClick={onPreview} disabled={running || !quantityValid || (source === "copied" && copiedDisabled)}>
               {running ? "Beräknar…" : "Förkalkylera"}
