@@ -116,6 +116,17 @@ describe("Kopierat — the routes", () => {
     const again = await call(cookie, "POST", "/articles/copied", { mode: "add", articleIds: [a, b] });
     expect([again.statusCode, again.json()]).toEqual([200, { count: 3, added: 1 }]);
     expect((await call(cookie, "GET", "/articles/copied")).json()).toEqual({ count: 3, articleIds: [c, a, b] });
+    // ?details=true (the page Kopierat): the articles themselves, same order.
+    expect((await call(cookie, "GET", "/articles/copied?details=true")).json()).toEqual({
+      count: 3,
+      articleIds: [c, a, b],
+      articles: [
+        { id: c, articleNumber: "R-3", name: "Artikel R-3", type: "purchased", active: true },
+        { id: a, articleNumber: "R-1", name: "Artikel R-1", type: "purchased", active: true },
+        { id: b, articleNumber: "R-2", name: "Artikel R-2", type: "purchased", active: true },
+      ],
+    });
+    expect((await call(cookie, "GET", "/articles/copied?details=maybe")).statusCode).toBe(400);
 
     const byQuery = await call(cookie, "POST", "/articles/copied", { mode: "replace", query: { search: "R-" } });
     expect([byQuery.statusCode, byQuery.json()]).toEqual([200, { count: 3, added: 3 }]);

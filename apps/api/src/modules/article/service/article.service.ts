@@ -1,8 +1,15 @@
 import { renderLabelsPdf, type LabelInput } from "../../mail/service/label-pdf.js";
-import type { AbcClass, ArticleLabelsInput, CopiedArticlesQuery, CopiedArticlesRemoveInput, CopiedArticlesSetInput } from "@navet/shared";
+import type {
+  AbcClass,
+  ArticleLabelsInput,
+  CopiedArticlesListQuery,
+  CopiedArticlesQuery,
+  CopiedArticlesRemoveInput,
+  CopiedArticlesSetInput,
+} from "@navet/shared";
 // Kopierat (#28): the cap error is the repository leaf's (its transaction
 // throws it); re-exported so the routes import every article error from here.
-import { CopiedArticlesTooManyError } from "../repository/copied-articles.js";
+import { CopiedArticlesTooManyError, type CopiedArticleRow } from "../repository/copied-articles.js";
 export { CopiedArticlesTooManyError };
 import {
   articleCopyPartAllowed,
@@ -582,7 +589,16 @@ export function createArticleService(
 
     // --- Kopierat (#28): the user's own working list of articles ---
 
-    async listCopiedArticles(userId: string): Promise<{ count: number; articleIds: string[] }> {
+    // `details` adds the articles themselves (the page Kopierat); the ids are
+    // always there, in the list's order either way.
+    async listCopiedArticles(
+      userId: string,
+      query: CopiedArticlesListQuery = {}
+    ): Promise<{ count: number; articleIds: string[]; articles?: CopiedArticleRow[] }> {
+      if (query.details) {
+        const rows = await repo.listCopiedArticleRows(userId);
+        return { count: rows.length, articleIds: rows.map((row) => row.id), articles: rows };
+      }
       const articleIds = await repo.listCopiedArticleIds(userId);
       return { count: articleIds.length, articleIds };
     },

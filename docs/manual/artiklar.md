@@ -548,22 +548,31 @@ Det finns tre ställen:
 
 Innehåller **Kopierat** redan artiklar frågar systemet *Kopierat innehåller N artiklar.* med tre val: **Lägg till** (de nya läggs sist), **Ersätt** (listan töms och fylls med de nya) och **Avbryt**. Är listan tom läggs artiklarna till direkt. Efteråt visas beskedet *N artiklar i Kopierat.* (eller *1 artikel i Kopierat.*) med det nya antalet.
 
-### Visa Kopierat
+### Sidan Kopierat
 
-I artikelregistret visar kryssrutan **Kopierat (N)** i verktygsraden bara artiklarna i din lista (adressen får `?copied=true`). Sökning och övriga filter fungerar som vanligt inom listan, och antalet ovanför tabellen följer.
+**Artiklar → Kopierat** (`/artiklar/kopierat`) visar hela din lista i den ordning artiklarna kopierades, med löpnummer, **Artikelnummer** (länk till artikelkortet), **Benämning**, **Typ** och **Status** (**Aktiv** eller **Inaktiv**). Sidan är öppen för alla som har någon meny, även ett konto som är **Endast läsning**. Sidhuvudet visar antalet, till exempel *12 artiklar i listan — i den ordning de kopierades*.
+
+- **Lägg till artikel** — sök fram en artikel i fältet överst och välj den; den läggs sist i listan och beskedet *A-100 lades till sist. 13 artiklar i Kopierat.* visas. Finns artikeln redan säger sidan *A-100 finns redan i Kopierat och behåller sin plats.* Fler artiklar på en gång kopierar du från artikelregistret, behovsberäkningen eller en artikels struktur (se ovan).
+- **Ta bort** på raden tar bort den artikeln ur listan; markera flera rader och klicka **Ta bort markerade (N)** i sidhuvudet för att ta bort dem på en gång. Rubrikens kryssruta markerar alla.
+- **Förkalkylera Kopierat** öppnar [Förkalkylera flera](#forkalkylera-flera) med **Kopierat** som urval.
+- **Töm Kopierat** tar bort alla artiklar ur listan, efter en bekräftelse. Artiklarna i sig påverkas aldrig — listan är bara en lista.
+
+### Visa Kopierat i artikelregistret
+
+I artikelregistret visar kryssrutan **Kopierat (N)** i verktygsraden bara artiklarna i din lista (adressen får `?copied=true`), sorterade som registret. Sökning och övriga filter fungerar som vanligt inom listan, och antalet ovanför tabellen följer. Knappen **Visa Kopierat** öppnar [sidan Kopierat](#sidan-kopierat) med listan i kopieringsordning.
 
 ### Förkalkylera Kopierat
 
-När filtret **Kopierat (N)** är på visas länken **Förkalkylera Kopierat**. Den öppnar [Förkalkylera flera](#forkalkylera-flera) med **Kopierat** som urval.
+När filtret **Kopierat (N)** är på visas länken **Förkalkylera Kopierat**. Den öppnar [Förkalkylera flera](#forkalkylera-flera) med **Kopierat** som urval. Samma knapp finns på sidan Kopierat.
 
 ### Ta bort och tömma
 
-När filtret **Kopierat (N)** är på:
+När filtret **Kopierat (N)** är på i artikelregistret:
 
 - Markera rader och klicka **Ta bort ur Kopierat (N)** för att ta bort dem ur listan.
 - **Töm Kopierat** tar bort alla artiklar ur listan, efter en bekräftelse. Artiklarna i sig påverkas inte.
 
-Raderas en artikel försvinner den också ur alla listor.
+Samma sak går att göra på [sidan Kopierat](#sidan-kopierat). Raderas en artikel försvinner den också ur alla listor.
 
 ## Förkalkylera flera
 
@@ -573,8 +582,10 @@ Raderas en artikel försvinner den också ur alla listor.
 
 Välj mellan två urval:
 
-- **Kopierat (N)** — artiklarna i din egen lista [Kopierat](#kopierat), i den ordning de kopierades. Valet är avstängt när listan är tom; texten *Kopierat är tomt* länkar då till artikelregistret. Länken **Förkalkylera Kopierat** i artikelregistret öppnar sidan med Kopierat valt.
-- **Filter** med fälten **Artikelnummer från** och **Artikelnummer till** (båda inklusive; jämförelsen sker tecken för tecken, så "A-10" sorteras före "A-9", precis som i listan), **Varugrupp**, **Typ** (**Alla**, **Tillverkad**, **Köpt** eller **Tjänst**, förvalt **Tillverkad**), **Artikelkod** och kryssrutan **Bara aktiva** (förvalt på). Konfiguratormallar ingår aldrig.
+- **Kopierat (N)** — artiklarna i din egen lista [Kopierat](#kopierat), i den ordning de kopierades. Länken **Visa och ändra** bredvid öppnar [sidan Kopierat](#sidan-kopierat), där du ser listan och kan lägga till och ta bort artiklar. Valet är avstängt när listan är tom; texten *Kopierat är tomt* länkar då till artikelregistret och till sidan Kopierat. Länken **Förkalkylera Kopierat** i artikelregistret och på sidan Kopierat öppnar sidan med Kopierat valt.
+- **Filter** — sektionen **Filtrera** med **Artikelnummer**-intervall, **Varugrupp**, **Typ** (**Alla**, **Tillverkad**, **Köpt** eller **Tjänst**, förvalt **Tillverkad**), **Artikelkod** och kryssrutan **Bara aktiva** (förvalt på). Konfiguratormallar ingår aldrig.
+
+**Artikelnummer**-intervallen: varje rad har fälten **Från** och **Till** (båda inklusive; jämförelsen sker tecken för tecken, så "A-10" sorteras före "A-9", precis som i listan). Lämnas ett av fälten tomt är intervallet öppet åt det hållet; en rad med båda fälten tomma begränsar ingenting. Med **+ Lägg till intervall** lägger du till fler rader (högst 20), och ✕ på raden tar bort den — en rad finns alltid kvar. En artikel tas med när den ligger i **något** av intervallen; varugrupp, typ, artikelkod och **Bara aktiva** gäller därutöver för alla.
 
 Högst 500 artiklar kan förkalkyleras åt gången. Blir urvalet större visas ett felmeddelande och ingenting beräknas — snäva in det med artikelnummerintervall, varugrupp eller artikelkod.
 

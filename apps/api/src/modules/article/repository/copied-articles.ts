@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { articles, userCopiedArticles, type Db, type Tx } from "@navet/db";
-import { COPIED_ARTICLES_MAX } from "@navet/shared";
+import { COPIED_ARTICLES_MAX, type ArticleType } from "@navet/shared";
 
 // Kopierat (#28, migration 0199): the user's own working list of articles.
 // Db | Tx leaf like article-number.ts — the article repository delegates
@@ -29,6 +29,25 @@ export async function listCopiedArticleIds(ex: Db | Tx, userId: string): Promise
     .where(eq(userCopiedArticles.userId, userId))
     .orderBy(asc(userCopiedArticles.position), asc(userCopiedArticles.articleId));
   return rows.map((row) => row.articleId);
+}
+
+// The list's articles themselves (the page Kopierat), in the same order as
+// listCopiedArticleIds — position, then article id.
+export interface CopiedArticleRow {
+  id: string;
+  articleNumber: string;
+  name: string;
+  type: ArticleType;
+  active: boolean;
+}
+
+export async function listCopiedArticleRows(ex: Db | Tx, userId: string): Promise<CopiedArticleRow[]> {
+  return ex
+    .select({ id: articles.id, articleNumber: articles.articleNumber, name: articles.name, type: articles.type, active: articles.active })
+    .from(userCopiedArticles)
+    .innerJoin(articles, eq(articles.id, userCopiedArticles.articleId))
+    .where(eq(userCopiedArticles.userId, userId))
+    .orderBy(asc(userCopiedArticles.position), asc(userCopiedArticles.articleId));
 }
 
 export async function countCopiedArticles(ex: Db | Tx, userId: string): Promise<number> {

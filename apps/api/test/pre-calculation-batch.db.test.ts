@@ -110,7 +110,15 @@ async function makeProduct(opts: {
   return parent;
 }
 
-const filter = (f: Partial<{ articleNumberFrom: string; articleNumberTo: string; groupId: string; type: "manufactured" | "purchased" | "service"; articleCodeId: string; activeOnly: boolean }> = {}) =>
+const filter = (
+  f: Partial<{
+    articleNumberRanges: { from?: string; to?: string }[];
+    groupId: string;
+    type: "manufactured" | "purchased" | "service";
+    articleCodeId: string;
+    activeOnly: boolean;
+  }> = {}
+) =>
   parsed(preCalculationBatchSchema, { selection: { activeOnly: true, ...f }, fallbackQuantity: 1 });
 
 const article = (id: string) => db.select().from(articles).where(eq(articles.id, id)).then((r) => r[0]!);
@@ -145,13 +153,34 @@ describe("Förkalkylera flera — the selection", () => {
     for (const n of ["A-1", "A-10", "A-9", "B-1"]) await makeProduct({ articleNumber: n });
     // Byte order: "A-1" < "A-10" < "A-9" < "B-1" — an ICU/natural sort would
     // put A-9 before A-10 and make this range something else.
-    const { rows } = await batch.preview(user.id, filter({ articleNumberFrom: "A-10", articleNumberTo: "A-9" }));
+    const { rows } = await batch.preview(user.id, filter({ articleNumberRanges: [{ from: "A-10", to: "A-9" }] }));
     expect(rows.map((r) => r.articleNumber)).toEqual(["A-10", "A-9"]);
-    const open = await batch.preview(user.id, filter({ articleNumberFrom: "A-9" }));
+    const open = await batch.preview(user.id, filter({ articleNumberRanges: [{ from: "A-9" }] }));
     expect(open.rows.map((r) => r.articleNumber)).toEqual(["A-9", "B-1"]);
     // The whole register comes in that same byte order.
     const all = await batch.preview(user.id, filter());
     expect(all.rows.map((r) => r.articleNumber)).toEqual(["A-1", "A-10", "A-9", "B-1"]);
+  });
+
+  it("several ranges are a union (or), overlapping ranges list an article once, and an unbounded range lets everything in", async () => {
+    const user = await makeUser();
+    for (const n of ["A-1", "A-2", "A-3", "B-1", "B-2", "C-1"]) await makeProduct({ articleNumber: n });
+    const numbers = async (ranges: { from?: string; to?: string }[]) =>
+      (await batch.preview(user.id, filter({ articleNumberRanges: ranges }))).rows.map((r) => r.articleNumber);
+
+    // Two disjoint ranges: the union, still in byte order over the whole list.
+    expect(await numbers([{ from: "B-2", to: "C-1" }, { from: "A-1", to: "A-2" }])).toEqual(["A-1", "A-2", "B-2", "C-1"]);
+    // Overlapping ranges: no duplicate rows.
+    expect(await numbers([{ from: "A-2", to: "B-1" }, { from: "A-3", to: "B-2" }])).toEqual(["A-2", "A-3", "B-1", "B-2"]);
+    // Open on one side each: up to A-2, and from C-1.
+    expect(await numbers([{ to: "A-2" }, { from: "C-1" }])).toEqual(["A-1", "A-2", "C-1"]);
+    // A range without bounds restricts nothing — or:ed with the rest, the
+    // whole list stays in; so does an empty list of ranges.
+    expect(await numbers([{ from: "B-1", to: "B-2" }, {}])).toEqual(["A-1", "A-2", "A-3", "B-1", "B-2", "C-1"]);
+    expect(await numbers([])).toEqual(["A-1", "A-2", "A-3", "B-1", "B-2", "C-1"]);
+    // The other filters apply on top of the union (and).
+    const only = await batch.preview(user.id, filter({ articleNumberRanges: [{ to: "A-2" }, { from: "C-1" }], type: "purchased" }));
+    expect(only.rows).toEqual([]);
   });
 
   it("filters on group, type, article code and active, and never takes a configurator template", async () => {

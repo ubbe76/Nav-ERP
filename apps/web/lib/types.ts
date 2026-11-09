@@ -6890,6 +6890,16 @@ export interface CreateMissingComponentsResult {
 export interface CopiedArticles {
   count: number;
   articleIds: string[];
+  // Only with ?details=true (the page Kopierat): the articles in the list's order.
+  articles?: CopiedArticleRow[];
+}
+
+export interface CopiedArticleRow {
+  id: string;
+  articleNumber: string;
+  name: string;
+  type: ArticleType;
+  active: boolean;
 }
 
 // The register's search and filters without paging; resolved on the server

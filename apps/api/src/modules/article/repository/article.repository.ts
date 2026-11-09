@@ -48,7 +48,7 @@ import {
 import { getOrCreateFallbackLocation } from "../../stock/service/location-resolver.js";
 import { applyInformation, copyArticleParts, readCopySource } from "./article-copy.js";
 import { articleVatRateSql } from "./article-vat-rate.js";
-import { clearCopiedArticles, listCopiedArticleIds, removeCopiedArticles, setCopiedArticles } from "./copied-articles.js";
+import { clearCopiedArticles, listCopiedArticleIds, listCopiedArticleRows, removeCopiedArticles, setCopiedArticles } from "./copied-articles.js";
 
 // Append-only write for article_standard_cost_history (D1) — called by the
 // three standard-cost writers (create, updateStandardCost, CSV import) in
@@ -443,6 +443,7 @@ export function createArticleRepository(db: Db) {
 
     // --- Kopierat (#28, copied-articles.ts) ---
     listCopiedArticleIds: (userId: string) => listCopiedArticleIds(db, userId),
+    listCopiedArticleRows: (userId: string) => listCopiedArticleRows(db, userId),
     setCopiedArticles: (userId: string, articleIds: readonly string[], mode: "add" | "replace") =>
       setCopiedArticles(db, userId, articleIds, mode),
     removeCopiedArticles: (userId: string, articleIds: readonly string[]) => removeCopiedArticles(db, userId, articleIds),

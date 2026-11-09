@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { articles, costCalculations, db, permissionGroups } from "@navet/db";
-import { createArticleSchema, PRE_CALCULATION_BATCH_MAX } from "@navet/shared";
+import { createArticleSchema, PRE_CALCULATION_BATCH_MAX, PRE_CALCULATION_BATCH_MAX_RANGES } from "@navet/shared";
 import { buildApp } from "../src/app.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -150,6 +150,18 @@ describe("Förkalkylera flera — the routes", () => {
       { url: "/costing/pre-calculations/batch", payload: { selection: { copied: true, type: "manufactured" }, fallbackQuantity: 1 } },
       { url: "/costing/pre-calculations/batch", payload: { selection: { activeOnly: true, type: "phantom" }, fallbackQuantity: 1 } },
       { url: "/costing/pre-calculations/batch", payload: { selection: { activeOnly: true }, fallbackQuantity: 1, multiLevel: "true" } },
+      // More ranges than PRE_CALCULATION_BATCH_MAX_RANGES, a range with an
+      // unknown key, an empty bound, and the old single from/to fields.
+      {
+        url: "/costing/pre-calculations/batch",
+        payload: {
+          selection: { activeOnly: true, articleNumberRanges: Array.from({ length: PRE_CALCULATION_BATCH_MAX_RANGES + 1 }, (_, i) => ({ from: `A-${i}` })) },
+          fallbackQuantity: 1,
+        },
+      },
+      { url: "/costing/pre-calculations/batch", payload: { selection: { activeOnly: true, articleNumberRanges: [{ start: "A" }] }, fallbackQuantity: 1 } },
+      { url: "/costing/pre-calculations/batch", payload: { selection: { activeOnly: true, articleNumberRanges: [{ from: " " }] }, fallbackQuantity: 1 } },
+      { url: "/costing/pre-calculations/batch", payload: { selection: { activeOnly: true, articleNumberFrom: "A" }, fallbackQuantity: 1 } },
       { url: "/costing/pre-calculations/batch/save", payload: { items: [] } },
       { url: "/costing/pre-calculations/batch/save", payload: { items: [{ articleId: "not-a-uuid", quantity: 1 }] } },
       { url: "/costing/pre-calculations/batch/save", payload: { items: [{ articleId: crypto.randomUUID(), quantity: 0 }] } },

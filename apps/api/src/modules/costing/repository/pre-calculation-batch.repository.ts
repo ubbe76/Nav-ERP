@@ -1,6 +1,6 @@
-import { and, asc, eq, exists, inArray, not, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, exists, inArray, not, or, sql, type SQL } from "drizzle-orm";
 import { articles, configuratorTemplates, type Db, type Tx } from "@navet/db";
-import type { ArticleType } from "@navet/shared";
+import type { ArticleNumberRange, ArticleType } from "@navet/shared";
 
 // Förkalkylera flera (#27): which articles a batch runs over. A Db | Tx leaf
 // like calculated-price.ts. Configurator templates (a configurator_templates
@@ -19,9 +19,9 @@ export interface BatchArticle {
 }
 
 export interface BatchArticleFilter {
-  // Inclusive, compared in byte order (collate "C") — see the shared schema.
-  articleNumberFrom?: string;
-  articleNumberTo?: string;
+  // Any of the ranges (or); each bound inclusive, compared in byte order
+  // (collate "C") — see the shared schema.
+  articleNumberRanges?: readonly ArticleNumberRange[];
   groupId?: string;
   type?: ArticleType;
   articleCodeId?: string;
@@ -41,12 +41,30 @@ const notTemplate = not(
   exists(sql`(select 1 from ${configuratorTemplates} where ${configuratorTemplates.articleId} = ${articles.id})`)
 );
 
+// The article number ranges as ONE condition: the or of the ranges, each
+// range the and of its bounds. A range without bounds restricts nothing, and
+// since it is or:ed with the rest, the whole condition then falls away —
+// hence null (no condition) rather than an always-true SQL fragment. An
+// empty list restricts nothing either.
+export function articleNumberRangesCondition(ranges: readonly ArticleNumberRange[] | undefined): SQL | null {
+  if (!ranges || ranges.length === 0) return null;
+  const parts: SQL[] = [];
+  for (const range of ranges) {
+    const bounds: SQL[] = [];
+    if (range.from !== undefined) bounds.push(sql`${articles.articleNumber} collate "C" >= ${range.from}`);
+    if (range.to !== undefined) bounds.push(sql`${articles.articleNumber} collate "C" <= ${range.to}`);
+    if (bounds.length === 0) return null;
+    parts.push(and(...bounds)!);
+  }
+  return parts.length === 1 ? parts[0]! : or(...parts)!;
+}
+
 // The filter variant, in article number order — byte order too, so the list
-// reads as the range the from/to bounds cut out of it.
+// reads as the ranges the from/to bounds cut out of it.
 export async function selectBatchArticles(dbc: Db | Tx, filter: BatchArticleFilter): Promise<BatchArticle[]> {
   const where: SQL[] = [notTemplate];
-  if (filter.articleNumberFrom !== undefined) where.push(sql`${articles.articleNumber} collate "C" >= ${filter.articleNumberFrom}`);
-  if (filter.articleNumberTo !== undefined) where.push(sql`${articles.articleNumber} collate "C" <= ${filter.articleNumberTo}`);
+  const ranges = articleNumberRangesCondition(filter.articleNumberRanges);
+  if (ranges) where.push(ranges);
   if (filter.groupId !== undefined) where.push(eq(articles.groupId, filter.groupId));
   if (filter.type !== undefined) where.push(eq(articles.type, filter.type));
   if (filter.articleCodeId !== undefined) where.push(eq(articles.articleCodeId, filter.articleCodeId));
