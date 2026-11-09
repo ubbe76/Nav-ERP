@@ -35,11 +35,14 @@
   border-bottom: none;
 }
 
+/* Ställtid · Tid/enhet · Antal · actions. Tid/enhet holds the value and the
+   min/st | sek/st | st/h switch (~130px on its own), so it takes the width
+   Ställtid and Antal can spare — the article column keeps its share. */
 .prepHeader,
 .opRow,
 .compRow {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) 110px 110px 100px 150px;
+  grid-template-columns: minmax(0, 1.6fr) 90px 150px 80px 150px;
   gap: 12px;
   align-items: center;
 }
@@ -341,11 +344,18 @@
 
 /* Tid/enhet cell on an operation row: the value plus the per-row min/st | st/h
    switch (ui/SegmentedToggle.tsx, small size). */
+/* The value never breaks ("20 min" on one line); when the column is too
+   narrow for value + switch, the switch wraps to its own line under it. */
 .timeCell {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 4px 8px;
+}
+
+.timeValue {
+  white-space: nowrap;
 }
 
 /* Tid/enhet plus the optional Cykeltid line underneath — a secondary line
