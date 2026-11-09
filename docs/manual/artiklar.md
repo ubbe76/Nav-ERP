@@ -495,12 +495,13 @@ Saknas antingen priset eller en sparad förkalkyl står det i kortet vilket av d
 
 ### Revisioner
 
-Fliken samlar artikelns revisionsregister — ren information utan koppling till de uppladdade filerna:
+Fliken samlar artikelns revisionsregister — ren information utan koppling till de uppladdade filerna. Den har två kort:
 
-- **Artikelrevisioner**: artikelns egna revisioner (t.ex. A, B, C) med valfri **Kommentar**. Högst en revision är **Aktiv** åt gången — den första som skapas blir aktiv automatiskt, och **Aktivera** på en annan rad flyttar markeringen. Lägg till med **Lägg till revision**, ta bort med **Ta bort** (tas den aktiva bort är ingen revision aktiv tills du aktiverar en annan).
-- **Ritningar**: artikeln kan ha flera frivilliga **ritningsnummer** (**Lägg till ritning**). Varje ritningsnummer har sitt eget revisionsregister med samma regler som artikelrevisionerna. **Ta bort** på ritningen tar även bort dess revisioner.
-- Samma revisionsbeteckning kan inte förekomma två gånger på samma artikel respektive ritning, och samma ritningsnummer kan inte läggas två gånger på samma artikel.
+- **Artikelrevisioner**: artikelns egna revisioner (t.ex. A, B, C) med valfri **Kommentar**. Högst en revision är **Aktiv** åt gången och märks så i kolumnen **Status**. Lägg till med **+ Ny revision**: fyll i **Revision** och eventuellt **Kommentar (valfritt)**. Den första revisionen blir aktiv automatiskt; finns det redan revisioner avgör bocken **Gör den till aktiv revision** (förvald) om den nya tar över. Menyn **⋯** på raden har **Aktivera** (flyttar markeringen till raden), **Ändra** (revisionsbeteckning och kommentar) och **Ta bort** (tas den aktiva bort är ingen revision aktiv tills du aktiverar en annan).
+- **Ritningar**: artikeln kan ha flera frivilliga **ritningsnummer**. **+ Ny ritning** lägger till ett — med **Första revision (valfritt)** får ritningen sin första revision på samma gång. Varje ritningsnummer visas med sin aktiva revision bredvid numret och har sitt eget revisionsregister med samma regler som artikelrevisionerna: **+ Ny revision** vid ritningsnumret och **⋯** på raderna. **⋯** vid ritningsnumret har **Byt ritningsnummer** och **Ta bort ritningen**, som även tar bort dess revisioner.
+- Samma revisionsbeteckning kan inte förekomma två gånger på samma artikel respektive ritning ("Den revisionen finns redan."), och samma ritningsnummer kan inte läggas två gånger på samma artikel ("Artikeln har redan det ritningsnumret.").
 - Artikelrevision, ritningsnummer och ritningsrevision kan också läsas in med [artikelimporten](#importera-artiklar).
+- Utan skrivbehörighet till artiklar visas registren utan knappar och menyer.
 
 Med systeminställningen **Visa revisioner på dokument** (se [System](/hjalp/system)) skrivs aktiv artikelrevision och ritningsnummer med aktiv ritningsrevision ut per orderrad på offert, orderbekräftelse, inköpsorder och förfrågan.
 
