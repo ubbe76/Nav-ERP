@@ -77,6 +77,11 @@ export const ARTIKLAR_SECTIONS: ModuleNavSection[] = [
           "Förkalkylera Kopierat eller ett filtrerat urval i ett svep, jämför mot förra förkalkylen och spara — med möjlighet att sätta standardpris och försäljningspris.",
       },
       {
+        href: "/artiklar/kopierat",
+        title: "Kopierat",
+        description: "Din egen arbetslista med artiklar — se vad som ligger i den, lägg till och ta bort artiklar, töm den eller förkalkylera den.",
+      },
+      {
         href: "/artiklar/import",
         title: "Importera artiklar",
         description: "Läs in artiklar, strukturer, operationer och priser från CSV- eller Excel-filer.",

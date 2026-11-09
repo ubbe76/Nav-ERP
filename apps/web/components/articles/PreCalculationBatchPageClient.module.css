@@ -103,3 +103,125 @@
   padding-left: 18px;
   font-size: 13px;
 }
+
+/* "Visa och ändra" beside the Kopierat radio: a plain text link in the row. */
+.sourceLink {
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  color: var(--accent-fg);
+  margin-left: -12px;
+}
+
+/* The Filtrera section, compact: small labels, fields that size to their
+   content and wrap, never a fixed-width grid that could spill past a phone
+   screen (px-grid pitfall). */
+.filter {
+  margin: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.filterLegend {
+  padding: 0 6px;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-text-label);
+}
+
+.filterLabel {
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-label);
+}
+
+.compactField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Varugrupp, Typ, Artikelkod and Bara aktiva: as many per line as fit, each
+   at least 150px, stacking on a phone. */
+.filterGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 12px;
+  align-items: end;
+}
+
+.gridCheck {
+  min-height: 36px;
+}
+
+.ranges {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Från – Till ✕ on one line; the two inputs share the width, the dash and
+   the remove button take only what they need. */
+.rangeRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  max-width: 440px;
+}
+
+.rangeDash {
+  color: var(--color-text-muted);
+}
+
+.rangeRemove {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.rangeRemove:hover:not(:disabled) {
+  background: var(--color-divider);
+  color: var(--color-text-primary);
+}
+
+.rangeRemove:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.addRange {
+  align-self: flex-start;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  color: var(--accent-fg);
+  cursor: pointer;
+}
+
+.addRange:hover {
+  text-decoration: underline;
+}
+
+.optionsRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px 24px;
+}

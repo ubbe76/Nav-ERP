@@ -2,6 +2,7 @@ import { articleLabelsSchema } from "@navet/shared";
 import type { FastifyInstance } from "fastify";
 import { SeriesExhaustedError } from "../../system/service/number-series.js";
 import {
+  copiedArticlesListQuerySchema,
   copiedArticlesRemoveSchema,
   copiedArticlesSetSchema,
   createArticleDrawingSchema,
@@ -91,7 +92,9 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
   // Read and write for any menu (COPIED_ARTICLES); the three writes are
   // readOnlySafe on purpose — the list is personal, never business data
   // (read-only-account.test.ts pins the list, article.md has the why).
-  app.get("/articles/copied", { config: { access: COPIED_ARTICLES } }, async (req) => service.listCopiedArticles(req.user!.id));
+  app.get("/articles/copied", { config: { access: COPIED_ARTICLES } }, async (req) =>
+    service.listCopiedArticles(req.user!.id, copiedArticlesListQuerySchema.parse(req.query))
+  );
 
   app.post("/articles/copied", { config: { access: COPIED_ARTICLES, readOnlySafe: true } }, async (req, reply) => {
     const input = copiedArticlesSetSchema.parse(req.body);

@@ -11,18 +11,30 @@ import { articleTypeSchema } from "./article.js";
 export const PRE_CALCULATION_BATCH_MAX = 500;
 
 // The selection: the user's Kopierat list (#28) in its order, or the
-// register's filter. Article number from/to are inclusive and compared in
-// BYTE order (collate "C" — "A-10" sorts before "A-9", the register's own
-// sort), so the range is what the sorted list shows between the two. `type`
-// absent = all types. Configurator templates never take part. Both forms
-// strict, so a filter field beside `copied: true` is a 400, not ignored.
+// register's filter. Article number ranges: an article is taken when it lies
+// in ANY of the ranges (or), the other filters apply on top (and). Each
+// bound is inclusive and compared in BYTE order (collate "C" — "A-10" sorts
+// before "A-9", the register's own sort), so a range is what the sorted
+// list shows between the two; an absent bound is open on that side, and a
+// range with neither bound restricts nothing (so the whole list stays in).
+// At most PRE_CALCULATION_BATCH_MAX_RANGES rows (400 validation-failed).
+// `type` absent = all types. Configurator templates never take part. Both
+// forms strict, so a filter field beside `copied: true` is a 400, not
+// ignored.
+export const PRE_CALCULATION_BATCH_MAX_RANGES = 20;
 const articleNumberBound = z.string().trim().min(1).max(50);
+export const articleNumberRangeSchema = z
+  .object({
+    from: articleNumberBound.optional(),
+    to: articleNumberBound.optional(),
+  })
+  .strict();
+export type ArticleNumberRange = z.infer<typeof articleNumberRangeSchema>;
 export const preCalculationBatchSelectionSchema = z.union([
   z.object({ copied: z.literal(true) }).strict(),
   z
     .object({
-      articleNumberFrom: articleNumberBound.optional(),
-      articleNumberTo: articleNumberBound.optional(),
+      articleNumberRanges: z.array(articleNumberRangeSchema).max(PRE_CALCULATION_BATCH_MAX_RANGES).optional(),
       groupId: z.string().uuid().optional(),
       type: articleTypeSchema.optional(),
       articleCodeId: z.string().uuid().optional(),

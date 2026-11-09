@@ -33,6 +33,10 @@ const ENTRIES: readonly Entry[] = [
   // Förkalkylera flera follows the card's pre-calculation routes (Artiklar or
   // Tillverkning), so a Tillverkning-only user reaches it too.
   { path: "/artiklar/forkalkylera", rule: ["artiklar", "tillverkning"] },
+  // Kopierat is the user's own list, open to every menu like its API routes
+  // (COPIED_ARTICLES = office) — a Tillverkning-only user fills it from the
+  // need calculation and empties it here.
+  { path: "/artiklar/kopierat", rule: ["office"] },
   { path: "/artiklar", rule: ["artiklar"] },
   { path: "/varugrupper", rule: ["artiklar"] },
   { path: "/grunddata", rule: SHARED_REGISTERS },

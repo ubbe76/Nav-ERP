@@ -401,6 +401,11 @@ export function ArticlesPageClient({
               Förkalkylera Kopierat
             </GatedLink>
           )}
+          {copiedView && (
+            <GatedLink href="/artiklar/kopierat" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
+              Visa Kopierat
+            </GatedLink>
+          )}
           {copiedView && articles.total > 0 && (
             <Button type="button" variant="ghost" disabled={copyBusy} onClick={() => void clearCopied()}>
               Töm Kopierat

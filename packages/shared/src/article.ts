@@ -56,6 +56,15 @@ export type ListArticlesQuery = z.infer<typeof listArticlesQuerySchema>;
 // copied-articles-too-many, nothing written).
 export const COPIED_ARTICLES_MAX = 5000;
 
+// GET /articles/copied?details=true — the page Kopierat (/artiklar/kopierat)
+// wants the articles themselves (number, name, type, active) in the list's
+// order; the count readers (the register's "Kopierat (N)", Förkalkylera
+// flera) leave it out and get only the ids.
+export const copiedArticlesListQuerySchema = z.object({
+  details: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
+});
+export type CopiedArticlesListQuery = z.infer<typeof copiedArticlesListQuerySchema>;
+
 // POST /articles/copied `query`: the register's search and filters, without
 // paging — every hit is copied, resolved on the server with the SAME where
 // as GET /articles (repo.list / repo.listIds). `withAbc` is harmless here and

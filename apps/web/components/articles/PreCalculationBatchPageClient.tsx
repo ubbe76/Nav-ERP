@@ -10,8 +10,9 @@ import { formatMoney, formatPercent, formatQuantity, formatSignedMoney } from ".
 import { ARTICLE_TYPE_LABELS, type ArticleGroup, type ArticleType, type RegisterEntry } from "../../lib/types";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
-import { Checkbox, Field, Input, Select } from "../ui/Field";
-import { FormError, FormHint, FormNotice, FormRow, FormStack } from "../ui/Form";
+import { Checkbox, Input, Select } from "../ui/Field";
+import { FormError, FormHint, FormNotice, FormStack } from "../ui/Form";
+import { GatedLink } from "../ui/GatedLink";
 import { useCan } from "../PermissionsProvider";
 import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
 import { shareTrack, Table } from "../ui/Table";
@@ -51,6 +52,17 @@ interface RanWith {
 
 type TypeFilter = "" | ArticleType;
 
+// One Artikelnummer från/till row in the filter. An article is taken when it
+// lies in ANY of the rows; a row with both fields empty is not sent (it
+// would let everything in). Mirrors PRE_CALCULATION_BATCH_MAX_RANGES in
+// packages/shared/src/pre-calculation-batch.ts (the web cannot import it).
+interface RangeRow {
+  from: string;
+  to: string;
+}
+const MAX_RANGES = 20;
+const emptyRange = (): RangeRow => ({ from: "", to: "" });
+
 const money = (v: number | null) => (v === null ? "—" : formatMoney(v));
 const dateOf = (iso: string) => new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Europe/Stockholm" });
 
@@ -60,8 +72,7 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
   const [source, setSource] = useState<Source>(initialSource);
   const [groups, setGroups] = useState<ArticleGroup[]>([]);
   const [articleCodes, setArticleCodes] = useState<RegisterEntry[]>([]);
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const [ranges, setRanges] = useState<RangeRow[]>([emptyRange()]);
   const [groupId, setGroupId] = useState("");
   const [type, setType] = useState<TypeFilter>("manufactured");
   const [articleCodeId, setArticleCodeId] = useState("");
@@ -97,12 +108,23 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
   const copiedDisabled = copiedCount === 0;
   const quantityValid = Number(fallbackQuantity) > 0;
 
+  function setRange(index: number, patch: Partial<RangeRow>) {
+    setRanges((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+  }
+  // At least one row stays, so the fields never disappear.
+  function removeRange(index: number) {
+    setRanges((prev) => (prev.length === 1 ? [emptyRange()] : prev.filter((_, i) => i !== index)));
+  }
+
   function selectionBody(): Record<string, unknown> {
     if (source === "copied") return { selection: { copied: true } };
+    const articleNumberRanges = ranges
+      .map((r) => ({ from: r.from.trim(), to: r.to.trim() }))
+      .filter((r) => r.from || r.to)
+      .map((r) => ({ ...(r.from ? { from: r.from } : {}), ...(r.to ? { to: r.to } : {}) }));
     return {
       selection: {
-        ...(from.trim() ? { articleNumberFrom: from.trim() } : {}),
-        ...(to.trim() ? { articleNumberTo: to.trim() } : {}),
+        ...(articleNumberRanges.length > 0 ? { articleNumberRanges } : {}),
         ...(groupId ? { groupId } : {}),
         ...(type ? { type } : {}),
         ...(articleCodeId ? { articleCodeId } : {}),
@@ -288,6 +310,9 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
               <input type="radio" name="source" checked={source === "copied"} disabled={copiedDisabled} onChange={() => setSource("copied")} />
               Kopierat{copiedCount !== null ? ` (${copiedCount.toLocaleString("sv-SE")})` : ""}
             </label>
+            <GatedLink href="/artiklar/kopierat" className={styles.sourceLink}>
+              Visa och ändra
+            </GatedLink>
             <label className={styles.radio}>
               <input type="radio" name="source" checked={source === "filter"} onChange={() => setSource("filter")} />
               Filter
@@ -295,22 +320,51 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
           </div>
           {copiedDisabled && (
             <FormHint>
-              Kopierat är tomt. Kopiera artiklar i <Link href="/artiklar/register">artikelregistret</Link> först.
+              Kopierat är tomt. Kopiera artiklar i <Link href="/artiklar/register">artikelregistret</Link> eller lägg till dem på sidan{" "}
+              <GatedLink href="/artiklar/kopierat">Kopierat</GatedLink> först.
             </FormHint>
           )}
 
           {source === "filter" && (
-            <>
-              <FormRow columns={2}>
-                <Field label="Artikelnummer från" htmlFor="pcb-from">
-                  <Input id="pcb-from" value={from} onChange={(e) => setFrom(e.target.value)} />
-                </Field>
-                <Field label="Artikelnummer till" htmlFor="pcb-to">
-                  <Input id="pcb-to" value={to} onChange={(e) => setTo(e.target.value)} />
-                </Field>
-              </FormRow>
-              <FormRow columns={3}>
-                <Field label="Varugrupp" htmlFor="pcb-group">
+            <fieldset className={styles.filter}>
+              <legend className={styles.filterLegend}>Filtrera</legend>
+              <div className={styles.ranges} role="group" aria-label="Artikelnummer från och till">
+                <span className={styles.filterLabel}>Artikelnummer</span>
+                {ranges.map((r, i) => (
+                  <div key={i} className={styles.rangeRow}>
+                    <Input
+                      value={r.from}
+                      placeholder="Från"
+                      aria-label={`Artikelnummer från, intervall ${i + 1}`}
+                      onChange={(e) => setRange(i, { from: e.target.value })}
+                    />
+                    <span className={styles.rangeDash} aria-hidden="true">
+                      –
+                    </span>
+                    <Input value={r.to} placeholder="Till" aria-label={`Artikelnummer till, intervall ${i + 1}`} onChange={(e) => setRange(i, { to: e.target.value })} />
+                    <button
+                      type="button"
+                      className={styles.rangeRemove}
+                      disabled={ranges.length === 1}
+                      aria-label={`Ta bort intervall ${i + 1}`}
+                      title="Ta bort intervall"
+                      onClick={() => removeRange(i)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                {ranges.length < MAX_RANGES && (
+                  <button type="button" className={styles.addRange} onClick={() => setRanges((prev) => [...prev, emptyRange()])}>
+                    + Lägg till intervall
+                  </button>
+                )}
+              </div>
+              <div className={styles.filterGrid}>
+                <div className={styles.compactField}>
+                  <label className={styles.filterLabel} htmlFor="pcb-group">
+                    Varugrupp
+                  </label>
                   <Select id="pcb-group" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
                     <option value="">Alla</option>
                     {groups.map((g) => (
@@ -319,8 +373,11 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
                       </option>
                     ))}
                   </Select>
-                </Field>
-                <Field label="Typ" htmlFor="pcb-type">
+                </div>
+                <div className={styles.compactField}>
+                  <label className={styles.filterLabel} htmlFor="pcb-type">
+                    Typ
+                  </label>
                   <Select id="pcb-type" value={type} onChange={(e) => setType(e.target.value as TypeFilter)}>
                     <option value="">Alla</option>
                     {(Object.keys(ARTICLE_TYPE_LABELS) as ArticleType[]).map((t) => (
@@ -329,8 +386,11 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
                       </option>
                     ))}
                   </Select>
-                </Field>
-                <Field label="Artikelkod" htmlFor="pcb-code">
+                </div>
+                <div className={styles.compactField}>
+                  <label className={styles.filterLabel} htmlFor="pcb-code">
+                    Artikelkod
+                  </label>
                   <Select id="pcb-code" value={articleCodeId} onChange={(e) => setArticleCodeId(e.target.value)}>
                     <option value="">Alla</option>
                     {articleCodes.map((c) => (
@@ -339,32 +399,27 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
                       </option>
                     ))}
                   </Select>
-                </Field>
-              </FormRow>
-              <label className={styles.checkLine}>
-                <Checkbox checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)} />
-                Bara aktiva
-              </label>
-            </>
+                </div>
+                <label className={`${styles.checkLine} ${styles.gridCheck}`}>
+                  <Checkbox checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)} />
+                  Bara aktiva
+                </label>
+              </div>
+            </fieldset>
           )}
 
-          <FormRow columns={2}>
-            <Field label="Antal när förkalkyl saknas" htmlFor="pcb-qty">
-              <Input
-                id="pcb-qty"
-                type="number"
-                size="sm"
-                min="0"
-                step="any"
-                value={fallbackQuantity}
-                onChange={(e) => setFallbackQuantity(e.target.value)}
-              />
-            </Field>
-          </FormRow>
-          <label className={styles.checkLine}>
-            <Checkbox checked={multiLevel} onChange={(e) => setMultiLevel(e.target.checked)} />
-            Räkna om underliggande nivåer
-          </label>
+          <div className={styles.optionsRow}>
+            <div className={styles.compactField}>
+              <label className={styles.filterLabel} htmlFor="pcb-qty">
+                Antal när förkalkyl saknas
+              </label>
+              <Input id="pcb-qty" type="number" size="sm" min="0" step="any" value={fallbackQuantity} onChange={(e) => setFallbackQuantity(e.target.value)} />
+            </div>
+            <label className={`${styles.checkLine} ${styles.gridCheck}`}>
+              <Checkbox checked={multiLevel} onChange={(e) => setMultiLevel(e.target.checked)} />
+              Räkna om underliggande nivåer
+            </label>
+          </div>
           <FormHint>Varje artikel räknas med antalet i sin senaste förkalkyl.</FormHint>
           <div>
             <Button type="button" onClick={onPreview} disabled={running || !quantityValid || (source === "copied" && copiedDisabled)}>
