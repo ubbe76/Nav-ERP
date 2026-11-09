@@ -1,12 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   closeTab,
   documentHref,
   embeddedBootScript,
+  isEmbedded,
   MAX_DOCUMENT_TABS,
   moveTab,
   openTab,
   provisionalTitle,
+  reassertEmbedded,
   restoreTabs,
   sameDocument,
   tabForDigit,
@@ -158,5 +160,76 @@ describe("embeddedBootScript", () => {
     (framed as { self?: unknown }).self = framed;
     run(framed, attrs);
     expect(attrs).toEqual([]);
+  });
+});
+
+// The live check behind every embedded decision (no tabs restored, no
+// polling, the bridge): the frame itself, because React strips <html>'s
+// attributes when it client-renders the root after a hydration error — the
+// page then nested Nav inside the tab.
+describe("isEmbedded and reassertEmbedded", () => {
+  const g = globalThis as { window?: unknown; document?: unknown };
+  afterEach(() => {
+    delete g.window;
+    delete g.document;
+  });
+
+  function framedWindow() {
+    const parent = { location: { origin: ORIGIN } };
+    const win = { top: parent, parent, location: { origin: ORIGIN } };
+    (win as { self?: unknown }).self = win;
+    return win;
+  }
+
+  function fakeDocument(initial: string[]) {
+    const attrs = new Set(initial);
+    return {
+      attrs,
+      documentElement: {
+        hasAttribute: (name: string) => attrs.has(name),
+        setAttribute: (name: string) => void attrs.add(name),
+      },
+    };
+  }
+
+  it("asks the frame, not the attribute", () => {
+    g.window = framedWindow();
+    g.document = fakeDocument([]);
+    expect(isEmbedded()).toBe(true);
+  });
+
+  it("is false on the top page, in a frame of another site and on the server", () => {
+    expect(isEmbedded()).toBe(false);
+    const top: { self?: unknown; top?: unknown; location?: unknown } = { location: { origin: ORIGIN } };
+    top.self = top;
+    top.top = top;
+    g.window = top;
+    expect(isEmbedded()).toBe(false);
+    const foreign = {
+      get location(): never {
+        throw new Error("cross-origin");
+      },
+    };
+    const framed = { top: foreign, parent: foreign, location: { origin: ORIGIN } };
+    (framed as { self?: unknown }).self = framed;
+    g.window = framed;
+    expect(isEmbedded()).toBe(false);
+  });
+
+  it("puts data-embedded back after React stripped it, and only inside a frame", () => {
+    g.window = framedWindow();
+    const doc = fakeDocument(["data-theme"]);
+    g.document = doc;
+    reassertEmbedded();
+    expect([...doc.attrs]).toEqual(["data-theme", "data-embedded"]);
+
+    const top: { self?: unknown; top?: unknown; location?: unknown } = { location: { origin: ORIGIN } };
+    top.self = top;
+    top.top = top;
+    g.window = top;
+    const topDoc = fakeDocument([]);
+    g.document = topDoc;
+    reassertEmbedded();
+    expect([...topDoc.attrs]).toEqual([]);
   });
 });

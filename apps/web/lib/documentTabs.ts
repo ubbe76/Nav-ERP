@@ -150,8 +150,29 @@ export function restoreTabs(raw: string | null, origin: string): { tabs: Documen
 // frame of Nav's own origin — reading the parent's origin throws otherwise.
 export const embeddedBootScript = `(function(){try{if(window.self!==window.top&&window.parent.location.origin===window.location.origin){document.documentElement.setAttribute("data-embedded","")}}catch(e){}})();`;
 
+// The frame check itself, never the attribute: when React client-renders the
+// root after a hydration error (a timestamp formatted in the server's zone, a
+// browser extension touching the DOM) it re-acquires <html> and strips every
+// attribute the boot scripts set, data-embedded included. A page that then
+// trusted the attribute showed the whole app frame inside the tab and
+// restored the tabs from the shared sessionStorage — Nav nested in itself,
+// frame by frame. reassertEmbedded puts the attribute back.
 export function isEmbedded(): boolean {
-  return typeof document !== "undefined" && document.documentElement.hasAttribute("data-embedded");
+  if (typeof window === "undefined") return false;
+  try {
+    return window.self !== window.top && window.parent.location.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+// Called on mount by DocumentTabsProvider (a layout effect, so before the
+// first paint of a client-rendered root): the CSS that hides the app frame
+// keys on the attribute.
+export function reassertEmbedded(): void {
+  if (isEmbedded() && !document.documentElement.hasAttribute("data-embedded")) {
+    document.documentElement.setAttribute("data-embedded", "");
+  }
 }
 
 // The messages a tab's page sends the frame around it (same origin only).
