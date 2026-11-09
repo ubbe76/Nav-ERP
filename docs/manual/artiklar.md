@@ -593,12 +593,14 @@ Högst 500 artiklar kan förkalkyleras åt gången. Blir urvalet större visas e
 
 Varje artikel räknas med antalet i **sin senaste sparade förkalkyl**. Har artikeln ingen förkalkyl används **Antal när förkalkyl saknas** (förvalt 1). Kryssrutan **Räkna om underliggande nivåer** fungerar som på kortet.
 
+Antalet går också att ändra **per rad** i tabellen: skriv ett nytt värde i radens **Antal** och tryck Enter eller lämna fältet, så räknas just den raden om med det antalet (under fältet står *räknar om…* medan det pågår). Ett eget antal vinner över både den senaste förkalkylens och **Antal när förkalkyl saknas**, och det ligger kvar när du klickar **Förkalkylera** igen. Esc ångrar ett värde du inte har lämnat än.
+
 ### Tabellen
 
 Klicka **Förkalkylera** (knappen visar **Beräknar…** medan det pågår). Inget sparas ännu. Tabellen har en rad per artikel:
 
 - **Artikelnummer** (länk till artikelkortet) och **Benämning**. Eventuella varningar från kalkylen står under benämningen.
-- **Antal**, med anmärkningen *senaste förkalkyl* eller *valt antal* som visar var antalet kom ifrån.
+- **Antal** — ett fält du kan ändra, med anmärkningen *senaste förkalkyl*, *valt antal* eller *eget antal* som visar var antalet kom ifrån.
 - **TVK/st** — tillverkningskostnaden per styck.
 - **Förra TVK/st** med datum, och **Ändring** i kronor och procent. Ändringen visas bara när det finns en tidigare förkalkyl; en höjd kostnad är röd och en sänkt grön.
 - **Standardpris** och **Försäljningspris** — artikelns nuvarande värden.
@@ -608,7 +610,7 @@ En artikel som inte går att kalkylera visar felet under benämningen och kan in
 
 ### Spara markerade
 
-**Spara markerade (N)** sparar en ny **Förkalkyl** på varje markerad artikel, med antalet som visas i tabellen och samma inställning för underliggande nivåer som förhandsvisningen. Knappen syns bara för dig som får spara kalkyler. Kalkylerna räknas om vid sparandet, så ändrade priser sedan förhandsvisningen kommer med.
+**Spara markerade (N)** sparar en ny **Förkalkyl** på varje markerad artikel, med antalet som visas i tabellen (räknas en rad om när du klickar, väntar sparandet in den) och samma inställning för underliggande nivåer som förhandsvisningen. Knappen syns bara för dig som får spara kalkyler. Kalkylerna räknas om vid sparandet, så ändrade priser sedan förhandsvisningen kommer med.
 
 Två kryssrutor, båda av från början, gör mer i samma svep:
 

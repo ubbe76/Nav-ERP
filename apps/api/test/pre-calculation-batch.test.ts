@@ -24,6 +24,14 @@ describe("batchQuantity", () => {
     expect(batchQuantity(undefined, 7)).toEqual({ quantity: 7, quantitySource: "fallback" });
   });
 
+  it("an Antal typed on the row wins over the latest calculation and the fallback", () => {
+    expect(batchQuantity({ quantity: 5 }, 1, 25)).toEqual({ quantity: 25, quantitySource: "manual" });
+    expect(batchQuantity(null, 7, 0.5)).toEqual({ quantity: 0.5, quantitySource: "manual" });
+    // Not a quantity: falls through to the usual rule.
+    expect(batchQuantity({ quantity: 5 }, 1, 0)).toEqual({ quantity: 5, quantitySource: "latest" });
+    expect(batchQuantity(null, 7, Number.NaN)).toEqual({ quantity: 7, quantitySource: "fallback" });
+  });
+
   it("treats an unusable latest quantity as none", () => {
     expect(batchQuantity({ quantity: "0.0000" }, 3)).toEqual({ quantity: 3, quantitySource: "fallback" });
     expect(batchQuantity({ quantity: -1 }, 3)).toEqual({ quantity: 3, quantitySource: "fallback" });

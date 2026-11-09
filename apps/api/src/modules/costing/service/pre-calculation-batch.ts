@@ -14,17 +14,23 @@ function round(value: number, decimals: number): number {
   return Math.round(value * factor) / factor;
 }
 
-export type QuantitySource = "latest" | "fallback";
+export type QuantitySource = "latest" | "fallback" | "manual";
 
 // The user's decision (spec 2026-11-08): an article is calculated with its
 // latest saved förkalkyl's quantity; one without a saved förkalkyl with the
 // chosen fallback. A latest calculation whose quantity is unusable (≤ 0,
 // which the schema has refused since day one but a row could carry) counts
 // as none — the fallback is used, never a quantity preCalculate would reject.
+// An Antal typed on the row (2026-11-09) wins over both ("manual"); a
+// non-positive one is no quantity (the schema refuses it anyway).
 export function batchQuantity(
   latest: { quantity: number | string } | null | undefined,
-  fallbackQuantity: number
+  fallbackQuantity: number,
+  manualQuantity?: number
 ): { quantity: number; quantitySource: QuantitySource } {
+  if (manualQuantity !== undefined && Number.isFinite(manualQuantity) && manualQuantity > 0) {
+    return { quantity: manualQuantity, quantitySource: "manual" };
+  }
   const q = latest ? Number(latest.quantity) : NaN;
   if (Number.isFinite(q) && q > 0) return { quantity: q, quantitySource: "latest" };
   return { quantity: fallbackQuantity, quantitySource: "fallback" };

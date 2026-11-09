@@ -162,6 +162,10 @@ describe("Förkalkylera flera — the routes", () => {
       { url: "/costing/pre-calculations/batch", payload: { selection: { activeOnly: true, articleNumberRanges: [{ start: "A" }] }, fallbackQuantity: 1 } },
       { url: "/costing/pre-calculations/batch", payload: { selection: { activeOnly: true, articleNumberRanges: [{ from: " " }] }, fallbackQuantity: 1 } },
       { url: "/costing/pre-calculations/batch", payload: { selection: { activeOnly: true, articleNumberFrom: "A" }, fallbackQuantity: 1 } },
+      // Antal per rad: a non-positive own quantity, an empty onlyArticleIds, a bad id.
+      { url: "/costing/pre-calculations/batch", payload: { selection: { activeOnly: true }, fallbackQuantity: 1, quantities: [{ articleId: crypto.randomUUID(), quantity: 0 }] } },
+      { url: "/costing/pre-calculations/batch", payload: { selection: { activeOnly: true }, fallbackQuantity: 1, onlyArticleIds: [] } },
+      { url: "/costing/pre-calculations/batch", payload: { selection: { activeOnly: true }, fallbackQuantity: 1, onlyArticleIds: ["nope"] } },
       { url: "/costing/pre-calculations/batch/save", payload: { items: [] } },
       { url: "/costing/pre-calculations/batch/save", payload: { items: [{ articleId: "not-a-uuid", quantity: 1 }] } },
       { url: "/costing/pre-calculations/batch/save", payload: { items: [{ articleId: crypto.randomUUID(), quantity: 0 }] } },

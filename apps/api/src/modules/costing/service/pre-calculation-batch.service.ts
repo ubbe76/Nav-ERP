@@ -149,7 +149,11 @@ export function createPreCalculationBatchService(deps: {
 
   return {
     async preview(userId: string, input: PreCalculationBatchInput): Promise<{ rows: PreCalculationBatchRow[] }> {
-      const selected = await selectArticles(userId, input.selection);
+      // The cap is the selection's (as for a full run); onlyArticleIds then
+      // keeps the rows being recalculated, in selection order.
+      const only = input.onlyArticleIds ? new Set(input.onlyArticleIds) : null;
+      const selected = (await selectArticles(userId, input.selection)).filter((a) => !only || only.has(a.id));
+      const manualById = new Map((input.quantities ?? []).map((q) => [q.articleId, q.quantity]));
       // ONE batch read of the latest förkalkyl per article — the same query
       // TB and the Kalkylpris read (calculated-price.ts), so the quantity and
       // "Förra TVK/st" come from the calculation the rest of the house shows.
@@ -158,7 +162,7 @@ export function createPreCalculationBatchService(deps: {
       const rows: PreCalculationBatchRow[] = [];
       for (const article of selected) {
         const latest = latestById.get(article.id);
-        const { quantity, quantitySource } = batchQuantity(latest, input.fallbackQuantity);
+        const { quantity, quantitySource } = batchQuantity(latest, input.fallbackQuantity, manualById.get(article.id));
         const previous = previousOf(latest);
         const base = {
           articleId: article.id,

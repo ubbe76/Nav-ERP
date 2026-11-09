@@ -53,6 +53,17 @@ export const preCalculationBatchSchema = z.object({
   // Räkna om underliggande nivåer, as on the card (plain z.boolean(), see
   // preCalculateSchema).
   multiLevel: z.boolean().default(false),
+  // Eget antal per rad (user's request 2026-11-09): wins over the latest
+  // förkalkyl's quantity and the fallback (quantitySource "manual"). An
+  // article outside the selection is ignored.
+  quantities: z
+    .array(z.object({ articleId: z.string().uuid(), quantity: z.coerce.number().positive() }))
+    .max(PRE_CALCULATION_BATCH_MAX)
+    .optional(),
+  // Recalculate only these articles of the selection — the one row whose
+  // Antal was just changed, without running the whole selection again. An id
+  // outside the selection gives no row.
+  onlyArticleIds: z.array(z.string().uuid()).min(1).max(PRE_CALCULATION_BATCH_MAX).optional(),
 });
 export type PreCalculationBatchInput = z.infer<typeof preCalculationBatchSchema>;
 
