@@ -333,6 +333,42 @@ describe("getValuation — fifo method (#19)", () => {
   });
 });
 
+describe("getValuation — a large article list reads unfiltered (perf 2026-11-09)", () => {
+  // Over IN_LIST_MAX articles the price readers read every row and keep the
+  // report's own articles in memory; the result must equal the IN-list path.
+  it("gives the same valuation for every method and date whichever path reads the prices", async () => {
+    const location = await makeLocation();
+    const unfiltered = createValuationService({ db, pdf: testDocumentPdfService, inListMax: 0 });
+    const a = await makeArticle();
+    const b = await makeArticle();
+    const netted = await makeArticle();
+    const order = crypto.randomUUID();
+    await insertHistory(a.id, 4, new Date("2024-01-01T10:00:00Z"));
+    await insertHistory(a.id, 6, new Date("2024-03-01T10:00:00Z"));
+    await insertHistory(b.id, 11, new Date("2024-01-01T10:00:00Z"));
+    await insertHistory(netted.id, 99, new Date("2024-01-01T10:00:00Z"));
+    const at = (day: string) => new Date(`${day}T10:00:00Z`);
+    await insertTransaction({ articleId: a.id, locationId: location.id, quantityDelta: 10, unitCost: 5, transactionType: "purchase_receipt", createdAt: at("2024-01-10") });
+    await insertTransaction({ articleId: a.id, locationId: location.id, quantityDelta: 10, unitCost: 8, transactionType: "purchase_receipt", createdAt: at("2024-02-10") });
+    await insertTransaction({ articleId: a.id, locationId: location.id, quantityDelta: -15, transactionType: "sales_delivery", createdAt: at("2024-03-10") });
+    await insertTransaction({ articleId: b.id, locationId: location.id, quantityDelta: 4, unitCost: 9, transactionType: "mo_receipt", referenceId: order, createdAt: at("2024-01-20") });
+    await insertTransaction({ articleId: b.id, locationId: location.id, quantityDelta: 3, unitCost: 12, transactionType: "inventory_adjustment", createdAt: at("2024-02-20") });
+    // Bought and sold out: rows the unfiltered read sees, but no report row.
+    await insertTransaction({ articleId: netted.id, locationId: location.id, quantityDelta: 2, unitCost: 50, transactionType: "purchase_receipt", createdAt: at("2024-01-15") });
+    await insertTransaction({ articleId: netted.id, locationId: location.id, quantityDelta: -2, transactionType: "sales_delivery", createdAt: at("2024-01-16") });
+
+    for (const method of ["standard", "latest_purchase", "moving_average", "fifo"] as const) {
+      for (const asOf of ["2024-02-15", "2024-03-31"]) {
+        const viaInList = await valuationService.getValuation({ asOf, method });
+        const viaMemory = await unfiltered.getValuation({ asOf, method });
+        expect(viaMemory, `${method} ${asOf}`).toEqual(viaInList);
+        expect(rowFor(viaMemory, netted.id), `${method} ${asOf}`).toBeUndefined();
+        expect(rowFor(viaMemory, a.id)?.unitCost, `${method} ${asOf}`).not.toBeNull();
+      }
+    }
+  });
+});
+
 describe("getValuation — grouping, zero-net exclusion, totals", () => {
   it("drops zero-net articles, orders groups (null group last) and excludes unvalued rows from totals", async () => {
     const location = await makeLocation();

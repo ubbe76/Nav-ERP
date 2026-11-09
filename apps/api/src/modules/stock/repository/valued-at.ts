@@ -20,3 +20,14 @@ export const stockValuedAt = sql<Date>`coalesce(${stockTransactions.valuedAt}, $
 // by the end of that day in Stockholm", whatever the database session's zone
 // is (the container's Postgres runs UTC).
 export const stockValuedDate = sql`(coalesce(${stockTransactions.valuedAt}, ${stockTransactions.createdAt}) AT TIME ZONE 'Europe/Stockholm')::date`;
+
+// "Valued by the end of Stockholm day asOf" as a comparison on the moment
+// itself: the moment is before the next Stockholm midnight. Same rows as
+// `${stockValuedDate} <= asOf`, but without turning every row's moment into
+// a Stockholm day first — that per-row conversion was most of the valuation
+// report's scan, and it kept the expression index above out of reach
+// (perf run 2026-11-09). The lagerlogg's to-filter uses the same bound.
+export function stockValuedOnOrBefore(asOf: string) {
+  return sql`${stockValuedAt} < ((${asOf}::date + 1)::timestamp AT TIME ZONE 'Europe/Stockholm')`;
+}
+
