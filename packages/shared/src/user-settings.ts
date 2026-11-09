@@ -100,6 +100,9 @@ export const listColumnsEntrySchema = z
     widths: z
       .record(columnKeySchema, z.number().int().min(LIST_COLUMN_MIN_WIDTH).max(LIST_COLUMN_MAX_WIDTH))
       .refine((widths) => Object.keys(widths).length <= MAX_LIST_COLUMNS, { message: "För många kolumnbredder" }),
+    // Kolumnordning: the movable columns' keys in the user's order (absent =
+    // as built). Keys that no longer exist are ignored by the web.
+    order: z.array(columnKeySchema).max(MAX_LIST_COLUMNS).optional(),
   })
   .strict();
 export type ListColumnsEntry = z.infer<typeof listColumnsEntrySchema>;

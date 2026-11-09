@@ -72,6 +72,7 @@ export function PurchaseOrdersPageClient({ orders, pageSize }: { orders: Paged<P
       <Table<PurchaseOrder>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={orders.rows}
         emptyText="Inga ordrar matchar sökningen"
         renderCell={(order, key) => {

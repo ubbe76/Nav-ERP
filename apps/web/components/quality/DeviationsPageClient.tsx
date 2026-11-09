@@ -124,6 +124,7 @@ export function DeviationsPageClient({
       <Table<DeviationListRow>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={deviations.rows}
         emptyText="Inga avvikelser matchar urvalet"
         renderCell={(row, key) => {

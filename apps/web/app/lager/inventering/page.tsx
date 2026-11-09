@@ -1,19 +1,16 @@
 import { headers } from "next/headers";
 import Link from "next/link";
 import { AppShell } from "../../../components/AppShell";
-import { Table } from "../../../components/ui/Table";
-import { ListExportLink, ListToolbar, ListFilterSelect, Pagination } from "../../../components/ui/ListControls";
-import { StatusPill } from "../../../components/ui/StatusPill";
+import { Pagination } from "../../../components/ui/ListControls";
+import { StockCountsList } from "../../../components/stock/StockCountsList";
 import buttonStyles from "../../../components/ui/Button.module.css";
 import { apiGet, getCurrentUser } from "../../../lib/api";
 import { listApiQuery, type PageSearchParams } from "../../../lib/listQuery";
 import { getListPageSize } from "../../../lib/listPageSize";
-import { STOCK_COUNT_STATUS_LABELS, type Paged, type StockCountSession } from "../../../lib/types";
+import type { Paged, StockCountSession } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
 import { HelpLink } from "../../../components/ui/HelpLink";
 import { StockCountScanPanel } from "../../../components/stock/StockCountScanPanel";
-
-const PILL_STATUS = { open: "running", posted: "done", cancelled: "stopped" } as const;
 
 // Admin-gated like /lager/vardering — the API requires admin on /stock-counts.
 export default async function StockCountListPage(props: { searchParams: Promise<PageSearchParams> }) {
@@ -52,46 +49,7 @@ export default async function StockCountListPage(props: { searchParams: Promise<
 
       <StockCountScanPanel />
 
-      <ListToolbar placeholder="Sök INV-nummer eller lagerplats…">
-        <ListFilterSelect
-          param="status"
-          allLabel="Alla statusar"
-          ariaLabel="Filtrera på status"
-          options={Object.entries(STOCK_COUNT_STATUS_LABELS).map(([value, label]) => ({ value, label }))}
-        />
-        <ListExportLink endpoint="/api/v1/stock-counts/csv" />
-      </ListToolbar>
-
-      <Table<StockCountSession>
-        columns={[
-          { key: "countNumber", label: "Nummer", width: "120px" },
-          { key: "location", label: "Lagerplats", width: "1fr" },
-          { key: "status", label: "Status", width: "130px" },
-          { key: "blocksTransactions", label: "Spärr", width: "90px" },
-          { key: "counted", label: "Räknade", width: "110px", align: "right" },
-          { key: "createdAt", label: "Skapad", width: "160px" },
-        ]}
-        rows={sessions.rows}
-        emptyText="Inga inventeringar ännu"
-        renderCell={(row, key) => {
-          switch (key) {
-            case "countNumber":
-              return <Link href={`/lager/inventering/${row.id}`}>{row.countNumber}</Link>;
-            case "location":
-              return `${row.warehouseName} — ${row.locationName}`;
-            case "status":
-              return <StatusPill status={PILL_STATUS[row.status]} label={STOCK_COUNT_STATUS_LABELS[row.status]} compact />;
-            case "blocksTransactions":
-              return row.blocksTransactions ? "Ja" : "Nej";
-            case "counted":
-              return `${row.countedCount} / ${row.rowCount}`;
-            case "createdAt":
-              return new Date(row.createdAt).toLocaleString("sv-SE");
-            default:
-              return null;
-          }
-        }}
-      />
+      <StockCountsList rows={sessions.rows} />
 
       <Pagination total={sessions.total} pageSize={pageSize} />
     </AppShell>

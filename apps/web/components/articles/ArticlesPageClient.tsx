@@ -476,6 +476,7 @@ export function ArticlesPageClient({
         <Table<Article>
           columns={view.columns}
           onColumnResize={view.onColumnResize}
+          {...view.reorder}
           rows={rows}
           highlightedRowId={highlighted === null ? null : rows[highlighted]?.id ?? null}
           emptyText={copiedView && copiedCount === 0 ? "Kopierat är tomt" : "Inga artiklar matchar sökningen"}

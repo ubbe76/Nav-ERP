@@ -2,41 +2,62 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
-import { Columns3 } from "lucide-react";
+import { ArrowDown, ArrowUp, Columns3 } from "lucide-react";
 import { useUserPrefs } from "../UserPrefsProvider";
-import { applyListColumns, canHideColumn, listColumnsKey, type ColumnLike, type ListColumnsEntry } from "../../lib/listColumns";
+import {
+  applyListColumns,
+  canHideColumn,
+  listColumnsKey,
+  movedColumnOrder,
+  orderColumns,
+  type ColumnLike,
+  type ListColumnsEntry,
+} from "../../lib/listColumns";
 import styles from "./ListColumns.module.css";
 
 // Kolumner (Nav som program, punkt 6): a list page's columns as the user set
-// them up — hidden columns left out, dragged widths applied — saved per user
-// and list (the page's path). The page puts `chooser` in its ListToolbar and
-// hands `columns` and `onColumnResize` to its Table:
+// them up — in their order, hidden columns left out, dragged widths applied —
+// saved per user and list (the page's path). The page puts `chooser` in its
+// ListToolbar and spreads `tableProps` on its Table:
 //
 //   const view = useListColumns(columns);
 //   <ListToolbar>{filters}{view.chooser}</ListToolbar>
-//   <Table columns={view.columns} onColumnResize={view.onColumnResize} … />
+//   <Table columns={view.columns} onColumnResize={view.onColumnResize} {...view.reorder} … />
 export function useListColumns<C extends ColumnLike>(
   columns: C[]
-): { columns: C[]; chooser: ReactNode; onColumnResize?: (key: string, width: number | null) => void } {
+): {
+  columns: C[];
+  chooser: ReactNode;
+  onColumnResize?: (key: string, width: number | null) => void;
+  // Kolumnordning: the Table's drag grips (spread on the Table).
+  reorder: {
+    onColumnReorder?: (fromKey: string, toKey: string, after: boolean) => void;
+    reorderableKeys?: string[];
+  };
+} {
   const pathname = usePathname();
   const key = listColumnsKey(pathname);
   const { listColumns, setListColumns } = useUserPrefs();
   const entry = key ? listColumns[key] : undefined;
   const shown = useMemo(() => applyListColumns(columns, entry), [columns, entry]);
 
-  if (!key) return { columns, chooser: null };
+  if (!key) return { columns, chooser: null, reorder: {} };
 
   const current: ListColumnsEntry = entry ?? { hidden: [], widths: {} };
   function onColumnResize(columnKey: string, width: number | null) {
     const widths = { ...current.widths };
     if (width === null) delete widths[columnKey];
     else widths[columnKey] = width;
-    setListColumns(key!, { hidden: current.hidden, widths });
+    setListColumns(key!, { ...current, widths });
+  }
+  function onColumnReorder(fromKey: string, toKey: string, after: boolean) {
+    setListColumns(key!, { ...current, order: movedColumnOrder(columns, current.order, fromKey, toKey, after) });
   }
 
   return {
     columns: shown,
     onColumnResize,
+    reorder: { onColumnReorder, reorderableKeys: columns.filter(canHideColumn).map((c) => c.key) },
     chooser: <ColumnChooser columns={columns} entry={current} onChange={(next) => setListColumns(key, next)} />,
   };
 }
@@ -54,9 +75,10 @@ function ColumnChooser({
   const wrapRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelId = useId();
-  const hideable = columns.filter(canHideColumn);
+  // In the user's order, so ↑/↓ move them as the list shows them.
+  const hideable = orderColumns(columns, entry.order).filter(canHideColumn);
   const hidden = new Set(entry.hidden);
-  const changed = entry.hidden.length > 0 || Object.keys(entry.widths).length > 0;
+  const changed = entry.hidden.length > 0 || Object.keys(entry.widths).length > 0 || (entry.order?.length ?? 0) > 0;
 
   useEffect(() => {
     if (!open) return;
@@ -81,7 +103,14 @@ function ColumnChooser({
 
   function toggle(key: string, show: boolean) {
     const next = show ? entry.hidden.filter((k) => k !== key) : [...entry.hidden, key];
-    onChange({ hidden: next, widths: entry.widths });
+    onChange({ ...entry, hidden: next });
+  }
+
+  // ↑/↓: one place up or down among the movable columns.
+  function step(index: number, delta: -1 | 1) {
+    const target = hideable[index + delta];
+    if (!target) return;
+    onChange({ ...entry, order: movedColumnOrder(columns, entry.order, hideable[index]!.key, target.key, delta === 1) });
   }
 
   return (
@@ -101,8 +130,8 @@ function ColumnChooser({
       {open && (
         <div className={styles.panel} id={panelId} role="group" aria-label="Kolumner i listan">
           <ul className={styles.list}>
-            {hideable.map((column) => (
-              <li key={column.key}>
+            {hideable.map((column, index) => (
+              <li key={column.key} className={styles.item}>
                 <label className={styles.option}>
                   <input
                     type="checkbox"
@@ -111,11 +140,30 @@ function ColumnChooser({
                   />
                   {column.label}
                 </label>
+                <span className={styles.move}>
+                  <button
+                    type="button"
+                    aria-label={`Flytta ${column.label} upp`}
+                    disabled={index === 0}
+                    onClick={() => step(index, -1)}
+                  >
+                    <ArrowUp size={13} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Flytta ${column.label} ned`}
+                    disabled={index === hideable.length - 1}
+                    onClick={() => step(index, 1)}
+                  >
+                    <ArrowDown size={13} aria-hidden="true" />
+                  </button>
+                </span>
               </li>
             ))}
           </ul>
           <p className={styles.hint}>
-            Dra i kanten på en kolumnrubrik för att ändra bredden; dubbelklicka på kanten för att återställa den.
+            Dra i kanten på en kolumnrubrik för att ändra bredden; dubbelklicka på kanten för att återställa den. Dra i
+            greppet framför en rubrik — eller använd pilarna här — för att flytta kolumnen.
           </p>
           <button type="button" className={styles.reset} disabled={!changed} onClick={() => onChange(null)}>
             Återställ kolumnerna

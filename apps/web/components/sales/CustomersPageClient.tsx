@@ -56,6 +56,7 @@ export function CustomersPageClient({ customers, pageSize }: { customers: Paged<
       <Table<Customer>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={customers.rows}
         emptyText="Inga kunder matchar sökningen"
         renderCell={(customer, key) => {

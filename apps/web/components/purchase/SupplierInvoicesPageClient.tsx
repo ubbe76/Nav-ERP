@@ -91,6 +91,7 @@ export function SupplierInvoicesPageClient({
       <Table<SupplierInvoice>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={invoices.rows}
         emptyText="Inga leverantörsfakturor matchar sökningen"
         renderCell={(invoice, key) => {

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ColumnResizeHandle } from "./ColumnResizeHandle";
+import { ColumnDragGrip } from "./ColumnDragGrip";
 import styles from "./Table.module.css";
 
 interface Column {
@@ -28,6 +29,11 @@ interface TableProps<T extends { id: string }> {
   // edge; the new content width (null = reset) goes here. Only from a client
   // component — useListColumns hands it out.
   onColumnResize?: (key: string, width: number | null) => void;
+  // Kolumnordning: the movable columns get a grip in their header cell; a
+  // drop calls this. Only from a client component — useListColumns hands
+  // out both.
+  onColumnReorder?: (fromKey: string, toKey: string, after: boolean) => void;
+  reorderableKeys?: readonly string[];
   // Återkoppling (Nav som program, punkt 7): while the rows are on their way
   // the table shows grey placeholder rows in its own shape instead of a
   // "Hämtar …" line. Only while there are no rows to show yet.
@@ -77,6 +83,8 @@ export function Table<T extends { id: string }>({
   footer,
   highlightedRowId,
   onColumnResize,
+  onColumnReorder,
+  reorderableKeys,
   loading = false,
   loadingRows = 5,
 }: TableProps<T>) {
@@ -95,6 +103,9 @@ export function Table<T extends { id: string }>({
       <div className={styles.headerRow}>
         {columns.map((col, i) => (
           <div key={col.key} className={styles.headerCell} data-align={col.align ?? "left"}>
+            {onColumnReorder && reorderableKeys?.includes(col.key) && (
+              <ColumnDragGrip columnKey={col.key} label={col.label} onReorder={onColumnReorder} />
+            )}
             {col.header ?? col.label}
             {onColumnResize && (
               <ColumnResizeHandle

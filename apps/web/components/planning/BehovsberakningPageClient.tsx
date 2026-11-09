@@ -779,6 +779,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
       <Table<DisplayRow>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={articleRows}
         loading={loading}
         emptyText="Inga artiklar matchar filtren"

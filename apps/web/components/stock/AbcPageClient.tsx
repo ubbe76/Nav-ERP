@@ -167,6 +167,7 @@ export function AbcPageClient({
         <Table<AbcRow & { id: string }>
           columns={view.columns}
           onColumnResize={view.onColumnResize}
+          {...view.reorder}
           rows={rows}
           emptyText="Inga artiklar matchar filtren"
           renderCell={(row, key) => {

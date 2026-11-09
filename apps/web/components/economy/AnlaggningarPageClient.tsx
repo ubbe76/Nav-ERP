@@ -104,6 +104,7 @@ export function AnlaggningarPageClient({
       <Table
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={assets.rows}
         emptyText="Inga anläggningar."
         renderCell={(asset, key) => {

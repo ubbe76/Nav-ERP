@@ -48,6 +48,7 @@ export function PaymentBatchesPageClient({ batches, pageSize }: { batches: Paged
       <Table<PaymentBatchListRow>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={batches.rows}
         emptyText="Inga betalfiler än — skapa en från Öppna poster"
         renderCell={(row, key) => {

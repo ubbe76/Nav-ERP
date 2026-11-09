@@ -9,6 +9,9 @@ import {
   applyListColumns,
   canHideColumn,
   clampColumnWidth,
+  isEmptyEntry,
+  movedColumnOrder,
+  orderColumns,
   LIST_COLUMN_MAX_WIDTH,
   LIST_COLUMN_MIN_WIDTH,
   listColumnsKey,
@@ -87,5 +90,45 @@ describe("listColumnsKey", () => {
     for (const path of ["/forsaljning/ordrar", "/lager/abc-analys", "/inkop/leverantorsfakturor"]) {
       expect(listColumnsKeySchema.safeParse(listColumnsKey(path)).success).toBe(true);
     }
+  });
+});
+
+describe("Kolumnordning", () => {
+  const cols = [
+    { key: "select", label: "", width: "40px", header: "☐" },
+    { key: "number", label: "Nummer", width: "100px" },
+    { key: "customer", label: "Kund", width: "1fr" },
+    { key: "date", label: "Datum", width: "100px" },
+    { key: "amount", label: "Belopp", width: "100px" },
+    { key: "menu", label: "", width: "40px" },
+  ];
+  const keys = (list: { key: string }[]) => list.map((c) => c.key);
+
+  it("orders only the movable columns, in their places; the rest keep the built order after the ordered", () => {
+    expect(keys(orderColumns(cols, ["amount", "customer"]))).toEqual(["select", "number", "amount", "customer", "date", "menu"]);
+    // A key that does not exist, or one that may not move, changes nothing.
+    expect(keys(orderColumns(cols, ["gone", "number", "select"]))).toEqual(keys(cols));
+    expect(keys(orderColumns(cols, undefined))).toEqual(keys(cols));
+  });
+
+  it("moves a column before or after another, never the identity or a control column", () => {
+    expect(movedColumnOrder(cols, undefined, "amount", "customer", false)).toEqual(["amount", "customer", "date"]);
+    expect(movedColumnOrder(cols, undefined, "customer", "amount", true)).toEqual(["date", "amount", "customer"]);
+    expect(movedColumnOrder(cols, ["date", "customer", "amount"], "amount", "date", false)).toEqual(["amount", "date", "customer"]);
+    expect(movedColumnOrder(cols, undefined, "number", "date", false)).toEqual(["customer", "date", "amount"]);
+    expect(movedColumnOrder(cols, undefined, "date", "menu", true)).toEqual(["customer", "date", "amount"]);
+  });
+
+  it("applies order, hiding and widths together, and an order alone is a setting", () => {
+    const shown = applyListColumns(cols, { hidden: ["date"], widths: { amount: 140 }, order: ["amount", "customer"] });
+    expect(shown.map((c) => [c.key, c.width])).toEqual([
+      ["select", "40px"],
+      ["number", "100px"],
+      ["amount", "140px"],
+      ["customer", "1fr"],
+      ["menu", "40px"],
+    ]);
+    expect(isEmptyEntry({ hidden: [], widths: {}, order: ["amount"] })).toBe(false);
+    expect(isEmptyEntry({ hidden: [], widths: {}, order: [] })).toBe(true);
   });
 });

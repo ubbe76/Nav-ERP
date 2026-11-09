@@ -272,6 +272,7 @@ export function ManufacturingOrdersPageClient({
       <Table<ManufacturingOrder>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={orders.rows}
         emptyText="Inga ordrar matchar sökningen"
         renderCell={(order, key) => {

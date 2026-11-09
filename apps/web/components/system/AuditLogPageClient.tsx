@@ -101,6 +101,7 @@ export function AuditLogPageClient({ log, pageSize }: { log: Paged<AuditLogEntry
       <Table<AuditLogEntry>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={log.rows}
         emptyText="Inga händelser matchar sökningen"
         renderCell={(entry, key) => {

@@ -79,6 +79,7 @@ export function SuppliersPageClient({ suppliers, pageSize }: { suppliers: Paged<
       <Table<Supplier>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={suppliers.rows}
         emptyText="Inga leverantörer matchar sökningen"
         renderCell={(supplier, key) => {

@@ -68,6 +68,7 @@ export function OpenInvoicesPageClient({
       <Table<OpenInvoiceRow>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={openInvoices.rows}
         emptyText="Inga öppna poster matchar sökningen"
         renderCell={(row, key) => {

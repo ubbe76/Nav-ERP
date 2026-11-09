@@ -15,6 +15,8 @@ export const LIST_COLUMN_MAX_WIDTH = 1600;
 export interface ListColumnsEntry {
   hidden: string[];
   widths: Record<string, number>;
+  // Kolumnordning: the movable columns' keys in the user's order.
+  order?: string[];
 }
 export type ListColumns = Record<string, ListColumnsEntry>;
 
@@ -40,15 +42,52 @@ export function canHideColumn(column: ColumnLike, index: number, columns: readon
   return columns.findIndex((c) => !isControlColumn(c)) !== index;
 }
 
-// The columns as the user set them up: hidden ones left out (only those that
-// may be hidden — a stored key for a column that has become the first one
-// is ignored) and dragged widths as fixed px. A key that no longer exists
-// matches nothing.
+// Kolumnordning: the movable columns — the same as may be hidden — take the
+// user's order in the places movable columns have; the control columns and
+// the first column (the number, the link Enter opens) never move. Keys not
+// in the order keep their built order after the ordered ones.
+export function orderColumns<C extends ColumnLike>(columns: C[], order: readonly string[] | undefined): C[] {
+  if (!order || order.length === 0) return columns;
+  const movable = columns.filter(canHideColumn);
+  const rank = new Map(order.map((key, i) => [key, i]));
+  const sorted = movable
+    .map((column, i) => ({ column, i }))
+    .sort((a, b) => (rank.get(a.column.key) ?? Infinity) - (rank.get(b.column.key) ?? Infinity) || a.i - b.i)
+    .map(({ column }) => column);
+  let next = 0;
+  return columns.map((column, index) => (canHideColumn(column, index, columns) ? sorted[next++]! : column));
+}
+
+// The new order after moving `fromKey` before `toKey` (after it with
+// `after`), as the movable columns' keys. A move onto a column that cannot
+// move, or of one, changes nothing.
+export function movedColumnOrder(
+  columns: readonly ColumnLike[],
+  order: readonly string[] | undefined,
+  fromKey: string,
+  toKey: string,
+  after: boolean
+): string[] {
+  const keys = orderColumns([...columns], order)
+    .filter(canHideColumn)
+    .map((c) => c.key);
+  if (!keys.includes(fromKey) || !keys.includes(toKey) || fromKey === toKey) return keys;
+  const without = keys.filter((k) => k !== fromKey);
+  const at = without.indexOf(toKey) + (after ? 1 : 0);
+  without.splice(at, 0, fromKey);
+  return without;
+}
+
+// The columns as the user set them up: in their order, hidden ones left out
+// (only those that may be hidden — a stored key for a column that has
+// become the first one is ignored) and dragged widths as fixed px. A key
+// that no longer exists matches nothing.
 export function applyListColumns<C extends ColumnLike>(columns: C[], entry: ListColumnsEntry | undefined): C[] {
   if (!entry) return columns;
   const hidden = new Set(entry.hidden);
-  return columns
-    .filter((column, index) => !(hidden.has(column.key) && canHideColumn(column, index, columns)))
+  const ordered = orderColumns(columns, entry.order);
+  return ordered
+    .filter((column, index) => !(hidden.has(column.key) && canHideColumn(column, index, ordered)))
     .map((column) => {
       const width = entry.widths[column.key];
       return width === undefined ? column : { ...column, width: `${width}px` };
@@ -71,5 +110,5 @@ export function listColumnsKey(pathname: string): string | null {
 }
 
 export function isEmptyEntry(entry: ListColumnsEntry): boolean {
-  return entry.hidden.length === 0 && Object.keys(entry.widths).length === 0;
+  return entry.hidden.length === 0 && Object.keys(entry.widths).length === 0 && (entry.order?.length ?? 0) === 0;
 }

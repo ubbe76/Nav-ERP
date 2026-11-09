@@ -138,6 +138,7 @@ export function VerifikatPageClient({
       <Table<VerificationListRow>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
+        {...view.reorder}
         rows={verifications.rows}
         emptyText="Inga verifikat matchar sökningen"
         renderCell={(v, key) => {

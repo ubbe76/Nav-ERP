@@ -125,7 +125,8 @@ Alla registerlistor (artiklar, kunder, leverantörer, ordrar, saldon, transaktio
 - Sökning, filter och sida ligger i sidans adress — du kan bokmärka eller dela en filtrerad vy.
 - **Kolumner** längst till höger ovanför tabellen väljer vilka kolumner listan visar. Kolumnen med numret eller namnet du klickar på och kolumnerna för kryssrutor och ⋯-menyn finns alltid kvar. Ikonen på knappen färgas när listan skiljer sig från hur den är byggd.
 - **Kolumnbredd**: dra i kanten till höger om en kolumnrubrik för att göra kolumnen smalare eller bredare; dubbelklicka på kanten för att återställa den. Med tangentbordet: tabba till kanten och tryck **←** eller **→**. Ändringen gäller kolumnen tills du återställer den.
-- Valen av kolumner och bredder sparas på ditt konto för varje lista för sig — kundorder och offerter har till exempel var sin uppsättning — och följer med mellan datorer. **Återställ kolumnerna** i **Kolumner** ger tillbaka listan som den är byggd. Listan över lagersaldon och inventeringslistan har inga kolumnval.
+- **Kolumnordning**: för musen över rubrikraden så syns ett grepp framför varje rubrik som går att flytta — dra det till en annan rubrik (vänstra halvan lägger kolumnen före, högra efter); ett streck visar var den hamnar. I **Kolumner** gör pilarna **↑** och **↓** samma sak. Kolumnen med numret eller namnet och kolumnerna för kryssrutor och ⋯-menyn står kvar på sina platser.
+- Valen av kolumner, bredder och ordning sparas på ditt konto för varje lista för sig — kundorder och offerter har till exempel var sin uppsättning — och följer med mellan datorer. **Återställ kolumnerna** i **Kolumner** ger tillbaka listan som den är byggd.
 - **Täthet** i användarmenyn gäller alla tabeller i Nav: **Normal** eller **Kompakt**, som ger lägre rader så att fler får plats på skärmen. Valet sparas på ditt konto. På mobilen, där tabellerna visas som kort, ändras ingenting.
 
 ## Artikelväljaren
