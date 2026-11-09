@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   closeTab as closeTabRule,
@@ -10,6 +10,7 @@ import {
   isEmbedded,
   openTab as openTabRule,
   provisionalTitle,
+  reassertEmbedded,
   restoreTabs,
   sameDocument,
   TABS_MIN_WIDTH,
@@ -108,6 +109,12 @@ export function DocumentTabsProvider({ children }: { children: ReactNode }) {
   tabsRef.current = tabs;
 
   const available = enabled && wide && shells > 0 && !embedded;
+
+  // A root that React client-rendered (after a hydration error) lost the
+  // boot script's data-embedded — put it back before the first paint.
+  useLayoutEffect(() => {
+    reassertEmbedded();
+  }, []);
 
   useEffect(() => {
     // A page inside a tab is a whole Nav of its own, sharing the top page's
