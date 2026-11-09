@@ -38,6 +38,25 @@ describe("Översiktens kort", () => {
     expect(offered(admin)).toEqual([...OVERVIEW_CARDS]);
   });
 
+  it("Favoriter in the user menu: Menyn, Översikten or Båda sets the sidebar and the card together", () => {
+    expect(web.favoritesPlacement(true, false)).toBe("sidebar");
+    expect(web.favoritesPlacement(false, true)).toBe("overview");
+    expect(web.favoritesPlacement(true, true)).toBe("both");
+    expect(web.favoritesPlacement(false, false)).toBeNull();
+    // The standard has no Favoriter card; adding one puts it first, after
+    // that the standard is a list of its own.
+    expect(web.hasFavoritesCard(null)).toBe(false);
+    expect(web.overviewCardsWithFavorites(null, false)).toBeUndefined();
+    expect(web.overviewCardsWithFavorites(null, true)).toEqual(["favorites", "flow", "attention", "orders", "stock"]);
+    expect(web.overviewCardsWithFavorites(["quotes", "favorites"], true)).toBeUndefined();
+    expect(web.overviewCardsWithFavorites(["quotes", "favorites", "bogus"], false)).toEqual(["quotes"]);
+    expect(web.overviewCardsWithFavorites(["favorites"], false)).toEqual([]);
+    expect(web.hasFavoritesCard(["quotes", "favorites"])).toBe(true);
+    // Every list it writes is one PATCH /me/settings takes.
+    expect(overviewCardsSchema.safeParse(web.overviewCardsWithFavorites(null, true)).success).toBe(true);
+    expect(overviewCardsSchema.safeParse(web.overviewCardsWithFavorites(["favorites"], false)).success).toBe(true);
+  });
+
   it("pairs two half cards on a row and gives a lone half card the full width", () => {
     expect(web.overviewRows(["flow", "quotes", "deliveries", "capacity", "stock", "deviations"])).toEqual([
       ["flow"],

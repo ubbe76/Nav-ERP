@@ -1,5 +1,6 @@
 import { apiGet } from "./api";
 import type { ListColumns, TableDensity } from "./listColumns";
+import { hasFavoritesCard } from "./overviewCards";
 
 // Favoriter: the user's own shortcuts at the top of the sidebar, stored as
 // the personal setting `favorites` (GET/PATCH /me/settings, replaced as a
@@ -31,6 +32,8 @@ export function favoriteHref(pathname: string, searchParams: URLSearchParams | {
 export interface FavoritesState {
   favorites: Favorite[] | null;
   inSidebar: boolean;
+  // Översikten shows the Favoriter card (`overviewCards`).
+  onOverview: boolean;
 }
 
 // The frame's personal settings in one read (AppShell and Översikten): the
@@ -45,12 +48,20 @@ export interface ShellSettings extends FavoritesState {
 }
 
 export async function loadShellSettings(cookieHeader: string | undefined): Promise<ShellSettings> {
-  const fallback: ShellSettings = { favorites: null, inSidebar: true, density: "normal", listColumns: {}, documentTabs: true };
+  const fallback: ShellSettings = {
+    favorites: null,
+    inSidebar: true,
+    onOverview: false,
+    density: "normal",
+    listColumns: {},
+    documentTabs: true,
+  };
   if (!cookieHeader) return fallback;
   try {
     const settings = await apiGet<{
       favorites?: Favorite[];
       favoritesInSidebar?: boolean;
+      overviewCards?: unknown;
       density?: string;
       listColumns?: ListColumns;
       documentTabs?: boolean;
@@ -58,6 +69,7 @@ export async function loadShellSettings(cookieHeader: string | undefined): Promi
     return {
       favorites: settings.favorites ?? null,
       inSidebar: settings.favoritesInSidebar !== false,
+      onOverview: hasFavoritesCard(settings.overviewCards),
       density: settings.density === "compact" ? "compact" : "normal",
       listColumns: settings.listColumns ?? {},
       documentTabs: settings.documentTabs !== false,

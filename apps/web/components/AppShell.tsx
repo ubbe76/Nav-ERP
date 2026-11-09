@@ -36,7 +36,7 @@ export async function AppShell({ active, children }: AppShellProps) {
   const roleLabel = ROLE_LABELS[user.role] ?? user.role;
 
   return (
-    <FavoritesProvider initial={favorites.favorites} initialInSidebar={favorites.inSidebar}>
+    <FavoritesProvider initial={favorites.favorites} initialInSidebar={favorites.inSidebar} initialOnOverview={favorites.onOverview}>
       <UserPrefsProvider
         className={styles.frame}
         initialDensity={favorites.density}

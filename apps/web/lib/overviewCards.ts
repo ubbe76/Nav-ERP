@@ -98,6 +98,40 @@ export function resolveOverviewCards(stored: unknown): OverviewCard[] {
   return out;
 }
 
+// Var favoriterna visas (Favoriter in the user menu): the sidebar group
+// (`favoritesInSidebar`) and/or Översikten's Favoriter card — one choice for
+// both settings, so nobody has to find the card under Anpassa and the
+// checkbox under Favoriter → Ändra.
+export const FAVORITES_PLACEMENTS = ["sidebar", "overview", "both"] as const;
+export type FavoritesPlacement = (typeof FAVORITES_PLACEMENTS)[number];
+export const FAVORITES_PLACEMENT_LABELS: Record<FavoritesPlacement, string> = {
+  sidebar: "Menyn",
+  overview: "Översikten",
+  both: "Båda",
+};
+
+// null: neither — the favourites show nowhere (the user's own choice, made
+// with the checkbox and Anpassa); the menu then has no option marked.
+export function favoritesPlacement(inSidebar: boolean, onOverview: boolean): FavoritesPlacement | null {
+  if (inSidebar && onOverview) return "both";
+  if (inSidebar) return "sidebar";
+  if (onOverview) return "overview";
+  return null;
+}
+
+export function hasFavoritesCard(stored: unknown): boolean {
+  return resolveOverviewCards(stored).includes("favorites");
+}
+
+// The stored card list with the Favoriter card added — first, the shortcuts
+// at the top — or taken away; undefined when it already is so (the standard,
+// null, then stays the standard).
+export function overviewCardsWithFavorites(stored: unknown, on: boolean): OverviewCard[] | undefined {
+  const cards = resolveOverviewCards(stored);
+  if (cards.includes("favorites") === on) return undefined;
+  return on ? ["favorites", ...cards] : cards.filter((card) => card !== "favorites");
+}
+
 export type OverviewRow = OverviewCard[];
 
 // Two consecutive half cards share a row; a lone half card (a full card on
