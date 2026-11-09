@@ -1124,12 +1124,71 @@ describe("time-phased proposals — safety stock floor and reorder point", () =>
     ]);
   });
 
-  it("a pool already below the safety stock is a need today", () => {
+  it("a pool already below the safety stock is a Säkerhetslager proposal today — never late", () => {
+    // Before 2026-11-09 this was a firm demand today: "Förslag vecka N" and
+    // Passerat on every run (the order day is before today even without a
+    // lead time — compare "negative stock is a need today").
     const rows = computeRequirements(
       timed({ articles: [art({ articleId: "a", safetyStock: 10 })], stock: [{ articleId: "a", quantity: 4 }] })
     );
     expect(rowFor(rows, "a").proposals).toEqual([
-      expect.objectContaining({ needDate: TODAY, needWeek: TODAY, quantity: 6, reason: "demand" }),
+      { key: `purchase:a:${TODAY}`, needDate: TODAY, needWeek: TODAY, latestDate: TODAY, late: false, quantity: 6, reason: "safety_stock" },
+    ]);
+    expect(rowFor(rows, "a").anyLate).toBe(false);
+  });
+
+  it("the Säkerhetslager refill and the reorder point are two proposals, neither late", () => {
+    const rows = computeRequirements(
+      timed({ articles: [art({ articleId: "a", safetyStock: 10, reorderPoint: 20 })] })
+    );
+    expect(rowFor(rows, "a").proposals).toEqual([
+      expect.objectContaining({ needDate: TODAY, quantity: 10, late: false, reason: "safety_stock" }),
+      expect.objectContaining({ key: "purchase:a:rop", quantity: 10, late: false, reason: "reorder_point" }),
+    ]);
+  });
+
+  it("a firm demand in the same week dates the proposal and decides its lateness", () => {
+    // TODAY is a Monday; a KO row today: the refill joins the week's firm demand.
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "a", safetyStock: 10 })],
+        stock: [{ articleId: "a", quantity: 4 }],
+        salesRows: [sale("a", TODAY, 3)],
+      })
+    );
+    expect(rowFor(rows, "a").proposals).toEqual([
+      expect.objectContaining({ needDate: TODAY, needWeek: TODAY, quantity: 9, reason: "demand", late: true }),
+    ]);
+  });
+
+  it("a later week's demand stays its own proposal beside the Säkerhetslager refill", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "a", safetyStock: 10 })],
+        stock: [{ articleId: "a", quantity: 4 }],
+        salesRows: [sale("a", "2026-11-25", 5)],
+      })
+    );
+    expect(rowFor(rows, "a").proposals).toEqual([
+      expect.objectContaining({ needWeek: TODAY, quantity: 6, reason: "safety_stock", late: false }),
+      expect.objectContaining({ needWeek: "2026-11-23", quantity: 5, reason: "demand" }),
+    ]);
+  });
+
+  it("a manufactured Säkerhetslager proposal's material is needed now at the component — never late", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "p", type: "manufactured", safetyStock: 2 }), art({ articleId: "c" })],
+        bomEdges: [{ parentArticleId: "p", componentArticleId: "c", quantity: 3 }],
+      })
+    );
+    expect(rowFor(rows, "p").proposals).toEqual([
+      expect.objectContaining({ needDate: TODAY, latestDate: TODAY, late: false, quantity: 2, reason: "safety_stock" }),
+    ]);
+    // The component's own floor is not involved: material for a proposal
+    // dated today is labelled like the reorder point's (asap).
+    expect(rowFor(rows, "c").proposals).toEqual([
+      { key: `purchase:c:${TODAY}`, needDate: TODAY, needWeek: TODAY, latestDate: TODAY, late: false, quantity: 6, reason: "reorder_point" },
     ]);
   });
 

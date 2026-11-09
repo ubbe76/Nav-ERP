@@ -498,3 +498,29 @@ describe("inställningarna", () => {
     );
   });
 });
+
+describe("Säkerhetslager-förslaget är aldrig Passerat (användarbeslut 2026-11-09)", () => {
+  it("a purchased article below its safety stock with a lead time: one `safety_stock` proposal today, outside latest=late, and Skapa ordrar warns for none", async () => {
+    const article = await articleService.createArticle(
+      parsed(createArticleSchema, { articleNumber: "SL-LEAD", name: "SL-LEAD", type: "purchased", active: true, safetyStock: 5 })
+    );
+    await supplierFor([article.id], 10);
+    const user = await makeUser();
+
+    const row = (await requirementRow(article.id, "SL-LEAD"))!;
+    expect(row.proposals).toEqual([
+      expect.objectContaining({ needDate: TODAY, latestDate: TODAY, late: false, quantity: 5, reason: "safety_stock" }),
+    ]);
+    expect(row.anyLate).toBe(false);
+    const late = await planningService.listRequirements({ limit: 50, offset: 0, latest: "late" } as never);
+    expect(late.rows.find((r) => r.articleId === article.id)).toBeUndefined();
+
+    const result = await planningService.createOrdersFromProposals(
+      { proposals: [{ articleId: article.id, quantity: 5, kind: "purchase" as const, needDate: TODAY, reason: "safety_stock" }] },
+      user.id
+    );
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toEqual([]);
+    expect(result.purchaseOrders).toHaveLength(1);
+  });
+});

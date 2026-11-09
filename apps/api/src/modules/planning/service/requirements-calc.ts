@@ -259,10 +259,13 @@ export interface RequirementsInput {
   leadDaysFor?: (articleId: string, quantity: number) => number;
 }
 
-export type ProposalReason = "demand" | "reorder_point" | "forecast" | "undated";
+export type ProposalReason = "demand" | "reorder_point" | "safety_stock" | "forecast" | "undated";
 
 // One proposal of an article row: a need week's uncovered demand (demand),
-// the reorder-point top-up dated today (reorder_point), a week whose
+// the reorder-point top-up dated today (reorder_point), the refill of a
+// pool already below the safety stock (safety_stock — dated today, never
+// Passerat: the shortfall is a floor to restore, not a deadline that was
+// missed; a firm demand in the same week dates the proposal), a week whose
 // uncovered demand is ONLY forecast (forecast — Prognos #10: dated by its
 // first forecast piece, latest date never before today, never Passerat: a
 // forecast is not a deadline, and the current month's first piece is dated
@@ -478,6 +481,12 @@ interface Demand {
   // never Passerat. A firm demand in the same week dates the proposal and
   // decides its lateness, so the forecast never hides a real late order.
   forecast?: boolean;
+  // The refill of a pool below Säkerhetslager: needed now, but no deadline —
+  // a week with only this (and asap/forecast) is a `safety_stock` proposal
+  // dated today, never Passerat (user's choice 2026-11-09: it was "Förslag
+  // vecka N" and Passerat on every run for every article with a lead time).
+  // A firm demand in the same week still dates the proposal.
+  safety?: boolean;
 }
 
 function pushDemand(map: Map<string, Demand[]>, articleId: string, demand: Demand) {
@@ -667,7 +676,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
       const own: Demand[] = [...(demands.get(id) ?? [])];
       if (stockQty < 0) own.push({ date: today, quantity: -stockQty });
       if (pool < 0) {
-        own.push({ date: today, quantity: -pool });
+        own.push({ date: today, quantity: -pool, safety: true });
         pool = 0;
       }
       // Date order, undated last; a stable sort keeps same-day demands in
@@ -685,7 +694,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
       // Firm wins over both, reorder-point material over forecast.
       const groups = new Map<
         string | null,
-        { needDate: string | null; forecastDate: string | null; asap: boolean; uncovered: number }
+        { needDate: string | null; forecastDate: string | null; asap: boolean; safety: boolean; uncovered: number }
       >();
       for (const demand of own) {
         const covered = Math.min(pool, demand.quantity);
@@ -693,7 +702,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
         const uncovered = round4(demand.quantity - covered);
         if (uncovered <= 0) continue;
         const week = demand.date === null ? null : needWeekOf(demand.date, thisMonday);
-        const firmDate = demand.asap || demand.forecast ? null : demand.date;
+        const firmDate = demand.asap || demand.forecast || demand.safety ? null : demand.date;
         const forecastDate = demand.forecast ? demand.date : null;
         const group = groups.get(week);
         if (group) {
@@ -701,7 +710,9 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
           if (group.needDate === null) group.needDate = firmDate;
           if (group.forecastDate === null) group.forecastDate = forecastDate;
           group.asap ||= demand.asap === true;
-        } else groups.set(week, { needDate: firmDate, forecastDate, asap: demand.asap === true, uncovered });
+          group.safety ||= demand.safety === true;
+        } else
+          groups.set(week, { needDate: firmDate, forecastDate, asap: demand.asap === true, safety: demand.safety === true, uncovered });
       }
 
       // One proposal per group in week order: the uncovered quantity less
@@ -717,8 +728,11 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
         }
         const quantity = orderQuantityFor(net, article);
         carry = round4(quantity - net);
-        if (week !== null && group.needDate === null && (group.asap || group.forecastDate === null)) {
-          // Only reorder-point material in this week: "now", never late.
+        if (week !== null && group.needDate === null && (group.safety || group.asap || group.forecastDate === null)) {
+          // No firm demand in this week, only the safety-stock refill and/or
+          // reorder-point material: "now", never late. The safety stock
+          // names the proposal when it is part of it (it is the article's
+          // own floor; asap is material for a parent's proposal).
           proposals.push({
             key: `${kind}:${id}:${week}`,
             needDate: today,
@@ -726,7 +740,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
             latestDate: today,
             late: false,
             quantity,
-            reason: "reorder_point",
+            reason: group.safety ? "safety_stock" : "reorder_point",
           });
           continue;
         }
@@ -803,7 +817,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
           pushDemand(demands, componentId, {
             date: proposal.latestDate,
             quantity: componentQuantity,
-            asap: proposal.reason === "reorder_point",
+            asap: proposal.reason === "reorder_point" || proposal.reason === "safety_stock",
             forecast: proposal.reason === "forecast",
           });
         }

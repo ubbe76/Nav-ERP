@@ -2921,10 +2921,11 @@ export function createPlanningService(
       // like a late IO row — except a reorder-point proposal: it is dated
       // today for no deadline (the list never marks it Passerat), so its
       // floor date is simply "as soon as possible". The same for a
-      // forecast-only proposal (Prognos #10): a forecast is not a deadline.
+      // forecast-only proposal (Prognos #10): a forecast is not a deadline,
+      // and for the safety-stock refill (safety_stock): a floor to restore.
       const today = todayFn();
       const noDeadline = (reason: CreatePlanningOrdersInput["proposals"][number]["reason"]) =>
-        reason === "reorder_point" || reason === "forecast";
+        reason === "reorder_point" || reason === "safety_stock" || reason === "forecast";
       const pushLateManufacturing = (
         orderNumber: string,
         articleId: string,

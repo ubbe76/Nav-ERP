@@ -77,7 +77,7 @@ export const createPlanningOrdersSchema = z.object({
           // one) is "now" for no deadline, and a forecast-only proposal
           // (Prognos #10) is for no deadline either, so Skapa ordrar never
           // warns that either is late. Omitted = an ordinary demand.
-          reason: z.enum(["demand", "reorder_point", "forecast", "undated"]).optional(),
+          reason: z.enum(["demand", "reorder_point", "safety_stock", "forecast", "undated"]).optional(),
         })
         .refine((p) => p.kind !== "subcontract" || p.moOperationId !== undefined, {
           message: "moOperationId is required for subcontract proposals",
