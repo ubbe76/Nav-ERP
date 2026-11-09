@@ -1983,7 +1983,8 @@ export function createManufacturingService(
         createdBy,
         materialShortage: await materialShortageCheck(input.allowMaterialShortage),
       });
-      if (result.ok) return result.row;
+      // The row as before, plus the draw's report (Ångra in the TO card's notice).
+      if (result.ok) return { ...result.row, reportId: result.reportId };
 
       switch (result.reason) {
         case "order_not_found":
@@ -2335,7 +2336,8 @@ export function createManufacturingService(
           detail: { quantity: result.received, locationId: input.locationId ?? null },
           userId: createdBy,
         });
-        return result.order;
+        // The order as before, plus the Slutför order report (Ångra in the notice).
+        return { ...result.order, reportId: result.reportId };
       }
 
       switch (result.reason) {
