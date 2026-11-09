@@ -54,6 +54,8 @@ Välj en av anledningarna (stora knappar) och skriv vid behov en **Kommentar (va
 
    Räcker inte lagersaldot för det material utstämplingen skulle dra kan terminalen, beroende på systeminställningen **Materialbrist vid rapportering**, fråga "Det saknas ingående delar: … Rapportera ändå?" (**Rapportera ändå** stämplar ut och rapporterar; avbryter du står du kvar på utstämplingen och ingenting är sparat) eller neka utstämplingen med "Det finns inte tillräckligt med ingående delar: …". Du är då fortfarande instämplad — be arbetsledaren fylla på lagret. Se [Tillverkning](/hjalp/tillverkning#materialbrist-vid-rapportering).
 
+   **Ritning:** under varje pågående stämpling i hemvyn och i utstämplingen finns en knapp per ritning, t.ex. **Ritning R-1002-SVETS rev A** (med en dokumentikon) — operationens valda ritningar, eller alla orderns ritningar och artikelns filer när operationen inte har några valda. Ritningen är den revision ordern byggs efter (se [Tillverkning](/hjalp/tillverkning#ritningar-och-revisioner)) och öppnas i en ny flik, där den kan skrivas ut. Finns ingen ritning visas ingen knapp.
+
    Blev en utstämpling fel — fel antal, fel operation eller fel order — ångrar arbetsledaren den med **Ångra** under **Rapporteringar** på tillverkningsorderns detaljsida; antalen, materialet, inleveransen och stämplingens tid backas då i ett svep (se [Tillverkning](/hjalp/tillverkning#rapporteringar-och-angra)).
 
 ### Ställ och produktion

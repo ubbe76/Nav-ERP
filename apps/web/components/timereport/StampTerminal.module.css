@@ -870,3 +870,33 @@
   width: auto;
   max-width: none;
 }
+
+/* Ritning: the operation's drawings — large touch targets like the other
+   secondary actions. */
+.drawingLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.drawingLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 0 16px;
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-decoration: none;
+  background: var(--color-surface);
+  border: 2px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+}
+.drawingLink:hover {
+  background: var(--color-bg);
+}
+.drawingLink:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}

@@ -4,7 +4,8 @@ import { useScrapReasons } from "../../lib/useScrapReasons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Wordmark } from "../ui/Wordmark";
-import { ApiError, apiFetch } from "../../lib/api";
+import { FileText } from "lucide-react";
+import { API_URL, ApiError, apiFetch } from "../../lib/api";
 import { formatStockholmDate, stockholmToday, toDateTimeLocalValue } from "../../lib/date";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
@@ -15,6 +16,7 @@ import type {
   AttendanceReasonInput,
   AttendanceSession,
   AttendanceDeviationReason,
+  DrawingFileMeta,
   OvertimeCompensation,
   EmployeeDirectoryEntry,
   ResolvedCalendarDay,
@@ -1116,6 +1118,7 @@ export function StampTerminal({
               {step.session.packingInstructions && (
                 <div className={styles.packingNote}>📦 {step.session.packingInstructions}</div>
               )}
+              <OperationDrawingLinks orderId={step.session.manufacturingOrderId} operationId={step.session.moOperationId} />
             </div>
             <OperationProgressTiles
               progress={operationProgress(
@@ -1222,6 +1225,42 @@ export function StampTerminal({
           </section>
         )}
       </main>
+    </div>
+  );
+}
+
+// Ritning (0200): the files the operation is worked from — its chosen
+// drawings, otherwise the order's drawings and loose files, in the revision
+// the order is built from. Each opens in a new tab (the browser's viewer
+// prints it). Nothing is shown when there are none.
+function OperationDrawingLinks({ orderId, operationId }: { orderId: string; operationId: string }) {
+  const [files, setFiles] = useState<DrawingFileMeta[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<DrawingFileMeta[]>(`/api/v1/manufacturing-orders/${orderId}/operations/${operationId}/drawings`)
+      .then((list) => {
+        if (!cancelled) setFiles(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [orderId, operationId]);
+  if (files.length === 0) return null;
+  return (
+    <div className={styles.drawingLinks}>
+      {files.map((file) => (
+        <a
+          key={file.id}
+          className={styles.drawingLink}
+          href={`${API_URL}/api/v1/manufacturing-orders/${orderId}/files/${file.id}`}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <FileText size={20} strokeWidth={2} aria-hidden="true" />
+          {file.drawingNumber ? `Ritning ${file.drawingNumber}${file.revision ? ` rev ${file.revision}` : ""}` : file.filename}
+        </a>
+      ))}
     </div>
   );
 }
@@ -1359,6 +1398,7 @@ function HomeStep({
                   Ställ klart
                 </button>
               )}
+              <OperationDrawingLinks orderId={session.manufacturingOrderId} operationId={session.moOperationId} />
             </div>
           ))}
         </div>

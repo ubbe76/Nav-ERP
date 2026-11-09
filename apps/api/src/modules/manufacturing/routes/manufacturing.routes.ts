@@ -36,6 +36,7 @@ import {
   InvalidStatusTransitionError,
   LastOperationLockedError,
   ManufacturingOrderNotEditableError,
+  ManufacturingOrderFileNotFoundError,
   MoMaterialConsumedError,
   MoMaterialDuplicateError,
   MoMaterialOwnArticleError,
@@ -73,6 +74,7 @@ import {
   ScrapReasonRequiredError,
   ProductionGroupNotFoundError,
   RoutingAlternativeInvalidError,
+  RoutingDrawingInvalidError,
   RoutingOperationHasAlternativesError,
   WorkCenterInAlternativesError,
   RoutingOperationNotFoundError,
@@ -221,6 +223,7 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
         if (err instanceof NotSubcontractOperationError) return reply.code(400).send(errorBody(err));
         if (err instanceof WorkCenterSupplierNotFoundError) return reply.code(400).send(errorBody(err));
         if (err instanceof RoutingAlternativeInvalidError) return reply.code(400).send(errorBody(err));
+        if (err instanceof RoutingDrawingInvalidError) return reply.code(400).send(errorBody(err));
         throw err;
       }
     }
@@ -241,6 +244,7 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
         if (err instanceof NotSubcontractOperationError) return reply.code(400).send(errorBody(err));
         if (err instanceof WorkCenterSupplierNotFoundError) return reply.code(400).send(errorBody(err));
         if (err instanceof RoutingAlternativeInvalidError) return reply.code(400).send(errorBody(err));
+        if (err instanceof RoutingDrawingInvalidError) return reply.code(400).send(errorBody(err));
         if (err instanceof RoutingOperationHasAlternativesError) return reply.code(409).send(errorBody(err));
         throw err;
       }
@@ -462,6 +466,59 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
       throw err;
     }
   });
+
+  // --- Revisionerna TO:n byggs efter (0200) ---
+
+  app.get<{ Params: { id: string } }>("/manufacturing-orders/:id/revisions", { config: { access: MO_READ } }, async (req, reply) => {
+    try {
+      return await service.getOrderRevisions(req.params.id);
+    } catch (err) {
+      if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Uppdatera: the order takes today's revisions (released/in progress).
+  app.post<{ Params: { id: string } }>("/manufacturing-orders/:id/revisions/refresh", async (req, reply) => {
+    try {
+      return await service.refreshOrderRevisions(req.params.id, req.user!.id);
+    } catch (err) {
+      if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof ManufacturingOrderNotEditableError) return reply.code(409).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // The files of an operation as the order has them (the terminal's
+  // Ritning): the operation's chosen drawings, otherwise all the order's
+  // drawings and the loose files (drawing-files.ts).
+  app.get<{ Params: { id: string; opId: string } }>(
+    "/manufacturing-orders/:id/operations/:opId/drawings",
+    { config: { access: MO_READ } },
+    async (req, reply) => {
+      const files = await service.listOperationDrawingFiles(req.params.id, req.params.opId);
+      if (!files) return reply.code(404).send({ error: "Operation not found" });
+      return files;
+    }
+  );
+
+  // One of the order's article's files — the snapshot's, a loose one or an
+  // older revision's (open/print on demand). MO_READ: the workshop opens it.
+  app.get<{ Params: { id: string; fileId: string } }>(
+    "/manufacturing-orders/:id/files/:fileId",
+    { config: { access: MO_READ } },
+    async (req, reply) => {
+      try {
+        const file = await service.downloadOrderFile(req.params.id, req.params.fileId);
+        reply.header("Content-Type", file.contentType);
+        reply.header("Content-Disposition", contentDisposition(file.filename, "inline"));
+        return reply.send(file.data);
+      } catch (err) {
+        if (err instanceof ManufacturingOrderFileNotFoundError) return reply.code(404).send(errorBody(err));
+        throw err;
+      }
+    }
+  );
 
   app.get<{ Params: { id: string } }>("/manufacturing-orders/:id/pdf", { config: { access: MO_READ } }, async (req, reply) => {
     try {

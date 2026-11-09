@@ -4,17 +4,12 @@ import { confirmDelete } from "../../lib/confirm";
 import { useEffect, useRef, useState } from "react";
 import { Table } from "../ui/Table";
 import { Button } from "../ui/Button";
-import { API_URL, apiFetch } from "../../lib/api";
+import { apiFetch } from "../../lib/api";
+import { ARTICLE_FILE_ACCEPT, articleFileHref, formatFileSize, uploadArticleFile } from "../../lib/articleFiles";
 import type { ArticleFile } from "../../lib/types";
 import { FormError } from "../ui/Form";
+import { formatStockholmDate } from "../../lib/date";
 
-const ACCEPT = ".pdf,.jpg,.jpeg,.png";
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} kB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 // Ritningar och andra filer kopplade till artikeln (PDF/JPEG/PNG). Files are
 // appended to the TO printout and can be attached to outgoing order emails.
@@ -41,19 +36,7 @@ export function FilerTab({ articleId }: { articleId: string }) {
     setError(null);
     setPending(true);
     try {
-      const body = new FormData();
-      body.append("file", file);
-      // Multipart upload — apiFetch sets a JSON content type, so this one
-      // goes through fetch directly (same as the company logo upload).
-      const res = await fetch(`${API_URL}/api/v1/articles/${articleId}/files`, {
-        method: "POST",
-        credentials: "include",
-        body,
-      });
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        throw new Error(payload.error ?? "Uppladdningen misslyckades");
-      }
+      await uploadArticleFile(articleId, file);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Uppladdningen misslyckades");
@@ -81,14 +64,16 @@ export function FilerTab({ articleId }: { articleId: string }) {
     <div>
       <p style={{ marginTop: 0 }}>
         Ritningar och andra filer kopplade till artikeln. Tillåtna format: PDF, JPEG och PNG, max 20 MB per fil.
-        Filerna skrivs ut tillsammans med tillverkningsordern och kan bifogas när ordrar mejlas.
+        Filerna skrivs ut tillsammans med tillverkningsordern och kan bifogas när ordrar mejlas. En fil som hör till en
+        ritningsrevision (fliken Revisioner) följer bara med när revisionen gäller — en äldre revisions fil öppnas här
+        eller under Revisioner.
       </p>
 
       <div style={{ display: "flex", gap: 12, alignItems: "center", margin: "16px 0" }}>
         <input
           ref={inputRef}
           type="file"
-          accept={ACCEPT}
+          accept={ARTICLE_FILE_ACCEPT}
           aria-label="Välj fil att ladda upp"
           disabled={pending}
           onChange={(e) => {
@@ -105,6 +90,7 @@ export function FilerTab({ articleId }: { articleId: string }) {
         <Table<ArticleFile>
           columns={[
             { key: "filename", label: "Filnamn", width: "1fr" },
+            { key: "drawing", label: "Ritning", width: "minmax(140px, 220px)" },
             { key: "contentType", label: "Typ", width: "140px" },
             { key: "sizeBytes", label: "Storlek", width: "110px", align: "right" },
             { key: "createdAt", label: "Uppladdad", width: "140px" },
@@ -116,7 +102,7 @@ export function FilerTab({ articleId }: { articleId: string }) {
               case "filename":
                 return (
                   <a
-                    href={`${API_URL}/api/v1/articles/${articleId}/files/${file.id}`}
+                    href={articleFileHref(articleId, file.id)}
                     target="_blank"
                     rel="noreferrer"
                     style={{ fontWeight: 600, color: "inherit" }}
@@ -124,12 +110,25 @@ export function FilerTab({ articleId }: { articleId: string }) {
                     {file.filename}
                   </a>
                 );
+              case "drawing":
+                // A drawing revision's file: which one, and whether it is the
+                // one in force (an older revision's never rides along).
+                return file.drawingNumber ? (
+                  <span>
+                    {file.drawingNumber} rev {file.revision}
+                    <span style={{ color: "var(--color-text-secondary)" }}>
+                      {file.revisionActive ? " · gällande" : " · äldre"}
+                    </span>
+                  </span>
+                ) : (
+                  <span style={{ color: "var(--color-text-muted)" }}>–</span>
+                );
               case "contentType":
                 return file.contentType.replace("application/", "").replace("image/", "").toUpperCase();
               case "sizeBytes":
-                return formatSize(file.sizeBytes);
+                return formatFileSize(file.sizeBytes);
               case "createdAt":
-                return new Date(file.createdAt).toLocaleDateString("sv-SE");
+                return formatStockholmDate(file.createdAt);
               case "id":
                 return (
                   <Button type="button" size="small" variant="danger" disabled={pending} onClick={() => remove(file)}>

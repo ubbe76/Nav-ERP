@@ -76,3 +76,49 @@
   color: var(--color-text-primary);
   cursor: pointer;
 }
+
+.fileLink {
+  color: var(--accent-fg);
+  overflow-wrap: anywhere;
+}
+
+.fileInput {
+  font-size: 14px;
+  color: var(--color-text-primary);
+}
+
+.hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+/* Ritningar i Beredningen: one line per drawing. */
+.panel {
+  margin-bottom: var(--space-5);
+}
+
+.panelList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.panelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.panelTitle {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  min-width: 0;
+  font-size: 14px;
+}

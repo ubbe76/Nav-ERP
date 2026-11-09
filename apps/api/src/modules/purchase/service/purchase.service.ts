@@ -616,31 +616,38 @@ export function createPurchaseService(
       unitFactor: selection.unitFactor,
     };
   }
-  // Drawings for every distinct article on the order, as extra attachments.
-  async function drawingAttachments(articleIds: string[]) {
-    const files = await articleFiles.filesWithData([...new Set(articleIds)]);
-    return files.map((f) => ({ filename: f.filename, content: f.data }));
-  }
   // Extra attachments for a document email. Lego rows' drawings are ALWAYS
-  // attached (the subcontractor cannot work without them): the article's
-  // own drawings when the operation says "use article drawings" (default
-  // when the routing row is gone), otherwise the file uploaded on the
-  // operation. The attachDrawings checkbox governs the other rows only. One
-  // combined article-id set, so a file never attaches twice.
+  // attached (the subcontractor cannot work without them): when the
+  // operation says "use article drawings" (default when the routing row is
+  // gone), the drawings the TO is built from — the operation's chosen ones,
+  // otherwise all of them and the loose files (drawing-files.ts) — otherwise
+  // the file uploaded on the operation. The attachDrawings checkbox governs
+  // the other rows: their articles' files in force. Keyed by file id, so a
+  // file never attaches twice.
   async function legoAwareAttachments(
     legoSources: Awaited<ReturnType<PurchaseRepository["subcontractDrawingSources"]>>,
     allArticleIds: string[],
     attachDrawings: boolean
   ) {
-    const articleIdsForDrawings = new Set(
-      legoSources.filter((s) => s.useArticleDrawing !== false).map((s) => s.articleId)
-    );
-    if (attachDrawings) for (const articleId of allArticleIds) articleIdsForDrawings.add(articleId);
-    const drawings = await drawingAttachments([...articleIdsForDrawings]);
+    const files = new Map<string, { filename: string; content: Buffer }>();
+    for (const source of legoSources) {
+      if (source.useArticleDrawing === false) continue;
+      const drawings = await articleFiles.drawingFilesWithData({
+        articleId: source.articleId,
+        moId: source.moId,
+        routingOperationId: source.routingOperationId,
+      });
+      for (const f of drawings) files.set(f.id, { filename: f.filename, content: f.data });
+    }
+    if (attachDrawings) {
+      for (const f of await articleFiles.filesWithData([...new Set(allArticleIds)])) {
+        files.set(f.id, { filename: f.filename, content: f.data });
+      }
+    }
     const operationFiles = legoSources
       .filter((s) => s.useArticleDrawing === false && s.fileData !== null)
       .map((s) => ({ filename: s.fileFilename!, content: s.fileData! }));
-    return [...drawings, ...operationFiles];
+    return [...files.values(), ...operationFiles];
   }
   // Lego link on an inquiry row: validates the operation (exists, belongs
   // to the row's article, sits on a legoresurs), derives the routing

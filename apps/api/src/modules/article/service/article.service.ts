@@ -29,6 +29,7 @@ import {
 } from "@navet/shared";
 import type { Db, Tx } from "@navet/db";
 import type { ArticleRepository } from "../repository/article.repository.js";
+import type { DrawingFileRef, DrawingFileWithData } from "../repository/drawing-files.js";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { DEFAULT_ARTICLE_SERIES_KEY, SeriesExhaustedError } from "../../system/service/number-series.js";
@@ -182,6 +183,15 @@ export class ArticleFileNotFoundError extends Error {
   }
 }
 
+// A file already on another drawing revision can't be taken — upload a
+// copy instead (one revision, one file).
+export class DrawingFileNotLooseError extends Error {
+  constructor(id: string) {
+    super(`Article file ${id} already belongs to another drawing revision`);
+    this.name = "DrawingFileNotLooseError";
+  }
+}
+
 export class InvalidFileTypeError extends Error {
   constructor(contentType: string) {
     super(`Unsupported file type "${contentType}" — only PDF, JPEG and PNG are allowed`);
@@ -205,9 +215,14 @@ export interface ArticleUnitReader {
 
 // Narrow reader for cross-module use (TO printout, order email attachments)
 // — same pattern as RegisterReferenceReader/StockBalanceReader.
+// filesWithData: the files in force (loose + the drawings' active
+// revisions'), for the order mails. drawingFilesWithData: the ONE rule with
+// an order's snapshot and an operation's chosen drawings (drawing-files.ts)
+// — the TO printout and the lego mail.
 export interface ArticleFileReader {
   listFiles(articleId: string): Promise<{ id: string; filename: string; contentType: string; sizeBytes: number }[]>;
-  filesWithData(articleIds: string[]): Promise<{ filename: string; contentType: string; data: Buffer }[]>;
+  filesWithData(articleIds: string[]): Promise<{ id: string; filename: string; contentType: string; data: Buffer }[]>;
+  drawingFilesWithData(ref: DrawingFileRef): Promise<DrawingFileWithData[]>;
 }
 
 export class ArticleRevisionNotFoundError extends Error {
@@ -780,8 +795,12 @@ export function createArticleService(
       return repo.update(id, { salesPrice });
     },
 
+    // Each row carries its component's drawings with the active revision and
+    // its file (the Beredning's structure rows link them).
     async getBom(parentArticleId: string) {
-      return repo.getBomComponents(parentArticleId);
+      const rows = await repo.getBomComponents(parentArticleId);
+      const drawings = await repo.currentDrawingsByArticle([...new Set(rows.map((r) => r.componentArticleId))]);
+      return rows.map((row) => ({ ...row, componentDrawings: drawings.get(row.componentArticleId) ?? [] }));
     },
 
     // Full structure tree for the article card's Beredning view. Unlike
@@ -912,10 +931,19 @@ export function createArticleService(
       return repo.listFiles(articleId);
     },
 
-    async addFile(articleId: string, file: { filename: string; contentType: string; data: Buffer }) {
+    // drawingRevisionId: the upload is that drawing revision's file (a file
+    // it had is replaced); otherwise a loose file as before.
+    async addFile(
+      articleId: string,
+      file: { filename: string; contentType: string; data: Buffer },
+      drawingRevisionId: string | null = null
+    ) {
       if (!(await repo.findById(articleId))) throw new ArticleNotFoundError(articleId);
       if (!(ALLOWED_FILE_TYPES as readonly string[]).includes(file.contentType)) {
         throw new InvalidFileTypeError(file.contentType);
+      }
+      if (drawingRevisionId && !(await repo.findArticleDrawingRevision(articleId, drawingRevisionId))) {
+        throw new ArticleRevisionNotFoundError(drawingRevisionId);
       }
       return repo.addFile({
         articleId,
@@ -923,7 +951,21 @@ export function createArticleService(
         contentType: file.contentType,
         sizeBytes: file.data.length,
         data: file.data,
+        drawingRevisionId,
       });
+    },
+
+    // One of the article's loose files becomes the drawing revision's file.
+    async linkDrawingRevisionFile(articleId: string, drawingId: string, revisionId: string, fileId: string) {
+      if (!(await repo.findDrawing(articleId, drawingId))) throw new ArticleDrawingNotFoundError(drawingId);
+      if (!(await repo.findDrawingRevision(drawingId, revisionId))) throw new ArticleRevisionNotFoundError(revisionId);
+      const result = await repo.linkFileToDrawingRevision(articleId, revisionId, fileId);
+      if (result.kind === "not-found") throw new ArticleFileNotFoundError(fileId);
+      if (result.kind === "not-loose") throw new DrawingFileNotLooseError(fileId);
+    },
+
+    async drawingFilesWithData(ref: DrawingFileRef) {
+      return repo.drawingFilesWithData(ref);
     },
 
     async downloadFile(articleId: string, fileId: string) {

@@ -377,6 +377,13 @@ export const updateArticleDrawingSchema = z.object({
 });
 export type UpdateArticleDrawingInput = z.infer<typeof updateArticleDrawingSchema>;
 
+// Ritningsrevisionens fil (0200): POST /articles/:id/files?drawingRevisionId=
+// uploads the revision's file; PUT …/revisions/:revisionId/file takes one of
+// the article's loose files.
+export const articleFileUploadQuerySchema = z.object({ drawingRevisionId: z.string().uuid().optional() });
+export const linkDrawingRevisionFileSchema = z.object({ fileId: z.string().uuid() });
+export type LinkDrawingRevisionFileInput = z.infer<typeof linkDrawingRevisionFileSchema>;
+
 // Drawing revisions share the article revision's shape.
 export const createDrawingRevisionSchema = createArticleRevisionSchema;
 export type CreateDrawingRevisionInput = z.infer<typeof createDrawingRevisionSchema>;

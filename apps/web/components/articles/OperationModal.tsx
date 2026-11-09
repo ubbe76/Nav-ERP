@@ -14,7 +14,7 @@ import styles from "./OperationModal.module.css";
 import { API_URL, apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { OPERATION_TIME_UNIT_LABELS, runTimeInUnit, runTimeToMinutes, type OperationTimeUnit } from "../../lib/units";
-import type { MOOperation, MOOperationResource, Paged, RoutingOperation, Supplier, WorkCenter } from "../../lib/types";
+import type { ArticleDrawing, MOOperation, MOOperationResource, Paged, RoutingOperation, Supplier, WorkCenter } from "../../lib/types";
 import { Form, FormActions, FormError, FormHint, FormLineRow, FormNotice, FormRow } from "../ui/Form";
 import { MAX_ROUTING_ALTERNATIVES, moveItem, workCenterHasCapacity } from "../../lib/routingAlternatives";
 
@@ -60,6 +60,9 @@ export interface OperationPayload {
   transportPrice: number | null;
   showNetWeight: boolean;
   useArticleDrawing?: boolean;
+  // Ritningar (routing mode): the article's drawings the operation is
+  // worked from — the whole set.
+  drawingIds?: string[];
   // Routing only — Alternativa resurser, the whole set in rank order (sent
   // always, so it replaces the operation's set; [] removes it). Times are
   // minutes, null = Som ordinarie.
@@ -211,6 +214,21 @@ function OperationForm({
   );
   const [showNetWeight, setShowNetWeight] = useState(editing?.showNetWeight ?? false);
   const [useArticleDrawing, setUseArticleDrawing] = useState(routingEditing?.useArticleDrawing ?? true);
+  // --- Ritningar (routing mode): the article's drawings to choose among. ---
+  const [articleDrawings, setArticleDrawings] = useState<ArticleDrawing[]>([]);
+  const [drawingIds, setDrawingIds] = useState<string[]>(() => (routingEditing?.drawings ?? []).map((d) => d.id));
+  useEffect(() => {
+    if (moMode || !articleId) return;
+    let cancelled = false;
+    apiFetch<ArticleDrawing[]>(`/api/v1/articles/${articleId}/drawings`)
+      .then((list) => {
+        if (!cancelled) setArticleDrawings(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [moMode, articleId]);
   const [hasFile, setHasFile] = useState(routingEditing?.hasFile ?? false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -346,7 +364,7 @@ function OperationForm({
         unitPrice: isLego && unitPrice !== "" ? Number(unitPrice) : null,
         transportPrice: isLego && transportPrice !== "" ? Number(transportPrice) : null,
         showNetWeight: isLego ? showNetWeight : false,
-        ...(moMode ? {} : { costingOnly, useArticleDrawing: isLego ? useArticleDrawing : true }),
+        ...(moMode ? {} : { costingOnly, useArticleDrawing: isLego ? useArticleDrawing : true, drawingIds }),
         // The whole set, so a swap of ordinarie and alternative passes; a lego or
         // Kalkyl operation carries none.
         ...(moMode
@@ -695,6 +713,34 @@ function OperationForm({
           known={routingEditing?.alternatives ?? []}
           timeUnit={timeUnit}
         />
+      )}
+
+      {/* Ritningar: which of the article's drawings the operation is worked
+          from — the terminal and the printout show them, a lego operation's
+          mail sends only them. None chosen = all the article's. */}
+      {!moMode && articleDrawings.length > 0 && (
+        <fieldset className={styles.drawings}>
+          <legend className={fieldStyles.label}>Ritningar (valfritt)</legend>
+          {articleDrawings.map((drawing) => {
+            const active = drawing.revisions.find((r) => r.isActive);
+            return (
+              <label key={drawing.id} style={checkboxRowStyle}>
+                <Checkbox
+                  checked={drawingIds.includes(drawing.id)}
+                  onChange={(e) =>
+                    setDrawingIds((ids) => (e.target.checked ? [...ids, drawing.id] : ids.filter((id) => id !== drawing.id)))
+                  }
+                />
+                {drawing.drawingNumber}
+                {active ? ` rev ${active.revision}` : ""}
+              </label>
+            );
+          })}
+          <FormHint attached>
+            Terminalen och tillverkningsorderns utskrift visar de valda ritningarna vid operationen, och en legooperation
+            som använder artikelns ritningar mejlar bara dem. Utan val gäller alla artikelns ritningar och filer.
+          </FormHint>
+        </fieldset>
       )}
 
       <Field label="Kommentar (valfritt)" htmlFor="comment">

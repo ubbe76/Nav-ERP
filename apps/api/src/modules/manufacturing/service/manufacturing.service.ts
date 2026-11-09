@@ -51,6 +51,7 @@ import { extraDescriptionFor } from "../../mail/service/document-pdf.js";
 import { appendFilesToPdf, mergePdfs } from "../../mail/service/pdf-merge.js";
 import { ArticleNotFoundError, assertOrderableArticle, type ArticleFileReader, type ArticleUnitReader } from "../../article/service/article.service.js";
 import type { MaterialRow, OperationRowView } from "../repository/order-edit.js";
+import { revisionLine } from "../repository/drawing-snapshot.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/db-errors.js";
 import type { Tx } from "@navet/db";
 // G1: append-only audit trail (see audit.repository.ts). Status transitions
@@ -218,6 +219,14 @@ export class OperationHasLinkedMaterialError extends Error {
 // rule — the ordinarie or a legoresurs as alternative, a duplicate, too
 // many, an inactive resource added, or alternatives on a lego or Kalkyl
 // operation (400; Swedish text from routing-alternatives.ts).
+// Ritningar per operation: a drawing that is not the operation's article's.
+export class RoutingDrawingInvalidError extends Error {
+  constructor() {
+    super("En vald ritning hör inte till artikeln");
+    this.name = "RoutingDrawingInvalidError";
+  }
+}
+
 export class RoutingAlternativeInvalidError extends Error {
   constructor(message: string) {
     super(message);
@@ -278,6 +287,14 @@ export class DuplicateProductionGroupCodeError extends Error {
   constructor(code: string) {
     super(`A production group with code ${code} already exists`);
     this.name = "DuplicateProductionGroupCodeError";
+  }
+}
+
+// A file that is not the order's article's.
+export class ManufacturingOrderFileNotFoundError extends Error {
+  constructor(id: string) {
+    super(`File ${id} not found for the order's article`);
+    this.name = "ManufacturingOrderFileNotFoundError";
   }
 }
 
@@ -1074,6 +1091,24 @@ export function createManufacturingService(
     return resources;
   }
 
+  // Ritningar per operation: every sent drawing must be the article's.
+  async function assertRoutingDrawings(articleId: string, drawingIds: string[] | undefined) {
+    if (!drawingIds || drawingIds.length === 0) return;
+    if ((await repo.countArticleDrawings(articleId, drawingIds)) !== drawingIds.length) {
+      throw new RoutingDrawingInvalidError();
+    }
+  }
+
+  // A routing operation as the routes answer it: with its alternatives and
+  // its chosen drawings.
+  async function withRoutingExtras<T extends { id: string }>(row: T) {
+    const [alternatives, drawings] = await Promise.all([
+      repo.listRoutingAlternatives([row.id]),
+      repo.listRoutingDrawings([row.id]),
+    ]);
+    return { ...row, alternatives: alternatives.get(row.id) ?? [], drawings: drawings.get(row.id) ?? [] };
+  }
+
   // The order's operations are replanned inside the edit's transaction by
   // the planning service; without a plan reader (fixtures) nothing is.
   const replanner = () => (planning ? (tx: Tx, id: string) => planning.replanOrderInTx(tx, id) : undefined);
@@ -1376,9 +1411,10 @@ export function createManufacturingService(
         });
         if (problem) throw new RoutingAlternativeInvalidError(problem);
       }
+      await assertRoutingDrawings(articleId, input.drawingIds);
       try {
         const row = await repo.createRoutingOperation(articleId, withDefaults);
-        return { ...row, alternatives: (await repo.listRoutingAlternatives([row.id])).get(row.id) ?? [] };
+        return withRoutingExtras(row);
       } catch (err) {
         if (isUniqueViolation(err)) throw new DuplicateSequenceNoError();
         if (isForeignKeyViolation(err, "routing_operations_subcontract_supplier_id_suppliers_id_fk")) {
@@ -1427,6 +1463,7 @@ export function createManufacturingService(
       if (input.costingOnly === true && (await repo.countBomComponentsForOperation(operationId)) > 0) {
         throw new OperationHasLinkedMaterialError();
       }
+      await assertRoutingDrawings(articleId, input.drawingIds);
       try {
         // The rules run on the operation as locked in the transaction
         // (repo.updateRoutingOperation): the effective ordinarie and Kalkyl
@@ -1462,7 +1499,7 @@ export function createManufacturingService(
           return workCenter.type !== "subcontract" ? { ...input, ...CLEARED_LEGO_FIELDS, useArticleDrawing: true } : input;
         });
         if (!row) throw new RoutingOperationNotFoundError(operationId);
-        return { ...row, alternatives: (await repo.listRoutingAlternatives([row.id])).get(row.id) ?? [] };
+        return withRoutingExtras(row);
       } catch (err) {
         if (isUniqueViolation(err)) throw new DuplicateSequenceNoError();
         if (isForeignKeyViolation(err, "routing_operations_subcontract_supplier_id_suppliers_id_fk")) {
@@ -2296,18 +2333,60 @@ export function createManufacturingService(
       return { filename: `tillverkningsordrar-${moIds.length}-st.pdf`, content: await mergePdfs(documents) };
     },
 
+    // --- Revisionerna TO:n byggs efter (drawing-snapshot.ts) ---
+
+    async getOrderRevisions(moId: string) {
+      const view = await repo.orderRevisions(moId);
+      if (!view) throw new ManufacturingOrderNotFoundError(moId);
+      return view;
+    },
+
+    // Uppdatera: the order takes today's revisions — only while it is open
+    // (released/in progress); logged with the line before and after.
+    async refreshOrderRevisions(moId: string, userId: string) {
+      const order = await repo.findManufacturingOrderById(moId);
+      if (!order) throw new ManufacturingOrderNotFoundError(moId);
+      const before = await repo.orderRevisions(moId);
+      const result = await repo.refreshOrderRevisions(moId, ["released", "in_progress"]);
+      if (!result || !before) throw new ManufacturingOrderNotFoundError(moId);
+      if (!result.refreshed) throw new ManufacturingOrderNotEditableError(result.status);
+      const after = (await repo.orderRevisions(moId))!;
+      await audit.log({
+        entityType: "manufacturing_order",
+        entityId: order.orderNumber,
+        action: "revisions_updated",
+        detail: { before: revisionLine(before), after: revisionLine(after) },
+        userId,
+      });
+      return after;
+    },
+
+    async listOperationDrawingFiles(moId: string, moOperationId: string) {
+      return repo.operationDrawingFiles(moId, moOperationId);
+    },
+
+    async downloadOrderFile(moId: string, fileId: string) {
+      const file = await repo.findOrderArticleFile(moId, fileId);
+      if (!file) throw new ManufacturingOrderFileNotFoundError(fileId);
+      return file;
+    },
+
     // Shop-floor printout handed to the operator: order header, operations
-    // and material, with the article's drawings appended as extra pages.
+    // and material, with the drawings the order is built from appended as
+    // extra pages — the snapshot's revisions' files and the loose files
+    // (drawing-files.ts), never an older revision's.
     async getManufacturingOrderPdf(moId: string) {
       const order = await repo.findManufacturingOrderById(moId);
       if (!order) throw new ManufacturingOrderNotFoundError(moId);
 
-      const [operations, materials, drawings, salesOrderRow] = await Promise.all([
+      const [operations, materials, drawings, salesOrderRow, revisions] = await Promise.all([
         repo.listOperations(moId),
         repo.listMaterialConsumptions(moId),
-        articleFiles.filesWithData([order.articleId]),
+        articleFiles.drawingFilesWithData({ articleId: order.articleId, moId }),
         order.salesOrderRowId ? salesOrders.findRowForManufacturing(order.salesOrderRowId) : Promise.resolve(null),
+        repo.orderRevisions(moId),
       ]);
+      const operationDrawings = revisions ? await repo.operationDrawingLabels(moId, revisions) : new Map<string, string[]>();
 
       const quantity = Number(order.quantity);
       const extraDescription = extraDescriptionFor(
@@ -2336,6 +2415,7 @@ export function createManufacturingService(
           ? configurationLines((order.configuration as ManufacturingOrderConfiguration).selection)
           : undefined,
         extraDescription,
+        revisionLine: revisions ? revisionLine(revisions) : null,
         operations: operations.map((op) => ({
           sequenceNo: op.sequenceNo,
           workCenterName: op.workCenterName,
@@ -2350,6 +2430,7 @@ export function createManufacturingService(
           comment: op.comment,
           printOnWorkCard: op.printOnWorkCard,
           packingInstructions: op.packingInstructions,
+          drawings: operationDrawings.get(op.id) ?? [],
         })),
         // Printed in the row's unit (quantities are stored in the base unit).
         // Grouped by the operation the material is consumed at (unlinked

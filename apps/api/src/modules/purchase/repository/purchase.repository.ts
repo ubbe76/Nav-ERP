@@ -1120,10 +1120,20 @@ export function createPurchaseRepository(db: Db) {
         // never ship a 20 MB blob just to discard it in the service.
         fileData: sql<Buffer | null>`case when ${routingOperations.useArticleDrawing} = false then ${routingOperationFiles.data} end`,
       };
+      // moId + routingOperationId: which drawings and revisions the
+      // "article's drawings" are (drawing-files.ts) — the TO's snapshot and
+      // the operation's chosen drawings.
       if ("inquiryId" in ref) {
         return db
-          .select({ rowId: inquiryRows.id, articleId: inquiryRows.articleId, ...drawingColumns })
+          .select({
+            rowId: inquiryRows.id,
+            articleId: inquiryRows.articleId,
+            moId: moOperations.manufacturingOrderId,
+            routingOperationId: inquiryRows.routingOperationId,
+            ...drawingColumns,
+          })
           .from(inquiryRows)
+          .leftJoin(moOperations, eq(moOperations.id, inquiryRows.moOperationId))
           .leftJoin(routingOperations, eq(routingOperations.id, inquiryRows.routingOperationId))
           .leftJoin(routingOperationFiles, eq(routingOperationFiles.routingOperationId, routingOperations.id))
           .where(
@@ -1134,7 +1144,13 @@ export function createPurchaseRepository(db: Db) {
           );
       }
       return db
-        .select({ rowId: purchaseOrderRows.id, articleId: purchaseOrderRows.articleId, ...drawingColumns })
+        .select({
+          rowId: purchaseOrderRows.id,
+          articleId: purchaseOrderRows.articleId,
+          moId: moOperations.manufacturingOrderId,
+          routingOperationId: moOperations.routingOperationId,
+          ...drawingColumns,
+        })
         .from(purchaseOrderRows)
         .innerJoin(moOperations, eq(moOperations.id, purchaseOrderRows.moOperationId))
         .leftJoin(routingOperations, eq(routingOperations.id, moOperations.routingOperationId))

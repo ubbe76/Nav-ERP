@@ -18,6 +18,7 @@ import { MoMaterialModal } from "./MoMaterialModal";
 import { OperationModal, type OperationPayload } from "../articles/OperationModal";
 import { ReportsSection } from "./ReportsSection";
 import { ReportPanel } from "./ReportPanel";
+import { OrderRevisionsSection } from "./OrderRevisionsSection";
 import { PalletCardDialog, type PalletCardTarget } from "../documents/PalletCardDialog";
 import { RowMenu } from "../ui/RowMenu";
 import { GatedLink } from "../ui/GatedLink";
@@ -417,6 +418,13 @@ export function ManufacturingOrderDetail({
         </FormNotice>
       )}
       {lineError && <FormError margin="below">{lineError}</FormError>}
+
+      {/* Ritningar: the revisions the order is built from (0200). */}
+      <OrderRevisionsSection
+        orderId={order.id}
+        canRefresh={canEditLines}
+        onRefreshed={() => setHistoryKey((k) => k + 1)}
+      />
 
       <SectionHeading
         actions={

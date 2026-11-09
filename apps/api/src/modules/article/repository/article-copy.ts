@@ -3,6 +3,7 @@ import { articleSuppliers, articles, bomComponents, type Tx } from "@navet/db";
 import type { ArticleCopyPart, CreateArticleInput } from "@navet/shared";
 import { copyRouting } from "../../manufacturing/repository/routing-write.js";
 import { insertBomRows } from "./bom-write.js";
+import { currentArticleFileSql } from "./drawing-files.js";
 
 // "Kopiera från befintlig artikel" — the DB leaf behind POST /articles'
 // copyFrom. Everything here runs inside the create transaction (see
@@ -72,8 +73,9 @@ export function applyInformation(
 }
 
 // Copies the chosen parts after the new article row exists. Order matters
-// only for the remapping (routing before BOM, catalog rows before their
-// price breaks); drawings go last.
+// for the remapping: drawings before the routing (an operation's chosen
+// drawings follow by drawing number, copyRouting), routing before BOM,
+// catalog rows before their price breaks.
 export async function copyArticleParts(
   tx: Tx,
   sourceId: string,
@@ -86,19 +88,24 @@ export async function copyArticleParts(
       INSERT INTO article_units (article_id, unit_id, quantity_per_base)
       SELECT ${targetId}, unit_id, quantity_per_base FROM article_units WHERE article_id = ${sourceId}`);
   }
-  if (parts.includes("beredning")) await copyBeredning(tx, sourceId, targetId);
-  if (parts.includes("inkop")) await copySupplierCatalog(tx, sourceId, targetId);
   if (parts.includes("filer")) {
+    // The files in force — loose ones and the drawings' active revisions' —
+    // as loose files: revisions are never copied, so an active revision's
+    // file has no revision to sit on, and an older revision's is left
+    // behind (drawing-files.ts).
     await tx.execute(sql`
       INSERT INTO article_files (article_id, filename, content_type, size_bytes, data)
-      SELECT ${targetId}, filename, content_type, size_bytes, data
-      FROM article_files WHERE article_id = ${sourceId} ORDER BY created_at, id`);
+      SELECT ${targetId}, f.filename, f.content_type, f.size_bytes, f.data
+      FROM article_files f WHERE f.article_id = ${sourceId} AND ${currentArticleFileSql}
+      ORDER BY f.created_at, f.id`);
     // Drawing numbers only — their revision registers are revisions, which
     // are never copied.
     await tx.execute(sql`
       INSERT INTO article_drawings (article_id, drawing_number)
       SELECT ${targetId}, drawing_number FROM article_drawings WHERE article_id = ${sourceId} ORDER BY created_at, id`);
   }
+  if (parts.includes("beredning")) await copyBeredning(tx, sourceId, targetId);
+  if (parts.includes("inkop")) await copySupplierCatalog(tx, sourceId, targetId);
 }
 
 // Beredning: the routing (with the lego operation's own file) first via the

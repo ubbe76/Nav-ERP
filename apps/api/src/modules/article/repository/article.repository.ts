@@ -2,6 +2,7 @@ import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions }
 import { and, asc, count, desc, eq, getTableColumns, ilike, inArray, notExists, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { pluginEvents } from "../../system/service/plugin-events.js";
+import { currentArticleFileCondition, drawingFilesWithData, type DrawingFileRef } from "./drawing-files.js";
 import {
   claimArticleNumber,
   findArticleNumberSeries,
@@ -725,6 +726,9 @@ export function createArticleRepository(db: Db) {
 
     // Never selects `data` (bytea) — binary data must not end up in JSON
     // responses. downloadFile() is the only reader that fetches the bytes.
+    // With the drawing revision a file belongs to (null = a loose file):
+    // the Filer tab shows which files are a drawing's and whether that
+    // revision is the one in force.
     async listFiles(articleId: string) {
       return db
         .select({
@@ -734,28 +738,87 @@ export function createArticleRepository(db: Db) {
           contentType: articleFiles.contentType,
           sizeBytes: articleFiles.sizeBytes,
           createdAt: articleFiles.createdAt,
+          drawingRevisionId: articleFiles.drawingRevisionId,
+          drawingNumber: articleDrawings.drawingNumber,
+          revision: articleDrawingRevisions.revision,
+          revisionActive: articleDrawingRevisions.isActive,
         })
         .from(articleFiles)
+        .leftJoin(articleDrawingRevisions, eq(articleDrawingRevisions.id, articleFiles.drawingRevisionId))
+        .leftJoin(articleDrawings, eq(articleDrawings.id, articleDrawingRevisions.drawingId))
         .where(eq(articleFiles.articleId, articleId))
-        .orderBy(asc(articleFiles.filename));
+        .orderBy(asc(articleFiles.filename), asc(articleFiles.id));
     },
 
+    // drawingRevisionId: the file becomes that revision's — one per
+    // revision, so a file it already had is deleted in the same transaction
+    // (Byt fil). The caller has checked the revision is the article's.
     async addFile(input: {
       articleId: string;
       filename: string;
       contentType: string;
       sizeBytes: number;
       data: Buffer;
+      drawingRevisionId?: string | null;
     }) {
-      const [row] = await db.insert(articleFiles).values(input).returning({
-        id: articleFiles.id,
-        articleId: articleFiles.articleId,
-        filename: articleFiles.filename,
-        contentType: articleFiles.contentType,
-        sizeBytes: articleFiles.sizeBytes,
-        createdAt: articleFiles.createdAt,
+      return db.transaction(async (tx) => {
+        if (input.drawingRevisionId) {
+          await tx.delete(articleFiles).where(eq(articleFiles.drawingRevisionId, input.drawingRevisionId));
+        }
+        const [row] = await tx.insert(articleFiles).values(input).returning({
+          id: articleFiles.id,
+          articleId: articleFiles.articleId,
+          filename: articleFiles.filename,
+          contentType: articleFiles.contentType,
+          sizeBytes: articleFiles.sizeBytes,
+          createdAt: articleFiles.createdAt,
+          drawingRevisionId: articleFiles.drawingRevisionId,
+        });
+        return row!;
       });
-      return row!;
+    },
+
+    // Ritningsrevisionens fil from the article's loose files: the loose file
+    // moves onto the revision and a file the revision had is deleted. The
+    // file row is locked first, so two revisions can't take the same file.
+    async linkFileToDrawingRevision(articleId: string, drawingRevisionId: string, fileId: string) {
+      return db.transaction(async (tx) => {
+        const [file] = await tx
+          .select({ id: articleFiles.id, drawingRevisionId: articleFiles.drawingRevisionId })
+          .from(articleFiles)
+          .where(and(eq(articleFiles.id, fileId), eq(articleFiles.articleId, articleId)))
+          .for("update");
+        if (!file) return { kind: "not-found" as const };
+        if (file.drawingRevisionId === drawingRevisionId) return { kind: "linked" as const };
+        if (file.drawingRevisionId !== null) return { kind: "not-loose" as const };
+        await tx.delete(articleFiles).where(eq(articleFiles.drawingRevisionId, drawingRevisionId));
+        await tx.update(articleFiles).set({ drawingRevisionId }).where(eq(articleFiles.id, fileId));
+        return { kind: "linked" as const };
+      });
+    },
+
+    // The files in force for an order/operation (drawing-files.ts).
+    async drawingFilesWithData(ref: DrawingFileRef) {
+      return drawingFilesWithData(db, ref);
+    },
+
+    async findDrawingRevision(drawingId: string, revisionId: string) {
+      const [row] = await db
+        .select()
+        .from(articleDrawingRevisions)
+        .where(and(eq(articleDrawingRevisions.id, revisionId), eq(articleDrawingRevisions.drawingId, drawingId)));
+      return row ?? null;
+    },
+
+    // The revision with its drawing, when it is the article's (upload with
+    // ?drawingRevisionId=).
+    async findArticleDrawingRevision(articleId: string, revisionId: string) {
+      const [row] = await db
+        .select({ id: articleDrawingRevisions.id, drawingId: articleDrawings.id })
+        .from(articleDrawingRevisions)
+        .innerJoin(articleDrawings, eq(articleDrawings.id, articleDrawingRevisions.drawingId))
+        .where(and(eq(articleDrawingRevisions.id, revisionId), eq(articleDrawings.articleId, articleId)));
+      return row ?? null;
     },
 
     async findFile(articleId: string, fileId: string) {
@@ -774,13 +837,15 @@ export function createArticleRepository(db: Db) {
       return row ?? null;
     },
 
-    // Bytes included — for the TO printout and email attachments.
+    // Bytes included — for the order mails' attachments: the files in force
+    // (loose ones and the drawings' active revisions'), never an older
+    // revision's (drawing-files.ts).
     async filesWithData(articleIds: string[]) {
       if (articleIds.length === 0) return [];
       return db
         .select()
         .from(articleFiles)
-        .where(inArray(articleFiles.articleId, articleIds))
+        .where(and(inArray(articleFiles.articleId, articleIds), currentArticleFileCondition))
         .orderBy(asc(articleFiles.filename));
     },
 
@@ -872,11 +937,27 @@ export function createArticleRepository(db: Db) {
         .orderBy(asc(articleDrawings.drawingNumber));
       if (drawings.length === 0) return [];
       const revisions = await db
-        .select()
+        .select({
+          ...getTableColumns(articleDrawingRevisions),
+          fileId: articleFiles.id,
+          fileName: articleFiles.filename,
+          fileContentType: articleFiles.contentType,
+          fileSizeBytes: articleFiles.sizeBytes,
+        })
         .from(articleDrawingRevisions)
+        .leftJoin(articleFiles, eq(articleFiles.drawingRevisionId, articleDrawingRevisions.id))
         .where(inArray(articleDrawingRevisions.drawingId, drawings.map((d) => d.id)))
         .orderBy(desc(articleDrawingRevisions.isActive), asc(articleDrawingRevisions.createdAt));
-      return drawings.map((d) => ({ ...d, revisions: revisions.filter((r) => r.drawingId === d.id) }));
+      // Each revision carries its file (one at most, 0200) — open/print it
+      // on demand, also an older revision's.
+      const withFile = revisions.map(({ fileId, fileName, fileContentType, fileSizeBytes, ...r }) => ({
+        ...r,
+        file:
+          fileId === null
+            ? null
+            : { id: fileId, filename: fileName!, contentType: fileContentType!, sizeBytes: fileSizeBytes! },
+      }));
+      return drawings.map((d) => ({ ...d, revisions: withFile.filter((r) => r.drawingId === d.id) }));
     },
 
     async findDrawing(articleId: string, drawingId: string) {
@@ -959,6 +1040,38 @@ export function createArticleRepository(db: Db) {
         .where(and(eq(articleDrawingRevisions.id, revisionId), eq(articleDrawingRevisions.drawingId, drawingId)))
         .returning({ id: articleDrawingRevisions.id });
       return row ?? null;
+    },
+
+    // The articles' drawings with today's active revision and its file, in
+    // drawing-number order (the structure rows in the Beredning).
+    async currentDrawingsByArticle(articleIds: string[]) {
+      const map = new Map<
+        string,
+        { drawingNumber: string; revision: string | null; fileId: string | null; filename: string | null }[]
+      >();
+      if (articleIds.length === 0) return map;
+      const rows = await db
+        .select({
+          articleId: articleDrawings.articleId,
+          drawingNumber: articleDrawings.drawingNumber,
+          revision: articleDrawingRevisions.revision,
+          fileId: articleFiles.id,
+          filename: articleFiles.filename,
+        })
+        .from(articleDrawings)
+        .leftJoin(
+          articleDrawingRevisions,
+          and(eq(articleDrawingRevisions.drawingId, articleDrawings.id), eq(articleDrawingRevisions.isActive, true))
+        )
+        .leftJoin(articleFiles, eq(articleFiles.drawingRevisionId, articleDrawingRevisions.id))
+        .where(inArray(articleDrawings.articleId, articleIds))
+        .orderBy(asc(articleDrawings.drawingNumber));
+      for (const { articleId, ...drawing } of rows) {
+        const list = map.get(articleId) ?? [];
+        list.push(drawing);
+        map.set(articleId, list);
+      }
+      return map;
     },
 
     // Active revision info for document printing: the active article

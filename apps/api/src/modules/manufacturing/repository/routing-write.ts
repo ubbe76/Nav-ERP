@@ -1,5 +1,5 @@
 import { asc, eq, sql } from "drizzle-orm";
-import { routingOperationAlternatives, routingOperations, type Tx } from "@navet/db";
+import { routingOperationAlternatives, routingOperationDrawings, routingOperations, type Tx } from "@navet/db";
 
 // Tx-only routing writers — the manufacturing module owns routing_operations,
 // so every caller that writes a routing inside a larger transaction (Kopiera
@@ -51,11 +51,55 @@ export async function copyRouting(tx: Tx, sourceArticleId: string, targetArticle
       SELECT ${inserted!.id}, filename, content_type, size_bytes, data
       FROM routing_operation_files WHERE routing_operation_id = ${oldId}`);
   }
-  await copyRoutingAlternatives(
-    tx,
-    [...operationMap].map(([from, to]) => ({ from, to }))
-  );
+  const pairs = [...operationMap].map(([from, to]) => ({ from, to }));
+  await copyRoutingAlternatives(tx, pairs);
+  await copyRoutingDrawingLinks(tx, pairs, targetArticleId);
   return operationMap;
+}
+
+// Ritningar per operation (0200): the operation's chosen drawings as a set.
+// Only the article's own drawings are written (the service has refused
+// others; one deleted meanwhile just drops out).
+export async function replaceRoutingDrawings(
+  tx: Tx,
+  routingOperationId: string,
+  articleId: string,
+  drawingIds: string[]
+): Promise<void> {
+  await tx.delete(routingOperationDrawings).where(eq(routingOperationDrawings.routingOperationId, routingOperationId));
+  if (drawingIds.length === 0) return;
+  const ids = sql.join(
+    drawingIds.map((id) => sql`${id}::uuid`),
+    sql`, `
+  );
+  await tx.execute(sql`
+    INSERT INTO routing_operation_drawings (routing_operation_id, drawing_id)
+    SELECT ${routingOperationId}, d.id FROM article_drawings d
+    WHERE d.article_id = ${articleId} AND d.id IN (${ids})`);
+}
+
+// Ritningar per operation (0200): an operation's chosen drawings follow to
+// the copy where the target article has a drawing with the same number
+// (Kopiera från copies the drawing numbers first); otherwise the link is
+// dropped. The configurator's variants have no drawings, so none follow.
+export async function copyRoutingDrawingLinks(
+  tx: Tx,
+  pairs: { from: string; to: string }[],
+  targetArticleId: string
+): Promise<void> {
+  if (pairs.length === 0) return;
+  const values = sql.join(
+    pairs.map((p) => sql`(${p.from}::uuid, ${p.to}::uuid)`),
+    sql`, `
+  );
+  await tx.execute(sql`
+    INSERT INTO routing_operation_drawings (routing_operation_id, drawing_id)
+    SELECT v.to_id, td.id
+    FROM (VALUES ${values}) AS v(from_id, to_id)
+    JOIN routing_operation_drawings l ON l.routing_operation_id = v.from_id
+    JOIN article_drawings sd ON sd.id = l.drawing_id
+    JOIN article_drawings td ON td.article_id = ${targetArticleId} AND td.drawing_number = sd.drawing_number
+    ON CONFLICT DO NOTHING`);
 }
 
 // --- Alternativa resurser (#15) ---

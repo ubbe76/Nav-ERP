@@ -1,0 +1,32 @@
+/* Ritningar på TO-kortet — a block of its own above Material. */
+.section {
+  margin-bottom: var(--space-6);
+}
+
+.articleRevision,
+.looseFiles {
+  margin: 0 0 var(--space-3);
+  font-size: 14px;
+  color: var(--color-text-primary);
+}
+
+.looseFiles {
+  margin-top: var(--space-3);
+}
+
+.drawingNumber {
+  font-weight: 600;
+}
+
+.fileLink {
+  color: var(--accent-fg);
+  overflow-wrap: anywhere;
+}
+
+.none {
+  color: var(--color-text-muted);
+}
+
+.current {
+  overflow-wrap: anywhere;
+}

@@ -160,6 +160,19 @@
   min-width: 0;
 }
 
+/* The component's drawings under its name (Pos. column width in front). */
+.compDrawings {
+  display: block;
+  margin-top: 2px;
+  padding-left: calc(4.5ch + 8px);
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+.compDrawings a {
+  color: var(--accent-fg);
+}
+
 /* Pos. — the drawing position, a fixed-width leading column so the numbers
    line up from row to row. */
 .compPosition {
