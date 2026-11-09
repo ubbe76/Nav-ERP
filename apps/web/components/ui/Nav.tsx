@@ -40,7 +40,6 @@ import styles from "./Nav.module.css";
 
 const NAV_ITEMS = [
   "Översikt",
-  "Aviseringar",
   "Artiklar",
   "Inköp",
   "Försäljning",
@@ -50,6 +49,7 @@ const NAV_ITEMS = [
   "Kvalitet",
   "Ekonomi",
   "Rapporter",
+  "Aviseringar",
   "System",
   "Hjälp",
 ] as const;

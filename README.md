@@ -65,6 +65,16 @@ exempeldata. Klicka på en bild för full storlek.
       <br><sub><b>Artikelöversikten</b> — behov och inkommande med löpande disponibelt, i Dracula</sub>
     </td>
   </tr>
+  <tr>
+    <td width="50%">
+      <a href="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/screenshot-flikar.png"><img src="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/screenshot-flikar.png" alt="Fyra dokument öppna i flikar med kundordern framme"></a>
+      <br><sub><b>Flikar</b> — flera dokument öppna samtidigt</sub>
+    </td>
+    <td width="50%">
+      <a href="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/screenshot-delad-vy-dark.png"><img src="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/screenshot-delad-vy-dark.png" alt="Delad vy med listan över tillverkningsordrar till vänster och en tillverkningsorder till höger, i mörkt tema"></a>
+      <br><sub><b>Delad vy</b> — listan och dokumentet sida vid sida, i mörkt tema</sub>
+    </td>
+  </tr>
 </table>
 
 ## Teknikstack
