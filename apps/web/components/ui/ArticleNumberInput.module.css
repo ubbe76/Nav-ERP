@@ -1,0 +1,12 @@
+/* Number over benämning: the list is only as wide as the field, so the
+   benämning wraps instead of being cut after a few characters. */
+.option {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.name {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
