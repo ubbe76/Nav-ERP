@@ -741,7 +741,8 @@ describe("request for quotation and purchase order in English", () => {
     expectEnglish(rfqText);
 
     const order = await purchaseService.createPurchaseOrder(
-      { supplierId: supplier.id, expectedDeliveryDate: "2030-01-15", yourReference: "Herr Lieferant", ourReference: "Buyer" } as never,
+      // A EUR supplier: an explicit rate (no rate source in the tests).
+      { supplierId: supplier.id, exchangeRate: 11, expectedDeliveryDate: "2030-01-15", yourReference: "Herr Lieferant", ourReference: "Buyer" } as never,
       userId
     );
     await purchaseService.addRow(order.id, { articleId: base.article.id, quantity: 3, unitPrice: 1234.5 });

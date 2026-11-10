@@ -190,7 +190,27 @@ const rowProjects = alias(projects, "si_row_projects");
 // the same reads and writes (the service's createInTx binds a repository to
 // the tx), like the other Db | Tx helpers. On a transaction, the
 // repository's own `db.transaction` calls become savepoints.
+// A row write on a draft: refused (with the status found, null = no such
+// invoice) when the invoice is not a draft under its lock.
+export type DraftRowWriteResult<T> = { ok: true; value: T } | { ok: false; status: string | null };
+
 export function createSupplierInvoiceRepository(db: Db | Tx) {
+  // Row writes lock the invoice and check draft under the lock, like the
+  // attest does: the service's own status check reads unlocked, so a row
+  // could otherwise be changed after the attest had booked the verification
+  // from the rows.
+  async function writeRowIfDraft<T>(invoiceId: string, write: (tx: Tx) => Promise<T>): Promise<DraftRowWriteResult<T>> {
+    return db.transaction(async (tx): Promise<DraftRowWriteResult<T>> => {
+      const [invoice] = await tx
+        .select({ status: supplierInvoices.status })
+        .from(supplierInvoices)
+        .where(eq(supplierInvoices.id, invoiceId))
+        .for("update");
+      if (!invoice) return { ok: false, status: null };
+      if (invoice.status !== "draft") return { ok: false, status: invoice.status };
+      return { ok: true, value: await write(tx) };
+    });
+  }
   const repository = {
     async transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
       return (db as Db).transaction(fn);
@@ -211,6 +231,18 @@ export function createSupplierInvoiceRepository(db: Db | Tx) {
     async findPurchaseOrderProject(purchaseOrderId: string): Promise<string | null> {
       const [row] = await db.select({ projectId: purchaseOrders.projectId }).from(purchaseOrders).where(eq(purchaseOrders.id, purchaseOrderId));
       return row?.projectId ?? null;
+    },
+
+    // Existence checks behind the service's 404s (an unknown id otherwise
+    // surfaced as an FK violation, a 500).
+    async purchaseOrderExists(id: string): Promise<boolean> {
+      const [row] = await db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.id, id));
+      return row !== undefined;
+    },
+
+    async articleExists(id: string): Promise<boolean> {
+      const [row] = await db.select({ id: articles.id }).from(articles).where(eq(articles.id, id));
+      return row !== undefined;
     },
 
     // The article group's Kostnadsställe (förval) — a new row's default.
@@ -776,24 +808,26 @@ export function createSupplierInvoiceRepository(db: Db | Tx) {
     },
 
     async addRow(invoiceId: string, row: SupplierInvoiceRowWrite) {
-      const [inserted] = await db
-        .insert(supplierInvoiceRows)
-        .values({
-          supplierInvoiceId: invoiceId,
-          articleId: row.articleId,
-          purchaseOrderRowId: row.purchaseOrderRowId,
-          description: row.description,
-          quantity: String(row.quantity),
-          unitPrice: String(row.unitPrice),
-          lineAmount: String(row.lineAmount),
-          vatAmount: String(row.vatAmount),
-          vatRate: row.vatRate === null ? null : String(row.vatRate),
-          vatCodeId: row.vatCodeId,
-          costCenterId: row.costCenterId,
-          projectId: row.projectId,
-        })
-        .returning();
-      return inserted!;
+      return writeRowIfDraft(invoiceId, async (tx) => {
+        const [inserted] = await tx
+          .insert(supplierInvoiceRows)
+          .values({
+            supplierInvoiceId: invoiceId,
+            articleId: row.articleId,
+            purchaseOrderRowId: row.purchaseOrderRowId,
+            description: row.description,
+            quantity: String(row.quantity),
+            unitPrice: String(row.unitPrice),
+            lineAmount: String(row.lineAmount),
+            vatAmount: String(row.vatAmount),
+            vatRate: row.vatRate === null ? null : String(row.vatRate),
+            vatCodeId: row.vatCodeId,
+            costCenterId: row.costCenterId,
+            projectId: row.projectId,
+          })
+          .returning();
+        return inserted!;
+      });
     },
 
     // Scoped to the invoice so a row id from another invoice 404s.
@@ -806,32 +840,36 @@ export function createSupplierInvoiceRepository(db: Db | Tx) {
     },
 
     async updateRow(invoiceId: string, rowId: string, row: SupplierInvoiceRowWrite) {
-      const [updated] = await db
-        .update(supplierInvoiceRows)
-        .set({
-          articleId: row.articleId,
-          purchaseOrderRowId: row.purchaseOrderRowId,
-          description: row.description,
-          quantity: String(row.quantity),
-          unitPrice: String(row.unitPrice),
-          lineAmount: String(row.lineAmount),
-          vatAmount: String(row.vatAmount),
-          vatRate: row.vatRate === null ? null : String(row.vatRate),
-          vatCodeId: row.vatCodeId,
-          costCenterId: row.costCenterId,
-          projectId: row.projectId,
-        })
-        .where(and(eq(supplierInvoiceRows.id, rowId), eq(supplierInvoiceRows.supplierInvoiceId, invoiceId)))
-        .returning();
-      return updated ?? null;
+      return writeRowIfDraft(invoiceId, async (tx) => {
+        const [updated] = await tx
+          .update(supplierInvoiceRows)
+          .set({
+            articleId: row.articleId,
+            purchaseOrderRowId: row.purchaseOrderRowId,
+            description: row.description,
+            quantity: String(row.quantity),
+            unitPrice: String(row.unitPrice),
+            lineAmount: String(row.lineAmount),
+            vatAmount: String(row.vatAmount),
+            vatRate: row.vatRate === null ? null : String(row.vatRate),
+            vatCodeId: row.vatCodeId,
+            costCenterId: row.costCenterId,
+            projectId: row.projectId,
+          })
+          .where(and(eq(supplierInvoiceRows.id, rowId), eq(supplierInvoiceRows.supplierInvoiceId, invoiceId)))
+          .returning();
+        return updated ?? null;
+      });
     },
 
     async deleteRow(invoiceId: string, rowId: string) {
-      const [row] = await db
-        .delete(supplierInvoiceRows)
-        .where(and(eq(supplierInvoiceRows.id, rowId), eq(supplierInvoiceRows.supplierInvoiceId, invoiceId)))
-        .returning();
-      return row ?? null;
+      return writeRowIfDraft(invoiceId, async (tx) => {
+        const [row] = await tx
+          .delete(supplierInvoiceRows)
+          .where(and(eq(supplierInvoiceRows.id, rowId), eq(supplierInvoiceRows.supplierInvoiceId, invoiceId)))
+          .returning();
+        return row ?? null;
+      });
     },
 
     // --- Underlag (the supplier's invoice file). Listing never selects data. ---

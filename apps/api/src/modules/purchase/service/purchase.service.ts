@@ -45,7 +45,7 @@ import type {
 } from "@navet/shared";
 import type { Tx } from "@navet/db";
 import { InvalidStatusTransitionError as MoInvalidStatusTransitionError } from "../../manufacturing/service/manufacturing.service.js";
-import type { LegoSnapshot, PurchaseRepository } from "../repository/purchase.repository.js";
+import { PurchaseOrderNotEditableError, type LegoSnapshot, type PurchaseRepository } from "../repository/purchase.repository.js";
 import type { RegisterReferenceReader } from "../../register/service/register.service.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import type { MailService } from "../../mail/service/mail.service.js";
@@ -82,6 +82,7 @@ import { documentVatCode, supplierVatCode, vatCodeRef, type VatCodeBook } from "
 // sales.service.ts's identical comment) so the many pre-existing test call
 // sites keep compiling; app.ts wires the real one.
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
+import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
 
 // Lego (subcontract): receiving an IO row that buys an MO operation
 // auto-reports that operation. Consumer-side interface satisfied
@@ -174,6 +175,14 @@ export class InvalidStatusTransitionError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "InvalidStatusTransitionError";
+  }
+}
+
+// Valuta: a SEK order's rate is always 1 (→ 400).
+export class PurchaseOrderExchangeRateError extends Error {
+  constructor() {
+    super("En inköpsorder i SEK har alltid kursen 1");
+    this.name = "PurchaseOrderExchangeRateError";
   }
 }
 
@@ -575,8 +584,28 @@ export function createPurchaseService(
   settings: PurchaseSettingsReader,
   manufacturing: SubcontractOperationReporter & RoutingPriceWriter,
   // G1: optional, defaults to a no-op — see the import comment above.
-  audit: AuditWriter = { log: async () => {} }
+  audit: AuditWriter = { log: async () => {} },
+  // Valuta: today's rate for a new order in another currency. Optional so
+  // the existing test call sites keep compiling; without it such an order
+  // needs its rate sent (ExchangeRateUnavailableError otherwise).
+  rates: ExchangeRateReader | null = null
 ) {
+  // Valuta: a new order's rate (SEK per 1 unit) — SEK is always 1 (another
+  // explicit rate is a 400), an explicit rate wins, else today's rate from
+  // Riksbanken / Valutakurser. Looked up BEFORE any transaction (it may call
+  // Riksbanken); no rate ⇒ ExchangeRateUnavailableError (409). The receipt
+  // stamps unit_cost = price × this rate, so a foreign order must never
+  // silently get 1.
+  async function orderRate(currency: string, explicit: number | undefined): Promise<number> {
+    if (currency === "SEK") {
+      if (explicit !== undefined && explicit !== 1) throw new PurchaseOrderExchangeRateError();
+      return 1;
+    }
+    if (explicit !== undefined) return explicit;
+    const today = stockholmToday();
+    if (!rates) throw new ExchangeRateUnavailableError(currency, today);
+    return (await rates.getRate(currency, today)).rate;
+  }
   // Per-row revision line for document printing — null when the system
   // setting "show_revisions_on_documents" is off.
   async function revisionInfoMap(articleIds: string[]) {
@@ -600,10 +629,12 @@ export function createPurchaseService(
     input: T
   ) {
     // Produktkonfigurator: a template in mode variants never goes on a new
-    // row (IO addRow, createInquiry, addInquiryRow) — an unknown article is
-    // left to the FK as before. One read serves the guard and the rounding.
+    // row (IO addRow, createInquiry, addInquiryRow). An unknown article is a
+    // 404 here — left to the FK it surfaced as a 500. One read serves the
+    // guards and the rounding.
     const article = await articleFiles.getArticle(input.articleId);
-    if (article) assertPurchasableArticle(article);
+    if (!article) throw new ArticleNotFoundError(input.articleId);
+    assertPurchasableArticle(article);
     const selection = await articleFiles.resolveUnitSelection(input.articleId, input.unitId);
     return {
       ...input,
@@ -664,6 +695,20 @@ export function createPurchaseService(
     }
     const ref = await repo.resolveLegoOperationRef(input);
     if (!ref) throw new LegoOperationNotFoundError(input.moOperationId ?? input.routingOperationId!);
+    assertLegoRef(ref, input);
+    return {
+      moOperationId: ref.moOperationId,
+      routingOperationId: ref.routingOperationId,
+      setupPrice: input.setupPrice ?? (ref.setupPrice !== null ? Number(ref.setupPrice) : null),
+    };
+  }
+  // The lego link's own rules, shared by the inquiry rows and the IO rows
+  // (addRow): the operation belongs to the row's article, sits on a
+  // legoresurs and — for a TO operation — is still open.
+  function assertLegoRef(
+    ref: NonNullable<Awaited<ReturnType<PurchaseRepository["resolveLegoOperationRef"]>>>,
+    input: { articleId: string; moOperationId?: string | null }
+  ) {
     if (ref.articleId !== input.articleId) throw new LegoOperationArticleMismatchError();
     if (ref.workCenterType !== "subcontract") throw new NotLegoOperationError();
     // A TO operation link (not the TO-less routing-operation link) must
@@ -676,11 +721,6 @@ export function createPurchaseService(
     ) {
       throw new LegoOperationClosedError();
     }
-    return {
-      moOperationId: ref.moOperationId,
-      routingOperationId: ref.routingOperationId,
-      setupPrice: input.setupPrice ?? (ref.setupPrice !== null ? Number(ref.setupPrice) : null),
-    };
   }
   // Assembles the printable PDF for an inquiry — shared by the download
   // endpoint and the email flow.
@@ -1037,10 +1077,12 @@ export function createPurchaseService(
       if (!supplier) throw new SupplierNotFoundError(input.supplierId);
       // Projekt (kostnadsställen och projekt): must exist and be open.
       const { projectId } = await repo.resolveDimensions({ projectId: input.projectId });
+      // Valuta: before the transaction — the lookup may call Riksbanken.
+      const exchangeRate = await orderRate(supplier.currency, input.exchangeRate);
       // Avvikelser (Skapa inköpsorder): the case link in the IO's transaction.
       const deviationId = input.deviationId;
       return repo.createPurchaseOrder(
-        { ...input, projectId },
+        { ...input, projectId, exchangeRate },
         createdBy,
         supplier.currency,
         deviationId
@@ -1058,6 +1100,17 @@ export function createPurchaseService(
       if (!order) throw new PurchaseOrderNotFoundError(orderId);
       if (order.status !== "draft" && order.status !== "confirmed" && order.status !== "partially_received") {
         throw new InvalidStatusTransitionError(`Cannot change the header of an order in status "${order.status}"`);
+      }
+      // Valuta: SEK ⇔ 1. Re-sending the stored rate (the card saves the whole
+      // header) is let through so an older SEK order with another rate is
+      // not locked.
+      if (
+        order.currency === "SEK" &&
+        input.exchangeRate !== undefined &&
+        input.exchangeRate !== 1 &&
+        input.exchangeRate !== Number(order.exchangeRate)
+      ) {
+        throw new PurchaseOrderExchangeRateError();
       }
       await validateRegisterRefs(input);
       // Projekt: a new choice must be open; the order's own may stay closed.
@@ -1172,7 +1225,9 @@ export function createPurchaseService(
       if (inquiry.status !== "draft") {
         throw new InvalidStatusTransitionError(`Cannot send an inquiry in status "${inquiry.status}"`);
       }
-      const updated = await repo.updateInquiryStatus(id, "sent");
+      // Conditional on the status read above — null when it moved meanwhile.
+      const updated = await repo.updateInquiryStatus(id, "sent", ["draft"]);
+      if (!updated) throw new InvalidStatusTransitionError("Cannot send the inquiry — its status changed meanwhile");
       await audit.log({
         entityType: "inquiry",
         entityId: inquiry.inquiryNumber,
@@ -1213,7 +1268,11 @@ export function createPurchaseService(
         attachments: dedupeAttachmentFilenames([attachment, ...extra]),
         attachDrawings: input.attachDrawings,
       });
-      if (inquiry.status === "draft") return repo.updateInquiryStatus(id, "sent");
+      // The mail has gone: a status that moved meanwhile is no error — the
+      // inquiry is returned as it now stands.
+      if (inquiry.status === "draft") {
+        return (await repo.updateInquiryStatus(id, "sent", ["draft"])) ?? (await repo.findInquiryById(id)) ?? inquiry;
+      }
       return inquiry;
     },
 
@@ -1223,7 +1282,8 @@ export function createPurchaseService(
       if (inquiry.status !== "sent") {
         throw new InvalidStatusTransitionError(`Cannot mark an inquiry in status "${inquiry.status}" as answered`);
       }
-      const updated = await repo.updateInquiryStatus(id, "answered");
+      const updated = await repo.updateInquiryStatus(id, "answered", ["sent"]);
+      if (!updated) throw new InvalidStatusTransitionError("Cannot mark the inquiry as answered — its status changed meanwhile");
       await audit.log({
         entityType: "inquiry",
         entityId: inquiry.inquiryNumber,
@@ -1239,7 +1299,10 @@ export function createPurchaseService(
       if (inquiry.status === "ordered" || inquiry.status === "cancelled") {
         throw new InvalidStatusTransitionError(`Cannot cancel an inquiry in status "${inquiry.status}"`);
       }
-      const updated = await repo.updateInquiryStatus(id, "cancelled");
+      // From the status that was read: an inquiry converted to an order
+      // meanwhile must not end up cancelled with a live order behind it.
+      const updated = await repo.updateInquiryStatus(id, "cancelled", [inquiry.status]);
+      if (!updated) throw new InvalidStatusTransitionError("Cannot cancel the inquiry — its status changed meanwhile");
       await audit.log({
         entityType: "inquiry",
         entityId: inquiry.inquiryNumber,
@@ -1257,9 +1320,17 @@ export function createPurchaseService(
           `Cannot convert an inquiry in status "${inquiry.status}" to a purchase order`
         );
       }
-      const order = await repo.convertInquiryToOrder(id, createdBy);
-      if (!order) throw new InquiryNotFoundError(id);
-      return order;
+      // Currency and rate before the transaction (the lookup may call
+      // Riksbanken); the repository re-checks the status under the lock.
+      const supplier = await repo.findSupplierById(inquiry.supplierId);
+      if (!supplier) throw new SupplierNotFoundError(inquiry.supplierId);
+      const exchangeRate = await orderRate(supplier.currency, undefined);
+      const result = await repo.convertInquiryToOrder(id, createdBy, { currency: supplier.currency, exchangeRate });
+      if (!result.ok) {
+        if (result.reason === "inquiry_not_found") throw new InquiryNotFoundError(id);
+        throw new InvalidStatusTransitionError(`Cannot convert an inquiry in status "${result.status}" to a purchase order`);
+      }
+      return result.order;
     },
 
     // "Uppdatera beredningens legopris" — writes the answered unit price,
@@ -1347,23 +1418,37 @@ export function createPurchaseService(
       return repo.listRowsByOrder(purchaseOrderId);
     },
 
-    // Article FK is enforced by the DB (same precedent as the stock module,
-    // which doesn't pre-check articleId either) — no cross-module lookup here.
-    // Rows are editable until the order is fully received/closed/cancelled.
+    // Rows are editable until the order is fully received/closed/cancelled —
+    // checked here for the plain answer and again under the order lock in the
+    // repository (a receipt or Stäng may commit in between).
     async addRow(purchaseOrderId: string, input: CreatePurchaseOrderRowInput, userId?: string | null) {
       const order = await repo.findPurchaseOrderById(purchaseOrderId);
       if (!order) throw new PurchaseOrderNotFoundError(purchaseOrderId);
       if (order.status !== "draft" && order.status !== "confirmed" && order.status !== "partially_received") {
         throw new InvalidStatusTransitionError(`Cannot add rows to an order in status "${order.status}"`);
       }
+      const resolved = await resolveRowInput(input);
+      // Lego row: the same link rules as an inquiry row (the operation is
+      // this article's, on a legoresurs, still open on a released/started
+      // TO) — a row pointing anywhere else would report the wrong operation
+      // at receipt. The ställpris stays what was sent (no default here).
+      if (input.moOperationId) {
+        const ref = await repo.resolveLegoOperationRef({ moOperationId: input.moOperationId });
+        if (!ref) throw new MoOperationNotFoundError(input.moOperationId);
+        assertLegoRef(ref, input);
+      }
       let row;
       try {
-        row = await repo.addRow(purchaseOrderId, await resolveRowInput(input));
+        row = await repo.addRow(purchaseOrderId, resolved);
       } catch (err) {
         // Lego row pointing at an unknown MO operation — the hand-declared
         // FK is the existence check.
         if (isForeignKeyViolation(err, "purchase_order_rows_mo_operation_id_mo_operations_id_fk")) {
           throw new MoOperationNotFoundError(input.moOperationId ?? "");
+        }
+        // The status moved between the read above and the order lock.
+        if (err instanceof PurchaseOrderNotEditableError) {
+          throw new InvalidStatusTransitionError(`Cannot add rows to an order in status "${err.status ?? "unknown"}"`);
         }
         throw err;
       }
@@ -1452,6 +1537,8 @@ export function createPurchaseService(
         // deleteRow only — never raised by updateRow.
         case "row_has_dispatches":
           throw new PurchaseOrderRowHasDispatchesError();
+        case "invalid_status":
+          throw new InvalidStatusTransitionError(`Cannot change rows on an order in status "${result.status}"`);
       }
     },
 
@@ -1485,6 +1572,8 @@ export function createPurchaseService(
           throw new RowHasReceiptsError();
         case "row_has_dispatches":
           throw new PurchaseOrderRowHasDispatchesError();
+        case "invalid_status":
+          throw new InvalidStatusTransitionError(`Cannot change rows on an order in status "${result.status}"`);
       }
     },
 
@@ -1494,7 +1583,8 @@ export function createPurchaseService(
       if (order.status !== "draft") {
         throw new InvalidStatusTransitionError(`Cannot confirm an order in status "${order.status}"`);
       }
-      const updated = await repo.updateStatus(orderId, "confirmed");
+      const updated = await repo.updateStatus(orderId, "confirmed", ["draft"]);
+      if (!updated) throw new InvalidStatusTransitionError("Cannot confirm the order — its status changed meanwhile");
       await audit.log({
         entityType: "purchase_order",
         entityId: order.orderNumber,
@@ -1552,7 +1642,11 @@ export function createPurchaseService(
         attachments: dedupeAttachmentFilenames([attachment, ...extra]),
         attachDrawings: input.attachDrawings,
       });
-      if (order.status === "draft") return repo.updateStatus(orderId, "confirmed");
+      // The mail has gone: an order that left draft meanwhile (cancelled,
+      // confirmed by someone else) keeps its status and is returned re-read.
+      if (order.status === "draft") {
+        return (await repo.updateStatus(orderId, "confirmed", ["draft"])) ?? (await repo.findPurchaseOrderById(orderId)) ?? order;
+      }
       return order;
     },
 
@@ -1583,7 +1677,10 @@ export function createPurchaseService(
       if (order.status !== "received") {
         throw new InvalidStatusTransitionError(`Cannot close an order in status "${order.status}"`);
       }
-      const updated = await repo.updateStatus(orderId, "closed");
+      // Conditional: an Ångra inleverans that committed meanwhile reopened
+      // the order, and closing it then would strand the undone goods.
+      const updated = await repo.updateStatus(orderId, "closed", ["received"]);
+      if (!updated) throw new InvalidStatusTransitionError("Cannot close the order — its status changed meanwhile");
       await audit.log({
         entityType: "purchase_order",
         entityId: order.orderNumber,

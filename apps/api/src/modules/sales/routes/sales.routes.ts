@@ -52,6 +52,7 @@ import {
   OverDeliveryError,
   QuoteLossReasonInvalidError,
   RowHasDeliveriesError,
+  RowHasInvoiceRowsError,
   SalesOrderNotFoundError,
   SalesOrderRowNotFoundError,
 } from "../service/sales.service.js";
@@ -452,7 +453,7 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       const row = await service.addRow(req.params.id, input, req.user!.id);
       return reply.code(201).send(row);
     } catch (err) {
-      if (err instanceof SalesOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof SalesOrderNotFoundError || err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
       // C3: unitPrice omitted and the price chain came up empty.
       if (err instanceof PriceNotFoundError) return reply.code(400).send(errorBody(err));
@@ -578,6 +579,7 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
           err instanceof InvalidStatusTransitionError ||
           err instanceof OverDeliveryError ||
           err instanceof RowHasDeliveriesError ||
+          err instanceof RowHasInvoiceRowsError ||
           err instanceof RowHasManufacturingOrdersError
         ) {
           return reply.code(409).send(errorBody(err));

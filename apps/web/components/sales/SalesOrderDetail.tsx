@@ -456,7 +456,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
       });
       router.refresh();
     } catch (err) {
-      setRowError(err instanceof Error ? err.message : "Kunde inte ta bort raden");
+      setRowError(apiErrorMessage(err, "Kunde inte ta bort raden"));
     } finally {
       setRowPending(false);
     }
@@ -506,7 +506,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
       if (action === "confirm") router.push(`/forsaljning/ordrar/${order.id}`);
       else router.refresh();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Åtgärden misslyckades");
+      setActionError(apiErrorMessage(err, "Åtgärden misslyckades"));
     } finally {
       setActionPending(null);
     }
@@ -1892,7 +1892,7 @@ function CreateMoForm({
         router.refresh();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte skapa tillverkningsordern");
+      setError(apiErrorMessage(err, "Kunde inte skapa tillverkningsordern"));
       setPending(false);
     }
   }
@@ -1993,7 +1993,7 @@ function DeliverGoodsForm({
       });
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte leverera");
+      setError(apiErrorMessage(err, "Kunde inte leverera"));
     } finally {
       setPending(false);
     }

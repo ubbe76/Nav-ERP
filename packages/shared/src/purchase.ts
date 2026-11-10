@@ -200,12 +200,14 @@ export type UpdateSupplierInput = z.infer<typeof updateSupplierSchema>;
 // Header only — rows are added separately via createPurchaseOrderRowSchema,
 // mirroring the article/BOM pattern (create article, then add BOM rows).
 // No `currency` here — it's always snapshotted from the supplier, never
-// chosen per order. `exchangeRate` is set manually (no external rate source).
+// chosen per order. `exchangeRate` (SEK per 1 unit of the currency) is
+// optional: omitted = today's rate from Riksbanken / Valutakurser, looked up
+// by the service; a SEK order only accepts 1.
 export const createPurchaseOrderSchema = z.object({
   supplierId: z.string().uuid(),
   expectedDeliveryDate: z.string().date().optional(),
   note: z.string().optional(),
-  exchangeRate: z.coerce.number().positive().default(1),
+  exchangeRate: z.coerce.number().positive().optional(),
   // Er referens (the supplier's contact) / Vår referens (our buyer) —
   // printed on the PO document when set.
   yourReference: z.string().max(100).optional(),

@@ -25,6 +25,7 @@ import {
   isVatRate,
   localized,
   round2,
+  round4,
   salesRowIsGoods,
   salesVatCode,
   toUnitPrice,
@@ -206,6 +207,15 @@ export class OverCreditError extends Error {
   constructor() {
     super("Credited quantity would exceed the net invoiced quantity for this sales order row");
     this.name = "OverCreditError";
+  }
+}
+
+// The credit notes issued against an invoice may not add up to more than the
+// invoice (Σ rows incl. VAT) — also for rows without an order row.
+export class CreditExceedsInvoiceError extends Error {
+  constructor() {
+    super("The credit notes would exceed the amount of the invoice they credit");
+    this.name = "CreditExceedsInvoiceError";
   }
 }
 
@@ -1020,11 +1030,13 @@ export function createInvoiceService(
       // Already signed by the caller per this batch's invoice type.
       netInvoiced += batchAccumulated?.get(salesOrderRowId) ?? 0;
 
+      // Compared at the column's scale (round4): the sums are JS numbers,
+      // and 0.1 + 0.2 invoiced of 0.3 delivered must not be an over-invoice.
       if (type === "credit") {
-        if (netInvoiced - input.quantity < 0) {
+        if (round4(netInvoiced - input.quantity) < 0) {
           throw new OverCreditError();
         }
-      } else if (netInvoiced + input.quantity > quantityDelivered) {
+      } else if (round4(netInvoiced + input.quantity) > round4(quantityDelivered)) {
         throw new OverInvoicingError();
       }
     }
@@ -1861,6 +1873,7 @@ export function createInvoiceService(
       if (!result.ok) {
         if (result.reason === "over_invoicing") throw new OverInvoicingError();
         if (result.reason === "over_crediting") throw new OverCreditError();
+        if (result.reason === "credit_exceeds_invoice") throw new CreditExceedsInvoiceError();
         throw new InvalidStatusTransitionError(`Cannot issue invoice ${id}: it is no longer a draft`);
       }
       await audit.log({

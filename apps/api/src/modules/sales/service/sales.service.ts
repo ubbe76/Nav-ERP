@@ -131,6 +131,7 @@ import {
   MarkupRepricingConflictError,
   MarkupRepricingNotConfirmedError,
   SalesOrderMarkupsChangedError,
+  SalesOrderRowsLockedError,
 } from "./sales.errors.js";
 import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
 
@@ -318,6 +319,15 @@ export class RowHasDeliveriesError extends Error {
   constructor() {
     super("Cannot delete a row that has delivered goods");
     this.name = "RowHasDeliveriesError";
+  }
+}
+
+// A row on an invoice row — a cancelled draft or a credited invoice included
+// — keeps its history: the invoice row's restrict FK.
+export class RowHasInvoiceRowsError extends Error {
+  constructor() {
+    super("Cannot delete a row that is on an invoice");
+    this.name = "RowHasInvoiceRowsError";
   }
 }
 
@@ -785,10 +795,12 @@ export function createSalesService(
     // Produktkonfigurator: a template in mode variants never goes on a new
     // row without a configuration (its variants are); a template in to_order
     // (beställningsvara) goes on the row WITH a configuration, and a
-    // configuration is refused on anything else. An unknown article is left
-    // to the FK as before. One read serves the guards and the rounding step.
+    // configuration is refused on anything else. An unknown article is a 404
+    // (ArticleNotFoundError), not the row's FK failing as a 500. One read
+    // serves the guards and the rounding step.
     const article = await articleFiles.getArticle(input.articleId);
-    if (article) assertOrderableArticle(article);
+    if (!article) throw new ArticleNotFoundError(input.articleId);
+    assertOrderableArticle(article);
     if (article?.configuratorMode === "to_order" && !input.configuration) throw new ConfigurationRequiredError(article.articleNumber);
     if (input.configuration && article?.configuratorMode !== "to_order") {
       throw new ConfigurationNotAllowedError(article?.articleNumber ?? input.articleId);
@@ -1487,6 +1499,10 @@ export function createSalesService(
     },
 
     async createQuote(input: CreateQuoteInput, createdBy: string | null) {
+      // An unknown customer is a 404 here, not the order's FK failing as a 500
+      // (POST /quotes is the external API's entry point).
+      const customer = await repo.findCustomerById(input.customerId);
+      if (!customer) throw new CustomerNotFoundError(input.customerId);
       // The delivery address must belong to the ordering customer.
       if (input.deliveryAddressId) {
         const address = await repo.findDeliveryAddress(input.customerId, input.deliveryAddressId);
@@ -1495,8 +1511,7 @@ export function createSalesService(
       // Valuta: the customer's currency unless the caller chose one, and
       // today's rate unless the caller sent one — looked up here, before the
       // transaction (it may call Riksbanken). Every row is priced in it.
-      const customer = await repo.findCustomerById(input.customerId);
-      const currency = input.currency ?? customer?.currency ?? SEK;
+      const currency = input.currency ?? customer.currency ?? SEK;
       const exchangeRate = await documentRate(currency, input.exchangeRate);
       const pricing: RowPricing = { customerId: input.customerId, currency, exchangeRate };
       // Variants resolved here (delprojekt 5) are created under the template
@@ -1616,7 +1631,13 @@ export function createSalesService(
       // (#16 etapp 3): likewise the order's markups, but only when the price
       // chain priced the row — a beställningsvara's template chain never
       // reads them, so a markup change cannot make its price stale.
-      const row = await repo.addRow(salesOrderId, write, pricing.currency, chainPriced ? (pricing.orderMarkups ?? null) : undefined);
+      let row;
+      try {
+        row = await repo.addRow(salesOrderId, write, pricing.currency, chainPriced ? (pricing.orderMarkups ?? null) : undefined);
+      } catch (err) {
+        if (err instanceof SalesOrderRowsLockedError) throw new InvalidStatusTransitionError(err.message);
+        throw err;
+      }
       await logRowAdded(order.orderNumber, row, userId);
       return withoutConfigurationCost(row);
     },
@@ -1785,6 +1806,9 @@ export function createSalesService(
           throw new OverDeliveryError();
         case "row_has_deliveries":
           throw new RowHasDeliveriesError();
+        // deleteRow only — never raised by updateRow.
+        case "row_has_invoice_rows":
+          throw new RowHasInvoiceRowsError();
         case "markups_changed":
           throw new SalesOrderMarkupsChangedError(order.orderNumber);
       }
@@ -1973,6 +1997,8 @@ export function createSalesService(
           throw new OverDeliveryError();
         case "row_has_deliveries":
           throw new RowHasDeliveriesError();
+        case "row_has_invoice_rows":
+          throw new RowHasInvoiceRowsError();
       }
     },
 
@@ -2121,7 +2147,10 @@ export function createSalesService(
       if (order.status !== "confirmed") {
         throw new InvalidStatusTransitionError(`Cannot start production for an order in status "${order.status}"`);
       }
-      const updated = await repo.updateStatus(orderId, "in_production");
+      // Conditional on Bekräftad: a Makulera committing meanwhile is not
+      // overwritten with Under tillverkning.
+      const updated = await repo.updateStatus(orderId, "in_production", null, "confirmed");
+      if (!updated) throw new InvalidStatusTransitionError("Cannot start production: the order is no longer confirmed");
       await audit.log({
         entityType: "sales_order",
         entityId: order.orderNumber,

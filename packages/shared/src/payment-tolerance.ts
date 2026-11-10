@@ -22,7 +22,9 @@ export function applyPaymentTolerance(open: number, applied: number, tolerance: 
   if (o === 0) return { ok: false, reason: "not_open" };
   if (a === 0) return { ok: false, reason: "zero" };
   if (Math.sign(a) !== Math.sign(o)) return { ok: false, reason: "sign_mismatch" };
-  if (Math.abs(a) > Math.abs(o) + tol) return { ok: false, reason: "exceeds_open" };
+  // Rounded before the comparison: 0.18 + 0.5 is 0.6799999… in floats, which
+  // refused a payment of exactly open + tolerance.
+  if (round2(Math.abs(a) - Math.abs(o)) > tol) return { ok: false, reason: "exceeds_open" };
   const difference = round2(o - a);
   const writeOffAmount = Math.abs(difference) <= tol ? difference : 0;
   const rest = round2(o - a - writeOffAmount);

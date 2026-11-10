@@ -274,6 +274,17 @@ export const ERROR_CODES = {
   DELIVERY_UNDONE: "delivery-undone",
   SHIPMENT_DELIVERY_UNDONE: "shipment-delivery-undone",
   ROW_HAS_RECEIPTS: "row-has-receipts",
+  // Kundorderrad med historik (ångrad leverans, makulerad/krediterad faktura)
+  ROW_HAS_DELIVERIES: "row-has-deliveries",
+  ROW_HAS_INVOICE_ROWS: "row-has-invoice-rows",
+  // Kreditfakturorna överstiger fakturan de krediterar
+  CREDIT_EXCEEDS_INVOICE: "credit-exceeds-invoice",
+  // Inköpsorderns kurs: SEK ⇔ 1
+  PURCHASE_ORDER_EXCHANGE_RATE: "purchase-order-exchange-rate",
+  // Legorad på förfrågan och IO
+  LEGO_OPERATION_ARTICLE_MISMATCH: "lego-operation-article-mismatch",
+  NOT_LEGO_OPERATION: "not-lego-operation",
+  LEGO_OPERATION_CLOSED: "lego-operation-closed",
   // Avsändning lego: the row has a dispatch that is not undone
   PURCHASE_ORDER_ROW_HAS_DISPATCHES: "purchase-order-row-has-dispatches",
   OVER_RECEIPT: "over-receipt",

@@ -1592,6 +1592,9 @@ export interface CustomerDeliveryAddress {
   country: string;
   isDefault: boolean;
   createdAt: string;
+  // Orders (any status) pointing at the address — Ändra inte befintliga
+  // ordrar in the edit dialog and the delete confirmation.
+  orderCount: number;
 }
 
 // Prislistor (register) — staggered per-quantity pricing shared across

@@ -586,7 +586,15 @@ function AdresserTab({
   }
 
   async function removeAddress(address: PartnerDeliveryAddress) {
-    if (!(await confirmDelete(`Ta bort leveransadressen ${address.label}?`))) return;
+    // A customer's orders keep the address they use (each gets it as its own).
+    const orders = "orderCount" in address ? address.orderCount : 0;
+    const keeps =
+      orders === 0
+        ? ""
+        : orders === 1
+          ? " 1 order använder adressen och behåller den som egen adress."
+          : ` ${orders} ordrar använder adressen och behåller den som egen adress.`;
+    if (!(await confirmDelete(`Ta bort leveransadressen ${address.label}?${keeps}`))) return;
     setListError(null);
     try {
       await apiFetch(`${addressesBase}/${address.id}`, { method: "DELETE" });
@@ -778,6 +786,9 @@ function DeliveryAddressForm({
   const [city, setCity] = useState(address?.city ?? "");
   const [country, setCountry] = useState(address && "country" in address ? address.country : "SE");
   const [isDefault, setIsDefault] = useState(address?.isDefault ?? false);
+  // Ändra inte befintliga ordrar — only a customer's address carries orders.
+  const orderCount = address && "orderCount" in address ? address.orderCount : 0;
+  const [keepOnOrders, setKeepOnOrders] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -796,6 +807,7 @@ function DeliveryAddressForm({
             city: orNull(city),
             ...(showCountry ? { country: country.trim().toUpperCase() || "SE" } : {}),
             isDefault,
+            ...(orderCount > 0 && keepOnOrders ? { keepOnOrders: true } : {}),
           }),
         });
       } else {
@@ -881,6 +893,17 @@ function DeliveryAddressForm({
       <Field label="Förvald" htmlFor="deliveryAddressDefault">
         <Toggle id="deliveryAddressDefault" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} />
       </Field>
+
+      {orderCount > 0 && (
+        <>
+          <Field label={`Ändra inte befintliga ordrar (${orderCount} st)`} htmlFor="deliveryAddressKeepOnOrders">
+            <Toggle id="deliveryAddressKeepOnOrders" checked={keepOnOrders} onChange={(e) => setKeepOnOrders(e.target.checked)} />
+          </Field>
+          <FormHint attached>
+            Ordrarna som använder adressen behåller den gamla adressen som egen adress. Utan kryss ändras adressen även på dem.
+          </FormHint>
+        </>
+      )}
 
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>

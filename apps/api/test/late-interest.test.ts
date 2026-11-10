@@ -477,9 +477,13 @@ describe("Skapa räntefakturor", () => {
     expect((await invoiceService.getInvoice(invoice.id))!.lateInterestCharges.filter((c) => c.active)).toHaveLength(2);
 
     // Fully credited: inactive, period and fee free again. The credit note
-    // copies the rows' revenue accounts.
+    // copies the rows' revenue accounts. The rest only — the 100 already
+    // credited comes off the fee row: crediting the whole invoice on top of
+    // the partial credit is an over-credit (credit-exceeds-invoice).
     const full = await invoiceService.createCredit(issued.invoiceId, {}, user.id);
-    expect((await invoiceService.getInvoice(full!.id))!.rows.map((r) => r.revenueAccount)).toEqual(["8313", "3990"]);
+    const fullRows = (await invoiceService.getInvoice(full!.id))!.rows;
+    expect(fullRows.map((r) => r.revenueAccount)).toEqual(["8313", "3990"]);
+    await invoiceService.updateRow(full!.id, fullRows.find((r) => r.revenueAccount === "3990")!.id, { unitPrice: 350 }, user.id);
     await invoiceService.issue(full!.id, user.id);
     const afterCredit = (await invoiceService.getInvoice(invoice.id))!.lateInterestCharges;
     expect(afterCredit.filter((c) => c.chargeInvoiceId === issued.invoiceId).map((c) => c.active)).toEqual([false, false]);

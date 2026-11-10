@@ -25,7 +25,8 @@ import {
   VerificationAlreadyReversedError,
 } from "../service/supplier-invoice.service.js";
 import { ExchangeRateUnavailableError } from "../../system/service/exchange-rates.js";
-import { InvalidStatusTransitionError, SupplierNotFoundError } from "../service/purchase.service.js";
+import { InvalidStatusTransitionError, PurchaseOrderNotFoundError, SupplierNotFoundError } from "../service/purchase.service.js";
+import { ArticleNotFoundError } from "../../article/service/article.service.js";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { errorBody } from "../../system/service/error-body.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
@@ -63,6 +64,9 @@ export function invoiceError(err: unknown, reply: { code: (n: number) => { send:
     err instanceof SupplierInvoiceRowNotFoundError ||
     err instanceof SupplierInvoiceFileNotFoundError ||
     err instanceof SupplierNotFoundError ||
+    // An unknown purchase order on the header, an unknown article on a row.
+    err instanceof PurchaseOrderNotFoundError ||
+    err instanceof ArticleNotFoundError ||
     err instanceof CostCenterNotFoundError ||
     err instanceof ProjectNotFoundError
   ) {

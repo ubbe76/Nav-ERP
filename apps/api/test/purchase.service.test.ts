@@ -1063,7 +1063,15 @@ describe("purchase service — document terms (villkor)", () => {
   });
 
   it("updates PO header fields (delivery date, exchange rate, references, note)", async () => {
-    const { order } = await makeOrderWithRow(5);
+    // A EUR supplier: a SEK order's rate is always 1 (PurchaseOrderExchangeRateError).
+    const user = await makeUser();
+    const supplier = await purchaseService.createSupplier(
+      parsed(createSupplierSchema, { name: "Euro GmbH", active: true, currency: "EUR" })
+    );
+    const order = await purchaseService.createPurchaseOrder(
+      parsed(createPurchaseOrderSchema, { supplierId: supplier.id, exchangeRate: 11 }),
+      user.id
+    );
 
     const updated = await purchaseService.updatePurchaseOrderHeader(order.id, {
       expectedDeliveryDate: "2026-08-15",

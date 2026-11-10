@@ -469,7 +469,9 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     articleService,
     systemService,
     manufacturingService,
-    auditRepository
+    auditRepository,
+    // Valuta: today's rate for a new order in another currency.
+    exchangeRateService
   );
   // Leverantörsfaktura (AP) — its own service in the purchase module, coupled
   // to suppliers/POs/number-series. verificationPoster books the L

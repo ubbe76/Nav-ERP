@@ -75,6 +75,7 @@ import {
   InvoiceRowCurrencyMismatchError,
   ReminderFeeAfterLateFeeError,
   ReminderFeeCurrencyError,
+  CreditExceedsInvoiceError,
 } from "../src/modules/sales/service/invoice.service.js";
 import { LateInterestAlreadyChargedError, LateInterestDisabledError, LateInterestFutureDateError } from "../src/modules/sales/service/late-interest.service.js";
 import { CustomerPaymentAmountSekError } from "../src/modules/sales/service/payment.service.js";
@@ -247,6 +248,8 @@ import {
   OverDeliveryError,
   QuoteLossReasonInvalidError,
   SalesOrderRowNotFoundError,
+  RowHasDeliveriesError,
+  RowHasInvoiceRowsError,
 } from "../src/modules/sales/service/sales.service.js";
 import {
   ConfigurationNotAllowedError,
@@ -334,6 +337,10 @@ import {
   PurchaseReceiptStockMissingError,
   PurchaseOrderRowHasDispatchesError,
   RowHasReceiptsError,
+  PurchaseOrderExchangeRateError,
+  LegoOperationArticleMismatchError,
+  NotLegoOperationError,
+  LegoOperationClosedError,
 } from "../src/modules/purchase/service/purchase.service.js";
 import {
   PaymentMixedCurrenciesError,
@@ -608,6 +615,13 @@ const cases: Array<[Error, string]> = [
   [new SalesOrderRowNotFoundError("row-1"), ERROR_CODES.SALES_ORDER_ROW_NOT_FOUND],
   [new OverDeliveryError(), ERROR_CODES.OVER_DELIVERY],
   [new RowHasReceiptsError(), ERROR_CODES.ROW_HAS_RECEIPTS],
+  [new RowHasDeliveriesError(), ERROR_CODES.ROW_HAS_DELIVERIES],
+  [new RowHasInvoiceRowsError(), ERROR_CODES.ROW_HAS_INVOICE_ROWS],
+  [new CreditExceedsInvoiceError(), ERROR_CODES.CREDIT_EXCEEDS_INVOICE],
+  [new PurchaseOrderExchangeRateError(), ERROR_CODES.PURCHASE_ORDER_EXCHANGE_RATE],
+  [new LegoOperationArticleMismatchError(), ERROR_CODES.LEGO_OPERATION_ARTICLE_MISMATCH],
+  [new NotLegoOperationError(), ERROR_CODES.NOT_LEGO_OPERATION],
+  [new LegoOperationClosedError(), ERROR_CODES.LEGO_OPERATION_CLOSED],
   [new PurchaseOrderRowHasDispatchesError(), ERROR_CODES.PURCHASE_ORDER_ROW_HAS_DISPATCHES],
   [new OverReceiptError(), ERROR_CODES.OVER_RECEIPT],
   [new PurchaseReceiptNotFoundError("x"), ERROR_CODES.PURCHASE_RECEIPT_NOT_FOUND],

@@ -522,9 +522,13 @@ export class ConfigurationNotAllowedError extends Error {
 // number series, validation and transactions stay in one place.
 export interface PurchaseOrderCreator {
   createPurchaseOrder(
-    input: { supplierId: string; exchangeRate: number; expectedDeliveryDate?: string },
+    // No rate: the purchase service looks today's up for a supplier in
+    // another currency (a failure is an error row, like any other).
+    input: { supplierId: string; expectedDeliveryDate?: string },
     createdBy: string
-  ): Promise<{ id: string; orderNumber: string }>;
+    // currency: the order's (the supplier's) — a catalog price in another
+    // currency is not put on the row.
+  ): Promise<{ id: string; orderNumber: string; currency?: string }>;
   addRow(
     purchaseOrderId: string,
     input: {
@@ -3042,6 +3046,8 @@ export function createPlanningService(
         articleId: string;
         quantity: number;
         unitPrice: number;
+        // The catalog row's currency — compared with the order's below.
+        priceCurrency: string;
         demandDate: string | null;
         // A reorder-point or forecast-only proposal: dated, but never
         // reported late (no deadline behind it).
@@ -3069,6 +3075,7 @@ export function createPlanningService(
           quantity: proposal.quantity,
           // Stafflat: the break for the proposal quantity, else grundpriset.
           unitPrice: resolveSupplierPrice(supplier, proposal.quantity).price ?? 0,
+          priceCurrency: supplier.currency,
           demandDate,
           noDeadline: noDeadline(proposal.reason),
           fallbackDate,
@@ -3119,10 +3126,10 @@ export function createPlanningService(
           .filter((d): d is string => d !== null)
           .sort()[0];
 
-        let order: { id: string; orderNumber: string };
+        let order: { id: string; orderNumber: string; currency?: string };
         try {
           order = await deps.purchase.createPurchaseOrder(
-            { supplierId, exchangeRate: 1, ...(orderDate ? { expectedDeliveryDate: orderDate } : {}) },
+            { supplierId, ...(orderDate ? { expectedDeliveryDate: orderDate } : {}) },
             createdBy
           );
         } catch (err) {
@@ -3136,7 +3143,10 @@ export function createPlanningService(
             await deps.purchase.addRow(order.id, {
               articleId: row.articleId,
               quantity: row.quantity,
-              unitPrice: row.unitPrice,
+              // A catalog price in another currency than the order's is not
+              // the order's price — 0, as when the price is missing (the IO
+              // card's prefill skips the same case).
+              unitPrice: order.currency !== undefined && row.priceCurrency !== order.currency ? 0 : row.unitPrice,
               ...(rowDate && rowDate !== orderDate ? { expectedDeliveryDate: rowDate } : {}),
             });
             rowCount += 1;
@@ -3248,7 +3258,7 @@ export function createPlanningService(
           let order: { id: string; orderNumber: string };
           try {
             order = await deps.purchase.createPurchaseOrder(
-              { supplierId, exchangeRate: 1, ...(orderDate ? { expectedDeliveryDate: orderDate } : {}) },
+              { supplierId, ...(orderDate ? { expectedDeliveryDate: orderDate } : {}) },
               createdBy
             );
           } catch (err) {

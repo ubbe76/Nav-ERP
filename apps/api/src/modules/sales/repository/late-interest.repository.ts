@@ -10,6 +10,7 @@ import {
   type Tx,
 } from "@navet/db";
 import { SEK } from "@navet/shared";
+import { capitalPayments } from "../service/late-interest.js";
 
 // Dröjsmålsränta — the DB leaf (Db | Tx throughout): what Räntefakturering's
 // candidate list reads outside a transaction, Skapa räntefakturor re-reads
@@ -101,8 +102,39 @@ export async function lockInvoices(tx: Tx, invoiceIds: string[]): Promise<void> 
   await tx.select({ id: invoices.id }).from(invoices).where(inArray(invoices.id, ids)).orderBy(asc(invoices.id)).for("update");
 }
 
-// Live payment rows per invoice: the day and what it took off the capital.
+// Live payment rows per invoice: the day and what it took off the capital —
+// a payment after a påminnelseavgift pays the fee first (capitalPayments,
+// the ONE rule for both the räntefakturering and the reminder's accrued
+// interest).
 export async function paymentsByInvoice(
+  executor: Db | Tx,
+  invoiceIds: string[]
+): Promise<Map<string, { date: string; amount: number }[]>> {
+  const raw = await rawPaymentsByInvoice(executor, invoiceIds);
+  if (raw.size === 0) return raw;
+  // The fee's day is the Stockholm day the reminder was sent.
+  const fees = await executor
+    .select({
+      invoiceId: invoiceReminders.invoiceId,
+      date: sql<string>`to_char((${invoiceReminders.sentAt} AT TIME ZONE 'Europe/Stockholm')::date, 'YYYY-MM-DD')`,
+      amount: invoiceReminders.fee,
+    })
+    .from(invoiceReminders)
+    .where(and(inArray(invoiceReminders.invoiceId, [...raw.keys()]), sql`${invoiceReminders.fee} > 0`));
+  const feesByInvoice = new Map<string, { date: string; amount: number }[]>();
+  for (const fee of fees) {
+    const list = feesByInvoice.get(fee.invoiceId) ?? [];
+    list.push({ date: fee.date, amount: Number(fee.amount) });
+    feesByInvoice.set(fee.invoiceId, list);
+  }
+  const out = new Map<string, { date: string; amount: number }[]>();
+  for (const [invoiceId, payments] of raw) {
+    out.set(invoiceId, capitalPayments(payments, feesByInvoice.get(invoiceId) ?? []));
+  }
+  return out;
+}
+
+async function rawPaymentsByInvoice(
   executor: Db | Tx,
   invoiceIds: string[]
 ): Promise<Map<string, { date: string; amount: number }[]>> {

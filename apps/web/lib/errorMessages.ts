@@ -391,6 +391,15 @@ const MESSAGES: Record<string, MessageEntry> = {
       : "Levererat antal skulle överskrida beställt antal på raden.";
   },
   "row-has-receipts": "Raden har redan inleveranser och kan inte tas bort.",
+  // Kundorderraden: leveranser räknas även när de är ångrade, och en faktura
+  // även när den är makulerad eller krediterad — historiken ligger kvar.
+  "row-has-deliveries": "Raden har leveranser (även ångrade) och kan inte tas bort.",
+  "row-has-invoice-rows": "Raden finns på en faktura (även makulerad eller krediterad) och kan inte tas bort.",
+  "credit-exceeds-invoice": "Kreditfakturorna skulle överstiga beloppet på fakturan de krediterar.",
+  "purchase-order-exchange-rate": "En inköpsorder i SEK har alltid kursen 1.",
+  "lego-operation-article-mismatch": "Legooperationen tillhör en annan artikel än raden.",
+  "not-lego-operation": "Operationen ligger inte på en legoresurs.",
+  "lego-operation-closed": "Legooperationen är inte öppen — den är klar eller tillverkningsordern är inte frisläppt eller pågående.",
   "purchase-order-row-has-dispatches": "Raden har en avsändning till legoleverantören — ångra avsändningen först.",
   // A goods receipt carries the system setting Tillåten överleverans it broke
   // (allowedPercent > 0 ⇒ name it); a row edit below the received quantity
