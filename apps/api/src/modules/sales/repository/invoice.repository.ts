@@ -40,6 +40,7 @@ import {
   isVatCode,
   isVatRate,
   round2,
+  round4,
   type DocumentLanguage,
   type EinvoiceStatus,
   type InvoiceStatus,
@@ -112,6 +113,42 @@ class IssueRaceError extends Error {}
 // can tell them apart with a plain instanceof, same idiom as IssueRaceError.
 class CommitOverInvoicingError extends Error {}
 class CommitOverCreditingError extends Error {}
+class CommitCreditExceedsInvoiceError extends Error {}
+
+// Överkreditering by amount (spec C1 punkt 17): the credit notes issued
+// against one invoice never add up to more than it — the quantity guard
+// above only sees rows linked to an order row, so a räntefaktura, a
+// fraktrad or a free row could otherwise be credited in full twice. Runs
+// inside issueInvoice's transaction with the credit note already locked; the
+// source invoice is locked next, so two credit notes of the same invoice are
+// issued one at a time and the second sees the first. Gross per invoice =
+// Σ (line + VAT), compared in öre; credit rows are stored positive.
+async function assertCreditWithinSource(tx: Tx, creditId: string, sourceId: string) {
+  await tx.select({ id: invoices.id }).from(invoices).where(eq(invoices.id, sourceId)).for("update");
+  const totals = await tx
+    .select({
+      invoiceId: invoiceRows.invoiceId,
+      gross: sql<string>`COALESCE(SUM(${invoiceRows.lineAmount} + ${invoiceRows.vatAmount}), 0)`,
+    })
+    .from(invoiceRows)
+    .innerJoin(invoices, eq(invoiceRows.invoiceId, invoices.id))
+    .where(
+      or(
+        eq(invoices.id, sourceId),
+        eq(invoices.id, creditId),
+        and(eq(invoices.creditedInvoiceId, sourceId), inArray(invoices.status, ["issued", "paid"]))
+      )
+    )
+    .groupBy(invoiceRows.invoiceId);
+  const ore = (v: string) => Math.round(Number(v) * 100);
+  let source = 0;
+  let credited = 0;
+  for (const t of totals) {
+    if (t.invoiceId === sourceId) source = ore(t.gross);
+    else credited += ore(t.gross);
+  }
+  if (credited > source) throw new CommitCreditExceedsInvoiceError();
+}
 
 // Shared invoiced-quantity aggregation, parameterized by executor so the
 // order-status recompute (which must run inside issueInvoice's own tx) and
@@ -201,7 +238,8 @@ async function validateCommittedQuantities(tx: Tx, invoiceId: string, type: Invo
 
   if (type === "credit") {
     for (const [rowId, ownQty] of ownByRow) {
-      if ((committed.get(rowId) ?? 0) - ownQty < 0) throw new CommitOverCreditingError();
+      // At the column's scale: 0.1 + 0.2 credited of 0.3 is not an over-credit.
+      if (round4((committed.get(rowId) ?? 0) - ownQty) < 0) throw new CommitOverCreditingError();
     }
     return;
   }
@@ -210,8 +248,8 @@ async function validateCommittedQuantities(tx: Tx, invoiceId: string, type: Invo
   // SELECT against the same rows.
   const deliveredMap = new Map(lockedRows.map((d) => [d.id, Number(d.quantityDelivered)]));
   for (const [rowId, ownQty] of ownByRow) {
-    const net = (committed.get(rowId) ?? 0) + ownQty;
-    if (net > (deliveredMap.get(rowId) ?? 0)) throw new CommitOverInvoicingError();
+    const net = round4((committed.get(rowId) ?? 0) + ownQty);
+    if (net > round4(deliveredMap.get(rowId) ?? 0)) throw new CommitOverInvoicingError();
   }
 }
 
@@ -380,7 +418,7 @@ export type CreateReminderResult =
 
 export type IssueInvoiceResult =
   | { ok: true; invoice: typeof invoices.$inferSelect }
-  | { ok: false; reason: "race" | "over_invoicing" | "over_crediting" };
+  | { ok: false; reason: "race" | "over_invoicing" | "over_crediting" | "credit_exceeds_invoice" };
 
 // Momskoder: what Utfärda checks the rows' codes against inside the issue
 // transaction — the momsregistreringsnummer being stamped and the customer's
@@ -657,7 +695,9 @@ export function createInvoiceRepository(db: Db) {
         return candidate;
       };
       for (const r of rows) {
-        const rest = Number(r.quantityDelivered) - (invoiced.get(r.salesOrderRowId) ?? 0);
+        // At the column's scale (round4): a float rest of 0.6000000000000001
+        // would be invoiced as is and fail the over-invoicing guard.
+        const rest = round4(Number(r.quantityDelivered) - (invoiced.get(r.salesOrderRowId) ?? 0));
         if (rest <= 0) continue;
         const c = candidateFor(r);
         c.orderIds.add(r.orderId);
@@ -783,7 +823,9 @@ export function createInvoiceRepository(db: Db) {
         }
       >();
       for (const r of rows) {
-        const rest = Number(r.quantityDelivered) - (invoiced.get(r.salesOrderRowId) ?? 0);
+        // At the column's scale (round4): a float rest of 0.6000000000000001
+        // would be invoiced as is and fail the over-invoicing guard.
+        const rest = round4(Number(r.quantityDelivered) - (invoiced.get(r.salesOrderRowId) ?? 0));
         if (rest <= 0) continue;
         let order = orders.get(r.orderId);
         if (!order) {
@@ -1196,6 +1238,18 @@ export function createInvoiceRepository(db: Db) {
     ): Promise<IssueInvoiceResult> {
       try {
         return await db.transaction(async (tx) => {
+          // The invoice first: a row added or changed on the draft meanwhile
+          // (addRow/updateRow lock the invoice too) is then either in the
+          // validation below or waits for this transaction and finds it issued.
+          const [locked] = await tx
+            .select({ status: invoices.status, creditedInvoiceId: invoices.creditedInvoiceId })
+            .from(invoices)
+            .where(eq(invoices.id, id))
+            .for("update");
+          if (!locked || locked.status !== "draft") throw new IssueRaceError();
+          if (type === "credit" && locked.creditedInvoiceId) {
+            await assertCreditWithinSource(tx, id, locked.creditedInvoiceId);
+          }
           await validateCommittedQuantities(tx, id, type);
 
           const invoiceNumber = await getNextOrderNumber(tx, "invoice");
@@ -1391,6 +1445,7 @@ export function createInvoiceRepository(db: Db) {
         if (err instanceof IssueRaceError) return { ok: false, reason: "race" };
         if (err instanceof CommitOverInvoicingError) return { ok: false, reason: "over_invoicing" };
         if (err instanceof CommitOverCreditingError) return { ok: false, reason: "over_crediting" };
+        if (err instanceof CommitCreditExceedsInvoiceError) return { ok: false, reason: "credit_exceeds_invoice" };
         throw err;
       }
     },

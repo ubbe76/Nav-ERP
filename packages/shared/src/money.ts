@@ -11,3 +11,10 @@
 export function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
+
+// Rounds to 4 decimals — the scale of every numeric(14,4) quantity. Sums of
+// such quantities are added as JS numbers (0.1 + 0.2 = 0.30000000000000004),
+// so a guard comparing them against another quantity rounds both sides first.
+export function round4(n: number): number {
+  return Math.round((n + Number.EPSILON) * 10000) / 10000;
+}

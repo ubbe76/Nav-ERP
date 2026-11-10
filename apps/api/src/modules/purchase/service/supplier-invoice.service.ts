@@ -21,7 +21,8 @@ import {
   type SupplierInvoiceRepository,
   type SupplierInvoiceRowWrite,
 } from "../repository/supplier-invoice.repository.js";
-import { InvalidStatusTransitionError, SupplierNotFoundError } from "./purchase.service.js";
+import { InvalidStatusTransitionError, PurchaseOrderNotFoundError, SupplierNotFoundError } from "./purchase.service.js";
+import { ArticleNotFoundError } from "../../article/service/article.service.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { dueDateFromTerm } from "../../system/service/due-date.js";
 import type { PostingVatCode } from "../../economy/service/verification-poster.js";
@@ -293,6 +294,13 @@ export function createSupplierInvoiceService(
   // stored numbers always equal quantity × unitPrice. A row's own momskod
   // must be a purchase code (both/purchase) and active — unless it is the
   // code the row already carries (`keepVatCodeId`, a PATCH leaving it alone).
+  // A row write the repository refused under the invoice lock: the attest
+  // (or a makulering) won the race after the service's own status check.
+  function notDraft(invoiceId: string, status: string | null): Error {
+    return status === null
+      ? new SupplierInvoiceNotFoundError(invoiceId)
+      : new InvalidStatusTransitionError(`Cannot change rows on a supplier invoice in status "${status}"`);
+  }
   async function resolveRow(
     r: SupplierInvoiceRepository,
     input: RowInput,
@@ -306,6 +314,8 @@ export function createSupplierInvoiceService(
       documentVatCode(book, { id: vatCodeId }, "purchase", { allowInactive: vatCodeId === keepVatCodeId });
     }
     const articleId = input.articleId ?? null;
+    // An unknown article is a 404, not the FK's 500.
+    if (articleId !== null && !(await r.articleExists(articleId))) throw new ArticleNotFoundError(articleId);
     const purchaseOrderRowId = input.purchaseOrderRowId ?? null;
     // The PO's supplier is deliberately NOT compared with the invoice's: the
     // invoice may be paid to another supplier than the one the goods were
@@ -475,6 +485,10 @@ export function createSupplierInvoiceService(
     async prepareCreate(input: CreateSupplierInvoiceInput): Promise<PreparedSupplierInvoice> {
       const supplier = await repo.findSupplierById(input.supplierId);
       if (!supplier) throw new SupplierNotFoundError(input.supplierId);
+      // An unknown order is a 404, not the FK's 500.
+      if (input.purchaseOrderId && !(await repo.purchaseOrderExists(input.purchaseOrderId))) {
+        throw new PurchaseOrderNotFoundError(input.purchaseOrderId);
+      }
       const rate = await resolveRate(supplier.currency, input.invoiceDate, input.exchangeRate, input.purchaseOrderId ?? null);
       return { supplier, rate };
     },
@@ -599,17 +613,27 @@ export function createSupplierInvoiceService(
       // omitted one keeps the header's. The project follows a NEW purchase
       // order link when the invoice has none and the PATCH sets none
       // ("manuellt vinner" — a chosen project is never overwritten).
+      if (input.purchaseOrderId && input.purchaseOrderId !== invoice.purchaseOrderId && !(await repo.purchaseOrderExists(input.purchaseOrderId))) {
+        throw new PurchaseOrderNotFoundError(input.purchaseOrderId);
+      }
       const dimensions = await repo.resolveDimensions(
         { costCenterId: input.costCenterId, projectId: input.projectId },
         { existing: { costCenterId: invoice.costCenterId, projectId: invoice.projectId } }
       );
+      // Written only when sent, or when the project follows a new order link:
+      // a PATCH of something else must not write back the values it read (a
+      // concurrent change of the objects was silently undone).
+      let projectFromOrder = false;
       if (dimensions.projectId === null && input.projectId === undefined && input.purchaseOrderId && input.purchaseOrderId !== invoice.purchaseOrderId) {
         const linked = await repo.findPurchaseOrderProject(input.purchaseOrderId);
         // A closed project on the order is dropped silently, like any default.
-        if (linked) dimensions.projectId = (await repo.resolveDimensions({}, { fallback: { projectId: linked } })).projectId;
+        if (linked) {
+          dimensions.projectId = (await repo.resolveDimensions({}, { fallback: { projectId: linked } })).projectId;
+          projectFromOrder = dimensions.projectId !== null;
+        }
       }
-      patch.costCenterId = dimensions.costCenterId;
-      patch.projectId = dimensions.projectId;
+      if (input.costCenterId !== undefined) patch.costCenterId = dimensions.costCenterId;
+      if (input.projectId !== undefined || projectFromOrder) patch.projectId = dimensions.projectId;
       // Byte av leverantör (betalas till): the currency is re-snapshotted from
       // the new supplier, as at creation. The due date is left alone — like
       // every other draft edit it stays under manual control.
@@ -746,7 +770,9 @@ export function createSupplierInvoiceService(
       if (invoice.status !== "draft") {
         throw new InvalidStatusTransitionError(`Cannot change rows on a supplier invoice in status "${invoice.status}"`);
       }
-      return repo.addRow(invoiceId, await resolveRow(repo, input, await repo.vatCodeBook()));
+      const result = await repo.addRow(invoiceId, await resolveRow(repo, input, await repo.vatCodeBook()));
+      if (!result.ok) throw notDraft(invoiceId, result.status);
+      return result.value;
     },
 
     async updateRow(invoiceId: string, rowId: string, input: UpdateSupplierInvoiceRowInput) {
@@ -772,13 +798,14 @@ export function createSupplierInvoiceService(
         costCenterId: input.costCenterId,
         projectId: input.projectId,
       };
-      const row = await repo.updateRow(
+      const result = await repo.updateRow(
         invoiceId,
         rowId,
         await resolveRow(repo, merged, await repo.vatCodeBook(), existing.vatCodeId, { costCenterId: existing.costCenterId, projectId: existing.projectId })
       );
-      if (!row) throw new SupplierInvoiceRowNotFoundError(rowId);
-      return row;
+      if (!result.ok) throw notDraft(invoiceId, result.status);
+      if (!result.value) throw new SupplierInvoiceRowNotFoundError(rowId);
+      return result.value;
     },
 
     async deleteRow(invoiceId: string, rowId: string) {
@@ -787,8 +814,9 @@ export function createSupplierInvoiceService(
       if (invoice.status !== "draft") {
         throw new InvalidStatusTransitionError(`Cannot change rows on a supplier invoice in status "${invoice.status}"`);
       }
-      const row = await repo.deleteRow(invoiceId, rowId);
-      if (!row) throw new SupplierInvoiceRowNotFoundError(rowId);
+      const result = await repo.deleteRow(invoiceId, rowId);
+      if (!result.ok) throw notDraft(invoiceId, result.status);
+      if (!result.value) throw new SupplierInvoiceRowNotFoundError(rowId);
     },
 
     // --- Status flow: draft → approved → paid, cancel from draft/approved ---

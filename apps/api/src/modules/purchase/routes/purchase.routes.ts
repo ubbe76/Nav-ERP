@@ -67,7 +67,9 @@ import {
   LegoOperationClosedError,
   NotLegoOperationError,
   InquiryRowPriceNotApplicableError,
+  PurchaseOrderExchangeRateError,
 } from "../service/purchase.service.js";
+import { ExchangeRateUnavailableError } from "../../system/service/exchange-rates.js";
 import { ArticleIsTemplateError, ArticleNotFoundError, InvalidUnitError } from "../../article/service/article.service.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import { LocationUnderStockCountError } from "../../stock/service/stock.service.js";
@@ -248,9 +250,15 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
       err instanceof InquiryNotFoundError ||
       err instanceof InquiryRowNotFoundError ||
       err instanceof SupplierNotFoundError ||
-      err instanceof LegoOperationNotFoundError
+      err instanceof LegoOperationNotFoundError ||
+      // An unknown article on a new row.
+      err instanceof ArticleNotFoundError
     ) {
       return reply.code(404).send(errorBody(err as Error));
+    }
+    // Valuta (convert-to-order): no rate today for the supplier's currency.
+    if (err instanceof ExchangeRateUnavailableError) {
+      return reply.code(409).send({ ...errorBody(err), currency: err.currency, date: err.date });
     }
     // InvalidUnitError: a unit that is not one of the article's.
     if (err instanceof LegoOperationArticleMismatchError || err instanceof NotLegoOperationError || err instanceof InvalidUnitError) {
@@ -442,6 +450,13 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
       // Avvikelser: the case cannot take the link (closed, wrong type, other supplier).
       if (err instanceof DeviationLinkNotAllowedError) return reply.code(409).send(errorBody(err));
       if (err instanceof ProjectClosedError) return reply.code(400).send(errorBody(err));
+      // Valuta: a SEK order with another rate than 1.
+      if (err instanceof PurchaseOrderExchangeRateError) return reply.code(400).send(errorBody(err));
+      // Valuta: no rate today for the supplier's currency — the client asks
+      // the user to type one.
+      if (err instanceof ExchangeRateUnavailableError) {
+        return reply.code(409).send({ ...errorBody(err), currency: err.currency, date: err.date });
+      }
       throw err;
     }
   });
@@ -455,7 +470,7 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
       if (err instanceof PurchaseOrderNotFoundError || err instanceof RegisterEntryNotFoundError || err instanceof ProjectNotFoundError) {
         return reply.code(404).send(errorBody(err));
       }
-      if (err instanceof ProjectClosedError) return reply.code(400).send(errorBody(err));
+      if (err instanceof ProjectClosedError || err instanceof PurchaseOrderExchangeRateError) return reply.code(400).send(errorBody(err));
       if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
       throw err;
     }
@@ -471,8 +486,13 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
       const row = await service.addRow(req.params.id, input, req.user!.id);
       return reply.code(201).send(row);
     } catch (err) {
-      if (err instanceof PurchaseOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof PurchaseOrderNotFoundError || err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof MoOperationNotFoundError) return reply.code(404).send(errorBody(err));
+      // Lego row: the same link rules (and answers) as an inquiry row.
+      if (err instanceof LegoOperationArticleMismatchError || err instanceof NotLegoOperationError) {
+        return reply.code(400).send(errorBody(err));
+      }
+      if (err instanceof LegoOperationClosedError) return reply.code(409).send(errorBody(err));
       if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
       // Produktkonfigurator: a template in mode variants on a new row.
       if (err instanceof ArticleIsTemplateError) return reply.code(409).send(errorBody(err));

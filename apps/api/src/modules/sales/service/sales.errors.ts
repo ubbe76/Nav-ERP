@@ -299,3 +299,14 @@ export class SalesOrderMarkupsChangedError extends Error {
     this.name = "SalesOrderMarkupsChangedError";
   }
 }
+
+// addRow re-reads the order's status under its key lock: the order left
+// quote/confirmed/in_production after the service's unlocked check (a
+// delivery that made it Levererad, a Makulera). The service turns it into
+// InvalidStatusTransitionError (409).
+export class SalesOrderRowsLockedError extends Error {
+  constructor(public status: string) {
+    super(`Cannot add rows to an order in status "${status}"`);
+    this.name = "SalesOrderRowsLockedError";
+  }
+}

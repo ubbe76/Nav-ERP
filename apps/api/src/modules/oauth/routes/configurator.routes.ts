@@ -5,6 +5,7 @@ import { createQuoteSchema, priceQuoteQuerySchema } from "@navet/shared";
 import type { ArticleService } from "../../article/service/article.service.js";
 import type { SalesService } from "../../sales/service/sales.service.js";
 import {
+  CustomerNotFoundError,
   DeliveryAddressNotFoundError,
   InvalidStatusTransitionError,
   SalesOrderNotFoundError,
@@ -14,7 +15,7 @@ import {
   ConfigurationRequiredError,
   PriceNotFoundError,
 } from "../../sales/service/sales.errors.js";
-import { ArticleIsTemplateError, InvalidUnitError } from "../../article/service/article.service.js";
+import { ArticleIsTemplateError, ArticleNotFoundError, InvalidUnitError } from "../../article/service/article.service.js";
 import type { ConfiguratorService } from "../../configurator/service/configurator.service.js";
 import {
   ConfigurationNotDerivableError,
@@ -115,6 +116,8 @@ export async function configuratorRoutes(
       const result = await salesService.createQuote(input, req.user?.id ?? null);
       return reply.code(201).send(req.apiClient ? { ...result, order: withoutOrderMarkups(result.order) } : result);
     } catch (err) {
+      // An unknown customer or row article (an uuid that is not one).
+      if (err instanceof CustomerNotFoundError || err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
       // The delivery address must belong to the quote's customer.
       if (err instanceof DeliveryAddressNotFoundError) return reply.code(400).send(errorBody(err));
       // Avvikelser: the case cannot take the link (closed, wrong type, other customer).

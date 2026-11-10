@@ -36,6 +36,7 @@ import {
   NothingToRemindError,
   NotCreditableError,
   OverCreditError,
+  CreditExceedsInvoiceError,
   OverInvoicingError,
   ReminderFeeAlreadyChargedError,
   SalesOrderRowMismatchError,
@@ -108,6 +109,7 @@ export async function invoiceRoutes(app: FastifyInstance, opts: { service: Invoi
       err instanceof InvalidStatusTransitionError ||
       err instanceof OverInvoicingError ||
       err instanceof OverCreditError ||
+      err instanceof CreditExceedsInvoiceError ||
       err instanceof NotCreditableError ||
       err instanceof EmptyInvoiceError ||
       // Samlingsfaktura customers are billed by the routine, not by hand.

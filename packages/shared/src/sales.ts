@@ -297,6 +297,9 @@ export const updateDeliveryAddressSchema = z
     city: z.string().max(100).nullable().optional(),
     country: countryCodeSchema.optional(),
     isDefault: z.boolean().optional(),
+    // Ändra inte befintliga ordrar: the orders using the address keep the
+    // old one (each gets it as its own engångsadress) instead of following.
+    keepOnOrders: z.boolean().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateDeliveryAddressInput = z.infer<typeof updateDeliveryAddressSchema>;

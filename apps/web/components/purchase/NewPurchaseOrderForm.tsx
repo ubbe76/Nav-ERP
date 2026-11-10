@@ -8,6 +8,9 @@ import { SearchPicker } from "../ui/SearchPicker";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { useSupplierDeliveryDateSuggestion } from "../../lib/useDeliveryDateSuggestion";
+import { useExchangeRateLookup } from "../../lib/useExchangeRate";
+import { formatRate } from "../../lib/currency";
+import { stockholmToday } from "../../lib/date";
 import { DeliveryDateHint } from "../ui/DeliveryDateHint";
 import type { Article, PurchaseOrder, Supplier, SupplierPriceQuote } from "../../lib/types";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
@@ -47,7 +50,14 @@ export function NewPurchaseOrderForm({
     setExpectedDeliveryDate(suggestion?.date ?? "");
   }, [suggestion, dateTouched]);
   const [note, setNote] = useState(deviation ? `Ersättning för ${deviation.number}` : "");
-  const [exchangeRate, setExchangeRate] = useState("1");
+  // Växelkurs: a SEK order is always 1 (the API refuses anything else); for
+  // a foreign supplier an empty field means today's rate, looked up by the
+  // API when the order is created — shown here as the placeholder. Only a
+  // typed rate is sent.
+  const [exchangeRate, setExchangeRate] = useState("");
+  const supplierCurrency = supplier?.currency ?? "SEK";
+  const foreign = supplierCurrency !== "SEK";
+  const rateLookup = useExchangeRateLookup(foreign ? supplierCurrency : null, stockholmToday());
   const [yourReference, setYourReference] = useState("");
   const [ourReference, setOurReference] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -68,7 +78,7 @@ export function NewPurchaseOrderForm({
           supplierId: supplier.id,
           expectedDeliveryDate: expectedDeliveryDate || undefined,
           note: note || undefined,
-          exchangeRate: Number(exchangeRate),
+          ...(foreign && exchangeRate.trim() ? { exchangeRate: Number(exchangeRate) } : {}),
           yourReference: yourReference.trim() || undefined,
           ourReference: ourReference.trim() || undefined,
           ...(deviation ? { deviationId: deviation.id } : {}),
@@ -145,14 +155,18 @@ export function NewPurchaseOrderForm({
             min="0"
             step="any"
             size="xs"
-            value={exchangeRate}
+            disabled={!foreign}
+            placeholder={foreign && rateLookup.status === "ok" ? formatRate(rateLookup.lookup.rate) : undefined}
+            value={foreign ? exchangeRate : "1"}
             onChange={(e) => setExchangeRate(e.target.value)}
           />
         </Field>
       </FormRow>
-      {supplier && supplier.currency !== "SEK" && (
+      {foreign && (
         <FormHint attached>
-          Leverantören fakturerar i {supplier.currency} — ange växelkursen mot SEK.
+          {rateLookup.status === "error"
+            ? `Leverantören fakturerar i ${supplierCurrency} och dagens kurs saknas — ange växelkursen mot SEK.`
+            : `Leverantören fakturerar i ${supplierCurrency} — lämnas fältet tomt används dagens kurs.`}
         </FormHint>
       )}
 

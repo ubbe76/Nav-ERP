@@ -83,6 +83,7 @@ import {
   RowHasManufacturingOrdersError,
   SalesOrderCurrencyChangedError,
   SalesOrderMarkupsChangedError,
+  SalesOrderRowsLockedError,
 } from "../service/sales.errors.js";
 import type { PriceMarkups } from "../service/price-resolver.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/db-errors.js";
@@ -249,7 +250,10 @@ function setupChargeRowValues(
 
 export type SalesRowMutationResult =
   | { ok: true; row: typeof salesOrderRows.$inferSelect | null; orderStatus: SalesOrderStatus }
-  | { ok: false; reason: "row_not_found" | "quantity_below_delivered" | "row_has_deliveries" | "markups_changed" };
+  | {
+      ok: false;
+      reason: "row_not_found" | "quantity_below_delivered" | "row_has_deliveries" | "row_has_invoice_rows" | "markups_changed";
+    };
 
 export type RowConfigurationMutationResult =
   | { ok: true; row: typeof salesOrderRows.$inferSelect; previous: typeof salesOrderRows.$inferSelect; orderStatus: SalesOrderStatus }
@@ -381,6 +385,25 @@ async function insertRow(tx: Tx, salesOrderId: string, input: SalesRowWrite) {
   return row!;
 }
 
+// The order rows (of `rowIds`) that have delivery rows — undone ones too —
+// and those on any invoice row, whatever the invoice's status: the restrict
+// FKs that keep a row with history from being deleted.
+async function rowHistory(tx: Tx, rowIds: string[]) {
+  // One after the other: both run on the transaction's connection.
+  const delivered = await tx
+    .selectDistinct({ rowId: deliveryRows.salesOrderRowId })
+    .from(deliveryRows)
+    .where(inArray(deliveryRows.salesOrderRowId, rowIds));
+  const invoiced = await tx
+    .selectDistinct({ rowId: invoiceRows.salesOrderRowId })
+    .from(invoiceRows)
+    .where(inArray(invoiceRows.salesOrderRowId, rowIds));
+  return {
+    delivered: new Set(delivered.map((r) => r.rowId)),
+    invoiced: new Set(invoiced.map((r) => r.rowId).filter((id): id is string => id !== null)),
+  };
+}
+
 // Quantities live in numeric(14,4) — compare and store at that precision.
 function round4(n: number): number {
   return Math.round((n + Number.EPSILON) * 10000) / 10000;
@@ -396,6 +419,55 @@ async function insertNewDeliveryAddress(tx: Tx, customerId: string, input: NewDe
     .values({ ...address, customerId, isDefault: false, oneOff: !saveToCustomer })
     .returning();
   return row!;
+}
+
+// A customer's own (not one-off) delivery address, FOR NO KEY UPDATE — not
+// FOR UPDATE: an order header PATCH holds its order's lock and then takes KEY
+// SHARE on the address it points at (the FK check), so FOR UPDATE here while
+// detachOrdersFromAddress waits for that order's lock would deadlock.
+async function lockDeliveryAddress(tx: Tx, customerId: string, addressId: string) {
+  const [row] = await tx
+    .select()
+    .from(customerDeliveryAddresses)
+    .where(
+      and(
+        eq(customerDeliveryAddresses.id, addressId),
+        eq(customerDeliveryAddresses.customerId, customerId),
+        eq(customerDeliveryAddresses.oneOff, false)
+      )
+    )
+    .for("no key update");
+  return row ?? null;
+}
+
+// Every order pointing at `address` gets a copy of it as its own
+// engångsadress (one per order — an order switching away deletes its
+// one-off, so a shared copy would vanish from the others) and is repointed
+// to it. Orders are locked in id order first, as the header PATCH locks
+// one: the repoint is not a content change (no revision bump).
+async function detachOrdersFromAddress(tx: Tx, address: typeof customerDeliveryAddresses.$inferSelect) {
+  const orders = await tx
+    .select({ id: salesOrders.id })
+    .from(salesOrders)
+    .where(eq(salesOrders.deliveryAddressId, address.id))
+    .orderBy(asc(salesOrders.id))
+    .for("update");
+  for (const order of orders) {
+    const [copy] = await tx
+      .insert(customerDeliveryAddresses)
+      .values({
+        customerId: address.customerId,
+        label: address.label,
+        address: address.address,
+        postalCode: address.postalCode,
+        city: address.city,
+        country: address.country,
+        isDefault: false,
+        oneOff: true,
+      })
+      .returning({ id: customerDeliveryAddresses.id });
+    await tx.update(salesOrders).set({ deliveryAddressId: copy!.id }).where(eq(salesOrders.id, order.id));
+  }
 }
 
 // bumpRevision is a directive, not a column — stripped before the spread.
@@ -441,7 +513,12 @@ async function bumpRevision(tx: Tx, orderId: string) {
 // fully delivered — mirror deliverGoods' status recomputation. Other
 // statuses are left untouched (the service guards which ones are editable).
 async function recomputeInProduction(tx: Tx, orderId: string): Promise<SalesOrderStatus> {
-  const [order] = await tx.select().from(salesOrders).where(eq(salesOrders.id, orderId));
+  // The header FOR UPDATE (rows → header, as the delivery takes them) before
+  // the rows are read: a row lowered to its delivered quantity while a
+  // delivery finishes another row otherwise sees that row still open, the
+  // delivery sees this one, and a fully delivered order stays Under
+  // tillverkning.
+  const [order] = await tx.select().from(salesOrders).where(eq(salesOrders.id, orderId)).for("update");
   if (!order || order.status !== "in_production") return order?.status ?? "in_production";
   const allRows = await tx.select().from(salesOrderRows).where(eq(salesOrderRows.salesOrderId, orderId));
   const allDelivered =
@@ -662,6 +739,14 @@ export function createSalesRepository(db: Db) {
     // Scoped to the customer so a contact id from another customer 404s.
     async updateCustomerContact(customerId: string, contactId: string, input: UpdateContactInput) {
       return db.transaction(async (tx) => {
+        // The target first: an unknown contact id must not demote the
+        // customer's current primary contact on its way to a 404.
+        const [target] = await tx
+          .select({ id: customerContacts.id })
+          .from(customerContacts)
+          .where(and(eq(customerContacts.id, contactId), eq(customerContacts.customerId, customerId)))
+          .for("update");
+        if (!target) return null;
         if (input.isPrimary === true) {
           await tx
             .update(customerContacts)
@@ -691,9 +776,16 @@ export function createSalesRepository(db: Db) {
     // findDeliveryAddress returns it, so the service can let an order keep
     // its own one.
 
+    // orderCount: the orders (any status) pointing at the address — the
+    // edit dialog's Ändra inte befintliga ordrar and the delete text.
     async listDeliveryAddresses(customerId: string) {
       return db
-        .select()
+        .select({
+          ...getTableColumns(customerDeliveryAddresses),
+          // Written out qualified: drizzle renders a lone table's columns
+          // unqualified, so "id" inside the subquery bound to sales_orders.id.
+          orderCount: sql<number>`(SELECT count(*)::int FROM sales_orders so WHERE so.delivery_address_id = customer_delivery_addresses.id)`,
+        })
         .from(customerDeliveryAddresses)
         .where(and(eq(customerDeliveryAddresses.customerId, customerId), eq(customerDeliveryAddresses.oneOff, false)))
         .orderBy(desc(customerDeliveryAddresses.isDefault), asc(customerDeliveryAddresses.label));
@@ -724,9 +816,20 @@ export function createSalesRepository(db: Db) {
       });
     },
 
+    // keepOnOrders (Ändra inte befintliga ordrar): every order pointing at
+    // the address gets the old address as its own engångsadress first, so
+    // the change only reaches new orders. Without it the orders follow, as
+    // before (the FK is the only link).
     async updateDeliveryAddress(customerId: string, addressId: string, input: UpdateDeliveryAddressInput) {
+      const { keepOnOrders, ...fields } = input;
       return db.transaction(async (tx) => {
-        if (input.isDefault === true) {
+        // The target first: an unknown or one-off address id must not demote
+        // the customer's default on its way to a 404.
+        const target = await lockDeliveryAddress(tx, customerId, addressId);
+        if (!target) return null;
+        if (keepOnOrders) await detachOrdersFromAddress(tx, target);
+        if (Object.keys(fields).length === 0) return target;
+        if (fields.isDefault === true) {
           await tx
             .update(customerDeliveryAddresses)
             .set({ isDefault: false })
@@ -736,31 +839,25 @@ export function createSalesRepository(db: Db) {
         }
         const [row] = await tx
           .update(customerDeliveryAddresses)
-          .set(input)
-          .where(
-            and(
-              eq(customerDeliveryAddresses.id, addressId),
-              eq(customerDeliveryAddresses.customerId, customerId),
-              eq(customerDeliveryAddresses.oneOff, false)
-            )
-          )
+          .set(fields)
+          .where(eq(customerDeliveryAddresses.id, addressId))
           .returning();
         return row ?? null;
       });
     },
 
+    // The orders keep the address (user decision 2026-11-10): each one
+    // pointing at it gets it as its own engångsadress before it goes, so
+    // documents, the pick list and freight read the same address as before
+    // — the FK's set null would otherwise move them to the customer's.
     async deleteDeliveryAddress(customerId: string, addressId: string) {
-      const [row] = await db
-        .delete(customerDeliveryAddresses)
-        .where(
-          and(
-            eq(customerDeliveryAddresses.id, addressId),
-            eq(customerDeliveryAddresses.customerId, customerId),
-            eq(customerDeliveryAddresses.oneOff, false)
-          )
-        )
-        .returning();
-      return row ?? null;
+      return db.transaction(async (tx) => {
+        const target = await lockDeliveryAddress(tx, customerId, addressId);
+        if (!target) return null;
+        await detachOrdersFromAddress(tx, target);
+        const [row] = await tx.delete(customerDeliveryAddresses).where(eq(customerDeliveryAddresses.id, addressId)).returning();
+        return row ?? null;
+      });
     },
 
     // Header fields editable while quote/confirmed/in_production (service guard).
@@ -1342,17 +1439,24 @@ export function createSalesRepository(db: Db) {
     // (sales-order-markups-changed). undefined = an à-pris was sent.
     async addRow(salesOrderId: string, input: SalesRowWrite, pricedIn?: string, pricedWithMarkups?: PriceMarkups | null) {
       return db.transaction(async (tx) => {
+        const [order] = await tx
+          .select({
+            orderNumber: salesOrders.orderNumber,
+            status: salesOrders.status,
+            currency: salesOrders.currency,
+            generalMarkupPercent: salesOrders.generalMarkupPercent,
+            materialMarkupPercent: salesOrders.materialMarkupPercent,
+          })
+          .from(salesOrders)
+          .where(eq(salesOrders.id, salesOrderId))
+          .for("key share");
+        // The status again under the key lock — it waits for a delivery's
+        // header lock, so a row never lands on an order that just became
+        // Levererad (or was cancelled) after the service's unlocked check.
+        if (order && order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
+          throw new SalesOrderRowsLockedError(order.status);
+        }
         if (pricedIn !== undefined) {
-          const [order] = await tx
-            .select({
-              orderNumber: salesOrders.orderNumber,
-              currency: salesOrders.currency,
-              generalMarkupPercent: salesOrders.generalMarkupPercent,
-              materialMarkupPercent: salesOrders.materialMarkupPercent,
-            })
-            .from(salesOrders)
-            .where(eq(salesOrders.id, salesOrderId))
-            .for("key share");
           if (order && order.currency !== pricedIn) throw new SalesOrderCurrencyChangedError(order.orderNumber, pricedIn, order.currency);
           if (order && pricedWithMarkups !== undefined) {
             const current = orderMarkupsOf(order);
@@ -1635,21 +1739,34 @@ export function createSalesRepository(db: Db) {
           .for("update");
         if (!row) return { ok: false, reason: "row_not_found" };
         if (Number(row.quantityDelivered) > 0) return { ok: false, reason: "row_has_deliveries" };
-        // The row's own Ställkostnad goes with it while undelivered; a
-        // delivered one stays as a plain row (setup_for_row_id set null).
-        await tx
-          .delete(salesOrderRows)
+        // History the delivered quantity no longer shows: an undone delivery
+        // keeps its delivery_rows (undone_at), a cancelled draft or a credited
+        // invoice keeps its invoice_rows — both restrict FKs, so the DELETE
+        // below would fail with a bare 23503. Checked under the row lock (a
+        // delivery or an invoice row takes the row lock too).
+        const history = await rowHistory(tx, [rowId]);
+        if (history.delivered.has(rowId)) return { ok: false, reason: "row_has_deliveries" };
+        if (history.invoiced.has(rowId)) return { ok: false, reason: "row_has_invoice_rows" };
+        // The row's own Ställkostnad goes with it while undelivered and
+        // without history; otherwise it stays as a plain row (setup_for_row_id
+        // set null by the FK).
+        const setupRows = await tx
+          .select({ id: salesOrderRows.id })
+          .from(salesOrderRows)
           .where(and(eq(salesOrderRows.setupForRowId, rowId), eq(salesOrderRows.quantityDelivered, "0")));
+        if (setupRows.length > 0) {
+          const setupHistory = await rowHistory(tx, setupRows.map((r) => r.id));
+          const removable = setupRows
+            .map((r) => r.id)
+            .filter((id) => !setupHistory.delivered.has(id) && !setupHistory.invoiced.has(id));
+          if (removable.length > 0) await tx.delete(salesOrderRows).where(inArray(salesOrderRows.id, removable));
+        }
 
         // E3: a linked (non-deleted) manufacturing_orders row blocks this
         // DELETE via its restrict FK — caught right here where it's thrown,
-        // rather than left to bubble out of db.transaction uncaught. Three
-        // restrict FKs can fire on this same DELETE (manufacturing_orders,
-        // delivery_rows, invoice_rows) — the quantityDelivered guard above
-        // already rules the other two out in practice, but that's an
-        // undocumented coincidence, not a guarantee a future delivery/invoice
-        // change couldn't break, so the constraint name is checked
-        // explicitly rather than assuming any 23503 here means an MO link.
+        // rather than left to bubble out of db.transaction uncaught. The two
+        // other restrict FKs (delivery_rows, invoice_rows) are ruled out by
+        // rowHistory above.
         try {
           await tx.delete(salesOrderRows).where(eq(salesOrderRows.id, rowId));
         } catch (err) {
@@ -1806,7 +1923,14 @@ export function createSalesRepository(db: Db) {
           // of one order queue here, so the status derived below reads every
           // row's final quantity — without it each saw the other's row still
           // undelivered and a fully delivered order stayed Under tillverkning.
-          await tx.select({ id: salesOrders.id }).from(salesOrders).where(eq(salesOrders.id, orderId)).for("update");
+          const [lockedOrder] = await tx
+            .select({ status: salesOrders.status })
+            .from(salesOrders)
+            .where(eq(salesOrders.id, orderId))
+            .for("update");
+          // Read again under the lock: a Makulera or a manual status that
+          // committed after the unlocked read above.
+          if (lockedOrder?.status !== "in_production") throw new BatchInvalidStatusError();
 
           const updatedRows: (typeof salesOrderRows.$inferSelect)[] = [];
           // Ångra utleverans: where each row's goods were taken from and the

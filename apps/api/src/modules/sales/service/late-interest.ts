@@ -141,6 +141,37 @@ export function lateFeeAmount(chargedReminderFees: number): number {
   return Math.max(0, round2(LATE_FEE_AMOUNT - chargedReminderFees));
 }
 
+// Avräkningsordningen (user decision 2026-11-10): costs before capital — a
+// payment dated after a påminnelseavgift was charged pays the outstanding
+// fee first, and only the rest reduces the capital the interest runs on (the
+// open amount carries the fee, so a payment of exactly the fee is not a
+// payment of capital). A payment on the reminder's own day predates the fee.
+// Payments whose whole amount went to a fee drop out.
+export function capitalPayments(
+  payments: readonly LateInterestPayment[],
+  fees: readonly LateInterestPayment[]
+): LateInterestPayment[] {
+  const byDate = (a: LateInterestPayment, b: LateInterestPayment) => a.date.localeCompare(b.date);
+  const charged = fees.filter((fee) => fee.amount > 0).sort(byDate);
+  let feeIndex = 0;
+  let feeDue = 0;
+  const out: LateInterestPayment[] = [];
+  for (const payment of [...payments].sort(byDate)) {
+    while (feeIndex < charged.length && charged[feeIndex]!.date < payment.date) {
+      feeDue = round2(feeDue + charged[feeIndex]!.amount);
+      feeIndex += 1;
+    }
+    let amount = payment.amount;
+    if (feeDue > 0 && amount > 0) {
+      const toFee = Math.min(feeDue, amount);
+      feeDue = round2(feeDue - toFee);
+      amount = round2(amount - toFee);
+    }
+    if (amount !== 0) out.push({ date: payment.date, amount });
+  }
+  return out;
+}
+
 // The payment day on which the capital reaches 0 (payments dated ≤ through),
 // or null while something is left.
 export function fullyPaidDate(principal: number, payments: readonly LateInterestPayment[], through: string): string | null {

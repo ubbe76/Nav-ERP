@@ -125,7 +125,40 @@ export interface LegoOperationRef {
 
 export type PurchaseRowMutationResult =
   | { ok: true; row: typeof purchaseOrderRows.$inferSelect | null; orderStatus: PurchaseOrderStatus }
-  | { ok: false; reason: "row_not_found" | "quantity_below_received" | "row_has_receipts" | "row_has_dispatches" };
+  | { ok: false; reason: "row_not_found" | "quantity_below_received" | "row_has_receipts" | "row_has_dispatches" }
+  // The order left the editable statuses between the service's read and the
+  // row lock (received, closed or cancelled meanwhile).
+  | { ok: false; reason: "invalid_status"; status: PurchaseOrderStatus };
+
+// Rows are editable in these statuses only — re-checked under the order lock
+// by every row write (the service's own check reads unlocked).
+const ROW_EDITABLE_STATUSES: readonly PurchaseOrderStatus[] = ["draft", "confirmed", "partially_received"];
+
+// Locks the order header (after the row, the row → order order of the
+// receipt) and returns its status, null when the order is gone.
+async function lockOrderStatus(tx: Tx, orderId: string): Promise<PurchaseOrderStatus | null> {
+  const [order] = await tx
+    .select({ status: purchaseOrders.status })
+    .from(purchaseOrders)
+    .where(eq(purchaseOrders.id, orderId))
+    .for("update");
+  return order?.status ?? null;
+}
+
+// addRow under the order lock: the order is no longer in a row-editable
+// status. Thrown (not returned) so addRow keeps returning the row; the
+// service turns it into its InvalidStatusTransitionError.
+export class PurchaseOrderNotEditableError extends Error {
+  constructor(readonly status: PurchaseOrderStatus | null) {
+    super(`Purchase order is not editable in status "${status ?? "unknown"}"`);
+    this.name = "PurchaseOrderNotEditableError";
+  }
+}
+
+export type ConvertInquiryResult =
+  | { ok: true; order: typeof purchaseOrders.$inferSelect }
+  | { ok: false; reason: "inquiry_not_found" }
+  | { ok: false; reason: "invalid_status"; status: InquiryStatus };
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
@@ -143,7 +176,10 @@ async function bumpRevision(tx: Tx, orderId: string) {
 // row fully covered — mirror receiveGoods' status recomputation. Other
 // statuses are left untouched (the service guards which ones are editable).
 async function recomputePartiallyReceived(tx: Tx, orderId: string): Promise<PurchaseOrderStatus> {
-  const [order] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, orderId));
+  // Locked: a receipt on another row holds this lock while it recomputes the
+  // status, so the two never write a status from a stale set of rows (and a
+  // concurrent Stäng/Makulera waits instead of being overwritten).
+  const [order] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, orderId)).for("update");
   if (!order || order.status !== "partially_received") return order?.status ?? "partially_received";
   const allRows = await tx.select().from(purchaseOrderRows).where(eq(purchaseOrderRows.purchaseOrderId, orderId));
   const allReceived =
@@ -315,6 +351,14 @@ export function createPurchaseRepository(db: Db) {
     async updateSupplierContact(supplierId: string, contactId: string, input: UpdateContactInput) {
       return db.transaction(async (tx) => {
         if (input.isPrimary === true) {
+          // The target is locked first: an unknown (or another supplier's)
+          // contact id must not demote the current primary on its way to 404.
+          const [target] = await tx
+            .select({ id: supplierContacts.id })
+            .from(supplierContacts)
+            .where(and(eq(supplierContacts.id, contactId), eq(supplierContacts.supplierId, supplierId)))
+            .for("update");
+          if (!target) return null;
           await tx
             .update(supplierContacts)
             .set({ isPrimary: false })
@@ -379,6 +423,13 @@ export function createPurchaseRepository(db: Db) {
     async updateSupplierDeliveryAddress(supplierId: string, addressId: string, input: UpdateDeliveryAddressInput) {
       return db.transaction(async (tx) => {
         if (input.isDefault === true) {
+          // Target first — an unknown address id must not demote the default.
+          const [target] = await tx
+            .select({ id: supplierDeliveryAddresses.id })
+            .from(supplierDeliveryAddresses)
+            .where(and(eq(supplierDeliveryAddresses.id, addressId), eq(supplierDeliveryAddresses.supplierId, supplierId)))
+            .for("update");
+          if (!target) return null;
           await tx
             .update(supplierDeliveryAddresses)
             .set({ isDefault: false })
@@ -663,11 +714,15 @@ export function createPurchaseRepository(db: Db) {
       return row ?? null;
     },
 
-    async updateInquiryStatus(id: string, status: InquiryStatus) {
+    // fromStatuses: only from one of those — null when the inquiry has moved
+    // on since the service read it (the same rule as updateStatus).
+    async updateInquiryStatus(id: string, status: InquiryStatus, fromStatuses?: readonly InquiryStatus[]) {
       const [row] = await db
         .update(inquiries)
         .set({ status, updatedAt: new Date() })
-        .where(eq(inquiries.id, id))
+        .where(
+          fromStatuses ? and(eq(inquiries.id, id), inArray(inquiries.status, [...fromStatuses])) : eq(inquiries.id, id)
+        )
         .returning();
       return row ?? null;
     },
@@ -675,11 +730,22 @@ export function createPurchaseRepository(db: Db) {
     // Converts the inquiry into a fresh purchase order in one transaction:
     // new IO number, currency snapshotted from the supplier, rows copied
     // (unanswered prices become 0), inquiry marked ordered + linked.
-    async convertInquiryToOrder(inquiryId: string, createdBy: string) {
-      return db.transaction(async (tx) => {
-        const [inquiry] = await tx.select().from(inquiries).where(eq(inquiries.id, inquiryId));
-        if (!inquiry) return null;
-        const [supplier] = await tx.select().from(suppliers).where(eq(suppliers.id, inquiry.supplierId));
+    // The inquiry is locked and its status checked under the lock — two
+    // concurrent conversions would otherwise both pass the service's unlocked
+    // read and create an order each. `money` is the currency and its rate,
+    // resolved by the service before the transaction (the rate lookup may
+    // call Riksbanken).
+    async convertInquiryToOrder(
+      inquiryId: string,
+      createdBy: string,
+      money: { currency: string; exchangeRate: number }
+    ): Promise<ConvertInquiryResult> {
+      return db.transaction(async (tx): Promise<ConvertInquiryResult> => {
+        const [inquiry] = await tx.select().from(inquiries).where(eq(inquiries.id, inquiryId)).for("update");
+        if (!inquiry) return { ok: false, reason: "inquiry_not_found" };
+        if (inquiry.status !== "sent" && inquiry.status !== "answered") {
+          return { ok: false, reason: "invalid_status", status: inquiry.status };
+        }
 
         const orderNumber = await getNextOrderNumber(tx, "purchase_order");
         const [order] = await tx
@@ -689,7 +755,8 @@ export function createPurchaseRepository(db: Db) {
             supplierId: inquiry.supplierId,
             expectedDeliveryDate: inquiry.expectedDeliveryDate,
             note: inquiry.note,
-            currency: supplier!.currency,
+            currency: money.currency,
+            exchangeRate: String(money.exchangeRate),
             deliveryTermId: inquiry.deliveryTermId,
             paymentTermId: inquiry.paymentTermId,
             carrierId: inquiry.carrierId,
@@ -733,7 +800,7 @@ export function createPurchaseRepository(db: Db) {
 
         // Tillägg: a purchase order made from an inquiry is created too.
         await pluginEvents.emit(tx, { type: "purchase_order.created", entityId: order!.id, entityNumber: order!.orderNumber });
-        return order!;
+        return { ok: true, order: order! };
       });
     },
 
@@ -951,8 +1018,14 @@ export function createPurchaseRepository(db: Db) {
       return row ?? null;
     },
 
+    // Throws PurchaseOrderNotEditableError when the order is no longer in a
+    // row-editable status (checked under its lock: a receipt that completed
+    // the order, or a Stäng/Makulera, may have committed since the service
+    // read it).
     async addRow(purchaseOrderId: string, input: CreatePurchaseOrderRowInput & UnitSnapshot) {
       return db.transaction(async (tx) => {
+        const status = await lockOrderStatus(tx, purchaseOrderId);
+        if (status === null || !ROW_EDITABLE_STATUSES.includes(status)) throw new PurchaseOrderNotEditableError(status);
         const [row] = await tx
           .insert(purchaseOrderRows)
           .values({
@@ -999,6 +1072,11 @@ export function createPurchaseRepository(db: Db) {
           .where(and(eq(purchaseOrderRows.id, rowId), eq(purchaseOrderRows.purchaseOrderId, orderId)))
           .for("update");
         if (!row) return { ok: false, reason: "row_not_found" };
+        // The status again, under the order lock (row → order).
+        const status = await lockOrderStatus(tx, orderId);
+        if (status === null || !ROW_EDITABLE_STATUSES.includes(status)) {
+          return { ok: false, reason: "invalid_status", status: status ?? "cancelled" };
+        }
         if (patch.quantity !== undefined && patch.quantity < Number(row.quantityReceived)) {
           return { ok: false, reason: "quantity_below_received" };
         }
@@ -1035,6 +1113,11 @@ export function createPurchaseRepository(db: Db) {
           .where(and(eq(purchaseOrderRows.id, rowId), eq(purchaseOrderRows.purchaseOrderId, orderId)))
           .for("update");
         if (!row) return { ok: false, reason: "row_not_found" };
+        // The status again, under the order lock (row → order).
+        const status = await lockOrderStatus(tx, orderId);
+        if (status === null || !ROW_EDITABLE_STATUSES.includes(status)) {
+          return { ok: false, reason: "invalid_status", status: status ?? "cancelled" };
+        }
         if (Number(row.quantityReceived) > 0) return { ok: false, reason: "row_has_receipts" };
         // Avsändning lego: a row with a live dispatch stays (undo the
         // dispatch first). Undone dispatches are history only — their rows
@@ -1678,6 +1761,14 @@ export function createPurchaseRepository(db: Db) {
     async updateArticleSupplier(articleId: string, rowId: string, input: UpdateArticleSupplierInput) {
       return db.transaction(async (tx) => {
         if (input.isPrimary === true) {
+          // Target first — an unknown row id (or another article's) must not
+          // demote the article's huvudleverantör on its way to 404.
+          const [target] = await tx
+            .select({ id: articleSuppliers.id })
+            .from(articleSuppliers)
+            .where(and(eq(articleSuppliers.id, rowId), eq(articleSuppliers.articleId, articleId)))
+            .for("update");
+          if (!target) return null;
           await tx
             .update(articleSuppliers)
             .set({ isPrimary: false })
