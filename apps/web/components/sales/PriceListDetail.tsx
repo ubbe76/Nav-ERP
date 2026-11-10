@@ -18,9 +18,13 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import { currencyLabel } from "../../lib/currency";
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
+import { useCan } from "../PermissionsProvider";
 
 export function PriceListDetail({ priceList }: { priceList: PriceListWithRows }) {
   const router = useRouter();
+  // Every price-list write is the administrator's in the API; everyone else
+  // reads the card, so the write controls are hidden and the fields locked.
+  const canWrite = useCan()(["admin"]);
   const [code, setCode] = useState(priceList.code);
   const [name, setName] = useState(priceList.name);
   const [description, setDescription] = useState(priceList.description ?? "");
@@ -40,6 +44,7 @@ export function PriceListDetail({ priceList }: { priceList: PriceListWithRows })
 
   async function saveHeader(e: FormEvent) {
     e.preventDefault();
+    if (!canWrite) return;
     setHeaderError(null);
     setSaved(false);
     setSaving(true);
@@ -101,9 +106,11 @@ export function PriceListDetail({ priceList }: { priceList: PriceListWithRows })
           <div className={shellStyles.meta}>Prislista</div>
         </div>
         <div className={shellStyles.topbarActions}>
-          <Button type="button" variant="danger" disabled={deleting} onClick={handleDelete}>
-            {deleting ? "Tar bort…" : "Ta bort prislista"}
-          </Button>
+          {canWrite && (
+            <Button type="button" variant="danger" disabled={deleting} onClick={handleDelete}>
+              {deleting ? "Tar bort…" : "Ta bort prislista"}
+            </Button>
+          )}
           <HelpLink chapter="forsaljning" anchor="prislistor" label="Hjälp om prislistor" />
         </div>
       </div>
@@ -120,6 +127,7 @@ export function PriceListDetail({ priceList }: { priceList: PriceListWithRows })
                 id="priceListCode"
                 size="md"
                 required
+                disabled={!canWrite}
                 maxLength={20}
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
@@ -129,6 +137,7 @@ export function PriceListDetail({ priceList }: { priceList: PriceListWithRows })
               <Input
                 id="priceListName"
                 required
+                disabled={!canWrite}
                 maxLength={100}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -139,6 +148,7 @@ export function PriceListDetail({ priceList }: { priceList: PriceListWithRows })
           <Field label="Beskrivning" htmlFor="priceListDescription">
             <Input
               id="priceListDescription"
+              disabled={!canWrite}
               maxLength={500}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -149,40 +159,44 @@ export function PriceListDetail({ priceList }: { priceList: PriceListWithRows })
             <CurrencyInput
               id="priceListCurrency"
               required
-              disabled={priceList.rows.length > 0}
+              disabled={!canWrite || priceList.rows.length > 0}
               value={currency}
               onValueChange={setCurrency}
             />
           </Field>
           <FormHint attached>
-            {priceList.rows.length > 0
+            {canWrite && priceList.rows.length > 0
               ? "Valutan kan inte ändras när listan har prisrader — ta bort raderna först. "
               : ""}
             Priskedjan använder listan bara på ordrar i samma valuta; en prislista i SEK hoppas över på en order i EUR.
           </FormHint>
 
-          <FormActions>
-            <Button type="submit" variant="primary" disabled={saving}>
-              {saving ? "Sparar…" : "Spara"}
-            </Button>
-            {saved && <FormSaved>Sparat</FormSaved>}
-          </FormActions>
+          {canWrite && (
+            <FormActions>
+              <Button type="submit" variant="primary" disabled={saving}>
+                {saving ? "Sparar…" : "Spara"}
+              </Button>
+              {saved && <FormSaved>Sparat</FormSaved>}
+            </FormActions>
+          )}
         </Form>
       </Card>
 
       <SectionHeading
         spaced
         actions={
-          <Button
-            type="button"
-            variant="primary"
-            onClick={() => {
-              setEditing(null);
-              setModalOpen(true);
-            }}
-          >
-            + Lägg till rad
-          </Button>
+          canWrite ? (
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => {
+                setEditing(null);
+                setModalOpen(true);
+              }}
+            >
+              + Lägg till rad
+            </Button>
+          ) : undefined
         }
       >
         Prisrader
@@ -215,6 +229,7 @@ export function PriceListDetail({ priceList }: { priceList: PriceListWithRows })
                 maximumFractionDigits: 2,
               });
             case "id":
+              if (!canWrite) return null;
               return (
                 <span style={{ display: "inline-flex", gap: 8 }}>
                   <Button

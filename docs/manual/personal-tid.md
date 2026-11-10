@@ -82,7 +82,7 @@ ATF tjänas in med ett schablonvärde i **minuter per vecka** för varje fullbor
 - Systemstandarden sätts under **Personal & lön → Lön, PAXml & schema** ("ATF-intjäning (minuter per vecka)"); på personalkortets **ATF**-flik kan den överstyras per anställd.
 - **Intjäning från** anger från vilket datum intjäningen räknas.
 - **Uttagsläge**: **Tidbank** (uttag dras från saldot) eller **Veckouttag** (den anställde tar ut sin ATF varje vecka — ingen bank byggs upp). För ATF som tas ut som kortare arbetstid i veckoschemat, se [ATF och inarbetning i veckoschemat](#atf-och-inarbetning-i-veckoschemat).
-- Fliken visar saldot och alla transaktioner (Uttag/Justering). Uttag registreras här eller av den anställde själv i [stämpelterminalen](/hjalp/terminal); justeringar (± timmar) används för korrigeringar. Negativt saldo tillåts men visas rött.
+- Fliken visar saldot och alla transaktioner (Uttag/Justering). Uttag registreras här eller av den anställde själv i [stämpelterminalen](/hjalp/terminal); justeringar (± timmar) används för korrigeringar och kan bara registreras här på personalkortet, av en arbetsledare eller administratör med behörigheten **Personal & lön** — aldrig från terminalen. Negativt saldo tillåts men visas rött.
 
 > Ändras intjäningstakten räknas hela historiken om med den nya takten — korrigera i så fall med en justeringstransaktion.
 

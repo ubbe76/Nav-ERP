@@ -7,17 +7,28 @@ export function createOAuthRepository(db: Db) {
       input: { name: string; clientSecretHash: string; scopes: string[]; customerId: string | null },
       createdBy: string
     ) {
-      const [row] = await db
-        .insert(apiClients)
-        .values({
-          name: input.name,
-          clientSecretHash: input.clientSecretHash,
-          scopes: input.scopes,
-          customerId: input.customerId,
-          createdBy,
-        })
-        .returning();
-      return row!;
+      // Logged with the client in one transaction (granskningen 2026-11-10:
+      // only PATCH was) — a new client is new access to the API.
+      return db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(apiClients)
+          .values({
+            name: input.name,
+            clientSecretHash: input.clientSecretHash,
+            scopes: input.scopes,
+            customerId: input.customerId,
+            createdBy,
+          })
+          .returning();
+        await tx.insert(auditLog).values({
+          entityType: "api_client",
+          entityId: row!.id,
+          action: "created",
+          detail: { name: row!.name, scopes: row!.scopes, customerId: row!.customerId },
+          userId: createdBy,
+        });
+        return row!;
+      });
     },
 
     async findApiClientById(id: string) {
@@ -63,9 +74,23 @@ export function createOAuthRepository(db: Db) {
       });
     },
 
-    async revokeApiClient(id: string) {
-      const [row] = await db.update(apiClients).set({ active: false }).where(eq(apiClients.id, id)).returning();
-      return row ?? null;
+    // Logged only when the client actually goes from active to revoked — a
+    // repeated Återkalla answers with the row and writes nothing.
+    async revokeApiClient(id: string, userId: string | null) {
+      return db.transaction(async (tx) => {
+        const [before] = await tx.select().from(apiClients).where(eq(apiClients.id, id)).for("update");
+        if (!before) return null;
+        if (!before.active) return before;
+        const [row] = await tx.update(apiClients).set({ active: false }).where(eq(apiClients.id, id)).returning();
+        await tx.insert(auditLog).values({
+          entityType: "api_client",
+          entityId: before.id,
+          action: "revoked",
+          detail: { name: before.name },
+          userId,
+        });
+        return row!;
+      });
     },
   };
 }

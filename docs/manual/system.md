@@ -20,6 +20,10 @@
 
 **System → Användare** hanterar inloggningskonton. Det första kontot skapas via `/register` (se [Komma igång](/hjalp/komma-igang)); därefter skapar en administratör nya konton här med namn, e-post, lösenord och roll (**Administratör** eller **Användare**) och **Behörighetsgrupp** (se [Behörighetsgrupper](#behorighetsgrupper)). Endast administratörer ser System-menyn. Ett tilläggs tekniska användare syns också i listan, märkt **Tillägg**; den kan inte redigeras här utan hanteras under [Tillägg](/hjalp/tillagg). Listans kolumn **Behörighetsgrupp** visar gruppens namn, **Alla (administratör)** för administratörer och **Ingen åtkomst** för den som saknar grupp.
 
+E-postadressen skiljer inte på stora och små bokstäver: den sparas med gemener, och `Anna.Berg@firma.se` och `anna.berg@firma.se` är samma konto — både vid inloggning och när ett nytt konto skapas.
+
+Ett **Nytt lösenord** loggar ut kontot överallt där det är inloggat, även på andra datorer och telefoner, så ett lösenord som kommit på avvägar slutar gälla direkt. Byter du ditt eget lösenord förblir du inloggad där du gjorde det. **Logga ut** loggar bara ut den enhet du använder — ett konto som är inloggat på flera stämpelterminaler loggas inte ut från de andra.
+
 Att stänga av ett konto (status **Avstängd**) räcker för de flesta fall — kontot kan inte logga in men syns kvar i listan. För att helt bli av med ett konto finns knappen **Ta bort användare** längst ned när man redigerar en användare (dold för det egna kontot — man kan inte ta bort sig själv). Ett bekräftelsemeddelande visas: "Ta bort användaren \<namn\>? Kontot försvinner ur listan och kan inte logga in, men historiken (ordrar, verifikat m.m.) behåller sin signatur." Raderingen är mjuk: kontot försvinner ur listan och kan inte längre logga in, men allt kontot en gång skapat eller attesterat behåller sin signatur, och e-postadressen kan återanvändas för ett nytt konto. Den sista aktiva administratören kan varken stängas av eller tas bort.
 
 ### Endast läsning
@@ -45,7 +49,7 @@ Ett tilläggs egen grupp (**Tillägg: \<namn\>**, kod `plg-…`) syns också i l
 
 Vid uppgraderingen skapades två grupper. **Alla moduler** (kod ALLA: Artiklar, Inköp, Försäljning, Tillverkning, Lager och Personal & lön) fick alla befintliga användare som inte är administratörer, så ingen tappade åtkomst. **Verkstad** (kod VERKSTAD) är den färdiga verkstadsprofilen med de tre verkstadsrättigheterna.
 
-En ändring av en grupp gäller direkt — användarna behöver inte logga in igen.
+En ändring av en grupp gäller direkt — användarna behöver inte logga in igen. Att skapa, ändra och ta bort en grupp syns i [händelseloggen](#handelselogg) med rättigheterna före och efter, liksom när en API-klient skapas eller återkallas.
 
 En användare utan grupp (**Ingen åtkomst**) når bara hjälpen och sidan **Ingen behörighet**. Rollen **Arbetsledare** ger inte i sig åtkomst till modulerna: för att nå **Attestering** och **Löneunderlag** måste arbetsledaren också ha en grupp med **Personal & lön**. Personalregistret (**Personal & lön → Anställda**) och dess uppgifter är bara för administratörer och för arbetsledare vars grupp har **Personal & lön**; terminalen och TO-kortet ser bara anställningsnummer och namn.
 
@@ -554,7 +558,7 @@ Filerna behåller sina namn; två filer med samma namn i samma mapp får ` (2)`,
 
 ## Händelselogg
 
-**System → Händelselogg** (endast administratörer) listar statusövergångar och radändringar i hela systemet — vem gjorde vad och när. Varje rad visar tid, användare, typ (t.ex. Kundorder, Inköpsorder, Tillverkningsorder, Faktura, Leverantörsfaktura, Verifikat, Användare, Inställningar), id (dokumentets nummer, t.ex. KO2500123 eller LF2500045), händelse (t.ex. Bekräftad, Ändrad, Borttagen, Bokförd) och en kort detalj — en radändring visas som **fält: gammalt värde → nytt värde**.
+**System → Händelselogg** (endast administratörer) listar statusövergångar och radändringar i hela systemet — vem gjorde vad och när. Varje rad visar tid, användare, typ (t.ex. Kundorder, Inköpsorder, Tillverkningsorder, Faktura, Leverantörsfaktura, Verifikat, Användare, Behörighetsgrupp, API-klient, Inställningar), id (dokumentets nummer, t.ex. KO2500123 eller LF2500045), händelse (t.ex. Bekräftad, Ändrad, Borttagen, Bokförd) och en kort detalj — en radändring visas som **fält: gammalt värde → nytt värde**.
 
 Sök på id eller händelse, och filtrera på typ, användare och tidsperiod (Från/Till). **Exportera CSV** laddar ner den filtrerade listan. En rad utan användare (kolumnen visar **System**) kommer från en systemhändelse utan inloggad användare bakom sig; en användare som senare tagits bort visas fortfarande med sitt namn.
 

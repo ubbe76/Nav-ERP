@@ -15,12 +15,15 @@ import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 import { CurrencyInput } from "../ui/CurrencyInput";
+import { useCan } from "../PermissionsProvider";
 
 // Prislistor — registerlistan (kopierad från kundlistans form, se
 // CustomersPageClient.tsx): URL-driven sök/sida via ListToolbar/Pagination,
 // "+ Ny prislista" öppnar en modal, raderna länkar till kortet.
 export function PriceListsPageClient({ priceLists, pageSize }: { priceLists: Paged<PriceList>; pageSize: number }) {
   const router = useRouter();
+  // Creating a price list is the administrator's in the API.
+  const canWrite = useCan()(["admin"]);
   const [modalOpen, setModalOpen] = useState(false);
 
   const view = useListColumns([
@@ -39,9 +42,11 @@ export function PriceListsPageClient({ priceLists, pageSize }: { priceLists: Pag
           <div className={shellStyles.meta}>{priceLists.total.toLocaleString("sv-SE")} prislistor</div>
         </div>
         <div className={shellStyles.topbarActions}>
-          <Button type="button" variant="primary" onClick={() => setModalOpen(true)}>
-            + Ny prislista
-          </Button>
+          {canWrite && (
+            <Button type="button" variant="primary" onClick={() => setModalOpen(true)}>
+              + Ny prislista
+            </Button>
+          )}
           <HelpLink chapter="forsaljning" anchor="prislistor" label="Hjälp om prislistor" />
         </div>
       </div>

@@ -6,6 +6,7 @@ import {
   createEmployeeSchema,
   createTimeReportSchema,
   listQuerySchema,
+  satisfiesRule,
   stampInSchema,
   stampOutSchema,
   updateAttendanceSessionSchema,
@@ -42,6 +43,7 @@ import {
 } from "../../manufacturing/service/manufacturing.service.js";
 import { PayrollPeriodLockedError } from "../../payroll/service/period-lock.js";
 import { requireRole } from "../../auth/middleware/auth.middleware.js";
+import { ForbiddenError } from "../../auth/middleware/permission.middleware.js";
 import { DIRECTORY_READ, MO_READ, PERSONAL, TERMINAL_READ, TERMINAL_WRITE } from "../../auth/middleware/access-rules.js";
 import { LocationUnderStockCountError } from "../../stock/service/stock.service.js";
 import { materialShortageBody } from "../../manufacturing/service/material-shortage.js";
@@ -248,8 +250,18 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
   });
 
   // Närvarostämpling (kom/gå) — the terminal's attendance endpoints.
-  app.get<{ Querystring: { open?: string } }>("/attendance-sessions", { config: { access: TERMINAL_READ } }, async (req) => {
-    return service.listAttendanceSessions(req.query.open === "true");
+  // The terminal and Pågående arbete read who is present now (?open=true).
+  // The full history is every employee's attendance through the years and
+  // the reasons for coming late or leaving early are personal data: both are
+  // Personal & lön's (admin passes), so without it the history is refused
+  // and the four reason fields are left out of the open list.
+  app.get<{ Querystring: { open?: string } }>("/attendance-sessions", { config: { access: TERMINAL_READ } }, async (req, reply) => {
+    const onlyOpen = req.query.open === "true";
+    const personal = satisfiesRule(req.user!, PERSONAL);
+    if (!onlyOpen && !personal) return reply.code(403).send(errorBody(new ForbiddenError()));
+    const sessions = await service.listAttendanceSessions(onlyOpen);
+    if (personal) return sessions;
+    return sessions.map(({ startReasonId: _a, startNote: _b, stopReasonId: _c, stopNote: _d, ...rest }) => rest);
   });
 
   app.post("/attendance-sessions", { config: { access: TERMINAL_WRITE } }, async (req, reply) => {

@@ -63,6 +63,7 @@ Orsakerna som [avvikelser](/hjalp/kvalitet) och kassationer väljer ur, t.ex. `T
 ## Användning och regler
 
 - Redigera en post genom att klicka på benämningen; dubbletter av kod eller benämning avvisas.
+- **Behörighet:** leveransvillkor, betalningsvillkor, speditörer, enheter och kollityper skapas och ändras av den som har behörigheten **Artiklar**, **Inköp** eller **Försäljning** — det gäller också **Förifyll Combiterms**, **Lägg till standardenheter**, **Lägg till standardkollityper** och kollitypernas fraktuppgifter. Förlustorsaker kräver **Försäljning**, artikelkoder **Artiklar** och kvalitetsorsaker **Kvalitet**. **Ta bort** är förbehållet administratörer i alla register. Knapparna visas bara för den som får använda dem; övriga ser registren i läsläge.
 - Villkoren och speditören väljs på kund-/leverantörskortets flik **Villkor & frakt**; där anges också partens **kundnummer hos speditören**.
 - Öppna en post och klicka **Ta bort** för att radera den. Används posten ingenstans visas frågan `Ta bort <namn>?` och posten tas bort.
 - Används posten på andra rader visar dialogen `Posten används av:` med en rad per typ av koppling (t.ex. `3 kunder`, `2 leverantörer`, `5 kundorder`, `1 faktura`, `12 artiklar`, `4 orderrader`). Välj en annan post i samma register under **Flytta kopplingarna till** och klicka **Flytta och ta bort** — alla kopplingar flyttas till den valda posten i samma transaktion, sedan raderas originalet. Finns ingen annan post i registret visas i stället `Lägg först till den post kopplingarna ska flyttas till.`
