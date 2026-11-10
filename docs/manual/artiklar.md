@@ -589,6 +589,8 @@ Välj mellan två urval:
 
 Högst 500 artiklar kan förkalkyleras åt gången. Blir urvalet större visas ett felmeddelande och ingenting beräknas — snäva in det med artikelnummerintervall, varugrupp eller artikelkod.
 
+**Visa urval** listar artiklarna som urvalet träffar — **Artikelnummer** (länk till artikeln), **Benämning** och **Typ**, i den ordning de förkalkyleras — utan att räkna något, så att du kan kontrollera urvalet innan du startar ett stort jobb. Överst står hur många artiklar urvalet har (*Urvalet har 37 artiklar*). Har urvalet fler än 500 artiklar säger en notis att det måste snävas in, och listan visar de första 500. Ändrar du urvalet försvinner listan, så den aldrig visar ett gammalt urval; **Dölj** stänger den.
+
 ### Antal
 
 Varje artikel räknas med antalet i **sin senaste sparade förkalkyl**. Har artikeln ingen förkalkyl används **Antal när förkalkyl saknas** (förvalt 1). Kryssrutan **Räkna om underliggande nivåer** fungerar som på kortet.

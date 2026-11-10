@@ -43,6 +43,7 @@ export const unwiredEinvoiceReceive: EinvoiceReceiveService = {
 // Förkalkylera flera (#27). Tests that register costingRoutes for something
 // else (Produkter i arbete) pass this.
 export const unwiredPreCalculationBatch: PreCalculationBatchService = {
+  listSelection: () => unwired("PreCalculationBatchService.listSelection"),
   preview: () => unwired("PreCalculationBatchService.preview"),
   save: () => unwired("PreCalculationBatchService.save"),
 };

@@ -67,6 +67,11 @@ export const preCalculationBatchSchema = z.object({
 });
 export type PreCalculationBatchInput = z.infer<typeof preCalculationBatchSchema>;
 
+// Visa urval (user's request 2026-11-10): the selection's articles listed
+// before anything is calculated — same selection, nothing else.
+export const preCalculationBatchListSchema = z.object({ selection: preCalculationBatchSelectionSchema }).strict();
+export type PreCalculationBatchListInput = z.infer<typeof preCalculationBatchListSchema>;
+
 // The save: the ticked rows with the quantity each was previewed at. Each
 // article is saved on its own (preCalculate with save, recomputed — prices
 // changed since the preview come along), then optionally Sätt standardpris
