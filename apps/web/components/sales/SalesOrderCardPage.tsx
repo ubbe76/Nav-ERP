@@ -224,7 +224,8 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
             ? []
             : [
           { label: "Offert (PDF)", href: `/api/v1/sales-orders/${order.id}/pdf?variant=quote`, configurationPrices: true },
-          // Only on the order card — a quote has no order confirmation.
+          // Only on the order card — a quote has neither an order
+          // confirmation nor anything to pick.
           ...(kind === "order"
             ? [
                 {
@@ -232,9 +233,9 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
                   href: `/api/v1/sales-orders/${order.id}/pdf?variant=confirmation`,
                   configurationPrices: true,
                 },
+                { label: "Plocklista (PDF)", href: `/api/v1/sales-orders/${order.id}/pick-list` },
               ]
             : []),
-          { label: "Plocklista (PDF)", href: `/api/v1/sales-orders/${order.id}/pick-list` },
           ...(order.status === "invoiced" && order.invoiceNumber
             ? [{ label: "Faktura (PDF)", href: `/api/v1/sales-orders/${order.id}/invoice-pdf` }]
             : []),
