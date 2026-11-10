@@ -113,6 +113,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
+- [ ] **Efterkalkylera flera** — en rutin som efterkalkylerar ett urval tillverkningsorder i ett svep, som Förkalkylera flera i dag: urval med Visa urval, efterkalkyl per order bredvid förkalkylen och avvikelsen, Spara markerade (önskat av användaren 2026-11-10) → [#34](https://github.com/ubbe76/Nav-ERP/issues/34)
 - [ ] **D3 Spårbarhet batch/serienr** (L) — vid behov, senare → [#8](https://github.com/ubbe76/Nav-ERP/issues/8) *(hemsidan, under både Tillverkning och Lager)*
 
 ### Låg
