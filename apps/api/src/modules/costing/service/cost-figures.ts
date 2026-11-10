@@ -53,3 +53,43 @@ export function perUnit(total: number, quantity: number | string): number | null
   if (!Number.isFinite(q) || q <= 0) return null;
   return total / q;
 }
+
+// What a SAVED calculation's totals are divided by to give a per-unit figure —
+// the one rule behind Sätt standardpris, Sätt försäljningspris and the
+// specification's Per st column (the web mirrors it in
+// apps/web/lib/calculationDivisor.ts; kalkylgranskning.test.ts pins the two
+// against each other).
+//
+// A förkalkyl is calculated FOR its quantity, so that is the divisor. An
+// efterkalkyl's totals are what the order actually consumed, and they bought
+// N = the received quantity (output_quantity, the same N Kalkylutfall divides
+// by): an order for 10 that delivered 8 cost TVK ÷ 8 per piece, not ÷ 10.
+//   - final analysis, N > 0      → N ("output")
+//   - preliminary analysis       → no figure ("preliminary"): the order is
+//     still open, its costs and its N are both moving
+//   - final analysis, N = 0      → no figure ("no-output"): nothing was made
+//   - saved before the analysis (0187: both fields null) → the quantity, as
+//     it always was — N was never stored for those
+export interface PerUnitDivisorSource {
+  type: "pre" | "post";
+  quantity: number | string;
+  outputQuantity?: number | string | null;
+  preliminary?: boolean | null;
+}
+
+export type PerUnitDivisor =
+  | { divisor: number; basis: "quantity" | "output" }
+  | { divisor: null; reason: "invalid-quantity" | "preliminary" | "no-output" };
+
+export function perUnitDivisor(c: PerUnitDivisorSource): PerUnitDivisor {
+  const analysed = c.type === "post" && c.outputQuantity !== null && c.outputQuantity !== undefined && typeof c.preliminary === "boolean";
+  if (analysed) {
+    if (c.preliminary) return { divisor: null, reason: "preliminary" };
+    const n = Number(c.outputQuantity);
+    if (!Number.isFinite(n) || n <= 0) return { divisor: null, reason: "no-output" };
+    return { divisor: n, basis: "output" };
+  }
+  const q = Number(c.quantity);
+  if (!Number.isFinite(q) || q <= 0) return { divisor: null, reason: "invalid-quantity" };
+  return { divisor: q, basis: "quantity" };
+}

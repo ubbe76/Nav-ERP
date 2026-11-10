@@ -567,6 +567,10 @@ export function createPurchaseRepository(db: Db) {
           supplierName: suppliers.name,
           // Språk (#7): the language the inquiry PDF is printed in (live).
           supplierLanguage: suppliers.language,
+          // The inquiry has no currency of its own — the supplier's, live
+          // (as Gör till inköpsorder reads it); the row form needs it for the
+          // lego ställpris default, which is kronor on the operation.
+          supplierCurrency: suppliers.currency,
           purchaseOrderNumber: purchaseOrders.orderNumber,
           deliveryTermCode: deliveryTerms.code,
           deliveryTermName: deliveryTerms.name,

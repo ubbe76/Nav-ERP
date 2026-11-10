@@ -573,7 +573,7 @@ describe("planning service — configured rows: one derivation per configuration
     rowId, salesOrderId: `so-${rowId}`, orderNumber: `KO-${rowId}`, customerName: "Kund AB", articleId: "t",
     expectedDeliveryDate: null, quantityOrdered, quantityDelivered: 0,
     configuration: { templateArticleId: "t", key, selection, price: { base: 0, additions: [], unitPrice: 0, discountPercent: 0, source: "base" } },
-    linkedOrders: [] as { status: string; quantity: number }[],
+    linkedOrders: [] as { status: string; quantity: number; received: number }[],
   });
   const repo = (rows: ReturnType<typeof configuredRow>[], template: Record<string, unknown> = {}) =>
     makeRepo({
@@ -642,7 +642,7 @@ describe("planning service — configured rows: one derivation per configuration
 
   it("a covered row is left out of the derivation entirely", async () => {
     const calls: number[] = [];
-    const covered = { ...configuredRow("r1", 2), linkedOrders: [{ status: "planned", quantity: 2 }] };
+    const covered = { ...configuredRow("r1", 2), linkedOrders: [{ status: "planned", quantity: 2, received: 0 }] };
     const service = createPlanningService(repo([covered, configuredRow("r2", 1)]), {
       ...noCreators,
       requirementsCacheMs: 0,

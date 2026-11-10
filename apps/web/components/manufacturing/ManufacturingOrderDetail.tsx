@@ -59,6 +59,7 @@ import { CostCalculationList } from "../costing/CostCalculationList";
 import { CostChain } from "../ui/CostChain";
 import { VarianceSummary } from "../costing/VarianceSummary";
 import { chainLines } from "../../lib/costChain";
+import { perUnitDivisor } from "../../lib/calculationDivisor";
 import { SectionHeading } from "../ui/SectionHeading";
 import { AuditTrailSection } from "../system/AuditTrailSection";
 import { Lock } from "lucide-react";
@@ -1077,6 +1078,13 @@ function PostCalculatePreview({
   onSave: () => void;
   onClose: () => void;
 }) {
+  const divisor = perUnitDivisor({
+    type: "post",
+    quantity: preview.calculation.quantity,
+    outputQuantity: preview.analysis?.outputQuantity ?? null,
+    preliminary: preview.analysis?.preliminary ?? null,
+  });
+
   return (
     <Card maxWidth={360} style={{ marginBottom: 20 }}>
       <FormStack>
@@ -1092,10 +1100,14 @@ function PostCalculatePreview({
             </ul>
           </FormError>
         )}
-        {/* Number(quantity) comes from the calculation itself, not any
-            live input — the panel has none, but this keeps the call
-            sited the same way as the Kalkyl tab's. */}
-        <CostChain lines={chainLines(preview.calculation, Number(preview.calculation.quantity))} />
+        {/* Per st as the saved specification will show it and as Sätt
+            standardpris will write it (perUnitDivisor): the received
+            quantity on a final efterkalkyl, no Per st column while the order
+            is open or when nothing is received. */}
+        <CostChain lines={chainLines(preview.calculation, divisor.divisor ?? undefined)} />
+        {divisor.divisor !== null && divisor.basis === "output" && (
+          <FormHint>Per st är delat med inlevererat antal ({formatQuantity(divisor.divisor)} st).</FormHint>
+        )}
         {preview.analysis && <VarianceSummary analysis={preview.analysis} />}
         <FormError>{error}</FormError>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

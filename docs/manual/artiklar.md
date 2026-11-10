@@ -464,9 +464,9 @@ Sektionen **Planering** överst på fliken har fält som styr [behovsberäkninge
 - **Pröva påslag** — se [Pröva påslag](#prova-paslag) nedan: två fält under **Räkna om underliggande nivåer** för att räkna förkalkylen med andra prispåslag.
 - **Spara kalkyl** i panelen lägger beräkningen som en ny rad i listan högst upp och öppnar **Kalkylspecifikation** direkt. Kalkylen räknas om vid sparningen, så byter någon inställning under tiden är det de nya påslagen som sparas.
 - En sparad **Förkalkyl** tas bort med **Ta bort** längst till höger på raden (bekräftas först). **Efterkalkyl** har ingen sådan knapp — den är facit för vad ordern kostade och kan inte tas bort.
-- **Efterkalkyl** görs från tillverkningsorderns detaljsida när ordern är klar, och listas här per order. Även dess kedja visas med **Totalt** och **Per st** (delat med orderns antal).
+- **Efterkalkyl** görs från tillverkningsorderns detaljsida när ordern är klar, och listas här per order. Även dess kedja visas med **Totalt** och **Per st** — delat med det **inlevererade** antalet, inte orderns antal: en order på 10 där 8 levererades in kostar kedjans belopp delat med 8 per styck. En efterkalkyl som görs medan ordern är öppen är preliminär och har ingen **Per st**-kolumn, och inte heller en order där inget inlevererats. En efterkalkyl som sparades innan avvikelseanalysen fanns delas med orderns antal.
 - En kalkyl som sparats med **Spara som prövad kalkyl** är märkt **Prövat** under typen i listan.
-- Listan visar kolumnen **Styckpris** — försäljningspriset delat med kalkylens antal, alltid härlett vid visning.
+- Listan visar kolumnen **Styckpris** — försäljningspriset delat med kalkylens antal (för en efterkalkyl med det inlevererade antalet, som **Per st** ovan; **—** för en preliminär efterkalkyl eller när inget inlevererats), alltid härlett vid visning.
 - Var materialkostnaden hämtas (standardpris eller huvudleverantörens pris) och påslagens storlek ställs in under **System → Kalkyler**, se [System & inställningar](/hjalp/system#kalkyler). Faller kalkylen tillbaka på ett annat pris än det valda visas en varning per rad.
 
 Klicka på **Förkalkyl** eller **Efterkalkyl** i typkolumnen för att öppna **Kalkylspecifikation** — den visar exakt vad som kostade:
@@ -496,7 +496,7 @@ Under **Pröva påslag** i formuläret på fliken **Kalkyl** finns fälten **Gen
 
 #### Föra tillbaka kalkylen till artikeln
 
-Längst ned i **Summering** finns två knappar som för tillbaka kalkylens resultat till artikelregistret. De finns bara på en **sparad** kalkyl — förhandsvisningen skriver aldrig något, och siffran ska gå att spåra till en kalkyl som finns kvar och går att öppna. Både förkalkyl och efterkalkyl duger som källa; efterkalkylen är det verkliga utfallet.
+Längst ned i **Summering** finns två knappar som för tillbaka kalkylens resultat till artikelregistret. De finns bara på en **sparad** kalkyl — förhandsvisningen skriver aldrig något, och siffran ska gå att spåra till en kalkyl som finns kvar och går att öppna. Både förkalkyl och efterkalkyl duger som källa; efterkalkylen är det verkliga utfallet, och dess pris per styck räknas på det inlevererade antalet. Knapparna finns inte på en **preliminär** efterkalkyl (ordern är inte klar) eller när inget är inlevererat — gör en ny efterkalkyl när ordern är klar.
 
 - **Sätt standardpris** skriver kalkylens **tillverkningskostnad (TVK) per styck** till artikelns **Standardkostnad** på fliken Allmänt, och loggar ändringen i standardprishistoriken. Alltså utan TO-påslag, utan Affo-påslag och utan generellt påslag: fältet används även till lagervärdering och till värdet på tillverkningsinleveranser, och omkostnadspåslagen hör inte hemma i ett lagervärde. Kör du knappen nedifrån och upp — halvfabrikaten först, slutartikeln sist — blir också flernivåkalkylen rätt utan att kryssrutan behövs.
 - **Sätt försäljningspris** skriver kalkylens **försäljningspris per styck** till artikelns **Försäljningspris**, alltså grundpriset längst ned i [priskedjan](/hjalp/forsaljning).

@@ -12,6 +12,7 @@ import { formatStockholmDateTime } from "../../lib/date";
 import type { CostCalculation } from "../../lib/types";
 import { StatusPill } from "../ui/StatusPill";
 import { CostSpecification } from "./CostSpecification";
+import { perUnitDivisor, type PerUnitDivisorSource } from "../../lib/calculationDivisor";
 import styles from "./CostCalculationList.module.css";
 
 const TYPE_LABELS: Record<CostCalculation["type"], string> = { pre: "Förkalkyl", post: "Efterkalkyl" };
@@ -28,12 +29,17 @@ function isTrial(c: CostCalculation) {
   return c.generalMarkupLevel === "trial" || c.materialMarkupLevel === "trial";
 }
 
-// Sales price divided by quantity — "—" rather than Infinity/NaN for the
-// (should-be-impossible) zero-quantity calculation.
-function unitPrice(c: CostCalculation) {
-  const quantity = Number(c.quantity);
-  if (!quantity) return "—";
-  return money(Number(c.salesPrice) / quantity);
+// Sales price per piece — divided by what the specification's Per st and Sätt
+// försäljningspris divide by (perUnitDivisor: the quantity on a förkalkyl, the
+// received quantity on a final efterkalkyl). "—" when the calculation carries
+// no per-unit figure: a preliminary efterkalkyl, nothing received, or the
+// (should-be-impossible) zero-quantity calculation. The list rows carry the
+// header's outputQuantity/preliminary although CostCalculation does not type
+// them — hence the widened parameter.
+function unitPrice(c: CostCalculation & PerUnitDivisorSource) {
+  const { divisor } = perUnitDivisor(c);
+  if (divisor === null) return "—";
+  return money(Number(c.salesPrice) / divisor);
 }
 
 // TVK and SVK are plain sums of the stored steps — the API never stores them.

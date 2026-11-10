@@ -208,6 +208,18 @@ export function firmDemandsOf(rows: readonly ArticleOverviewRow[]): DatedDemand[
   return rows.filter((r) => r.direction === "demand" && isFirmOverviewRow(r)).map((r) => ({ date: r.date, quantity: -r.quantity }));
 }
 
+// The closing balance without the forecast rows — stock plus every open
+// supply minus every FIRM demand, summed in the same order and 4-decimal
+// steps as closingBalance. What Skapa saknade halvfabrikat nets its new
+// demands against below level 1 (level 1 goes through pegOverview, which
+// skips the same rows): a forecast is planned for by the behovsberäkning,
+// never a reason to make a TO for a parent's shortage.
+export function firmClosingBalance(overview: Pick<ArticleOverview, "onHand" | "rows">): number {
+  let balance = overview.onHand;
+  for (const row of overview.rows) if (isFirmOverviewRow(row)) balance = round4(balance + row.quantity);
+  return balance;
+}
+
 function compareStrings(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }

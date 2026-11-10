@@ -37,7 +37,7 @@ import {
 } from "./level-costing.js";
 import { costMultiLevel, type SubAssemblyPort } from "./sub-assembly.js";
 import { explodeDerivedMaterials } from "../../configurator/service/configurator-explode.js";
-import { manufacturingCost, perUnit, selfCost } from "./cost-figures.js";
+import { manufacturingCost, perUnit, perUnitDivisor, selfCost, type PerUnitDivisorSource } from "./cost-figures.js";
 import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
 import { stockholmDateOf, stockholmToday } from "../../system/service/delivery-days.js";
 import {
@@ -106,6 +106,24 @@ export class InvalidCalculationQuantityError extends Error {
   }
 }
 
+// Prisåterföring from an efterkalkyl that cannot carry a per-unit figure: the
+// order is still open (a preliminary analysis — costs and received quantity
+// are both moving) or nothing was received (N = 0). 400, and the article is
+// left alone. The message is Swedish because the web shows it as it is.
+export class CostCalculationNotFinalError extends Error {
+  constructor(
+    public readonly id: string,
+    public readonly reason: "preliminary" | "no-output"
+  ) {
+    super(
+      reason === "preliminary"
+        ? "Efterkalkylen är preliminär — tillverkningsordern är inte klar, så kalkylen ger inget pris per styck. Gör en ny efterkalkyl när ordern är klar."
+        : "Inget är inlevererat på tillverkningsordern, så efterkalkylen ger inget pris per styck."
+    );
+    this.name = "CostCalculationNotFinalError";
+  }
+}
+
 // Sätt försäljningspris from a calculation saved with Pröva påslag, by a user
 // who may not set the article's sales price directly (no Artiklar). The route
 // answers 403 forbidden — the same refusal as the price field on the card.
@@ -114,6 +132,15 @@ export class TrialSalesPriceNotAllowedError extends Error {
     super(`Cost calculation ${id} uses tried markups; setting the sales price from it requires the Artiklar permission`);
     this.name = "TrialSalesPriceNotAllowedError";
   }
+}
+
+// The divisor of the two write-backs, or the refusal — one place, so Sätt
+// standardpris and Sätt försäljningspris can never divide by different things.
+function writeBackDivisor(calculation: PerUnitDivisorSource & { id: string }): number {
+  const resolved = perUnitDivisor(calculation);
+  if (resolved.divisor !== null) return resolved.divisor;
+  if (resolved.reason === "invalid-quantity") throw new InvalidCalculationQuantityError(calculation.id);
+  throw new CostCalculationNotFinalError(calculation.id, resolved.reason);
 }
 
 // Narrow slice of the article service — writing a calculated figure back onto
@@ -1033,8 +1060,11 @@ export function createCostingService(
       // is what the field is already used for elsewhere: stock valuation and
       // the value of a manufacturing receipt. Affo and TO are period costs
       // and do not belong in a stock value.
-      const perUnitCost = perUnit(manufacturingCost(calculation), calculation.quantity);
-      if (perUnitCost === null) throw new InvalidCalculationQuantityError(id);
+      //
+      // Divided by what the totals bought (perUnitDivisor): the quantity on a
+      // förkalkyl, N = the received quantity on a final efterkalkyl. A
+      // preliminary efterkalkyl, or one with nothing received, writes nothing.
+      const perUnitCost = manufacturingCost(calculation) / writeBackDivisor(calculation);
       return articles.updateStandardCost(calculation.articleId, round(perUnitCost, 4));
     },
 
@@ -1049,8 +1079,7 @@ export function createCostingService(
       if (!calculation) throw new CostCalculationNotFoundError(id);
       const tried = calculation.generalMarkupLevel === "trial" || calculation.materialMarkupLevel === "trial";
       if (tried && opts.mayApplyTrial === false) throw new TrialSalesPriceNotAllowedError(id);
-      const perUnitPrice = perUnit(Number(calculation.salesPrice), calculation.quantity);
-      if (perUnitPrice === null) throw new InvalidCalculationQuantityError(id);
+      const perUnitPrice = Number(calculation.salesPrice) / writeBackDivisor(calculation);
       return articles.updateSalesPrice(calculation.articleId, round(perUnitPrice, 4));
     },
 

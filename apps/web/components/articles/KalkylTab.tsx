@@ -104,13 +104,19 @@ export function KalkylTab({
     };
   }, [articleId]);
 
-  // The markups to send: a field that differs from what applies.
+  // The markups to send: a field that differs from what applies. While the
+  // applying values are unknown (their fetch has not landed, or failed) there
+  // is nothing to compare with — a field the user has typed in is then sent
+  // as it stands, never silently dropped: the calculation would otherwise run
+  // on the applying markups while the form shows the tried ones. Sending a
+  // value that happens to equal the applying one only marks the calculation
+  // as tried; the figures are the same.
   function tryMarkups(): TryMarkups {
     const out: TryMarkups = {};
-    if (applying) {
-      if (generalTry.trim() !== "" && Number(generalTry) !== Number(applying.general)) out.generalMarkupPercent = Number(generalTry);
-      if (materialTry.trim() !== "" && Number(materialTry) !== Number(applying.material)) out.materialMarkupPercent = Number(materialTry);
-    }
+    const differs = (value: string, applies: string | undefined, touched: boolean) =>
+      value.trim() !== "" && (applies === undefined ? touched : Number(value) !== Number(applies));
+    if (differs(generalTry, applying?.general, generalTouchedNow.current)) out.generalMarkupPercent = Number(generalTry);
+    if (differs(materialTry, applying?.material, materialTouchedNow.current)) out.materialMarkupPercent = Number(materialTry);
     return out;
   }
 

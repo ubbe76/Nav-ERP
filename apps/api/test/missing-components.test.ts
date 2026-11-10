@@ -32,6 +32,7 @@ function article(id: string, over: Partial<MissingArticle> = {}): MissingArticle
     orderQuantity: null,
     rounding: null,
     closingBalance: 0,
+    active: true,
     configuratorMode: null,
     hasRouting: true,
     ...over,

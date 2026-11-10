@@ -19,6 +19,7 @@ import { contentDisposition } from "../../system/service/content-disposition.js"
 import { errorBody } from "../../system/service/error-body.js";
 import {
   ArticleNotFoundError,
+  CostCalculationNotFinalError,
   CostCalculationNotFoundError,
   InvalidCalculationQuantityError,
   ManufacturingOrderNotFoundError,
@@ -131,6 +132,7 @@ export async function costingRoutes(
       } catch (err) {
         if (err instanceof CostCalculationNotFoundError) return reply.code(404).send(errorBody(err));
         if (err instanceof InvalidCalculationQuantityError) return reply.code(400).send(errorBody(err));
+        if (err instanceof CostCalculationNotFinalError) return reply.code(400).send(errorBody(err));
         throw err;
       }
     }
@@ -150,6 +152,7 @@ export async function costingRoutes(
         if (err instanceof TrialSalesPriceNotAllowedError) return reply.code(403).send(errorBody(new ForbiddenError()));
         if (err instanceof CostCalculationNotFoundError) return reply.code(404).send(errorBody(err));
         if (err instanceof InvalidCalculationQuantityError) return reply.code(400).send(errorBody(err));
+        if (err instanceof CostCalculationNotFinalError) return reply.code(400).send(errorBody(err));
         throw err;
       }
     }

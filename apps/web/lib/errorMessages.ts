@@ -284,6 +284,9 @@ const MESSAGES: Record<string, MessageEntry> = {
   "article-location-invalid": serverMessage("Lagerplatserna kunde inte sparas — kontrollera huvudplatsen och de alternativa platserna."),
   // Kopierat (#28): the server names the count and the cap (Swedish).
   "copied-articles-too-many": serverMessage("Kopierat rymmer högst 5 000 artiklar — ta bort några eller ersätt listan."),
+  // Prisåterföring from an efterkalkyl: per st is divided by the received
+  // quantity, so a preliminary one or one with nothing received gives none.
+  "cost-calculation-not-final": serverMessage("Efterkalkylen ger inget pris per styck — tillverkningsordern är inte klar eller inget är inlevererat."),
   // Förkalkylera flera (#27): the server names the count and the cap (Swedish).
   "pre-calculation-batch-too-large": serverMessage("Urvalet är för stort — högst 500 artiklar kan förkalkyleras åt gången. Snäva in urvalet med ett artikelnummerintervall, en varugrupp eller en artikelkod."),
   // The server names what went wrong with the key / the mailbox.
@@ -629,6 +632,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "operation-not-found": "Operationen finns inte — ladda om beläggningen.",
   "operation-not-plannable": serverMessage("Operationen kan inte planeras — den är klar, en legooperation, utan tid eller ordern är inte öppen."),
   "plan-week-in-past": "Veckan har passerat — välj innevarande vecka eller en senare.",
+  "plan-week-no-capacity": serverMessage("Resursen har ingen kapacitet den veckan — välj en annan vecka."),
   // Reservationen från Leveranstidskontrollen (the 409 body carries the new result).
   "delivery-time-changed": "Läget har ändrats sedan kontrollen — se det nya datumet och försök igen.",
   "nothing-to-reserve": "Kontrollen fann inget att tillverka — det som saknas köps in eller finns redan på väg.",

@@ -644,6 +644,7 @@ export function createPlanningRepository(db: Db) {
           rowId: manufacturingOrders.salesOrderRowId,
           status: manufacturingOrders.status,
           quantity: manufacturingOrders.quantity,
+          received: manufacturingOrders.quantityReceived,
         })
         .from(manufacturingOrders)
         .where(
@@ -652,11 +653,11 @@ export function createPlanningRepository(db: Db) {
             rows.map((r) => r.rowId)
           )
         );
-      const byRow = new Map<string, { status: string; quantity: number }[]>();
+      const byRow = new Map<string, { status: string; quantity: number; received: number }[]>();
       for (const l of linked) {
         if (!l.rowId) continue;
         const list = byRow.get(l.rowId) ?? [];
-        list.push({ status: l.status, quantity: Number(l.quantity) });
+        list.push({ status: l.status, quantity: Number(l.quantity), received: Number(l.received) });
         byRow.set(l.rowId, list);
       }
       return rows.map((r) => ({
@@ -1560,17 +1561,21 @@ export function createPlanningRepository(db: Db) {
                 orderNumber: manufacturingOrders.orderNumber,
                 status: manufacturingOrders.status,
                 quantity: manufacturingOrders.quantity,
+                received: manufacturingOrders.quantityReceived,
                 dueDate: manufacturingOrders.dueDate,
               })
               .from(manufacturingOrders)
               .where(and(inArray(manufacturingOrders.salesOrderRowId, configuredRowIds), ne(manufacturingOrders.status, "cancelled")))
               .orderBy(manufacturingOrders.orderNumber);
-      const linkedByRow = new Map<string, { id: string; orderNumber: string; status: string; quantity: number; dueDate: string | null }[]>();
+      const linkedByRow = new Map<
+        string,
+        { id: string; orderNumber: string; status: string; quantity: number; received: number; dueDate: string | null }[]
+      >();
       for (const l of linked) {
         if (!l.rowId) continue;
         linkedByRow.set(l.rowId, [
           ...(linkedByRow.get(l.rowId) ?? []),
-          { id: l.id, orderNumber: l.orderNumber, status: l.status, quantity: Number(l.quantity), dueDate: l.dueDate },
+          { id: l.id, orderNumber: l.orderNumber, status: l.status, quantity: Number(l.quantity), received: Number(l.received), dueDate: l.dueDate },
         ]);
       }
       return {

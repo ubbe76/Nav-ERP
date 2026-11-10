@@ -408,7 +408,13 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
       </Modal>
 
       <Modal open={modal === "addRow"} onClose={() => setModal(null)} title="Lägg till rad">
-        <AddInquiryRowForm inquiryId={inquiry.id} existingRows={rows} onDone={refresh} onCancel={() => setModal(null)} />
+        <AddInquiryRowForm
+          inquiryId={inquiry.id}
+          currency={inquiry.supplierCurrency ?? "SEK"}
+          existingRows={rows}
+          onDone={refresh}
+          onCancel={() => setModal(null)}
+        />
       </Modal>
     </div>
   );
@@ -480,11 +486,16 @@ function EditHeaderForm({
 
 function AddInquiryRowForm({
   inquiryId,
+  currency,
   existingRows,
   onDone,
   onCancel,
 }: {
   inquiryId: string;
+  // The supplier's currency. The operation's ställpris is kronor, so it is
+  // only prefilled on an SEK inquiry; otherwise the field stays empty and the
+  // server fills it in converted with today's rate.
+  currency: string;
   existingRows: InquiryRow[];
   onDone: () => void;
   onCancel: () => void;
@@ -530,7 +541,7 @@ function AddInquiryRowForm({
   function handleLegoOptionChange(key: string) {
     setLegoOptionKey(key);
     const option = legoOptions.find((o) => o.key === key) ?? null;
-    setSetupPrice(option?.setupPrice ?? "");
+    setSetupPrice(currency === "SEK" ? (option?.setupPrice ?? "") : "");
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -630,6 +641,12 @@ function AddInquiryRowForm({
             </Field>
           )}
         </FormRow>
+      )}
+      {legoOption && currency !== "SEK" && (
+        <FormHint>
+          Operationens ställpris är i kronor. Lämnas fältet tomt räknas det om till {currency} med dagens kurs när raden
+          sparas.
+        </FormHint>
       )}
       {legoOptions.length > 0 && (
         <FormHint>

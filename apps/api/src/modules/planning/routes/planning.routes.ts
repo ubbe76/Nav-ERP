@@ -30,6 +30,7 @@ import {
   OperationNotFoundError,
   OperationNotPlannableError,
   PlanWeekInPastError,
+  PlanWeekNoCapacityError,
   SalesOrderNotFoundError,
   SalesOrderNotOpenError,
   type AbcList,
@@ -335,6 +336,7 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
     } catch (err) {
       if (err instanceof OperationNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof PlanWeekInPastError) return reply.code(400).send(errorBody(err));
+      if (err instanceof PlanWeekNoCapacityError) return reply.code(409).send(errorBody(err));
       if (err instanceof OperationNotPlannableError) return reply.code(409).send(errorBody(err));
       throw err;
     }
