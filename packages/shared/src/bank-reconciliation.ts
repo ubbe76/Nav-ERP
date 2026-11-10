@@ -176,6 +176,24 @@ export const bookBankEntriesByRuleSchema = z.object({
 });
 export type BookBankEntriesByRuleInput = z.infer<typeof bookBankEntriesByRuleSchema>;
 
+// Ignorera poster (POST /bank-statement-entries/ignore | unignore): a wrongly
+// imported statement entry is taken out of the reconciliation with a reason,
+// and brought back. All ids must be entries of ONE bank account.
+const uniqueEntryIds = z
+  .array(z.string().uuid())
+  .min(1)
+  .max(2000)
+  .refine((ids) => new Set(ids).size === ids.length, { message: "Samma post är vald flera gånger" });
+
+export const ignoreBankStatementEntriesSchema = z.object({
+  entryIds: uniqueEntryIds,
+  reason: z.string().trim().min(1, "Ange en orsak").max(255),
+});
+export type IgnoreBankStatementEntriesInput = z.infer<typeof ignoreBankStatementEntriesSchema>;
+
+export const unignoreBankStatementEntriesSchema = z.object({ entryIds: uniqueEntryIds });
+export type UnignoreBankStatementEntriesInput = z.infer<typeof unignoreBankStatementEntriesSchema>;
+
 export const BANK_RULE_DIRECTIONS = ["in", "out", "both"] as const;
 export type BankRuleDirection = (typeof BANK_RULE_DIRECTIONS)[number];
 

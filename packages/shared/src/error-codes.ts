@@ -306,6 +306,10 @@ export const ERROR_CODES = {
   EINVOICE_NOT_CONFIGURED: "einvoice-not-configured",
   EINVOICE_NOT_ALLOWED: "einvoice-not-allowed",
   EINVOICE_ALREADY_SENT: "einvoice-already-sent",
+  // A row from the environment that is not selected (the saved key is the other's).
+  EINVOICE_OTHER_ENVIRONMENT: "einvoice-other-environment",
+  // The API key's prefix contradicts the selected Miljö.
+  EINVOICE_KEY_ENVIRONMENT_MISMATCH: "einvoice-key-environment-mismatch",
   EINVOICE_DOCUMENT_INVALID: "einvoice-document-invalid",
   EINVOICE_PROVIDER_REJECTED: "einvoice-provider-rejected",
   EINVOICE_PROVIDER_UNAUTHORIZED: "einvoice-provider-unauthorized",
@@ -432,6 +436,14 @@ export const ERROR_CODES = {
   // Import: the chosen account already has entries under another identifier,
   // so the file's identifier cannot be learned onto it (409).
   BANK_ACCOUNT_IDENTIFIER_LOCKED: "bank-account-identifier-locked",
+  // Ignorera poster: an ignored entry can be neither matched nor booked,
+  // nor ignored again (409); a matched entry cannot be ignored (409); the
+  // ids of one call belong to several bank accounts (400).
+  BANK_STATEMENT_ENTRY_IGNORED: "bank-statement-entry-ignored",
+  BANK_STATEMENT_ENTRY_MATCHED: "bank-statement-entry-matched",
+  BANK_STATEMENT_ENTRIES_MIXED_ACCOUNTS: "bank-statement-entries-mixed-accounts",
+  // Avstämd t.o.m. a day after today (400).
+  BANK_RECONCILIATION_FUTURE_DATE: "bank-reconciliation-future-date",
   // configurator
   CONFIGURATOR_TEMPLATE_NOT_FOUND: "configurator-template-not-found",
   CONFIGURATOR_TEMPLATE_EXISTS: "configurator-template-exists",

@@ -9,6 +9,7 @@ import { StatusPill } from "../ui/StatusPill";
 import { Table } from "../ui/Table";
 import { PAYMENT_BATCH_STATUS } from "../../lib/banking";
 import { currencyLabel } from "../../lib/currency";
+import { formatStockholmDate } from "../../lib/date";
 import { batchTotals } from "../../lib/currencyTotals";
 import { formatMoney } from "../../lib/format";
 import type { Paged, PaymentBatchListRow } from "../../lib/types";
@@ -77,7 +78,7 @@ export function PaymentBatchesPageClient({ batches, pageSize }: { batches: Paged
             case "earliestExecutionDate":
               return row.earliestExecutionDate ?? "–";
             case "exportedAt":
-              return row.exportedAt ? row.exportedAt.slice(0, 10) : "–";
+              return formatStockholmDate(row.exportedAt);
             case "confirmedCount":
               return row.status === "exported" ? `${row.confirmedCount} av ${row.itemCount}` : row.status === "confirmed" ? "Alla" : "–";
             default:

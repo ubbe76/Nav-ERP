@@ -158,7 +158,9 @@ export function EInvoiceSection({ invoiceId, invoiceNumber }: { invoiceId: strin
                       <a href={`/api/v1/einvoice-transmissions/${t.id}/document`} download>
                         UBL
                       </a>
-                      {canWrite && isLiveEInvoiceStatus(t.status) && (
+                      {/* Only in the selected environment: the saved key belongs to it,
+                          so the other one's rows cannot be asked about. */}
+                      {canWrite && isLiveEInvoiceStatus(t.status) && t.environment === data.environment && (
                         <Button type="button" size="small" variant="ghost" disabled={busyId !== null} onClick={() => refresh(t)}>
                           Uppdatera status
                         </Button>

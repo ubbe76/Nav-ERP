@@ -13,6 +13,16 @@ import {
 } from "@navet/db";
 import { ilikePattern, type ListBankFilesQuery } from "@navet/shared";
 
+// THE bank files of this module: the bank's camt.054 notifications. The
+// account statements of the bank reconciliation (camt.053 / CSV) are stored
+// in the same table with direction "incoming" too, but they belong to
+// Ekonomi (rule `ekonomi`) — every read of an incoming file here goes
+// through `incomingCamt054`, so a user with only inköp/försäljning can
+// neither list nor download a statement, and a statement's bytes never
+// answer "Filen är redan inläst" to an upload under Bankfiler.
+export const CAMT054_MESSAGE_TYPE = "camt.054.001.02";
+const incomingCamt054 = and(eq(bankFiles.direction, "incoming"), eq(bankFiles.messageType, CAMT054_MESSAGE_TYPE))!;
+
 // Everything but the bytes: listings never select `data`.
 const fileMeta = {
   id: bankFiles.id,
@@ -63,13 +73,13 @@ const incomingBookedSql = sql<boolean>`EXISTS (
 export function createBankFileRepository(db: Db) {
   return {
     async findIncomingBySha(sha256: string) {
-      const [row] = await db.select(fileMeta).from(bankFiles).where(and(eq(bankFiles.sha256, sha256), eq(bankFiles.direction, "incoming")));
+      const [row] = await db.select(fileMeta).from(bankFiles).where(and(eq(bankFiles.sha256, sha256), incomingCamt054));
       return row ?? null;
     },
 
     // Incoming files only: the outgoing pain.001 lives under its batch.
     async findFile(id: string) {
-      const [row] = await db.select(fileMeta).from(bankFiles).where(and(eq(bankFiles.id, id), eq(bankFiles.direction, "incoming")));
+      const [row] = await db.select(fileMeta).from(bankFiles).where(and(eq(bankFiles.id, id), incomingCamt054));
       return row ?? null;
     },
 
@@ -77,7 +87,7 @@ export function createBankFileRepository(db: Db) {
       const [row] = await db
         .select({ filename: bankFiles.filename, messageType: bankFiles.messageType, data: bankFiles.data })
         .from(bankFiles)
-        .where(and(eq(bankFiles.id, id), eq(bankFiles.direction, "incoming")));
+        .where(and(eq(bankFiles.id, id), incomingCamt054));
       return row ?? null;
     },
 
@@ -117,7 +127,7 @@ export function createBankFileRepository(db: Db) {
     },
 
     async list(query: ListBankFilesQuery) {
-      const conditions: SQL[] = [eq(bankFiles.direction, "incoming")];
+      const conditions: SQL[] = [incomingCamt054];
       if (query.search) conditions.push(sql`${bankFiles.filename} ILIKE ${ilikePattern(query.search)}`);
       if (query.direction) {
         conditions.push(

@@ -11,7 +11,7 @@ import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import type { EinvoiceRepository } from "../repository/einvoice.repository.js";
 import { b2brouterProviderFactory } from "./b2brouter-provider.js";
 import { EInvoiceProviderError, type EInvoiceProvider, type EInvoiceProviderFactory, type PeppolTransport } from "./einvoice-provider.js";
-import { EinvoiceNotConfiguredError } from "./einvoice.errors.js";
+import { EinvoiceKeyEnvironmentMismatchError, EinvoiceNotConfiguredError } from "./einvoice.errors.js";
 import { orgNumberDigits } from "./peppol-schemes.js";
 
 // E-fakturainställningar live as einvoice_* keys in system_settings (key–
@@ -180,6 +180,29 @@ export function companyProblems(company: CompanyInfoRow | null): string[] {
   return problems;
 }
 
+// Which B2Brouter environment a key belongs to, read from its prefix
+// (b2brouter-provider.ts): "test_" sandbox, "prod_" production, "stag_"
+// their staging host. A key without a known prefix is an older production
+// key — or a test fixture — and is not judged (null): only an explicit
+// contradiction is refused.
+export function keyEnvironment(apiKey: string): "sandbox" | "production" | "staging" | null {
+  const key = apiKey.trim();
+  if (key.startsWith("test_")) return "sandbox";
+  if (key.startsWith("prod_")) return "production";
+  if (key.startsWith("stag_")) return "staging";
+  return null;
+}
+
+function keyContradicts(apiKey: string, environment: "sandbox" | "production"): boolean {
+  const owner = keyEnvironment(apiKey);
+  return owner !== null && owner !== environment;
+}
+
+function assertKeyMatchesEnvironment(apiKey: string, environment: "sandbox" | "production"): void {
+  const owner = keyEnvironment(apiKey);
+  if (owner !== null && owner !== environment) throw new EinvoiceKeyEnvironmentMismatchError(owner, environment);
+}
+
 export function createEinvoiceSettingsService(deps: {
   repo: EinvoiceRepository;
   company: CompanyInfoReader;
@@ -230,9 +253,12 @@ export function createEinvoiceSettingsService(deps: {
   // error: the page must open even when B2Brouter is down).
   async function receptionView(settings: EinvoiceSettings, transport?: PeppolTransport | null): Promise<EinvoiceReceptionView> {
     let live = transport ?? null;
-    if (transport === undefined && settings.apiKey && settings.accountId) {
+    // A key that contradicts the selected Miljö would read the other
+    // environment's publication state — shown as unknown instead.
+    const apiKey = settings.apiKey !== null && !keyContradicts(settings.apiKey, settings.environment) ? settings.apiKey : null;
+    if (transport === undefined && apiKey && settings.accountId) {
       try {
-        live = await providerFactory({ environment: settings.environment, apiKey: settings.apiKey, accountId: settings.accountId }).getTransport();
+        live = await providerFactory({ environment: settings.environment, apiKey, accountId: settings.accountId }).getTransport();
       } catch {
         live = null;
       }
@@ -297,11 +323,14 @@ export function createEinvoiceSettingsService(deps: {
 
   // requireEnabled: sending needs the feature on; the directory lookup and
   // Validera only need a key. requireAccount: import needs the account id.
+  // A key that contradicts the selected Miljö is never used — saved before
+  // the check existed, it would send real invoices labelled sandbox.
   async function provider(opts: { requireEnabled: boolean; requireAccount?: boolean }): Promise<EInvoiceProvider> {
     const settings = await read();
     if (opts.requireEnabled && !settings.enabled) throw new EinvoiceNotConfiguredError("disabled");
     if (!settings.apiKey) throw new EinvoiceNotConfiguredError("no-key");
     if (opts.requireAccount && !settings.accountId) throw new EinvoiceNotConfiguredError("no-account");
+    assertKeyMatchesEnvironment(settings.apiKey, settings.environment);
     return providerFactory({ environment: settings.environment, apiKey: settings.apiKey, accountId: settings.accountId });
   }
 
@@ -312,6 +341,14 @@ export function createEinvoiceSettingsService(deps: {
     companyView,
 
     async update(input: UpdateEinvoiceSettingsInput, userId: string | null) {
+      // Checked before anything is written: the key and the Miljö the save
+      // leaves behind must not contradict each other.
+      // A save that removes the key (apiKey null) leaves nothing to check.
+      if (input.apiKey !== null && (input.environment !== undefined || (input.apiKey !== undefined && input.apiKey !== ""))) {
+        const saved = await read();
+        const apiKey = input.apiKey && input.apiKey !== "" ? input.apiKey : saved.apiKey;
+        if (apiKey) assertKeyMatchesEnvironment(apiKey, input.environment ?? saved.environment);
+      }
       const changed: string[] = [];
       const set = async (key: string, value: string) => {
         changed.push(key);
@@ -451,6 +488,7 @@ export function createEinvoiceSettingsService(deps: {
       const apiKey = input.apiKey && input.apiKey !== "" ? input.apiKey : saved.apiKey;
       if (!apiKey) throw new EinvoiceNotConfiguredError("no-key");
       const environment = input.environment ?? saved.environment;
+      assertKeyMatchesEnvironment(apiKey, environment);
       const result = await providerFactory({ environment, apiKey, accountId: saved.accountId }).checkKey();
       return { ...result, environment };
     },

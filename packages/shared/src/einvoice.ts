@@ -57,6 +57,9 @@ export interface EinvoiceAutoSendOutcome {
   message: string;
   transmissionId: string | null;
   reason: EinvoiceBlockedReason | null;
+  // "error" because the access point did not answer — samlingsfaktureringen
+  // stops waiting on it for the rest of the run (review 2026-11-10).
+  unavailable?: boolean;
 }
 
 // --- Settings (System → E-faktura, admin) ---

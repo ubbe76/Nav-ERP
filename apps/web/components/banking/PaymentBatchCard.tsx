@@ -33,7 +33,7 @@ import {
   toSek,
 } from "../../lib/currency";
 import { batchTotals, formatCurrencyAmounts, sumByCurrency } from "../../lib/currencyTotals";
-import { stockholmToday } from "../../lib/date";
+import { formatStockholmDate, stockholmToday } from "../../lib/date";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney, round2 } from "../../lib/format";
 import { applyPaymentTolerance } from "../../lib/paymentTolerance";
@@ -615,7 +615,7 @@ function ConfirmModal({
       <Field label="Betalningsdag" htmlFor="confirmDate">
         <Input id="confirmDate" type="date" value={date} max={today} onChange={(e) => setDate(e.target.value)} />
       </Field>
-      {batch.exportedAt && date < batch.exportedAt.slice(0, 10) && <FormNotice>Datumet ligger före exportdagen.</FormNotice>}
+      {batch.exportedAt && date < formatStockholmDate(batch.exportedAt) && <FormNotice>Datumet ligger före exportdagen.</FormNotice>}
       {early.length > 0 && (
         <FormNotice>Datumet ligger före betalningsdagen i filen för {early.map((i) => `${i.endToEndId} (${i.executionDate})`).join(", ")}.</FormNotice>
       )}
@@ -676,19 +676,50 @@ function ConfirmModal({
   );
 }
 
+// Every payable open item, however many there are: the ledger's list is
+// read page by page until `total` (it has no "payable" filter of its own —
+// reserved, settled and method-less invoices are dropped here), and the
+// search box (leverantör / löpnummer / fakturanummer) narrows it on the
+// server. A selection survives a new search.
+const OPEN_ITEMS_PAGE = 200;
+const OPEN_ITEMS_MAX_PAGES = 100;
+
+async function fetchPayableInvoices(search: string, isStale: () => boolean): Promise<OpenSupplierInvoiceRow[]> {
+  const rows: OpenSupplierInvoiceRow[] = [];
+  for (let page = 0; page < OPEN_ITEMS_MAX_PAGES; page++) {
+    const params = new URLSearchParams({ limit: String(OPEN_ITEMS_PAGE), offset: String(page * OPEN_ITEMS_PAGE) });
+    if (search) params.set("search", search);
+    const answer = await apiFetch<Paged<OpenSupplierInvoiceRow>>(`/api/v1/open-supplier-invoices?${params.toString()}`);
+    if (isStale()) return rows;
+    rows.push(...answer.rows);
+    if (answer.rows.length < OPEN_ITEMS_PAGE || rows.length >= answer.total) break;
+  }
+  // Valuta steg 2: an invoice in any currency, to an account in any country,
+  // can go in a batch — the draft shows what a payment abroad still lacks.
+  const seen = new Set<string>();
+  return rows.filter((r) => {
+    if (seen.has(r.id)) return false; // a row that moved between two pages
+    seen.add(r.id);
+    return !r.paymentBatch && r.openAmount > 0 && Boolean(r.supplierPaymentMethod);
+  });
+}
+
 function AddInvoicesModal({ batchId, onClose, onAdded }: { batchId: string; onClose: () => void; onAdded: () => void }) {
   const [rows, setRows] = useState<OpenSupplierInvoiceRow[] | null>(null);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(searchInput.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
   useEffect(() => {
     let cancelled = false;
-    apiFetch<Paged<OpenSupplierInvoiceRow>>("/api/v1/open-supplier-invoices?limit=200")
-      .then((page) => {
-        if (cancelled) return;
-        // Valuta steg 2: an invoice in any currency, to an account in any
-        // country, can go in a batch — the draft shows what a payment abroad
-        // still lacks.
-        setRows(page.rows.filter((r) => !r.paymentBatch && r.openAmount > 0 && r.supplierPaymentMethod));
+    setRows(null);
+    fetchPayableInvoices(search, () => cancelled)
+      .then((payable) => {
+        if (!cancelled) setRows(payable);
       })
       .catch((err) => {
         if (!cancelled) setError(apiErrorMessage(err, "Öppna poster kunde inte hämtas."));
@@ -696,11 +727,30 @@ function AddInvoicesModal({ batchId, onClose, onAdded }: { batchId: string; onCl
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [search]);
+  const hiddenChosen = rows ? [...chosen].filter((id) => !rows.some((r) => r.id === id)).length : 0;
   return (
     <Modal open onClose={onClose} title="Lägg till fakturor" wide>
+      <Field label="Sök" htmlFor="addInvoicesSearch">
+        <Input
+          id="addInvoicesSearch"
+          type="search"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          maxLength={100}
+          placeholder="Leverantör, löpnummer eller fakturanummer"
+        />
+      </Field>
       {error && <FormError>{error}</FormError>}
-      {rows?.length === 0 && <p>Inga fler betalbara öppna poster.</p>}
+      {rows === null && !error && <p>Hämtar öppna poster…</p>}
+      {rows?.length === 0 && <p>{search ? "Inga betalbara öppna poster matchar sökningen." : "Inga fler betalbara öppna poster."}</p>}
+      {rows && rows.length > 0 && (
+        <FormHint>
+          {rows.length} {rows.length === 1 ? "betalbar öppen post" : "betalbara öppna poster"}
+          {chosen.size > 0 ? ` · ${chosen.size} ${chosen.size === 1 ? "vald" : "valda"}` : ""}
+          {hiddenChosen > 0 ? ` (varav ${hiddenChosen} utanför sökningen)` : ""}
+        </FormHint>
+      )}
       {rows?.map((r) => (
         <label key={r.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <Checkbox

@@ -545,6 +545,8 @@ Förhandsgranskningen visar per kontoutdrag konto, period, saldon och antalet po
 
 Med kryssrutan **Matcha automatiskt efter import** (förvald) matchas posterna direkt när de lagts in; därefter bokförs nya poster som fortfarande är omatchade enligt bankregler med **Bokför direkt**. Efteråt visar sidan hur många poster som importerades, hur många dubbletter som hoppades över, hur många som matchades automatiskt och hur många som bokfördes direkt enligt en bankregel. En post som en regel skulle ha bokfört men inte kunde (till exempel låst period) visas som en varning och ligger kvar omatchad — själva importen påverkas inte, och detsamma gäller om matchningen eller reglerna skulle gå fel efter att posterna lagts in. Kontoutdraget och varje post måste vara i bankkontots valuta; en post i en annan valuta stoppar importen.
 
+**Poster före startpunkten.** Har bankkontot en [startpunkt](#startpunkt-for-avstamningen) och filen innehåller nya poster som är daterade på eller före den, varnar förhandsgranskningen med antalet poster och deras datumintervall. Startpunkten täcker redan de dagarna, så posterna blir omatchade om du importerar dem. Importen går fortfarande att göra — [ignorera posterna](#ignorera-poster) efteråt om de inte ska stämmas av.
+
 ### Matchning
 
 En **matchning** knyter ihop en eller flera poster på kontoutdraget med en eller flera rader i bokföringen på bankkontot. Summorna måste vara lika. Tre listor visar läget: **Omatchade poster på kontoutdraget**, **Omatchade rader i bokföringen** och **Matchat**.
@@ -560,6 +562,14 @@ En **matchning** knyter ihop en eller flera poster på kontoutdraget med en elle
 **Manuell matchning.** Kryssa i en eller flera poster och en eller flera rader. Fältet över listorna visar de **Markerade posterna**, **Markerade raderna** och **Skillnad**. När skillnaden är 0,00 aktiveras **Matcha**. En post kan matchas mot flera rader (och tvärtom) — till exempel en utbetalning som bokförts som två leverantörsbetalningar. Ena sidan får vara tom när den markerade sidan summerar till 0,00: en **Återföring** på kontoutdraget nettas mot sin ursprungliga post utan någon rad i bokföringen, och två rader som tar ut varandra nettas på samma sätt.
 
 **Ångra.** Under **Matchat** fäller du ut en matchning och klickar **Ångra**, efter en bekräftelse. Posterna och raderna blir omatchade igen; matchningen raderas aldrig utan sparas som ångrad. Är matchningen **Bokförd från posten** ligger verifikatet kvar — rätta det med en omföring om det var fel.
+
+### Ignorera poster
+
+En post som har importerats av misstag — fel fil, ett kontoutdrag för dagar före startpunkten — kan inte raderas, eftersom kontoutdraget är räkenskapsinformation. I stället **ignorerar** du den: kryssa i en eller flera poster under **Omatchade poster på kontoutdraget** och klicka **Ignorera…**. Med **Markera alla från en import** över listan kryssar du i alla omatchade poster från en viss fil på en gång. Dialogen **Ignorera poster** visar hur många poster och vilket belopp det gäller; ange **Orsak** (obligatorisk) och klicka **Ignorera**.
+
+En ignorerad post räknas inte längre med i avstämningen: den hör inte till de omatchade posterna, ingår inte i sammanställningen, hindrar inte **Markera som avstämd**, ger ingen varning om att bokföringen har ändrats efter avstämningen och tas inte med i aviseringen **Omatchade bankposter**. Den kan varken matchas eller bokföras så länge den är ignorerad. Bara omatchade poster kan ignoreras — ångra matchningen först om posten är matchad.
+
+Ignorerade poster i perioden visas under **Ignorerade poster** med orsak, vem som ignorerade posten och när. **Ångra ignorering** gör posten omatchad igen, efter en bekräftelse. Både ignoreringen och ångringen skrivs i händelseloggen.
 
 ### Bokföra en post som saknas
 
@@ -590,7 +600,7 @@ I listan över omatchade poster visas regelns förslag under posten (*Regel: kon
 
 ### Avstämd t.o.m.
 
-Avstämningen börjar med en [startpunkt](#startpunkt-for-avstamningen). När allt till och med ett datum sedan är matchat och kontoutdragets saldo stämmer med bokföringens kan du markera bankkontot som avstämt. Under **Avstämd t.o.m.** står när kontot senast stämdes av. Välj **Datum** (förvalt är kontoutdragets saldodag) och klicka **Markera som avstämd**. Nav vägrar när det finns omatchade poster eller rader till och med datumet, när kontoutdragets saldo saknas för datumet eller när saldona inte stämmer — meddelandet säger vilket. Saldona jämförs med hänsyn till det som är **I transit**: skillnaden mellan kontoutdragets och bokföringens saldo ska vara exakt det matchningarna som korsar datumet bidrar med. Varje avstämning sparas och syns under **Tidigare avstämningar**; den kan inte ändras i efterhand (bara startpunkten kan ångras, och bara så länge den är den enda avstämningen).
+Avstämningen börjar med en [startpunkt](#startpunkt-for-avstamningen). När allt till och med ett datum sedan är matchat och kontoutdragets saldo stämmer med bokföringens kan du markera bankkontot som avstämt. Under **Avstämd t.o.m.** står när kontot senast stämdes av. Välj **Datum** (förvalt är kontoutdragets saldodag) och klicka **Markera som avstämd**. Datumet kan inte ligga i framtiden — senast dagens datum går att välja. Nav vägrar när det finns omatchade poster eller rader till och med datumet, när kontoutdragets saldo saknas för datumet eller när saldona inte stämmer — meddelandet säger vilket. Saldona jämförs med hänsyn till det som är **I transit**: skillnaden mellan kontoutdragets och bokföringens saldo ska vara exakt det matchningarna som korsar datumet bidrar med. Varje avstämning sparas och syns under **Tidigare avstämningar**; den kan inte ändras i efterhand (bara startpunkten kan ångras, och bara så länge den är den enda avstämningen).
 
 Bokförs något på bankkontot i efterhand med ett datum som redan är avstämt — eller blir en post eller rad till och med datumet omatchad igen, till exempel efter **Ångra** på en matchning eller en ny import — visar sidan en varning: **Bokföringen har ändrats efter avstämningen** med datum och antal rader och poster. Matcha eller bokför dem och stäm av igen.
 
@@ -598,7 +608,7 @@ Avstämningen är ingen spärr — du kan fortfarande bokföra — men [årsboks
 
 ### Aviseringen
 
-[Aviseringen](/hjalp/aviseringar) **Omatchade bankposter** (gul, rättighet **Ekonomi**) listar poster på kontoutdraget som är äldre än 10 dagar och ännu inte matchade, så att inget glöms bort mellan avstämningarna.
+[Aviseringen](/hjalp/aviseringar) **Omatchade bankposter** (gul, rättighet **Ekonomi**) listar poster på kontoutdraget som är äldre än 10 dagar och ännu inte matchade (ignorerade poster räknas inte), så att inget glöms bort mellan avstämningarna.
 
 ## Anläggningsregister
 

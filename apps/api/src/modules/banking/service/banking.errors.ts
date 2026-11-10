@@ -466,3 +466,37 @@ export class BankAccountIdentifierLockedError extends Error {
     this.name = "BankAccountIdentifierLockedError";
   }
 }
+
+// Ignorera poster: the entry is ignored — it can be neither matched nor
+// booked (nor ignored again) until the ignoring is undone. 409.
+export class BankStatementEntryIgnoredError extends Error {
+  constructor() {
+    super("Posten är ignorerad — ångra ignoreringen först");
+    this.name = "BankStatementEntryIgnoredError";
+  }
+}
+
+// Ignorera poster: only an unmatched entry can be ignored. 409.
+export class BankStatementEntryMatchedError extends Error {
+  constructor() {
+    super("Posten är matchad och kan inte ignoreras — ångra matchningen först");
+    this.name = "BankStatementEntryMatchedError";
+  }
+}
+
+// Ignorera poster: the ids of one call belong to several bank accounts. 400.
+export class BankStatementEntriesMixedAccountsError extends Error {
+  constructor() {
+    super("Posterna hör till olika bankkonton — ignorera ett bankkonto i taget");
+    this.name = "BankStatementEntriesMixedAccountsError";
+  }
+}
+
+// Avstämd t.o.m. a day that has not come yet: the mark is append-only, so a
+// future date would lock days nobody has seen a statement for. 400.
+export class BankReconciliationFutureDateError extends Error {
+  constructor(public today: string) {
+    super(`Avstämd t.o.m. kan inte ligga i framtiden — välj senast ${today}`);
+    this.name = "BankReconciliationFutureDateError";
+  }
+}

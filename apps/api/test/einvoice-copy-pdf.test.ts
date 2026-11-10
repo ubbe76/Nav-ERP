@@ -14,19 +14,20 @@ const n = (value: number) => formatNumber(value, 2);
 // the PDF for a pdftoppm look.
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/ubl/${name}`, import.meta.url));
-const RECEIVED = new Date("2026-11-05T10:00:00Z");
 
 describe("renderEInvoiceCopy", () => {
   it("prints the title band, the original note, parties, rows, VAT, totals and payment — one page", async () => {
     const doc = readUblInvoice(fixture("invoice-two-rates-discount.xml"));
-    const pdf = await renderEInvoiceCopy(doc, { receivedAt: RECEIVED });
+    const pdf = await renderEInvoiceCopy(doc, {});
     if (process.env.PDF_DUMP_DIR) {
       mkdirSync(process.env.PDF_DUMP_DIR, { recursive: true });
       writeFileSync(`${process.env.PDF_DUMP_DIR}/einvoice-copy.pdf`, pdf);
     }
     const text = pdfText(pdf);
     expect(text).toContain(EINVOICE_COPY_TITLE);
-    expect(text).toContain("Originalet är e-fakturan (XML) som mottogs via Peppol 2026-11-05");
+    expect(text).toContain("Originalet är e-fakturan (XML) som mottogs via Peppol");
+    // No reception date: the same document another day is the same file.
+    expect(text).not.toContain("2026-11-05");
     expect(text).toContain("FAKTURA FA-1001");
     for (const s of ["Exempel Verkstad AB", "Industrigatan 12", "802 22 Gävle", "Org.nr 5566778899", "Momsreg.nr SE556677889901", "Peppol-id 0007:5566778899"]) expect(text).toContain(s);
     for (const s of ["Kund & Son AB", "Box 44", "Fakturadatum", "2026-10-21", "Förfallodatum", "2026-11-20", "Er referens", "Anna Andersson", "Ordernummer", "PO-4711"]) expect(text).toContain(s);
@@ -40,23 +41,24 @@ describe("renderEInvoiceCopy", () => {
 
   it("is deterministic: two renders of the same document are byte-identical, a different received date is not", async () => {
     const doc = readUblInvoice(fixture("invoice-two-rates-discount.xml"));
-    const a = await renderEInvoiceCopy(doc, { receivedAt: RECEIVED, remarks: ["Bilagan var för stor och finns kvar i e-fakturan"] });
-    const b = await renderEInvoiceCopy(readUblInvoice(fixture("invoice-two-rates-discount.xml")), { receivedAt: RECEIVED, remarks: ["Bilagan var för stor och finns kvar i e-fakturan"] });
+    const a = await renderEInvoiceCopy(doc, { remarks: ["Bilagan var för stor och finns kvar i e-fakturan"] });
+    const b = await renderEInvoiceCopy(readUblInvoice(fixture("invoice-two-rates-discount.xml")), { remarks: ["Bilagan var för stor och finns kvar i e-fakturan"] });
     expect(a.equals(b)).toBe(true);
     expect(pdfText(a)).toContain("Bilagan var för stor och finns kvar i e-fakturan");
     // The CreationDate is the invoice date, never the clock.
     expect(a.toString("latin1")).toContain("D:20261021000000Z");
-    const later = await renderEInvoiceCopy(doc, { receivedAt: new Date("2026-11-06T10:00:00Z") });
-    expect(later.equals(a)).toBe(false);
+    // Without the remark it is another file; the same remark any day is the same file.
+    const plain = await renderEInvoiceCopy(doc, {});
+    expect(plain.equals(a)).toBe(false);
   });
 
   it("draws a credit note with the credited invoice and an IBAN/SEPA invoice with its exemption", async () => {
-    const credit = pdfText(await renderEInvoiceCopy(readUblInvoice(fixture("credit-note.xml")), { receivedAt: RECEIVED }));
+    const credit = pdfText(await renderEInvoiceCopy(readUblInvoice(fixture("credit-note.xml")), {}));
     expect(credit).toContain("KREDITFAKTURA FA-1003");
     expect(credit).toContain("Krediterar faktura");
     expect(credit).toContain("FA-1001");
     expect(credit).toContain("Att kreditera SEK");
-    const eur = pdfText(await renderEInvoiceCopy(readUblInvoice(fixture("invoice-eu-goods-eur.xml")), { receivedAt: RECEIVED }));
+    const eur = pdfText(await renderEInvoiceCopy(readUblInvoice(fixture("invoice-eu-goods-eur.xml")), {}));
     expect(eur).toContain("IBAN SE3550000000054910000003");
     expect(eur).toContain("BIC ESSESESS");
     expect(eur).toContain("Att betala EUR");
@@ -66,7 +68,7 @@ describe("renderEInvoiceCopy", () => {
   it("breaks a long invoice over several pages with the row header repeated", async () => {
     const doc = readUblInvoice(fixture("invoice-two-rates-discount.xml"));
     doc.lines = Array.from({ length: 80 }, (_, i) => ({ ...doc.lines[i % 3]!, id: String(i + 1), description: `Rad ${i + 1} ${doc.lines[i % 3]!.description}` }));
-    const pdf = await renderEInvoiceCopy(doc, { receivedAt: RECEIVED });
+    const pdf = await renderEInvoiceCopy(doc, {});
     expect(pdfPageCount(pdf)).toBeGreaterThan(1);
     const text = pdfText(pdf);
     expect(text).toContain("Rad 80");

@@ -15,9 +15,10 @@ import { formatNumber } from "./document-pdf.js";
 // the info dictionary — no clock, no random id (einvoice-copy-pdf.test.ts
 // renders twice and compares).
 
+// No reception date on the copy (review 2026-11-10): the same document
+// received on another day must give the same bytes, or the inbox's sha256
+// duplicate check holds only within one day. The post carries the date.
 export interface EInvoiceCopyOptions {
-  // When the document reached Nav (printed in the sub-title line).
-  receivedAt: Date;
   // Remarks printed under the title (the embedded PDF was too large …).
   remarks?: string[];
 }
@@ -40,10 +41,6 @@ const UNIT_LABELS: Record<string, string> = {
   HUR: "tim", MIN: "min", DAY: "dag", XPK: "förp", XCT: "krt", XBX: "låda", XPX: "pall", SET: "sats", E48: "tjänst", LS: "klumpsumma",
 };
 export const unitLabel = (code: string | null) => (code === null ? "" : (UNIT_LABELS[code.toUpperCase()] ?? code));
-
-function stockholmDate(date: Date): string {
-  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
-}
 
 function partyLines(party: ReceivedEInvoiceParty): string[] {
   const lines = [party.name, ...party.address.lines];
@@ -108,7 +105,7 @@ export async function renderEInvoiceCopy(doc: ReceivedEInvoice, options: EInvoic
   pdf.fillColor("#ffffff").font("Helvetica-Bold").fontSize(12).text(EINVOICE_COPY_TITLE, MARGIN + 8, y + 7, { width: CONTENT_WIDTH - 16 });
   pdf.fillColor("#000000");
   y += 32;
-  textLine(`Originalet är e-fakturan (XML) som mottogs via Peppol ${stockholmDate(options.receivedAt)}`, MARGIN, CONTENT_WIDTH, { size: 8 });
+  textLine("Originalet är e-fakturan (XML) som mottogs via Peppol", MARGIN, CONTENT_WIDTH, { size: 8 });
   y += LINE;
   for (const remark of options.remarks ?? []) {
     y += textLine(remark, MARGIN, CONTENT_WIDTH, { size: 8, bold: true });

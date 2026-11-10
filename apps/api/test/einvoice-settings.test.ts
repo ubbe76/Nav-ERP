@@ -122,20 +122,22 @@ describe("e-fakturainställningar", () => {
   it("builds the provider from the settings and refuses when off / without key / without account", async () => {
     await expect(settings.provider({ requireEnabled: true })).rejects.toMatchObject({ reason: "disabled" });
     await expect(settings.provider({ requireEnabled: false })).rejects.toMatchObject({ reason: "no-key" });
-    await settings.update({ apiKey: "test_k", environment: "production" }, null);
+    // A production key: a test_ key under Produktion is refused since the
+    // review 2026-11-10 (einvoicegranskning.test.ts).
+    await settings.update({ apiKey: "prod_k", environment: "production" }, null);
     await settings.provider({ requireEnabled: false });
-    expect(fake.configs.at(-1)).toEqual({ environment: "production", apiKey: "test_k", accountId: null });
+    expect(fake.configs.at(-1)).toEqual({ environment: "production", apiKey: "prod_k", accountId: null });
     await expect(settings.provider({ requireEnabled: false, requireAccount: true })).rejects.toBeInstanceOf(EinvoiceNotConfiguredError);
     await settings.update({ enabled: true, accountId: "acc" }, null);
     await settings.provider({ requireEnabled: true, requireAccount: true });
-    expect(fake.configs.at(-1)).toEqual({ environment: "production", apiKey: "test_k", accountId: "acc" });
+    expect(fake.configs.at(-1)).toEqual({ environment: "production", apiKey: "prod_k", accountId: "acc" });
   });
 
   it("Testa anslutning uses the typed key and environment, saves nothing, and answers with the account", async () => {
     await settings.update({ apiKey: "test_saved" }, null);
-    const result = await settings.testConnection({ apiKey: "test_typed", environment: "production" });
+    const result = await settings.testConnection({ apiKey: "prod_typed", environment: "production" });
     expect(result).toEqual({ accountId: "nav-test", accountName: "Nav Test AB", vatNumber: "SE556000000101", environment: "production" });
-    expect(fake.configs.at(-1)).toMatchObject({ apiKey: "test_typed", environment: "production" });
+    expect(fake.configs.at(-1)).toMatchObject({ apiKey: "prod_typed", environment: "production" });
     expect(await settings.read()).toMatchObject({ apiKey: "test_saved", environment: "sandbox", accountId: null });
 
     // Omitted key = the saved one.
@@ -217,7 +219,8 @@ describe("automatik och statusbesked (spec 2026-11-05)", () => {
     expect(fake.calls.filter((c) => c.method === "deleteWebhook")).toHaveLength(1);
 
     // Another environment chosen afterwards: the page says so.
-    await withUrl.update({ environment: "production" }, "u1");
+    // (with that environment's key — the saved test_ key would be refused).
+    await withUrl.update({ environment: "production", apiKey: "prod_key" }, "u1");
     expect((await withUrl.view()).webhook).toMatchObject({ active: true, environmentMismatch: true });
   });
 

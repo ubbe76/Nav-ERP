@@ -153,13 +153,15 @@ export function createEinvoiceRepository(db: Db) {
 
     // The status job's work list: live rows the access point can still say
     // something about — `sending` with a provider id, and `sent` — started
-    // after `since` (a transmission never registered is not polled forever).
-    async listPollable(since: Date): Promise<string[]> {
+    // after `since` (a transmission never registered is not polled forever),
+    // in the environment whose key is saved (the other one's rows wait).
+    async listPollable(since: Date, environment: "sandbox" | "production"): Promise<string[]> {
       const rows = await db
         .select({ id: einvoiceTransmissions.id })
         .from(einvoiceTransmissions)
         .where(
           and(
+            eq(einvoiceTransmissions.environment, environment),
             gt(einvoiceTransmissions.startedAt, since),
             isNotNull(einvoiceTransmissions.providerInvoiceId),
             inArray(einvoiceTransmissions.status, ["sending", "sent"])
@@ -296,8 +298,8 @@ export function createEinvoiceRepository(db: Db) {
 
     // The reception behind an inbox post (the latest, should a test database
     // ever link two).
-    async findReceptionByScan(scanId: string) {
-      const [row] = await db
+    async findReceptionByScan(scanId: string, dbc: Db | Tx = db) {
+      const [row] = await dbc
         .select(receptionColumns)
         .from(einvoiceReceptions)
         .where(eq(einvoiceReceptions.invoiceScanId, scanId))
