@@ -8,6 +8,7 @@ import {
   createSupplierSchema,
   createWorkCenterSchema,
 } from "@navet/shared";
+import { readFileSync } from "node:fs";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import {
@@ -491,6 +492,51 @@ describe("tjänster lagerförs inte", () => {
     const detail = await countService.getSession(session.id);
     expect(detail.rows.map((r) => r.articleId)).toEqual([x.id]);
     await expect(countService.addRow(session.id, { articleId: s.id })).rejects.toBeInstanceOf(ServiceArticleNotStockedError);
+  });
+});
+
+describe("migration 0204 — tjänsternas gamla saldon nollas", () => {
+  const statements = readFileSync(new URL("../../../packages/db/drizzle/0204_tjanster_nollade_saldon.sql", import.meta.url), "utf8")
+    .split("--> statement-breakpoint")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const migrate = () => db.transaction(async (tx) => {
+    for (const statement of statements) await tx.execute(sql.raw(statement));
+  });
+
+  it("zeroes every (service, place) with an adjustment, leaves goods alone, and puts an emptied inactive place back", async () => {
+    const a1 = await place("A1");
+    const t = await place("T1", { fixed: false });
+    const s = await article("S-1", "service");
+    const x = await article("X-1", "purchased", a1.id);
+    // The shape before the rule: a receipt of the service into A1 and a TO
+    // draw that took it negative on T, which was then retired.
+    await db.insert(stockTransactions).values([
+      { articleId: s.id, locationId: a1.id, quantityDelta: "5", transactionType: "purchase_receipt", unitCost: "100" },
+      { articleId: s.id, locationId: t.id, quantityDelta: "-3", transactionType: "mo_consumption" },
+    ]);
+    await db.update(stockLocations).set({ active: false }).where(eq(stockLocations.id, t.id));
+    await stock(x.id, a1.id, 7);
+
+    await migrate();
+
+    expect([await balance(s.id, a1.id), await balance(s.id, t.id), await balance(x.id, a1.id)]).toEqual([0, 0, 7]);
+    const added = (await stockRows(s.id)).filter((r) => r.transactionType === "inventory_adjustment");
+    expect(added.map((r) => [r.locationId, Number(r.quantityDelta), r.unitCost, r.note]).sort()).toEqual(
+      [
+        [a1.id, -5, null, "Tjänster lagerförs inte — saldot nollat vid uppdateringen (0204)"],
+        [t.id, 3, null, "Tjänster lagerförs inte — saldot nollat vid uppdateringen (0204)"],
+      ].sort()
+    );
+    const [place1] = await db.select({ active: stockLocations.active }).from(stockLocations).where(eq(stockLocations.id, t.id));
+    expect(place1!.active).toBe(false);
+    const [placeA] = await db.select({ active: stockLocations.active }).from(stockLocations).where(eq(stockLocations.id, a1.id));
+    expect(placeA!.active).toBe(true);
+
+    // Run again: nothing left to zero.
+    const before = (await db.select().from(stockTransactions)).length;
+    await migrate();
+    expect((await db.select().from(stockTransactions)).length).toBe(before);
   });
 });
 
