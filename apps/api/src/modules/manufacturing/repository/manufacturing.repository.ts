@@ -64,6 +64,7 @@ import { allocateOutflowLocations, lockArticlesForOutflow, type BlockedChoice } 
 import { isStockedArticle } from "../../stock/service/stocked-article.js";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
 import { listLegoPurchases } from "./lego-purchases.js";
+import { legoOneOffSql } from "./lego-one-off.js";
 // Produktionsplanering: a leaf with only the lock SQL — no module cycle.
 import { lockProductionPlan } from "../../planning/repository/plan-lock.js";
 import { pluginEvents } from "../../system/service/plugin-events.js";
@@ -96,6 +97,7 @@ import {
   updateOperationInTx,
   type AddMaterialInput,
   type OrderReplanner,
+  type PrepareOperationUpdate,
   type UpdateMaterialInput,
 } from "./order-edit.js";
 
@@ -516,7 +518,9 @@ async function receiveFinishedGoods(
       : producedArticle?.standardCost ?? null,
   });
 
-  const received = already + delta;
+  // round4: 0.7 + 0.1 is 0.7999999999999999, which never reached an order
+  // quantity of 0.8 — the order stayed in progress with everything received.
+  const received = round4(already + delta);
   // Material not tied to any operation follows the finished goods.
   const consumed = await consumeLinkedMaterial(tx, {
     moId: order.id,
@@ -576,8 +580,11 @@ async function reportOperationQuantitiesInTx(
     return { ok: false, reason: "invalid_status" };
   }
 
-  const totalOk = Number(operation.quantityCompleted ?? 0) + input.quantityOk;
-  const totalScrapped = Number(operation.quantityScrapped) + input.quantityScrapped;
+  // At the column's 4 decimals (round4): the sums are compared with the
+  // order quantity below (done, the receipt) and float noise must not
+  // leave a covered operation or order open.
+  const totalOk = round4(Number(operation.quantityCompleted ?? 0) + input.quantityOk);
+  const totalScrapped = round4(Number(operation.quantityScrapped) + input.quantityScrapped);
 
   const shouldMarkDone = input.markDoneWhenCovered ? totalOk >= Number(order.quantity) : input.markDone;
 
@@ -883,7 +890,7 @@ async function undoReportInTx(
     const quantity = Number(line.quantity);
     await tx
       .update(moMaterialConsumptions)
-      .set({ quantityConsumed: String(Math.max(Number(row.quantityConsumed) - quantity, 0)) })
+      .set({ quantityConsumed: String(Math.max(round4(Number(row.quantityConsumed) - quantity), 0)) })
       .where(eq(moMaterialConsumptions.id, row.id));
     // Reactivates the location if it was cleaned up after the draw.
     // A service line (no place) was never drawn from stock: nothing to return.
@@ -902,8 +909,8 @@ async function undoReportInTx(
 
   // The operation's quantities, scrap rows and done flag.
   if (operation) {
-    const newOk = Math.max(Number(operation.quantityCompleted ?? 0) - Number(report.quantityOk), 0);
-    const newScrapped = Math.max(Number(operation.quantityScrapped) - Number(report.quantityScrapped), 0);
+    const newOk = Math.max(round4(Number(operation.quantityCompleted ?? 0) - Number(report.quantityOk)), 0);
+    const newScrapped = Math.max(round4(Number(operation.quantityScrapped) - Number(report.quantityScrapped)), 0);
     await tx.delete(moOperationScrap).where(eq(moOperationScrap.moReportId, report.id));
     // Reopened when this report closed it, or when what remains no
     // longer covers the order and no other live report closed it.
@@ -949,7 +956,7 @@ async function undoReportInTx(
   // longer is reopens — under way when anything is still reported on
   // it, else released; an open order keeps its status (stamping in
   // starts it, and nothing here un-starts it).
-  const newReceived = Math.max(Number(order.quantityReceived) - received, 0);
+  const newReceived = Math.max(round4(Number(order.quantityReceived) - received), 0);
   const live = await tx
     .select({ kind: moReports.kind })
     .from(moReports)
@@ -1402,7 +1409,8 @@ export function createManufacturingRepository(db: Db) {
         .from(routingOperations)
         .innerJoin(workCenters, eq(workCenters.id, routingOperations.workCenterId))
         .leftJoin(suppliers, eq(suppliers.id, routingOperations.subcontractSupplierId))
-        .where(eq(routingOperations.articleId, articleId));
+        .where(eq(routingOperations.articleId, articleId))
+        .orderBy(asc(routingOperations.sequenceNo));
       const alternatives = await listRoutingAlternatives(db, operations.map((op) => op.id));
       const drawings = await this.listRoutingDrawings(operations.map((op) => op.id));
       const files = await this.listRoutingFiles(operations.map((op) => op.id));
@@ -1492,7 +1500,10 @@ export function createManufacturingRepository(db: Db) {
           sequenceNo: routingOperations.sequenceNo,
           description: routingOperations.description,
           supplierId: routingOperations.subcontractSupplierId,
-          setupPrice: routingOperations.setupPrice,
+          // The inquiry row's prefilled Ställpris is the lego order's one-off
+          // charge — Ställpris + Transportkostnad (lego-one-off.ts), like
+          // every other reader; the raw setup_price dropped the transport.
+          setupPrice: legoOneOffSql(routingOperations),
           unitPrice: routingOperations.unitPrice,
         })
         .from(routingOperations)
@@ -1508,7 +1519,7 @@ export function createManufacturingRepository(db: Db) {
           sequenceNo: moOperations.sequenceNo,
           description: moOperations.description,
           supplierId: moOperations.subcontractSupplierId,
-          setupPrice: moOperations.setupPrice,
+          setupPrice: legoOneOffSql(moOperations),
           unitPrice: moOperations.unitPrice,
         })
         .from(moOperations)
@@ -1739,7 +1750,8 @@ export function createManufacturingRepository(db: Db) {
           quantityReceived: manufacturingOrders.quantityReceived,
         })
         .from(manufacturingOrders)
-        .where(and(inArray(manufacturingOrders.salesOrderRowId, rowIds), ne(manufacturingOrders.status, "cancelled")));
+        .where(and(inArray(manufacturingOrders.salesOrderRowId, rowIds), ne(manufacturingOrders.status, "cancelled")))
+        .orderBy(asc(manufacturingOrders.orderNumber));
 
       for (const row of rows) {
         if (!row.salesOrderRowId) continue;
@@ -1832,13 +1844,30 @@ export function createManufacturingRepository(db: Db) {
 
     // Header update — today only the planned finish date (E2); everything
     // else moves through status transitions.
-    async updateManufacturingOrder(id: string, input: { dueDate: string | null }) {
-      const [row] = await db
-        .update(manufacturingOrders)
-        .set({ dueDate: input.dueDate, updatedAt: new Date() })
-        .where(eq(manufacturingOrders.id, id))
-        .returning();
-      return row ?? null;
+    // Under the order's lock, open orders only (the service's status check
+    // is for the clean error): an order that turned done, closed or
+    // cancelled in between keeps its date, and `before` is the date this
+    // write replaced — not one a Flytta halvfabrikaten moved meanwhile.
+    async updateManufacturingOrder(
+      id: string,
+      input: { dueDate: string | null }
+    ): Promise<
+      | { ok: true; before: typeof manufacturingOrders.$inferSelect; order: typeof manufacturingOrders.$inferSelect }
+      | { ok: false; status: (typeof manufacturingOrders.$inferSelect)["status"] | null }
+    > {
+      return db.transaction(async (tx) => {
+        const [before] = await tx.select().from(manufacturingOrders).where(eq(manufacturingOrders.id, id)).for("update");
+        if (!before) return { ok: false, status: null };
+        if (before.status !== "planned" && before.status !== "released" && before.status !== "in_progress") {
+          return { ok: false, status: before.status };
+        }
+        const [row] = await tx
+          .update(manufacturingOrders)
+          .set({ dueDate: input.dueDate, updatedAt: new Date() })
+          .where(eq(manufacturingOrders.id, id))
+          .returning();
+        return { ok: true, before, order: row! };
+      });
     },
 
     // Flytta halvfabrikaten (pegging #9): the orders FOR UPDATE in id order
@@ -1977,16 +2006,34 @@ export function createManufacturingRepository(db: Db) {
     async addOperation(moId: string, input: CreateMoOperationInput, replan?: OrderReplanner) {
       return db.transaction((tx) => addOperationInTx(tx, moId, input, replan));
     },
-    async updateOperation(moId: string, opId: string, input: UpdateMoOperationInput, replan?: OrderReplanner) {
-      return db.transaction((tx) => updateOperationInTx(tx, moId, opId, input, replan));
+    async updateOperation(
+      moId: string,
+      opId: string,
+      input: UpdateMoOperationInput,
+      replan?: OrderReplanner,
+      prepare?: PrepareOperationUpdate
+    ) {
+      return db.transaction((tx) => updateOperationInTx(tx, moId, opId, input, replan, prepare));
     },
     async removeOperation(moId: string, opId: string, replan?: OrderReplanner) {
       return db.transaction((tx) => removeOperationInTx(tx, moId, opId, replan));
     },
 
-    // Atomic: Släpp of a TO still in planned — see releaseInTx.
+    // Atomic: Släpp of a TO still in planned — see releaseInTx. The order
+    // is locked and its status read again first: two Släpp at once (the
+    // second fell on the snapshot's unique indexes) or a Makulera between
+    // the service's check and here (overwritten with released) are refused.
     async release(moId: string) {
-      return db.transaction((tx) => releaseInTx(tx, moId));
+      return db.transaction(async (tx) => {
+        const [locked] = await tx
+          .select({ status: manufacturingOrders.status })
+          .from(manufacturingOrders)
+          .where(eq(manufacturingOrders.id, moId))
+          .for("update");
+        if (!locked) return null;
+        if (locked.status !== "planned") return { invalidStatus: locked.status };
+        return releaseInTx(tx, moId);
+      });
     },
 
     async findMaterialConsumptionById(rowId: string) {

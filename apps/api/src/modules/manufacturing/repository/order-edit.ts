@@ -157,6 +157,16 @@ async function materialHasConsumption(tx: Tx, row: typeof moMaterialConsumptions
   return line !== undefined;
 }
 
+// Linked material is drawn by its operation's reports (the top-up), so on
+// an operation that is already Klar nothing draws it any more — saved all
+// the same (the user's choice), with this note beside the shortage
+// warnings. Only while something is left to draw.
+function doneOperationWarnings(op: OperationRow | null, row: { quantityPlanned: string; quantityConsumed: string }): string[] {
+  if (op?.status !== "done") return [];
+  if (Number(row.quantityPlanned) <= Number(row.quantityConsumed)) return [];
+  return [`Operation ${op.sequenceNo} är klar — materialet dras inte automatiskt, använd Förbruka.`];
+}
+
 export async function addMaterialInTx(tx: Tx, moId: string, input: AddMaterialInput): Promise<MaterialEditResult> {
   const operation = input.moOperationId ? await lockOperationForMaterial(tx, input.moOperationId) : null;
   const locked = await lockEditableOrder(tx, moId);
@@ -178,7 +188,10 @@ export async function addMaterialInTx(tx: Tx, moId: string, input: AddMaterialIn
     })
     .returning();
   const material = await materialRow(tx, inserted!.id);
-  const warnings = await shortageWarnings(tx, [material], new Map([[material.componentArticleId, material.componentName]]));
+  const warnings = [
+    ...(await shortageWarnings(tx, [material], new Map([[material.componentArticleId, material.componentName]]))),
+    ...doneOperationWarnings(operation, material),
+  ];
   return { ok: true, order: locked.order, before: null, material, warnings };
 }
 
@@ -213,10 +226,21 @@ export async function updateMaterialInTx(tx: Tx, moId: string, rowId: string, in
     .where(eq(moMaterialConsumptions.id, rowId));
   const material = await materialRow(tx, rowId);
   // Shortage only when the need grew: a raised quantity or another component.
-  const warnings =
-    componentChanged || quantityPlanned > Number(row.quantityPlanned)
-      ? await shortageWarnings(tx, [material], new Map([[material.componentArticleId, material.componentName]]))
-      : [];
+  const needGrew = componentChanged || quantityPlanned > Number(row.quantityPlanned);
+  const warnings = needGrew
+    ? await shortageWarnings(tx, [material], new Map([[material.componentArticleId, material.componentName]]))
+    : [];
+  // Moved onto a Klar operation, or more needed on the one it is on: nothing
+  // will draw it (doneOperationWarnings). The row's own operation is only a
+  // read — its status is a note here, never a guard.
+  const movedTo = input.moOperationId != null && input.moOperationId !== row.moOperationId;
+  if (movedTo || needGrew) {
+    const [own] =
+      input.moOperationId !== undefined || row.moOperationId === null
+        ? []
+        : await tx.select().from(moOperations).where(eq(moOperations.id, row.moOperationId));
+    warnings.push(...doneOperationWarnings(input.moOperationId !== undefined ? operation : own ?? null, material));
+  }
   return { ok: true, order: locked.order, before, material, warnings };
 }
 
@@ -367,12 +391,23 @@ export async function addOperationInTx(
   return { ok: true, order: locked.order, before: null, operation: await operationRow(tx, inserted!.id), warnings, replanned: !!replan };
 }
 
+// The service's rules on the operation as this transaction holds it (the
+// lego rule: the effective resource decides the lego fields) — never on a
+// read from before the locks, which a concurrent edit could have moved to
+// or from a legoresurs. Resources are read FOR SHARE, last in the lock
+// order (operations → order → work_centers); a throw rolls the edit back.
+export type PrepareOperationUpdate = (
+  locked: OperationRow,
+  findWorkCenter: (id: string) => Promise<typeof workCenters.$inferSelect | null>
+) => Promise<UpdateMoOperationInput>;
+
 export async function updateOperationInTx(
   tx: Tx,
   moId: string,
   opId: string,
-  input: UpdateMoOperationInput,
-  replan?: OrderReplanner
+  given: UpdateMoOperationInput,
+  replan?: OrderReplanner,
+  prepare?: PrepareOperationUpdate
 ): Promise<OperationEditResult> {
   await lockProductionPlan(tx);
   const ops = await lockOrderOperations(tx, moId);
@@ -381,6 +416,12 @@ export async function updateOperationInTx(
   const locked = await lockEditableOrder(tx, moId);
   if (!locked.ok) return locked;
   if (op.status === "done") return { ok: false, reason: "done" };
+  const input = prepare
+    ? await prepare(op, async (id) => {
+        const [row] = await tx.select().from(workCenters).where(eq(workCenters.id, id)).for("share");
+        return row ?? null;
+      })
+    : given;
   // Byt till X's precondition (#15), read on the row this transaction holds
   // FOR UPDATE: the operation is still on the resource the förslag was made
   // for, and has not been moved (Flyttad) since — a förslag is only ever

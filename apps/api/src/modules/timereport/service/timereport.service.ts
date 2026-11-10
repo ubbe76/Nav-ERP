@@ -13,7 +13,7 @@ import type {
   UpdateTimeReportInput,
 } from "@navet/shared";
 import type { Tx } from "@navet/db";
-import type { StampReason, TimeReportRepository } from "../repository/timereport.repository.js";
+import type { StampReason, StampTargetState, TimeReportRepository } from "../repository/timereport.repository.js";
 import { ONE_OPEN_ATTENDANCE, ONE_OPEN_STAMP } from "../repository/timereport.repository.js";
 import { effectiveStopTime, localDateOf, stampedHours } from "../repository/stamp-close.js";
 import type { ManufacturingService } from "../../manufacturing/service/manufacturing.service.js";
@@ -393,8 +393,11 @@ export function createTimeReportService(
     // separate operations from the quantity report, so a report refused
     // inside its own transaction would leave the person stamped out with
     // nothing reported. The exact report is dry-run first, while nothing is
-    // written; only a stint with quantities draws anything.
-    if (hasQuantities) {
+    // written — also for 0/0 with "operationen klar": that report still
+    // tops the linked material up (a planned quantity raised in Ändra
+    // material since the last report) and can be refused just the same.
+    const reportsQuantities = hasQuantities || markDone;
+    if (reportsQuantities) {
       await manufacturing.assertMaterialBeforeOperationReport(
         session.moOperationId,
         { quantityOk, quantityScrapped, scrapReason: input.scrapReason, scrapReasonId: input.scrapReasonId, markDone, employeeId: session.employeeId, createdBy },
@@ -437,7 +440,7 @@ export function createTimeReportService(
     // Pallkort: the mo_reports row this stamp-out wrote, so the terminal can
     // print the REPORT's card (date + reporter) rather than the operation's.
     let reportId: string | null = null;
-    if (hasQuantities || markDone) {
+    if (reportsQuantities) {
       const totalHours = markDone ? await repo.sumReportedHoursForOperation(session.moOperationId) : undefined;
       const reported = await manufacturing.reportOperationQuantities(session.moOperationId, {
         quantityOk,
@@ -454,7 +457,7 @@ export function createTimeReportService(
         // time report written, so this report must not be refused. Stock
         // can go negative through another report landing in between —
         // accepted (see assertMaterialBeforeOperationReport).
-        materialShortageChecked: hasQuantities,
+        materialShortageChecked: true,
       });
       reportId = reported.reportId;
     } else {
@@ -555,6 +558,19 @@ export function createTimeReportService(
         if (input.workCenterId !== undefined && workCenterId !== input.workCenterId) throw new StampWorkCenterChangedError();
       };
       expectWorkCenter(operation.workCenterId);
+      // The same questions on the locked operation and order: a report that
+      // made the operation done, or a Slutför order / Makulera, committing
+      // between the reads above and the insert is refused too — never an
+      // open stamp on a done operation or a cancelled order.
+      const expectStampable = (locked: StampTargetState) => {
+        if (locked.operationStatus === "done") {
+          throw new InvalidStatusTransitionError("Cannot stamp in on an operation that is already done");
+        }
+        if (locked.orderStatus !== "released" && locked.orderStatus !== "in_progress") {
+          throw new InvalidStatusTransitionError("Stamping is only possible while the order is released or in progress");
+        }
+        expectWorkCenter(locked.workCenterId);
+      };
 
       if (await repo.hasOpenStampSessionForOperation(input.employeeId, input.moOperationId)) {
         throw new AlreadyStampedInError();
@@ -594,7 +610,7 @@ export function createTimeReportService(
       let session;
       try {
         // Ställ/produktion when the terminal sent it — never required.
-        session = await repo.createStampSession(input.employeeId, input.moOperationId, createdBy, input.kind ?? null, expectWorkCenter);
+        session = await repo.createStampSession(input.employeeId, input.moOperationId, createdBy, input.kind ?? null, expectStampable);
       } catch (err) {
         if (isUniqueViolation(err, ONE_OPEN_STAMP)) throw new AlreadyStampedInError();
         throw err;

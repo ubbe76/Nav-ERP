@@ -35,6 +35,7 @@ import type {
 // runs inside the report transactions; the mode is read here, outside them.
 import { MaterialShortageError, type MaterialShortageCheck } from "./material-shortage.js";
 import { computeReadiness, type Readiness, type ReadinessResult } from "./terminal-readiness.js";
+import { MANUFACTURING_ORDER_STATUS_LABELS } from "./export-columns.js";
 import type { GivenOperationPlan, GivenPlanOptions, ManufacturingPlanReader, SetDueDatesOutcome } from "../../planning/service/planning.service.js";
 import type { OperationResourceSuggestion } from "../../planning/service/resource-suggestions.js";
 export { MaterialShortageError, type MaterialShortage } from "./material-shortage.js";
@@ -580,16 +581,6 @@ export interface MaterialShortageSettingsReader {
   }>;
 }
 
-// Swedish labels for the printout — the UI's status pills use the same words.
-const MO_STATUS_LABELS: Record<string, string> = {
-  planned: "Planerad",
-  released: "Frisläppt",
-  in_progress: "Pågår",
-  completed: "Klar",
-  closed: "Stängd",
-  cancelled: "Makulerad",
-};
-
 // Lego fields belong to operations on a legoresurs (work center type
 // "subcontract") — on any other resource they are refused rather than
 // silently stored. ONE rule for the routing (beredning) and the TO's own
@@ -887,10 +878,12 @@ export function createManufacturingService(
     // applies to its proposals, so a planned TO matches its proposal.
     // createFromSalesOrderRow delegates here and inherits it.
     const article = await articleFiles.getArticle(articleId!);
+    // An unknown article is a 404 here, not the insert's FK violation (500).
+    if (!article) throw new ArticleNotFoundError(articleId!);
     // Produktkonfigurator: a template in mode variants never gets a TO —
     // also for the KO row's Skapa TO on a row that predates the mode.
-    if (article) assertOrderableArticle(article);
-    const quantity = roundUpToMultiple(input.quantity, article?.rounding);
+    assertOrderableArticle(article);
+    const quantity = roundUpToMultiple(input.quantity, article.rounding);
 
     // Konfigurator 4c: a beställningsvara's TO carries its derived structure
     // from creation. With a sales order row the ROW owns the choices; without
@@ -1145,7 +1138,9 @@ export function createManufacturingService(
   function materialAuditView(row: MaterialRow, sequences: Map<string, number>) {
     return {
       articleNumber: row.componentArticleNumber,
-      quantityPlanned: Number(row.quantityPlanned),
+      // In the unit beside it (the row's own, like the printout), not the
+      // stored base quantity: 8 kg at factor 0.5 was logged as "4 kg".
+      quantityPlanned: toUnitQuantity(Number(row.quantityPlanned), row.unitFactor),
       unitCode: row.unitCode,
       operationSequenceNo: row.moOperationId ? sequences.get(row.moOperationId) ?? null : null,
     };
@@ -1164,6 +1159,7 @@ export function createManufacturingService(
       subcontractSupplierName: op.subcontractSupplierName,
       setupPrice: op.setupPrice === null ? null : Number(op.setupPrice),
       unitPrice: op.unitPrice === null ? null : Number(op.unitPrice),
+      transportPrice: op.transportPrice === null ? null : Number(op.transportPrice),
       showNetWeight: op.showNetWeight,
       // Alternativa resurser: Vald för hand, so a switch shows the resource
       // (workCenterCode above) and the flag before and after.
@@ -1272,6 +1268,9 @@ export function createManufacturingService(
       try {
         return await repo.createWorkCenter(input);
       } catch (err) {
+        // The pre-check above is for the clean error; two at once with the
+        // same number are decided by the unique constraint.
+        if (isUniqueViolation(err, "work_centers_code_unique")) throw new DuplicateWorkCenterCodeError(input.code);
         // The hand-added FK is the existence check (atomic, no extra reader
         // dependency — the E3 constraint-catch pattern).
         if (isForeignKeyViolation(err, "work_centers_week_schedule_id_week_schedules_id_fk")) {
@@ -1365,6 +1364,9 @@ export function createManufacturingService(
       try {
         row = await repo.updateWorkCenter(id, input);
       } catch (err) {
+        if (input.code !== undefined && isUniqueViolation(err, "work_centers_code_unique")) {
+          throw new DuplicateWorkCenterCodeError(input.code);
+        }
         if (isForeignKeyViolation(err, "work_centers_week_schedule_id_week_schedules_id_fk")) {
           throw new WeekScheduleNotFoundError(input.weekScheduleId ?? "");
         }
@@ -1440,6 +1442,8 @@ export function createManufacturingService(
         return withRoutingExtras(row);
       } catch (err) {
         if (isUniqueViolation(err)) throw new DuplicateSequenceNoError();
+        // The article FK is the existence check (404, not a 500).
+        if (isForeignKeyViolation(err, "routing_operations_article_id_articles_id_fk")) throw new ArticleNotFoundError(articleId);
         if (isForeignKeyViolation(err, "routing_operations_subcontract_supplier_id_suppliers_id_fk")) {
           throw new WorkCenterSupplierNotFoundError(input.subcontractSupplierId ?? "");
         }
@@ -1720,15 +1724,20 @@ export function createManufacturingService(
           `Cannot update the planned finish date of a ${order.status} order`
         );
       }
-      const updated = (await repo.updateManufacturingOrder(id, { dueDate: input.dueDate }))!;
+      const result = await repo.updateManufacturingOrder(id, { dueDate: input.dueDate });
+      if (!result.ok) {
+        if (result.status === null) throw new ManufacturingOrderNotFoundError(id);
+        throw new InvalidStatusTransitionError(`Cannot update the planned finish date of a ${result.status} order`);
+      }
+      const updated = result.order;
       // Only the planned finish date is editable today (see
       // updateManufacturingOrderSchema) — only log when it actually moved.
-      if (updated.dueDate !== order.dueDate) {
+      if (updated.dueDate !== result.before.dueDate) {
         await audit.log({
           entityType: "manufacturing_order",
           entityId: order.orderNumber,
           action: "updated",
-          detail: { before: { dueDate: order.dueDate }, after: { dueDate: updated.dueDate } },
+          detail: { before: { dueDate: result.before.dueDate }, after: { dueDate: updated.dueDate } },
           userId,
         });
       }
@@ -1886,9 +1895,15 @@ export function createManufacturingService(
       if (order.status !== "planned") {
         throw new InvalidStatusTransitionError(`Cannot release an order in status "${order.status}"`);
       }
+      // The repository re-reads the status under the order's lock: a
+      // second Släpp or a Makulera that got there first is refused.
       const result = await repo.release(moId);
+      if (!result) throw new ManufacturingOrderNotFoundError(moId);
+      if ("invalidStatus" in result) {
+        throw new InvalidStatusTransitionError(`Cannot release an order in status "${result.invalidStatus}"`);
+      }
       await audit.log({ entityType: "manufacturing_order", entityId: order.orderNumber, action: "released", userId });
-      return result!;
+      return result;
     },
 
     async start(moId: string, userId: string | null = null) {
@@ -1897,7 +1912,12 @@ export function createManufacturingService(
       if (order.status !== "released") {
         throw new InvalidStatusTransitionError(`Cannot start an order in status "${order.status}"`);
       }
-      const updated = await repo.updateStatus(moId, "in_progress");
+      // Only from released: the first stamp starts the order, and a Slutför
+      // order or Makulera that locked the row first must not be overwritten
+      // by it (the stamp-in tolerates the refusal only when the order is
+      // under way anyway).
+      const updated = await repo.updateStatus(moId, "in_progress", "released");
+      if (!updated) throw new InvalidStatusTransitionError(`Cannot start the order: it is no longer released`);
       await audit.log({ entityType: "manufacturing_order", entityId: order.orderNumber, action: "started", userId });
       return updated;
     },
@@ -2094,9 +2114,13 @@ export function createManufacturingService(
     // the terminal (the same rule a lego receipt uses). Antal klart defaults
     // to what remains of the order quantity, so terminal partials aren't
     // double-counted.
-    async completeOperation(operationId: string, input: CompleteOperationInput, createdBy: string) {
+    // moId: the order in the URL — an operation on another order is a 404,
+    // never a report (with stock moves) on that other order.
+    async completeOperation(operationId: string, input: CompleteOperationInput, createdBy: string, moId?: string) {
       const operation = await repo.findOperationById(operationId);
-      if (!operation) throw new MOOperationNotFoundError(operationId);
+      if (!operation || (moId !== undefined && operation.manufacturingOrderId !== moId)) {
+        throw new MOOperationNotFoundError(operationId);
+      }
 
       const order = await repo.findManufacturingOrderById(operation.manufacturingOrderId);
       if (!order) throw new ManufacturingOrderNotFoundError(operation.manufacturingOrderId);
@@ -2270,13 +2294,18 @@ export function createManufacturingService(
       if (!existing || existing.manufacturingOrderId !== moId) throw new MOOperationNotFoundError(opId);
       // The effective resource decides whether lego fields are legal —
       // same rule as updateRoutingOperation; moving to an ordinary resource
-      // clears them.
-      const workCenterId = input.workCenterId ?? existing.workCenterId;
-      const workCenter = await repo.findWorkCenterById(workCenterId);
-      if (!workCenter) throw new WorkCenterNotFoundError(workCenterId);
-      assertLegoFieldsForResource(workCenter, input, "update");
-      const patch: UpdateMoOperationInput = workCenter.type !== "subcontract" ? { ...input, ...CLEARED_LEGO_FIELDS } : input;
-      const result = await catchOperationWriteErrors(input, () => repo.updateOperation(moId, opId, patch, replanner()));
+      // clears them. Judged on the operation as the edit's transaction
+      // holds it: a concurrent switch to or from a legoresurs must not be
+      // undone by this patch's cleared (or kept) lego fields.
+      const result = await catchOperationWriteErrors(input, () =>
+        repo.updateOperation(moId, opId, input, replanner(), async (locked, findWorkCenter) => {
+          const workCenterId = input.workCenterId ?? locked.workCenterId;
+          const workCenter = await findWorkCenter(workCenterId);
+          if (!workCenter) throw new WorkCenterNotFoundError(workCenterId);
+          assertLegoFieldsForResource(workCenter, input, "update");
+          return workCenter.type !== "subcontract" ? { ...input, ...CLEARED_LEGO_FIELDS } : input;
+        })
+      );
       if (!result.ok) throw operationEditError(result.reason, moId, order.status, input.sequenceNo ?? existing.sequenceNo, opId);
       const diff = changedFields(operationAuditView(result.before!), operationAuditView(result.operation));
       await audit.log({
@@ -2431,7 +2460,7 @@ export function createManufacturingService(
         articleNumber: order.articleNumber,
         articleName: order.articleName,
         quantity: order.quantity,
-        statusLabel: MO_STATUS_LABELS[order.status] ?? order.status,
+        statusLabel: MANUFACTURING_ORDER_STATUS_LABELS[order.status],
         note: order.note,
         salesOrderRef: salesOrderRow
           ? { orderNumber: salesOrderRow.orderNumber, customerName: salesOrderRow.customerName }
