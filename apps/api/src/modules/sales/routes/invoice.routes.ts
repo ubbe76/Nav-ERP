@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { deviationLinkForbidden } from "../../quality/service/deviation-link-access.js";
 import { DeviationLinkNotAllowedError } from "../../quality/service/deviation-errors.js";
-import { InvalidUnitError } from "../../article/service/article.service.js";
+import { ArticleNotFoundError, InvalidUnitError } from "../../article/service/article.service.js";
+import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import { z } from "zod";
 import {
   createCreditInvoiceSchema,
@@ -87,7 +88,10 @@ export async function invoiceRoutes(app: FastifyInstance, opts: { service: Invoi
       err instanceof InvoiceRowNotFoundError ||
       err instanceof CustomerNotFoundError ||
       err instanceof CostCenterNotFoundError ||
-      err instanceof ProjectNotFoundError
+      err instanceof ProjectNotFoundError ||
+      // An uuid that is not an article (free row) or a payment term.
+      err instanceof ArticleNotFoundError ||
+      err instanceof RegisterEntryNotFoundError
     ) {
       return reply.code(404).send(errorBody(err as Error));
     }

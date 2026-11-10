@@ -191,6 +191,21 @@ export interface ReportOperationQuantitiesInput {
   // Materialbrist: how the drawn material is checked against stock —
   // omitted = not at all (see material-shortage.ts).
   materialShortage?: MaterialShortageCheck;
+  // Lego-inleveransen: the IO receipt behind the report (see
+  // PurchaseReceiptLink). Only the real report runs it, never the dry run.
+  receiptLink?: PurchaseReceiptLink;
+}
+
+// The purchase module's side of a lego report, run inside the report's own
+// transaction (purchase owns purchase_receipts): `claim` locks the receipt
+// FIRST — before the operation, the order Ångra inleverans takes them in —
+// and throws when it was undone meanwhile (the report then rolls back);
+// `link` stamps the report on it before the commit. The report and the link
+// are thereby one commit: a report never stands without its link (which
+// left it undoable from neither the IO nor the TO card).
+export interface PurchaseReceiptLink {
+  claim(tx: Tx): Promise<void>;
+  link(tx: Tx, reportId: string): Promise<void>;
 }
 
 // Quantities are numeric(14,4): compare and store at 4 decimals, so float
@@ -2108,7 +2123,12 @@ export function createManufacturingRepository(db: Db) {
 
     // Atomic: one incremental quantity report — see reportOperationQuantitiesInTx.
     async reportOperationQuantities(operationId: string, input: ReportOperationQuantitiesInput): Promise<CompleteOperationResult> {
-      return db.transaction((tx) => reportOperationQuantitiesInTx(tx, operationId, input));
+      return db.transaction(async (tx) => {
+        await input.receiptLink?.claim(tx);
+        const result = await reportOperationQuantitiesInTx(tx, operationId, input);
+        if (result.ok) await input.receiptLink?.link(tx, result.reportId);
+        return result;
+      });
     },
 
     // Materialbrist, dry run: runs the very same report in a transaction

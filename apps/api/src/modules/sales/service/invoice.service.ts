@@ -51,7 +51,8 @@ import {
 } from "../../economy/service/document-vat-code.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { CustomerNotFoundError, InvalidStatusTransitionError } from "./sales.service.js";
-import { InvalidUnitError } from "../../article/service/article.service.js";
+import { ArticleNotFoundError, InvalidUnitError } from "../../article/service/article.service.js";
+import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 // G1: append-only audit trail — optional with a no-op default (see
 // sales.service.ts's identical comment) so the many pre-existing test call
 // sites keep compiling; app.ts wires the real one.
@@ -951,6 +952,8 @@ export function createInvoiceService(
     // linked order row's; a free row has none.
     let configuration: OrderRowConfiguration | null = input.configuration ?? null;
 
+    // A free row's article must exist (a linked row's is its order row's).
+    if (!salesOrderRowId && articleId && !(await repo.articleExists(articleId))) throw new ArticleNotFoundError(articleId);
     if (salesOrderRowId) {
       const orderRow = await repo.findSalesOrderRowForInvoicing(salesOrderRowId);
       if (!orderRow) throw new SalesOrderRowMismatchError("The linked sales order row does not exist");
@@ -1221,6 +1224,9 @@ export function createInvoiceService(
       if (customer.collectiveInvoicing && !opts.collective) {
         throw new CollectiveInvoicingCustomerError(customer.id);
       }
+      if (input.paymentTermId && !(await repo.findPaymentTermById(input.paymentTermId))) {
+        throw new RegisterEntryNotFoundError(input.paymentTermId);
+      }
       // A collection invoice may bill rows against several of the customer's
       // orders in one go — resolveRow validates each row's own order/article
       // match independently, so mixing orders (same customer) is allowed and
@@ -1433,7 +1439,12 @@ export function createInvoiceService(
         throw new InvalidStatusTransitionError(`Cannot change an invoice in status "${invoice.status}"`);
       }
       const patch: { paymentTermId?: string | null; note?: string | null; exchangeRate?: number | null; exchangeRateManual?: boolean } = {};
-      if (input.paymentTermId !== undefined) patch.paymentTermId = input.paymentTermId;
+      if (input.paymentTermId !== undefined) {
+        if (input.paymentTermId !== null && !(await repo.findPaymentTermById(input.paymentTermId))) {
+          throw new RegisterEntryNotFoundError(input.paymentTermId);
+        }
+        patch.paymentTermId = input.paymentTermId;
+      }
       if (input.note !== undefined) patch.note = input.note;
       // Valuta: a rate typed in on a foreign draft (null = automatic again —
       // the invoice date's rate at Utfärda). SEK takes only 1 (a no-op); a

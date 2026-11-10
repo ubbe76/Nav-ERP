@@ -222,6 +222,9 @@ describe("lagergranskningen — status and stock races", () => {
       await gate;
     });
     const cancelling = purchaseService.cancel(order.id, user.id);
+    // Handled at once: it can reject while the test still awaits the holder
+    // (Vitest reports that as an unhandled rejection); the expect below reads it.
+    cancelling.catch(() => {});
     try {
       await waitForLockWaiter();
     } finally {
@@ -245,6 +248,9 @@ describe("lagergranskningen — status and stock races", () => {
       await gate;
     });
     const receiving = purchaseService.receiveGoods(order.id, rows[0]!.id, { quantity: 5 }, user.id);
+    // Handled at once: it can reject while the test still awaits the holder
+    // (Vitest reports that as an unhandled rejection); the expect below reads it.
+    receiving.catch(() => {});
     try {
       await waitForLockWaiter();
     } finally {
@@ -269,6 +275,9 @@ describe("lagergranskningen — status and stock races", () => {
       await gate;
     });
     const moving = stockService.transferStock({ fromLocationId: l1.id, toLocationId: l2.id, rows: [{ articleId: x.id, quantity: 10 }] }, user.id);
+    // Handled at once: it can reject while the test still awaits the holder
+    // (Vitest reports that as an unhandled rejection); the expect below reads it.
+    moving.catch(() => {});
     try {
       await waitForLockWaiter();
     } finally {
@@ -309,14 +318,20 @@ describe("lagergranskningen — status and stock races", () => {
       await tx.update(manufacturingOrders).set({ status: "in_progress" }).where(eq(manufacturingOrders.id, f.order.id));
       await gate;
     });
-    const closing = mfgService.close(f.order.id, user.id);
+    // The outcome caught right away: the close can reject while the test
+    // still awaits `reopen`, which Vitest reports as an unhandled rejection.
+    const closing = mfgService.close(f.order.id, user.id).then(
+      () => null,
+      (error: unknown) => error
+    );
     try {
       await waitForLockWaiter();
     } finally {
       release(); // never leave the holder's locks behind a failed wait
     }
     await reopen;
-    await expect(closing).rejects.toThrow(/no longer done/);
+    expect(await closing).toBeInstanceOf(Error);
+    expect(((await closing) as Error).message).toMatch(/no longer done/);
     const [row] = await db.select({ status: manufacturingOrders.status }).from(manufacturingOrders).where(eq(manufacturingOrders.id, f.order.id));
     expect(row!.status).toBe("in_progress");
   });
@@ -335,6 +350,9 @@ describe("lagergranskningen — status and stock races", () => {
       await gate;
     });
     const undoing = purchaseService.undoReceipt(order.id, receipt!.id, user.id);
+    // Handled at once: it can reject while the test still awaits the holder
+    // (Vitest reports that as an unhandled rejection); the expect below reads it.
+    undoing.catch(() => {});
     try {
       await waitForLockWaiter();
     } finally {

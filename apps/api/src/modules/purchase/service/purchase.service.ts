@@ -45,7 +45,13 @@ import type {
 } from "@navet/shared";
 import type { Tx } from "@navet/db";
 import { InvalidStatusTransitionError as MoInvalidStatusTransitionError } from "../../manufacturing/service/manufacturing.service.js";
-import { PurchaseOrderNotEditableError, type LegoSnapshot, type PurchaseRepository } from "../repository/purchase.repository.js";
+import {
+  claimReceiptForReportInTx,
+  linkReceiptReportInTx,
+  PurchaseOrderNotEditableError,
+  type LegoSnapshot,
+  type PurchaseRepository,
+} from "../repository/purchase.repository.js";
 import type { RegisterReferenceReader } from "../../register/service/register.service.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import type { MailService } from "../../mail/service/mail.service.js";
@@ -106,6 +112,10 @@ export interface SubcontractOperationReporter {
       purchaseOrderId?: string;
       // Materialbrist: the receipt's "Rapportera ändå" flag, passed on.
       allowMaterialShortage?: boolean;
+      // The receipt, claimed first and linked to the report inside the
+      // report's own transaction — one commit, never a report without its
+      // link (see claimReceiptForReportInTx).
+      receiptLink?: { claim(tx: Tx): Promise<void>; link(tx: Tx, reportId: string): Promise<void> };
     }
   ): Promise<{ reportId: string }>;
   // Materialbrist: asked BEFORE the goods are booked. Throws the
@@ -1765,8 +1775,8 @@ export function createPurchaseService(
         // warning instead of an error. Linked material tops up via the
         // ordinary consumeLinkedMaterial path.
         let operationReport: OperationReportOutcome | undefined;
-        let reportId: string | null = null;
         if (result.row.moOperationId !== null) {
+          const receiptId = result.receiptId;
           try {
             // A fully-received IO row doesn't by itself mean the operation is
             // done — a manually shorted row (50 of the MO's 100) must leave
@@ -1774,7 +1784,7 @@ export function createPurchaseService(
             // proposals. The coverage decision (accumulated quantity_completed
             // vs. the MO's order quantity) is made on the manufacturing side,
             // which already has the order quantity loaded under the row lock.
-            ({ reportId } = await manufacturing.reportOperationQuantities(result.row.moOperationId, {
+            await manufacturing.reportOperationQuantities(result.row.moOperationId, {
               quantityOk: input.quantity,
               quantityScrapped: 0,
               markDone: false,
@@ -1783,7 +1793,13 @@ export function createPurchaseService(
               source: "purchase_receipt",
               purchaseOrderId: orderId,
               allowMaterialShortage: input.allowMaterialShortage,
-            }));
+              // Ångra inleverans undoes the TO report together with the
+              // receipt: the link is written in the report's transaction.
+              receiptLink: {
+                claim: (tx) => claimReceiptForReportInTx(tx, receiptId),
+                link: (tx, reportId) => linkReceiptReportInTx(tx, receiptId, reportId),
+              },
+            });
             operationReport = { ok: true };
           } catch (err) {
             operationReport = {
@@ -1792,12 +1808,6 @@ export function createPurchaseService(
             };
           }
         }
-        // Ångra inleverans undoes the TO report together with the receipt.
-        // Outside the try above: the report stands either way, so a failed
-        // link must not read as a failed report. (An undo that lands before
-        // the link is written reverses only the IO side — a window of one
-        // report call.)
-        if (reportId !== null) await repo.linkReceiptReport(result.receiptId, reportId);
         // receiptId: the webb's notice offers Ångra on exactly this receipt.
         return { row: result.row, orderStatus: result.orderStatus, operationReport, receiptId: result.receiptId };
       }

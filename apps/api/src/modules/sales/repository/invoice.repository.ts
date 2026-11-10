@@ -1186,6 +1186,13 @@ export function createInvoiceRepository(db: Db) {
     // code/name for a specific payment term id — used to resolve the
     // invoice's own paymentTermId (or, when absent, the customer's) into the
     // text snapshotted onto the invoice at issue.
+    // A free row's article and the header's payment term: unknown ⇒ 404 in
+    // the service, not the FK's 23503 (500).
+    async articleExists(id: string) {
+      const [row] = await db.select({ id: articles.id }).from(articles).where(eq(articles.id, id));
+      return row !== undefined;
+    },
+
     async findPaymentTermById(id: string) {
       const [row] = await db
         .select({ code: paymentTerms.code, name: paymentTerms.name })
