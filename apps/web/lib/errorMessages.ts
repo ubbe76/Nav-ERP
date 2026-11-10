@@ -274,6 +274,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "stock-location-already-blocked": "Lagerplatsen är redan spärrad — ladda om sidan.",
   "stock-location-not-blocked": "Lagerplatsen är inte spärrad — ladda om sidan.",
   "fallback-location-not-blockable": "Reservplatsen *** kan inte spärras — resten av ett uttag med Automatiskt hamnar där.",
+  "stock-location-name-reserved": "Namnet *** är reserverat för reservplatsen — välj ett annat namn",
+  "service-article-not-stocked": "Artikeln är en tjänst — tjänster lagerförs inte",
   // The server names the place (Swedish).
   "stock-location-blocked": serverMessage("Lagerplatsen är spärrad — välj en annan plats eller Automatiskt."),
   "forecast-month-outside-horizon": "Månaden ligger utanför prognoshorisonten — bara månader i horisonten kan få ett eget antal.",

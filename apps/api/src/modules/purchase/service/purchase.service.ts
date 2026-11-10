@@ -1564,7 +1564,10 @@ export function createPurchaseService(
           `Cannot cancel an order in status "${order.status}" — goods have already been received`
         );
       }
-      const updated = await repo.updateStatus(orderId, "cancelled");
+      const updated = await repo.updateStatus(orderId, "cancelled", ["draft", "confirmed"]);
+      if (!updated) {
+        throw new InvalidStatusTransitionError("Cannot cancel the order — goods have been received on it meanwhile");
+      }
       await audit.log({
         entityType: "purchase_order",
         entityId: order.orderNumber,

@@ -38,6 +38,7 @@ import {
   createStockService,
   FallbackLocationNotBlockableError,
   StockLocationAlreadyBlockedError,
+  StockLocationNameReservedError,
   StockLocationBlockedError,
   StockLocationNotBlockedError,
   StockLocationNotFoundError,
@@ -218,14 +219,23 @@ describe("Spärra och släppa", () => {
     expect(open).toMatchObject({ blocked: false, blockedAt: null, blockedNote: null });
   });
 
-  it("never blocks the *** fallback — not by Spärra, not on create, not by renaming a blocked place", async () => {
+  // The name "***" is reserved (granskningen 2026-11-10): no second place
+  // gets it — blocked or not — and the reservplats keeps it.
+  it("never blocks the *** fallback, and reserves its name — not on create, not by renaming, not away from it", async () => {
     const x = await article("X-1");
     const fallback = await fallbackId();
     await expect(stockService.blockLocation(fallback, null, user.id)).rejects.toBeInstanceOf(FallbackLocationNotBlockableError);
-    await expect(place("***", { blocked: true })).rejects.toBeInstanceOf(FallbackLocationNotBlockableError);
+    await expect(place("***", { blocked: true })).rejects.toBeInstanceOf(StockLocationNameReservedError);
+    await expect(place("***")).rejects.toBeInstanceOf(StockLocationNameReservedError);
     const k = await place("K1", { blocked: true });
-    await expect(stockService.updateLocation(k.id, { name: "***" })).rejects.toBeInstanceOf(FallbackLocationNotBlockableError);
+    await expect(stockService.updateLocation(k.id, { name: "***" })).rejects.toBeInstanceOf(StockLocationNameReservedError);
+    const open = await place("K2");
+    await expect(stockService.updateLocation(open.id, { name: " *** " })).rejects.toBeInstanceOf(StockLocationNameReservedError);
+    await expect(stockService.updateLocation(fallback, { name: "Reserv" })).rejects.toBeInstanceOf(StockLocationNameReservedError);
     expect((await locationRow(k.id)).name).toBe("K1");
+    expect((await locationRow(fallback)).name).toBe("***");
+    // The reservplats may still be edited without changing its name.
+    expect(await stockService.updateLocation(fallback, { name: "***" })).toMatchObject({ name: "***" });
     expect(x.id).toBeTruthy();
   });
 

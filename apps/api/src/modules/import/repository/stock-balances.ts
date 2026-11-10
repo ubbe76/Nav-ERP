@@ -1,6 +1,6 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { stockCountSessions, stockLocations, stockTransactions, warehouses, type Db, type Tx } from "@navet/db";
-import { FALLBACK_LOCATION_NAME, resolveStockLocation, usableArticleLocations } from "../../stock/service/location-resolver.js";
+import { FALLBACK_LOCATION_NAME, getOrCreateFallbackLocation, resolveStockLocation, usableArticleLocations } from "../../stock/service/location-resolver.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { STOCK_IMPORT_NOTE, type StockBalanceImportPlan } from "../service/stock-balances.js";
@@ -87,6 +87,9 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
         }
         const newLocationIds = new Map<string, string>();
         async function locationFor(warehouseName: string, locationName: string) {
+          // "***" is the one reservplats, whatever Lager the file names —
+          // never a second place by that name (StockLocationNameReservedError).
+          if (locationName.trim() === FALLBACK_LOCATION_NAME) return getOrCreateFallbackLocation(tx);
           const key = `${warehouseName.toLowerCase()}/${locationName.toLowerCase()}`;
           const known = newLocationIds.get(key);
           if (known) return known;

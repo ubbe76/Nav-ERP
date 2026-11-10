@@ -113,7 +113,10 @@ export function ReportsSection({
                   {reportLabel(row)}
                   {row.materials.length > 0 && (
                     <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
-                      Material: {row.materials.map((m) => `${m.articleNumber} ${quantity(m.quantity)} (${m.locationName})`).join(", ")}
+                      Material:{" "}
+                      {row.materials
+                        .map((m) => `${m.articleNumber} ${quantity(m.quantity)}${m.locationName ? ` (${m.locationName})` : ""}`)
+                        .join(", ")}
                     </div>
                   )}
                 </span>

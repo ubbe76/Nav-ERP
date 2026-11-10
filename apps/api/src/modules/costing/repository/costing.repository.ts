@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, getTableColumns, inArray, lt, max, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, isNull, lt, max, ne, sql } from "drizzle-orm";
 import { legoOneOffSql } from "../../manufacturing/repository/lego-one-off.js";
 import { alias } from "drizzle-orm/pg-core";
 import {
@@ -15,6 +15,8 @@ import {
   manufacturingOrders,
   moMaterialConsumptions,
   moOperations,
+  moReportMaterials,
+  moReports,
   purchaseOrderRows,
   purchaseOrders,
   routingOperations,
@@ -331,7 +333,29 @@ export function createCostingRepository(db: Db | Tx) {
           )
         )
         .groupBy(stockTransactions.articleId);
-      return new Map(rows.filter((r) => r.drawnAt !== null).map((r) => [r.articleId, new Date(r.drawnAt!)]));
+      // A service component (tjänst, never stocked) is consumed by a live
+      // report-log line without a place: its moment is that report's.
+      const services = await db
+        .select({ articleId: moMaterialConsumptions.componentArticleId, drawnAt: max(moReports.createdAt) })
+        .from(moReportMaterials)
+        .innerJoin(moReports, eq(moReports.id, moReportMaterials.moReportId))
+        .innerJoin(moMaterialConsumptions, eq(moMaterialConsumptions.id, moReportMaterials.materialConsumptionId))
+        .where(
+          and(
+            eq(moReports.manufacturingOrderId, manufacturingOrderId),
+            isNull(moReports.undoneAt),
+            isNull(moReportMaterials.locationId)
+          )
+        )
+        .groupBy(moMaterialConsumptions.componentArticleId);
+      const times = new Map<string, Date>();
+      for (const r of [...rows, ...services]) {
+        if (r.drawnAt === null) continue;
+        const at = new Date(r.drawnAt);
+        const seen = times.get(r.articleId);
+        if (!seen || at > seen) times.set(r.articleId, at);
+      }
+      return times;
     },
 
     // The standard cost (D1) and supplier catalog (migration 0169) histories

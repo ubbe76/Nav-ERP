@@ -63,7 +63,9 @@ Med behörigheten **Artiklar** finns knappen **Redigera** bredvid **+ Ny artikel
 |---|---|
 | **Tillverkad** | Tillverkas internt via tillverkningsorder; har struktur (BOM) och rutt |
 | **Köpt** | Köps in via inköpsorder |
-| **Tjänst** | Lagerförs inte |
+| **Tjänst** | Lagerförs inte — arbete, inte gods |
+
+**Tjänster lagerförs aldrig.** En tjänst kan köpas på en inköpsorder, säljas på en kundorder och stå i en struktur, men den får aldrig något lagersaldo: inleveransen räknar upp inköpsorderns rad, utleveransen kundorderns rad och en tillverkningsorder bokar tjänsten som förbrukad — utan någon lagerrörelse. Lagerjustering, lagerflytt och inventering tar inte tjänster (*Artikeln … är en tjänst — tjänster lagerförs inte*). Ett saldo en tjänst fick före regeln (november 2026) ligger kvar i lagerloggen som historik.
 
 **Fantomartikel:** en artikel som aldrig lagerhålls utan alltid "löses upp" till sina komponenter vid tillverkning och kalkyl — typiskt en modul/underrede i en konfigurerbar produkt. Markeras med fantomflaggan på artikeln och visas som "Fantom" i register och strukturer.
 

@@ -61,6 +61,7 @@ import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.
 import { uncoveredConfiguredQuantity } from "../../planning/service/configured-coverage.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { allocateOutflowLocations, lockArticlesForOutflow, type BlockedChoice } from "../../stock/service/outflow-locations.js";
+import { isStockedArticle } from "../../stock/service/stocked-article.js";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
 import { listLegoPurchases } from "./lego-purchases.js";
 // Produktionsplanering: a leaf with only the lock SQL — no module cycle.
@@ -114,7 +115,8 @@ export interface ConsumedMaterialLine {
   componentArticleId: string;
   quantity: number;
   materialConsumptionId: string;
-  locationId: string;
+  // null = a service component: consumed, never drawn from stock.
+  locationId: string | null;
 }
 
 // Where a reporting event came from (mo_reports.source).
@@ -189,6 +191,13 @@ export interface ReportOperationQuantitiesInput {
   materialShortage?: MaterialShortageCheck;
 }
 
+// Quantities are numeric(14,4): compare and store at 4 decimals, so float
+// noise (0.1 + 0.2, 0.1 × 3) never refuses a draw that lands exactly on the
+// plan nor books a draw of 5e-17 (purchase.repository.ts's receipt does the same).
+function round4(value: number): number {
+  return Math.round(value * 10000) / 10000;
+}
+
 // Draws the material rows matching `operationFilter` up to what the reported
 // quantity requires: target = planned/orderQuantity × reported, and only the
 // difference against what's already consumed is booked. Over-reporting
@@ -216,13 +225,13 @@ async function consumeLinkedMaterial(
   const consumed: ConsumedMaterialLine[] = [];
   for (const row of rows) {
     const perUnit = opts.orderQuantity === 0 ? 0 : Number(row.quantityPlanned) / opts.orderQuantity;
-    const target = perUnit * opts.reportedQuantity;
-    const delta = target - Number(row.quantityConsumed);
+    const target = round4(perUnit * opts.reportedQuantity);
+    const delta = round4(target - Number(row.quantityConsumed));
     if (delta <= 0) continue;
 
     await tx
       .update(moMaterialConsumptions)
-      .set({ quantityConsumed: String(Number(row.quantityConsumed) + delta) })
+      .set({ quantityConsumed: String(round4(Number(row.quantityConsumed) + delta)) })
       .where(eq(moMaterialConsumptions.id, row.id));
 
     // The TO card's field also receives the finished goods, so a Spärrad
@@ -269,6 +278,12 @@ async function drawMaterial(
   createdBy: string | null,
   blockedChoice: BlockedChoice
 ): Promise<ConsumedMaterialLine[]> {
+  // A service component (tjänst) is work, not goods: the consumption is
+  // recorded (one line without a place, for the report log and Ångra), but
+  // nothing is drawn from stock (stocked-article.ts).
+  if (!(await isStockedArticle(tx, row.componentArticleId))) {
+    return [{ componentArticleId: row.componentArticleId, quantity, materialConsumptionId: row.id, locationId: null }];
+  }
   const parts = await allocateOutflowLocations(tx, row.componentArticleId, quantity, locationId, { blockedChoice });
   const lines: ConsumedMaterialLine[] = [];
   for (const part of parts) {
@@ -831,9 +846,13 @@ async function undoReportInTx(
     return { ok: false, reason: "invalid_status" };
   }
 
-  // Finished goods out of the location they went into.
+  // Finished goods out of the location they went into — an outflow, so the
+  // article lock first (order → article, as the reports take their
+  // components): the "still in stock" check below must not race a delivery
+  // drawing the same goods (both passed and the place went negative).
   const received = Number(report.quantityReceived);
   if (received > 0 && report.receiptLocationId) {
+    await lockArticlesForOutflow(tx, [order.articleId]);
     const [balance] = await tx
       .select({ quantity: sql<string>`coalesce(sum(${stockTransactions.quantityDelta}), 0)` })
       .from(stockTransactions)
@@ -867,6 +886,8 @@ async function undoReportInTx(
       .set({ quantityConsumed: String(Math.max(Number(row.quantityConsumed) - quantity, 0)) })
       .where(eq(moMaterialConsumptions.id, row.id));
     // Reactivates the location if it was cleaned up after the draw.
+    // A service line (no place) was never drawn from stock: nothing to return.
+    if (line.locationId === null) continue;
     const locationId = await resolveStockLocation(tx, row.componentArticleId, line.locationId);
     await assertLocationNotUnderCount(tx, locationId);
     await tx.insert(stockTransactions).values({
@@ -1904,11 +1925,18 @@ export function createManufacturingRepository(db: Db) {
       return { rows: rows.map((row): ListedOrder => ({ ...row, operations: summaries.get(row.id) ?? [] })), total };
     },
 
-    async updateStatus(id: string, status: (typeof manufacturingOrders.$inferSelect)["status"]) {
+    // fromStatus: only from that status (null when the order has moved on) —
+    // Stäng order, whose done → closed must not overtake a Förbruka that
+    // locked the order first.
+    async updateStatus(
+      id: string,
+      status: (typeof manufacturingOrders.$inferSelect)["status"],
+      fromStatus?: (typeof manufacturingOrders.$inferSelect)["status"]
+    ) {
       const [row] = await db
         .update(manufacturingOrders)
         .set({ status, updatedAt: new Date() })
-        .where(eq(manufacturingOrders.id, id))
+        .where(fromStatus ? and(eq(manufacturingOrders.id, id), eq(manufacturingOrders.status, fromStatus)) : eq(manufacturingOrders.id, id))
         .returning();
       return row ?? null;
     },
@@ -1975,7 +2003,10 @@ export function createManufacturingRepository(db: Db) {
       input: { locationId?: string; quantity: number; createdBy: string; materialShortage?: MaterialShortageCheck }
     ): Promise<ConsumeMaterialResult> {
       return db.transaction(async (tx) => {
-        const [order] = await tx.select().from(manufacturingOrders).where(eq(manufacturingOrders.id, moId));
+        // The order FOR UPDATE, before the row (the reports' order → rows):
+        // Stäng order is conditional on the status this lock serialises, so a
+        // draw never lands on an order that closed under it.
+        const [order] = await tx.select().from(manufacturingOrders).where(eq(manufacturingOrders.id, moId)).for("update");
         if (!order) return { ok: false, reason: "order_not_found" };
         // Efterrapportering: a done order may still draw (see
         // reportOperationQuantitiesInTx); only a closed one is locked.
@@ -1990,8 +2021,8 @@ export function createManufacturingRepository(db: Db) {
           .for("update");
         if (!row) return { ok: false, reason: "row_not_found" };
 
-        const newConsumed = Number(row.quantityConsumed) + input.quantity;
-        if (newConsumed > Number(row.quantityPlanned)) {
+        const newConsumed = round4(Number(row.quantityConsumed) + input.quantity);
+        if (newConsumed > round4(Number(row.quantityPlanned))) {
           return { ok: false, reason: "over_consumption" };
         }
 
@@ -2127,7 +2158,8 @@ export function createManufacturingRepository(db: Db) {
             .from(moReportMaterials)
             .innerJoin(moMaterialConsumptions, eq(moMaterialConsumptions.id, moReportMaterials.materialConsumptionId))
             .innerJoin(articles, eq(articles.id, moMaterialConsumptions.componentArticleId))
-            .innerJoin(stockLocations, eq(stockLocations.id, moReportMaterials.locationId))
+            // Left: a service line has no place (locationName null).
+            .leftJoin(stockLocations, eq(stockLocations.id, moReportMaterials.locationId))
             .where(
               inArray(
                 moReportMaterials.moReportId,

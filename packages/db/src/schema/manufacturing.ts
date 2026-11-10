@@ -632,9 +632,9 @@ export const moReportMaterials = pgTable("mo_report_materials", {
     .notNull()
     .references(() => moMaterialConsumptions.id, { onDelete: "cascade" }),
   quantity: numeric("quantity", { precision: 14, scale: 4 }).notNull(),
-  locationId: uuid("location_id")
-    .notNull()
-    .references(() => stockLocations.id, { onDelete: "restrict" }),
+  // The place the part was drawn from; null for a service component (tjänst,
+  // never stocked — the line records the consumption, no stock movement).
+  locationId: uuid("location_id").references(() => stockLocations.id, { onDelete: "restrict" }),
 });
 
 // Snapshot of BOM quantity x MO quantity, taken at release.

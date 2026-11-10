@@ -35,13 +35,21 @@ export async function deactivateEmptyLocation(db: Db | Tx, locationId: string): 
   // tried again: a draw that held one of those locks has committed and is
   // seen. (Two transactions can only both see the place empty when they
   // drew the same article, and the draws serialise on the article first.)
+  //
+  // FOR UPDATE, not FOR NO KEY UPDATE: it also conflicts with the FOR KEY
+  // SHARE an insert's FK check holds on the place until commit, so an
+  // inflow that already wrote a row here is waited out and seen by the
+  // re-check, and one that writes after waits until this commits — the
+  // trigger stock_transactions_revive_location (0202) then revives the place
+  // for it. Inflows otherwise never wait; this lock only exists while a
+  // temporary place is being retired.
   const lockedArticles = await db
     .select({ id: articles.id })
     .from(articles)
     .where(eq(articles.defaultLocationId, locationId))
     .orderBy(asc(articles.id))
     .for("no key update");
-  await db.select({ id: stockLocations.id }).from(stockLocations).where(eq(stockLocations.id, locationId)).for("no key update");
+  await db.select({ id: stockLocations.id }).from(stockLocations).where(eq(stockLocations.id, locationId)).for("update");
   if (await locationHoldsStock(db, locationId)) return false;
 
   // A Spärrad lagerplats keeps its spärr (0185) — a revived one is still blocked.

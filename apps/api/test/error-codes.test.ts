@@ -40,6 +40,8 @@ import { SupplierInvoiceFileFromScanError } from "../src/modules/purchase/servic
 import {
   ArticleLocationInvalidError,
   FallbackLocationNotBlockableError,
+  ServiceArticleNotStockedError,
+  StockLocationNameReservedError,
   StockLocationAlreadyBlockedError,
   StockLocationBlockedError,
   StockLocationNotBlockedError,
@@ -923,6 +925,8 @@ const cases: Array<[Error, string]> = [
   [new StockLocationAlreadyBlockedError("K1"), ERROR_CODES.STOCK_LOCATION_ALREADY_BLOCKED],
   [new StockLocationNotBlockedError("K1"), ERROR_CODES.STOCK_LOCATION_NOT_BLOCKED],
   [new FallbackLocationNotBlockableError(), ERROR_CODES.FALLBACK_LOCATION_NOT_BLOCKABLE],
+  [new StockLocationNameReservedError(), ERROR_CODES.STOCK_LOCATION_NAME_RESERVED],
+  [new ServiceArticleNotStockedError("T-1"), ERROR_CODES.SERVICE_ARTICLE_NOT_STOCKED],
   [new StockLocationBlockedError("Huvudlager — K1"), ERROR_CODES.STOCK_LOCATION_BLOCKED],
   [new DefaultLocationBlockedError(), ERROR_CODES.DEFAULT_LOCATION_BLOCKED],
   // Prognos (#10)

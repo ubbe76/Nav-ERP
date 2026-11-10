@@ -8,12 +8,14 @@
 // värderingsdatum (stockValuedDate, the rule for every per-date reader of the
 // stock log); time_reports on the work date; mo_reports and purchase_receipts
 // are "alive on D": created on or before D and not undone, or undone after D.
-import { and, asc, eq, lt, ne, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, asc, eq, isNull, lt, ne, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import {
   articles,
   manufacturingOrders,
+  moMaterialConsumptions,
   moOperations,
+  moReportMaterials,
   moReports,
   purchaseOrderRows,
   purchaseOrders,
@@ -129,7 +131,7 @@ export function createWorkInProgressRepository(db: Db | Tx) {
     // standard/supplier prices are read as of.
     async listMaterialNet(asOf: string) {
       const net = sql<string>`-sum(${stockTransactions.quantityDelta})`;
-      return db
+      const stockNet = await db
         .select({
           manufacturingOrderId: sql<string>`${stockTransactions.referenceId}`,
           articleId: stockTransactions.articleId,
@@ -148,6 +150,46 @@ export function createWorkInProgressRepository(db: Db | Tx) {
         )
         .groupBy(stockTransactions.referenceId, stockTransactions.articleId)
         .having(sql`-sum(${stockTransactions.quantityDelta}) > 0`);
+      // Tjänster lagerförs inte (stocked-article.ts): a service component's
+      // consumption is a report-log line without a place and no stock row.
+      // It counts while its report lives on D (created by D, not undone by
+      // D) — the same as a draw and its Ångra return in the stock log.
+      const reportDay = sql`(${moReports.createdAt} AT TIME ZONE 'Europe/Stockholm')::date`;
+      const undoneDay = sql`(${moReports.undoneAt} AT TIME ZONE 'Europe/Stockholm')::date`;
+      const serviceNet = await db
+        .select({
+          manufacturingOrderId: moReports.manufacturingOrderId,
+          articleId: moMaterialConsumptions.componentArticleId,
+          quantity: sql<string>`sum(${moReportMaterials.quantity})`,
+          drawnAt: sql<Date | null>`max(${moReports.createdAt})`.mapWith(moReports.createdAt),
+        })
+        .from(moReportMaterials)
+        .innerJoin(moReports, eq(moReports.id, moReportMaterials.moReportId))
+        .innerJoin(moMaterialConsumptions, eq(moMaterialConsumptions.id, moReportMaterials.materialConsumptionId))
+        .where(
+          and(
+            isNull(moReportMaterials.locationId),
+            sql`${reportDay} <= ${asOf}::date`,
+            sql`(${moReports.undoneAt} IS NULL OR ${undoneDay} > ${asOf}::date)`,
+            sql`${moReports.manufacturingOrderId} IN ${candidateOrders(asOf)}`
+          )
+        )
+        .groupBy(moReports.manufacturingOrderId, moMaterialConsumptions.componentArticleId)
+        .having(sql`sum(${moReportMaterials.quantity}) > 0`);
+      // One row per (TO, article): a service drawn from stock before the rule
+      // and consumed without stock after has both.
+      const merged = new Map<string, (typeof stockNet)[number]>();
+      for (const row of [...stockNet, ...serviceNet]) {
+        const key = `${row.manufacturingOrderId}:${row.articleId}`;
+        const seen = merged.get(key);
+        if (!seen) {
+          merged.set(key, { ...row });
+          continue;
+        }
+        seen.quantity = String(Number(seen.quantity) + Number(row.quantity));
+        if (row.drawnAt && (!seen.drawnAt || row.drawnAt > seen.drawnAt)) seen.drawnAt = row.drawnAt;
+      }
+      return [...merged.values()];
     },
 
     // Verklig kostnad per D: the draws (negative mo_consumption) by D and the

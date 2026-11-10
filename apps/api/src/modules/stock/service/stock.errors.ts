@@ -138,6 +138,17 @@ export class StockLocationNotBlockedError extends Error {
 // The remainder of an Automatiskt draw lands on "***" (withRemainder), so a
 // blocked "***" would put minus on a place the usable balance leaves out.
 // Also a blocked place renamed to "***" (stock_locations_fallback_not_blocked).
+// "***" is the reservplats: the resolver finds it by name, so a second place
+// called "***" (or the real one renamed) makes the remainder of Automatiskt
+// and unplaced inflows land on whichever the lookup happens to return. The
+// name is reserved — no place gets it, and the one that has it keeps it.
+export class StockLocationNameReservedError extends Error {
+  constructor() {
+    super("Namnet *** är reserverat för reservplatsen — välj ett annat namn");
+    this.name = "StockLocationNameReservedError";
+  }
+}
+
 export class FallbackLocationNotBlockableError extends Error {
   constructor() {
     super("Reservplatsen *** kan inte spärras — resten av ett uttag med Automatiskt hamnar där");
@@ -162,5 +173,14 @@ export class StockLocationBlockedError extends Error {
   constructor(readonly label: string) {
     super(`Lagerplatsen ${label} är spärrad — uttag görs inte därifrån. Välj en annan lagerplats eller Automatiskt.`);
     this.name = "StockLocationBlockedError";
+  }
+}
+
+// Tjänster lagerförs inte (stocked-article.ts): a manual stock movement, a
+// transfer or a count row for a service article is refused.
+export class ServiceArticleNotStockedError extends Error {
+  constructor(articleNumber: string) {
+    super(`Artikeln ${articleNumber} är en tjänst — tjänster lagerförs inte`);
+    this.name = "ServiceArticleNotStockedError";
   }
 }

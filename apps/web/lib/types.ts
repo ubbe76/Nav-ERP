@@ -2865,7 +2865,8 @@ export interface MOReport {
   createdAt: string;
   undoneAt: string | null;
   undoneByName: string | null;
-  materials: { articleNumber: string; quantity: string; locationName: string }[];
+  // locationName null = a service component (tjänst): consumed, never drawn from stock.
+  materials: { articleNumber: string; quantity: string; locationName: string | null }[];
 }
 
 export type EmploymentType = "hourly" | "monthly";

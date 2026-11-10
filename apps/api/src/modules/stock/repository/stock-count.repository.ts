@@ -23,9 +23,11 @@ import {
 import { getNextOrderNumber } from "../../system/service/number-series.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { deactivateEmptyLocation } from "../service/location-lifecycle.js";
+import { isStockedArticleType } from "../service/stocked-article.js";
 import { stockValuedDate } from "./valued-at.js";
 import {
   ArticleNotFoundError,
+  ServiceArticleNotStockedError,
   DuplicateStockCountRowError,
   StockCountBackdateRefusedError,
   InactiveStockLocationError,
@@ -209,13 +211,17 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
           throw err;
         }
 
+        // Services are never counted (tjänster lagerförs inte,
+        // stocked-article.ts) — a balance one got before the rule stays as
+        // history.
         const balances = await tx
           .select({
             articleId: stockTransactions.articleId,
             quantity: sql<string>`sum(${stockTransactions.quantityDelta})`,
           })
           .from(stockTransactions)
-          .where(eq(stockTransactions.locationId, input.locationId))
+          .innerJoin(articles, eq(articles.id, stockTransactions.articleId))
+          .where(and(eq(stockTransactions.locationId, input.locationId), ne(articles.type, "service")))
           .groupBy(stockTransactions.articleId)
           .having(sql`sum(${stockTransactions.quantityDelta}) <> 0`);
 
@@ -413,10 +419,11 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
       return db.transaction(async (tx) => {
         const session = await lockOpenSession(tx, sessionId);
         const [article] = await tx
-          .select({ id: articles.id, articleNumber: articles.articleNumber })
+          .select({ id: articles.id, articleNumber: articles.articleNumber, type: articles.type })
           .from(articles)
           .where(eq(articles.id, input.articleId));
         if (!article) throw new ArticleNotFoundError(input.articleId);
+        if (!isStockedArticleType(article.type)) throw new ServiceArticleNotStockedError(article.articleNumber);
 
         const snapshot = await balanceFor(tx, input.articleId, session.locationId);
         try {

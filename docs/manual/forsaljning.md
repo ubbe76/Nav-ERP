@@ -857,6 +857,8 @@ Fakturor skapas i **fakturamodulen** (se [Fakturor](#fakturor) ovan) i stället 
 
 Enstaka rader kan fortfarande levereras direkt på kundorderkortet med **Leverera** — även det skapar ett eget leveranstillfälle (en följesedel med en rad).
 
+En rad med en **tjänst** levereras utan att något dras från lagret — [tjänster lagerförs inte](/hjalp/artiklar#artikeltyper) — och **Ångra…** räknar bara ned raden.
+
 ### Överleverans till kund
 
 Om en kundorderrad får levereras med mer än beställt antal styrs först av kundkortets fält **Överleverans** och annars av systeminställningen **Tillåten överleverans på kundorder (%)** under [System → Inställningar](/hjalp/system#installningar):
