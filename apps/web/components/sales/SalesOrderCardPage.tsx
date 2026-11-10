@@ -72,12 +72,10 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
   const defaultTo = await getDefaultRecipient("customers", order.customerId, customer?.email ?? null, cookieHeader);
   const drawingCount = await countDrawings(rows.map((r) => r.articleId), cookieHeader);
 
-  // "Skicka orderbekräftelse" on a quote is what confirms it; on later
-  // statuses it's a resend. The quote itself is only sent while it IS a quote.
+  // The quote is only sent while it IS a quote; the order confirmation only
+  // from the order card — a quote has no confirmation buttons (Bekräfta
+  // makes it an order first).
   const sendButtons: SendButtonConfig[] = [];
-  // An OF-numbered quote gets its KO number when the confirmation is sent, so
-  // the default texts name the quote rather than a number it doesn't have yet.
-  const confirmsQuote = order.status === "quote" && !!quoteNumber && quoteNumber === order.orderNumber;
   // Dokument på engelska (#7): the mail defaults follow the customer's language.
   const documentLanguage = documentLanguageOf(order.customerLanguage);
   if (order.status === "quote") {
@@ -91,22 +89,18 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
       extraBody: { variant: "quote" },
     });
   }
-  if (order.status !== "cancelled" && order.status !== "lost") {
+  if (kind === "order" && order.status !== "cancelled") {
     const confirmationMail = documentMailTexts(
-      { kind: "orderConfirmation", number: order.orderNumber, quoteNumber: confirmsQuote ? quoteNumber : null },
+      { kind: "orderConfirmation", number: order.orderNumber, quoteNumber: null },
       documentLanguage
     );
     sendButtons.push({
       label: "Skicka orderbekräftelse",
-      modalTitle: confirmsQuote
-        ? `Skicka orderbekräftelse för offert ${quoteNumber} via e-post`
-        : `Skicka orderbekräftelse ${order.orderNumber} via e-post`,
+      modalTitle: `Skicka orderbekräftelse ${order.orderNumber} via e-post`,
       endpoint: `/api/v1/sales-orders/${order.id}/send-email`,
       subject: confirmationMail.subject,
       message: confirmationMail.body,
       extraBody: { variant: "confirmation" },
-      // Confirming a quote gives it a KO number — land on the order card.
-      ...(order.status === "quote" ? { redirectTo: `/forsaljning/ordrar/${order.id}` } : {}),
     });
   }
   // The invoice exists once the order is invoiced. Its email goes to the
@@ -230,17 +224,16 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
             ? []
             : [
           { label: "Offert (PDF)", href: `/api/v1/sales-orders/${order.id}/pdf?variant=quote`, configurationPrices: true },
-          // An OF-numbered quote has no KO number yet — its confirmation is
-          // only made by Skicka orderbekräftelse, which gives it one.
-          ...(confirmsQuote
-            ? []
-            : [
+          // Only on the order card — a quote has no order confirmation.
+          ...(kind === "order"
+            ? [
                 {
                   label: "Orderbekräftelse (PDF)",
                   href: `/api/v1/sales-orders/${order.id}/pdf?variant=confirmation`,
                   configurationPrices: true,
                 },
-              ]),
+              ]
+            : []),
           { label: "Plocklista (PDF)", href: `/api/v1/sales-orders/${order.id}/pick-list` },
           ...(order.status === "invoiced" && order.invoiceNumber
             ? [{ label: "Faktura (PDF)", href: `/api/v1/sales-orders/${order.id}/invoice-pdf` }]
