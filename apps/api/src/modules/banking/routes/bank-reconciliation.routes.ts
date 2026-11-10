@@ -11,7 +11,9 @@ import {
   createBankOpeningSchema,
   createBankReconciliationSchema,
   createBankRuleSchema,
+  ignoreBankStatementEntriesSchema,
   listBankAccountsQuerySchema,
+  unignoreBankStatementEntriesSchema,
   updateBankAccountSchema,
   updateBankRuleSchema,
 } from "@navet/shared";
@@ -50,6 +52,7 @@ import {
   BankMatchWrongAccountError,
   BankOpeningBalanceMismatchError,
   BankOpeningNotAllowedError,
+  BankReconciliationFutureDateError,
   BankReconciliationIncompleteError,
   BankRuleAccountMissingError,
   BankRuleAmbiguousError,
@@ -59,6 +62,9 @@ import {
   BankStatementAccountUnknownError,
   BankStatementCsvMappingError,
   BankStatementCurrencyError,
+  BankStatementEntriesMixedAccountsError,
+  BankStatementEntryIgnoredError,
+  BankStatementEntryMatchedError,
   BankStatementEntryNotFoundError,
   BankStatementFormatError,
 } from "../service/banking.errors.js";
@@ -90,6 +96,8 @@ function bankError(err: unknown, reply: Reply) {
     err instanceof BankAccountIdentifierTakenError ||
     err instanceof BankMatchAlreadyMatchedError ||
     err instanceof BankMatchAlreadyUndoneError ||
+    err instanceof BankStatementEntryIgnoredError ||
+    err instanceof BankStatementEntryMatchedError ||
     err instanceof BankRuleMissingError ||
     err instanceof AccountingPeriodLockedError ||
     err instanceof UnbalancedVerificationError ||
@@ -114,6 +122,7 @@ function bankError(err: unknown, reply: Reply) {
     err instanceof BankStatementAccountUnknownError ||
     err instanceof BankStatementAccountMismatchError ||
     err instanceof BankStatementCurrencyError ||
+    err instanceof BankStatementEntriesMixedAccountsError ||
     err instanceof BankMatchWrongAccountError ||
     err instanceof BankEntryBookMismatchError ||
     err instanceof BankRuleAccountMissingError ||
@@ -124,6 +133,7 @@ function bankError(err: unknown, reply: Reply) {
   ) {
     return reply.code(400).send(errorBody(err));
   }
+  if (err instanceof BankReconciliationFutureDateError) return reply.code(400).send({ ...errorBody(err), today: err.today });
   throw err;
 }
 
@@ -264,6 +274,26 @@ export async function bankReconciliationRoutes(app: FastifyInstance, opts: { ser
     const input = bookBankEntriesByRuleSchema.parse(req.body);
     try {
       return await service.bookByRule(input, req.user!.id);
+    } catch (err) {
+      return bankError(err, reply);
+    }
+  });
+
+  // --- Ignorera poster --- (static paths: registered beside /:id/book,
+  // which has another shape, so nothing collides)
+  app.post("/bank-statement-entries/ignore", ekonomi, async (req, reply) => {
+    const input = ignoreBankStatementEntriesSchema.parse(req.body);
+    try {
+      return await service.ignoreEntries(input, req.user!.id);
+    } catch (err) {
+      return bankError(err, reply);
+    }
+  });
+
+  app.post("/bank-statement-entries/unignore", ekonomi, async (req, reply) => {
+    const input = unignoreBankStatementEntriesSchema.parse(req.body);
+    try {
+      return await service.unignoreEntries(input, req.user!.id);
     } catch (err) {
       return bankError(err, reply);
     }

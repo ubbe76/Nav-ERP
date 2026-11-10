@@ -671,6 +671,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   },
   "einvoice-not-allowed": serverMessage("Fakturan kan inte skickas som e-faktura."),
   "einvoice-already-sent": "Fakturan har redan en pågående eller godkänd e-fakturasändning.",
+  "einvoice-other-environment": serverMessage("Raden hör till den andra miljön — välj den miljön under System → E-faktura för att hantera den."),
+  "einvoice-key-environment-mismatch": serverMessage("Nyckeln hör inte till vald miljö — välj samma miljö som nyckeln."),
   "einvoice-document-invalid": "E-fakturan klarade inte Navs egen kontroll och skickades inte",
   "einvoice-provider-rejected": "Mottagande tjänst (B2Brouter) avvisade e-fakturan",
   "einvoice-provider-unauthorized": "B2Brouter nekade åtkomst — kontrollera API-nyckeln och miljön under System → E-faktura.",
@@ -851,6 +853,13 @@ const MESSAGES: Record<string, MessageEntry> = {
     return typeof body?.accountName === "string" && typeof body?.fileIdentifier === "string"
       ? `Bankkontot ${body.accountName} har redan importerade poster under ${String(body.identifier ?? "sin identifierare")} — filens konto ${body.fileIdentifier} kan inte tas över. Lägg upp ett eget bankkonto för det.`
       : "Bankkontot har redan importerade poster under en annan identifierare — lägg upp ett eget bankkonto för filens konto.";
+  },
+  "bank-statement-entry-ignored": "Posten är ignorerad och kan varken matchas eller bokföras — ångra ignoreringen först, eller ladda om sidan.",
+  "bank-statement-entry-matched": "En matchad post kan inte ignoreras — ångra matchningen först, eller ladda om sidan.",
+  "bank-statement-entries-mixed-accounts": "Posterna hör till olika bankkonton — ignorera ett bankkonto i taget.",
+  "bank-reconciliation-future-date": (err) => {
+    const today = (err.body as { today?: unknown } | undefined)?.today;
+    return typeof today === "string" ? `Avstämd t.o.m. kan inte ligga i framtiden — välj senast ${today}.` : "Avstämd t.o.m. kan inte ligga i framtiden.";
   },
   // generic (thrown by the zod/body-parsing layer, not a named domain error)
   "validation-failed": "Ogiltiga uppgifter — kontrollera fälten.",

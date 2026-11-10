@@ -5386,6 +5386,7 @@ export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
   // Bankfiler (ISO 20022).
   payment_batch: "Betalfil",
   bank_file: "Bankfil",
+  bank_statement_entry: "Kontoutdragspost",
   bank_settings: "Bankinställningar",
   einvoice_settings: "E-fakturainställningar",
   // Fakturaskanning.
@@ -5474,6 +5475,10 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   entry_restored: "Post återställd",
   einvoice_sent: "E-faktura skickad",
   einvoice_failed: "E-faktura misslyckad",
+  einvoice_not_sent: "E-faktura skickades inte",
+  // Bankavstämningen: Ignorera poster / Ångra ignorering.
+  ignored: "Ignorerad",
+  unignored: "Ignorering ångrad",
   theme_created: "Tema skapat",
   theme_updated: "Tema ändrat",
   theme_deleted: "Tema borttaget",
@@ -6622,6 +6627,17 @@ export interface BankReconciliationView {
   // it or are unmatched now, and unmatched entries ≤ the mark.
   changedAfterReconciliation: { through: string; rows: number; entries: number } | null;
   proposals: BankMatchProposal[];
+  // Ignorera: the period's ignored entries (out of every list and sum above)
+  // and the imports behind the open ones ("Markera alla från en import").
+  ignoredEntries: BankIgnoredEntry[];
+  imports: { bankFileId: string; filename: string; importedAt: string; count: number }[];
+}
+
+export interface BankIgnoredEntry extends BankStatementEntryBase {
+  ignoredAt: string;
+  ignoredBy: string | null;
+  ignoredByName: string | null;
+  ignoreReason: string;
 }
 
 export interface BankStatementPreviewEntry {
@@ -6645,6 +6661,8 @@ export interface BankStatementPreviewStatement {
   entryCount: number;
   newEntryCount: number;
   duplicateCount: number;
+  // New entries dated on or before the account's Startpunkt (warned about).
+  beforeOpening: { count: number; from: string; to: string; openingDate: string } | null;
   entries: BankStatementPreviewEntry[];
 }
 

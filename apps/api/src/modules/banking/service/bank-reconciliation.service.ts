@@ -17,11 +17,14 @@ import {
   type CreateBankReconciliationInput,
   type CreateBankRuleInput,
   type BankReconciliationQuery,
+  type IgnoreBankStatementEntriesInput,
+  type UnignoreBankStatementEntriesInput,
   type UpdateBankAccountInput,
   type UpdateBankRuleInput,
   type VerificationRowInput,
 } from "@navet/shared";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
+import { stockholmDateOf } from "../../system/service/delivery-days.js";
 import { errorBody } from "../../system/service/error-body.js";
 import type { PostingSettings } from "../../system/service/posting-settings.js";
 import type { VerificationComposeInput } from "../../economy/service/economy.service.js";
@@ -53,6 +56,7 @@ import {
   type BankReconciliationRepository,
   type BankReconciliationRow,
   type BankRuleRow,
+  type IgnoredEntryView,
   type LedgerRowView,
   type StatementEntryView,
 } from "../repository/bank-reconciliation.repository.js";
@@ -73,6 +77,7 @@ import {
   BankMatchWrongAccountError,
   BankOpeningBalanceMismatchError,
   BankOpeningNotAllowedError,
+  BankReconciliationFutureDateError,
   BankReconciliationIncompleteError,
   BankRuleAccountMissingError,
   BankRuleAmbiguousError,
@@ -82,6 +87,9 @@ import {
   BankStatementAccountUnknownError,
   BankStatementCsvMappingError,
   BankStatementCurrencyError,
+  BankStatementEntriesMixedAccountsError,
+  BankStatementEntryIgnoredError,
+  BankStatementEntryMatchedError,
   BankStatementEntryNotFoundError,
   BankStatementFormatError,
 } from "./banking.errors.js";
@@ -185,6 +193,10 @@ export interface StatementPreview {
   entryCount: number;
   newEntryCount: number;
   duplicateCount: number;
+  // New entries dated on or before the account's Startpunkt: the opening
+  // matching was made without them, so they land as unmatched (a warning —
+  // the import is still allowed, and Ignorera takes them out again).
+  beforeOpening: { count: number; from: string; to: string; openingDate: string } | null;
   entries: PreviewEntry[];
 }
 
@@ -450,6 +462,7 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
     const locked = await repo.lockEntry(tx, entry.id);
     if (!locked) throw new BankStatementEntryNotFoundError(entry.id);
     if (await repo.isEntryMatched(tx, entry.id)) throw new BankMatchAlreadyMatchedError();
+    if (await repo.anyIgnored(tx, [entry.id])) throw new BankStatementEntryIgnoredError();
     const onBank = round2(input.rows.filter((r) => r.accountId === ledgerAccountId).reduce((acc, r) => acc + r.debit - r.credit, 0));
     if (onBank !== locked.amount) throw new BankEntryBookMismatchError(locked.amount, onBank);
     const series = input.seriesId ? await repo.findSeriesById(tx, input.seriesId) : await repo.ensureSeries(tx, BANK_SERIES);
@@ -504,6 +517,7 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
     const entry = await repo.findEntry(db, entryId);
     if (!entry) throw new BankStatementEntryNotFoundError(entryId);
     if (await repo.isEntryMatched(db, entryId)) throw new BankMatchAlreadyMatchedError();
+    if (await repo.anyIgnored(db, [entryId])) throw new BankStatementEntryIgnoredError();
     const hits = matchingRules(rules, entry);
     if (hits.length === 0) throw new BankRuleMissingError();
     if (hits.length > 1) throw new BankRuleAmbiguousError(hits.map((r) => r.id));
@@ -537,6 +551,8 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
         await db.transaction(async (tx) => {
           await lockBankAccount(tx, account.id);
           if (await repo.anyMatched(tx, proposal.entryIds, proposal.rowIds)) return;
+          // Ignored between the proposal and the lock: no longer a candidate.
+          if (await repo.anyIgnored(tx, proposal.entryIds)) return;
           const id = await repo.insertMatch(tx, { bankAccountId: account.id, kind: "auto", createdBy: userId }, proposal.entryIds, proposal.rowIds);
           await audit(tx, "bank_match", id, "auto_matched", { basis: proposal.basis, entryIds: proposal.entryIds, rowIds: proposal.rowIds }, userId);
           matched++;
@@ -734,6 +750,11 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
       const rules = await rulesList();
       const keys = parsed.statements.flatMap((s) => s.entries.map((e) => e.dedupeKey));
       const existing = await repo.existingEntryKeys(db, keys);
+      // The Startpunkt per resolved account (read once per account).
+      const openingDates = new Map<string, string | null>();
+      for (const { account } of resolved) {
+        if (account && !openingDates.has(account.id)) openingDates.set(account.id, (await repo.openingReconciliation(db, account.id))?.throughDate ?? null);
+      }
       const statements: StatementPreview[] = resolved.map(({ statement, account }) => {
         if (account && statement.currency && statement.currency !== account.currency) {
           blockers.push(`Kontoutdraget är i ${statement.currency} men bankkontot ${account.name} är i ${account.currency}`);
@@ -755,6 +776,17 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
           ruleId: suggestionFor(rules, e)?.ruleId ?? null,
         }));
         const duplicateCount = entries.filter((e) => e.duplicate).length;
+        // New entries on or before the Startpunkt: allowed, but warned about.
+        const openingDate = account ? (openingDates.get(account.id) ?? null) : null;
+        const early = openingDate ? entries.filter((e) => !e.duplicate && e.bookingDate <= openingDate).map((e) => e.bookingDate).sort() : [];
+        const beforeOpening = openingDate && early.length > 0 ? { count: early.length, from: early[0]!, to: early[early.length - 1]!, openingDate } : null;
+        if (beforeOpening && account) {
+          const span = beforeOpening.from === beforeOpening.to ? beforeOpening.from : `${beforeOpening.from}–${beforeOpening.to}`;
+          warnings.push(
+            `${beforeOpening.count} ${beforeOpening.count === 1 ? "post är daterad" : "poster är daterade"} på eller före startpunkten ${openingDate} för ${account.name} (${span}). ` +
+              `Startpunkten täcker redan de dagarna, så ${beforeOpening.count === 1 ? "posten" : "posterna"} blir ${beforeOpening.count === 1 ? "omatchad" : "omatchade"} — ignorera ${beforeOpening.count === 1 ? "den" : "dem"} efter importen om ${beforeOpening.count === 1 ? "den" : "de"} inte ska stämmas av.`
+          );
+        }
         return {
           accountIdentifier: statement.accountIdentifier,
           bankAccountId: account?.id ?? null,
@@ -765,6 +797,7 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
           entryCount: entries.length,
           newEntryCount: entries.length - duplicateCount,
           duplicateCount,
+          beforeOpening,
           entries,
         };
       });
@@ -932,11 +965,16 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
       const latest = await repo.latestReconciliation(db, bankAccount.id);
       const changed = latest && ledger ? await repo.changedSinceReconciliation(db, bankAccount.id, ledger.id, latest.throughDate, latest.createdAt) : null;
       const proposals: MatchProposal[] = proposeMatches(forProposals(entries), rows);
+      const ignoredEntries: IgnoredEntryView[] = await repo.ignoredEntries(db, bankAccount.id, { from: query.from, to: query.to });
+      // The imports behind the open entries ("Markera alla från en import").
+      const imports = await repo.filesByIds(db, [...new Set(entries.map((e) => e.bankFileId))]);
       return {
         bankAccount,
         from: query.from,
         to: query.to,
         statementEntries: entries.map((e): EntryView => ({ ...e, ruleSuggestion: suggestionFor(rules, e) })),
+        ignoredEntries,
+        imports: imports.map((f) => ({ bankFileId: f.id, filename: f.filename, importedAt: f.createdAt, count: entries.filter((e) => e.bankFileId === f.id).length })),
         ledgerRows: rows.map(toRowOut),
         matches,
         summary,
@@ -974,6 +1012,7 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
         matchId = await db.transaction(async (tx) => {
           await lockBankAccount(tx, account.id);
           if (await repo.anyMatched(tx, entryIds, rowIds)) throw new BankMatchAlreadyMatchedError();
+          if (await repo.anyIgnored(tx, entryIds)) throw new BankStatementEntryIgnoredError();
           const id = await repo.insertMatch(tx, { bankAccountId: account.id, kind: "manual", createdBy: userId }, entryIds, rowIds);
           await audit(tx, "bank_match", id, "matched", { entryIds, rowIds, sum: entriesSum }, userId);
           return id;
@@ -1084,6 +1123,59 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
       return { booked, failed };
     },
 
+    // --- Ignorera poster ---
+    // A wrongly imported entry (the wrong file, days before the Startpunkt)
+    // can never be deleted — the file is räkenskapsinformation — so it is
+    // taken out of the reconciliation with a stamp and a reason. Under the
+    // account's advisory lock like every matching write, so an entry is
+    // never matched and ignored at once; every entry is audited in the same
+    // transaction.
+    async ignoreEntries(input: IgnoreBankStatementEntriesInput, userId: string): Promise<{ ignored: number }> {
+      const bankAccountId = await accountOfEntries(input.entryIds);
+      await db.transaction(async (tx) => {
+        await lockBankAccount(tx, bankAccountId);
+        const locked = await repo.lockEntriesForIgnore(tx, input.entryIds);
+        if (locked.length !== input.entryIds.length) throw new BankStatementEntryNotFoundError(input.entryIds.find((id) => !locked.some((e) => e.id === id))!);
+        if (locked.some((e) => e.ignoredAt !== null)) throw new BankStatementEntryIgnoredError();
+        if (await repo.anyMatched(tx, input.entryIds, [])) throw new BankStatementEntryMatchedError();
+        await repo.setEntriesIgnored(tx, input.entryIds, { ignoredAt: now(), ignoredBy: userId, ignoreReason: input.reason });
+        await tx.insert(auditLog).values(
+          locked.map((e) => ({
+            entityType: "bank_statement_entry",
+            entityId: e.id,
+            action: "ignored",
+            detail: { bankAccountId, bookingDate: e.bookingDate, amount: e.amount, reason: input.reason },
+            userId,
+          }))
+        );
+      });
+      return { ignored: input.entryIds.length };
+    },
+
+    // Ångra ignorering: the entries are open again (unmatched). Restoring an
+    // entry that is not ignored changes nothing (idempotent).
+    async unignoreEntries(input: UnignoreBankStatementEntriesInput, userId: string): Promise<{ restored: number }> {
+      const bankAccountId = await accountOfEntries(input.entryIds);
+      return db.transaction(async (tx) => {
+        await lockBankAccount(tx, bankAccountId);
+        const locked = await repo.lockEntriesForIgnore(tx, input.entryIds);
+        if (locked.length !== input.entryIds.length) throw new BankStatementEntryNotFoundError(input.entryIds.find((id) => !locked.some((e) => e.id === id))!);
+        const ignored = locked.filter((e) => e.ignoredAt !== null);
+        if (ignored.length === 0) return { restored: 0 };
+        await repo.setEntriesIgnored(tx, ignored.map((e) => e.id), { ignoredAt: null, ignoredBy: null, ignoreReason: null });
+        await tx.insert(auditLog).values(
+          ignored.map((e) => ({
+            entityType: "bank_statement_entry",
+            entityId: e.id,
+            action: "unignored",
+            detail: { bankAccountId, bookingDate: e.bookingDate, amount: e.amount, reason: e.ignoreReason },
+            userId,
+          }))
+        );
+        return { restored: ignored.length };
+      });
+    },
+
     // --- Bankregler ---
     async listRules(opts: { seed?: boolean } = {}): Promise<{ rows: BankRuleView[]; total: number }> {
       if (opts.seed !== false) await seedRulesOnce();
@@ -1137,6 +1229,10 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
     async createReconciliation(input: CreateBankReconciliationInput, userId: string): Promise<ReconciliationView> {
       const account = await requireAccount(db, input.bankAccountId);
       const ledger = await requireLedgerAccount(db, account.ledgerAccount);
+      // The mark is append-only: a day that has not come yet (Stockholm) is
+      // refused — nobody has seen a statement for it.
+      const today = stockholmDateOf(now());
+      if (input.throughDate > today) throw new BankReconciliationFutureDateError(today);
       const row = await db.transaction(async (tx) => {
         await lockBankAccount(tx, account.id);
         const unmatchedEntries = await repo.unmatchedEntriesCount(tx, account.id, input.throughDate);
@@ -1171,6 +1267,18 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
       return reconciliationView(row);
     },
   };
+
+  // The ONE bank account a call's entries belong to (400 when they are
+  // spread over several, 404 for an unknown id) — read before the lock,
+  // which needs the account; the entries are re-read under it.
+  async function accountOfEntries(entryIds: string[]): Promise<string> {
+    const found = await repo.entryAccounts(db, entryIds);
+    const missing = entryIds.find((id) => !found.some((e) => e.id === id));
+    if (missing) throw new BankStatementEntryNotFoundError(missing);
+    const accountIds = new Set(found.map((e) => e.bankAccountId));
+    if (accountIds.size > 1) throw new BankStatementEntriesMixedAccountsError();
+    return found[0]!.bankAccountId;
+  }
 
   async function requireRuleAccount(number: string) {
     const account = await repo.findLedgerAccountByNumber(db, number);

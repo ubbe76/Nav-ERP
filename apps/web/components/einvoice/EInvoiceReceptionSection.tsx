@@ -326,7 +326,8 @@ export function EInvoiceReceptionSection({
                     </>
                   )}
                   {row.outcome === "unreadable" ? " — öppna i B2Brouter " : ""}
-                  {row.outcome === "unreadable" ? (
+                  {/* The ack goes with the saved key: only the selected environment's rows. */}
+                  {row.outcome === "unreadable" && row.environment === environment ? (
                     <Button type="button" variant="secondary" size="small" disabled={dismissing === row.id} onClick={() => void dismiss(row)}>
                       Markera som hanterad
                     </Button>

@@ -1,0 +1,5 @@
+ALTER TABLE "bank_statement_entries" ADD COLUMN "ignored_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "bank_statement_entries" ADD COLUMN "ignored_by" uuid;--> statement-breakpoint
+ALTER TABLE "bank_statement_entries" ADD COLUMN "ignore_reason" text;--> statement-breakpoint
+ALTER TABLE "bank_statement_entries" ADD CONSTRAINT "bank_statement_entries_ignored_by_users_id_fk" FOREIGN KEY ("ignored_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "bank_statement_entries" ADD CONSTRAINT "bank_statement_entries_ignored_all_or_none" CHECK (("bank_statement_entries"."ignored_at" IS NULL AND "bank_statement_entries"."ignored_by" IS NULL AND "bank_statement_entries"."ignore_reason" IS NULL) OR ("bank_statement_entries"."ignored_at" IS NOT NULL AND "bank_statement_entries"."ignore_reason" IS NOT NULL AND btrim("bank_statement_entries"."ignore_reason") <> ''));

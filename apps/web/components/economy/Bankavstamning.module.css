@@ -237,3 +237,9 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* "Markera alla från en import" above the unmatched entries. */
+.importPick {
+  max-width: 520px;
+  margin: 0 0 12px;
+}

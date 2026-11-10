@@ -627,7 +627,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     // Skicka e-faktura automatiskt vid Utfärda: the e-invoice service is
     // built below (it reads invoices through this one); the closure is only
     // called at runtime, long after both exist.
-    (invoiceId, userId) => einvoiceService.sendAfterIssue(invoiceId, userId)
+    (invoiceId, userId, opts) => einvoiceService.sendAfterIssue(invoiceId, userId, opts)
   );
   // Räntefakturering: one invoice per customer with the interest/fee rows,
   // issued through the ordinary path; referensräntor via the same service

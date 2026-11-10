@@ -51,6 +51,9 @@ import { camt053File, type Camt053Entry } from "./helpers/camt053.js";
 // and the alert. Dates live in BANK_YEAR (2024), far from the real calendar.
 
 const service = buildBankReconciliationService();
+// Avstämd t.o.m. refuses a day after today (bankgranskningen): the marks
+// dated after the suite's CLOCK (2024-10-09) are made at the year's end.
+const yearEndService = buildBankReconciliationService(() => new Date(`${BANK_YEAR}-12-31T10:00:00Z`));
 let userId: string;
 let restoreCompany: () => Promise<void>;
 const SWEDBANK = "821491234567890";
@@ -498,7 +501,7 @@ describe("avstämd t.o.m.", () => {
     await service.import(uploadOf(statementWith([{ direction: "credit", amount: 5, bookingDate: `${BANK_YEAR}-10-10`, acctSvcrRef: "S4", addtlNtryInf: "X" }], { closing: { amount: 900, date: `${BANK_YEAR}-10-10` } })), { autoMatch: false }, userId);
     await bookOnBank(`${BANK_YEAR}-10-10`, 5, "1510");
     await service.autoMatch({ bankAccountId: account.id }, userId);
-    const mismatch = await service.createReconciliation({ bankAccountId: account.id, throughDate: `${BANK_YEAR}-10-10` }, userId).catch((err: unknown) => err);
+    const mismatch = await yearEndService.createReconciliation({ bankAccountId: account.id, throughDate: `${BANK_YEAR}-10-10` }, userId).catch((err: unknown) => err);
     expect(mismatch).toBeInstanceOf(BankReconciliationIncompleteError);
     expect((mismatch as BankReconciliationIncompleteError).reason).toBe("balance-mismatch");
     expect((mismatch as BankReconciliationIncompleteError).detail).toEqual({ statementBalance: 900, ledgerBalance: 835, inTransit: 0 });
@@ -522,7 +525,7 @@ describe("årsbokslut och avisering", () => {
     await service.updateAccount(inactive.id, { active: false }, userId);
     expect(await unreconciledBankAccountsAsOf(db, `${BANK_YEAR}-12-31`)).toEqual([{ id: account.id, name: "Företagskonto", ledgerAccount: "1930", reconciledThrough: null }]);
     await service.import(uploadOf(statementWith([], { closing: { amount: 0, date: `${BANK_YEAR}-11-30` } })), { autoMatch: false }, userId);
-    await service.createReconciliation({ bankAccountId: account.id, throughDate: `${BANK_YEAR}-11-30` }, userId);
+    await yearEndService.createReconciliation({ bankAccountId: account.id, throughDate: `${BANK_YEAR}-11-30` }, userId);
     const partial = await unreconciledBankAccountsAsOf(db, `${BANK_YEAR}-12-31`);
     expect(partial).toEqual([{ id: account.id, name: "Företagskonto", ledgerAccount: "1930", reconciledThrough: `${BANK_YEAR}-11-30` }]);
     expect(await unreconciledBankAccountsAsOf(db, `${BANK_YEAR}-11-30`)).toEqual([]);
@@ -648,7 +651,7 @@ describe("i transit", () => {
     expect(view.summary).toMatchObject({ statementBalance: 1000, ledgerBalance: -200, inTransit: 1200, difference: 1200, explained: true });
     view = await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-10-01`, to: `${BANK_YEAR}-10-12` });
     expect(view.summary).toMatchObject({ statementBalance: 800, ledgerBalance: 800, inTransit: 0, difference: 0, explained: true });
-    const mismatch = await service.createReconciliation({ bankAccountId: account.id, throughDate: `${BANK_YEAR}-10-12` }, userId);
+    const mismatch = await yearEndService.createReconciliation({ bankAccountId: account.id, throughDate: `${BANK_YEAR}-10-12` }, userId);
     expect(mismatch).toMatchObject({ statementBalance: 800, ledgerBalance: 800 });
   });
 });

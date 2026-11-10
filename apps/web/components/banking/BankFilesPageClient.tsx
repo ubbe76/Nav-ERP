@@ -11,6 +11,7 @@ import { useListColumns } from "../ui/ListColumns";
 import { Table } from "../ui/Table";
 import { GatedLink } from "../ui/GatedLink";
 import { API_URL, ApiError } from "../../lib/api";
+import { formatStockholmDate, formatStockholmDateTime } from "../../lib/date";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import type { BankFileListRow, BankFileMeta, BankFileSkippedFrom, Paged } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
@@ -145,9 +146,9 @@ export function BankFilesPageClient({ direction, files, pageSize }: { direction:
                 </Link>
               );
             case "bankCreatedAt":
-              return row.bankCreatedAt ? row.bankCreatedAt.slice(0, 16).replace("T", " ") : "–";
+              return formatStockholmDateTime(row.bankCreatedAt);
             case "createdAt":
-              return row.createdAt.slice(0, 10);
+              return formatStockholmDate(row.createdAt);
             case "entries":
               return row.entries;
             case "booked":

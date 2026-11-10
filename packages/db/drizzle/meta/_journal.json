@@ -1443,6 +1443,13 @@
       "when": 1794320885410,
       "tag": "0205_auth_granskning",
       "breakpoints": true
+    },
+    {
+      "idx": 206,
+      "version": "7",
+      "when": 1794337339762,
+      "tag": "0206_bankgranskning",
+      "breakpoints": true
     }
   ]
 }

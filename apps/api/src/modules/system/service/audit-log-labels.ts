@@ -45,6 +45,7 @@ export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
   // Bankfiler (ISO 20022).
   payment_batch: "Betalfil",
   bank_file: "Bankfil",
+  bank_statement_entry: "Kontoutdragspost",
   bank_settings: "Bankinställningar",
   einvoice_settings: "E-fakturainställningar",
   // Fakturaskanning.
@@ -117,6 +118,10 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   entry_restored: "Post återställd",
   einvoice_sent: "E-faktura skickad",
   einvoice_failed: "E-faktura misslyckad",
+  einvoice_not_sent: "E-faktura skickades inte",
+  // Bankavstämningen: Ignorera poster / Ångra ignorering.
+  ignored: "Ignorerad",
+  unignored: "Ignorering ångrad",
   theme_created: "Tema skapat",
   theme_updated: "Tema ändrat",
   theme_deleted: "Tema borttaget",

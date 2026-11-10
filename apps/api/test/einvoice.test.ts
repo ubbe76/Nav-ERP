@@ -23,7 +23,7 @@ import { createVerificationPoster } from "../src/modules/economy/service/verific
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { createEinvoiceRepository } from "../src/modules/einvoice/repository/einvoice.repository.js";
 import { createEinvoiceSettingsService } from "../src/modules/einvoice/service/einvoice-settings.service.js";
-import { createEinvoiceService, resolveRecipient, blockedReasonFor } from "../src/modules/einvoice/service/einvoice.service.js";
+import { createEinvoiceService, resolveRecipient, blockedReasonFor, UNEXPECTED_SEND_MESSAGE } from "../src/modules/einvoice/service/einvoice.service.js";
 import { createEinvoiceWebhookService } from "../src/modules/einvoice/service/einvoice-webhook.service.js";
 import { createHmac } from "node:crypto";
 import {
@@ -471,7 +471,8 @@ describe("Skicka e-faktura — the send", () => {
     fake.state.importError = new Error("boom");
     await expect(einvoice.send(invoice.id, userId)).rejects.toThrow("boom");
     const [row] = await db.select().from(einvoiceTransmissions);
-    expect(row).toMatchObject({ status: "failed", errorMessage: "boom" });
+    // The fixed text, never the internal message (review 2026-11-10).
+    expect(row).toMatchObject({ status: "failed", errorMessage: UNEXPECTED_SEND_MESSAGE });
   });
 
   it("writes the access point's id to the row BEFORE the send, so a death in between leaves a pollable row", async () => {
@@ -544,7 +545,9 @@ describe("Skicka e-faktura — the send", () => {
   it("one live transmission per invoice AND environment: a sandbox trial never blocks the real send", async () => {
     const invoice = await issuedInvoice(await makeCustomer());
     await sentRow(invoice.id, { environment: "sandbox", status: "delivered", providerState: "registered" });
-    await enable({ einvoice_environment: "production" });
+    // Each environment with its own key: a test_ key under Produktion is
+    // refused since the review 2026-11-10.
+    await enable({ einvoice_environment: "production", einvoice_api_key: "prod_key" });
     const real = await einvoice.send(invoice.id, userId);
     expect(real).toMatchObject({ status: "sent", environment: "production" });
     await expect(einvoice.send(invoice.id, userId)).rejects.toBeInstanceOf(EinvoiceAlreadySentError);

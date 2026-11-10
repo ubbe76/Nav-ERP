@@ -11,7 +11,8 @@ import {
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { readPostingSettings } from "../../system/service/posting-settings.js";
 import { findItemByEndToEndId } from "../repository/payment-batch.repository.js";
-import type { BankFileRepository } from "../repository/bank-file.repository.js";
+import { CAMT054_MESSAGE_TYPE, type BankFileRepository } from "../repository/bank-file.repository.js";
+import { bankFileInstant } from "./banking-dates.js";
 import {
   BankEntryAlreadyBookedError,
   BankEntryAmountDiffersError,
@@ -219,7 +220,8 @@ export function createBankFileService(deps: BankFileServiceDeps) {
       if (existing) return { file: existing, created: false, skippedFrom: [] as SkippedFrom[], warnings: [] as string[] };
       // Parse errors are thrown before anything is written.
       const parsed = parseCamt054(input.data.toString("utf8"));
-      const bankCreatedAt = parsed.createdAt ? new Date(parsed.createdAt) : null;
+      // A CreDtTm without a zone is Swedish wall-clock time, not the process's.
+      const bankCreatedAt = bankFileInstant(parsed.createdAt);
       try {
         const { file, skippedFrom } = await db.transaction(async (tx) => {
           const earlier = await repo.existingEntries(tx, parsed.entries.map((e) => e.dedupeKey));
@@ -240,14 +242,14 @@ export function createBankFileService(deps: BankFileServiceDeps) {
           // still keeps every entry exactly once.
           const file = await repo.insertFile(tx, {
             direction: "incoming",
-            messageType: "camt.054.001.02",
+            messageType: CAMT054_MESSAGE_TYPE,
             filename: input.filename.slice(0, 255),
             contentType: (input.contentType || "application/xml").slice(0, 100),
             sizeBytes: input.data.length,
             sha256,
             data: input.data,
             bankMessageId: parsed.messageId.slice(0, 35),
-            bankCreatedAt: bankCreatedAt && !Number.isNaN(bankCreatedAt.getTime()) ? bankCreatedAt : null,
+            bankCreatedAt,
             entryCount: fresh.length,
             skippedDuplicates: skipped,
             warnings: [...parsed.warnings, ...skippedFrom.map(skippedSummary)],

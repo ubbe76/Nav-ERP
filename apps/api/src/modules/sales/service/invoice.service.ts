@@ -311,7 +311,9 @@ export type CollectiveInvoicingResult = {
 // service). Called after the issue transaction and the PDF archive; it never
 // throws by contract, and a throw is swallowed anyway — the invoice is
 // issued whatever becomes of its e-invoice.
-export type InvoiceIssuedHook = (invoiceId: string, userId: string) => Promise<EinvoiceAutoSendOutcome | null>;
+// providerDown: the access point did not answer earlier in the same run
+// (samlingsfakturering) — the hook does not wait on it again.
+export type InvoiceIssuedHook = (invoiceId: string, userId: string, opts?: { providerDown?: boolean }) => Promise<EinvoiceAutoSendOutcome | null>;
 
 // Valuta: an order row (or a shipment's order) in another currency than the
 // invoice's — one invoice, one currency. 400 invoice-row-currency-mismatch.
@@ -1695,6 +1697,8 @@ export function createInvoiceService(
     // rolls back or stops the others.
     async runCollectiveInvoicing(input: RunCollectiveInvoicingInput, userId: string) {
       const results: CollectiveInvoicingResult[] = [];
+      // Set once the access point fails to answer an automatic e-invoice.
+      let einvoiceProviderDown = false;
       // One settings read for the whole run — the freight article does not
       // change per customer.
       const freightArticleId = await freight.freightArticleId();
@@ -1782,10 +1786,15 @@ export function createInvoiceService(
             if (input.issue && customerOnHold) {
               result.onHold = true;
             } else if (input.issue) {
-              const issued = await service.issue(invoice!.id, userId);
+              const issued = await service.issue(invoice!.id, userId, { einvoiceProviderDown });
               result.invoiceNumber = issued!.invoiceNumber;
               result.status = "issued";
               result.einvoice = issued!.einvoiceAutoSend;
+              // B2Brouter did not answer (up to ~2 minutes per invoice): the
+              // rest of the run issues without waiting on it again — each
+              // later e-invoice is reported as not sent, to be sent from the
+              // invoice card (review 2026-11-10).
+              if (issued!.einvoiceAutoSend?.unavailable) einvoiceProviderDown = true;
             }
           } catch (err) {
             result.error = err instanceof Error ? err.message : String(err);
@@ -1800,7 +1809,7 @@ export function createInvoiceService(
     // payment-term snapshot, books the F verification (automatkontering) and
     // recomputes any linked sales order's status — all inside the same repo
     // transaction. userId owns the verification it books.
-    async issue(id: string, userId: string) {
+    async issue(id: string, userId: string, opts: { einvoiceProviderDown?: boolean } = {}) {
       const invoice = await repo.findRawById(id);
       if (!invoice) throw new InvoiceNotFoundError(id);
       if (invoice.status !== "draft") {
@@ -1911,7 +1920,7 @@ export function createInvoiceService(
       let einvoiceAutoSend: EinvoiceAutoSendOutcome | null = null;
       if (afterIssue) {
         try {
-          einvoiceAutoSend = await afterIssue(result.invoice.id, userId);
+          einvoiceAutoSend = await afterIssue(result.invoice.id, userId, opts.einvoiceProviderDown ? { providerDown: true } : undefined);
         } catch {
           einvoiceAutoSend = null;
         }

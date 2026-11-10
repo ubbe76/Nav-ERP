@@ -49,7 +49,9 @@ export function PeppolFields({
       const typed = peppolId.trim();
       const r = await apiFetch<PeppolLookupResult>(`/api/v1/customers/${customerId}/peppol-lookup`, {
         method: "POST",
-        body: JSON.stringify(typed ? { peppolId: typed } : {}),
+        // An emptied field asks about the id that will apply once saved —
+        // the derived one — never the id still stored.
+        body: JSON.stringify({ peppolId: typed || null }),
       });
       let text: string;
       if (r.found === true) {

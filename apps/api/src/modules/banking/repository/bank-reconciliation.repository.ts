@@ -15,6 +15,7 @@ import {
   fiscalYears,
   supplierPayments,
   systemSettings,
+  users,
   vatCodes,
   verificationRows,
   verificationSeries,
@@ -56,6 +57,14 @@ export interface StatementEntryView {
   createdAt: Date;
 }
 
+// An ignored entry with why, who and when (the Ignorerade poster section).
+export interface IgnoredEntryView extends StatementEntryView {
+  ignoredAt: Date;
+  ignoredBy: string | null;
+  ignoredByName: string | null;
+  ignoreReason: string;
+}
+
 export interface LedgerRowView {
   id: string;
   verificationId: string;
@@ -73,7 +82,11 @@ export interface LedgerRowView {
 
 const E = sql.raw(`"bank_statement_entries"`);
 const VR = sql.raw(`"verification_rows"`);
-const entryUnmatched = sql`NOT EXISTS (SELECT 1 FROM bank_match_entries me WHERE me.entry_id = ${E}."id" AND me.active)`;
+// An OPEN entry — what every "omatchade poster" reader means: no live
+// matching and not ignored (Ignorera, 0206). An ignored entry is out of the
+// lists, the sums, the Avstämd t.o.m. guard, the "ändrats efter" warning and
+// the alert; it comes back with Ångra ignorering.
+const entryUnmatched = sql`(${E}."ignored_at" IS NULL AND NOT EXISTS (SELECT 1 FROM bank_match_entries me WHERE me.entry_id = ${E}."id" AND me.active))`;
 const rowUnmatched = sql`NOT EXISTS (SELECT 1 FROM bank_match_rows mr WHERE mr.verification_row_id = ${VR}."id" AND mr.active)`;
 // The live reconciliation marks: an undone Startpunkt no longer counts.
 const reconciledThroughSql = sql<string | null>`(SELECT max(r.through_date) FROM bank_reconciliations r WHERE r.bank_account_id = "bank_accounts"."id" AND r.undone_at IS NULL)`;
@@ -213,7 +226,7 @@ export function createBankReconciliationRepository(db: Db) {
           ledgerAccountName: accounts.name,
           reconciledThrough: reconciledThroughSql,
           lastStatementDate: sql<string | null>`(SELECT max(e.booking_date) FROM bank_statement_entries e WHERE e.bank_account_id = "bank_accounts"."id")`,
-          unmatchedCount: sql<number>`(SELECT count(*) FROM bank_statement_entries e WHERE e.bank_account_id = "bank_accounts"."id" AND NOT EXISTS (SELECT 1 FROM bank_match_entries me WHERE me.entry_id = e.id AND me.active))`,
+          unmatchedCount: sql<number>`(SELECT count(*) FROM bank_statement_entries e WHERE e.bank_account_id = "bank_accounts"."id" AND e.ignored_at IS NULL AND NOT EXISTS (SELECT 1 FROM bank_match_entries me WHERE me.entry_id = e.id AND me.active))`,
           // Entries or matchings on the account: the ledger account and the
           // currency are locked then (PATCH), and the identifier is no longer
           // learned from a file.
@@ -404,6 +417,88 @@ export function createBankReconciliationRepository(db: Db) {
       return rows.map(toEntryView);
     },
 
+    // The entries with the ignore stamp, locked: the ignore/unignore routine
+    // (and the matching, which must not race an ignoring) re-reads them
+    // under the account's advisory lock.
+    async lockEntriesForIgnore(tx: Tx, ids: string[]): Promise<{ id: string; bankAccountId: string; ignoredAt: Date | null; ignoreReason: string | null; amount: number; bookingDate: string }[]> {
+      if (ids.length === 0) return [];
+      const rows = await tx
+        .select({
+          id: bankStatementEntries.id,
+          bankAccountId: bankStatementEntries.bankAccountId,
+          ignoredAt: bankStatementEntries.ignoredAt,
+          ignoreReason: bankStatementEntries.ignoreReason,
+          amount: bankStatementEntries.amount,
+          bookingDate: bankStatementEntries.bookingDate,
+        })
+        .from(bankStatementEntries)
+        .where(inArray(bankStatementEntries.id, ids))
+        .orderBy(asc(bankStatementEntries.id))
+        .for("update");
+      return rows.map((r) => ({ ...r, amount: round2(Number(r.amount)) }));
+    },
+
+    // Read without a lock: which bank accounts the entries belong to (the
+    // routine needs the account before it can take its lock).
+    async entryAccounts(executor: Db | Tx, ids: string[]): Promise<{ id: string; bankAccountId: string }[]> {
+      if (ids.length === 0) return [];
+      return executor.select({ id: bankStatementEntries.id, bankAccountId: bankStatementEntries.bankAccountId }).from(bankStatementEntries).where(inArray(bankStatementEntries.id, ids));
+    },
+
+    async anyIgnored(executor: Db | Tx, ids: string[]): Promise<boolean> {
+      if (ids.length === 0) return false;
+      const [row] = await executor.select({ n: count() }).from(bankStatementEntries).where(and(inArray(bankStatementEntries.id, ids), sql`${bankStatementEntries.ignoredAt} IS NOT NULL`));
+      return row!.n > 0;
+    },
+
+    async setEntriesIgnored(tx: Tx, ids: string[], values: { ignoredAt: Date | null; ignoredBy: string | null; ignoreReason: string | null }): Promise<void> {
+      if (ids.length === 0) return;
+      await tx.update(bankStatementEntries).set(values).where(inArray(bankStatementEntries.id, ids));
+    },
+
+    // The ignored entries of the period, newest ignoring first.
+    async ignoredEntries(executor: Db | Tx, bankAccountId: string, range: { from?: string; to?: string }): Promise<IgnoredEntryView[]> {
+      const conditions: SQL[] = [eq(bankStatementEntries.bankAccountId, bankAccountId), sql`${bankStatementEntries.ignoredAt} IS NOT NULL`];
+      if (range.from) conditions.push(gte(bankStatementEntries.bookingDate, range.from));
+      if (range.to) conditions.push(lte(bankStatementEntries.bookingDate, range.to));
+      const rows = await executor
+        .select({
+          ...entryView,
+          ignoredAt: bankStatementEntries.ignoredAt,
+          ignoredBy: bankStatementEntries.ignoredBy,
+          ignoredByName: users.name,
+          ignoreReason: bankStatementEntries.ignoreReason,
+        })
+        .from(bankStatementEntries)
+        .leftJoin(users, eq(users.id, bankStatementEntries.ignoredBy))
+        .where(and(...conditions))
+        .orderBy(desc(bankStatementEntries.ignoredAt), asc(bankStatementEntries.bookingDate), asc(bankStatementEntries.position));
+      return rows.map(({ ignoredAt, ignoredBy, ignoredByName, ignoreReason, ...entry }) => ({
+        ...toEntryView(entry),
+        ignoredAt: ignoredAt!,
+        ignoredBy,
+        ignoredByName,
+        ignoreReason: ignoreReason ?? "",
+      }));
+    },
+
+    // The files (imports) behind a set of entries — the page's "alla från en
+    // import" choice names them.
+    async filesByIds(executor: Db | Tx, ids: string[]): Promise<{ id: string; filename: string; createdAt: Date }[]> {
+      if (ids.length === 0) return [];
+      return executor.select({ id: bankFiles.id, filename: bankFiles.filename, createdAt: bankFiles.createdAt }).from(bankFiles).where(inArray(bankFiles.id, ids)).orderBy(desc(bankFiles.createdAt));
+    },
+
+    // The account's live Startpunkt mark, if any.
+    async openingReconciliation(executor: Db | Tx, bankAccountId: string): Promise<BankReconciliationRow | null> {
+      const [row] = await executor
+        .select()
+        .from(bankReconciliations)
+        .where(and(eq(bankReconciliations.bankAccountId, bankAccountId), isNull(bankReconciliations.undoneAt), sql`${bankReconciliations.openingMatchId} IS NOT NULL`))
+        .limit(1);
+      return row ?? null;
+    },
+
     async isEntryMatched(executor: Db | Tx, id: string): Promise<boolean> {
       const [row] = await executor.select({ n: count() }).from(bankMatchEntries).where(and(eq(bankMatchEntries.entryId, id), eq(bankMatchEntries.active, true)));
       return row!.n > 0;
@@ -529,7 +624,15 @@ export function createBankReconciliationRepository(db: Db) {
       const [row] = await executor
         .select({ n: count() })
         .from(bankStatementEntries)
-        .where(and(eq(bankStatementEntries.bankAccountId, bankAccountId), sql`${bankStatementEntries.bookingDate} > ${afterDate}`, lte(bankStatementEntries.bookingDate, through)));
+        .where(
+          and(
+            eq(bankStatementEntries.bankAccountId, bankAccountId),
+            sql`${bankStatementEntries.bookingDate} > ${afterDate}`,
+            lte(bankStatementEntries.bookingDate, through),
+            // An ignored entry is outside the reconciliation (0206).
+            isNull(bankStatementEntries.ignoredAt)
+          )
+        );
       return row!.n;
     },
 

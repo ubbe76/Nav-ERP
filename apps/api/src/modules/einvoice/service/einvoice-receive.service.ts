@@ -16,7 +16,7 @@ import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import type { EinvoiceRepository, ReceptionInsert, ReceptionRow } from "../repository/einvoice.repository.js";
 import { EInvoiceProviderError, type EInvoiceProvider, type ReceivedDocumentRef } from "./einvoice-provider.js";
 import type { EinvoiceSettingsService } from "./einvoice-settings.service.js";
-import { EinvoiceNotConfiguredError, EinvoiceReceiveBusyError, EinvoiceReceptionNotFoundError } from "./einvoice.errors.js";
+import { EinvoiceNotConfiguredError, EinvoiceOtherEnvironmentError, EinvoiceReceiveBusyError, EinvoiceReceptionNotFoundError } from "./einvoice.errors.js";
 import type { ReceivedEInvoice, ReceivedEInvoiceAttachment } from "./ubl/received-einvoice.js";
 import { looksLikeUblInvoice, readUblInvoice, UblReadError } from "./ubl/ubl-reader.js";
 
@@ -66,6 +66,10 @@ export const RECEIVE_TEXTS = {
   attachmentNotPdf: "Bilagan var ingen PDF och finns kvar i e-fakturan",
   ackFailed: (n: number) => `${n} dokument kunde inte kvitteras hos B2Brouter — ${n === 1 ? "det" : "de"} hämtas igen vid nästa körning`,
   dismissed: "Markerad som hanterad",
+  // The embedded PDF is a file another e-invoice's post already has (the
+  // supplier's terms attached to every invoice, say): this document gets the
+  // copy as its file instead of being thrown away as a duplicate.
+  sharedPdf: (scanNumber: string) => `Den bifogade PDF:en finns redan i inkorgen (${scanNumber}) för en annan e-faktura — visningskopian används`,
 } as const;
 
 // The scheduler ticks every 5 minutes; a margin keeps a run from slipping
@@ -176,7 +180,7 @@ export function createEinvoiceReceiveService(deps: {
   }
 
   // Step 2: the post's file and the remarks the copy (and the result) carry.
-  async function chooseFile(doc: ReceivedEInvoice, receivedAt: Date): Promise<{ filename: string; pdf: Buffer; remarks: string[] }> {
+  async function chooseFile(doc: ReceivedEInvoice): Promise<{ filename: string; pdf: Buffer; remarks: string[] }> {
     const remarks: string[] = [];
     const attachment = pickPdfAttachment(doc.attachments);
     if (attachment) {
@@ -189,7 +193,7 @@ export function createEinvoiceReceiveService(deps: {
         remarks.push(RECEIVE_TEXTS.attachmentNotPdf);
       }
     }
-    const pdf = await renderCopy(doc, { receivedAt, remarks });
+    const pdf = await renderCopy(doc, { remarks });
     return { filename: safeFilename(`Visningskopia-${doc.number}.pdf`), pdf, remarks };
   }
 
@@ -256,12 +260,32 @@ export function createEinvoiceReceiveService(deps: {
       return { outcome: receptionId ? "duplicate" : "already", receptionId, scanId: live.invoiceScanId, scanNumber: live.scanNumber };
     }
 
-    const file = await chooseFile(doc, at);
-    const sha256 = createHash("sha256").update(file.pdf).digest("hex");
+    let file = await chooseFile(doc);
+    let sha256 = createHash("sha256").update(file.pdf).digest("hex");
     return repo.transaction(async (tx) => {
       const receptionId = await ensureRow(tx, base);
       if (!receptionId) return { outcome: "already" as const, receptionId: null, scanId: null, scanNumber: null };
-      const imported = await scans.importEInvoiceInTx(tx, { filename: file.filename, pdf: file.pdf, sha256 });
+      let imported = await scans.importEInvoiceInTx(tx, { filename: file.filename, pdf: file.pdf, sha256 });
+      // The same file as a post of ANOTHER e-invoice (another sender or
+      // number — one attachment on every invoice): this document is no
+      // duplicate, so it gets the copy as its file. The same file as a post
+      // that came another way (scanned, e-mailed) or from this very
+      // document stays a duplicate (user decision 2026-11-10; before, the
+      // invoice was acknowledged and never reached the inbox).
+      if (!imported.ok) {
+        const owner = await repo.findReceptionByScan(imported.existing.id, tx);
+        const sameDocument =
+          owner !== null &&
+          owner.documentType === doc.type &&
+          owner.documentNumber === base.documentNumber &&
+          (owner.senderEndpoint ?? null) === (base.senderEndpoint ?? null);
+        if (owner !== null && !sameDocument) {
+          const remarks = [...file.remarks, RECEIVE_TEXTS.sharedPdf(imported.existing.scanNumber)];
+          file = { filename: safeFilename(`Visningskopia-${doc.number}.pdf`), pdf: await renderCopy(doc, { remarks }), remarks };
+          sha256 = createHash("sha256").update(file.pdf).digest("hex");
+          imported = await scans.importEInvoiceInTx(tx, { filename: file.filename, pdf: file.pdf, sha256 });
+        }
+      }
       if (!imported.ok) {
         await repo.updateReceptionOutcome(
           receptionId,
@@ -559,6 +583,11 @@ export function createEinvoiceReceiveService(deps: {
       const row = await repo.findReception(receptionId);
       if (!row) throw new EinvoiceReceptionNotFoundError(receptionId);
       if (row.outcome !== "unreadable") throw new InvalidStatusTransitionError(`Cannot dismiss a reception with outcome "${row.outcome}"`);
+      // The ack goes with the saved key — the other environment's document
+      // would answer not-found and be "dismissed" without ever being
+      // acknowledged where it lives.
+      const { environment } = await settings.read();
+      if (row.environment !== environment) throw new EinvoiceOtherEnvironmentError(row.environment === "production" ? "production" : "sandbox");
       const provider = await settings.provider({ requireEnabled: false, requireAccount: true });
       try {
         await provider.acknowledgeReceived(row.providerInvoiceId);

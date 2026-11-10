@@ -239,7 +239,7 @@ describe("the reception run", () => {
     expect(await setting("einvoice_receive_last_error")).toBeNull();
   });
 
-  it("logs a resend of the same sender's invoice number as a duplicate and acknowledges it — and the same PDF under another number", async () => {
+  it("logs a resend of the same sender's invoice number as a duplicate and acknowledges it — the same PDF under another number is its own post with the visningskopia", async () => {
     await makeSupplier();
     fake.receive(invoiceXml());
     await run();
@@ -249,21 +249,27 @@ describe("the reception run", () => {
     const samePdf = fake.receive(invoiceXml({ invoiceNumber: "FA-1002" }));
     clock = new Date(clock.getTime() + 20 * 60_000);
     const result = await run();
-    expect(result).toMatchObject({ listed: 2, imported: 0, duplicates: 2 });
-    const [first] = await scans();
-    expect(await scans()).toHaveLength(1);
+    // The resend is a duplicate; the other number is ANOTHER invoice that
+    // happens to carry the same PDF (review 2026-11-10: it used to be
+    // thrown away as "Filen fanns redan i inkorgen" and never reached the
+    // inbox) — it becomes its own post with the visningskopia as its file.
+    expect(result).toMatchObject({ listed: 2, imported: 1, duplicates: 1 });
+    const [first, second] = await scans();
+    expect(await scans()).toHaveLength(2);
     const rows = await receptions();
     expect(rows).toHaveLength(3);
     expect(rows[1]).toMatchObject({ providerInvoiceId: resend, outcome: "duplicate", detail: `Samma faktura finns redan i inkorgen (${first!.scanNumber})`, invoiceScanId: first!.id });
-    expect(rows[2]).toMatchObject({ providerInvoiceId: samePdf, outcome: "duplicate", detail: `Filen fanns redan i inkorgen (${first!.scanNumber})`, invoiceScanId: first!.id });
+    expect(rows[2]).toMatchObject({ providerInvoiceId: samePdf, outcome: "imported", detail: RECEIVE_TEXTS.sharedPdf(first!.scanNumber), invoiceScanId: second!.id });
+    expect(second).toMatchObject({ source: "einvoice", filename: "Visningskopia-FA-1002.pdf" });
+    expect(second!.data!.equals(FAKE_PDF)).toBe(false);
     expect(fake.state.received.get(resend)!.acked).toBe(true);
     expect(fake.state.received.get(samePdf)!.acked).toBe(true);
-    // No FI- number was burned by the sha256 duplicate.
+    // No FI- number was burned by the sha256 duplicate inside that import.
     const next = fake.receive(invoiceXml({ invoiceNumber: "FA-1003", attachment: null }));
     clock = new Date(clock.getTime() + 20 * 60_000);
     await run();
     const numbers = (await scans()).map((s) => Number(s.scanNumber.slice(3)));
-    expect(numbers[1]).toBe(numbers[0]! + 1);
+    expect(numbers).toEqual([numbers[0]!, numbers[0]! + 1, numbers[0]! + 2]);
     expect(fake.state.received.get(next)!.acked).toBe(true);
   });
 
@@ -581,6 +587,8 @@ describe("the scheduler's guards", () => {
     fake.receive(invoiceXml({ attachment: null }));
     await run();
     await setSetting("einvoice_environment", "production");
+    // The production key with it: test_key under Produktion is refused.
+    await setSetting("einvoice_api_key", "prod_key");
     fake.state.received.forEach((d) => (d.acked = false));
     clock = new Date(clock.getTime() + 20 * 60_000);
     expect(await run()).toMatchObject({ duplicates: 1 });

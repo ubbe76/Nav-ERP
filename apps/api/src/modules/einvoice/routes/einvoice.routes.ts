@@ -22,6 +22,8 @@ import {
   EinvoiceAlreadySentError,
   EinvoiceDocumentInvalidError,
   EinvoiceNotAllowedError,
+  EinvoiceOtherEnvironmentError,
+  EinvoiceKeyEnvironmentMismatchError,
   EinvoiceNotConfiguredError,
   EinvoiceProviderRejectedError,
   EinvoiceProviderUnauthorizedError,
@@ -53,6 +55,10 @@ export function mapEinvoiceError(reply: FastifyReply, err: unknown): FastifyRepl
   if (err instanceof EinvoiceReceptionNotFoundError) return reply.code(404).send(errorBody(err));
   if (err instanceof EinvoiceNotAllowedError) return reply.code(409).send({ ...errorBody(err), reason: err.reason });
   if (err instanceof EinvoiceAlreadySentError) return reply.code(409).send(errorBody(err));
+  if (err instanceof EinvoiceOtherEnvironmentError) return reply.code(409).send({ ...errorBody(err), environment: err.environment });
+  if (err instanceof EinvoiceKeyEnvironmentMismatchError) {
+    return reply.code(400).send({ ...errorBody(err), keyEnvironment: err.keyEnvironment, environment: err.selected });
+  }
   if (err instanceof EinvoiceTransmissionNotFoundError || err instanceof InvoiceNotFoundError || err instanceof CustomerNotFoundError) {
     return reply.code(404).send(errorBody(err));
   }

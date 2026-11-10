@@ -149,10 +149,22 @@ export const bankStatementEntries = pgTable(
     details: jsonb("details").$type<BankStatementEntryDetails>().notNull(),
     reversal: boolean("reversal").notNull().default(false),
     position: integer("position").notNull(),
+    // Ignorera (0206): a wrongly imported entry is taken out of the
+    // reconciliation by a stamp with a reason — never deleted (the file is
+    // räkenskapsinformation). Only an unmatched entry can carry it, and an
+    // ignored one can be neither matched nor booked (the service, under the
+    // account's advisory lock). ignored_by may go null with the user.
+    ignoredAt: timestamp("ignored_at", { withTimezone: true }),
+    ignoredBy: uuid("ignored_by").references(() => users.id, { onDelete: "set null" }),
+    ignoreReason: text("ignore_reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     check("bank_statement_entries_amount_nonzero", sql`${table.amount} <> 0`),
+    check(
+      "bank_statement_entries_ignored_all_or_none",
+      sql`(${table.ignoredAt} IS NULL AND ${table.ignoredBy} IS NULL AND ${table.ignoreReason} IS NULL) OR (${table.ignoredAt} IS NOT NULL AND ${table.ignoreReason} IS NOT NULL AND btrim(${table.ignoreReason}) <> '')`
+    ),
     index("idx_bank_statement_entries_account_date").on(table.bankAccountId, table.bookingDate),
     index("idx_bank_statement_entries_statement").on(table.bankStatementId),
   ]

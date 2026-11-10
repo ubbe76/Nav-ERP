@@ -87,6 +87,13 @@ export function createEinvoiceStatusService(deps: {
     const row = await repo.findTransmission(id);
     if (!row) throw new EinvoiceTransmissionNotFoundError(id);
     if (!row.providerInvoiceId || isTerminalStatus(row.status)) return row;
+    // One API key is saved and it belongs to the selected environment: a
+    // row sent in the other one is never asked about with it — the access
+    // point would answer 404 (the row failed, Skicka igen opened, the
+    // invoice sent twice once the environment is switched back) or 401
+    // (review 2026-11-10). The web hook has the same guard.
+    const s = await settings.read();
+    if (row.environment !== s.environment) return row;
     const provider = await settings.provider({ requireEnabled: false });
     const at = now();
     let remote: ProviderStatus;
@@ -126,7 +133,7 @@ export function createEinvoiceStatusService(deps: {
     const stale = await repo.failStaleSending(new Date(at.getTime() - STALE_SENDING_MS), STALE_SENDING_MESSAGE, at);
     for (const row of stale) await logFailure(row, STALE_SENDING_MESSAGE, "failed");
     const since = new Date(at.getTime() - STATUS_MAX_AGE_DAYS * 24 * 60 * 60_000);
-    const ids = await repo.listPollable(since);
+    const ids = await repo.listPollable(since, (await settings.read()).environment);
     let changed = 0;
     let failed = 0;
     for (const id of ids) {

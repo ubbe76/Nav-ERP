@@ -6,9 +6,11 @@ import { usePathname, useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Checkbox, Field, Input, Select } from "../ui/Field";
-import { FormError, FormHint, FormNotice, FormStack } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint, FormNotice, FormStack } from "../ui/Form";
 import { HelpLink } from "../ui/HelpLink";
 import { useListNavigation } from "../ui/ListControls";
+import { Modal } from "../ui/Modal";
+import { useCan } from "../PermissionsProvider";
 import { SectionHeading } from "../ui/SectionHeading";
 import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
 import { Table } from "../ui/Table";
@@ -16,11 +18,13 @@ import { ApiError, apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { BANK_MATCH_KIND_LABELS, isIsoDate, sumAmounts } from "../../lib/bankReconciliation";
+import { formatStockholmDate, formatStockholmDateTime, stockholmToday } from "../../lib/date";
 import { formatMoney, round2 } from "../../lib/format";
 import type {
   Account,
   BankAccount,
   BankBookByRuleResult,
+  BankIgnoredEntry,
   BankLedgerRow,
   BankMatch,
   BankMatchProposal,
@@ -82,6 +86,14 @@ export function BankavstamningPageClient({
   const [pending, setPending] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [bookEntry, setBookEntry] = useState<BankStatementEntry | null>(null);
+  // Ignorera…: the dialog asks for the reason of the marked entries.
+  const [ignoreOpen, setIgnoreOpen] = useState(false);
+  const [ignoreReason, setIgnoreReason] = useState("");
+  const [ignoreError, setIgnoreError] = useState<string | null>(null);
+  const can = useCan();
+  const canWrite = can(["ekonomi"]);
+  // Avstämd t.o.m. never lies in the future (the server refuses it too).
+  const today = stockholmToday();
 
   useEffect(() => setFromInput(from), [from]);
   useEffect(() => setToInput(to), [to]);
@@ -90,7 +102,10 @@ export function BankavstamningPageClient({
   useEffect(() => {
     setSelEntries(new Set());
     setSelRows(new Set());
-    setReconcileDate(view ? (view.summary.statementBalanceDate ?? view.to) : "");
+    // Never a day after today: the mark cannot lie in the future.
+    const suggested = view ? (view.summary.statementBalanceDate ?? view.to) : "";
+    const lastDay = stockholmToday();
+    setReconcileDate(suggested > lastDay ? lastDay : suggested);
   }, [view]);
 
   const entries = view?.statementEntries ?? [];
@@ -253,9 +268,48 @@ export function BankavstamningPageClient({
     }, "Posterna kunde inte bokföras");
   }
 
+  // Ignorera: the marked entries leave the reconciliation with a reason
+  // (a wrongly imported file, days before the Startpunkt). Nothing is
+  // deleted — they stay under Ignorerade poster and can be brought back.
+  async function ignoreChosen() {
+    const reason = ignoreReason.trim();
+    if (!reason || chosenEntries.length === 0 || pending) return;
+    setPending(true);
+    setIgnoreError(null);
+    try {
+      await apiFetch<{ ignored: number }>("/api/v1/bank-statement-entries/ignore", {
+        method: "POST",
+        body: JSON.stringify({ entryIds: chosenEntries.map((e) => e.id), reason }),
+      });
+      setIgnoreOpen(false);
+      setIgnoreReason("");
+      setError(null);
+      setFailures([]);
+      setNotice(`${chosenEntries.length} ${chosenEntries.length === 1 ? "post ignorerades" : "poster ignorerades"}. ${chosenEntries.length === 1 ? "Den" : "De"} ligger kvar under Ignorerade poster.`);
+      router.refresh();
+    } catch (err) {
+      setIgnoreError(apiErrorMessage(err, "Posterna kunde inte ignoreras"));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function unignore(entry: BankIgnoredEntry) {
+    const ok = await confirmDialog(`Ångra ignoreringen av posten ${entry.bookingDate} ${entry.text} (${formatMoney(entry.amount)} kr)? Posten blir omatchad igen och räknas med i avstämningen.`, {
+      confirmLabel: "Ångra ignorering",
+    });
+    if (!ok) return;
+    void run(async () => {
+      await apiFetch<{ restored: number }>("/api/v1/bank-statement-entries/unignore", { method: "POST", body: JSON.stringify({ entryIds: [entry.id] }) });
+      setNotice("Ignoreringen ångrades — posten är omatchad igen.");
+      router.refresh();
+    }, "Ignoreringen kunde inte ångras");
+  }
+
   async function reconcile() {
     if (!view) return;
     if (!isIsoDate(reconcileDate)) return setError("Ange ett datum.");
+    if (reconcileDate > today) return setError(`Avstämd t.o.m. kan inte ligga i framtiden — välj senast ${today}.`);
     const ok = await confirmDialog(
       `Markera ${view.bankAccount.name} som avstämd t.o.m. ${reconcileDate}?`,
       { confirmLabel: "Markera som avstämd" }
@@ -510,10 +564,44 @@ export function BankavstamningPageClient({
               <Button type="button" variant="secondary" disabled={pending || ruleEntries.length === 0} onClick={() => void bookByRule()}>
                 Bokför enligt regel{ruleEntries.length > 0 ? ` (${ruleEntries.length})` : ""}
               </Button>
+              {canWrite && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={pending || chosenEntries.length === 0}
+                  onClick={() => {
+                    setIgnoreError(null);
+                    setIgnoreOpen(true);
+                  }}
+                >
+                  Ignorera…{chosenEntries.length > 0 ? ` (${chosenEntries.length})` : ""}
+                </Button>
+              )}
             </div>
           </div>
 
           <SectionHeading>Omatchade poster på kontoutdraget</SectionHeading>
+          {view.imports.length > 0 && (
+            <div className={styles.importPick}>
+              <Field label="Markera alla från en import" htmlFor="bankReconImportPick">
+                <Select
+                  id="bankReconImportPick"
+                  value=""
+                  onChange={(e) => {
+                    const fileId = e.target.value;
+                    if (fileId) setSelEntries(new Set(entries.filter((entry) => entry.bankFileId === fileId).map((entry) => entry.id)));
+                  }}
+                >
+                  <option value="">Välj import…</option>
+                  {view.imports.map((f) => (
+                    <option key={f.bankFileId} value={f.bankFileId}>
+                      {f.filename} · importerad {formatStockholmDate(f.importedAt)} · {f.count} {f.count === 1 ? "post" : "poster"}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+          )}
           <Table<BankStatementEntry>
             columns={[
               {
@@ -663,6 +751,61 @@ export function BankavstamningPageClient({
             view.matches.map((m) => <MatchCard key={m.id} match={m} pending={pending} onUndo={() => void undo(m)} />)
           )}
 
+          {view.ignoredEntries.length > 0 && (
+            <>
+              <SectionHeading spaced>Ignorerade poster</SectionHeading>
+              <FormHint>
+                Poster som är ignorerade räknas inte med i avstämningen och kan varken matchas eller bokföras. Ångra ignorering gör posten
+                omatchad igen.
+              </FormHint>
+              <Table<BankIgnoredEntry>
+                columns={[
+                  { key: "date", label: "Datum", width: "100px" },
+                  { key: "text", label: "Text", width: "1.4fr" },
+                  { key: "amount", label: "Belopp", width: "110px", align: "right" },
+                  { key: "reason", label: "Orsak", width: "1.4fr" },
+                  { key: "id", label: "", width: "150px", align: "right" },
+                ]}
+                rows={view.ignoredEntries}
+                emptyText="Inga ignorerade poster"
+                renderCell={(entry, key) => {
+                  switch (key) {
+                    case "date":
+                      return entry.bookingDate;
+                    case "text":
+                      return (
+                        <>
+                          {entry.text}
+                          {(entry.counterparty || entry.reference) && (
+                            <span className={styles.sub}>{[entry.counterparty, entry.reference].filter(Boolean).join(" · ")}</span>
+                          )}
+                        </>
+                      );
+                    case "amount":
+                      return formatMoney(entry.amount);
+                    case "reason":
+                      return (
+                        <>
+                          {entry.ignoreReason}
+                          <span className={styles.sub}>
+                            {entry.ignoredByName ?? "Okänd användare"} · {formatStockholmDateTime(entry.ignoredAt)}
+                          </span>
+                        </>
+                      );
+                    case "id":
+                      return canWrite ? (
+                        <Button type="button" size="small" variant="ghost" disabled={pending} onClick={() => void unignore(entry)}>
+                          Ångra ignorering
+                        </Button>
+                      ) : null;
+                    default:
+                      return null;
+                  }
+                }}
+              />
+            </>
+          )}
+
           <SectionHeading spaced>Avstämd t.o.m.</SectionHeading>
           <p style={{ margin: "0 0 12px" }}>
             {bankAccount.reconciledThrough
@@ -675,17 +818,18 @@ export function BankavstamningPageClient({
                 id="bankReconThrough"
                 type="date"
                 size="sm"
+                max={today}
                 value={reconcileDate}
                 onChange={(e) => setReconcileDate(e.target.value)}
               />
             </Field>
-            <Button type="button" variant="primary" disabled={pending || !isIsoDate(reconcileDate)} onClick={() => void reconcile()}>
+            <Button type="button" variant="primary" disabled={pending || !isIsoDate(reconcileDate) || reconcileDate > today} onClick={() => void reconcile()}>
               Markera som avstämd
             </Button>
           </div>
           <FormHint>
             Går bara när allt till och med datumet är matchat och kontoutdragets saldo stämmer med bokföringens (matchningar som korsar
-            datumet räknas som i transit).
+            datumet räknas som i transit). Datumet kan inte ligga i framtiden.
           </FormHint>
           {view.reconciliations.length > 0 && (
             <details style={{ marginTop: 8 }}>
@@ -694,12 +838,43 @@ export function BankavstamningPageClient({
                 {view.reconciliations.map((r) => (
                   <li key={r.id}>
                     {r.opening ? "Startpunkt " : "t.o.m. "}
-                    {r.throughDate} — saldo {formatMoney(r.statementBalance)} kr, markerad {r.createdAt.slice(0, 10)}
+                    {r.throughDate} — saldo {formatMoney(r.statementBalance)} kr, markerad {formatStockholmDate(r.createdAt)}
                   </li>
                 ))}
               </ul>
             </details>
           )}
+
+          <Modal open={ignoreOpen} onClose={() => setIgnoreOpen(false)} title="Ignorera poster">
+            <Form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void ignoreChosen();
+              }}
+            >
+              <p style={{ margin: 0 }}>
+                {chosenEntries.length} {chosenEntries.length === 1 ? "markerad post" : "markerade poster"} ({formatMoney(entriesSum)} kr) tas ur
+                avstämningen: {chosenEntries.length === 1 ? "den" : "de"} räknas inte som {chosenEntries.length === 1 ? "omatchad" : "omatchade"} och kan
+                varken matchas eller bokföras. Ingenting raderas — {chosenEntries.length === 1 ? "posten" : "posterna"} ligger kvar under Ignorerade poster
+                och ignoreringen kan ångras.
+              </p>
+              <Field label="Orsak" htmlFor="bankIgnoreReason">
+                <Input
+                  id="bankIgnoreReason"
+                  value={ignoreReason}
+                  onChange={(e) => setIgnoreReason(e.target.value)}
+                  maxLength={255}
+                  placeholder="t.ex. fel fil importerad, poster före startpunkten"
+                />
+              </Field>
+              {ignoreError && <FormError>{ignoreError}</FormError>}
+              <FormActions>
+                <Button type="submit" variant="primary" disabled={pending || !ignoreReason.trim() || chosenEntries.length === 0}>
+                  Ignorera
+                </Button>
+              </FormActions>
+            </Form>
+          </Modal>
 
           <BankBookDialog
             entry={bookEntry}
@@ -751,7 +926,7 @@ function MatchCard({ match, pending, onUndo }: { match: BankMatch; pending: bool
     <details className={styles.match}>
       <summary>
         <strong>{BANK_MATCH_KIND_LABELS[match.kind]}</strong>
-        <span>{match.createdAt.slice(0, 10)}</span>
+        <span>{formatStockholmDate(match.createdAt)}</span>
         <span>
           {match.entries.length} {match.entries.length === 1 ? "post" : "poster"} · {match.rows.length}{" "}
           {match.rows.length === 1 ? "rad" : "rader"}

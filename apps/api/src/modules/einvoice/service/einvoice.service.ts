@@ -26,6 +26,7 @@ import {
   EinvoiceDocumentInvalidError,
   EinvoiceNotAllowedError,
   EinvoiceNotConfiguredError,
+  EinvoiceProviderUnavailableError,
   fromProviderError,
 } from "./einvoice.errors.js";
 import { checkUblInput } from "./ubl/ubl-check.js";
@@ -128,8 +129,10 @@ export interface Recipient {
 // The customer's Peppol-id, else one derived from the organisation number
 // where the country's register is the Peppol address (SE 0007, NO 0192,
 // DK 0184, BE 0208 — peppol-schemes.ts); anywhere else the id must be typed.
+// `override` (Kontrollera before Spara): undefined = the saved id, null = the
+// field was emptied, so the derived id is what will apply — not the saved one.
 export function resolveRecipient(customer: Pick<CustomerReadModel, "peppolId" | "orgNumber" | "country">, override?: string | null): Recipient {
-  const own = (override ?? customer.peppolId)?.trim();
+  const own = (override === undefined ? customer.peppolId : override)?.trim();
   if (own) return { peppolId: own, source: "customer" };
   const derived = derivedPeppolId(customer.country, customer.orgNumber);
   if (derived) return { peppolId: derived, source: "org-number" };
@@ -397,6 +400,12 @@ function autoSendMessage(t: TransmissionView): string {
 
 const sha256 = (buf: Buffer) => createHash("sha256").update(buf).digest("hex");
 
+// A send that failed outside the access point's answer — what the card and
+// the alert say (the real error is in the server log).
+export const UNEXPECTED_SEND_MESSAGE = "Sändningen avbröts av ett oväntat fel — försök igen";
+// Samlingsfaktureringen after B2Brouter failed to answer earlier in the run.
+export const PROVIDER_DOWN_MESSAGE = "E-fakturan skickades inte: B2Brouter svarade inte tidigare i körningen — skicka den från fakturakortet";
+
 export function createEinvoiceService(deps: {
   repo: EinvoiceRepository;
   settings: EinvoiceSettingsService;
@@ -409,6 +418,10 @@ export function createEinvoiceService(deps: {
   const { repo, settings, invoices, company, audit } = deps;
   const now = deps.now ?? (() => new Date());
   const log = deps.log ?? ((msg: string, extra?: unknown) => console.error(msg, extra));
+  // The errors send() has already written an event for (einvoice_failed, or
+  // the document left Nav): sendAfterIssue logs einvoice_not_sent for every
+  // other failure, never for these.
+  const accounted = new WeakSet<Error>();
 
   async function loadInvoice(id: string) {
     const invoice = await invoices.getInvoice(id);
@@ -522,13 +535,23 @@ export function createEinvoiceService(deps: {
           },
           userId,
         });
-        throw fromProviderError(err);
+        const mapped = fromProviderError(err);
+        accounted.add(mapped);
+        throw mapped;
       }
-      await repo.updateTransmission(transmissionId, {
-        status: "failed",
-        errorMessage: err instanceof Error ? err.message : "Sändningen misslyckades",
-        statusUpdatedAt: at,
+      // Not the access point's answer (a database failure in onImported,
+      // say): the card and the alert show a fixed Swedish text, never the
+      // internal message, which goes to the server log (review 2026-11-10).
+      log("E-invoice send failed outside the access point", { transmissionId, error: err instanceof Error ? err.message : String(err) });
+      await repo.updateTransmission(transmissionId, { status: "failed", errorMessage: UNEXPECTED_SEND_MESSAGE, statusUpdatedAt: at });
+      await audit.log({
+        entityType: "invoice",
+        entityId: invoice.id,
+        action: "einvoice_failed",
+        detail: { transmissionId, kind: "unexpected", reason: UNEXPECTED_SEND_MESSAGE, ...(opts.auto ? { auto: true } : {}) },
+        userId,
       });
+      if (err instanceof Error) accounted.add(err);
       throw err;
     }
 
@@ -541,14 +564,21 @@ export function createEinvoiceService(deps: {
       ? (providerErrorText(result.errorMessage) ?? (status === "rejected" ? "Mottagaren avvisade fakturan" : "Sändningen misslyckades"))
       : null;
     try {
-      await repo.updateTransmission(transmissionId, {
-        status,
-        providerInvoiceId: result.providerInvoiceId,
-        providerState: result.state.slice(0, 40),
-        errorMessage,
-        sentAt: isLiveStatus(status) && status !== "sending" ? at : null,
-        statusUpdatedAt: at,
-      });
+      // Conditional on `sending`: the web hook or the status job may already
+      // have written what came next (sent, delivered) — this answer is older
+      // and must not take the row back (review 2026-11-10).
+      await repo.updateTransmission(
+        transmissionId,
+        {
+          status,
+          providerInvoiceId: result.providerInvoiceId,
+          providerState: result.state.slice(0, 40),
+          errorMessage,
+          ...(isLiveStatus(status) && status !== "sending" ? { sentAt: at } : {}),
+          statusUpdatedAt: at,
+        },
+        "sending"
+      );
       await audit.log({
         entityType: "invoice",
         entityId: invoice.id,
@@ -569,6 +599,8 @@ export function createEinvoiceService(deps: {
         providerInvoiceId: result.providerInvoiceId,
         error: err instanceof Error ? err.message : String(err),
       });
+      // Sent: never "not sent" in the event log.
+      if (err instanceof Error) accounted.add(err);
       throw err;
     }
     return transmissionView((await repo.findTransmission(transmissionId))!);
@@ -610,7 +642,7 @@ export function createEinvoiceService(deps: {
     // Skicka e-faktura automatiskt vid Utfärda (spec 2026-11-05): called by
     // the invoice service after an issue, outside its transaction. Never
     // throws — the invoice is issued whatever happens here.
-    async sendAfterIssue(invoiceId: string, userId: string | null): Promise<EinvoiceAutoSendOutcome | null> {
+    async sendAfterIssue(invoiceId: string, userId: string | null, opts: { providerDown?: boolean } = {}): Promise<EinvoiceAutoSendOutcome | null> {
       try {
         const s = await settings.read();
         if (!s.enabled || !s.apiKey || !s.accountId || !s.autoSend) return null;
@@ -621,6 +653,11 @@ export function createEinvoiceService(deps: {
           await audit.log({ entityType: "invoice", entityId: invoice.id, action: "einvoice_not_sent", detail: { reason: blocked, auto: true }, userId });
           return { status: "blocked", reason: blocked, transmissionId: null, message: `Skickades inte som e-faktura: ${BLOCKED_MESSAGES[blocked]}` };
         }
+        if (opts.providerDown) {
+          const message = PROVIDER_DOWN_MESSAGE;
+          await audit.log({ entityType: "invoice", entityId: invoice.id, action: "einvoice_not_sent", detail: { reason: "provider-unavailable", auto: true, message }, userId });
+          return { status: "error", reason: null, transmissionId: null, message, unavailable: true };
+        }
         try {
           const t = await send(invoiceId, userId, { auto: true });
           return { status: t.status, reason: null, transmissionId: t.id, message: autoSendMessage(t) };
@@ -630,11 +667,35 @@ export function createEinvoiceService(deps: {
           // for the user. Anything else is logged and summarised.
           const known = err instanceof Error && err.name.startsWith("Einvoice");
           if (!known) log("Automatic e-invoice send failed", { invoiceId, error: err instanceof Error ? err.message : String(err) });
+          const message = `E-fakturan kunde inte skickas: ${known ? (err as Error).message : "oväntat fel — se fakturakortet"}`;
+          // Stopped before a transmission row (ubl-check, the PDF archive, a
+          // key that contradicts Miljö …): the reply was the only trace, and
+          // a caller that drops it (samlingsfakturering's summary, an API
+          // client) left an invoice nobody knew was never sent. The event
+          // says so on the card's Historik (review 2026-11-10). A failure
+          // send() already logged (einvoice_failed) is not logged twice.
+          if (!(err instanceof Error && accounted.has(err))) {
+            await audit
+              .log({
+                entityType: "invoice",
+                entityId: invoiceId,
+                action: "einvoice_not_sent",
+                detail: {
+                  reason: err instanceof EinvoiceNotAllowedError ? err.reason : "error",
+                  auto: true,
+                  message,
+                  ...(err instanceof EinvoiceDocumentInvalidError ? { problems: err.problems } : {}),
+                },
+                userId,
+              })
+              .catch(() => undefined);
+          }
           return {
             status: "error",
             reason: err instanceof EinvoiceNotAllowedError ? err.reason : null,
             transmissionId: null,
-            message: `E-fakturan kunde inte skickas: ${known ? (err as Error).message : "oväntat fel — se fakturakortet"}`,
+            message,
+            unavailable: err instanceof EinvoiceProviderUnavailableError,
           };
         }
       } catch (err) {

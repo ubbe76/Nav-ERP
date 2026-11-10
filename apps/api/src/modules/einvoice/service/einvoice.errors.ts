@@ -47,6 +47,36 @@ export class EinvoiceAlreadySentError extends Error {
   }
 }
 
+const ENVIRONMENT_NAMES = { sandbox: "Sandbox", production: "Produktion" } as const;
+
+// A row from the environment that is not selected: the saved key belongs to
+// the other one, so nothing about the row can be asked or acknowledged at
+// the access point with it (review 2026-11-10).
+export class EinvoiceOtherEnvironmentError extends Error {
+  constructor(readonly environment: "sandbox" | "production") {
+    super(`Raden hör till miljön ${ENVIRONMENT_NAMES[environment]} — välj den miljön under System → E-faktura för att hantera den`);
+    this.name = "EinvoiceOtherEnvironmentError";
+  }
+}
+
+// The API key does not belong to the selected Miljö: B2Brouter routes by the
+// key ("test_" = sandbox, "prod_" or no prefix = production, "stag_" = their
+// staging host, never Nav's), so a production key under Sandbox would send
+// real invoices labelled as tests (review 2026-11-10).
+export class EinvoiceKeyEnvironmentMismatchError extends Error {
+  constructor(
+    readonly keyEnvironment: "sandbox" | "production" | "staging",
+    readonly selected: "sandbox" | "production"
+  ) {
+    super(
+      keyEnvironment === "staging"
+        ? "Nyckeln börjar på stag_ och hör till B2Brouters staging-miljö, som Nav inte använder — skapa en nyckel för Sandbox (test_) eller Produktion (prod_)"
+        : `Nyckeln hör till ${ENVIRONMENT_NAMES[keyEnvironment]} men Miljö är ${ENVIRONMENT_NAMES[selected]} — välj samma miljö som nyckeln`
+    );
+    this.name = "EinvoiceKeyEnvironmentMismatchError";
+  }
+}
+
 // ubl-check found a structural problem before anything left Nav.
 export class EinvoiceDocumentInvalidError extends Error {
   constructor(readonly problems: string[]) {
