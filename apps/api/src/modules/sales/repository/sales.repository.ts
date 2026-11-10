@@ -77,6 +77,7 @@ import { resolveStockLocation } from "../../stock/service/location-resolver.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { allocateOutflowLocations, lockArticlesForOutflow } from "../../stock/service/outflow-locations.js";
+import { isStockedArticle, stockedArticleIds } from "../../stock/service/stocked-article.js";
 import {
   PriceListInUseError,
   RowHasManufacturingOrdersError,
@@ -1784,6 +1785,9 @@ export function createSalesRepository(db: Db) {
               .where(and(inArray(salesOrderRows.id, rowIds), eq(salesOrderRows.salesOrderId, orderId)))
           ).map((r) => r.articleId);
           await lockArticlesForOutflow(tx, articleIds);
+          // A service row (tjänst) is delivered without a stock movement and
+          // without parts (stocked-article.ts).
+          const stocked = await stockedArticleIds(tx, articleIds);
           // The order's rows in id order before the loop takes them one by
           // one in the request's order — the header PATCH that reprices
           // rows (#16 etapp 3) and the invoice's commit lock several rows
@@ -1797,6 +1801,12 @@ export function createSalesRepository(db: Db) {
               .orderBy(asc(salesOrderRows.id))
               .for("update");
           }
+          // The header after the rows (rows → header, as the header PATCH and
+          // Ångra utleverans take them): two batches delivering different rows
+          // of one order queue here, so the status derived below reads every
+          // row's final quantity — without it each saw the other's row still
+          // undelivered and a fully delivered order stayed Under tillverkning.
+          await tx.select({ id: salesOrders.id }).from(salesOrders).where(eq(salesOrders.id, orderId)).for("update");
 
           const updatedRows: (typeof salesOrderRows.$inferSelect)[] = [];
           // Ångra utleverans: where each row's goods were taken from and the
@@ -1823,7 +1833,9 @@ export function createSalesRepository(db: Db) {
               .where(eq(salesOrderRows.id, r.rowId))
               .returning();
 
-            const parts = await allocateOutflowLocations(tx, row.articleId, r.quantity, r.locationId ?? input.locationId);
+            const parts = stocked.has(row.articleId)
+              ? await allocateOutflowLocations(tx, row.articleId, r.quantity, r.locationId ?? input.locationId)
+              : [];
             const rowLinks: { locationId: string; quantity: number; stockTransactionId: string }[] = [];
             for (const part of parts) {
               await assertLocationNotUnderCount(tx, part.locationId);
@@ -1865,16 +1877,16 @@ export function createSalesRepository(db: Db) {
               }))
             )
             .returning({ id: deliveryRows.id });
-          await tx.insert(deliveryRowLocations).values(
-            insertedRows.flatMap((inserted, i) =>
-              links[i]!.map((part) => ({
-                deliveryRowId: inserted.id,
-                locationId: part.locationId,
-                quantity: String(part.quantity),
-                stockTransactionId: part.stockTransactionId,
-              }))
-            )
+          const partRows = insertedRows.flatMap((inserted, i) =>
+            links[i]!.map((part) => ({
+              deliveryRowId: inserted.id,
+              locationId: part.locationId,
+              quantity: String(part.quantity),
+              stockTransactionId: part.stockTransactionId,
+            }))
           );
+          // Only service rows ⇒ no parts at all.
+          if (partRows.length > 0) await tx.insert(deliveryRowLocations).values(partRows);
 
           const allRows = await tx.select().from(salesOrderRows).where(eq(salesOrderRows.salesOrderId, orderId));
           const allDelivered = allRows.every((r) => Number(r.quantityDelivered) >= Number(r.quantityOrdered));
@@ -1951,7 +1963,15 @@ export function createSalesRepository(db: Db) {
           .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
           .where(eq(deliveryRowLocations.deliveryRowId, deliveryRow.id))
           .orderBy(asc(warehouses.name), asc(stockLocations.name));
-        if (parts.length === 0) return { ok: false, reason: "not_undoable" };
+        // No parts: a service row (never stocked — undone without a stock
+        // movement) or a row the 0132 backfill could not pair (not undoable).
+        if (parts.length === 0) {
+          const [line] = await tx
+            .select({ articleId: salesOrderRows.articleId })
+            .from(salesOrderRows)
+            .where(eq(salesOrderRows.id, deliveryRow.salesOrderRowId));
+          if (!line || (await isStockedArticle(tx, line.articleId))) return { ok: false, reason: "not_undoable" };
+        }
 
         const [orderRow] = await tx
           .select()

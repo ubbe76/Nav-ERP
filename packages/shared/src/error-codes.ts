@@ -581,6 +581,8 @@ export const ERROR_CODES = {
   // "***" (the remainder of Automatiskt lands there) can never be blocked —
   // also a rename of a blocked place to "***" (409)
   FALLBACK_LOCATION_NOT_BLOCKABLE: "fallback-location-not-blockable",
+  STOCK_LOCATION_NAME_RESERVED: "stock-location-name-reserved",
+  SERVICE_ARTICLE_NOT_STOCKED: "service-article-not-stocked",
   // An outflow from a blocked place chosen by hand: utleverans, the order
   // card's Leverera and Förbruka (409, Swedish message naming the place)
   STOCK_LOCATION_BLOCKED: "stock-location-blocked",

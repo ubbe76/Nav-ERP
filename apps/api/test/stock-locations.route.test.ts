@@ -204,7 +204,7 @@ describe("Spärra / Släpp spärr — routes", () => {
     const noteWithoutBlock = await post(cookie, "/stock/locations", { warehouseId: warehouse!.id, name: "B2", blockedNote: "x" });
     expect(noteWithoutBlock.statusCode).toBe(400);
     const star = await post(cookie, "/stock/locations", { warehouseId: warehouse!.id, name: "***", blocked: true });
-    expect([star.statusCode, star.json().code]).toEqual([409, "fallback-location-not-blockable"]);
+    expect([star.statusCode, star.json().code]).toEqual([409, "stock-location-name-reserved"]);
   });
 
   it("refuses without lager (403) and for a read-only account (403 read-only-account)", async () => {

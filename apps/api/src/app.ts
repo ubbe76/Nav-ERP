@@ -199,6 +199,8 @@ import { createAlertDigestRepository } from "./modules/alerts/repository/alert-d
 import { createAlertDigestService } from "./modules/alerts/service/alert-digest.service.js";
 import { alertsRoutes } from "./modules/alerts/routes/alerts.routes.js";
 import { isBookkeepingLockViolation, isClosedFiscalYearViolation, isEmployeeAnonymizedViolation } from "./modules/system/service/db-errors.js";
+import { StockLocationNotFoundError } from "./modules/stock/service/stock.errors.js";
+import { errorBody } from "./modules/system/service/error-body.js";
 import { createQualityRepository } from "./modules/quality/repository/quality.repository.js";
 import { createQualityService } from "./modules/quality/service/quality.service.js";
 import { qualityRoutes } from "./modules/quality/routes/quality.routes.js";
@@ -276,6 +278,10 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
         code: "bookkeeping-record-locked",
       });
     }
+    // A chosen stock location that does not exist, from any stock writer
+    // (resolveStockLocation) — inleverans, utleverans, Förbruka, justering:
+    // the client's mistake, mapped once here rather than in every route.
+    if (err instanceof StockLocationNotFoundError) return reply.code(404).send(errorBody(err));
     // GDPR (#2): the anonymized-employee guard (migration 0170).
     if (isEmployeeAnonymizedViolation(err)) {
       return reply.code(409).send({

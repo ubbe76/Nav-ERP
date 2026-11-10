@@ -73,6 +73,8 @@ import { pluginEvents } from "../../system/service/plugin-events.js";
 import { resolveStockLocation } from "../../stock/service/location-resolver.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
+import { lockArticlesForOutflow } from "../../stock/service/outflow-locations.js";
+import { isStockedArticle } from "../../stock/service/stocked-article.js";
 import { loadVatCodeBook } from "../../economy/repository/vat-codes.js";
 import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions } from "../../economy/service/dimension-check.js";
 import { purchaseRowArrivalDate } from "../../planning/repository/effective-dates.js";
@@ -932,11 +934,19 @@ export function createPurchaseRepository(db: Db) {
       return { rows, total: totalRows[0]!.total };
     },
 
-    async updateStatus(id: string, status: PurchaseOrderStatus) {
+    // fromStatuses: only from one of those (null when the order has moved
+    // on) — Makulera, which must not overwrite a receipt that committed
+    // between its check and this UPDATE (the UPDATE waits for the receipt's
+    // order lock and then re-checks the WHERE).
+    async updateStatus(id: string, status: PurchaseOrderStatus, fromStatuses?: readonly PurchaseOrderStatus[]) {
       const [row] = await db
         .update(purchaseOrders)
         .set({ status, updatedAt: new Date() })
-        .where(eq(purchaseOrders.id, id))
+        .where(
+          fromStatuses
+            ? and(eq(purchaseOrders.id, id), inArray(purchaseOrders.status, [...fromStatuses]))
+            : eq(purchaseOrders.id, id)
+        )
         .returning();
       return row ?? null;
     },
@@ -1184,7 +1194,17 @@ export function createPurchaseRepository(db: Db) {
         // The order lock (after the row, the order updateRow takes them in)
         // serialises receipts and undos on different rows of one order, so
         // the status recomputed below always sees every row's final quantity.
-        await tx.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.id, orderId)).for("update");
+        // The status again, under the lock: the read above was unlocked, and a
+        // Makulera (conditional on draft/confirmed) that committed meanwhile
+        // must not get goods on a cancelled order.
+        const [locked] = await tx
+          .select({ status: purchaseOrders.status })
+          .from(purchaseOrders)
+          .where(eq(purchaseOrders.id, orderId))
+          .for("update");
+        if (!locked || (locked.status !== "confirmed" && locked.status !== "partially_received")) {
+          return { ok: false, reason: "invalid_status" };
+        }
 
         // Compared at the column's 4 decimals so float noise (0.1 + 0.2, or
         // 10 × 1.1) never rejects a receipt that lands exactly on the limit.
@@ -1207,8 +1227,10 @@ export function createPurchaseRepository(db: Db) {
         // (and pollute the D0 moving average with the lego price). Only the
         // PO-row bookkeeping below and the operation auto-report in the
         // service layer happen for such rows.
+        // A service row (tjänst) is work, not goods: no stock movement either
+        // (stocked-article.ts) — the receipt row below still records it.
         let stock: { locationId: string; stockTransactionId: string } | null = null;
-        if (row.moOperationId === null) {
+        if (row.moOperationId === null && (await isStockedArticle(tx, row.articleId))) {
           // unit_cost is the SEK cost per unit at receipt time: the row's
           // purchase price (already in the article's base unit) converted at
           // the order's exchange rate ("rate against SEK", defaults to "1").
@@ -1326,6 +1348,10 @@ export function createPurchaseRepository(db: Db) {
 
         const quantity = Number(receipt.quantity);
         if (receipt.stockTransactionId && receipt.locationId) {
+          // An outflow: the article lock every draw takes, before the
+          // "still in stock" check — a delivery drawing the same goods
+          // waits, instead of both passing and the place going negative.
+          await lockArticlesForOutflow(tx, [row.articleId]);
           const [balance] = await tx
             .select({ quantity: sql<string>`coalesce(sum(${stockTransactions.quantityDelta}), 0)` })
             .from(stockTransactions)

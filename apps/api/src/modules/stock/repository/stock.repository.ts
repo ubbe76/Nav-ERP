@@ -20,6 +20,8 @@ import {
 import { resolveStockLocation } from "../service/location-resolver.js";
 import { deactivateEmptyLocation, locationHoldsStock } from "../service/location-lifecycle.js";
 import { assertLocationNotUnderCount } from "../service/count-guard.js";
+import { lockArticlesForOutflow } from "../service/outflow-locations.js";
+import { isStockedArticleType } from "../service/stocked-article.js";
 import { articlePlacePreference, compareOutflowLocations, FALLBACK_LOCATION_NAME } from "../service/outflow-allocation.js";
 import { isCheckViolation } from "../../system/service/db-errors.js";
 import { stockValuedAt } from "./valued-at.js";
@@ -52,6 +54,8 @@ import {
   StockLocationAlreadyBlockedError,
   StockLocationNotBlockedError,
   StockLocationNotEmptyError,
+  ServiceArticleNotStockedError,
+  StockLocationNameReservedError,
   StockLocationNotFoundError,
 } from "../service/stock.errors.js";
 
@@ -126,6 +130,7 @@ export function createStockRepository(db: Db) {
 
     // A place may be created blocked (a Karantän); blocked_at is the moment.
     async createLocation(input: CreateStockLocationInput) {
+      if (input.name.trim() === FALLBACK_LOCATION_NAME) throw new StockLocationNameReservedError();
       const { blocked, blockedNote, ...fields } = input;
       const isBlocked = blocked === true;
       try {
@@ -152,6 +157,18 @@ export function createStockRepository(db: Db) {
     async updateLocation(id: string, input: UpdateStockLocationInput) {
       try {
         return await db.transaction(async (tx) => {
+          // The reserved name: the real "***" keeps it, no other place takes it.
+          if (input.name !== undefined) {
+            const [named] = await tx
+              .select({ name: stockLocations.name })
+              .from(stockLocations)
+              .where(eq(stockLocations.id, id))
+              .for("no key update");
+            if (!named) return null;
+            if ((named.name === FALLBACK_LOCATION_NAME) !== (input.name.trim() === FALLBACK_LOCATION_NAME)) {
+              throw new StockLocationNameReservedError();
+            }
+          }
           if (input.active === false || input.blockedNote !== undefined) {
             // Locked like Spärra/Släpp spärr, so a note never lands on a
             // place that was just unblocked.
@@ -339,6 +356,12 @@ export function createStockRepository(db: Db) {
 
     async createTransaction(input: CreateStockTransactionInput, createdBy?: string) {
       return db.transaction(async (tx) => {
+        const [subject] = await tx
+          .select({ articleNumber: articles.articleNumber, type: articles.type })
+          .from(articles)
+          .where(eq(articles.id, input.articleId));
+        if (!subject) throw new ArticleNotFoundError(input.articleId);
+        if (!isStockedArticleType(subject.type)) throw new ServiceArticleNotStockedError(subject.articleNumber);
         // Location is mandatory — resolve article default / "***" when absent.
         const locationId = await resolveStockLocation(tx, input.articleId, input.locationId);
         await assertLocationNotUnderCount(tx, locationId);
@@ -397,6 +420,14 @@ export function createStockRepository(db: Db) {
 
         const articleIds = input.rows.map((row) => row.articleId);
 
+        // Every moved article FOR NO KEY UPDATE, sorted, before anything else:
+        // the overdraw check below reads the source's balance, and every
+        // outflow (Automatiskt, a chosen place, another transfer) takes the
+        // article first — without it a transfer and a draw could both take
+        // the same balance and leave the source negative. Article → place,
+        // as in every draw.
+        await lockArticlesForOutflow(tx, articleIds);
+
         // The followers — moved articles whose huvudplats is the source —
         // captured before the cleanup below clears every pointer to it, and
         // LOCKED as they are read (FOR NO KEY UPDATE, sorted, before any
@@ -416,10 +447,11 @@ export function createStockRepository(db: Db) {
         const transferId = randomUUID();
         for (const row of input.rows) {
           const [article] = await tx
-            .select({ articleNumber: articles.articleNumber })
+            .select({ articleNumber: articles.articleNumber, type: articles.type })
             .from(articles)
             .where(eq(articles.id, row.articleId));
           if (!article) throw new ArticleNotFoundError(row.articleId);
+          if (!isStockedArticleType(article.type)) throw new ServiceArticleNotStockedError(article.articleNumber);
 
           const [balance] = await tx
             .select({ quantityOnHand: sql<string>`coalesce(sum(${stockTransactions.quantityDelta}), 0)` })

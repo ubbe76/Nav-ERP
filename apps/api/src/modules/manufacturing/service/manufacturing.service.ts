@@ -1971,7 +1971,8 @@ export function createManufacturingService(
       if (order.status !== "done") {
         throw new InvalidStatusTransitionError(`Cannot close an order in status "${order.status}"`);
       }
-      const updated = await repo.updateStatus(moId, "closed");
+      const updated = await repo.updateStatus(moId, "closed", "done");
+      if (!updated) throw new InvalidStatusTransitionError(`Cannot close the order: it is no longer done`);
       await audit.log({ entityType: "manufacturing_order", entityId: order.orderNumber, action: "closed", userId });
       return updated;
     },

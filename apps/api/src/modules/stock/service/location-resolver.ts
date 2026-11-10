@@ -1,6 +1,7 @@
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { articleAlternativeLocations, articles, stockLocations, warehouses, type Db, type Tx } from "@navet/db";
 import { articlePlacePreference, FALLBACK_LOCATION_NAME } from "./outflow-allocation.js";
+import { StockLocationNotFoundError } from "./stock.errors.js";
 
 // Stock locations are mandatory on every stock movement, but the caller may
 // leave the location out — it then resolves in this order:
@@ -40,11 +41,17 @@ export async function resolveStockLocation(
   // (and therefore visible in every list). Reviving rather than refusing keeps
   // the order routines working when an earlier row empties the location the
   // whole order is being booked against.
+  // An unknown id is the caller's mistake: 404 stock-location-not-found
+  // (app.ts maps it for every route), never the insert's FK violation (500).
   if (locationId) {
-    await db
-      .update(stockLocations)
-      .set({ active: true })
-      .where(and(eq(stockLocations.id, locationId), eq(stockLocations.active, false)));
+    const [place] = await db.select({ active: stockLocations.active }).from(stockLocations).where(eq(stockLocations.id, locationId));
+    if (!place) throw new StockLocationNotFoundError(locationId);
+    if (!place.active) {
+      await db
+        .update(stockLocations)
+        .set({ active: true })
+        .where(and(eq(stockLocations.id, locationId), eq(stockLocations.active, false)));
+    }
     return locationId;
   }
 

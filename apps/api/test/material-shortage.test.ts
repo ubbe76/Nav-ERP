@@ -290,7 +290,8 @@ describe("Materialbrist — TO card Slutför operation", () => {
     const f = await makeOrder({ quantity: 4, componentPerUnit: 2, stock: 0, linkedType: "service" });
     await mfgService.completeOperation(f.op10.id, parsed(completeOperationSchema, { quantityCompleted: 4 }), f.user.id);
     expect(await consumedFor(f.order.id, f.linked.id)).toBe(8);
-    expect(await totalBalance(f.linked.id)).toBe(-8);
+    // Tjänster lagerförs inte (2026-11-10): consumed, never drawn from stock.
+    expect(await totalBalance(f.linked.id)).toBe(0);
   });
 
   it("a re-report that draws nothing more passes even with negative stock", async () => {

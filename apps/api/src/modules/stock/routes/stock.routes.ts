@@ -6,7 +6,7 @@ import {
   blockStockLocationSchema,
   createStockCountSchema,
   createStockLocationSchema,
-  createStockTransactionSchema,
+  createStockAdjustmentSchema,
   createStockTransferSchema,
   createWarehouseSchema,
   listStockTransactionsQuerySchema,
@@ -49,6 +49,8 @@ import {
   StockLocationAlreadyBlockedError,
   StockLocationNotBlockedError,
   StockLocationNotEmptyError,
+  ServiceArticleNotStockedError,
+  StockLocationNameReservedError,
   StockLocationNotFoundError,
   WarehouseNotFoundError,
 } from "../service/stock.service.js";
@@ -123,6 +125,7 @@ export async function stockRoutes(
       // blockedNote on an open place / a blocked place renamed to "***".
       if (err instanceof StockLocationNotBlockedError) return reply.code(409).send(errorBody(err));
       if (err instanceof FallbackLocationNotBlockableError) return reply.code(409).send(errorBody(err));
+      if (err instanceof StockLocationNameReservedError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });
@@ -134,6 +137,7 @@ export async function stockRoutes(
       return reply.code(201).send(row);
     } catch (err) {
       if (err instanceof FallbackLocationNotBlockableError) return reply.code(409).send(errorBody(err));
+      if (err instanceof StockLocationNameReservedError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });
@@ -195,12 +199,14 @@ export async function stockRoutes(
   );
 
   app.post("/stock/transactions", async (req, reply) => {
-    const input = createStockTransactionSchema.parse(req.body);
+    const input = createStockAdjustmentSchema.parse(req.body);
     try {
       const row = await service.recordTransaction(input, req.user!.id);
       return reply.code(201).send(row);
     } catch (err) {
       if (err instanceof LocationUnderStockCountError) return reply.code(409).send(errorBody(err));
+      if (err instanceof ServiceArticleNotStockedError) return reply.code(400).send(errorBody(err));
+      if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
       throw err;
     }
   });
@@ -218,6 +224,7 @@ export async function stockRoutes(
       }
       if (err instanceof InsufficientStockError) return reply.code(409).send(errorBody(err));
       if (err instanceof LocationUnderStockCountError) return reply.code(409).send(errorBody(err));
+      if (err instanceof ServiceArticleNotStockedError) return reply.code(400).send(errorBody(err));
       if (err instanceof InactiveStockLocationError) {
         return reply.code(400).send(errorBody(err));
       }
@@ -329,6 +336,7 @@ export async function stockRoutes(
       if (err instanceof StockCountNotOpenError || err instanceof DuplicateStockCountRowError) {
         return reply.code(409).send(errorBody(err));
       }
+      if (err instanceof ServiceArticleNotStockedError) return reply.code(400).send(errorBody(err));
       throw err;
     }
   });

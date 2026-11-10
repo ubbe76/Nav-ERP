@@ -70,6 +70,16 @@ export const createStockTransactionSchema = z.object({
 });
 export type CreateStockTransactionInput = z.infer<typeof createStockTransactionSchema>;
 
+// POST /stock/transactions — Lagerjustering: the only movement the route
+// books by itself. Inleverans, utleverans, TO-uttag/-inleverans and flytt
+// belong to their own routines, which link the movement to its document and
+// price it; a free row typed as one of them would count as that document's
+// in FIFO, the latest purchase price and the stock log (granskningen
+// 2026-11-10). Omitted = inventory_adjustment; anything else is 400.
+export const createStockAdjustmentSchema = createStockTransactionSchema.extend({
+  transactionType: z.literal("inventory_adjustment").default("inventory_adjustment"),
+});
+
 // Lagerflytt — move balances from one stock location to another. Both legs of
 // every row are written in one transaction; see stock.repository.transferStock.
 export const createStockTransferSchema = z

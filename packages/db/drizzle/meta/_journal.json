@@ -1415,6 +1415,20 @@
       "when": 1794214388436,
       "tag": "0201_operation-filer",
       "breakpoints": true
+    },
+    {
+      "idx": 202,
+      "version": "7",
+      "when": 1794293570081,
+      "tag": "0202_lagerplats_vacks",
+      "breakpoints": true
+    },
+    {
+      "idx": 203,
+      "version": "7",
+      "when": 1794294077432,
+      "tag": "0203_tjanst_utan_lagerplats",
+      "breakpoints": true
     }
   ]
 }

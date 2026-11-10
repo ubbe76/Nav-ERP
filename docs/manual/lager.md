@@ -95,7 +95,7 @@ Markera platser i listan och klicka **Skriv ut etiketter** för att skriva ut et
 
 1. **Artikelns huvudplats** — kortet **Lagerplatser** på artikelkortets Lager-flik (se [Artiklar](/hjalp/artiklar#lager)). En inaktiverad eller [spärrad](#sparrade-lagerplatser) plats hoppas över. Är huvudplatsen reservplatsen (`*** (standard)` på kortet, som alla artiklar får när ingen plats väljs) räknas det som att artikeln saknar huvudplats.
 2. **Artikelns första användbara alternativa lagerplats** — i den ordning som står under **Alternativa lagerplatser**. Inleveranser fyller alltså inte på en alternativ plats bara för att det finns saldo där; de går till huvudplatsen.
-3. **`***`** — en reservplats (lagret `***` med lagerplatsen `***`) som systemet skapar automatiskt första gången den behövs.
+3. **`***`** — en reservplats (lagret `***` med lagerplatsen `***`) som systemet skapar automatiskt första gången den behövs. Namnet `***` är reserverat: ingen annan lagerplats kan heta så, och reservplatsen kan inte byta namn (*Namnet \*\*\* är reserverat för reservplatsen — välj ett annat namn*). En lagersaldofil med lagerplatsen `***` hamnar på reservplatsen, oavsett vilket lager filen anger.
 
 I formulären för inleveranser och justeringar heter standardvalet **"Artikelns lagerplats"**; välj en specifik plats i listan för att styra transaktionen dit i stället. Vid uttag (utleverans, materialuttag på tillverkningsorder) heter standardvalet **"Automatiskt"** och fungerar lite annorlunda, se [Uttag med Automatiskt](#uttag-med-automatiskt).
 
@@ -223,7 +223,9 @@ Enter i **Räknat** sparar raden även när du skriver utan att skanna. **Spara 
 
 ## Justering
 
-**Lager → Justering** registrerar en enstaka saldojustering: välj artikel (artikelväljaren), lagerplats, ange **justeringen som +/− antal** (inte det räknade totalsaldot) och gärna en anteckning om orsaken. Klicka **Registrera justering** — justeringen bokförs som transaktion och syns direkt i saldot.
+**Lager → Justering** registrerar en enstaka saldojustering: välj artikel (artikelväljaren), lagerplats, ange **justeringen som +/− antal** (inte det räknade totalsaldot) och gärna en anteckning om orsaken. Klicka **Registrera justering** — justeringen bokförs som transaktion och syns direkt i saldot. En tjänst kan inte justeras — [tjänster lagerförs inte](/hjalp/artiklar#artikeltyper).
+
+Justeringen är också det enda en integration kan boka direkt via API:t (`POST /stock/transactions`). Inleveranser, utleveranser, materialuttag och lagerflyttar görs i sina egna rutiner, som kopplar rörelsen till sitt dokument och sitt pris.
 
 Har artikeln alternativa enheter visas en **Enhet**-dropdown vid justeringsfältet — antalet kan då matas in i t.ex. kg och räknas om till grundenheten vid bokföringen (omräkningen visas som hjälptext innan du sparar).
 

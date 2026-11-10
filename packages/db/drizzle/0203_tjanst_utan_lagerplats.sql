@@ -1,0 +1,1 @@
+ALTER TABLE "mo_report_materials" ALTER COLUMN "location_id" DROP NOT NULL;
