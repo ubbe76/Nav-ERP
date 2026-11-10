@@ -71,6 +71,8 @@ export const ERROR_CODES = {
   TOO_FEW_VERIFICATION_ROWS: "too-few-verification-rows",
   INACTIVE_ACCOUNT: "inactive-account",
   ALREADY_REVERSED: "already-reversed",
+  REVERSAL_ROWS_LOCKED: "reversal-rows-locked",
+  VERIFICATION_IS_REVERSAL: "verification-is-reversal",
   INVALID_VERIFICATION_STATE: "invalid-verification-state",
   DUPLICATE_POSTING_RULE: "duplicate-posting-rule",
   POSTING_RULE_NO_ACCOUNTS: "posting-rule-no-accounts",

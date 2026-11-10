@@ -8,6 +8,7 @@ import { confirmDialog } from "../../lib/confirm";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney, formatPercent, formatSignedMoney } from "../../lib/format";
 import { ARTICLE_TYPE_LABELS, type ArticleGroup, type ArticleType, type RegisterEntry } from "../../lib/types";
+import { ArticleNumberInput } from "../ui/ArticleNumberInput";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Checkbox, Input, Select } from "../ui/Field";
@@ -442,16 +443,21 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
                 <span className={styles.filterLabel}>Artikelnummer</span>
                 {ranges.map((r, i) => (
                   <div key={i} className={styles.rangeRow}>
-                    <Input
+                    <ArticleNumberInput
                       value={r.from}
                       placeholder="Från"
                       aria-label={`Artikelnummer från, intervall ${i + 1}`}
-                      onChange={(e) => setRange(i, { from: e.target.value })}
+                      onChange={(from) => setRange(i, { from })}
                     />
                     <span className={styles.rangeDash} aria-hidden="true">
                       –
                     </span>
-                    <Input value={r.to} placeholder="Till" aria-label={`Artikelnummer till, intervall ${i + 1}`} onChange={(e) => setRange(i, { to: e.target.value })} />
+                    <ArticleNumberInput
+                      value={r.to}
+                      placeholder="Till"
+                      aria-label={`Artikelnummer till, intervall ${i + 1}`}
+                      onChange={(to) => setRange(i, { to })}
+                    />
                     <button
                       type="button"
                       className={styles.rangeRemove}

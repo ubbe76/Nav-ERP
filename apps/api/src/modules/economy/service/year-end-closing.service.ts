@@ -1081,8 +1081,13 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
       ...ub.filter((b) => isBalanceAccount(b.accountNumber)).map((b) => b.accountId),
       ...rows.map((row) => row.accountId),
     ]);
+    // The import duplicates only what the books already carry: with nothing
+    // booked through this year's end (an empty year in front of the import's
+    // year) it IS the opening balance — the SIE import's own
+    // SiePriorBookkeepingError rule, seen from this side.
+    const duplicates = await repo.hasBookedVerificationThrough(executor, year.endDate);
     const differences = [...net.entries()]
-      .filter(([, entry]) => entry.amount !== 0)
+      .filter(([, entry]) => duplicates && entry.amount !== 0)
       .map(([accountId, entry]) => {
         const balance = ub.find((b) => b.accountId === accountId);
         const ubAmount = balance ? round2(balance.periodDebit - balance.periodCredit) : 0;

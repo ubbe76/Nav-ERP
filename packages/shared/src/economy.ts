@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { listQuerySchema, statusListParam } from "./list.js";
 import { blankSafe } from "./coerce.js";
+import { round2 } from "./money.js";
 import { dimensionFields, dimensionFilterQuery, incomeStatementGroupBySchema } from "./dimensions.js";
 
 // --- Kontoplan (chart of accounts) ---
@@ -170,7 +171,8 @@ export type ListVerificationsQuery = z.infer<typeof listVerificationsQuerySchema
 
 // Debit/credit as two always-nonnegative fields (mirrors the column split in
 // the schema) with an XOR refine: exactly one of the two must be > 0, never
-// both and never neither.
+// both and never neither — judged on the öre the service stores (round2), so
+// 0.004 is "neither" here instead of a 0 that the column CHECK turns into a 500.
 export const verificationRowInputSchema = z
   .object({
     accountId: z.string().uuid(),
@@ -180,7 +182,7 @@ export const verificationRowInputSchema = z
     // Kostnadsställen och projekt: the row's SIE objects.
     ...dimensionFields,
   })
-  .refine((data) => (data.debit > 0) !== (data.credit > 0), {
+  .refine((data) => (round2(data.debit) > 0) !== (round2(data.credit) > 0), {
     message: "Exactly one of debit or credit must be greater than zero",
     path: ["debit"],
   });

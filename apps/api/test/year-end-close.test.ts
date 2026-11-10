@@ -285,6 +285,26 @@ describe("steg 6 — stäng året", () => {
     expect(entry!.detail).toMatchObject({ ibCheck: { nextFiscalYear: String(NEXT_YEAR), accounts: 3, differences: 0 } });
   });
 
+  // An empty year in front of the year Nav started in: the IB import is the
+  // opening balance there, not a duplicate of a UB the books do not carry —
+  // blocking would leave neither year closable (the later one waits for this).
+  it("does not block an empty year on the next year's opening-balance import", async () => {
+    const { user } = await setupUserAndAccounts();
+    const year = await createCalendarYear(YEAR);
+    await createCalendarYear(NEXT_YEAR);
+    await db.transaction(async (tx) =>
+      testYearEndPoster.postOpeningBalances(
+        tx,
+        { date: `${NEXT_YEAR}-01-01`, balances: [{ accountId: await accountId("1930"), amount: 5000 }, { accountId: await accountId("2091"), amount: -5000 }] },
+        user.id
+      )
+    );
+    const closing = await service.startClosing({ fiscalYearId: year.id }, user.id);
+    const detail = await service.getClosing(closing.id);
+    expect(detail.ibCheck).toMatchObject({ nextFiscalYearLabel: String(NEXT_YEAR), imports: [], differences: [] });
+    expect(detail.checks.closeBlockers.map((c) => c.code)).not.toContain("next-year-opening-balance-import");
+  });
+
   // Spec 4.7: only balance accounts are compared — a series-I row on class
   // 3–8 is no opening balance and must not block.
   it("ignores series-I rows on income statement accounts", async () => {

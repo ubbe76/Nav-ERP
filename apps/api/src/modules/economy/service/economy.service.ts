@@ -280,6 +280,28 @@ export class FixedAssetVerificationError extends Error {
   }
 }
 
+// An omföring's rows are the source's, mirrored — the poster trusts a booked
+// one as the correction of its source (reverseBookedVerification's
+// alreadyReversed: a Makulera or a removed payment then commits without an
+// omföring of its own), so a draft with reversesVerificationId may change its
+// date, description and series but never its rows.
+export class ReversalRowsLockedError extends Error {
+  constructor(id: string) {
+    super(`Verification ${id} is an omföring — its rows mirror the source and cannot change`);
+    this.name = "ReversalRowsLockedError";
+  }
+}
+
+// Omför of an omföring: the source would stand in the books again while the
+// first omföring still counts as its correction (above). To book the source
+// again, Kopiera it instead.
+export class VerificationIsReversalError extends Error {
+  constructor(id: string) {
+    super(`Verification ${id} is itself an omföring and cannot be reversed — copy the source instead`);
+    this.name = "VerificationIsReversalError";
+  }
+}
+
 // The closing guide owns its BS verifications: the closing row points at the
 // live ones, so a manual Omför would let the guide and the ledger drift.
 export class YearEndClosingVerificationError extends Error {
@@ -365,6 +387,12 @@ export function displayNumber(v: { status: string; seriesCode: string; yearLabel
     return `${v.seriesCode}-${v.yearLabel}-${v.verificationNumber}`;
   }
   return "Utkast";
+}
+
+// The row writers' omföring guard (ReversalRowsLockedError). No race to
+// close: reversesVerificationId is written with the draft and never changes.
+function assertRowsEditable(verification: { id: string; reversesVerificationId: string | null }): void {
+  if (verification.reversesVerificationId) throw new ReversalRowsLockedError(verification.id);
 }
 
 // Row validation shared by create/addRow/updateRow: the account must exist
@@ -820,6 +848,7 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
       if (existing.status !== "draft") {
         throw new InvalidVerificationStateError(`Cannot change rows on verification ${id}: it is not a draft`);
       }
+      assertRowsEditable(existing);
       const rows: VerificationRowWrite[] = [];
       for (const r of input) rows.push(await resolveVerificationRow(repo, r));
 
@@ -925,6 +954,7 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
       if (existing.status !== "draft") {
         throw new InvalidVerificationStateError(`Cannot change rows on verification ${verificationId}: it is not a draft`);
       }
+      assertRowsEditable(existing);
       const row = await repo.addRow(verificationId, await resolveVerificationRow(repo, input));
       if (!row) {
         throw new InvalidVerificationStateError(`Cannot add a row to verification ${verificationId}: it is no longer a draft`);
@@ -941,6 +971,7 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
       if (existing.status !== "draft") {
         throw new InvalidVerificationStateError(`Cannot change rows on verification ${verificationId}: it is not a draft`);
       }
+      assertRowsEditable(existing);
       const existingRow = await repo.findRow(verificationId, rowId);
       if (!existingRow) throw new VerificationRowNotFoundError(rowId);
 
@@ -961,6 +992,7 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
       if (existing.status !== "draft") {
         throw new InvalidVerificationStateError(`Cannot change rows on verification ${verificationId}: it is not a draft`);
       }
+      assertRowsEditable(existing);
       const existingRow = await repo.findRow(verificationId, rowId);
       if (!existingRow) throw new VerificationRowNotFoundError(rowId);
 
@@ -1039,6 +1071,8 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
       }
       if (await repo.findFixedAssetLink(id)) throw new FixedAssetVerificationError(id);
       if (await repo.findYearEndLink(id)) throw new YearEndClosingVerificationError(id);
+      // After the owners above: their refusal says where to undo instead.
+      if (source.reversesVerificationId) throw new VerificationIsReversalError(id);
       // Friendly pre-check — the partial unique index on
       // reversesVerificationId is the real guarantee, caught below.
       if (await repo.findReversalOf(id)) throw new AlreadyReversedError(id);

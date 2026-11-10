@@ -36,6 +36,8 @@ import {
   AccountingPeriodLockedError,
   AccountingPeriodNotFoundError,
   AlreadyReversedError,
+  ReversalRowsLockedError,
+  VerificationIsReversalError,
   ArticleGroupNotFoundError,
   CostCenterInactiveError,
   CostCenterNotFoundError,
@@ -329,6 +331,8 @@ export async function economyRoutes(
       err instanceof UnbalancedVerificationError ||
       err instanceof AccountingPeriodLockedError ||
       err instanceof AlreadyReversedError ||
+      err instanceof ReversalRowsLockedError ||
+      err instanceof VerificationIsReversalError ||
       err instanceof FixedAssetVerificationError ||
       err instanceof YearEndClosingVerificationError ||
       err instanceof VerificationFileLockedError

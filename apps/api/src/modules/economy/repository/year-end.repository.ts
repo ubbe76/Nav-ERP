@@ -384,6 +384,17 @@ export async function openingBalanceRows(executor: Executor, fiscalYearId: strin
     );
 }
 
+// Anything booked on or before `date` — the IB check's "do the books already
+// carry this year's UB?" (an empty year before an IB import's year has none).
+export async function hasBookedVerificationThrough(executor: Executor, date: string): Promise<boolean> {
+  const [row] = await executor
+    .select({ id: verifications.id })
+    .from(verifications)
+    .where(and(eq(verifications.status, "booked"), lte(verifications.date, date)))
+    .limit(1);
+  return row !== undefined;
+}
+
 // Steg 3's footprint: a register run (not a disposal catch-up) whose AV
 // verification is dated on the closing date — undone or not, its rows stay
 // on that date, so the closing date can no longer move.

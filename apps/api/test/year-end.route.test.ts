@@ -360,12 +360,12 @@ describe("year-end-closings in the real app", () => {
     }
   });
 
-  // Spec 3/§12: the closed-year trigger is the last line. A result transfer
-  // whose app guard read the year as open, while another transaction is
-  // closing it, waits on the trigger's FOR SHARE and is then refused with
-  // SQLSTATE NV001 — which the app's error handler turns into 409
-  // fiscal-year-closed (the trigger's message says which NV001 it is).
-  it("409s fiscal-year-closed when the closed-year trigger refuses a booking", async () => {
+  // Spec 3/§12: a result transfer that starts while another transaction is
+  // closing the year. The poster's guard reads the year FOR SHARE
+  // (posting-period-lock.ts), so it waits for the closer and then sees the
+  // year closed — 409 fiscal-year-closed before the closed-year trigger (the
+  // last line, tested in year-end-schema.test.ts) is even reached.
+  it("409s fiscal-year-closed when a booking meets a year being closed", async () => {
     const app = buildApp();
     await app.ready();
     try {
@@ -385,14 +385,14 @@ describe("year-end-closings in the real app", () => {
       await updatedSignal;
       const request = app.inject({ method: "POST", url: `/api/v1/year-end-closings/${closingId}/result-transfer`, headers: { cookie: ekonomi } });
       try {
-        await waitForLockWaiter(); // the booking's trigger waits on the year row
+        await waitForLockWaiter(); // the booking's guard waits on the year row
       } finally {
         release(); // never leave the closer's row lock behind a failed wait
         await closer;
       }
       const res = await request;
       expect(res.statusCode).toBe(409);
-      expect(res.json()).toMatchObject({ code: "fiscal-year-closed", error: "Räkenskapsåret är stängt — öppna det igen under Bokslut" });
+      expect(res.json()).toMatchObject({ code: "fiscal-year-closed" });
       expect(await countVerifications("BS")).toBe(0);
     } finally {
       await app.close();

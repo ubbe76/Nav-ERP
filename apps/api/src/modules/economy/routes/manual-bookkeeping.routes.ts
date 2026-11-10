@@ -24,6 +24,7 @@ import {
   InvalidVerificationStateError,
   NoAccountingPeriodError,
   NoFiscalYearForDateError,
+  ReversalRowsLockedError,
   TooFewVerificationRowsError,
   UnbalancedVerificationError,
   VerificationNotFoundError,
@@ -99,6 +100,7 @@ export async function manualBookkeepingRoutes(
     }
     if (
       err instanceof InvalidVerificationStateError ||
+      err instanceof ReversalRowsLockedError ||
       err instanceof TooFewVerificationRowsError ||
       err instanceof UnbalancedVerificationError ||
       err instanceof AccountingPeriodLockedError

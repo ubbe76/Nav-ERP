@@ -177,6 +177,30 @@ describe("verifications: PUT rows, book, copy, template", () => {
     expect((await c.post(`/verifications/${crypto.randomUUID()}/copy`)).statusCode).toBe(404);
   });
 
+  // The table editor saves through PUT rows, so the omföring guard must come
+  // back as the 409 the web translates — not a 500 from an unmapped error.
+  it("answers 409 reversal-rows-locked on PUT and POST rows of an omföring draft, and 409 verification-is-reversal on its Omför", async () => {
+    const { series, bank, revenue } = await setupEconomy();
+    const c = api(await ekonomiCookie());
+    const rows = [
+      { accountId: bank.id, debit: 70, credit: 0 },
+      { accountId: revenue.id, debit: 0, credit: 70 },
+    ];
+    const booked = await c.post("/verifications", { seriesId: series.id, date: `${YEAR}-03-12`, description: "Källa", rows, book: true });
+    const reversal = await c.post(`/verifications/${booked.json().id}/reverse`);
+    expect(reversal.statusCode).toBe(201);
+    const put = await c.put(`/verifications/${reversal.json().id}/rows`, { rows });
+    expect(put.statusCode).toBe(409);
+    expect(put.json().code).toBe("reversal-rows-locked");
+    const added = await c.post(`/verifications/${reversal.json().id}/rows`, rows[0]);
+    expect(added.statusCode).toBe(409);
+    expect(added.json().code).toBe("reversal-rows-locked");
+    expect((await c.post(`/verifications/${reversal.json().id}/book`)).statusCode).toBe(200);
+    const again = await c.post(`/verifications/${reversal.json().id}/reverse`);
+    expect(again.statusCode).toBe(409);
+    expect(again.json().code).toBe("verification-is-reversal");
+  });
+
   it("keeps the routes behind Ekonomi", async () => {
     await setupEconomy();
     const other = api(await officeCookie());

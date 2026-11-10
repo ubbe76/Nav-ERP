@@ -193,6 +193,20 @@ describe("aggregatePeriodicSummary", () => {
     expect(rows.map((row) => row.vatNumber)).toEqual(["DE123456789"]);
     expect(warnings.map((warning) => warning.kind)).toEqual(["non_eu_country"]);
   });
+
+  // Northern Ireland (country GB): goods with the XI number are reported,
+  // without the country warning; services with it are no EU sale.
+  it("reports goods to a Northern Ireland buyer under the XI number, but not services", () => {
+    const ni = { vatNumber: "XI123456789", customerId: "ni", customerName: "Belfast Ltd", customerCountry: "GB" };
+    const { rows, warnings } = aggregatePeriodicSummary([
+      line({ ...ni, code: "EUV", amount: "100.00" }),
+      line({ ...ni, code: "EUT", amount: "40.00" }),
+    ]);
+    expect(rows.map((row) => [row.vatNumber, row.goods, row.services, row.goodsUsed, row.servicesUsed])).toEqual([
+      ["XI123456789", 100, 0, true, false],
+    ]);
+    expect(warnings.map((warning) => warning.kind).sort()).toEqual(["invalid_vat_number", "non_eu_country"]);
+  });
 });
 
 describe("ledgerDifferenceWarnings / ledgerDifference (öre)", () => {
