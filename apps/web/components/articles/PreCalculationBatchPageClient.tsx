@@ -53,6 +53,15 @@ interface RanWith {
 
 type TypeFilter = "" | ArticleType;
 
+// Visa urval's answer plus the selection it was asked for (JSON of the
+// request body).
+interface ListedSelection {
+  key: string;
+  count: number;
+  max: number;
+  articles: { id: string; articleNumber: string; name: string; type: ArticleType }[];
+}
+
 // One Artikelnummer från/till row in the filter. An article is taken when it
 // lies in ANY of the rows; a row with both fields empty is not sent (it
 // would let everything in). Mirrors PRE_CALCULATION_BATCH_MAX_RANGES in
@@ -85,6 +94,13 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
   const [activeOnly, setActiveOnly] = useState(true);
   const [fallbackQuantity, setFallbackQuantity] = useState("1");
   const [multiLevel, setMultiLevel] = useState(false);
+
+  // Visa urval: the selection's articles, listed without calculating. `key`
+  // is the selection it was listed for — the list is only shown while the
+  // form still asks for that selection.
+  const [listed, setListed] = useState<ListedSelection | null>(null);
+  const [listing, setListing] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
 
   const [rows, setRows] = useState<BatchRow[] | null>(null);
   const [ranWith, setRanWith] = useState<RanWith | null>(null);
@@ -241,10 +257,32 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
     inFlight.current.set(id, work);
   }
 
+  async function onListSelection() {
+    const body = selectionBody();
+    const key = JSON.stringify(body);
+    setListing(true);
+    setListError(null);
+    try {
+      const res = await apiFetch<Omit<ListedSelection, "key">>("/api/v1/costing/pre-calculations/batch/selection", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      setListed({ key, ...res });
+    } catch (err) {
+      setListed(null);
+      setListError(apiErrorMessage(err, "Kunde inte visa urvalet"));
+    } finally {
+      setListing(false);
+    }
+  }
+
   function onPreview() {
     if (!quantityValid) return;
     void runPreview({ body: { ...selectionBody(), fallbackQuantity: Number(fallbackQuantity) }, multiLevel }, false);
   }
+
+  // Shown only while the form still asks for the listed selection.
+  const shownSelection = listed && listed.key === JSON.stringify(selectionBody()) ? listed : null;
 
   const selectable = useMemo(() => (rows ?? []).filter((r) => !r.error), [rows]);
   const selectedCount = selectable.filter((r) => selected.has(r.articleId)).length;
@@ -537,14 +575,64 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
             </label>
           </div>
           <FormHint>Varje artikel räknas med antalet i sin senaste förkalkyl. Ändra Antal på en rad för att räkna om just den.</FormHint>
-          <div>
+          <div className={styles.runButtons}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void onListSelection()}
+              disabled={listing || (source === "copied" && copiedDisabled)}
+            >
+              {listing ? "Hämtar…" : "Visa urval"}
+            </Button>
             <Button type="button" onClick={onPreview} disabled={running || !quantityValid || (source === "copied" && copiedDisabled)}>
               {running ? "Beräknar…" : "Förkalkylera"}
             </Button>
           </div>
-          <FormError>{error}</FormError>
+          <FormError>{listError ?? error}</FormError>
         </FormStack>
       </Card>
+
+      {shownSelection && (
+        <Card maxWidth="none">
+          <div className={styles.listedHead}>
+            <strong>
+              Urvalet har {shownSelection.count === 1 ? "1 artikel" : `${shownSelection.count.toLocaleString("sv-SE")} artiklar`}
+            </strong>
+            <Button type="button" variant="secondary" size="small" onClick={() => setListed(null)}>
+              Dölj
+            </Button>
+          </div>
+          {shownSelection.count > shownSelection.max && (
+            <FormNotice>
+              Högst {shownSelection.max} artiklar kan förkalkyleras åt gången — snäva in urvalet. Listan visar de första{" "}
+              {shownSelection.max}.
+            </FormNotice>
+          )}
+          {shownSelection.articles.length > 0 && (
+            <div className={styles.listedWrap}>
+              <Table
+                columns={[
+                  { key: "articleNumber", label: "Artikelnummer", width: shareTrack(110) },
+                  { key: "name", label: "Benämning", width: shareTrack(200, 3) },
+                  { key: "type", label: "Typ", width: shareTrack(90) },
+                ]}
+                rows={shownSelection.articles}
+                renderCell={(a, key) =>
+                  key === "articleNumber" ? (
+                    <GatedLink href={`/artiklar/${a.id}`}>{a.articleNumber}</GatedLink>
+                  ) : key === "name" ? (
+                    a.name
+                  ) : (
+                    ARTICLE_TYPE_LABELS[a.type]
+                  )
+                }
+                emptyText="Inga artiklar matchar urvalet"
+              />
+            </div>
+          )}
+          {shownSelection.count === 0 && <p className={styles.summary}>Inga artiklar matchar urvalet.</p>}
+        </Card>
+      )}
 
       {result && (
         <Card maxWidth="none">

@@ -316,6 +316,7 @@ describe("Endast läsning — reads and side-effect-free POSTs work", () => {
       // Förkalkylera flera (#27): the preview over a selection is a preview.
       { url: "/api/v1/costing/pre-calculations/batch", payload: { selection: { activeOnly: true }, fallbackQuantity: 1 } },
       { url: "/api/v1/costing/pre-calculations/batch", payload: { selection: { copied: true }, fallbackQuantity: 2, multiLevel: true } },
+      { url: "/api/v1/costing/pre-calculations/batch/selection", payload: { selection: { activeOnly: true } } },
       { url: `/api/v1/manufacturing-orders/${f.order.id}/cost-calculations/post-calculate`, payload: undefined },
       { url: `/api/v1/manufacturing-orders/${f.order.id}/cost-calculations/post-calculate`, payload: { save: false } },
       { url: `/api/v1/articles/${f.template.id}/configurator/variants/preview`, payload: { sets: { LOCK: ["A"] }, calcQuantity: 1 } },
@@ -450,6 +451,8 @@ describe("Endast läsning — the allowlist", () => {
         // without save over the selection — computed and answered, nothing
         // written; the save is its own route and is refused. costing.md.
         "POST /api/v1/costing/pre-calculations/batch",
+        // Visa urval: the same selection listed, nothing calculated.
+        "POST /api/v1/costing/pre-calculations/batch/selection",
         // The one route that writes: the account's own preferences.
         "PATCH /api/v1/me/settings",
         // Kopierat (#28): the three writes to the user's own working list of

@@ -6,6 +6,7 @@ import { ForbiddenError } from "../../auth/middleware/permission.middleware.js";
 import {
   postCalculateSchema,
   preCalculateSchema,
+  preCalculationBatchListSchema,
   preCalculationBatchSaveSchema,
   preCalculationBatchSchema,
   satisfiesRule,
@@ -175,6 +176,15 @@ export async function costingRoutes(
         throw err;
       }
     }
+  );
+
+  // Visa urval: the selection's articles before anything is calculated —
+  // read-only like the preview, same access, never refused for size (the
+  // answer carries count and max instead).
+  app.post(
+    "/costing/pre-calculations/batch/selection",
+    { config: { access: articleCardWrite(["tillverkning"]), readOnlySafe: true } },
+    async (req) => batch.listSelection(req.user!.id, preCalculationBatchListSchema.parse(req.body))
   );
 
   // The save: per ticked article the card's Spara kalkyl, then Sätt

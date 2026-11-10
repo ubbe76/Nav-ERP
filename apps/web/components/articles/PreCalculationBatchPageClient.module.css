@@ -232,3 +232,25 @@
   align-items: end;
   gap: 8px 24px;
 }
+
+.runButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.listedHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+
+/* A long selection scrolls inside the card instead of pushing the result
+   table far down the page. */
+.listedWrap {
+  max-height: 420px;
+  overflow-y: auto;
+}

@@ -3,6 +3,7 @@ import {
   PRE_CALCULATION_BATCH_MAX,
   type ArticleType,
   type PreCalculationBatchInput,
+  type PreCalculationBatchListInput,
   type PreCalculationBatchSaveInput,
 } from "@navet/shared";
 import { latestPreCalculations, type LatestPreCalculation } from "../repository/calculated-price.js";
@@ -136,18 +137,38 @@ export function createPreCalculationBatchService(deps: {
     });
   }
 
-  // The selection resolved to articles, in selection order, capped BEFORE
-  // any calculation. Empty is just empty.
+  // The selection resolved to articles, in selection order — the ONE match
+  // the run and Visa urval share. Empty is just empty.
+  async function matchArticles(userId: string, selection: PreCalculationBatchInput["selection"]): Promise<BatchArticle[]> {
+    return "copied" in selection
+      ? await selectBatchArticlesByIds(db, await copied.listCopiedArticleIds(userId))
+      : await selectBatchArticles(db, selection);
+  }
+
+  // The run's match, capped BEFORE any calculation.
   async function selectArticles(userId: string, selection: PreCalculationBatchInput["selection"]): Promise<BatchArticle[]> {
-    const rows =
-      "copied" in selection
-        ? await selectBatchArticlesByIds(db, await copied.listCopiedArticleIds(userId))
-        : await selectBatchArticles(db, selection);
+    const rows = await matchArticles(userId, selection);
     if (rows.length > PRE_CALCULATION_BATCH_MAX) throw new PreCalculationBatchTooLargeError(rows.length);
     return rows;
   }
 
   return {
+    // Visa urval: what Förkalkylera would run over, without calculating.
+    // Never refused for size — `count` says how far over `max` the
+    // selection is (the run would answer 400), and at most `max` articles
+    // are listed, in the run's order. No prices: the list is the selection.
+    async listSelection(
+      userId: string,
+      input: PreCalculationBatchListInput
+    ): Promise<{ count: number; max: number; articles: { id: string; articleNumber: string; name: string; type: ArticleType }[] }> {
+      const rows = await matchArticles(userId, input.selection);
+      return {
+        count: rows.length,
+        max: PRE_CALCULATION_BATCH_MAX,
+        articles: rows.slice(0, PRE_CALCULATION_BATCH_MAX).map(({ id, articleNumber, name, type }) => ({ id, articleNumber, name, type })),
+      };
+    },
+
     async preview(userId: string, input: PreCalculationBatchInput): Promise<{ rows: PreCalculationBatchRow[] }> {
       // The cap is the selection's (as for a full run); onlyArticleIds then
       // keeps the rows being recalculated, in selection order.

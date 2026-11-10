@@ -10,10 +10,10 @@ import { createAuditRepository } from "../src/modules/system/repository/audit.re
 import { testArticleService } from "./helpers/services.js";
 import { parsed } from "./helpers/parsed.js";
 
-// Förkalkylera flera (#27) through the real app: the two routes' shapes, the
-// zod 400s, the cap's 400 envelope, the access rule (Artiklar or
-// Tillverkning, never the workshop profile) and a read-only account —
-// allowed the preview, refused the save. The arithmetic is
+// Förkalkylera flera (#27) through the real app: the routes' shapes (also
+// Visa urval's), the zod 400s, the cap's 400 envelope, the access rule
+// (Artiklar or Tillverkning, never the workshop profile) and a read-only
+// account — allowed the preview and Visa urval, refused the save. The arithmetic is
 // pre-calculation-batch.db.test.ts's.
 
 const authService = createAuthService(createAuthRepository(db), "unused", createAuditRepository(db));
@@ -209,18 +209,60 @@ describe("Förkalkylera flera — the routes", () => {
     expect(none.json()).toEqual({ rows: [] });
   });
 
+  // Visa urval (2026-11-10): the articles the run would take, listed before
+  // anything is calculated — the run's own match, never refused for size.
+  it("lists the selection without calculating: the run's match and order, count past the cap, nothing written", async () => {
+    const cookie = await adminCookie();
+    const b = await makeProduct("B-2");
+    const a = await makeProduct("A-1");
+    await makeProduct("C-3");
+    const ranges = { selection: { activeOnly: true, type: "manufactured", articleNumberRanges: [{ from: "A", to: "B-9" }] } };
+    const listed = await post(cookie, "/costing/pre-calculations/batch/selection", ranges);
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json()).toEqual({
+      count: 2,
+      max: PRE_CALCULATION_BATCH_MAX,
+      articles: [
+        { id: a.id, articleNumber: "A-1", name: "Produkt A-1", type: "manufactured" },
+        { id: b.id, articleNumber: "B-2", name: "Produkt B-2", type: "manufactured" },
+      ],
+    });
+    const run = await post(cookie, "/costing/pre-calculations/batch", { ...ranges, fallbackQuantity: 1 });
+    expect(run.json().rows.map((r: { articleId: string }) => r.articleId)).toEqual([a.id, b.id]);
+    expect(await db.select().from(costCalculations)).toEqual([]);
+
+    const unitId = await articleRepo.getOrCreateDefaultUnitId();
+    await db.insert(articles).values(
+      Array.from({ length: PRE_CALCULATION_BATCH_MAX + 1 }, (_, i) => ({
+        articleNumber: `BULK-${String(i).padStart(4, "0")}`,
+        name: `Bulk ${i}`,
+        type: "purchased" as const,
+        unitId,
+      }))
+    );
+    const big = await post(cookie, "/costing/pre-calculations/batch/selection", { selection: { activeOnly: true, type: "purchased" } });
+    expect(big.statusCode).toBe(200);
+    expect(big.json().count).toBe(PRE_CALCULATION_BATCH_MAX + 4); // the bulk rows and the three components
+    expect(big.json().articles).toHaveLength(PRE_CALCULATION_BATCH_MAX);
+    const bad = await post(cookie, "/costing/pre-calculations/batch/selection", { selection: { activeOnly: true }, fallbackQuantity: 1 });
+    expect(bad.statusCode).toBe(400);
+  });
+
   it("is open to Artiklar and to Tillverkning, closed to the workshop profile and to other menus", async () => {
     const product = await makeProduct("A-1");
     const save = { items: [{ articleId: product.id, quantity: 1 }] };
     for (const permissions of [["artiklar"], ["tillverkning"]]) {
       const cookie = await userCookie(permissions);
       expect((await post(cookie, "/costing/pre-calculations/batch", preview)).statusCode).toBe(200);
+      expect((await post(cookie, "/costing/pre-calculations/batch/selection", { selection: preview.selection })).statusCode).toBe(200);
       expect((await post(cookie, "/costing/pre-calculations/batch/save", save)).statusCode).toBe(200);
     }
     for (const permissions of [["terminal", "tillverkningsorder_las", "artikeloversikt"], ["inkop"], ["forsaljning", "lager"]]) {
       const cookie = await userCookie(permissions);
       const res = await post(cookie, "/costing/pre-calculations/batch", preview);
       expect([permissions.join(","), res.statusCode]).toEqual([permissions.join(","), 403]);
+      const listed = await post(cookie, "/costing/pre-calculations/batch/selection", { selection: preview.selection });
+      expect([permissions.join(","), listed.statusCode]).toEqual([permissions.join(","), 403]);
       const saved = await post(cookie, "/costing/pre-calculations/batch/save", save);
       expect([permissions.join(","), saved.statusCode]).toEqual([permissions.join(","), 403]);
     }
@@ -233,6 +275,9 @@ describe("Förkalkylera flera — the routes", () => {
     const res = await post(cookie, "/costing/pre-calculations/batch", { selection: { copied: true }, fallbackQuantity: 1 });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ rows: [] });
+    const listed = await post(cookie, "/costing/pre-calculations/batch/selection", { selection: { copied: true } });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json()).toEqual({ count: 0, max: PRE_CALCULATION_BATCH_MAX, articles: [] });
     const saved = await post(cookie, "/costing/pre-calculations/batch/save", { items: [{ articleId: product.id, quantity: 1 }] });
     expect(saved.statusCode).toBe(403);
     expect(saved.json().code).toBe("read-only-account");
