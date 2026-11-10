@@ -297,7 +297,7 @@ I den stafflade prislistan har varje staffelsteg en egen rad: kund och artikel u
 
 En offert är en kundorder i status **Offert** — raderna, konfigurationen, fraktpriset, revisionen och offertuppföljningen fungerar som på en order — men den har ett **eget nummer** ur serien **Offert** (**OF-1001**, se [Nummerserier](/hjalp/system#nummerserier)) och sin egen lista och sitt eget kort, med rubriken **Offert OF-1001**. Offert-PDF:en och offertmejlet använder offertnumret.
 
-Offertkortet har inga knappar för orderbekräftelse: **Orderbekräftelse (PDF)** och **Skicka orderbekräftelse** finns på orderkortet, när offerten har bekräftats.
+Offertkortet har inga knappar för orderbekräftelse och plocklista: **Orderbekräftelse (PDF)**, **Skicka orderbekräftelse** och **Plocklista (PDF)** finns på orderkortet, när offerten har bekräftats.
 
 **Bekräfta** gör offerten till kundorder: den får nästa **KO-nummer** ur serien Kundorder, offertnumret finns kvar som referens och du hamnar på orderkortet, som visar *Från offert OF-1001* under rubriken **Kundorder KO-1043**. Där finns **Skicka orderbekräftelse** och **Orderbekräftelse (PDF)**; orderbekräftelsen skriver **Vår offert: OF-1001** i huvudet, och orderkortets **Historik** visar även händelserna från tiden som offert. En order som sätts tillbaka till status Offert behåller sitt KO-nummer och får inget nytt när den bekräftas igen; förloras eller avbryts den får den tillbaka sitt OF-nummer och KO-numret blir oanvänt.
 
@@ -436,7 +436,7 @@ Orderns detaljsida har en sektion **E-post** längst ner (kräver att SMTP är k
 - Dialogen förifyller **Mottagare** (kundens huvudkontakts e-post; saknas den används en eventuell e-postadress från kundimporten eller en äldre registrering), **Ämne** och **Meddelande** — alla redigerbara. Ämne och meddelande skrivs på kundens språk, se [Dokument på engelska](#dokument-pa-engelska).
 - Har någon av orderns artiklar uppladdade ritningar visas kryssrutan **Bifoga ritningar (N filer)**, ikryssad från början — bocka ur den för att bara skicka dokumentet (se fliken Filer i [Artiklar](/hjalp/artiklar)).
 - Har ordern konfigurerade rader (se [Beställningsvara](#kundorder)) visas kryssrutan **Visa tilläggspriser** bredvid PDF-länkarna — ikryssad enligt kundkortets inställning **Visa tilläggspriser**. Med kryss skrivs varje vals tillägg ut efter valet, t.ex. *Lock: Lock B (+ 240,00)*; utan kryss bara valet. Valet gäller både **Offert (PDF)**/**Orderbekräftelse (PDF)** och mejlets bilaga, sparas i e-postloggen och används oförändrat av **Skicka om**.
-- **Offert (PDF)**, **Orderbekräftelse (PDF)** och **Plocklista (PDF)** (se [Plocklista](#plocklista)) laddar ner dokumenten utan att skicka något. Offertens och orderbekräftelsens radtabell har en egen kolumn **Rabatt**; cellen är tom för rader utan rabatt.
+- **Offert (PDF)**, **Orderbekräftelse (PDF)** och **Plocklista (PDF)** (se [Plocklista](#plocklista)) laddar ner dokumenten utan att skicka något; orderbekräftelsen och plocklistan finns bara på orderkortet. Offertens och orderbekräftelsens radtabell har en egen kolumn **Rabatt**; cellen är tom för rader utan rabatt.
 - Kortets utskickshistorik visas under knapparna; hela loggen finns i [System → E-postlogg](/hjalp/system).
 
 ## Leveranstidskontroll
