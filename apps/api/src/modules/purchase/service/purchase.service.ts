@@ -694,12 +694,17 @@ export function createPurchaseService(
   // to the row's article, sits on a legoresurs), derives the routing
   // operation for TO rows and defaults the ställpris from the operation.
   // The unit price is never defaulted — an inquiry asks for it.
-  async function resolveLegoRow(input: {
-    articleId: string;
-    moOperationId?: string;
-    routingOperationId?: string;
-    setupPrice?: number;
-  }): Promise<LegoSnapshot> {
+  // `toInquiryCurrency`: the operation's ställpris is kronor; an inquiry to
+  // a supplier in another currency gets it converted (inquiryPriceDefault).
+  async function resolveLegoRow(
+    input: {
+      articleId: string;
+      moOperationId?: string;
+      routingOperationId?: string;
+      setupPrice?: number;
+    },
+    toInquiryCurrency: (sek: number) => Promise<number | null>
+  ): Promise<LegoSnapshot> {
     if (!input.moOperationId && !input.routingOperationId) {
       return { moOperationId: null, routingOperationId: null, setupPrice: null };
     }
@@ -709,7 +714,24 @@ export function createPurchaseService(
     return {
       moOperationId: ref.moOperationId,
       routingOperationId: ref.routingOperationId,
-      setupPrice: input.setupPrice ?? (ref.setupPrice !== null ? Number(ref.setupPrice) : null),
+      setupPrice: input.setupPrice ?? (ref.setupPrice !== null ? await toInquiryCurrency(Number(ref.setupPrice)) : null),
+    };
+  }
+  // The default ställpris on an inquiry row in the supplier's currency: SEK
+  // as it is; another currency divided by today's rate (2 decimals, the
+  // column's scale), looked up once per call. No rate ⇒ no default (null) —
+  // a default is a convenience, never a reason to refuse the row (user
+  // decision 2026-11-10: lego prices are converted, not copied as kronor).
+  function inquiryPriceDefault(currency: string): (sek: number) => Promise<number | null> {
+    if (currency === "SEK") return async (sek) => sek;
+    let pending: Promise<number | null> | null = null;
+    return async (sek) => {
+      pending ??= orderRate(currency, undefined).catch((err: unknown) => {
+        if (err instanceof ExchangeRateUnavailableError) return null;
+        throw err;
+      });
+      const rate = await pending;
+      return rate && rate > 0 ? Math.round((sek / rate + Number.EPSILON) * 100) / 100 : null;
     };
   }
   // The lego link's own rules, shared by the inquiry rows and the IO rows
@@ -1133,11 +1155,13 @@ export function createPurchaseService(
     // draft → sent → answered → ordered, cancellable until ordered. ---
 
     async createInquiry(input: CreateInquiryInput, createdBy: string) {
-      if (!(await repo.findSupplierById(input.supplierId))) throw new SupplierNotFoundError(input.supplierId);
+      const supplier = await repo.findSupplierById(input.supplierId);
+      if (!supplier) throw new SupplierNotFoundError(input.supplierId);
+      const toInquiryCurrency = inquiryPriceDefault(supplier.currency);
       // The same article may sit on several rows (two lego operations on
       // one article included).
       const rows = await Promise.all(
-        input.rows.map(async (r) => ({ ...(await resolveRowInput(r)), ...(await resolveLegoRow(r)) }))
+        input.rows.map(async (r) => ({ ...(await resolveRowInput(r)), ...(await resolveLegoRow(r, toInquiryCurrency)) }))
       );
       return repo.createInquiry({ ...input, rows }, createdBy);
     },
@@ -1163,7 +1187,9 @@ export function createPurchaseService(
       if (inquiry.status === "ordered" || inquiry.status === "cancelled") {
         throw new InvalidStatusTransitionError(`Cannot change rows on an inquiry in status "${inquiry.status}"`);
       }
-      const row = { ...(await resolveRowInput(input)), ...(await resolveLegoRow(input)) };
+      const supplier = await repo.findSupplierById(inquiry.supplierId);
+      const toInquiryCurrency = inquiryPriceDefault(supplier?.currency ?? "SEK");
+      const row = { ...(await resolveRowInput(input)), ...(await resolveLegoRow(input, toInquiryCurrency)) };
       return repo.addInquiryRow(inquiryId, row);
     },
 
@@ -1367,13 +1393,29 @@ export function createPurchaseService(
       }
 
       // Row prices are stored per base unit, which is what the routing
-      // operation's unit price means too. The manufacturing service's own
-      // errors are matched by name — this module must not import it.
+      // operation's unit price means too. The routing's prices are kronor
+      // (the costing reads them as SEK): an answer in another currency is
+      // converted with today's rate, looked up before the write like an IO's
+      // (no rate ⇒ 409 exchange-rate-unavailable, nothing written — user
+      // decision 2026-11-10; before, EUR 50 became 50 kr). The manufacturing
+      // service's own errors are matched by name — this module must not
+      // import it.
+      // An inquiry has no currency of its own: the supplier's, as Gör till
+      // inköpsorder reads it.
+      const supplier = await repo.findSupplierById(inquiry.supplierId);
+      const currency = supplier?.currency ?? "SEK";
+      const rate = await orderRate(currency, undefined);
+      const inKronor = (price: number, decimals: 2 | 4) => {
+        const f = 10 ** decimals;
+        return Math.round((price * rate + Number.EPSILON) * f) / f;
+      };
+      const unitPrice = inKronor(Number(row.unitPrice), 4);
+      const setupPrice = row.setupPrice !== null ? inKronor(Number(row.setupPrice), 2) : null;
       let updated: unknown;
       try {
         updated = await manufacturing.updateRoutingOperation(row.articleId, row.routingOperationId, {
-          unitPrice: Number(row.unitPrice),
-          setupPrice: row.setupPrice !== null ? Number(row.setupPrice) : null,
+          unitPrice,
+          setupPrice,
           subcontractSupplierId: inquiry.supplierId,
         });
       } catch (err) {
@@ -1394,6 +1436,9 @@ export function createPurchaseService(
           unitPrice: row.unitPrice,
           setupPrice: row.setupPrice,
           supplierId: inquiry.supplierId,
+          // What the routing got, in kronor, when the answer was in another
+          // currency.
+          ...(currency !== "SEK" ? { currency, exchangeRate: rate, unitPriceSek: unitPrice, setupPriceSek: setupPrice } : {}),
         },
         userId: userId ?? null,
       });

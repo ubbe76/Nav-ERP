@@ -27,7 +27,7 @@ import { useCan } from "../PermissionsProvider";
 import { PdfActions } from "../documents/PdfActions";
 import { SupplierCheckboxList } from "../purchase/SupplierCheckboxList";
 import { CreatedInquiriesPanel } from "../purchase/CreatedInquiriesPanel";
-import { listApiQuery, pageFromSearchParams } from "../../lib/listQuery";
+import { listApiQuery } from "../../lib/listQuery";
 import { isoWeekNumber } from "../../lib/deliveryTimeCheck";
 import {
   INQUIRY_STATUS_PILL,
@@ -142,6 +142,9 @@ interface RowState {
   // omitted; a reorder-point proposal is never reported late).
   needDate: string | null;
   reason: RequirementProposal["reason"] | null;
+  // The proposal's key, sent on Skapa ordrar so the server can refuse a
+  // proposal that orders made since (another tab, a repeated click) cover.
+  proposalKey: string | null;
   // Set once the user changes the selection or the quantity — a touched row
   // keeps its state across refetches, an untouched one follows the server.
   touched: boolean;
@@ -166,9 +169,9 @@ function keepChoice(old: RowState, rebuilt: RowState): RowState {
   return { ...rebuilt, selected: old.selected && rebuilt.selected, quantity: old.quantity, touched: true };
 }
 
-// The server-side filters of the list (the Alla/Artiklar/Lego filter is
-// client-side, see KIND_OPTIONS).
-const SERVER_FILTER_KEYS = ["type", "groupId", "showAll", "latest", "sort"];
+// The server-side filters of the list — Alla/Artiklar/Lego (`kind`) too,
+// filtered before paging so the lego rows (sorted last) are never cut off.
+const SERVER_FILTER_KEYS = ["type", "groupId", "showAll", "latest", "sort", "kind"];
 
 // Every line of the current filter, page by page (the list schema's max is
 // 1000) — the server's cache was just recomputed, so these read it.
@@ -207,6 +210,7 @@ function makeRowState(row: DisplayRow): RowState {
     unitCode: row.unitCode,
     needDate: row.proposal?.needDate ?? null,
     reason: row.proposal?.reason ?? null,
+    proposalKey: row.proposal?.key ?? null,
     touched: false,
   };
 }
@@ -306,29 +310,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
     setLoading(true);
     setLoadError(null);
     const sp = Object.fromEntries(searchParams.entries());
-    const kind = sp.kind === "lego" || sp.kind === "article" ? sp.kind : null;
-
-    // The Alla/Artiklar/Lego filter has no server-side counterpart (see the
-    // KIND_OPTIONS comment above), so when it's active we fetch the whole
-    // (still type/groupId/showAll/search-filtered) result set in one go —
-    // the same "limit=1000" idiom the article pickers use for "everything",
-    // and within the shared list schema's max — and paginate the filtered
-    // rows ourselves. Unfiltered ("Alla") keeps the plain server pagination
-    // unchanged.
-    const query = kind
-      ? (() => {
-          const params = new URLSearchParams();
-          if (sp.search) params.set("search", sp.search);
-          if (sp.type) params.set("type", sp.type);
-          if (sp.groupId) params.set("groupId", sp.groupId);
-          if (sp.showAll) params.set("showAll", sp.showAll);
-          if (sp.latest) params.set("latest", sp.latest);
-          if (sp.sort) params.set("sort", sp.sort);
-          params.set("limit", "1000");
-          params.set("offset", "0");
-          return `?${params.toString()}`;
-        })()
-      : listApiQuery(sp, SERVER_FILTER_KEYS, pageSize);
+    const query = listApiQuery(sp, SERVER_FILTER_KEYS, pageSize);
 
     const refreshing = forceRefresh.current;
     const refresh = refreshing ? "&refresh=true" : "";
@@ -351,15 +333,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
       setComputedAt(res.computedAt);
       const recomputed = lastComputedAt.current !== null && lastComputedAt.current !== res.computedAt;
       lastComputedAt.current = res.computedAt;
-      let paged: Paged<RequirementRow> = res;
-      if (kind) {
-        const filtered = res.rows.filter((r) =>
-          kind === "lego" ? r.proposalKind === "subcontract" : r.proposalKind !== "subcontract"
-        );
-        const page = pageFromSearchParams(sp);
-        const offset = (page - 1) * pageSize;
-        paged = { rows: filtered.slice(offset, offset + pageSize), total: filtered.length };
-      }
+      const paged: Paged<RequirementRow> = res;
       setData(paged);
       const lines = paged.rows.flatMap(toLines).filter((l) => !l.header);
       // After a recomputation (Uppdatera, or the server's minute-cache ran
@@ -377,7 +351,6 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
           ([key, state]) => !pageKeys.has(key) && (state.selected || state.touched)
         );
         if (!offPage) fresh = lines;
-        else if (kind) fresh = res.rows.flatMap(toLines).filter((l) => !l.header);
         else fresh = await fetchAllLines(sp).catch(() => lines);
         if (cancelled) return;
       }
@@ -511,6 +484,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
         kind: state.kind,
         ...(state.needDate ? { needDate: state.needDate } : {}),
         ...(state.reason ? { reason: state.reason } : {}),
+        ...(state.proposalKey ? { key: state.proposalKey } : {}),
         ...(state.kind === "configured" && state.salesOrderRowId ? { salesOrderRowId: state.salesOrderRowId } : {}),
         // Subcontract proposals are keyed by the MO operation they buy.
         ...(state.kind === "subcontract" && state.moOperationId ? { moOperationId: state.moOperationId } : {}),

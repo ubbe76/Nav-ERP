@@ -32,6 +32,11 @@ export const listRequirementsQuerySchema = listQuerySchema.extend({
   // fourth week (a passed date is inside every horizon).
   sort: z.enum(["article", "latest"]).default("article"),
   latest: z.enum(["late", "this_week", "next_week", "four_weeks"]).optional(),
+  // The page's Alla / Artiklar / Lego toggle: "lego" = only the lego
+  // operation rows (proposalKind subcontract), "article" = everything else.
+  // Filtered BEFORE paging so total follows it — the web used to filter one
+  // limit=1000 page itself, and the lego rows (sorted last) fell off it.
+  kind: z.enum(["article", "lego"]).optional(),
 });
 export type ListRequirementsQuery = z.infer<typeof listRequirementsQuerySchema>;
 
@@ -78,6 +83,14 @@ export const createPlanningOrdersSchema = z.object({
           // (Prognos #10) is for no deadline either, so Skapa ordrar never
           // warns that either is late. Omitted = an ordinary demand.
           reason: z.enum(["demand", "reorder_point", "safety_stock", "forecast", "undated"]).optional(),
+          // The proposal's key as the list showed it (RequirementProposal.key,
+          // e.g. "purchase:<articleId>:2026-11-16"). Given ⇒ the server
+          // recomputes the behovsberäkning first and refuses the proposal
+          // when the fresh result no longer has it — already covered by
+          // orders someone else (another tab, a repeated click) just made.
+          // Omitted (integrations, the TO card's Skapa inköpsorder) ⇒ no
+          // check, as before.
+          key: z.string().min(1).max(200).optional(),
         })
         .refine((p) => p.kind !== "subcontract" || p.moOperationId !== undefined, {
           message: "moOperationId is required for subcontract proposals",

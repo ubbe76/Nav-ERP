@@ -154,6 +154,13 @@ export interface CapacityCell {
   loadHours: number;
   availableHours: number | null; // null = no schedule (or undated/later columns)
   loadPercent: number | null; // null when availableHours is null or 0
+  // Overload — the ONE rule, read by the summary's count and by the web's red
+  // tone and list: more load than capacity (loadPercent > 100), or load in a
+  // week whose schedule gives 0 h (a closed week, a week of holidays). The
+  // second has no percentage to show — loadPercent stays null — but it is the
+  // most overloaded a cell can be, not a neutral one. A resource WITHOUT a
+  // schedule (availableHours null) is never overloaded: no capacity is known.
+  overloaded: boolean;
   orders: CapacityCellOrder[];
 }
 
@@ -189,7 +196,7 @@ export interface CapacityWeek {
 
 export interface CapacitySummary {
   plannedAt: string | null; // the latest plan run (max plannedAt over the operations)
-  overloadedCells: number; // resource × week cells with loadPercent > 100
+  overloadedCells: number; // resource × week cells with `overloaded`
   lateOrders: { manufacturingOrderId: string; orderNumber: string; dueDate: string | null; plannedFinish: string | null }[];
   unplannedOrders: { manufacturingOrderId: string; orderNumber: string }[];
   // Förslag på resurs (#15): every open operation's förslag, by order number
@@ -480,7 +487,7 @@ export function capacityHorizon(today: string, weeks: number): { firstMonday: st
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 function emptyCell(): CapacityCell {
-  return { loadHours: 0, availableHours: null, loadPercent: null, orders: [] };
+  return { loadHours: 0, availableHours: null, loadPercent: null, overloaded: false, orders: [] };
 }
 
 function finishCell(cell: CapacityCell): CapacityCell {
@@ -490,6 +497,8 @@ function finishCell(cell: CapacityCell): CapacityCell {
     cell.availableHours != null && cell.availableHours > 0
       ? Math.round((cell.loadHours / cell.availableHours) * 100)
       : null;
+  // After the rounding above, so the flag and the figures shown agree.
+  cell.overloaded = cell.loadPercent != null ? cell.loadPercent > 100 : cell.availableHours === 0 && cell.loadHours > 0;
   cell.orders.sort((a, b) =>
     a.orderNumber !== b.orderNumber ? (a.orderNumber < b.orderNumber ? -1 : 1) : a.sequenceNo - b.sequenceNo
   );
@@ -721,7 +730,7 @@ export function computeCapacity(
     return a.orderNumber < b.orderNumber ? -1 : a.orderNumber > b.orderNumber ? 1 : 0;
   };
   const overloadedCells = [...resourceRows.values()].reduce(
-    (n, row) => n + row.weeks.filter((c) => c.loadPercent != null && c.loadPercent > 100).length,
+    (n, row) => n + row.weeks.filter((c) => c.overloaded).length,
     0
   );
   const lateOrders: CapacitySummary["lateOrders"] = [];

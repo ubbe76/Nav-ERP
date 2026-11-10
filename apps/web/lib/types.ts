@@ -914,6 +914,8 @@ export const INQUIRY_STATUS_PILL: Record<InquiryStatus, { status: "running" | "d
 export interface Inquiry extends DocumentTermsFields {
   id: string;
   supplierLanguage?: DocumentLanguage;
+  // The supplier's currency (live) — the inquiry's prices are in it.
+  supplierCurrency?: string;
   inquiryNumber: string;
   supplierId: string;
   supplierName: string;
@@ -2621,7 +2623,11 @@ export interface CapacityCell {
   // null when the resource has no week schedule (hasSchedule = false on the
   // owning CapacityResourceRow) — no capacity figure to compare against.
   availableHours: number | null;
+  // null without a schedule and when the week's schedule gives 0 h.
   loadPercent: number | null;
+  // The API's one overload rule: loadPercent > 100, or load in a week with
+  // 0 h capacity (no percentage, but overloaded all the same).
+  overloaded: boolean;
   orders: CapacityCellOrder[];
 }
 
@@ -5042,6 +5048,9 @@ export interface PlanningOrderProposal {
   needDate?: string;
   // reorder_point / safety_stock / forecast: no deadline — never reported late, no warning.
   reason?: RequirementProposal["reason"];
+  // RequirementProposal.key: the server refuses a proposal its fresh
+  // recomputation no longer has. Omitted by the TO card's Skapa inköpsorder.
+  key?: string;
 }
 
 export interface PlanningOrdersResult {
@@ -6339,7 +6348,8 @@ export interface DtcAlternativeOf {
   workCenterId: string;
   workCenterCode: string;
   workCenterName: string;
-  toWeek: string;
+  // null = the ordinary resource has no room within the horizon (two years).
+  toWeek: string | null;
 }
 
 export interface DeliveryTimeCheckRow {

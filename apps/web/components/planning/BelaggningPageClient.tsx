@@ -43,10 +43,11 @@ interface SwitchHandlers {
 const WEEK_OPTIONS = [4, 8, 13, 26];
 const DEFAULT_WEEKS = 8;
 
-function toneFor(loadPercent: number | null): "neutral" | "warn" | "alert" {
-  if (loadPercent === null) return "neutral";
-  if (loadPercent > 100) return "alert";
-  if (loadPercent > 85) return "warn";
+// Red is the API's `overloaded` flag (over 100 %, or load in a week whose
+// schedule gives 0 h — that one has no percentage), never re-derived here.
+function toneFor(cell: CapacityCell): "neutral" | "warn" | "alert" {
+  if (cell.overloaded) return "alert";
+  if (cell.loadPercent !== null && cell.loadPercent > 85) return "warn";
   return "neutral";
 }
 
@@ -461,6 +462,9 @@ function CellContent({ cell, flags = true }: { cell: CapacityCell; flags?: boole
         {formatHours(cell.loadHours)}
         {cell.availableHours !== null && ` / ${formatHours(cell.availableHours)}`}
       </span>
+      {/* Load in a week with 0 h capacity: no percentage exists, so say why
+          the cell is red instead of leaving the slot empty. */}
+      {cell.loadPercent === null && cell.overloaded && <span className={styles.cellPercent}>Ingen kapacitet</span>}
       {cell.loadPercent !== null && (
         <>
           <span className={styles.cellPercent}>{cell.loadPercent}%</span>
@@ -516,7 +520,7 @@ function CellView({
   return (
     <div
       className={styles.cell}
-      data-tone={toneFor(cell.loadPercent)}
+      data-tone={toneFor(cell)}
       data-clickable={clickable}
       data-active={active}
       data-summa={summa}
@@ -689,12 +693,12 @@ function overloadedCellList(data: CapacityResult): OverloadedCell[] {
   for (const group of data.groups) {
     for (const resource of group.resources) {
       resource.weeks.forEach((cell, i) => {
-        if (cell.loadPercent === null || cell.loadPercent <= 100) return;
+        if (!cell.overloaded) return;
         const week = data.weeks[i];
         if (!week) return;
         out.push({
           key: `${resource.workCenterId}:${week.monday}`,
-          text: `${resource.code} · ${resource.name}, ${weekLabel(week, multiYear)} — ${cell.loadPercent}% (${formatHours(cell.loadHours)} av ${formatHours(cell.availableHours ?? 0)} h)`,
+          text: `${resource.code} · ${resource.name}, ${weekLabel(week, multiYear)} — ${cell.loadPercent === null ? "ingen kapacitet" : `${cell.loadPercent}%`} (${formatHours(cell.loadHours)} av ${formatHours(cell.availableHours ?? 0)} h)`,
         });
       });
     }

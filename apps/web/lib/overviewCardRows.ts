@@ -77,9 +77,13 @@ export function capacityRows(capacity: CapacityResult, href: string): { rows: Li
     .map((r) => ({ resource: r, cell: r.weeks[0] }))
     .filter((x): x is { resource: (typeof x)["resource"]; cell: NonNullable<(typeof x)["cell"]> } => x.cell !== undefined)
     .filter(({ resource, cell }) => resource.active && (cell.loadHours > 0 || (cell.availableHours ?? 0) > 0));
+  // Load in a week with 0 h capacity (the API's `overloaded` without a
+  // percentage) is the most loaded there is — first, and red.
+  const rank = (cell: { loadPercent: number | null; overloaded?: boolean }) =>
+    cell.loadPercent ?? (cell.overloaded ? Number.POSITIVE_INFINITY : -1);
   resources.sort(
     (a, b) =>
-      (b.cell.loadPercent ?? -1) - (a.cell.loadPercent ?? -1) ||
+      rank(b.cell) - rank(a.cell) ||
       b.cell.loadHours - a.cell.loadHours ||
       a.resource.code.localeCompare(b.resource.code, "sv", { numeric: true })
   );
@@ -88,7 +92,7 @@ export function capacityRows(capacity: CapacityResult, href: string): { rows: Li
     return {
       key: resource.workCenterId,
       href,
-      tone: percent === null ? null : percent > 100 ? "red" : percent >= 90 ? "yellow" : null,
+      tone: cell.overloaded ? "red" : percent === null ? null : percent > 100 ? "red" : percent >= 90 ? "yellow" : null,
       primary: `${resource.code} ${resource.name}`,
       secondary:
         cell.availableHours === null ? `${hours(cell.loadHours)} · inget schema` : `${hours(cell.loadHours)} av ${hours(cell.availableHours)}`,

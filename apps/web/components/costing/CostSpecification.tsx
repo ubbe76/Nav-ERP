@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Table } from "../ui/Table";
 import { CostChain } from "../ui/CostChain";
 import { chainLines } from "../../lib/costChain";
+import { noPerUnitNotice, perUnitDivisor, type PerUnitDivisorSource } from "../../lib/calculationDivisor";
 import { MARKUP_LEVEL_WORDS, type MarkupLevel } from "../../lib/markupLevels";
 import { Button } from "../ui/Button";
 import { FormActions, FormError, FormHint, FormSaved } from "../ui/Form";
@@ -117,7 +118,9 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
   if (error) return <FormError>{error}</FormError>;
   if (!detail) return <p>Hämtar kalkylen…</p>;
 
+  const divisor = perUnitDivisor(divisorSource(detail));
   const hasRows = detail.materialRows.length > 0 || detail.operationRows.length > 0;
+  const figures = perUnitFigures(detail);
   // A halvfabrikat row carries the TO its own calculation lifted up (TO sits
   // outside TVK, so it cannot be inside the row's amount). Shown only when
   // some row has one: single-level calculations and every calculation saved
@@ -257,12 +260,22 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
 
       <section className={styles.section}>
         <SectionHeading>Summering</SectionHeading>
-        <CostChain lines={chainLines(detail, Number(detail.quantity))} />
+        {/* Per st = the totals ÷ what they bought: the quantity on a förkalkyl,
+            the received quantity on a final efterkalkyl. No column at all on
+            a preliminary efterkalkyl or one with nothing received. */}
+        <CostChain lines={chainLines(detail, divisor.divisor ?? undefined)} />
+        {divisor.divisor !== null && divisor.basis === "output" && (
+          <FormHint>
+            Per st är delat med inlevererat antal ({formatQuantity(divisor.divisor)} st), inte med orderns antal (
+            {formatQuantity(Number(detail.quantity))} st).
+          </FormHint>
+        )}
+        {noPerUnitNotice(divisor) && <FormHint>{noPerUnitNotice(divisor)}</FormHint>}
 
         {/* Prisåterföring. The amounts in the hints are computed here only to
             show what the button will do — the server re-derives them from the
             saved calculation, so nothing numeric is ever posted. */}
-        {perUnitFigures(detail) && (
+        {figures && (
           <>
             <FormActions>
               <Button type="button" disabled={applying !== null} onClick={() => apply("standard")}>
@@ -274,10 +287,10 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
             </FormActions>
             <FormHint>
               <strong>Sätt standardpris</strong> skriver kalkylens tillverkningskostnad{" "}
-              {money(perUnitFigures(detail)!.manufacturing)}/st (utan TO-påslag) till artikelns{" "}
+              {money(figures.manufacturing)}/st (utan TO-påslag) till artikelns{" "}
               <strong>Standardkostnad</strong> och loggar ändringen i standardprishistoriken. Fältet styr även
               lagervärdet och värdet på tillverkningsinleveranser. <strong>Sätt försäljningspris</strong> skriver{" "}
-              {money(perUnitFigures(detail)!.sales)}/st till artikelns <strong>Försäljningspris</strong> — grundpriset
+              {money(figures.sales)}/st till artikelns <strong>Försäljningspris</strong> — grundpriset
               längst ned i priskedjan.
             </FormHint>
             <FormError>{applyError}</FormError>
@@ -476,15 +489,30 @@ function VarianceSection({ analysis }: { analysis: CostVarianceAnalysis | null }
   );
 }
 
+// The header's N and preliminary flag as the divisor rule reads them. They
+// come from the analysis: it is non-null exactly when the header carries its
+// four analysis fields (costVarianceAnalysis), and null on a förkalkyl and on
+// an efterkalkyl saved before the analysis existed.
+function divisorSource(detail: CostCalculationDetail): PerUnitDivisorSource {
+  return {
+    type: detail.type,
+    quantity: detail.quantity,
+    outputQuantity: detail.analysis?.outputQuantity ?? null,
+    preliminary: detail.analysis?.preliminary ?? null,
+  };
+}
+
 // Per-unit figures for the two buttons' hints, derived with chainLines — the
-// web's single per-styck authority. Null when the quantity cannot carry one,
+// web's single per-styck authority — over perUnitDivisor, the same divisor
+// the server writes with. Null when the calculation cannot carry a per-unit
+// figure (unusable quantity, preliminary efterkalkyl, nothing received),
 // which is also when the server would refuse.
 function perUnitFigures(detail: CostCalculationDetail) {
-  const quantity = Number(detail.quantity);
-  if (!Number.isFinite(quantity) || quantity <= 0) return null;
+  const { divisor } = perUnitDivisor(divisorSource(detail));
+  if (divisor === null) return null;
   const lines = chainLines(detail);
   const manufacturing = lines.find((l) => l.label === "Tillverkningskostnad (TVK)")?.amount ?? 0;
-  return { manufacturing: manufacturing / quantity, sales: Number(detail.salesPrice) / quantity };
+  return { manufacturing: manufacturing / divisor, sales: Number(detail.salesPrice) / divisor };
 }
 
 // Same total-Record rationale as SOURCE_LABELS above. "none" is handled

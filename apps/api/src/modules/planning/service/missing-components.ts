@@ -49,9 +49,13 @@ export interface MissingArticle {
   unitCode: string | null; // the base unit, for the notes
   orderQuantity: number | null;
   rounding: number | null;
-  // The overview's closing balance: stock plus every open supply minus
-  // every open demand — the pool the new demands are netted against.
+  // The overview's FIRM closing balance (firmClosingBalance: stock plus
+  // every open supply minus every open demand, forecast rows left out) —
+  // the pool the new demands are netted against.
   closingBalance: number;
+  // An inactive article gets a note, never a TO — the behovsberäkning
+  // proposes nothing for one either.
+  active: boolean;
   configuratorMode: "variants" | "to_order" | null;
   // Worked (non-Kalkyl) routing operations exist.
   hasRouting: boolean;
@@ -108,6 +112,7 @@ export function lateWarning(row: MissingOrderRow): string {
 
 // Why an article gets a note instead of a TO (null = it can be made).
 function refusal(article: MissingArticle, bomIndex: Map<string, BomEdge[]>): string | null {
+  if (!article.active) return `${article.articleNumber} är inaktiv — ingen tillverkningsorder`;
   if (article.configuratorMode === "variants") return `${article.articleNumber} är en variantmall — välj en variant`;
   if (article.configuratorMode === "to_order") return `${article.articleNumber} är en beställningsvara — skapas från kundorderraden`;
   if ((bomIndex.get(article.articleId)?.length ?? 0) === 0 && !article.hasRouting) {

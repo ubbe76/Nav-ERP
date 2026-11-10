@@ -8,8 +8,10 @@ import {
   OperationNotFoundError,
   OperationNotPlannableError,
   PlanWeekInPastError,
+  PlanWeekNoCapacityError,
   SalesOrderNotOpenError,
 } from "../src/modules/planning/service/planning.service.js";
+import { CostCalculationNotFinalError } from "../src/modules/costing/service/costing.service.js";
 import {
   VerificationTemplateAccountMissingError,
   VerificationTemplateInUseError,
@@ -841,6 +843,8 @@ const cases: Array<[Error, string]> = [
   [new OperationNotFoundError("x"), ERROR_CODES.OPERATION_NOT_FOUND],
   [new OperationNotPlannableError("done"), ERROR_CODES.OPERATION_NOT_PLANNABLE],
   [new PlanWeekInPastError("2030-02-25", "2030-03-04"), ERROR_CODES.PLAN_WEEK_IN_PAST],
+  [new PlanWeekNoCapacityError("2030-03-04", "110"), ERROR_CODES.PLAN_WEEK_NO_CAPACITY],
+  [new CostCalculationNotFinalError("calc-1", "preliminary"), ERROR_CODES.COST_CALCULATION_NOT_FINAL],
   [
     new DeliveryTimeChangedError("2030-03-20", { shipDate: null, deliveryDate: null, rows: [], notes: [], batches: [], usesAlternatives: false, ordinaryShipDate: null, ordinaryDeliveryDate: null }),
     ERROR_CODES.DELIVERY_TIME_CHANGED,

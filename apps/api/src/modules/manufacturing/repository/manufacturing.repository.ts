@@ -1667,13 +1667,17 @@ export function createManufacturingRepository(db: Db) {
         }
         if (configured.lockRow.onlyUncovered) {
           const linkedOrders = await tx
-            .select({ status: manufacturingOrders.status, quantity: manufacturingOrders.quantity })
+            .select({
+              status: manufacturingOrders.status,
+              quantity: manufacturingOrders.quantity,
+              received: manufacturingOrders.quantityReceived,
+            })
             .from(manufacturingOrders)
             .where(and(eq(manufacturingOrders.salesOrderRowId, configured.lockRow.rowId), ne(manufacturingOrders.status, "cancelled")));
           const uncovered = uncoveredConfiguredQuantity({
             quantityOrdered: locked.quantityOrdered,
             quantityDelivered: locked.quantityDelivered,
-            linkedOrders: linkedOrders.map((o) => ({ status: o.status, quantity: Number(o.quantity) })),
+            linkedOrders: linkedOrders.map((o) => ({ status: o.status, quantity: Number(o.quantity), received: Number(o.received) })),
           });
           if (input.quantity > uncovered + 0.00005) return { ok: false, reason: "already_covered", uncovered };
         }

@@ -480,7 +480,7 @@ Alternativen behålls **bara där de behövs för datumet.** Blir en rad klar ti
 
 - Överst står en rad som *Leverans 2026-11-12 med alternativa resurser (ordinarie: 2026-11-19)*. Ger ordinarie resurser inget datum inom två år står det *(ordinarie resurser ger inget datum inom två år)*.
 - Under raden väljer du datum med två radioknappar: **Med alternativa resurser (2026-11-12)**, som är förvald, och **Med ordinarie resurser (2026-11-19)**. Valet styr vilket datum **Använd datumet** använder, och vilket läge tillverkningsordrarna skapas i. Väljer du **Med ordinarie resurser** visar leveransdatum, avsändningsdag och *Klar* ordinariedatumen; stegen under *Vad som begränsar* visar fortfarande körningen med alternativ.
-- I *Vad som begränsar* står resursen på varje operation, och används ett alternativ står det efter resursen, till exempel *BÄNK-1 op 20 Bocka — Kantpress 2 (120) (alternativ till 110, ordinarie v. 49), vecka 46, klar 2026-11-12*. Veckan är den som den ordinarie resursen hade gett.
+- I *Vad som begränsar* står resursen på varje operation, och används ett alternativ står det efter resursen, till exempel *BÄNK-1 op 20 Bocka — Kantpress 2 (120) (alternativ till 110, ordinarie v. 49), vecka 46, klar 2026-11-12*. Veckan är den som den ordinarie resursen hade gett. Ryms operationen inte på den ordinarie resursen inom två år står det i stället *(alternativ till 110, ordinarie ger ingen vecka inom två år)*.
 - Den fristående sidan och **Ny kundorder** listar bara de två datumen — där finns inget val att göra.
 
 ### Vad som räknas

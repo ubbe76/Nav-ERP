@@ -75,6 +75,7 @@ import {
 } from "./capacity-calc.js";
 import {
   buildArticleOverview,
+  firmClosingBalance,
   firmDemandsOf,
   type ArticleOverview,
   type ArticleOverviewInput,
@@ -146,6 +147,7 @@ import { resolveSupplierPrice } from "../../purchase/service/supplier-price.js";
 import { configurationLines } from "../../configurator/service/configuration-lines.js";
 import { selectionFromEntries } from "../../configurator/service/variant-identity.js";
 import { addDays, previousWorkingDay } from "../../system/service/delivery-days.js";
+import { isoWeekOf } from "../../timereport/service/schedule.service.js";
 import type { ConfiguredStructureReader } from "../../configurator/service/configurator.service.js";
 
 // Own copy rather than importing the article module's class — planning
@@ -351,6 +353,22 @@ export class PlanWeekInPastError extends Error {
   }
 }
 
+// Flytta to a week where the resource has no capacity at all (every day a
+// holiday, or no working day left of the current week): the forced start
+// took nothing and the operation would silently land — and be locked —
+// some later week. Refused instead (review 2026-11-10).
+export class PlanWeekNoCapacityError extends Error {
+  constructor(
+    public weekMonday: string,
+    public workCenterCode: string
+  ) {
+    super(
+      `${workCenterCode} har ingen kapacitet kvar vecka ${isoWeekOf(weekMonday).isoWeek} — välj en annan vecka`
+    );
+    this.name = "PlanWeekNoCapacityError";
+  }
+}
+
 // What Planera, Flytta and the planning of a new TO answer with.
 export interface PlanRunResult {
   plannedAt: string;
@@ -528,7 +546,9 @@ export interface PurchaseOrderCreator {
     createdBy: string
     // currency: the order's (the supplier's) — a catalog price in another
     // currency is not put on the row.
-  ): Promise<{ id: string; orderNumber: string; currency?: string }>;
+    // exchangeRate: the order's SEK rate — a lego operation's prices are in
+    // kronor and are converted with it for an order in another currency.
+  ): Promise<{ id: string; orderNumber: string; currency?: string; exchangeRate?: string | number }>;
   addRow(
     purchaseOrderId: string,
     input: {
@@ -692,6 +712,25 @@ function latestHorizonEnd(latest: NonNullable<ListRequirementsQuery["latest"]>, 
 // Same scale as the calc (numeric(14,4)).
 const round4 = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
 
+// Skapa ordrar: a proposal the fresh recomputation no longer has.
+export const STALE_PROPOSAL_MESSAGE = "Förslaget finns inte längre — uppdatera behovsberäkningen";
+
+// A lego operation's prices (mo_operations.unit_price / the one-off) are
+// kronor. On an IO in another currency they are divided by the order's own
+// rate (SEK per unit of the currency) and rounded to the IO column's scale
+// (à-pris 4, ställpris 2 decimals); an order without a usable rate gets 0,
+// like a catalog price in another currency. SEK or no currency (fixtures):
+// unchanged.
+export function legoPriceConverter(order: { currency?: string; exchangeRate?: string | number }) {
+  const rate = Number(order.exchangeRate);
+  return (sek: number, decimals: 2 | 4): number => {
+    if (order.currency === undefined || order.currency === "SEK") return sek;
+    if (!Number.isFinite(rate) || rate <= 0) return 0;
+    const f = 10 ** decimals;
+    return Math.round((sek / rate + Number.EPSILON) * f) / f;
+  };
+}
+
 // The rows with only the proposals inside the horizon (a passed latest date
 // is inside every horizon); a row left without proposals is dropped. The
 // cached rows are never mutated — copies all the way.
@@ -765,6 +804,16 @@ export function createPlanningService(
   // PROMISE is cached so concurrent requests share one computation; a failed
   // one is dropped so the next request retries.
   let cache: { at: number; rows: Promise<RequirementRow[]> } | null = null;
+  // Skapa ordrar runs one call at a time in this process (one API container):
+  // a second call — another tab, a click repeated after a timeout — waits
+  // for the first, so its fresh recomputation sees the orders the first one
+  // made. Each order is still created in its own transaction.
+  let orderCreationQueue: Promise<unknown> = Promise.resolve();
+  function serializedOrderCreation<T>(run: () => Promise<T>): Promise<T> {
+    const next = orderCreationQueue.then(run, run);
+    orderCreationQueue = next.catch(() => undefined);
+    return next;
+  }
 
   // Fasta leveransdagar: a sales order's date is the day the customer gets
   // the goods; what we must have ready is the SHIP date (transit days and the
@@ -1843,7 +1892,8 @@ export function createPlanningService(
             unitCode: o.article.unitCode,
             orderQuantity: o.article.orderQuantity,
             rounding: o.article.rounding,
-            closingBalance: o.closingBalance,
+            closingBalance: firmClosingBalance(o),
+            active: o.article.active,
             configuratorMode: modeOf.get(id) ?? null,
             hasRouting: routed.has(id),
           },
@@ -1924,7 +1974,7 @@ export function createPlanningService(
       coverage?: {
         quantityOrdered: number;
         quantityDelivered: number;
-        linkedOrders: { id: string; orderNumber: string; status: string; quantity: number; dueDate: string | null }[];
+        linkedOrders: { id: string; orderNumber: string; status: string; quantity: number; received: number; dueDate: string | null }[];
       };
     };
     let requestRows: RequestRow[] = (request.rows ?? []).map((r, i) => ({
@@ -2168,6 +2218,10 @@ export function createPlanningService(
       // filter treats them as such without a special case.
       if (query.type) rows = rows.filter((r) => r.type === query.type);
       if (query.groupId) rows = rows.filter((r) => r.groupId === query.groupId);
+      if (query.kind) {
+        const lego = query.kind === "lego";
+        rows = rows.filter((r) => (r.proposalKind === "subcontract") === lego);
+      }
       if (query.search) {
         const term = query.search.toLowerCase();
         rows = rows.filter(
@@ -2479,6 +2533,9 @@ export function createPlanningService(
         const { runs } = await runDeliveryTimeCheck({ salesOrderId: input.salesOrderId });
         throw new DeliveryTimeChangedError(deliveryTimeAnswer(runs, input.useAlternatives).deliveryDate, deliveryTimeAnswer(runs));
       });
+      // The reservation's TOs cover proposals — the same cache drop as Skapa
+      // ordrar, after the commit (review 2026-11-10).
+      cache = null;
       for (const mo of applied.result.manufacturingOrders) {
         const createdAudit = applied.createdAudits.get(mo.orderNumber);
         if (createdAudit) await audit.log(createdAudit);
@@ -2633,6 +2690,12 @@ export function createPlanningService(
           forceStart: { operationId: opId, weekMonday: input.weekMonday },
           longOperationWeeks: world.longOperationWeeks,
         });
+        // The forced week took nothing (no capacity that week) — the book
+        // went on to the first free week. Rolled back, nothing written.
+        const ownPlan = result.plans.find((p) => p.operationId === opId);
+        if (ownPlan && ownPlan.startWeek !== input.weekMonday) {
+          throw new PlanWeekNoCapacityError(input.weekMonday, op.workCenterCode);
+        }
         await repo.writeOperationPlans(tx, { plans: result.plans, clear: result.clear, plannedAt: new Date() });
         // Locked only when it got a plan — beyond the horizon it is cleared
         // (the CHECK forbids a lock without weeks) and the warning says so.
@@ -2801,6 +2864,8 @@ export function createPlanningService(
           userId,
         });
       }
+      // New färdigdatum move the proposals' dates.
+      cache = null;
       return { moved: updated.map((u) => ({ id: u.id, orderNumber: u.orderNumber, dueDate: u.after })), notice: COMPONENT_MOVE_NOTICE };
     },
 
@@ -2864,6 +2929,9 @@ export function createPlanningService(
         }
         return { orderNumber: computed.head.orderNumber, manufacturingOrders, warnings, createdAudits };
       });
+      // The new TOs cover proposals — dropped after the commit, as in Skapa
+      // ordrar (review 2026-11-10).
+      cache = null;
       for (const mo of created.manufacturingOrders) {
         const createdAudit = created.createdAudits.get(mo.orderNumber);
         if (createdAudit) await audit.log(createdAudit);
@@ -2890,372 +2958,261 @@ export function createPlanningService(
       input: CreatePlanningOrdersInput,
       createdBy: string
     ): Promise<CreatedOrdersResult> {
-      const result: CreatedOrdersResult = { purchaseOrders: [], manufacturingOrders: [], errors: [], warnings: [] };
+      return serializedOrderCreation(async () => {
+        const result: CreatedOrdersResult = { purchaseOrders: [], manufacturingOrders: [], errors: [], warnings: [] };
 
-      const articleNumbers = new Map(
-        (await repo.articleInfoForIds(input.proposals.map((p) => p.articleId))).map((a) => [
-          a.articleId,
-          a.articleNumber,
-        ])
-      );
-      const numberFor = (articleId: string) => articleNumbers.get(articleId) ?? "";
-      const pushError = (articleId: string, message: string) =>
-        result.errors.push({ articleId, articleNumber: numberFor(articleId), message });
-
-      const purchaseProposals = input.proposals.filter((p) => p.kind === "purchase");
-      const manufactureProposals = input.proposals.filter((p) => p.kind === "manufacture");
-      const subcontractProposals = input.proposals.filter((p) => p.kind === "subcontract");
-      const configuredProposals = input.proposals.filter((p) => p.kind === "configured");
-
-      // Tidsfasade förslag (#13): a proposal that carries its needDate is
-      // dated from it (the TO's färdigdatum, the IO row's önskade
-      // leveransdatum); one without (integrations) from the article's first
-      // firm demand, as before. A TO whose earliest possible finish comes
-      // after the need is created anyway and reported in `warnings`, exactly
-      // like a late IO row — except a reorder-point proposal: it is dated
-      // today for no deadline (the list never marks it Passerat), so its
-      // floor date is simply "as soon as possible". The same for a
-      // forecast-only proposal (Prognos #10): a forecast is not a deadline,
-      // and for the safety-stock refill (safety_stock): a floor to restore.
-      const today = todayFn();
-      const noDeadline = (reason: CreatePlanningOrdersInput["proposals"][number]["reason"]) =>
-        reason === "reorder_point" || reason === "safety_stock" || reason === "forecast";
-      const pushLateManufacturing = (
-        orderNumber: string,
-        articleId: string,
-        s: DueDateSuggestion | null,
-        reason: CreatePlanningOrdersInput["proposals"][number]["reason"]
-      ) => {
-        if (!s?.late || noDeadline(reason)) return;
-        result.warnings.push({
-          orderNumber,
-          articleNumber: numberFor(articleId),
-          demandDate: s.demandDate,
-          deliveryDate: s.dueDate,
-          message: `Färdigdatumet (${s.dueDate}) hinner inte före behovet (${s.demandDate})`,
-        });
-      };
-
-      // Konfigurator 4c: configured rows first — they are parents (their TO's
-      // material is what the component proposals below were netted against).
-      // The manufacturing service derives the structure from the row's own
-      // choices and refuses a row whose configuration is no longer valid.
-      for (const proposal of configuredProposals) {
-        try {
-          // The TO is made from the row, so the row must be the configured
-          // row OF this proposal's article — the article id is otherwise
-          // only used for the result's labels, and a stale or mismatched
-          // pair would silently make another article's TO.
-          const linked = await repo.salesOrderRowForDueDate(proposal.salesOrderRowId!);
-          if (!linked || !linked.configured || linked.articleId !== proposal.articleId) {
-            pushError(proposal.articleId, "Kundorderraden hör inte till artikeln eller är inte konfigurerad");
-            continue;
-          }
-          const suggestion = proposal.needDate
-            ? await dueDateForNeed(
-                proposal.articleId,
-                proposal.needDate,
-                proposal.quantity,
-                linked.configuration ? { configuration: selectionFromEntries(linked.configuration.selection) } : null
-              )
-            : await this.suggestManufacturingDueDate(proposal.articleId, {
-                salesOrderRowId: proposal.salesOrderRowId,
-                quantity: proposal.quantity,
-              });
-          // onlyUncovered: the proposal may come from a cached list (up to
-          // REQUIREMENTS_CACHE_MS old) or a second click — the row's TO is
-          // only created for what it still lacks, checked under its lock.
-          const mo = await deps.manufacturing.createFromSalesOrderRow(
-            proposal.salesOrderRowId!,
-            { quantity: proposal.quantity, onlyUncovered: true, ...(suggestion ? { dueDate: suggestion.dueDate } : {}) },
-            createdBy
-          );
-          result.manufacturingOrders.push({
-            id: mo.id,
-            orderNumber: mo.orderNumber,
-            articleNumber: numberFor(proposal.articleId),
-          });
-          pushLateManufacturing(mo.orderNumber, proposal.articleId, suggestion, proposal.reason);
-        } catch (err) {
-          pushError(proposal.articleId, errorMessage(err));
-        }
-      }
-
-      // TOs FIRST, parents before components (low-level code order, like the
-      // MRP's own netting): a new planned TO is material demand in its
-      // components' overview, so both a component TO's färdigdatum and a
-      // purchased component's önskade leveransdatum (below) land before it.
-      // Within a level the proposals keep their order (stable sort) — two
-      // week proposals of one article become two TOs.
-      if (manufactureProposals.length > 1) {
-        const levels = computeLowLevelCodes(await repo.loadBomEdges());
-        manufactureProposals.sort((a, b) => (levels.get(a.articleId) ?? 0) - (levels.get(b.articleId) ?? 0));
-      }
-
-      for (const proposal of manufactureProposals) {
-        try {
-          const suggestion = proposal.needDate
-            ? await dueDateForNeed(proposal.articleId, proposal.needDate, proposal.quantity, null)
-            : await this.suggestManufacturingDueDate(proposal.articleId, { quantity: proposal.quantity });
-          const mo = await deps.manufacturing.createManufacturingOrder(
-            {
-              articleId: proposal.articleId,
-              quantity: proposal.quantity,
-              note: "Skapad från behovsberäkning",
-              ...(suggestion ? { dueDate: suggestion.dueDate } : {}),
-            },
-            createdBy
-          );
-          result.manufacturingOrders.push({
-            id: mo.id,
-            orderNumber: mo.orderNumber,
-            articleNumber: numberFor(proposal.articleId),
-          });
-          pushLateManufacturing(mo.orderNumber, proposal.articleId, suggestion, proposal.reason);
-        } catch (err) {
-          pushError(proposal.articleId, errorMessage(err));
-        }
-      }
-
-      const supplierByArticle = new Map(
-        (await repo.primarySuppliersForArticles(purchaseProposals.map((p) => p.articleId))).map((s) => [
-          s.articleId,
-          s,
-        ])
-      );
-
-      // The raw demand date per purchase proposal: its own needDate, else the
-      // article's first firm demand (the TO färdigdatum rule's demand — a
-      // KO's ship date or a TO's start), looked up once per article. Only the
-      // demand: a purchased article has no manufacturing lead time to load
-      // (its arrival is the supplier's, below). A failed lookup is just no
-      // date — it must not stop the order (a real problem fails addRow).
-      const firstDemandByArticle = new Map<string, Promise<string | null>>();
-      const firstDemandDateFor = (articleId: string) => {
-        let pending = firstDemandByArticle.get(articleId);
-        if (!pending) {
-          pending = firmDemandFor(articleId, today, undefined)
-            .then(({ demand }) => demand?.date ?? null)
-            .catch(() => null);
-          firstDemandByArticle.set(articleId, pending);
-        }
-        return pending;
-      };
-
-      type PurchaseRow = {
-        articleId: string;
-        quantity: number;
-        unitPrice: number;
-        // The catalog row's currency — compared with the order's below.
-        priceCurrency: string;
-        demandDate: string | null;
-        // A reorder-point or forecast-only proposal: dated, but never
-        // reported late (no deadline behind it).
-        noDeadline: boolean;
-        // The fallback date when the delivery context cannot be loaded (the
-        // working day before the demand, today at the earliest — the TO
-        // färdigdatum rule, exactly as before fasta leveransdagar).
-        fallbackDate: string | null;
-      };
-      const bySupplier = new Map<string, { supplierName: string; rows: PurchaseRow[] }>();
-      for (const proposal of purchaseProposals) {
-        const supplier = supplierByArticle.get(proposal.articleId);
-        if (!supplier) {
-          pushError(proposal.articleId, "Artikeln saknar huvudleverantör");
-          continue;
-        }
-        const demandDate = proposal.needDate ?? (await firstDemandDateFor(proposal.articleId));
-        // The working day before the need, today at the earliest (no
-        // holidays without the context).
-        const before = demandDate ? previousWorkingDay(demandDate, new Set<string>()) : null;
-        const fallbackDate = before === null ? null : before < today ? today : before;
-        const group = bySupplier.get(supplier.supplierId) ?? { supplierName: supplier.supplierName, rows: [] };
-        group.rows.push({
-          articleId: proposal.articleId,
-          quantity: proposal.quantity,
-          // Stafflat: the break for the proposal quantity, else grundpriset.
-          unitPrice: resolveSupplierPrice(supplier, proposal.quantity).price ?? 0,
-          priceCurrency: supplier.currency,
-          demandDate,
-          noDeadline: noDeadline(proposal.reason),
-          fallbackDate,
-        });
-        bySupplier.set(supplier.supplierId, group);
-      }
-
-      // Önskat leveransdatum: the raw demand date per row, then the latest
-      // arrival before it that the supplier's days allow, never earlier than
-      // the earliest possible arrival with lead time and transit (late ⇒ a
-      // warning). Without settings: the working day before the demand,
-      // exactly as before.
-      const knownDemands = [...bySupplier.values()].flatMap((g) => g.rows.flatMap((r) => (r.demandDate ? [r.demandDate] : [])));
-      const maxLead = Math.max(0, ...[...supplierByArticle.values()].map((s) => s.leadTimeDays ?? 0));
-      // The delivery context (defaults + holidays) is a convenience for the
-      // dates, never a reason to fail — the TOs above already exist. Without
-      // it the rows are dated as before fasta leveransdagar: the TO
-      // färdigdatum rule's own date (the working day before the demand).
-      const delivery =
-        bySupplier.size > 0
-          ? await repo.deliveryContext(deliveryHolidayWindow([today, ...knownDemands], maxLead + 60)).catch(() => null)
-          : null;
-
-      for (const [supplierId, group] of bySupplier) {
-        // Tidsfasade förslag: ONE draft IO per supplier with the rows in
-        // need-date order (undated last). An article with proposals in two
-        // weeks gets two rows on it, each with its own date — the same
-        // article may sit on several rows of an order.
-        const bucket = [...group.rows].sort((a, b) =>
-          a.demandDate === b.demandDate ? 0 : a.demandDate === null ? 1 : b.demandDate === null ? -1 : a.demandDate < b.demandDate ? -1 : 1
+        const articleNumbers = new Map(
+          (await repo.articleInfoForIds(input.proposals.map((p) => p.articleId))).map((a) => [
+            a.articleId,
+            a.articleNumber,
+          ])
         );
-        // The order gets the earliest date; a row whose own date is later
-        // keeps it on the row (null = follows the order).
-        const dates = bucket.map((row) => {
-          const supplier = supplierByArticle.get(row.articleId)!;
-          return delivery
-            ? suggestPurchaseDeliveryDate({
-                demandDate: row.demandDate,
-                today,
-                leadTimeDays: supplier.leadTimeDays,
-                settings: effectiveDeliverySettings(supplier.supplierDelivery ?? NO_PARTNER_SETTINGS, "supplier", delivery.defaults),
-                offDays: delivery.offDays,
-              })
-            : { date: row.fallbackDate, late: false };
-        });
-        const orderDate = dates
-          .map((d) => d.date)
-          .filter((d): d is string => d !== null)
-          .sort()[0];
+        const numberFor = (articleId: string) => articleNumbers.get(articleId) ?? "";
+        const pushError = (articleId: string, message: string) =>
+          result.errors.push({ articleId, articleNumber: numberFor(articleId), message });
 
-        let order: { id: string; orderNumber: string; currency?: string };
-        try {
-          order = await deps.purchase.createPurchaseOrder(
-            { supplierId, ...(orderDate ? { expectedDeliveryDate: orderDate } : {}) },
-            createdBy
-          );
-        } catch (err) {
-          for (const row of bucket) pushError(row.articleId, errorMessage(err));
-          continue;
+        // A proposal from the list carries its key: the behovsberäkning is
+        // recomputed first (the minute cache may be older than orders another
+        // tab or a repeated click just made — this call runs after any earlier
+        // one, serializedOrderCreation) and a proposal the fresh result no
+        // longer has is refused instead of ordered twice. A proposal still
+        // there is created with the user's own quantity.
+        let proposals = input.proposals;
+        if (proposals.some((p) => p.key !== undefined)) {
+          const fresh = await computedRequirements(true).rows;
+          const live = new Set(fresh.flatMap((r) => r.proposals.map((p) => p.key)));
+          proposals = proposals.filter((p) => {
+            if (p.key === undefined || live.has(p.key)) return true;
+            pushError(p.articleId, STALE_PROPOSAL_MESSAGE);
+            return false;
+          });
         }
-        let rowCount = 0;
-        for (const [i, row] of bucket.entries()) {
-          const { date: rowDate, late } = dates[i]!;
+
+        const purchaseProposals = proposals.filter((p) => p.kind === "purchase");
+        const manufactureProposals = proposals.filter((p) => p.kind === "manufacture");
+        const subcontractProposals = proposals.filter((p) => p.kind === "subcontract");
+        const configuredProposals = proposals.filter((p) => p.kind === "configured");
+
+        // Tidsfasade förslag (#13): a proposal that carries its needDate is
+        // dated from it (the TO's färdigdatum, the IO row's önskade
+        // leveransdatum); one without (integrations) from the article's first
+        // firm demand, as before. A TO whose earliest possible finish comes
+        // after the need is created anyway and reported in `warnings`, exactly
+        // like a late IO row — except a reorder-point proposal: it is dated
+        // today for no deadline (the list never marks it Passerat), so its
+        // floor date is simply "as soon as possible". The same for a
+        // forecast-only proposal (Prognos #10): a forecast is not a deadline,
+        // and for the safety-stock refill (safety_stock): a floor to restore.
+        const today = todayFn();
+        const noDeadline = (reason: CreatePlanningOrdersInput["proposals"][number]["reason"]) =>
+          reason === "reorder_point" || reason === "safety_stock" || reason === "forecast";
+        const pushLateManufacturing = (
+          orderNumber: string,
+          articleId: string,
+          s: DueDateSuggestion | null,
+          reason: CreatePlanningOrdersInput["proposals"][number]["reason"]
+        ) => {
+          if (!s?.late || noDeadline(reason)) return;
+          result.warnings.push({
+            orderNumber,
+            articleNumber: numberFor(articleId),
+            demandDate: s.demandDate,
+            deliveryDate: s.dueDate,
+            message: `Färdigdatumet (${s.dueDate}) hinner inte före behovet (${s.demandDate})`,
+          });
+        };
+
+        // Konfigurator 4c: configured rows first — they are parents (their TO's
+        // material is what the component proposals below were netted against).
+        // The manufacturing service derives the structure from the row's own
+        // choices and refuses a row whose configuration is no longer valid.
+        for (const proposal of configuredProposals) {
           try {
-            await deps.purchase.addRow(order.id, {
-              articleId: row.articleId,
-              quantity: row.quantity,
-              // A catalog price in another currency than the order's is not
-              // the order's price — 0, as when the price is missing (the IO
-              // card's prefill skips the same case).
-              unitPrice: order.currency !== undefined && row.priceCurrency !== order.currency ? 0 : row.unitPrice,
-              ...(rowDate && rowDate !== orderDate ? { expectedDeliveryDate: rowDate } : {}),
-            });
-            rowCount += 1;
-            if (late && rowDate && row.demandDate && !row.noDeadline) {
-              result.warnings.push({
-                orderNumber: order.orderNumber,
-                articleNumber: numberFor(row.articleId),
-                demandDate: row.demandDate,
-                deliveryDate: rowDate,
-                message: `Leveransen (${rowDate}) kommer efter behovet (${row.demandDate})`,
-              });
+            // The TO is made from the row, so the row must be the configured
+            // row OF this proposal's article — the article id is otherwise
+            // only used for the result's labels, and a stale or mismatched
+            // pair would silently make another article's TO.
+            const linked = await repo.salesOrderRowForDueDate(proposal.salesOrderRowId!);
+            if (!linked || !linked.configured || linked.articleId !== proposal.articleId) {
+              pushError(proposal.articleId, "Kundorderraden hör inte till artikeln eller är inte konfigurerad");
+              continue;
             }
+            const suggestion = proposal.needDate
+              ? await dueDateForNeed(
+                  proposal.articleId,
+                  proposal.needDate,
+                  proposal.quantity,
+                  linked.configuration ? { configuration: selectionFromEntries(linked.configuration.selection) } : null
+                )
+              : await this.suggestManufacturingDueDate(proposal.articleId, {
+                  salesOrderRowId: proposal.salesOrderRowId,
+                  quantity: proposal.quantity,
+                });
+            // onlyUncovered: the proposal may come from a cached list (up to
+            // REQUIREMENTS_CACHE_MS old) or a second click — the row's TO is
+            // only created for what it still lacks, checked under its lock.
+            const mo = await deps.manufacturing.createFromSalesOrderRow(
+              proposal.salesOrderRowId!,
+              { quantity: proposal.quantity, onlyUncovered: true, ...(suggestion ? { dueDate: suggestion.dueDate } : {}) },
+              createdBy
+            );
+            result.manufacturingOrders.push({
+              id: mo.id,
+              orderNumber: mo.orderNumber,
+              articleNumber: numberFor(proposal.articleId),
+            });
+            pushLateManufacturing(mo.orderNumber, proposal.articleId, suggestion, proposal.reason);
           } catch (err) {
-            pushError(row.articleId, errorMessage(err));
+            pushError(proposal.articleId, errorMessage(err));
           }
         }
-        if (rowCount === 0) {
-          // Every row failed — don't leave a rowless draft IO in the register
-          // and don't report it as created. Best-effort cancel; the row
-          // failures above are already reported per article.
-          try {
-            await deps.purchase.cancel(order.id);
-          } catch {
-            // The empty draft survives as junk, but the user already gets one
-            // error per row; a cancel failure has nothing actionable to add.
-          }
-          continue;
-        }
-        result.purchaseOrders.push({
-          id: order.id,
-          orderNumber: order.orderNumber,
-          supplierId,
-          supplierName: group.supplierName,
-          rowCount,
-        });
-      }
 
-      // --- Subcontract (lego) proposals: grouped per supplier into ONE
-      // draft IO like the purchase proposals, but keyed per MO OPERATION.
-      // Supplier and prices are reloaded server-side from the operation
-      // snapshot — the client only carries ids and quantities.
-      if (subcontractProposals.length > 0) {
-        const operationById = new Map(
-          (await repo.legoOperationsForIds(subcontractProposals.map((p) => p.moOperationId!))).map((op) => [
-            op.moOperationId,
-            op,
+        // TOs FIRST, parents before components (low-level code order, like the
+        // MRP's own netting): a new planned TO is material demand in its
+        // components' overview, so both a component TO's färdigdatum and a
+        // purchased component's önskade leveransdatum (below) land before it.
+        // Within a level the proposals keep their order (stable sort) — two
+        // week proposals of one article become two TOs.
+        if (manufactureProposals.length > 1) {
+          const levels = computeLowLevelCodes(await repo.loadBomEdges());
+          manufactureProposals.sort((a, b) => (levels.get(a.articleId) ?? 0) - (levels.get(b.articleId) ?? 0));
+        }
+
+        for (const proposal of manufactureProposals) {
+          try {
+            const suggestion = proposal.needDate
+              ? await dueDateForNeed(proposal.articleId, proposal.needDate, proposal.quantity, null)
+              : await this.suggestManufacturingDueDate(proposal.articleId, { quantity: proposal.quantity });
+            const mo = await deps.manufacturing.createManufacturingOrder(
+              {
+                articleId: proposal.articleId,
+                quantity: proposal.quantity,
+                note: "Skapad från behovsberäkning",
+                ...(suggestion ? { dueDate: suggestion.dueDate } : {}),
+              },
+              createdBy
+            );
+            result.manufacturingOrders.push({
+              id: mo.id,
+              orderNumber: mo.orderNumber,
+              articleNumber: numberFor(proposal.articleId),
+            });
+            pushLateManufacturing(mo.orderNumber, proposal.articleId, suggestion, proposal.reason);
+          } catch (err) {
+            pushError(proposal.articleId, errorMessage(err));
+          }
+        }
+
+        const supplierByArticle = new Map(
+          (await repo.primarySuppliersForArticles(purchaseProposals.map((p) => p.articleId))).map((s) => [
+            s.articleId,
+            s,
           ])
         );
 
-        type LegoRow = {
+        // The raw demand date per purchase proposal: its own needDate, else the
+        // article's first firm demand (the TO färdigdatum rule's demand — a
+        // KO's ship date or a TO's start), looked up once per article. Only the
+        // demand: a purchased article has no manufacturing lead time to load
+        // (its arrival is the supplier's, below). A failed lookup is just no
+        // date — it must not stop the order (a real problem fails addRow).
+        const firstDemandByArticle = new Map<string, Promise<string | null>>();
+        const firstDemandDateFor = (articleId: string) => {
+          let pending = firstDemandByArticle.get(articleId);
+          if (!pending) {
+            pending = firmDemandFor(articleId, today, undefined)
+              .then(({ demand }) => demand?.date ?? null)
+              .catch(() => null);
+            firstDemandByArticle.set(articleId, pending);
+          }
+          return pending;
+        };
+
+        type PurchaseRow = {
           articleId: string;
           quantity: number;
           unitPrice: number;
-          setupPrice?: number;
-          moOperationId: string;
+          // The catalog row's currency — compared with the order's below.
+          priceCurrency: string;
+          demandDate: string | null;
+          // A reorder-point or forecast-only proposal: dated, but never
+          // reported late (no deadline behind it).
+          noDeadline: boolean;
+          // The fallback date when the delivery context cannot be loaded (the
+          // working day before the demand, today at the earliest — the TO
+          // färdigdatum rule, exactly as before fasta leveransdagar).
+          fallbackDate: string | null;
         };
-        // One draft IO per supplier; two lego operations on the same article
-        // become two rows on it.
-        const rowsBySupplier = new Map<string, { supplierName: string; rows: LegoRow[] }>();
-
-        for (const proposal of subcontractProposals) {
-          const operation = operationById.get(proposal.moOperationId!);
-          if (!operation) {
-            pushError(proposal.articleId, "Legooperationen finns inte längre eller är redan klar");
+        const bySupplier = new Map<string, { supplierName: string; rows: PurchaseRow[] }>();
+        for (const proposal of purchaseProposals) {
+          const supplier = supplierByArticle.get(proposal.articleId);
+          if (!supplier) {
+            pushError(proposal.articleId, "Artikeln saknar huvudleverantör");
             continue;
           }
-          if (!operation.supplierId) {
-            pushError(
-              proposal.articleId,
-              `Legooperationen saknar leverantör (${operation.orderNumber} · Op ${operation.sequenceNo})`
-            );
-            continue;
-          }
-          const group = rowsBySupplier.get(operation.supplierId) ?? {
-            supplierName: operation.supplierName ?? operation.supplierId,
-            rows: [],
-          };
-          const row: LegoRow = {
-            articleId: operation.articleId,
+          const demandDate = proposal.needDate ?? (await firstDemandDateFor(proposal.articleId));
+          // The working day before the need, today at the earliest (no
+          // holidays without the context).
+          const before = demandDate ? previousWorkingDay(demandDate, new Set<string>()) : null;
+          const fallbackDate = before === null ? null : before < today ? today : before;
+          const group = bySupplier.get(supplier.supplierId) ?? { supplierName: supplier.supplierName, rows: [] };
+          group.rows.push({
+            articleId: proposal.articleId,
             quantity: proposal.quantity,
-            unitPrice: operation.unitPrice ?? 0,
-            setupPrice: operation.setupPrice ?? undefined,
-            moOperationId: operation.moOperationId,
-          };
-          group.rows.push(row);
-          rowsBySupplier.set(operation.supplierId, group);
+            // Stafflat: the break for the proposal quantity, else grundpriset.
+            unitPrice: resolveSupplierPrice(supplier, proposal.quantity).price ?? 0,
+            priceCurrency: supplier.currency,
+            demandDate,
+            noDeadline: noDeadline(proposal.reason),
+            fallbackDate,
+          });
+          bySupplier.set(supplier.supplierId, group);
         }
 
-        // Önskat leveransdatum (user decision 2026-11-04): when the
-        // operation must be back from the supplier — backward from the TO's
-        // färdigdatum, never before the earliest return when ordered today
-        // (legoReturnDates). The dating never fails the call: without it
-        // the rows stay undated, as before the rule.
-        const returns = await legoReturnDates([...operationById.values()]).catch(() => new Map<string, LegoReturn>());
+        // Önskat leveransdatum: the raw demand date per row, then the latest
+        // arrival before it that the supplier's days allow, never earlier than
+        // the earliest possible arrival with lead time and transit (late ⇒ a
+        // warning). Without settings: the working day before the demand,
+        // exactly as before.
+        const knownDemands = [...bySupplier.values()].flatMap((g) => g.rows.flatMap((r) => (r.demandDate ? [r.demandDate] : [])));
+        const maxLead = Math.max(0, ...[...supplierByArticle.values()].map((s) => s.leadTimeDays ?? 0));
+        // The delivery context (defaults + holidays) is a convenience for the
+        // dates, never a reason to fail — the TOs above already exist. Without
+        // it the rows are dated as before fasta leveransdagar: the TO
+        // färdigdatum rule's own date (the working day before the demand).
+        const delivery =
+          bySupplier.size > 0
+            ? await repo.deliveryContext(deliveryHolidayWindow([today, ...knownDemands], maxLead + 60)).catch(() => null)
+            : null;
 
-        for (const [supplierId, group] of rowsBySupplier) {
-          // Same shape as the purchase branch: rows in date order (undated
-          // last), the order gets the earliest date and a row with a later
-          // one keeps its own.
-          const bucket = [...group.rows].sort((a, b) => {
-            const dateA = returns.get(a.moOperationId)?.date ?? null;
-            const dateB = returns.get(b.moOperationId)?.date ?? null;
-            return dateA === dateB ? 0 : dateA === null ? 1 : dateB === null ? -1 : dateA < dateB ? -1 : 1;
+        for (const [supplierId, group] of bySupplier) {
+          // Tidsfasade förslag: ONE draft IO per supplier with the rows in
+          // need-date order (undated last). An article with proposals in two
+          // weeks gets two rows on it, each with its own date — the same
+          // article may sit on several rows of an order.
+          const bucket = [...group.rows].sort((a, b) =>
+            a.demandDate === b.demandDate ? 0 : a.demandDate === null ? 1 : b.demandDate === null ? -1 : a.demandDate < b.demandDate ? -1 : 1
+          );
+          // The order gets the earliest date; a row whose own date is later
+          // keeps it on the row (null = follows the order).
+          const dates = bucket.map((row) => {
+            const supplier = supplierByArticle.get(row.articleId)!;
+            return delivery
+              ? suggestPurchaseDeliveryDate({
+                  demandDate: row.demandDate,
+                  today,
+                  leadTimeDays: supplier.leadTimeDays,
+                  settings: effectiveDeliverySettings(supplier.supplierDelivery ?? NO_PARTNER_SETTINGS, "supplier", delivery.defaults),
+                  offDays: delivery.offDays,
+                })
+              : { date: row.fallbackDate, late: false };
           });
-          const orderDate = bucket
-            .map((row) => returns.get(row.moOperationId)?.date ?? null)
+          const orderDate = dates
+            .map((d) => d.date)
             .filter((d): d is string => d !== null)
             .sort()[0];
-          let order: { id: string; orderNumber: string };
+
+          let order: { id: string; orderNumber: string; currency?: string };
           try {
             order = await deps.purchase.createPurchaseOrder(
               { supplierId, ...(orderDate ? { expectedDeliveryDate: orderDate } : {}) },
@@ -3266,21 +3223,26 @@ export function createPlanningService(
             continue;
           }
           let rowCount = 0;
-          for (const row of bucket) {
-            const dated = returns.get(row.moOperationId);
+          for (const [i, row] of bucket.entries()) {
+            const { date: rowDate, late } = dates[i]!;
             try {
               await deps.purchase.addRow(order.id, {
-                ...row,
-                ...(dated && dated.date !== orderDate ? { expectedDeliveryDate: dated.date } : {}),
+                articleId: row.articleId,
+                quantity: row.quantity,
+                // A catalog price in another currency than the order's is not
+                // the order's price — 0, as when the price is missing (the IO
+                // card's prefill skips the same case).
+                unitPrice: order.currency !== undefined && row.priceCurrency !== order.currency ? 0 : row.unitPrice,
+                ...(rowDate && rowDate !== orderDate ? { expectedDeliveryDate: rowDate } : {}),
               });
               rowCount += 1;
-              if (dated?.late && dated.finishDate) {
+              if (late && rowDate && row.demandDate && !row.noDeadline) {
                 result.warnings.push({
                   orderNumber: order.orderNumber,
                   articleNumber: numberFor(row.articleId),
-                  demandDate: dated.finishDate,
-                  deliveryDate: dated.date,
-                  message: `Leveransen (${dated.date}) kommer efter behovet (${dated.finishDate})`,
+                  demandDate: row.demandDate,
+                  deliveryDate: rowDate,
+                  message: `Leveransen (${rowDate}) kommer efter behovet (${row.demandDate})`,
                 });
               }
             } catch (err) {
@@ -3288,12 +3250,14 @@ export function createPlanningService(
             }
           }
           if (rowCount === 0) {
-            // Same best-effort cleanup as the purchase branch above.
+            // Every row failed — don't leave a rowless draft IO in the register
+            // and don't report it as created. Best-effort cancel; the row
+            // failures above are already reported per article.
             try {
               await deps.purchase.cancel(order.id);
             } catch {
-              // The empty draft survives as junk; each row already
-              // reported its own error.
+              // The empty draft survives as junk, but the user already gets one
+              // error per row; a cancel failure has nothing actionable to add.
             }
             continue;
           }
@@ -3305,12 +3269,141 @@ export function createPlanningService(
             rowCount,
           });
         }
-      }
 
-      // The new orders cover the proposals — drop the cached result AFTER
-      // they exist, so a read racing the creation can't re-cache the old one.
-      cache = null;
-      return result;
+        // --- Subcontract (lego) proposals: grouped per supplier into ONE
+        // draft IO like the purchase proposals, but keyed per MO OPERATION.
+        // Supplier and prices are reloaded server-side from the operation
+        // snapshot — the client only carries ids and quantities.
+        if (subcontractProposals.length > 0) {
+          const operationById = new Map(
+            (await repo.legoOperationsForIds(subcontractProposals.map((p) => p.moOperationId!))).map((op) => [
+              op.moOperationId,
+              op,
+            ])
+          );
+
+          type LegoRow = {
+            articleId: string;
+            quantity: number;
+            unitPrice: number;
+            setupPrice?: number;
+            moOperationId: string;
+          };
+          // One draft IO per supplier; two lego operations on the same article
+          // become two rows on it.
+          const rowsBySupplier = new Map<string, { supplierName: string; rows: LegoRow[] }>();
+
+          for (const proposal of subcontractProposals) {
+            const operation = operationById.get(proposal.moOperationId!);
+            if (!operation) {
+              pushError(proposal.articleId, "Legooperationen finns inte längre eller är redan klar");
+              continue;
+            }
+            if (!operation.supplierId) {
+              pushError(
+                proposal.articleId,
+                `Legooperationen saknar leverantör (${operation.orderNumber} · Op ${operation.sequenceNo})`
+              );
+              continue;
+            }
+            const group = rowsBySupplier.get(operation.supplierId) ?? {
+              supplierName: operation.supplierName ?? operation.supplierId,
+              rows: [],
+            };
+            const row: LegoRow = {
+              articleId: operation.articleId,
+              quantity: proposal.quantity,
+              unitPrice: operation.unitPrice ?? 0,
+              setupPrice: operation.setupPrice ?? undefined,
+              moOperationId: operation.moOperationId,
+            };
+            group.rows.push(row);
+            rowsBySupplier.set(operation.supplierId, group);
+          }
+
+          // Önskat leveransdatum (user decision 2026-11-04): when the
+          // operation must be back from the supplier — backward from the TO's
+          // färdigdatum, never before the earliest return when ordered today
+          // (legoReturnDates). The dating never fails the call: without it
+          // the rows stay undated, as before the rule.
+          const returns = await legoReturnDates([...operationById.values()]).catch(() => new Map<string, LegoReturn>());
+
+          for (const [supplierId, group] of rowsBySupplier) {
+            // Same shape as the purchase branch: rows in date order (undated
+            // last), the order gets the earliest date and a row with a later
+            // one keeps its own.
+            const bucket = [...group.rows].sort((a, b) => {
+              const dateA = returns.get(a.moOperationId)?.date ?? null;
+              const dateB = returns.get(b.moOperationId)?.date ?? null;
+              return dateA === dateB ? 0 : dateA === null ? 1 : dateB === null ? -1 : dateA < dateB ? -1 : 1;
+            });
+            const orderDate = bucket
+              .map((row) => returns.get(row.moOperationId)?.date ?? null)
+              .filter((d): d is string => d !== null)
+              .sort()[0];
+            let order: { id: string; orderNumber: string; currency?: string; exchangeRate?: string | number };
+            try {
+              order = await deps.purchase.createPurchaseOrder(
+                { supplierId, ...(orderDate ? { expectedDeliveryDate: orderDate } : {}) },
+                createdBy
+              );
+            } catch (err) {
+              for (const row of bucket) pushError(row.articleId, errorMessage(err));
+              continue;
+            }
+            // The operation's Styckpris and Ställpris are kronor (the costing
+            // reads them as SEK): an order in another currency gets them
+            // converted with its own rate (user decision 2026-11-10).
+            const toOrderCurrency = legoPriceConverter(order);
+            let rowCount = 0;
+            for (const row of bucket) {
+              const dated = returns.get(row.moOperationId);
+              try {
+                await deps.purchase.addRow(order.id, {
+                  ...row,
+                  unitPrice: toOrderCurrency(row.unitPrice, 4),
+                  ...(row.setupPrice !== undefined ? { setupPrice: toOrderCurrency(row.setupPrice, 2) } : {}),
+                  ...(dated && dated.date !== orderDate ? { expectedDeliveryDate: dated.date } : {}),
+                });
+                rowCount += 1;
+                if (dated?.late && dated.finishDate) {
+                  result.warnings.push({
+                    orderNumber: order.orderNumber,
+                    articleNumber: numberFor(row.articleId),
+                    demandDate: dated.finishDate,
+                    deliveryDate: dated.date,
+                    message: `Leveransen (${dated.date}) kommer efter behovet (${dated.finishDate})`,
+                  });
+                }
+              } catch (err) {
+                pushError(row.articleId, errorMessage(err));
+              }
+            }
+            if (rowCount === 0) {
+              // Same best-effort cleanup as the purchase branch above.
+              try {
+                await deps.purchase.cancel(order.id);
+              } catch {
+                // The empty draft survives as junk; each row already
+                // reported its own error.
+              }
+              continue;
+            }
+            result.purchaseOrders.push({
+              id: order.id,
+              orderNumber: order.orderNumber,
+              supplierId,
+              supplierName: group.supplierName,
+              rowCount,
+            });
+          }
+        }
+
+        // The new orders cover the proposals — drop the cached result AFTER
+        // they exist, so a read racing the creation can't re-cache the old one.
+        cache = null;
+        return result;
+      });
     },
   };
 }
