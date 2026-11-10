@@ -32,6 +32,13 @@ import {
   type ErasureFacts,
 } from "./employee-erasure.js";
 
+// What the stamp-in asks again on the locked rows (createStampSession).
+export interface StampTargetState {
+  workCenterId: string;
+  operationStatus: (typeof moOperations.$inferSelect)["status"];
+  orderStatus: (typeof manufacturingOrders.$inferSelect)["status"] | null;
+}
+
 // Columns shared by every time-report listing; `source` marks whether the row
 // was materialized by a terminal stamp-out (a stamp_sessions row points at it)
 // or entered manually.
@@ -265,23 +272,41 @@ export function createTimeReportRepository(db: Db) {
     // FK's own lock mode): an instämpling that starts during a Byt resurs
     // waits for it and takes the new resource, and a Byt that starts after
     // the read waits for this commit and is then refused (someone is
-    // stamped in). `check` runs on the locked resource before the INSERT —
-    // stampIn passes the terminal's expected station, and throws to refuse.
+    // stamped in). `check` runs before the INSERT on the rows this
+    // transaction holds — the operation and then its order FOR SHARE
+    // (operation → order, as the reports lock) — and throws to refuse:
+    // stampIn asks for the terminal's station, an operation not done and an
+    // open order. A report that turns the operation done (FOR UPDATE on it)
+    // or a Slutför order / Makulera (FOR UPDATE on the order) that commits
+    // while this waits is seen here; one that starts after it waits for this
+    // insert and finds the stamp (regel 10 closes it, Makulera refuses an
+    // order with an open stamp).
     async createStampSession(
       employeeId: string,
       moOperationId: string,
       createdBy: string,
       kind: TimeKind | null = null,
-      check?: (workCenterId: string) => void
+      check?: (locked: StampTargetState) => void
     ) {
       return db.transaction(async (tx) => {
         const [op] = await tx
-          .select({ workCenterId: moOperations.workCenterId })
+          .select({
+            workCenterId: moOperations.workCenterId,
+            status: moOperations.status,
+            manufacturingOrderId: moOperations.manufacturingOrderId,
+          })
           .from(moOperations)
           .where(eq(moOperations.id, moOperationId))
           .for("key share");
         // An unknown operation fails on the FK below, as before.
-        if (op) check?.(op.workCenterId);
+        if (op && check) {
+          const [order] = await tx
+            .select({ status: manufacturingOrders.status })
+            .from(manufacturingOrders)
+            .where(eq(manufacturingOrders.id, op.manufacturingOrderId))
+            .for("share");
+          check({ workCenterId: op.workCenterId, operationStatus: op.status, orderStatus: order?.status ?? null });
+        }
         const [row] = await tx
           .insert(stampSessions)
           .values({ employeeId, moOperationId, createdBy, kind, workCenterId: op?.workCenterId ?? null })

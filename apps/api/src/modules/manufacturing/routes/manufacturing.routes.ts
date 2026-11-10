@@ -219,6 +219,7 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
         const operation = await service.createRoutingOperation(req.params.id, input);
         return reply.code(201).send(operation);
       } catch (err) {
+        if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
         if (err instanceof DuplicateSequenceNoError) return reply.code(409).send(errorBody(err));
         if (err instanceof WorkCenterNotFoundError) return reply.code(404).send(errorBody(err));
         if (err instanceof NotSubcontractOperationError) return reply.code(400).send(errorBody(err));
@@ -380,6 +381,7 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
       if (err instanceof LinkedRowArticleMismatchError) return reply.code(400).send(errorBody(err));
       if (err instanceof LinkedRowNotManufacturedError) return reply.code(400).send(errorBody(err));
       if (err instanceof LinkedOrderStatusError) return reply.code(409).send(errorBody(err));
+      if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
       // Produktkonfigurator: a template in mode variants never gets a TO.
       if (err instanceof ArticleIsTemplateError) return reply.code(409).send(errorBody(err));
       if (err instanceof ConfigurationRequiredError) return reply.code(409).send(errorBody(err));
@@ -794,7 +796,7 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
     async (req, reply) => {
       const input = completeOperationSchema.parse(req.body);
       try {
-        return await service.completeOperation(req.params.opId, input, req.user!.id);
+        return await service.completeOperation(req.params.opId, input, req.user!.id, req.params.id);
       } catch (err) {
         if (err instanceof MOOperationNotFoundError) return reply.code(404).send(errorBody(err));
         if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));

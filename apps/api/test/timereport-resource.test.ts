@@ -1,6 +1,6 @@
 import { createArticleSchema, createWeekScheduleSchema, createWorkCenterSchema, stampOutSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { attendanceSessions, db, stampSessions, timeReports } from "@navet/db";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -181,7 +181,13 @@ async function reportResource(id: string) {
 }
 
 async function reportResources(moOperationId: string) {
-  const rows = await db.select({ workCenterId: timeReports.workCenterId }).from(timeReports).where(eq(timeReports.moOperationId, moOperationId));
+  // In the order the time was reported (heap order is not guaranteed — the
+  // full suite once returned the November report first).
+  const rows = await db
+    .select({ workCenterId: timeReports.workCenterId })
+    .from(timeReports)
+    .where(eq(timeReports.moOperationId, moOperationId))
+    .orderBy(asc(timeReports.date), asc(timeReports.createdAt), asc(timeReports.id));
   return rows.map((r) => r.workCenterId);
 }
 

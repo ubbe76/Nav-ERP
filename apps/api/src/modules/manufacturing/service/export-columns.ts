@@ -5,14 +5,15 @@ import type { ManufacturingOrderStatus } from "@navet/shared";
 import { type CsvColumn } from "@navet/shared";
 
 // Server-side mirror of the web's MANUFACTURING_ORDER_STATUS_PILL labels
-// (apps/web/lib/types.ts) — duplicated rather than shared across the app boundary.
-const MANUFACTURING_ORDER_STATUS_LABELS: Record<ManufacturingOrderStatus, string> = {
+// (apps/web/lib/types.ts) — duplicated rather than shared across the app
+// boundary. Also the TO printout's Status line (manufacturing.service.ts).
+export const MANUFACTURING_ORDER_STATUS_LABELS: Record<ManufacturingOrderStatus, string> = {
   planned: "Planerad",
   released: "Frisläppt",
   in_progress: "Pågår",
   done: "Klar",
   closed: "Stängd",
-  cancelled: "Avbruten",
+  cancelled: "Makulerad",
 };
 
 export interface ManufacturingOrderExportRow {

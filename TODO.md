@@ -21,6 +21,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel — fel resultat i ovanliga lägen och 500-fel
 
+- [ ] **Talfält utan övre gräns ger 500, och tom sträng blir 0** (tillverkningsgranskningen 2026-11-10, gäller troligen hela kodbasen): zod-schemana (t.ex. `packages/shared/src/manufacturing.ts`: `sequenceNo`, `setupTime`, legopriserna, `hourlyRate`, materialets `quantity`) saknar `.max()` efter kolumnens precision, så `sequenceNo: 3000000000` eller `setupTime: 1e12` ger Postgres 22003 och 500. `z.coerce.number().nonnegative()` gör dessutom `""` till 0 där `blankSafe` (`coerce.ts`) borde ge null. Förslag: gränser efter int4/numeric(10,2)/numeric(14,4) i ett svep, eller 22003 → 400 `validation-failed` i den globala felhanteraren.
 
 ### Låga — races med litet fönster
 

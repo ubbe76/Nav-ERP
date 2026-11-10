@@ -113,7 +113,14 @@ export function BeredningView({
   }
 
   async function removeOperation(op: RoutingOperation) {
-    if (!(await confirmDelete(`Ta bort operation ${op.sequenceNo} (${op.description ?? op.workCenterName})?`))) return;
+    // The server unlinks the structure rows (FK set null) — said here, so the
+    // material moving to the finished-goods receipt is never a surprise.
+    const linked = bom.filter((row) => row.routingOperationId === op.id).length;
+    const linkedNote =
+      linked === 0
+        ? ""
+        : ` ${linked === 1 ? "1 strukturrad är kopplad till operationen och blir okopplad" : `${linked} strukturrader är kopplade till operationen och blir okopplade`} — kopplat material dras då när färdiga varor levereras in, inte vid operationen.`;
+    if (!(await confirmDelete(`Ta bort operation ${op.sequenceNo} (${op.description ?? op.workCenterName})?${linkedNote}`))) return;
     setError(null);
     setPending(true);
     try {
