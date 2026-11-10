@@ -1429,6 +1429,13 @@
       "when": 1794294077432,
       "tag": "0203_tjanst_utan_lagerplats",
       "breakpoints": true
+    },
+    {
+      "idx": 204,
+      "version": "7",
+      "when": 1794296836667,
+      "tag": "0204_tjanster_nollade_saldon",
+      "breakpoints": true
     }
   ]
 }
