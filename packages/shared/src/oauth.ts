@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 export const issueTokenSchema = z.object({
-  clientId: z.string().uuid(),
+  // Lower-cased (granskningen 2026-11-10): Postgres matches a uuid in any
+  // case, so the failed-attempt throttle's key must too — AB12… and ab12…
+  // are the same client.
+  clientId: z.string().trim().toLowerCase().uuid(),
   clientSecret: z.string().min(1),
 });
 export type IssueTokenInput = z.infer<typeof issueTokenSchema>;

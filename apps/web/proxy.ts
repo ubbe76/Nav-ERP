@@ -16,8 +16,23 @@ export async function proxy(req: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
+  // Only a session the API still accepts leaves /login. A cookie that no
+  // longer holds one — the account was deactivated or removed, its password
+  // changed, JWT_SECRET replaced — used to bounce /login → / → AppShell's
+  // redirect("/login") → … until the browser gave up ("too many
+  // redirects"). Now the page opens and the dead cookie is cleared; an
+  // unreachable API just opens the page.
   if (hasSession && isPublicPath) {
-    return NextResponse.redirect(new URL("/", req.url));
+    let user: Awaited<ReturnType<typeof getCurrentUser>> = null;
+    try {
+      user = await getCurrentUser(req.headers.get("cookie") ?? undefined);
+    } catch {
+      return NextResponse.next();
+    }
+    if (user) return NextResponse.redirect(new URL("/", req.url));
+    const res = NextResponse.next();
+    res.cookies.delete(SESSION_COOKIE);
+    return res;
   }
 
   // Behörighetsgrupper: page guard. The API refuses the data anyway; this

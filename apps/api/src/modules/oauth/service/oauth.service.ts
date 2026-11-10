@@ -113,8 +113,8 @@ export function createOAuthService(repo: OAuthRepository, jwtSecret: string) {
       );
     },
 
-    async revokeApiClient(id: string) {
-      const row = await repo.revokeApiClient(id);
+    async revokeApiClient(id: string, userId: string | null = null) {
+      const row = await repo.revokeApiClient(id, userId);
       if (!row) throw new ApiClientNotFoundError(id);
       return toPublicApiClient(row);
     },

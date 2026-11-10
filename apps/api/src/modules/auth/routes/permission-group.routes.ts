@@ -34,7 +34,7 @@ export async function permissionGroupRoutes(app: FastifyInstance, opts: { servic
   app.post("/permission-groups", admin, async (req, reply) => {
     const input = createPermissionGroupSchema.parse(req.body);
     try {
-      return reply.code(201).send(await service.create(input));
+      return reply.code(201).send(await service.create(input, req.user!.id));
     } catch (err) {
       if (err instanceof DuplicatePermissionGroupCodeError) return reply.code(409).send(errorBody(err));
       throw err;
@@ -44,7 +44,7 @@ export async function permissionGroupRoutes(app: FastifyInstance, opts: { servic
   app.patch<{ Params: { id: string } }>("/permission-groups/:id", admin, async (req, reply) => {
     const input = updatePermissionGroupSchema.parse(req.body);
     try {
-      return await service.update(req.params.id, input);
+      return await service.update(req.params.id, input, req.user!.id);
     } catch (err) {
       if (err instanceof PermissionGroupNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof DuplicatePermissionGroupCodeError) return reply.code(409).send(errorBody(err));
@@ -65,7 +65,7 @@ export async function permissionGroupRoutes(app: FastifyInstance, opts: { servic
   app.delete<{ Params: { id: string } }>("/permission-groups/:id", admin, async (req, reply) => {
     const { replacementId } = deletePermissionGroupQuerySchema.parse(req.query);
     try {
-      await service.remove(req.params.id, replacementId);
+      await service.remove(req.params.id, replacementId, req.user!.id);
       return reply.code(204).send();
     } catch (err) {
       if (err instanceof PermissionGroupNotFoundError) return reply.code(404).send(errorBody(err));

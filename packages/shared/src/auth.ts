@@ -10,8 +10,13 @@ export type UserKind = (typeof USER_KINDS)[number];
 
 // Bootstrap: skapar den allra första användaren (blir alltid admin). Stängs
 // automatiskt av service-lagret så snart minst en användare finns.
+// E-post utan skiftläge (granskningen 2026-11-10): every address is trimmed
+// and lower-cased before it is stored or looked up — Anna.Berg@ and
+// anna.berg@ are the same account (unique index on lower(email), 0205).
+const emailSchema = z.string().trim().toLowerCase().max(255).email();
+
 export const registerSchema = z.object({
-  email: z.string().email(),
+  email: emailSchema,
   password: z.string().min(8).max(255),
   name: z.string().min(1).max(255),
   // The one-time code from the api log; checked by the service.
@@ -20,14 +25,14 @@ export const registerSchema = z.object({
 export type RegisterInput = z.infer<typeof registerSchema>;
 
 export const loginSchema = z.object({
-  email: z.string().email(),
+  email: emailSchema,
   password: z.string().min(1),
 });
 export type LoginInput = z.infer<typeof loginSchema>;
 
 // Admin-only: skapar ytterligare användare med valfri roll.
 export const createUserSchema = z.object({
-  email: z.string().email(),
+  email: emailSchema,
   password: z.string().min(8).max(255),
   name: z.string().min(1).max(255),
   role: userRoleSchema.default("user"),
@@ -44,7 +49,7 @@ export type CreateUserInput = z.infer<typeof createUserSchema>;
 // nytt lösenord (lämnas utelämnat för att behålla det gamla), `active: false`
 // stänger av kontot utan att radera det (spärras vid inloggning/tokenkoll).
 export const updateUserSchema = z.object({
-  email: z.string().email().optional(),
+  email: emailSchema.optional(),
   name: z.string().min(1).max(255).optional(),
   role: userRoleSchema.optional(),
   active: z.boolean().optional(),

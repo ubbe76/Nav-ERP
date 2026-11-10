@@ -3127,11 +3127,12 @@ export interface AttendanceSession {
   employeeNumber: string;
   startedAt: string;
   stoppedAt: string | null;
-  // Avvikelseorsaker on the stamps (late start / early stop).
-  startReasonId: string | null;
-  startNote: string | null;
-  stopReasonId: string | null;
-  stopNote: string | null;
+  // Avvikelseorsaker on the stamps (late start / early stop) — personal
+  // data: only sent to users with Personal & lön (and admin).
+  startReasonId?: string | null;
+  startNote?: string | null;
+  stopReasonId?: string | null;
+  stopNote?: string | null;
 }
 
 // 409 attendance-input-required from Stämpla in närvaro, Stämpla in (when it
@@ -5339,6 +5340,7 @@ export interface AuditLogEntry {
 export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
   system: "System",
   api_client: "API-klient",
+  permission_group: "Behörighetsgrupp",
   absence: "Frånvaro",
   year_end_closing: "Bokslut",
   overtime_disposition: "Övertidsdisposition",
@@ -5471,6 +5473,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   plugin_paused: "Tillägg pausat",
   plugin_activated: "Tillägg aktiverat",
   plugin_key_rotated: "Ny API-nyckel",
+  revoked: "Återkallad",
   plugin_secret_rotated: "Ny webbhookshemlighet",
   plugin_uninstalled: "Tillägg avinstallerat",
   forecast_updated: "Prognos ändrad",

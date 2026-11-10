@@ -24,6 +24,7 @@ import { EmployeeNotFoundError, WeekScheduleNotFoundError } from "../service/tim
 import { PayrollPeriodLockedError } from "../../payroll/service/period-lock.js";
 import { errorBody } from "../../system/service/error-body.js";
 import { PERSONNEL_CARD_WRITE, TERMINAL_READ } from "../../auth/middleware/access-rules.js";
+import { requireRole } from "../../auth/middleware/auth.middleware.js";
 
 function isNotFound(err: unknown): err is Error {
   return (
@@ -120,19 +121,21 @@ export async function scheduleRoutes(app: FastifyInstance, opts: { service: Sche
   // Personalkalender — overrides + resolved calendar per employee. The
   // overrides are written from the personnel card's Schema tab (Personal &
   // lön) while the schedules themselves stayed under Tillverkning, so either
-  // menu may write them.
+  // menu may write them — but only as admin/supervisor, like the card: a
+  // plain Tillverkning user has no page that writes another's schedule.
+  const supervisorOnly = requireRole("admin", "supervisor");
   app.get<{ Params: { id: string } }>("/employees/:id/schedule-overrides", async (req, reply) => {
     return handle(reply, () => service.getEmployeeScheduleOverrides(req.params.id));
   });
 
-  app.post<{ Params: { id: string } }>("/employees/:id/week-overrides", { config: { access: PERSONNEL_CARD_WRITE } }, async (req, reply) => {
+  app.post<{ Params: { id: string } }>("/employees/:id/week-overrides", { config: { access: PERSONNEL_CARD_WRITE }, preHandler: supervisorOnly }, async (req, reply) => {
     const input = setWeekOverrideSchema.parse(req.body);
     return handle(reply, async () => reply.code(201).send(await service.setWeekOverride(req.params.id, input)));
   });
 
   app.delete<{ Params: { id: string; overrideId: string } }>(
     "/employees/:id/week-overrides/:overrideId",
-    { config: { access: PERSONNEL_CARD_WRITE } },
+    { config: { access: PERSONNEL_CARD_WRITE }, preHandler: supervisorOnly },
     async (req, reply) => {
       return handle(reply, async () => {
         await service.deleteWeekOverride(req.params.id, req.params.overrideId);
@@ -141,14 +144,14 @@ export async function scheduleRoutes(app: FastifyInstance, opts: { service: Sche
     }
   );
 
-  app.post<{ Params: { id: string } }>("/employees/:id/day-overrides", { config: { access: PERSONNEL_CARD_WRITE } }, async (req, reply) => {
+  app.post<{ Params: { id: string } }>("/employees/:id/day-overrides", { config: { access: PERSONNEL_CARD_WRITE }, preHandler: supervisorOnly }, async (req, reply) => {
     const input = setDayOverrideSchema.parse(req.body);
     return handle(reply, async () => reply.code(201).send(await service.setDayOverride(req.params.id, input)));
   });
 
   app.delete<{ Params: { id: string; overrideId: string } }>(
     "/employees/:id/day-overrides/:overrideId",
-    { config: { access: PERSONNEL_CARD_WRITE } },
+    { config: { access: PERSONNEL_CARD_WRITE }, preHandler: supervisorOnly },
     async (req, reply) => {
       return handle(reply, async () => {
         await service.deleteDayOverride(req.params.id, req.params.overrideId);

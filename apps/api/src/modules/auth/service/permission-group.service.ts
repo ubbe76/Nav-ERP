@@ -29,22 +29,24 @@ export function createPermissionGroupService(repo: PermissionGroupRepository) {
     list: () => repo.list(),
     get: existing,
 
-    async create(input: CreatePermissionGroupInput) {
+    async create(input: CreatePermissionGroupInput, userId: string | null = null) {
       try {
-        return await repo.create(input);
+        return await repo.create(input, userId);
       } catch (err) {
         if (isUniqueViolation(err)) throw new DuplicatePermissionGroupCodeError(input.code);
         throw err;
       }
     },
 
-    async update(id: string, input: UpdatePermissionGroupInput) {
+    async update(id: string, input: UpdatePermissionGroupInput, userId: string | null = null) {
       await existing(id);
       // Tillägg: a plugin's group changes on the plugin's card (System →
       // Tillägg), where the change is logged as the plugin's.
       if (await repo.ownedByPlugin(id)) throw new PermissionGroupOwnedByPluginError();
       try {
-        return (await repo.update(id, input))!;
+        const row = await repo.update(id, input, userId);
+        if (!row) throw new PermissionGroupNotFoundError(id);
+        return row;
       } catch (err) {
         if (isUniqueViolation(err)) throw new DuplicatePermissionGroupCodeError(input.code ?? "");
         throw err;
@@ -56,7 +58,7 @@ export function createPermissionGroupService(repo: PermissionGroupRepository) {
       return { users: await repo.liveUsers(id) };
     },
 
-    async remove(id: string, replacementId?: string) {
+    async remove(id: string, replacementId?: string, userId: string | null = null) {
       await existing(id);
       // Tillägg: a plugin's group goes with the plugin (Avinstallera), and
       // no person is moved into one.
@@ -66,7 +68,7 @@ export function createPermissionGroupService(repo: PermissionGroupRepository) {
         if (!(await repo.get(replacementId))) throw new InvalidReplacementError("unknown");
         if (await repo.ownedByPlugin(replacementId)) throw new PermissionGroupOwnedByPluginError();
       }
-      const removed = await repo.removeWithReplacement(id, replacementId);
+      const removed = await repo.removeWithReplacement(id, replacementId, userId);
       if (!removed) throw new PermissionGroupInUseError(await repo.liveUsers(id));
     },
   };

@@ -24,6 +24,7 @@ import {
 import type { UserSettingsService } from "../service/user-settings.service.js";
 import { crossSiteGuard, requireAuth, requireRole, SESSION_COOKIE } from "../middleware/auth.middleware.js";
 import { errorBody } from "../../system/service/error-body.js";
+import { rejectMalformedIds } from "../../system/middleware/reject-malformed-ids.js";
 import { UnknownThemeError } from "../../system/service/themes.errors.js";
 import { LoginThrottledError, type LoginThrottle } from "../service/login-throttle.js";
 
@@ -175,14 +176,23 @@ export async function authRoutes(
   });
 
   // Admin-only: edit a user (name/email/role/active, optional password reset).
+  // The user routes sit outside protectedRoutes, so they run the id guard
+  // themselves (a malformed :id gave a Postgres cast error, 500).
   app.patch(
     "/auth/users/:id",
-    { preHandler: [requireAuth(service), requireRole("admin")] },
+    { preHandler: [requireAuth(service), requireRole("admin"), rejectMalformedIds()] },
     async (req, reply) => {
       const { id } = req.params as { id: string };
       const input = updateUserSchema.parse(req.body);
       try {
-        return await service.updateUser(id, input, req.user!.id);
+        const updated = await service.updateUser(id, input, req.user!.id);
+        // A new password ended every earlier session of the account — the
+        // acting admin who changed their own keeps working on a fresh one.
+        if (input.password !== undefined && id === req.user!.id) {
+          const token = await service.sessionTokenFor(id);
+          if (token) setSessionCookie(reply, token);
+        }
+        return updated;
       } catch (err) {
         if (err instanceof UserNotFoundError) return reply.code(404).send(errorBody(err));
         if (err instanceof DuplicateEmailError) return reply.code(409).send(errorBody(err));
@@ -200,7 +210,7 @@ export async function authRoutes(
   // its history (attributions on other tables) is preserved.
   app.delete(
     "/auth/users/:id",
-    { preHandler: [requireAuth(service), requireRole("admin")] },
+    { preHandler: [requireAuth(service), requireRole("admin"), rejectMalformedIds()] },
     async (req, reply) => {
       const { id } = req.params as { id: string };
       try {

@@ -41,7 +41,7 @@ export async function apiClientRoutes(app: FastifyInstance, opts: { service: OAu
     { preHandler: requireRole("admin") },
     async (req, reply) => {
       try {
-        return await service.revokeApiClient(req.params.id);
+        return await service.revokeApiClient(req.params.id, req.user!.id);
       } catch (err) {
         if (err instanceof ApiClientNotFoundError) return reply.code(404).send(errorBody(err));
         throw err;

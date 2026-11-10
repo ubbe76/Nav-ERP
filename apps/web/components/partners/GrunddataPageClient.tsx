@@ -40,6 +40,14 @@ const REASON_FLAGS = [
 ] as const;
 type ReasonFlagKey = (typeof REASON_FLAGS)[number]["key"];
 
+// The registers customers, suppliers and articles share: the API's register
+// module lets any of the three menus write them (the seed routes and the
+// kollityp's freight fields included) and only the administrator delete.
+const SHARED_REGISTER: { writeRule: AccessRule; deleteRule: AccessRule } = {
+  writeRule: ["artiklar", "inkop", "forsaljning"],
+  deleteRule: ["admin"],
+};
+
 const TAB_CONFIG: Record<
   Tab,
   {
@@ -54,9 +62,10 @@ const TAB_CONFIG: Record<
     activeHint?: string;
     // Kvalitetsorsaker: the Kund/Leverantör/Intern/Kassation checkboxes.
     showReasonFlags?: boolean;
-    // Writes are the Kvalitet permission's, deleting is the administrator's.
-    writeRule?: AccessRule;
-    deleteRule?: AccessRule;
+    // Who may write (the API's rule for the register) and who may delete
+    // (the administrator, on every register). Buttons are hidden otherwise.
+    writeRule: AccessRule;
+    deleteRule: AccessRule;
     moveHint?: string;
     // Dokument på engelska (#7): the English text of the entry — the
     // delivery/payment terms' name ("nameEn") or the unit's code ("codeEn").
@@ -64,6 +73,7 @@ const TAB_CONFIG: Record<
   }
 > = {
   Leveransvillkor: {
+    ...SHARED_REGISTER,
     basePath: "/api/v1/delivery-terms",
     singular: "leveransvillkor",
     seed: { label: "Förifyll Combiterms", path: "/api/v1/delivery-terms/generate-combiterms" },
@@ -78,6 +88,7 @@ const TAB_CONFIG: Record<
     },
   },
   Betalningsvillkor: {
+    ...SHARED_REGISTER,
     basePath: "/api/v1/payment-terms",
     singular: "betalningsvillkor",
     english: {
@@ -87,8 +98,9 @@ const TAB_CONFIG: Record<
       hint: "Skrivs på engelska dokument. Tomt = den svenska benämningen.",
     },
   },
-  Speditörer: { basePath: "/api/v1/carriers", singular: "speditör" },
+  Speditörer: { ...SHARED_REGISTER, basePath: "/api/v1/carriers", singular: "speditör" },
   Enheter: {
+    ...SHARED_REGISTER,
     basePath: "/api/v1/units",
     singular: "enhet",
     seed: { label: "Lägg till standardenheter", path: "/api/v1/units/generate-standard" },
@@ -100,6 +112,7 @@ const TAB_CONFIG: Record<
     },
   },
   Kollityper: {
+    ...SHARED_REGISTER,
     basePath: "/api/v1/package-types",
     singular: "kollityp",
     seed: { label: "Lägg till standardkollityper", path: "/api/v1/package-types/generate-standard" },
@@ -116,6 +129,8 @@ const TAB_CONFIG: Record<
   Förlustorsaker: {
     basePath: "/api/v1/quote-loss-reasons",
     singular: "förlustorsak",
+    writeRule: ["forsaljning"],
+    deleteRule: ["admin"],
     showActive: true,
     activeHint: "Inaktiva orsaker kan inte väljas när en offert markeras som förlorad.",
   },
@@ -203,8 +218,8 @@ export function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry
   const [seeding, setSeeding] = useState(false);
   const { basePath, singular, seed, showDescription, descriptionLabel, showActive, activeHint, showReasonFlags, writeRule, deleteRule, moveHint, english } =
     TAB_CONFIG[tab];
-  const canWrite = writeRule ? can(writeRule) : true;
-  const canDelete = deleteRule ? can(deleteRule) : true;
+  const canWrite = can(writeRule);
+  const canDelete = can(deleteRule);
 
   async function runSeed() {
     if (!seed) return;
@@ -233,7 +248,7 @@ export function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry
             {seedNotice}
           </span>
         )}
-        {seed && (
+        {seed && canWrite && (
           <Button type="button" variant="secondary" disabled={seeding} onClick={runSeed}>
             {seeding ? "Förifyller…" : seed.label}
           </Button>
@@ -279,6 +294,7 @@ export function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry
             case "active":
               return entry.active === false ? "Inaktiv" : "Aktiv";
             case "freight":
+              if (!canWrite) return freightSummary(entry);
               return (
                 <button
                   type="button"

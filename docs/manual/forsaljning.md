@@ -178,6 +178,8 @@ Klicka på en rad för att öppna **prislistans kort**:
 - **Prisrader** — en rad per artikel och staffelsteg, med kolumnerna **Artikel**, **Från antal** och **À-pris (kr)** (för en lista i annan valuta står valutakoden i stället för kr, t.ex. **À-pris (EUR)**). **+ Lägg till rad** öppnar en dialog där artikeln väljs med artikelväljaren; **Från antal** och **À-pris (kr)** anges (`Från antal` minst 0, fritt antal decimaler; priset med två decimaler). Samma artikel kan ha flera rader med olika **Från antal** för att bygga en staffel, t.ex. 1 st → 90 kr och 10 st → 80 kr. Varje rad har egna knappar för **Ändra** och **Ta bort** — vilken artikel raden gäller kan inte ändras i efterhand, bara tas bort och läggas till på nytt.
 - **Ta bort prislista** tar bort hela listan, men avvisas (409) så länge en kund fortfarande pekar på den.
 
+Bara **administratörer** skapar och ändrar prislistor: **+ Ny prislista**, **Spara**, **+ Lägg till rad**, radernas **Ändra** och **Ta bort** samt **Ta bort prislista** visas inte för andra användare, som kan öppna och läsa listorna men inte ändra dem.
+
 Vid prissättning väljs den rad vars **Från antal** är det högsta som fortfarande är ≤ det beställda antalet — se [Kundpriser](#kundpriser) för hela priskedjan. Priskedjan använder en prislista bara på ordrar i listans egen valuta, se [Priskedjan i valuta](#priskedjan-i-valuta).
 
 ## Kundpriser

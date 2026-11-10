@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import type { CreateUserInput, LoginInput, RegisterInput, UpdateUserInput, UserKind, UserRole } from "@navet/shared";
@@ -107,6 +107,10 @@ export class PermissionGroupOwnedByPluginError extends Error {
 export interface AuthTokenPayload {
   sub: string;
   role: UserRole;
+  // users.token_version when the session was issued (0205); a token from
+  // before 0205 has none and counts as 0. A password change bumps the
+  // column, so every older session stops verifying.
+  ver?: number;
 }
 
 export interface PublicUser {
@@ -139,6 +143,17 @@ type UserRow = {
   kind: UserKind;
   groupPermissions: string[] | null;
 };
+
+// Inloggningens svarstid (granskningen 2026-11-10): an unknown, inactive or
+// plugin account still runs one bcrypt comparison — against this hash of a
+// random value — so the answer takes as long as a wrong password on a real
+// account and the timing doesn't tell which addresses have one. Computed
+// once, lazily, at the configured cost.
+let dummyHash: Promise<string> | null = null;
+function dummyPasswordHash(): Promise<string> {
+  dummyHash ??= bcrypt.hash(randomBytes(16).toString("hex"), BCRYPT_ROUNDS);
+  return dummyHash;
+}
 
 function toPublicUser(row: UserRow): PublicUser {
   return {
@@ -221,7 +236,7 @@ export function createAuthService(
       });
       // create returns the bare row; re-read through the group join.
       const user = (await repo.findById(created.id))!;
-      const token = await issueToken({ sub: user.id, role: user.role });
+      const token = await issueToken({ sub: user.id, role: user.role, ver: user.tokenVersion });
       return { user: toPublicUser(user), token };
     },
 
@@ -285,13 +300,10 @@ export function createAuthService(
         throw new DuplicateEmailError(input.email);
       }
 
-      const losesAdmin =
-        existing.role === "admin" &&
-        existing.active &&
-        ((input.role !== undefined && input.role !== "admin") || input.active === false);
-      if (losesAdmin && (await repo.countActiveAdmins()) <= 1) {
-        throw new LastAdminError();
-      }
+      // The last-admin guard itself runs in the repository, under the admin
+      // rows' lock (LastAdminError) — a count read here would let two admins
+      // demoting each other at the same time both pass.
+      const losesAdmin = (input.role !== undefined && input.role !== "admin") || input.active === false;
 
       if (input.permissionGroupId && !(await repo.groupExists(input.permissionGroupId))) {
         throw new PermissionGroupNotFoundError(input.permissionGroupId);
@@ -315,7 +327,11 @@ export function createAuthService(
       if (input.readOnly !== undefined) fields.readOnly = input.readOnly;
       if (input.password !== undefined) fields.passwordHash = await bcrypt.hash(input.password, BCRYPT_ROUNDS);
 
-      if (!(await repo.update(id, fields))) throw new UserNotFoundError(id);
+      // A new password ends every session issued before it (token_version);
+      // the route re-issues the acting admin's own cookie when they changed
+      // their own password.
+      const written = await repo.update(id, fields, { losesAdmin, bumpTokenVersion: input.password !== undefined });
+      if (!written) throw new UserNotFoundError(id);
       // update returns the bare row; re-read through the group join.
       const updated = await repo.findById(id);
       if (!updated) throw new UserNotFoundError(id);
@@ -372,10 +388,8 @@ export function createAuthService(
 
       if (id === actingUserId) throw new SelfDeleteError();
 
-      if (existing.role === "admin" && existing.active && (await repo.countActiveAdmins()) <= 1) {
-        throw new LastAdminError();
-      }
-
+      // The last-admin guard runs in softDelete's transaction, under the
+      // admin rows' lock (LastAdminError).
       const deleted = await repo.softDelete(id);
       if (!deleted) throw new UserNotFoundError(id);
 
@@ -390,13 +404,26 @@ export function createAuthService(
     async login(input: LoginInput) {
       const user = await repo.findByEmail(input.email);
       // A plugin's technical user has no usable password and never logs in.
-      if (!user || !user.active || user.kind !== "person") throw new InvalidCredentialsError();
+      if (!user || !user.active || user.kind !== "person") {
+        await bcrypt.compare(input.password, await dummyPasswordHash());
+        throw new InvalidCredentialsError();
+      }
 
       const valid = await bcrypt.compare(input.password, user.passwordHash);
       if (!valid) throw new InvalidCredentialsError();
 
-      const token = await issueToken({ sub: user.id, role: user.role });
+      const token = await issueToken({ sub: user.id, role: user.role, ver: user.tokenVersion });
       return { user: toPublicUser(user), token };
+    },
+
+    // A fresh session for an account that is signed in right now — the
+    // acting admin after changing their own password (which ended every
+    // earlier session, theirs included). null when the account can't hold
+    // a session.
+    async sessionTokenFor(userId: string): Promise<string | null> {
+      const user = await repo.findById(userId);
+      if (!user || !user.active || user.deletedAt || user.kind !== "person") return null;
+      return issueToken({ sub: user.id, role: user.role, ver: user.tokenVersion });
     },
 
     async verifyToken(token: string): Promise<PublicUser | null> {
@@ -408,6 +435,7 @@ export function createAuthService(
       }
       const user = await repo.findById(payload.sub);
       if (!user || !user.active || user.kind !== "person") return null;
+      if ((payload.ver ?? 0) !== user.tokenVersion) return null;
       return toPublicUser(user);
     },
 

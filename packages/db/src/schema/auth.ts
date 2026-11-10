@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, index, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, check, index, integer, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 
 // Roles: admin (everything, incl. System), supervisor (attest powers),
 // user. What a non-admin may open is decided by their permission group.
@@ -43,12 +43,18 @@ export const users = pgTable(
     // open, so the combination is refused in the service and here.
     readOnly: boolean("read_only").notNull().default(false),
     kind: userKindEnum("kind").notNull().default("person"),
+    // Sessions (granskningen 2026-11-10): stamped into every session JWT as
+    // `ver`; a password change bumps it, so every session issued before the
+    // change stops verifying (verifyToken reads the row on every request).
+    tokenVersion: integer("token_version").notNull().default(0),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex("users_email_unique").on(table.email).where(sql`${table.deletedAt} is null`),
+    // Case-insensitive (granskningen 2026-11-10): the API stores addresses in
+    // lower case, the expression index is the backstop.
+    uniqueIndex("users_email_unique").on(sql`lower(${table.email})`).where(sql`${table.deletedAt} is null`),
     index("users_permission_group_idx").on(table.permissionGroupId),
     check("users_read_only_not_admin", sql`not (${table.readOnly} and ${table.role} = 'admin')`),
     check("users_plugin_not_admin", sql`${table.kind} = 'person' or ${table.role} <> 'admin'`),
