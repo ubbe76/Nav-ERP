@@ -587,6 +587,11 @@ function foreignEuVatPrefix(normalized: string): string | null {
   return FOREIGN_EU_VAT_NUMBER.test(normalized) ? normalized.slice(0, 2) : null;
 }
 
+// Northern Ireland (XI): goods sold to a buyer there are EU goods sales with
+// the XI number (the Windsor framework keeps NI in the EU's goods rules) —
+// EUV accepts it, EUT does not (services to NI are exports to the UK).
+const NORTHERN_IRELAND_VAT_NUMBER = /^XI[A-Z0-9]{2,12}$/;
+
 // Utfärda (spec 4.2): codes that require the buyer's momsregistreringsnummer
 // need one on the invoice, in the right form — EU: a VAT number of ANOTHER
 // member state than Sweden (any of them; a prefix that differs from the
@@ -611,7 +616,8 @@ export function buyerVatNumberProblem(input: {
   const country = input.country.trim().toUpperCase();
   for (const entry of requiring) {
     if (entry.kind === "eu_sale") {
-      if (foreignEuVatPrefix(number) === null) {
+      const northernIreland = entry.code === "EUV" && NORTHERN_IRELAND_VAT_NUMBER.test(number);
+      if (foreignEuVatPrefix(number) === null && !northernIreland) {
         const prefix = country !== "SE" && isEuCountry(country) ? vatNumberPrefix(country) : null;
         return { reason: "eu_format", code: entry.code, prefix };
       }

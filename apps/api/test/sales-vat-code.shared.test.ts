@@ -207,6 +207,16 @@ describe("buyerVatNumberProblem", () => {
     expect(buyerVatNumberProblem({ codes: ["EUV"], vatNumber: "DE1234567890123", country: "DE" })?.reason).toBe("eu_format");
   });
 
+  // Northern Ireland: goods to a buyer there are EU goods sales with the XI
+  // number; services are not (exports to the UK).
+  it("accepts an XI number for EUV only, not for EUT or on an invoice that also has EUT", () => {
+    expect(buyerVatNumberProblem({ codes: ["EUV"], vatNumber: "XI 123456789", country: "GB" })).toBeNull();
+    expect(buyerVatNumberProblem({ codes: ["EUT"], vatNumber: "XI123456789", country: "GB" })).toEqual({ reason: "eu_format", code: "EUT", prefix: null });
+    expect(buyerVatNumberProblem({ codes: ["EUV", "EUT"], vatNumber: "XI123456789", country: "GB" })?.reason).toBe("eu_format");
+    expect(buyerVatNumberProblem({ codes: ["EUV"], vatNumber: "GB123456789", country: "GB" })?.reason).toBe("eu_format");
+    expect(buyerVatNumberWarning({ codes: ["EUV"], vatNumber: "XI123456789", country: "GB" })).toBeNull();
+  });
+
   it("OB is unchanged by the EU rule: a foreign number is no Swedish reverse-charge number", () => {
     expect(buyerVatNumberProblem({ codes: ["OB"], vatNumber: "DE123456789", country: "SE" })).toEqual({ reason: "ob_format", code: "OB" });
   });
@@ -294,8 +304,8 @@ describe("momskod derivations — web mirror", () => {
   });
 
   it("answers buyerVatNumberProblem like @navet/shared", () => {
-    const numbers = [null, " ", "de 123456789", "DE123456789", "123456789", "EL123456789", "GR123456789", "SE556677889901", "SE556677889902", "NO123456789", "ATU12345678"];
-    const countries = ["SE", "DE", "GR", "NO"];
+    const numbers = [null, " ", "de 123456789", "DE123456789", "123456789", "EL123456789", "GR123456789", "SE556677889901", "SE556677889902", "NO123456789", "ATU12345678", "XI123456789", "GB123456789"];
+    const countries = ["SE", "DE", "GR", "NO", "GB"];
     const codeSets = [["MP25"], ["EUV"], ["EUT"], ["OB"], ["EUV", "OB"], ["MP25", "EXV"], [...VAT_CODES]] as const;
     for (const codes of codeSets) {
       for (const vatNumber of numbers) {

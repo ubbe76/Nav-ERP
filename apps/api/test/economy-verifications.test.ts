@@ -14,6 +14,7 @@ import {
   InvalidVerificationStateError,
   NoAccountingPeriodError,
   NoFiscalYearForDateError,
+  ReversalRowsLockedError,
   TooFewVerificationRowsError,
   UnbalancedVerificationError,
   VerificationNotFoundError,
@@ -22,8 +23,10 @@ import {
   VerificationFileNotFoundError,
   InvalidVerificationFileTypeError,
   VerificationSeriesNotFoundError,
+  VerificationIsReversalError,
   createEconomyService,
 } from "../src/modules/economy/service/economy.service.js";
+import { assertPostablePeriod } from "../src/modules/economy/service/verification-poster.js";
 import { parsed } from "./helpers/parsed.js";
 
 const repo = createEconomyRepository(db);
@@ -247,6 +250,17 @@ describe("verificationRowInputSchema — debit XOR credit", () => {
       verificationRowInputSchema.safeParse({ accountId: "00000000-0000-0000-0000-000000000000", debit: 0, credit: 100 })
         .success
     ).toBe(true);
+  });
+
+  // The service stores round2(amount); 0.004 would reach the column CHECK as
+  // 0 and answer 500 — the schema judges the stored öre instead (400).
+  it("judges the amounts in whole öre: 0.004 is no amount, 0.005 is one öre", () => {
+    const row = (debit: number, credit: number) =>
+      verificationRowInputSchema.safeParse({ accountId: "00000000-0000-0000-0000-000000000000", debit, credit }).success;
+    expect(row(0.004, 0)).toBe(false);
+    expect(row(0, 0.004)).toBe(false);
+    expect(row(0.005, 0)).toBe(true);
+    expect(row(100, 0.004)).toBe(true);
   });
 });
 
@@ -841,6 +855,32 @@ describe("economy repository — bookVerification: race and immutability at repo
     if (fresh.ok) expect(fresh.verification.verificationNumber).toBe(1);
   });
 
+  // The other side of the same window: a Lås period that starts while a
+  // booking's transaction has already passed the period check. The check
+  // reads FOR SHARE (posting-period-lock.ts), so the lock waits for the
+  // booking instead of committing under it.
+  it("makes a Lås period wait for a booking that has already checked the period", async () => {
+    const { user } = await setupEconomy();
+    const period = (await repo.findPeriodForDate(DEFAULT_VERIFICATION_DATE))!;
+    let locking: Promise<unknown> | null = null;
+    let locked = false;
+    let lockedWhileBookingOpen: boolean | null = null;
+    await db.transaction(async (tx) => {
+      await assertPostablePeriod(tx, DEFAULT_VERIFICATION_DATE);
+      locking = repo.lockPeriod(period.id, user.id).then(() => {
+        locked = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Read inside the transaction: after the commit the lock may finish at
+      // once, so only this moment says whether it waited.
+      lockedWhileBookingOpen = locked;
+    });
+    expect(lockedWhileBookingOpen).toBe(false);
+    await locking;
+    expect(locked).toBe(true);
+    expect(await repo.getPeriodStatusForDate(DEFAULT_VERIFICATION_DATE)).toBe("locked");
+  });
+
   it("a genuinely booked verification is immutable at the repo level (every draft-conditioned write returns null)", async () => {
     const { user, series, bank, revenue } = await setupEconomy();
     const draft = await makeBalancedDraft(series, bank, revenue, user.id);
@@ -973,6 +1013,43 @@ describe("economy service — reverse (Omför)", () => {
     await service.reverse(booked.id, user.id);
 
     await expect(service.reverse(booked.id, user.id)).rejects.toBeInstanceOf(AlreadyReversedError);
+  });
+
+  // The poster takes a booked omföring as its source's correction (a Makulera
+  // then commits without one of its own), so the omföring must stay a mirror:
+  // its rows are locked while it is a draft, and it cannot be omförd itself.
+  it("locks an omföring draft's rows but not its header, and refuses Omför of a booked omföring", async () => {
+    const { user, series, bank, revenue } = await setupEconomy();
+    const other = await makeAccount("6570", "Bankkostnader");
+    const draft = await makeBalancedDraft(series, bank, revenue, user.id);
+    const booked = await service.book(draft.id, user.id);
+    const reversal = await service.reverse(booked.id, user.id);
+    const row = { accountId: other.id, debit: 500, credit: 0 };
+    const rowId = reversal.rows[0]!.id;
+
+    const rows = [row, { accountId: revenue.id, debit: 0, credit: 500 }].map((r) => parsed(verificationRowInputSchema, r));
+    await expect(service.replaceRows(reversal.id, rows)).rejects.toBeInstanceOf(ReversalRowsLockedError);
+    await expect(service.addRow(reversal.id, parsed(verificationRowInputSchema, row))).rejects.toBeInstanceOf(ReversalRowsLockedError);
+    await expect(service.updateRow(reversal.id, rowId, parsed(verificationRowInputSchema, row))).rejects.toBeInstanceOf(
+      ReversalRowsLockedError
+    );
+    await expect(service.deleteRow(reversal.id, rowId)).rejects.toBeInstanceOf(ReversalRowsLockedError);
+
+    const renamed = await service.updateVerificationHeader(reversal.id, { description: "Felbokning, omförd" });
+    expect(renamed.description).toBe("Felbokning, omförd");
+    expect(renamed.rows.map((r) => [r.accountId, Number(r.debit), Number(r.credit)])).toEqual(
+      expect.arrayContaining([
+        [bank.id, 0, 500],
+        [revenue.id, 500, 0],
+      ])
+    );
+
+    const bookedReversal = await service.book(reversal.id, user.id);
+    await expect(service.reverse(bookedReversal.id, user.id)).rejects.toBeInstanceOf(VerificationIsReversalError);
+    // Kopiera is the way to book the source again: a plain draft, rows free.
+    const { verification: copy } = await service.copy(booked.id, user.id);
+    expect(copy.reversesVerificationId).toBeNull();
+    await service.addRow(copy.id, parsed(verificationRowInputSchema, row));
   });
 });
 

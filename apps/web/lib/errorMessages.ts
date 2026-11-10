@@ -126,6 +126,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "too-few-verification-rows": "Verifikatet behöver minst två rader för att bokföras",
   "inactive-account": "Ett av kontona på raderna är inaktivt",
   "already-reversed": "Verifikatet är redan omfört",
+  "reversal-rows-locked": "Raderna på en omföring speglar originalet och kan inte ändras — ändra datum eller beskrivning, bokför eller ta bort utkastet",
+  "verification-is-reversal": "Verifikatet är en omföring och kan inte omföras — kopiera originalverifikatet om bokningen ska göras igen",
   "invalid-verification-state": "Verifikatet är i fel status för åtgärden",
   "duplicate-posting-rule": "Det finns redan en regel för den varugruppen och momskoden",
   "posting-rule-no-accounts": "Minst ett konto (intäkt eller kostnad) måste anges",

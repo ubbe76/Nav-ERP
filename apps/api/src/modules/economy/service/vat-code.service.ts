@@ -101,10 +101,14 @@ const SLOT_COLUMN = {
 
 type VatCodeRow = typeof vatCodes.$inferSelect;
 
-// "ruta 35" / "ingen ruta" — the Swedish wording the VAT report's warnings
-// share.
+// "ruta 35" / "ingen ruta" / "ingen ruta angiven" — the Swedish wording the
+// VAT report's warnings share.
 export function boxText(box: VatBoxSetting | null): string {
-  return box === null || box === "none" ? "ingen ruta" : `ruta ${box}`;
+  // null = not set yet, "none" = deliberately no box — two different states
+  // (an unset account under a slot that expects "none" is a real mismatch, and
+  // read "har ingen ruta men ska ha ingen ruta"). Same words as the web's.
+  if (box === null) return "ingen ruta angiven";
+  return box === "none" ? "ingen ruta" : `ruta ${box}`;
 }
 type AccountInfo = { number: string; name: string; active: boolean; vatBox: VatBoxSetting | null };
 

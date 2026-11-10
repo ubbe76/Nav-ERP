@@ -10,6 +10,7 @@ import {
   fixedAssetDepreciationRuns,
   fixedAssets,
   postingRules,
+  recurringVerificationRuns,
   users,
   vatCodes,
   verificationFiles,
@@ -35,6 +36,7 @@ import {
 } from "@navet/shared";
 import { generateMonthlyPeriods } from "../service/month-periods.js";
 import { allocateVerificationNumber } from "../service/verification-number.js";
+import { lockPostingPeriod } from "../service/posting-period-lock.js";
 import { resolveDimensions, type DimensionInput } from "../service/dimension-check.js";
 
 // Internal signal thrown INSIDE bookVerification's transaction when the
@@ -272,13 +274,10 @@ export function createEconomyRepository(db: Db) {
     // value proven fresh at this point — a concurrent header PATCH could
     // have moved the draft's date to a different period between the
     // service's fast path and here, and that fresh date was never
-    // period-checked at all until now. Same query shape as
-    // getPeriodStatusForDate, but via `tx` so it sees the locked row.
-    const [periodRow] = await tx
-      .select({ status: accountingPeriods.status, yearStatus: fiscalYears.status, yearLabel: fiscalYears.label })
-      .from(accountingPeriods)
-      .innerJoin(fiscalYears, eq(fiscalYears.id, accountingPeriods.fiscalYearId))
-      .where(and(lte(accountingPeriods.startDate, existing.date), gte(accountingPeriods.endDate, existing.date)));
+    // period-checked at all until now. Via `tx` and FOR SHARE, year before
+    // period (posting-period-lock.ts): a Lås period landing mid-booking
+    // either committed before this read or waits until the booking commits.
+    const periodRow = await lockPostingPeriod(tx, existing.date);
     const periodStatus = periodRow?.status ?? null;
     if (periodStatus === null) throw new NoPeriodAtBookingError(existing.date);
     if (periodRow!.yearStatus === "closed") throw new ClosedYearAtBookingError(periodRow!.yearLabel);
@@ -1056,6 +1055,14 @@ export function createEconomyRepository(db: Db) {
         // A draft's underlag goes with it (it was never booked) — the FK is
         // restrict precisely so nothing else can remove a booked one's.
         await tx.delete(verificationFiles).where(eq(verificationFiles.verificationId, id));
+        // A draft a recurring post created: its month becomes `skipped`, like
+        // a month that fell due during a pause — the run row must stay (the
+        // hourly job would otherwise create the month again) and its FK is
+        // restrict, so leaving it gave a raw 500.
+        await tx
+          .update(recurringVerificationRuns)
+          .set({ status: "skipped", verificationId: null })
+          .where(eq(recurringVerificationRuns.verificationId, id));
         const [row] = await tx.delete(verifications).where(eq(verifications.id, id)).returning();
         return row ?? null;
       });

@@ -161,6 +161,8 @@ import { ScheduleBalancingOffError } from "../src/modules/timereport/service/sch
 import {
   AccountNotFoundError,
   AlreadyReversedError,
+  ReversalRowsLockedError,
+  VerificationIsReversalError,
   DuplicateAccountNumberError,
   DuplicatePostingRuleError,
   InactiveAccountError,
@@ -528,6 +530,8 @@ const cases: Array<[Error, string]> = [
   [new TooFewVerificationRowsError("ver-1"), ERROR_CODES.TOO_FEW_VERIFICATION_ROWS],
   [new InactiveAccountError("acc-1"), ERROR_CODES.INACTIVE_ACCOUNT],
   [new AlreadyReversedError("ver-1"), ERROR_CODES.ALREADY_REVERSED],
+  [new ReversalRowsLockedError("ver-1"), ERROR_CODES.REVERSAL_ROWS_LOCKED],
+  [new VerificationIsReversalError("ver-1"), ERROR_CODES.VERIFICATION_IS_REVERSAL],
   [new InvalidVerificationStateError("bad state"), ERROR_CODES.INVALID_VERIFICATION_STATE],
   [new DuplicatePostingRuleError("grp-1", "25"), ERROR_CODES.DUPLICATE_POSTING_RULE],
   [new PostingRuleNoAccountsError("rule-1"), ERROR_CODES.POSTING_RULE_NO_ACCOUNTS],

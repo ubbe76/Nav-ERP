@@ -232,7 +232,7 @@ describe("findRuleBoxMismatches", () => {
     );
     expect(mismatches.map((mismatch) => mismatch.message)).toEqual([
       "Konteringsregel 310 Diskbänkar / EUV: konto 3010 har ruta 05 men ska ha ruta 35",
-      "Konteringsregel 310 Diskbänkar / IEUV25: konto 4011 har ingen ruta men ska ha ruta 20",
+      "Konteringsregel 310 Diskbänkar / IEUV25: konto 4011 har ingen ruta angiven men ska ha ruta 20",
     ]);
     expect(mismatches[0]).toMatchObject({
       code: "EUV",
@@ -269,7 +269,7 @@ describe("findRuleBoxMismatches", () => {
     expect(mismatches[1]!.message).toBe(
       "Konteringsregel 310 Diskbänkar / MP12: kostnadskonto 4515 har ruta 20 men ska inte ha någon av inköpsrutorna 20–24, 37 eller 50 (de gäller omvänd moms och import)"
     );
-    expect(mismatches[2]!.message).toBe("Konteringsregel 310 Diskbänkar / MP6: konto 3003 har ingen ruta men ska ha ruta 05");
+    expect(mismatches[2]!.message).toBe("Konteringsregel 310 Diskbänkar / MP6: konto 3003 har ingen ruta angiven men ska ha ruta 05");
   });
 
   it("checks Alla momskoder: revenue on ruta 05 or 42, no purchase box on the cost account", () => {

@@ -54,8 +54,15 @@ export function periodicSummaryPeriod(from: string, to: string): PeriodicSummary
 }
 
 // The VAT number prefixes of the OTHER member states (Greece EL) — a
-// Swedish buyer never belongs in the periodisk sammanställning.
-const FOREIGN_EU_PREFIXES: readonly string[] = EU_COUNTRY_CODES.filter((country) => country !== "SE").map(vatNumberPrefix);
+// Swedish buyer never belongs in the periodisk sammanställning — plus XI,
+// Northern Ireland: goods sold to a buyer there are reported with the XI
+// number (the Windsor framework keeps NI in the EU's goods rules), services
+// are not (summarize refuses an XI number on an EUT line).
+const NORTHERN_IRELAND_PREFIX = "XI";
+const FOREIGN_EU_PREFIXES: readonly string[] = [
+  ...EU_COUNTRY_CODES.filter((country) => country !== "SE").map(vatNumberPrefix),
+  NORTHERN_IRELAND_PREFIX,
+];
 const VALID_BUYER_VAT_NUMBER = new RegExp(`^(${FOREIGN_EU_PREFIXES.join("|")})[A-Z0-9]{2,12}$`);
 const ANY_EU_PREFIX: readonly string[] = [...FOREIGN_EU_PREFIXES, "SE"];
 
@@ -171,7 +178,10 @@ export function aggregatePeriodicSummary(lines: EuSalesLine[]): {
 
   for (const line of lines) {
     const country = line.customerCountry.trim().toUpperCase();
-    if (!isEuCountry(country)) {
+    const parsedBuyer = buyerVatNumber(line.vatNumber, country);
+    const northernIreland = parsedBuyer.status === "ok" && parsedBuyer.vatNumber.startsWith(NORTHERN_IRELAND_PREFIX);
+    // An XI number on a goods line is a buyer in Northern Ireland (country GB).
+    if (!isEuCountry(country) && !(northernIreland && line.code === "EUV")) {
       warn(
         `non_eu_country:${line.customerId}`,
         {
@@ -183,7 +193,8 @@ export function aggregatePeriodicSummary(lines: EuSalesLine[]): {
       );
     }
 
-    const buyer = buyerVatNumber(line.vatNumber, country);
+    const buyer: BuyerVatNumber =
+      northernIreland && line.code !== "EUV" ? { status: "invalid", vatNumber: parsedBuyer.vatNumber } : parsedBuyer;
     if (buyer.status === "missing") {
       warn(
         `missing_vat_number:${line.customerId}`,

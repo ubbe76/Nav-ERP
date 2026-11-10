@@ -83,6 +83,9 @@ export function VerificationCard({
   const router = useRouter();
   const pill = VERIFICATION_STATUS_PILL[verification.status];
   const editable = verification.status === "draft";
+  // An omföring's rows mirror its source (the API answers 409
+  // reversal-rows-locked): the draft keeps its header form, Bokför and Ta bort.
+  const rowsEditable = editable && !verification.reversesVerificationId;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -318,7 +321,10 @@ export function VerificationCard({
       )}
 
       <SectionHeading spaced>Rader</SectionHeading>
-      {editable ? (
+      {editable && !rowsEditable && (
+        <FormHint>Raderna på en omföring speglar originalverifikatet och kan inte ändras.</FormHint>
+      )}
+      {rowsEditable ? (
         <>
           <VerificationRowsEditor
             rows={rows}
@@ -411,7 +417,11 @@ export function VerificationCard({
                 Ta bort
               </Button>
             )}
-            {!editable && !verification.reversedBy && !verification.fixedAsset && !verification.yearEnd && (
+            {!editable &&
+              !verification.reversedBy &&
+              !verification.reversesVerificationId &&
+              !verification.fixedAsset &&
+              !verification.yearEnd && (
               <Button type="button" variant="secondary" disabled={pending} onClick={reverseVerification}>
                 Omför
               </Button>

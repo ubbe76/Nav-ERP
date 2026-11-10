@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { db, vatCodes, vatSettlements, verifications } from "@navet/db";
+import { accounts, db, vatCodes, vatSettlements, verifications } from "@navet/db";
 import { round2, createVerificationSchema } from "@navet/shared";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createEconomyRepository } from "../src/modules/economy/repository/economy.repository.js";
@@ -363,12 +363,32 @@ describe("vat report — box computation", () => {
         expectedBox: "10",
         actualBox: null,
         problem: "box_mismatch",
-        message: "Momskod MP25: konto 2611 har ingen ruta men ska ha ruta 10",
+        message: "Momskod MP25: konto 2611 har ingen ruta angiven men ska ha ruta 10",
       },
     ]);
     // Only accounts with a box that enters ruta 49 are emptied — none moved.
     expect(report.settlement.rows).toEqual([]);
     await expect(vatReport.settle(MAR, user.id)).rejects.toBeInstanceOf(ZeroAmountPostingError);
+  });
+
+  // A slot that expects "none" (the import base's counter account) on an
+  // account whose box is not set: a real mismatch, and the text must say so
+  // instead of "har ingen ruta men ska ha ingen ruta".
+  it("tells an account without a box set apart from one with Ingen ruta in the momskod warning", async () => {
+    await setupEconomy();
+    await service.createAccount({ number: "4548", name: "Motkonto importunderlag (egen)" });
+    await db.update(accounts).set({ vatBox: null }).where(eq(accounts.number, "4548"));
+    await db.update(vatCodes).set({ baseCounterAccount: "4548" }).where(eq(vatCodes.code, "IMP25"));
+    const report = await vatReport.getReport(MAR);
+    expect(report.warnings.vatCodeBoxMismatches).toEqual([
+      expect.objectContaining({
+        code: "IMP25",
+        slot: "baseCounter",
+        expectedBox: "none",
+        actualBox: null,
+        message: "Momskod IMP25: konto 4548 har ingen ruta angiven men ska ha ingen ruta",
+      }),
+    ]);
   });
 
   it("tagging the account with box 10 clears both warnings and the omföring empties it", async () => {

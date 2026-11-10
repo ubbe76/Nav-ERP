@@ -438,6 +438,22 @@ describe("recurring verifications — failures and Kör nu", () => {
     await templates.delete(template.id, user.id);
   });
 
+  // Ta bort on a draft the post created: the month turns skipped (its run row
+  // stays, so the job does not create it again), not a raw FK 500.
+  it("deleting a created draft skips its month, and the job leaves the month alone", async () => {
+    const { user, template } = await setup();
+    const post = await recurring.create({ templateId: template.id, dayOfMonth: 25, startMonth: `${YEAR}-01`, endMonth: null, mode: "draft" }, user.id);
+    const january = post.runs.find((r) => r.month === `${YEAR}-01`)!;
+    await economy.deleteVerification(january.verificationId!);
+    const detail = await recurring.findById(post.id);
+    expect(detail.runs.map((r) => [r.month, r.status, r.verificationId])).toEqual([
+      [`${YEAR}-02`, "created", expect.any(String)],
+      [`${YEAR}-01`, "skipped", null],
+    ]);
+    expect(await recurring.runDue()).toEqual({ posts: 1, created: 0, failed: 0 });
+    expect((await allVerifications()).map((v) => v.date)).toEqual([`${YEAR}-02-25`]);
+  });
+
   it("patches day, end month and mode; refuses an end month before the start", async () => {
     const { user, template } = await setup();
     today = `${YEAR}-01-01`;

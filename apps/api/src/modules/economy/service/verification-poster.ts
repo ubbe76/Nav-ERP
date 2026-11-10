@@ -31,6 +31,7 @@ import {
 import { AccountingPeriodLockedError, FiscalYearClosedError } from "./accounting-period-lock.js";
 import { disposalPostingRows } from "./depreciation-schedule.js";
 import { allocateVerificationNumber } from "./verification-number.js";
+import { lockPostingPeriod } from "./posting-period-lock.js";
 
 // Automatkontering (B2/B3): turns a customer/supplier invoice, a customer
 // payment or a reminder fee into a BOOKED verification. Every function here is
@@ -748,16 +749,13 @@ async function ensureSeries(tx: Tx, series: { code: string; name: string }): Pro
 }
 
 // "May something be booked on this date at all?" — no period covering it and
-// a locked period are different errors (same query shape as
-// economy.repository.ts's in-tx re-check). Takes a Db or a Tx: the write path
-// below calls it inside the caller's transaction, the pre-flight helpers call
-// it outside one, before something irreversible happens.
+// a locked period are different errors (same reads as economy.repository.ts's
+// in-tx re-check). Takes a Db or a Tx: the write path below calls it inside
+// the caller's transaction, the pre-flight helpers call it outside one, before
+// something irreversible happens. The reads lock FOR SHARE, year before
+// period (posting-period-lock.ts), so a Lås period cannot commit mid-booking.
 export async function assertPostablePeriod(executor: Db | Tx, date: string): Promise<void> {
-  const [period] = await executor
-    .select({ status: accountingPeriods.status, yearStatus: fiscalYears.status, yearLabel: fiscalYears.label })
-    .from(accountingPeriods)
-    .innerJoin(fiscalYears, eq(fiscalYears.id, accountingPeriods.fiscalYearId))
-    .where(and(lte(accountingPeriods.startDate, date), gte(accountingPeriods.endDate, date)));
+  const period = await lockPostingPeriod(executor, date);
   if (!period) throw new NoAccountingPeriodForPostingError(date);
   // The year's label, as every other thrower of this error names it.
   if (period.yearStatus === "closed") throw new FiscalYearClosedError(period.yearLabel);
@@ -806,11 +804,11 @@ async function insertBookedVerification(
   audit: PostingAuditContext,
   userId: string
 ): Promise<{ verificationId: string; displayNumber: string }> {
-  // Period status via the caller's tx. There is no TOCTOU window here — a
-  // concurrent lock either committed before this read or waits behind this
-  // transaction. (The pre-flight callers below run the same check OUTSIDE a
-  // transaction, where the window is real but only shrinks the misconfiguration
-  // case; this in-tx call stays the authority.)
+  // Period status via the caller's tx, under FOR SHARE (see
+  // assertPostablePeriod) — a concurrent lock either committed before this
+  // read or waits behind this transaction. (The pre-flight callers below run
+  // the same check OUTSIDE a transaction, where the window is real but only
+  // shrinks the misconfiguration case; this in-tx call stays the authority.)
   await assertPostablePeriod(tx, header.date);
 
   // Periods only exist inside a fiscal year, so a covering period implies a

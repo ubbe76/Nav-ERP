@@ -30,12 +30,13 @@ import { stockholmToday } from "../../lib/date";
 const MODE_LABELS = { draft: "Utkast", book: "Bokför direkt" } as const;
 
 // A run's status as the user reads it. `skipped` is a month that fell due
-// while the post was paused and was marked on Aktivera — never a problem,
-// so it never shows as an alert, only here.
+// while the post was paused and was marked on Aktivera, or one whose draft
+// was deleted (Ta bort on the verifikat) — never a problem, so it never shows
+// as an alert, only here.
 const RUN_STATUS: Record<RecurringRun["status"], { pill: "done" | "stopped" | "draft"; label: string }> = {
   created: { pill: "done", label: "Skapad" },
   failed: { pill: "stopped", label: "Misslyckades" },
-  skipped: { pill: "draft", label: "Hoppades över (pausad)" },
+  skipped: { pill: "draft", label: "Hoppades över" },
 };
 
 function dayLabel(day: number | "last"): string {
