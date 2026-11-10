@@ -148,6 +148,32 @@ async function lockOrderStatus(tx: Tx, orderId: string): Promise<PurchaseOrderSt
 // addRow under the order lock: the order is no longer in a row-editable
 // status. Thrown (not returned) so addRow keeps returning the row; the
 // service turns it into its InvalidStatusTransitionError.
+// Lego-inleveransen, inside the TO report's transaction (the
+// manufacturing module's PurchaseReceiptLink): the receipt is locked FIRST —
+// before the operation, as Ångra inleverans takes receipt → … → operation —
+// so an undo and the report never wait on each other crosswise, and a
+// receipt undone between its own commit and the report gets no report at all.
+export class PurchaseReceiptUndoneError extends Error {
+  constructor() {
+    super("Inleveransen ångrades innan operationen hann rapporteras");
+    this.name = "PurchaseReceiptUndoneError";
+  }
+}
+
+export async function claimReceiptForReportInTx(tx: Tx, receiptId: string): Promise<void> {
+  const [receipt] = await tx
+    .select({ undoneAt: purchaseReceipts.undoneAt })
+    .from(purchaseReceipts)
+    .where(eq(purchaseReceipts.id, receiptId))
+    .for("update");
+  if (!receipt || receipt.undoneAt !== null) throw new PurchaseReceiptUndoneError();
+}
+
+// Stamped in the same commit as the report, so Ångra inleverans always finds it.
+export async function linkReceiptReportInTx(tx: Tx, receiptId: string, moReportId: string): Promise<void> {
+  await tx.update(purchaseReceipts).set({ moReportId }).where(eq(purchaseReceipts.id, receiptId));
+}
+
 export class PurchaseOrderNotEditableError extends Error {
   constructor(readonly status: PurchaseOrderStatus | null) {
     super(`Purchase order is not editable in status "${status ?? "unknown"}"`);
@@ -1361,11 +1387,6 @@ export function createPurchaseRepository(db: Db) {
         });
         return { ok: true, row: updatedRow!, orderStatus, receiptId: receipt!.id };
       });
-    },
-
-    // A lego receipt's TO report, linked once the service has made it.
-    async linkReceiptReport(receiptId: string, moReportId: string) {
-      await db.update(purchaseReceipts).set({ moReportId }).where(eq(purchaseReceipts.id, receiptId));
     },
 
     // Inleveranser on the IO card, newest first — undone ones included.

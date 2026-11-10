@@ -25,11 +25,9 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — races med litet fönster
 
-- [ ] **Lego-inleveransens länk till TO-rapporten kan saknas** (försäljnings-/inköpsgranskningen 2026-11-10): `receiveGoods` (`purchase.service.ts`) committar inleveransen och TO-rapporten i två steg och länkar `purchase_receipts.mo_report_id` först efteråt (`linkReceiptReport`). Dör processen mellan dem saknar kvittot länken för gott: Ångra inleverans backar bara IO-sidan och TO-kortet vägrar ångra rapporten (den kommer från en inleverans). Förslag: låt `reportOperationQuantities` ta kvittots id och skriva länken i sin egen transaktion, eller slå upp rapporten (`source = purchase_receipt`, order, operation, tid) när länken saknas.
 
 ### Låga — otydliga fel, texter och småbeteenden
 
-- [ ] **Kundfaktura med okänd artikel eller betalningsvillkor ger troligen 500** (försäljningsgranskningen 2026-11-10, inte verifierat): `POST /invoices` och fakturans rad-POST med ett giltigt uuid som inte är en artikel eller ett betalningsvillkor faller troligen på FK:n i stället för 404 — samma mönster som rättades för `POST /quotes` och kundorderns rad-POST (`ArticleNotFoundError`). Prova med ett routetest och mappa i `invoice.routes.ts`.
 
 ### Låga — layout
 

@@ -27,6 +27,7 @@ import type { ManufacturingMaterialShortage, PalletCardCode } from "@navet/share
 import type {
   CreateManufacturingOrderOutcome,
   ManufacturingRepository,
+  PurchaseReceiptLink,
   ReportOperationQuantitiesInput,
   ReportSource,
   UndoReportResult,
@@ -2059,6 +2060,9 @@ export function createManufacturingService(
         // and closed session — so the real report must not be refused.
         // Skips the check regardless of mode.
         materialShortageChecked?: boolean;
+        // Lego-inleveransen: the IO receipt claimed and linked inside the
+        // report's transaction (PurchaseReceiptLink).
+        receiptLink?: PurchaseReceiptLink;
       }
     ) {
       const operation = await repo.findOperationById(operationId);

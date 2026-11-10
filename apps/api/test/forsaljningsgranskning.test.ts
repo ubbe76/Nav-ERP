@@ -533,6 +533,57 @@ describe("A4 — okänd kund eller artikel är 404, inte 500", () => {
   });
 });
 
+describe("TODO — kundfaktura med okänd artikel eller okänt betalningsvillkor", () => {
+  // The FK answered with a bare 23503 (500): an uuid that is not an article
+  // on a free row, or not a payment term on the header.
+  it("POST /invoices and the row POST/PATCH answer 404", async () => {
+    const headers = await session();
+    const c = await customer();
+    const free = { description: "Fri rad", quantity: 1, unitPrice: 10, vatRate: 25 };
+    const noArticle = await app.inject({
+      method: "POST",
+      url: "/api/v1/invoices",
+      headers,
+      payload: { customerId: c.id, rows: [{ ...free, articleId: crypto.randomUUID() }] },
+    });
+    expect([noArticle.statusCode, noArticle.json().code]).toEqual([404, "article-not-found"]);
+    const noTerm = await app.inject({
+      method: "POST",
+      url: "/api/v1/invoices",
+      headers,
+      payload: { customerId: c.id, paymentTermId: crypto.randomUUID(), rows: [free] },
+    });
+    expect([noTerm.statusCode, noTerm.json().code]).toEqual([404, "register-entry-not-found"]);
+    expect(await db.select().from(invoices)).toHaveLength(0);
+
+    const created = await app.inject({ method: "POST", url: "/api/v1/invoices", headers, payload: { customerId: c.id, rows: [free] } });
+    expect(created.statusCode).toBe(201);
+    const invoiceId = created.json().id as string;
+    const addRow = await app.inject({
+      method: "POST",
+      url: `/api/v1/invoices/${invoiceId}/rows`,
+      headers,
+      payload: { ...free, articleId: crypto.randomUUID() },
+    });
+    expect([addRow.statusCode, addRow.json().code]).toEqual([404, "article-not-found"]);
+    const rowId = (created.json().rows as { id: string }[])[0]!.id;
+    const patchRow = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/invoices/${invoiceId}/rows/${rowId}`,
+      headers,
+      payload: { articleId: crypto.randomUUID() },
+    });
+    expect([patchRow.statusCode, patchRow.json().code]).toEqual([404, "article-not-found"]);
+    const patchHeader = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/invoices/${invoiceId}`,
+      headers,
+      payload: { paymentTermId: crypto.randomUUID() },
+    });
+    expect([patchHeader.statusCode, patchHeader.json().code]).toEqual([404, "register-entry-not-found"]);
+  });
+});
+
 describe("A5 — ett okänt id tar inte bort huvudvalet", () => {
   // The demotion ran before the UPDATE that found no row, and committed.
   it("huvudkontakt survives a PATCH of an unknown contact — and a real switch still works", async () => {

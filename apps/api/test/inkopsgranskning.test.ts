@@ -19,7 +19,9 @@ import {
   exchangeRates,
   inquiries,
   moOperations,
+  moReports,
   purchaseOrderRows,
+  purchaseReceipts,
   purchaseOrders,
   stockTransactions,
   supplierContacts,
@@ -42,7 +44,12 @@ import { createManufacturingRepository } from "../src/modules/manufacturing/repo
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { createPlanningRepository } from "../src/modules/planning/repository/planning.repository.js";
 import { createPlanningService } from "../src/modules/planning/service/planning.service.js";
-import { createPurchaseRepository } from "../src/modules/purchase/repository/purchase.repository.js";
+import {
+  claimReceiptForReportInTx,
+  createPurchaseRepository,
+  linkReceiptReportInTx,
+  PurchaseReceiptUndoneError,
+} from "../src/modules/purchase/repository/purchase.repository.js";
 import { createSupplierInvoiceRepository } from "../src/modules/purchase/repository/supplier-invoice.repository.js";
 import { purchaseRoutes } from "../src/modules/purchase/routes/purchase.routes.js";
 import { supplierInvoiceRoutes } from "../src/modules/purchase/routes/supplier-invoice.routes.js";
@@ -498,6 +505,100 @@ describe("B4 — leverantörsfakturans rader efter attest", () => {
     expect(!deleting.ok && deleting.error).toBeInstanceOf(InvalidStatusTransitionError);
     const [kept] = await db.select().from(supplierInvoiceRows);
     expect(kept).toMatchObject({ id: row.id, unitPrice: "100.0000" });
+  });
+});
+
+describe("B11 — lego-inleveransens TO-rapport och länken i samma commit", () => {
+  // Until `n` backends of this database wait on a lock.
+  async function lockWaiters(n: number) {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      const result = await db.execute(
+        sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`
+      );
+      const [row] = [...result] as { n: number }[];
+      if ((row?.n ?? 0) >= n) return;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error(`Fewer than ${n} transactions waiting on a lock`);
+  }
+
+  async function confirmedLegoRow() {
+    const f = await legoOrder();
+    const row = await purchaseService.addRow(f.io.id, { articleId: f.parent.id, quantity: 4, unitPrice: 100, moOperationId: f.legoOp.id });
+    await purchaseService.confirm(f.io.id, user.id);
+    return { ...f, row };
+  }
+
+  // The link used to be written after the report's commit: an Ångra
+  // inleverans in between undid only the IO side and left a TO report no
+  // card could undo. The report's transaction now claims the receipt first,
+  // so the undo waits for the report and its link, and undoes both.
+  it("an undo that comes while the report waits undoes the TO report too", async () => {
+    const f = await confirmedLegoRow();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let locked!: () => void;
+    const hasLock = new Promise<void>((resolve) => (locked = resolve));
+    // The lego operation held: the receipt commits, its report waits here.
+    const holder = db.transaction(async (tx) => {
+      await tx.select({ id: moOperations.id }).from(moOperations).where(eq(moOperations.id, f.legoOp.id)).for("update");
+      locked();
+      await gate;
+    });
+    await hasLock;
+    let undoing: Promise<unknown> | undefined;
+    try {
+      const receiving = purchaseService.receiveGoods(f.io.id, f.row.id, { quantity: 4 }, user.id);
+      await lockWaiters(1);
+      const [receipt] = await db.select().from(purchaseReceipts).where(eq(purchaseReceipts.purchaseOrderRowId, f.row.id));
+      expect(receipt!.moReportId).toBeNull();
+      undoing = purchaseService.undoReceipt(f.io.id, receipt!.id, user.id);
+      await lockWaiters(2);
+      release();
+      await holder;
+      expect((await receiving).operationReport).toEqual({ ok: true });
+      await undoing;
+      const [after] = await db.select().from(purchaseReceipts).where(eq(purchaseReceipts.id, receipt!.id));
+      expect(after!.undoneAt).not.toBeNull();
+      expect(after!.moReportId).not.toBeNull();
+      const [report] = await db.select().from(moReports).where(eq(moReports.id, after!.moReportId!));
+      expect(report!.undoneAt).not.toBeNull();
+      const [op] = await db.select().from(moOperations).where(eq(moOperations.id, f.legoOp.id));
+      expect(Number(op!.quantityCompleted ?? 0)).toBe(0);
+    } finally {
+      release();
+      await holder.catch(() => {});
+      await undoing?.catch(() => {});
+    }
+  });
+
+  // A receipt undone before its report ran gets no report at all — the
+  // report rolls back with the claim.
+  it("the report refuses a receipt that is already undone, and writes nothing", async () => {
+    const f = await confirmedLegoRow();
+    await purchaseService.receiveGoods(f.io.id, f.row.id, { quantity: 4 }, user.id);
+    const [receipt] = await db.select().from(purchaseReceipts).where(eq(purchaseReceipts.purchaseOrderRowId, f.row.id));
+    await purchaseService.undoReceipt(f.io.id, receipt!.id, user.id);
+    const reportsBefore = await db.select().from(moReports);
+    await expect(
+      mfgService.reportOperationQuantities(f.legoOp.id, {
+        quantityOk: 4,
+        quantityScrapped: 0,
+        markDone: false,
+        markDoneWhenCovered: true,
+        createdBy: user.id,
+        source: "purchase_receipt",
+        purchaseOrderId: f.io.id,
+        receiptLink: {
+          claim: (tx) => claimReceiptForReportInTx(tx, receipt!.id),
+          link: (tx, reportId) => linkReceiptReportInTx(tx, receipt!.id, reportId),
+        },
+      })
+    ).rejects.toBeInstanceOf(PurchaseReceiptUndoneError);
+    expect(await db.select().from(moReports)).toHaveLength(reportsBefore.length);
+    const [op] = await db.select().from(moOperations).where(eq(moOperations.id, f.legoOp.id));
+    expect(Number(op!.quantityCompleted ?? 0)).toBe(0);
   });
 });
 
