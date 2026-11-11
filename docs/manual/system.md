@@ -316,6 +316,8 @@ POST /api/v1/quotes
 
 Offertens huvud kan även bära kundens egna referenser: `customerInquiryNumber` (kundens förfrågan, skrivs ut som **Er förfrågan** på offerten och orderbekräftelsen), `customerOrderNumber` (kundens ordernummer, **Ert ordernummer**) och `customerReference` (**Er referens**), alla valfria.
 
+**Svaret** (201) är `{ "order": …, "rows": [ … ] }`. `order` har `id`, `orderNumber`, `quoteNumber`, `documentKind` (`quote`/`order`), `status`, `customerId`, `customerOrderNumber`, `customerInquiryNumber`, `customerReference`, `deliveryAddressId`, `expectedDeliveryDate`, `quoteValidUntil`, `note`, `currency`, `exchangeRate`, `revision`, `costCenterId`, `projectId` och `createdAt` — samma `order` som `POST /api/v1/sales-orders/{id}/confirm` svarar med. Varje rad har `id`, `articleId` (varianten för en rad i läget **Variantartiklar**), `quantityOrdered`, `unitId`, `unitFactor`, `unitPrice`, `discountPercent`, `calculatedPrice` (priset är ett **Kalkylpris**), `expectedDeliveryDate`, `configuration` (valen och prisuppdelningen för en beställningsvara, annars `null`) och `setupForRowId` (raden är ställkostnaden för raden den pekar på). Antal och à-pris är i artikelns grundenhet. Interna uppgifter — kostnader och kalkyl, orderns påslag, frakt- och transportörspriser, hur priset räknades fram — lämnar aldrig systemet; en inloggad användare som anropar samma adress får hela orderkortets svar.
+
 **Felkoder.**
 
 | Kod | Status | Betyder |

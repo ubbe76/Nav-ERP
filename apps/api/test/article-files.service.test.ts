@@ -9,6 +9,7 @@ import {
   createArticleService,
   InvalidFileTypeError,
 } from "../src/modules/article/service/article.service.js";
+import { PDFDocument } from "pdf-lib";
 import { appendFilesToPdf } from "../src/modules/mail/service/pdf-merge.js";
 import { createDocumentPdfService } from "../src/modules/mail/service/document-pdf.js";
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
@@ -108,7 +109,7 @@ describe("article files", () => {
 });
 
 describe("pdf-merge", () => {
-  it("appends an image as an extra page and grows the document", async () => {
+  it("appends an image as an extra page", async () => {
     const base = await documentPdfService.renderPickList({
       documentNumber: "KO-1",
       printedAt: new Date("2026-01-01"),
@@ -122,7 +123,11 @@ describe("pdf-merge", () => {
       { filename: "ritning.png", contentType: "image/png", data: PNG_1PX },
     ]);
     expect(merged.subarray(0, 4).toString()).toBe("%PDF");
-    expect(merged.length).toBeGreaterThan(base.length);
+    // The page count, not the byte size: pdf-lib re-saves the document with
+    // compressed object streams, which can make it smaller than pdfkit's
+    // original even with the image (the embedded fonts, granskning 2026-11-11).
+    const pages = async (buffer: Buffer) => (await PDFDocument.load(buffer)).getPageCount();
+    expect(await pages(merged)).toBe((await pages(base)) + 1);
   });
 
   it("merges PDF attachments and skips unreadable files instead of failing", async () => {

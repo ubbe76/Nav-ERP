@@ -1,5 +1,5 @@
 import { buildCsv, type CsvColumn, type PurchaseOrderRegisterQuery, type SalesOrderRegisterQuery } from "@navet/shared";
-import { formatNumber, type OrderRegisterPdfInput } from "../../mail/service/document-pdf.js";
+import { formatNumber, formatUnitPrice, type OrderRegisterPdfInput } from "../../mail/service/document-pdf.js";
 import { PURCHASE_ORDER_STATUS_LABELS } from "../../purchase/service/export-columns.js";
 import { SALES_ORDER_STATUS_LABELS } from "../../sales/service/export-columns.js";
 import { ORDER_REGISTER_MAX_ROWS, type OrderRegisterRepository } from "../repository/order-register.repository.js";
@@ -151,7 +151,7 @@ export function createOrderRegisterService(repo: OrderRegisterRepository, pdf?: 
             done: qty(row.done),
             rest: qty(row.rest),
             unit: row.unit ?? "",
-            unitPrice: formatNumber(row.unitPrice),
+            unitPrice: formatUnitPrice(row.unitPrice),
             amount: formatNumber(row.amount),
             restAmount: formatNumber(row.restAmount),
             deliveryDate: row.deliveryDate ?? "",

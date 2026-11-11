@@ -789,7 +789,11 @@ describe("Ta emot e-faktura and the web hook", () => {
     await makeSupplier();
     fake.receive(invoiceXml({ attachment: null }));
     receive.kick();
-    for (let i = 0; i < 50 && (await scans()).length === 0; i++) await new Promise((r) => setTimeout(r, 100));
+    // kick() is fire-and-forget: the scan row lands before the run releases
+    // its lease, so wait for both (polling only for the scan was a race — it
+    // failed once in the full suite when the run took a few ms longer).
+    const settled = async () => (await scans()).length > 0 && (await setting("einvoice_receive_lease_until")) === null;
+    for (let i = 0; i < 50 && !(await settled()); i++) await new Promise((r) => setTimeout(r, 100));
     expect(await scans()).toHaveLength(1);
     expect(await setting("einvoice_receive_lease_until")).toBeNull();
   });

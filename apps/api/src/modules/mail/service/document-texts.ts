@@ -117,6 +117,9 @@ export interface DocumentTexts {
     ofWhichVat: string;
     totalExclVat: (currency: string) => string;
     vat: (rate: number) => string;
+    // The invoice's VAT line with its beskattningsunderlag: "Moms (25 %) på
+    // 200,00" — `label` is vat(rate) or a 0 % code's name, `base` formatted.
+    vatOn: (label: string, base: string) => string;
     totalExclUnpriced: (currency: string) => string;
     total: (currency: string) => string;
     vatInSek: (amount: string, rate: string) => string;
@@ -326,6 +329,7 @@ const sv: DocumentTexts = {
     ofWhichVat: "Varav moms",
     totalExclVat: (cur) => `Summa exkl. moms ${cur}`,
     vat: (rate) => `Moms (${rate} %)`,
+    vatOn: (label, base) => `${label} på ${base}`,
     totalExclUnpriced: (cur) => `Summa (exkl. rader utan pris) ${cur}`,
     total: (cur) => `Summa ${cur}`,
     vatInSek: (amount, rate) => `Moms i SEK: ${amount} (kurs ${rate})`,
@@ -536,6 +540,7 @@ const en: DocumentTexts = {
     ofWhichVat: "Of which VAT",
     totalExclVat: (cur) => `Total excl. VAT ${cur}`,
     vat: (rate) => `VAT (${rate}%)`,
+    vatOn: (label, base) => `${label} on ${base}`,
     totalExclUnpriced: (cur) => `Total (excl. unpriced rows) ${cur}`,
     total: (cur) => `Total ${cur}`,
     vatInSek: (amount, rate) => `VAT in SEK: ${amount} (rate ${rate})`,

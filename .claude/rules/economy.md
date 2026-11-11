@@ -51,7 +51,7 @@ Spec `private/superpowers/specs/2026-10-24-manuell-bokforing-design.md`.
 
 - Rent härledda — inget lagrat saldo. Intervalltabellen i `economy/service/bas-report-lines.ts` täcker **0000–9999 exakt en gång** så `classifyAccount` är total (testat över alla 10 000 nummer) — annars försvinner en bokning på ett oklassat konto tyst i stället för att hamna under "Ej klassificerade konton".
 - `account-balances.ts`s `readAccountBalances` är den enda aggregeringen (balans-, resultaträkning, SIE) — medvetet **utan** `vat_settlements`-undantagen som `vat-account-movements.ts` har; momsomföringarna är riktiga rader och utan dem balanserar inte balansräkningen. Balansräkningen lägger klass 3–8:s netto som en **beräknad** eget kapital-rad; resultaträkningen är strikt periodbunden. Huvudbokens IB för resultatkonton räknas från början av räkenskapsåret `from` ligger i (balanskonton kumulativt).
-- PDF:erna via mail-modulens A4-mall (`renderFinancialStatement`/`renderGeneralLedger`/`renderVerificationList`) med `formatNumber` — exporterad just för WinAnsi-fällan där `sv-SE`:s minustecken (U+2212) saknar glyf i Helvetica.
+- PDF:erna via mail-modulens A4-mall (`renderFinancialStatement`/`renderGeneralLedger`/`renderVerificationList`) med `formatNumber` — exporterad för minustecknet: `sv-SE`:s U+2212 saknade glyf i den gamla Helvetica-fonten och skrivs fortfarande som ASCII-minus (dokumenten bäddar in Liberation Sans sedan 2026-11-11, `mail.md`).
 
 ## SIE (B6b)
 

@@ -183,8 +183,10 @@ export function createShippingService(deps: {
   const isExpired = (rate: StoredRate) => rate.expiresAt !== null && Date.parse(rate.expiresAt) <= now().getTime();
 
   // Validate, push the shipment to the broker (create once, then update),
-  // fetch rates and store them. Caller has checked status/claim.
-  async function fetchRatesFor(s: ShipmentRow, provider: FreightProvider): Promise<StoredRates> {
+  // fetch rates and store them. Caller has checked status/claim. Returns the
+  // broker shipment the rates belong to — on a draft never priced before
+  // it did not exist when the caller read the row (book()'s trace).
+  async function fetchRatesFor(s: ShipmentRow, provider: FreightProvider): Promise<{ stored: StoredRates; providerShipmentId: string }> {
     const sender = await settings.sender();
     const parcels = await repo.listParcels(s.id);
     const missing = missingForBooking({ ...s, ...sender }, parcels.map((p) => ({ weightKg: Number(p.weightKg) })));
@@ -199,14 +201,24 @@ export function createShippingService(deps: {
     let providerId = s.providerShipmentId;
     // No lock is held over the broker calls, so the final write is optimistic:
     // it lands only if the draft still has the updated_at we read (saving the
-    // broker id below does not bump it). Under book()'s claim edits are
-    // blocked and the claim itself does not touch updated_at, so it passes.
+    // broker id below does not bump it) and still points at the broker copy
+    // we priced. Under book()'s claim edits are blocked and the claim itself
+    // does not touch updated_at, so it passes.
     if (providerId) {
       await provider.updateShipment(providerId, payload);
     } else {
-      providerId = await provider.createShipment(payload);
+      const created = await provider.createShipment(payload);
       // Saved at once: a later failure must not orphan the broker's copy.
-      await repo.saveProviderShipmentId(s.id, providerId);
+      // Only onto a row without one — a concurrent fetch that created its
+      // copy first keeps it, and this one drops its own (best effort, an
+      // orphaned draft at Sendify is harmless) and prices the stored copy.
+      const savedId = await repo.saveProviderShipmentId(s.id, created);
+      if (savedId !== created) {
+        await provider.deleteShipment(created).catch(() => undefined);
+        if (!savedId) throw new ShipmentNotFoundError(s.id);
+        await provider.updateShipment(savedId, payload);
+      }
+      providerId = savedId;
     }
     const { rates, warnings } = await provider.getRates(providerId, { date: s.pickupDate, time: pickupTime });
     const stored: StoredRates = {
@@ -214,12 +226,13 @@ export function createShippingService(deps: {
       warnings,
       rates: rates.map((r) => ({ id: randomUUID(), ...r })),
     };
+    const ownId = providerId;
     await repo.transaction(async (tx) => {
       await repo.upsertFreightProducts(provider.name, rates, tx);
-      const written = await repo.storeRates(tx, s.id, s.updatedAt, { ...sender, providerShipmentId: providerId, lastRates: stored, ratesFetchedAt: now() });
+      const written = await repo.storeRates(tx, s.id, s.updatedAt, ownId, { ...sender, lastRates: stored, ratesFetchedAt: now() });
       if (!written) throw new FreightShipmentChangedError();
     });
-    return stored;
+    return { stored, providerShipmentId: ownId };
   }
 
   // Fetch the label/waybill the broker offered for the booking (label only
@@ -471,7 +484,7 @@ export function createShippingService(deps: {
       const s = await repo.findShipment(id);
       if (!s) throw new ShipmentNotFoundError(id);
       assertDraft(s);
-      const stored = await fetchRatesFor(s, provider);
+      const { stored } = await fetchRatesFor(s, provider);
       return toRatesView(stored, await settings.read());
     },
 
@@ -507,8 +520,12 @@ export function createShippingService(deps: {
       }
       // The reservation's own timestamp — every later write is conditional on it.
       const claimedAt = claimed.bookingStartedAt!;
+      // The broker shipment the booked rate belongs to: the stored one, or —
+      // on a draft never priced before ("Boka vald produkt") — the one the
+      // fresh price fetch below created. The trace must name it.
+      let providerShipmentId = claimed.providerShipmentId;
 
-      let rate: StoredRate;
+      let rate: StoredRate | null = null;
       let booked: { trackingNumber: string | null; documentTypes: string[] };
       try {
         if ("rateId" in input) {
@@ -516,13 +533,14 @@ export function createShippingService(deps: {
           // shipment as it is now.
           const stored = claimed.lastRates?.rates.find((r) => r.id === input.rateId);
           if (!stored || isExpired(stored)) {
-            throw new FreightRatesExpiredError(toRatesView(await fetchRatesFor(claimed, provider), freight));
+            throw new FreightRatesExpiredError(toRatesView((await fetchRatesFor(claimed, provider)).stored, freight));
           }
           rate = stored;
         } else {
           if (!claimed.freightProductId) throw new FreightNoSelectionError();
           const product = await repo.findFreightProduct(claimed.freightProductId);
-          const fresh = await fetchRatesFor(claimed, provider);
+          const { stored: fresh, providerShipmentId: pricedId } = await fetchRatesFor(claimed, provider);
+          providerShipmentId = pricedId;
           const match = product
             ? fresh.rates.find((r) => r.carrierCode === product.carrierCode && r.productName === product.productName)
             : undefined;
@@ -543,6 +561,23 @@ export function createShippingService(deps: {
         booked = await provider.book(rate.bookingToken);
       } catch (err) {
         await repo.releaseBooking(id, claimedAt);
+        // No answer, a 5xx, or a 2xx we could not read: the transport may be
+        // booked at Sendify although the row stays a draft (the reservation
+        // is released like any failure — spec 3.4 step 3). The server log
+        // and the history carry what is needed to find it there.
+        if (err instanceof FreightProviderError && err.kind === "booking-unknown" && rate) {
+          const unknown = {
+            shipmentNumber: claimed.shipmentNumber,
+            providerShipmentId,
+            requestId: err.requestId,
+            carrier: rate.carrierName,
+            product: rate.productName,
+            price: rate.price,
+            currency: rate.currency,
+          };
+          console.error("Booking at the broker may have gone through — the shipment stays a draft", unknown);
+          await audit.log({ entityType: "shipment", entityId: id, action: "booking_unknown", detail: unknown, userId }).catch(() => undefined);
+        }
         throw err;
       }
 
@@ -553,7 +588,7 @@ export function createShippingService(deps: {
       // with no trace of the first transport). Never the API key.
       const trace = {
         shipmentNumber: claimed.shipmentNumber,
-        providerShipmentId: claimed.providerShipmentId,
+        providerShipmentId,
         trackingNumber: booked.trackingNumber,
         carrier: rate.carrierName,
         product: rate.productName,

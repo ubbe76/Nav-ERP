@@ -52,7 +52,7 @@ import type { PriceChainQuery, PriceMarkups, PriceResolution } from "./price-res
 import type { RegisterReferenceReader } from "../../register/service/register.service.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import type { MailService } from "../../mail/service/mail.service.js";
-import type { DocumentPdfService, PalletCardPdfInput } from "../../mail/service/document-pdf.js";
+import { formatQuantity, type DocumentPdfService, type PalletCardPdfInput } from "../../mail/service/document-pdf.js";
 import { documentLanguageOf, localized, type DocumentLanguage } from "@navet/shared";
 import { documentTexts } from "../../mail/service/document-texts.js";
 import {
@@ -2082,8 +2082,8 @@ export function createSalesService(
             .filter((b) => b.articleId === r.articleId && !b.blocked)
             .map((b) =>
               b.locationName
-                ? `${b.warehouseName} — ${b.locationName}: ${Number(b.quantityOnHand)}`
-                : `Utan lagerplats: ${Number(b.quantityOnHand)}`
+                ? `${b.warehouseName} — ${b.locationName}: ${formatQuantity(b.quantityOnHand)}`
+                : `Utan lagerplats: ${formatQuantity(b.quantityOnHand)}`
             ),
         })),
       });

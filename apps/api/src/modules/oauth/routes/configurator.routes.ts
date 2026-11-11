@@ -32,6 +32,7 @@ import {
 import { notDerivableBody } from "../../configurator/routes/not-derivable-body.js";
 import { CostCenterInactiveError, CostCenterNotFoundError, ProjectClosedError, ProjectNotFoundError } from "../../economy/service/dimension-check.js";
 import { errorBody } from "../../system/service/error-body.js";
+import { toPublicBomRow, toPublicOrder, toPublicPriceQuote, toPublicQuote } from "../service/public-responses.js";
 import { ExchangeRateUnavailableError } from "../../system/service/exchange-rates.js";
 import { SalesOrderExchangeRateError } from "../../sales/service/sales.errors.js";
 import {
@@ -48,17 +49,13 @@ import {
 // token (external configurator). The first three are exactly what
 // architecture.md §5 names for that integration; GET /price-quote (C3) was
 // added on top so the configurator can pre-fill customer prices too.
-// Påslag på offert och order (#16 etapp 3): the order's own price markups
-// are our pricing decision, set on the order card — a client never sets them
-// (createQuoteSchema has no such fields, so sent ones are dropped) and never
-// reads them back, like the Kalkylpris's basis. A new quote has none; a
-// quote a seller gave markups before the client confirms it would show them.
-function withoutOrderMarkups<T extends { generalMarkupPercent?: unknown; materialMarkupPercent?: unknown }>(
-  order: T
-): Omit<T, "generalMarkupPercent" | "materialMarkupPercent"> {
-  const { generalMarkupPercent: _general, materialMarkupPercent: _material, ...rest } = order;
-  return rest;
-}
+// Every answer to a client token goes through a whitelist
+// (../service/public-responses.ts — field by field, never spread), so an
+// internal field added later never reaches a client by accident: the
+// order's price markups (#16 etapp 3, set on the order card only — a client
+// never sets them, createQuoteSchema drops them), the freight probe and
+// Sendify's price on the order, the price origin, our costs. A session (the
+// web posts to the same routes) gets the full internal answer.
 
 export async function configuratorRoutes(
   app: FastifyInstance,
@@ -114,7 +111,7 @@ export async function configuratorRoutes(
       // (configuration_cost) — salesService strips it, so the external
       // configurator never sees what a configuration costs us to make.
       const result = await salesService.createQuote(input, req.user?.id ?? null);
-      return reply.code(201).send(req.apiClient ? { ...result, order: withoutOrderMarkups(result.order) } : result);
+      return reply.code(201).send(req.apiClient ? toPublicQuote(result) : result);
     } catch (err) {
       // An unknown customer or row article (an uuid that is not one).
       if (err instanceof CustomerNotFoundError || err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
@@ -206,15 +203,12 @@ export async function configuratorRoutes(
     // used: calculatedPriceUnavailable says the customer has a markup of its
     // own and whether the article has a förkalkyl (the review of etapp 2). A
     // session (the order forms) gets both for the à-pris help text.
-    if (req.apiClient) {
-      const { calculated: _basis, calculatedPriceUnavailable: _reason, ...priceOnly } = result;
-      return priceOnly;
-    }
-    return result;
+    return req.apiClient ? toPublicPriceQuote(result) : result;
   });
 
   app.get<{ Params: { id: string } }>("/articles/:id/bom", { config: { clientScope: "structure:read" } }, async (req) => {
-    return articleService.getBom(req.params.id);
+    const rows = await articleService.getBom(req.params.id);
+    return req.apiClient ? rows.map(toPublicBomRow) : rows;
   });
 
   app.post<{ Params: { id: string } }>("/sales-orders/:id/confirm", { config: { clientScope: "orders:confirm" } }, async (req, reply) => {
@@ -228,7 +222,7 @@ export async function configuratorRoutes(
     }
     try {
       const confirmed = await salesService.confirm(req.params.id, req.user?.id ?? null);
-      return req.apiClient ? withoutOrderMarkups(confirmed) : confirmed;
+      return req.apiClient ? toPublicOrder(confirmed) : confirmed;
     } catch (err) {
       if (err instanceof SalesOrderNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));

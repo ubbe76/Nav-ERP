@@ -1,5 +1,6 @@
 import type {
-  ConfiguratorGroupDetail, ConfiguratorMode, ConfiguratorTemplateDetail, PublicTemplate, PublicTemplateGroup, PublicTemplateSummary,
+  ConfiguratorEvaluation, ConfiguratorGroupDetail, ConfiguratorMode, ConfiguratorTemplateDetail, PublicTemplate, PublicTemplateGroup,
+  PublicTemplateSummary,
 } from "@navet/shared";
 
 // Konfigurator delprojekt 5 — the external configurator's view of a template.
@@ -72,5 +73,37 @@ export function toPublicTemplate(detail: ConfiguratorTemplateDetail, article: Pu
     currency: "SEK",
     basePrice: toNumber(detail.basePrice),
     groups: bySortOrder(detail.groups).map(toPublicGroup),
+  };
+}
+
+// POST /configurator/:articleId/evaluate for a client token: the engine's
+// answer copied field by field like the template, so a field added to the
+// evaluation for Nav's own forms later never reaches a client by accident.
+// A session (the web's Konfigurera) gets the engine's answer as it is.
+export function toPublicEvaluation(e: ConfiguratorEvaluation): ConfiguratorEvaluation {
+  return {
+    valid: e.valid,
+    key: e.key,
+    groups: e.groups.map((g) => ({
+      code: g.code,
+      kind: g.kind,
+      value: g.value,
+      defaulted: g.defaulted,
+      ...(g.availableValueCodes !== undefined ? { availableValueCodes: [...g.availableValueCodes] } : {}),
+      ...(g.min !== undefined ? { min: g.min } : {}),
+      ...(g.max !== undefined ? { max: g.max } : {}),
+      errors: [...g.errors],
+    })),
+    errors: [...e.errors],
+    price: {
+      base: e.price.base,
+      additions: e.price.additions.map((a) => ({ groupCode: a.groupCode, label: a.label, amount: a.amount })),
+      unitPrice: e.price.unitPrice,
+      discountPercent: e.price.discountPercent,
+      source: e.price.source,
+    },
+    warnings: [...e.warnings],
+    ...(e.currency !== undefined ? { currency: e.currency } : {}),
+    ...(e.exchangeRate !== undefined ? { exchangeRate: e.exchangeRate } : {}),
   };
 }

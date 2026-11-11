@@ -795,6 +795,12 @@ fullständiga licenstexten (SPDX: `GPL-3.0-or-later`).
   [Dracula-paletten](https://draculatheme.com) och används under
   MIT-licensen, © 2023 Dracula Theme. Licenstexten finns i
   [`licenses/Dracula-MIT.txt`](licenses/Dracula-MIT.txt).
+- **Liberation Sans** — typsnittet som bäddas in i alla PDF-dokument
+  (`apps/api/assets/fonts`, version 2.1.5 från
+  [liberationfonts/liberation-fonts](https://github.com/liberationfonts/liberation-fonts))
+  är © 2010 Google Corporation och © 2012 Red Hat, Inc. och används under
+  SIL Open Font License 1.1. Licenstexten finns i
+  [`apps/api/assets/fonts/LICENSE`](apps/api/assets/fonts/LICENSE).
 
 ## Historik
 

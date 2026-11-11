@@ -8,3 +8,6 @@
 # generated Excel templates are binary and must never be converted.
 docs/manual/importmallar.md text eol=lf
 *.xlsx binary
+
+# The PDF documents' embedded fonts (apps/api/assets/fonts).
+*.ttf binary

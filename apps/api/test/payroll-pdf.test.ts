@@ -1,11 +1,10 @@
 import { createWeekScheduleSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { stockholmInstant } from "../src/modules/system/service/delivery-days.js";
-import { inflateSync } from "node:zlib";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
 import { PAXML_CODES, testDocumentPdfService } from "./helpers/services.js";
-import { decodeWinAnsiHex, pdfText } from "./helpers/pdf.js";
+import { pdfPagesText, pdfText } from "./helpers/pdf.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createPayrollRepository } from "../src/modules/payroll/repository/payroll.repository.js";
 import { createPayrollService } from "../src/modules/payroll/service/payroll.service.js";
@@ -181,44 +180,10 @@ describe("payroll service — PDF report", () => {
 // identical whether a header and its row land on the same page or either
 // side of a break, so a plain toContain/not.toContain assertion against
 // pdfText's output would pass identically whether or not the bug is
-// present. `pdfPagesText` below instead keeps each content stream (== each
-// page, for this renderer) separate, so the test can check that a header
+// present. `pdfPagesText` (test/helpers/pdf.ts) instead keeps each content
+// stream (== each page) separate, so the test can check that a header
 // found on a given page has its own first row on that SAME page.
 // ---------------------------------------------------------------------------
-
-// Per-page variant of the pdfText helper (test/helpers/pdf.ts) — same
-// inflate + hex-decode logic, but keeps each "stream…endstream" block's
-// decoded text separate instead of concatenating them. pdfkit writes one
-// content stream per page (nothing here uses drawFooter/switchToPage, which
-// is the one thing that revisits an already-written page), so each
-// non-empty entry corresponds to one page in document order. Local to this
-// test file — not promoted to test/helpers/pdf.ts since no other test needs
-// page-level granularity.
-function pdfPagesText(buffer: Buffer): string[] {
-  const marker = Buffer.from("stream\n");
-  const end = Buffer.from("endstream");
-  const pages: string[] = [];
-  let offset = 0;
-  while (true) {
-    const start = buffer.indexOf(marker, offset);
-    if (start === -1) break;
-    const from = start + marker.length;
-    const to = buffer.indexOf(end, from);
-    if (to === -1) break;
-    try {
-      const decoded = inflateSync(buffer.subarray(from, to)).toString("latin1");
-      let text = "";
-      for (const [, hex] of decoded.matchAll(/<([0-9a-fA-F]+)>/g)) {
-        text += decodeWinAnsiHex(hex!);
-      }
-      if (text.length > 0) pages.push(text);
-    } catch {
-      // Not a deflate content stream (fonts, xref, etc.) — skip, same as pdfText.
-    }
-    offset = to + end.length;
-  }
-  return pages;
-}
 
 describe("payroll service — PDF report pagination", () => {
   it("keeps every employee's header on the same page as its first row, across a multi-page report", async () => {

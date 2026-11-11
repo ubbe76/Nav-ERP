@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { blankSafe } from "./coerce.js";
+import { businessDateSchema } from "./business-date.js";
 import { listQuerySchema } from "./list.js";
 
 // Frakt (Sendify) — see docs/superpowers/specs/2026-10-07-frakt-sendify-design.md.
@@ -57,7 +58,6 @@ export const createShipmentSchema = z.object({
 export type CreateShipmentInput = z.infer<typeof createShipmentSchema>;
 
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Expected HH:MM");
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
 const optionalLine = (max: number) =>
   z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? null : v), z.string().trim().max(max).nullable());
 
@@ -83,7 +83,8 @@ export const updateShipmentSchema = z
     recipientPrivatePerson: z.boolean().optional(),
     senderReference: optionalLine(100).optional(),
     receiverReference: optionalLine(100).optional(),
-    pickupDate: isoDate.optional(),
+    // A real calendar day (2030-02-30 is a 400, not a Postgres error = 500).
+    pickupDate: businessDateSchema.optional(),
     pickupFrom: hhmm.optional(),
     pickupTo: hhmm.optional(),
     customerPrice: optionalNonNegative.optional(),
@@ -116,24 +117,26 @@ export const bookShipmentSchema = z.union([
 ]);
 export type BookShipmentInput = z.infer<typeof bookShipmentSchema>;
 
-// PATCH /freight-settings. apiKey: "" = leave the stored key, null = remove it.
 // The key goes straight into an HTTP header, so anything outside printable
-// ASCII is refused here rather than by fetch's header validation.
+// ASCII is refused here rather than by fetch's header validation (which
+// would surface as "Sendify svarar inte"). One rule for the saved key and
+// the key typed into Testa anslutning.
+const apiKeyText = z
+  .string()
+  .trim()
+  .max(500)
+  .regex(/^[\x20-\x7E]*$/, "API-nyckeln får bara innehålla vanliga tecken");
+
 // Frakt etapp 2 — how often the scheduler asks the broker for tracking.
 export const TRACKING_INTERVALS = ["hourly", "every_4h", "daily"] as const;
 export type TrackingInterval = (typeof TRACKING_INTERVALS)[number];
 
+// PATCH /freight-settings. apiKey: "" = leave the stored key, null = remove it.
 export const updateFreightSettingsSchema = z
   .object({
     enabled: z.boolean().optional(),
     environment: z.enum(["sandbox", "production"]).optional(),
-    apiKey: z
-      .string()
-      .trim()
-      .max(500)
-      .regex(/^[\x20-\x7E]*$/, "API-nyckeln får bara innehålla vanliga tecken")
-      .nullable()
-      .optional(),
+    apiKey: apiKeyText.nullable().optional(),
     senderContactName: z.string().trim().max(255).optional(),
     senderPhone: z.string().trim().max(50).optional(),
     senderEmail: z.string().trim().max(255).optional(),
@@ -149,7 +152,7 @@ export type UpdateFreightSettingsInput = z.infer<typeof updateFreightSettingsSch
 // "Testa anslutning": the key typed in the form (not yet saved) and the
 // environment selected there; both optional — omitted = the saved values.
 export const testFreightConnectionSchema = z
-  .object({ apiKey: z.string().trim().min(1).optional(), environment: z.enum(["sandbox", "production"]).optional() })
+  .object({ apiKey: apiKeyText.min(1).optional(), environment: z.enum(["sandbox", "production"]).optional() })
   .strict();
 export type TestFreightConnectionInput = z.infer<typeof testFreightConnectionSchema>;
 

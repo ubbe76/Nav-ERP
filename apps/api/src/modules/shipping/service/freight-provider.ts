@@ -83,9 +83,10 @@ export type FreightProviderFactory = (config: FreightProviderConfig) => FreightP
 
 // validation: the broker refused the data (4xx) → 400 with fieldErrors.
 // unauthorized: the broker rejected our API key (401/403) → point at settings.
-// unavailable: network/timeout/429/5xx → 502. booking-unknown: no answer, or
-// a 5xx, on the BOOK call itself — it may have gone through → 502 with a
-// warning text. unexpected: an answer we cannot read → 502.
+// unavailable: network/timeout/429/5xx → 502. booking-unknown: no answer, a
+// 5xx, or a 2xx we cannot read, on the BOOK call itself — it may have gone
+// through → 502 with a warning text. unexpected: an answer we cannot read
+// (any other call) → 502.
 export type FreightProviderErrorKind = "validation" | "unauthorized" | "unavailable" | "booking-unknown" | "unexpected";
 
 export class FreightProviderError extends Error {

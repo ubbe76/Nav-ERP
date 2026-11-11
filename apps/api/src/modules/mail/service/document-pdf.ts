@@ -3,11 +3,13 @@ import {
   documentLanguageOf,
   minutesPerUnitToSecondsPerUnit,
   minutesPerUnitToUnitsPerHour,
+  round2,
   VAT_CODES,
   type DocumentLanguage,
   type ExtraDescriptionDocument,
 } from "@navet/shared";
 import { code128Width, drawCode128, drawQrCode } from "./pdf-codes.js";
+import { FONT, FONT_BOLD, FONT_ITALIC, registerDocumentFonts } from "./pdf-fonts.js";
 import { DOCUMENT_TEXTS, documentTexts, type DocumentTexts } from "./document-texts.js";
 import type { SystemService } from "../../system/service/system.service.js";
 import { stockholmDateOf } from "../../system/service/delivery-days.js";
@@ -15,7 +17,8 @@ import { stockholmDateOf } from "../../system/service/delivery-days.js";
 // One shared A4 layout for all outgoing business documents (förfrågan,
 // inköpsorder, offert, orderbekräftelse): company header with logo, document
 // title/number/date, partner address block, row table, optional total.
-// Built with pdfkit — the built-in Helvetica fonts cover åäö (WinAnsi).
+// Built with pdfkit in embedded Liberation Sans (pdf-fonts.ts — every
+// character the font has prints, not just WinAnsi).
 //
 // Dokument på engelska (#7): every customer-/supplier-facing renderer takes
 // `language` in its input (required, so no caller is forgotten) and prints
@@ -906,16 +909,16 @@ function colsFor(hasDiscount: boolean) {
 
 // Exported for the B6a economy reports, which format their own amounts
 // (economy owns the content, mail owns the paper) and therefore need this
-// function's WinAnsi handling — a balance sheet is full of negative numbers.
+// function's minus handling — a balance sheet is full of negative numbers.
 // `language` picks the locale (sv-SE "1 234,50", en-GB "1,234.50" — #7);
 // the default keeps every internal caller Swedish.
 export function formatNumber(value: number, decimals = 2, language: DocumentLanguage = "sv"): string {
-  // sv-SE renders a negative sign as U+2212 (MINUS SIGN), which the
-  // Helvetica standard font's WinAnsiEncoding has no glyph for — pdfkit
-  // silently substitutes the wrong character. Credit notes are the first
-  // caller to ever feed a negative amount through here, so normalize to the
-  // plain ASCII hyphen-minus WinAnsi does support; positive output (every
-  // other document) is unaffected. Kept for every locale — ICU data differs
+  // sv-SE renders a negative sign as U+2212 (MINUS SIGN), which the old
+  // Helvetica standard font (WinAnsi) had no glyph for. The embedded
+  // Liberation Sans (pdf-fonts.ts) has one, but the documents and their
+  // tests print the plain ASCII hyphen-minus since the credit notes, and
+  // every caller that copies this text (economy reports, CSV) expects it —
+  // so the normalization stays. Kept for every locale — ICU data differs
   // between builds.
   return value
     .toLocaleString(documentTexts(language).locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
@@ -949,15 +952,36 @@ export function formatStockholmDateTime(date: Date): string {
 // trailing zeros — "10 min", "6 min", "8,57 min", "7 st/h", never
 // "6,0000 min" or "8,5714 min". A positive time too small for two decimals
 // keeps two significant digits ("0,0042 min") instead of printing "0 min".
-// Same WinAnsi minus handling as formatNumber.
+// Same minus handling as formatNumber.
 function formatTime(value: number): string {
   const options = value > 0 && value < 0.005 ? { maximumSignificantDigits: 2 } : { maximumFractionDigits: 2 };
   return value.toLocaleString("sv-SE", options).replace("−", "-");
 }
 
-function formatQuantity(raw: string, language: DocumentLanguage = "sv"): string {
+// Antal and à-pris are numeric(14,4), and a document prints what is stored
+// (granskning 2026-11-11: 2,125 st printed as "2,13" and an à-pris of
+// 1,4306 as "1,43" — a row the reader could not multiply out). Whole
+// quantities print without decimals as before; any other quantity and every
+// à-pris at least two, at most four. Amounts stay at two (formatNumber).
+function formatDecimals(value: number, min: number, max: number, language: DocumentLanguage): string {
+  return value
+    .toLocaleString(documentTexts(language).locale, { minimumFractionDigits: min, maximumFractionDigits: max })
+    .replace("−", "-");
+}
+
+export function formatQuantity(raw: string | number, language: DocumentLanguage = "sv"): string {
   const n = Number(raw);
-  return Number.isInteger(n) ? n.toLocaleString(documentTexts(language).locale).replace("−", "-") : formatNumber(n, 2, language);
+  return Number.isInteger(n) ? formatDecimals(n, 0, 0, language) : formatDecimals(n, 2, 4, language);
+}
+
+export function formatUnitPrice(value: number, language: DocumentLanguage = "sv"): string {
+  return formatDecimals(value, 2, 4, language);
+}
+
+// A VAT rate as a number: "25", "25,5" (en "25.5") — up to two decimals,
+// never a padded "25,00".
+export function formatVatRate(value: number, language: DocumentLanguage = "sv"): string {
+  return formatDecimals(value, 0, 2, language);
 }
 
 // C3: the Rabatt column's cell text — "<n> %" in formatQuantity's style
@@ -1078,6 +1102,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       margin: PAGE_MARGIN,
       bufferPages: true,
     });
+    registerDocumentFonts(doc);
     const chunks: Buffer[] = [];
     doc.on("data", (chunk: Buffer) => chunks.push(chunk));
     const finished = new Promise<Buffer>((resolve, reject) => {
@@ -1092,8 +1117,8 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     // prints one card per page, and each card goes on its own pallet) —
     // every other renderer draws it once, on the first page only.
     const drawHeader = () => {
-      doc.font("Helvetica-Bold").fontSize(14).text(company?.name || "", left, PAGE_MARGIN);
-      doc.font("Helvetica").fontSize(9).fillColor("#444444");
+      doc.font(FONT_BOLD).fontSize(14).text(company?.name || "", left, PAGE_MARGIN);
+      doc.font(FONT).fontSize(9).fillColor("#444444");
       const companyLines = [
         company?.address,
         [company?.postalCode, company?.city].filter(Boolean).join(" "),
@@ -1156,7 +1181,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       let y = 838 - lines.length * 10 - 6;
       doc.moveTo(left, y).lineTo(left + CONTENT_WIDTH, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
       y += 5;
-      doc.font("Helvetica").fontSize(7.5).fillColor("#666666");
+      doc.font(FONT).fontSize(7.5).fillColor("#666666");
       for (const line of lines) {
         doc.text(line, left, y, { width: CONTENT_WIDTH, align: "center", lineBreak: false });
         y += 10;
@@ -1180,7 +1205,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       // Zeroed bottom margin so writing inside it doesn't trigger a new page.
       const previousBottom = doc.page.margins.bottom;
       doc.page.margins.bottom = 0;
-      doc.font("Helvetica").fontSize(7.5).fillColor("#666666");
+      doc.font(FONT).fontSize(7.5).fillColor("#666666");
       doc.text(texts.pageOf(i - range.start + 1, range.count), PAGE_MARGIN, doc.page.height - 30, {
         width: doc.page.width - PAGE_MARGIN * 2,
         align: "right",
@@ -1224,9 +1249,9 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     }
     doc.rect(PAGE_MARGIN, y, CONTENT_WIDTH, boxHeight).strokeColor("#cccccc").lineWidth(0.5).stroke();
     let by = y + 10;
-    doc.font("Helvetica-Bold").fontSize(9).fillColor("#888888").text(t.heading, PAGE_MARGIN + 12, by);
+    doc.font(FONT_BOLD).fontSize(9).fillColor("#888888").text(t.heading, PAGE_MARGIN + 12, by);
     by += 14;
-    doc.font("Helvetica").fontSize(10).fillColor("#000000");
+    doc.font(FONT).fontSize(10).fillColor("#000000");
     for (const line of boxLines) {
       doc.text(line, PAGE_MARGIN + 12, by);
       by += 14;
@@ -1245,11 +1270,11 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     // --- Document title ---
     let y = 130;
     const numberWithRevision = `${input.documentNumber}${input.revision != null ? ` / ${input.revision}` : ""}`;
-    doc.font("Helvetica-Bold").fontSize(18).text(`${input.title} ${numberWithRevision}`, left, y);
+    doc.font(FONT_BOLD).fontSize(18).text(`${input.title} ${numberWithRevision}`, left, y);
     if (input.documentNumberBarcode) drawTitleBarcode(doc, input.documentNumber, y);
     y += 26;
     doc
-      .font("Helvetica")
+      .font(FONT)
       .fontSize(10)
       .fillColor("#444444")
       .text(meta(t.meta.date, documentDay(input.date)), left, y);
@@ -1318,26 +1343,37 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     y += 10;
 
     // --- Partner address block (+ delivery address block beside it) ---
+    // A name or address line too long for its column wraps INSIDE it and
+    // pushes the next line down (granskning 2026-11-11: a long customer name
+    // ran into the LEVERANSADRESS block beside it). `wrapped` is the extra
+    // height beyond one line, so a line that fits advances exactly as before.
     const blockTop = y;
-    doc.font("Helvetica-Bold").fontSize(9).fillColor("#888888").text(input.partnerLabel.toUpperCase(), left, y);
+    const partnerWidth = input.deliveryAddress ? 250 : CONTENT_WIDTH;
+    const wrapped = (text: string, width: number) =>
+      Math.max(0, doc.heightOfString(text, { width }) - doc.heightOfString("X", { width }));
+    doc.font(FONT_BOLD).fontSize(9).fillColor("#888888").text(input.partnerLabel.toUpperCase(), left, y);
     y += 13;
-    doc.fillColor("#000000").font("Helvetica-Bold").fontSize(11).text(input.partner.name, left, y);
-    y += 15;
-    doc.font("Helvetica").fontSize(10);
+    doc.fillColor("#000000").font(FONT_BOLD).fontSize(11).text(input.partner.name, left, y, { width: partnerWidth });
+    y += 15 + wrapped(input.partner.name, partnerWidth);
+    doc.font(FONT).fontSize(10);
     const partnerLines = addressLines(input.partner, language);
     for (const line of partnerLines) {
-      doc.text(line, left, y);
-      y += 14;
+      doc.text(line, left, y, { width: partnerWidth });
+      y += 14 + wrapped(line, partnerWidth);
     }
 
     if (input.deliveryAddress) {
       const deliveryX = left + 260;
       let dy = blockTop;
-      doc.font("Helvetica-Bold").fontSize(9).fillColor("#888888").text(t.deliveryAddressLabel, deliveryX, dy);
+      doc.font(FONT_BOLD).fontSize(9).fillColor("#888888").text(t.deliveryAddressLabel, deliveryX, dy);
       dy += 13;
-      doc.fillColor("#000000").font("Helvetica-Bold").fontSize(11).text(input.deliveryAddress.label, deliveryX, dy);
-      dy += 15;
-      doc.font("Helvetica").fontSize(10);
+      doc
+        .fillColor("#000000")
+        .font(FONT_BOLD)
+        .fontSize(11)
+        .text(input.deliveryAddress.label, deliveryX, dy, { width: CONTENT_WIDTH - 260 });
+      dy += 15 + wrapped(input.deliveryAddress.label, CONTENT_WIDTH - 260);
+      doc.font(FONT).fontSize(10);
       const deliveryLines = addressLines(input.deliveryAddress, language);
       for (const line of deliveryLines) {
         doc.text(line, deliveryX, dy, { width: CONTENT_WIDTH - 260 });
@@ -1357,7 +1393,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       input.lateInterestText ?? null,
     ].filter((line): line is string => Boolean(line));
     if (termLines.length > 0) {
-      doc.font("Helvetica").fontSize(10).fillColor("#444444");
+      doc.font(FONT).fontSize(10).fillColor("#444444");
       for (const line of termLines) {
         doc.text(line, left, y);
         y += 14;
@@ -1367,7 +1403,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     }
 
     if (input.pricesIncludeVat) {
-      doc.font("Helvetica").fontSize(10).fillColor("#444444").text(t.pricesIncludeVat, left, y);
+      doc.font(FONT).fontSize(10).fillColor("#444444").text(t.pricesIncludeVat, left, y);
       doc.fillColor("#000000");
       y += 18;
     }
@@ -1377,7 +1413,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     // inquiry/PO rows never do, and their Benämning reclaims the width.
     const COLS = colsFor(input.rows.some((row) => Number(row.discountPercent ?? 0) !== 0));
     const drawTableHeader = () => {
-      doc.font("Helvetica-Bold").fontSize(9).fillColor("#555555");
+      doc.font(FONT_BOLD).fontSize(9).fillColor("#555555");
       doc.text(t.columns.articleNumber, left + COLS.articleNumber.x, y, { width: COLS.articleNumber.w });
       doc.text(t.columns.articleName, left + COLS.articleName.x, y, { width: COLS.articleName.w });
       doc.text(t.columns.quantity, left + COLS.quantity.x, y, { width: COLS.quantity.w, align: "right" });
@@ -1388,7 +1424,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       y += 14;
       doc.moveTo(left, y).lineTo(left + CONTENT_WIDTH, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
       y += 8;
-      doc.fillColor("#000000").font("Helvetica").fontSize(9);
+      doc.fillColor("#000000").font(FONT).fontSize(9);
     };
 
     drawTableHeader();
@@ -1427,12 +1463,6 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       );
       doc.fontSize(9);
       const infoHeight = infoLineCounts.reduce((sum, count) => sum + count, 0) * 11;
-      const rowHeight = Math.max(nameHeight + infoHeight, 11) + 6;
-      if (y + rowHeight > TABLE_BOTTOM) {
-        doc.addPage();
-        y = PAGE_MARGIN;
-        drawTableHeader();
-      }
       const quantity = Number(row.quantity);
       const unitPrice = row.unitPrice === null ? null : Number(row.unitPrice);
       // Stored lineAmount is the authority when present (see DocumentPdfRow's
@@ -1459,23 +1489,37 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         ? rowAmount + (row.vatAmount != null ? Number(row.vatAmount) : rowAmount * vatRateFraction)
         : rowAmount;
 
+      const quantityText = formatQuantity(row.quantity, language);
+      const unitPriceText = shownUnitPrice === null ? "–" : formatUnitPrice(shownUnitPrice, language);
+      const amountText = unitPrice === null ? "–" : num(shownAmount);
+      // Every cell that can wrap counts: a long article number (or a huge
+      // amount in its narrow column) used to run into the next row.
+      const rowHeight =
+        Math.max(
+          nameHeight + infoHeight,
+          doc.heightOfString(row.articleNumber, { width: COLS.articleNumber.w }),
+          doc.heightOfString(quantityText, { width: COLS.quantity.w }),
+          doc.heightOfString(unitPriceText, { width: COLS.unitPrice.w }),
+          doc.heightOfString(amountText, { width: COLS.amount.w }),
+          11
+        ) + 6;
+      if (y + rowHeight > TABLE_BOTTOM) {
+        doc.addPage();
+        y = PAGE_MARGIN;
+        drawTableHeader();
+      }
+
       doc.text(row.articleNumber, left + COLS.articleNumber.x, y, { width: COLS.articleNumber.w });
       doc.text(row.articleName, left + COLS.articleName.x, y, { width: COLS.articleName.w });
-      doc.text(formatQuantity(row.quantity, language), left + COLS.quantity.x, y, { width: COLS.quantity.w, align: "right" });
+      doc.text(quantityText, left + COLS.quantity.x, y, { width: COLS.quantity.w, align: "right" });
       doc.text(row.unit ?? "", left + COLS.unit.x, y, { width: COLS.unit.w });
-      doc.text(shownUnitPrice === null ? "–" : num(shownUnitPrice), left + COLS.unitPrice.x, y, {
-        width: COLS.unitPrice.w,
-        align: "right",
-      });
+      doc.text(unitPriceText, left + COLS.unitPrice.x, y, { width: COLS.unitPrice.w, align: "right" });
       if (COLS.discount)
         doc.text(formatDiscount(row.discountPercent, language), left + COLS.discount.x, y, {
           width: COLS.discount.w,
-        align: "right",
-      });
-      doc.text(unitPrice === null ? "–" : num(shownAmount), left + COLS.amount.x, y, {
-        width: COLS.amount.w,
-        align: "right",
-      });
+          align: "right",
+        });
+      doc.text(amountText, left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
       if (infoLines.length > 0) {
         doc.fontSize(8).fillColor("#666666");
         let infoY = y + nameHeight + 1;
@@ -1504,7 +1548,27 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     // rate instead (Summa + N Moms lines + Att betala), so 2+ rates don't
     // overflow the reserved space into the footer zone.
     const vatInSekLine = input.showTotal && input.vatInSek ? input.vatInSek : null;
-    const vatBlockHeight = (perRowVatGroups ? (2 + perRowVatGroups.filter(vatGroupPrints).length) * 15 : 45) + (vatInSekLine ? 15 : 0);
+    // The totals' labels end where the amounts' column begins.
+    const labelX = left + COLS.quantity.x - 60;
+    const labelW = COLS.unitPrice.x - COLS.quantity.x + 110;
+    // Each perRow VAT line carries its beskattningsunderlag — "Moms (25 %)
+    // på 200,00" (ML 17 kap. 24 § p. 8: the base per rate or exemption,
+    // which "Summa exkl. moms" stops being as soon as there are two). The
+    // label may use the width from the left margin to the labels' right
+    // edge (a 0 % code's name is long); one that still wraps grows its line.
+    const vatLabelW = labelX + labelW - left;
+    const perRowVatLines = perRowVatGroups
+      ? (() => {
+          doc.font(FONT).fontSize(10);
+          const single = doc.heightOfString("X", { width: vatLabelW });
+          return perRowVatGroups.filter(vatGroupPrints).map((group) => {
+            const label = t.totals.vatOn(vatGroupLabel(group, t), num(group.net));
+            return { label, amount: group.vatAmount, advance: 15 + Math.max(0, doc.heightOfString(label, { width: vatLabelW }) - single) };
+          });
+        })()
+      : null;
+    const vatBlockHeight =
+      (perRowVatLines ? 30 + perRowVatLines.reduce((sum, line) => sum + line.advance, 0) : 45) + (vatInSekLine ? 15 : 0);
 
     // Break to a fresh page rather than colliding with the footer when the
     // table ends near the bottom.
@@ -1518,29 +1582,28 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       // row through computePerRowVatGroups (stored vatAmount when present,
       // otherwise net × rate) — the same figures the cells above showed.
       const vatTotal = computePerRowVatGroups(input.rows).reduce((sum, g) => sum + g.vatAmount, 0);
-      const labelX = left + COLS.quantity.x - 60;
-      const labelW = COLS.unitPrice.x - COLS.quantity.x + 110;
-      doc.font("Helvetica-Bold").fontSize(10);
+      doc.font(FONT_BOLD).fontSize(10);
       const grossLabel = input.vat ? t.totals.amountDue(input.currency) : t.totals.totalInclVat(input.currency);
       doc.text(grossLabel, labelX, y, { width: labelW, align: "right" });
       doc.text(num(total + vatTotal), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
       y += 15;
-      doc.font("Helvetica").fontSize(10);
+      doc.font(FONT).fontSize(10);
       doc.text(t.totals.ofWhichVat, labelX, y, { width: labelW, align: "right" });
       doc.text(num(vatTotal), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
     } else if (input.showTotal && input.vat && "rate" in input.vat) {
-      // Invoice totals: net, VAT and the amount to pay.
-      const vatAmount = total * (input.vat.rate / 100);
-      const labelX = left + COLS.quantity.x - 60;
-      const labelW = COLS.unitPrice.x - COLS.quantity.x + 110;
-      doc.font("Helvetica").fontSize(10);
+      // Single-rate totals (the purchase order, the legacy invoice reprint):
+      // net, VAT and the gross. The VAT is rounded to öre like the IO card's
+      // (PurchaseOrderDetail), so the printed lines add up — 10,01 + 2,50 =
+      // 12,51, not the unrounded 12,52 (granskning 2026-11-11).
+      const vatAmount = round2(total * (input.vat.rate / 100));
+      doc.font(FONT).fontSize(10);
       doc.text(t.totals.totalExclVat(input.currency), labelX, y, { width: labelW, align: "right" });
       doc.text(num(total), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
       y += 15;
       doc.text(t.totals.vat(input.vat.rate), labelX, y, { width: labelW, align: "right" });
       doc.text(num(vatAmount), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
       y += 15;
-      doc.font("Helvetica-Bold").fontSize(10);
+      doc.font(FONT_BOLD).fontSize(10);
       const grossLabel =
         input.vat.grossLabel === "totalInclVat" ? t.totals.totalInclVat(input.currency) : t.totals.amountDue(input.currency);
       doc.text(grossLabel, labelX, y, { width: labelW, align: "right" });
@@ -1550,34 +1613,30 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       // present on the invoice, highest rate first. 0 %-rader contribute no
       // line of their own (their VAT is always 0) but their net amount still
       // counts toward "Summa exkl. moms"/"Att betala" via `total` above.
-      const labelX = left + COLS.quantity.x - 60;
-      const labelW = COLS.unitPrice.x - COLS.quantity.x + 110;
-      doc.font("Helvetica").fontSize(10);
+      doc.font(FONT).fontSize(10);
       doc.text(t.totals.totalExclVat(input.currency), labelX, y, { width: labelW, align: "right" });
       doc.text(num(total), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
       y += 15;
-      let vatTotal = 0;
-      for (const group of perRowVatGroups) {
-        vatTotal += group.vatAmount;
-        if (!vatGroupPrints(group)) continue;
-        doc.text(vatGroupLabel(group, t), labelX, y, { width: labelW, align: "right" });
-        doc.text(num(group.vatAmount), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
-        y += 15;
+      const vatTotal = perRowVatGroups.reduce((sum, group) => sum + group.vatAmount, 0);
+      for (const line of perRowVatLines!) {
+        doc.text(line.label, left, y, { width: vatLabelW, align: "right" });
+        doc.text(num(line.amount), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
+        y += line.advance;
       }
-      doc.font("Helvetica-Bold").fontSize(10);
+      doc.font(FONT_BOLD).fontSize(10);
       doc.text(t.totals.amountDue(input.currency), labelX, y, { width: labelW, align: "right" });
       doc.text(num(total + vatTotal), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
     } else if (input.showTotal) {
-      doc.font("Helvetica-Bold").fontSize(10);
+      doc.font(FONT_BOLD).fontSize(10);
       const label = hasUnpricedRows ? t.totals.totalExclUnpriced(input.currency) : t.totals.total(input.currency);
-      doc.text(label, left + COLS.quantity.x - 60, y, { width: COLS.unitPrice.x - COLS.quantity.x + 110, align: "right" });
+      doc.text(label, labelX, y, { width: labelW, align: "right" });
       doc.text(num(total), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
     }
 
     // Valuta: the VAT in SEK under the totals (ML 17 kap. 29 §).
     if (vatInSekLine) {
       y += 15;
-      doc.font("Helvetica").fontSize(9).fillColor("#444444");
+      doc.font(FONT).fontSize(9).fillColor("#444444");
       doc.text(t.totals.vatInSek(num(vatInSekLine.amount), num(vatInSekLine.rate, 6)), left, y, {
         width: CONTENT_WIDTH,
         align: "right",
@@ -1590,7 +1649,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     const vatTexts = (input.vatTexts ?? []).filter((text) => text.trim() !== "");
     if (vatTexts.length > 0) {
       y += input.showTotal ? 24 : 10;
-      doc.font("Helvetica").fontSize(9).fillColor("#444444");
+      doc.font(FONT).fontSize(9).fillColor("#444444");
       for (const text of vatTexts) {
         const height = doc.heightOfString(text, { width: CONTENT_WIDTH });
         if (y + height > TABLE_BOTTOM) {
@@ -1623,9 +1682,9 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     const t = documentTexts(language);
 
     let y = 130;
-    doc.font("Helvetica-Bold").fontSize(18).text(t.titles.paymentReminder(input.level), left, y);
+    doc.font(FONT_BOLD).fontSize(18).text(t.titles.paymentReminder(input.level), left, y);
     y += 26;
-    doc.font("Helvetica").fontSize(10).fillColor("#444444");
+    doc.font(FONT).fontSize(10).fillColor("#444444");
     doc.text(`${t.meta.date}: ${documentDay(input.printedAt)}`, left, y);
     y += 14;
     // The reference block — which invoice this is about.
@@ -1643,11 +1702,11 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     y += 10;
 
     // Address block — the invoice's frozen snapshot, same layout as render().
-    doc.font("Helvetica-Bold").fontSize(9).fillColor("#888888").text(t.partnerLabels.invoiceAddress.toUpperCase(), left, y);
+    doc.font(FONT_BOLD).fontSize(9).fillColor("#888888").text(t.partnerLabels.invoiceAddress.toUpperCase(), left, y);
     y += 13;
-    doc.fillColor("#000000").font("Helvetica-Bold").fontSize(11).text(input.partner.name, left, y);
+    doc.fillColor("#000000").font(FONT_BOLD).fontSize(11).text(input.partner.name, left, y);
     y += 15;
-    doc.font("Helvetica").fontSize(10);
+    doc.font(FONT).fontSize(10);
     const partnerLines = addressLines(input.partner, language);
     for (const line of partnerLines) {
       doc.text(line, left, y);
@@ -1674,7 +1733,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     const amountX = left + CONTENT_WIDTH - 90;
     const amountW = 90;
     const amountLine = (label: string, value: number, bold = false) => {
-      doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(10);
+      doc.font(bold ? FONT_BOLD : FONT).fontSize(10);
       doc.text(label, labelX, y, { width: labelW, align: "right" });
       doc.text(formatNumber(value, 2, language), amountX, y, { width: amountW, align: "right" });
       y += 15;
@@ -1709,9 +1768,9 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     const t = documentTexts(language);
 
     let y = 130;
-    doc.font("Helvetica-Bold").fontSize(18).text(input.title, left, y);
+    doc.font(FONT_BOLD).fontSize(18).text(input.title, left, y);
     y += 26;
-    doc.font("Helvetica").fontSize(10).fillColor("#444444");
+    doc.font(FONT).fontSize(10).fillColor("#444444");
     doc.text(`${t.deviation.number}: ${input.documentNumber}`, left, y);
     y += 14;
     doc.text(`${t.deviation.date}: ${input.date}`, left, y);
@@ -1724,11 +1783,11 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     y += 10;
 
     if (input.partner) {
-      doc.font("Helvetica-Bold").fontSize(9).fillColor("#888888").text(input.partnerLabel ?? "", left, y);
+      doc.font(FONT_BOLD).fontSize(9).fillColor("#888888").text(input.partnerLabel ?? "", left, y);
       y += 13;
-      doc.fillColor("#000000").font("Helvetica-Bold").fontSize(11).text(input.partner.name, left, y);
+      doc.fillColor("#000000").font(FONT_BOLD).fontSize(11).text(input.partner.name, left, y);
       y += 15;
-      doc.font("Helvetica").fontSize(10);
+      doc.font(FONT).fontSize(10);
       for (const line of addressLines(input.partner, language)) {
         doc.text(line, left, y);
         y += 14;
@@ -1739,15 +1798,15 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     // One labelled paragraph per section; a section that would collide with
     // the footer starts on a fresh page (long texts flow on from there).
     for (const section of input.sections) {
-      doc.font("Helvetica").fontSize(10);
+      doc.font(FONT).fontSize(10);
       const height = doc.heightOfString(section.text, { width: CONTENT_WIDTH });
       if (y + 14 + Math.min(height, 60) > TABLE_BOTTOM) {
         doc.addPage();
         y = PAGE_MARGIN;
       }
-      doc.font("Helvetica-Bold").fontSize(9).fillColor("#888888").text(section.label.toUpperCase(), left, y);
+      doc.font(FONT_BOLD).fontSize(9).fillColor("#888888").text(section.label.toUpperCase(), left, y);
       y += 13;
-      doc.font("Helvetica").fontSize(10).fillColor("#000000").text(section.text, left, y, { width: CONTENT_WIDTH });
+      doc.font(FONT).fontSize(10).fillColor("#000000").text(section.text, left, y, { width: CONTENT_WIDTH });
       y = doc.y + 12;
     }
 
@@ -1762,11 +1821,11 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     const left = PAGE_MARGIN;
 
     let y = 130;
-    doc.font("Helvetica-Bold").fontSize(18).text(`Plocklista ${input.documentNumber}`, left, y);
+    doc.font(FONT_BOLD).fontSize(18).text(`Plocklista ${input.documentNumber}`, left, y);
     // Skanning (#4): the picker scans the order number in Utleverans.
     drawTitleBarcode(doc, input.documentNumber, y);
     y += 26;
-    doc.font("Helvetica").fontSize(10).fillColor("#444444");
+    doc.font(FONT).fontSize(10).fillColor("#444444");
     doc.text(`Utskriven: ${documentDay(input.printedAt)}`, left, y);
     y += 14;
     doc.text(`Kund: ${input.customerName}`, left, y);
@@ -1797,7 +1856,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     y += 12;
 
     const drawTableHeader = () => {
-      doc.font("Helvetica-Bold").fontSize(9).fillColor("#555555");
+      doc.font(FONT_BOLD).fontSize(9).fillColor("#555555");
       doc.text("Artikelnummer", left + PICK_COLS.articleNumber.x, y, { width: PICK_COLS.articleNumber.w });
       doc.text("Benämning", left + PICK_COLS.articleName.x, y, { width: PICK_COLS.articleName.w });
       doc.text("Att plocka", left + PICK_COLS.quantity.x, y, { width: PICK_COLS.quantity.w, align: "right" });
@@ -1807,7 +1866,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       y += 14;
       doc.moveTo(left, y).lineTo(left + CONTENT_WIDTH, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
       y += 8;
-      doc.fillColor("#000000").font("Helvetica").fontSize(9);
+      doc.fillColor("#000000").font(FONT).fontSize(9);
     };
 
     drawTableHeader();
@@ -1826,7 +1885,12 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       ];
       const measured = measureInfoLines(doc, infoLines, PICK_COLS.articleName.w);
       const rowHeight =
-        Math.max(nameHeight + measured.height, doc.heightOfString(locationText, { width: PICK_COLS.locations.w }), 11) + 8;
+        Math.max(
+          nameHeight + measured.height,
+          doc.heightOfString(row.articleNumber, { width: PICK_COLS.articleNumber.w }),
+          doc.heightOfString(locationText, { width: PICK_COLS.locations.w }),
+          11
+        ) + 8;
       if (y + rowHeight > TABLE_BOTTOM) {
         doc.addPage();
         y = PAGE_MARGIN;
@@ -1835,12 +1899,12 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.text(row.articleNumber, left + PICK_COLS.articleNumber.x, y, { width: PICK_COLS.articleNumber.w });
       doc.text(row.articleName, left + PICK_COLS.articleName.x, y, { width: PICK_COLS.articleName.w });
       doc
-        .font("Helvetica-Bold")
+        .font(FONT_BOLD)
         .text(formatQuantity(String(row.quantityToPick)), left + PICK_COLS.quantity.x, y, {
           width: PICK_COLS.quantity.w,
           align: "right",
         })
-        .font("Helvetica");
+        .font(FONT);
       doc.text(row.unit ?? "", left + PICK_COLS.unit.x, y, { width: PICK_COLS.unit.w });
       doc.text(locationText, left + PICK_COLS.locations.x, y, { width: PICK_COLS.locations.w });
       // Empty line for the picker to tick off by hand.
@@ -1856,7 +1920,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
 
     doc.moveTo(left, y).lineTo(left + CONTENT_WIDTH, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
     y += 24;
-    doc.font("Helvetica").fontSize(10).text("Plockat av: ______________________    Datum: ______________", left, y);
+    doc.font(FONT).fontSize(10).text("Plockat av: ______________________    Datum: ______________", left, y);
 
     drawPageNumbers(doc);
     doc.end();
@@ -1872,10 +1936,10 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     const left = PAGE_MARGIN;
 
     let y = 130;
-    doc.font("Helvetica-Bold").fontSize(18).text(`Räknelista ${input.documentNumber}`, left, y);
+    doc.font(FONT_BOLD).fontSize(18).text(`Räknelista ${input.documentNumber}`, left, y);
     drawTitleBarcode(doc, input.locationLabelCode, y);
     y += 26;
-    doc.font("Helvetica").fontSize(10).fillColor("#444444");
+    doc.font(FONT).fontSize(10).fillColor("#444444");
     doc.text(`Utskriven: ${documentDay(input.printedAt)}`, left, y);
     y += 14;
     doc.text(`Lagerplats: ${input.warehouseName} — ${input.locationName}`, left, y);
@@ -1892,7 +1956,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     y += 12;
 
     const drawTableHeader = () => {
-      doc.font("Helvetica-Bold").fontSize(9).fillColor("#555555");
+      doc.font(FONT_BOLD).fontSize(9).fillColor("#555555");
       doc.text("Artikelnummer", left + COUNT_COLS.articleNumber.x, y, { width: COUNT_COLS.articleNumber.w });
       doc.text("Benämning", left + COUNT_COLS.articleName.x, y, { width: COUNT_COLS.articleName.w });
       doc.text("Enhet", left + COUNT_COLS.unit.x, y, { width: COUNT_COLS.unit.w });
@@ -1903,14 +1967,18 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       y += 14;
       doc.moveTo(left, y).lineTo(left + CONTENT_WIDTH, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
       y += 8;
-      doc.fillColor("#000000").font("Helvetica").fontSize(9);
+      doc.fillColor("#000000").font(FONT).fontSize(9);
     };
 
     drawTableHeader();
 
     for (const row of input.rows) {
       const rowHeight =
-        Math.max(doc.heightOfString(row.articleName, { width: COUNT_COLS.articleName.w }), 11) + 10;
+        Math.max(
+          doc.heightOfString(row.articleName, { width: COUNT_COLS.articleName.w }),
+          doc.heightOfString(row.articleNumber, { width: COUNT_COLS.articleNumber.w }),
+          11
+        ) + 10;
       if (y + rowHeight > TABLE_BOTTOM) {
         doc.addPage();
         y = PAGE_MARGIN;
@@ -1937,7 +2005,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
 
     doc.moveTo(left, y).lineTo(left + CONTENT_WIDTH, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
     y += 24;
-    doc.font("Helvetica").fontSize(10).text("Räknat av: ______________________    Datum: ______________", left, y);
+    doc.font(FONT).fontSize(10).text("Räknat av: ______________________    Datum: ______________", left, y);
 
     drawPageNumbers(doc);
     doc.end();
@@ -1958,13 +2026,13 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     const dn = t.deliveryNote;
 
     let y = 130;
-    doc.font("Helvetica-Bold").fontSize(18).text(`${t.titles.deliveryNote} ${input.documentNumber}`, left, y);
+    doc.font(FONT_BOLD).fontSize(18).text(`${t.titles.deliveryNote} ${input.documentNumber}`, left, y);
     y += 26;
-    doc.font("Helvetica").fontSize(10).fillColor("#444444");
+    doc.font(FONT).fontSize(10).fillColor("#444444");
     doc.text(`${dn.deliveryDate}: ${documentDay(input.deliveredAt)}`, left, y);
     y += 14;
     if (input.undoneAt) {
-      doc.font("Helvetica-Bold").text(dn.undone(formatStockholmDateTime(input.undoneAt)), left, y).font("Helvetica");
+      doc.font(FONT_BOLD).text(dn.undone(formatStockholmDateTime(input.undoneAt)), left, y).font(FONT);
       y += 14;
     }
     doc.text(`${dn.orderNumber}: ${input.orderNumber}`, left, y);
@@ -1997,7 +2065,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     y += 12;
 
     const drawTableHeader = () => {
-      doc.font("Helvetica-Bold").fontSize(9).fillColor("#555555");
+      doc.font(FONT_BOLD).fontSize(9).fillColor("#555555");
       doc.text(dn.columns.article, left + DELIVERY_NOTE_COLS.articleNumber.x, y, { width: DELIVERY_NOTE_COLS.articleNumber.w });
       doc.text(dn.columns.articleName, left + DELIVERY_NOTE_COLS.articleName.x, y, { width: DELIVERY_NOTE_COLS.articleName.w });
       doc.text(dn.columns.delivered, left + DELIVERY_NOTE_COLS.quantity.x, y, {
@@ -2012,7 +2080,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       y += 14;
       doc.moveTo(left, y).lineTo(left + CONTENT_WIDTH, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
       y += 8;
-      doc.fillColor("#000000").font("Helvetica").fontSize(9);
+      doc.fillColor("#000000").font(FONT).fontSize(9);
     };
 
     drawTableHeader();
@@ -2029,7 +2097,12 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         ...(row.undoneAt ? [dn.undone(formatStockholmDateTime(row.undoneAt))] : []),
       ];
       const measured = measureInfoLines(doc, infoLines, DELIVERY_NOTE_COLS.articleName.w);
-      const rowHeight = Math.max(nameHeight + measured.height, 11) + 8;
+      const rowHeight =
+        Math.max(
+          nameHeight + measured.height,
+          doc.heightOfString(row.articleNumber, { width: DELIVERY_NOTE_COLS.articleNumber.w }),
+          11
+        ) + 8;
       if (y + rowHeight > TABLE_BOTTOM) {
         doc.addPage();
         y = PAGE_MARGIN;
@@ -2040,12 +2113,12 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       });
       doc.text(row.articleName, left + DELIVERY_NOTE_COLS.articleName.x, y, { width: DELIVERY_NOTE_COLS.articleName.w });
       doc
-        .font("Helvetica-Bold")
+        .font(FONT_BOLD)
         .text(formatQuantity(String(row.quantity), language), left + DELIVERY_NOTE_COLS.quantity.x, y, {
           width: DELIVERY_NOTE_COLS.quantity.w,
           align: "right",
         })
-        .font("Helvetica");
+        .font(FONT);
       doc.text(row.unit ?? "", left + DELIVERY_NOTE_COLS.unit.x, y, { width: DELIVERY_NOTE_COLS.unit.w });
       doc.text(formatQuantity(String(row.priorDelivered), language), left + DELIVERY_NOTE_COLS.priorDelivered.x, y, {
         width: DELIVERY_NOTE_COLS.priorDelivered.w,
@@ -2074,21 +2147,21 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     const left = PAGE_MARGIN;
 
     let y = 130;
-    doc.font("Helvetica-Bold").fontSize(18).text(`Tillverkningsorder ${input.orderNumber}`, left, y);
+    doc.font(FONT_BOLD).fontSize(18).text(`Tillverkningsorder ${input.orderNumber}`, left, y);
     y += 26;
-    doc.font("Helvetica").fontSize(10).fillColor("#444444");
+    doc.font(FONT).fontSize(10).fillColor("#444444");
     doc.text(`Utskriven: ${documentDay(input.printedAt)}    Status: ${input.statusLabel}`, left, y);
     doc.fillColor("#000000");
     y += 22;
 
     if (input.salesOrderRef) {
-      doc.font("Helvetica").fontSize(10);
+      doc.font(FONT).fontSize(10);
       doc.text(`Kundorder: ${input.salesOrderRef.orderNumber} — ${input.salesOrderRef.customerName}`, left, y);
       y += 16;
     }
 
     if (input.dueDate) {
-      doc.font("Helvetica").fontSize(10);
+      doc.font(FONT).fontSize(10);
       doc.text(`Planerat färdigdatum: ${input.dueDate}`, left, y);
       y += 16;
     }
@@ -2097,10 +2170,10 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     // real height instead of a fixed step (they were printed on top of the
     // second line).
     const heading = `${input.articleNumber} — ${input.articleName}`;
-    doc.font("Helvetica-Bold").fontSize(13).text(heading, left, y, { width: CONTENT_WIDTH });
+    doc.font(FONT_BOLD).fontSize(13).text(heading, left, y, { width: CONTENT_WIDTH });
     y += doc.heightOfString(heading, { width: CONTENT_WIDTH }) + 5;
     if (input.extraDescription) {
-      doc.font("Helvetica").fontSize(9).fillColor("#444444");
+      doc.font(FONT).fontSize(9).fillColor("#444444");
       doc.text(input.extraDescription, left, y, { width: CONTENT_WIDTH });
       y += doc.heightOfString(input.extraDescription, { width: CONTENT_WIDTH }) + 6;
       doc.fillColor("#000000");
@@ -2108,7 +2181,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     // Konfigurator 4c: the choice lines under the article — the same 8 pt
     // grey sub-lines the customer documents print under a configured row.
     if (input.configurationLines && input.configurationLines.length > 0) {
-      doc.font("Helvetica").fontSize(8).fillColor("#666666");
+      doc.font(FONT).fontSize(8).fillColor("#666666");
       for (const line of input.configurationLines) {
         doc.text(line, left, y, { width: CONTENT_WIDTH });
         y += 11;
@@ -2117,12 +2190,12 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       y += 4;
     }
     if (input.revisionLine) {
-      doc.font("Helvetica").fontSize(9).fillColor("#444444");
+      doc.font(FONT).fontSize(9).fillColor("#444444");
       doc.text(input.revisionLine, left, y, { width: CONTENT_WIDTH });
       y += doc.heightOfString(input.revisionLine, { width: CONTENT_WIDTH }) + 6;
       doc.fillColor("#000000");
     }
-    doc.font("Helvetica").fontSize(11).text(`Antal att tillverka: ${formatQuantity(input.quantity)}`, left, y);
+    doc.font(FONT).fontSize(11).text(`Antal att tillverka: ${formatQuantity(input.quantity)}`, left, y);
     y += 18;
     if (input.note) {
       doc.fontSize(10).text(`Anteckning: ${input.note}`, left, y, { width: CONTENT_WIDTH });
@@ -2131,14 +2204,14 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     y += 12;
 
     // --- Operations ---
-    doc.font("Helvetica-Bold").fontSize(12).text("Operationer", left, y);
+    doc.font(FONT_BOLD).fontSize(12).text("Operationer", left, y);
     y += 18;
 
     if (input.operations.length === 0) {
-      doc.font("Helvetica").fontSize(10).text("Inga operationer — ordern är inte frisläppt än.", left, y);
+      doc.font(FONT).fontSize(10).text("Inga operationer — ordern är inte frisläppt än.", left, y);
       y += 20;
     } else {
-      doc.font("Helvetica-Bold").fontSize(9).fillColor("#555555");
+      doc.font(FONT_BOLD).fontSize(9).fillColor("#555555");
       doc.text("Op", left + MO_OP_COLS.seq.x, y, { width: MO_OP_COLS.seq.w });
       doc.text("Operation", left + MO_OP_COLS.workCenter.x, y, { width: MO_OP_COLS.workCenter.w });
       doc.text("Ställtid", left + MO_OP_COLS.setup.x, y, { width: MO_OP_COLS.setup.w, align: "right" });
@@ -2148,7 +2221,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       y += 14;
       doc.moveTo(left, y).lineTo(left + CONTENT_WIDTH, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
       y += 8;
-      doc.fillColor("#000000").font("Helvetica").fontSize(9);
+      doc.fillColor("#000000").font(FONT).fontSize(9);
 
       for (const op of input.operations) {
         if (y + 20 > TABLE_BOTTOM) {
@@ -2255,14 +2328,14 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.addPage();
       y = PAGE_MARGIN;
     }
-    doc.font("Helvetica-Bold").fontSize(12).fillColor("#000000").text("Material", left, y);
+    doc.font(FONT_BOLD).fontSize(12).fillColor("#000000").text("Material", left, y);
     y += 18;
 
     if (input.materials.length === 0) {
-      doc.font("Helvetica").fontSize(10).text("Inget material — ordern är inte frisläppt än.", left, y);
+      doc.font(FONT).fontSize(10).text("Inget material — ordern är inte frisläppt än.", left, y);
       y += 20;
     } else {
-      doc.font("Helvetica-Bold").fontSize(9).fillColor("#555555");
+      doc.font(FONT_BOLD).fontSize(9).fillColor("#555555");
       doc.text("Op", left + MO_MAT_COLS.op.x, y, { width: MO_MAT_COLS.op.w });
       doc.text("Artikelnummer", left + MO_MAT_COLS.articleNumber.x, y, { width: MO_MAT_COLS.articleNumber.w });
       doc.text("Benämning", left + MO_MAT_COLS.articleName.x, y, { width: MO_MAT_COLS.articleName.w });
@@ -2273,11 +2346,12 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       y += 14;
       doc.moveTo(left, y).lineTo(left + CONTENT_WIDTH, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
       y += 8;
-      doc.fillColor("#000000").font("Helvetica").fontSize(9);
+      doc.fillColor("#000000").font(FONT).fontSize(9);
 
       for (const material of input.materials) {
         const nameHeight = doc.heightOfString(material.articleName, { width: MO_MAT_COLS.articleName.w });
-        const rowHeight = Math.max(nameHeight, 11) + 9;
+        const rowHeight =
+          Math.max(nameHeight, doc.heightOfString(material.articleNumber, { width: MO_MAT_COLS.articleNumber.w }), 11) + 9;
         if (y + rowHeight > TABLE_BOTTOM) {
           doc.addPage();
           y = PAGE_MARGIN;
@@ -2308,7 +2382,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       y += 24;
     }
 
-    doc.font("Helvetica").fontSize(10).text("Utförd av: ______________________    Datum: ______________", left, y);
+    doc.font(FONT).fontSize(10).text("Utförd av: ______________________    Datum: ______________", left, y);
 
     drawPageNumbers(doc);
     doc.end();
@@ -2340,20 +2414,20 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
 
     // Small grey uppercase label above each value.
     const label = (text: string, x: number, y: number) => {
-      doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#777777");
+      doc.font(FONT_BOLD).fontSize(7.5).fillColor("#777777");
       doc.text(text, x, y, { lineBreak: false });
       doc.fillColor("#000000");
     };
     // One line, big and bold — ellipsis instead of wrapping, so a long value
     // can never push the card past the fold.
     const value = (text: string, x: number, y: number, size: number, width: number) => {
-      doc.font("Helvetica-Bold").fontSize(size).fillColor("#000000");
+      doc.font(FONT_BOLD).fontSize(size).fillColor("#000000");
       doc.text(text, x, y, { width, height: size * 1.25, ellipsis: true });
     };
     // The quantity: shrinks the font (never below 20 pt) until the value and
     // its unit fit on one line — "1 234,5 kg" must stay whole.
     const fitValue = (text: string, x: number, y: number, size: number, width: number) => {
-      doc.font("Helvetica-Bold").fillColor("#000000");
+      doc.font(FONT_BOLD).fillColor("#000000");
       let fontSize = size;
       while (fontSize > 20 && doc.fontSize(fontSize).widthOfString(text) > width) fontSize -= 2;
       doc.fontSize(fontSize).text(text, x, y + (size - fontSize) / 2, { width, height: fontSize * 1.25, ellipsis: true });
@@ -2397,7 +2471,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
 
       // 1. Title band.
       doc.rect(left, cardTop, CONTENT_WIDTH, 20).fill("#000000");
-      doc.font("Helvetica-Bold").fontSize(10).fillColor("#ffffff");
+      doc.font(FONT_BOLD).fontSize(10).fillColor("#ffffff");
       doc.text(pc.title, left + pad, cardTop + 5.5, { lineBreak: false });
       doc.text(card.kind === "final" ? pc.toCustomer : card.kind === "subcontract" ? pc.toSubcontractor : pc.internal, left, cardTop + 5.5, {
         width: CONTENT_WIDTH - pad,
@@ -2432,7 +2506,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       // Two-line budget before ellipsizing — same bold-black treatment as
       // value(), which is single-line only, so a direct doc.text call with a
       // taller fixed box (up to 2 lines at 13 pt; one line on the compact card).
-      doc.font("Helvetica-Bold").fontSize(13).fillColor("#000000");
+      doc.font(FONT_BOLD).fontSize(13).fillColor("#000000");
       doc.text(card.articleName || "—", left + pad, yName + 10, { width: articleColWidth - 2 * pad, height: compact ? 16 : 32, ellipsis: true });
       // The right column (quantity + Kolli) needs its own minimum on the
       // compact card, where the left column may be the shorter one.
@@ -2477,9 +2551,9 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
             .slice(0, 3);
         const addressCell = (labelText: string, name: string, lines: string[], x: number) => {
           label(labelText, x + pad, y + 5);
-          doc.font("Helvetica-Bold").fontSize(11).fillColor("#000000");
+          doc.font(FONT_BOLD).fontSize(11).fillColor("#000000");
           doc.text(name || "—", x + pad, y + 14, { width: half - 2 * pad, height: 14, ellipsis: true });
-          doc.font("Helvetica-Bold").fontSize(9).fillColor("#000000");
+          doc.font(FONT_BOLD).fontSize(9).fillColor("#000000");
           lines.forEach((line, i) => {
             doc.text(line, x + pad, y + 28 + i * 10, { width: half - 2 * pad, height: 10, ellipsis: true });
           });
@@ -2513,7 +2587,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         thinLine(left + half, y, left + half, y + rowDHeight);
         label(pc.manufacturingOrder, left + half + pad, y + 6);
         const moText = card.manufacturingOrder || "—";
-        doc.font("Helvetica-Bold").fillColor("#000000");
+        doc.font(FONT_BOLD).fillColor("#000000");
         let moSize = 18;
         while (moSize > 12 && doc.fontSize(moSize).widthOfString(moText) > half - 2 * pad) moSize -= 1;
         doc.fontSize(moSize).text(moText, left + half + pad, y + 15 + (18 - moSize) / 2, { width: half - 2 * pad, height: moSize * 1.25, ellipsis: true });
@@ -2535,14 +2609,14 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         // does not fit at 18 pt shrinks to 14 pt, and failing that wraps to
         // two 13 pt lines (the row grows to hold them).
         const nameWidth = half - 2 * pad;
-        doc.font("Helvetica-Bold");
+        doc.font(FONT_BOLD);
         const nameSize =
           address.length === 0 ? 18 : ([18, 16, 14].find((size) => doc.fontSize(size).widthOfString(card.customerName) <= nameWidth) ?? 13);
         const nameHeight = nameSize === 13 ? 2 * 13 * 1.25 : 21;
         const rowBHeight = 6 + 9 + Math.max(nameHeight, address.length * 11) + 6;
         if (address.length > 0) {
           label(pc.customer, left + pad, y + 6);
-          doc.font("Helvetica-Bold").fontSize(nameSize).fillColor("#000000");
+          doc.font(FONT_BOLD).fontSize(nameSize).fillColor("#000000");
           doc.text(card.customerName, left + pad, y + 15 + (nameSize === 13 ? 0 : 18 - nameSize), {
             width: nameWidth,
             height: nameSize === 13 ? nameHeight : nameSize * 1.25,
@@ -2550,7 +2624,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
           });
           thinLine(left + half, y, left + half, y + rowBHeight);
           label(pc.deliveryAddress, left + half + pad, y + 6);
-          doc.font("Helvetica-Bold").fontSize(10).fillColor("#000000");
+          doc.font(FONT_BOLD).fontSize(10).fillColor("#000000");
           address.forEach((line, i) => {
             doc.text(line, left + half + pad, y + 16 + i * 11, { width: half - 2 * pad, height: 11, ellipsis: true });
           });
@@ -2626,9 +2700,9 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     const left = PAGE_MARGIN;
 
     let y = 130;
-    doc.font("Helvetica-Bold").fontSize(18).text(input.periodLabel, left, y);
+    doc.font(FONT_BOLD).fontSize(18).text(input.periodLabel, left, y);
     y += 24;
-    doc.font("Helvetica").fontSize(10).fillColor("#444444").text(input.status, left, y);
+    doc.font(FONT).fontSize(10).fillColor("#444444").text(input.status, left, y);
     doc.fillColor("#000000");
     y += 24;
 
@@ -2649,14 +2723,14 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         y = PAGE_MARGIN;
       }
       doc
-        .font("Helvetica-Bold")
+        .font(FONT_BOLD)
         .fontSize(11)
         .text(`${employee.name} (${employee.employeeNumber}) — ${employee.employmentTypeLabel}`, left, y, {
           width: CONTENT_WIDTH,
         });
       y += 18;
 
-      doc.font("Helvetica").fontSize(9.5);
+      doc.font(FONT).fontSize(9.5);
       for (const row of employee.rows) {
         if (y + 13 > TABLE_BOTTOM) {
           doc.addPage();
@@ -2681,7 +2755,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     });
 
     if (input.employees.length === 0) {
-      doc.font("Helvetica").fontSize(10).text("Inga anställda i perioden.", left, y);
+      doc.font(FONT).fontSize(10).text("Inga anställda i perioden.", left, y);
     }
 
     drawPageNumbers(doc);
@@ -2694,9 +2768,9 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
   function startReport(doc: PDFKit.PDFDocument, title: string, subtitle: string): number {
     const left = PAGE_MARGIN;
     let y = 130;
-    doc.font("Helvetica-Bold").fontSize(18).text(title, left, y);
+    doc.font(FONT_BOLD).fontSize(18).text(title, left, y);
     y += 24;
-    doc.font("Helvetica").fontSize(10).fillColor("#444444").text(subtitle, left, y);
+    doc.font(FONT).fontSize(10).fillColor("#444444").text(subtitle, left, y);
     doc.fillColor("#000000");
     return y + 24;
   }
@@ -2727,7 +2801,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         .stroke();
     const columnHeader = () => {
       if (!multi) return;
-      doc.font("Helvetica-Bold").fontSize(8.5);
+      doc.font(FONT_BOLD).fontSize(8.5);
       columns.forEach((heading, index) => {
         doc.text(heading, columnX(index), y, { width: columnWidth - 4, align: "right", lineBreak: false });
       });
@@ -2737,11 +2811,11 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     };
 
     const STYLE = {
-      group: { indent: 0, font: "Helvetica-Bold", size: 11, gapBefore: 8, rule: "none" },
-      line: { indent: 12, font: "Helvetica-Bold", size: 9.5, gapBefore: 2, rule: "none" },
-      account: { indent: 24, font: "Helvetica", size: 9, gapBefore: 0, rule: "none" },
-      subtotal: { indent: 0, font: "Helvetica-Bold", size: 10, gapBefore: 4, rule: "single" },
-      total: { indent: 0, font: "Helvetica-Bold", size: 11, gapBefore: 6, rule: "double" },
+      group: { indent: 0, font: FONT_BOLD, size: 11, gapBefore: 8, rule: "none" },
+      line: { indent: 12, font: FONT_BOLD, size: 9.5, gapBefore: 2, rule: "none" },
+      account: { indent: 24, font: FONT, size: 9, gapBefore: 0, rule: "none" },
+      subtotal: { indent: 0, font: FONT_BOLD, size: 10, gapBefore: 4, rule: "single" },
+      total: { indent: 0, font: FONT_BOLD, size: 11, gapBefore: 6, rule: "double" },
     } as const;
 
     columnHeader();
@@ -2792,7 +2866,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     let y = startReport(doc, input.title, input.subtitle);
 
     if (input.accounts.length === 0) {
-      doc.font("Helvetica").fontSize(10).text(input.emptyText, left, y);
+      doc.font(FONT).fontSize(10).text(input.emptyText, left, y);
       doc.end();
       return finished;
     }
@@ -2802,7 +2876,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       // follows it, so a heading never lands alone at the foot of a page
       // (same rule as renderPayrollReport's employee header). The heading
       // height is measured — a long account name wraps instead of colliding.
-      doc.font("Helvetica-Bold").fontSize(11);
+      doc.font(FONT_BOLD).fontSize(11);
       const headingAdvance = doc.heightOfString(account.heading, { width: CONTENT_WIDTH }) + 6;
       if (y + headingAdvance + 13 > TABLE_BOTTOM) {
         doc.addPage();
@@ -2811,7 +2885,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.text(account.heading, left, y, { width: CONTENT_WIDTH });
       y += headingAdvance;
 
-      doc.font("Helvetica").fontSize(9);
+      doc.font(FONT).fontSize(9);
       doc.text("Ingående saldo", left + LEDGER_COLS.text.x, y, { width: LEDGER_COLS.text.w });
       doc.text(account.openingAmount, left + LEDGER_COLS.balance.x, y, {
         width: LEDGER_COLS.balance.w,
@@ -2844,13 +2918,13 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         doc.addPage();
         y = PAGE_MARGIN;
       }
-      doc.font("Helvetica-Bold").fontSize(9);
+      doc.font(FONT_BOLD).fontSize(9);
       doc.text("Utgående saldo", left + LEDGER_COLS.text.x, y, { width: LEDGER_COLS.text.w });
       doc.text(account.closingAmount, left + LEDGER_COLS.balance.x, y, {
         width: LEDGER_COLS.balance.w,
         align: "right",
       });
-      doc.font("Helvetica");
+      doc.font(FONT);
       y += 20;
     }
 
@@ -2865,7 +2939,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     let y = startReport(doc, input.title, input.subtitle);
 
     if (input.verifications.length === 0) {
-      doc.font("Helvetica").fontSize(10).text(input.emptyText, left, y);
+      doc.font(FONT).fontSize(10).text(input.emptyText, left, y);
       doc.end();
       return finished;
     }
@@ -2874,7 +2948,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       // The heading and the text cells wrap freely (free-text descriptions,
       // long account names) — measure the wrapped height and let it drive
       // the cursor, so a wrapped line can never collide with the next row.
-      doc.font("Helvetica-Bold").fontSize(10.5);
+      doc.font(FONT_BOLD).fontSize(10.5);
       const headingAdvance = doc.heightOfString(verification.heading, { width: CONTENT_WIDTH }) + 6;
       const headerReserve = headingAdvance + (verification.rows.length > 0 ? 13 : 0);
       if (y + headerReserve > TABLE_BOTTOM) {
@@ -2884,7 +2958,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.text(verification.heading, left, y, { width: CONTENT_WIDTH });
       y += headingAdvance;
 
-      doc.font("Helvetica").fontSize(9);
+      doc.font(FONT).fontSize(9);
       for (const row of verification.rows) {
         const rowHeight =
           Math.max(
@@ -2917,7 +2991,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         doc.addPage();
         y = PAGE_MARGIN;
       }
-      doc.font("Helvetica-Bold").fontSize(9);
+      doc.font(FONT_BOLD).fontSize(9);
       doc.text("Summa", left + VERIFICATION_LIST_COLS.text.x, y, { width: VERIFICATION_LIST_COLS.text.w });
       doc.text(verification.totalDebit, left + VERIFICATION_LIST_COLS.debit.x, y, {
         width: VERIFICATION_LIST_COLS.debit.w,
@@ -2927,7 +3001,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         width: VERIFICATION_LIST_COLS.credit.w,
         align: "right",
       });
-      doc.font("Helvetica");
+      doc.font(FONT);
       y += 20;
     }
 
@@ -2948,7 +3022,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.text(text, left + col.x, y, { width: col.w, height: 11, align, ellipsis: true });
 
     const orderHeader = () => {
-      doc.font("Helvetica-Bold").fontSize(8.5);
+      doc.font(FONT_BOLD).fontSize(8.5);
       cell("Order", O.orderNumber);
       cell("Orderdatum", O.orderDate);
       cell(input.partnerLabel, O.partner);
@@ -2959,7 +3033,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       cell("Restvärde", O.restValue, "right");
       y += 12;
       if (input.withRows) {
-        doc.font("Helvetica-Oblique").fontSize(8);
+        doc.font(FONT_ITALIC).fontSize(8);
         cell("Artikel", R.articleNumber);
         cell("Benämning", R.articleName);
         cell("Antal", R.quantity, "right");
@@ -2990,7 +3064,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     };
 
     if (input.orders.length === 0) {
-      doc.font("Helvetica").fontSize(10).text(input.emptyText, left, y);
+      doc.font(FONT).fontSize(10).text(input.emptyText, left, y);
       doc.end();
       return finished;
     }
@@ -2999,7 +3073,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     for (const order of input.orders) {
       // An order heading never lands alone at the foot of a page.
       ensure(input.withRows && order.rows.length > 0 ? 24 : 12);
-      doc.font(input.withRows ? "Helvetica-Bold" : "Helvetica").fontSize(8.5);
+      doc.font(input.withRows ? FONT_BOLD : FONT).fontSize(8.5);
       cell(order.orderNumber, O.orderNumber);
       cell(order.orderDate, O.orderDate);
       cell(order.partner, O.partner);
@@ -3011,7 +3085,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       y += 12;
 
       if (input.withRows) {
-        doc.font("Helvetica").fontSize(8);
+        doc.font(FONT).fontSize(8);
         for (const row of order.rows) {
           ensure(11);
           cell(row.articleNumber, R.articleNumber);
@@ -3038,7 +3112,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       .lineWidth(0.5)
       .stroke();
     y += 5;
-    doc.font("Helvetica-Bold").fontSize(9);
+    doc.font(FONT_BOLD).fontSize(9);
     doc.text(input.totals.label, left, y, { width: O.orderValue.x - 5, height: 12, ellipsis: true });
     cell(input.totals.orderValue, O.orderValue, "right");
     cell(input.totals.restValue, O.restValue, "right");
@@ -3063,15 +3137,15 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.text(text, left + col.x, y, { width: col.w, align: "right" });
 
     if (input.categories.length === 0) {
-      doc.font("Helvetica").fontSize(10).text(input.emptyText, left, y);
+      doc.font(FONT).fontSize(10).text(input.emptyText, left, y);
       y += 18;
     }
 
     for (const category of input.categories) {
       ensure(60);
-      doc.font("Helvetica-Bold").fontSize(11).text(category.heading, left, y, { width: CONTENT_WIDTH });
+      doc.font(FONT_BOLD).fontSize(11).text(category.heading, left, y, { width: CONTENT_WIDTH });
       y += 16;
-      doc.font("Helvetica-Bold").fontSize(8.5);
+      doc.font(FONT_BOLD).fontSize(8.5);
       doc.text("Nr", left + C.number.x, y, { width: C.number.w });
       doc.text("Benämning", left + C.name.x, y, { width: C.name.w });
       doc.text("Anskaffad", left + C.acquired.x, y, { width: C.acquired.w });
@@ -3081,7 +3155,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       amountCell("Bokfört värde", C.bookValue);
       y += 14;
 
-      doc.font("Helvetica").fontSize(8.5);
+      doc.font(FONT).fontSize(8.5);
       for (const row of category.rows) {
         const rowHeight = Math.max(doc.heightOfString(row.name, { width: C.name.w }), 10) + 3;
         ensure(rowHeight);
@@ -3094,7 +3168,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         amountCell(row.bookValue, C.bookValue);
         y += rowHeight;
       }
-      doc.font("Helvetica-Oblique").fontSize(8.5);
+      doc.font(FONT_ITALIC).fontSize(8.5);
       for (const line of category.movement) {
         ensure(12);
         doc.text(line, left + C.name.x, y, { width: CONTENT_WIDTH - C.name.x });
@@ -3110,7 +3184,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       .strokeColor("#666666")
       .lineWidth(0.5)
       .stroke();
-    doc.font("Helvetica-Bold").fontSize(9.5);
+    doc.font(FONT_BOLD).fontSize(9.5);
     doc.text("Summa", left + C.name.x, y, { width: C.name.w });
     amountCell(input.totals.cost, C.cost);
     amountCell(input.totals.yearDepreciation, C.yearDepreciation);
@@ -3119,9 +3193,9 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     y += 24;
 
     ensure(30);
-    doc.font("Helvetica-Bold").fontSize(9.5).text("Avstämning mot huvudboken", left, y);
+    doc.font(FONT_BOLD).fontSize(9.5).text("Avstämning mot huvudboken", left, y);
     y += 14;
-    doc.font("Helvetica").fontSize(9);
+    doc.font(FONT).fontSize(9);
     for (const line of input.reconciliation) {
       const height = doc.heightOfString(line, { width: CONTENT_WIDTH }) + 3;
       ensure(height);

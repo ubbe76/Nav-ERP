@@ -437,6 +437,17 @@ describe("Automatiskt and a chosen place in the outflows", () => {
       ["Karantänhylla", true],
     ]);
   });
+
+  it("the pick list prints a place's balance in the document's number format (granskning 2026-11-11)", async () => {
+    const own = await place("A1");
+    const x = await article("X-1", own.id);
+    await stock(x.id, own.id, 1234.125);
+    const { order } = await salesOrder(x.id, 2);
+
+    const text = pdfText((await salesService.getPickListPdf(order.id)).content);
+    // "1 234,125" (no-break space), never the raw "1234.125".
+    expect(text).toContain("Huvudlager — A1: 1\u00a0234,125");
+  });
 });
 
 describe("the TO card: a chosen blocked place only takes the finished goods", () => {

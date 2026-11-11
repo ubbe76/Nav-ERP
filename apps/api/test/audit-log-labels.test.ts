@@ -38,6 +38,8 @@ describe("händelseloggens etiketter", () => {
     ["action", "rejected"],
     ["action", "restored"],
     ["action", "booking_taken_over"],
+    // Fraktgranskningen: Sendify's answer to BOOK lost or unreadable.
+    ["action", "booking_unknown"],
     // Påslag per nivå (#16).
     ["entity", "article_group"],
     ["entity", "customer"],
