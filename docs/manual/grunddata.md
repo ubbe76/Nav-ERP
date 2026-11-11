@@ -15,7 +15,7 @@ Leveransvillkor har också **Benämning (engelska)** (kolumn och fält), som skr
 
 ## Betalningsvillkor
 
-T.ex. `30 · 30 dagar netto`. Skapa med **+ Ny betalningsvillkor**. Fältet **Benämning (engelska)** är texten på dokument som skrivs på engelska (t.ex. *30 days net*); tomt = den svenska benämningen.
+T.ex. `30 · 30 dagar netto`. Skapa med **+ Ny betalningsvillkor**. **Koden styr förfallodatum:** är den ett antal dagar (`30`, högst fyra siffror — också importens `30_2` när två villkor fick samma kod) blir förfallodatum fakturadatum plus så många dagar på kund- och leverantörsfakturor; en annan kod (`FORSKOTT`, `2/10`) ger inget förfallodatum. Fältet **Benämning (engelska)** är texten på dokument som skrivs på engelska (t.ex. *30 days net*); tomt = den svenska benämningen.
 
 ## Speditörer
 

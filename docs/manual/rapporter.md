@@ -39,7 +39,7 @@ Definitionerna:
 **Rapporter → Leveransprecision** mäter hur väl lovade leveransdatum hålls, för kundordrar och inköpsordrar var för sig.
 
 - **Kundordrar**: ordern räknas när den är **Levererad** eller **Fakturerad**. Utlovat datum är orderns **Förväntat leveransdatum** (dagen kunden får varan — även för kunder med [transportdagar](/hjalp/forsaljning#leveransdagar)); faktiskt datum är det **sista leveranstillfällets** datum. Leverans samma dag som utlovat räknas **i tid**.
-- **Inköpsordrar**: ordern räknas när den är **Mottagen** eller **Stängd** och har minst en inleverans. Faktiskt datum är den sista inleveransens datum.
+- **Inköpsordrar**: ordern räknas när den är **Mottagen** eller **Stängd** och har minst en inleverans. Faktiskt datum är den sista inleveransens datum — även inleveranser av lego- och tjänsterader, som inte ger någon lagerrörelse. Ångrade inleveranser räknas inte.
 - **Marginaler**: utan inställningar är en leverans sen redan dagen efter utlovat datum, och en tidig leverans räknas som i tid. Under [System → Inställningar → Leveransprecision](/hjalp/system#leveransprecision) kan du ge kundordrar och inköpsordrar var sin marginal: **Sen efter** (sen först mer än så många dagar efter datumet) och **För tidig före** (för tidig när leveransen kommer mer än så många dagar före). Raden under varje tabell visar vilka marginaler som gäller.
 - Är marginalen för tidiga leveranser påslagen får tabellen kolumnen **För tidiga** (under **Motpart**: **Tidiga**), och den finns även i CSV-filen.
 - **Precision** = andelen ordrar i tid av de mätbara, så en för tidig leverans sänker precisionen precis som en sen. **Snitt försening** räknas enbart över de försenade ordrarna, i dagar efter utlovat datum (inte efter marginalen).
@@ -59,7 +59,7 @@ Urvalet **Gruppera** väljer mellan **Månad** (som ovan) och **Motpart**. Med *
 
 ## Försäljningsstatistik
 
-**Rapporter → Försäljningsstatistik** summerar fakturerad nettoomsättning ur kundfakturorna (status **Utfärdad** eller **Betald**; utkast och makulerade räknas inte). Kreditfakturor dras av. Gruppera per **Månad** (fakturadatum), **Kund** eller **Artikel** — varugrupperingen visar även fakturerat antal, och fritextrader utan artikel samlas under **(Fritextrader)**.
+**Rapporter → Försäljningsstatistik** summerar fakturerad nettoomsättning ur kundfakturorna (status **Utfärdad** eller **Betald**; utkast och makulerade räknas inte). Kreditfakturor dras av. [Räntefakturor](/hjalp/forsaljning#rantefakturering) (dröjsmålsränta och förseningsersättning) och kreditfakturor på dem räknas inte — de är ingen försäljning. Gruppera per **Månad** (fakturadatum), **Kund** eller **Artikel** — varugrupperingen visar även fakturerat antal, och fritextrader utan artikel samlas under **(Fritextrader)**.
 
 ## Inköpsstatistik
 
@@ -108,7 +108,7 @@ Under tabellen står räknarna **N analyserade ordrar**, **N preliminära (Ej kl
 
 ## Marginal
 
-**Rapporter → Marginal** visar **täckningsbidraget** på fakturerad omsättning, grupperat per **Månad**, **Kund** eller **Artikel**. Underlaget är fakturaraderna (utfärdade och betalda fakturor), så nettoomsättningen stämmer med [Försäljningsstatistiken](#forsaljningsstatistik); kreditfakturor räknas med omvänt tecken.
+**Rapporter → Marginal** visar **täckningsbidraget** på fakturerad omsättning, grupperat per **Månad**, **Kund** eller **Artikel**. Underlaget är fakturaraderna (utfärdade och betalda fakturor, utom räntefakturor), så nettoomsättningen stämmer med [Försäljningsstatistiken](#forsaljningsstatistik); kreditfakturor räknas med omvänt tecken.
 
 Självkostnaden hämtas från artikelns **senaste sparade förkalkyl**, självkostnaden per styck. Två saker följer av det, och båda syns i rapporten:
 

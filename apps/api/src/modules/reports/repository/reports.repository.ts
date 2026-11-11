@@ -47,6 +47,14 @@ export interface ScrapStatisticsRow {
   reportCount: number;
 }
 
+// Försäljningsstatistik and Marginal/TB measure sales: a räntefaktura (an
+// invoice that bears late_interest_charges — dröjsmålsränta and
+// förseningsersättning, booked as financial income/3990) and a credit note
+// of one are left out. Same NOT EXISTS as the late-interest candidates
+// (late-interest.repository.ts); credited_invoice_id is null on an invoice,
+// so IN matches only its own id there.
+const notLateInterestInvoice = sql`NOT EXISTS (SELECT 1 FROM late_interest_charges lic WHERE lic.charge_invoice_id IN (${invoices.id}, ${invoices.creditedInvoiceId}))`;
+
 // `from`/`to` are YYYY-MM strings (month granularity, as validated by the
 // shared query schemas). invoice_date/supplier_invoices.invoice_date are
 // plain date columns with no time component — the range is expanded here to
@@ -232,14 +240,18 @@ export function createReportsRepository(db: Db) {
       }));
     },
 
-    // Completed purchase orders with promise + last purchase_receipt time —
-    // the same scalar-subquery idiom as purchase's listInvoiceBasis (live
+    // Completed purchase orders with promise + last inleverans time (live
     // receipts only: Ångra inleverans's reversal and the undone receipt are
-    // not deliveries).
+    // not deliveries). The receipt log (purchase_receipts, 0118) has every
+    // inleverans — also the lego and service rows, which book no stock
+    // movement — and the stock log covers the receipts from before 0118
+    // that have no log row; the later of the two counts (greatest skips a
+    // null). Same scalar-subquery idiom as purchase's listInvoiceBasis.
     async loadPurchasePrecisionOrders(): Promise<PrecisionOrderInput[]> {
-      const lastReceipt = sql<
-        string | null
-      >`(SELECT MAX(st.created_at) FROM ${stockTransactions} st WHERE st.reference_id = ${sql.raw('"purchase_orders"."id"')} AND st.transaction_type = 'purchase_receipt' AND st.quantity_delta > 0 AND NOT EXISTS (SELECT 1 FROM ${purchaseReceipts} pr WHERE pr.stock_transaction_id = st.id AND pr.undone_at IS NOT NULL))`;
+      const lastReceipt = sql<string | null>`greatest(
+        (SELECT MAX(pr.created_at) FROM ${purchaseReceipts} pr WHERE pr.purchase_order_id = ${sql.raw('"purchase_orders"."id"')} AND pr.undone_at IS NULL),
+        (SELECT MAX(st.created_at) FROM ${stockTransactions} st WHERE st.reference_id = ${sql.raw('"purchase_orders"."id"')} AND st.transaction_type = 'purchase_receipt' AND st.quantity_delta > 0 AND NOT EXISTS (SELECT 1 FROM ${purchaseReceipts} pr WHERE pr.stock_transaction_id = st.id AND pr.undone_at IS NOT NULL))
+      )`;
       const rows = await db
         .select({
           orderId: purchaseOrders.id,
@@ -323,7 +335,12 @@ export function createReportsRepository(db: Db) {
         // (sign-flipped) quantity is costed the same way.
         .leftJoin(salesOrderRows, eq(salesOrderRows.id, invoiceRows.salesOrderRowId))
         .where(
-          and(inArray(invoices.status, ["issued", "paid"]), gte(invoices.invoiceDate, start), lte(invoices.invoiceDate, end))
+          and(
+            inArray(invoices.status, ["issued", "paid"]),
+            gte(invoices.invoiceDate, start),
+            lte(invoices.invoiceDate, end),
+            notLateInterestInvoice
+          )
         );
       return rows.map((r) => ({
         month: r.month,
@@ -354,7 +371,8 @@ export function createReportsRepository(db: Db) {
       const dateFilter = and(
         inArray(invoices.status, ["issued", "paid"]),
         gte(invoices.invoiceDate, start),
-        lte(invoices.invoiceDate, end)
+        lte(invoices.invoiceDate, end),
+        notLateInterestInvoice
       );
 
       if (query.groupBy === "month") {

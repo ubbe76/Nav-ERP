@@ -17,6 +17,12 @@ paths:
 
 Rapporter-modulen och dess `rapporter`-rättighet; alla filter i URL:en.
 
+## Datum och urval (systemgranskningen 2026-11-11)
+
+- `dayParam` i `packages/shared/src/reports.ts` är `businessDateSchema` (riktig kalenderdag 1900–2999): orderförteckningen, offertuppföljningen och projektrapporten ger 400 `validation-failed` för 2026-02-30 — regexen släppte igenom den till Postgres (500).
+- **Försäljningsstatistiken och Marginal/TB** (`loadSalesStatistics`, `loadInvoiceMarginRows`) utesluter räntefakturor och kreditfakturor på dem (`notLateInterestInvoice`: `NOT EXISTS late_interest_charges` på fakturan eller `credited_invoice_id`, samma villkor som räntekandidaterna). Orderförteckningen läser orderrader och berörs inte.
+- Test: `systemgranskning.test.ts`.
+
 ## Orderförteckning
 
 - `GET /reports/sales-order-register` och `/reports/purchase-order-register` (+ `/csv`, `/pdf`); sidorna `/rapporter/orderforteckning-kundorder|-inkop`, delad `OrderRegisterPageClient`.
@@ -30,6 +36,7 @@ Rapporter-modulen och dess `rapporter`-rättighet; alla filter i URL:en.
 
 ## Leveransprecision per motpart (Kvalitet, 0153)
 
+- **Inköpssidans faktiska datum** (`loadPurchasePrecisionOrders`) = `greatest` av senaste levande `purchase_receipts.created_at` (alla inleveranser, även lego- och tjänsterader som inte skriver lagerrad) och senaste `purchase_receipt`-lagerraden (inleveranser före 0118 utan kvittorad). Test: `systemgranskning.test.ts`.
 - `GET /reports/delivery-precision?groupBy=month|counterparty` (+ `/csv?kind&groupBy`): förvalet `month` är oförändrat; `counterparty` lägger `counterparties: { rows, totals }` på varje sida. Precisionen mäts med samma `measureOrder` som månadsvyn (`delivery-precision-calc.ts`); rena `delivery-quality-calc.ts` lägger till Avvikelser (ärenden av sidans typ med Datum i perioden, ej makulerade), Order med avvikelse/Andel felfria (av de mätta ordrarna, via ärendets `purchase_order_id`/`sales_order_id`, oavsett datum), Reklamerat antal (per artikel; total bara när alla har samma enhet, annars null) och Avvikelsekostnad (nettokostnaden ur `deviation-costs.ts`, null utan `canSeePrices`). Kvalitetsdata läses genom `PrecisionQualityReader` (quality-servicen, injicerad i `createReportsService`).
 - **Marginalerna (#29):** fyra nycklar i `system_settings` (`PRECISION_MARGIN_KEYS` i lövet `system/service/precision-settings.ts`, `decodePrecisionMargins`, skräp ⇒ förval) — per sida **Sen efter** (förval 0) och **För tidig före** (null = av, lagras som ""), i `/settings` som `precision{Sales,Purchase}{Late,Early}MarginDays`. Rapporten läser dem med EN fråga (`repo.loadPrecisionMargins`) vid varje anrop; inget stämplas på ordern, så en ändring gäller även bakåt. **EN regel** `classifyDelivery` (sen = `daysLate > lateDays`, tidig = `earlyDays !== null && -daysLate > earlyDays`, annars i tid) går via `addMeasure` i både månadsvyn och `groupPrecisionByCounterparty` — marginalerna är obligatoriska argument, aldrig ett förval, så en ny läsare kan inte glömma dem. Varje sida ekar `margins`; Precision = I tid ÷ alla mätta (tidiga sänker den); Snitt försening räknas från utlovat datum, inte från marginalen. Kolumnen För tidiga (webben, båda CSV:erna) bara när `earlyDays !== null`. Tester: `delivery-precision-calc.test.ts`, `delivery-quality-calc.test.ts`, `reports-delivery-quality.route.test.ts` (inställningarna → båda vyerna och CSV:n).
 - Kassationsrapportens `groupBy=reason` grupperar på Avvikelseorsaken (`key` = orsakens id); äldre fritextrader på texten med `key` `text:<text>` och etiketten "… (fritext)".

@@ -18,3 +18,22 @@ describe("dueDateFromTerm", () => {
     expect(dueDateFromTerm("2026-05-04", null)).toBeNull();
   });
 });
+
+// Systemgranskningen 2026-11-11: only a code that IS a day count — one to
+// four digits, optionally with the import's collision suffix — gives a
+// förfallodag. parseInt read any leading number ("2/10" ⇒ 2, "-30" ⇒ −30)
+// and "99999999" threw a RangeError in addDays (a 500 at Utfärda and in
+// GET /alerts).
+describe("dueDateFromTerm — strict codes", () => {
+  it("reads the import's collision suffix as the same day count", () => {
+    expect(dueDateFromTerm("2026-03-15", "30_2")).toBe("2026-04-14");
+    expect(dueDateFromTerm("2026-03-15", "10_12")).toBe("2026-03-25");
+    expect(dueDateFromTerm("2026-03-15", "9999")).toBe("2053-07-30");
+  });
+
+  it("gives no date for anything else instead of a wrong one or a crash", () => {
+    for (const code of ["2/10", "-30", "30 dagar", " 30", "30_", "V_1_MANAD_NETTO", "1_MANAD_NETTO", "10_30_NETTO", "99999999", "12345", "3.5"]) {
+      expect([code, dueDateFromTerm("2026-05-04", code)]).toEqual([code, null]);
+    }
+  });
+});

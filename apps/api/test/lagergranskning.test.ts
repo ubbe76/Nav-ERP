@@ -370,17 +370,20 @@ describe("lagergranskningen — status and stock races", () => {
     await stock(a.id, t.id, 5);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
+    // The draw signals once it holds the retirement — waiting on pg_locks
+    // (any transaction in the whole cluster) let another test worker's
+    // transaction satisfy the wait before this one had locked anything.
+    let retired!: () => void;
+    const atGate = new Promise<void>((resolve) => (retired = resolve));
     // The draw that empties T and retires it, still uncommitted.
     const draw = db.transaction(async (tx) => {
       await lockArticlesForOutflow(tx, [a.id]);
       await tx.insert(stockTransactions).values({ articleId: a.id, locationId: t.id, quantityDelta: "-5", transactionType: "sales_delivery" });
       expect(await deactivateEmptyLocation(tx, t.id)).toBe(true);
+      retired();
       await gate;
     });
-    await waitForCondition(async () => {
-      const [row] = await db.execute(sql`SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'transactionid' AND granted`).then((r) => [...r] as { n: number }[]);
-      return (row?.n ?? 0) > 0;
-    });
+    await atGate;
     // B arrives on T: its FK check waits for the retirement, then the
     // trigger revives the place for it.
     const inflow = stock(b.id, t.id, 10);

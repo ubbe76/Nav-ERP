@@ -353,14 +353,16 @@ export function createExchangeRateService(deps: ExchangeRateServiceDeps) {
       return service.viewSettings();
     },
 
-    // The rate for (currency, date). SEK is always 1 without a lookup. A day
-    // after today asks for today's (the latest known) rate.
+    // The rate for (currency, date). SEK is always 1 without a lookup.
     //
-    // Setting riksbank (default): a manual rate for exactly the day wins (an
-    // explicit decision for that day); then Riksbanken's latest banking day
-    // ≤ the day — from the table when it can prove it, else one interval
-    // call; then, when Riksbanken has nothing or does not answer, the latest
-    // manual rate in [day−10, day] (a currency Riksbanken does not publish).
+    // In both settings a manual rate for exactly the day wins (an explicit
+    // decision for that day) — also for a day after today. Otherwise a day
+    // after today asks for today's (the latest known) rate, "the day" below:
+    // Setting riksbank (default): a manual rate for exactly the day; then
+    // Riksbanken's latest banking day ≤ the day — from the table when it can
+    // prove it, else one interval call; then, when Riksbanken has nothing or
+    // does not answer, the latest manual rate in [day−10, day] (a currency
+    // Riksbanken does not publish).
     // Setting manual: only the latest manual rate in [day−10, day].
     // Nothing found ⇒ ExchangeRateUnavailableError.
     async getRate(currencyInput: string, date: string): Promise<ExchangeRateLookup> {
@@ -372,7 +374,12 @@ export function createExchangeRateService(deps: ExchangeRateServiceDeps) {
       const target = date > todayDate ? todayDate : date;
       const from = addDays(target, -LOOKBACK_DAYS);
       const settings = await readSettings();
-      const stored = await ratesInRange(db, currency, from, target);
+      // Read through the requested day, before the clamp: a manual rate
+      // entered for a future day is what that day's documents take.
+      const read = await ratesInRange(db, currency, from, date);
+      const requestedManual = read.find((rate) => rate.source === "manual" && rate.date === date);
+      if (requestedManual) return lookup(currency, date, requestedManual);
+      const stored = read.filter((rate) => rate.date <= target);
       const manual = stored.filter((rate) => rate.source === "manual");
       const latestManual = manual.at(-1) ?? null;
 

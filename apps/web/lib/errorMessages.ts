@@ -452,6 +452,11 @@ const MESSAGES: Record<string, MessageEntry> = {
   "series-exhausted": "Nummerserien är full — kontrollera nummerserien under System.",
   "duplicate-number-series-name": "Det finns redan en nummerserie med det namnet.",
   "built-in-number-series": "Den inbyggda nummerserien kan inte byta namn eller tas bort.",
+  "number-series-too-long":
+    "Nästa nummer blir längre än 20 tecken med prefixet och antalet siffror — korta prefixet eller minska antalet siffror.",
+  "number-series-number-taken": "Nästa nummer finns redan på ett dokument — välj ett nästa nummer efter de som redan används.",
+  "document-number-taken":
+    "Numret som nummerserien gav finns redan på ett annat dokument — ändra Nästa nummer under System → Nummerserier och försök igen.",
   "order-register-too-large": "Urvalet har fler än 10 000 orderrader — avgränsa med datum, status eller kund/leverantör.",
   "quote-followup-too-large": "Urvalet har fler än 10 000 offerter — korta ned perioden eller välj en kund.",
   "setup-charge-article-not-found": "Artikeln finns inte — välj en annan ställkostnadsartikel.",

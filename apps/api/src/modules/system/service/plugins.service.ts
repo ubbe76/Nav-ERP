@@ -179,6 +179,16 @@ export function createPluginsService(deps: {
     return { manifest: result.manifest, warnings: result.warnings };
   }
 
+  // A transport failure — connecting, or the body after the headers (the
+  // timeout also covers the body: TimeoutError; a dropped connection:
+  // TypeError "terminated") — is the address being unreachable, 502, never
+  // the 500 a body failure used to give.
+  function unreachable(err: unknown, stage: "connect" | "body"): PluginManifestUnreachableError {
+    const name = err instanceof Error ? err.name : "";
+    if (name === "TimeoutError" || name === "AbortError") return new PluginManifestUnreachableError("tidsgränsen (10 s) överskreds");
+    return new PluginManifestUnreachableError(stage === "connect" ? "kunde inte ansluta" : "anslutningen bröts under hämtningen");
+  }
+
   async function fetchManifest(baseUrl: string): Promise<unknown> {
     let res: Response;
     try {
@@ -189,16 +199,18 @@ export function createPluginsService(deps: {
         signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
       });
     } catch (err) {
-      const name = err instanceof Error ? err.name : "";
-      throw new PluginManifestUnreachableError(
-        name === "TimeoutError" || name === "AbortError" ? "tidsgränsen (10 s) överskreds" : "kunde inte ansluta"
-      );
+      throw unreachable(err, "connect");
     }
     if (res.status !== 200) {
       await res.body?.cancel().catch(() => {});
       throw new PluginManifestUnreachableError(`adressen svarade ${res.status}`);
     }
-    const text = await readCapped(res, PLUGIN_MANIFEST_MAX_BYTES);
+    let text: string | null;
+    try {
+      text = await readCapped(res, PLUGIN_MANIFEST_MAX_BYTES);
+    } catch (err) {
+      throw unreachable(err, "body");
+    }
     if (text === null) throw new PluginManifestUnreachableError("manifestet är större än 64 kB");
     try {
       return JSON.parse(text);

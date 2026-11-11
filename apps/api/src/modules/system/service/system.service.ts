@@ -15,7 +15,7 @@ import type {
 } from "@navet/shared";
 import { EXTRA_DESCRIPTION_DOCUMENTS, round2 } from "@navet/shared";
 import { randomUUID } from "node:crypto";
-import { DEFAULT_ARTICLE_SERIES_KEY } from "./number-series.js";
+import { DEFAULT_ARTICLE_SERIES_KEY, documentSeriesTarget, formatSeriesNumber } from "./number-series.js";
 import type { SystemRepository } from "../repository/system.repository.js";
 import { createDatabaseBackup } from "./backup.js";
 import { decodeDeliveryDefaults, DELIVERY_SETTING_KEYS, type DeliveryDefaults } from "./delivery-days.js";
@@ -236,6 +236,24 @@ export class BuiltInNumberSeriesError extends Error {
   }
 }
 
+// Nummerserier: the series' first number after the change would not fit its
+// document column (varchar(20)) — every new document would 500.
+export class NumberSeriesTooLongError extends Error {
+  constructor(key: string, readonly number: string, readonly width: number) {
+    super(`Number series "${key}" would issue ${number}, longer than ${width} characters`);
+    this.name = "NumberSeriesTooLongError";
+  }
+}
+
+// Nummerserier: the series' first number after the change is already on a
+// document — the next create would collide with it.
+export class NumberSeriesNumberTakenError extends Error {
+  constructor(key: string, readonly number: string) {
+    super(`Number series "${key}" would issue ${number}, which is already taken`);
+    this.name = "NumberSeriesNumberTakenError";
+  }
+}
+
 const isOwnArticleSeries = (row: { key: string; forArticles: boolean }) =>
   row.forArticles && row.key !== DEFAULT_ARTICLE_SERIES_KEY;
 
@@ -451,17 +469,35 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
     },
 
     async updateNumberSeries(key: string, input: UpdateNumberSeriesInput, userId: string | null = null) {
-      const existing = await repo.getNumberSeries(key);
-      if (!existing) throw new NumberSeriesNotFoundError(key);
-      if (input.name !== undefined && !isOwnArticleSeries(existing)) throw new BuiltInNumberSeriesError(key, "rename");
-      let row;
+      let result;
       try {
-        row = await repo.updateNumberSeries(key, input);
+        result = await repo.transaction(async (tx) => {
+          const existing = await repo.lockNumberSeries(tx, key);
+          if (!existing) throw new NumberSeriesNotFoundError(key);
+          if (input.name !== undefined && !isOwnArticleSeries(existing)) throw new BuiltInNumberSeriesError(key, "rename");
+          // A document series' first number after the change must fit its
+          // column and must not already be taken — either way every new
+          // document would fail. The register and article series step over
+          // taken numbers themselves (documentSeriesTarget is null).
+          const target = documentSeriesTarget(key);
+          if (target) {
+            const first = formatSeriesNumber(
+              input.prefix ?? existing.prefix,
+              input.nextNumber ?? existing.nextNumber,
+              input.digits ?? existing.digits
+            );
+            if (Array.from(first).length > target.width) throw new NumberSeriesTooLongError(key, first, target.width);
+            if (await repo.documentNumberTaken(tx, key, first)) throw new NumberSeriesNumberTakenError(key, first);
+          }
+          const row = await repo.updateNumberSeries(key, input, tx);
+          if (!row) throw new NumberSeriesNotFoundError(key);
+          return { existing, row };
+        });
       } catch (err) {
         if (isUniqueViolation(err, "number_series_name_unique")) throw new DuplicateNumberSeriesNameError(input.name!);
         throw err;
       }
-      if (!row) throw new NumberSeriesNotFoundError(key);
+      const { existing, row } = result;
       const names = input.name !== undefined ? [{ name: existing.name }, { name: row.name }] : [{}, {}];
       await audit.log({
         entityType: "number_series",
@@ -624,236 +660,242 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       // value anywhere near the audit detail. This mirrors the DB storage
       // key rather than the request field name, since that's the actual
       // durable identity of the setting.
-      const changedKeys: string[] = [];
-      const set = async (key: string, value: string) => {
-        changedKeys.push(key);
-        await repo.setSetting(key, value);
-      };
+      //
+      // ONE transaction (repo.writeSettings): a refused reference or a
+      // failing write leaves nothing half saved, and the audit entry after
+      // commit lists exactly what was written.
+      const changedKeys = await repo.writeSettings(async (writer) => {
+        const changedKeys: string[] = [];
+        const set = async (key: string, value: string) => {
+          changedKeys.push(key);
+          await writer.setSetting(key, value);
+        };
 
-      // Egna teman: first, so an unknown theme refuses the whole request
-      // before anything is written. The write locks the theme row against a
-      // concurrent delete (themes.repository's lockThemeForSetting).
-      if (input.defaultTheme !== undefined) {
-        if (!(await repo.setDefaultTheme(input.defaultTheme))) throw new UnknownThemeError(input.defaultTheme);
-        changedKeys.push(DEFAULT_THEME_KEY);
-      }
-      if (input.themeChoiceLocked !== undefined) await set(THEME_CHOICE_LOCKED_KEY, String(input.themeChoiceLocked));
-
-      if (input.allowMultipleStamps !== undefined) {
-        await set(ALLOW_MULTIPLE_STAMPS_KEY, String(input.allowMultipleStamps));
-      }
-      if (input.showRevisionsOnDocuments !== undefined) {
-        await set(SHOW_REVISIONS_ON_DOCUMENTS_KEY, String(input.showRevisionsOnDocuments));
-      }
-      if (input.showOrderRevisionOnDocuments !== undefined) {
-        await set(SHOW_ORDER_REVISION_ON_DOCUMENTS_KEY, String(input.showOrderRevisionOnDocuments));
-      }
-      if (input.purchaseOrderBarcode !== undefined) {
-        await set(PURCHASE_ORDER_BARCODE_KEY, String(input.purchaseOrderBarcode));
-      }
-      if (input.extraDescriptionDocuments !== undefined) {
-        // Stored in the catalog's order, without duplicates.
-        const chosen = new Set(input.extraDescriptionDocuments);
-        await set(
-          EXTRA_DESCRIPTION_DOCUMENTS_KEY,
-          JSON.stringify(EXTRA_DESCRIPTION_DOCUMENTS.filter((kind) => chosen.has(kind)))
-        );
-      }
-      if (input.atfMinutesPerWeek !== undefined) {
-        await set(ATF_MINUTES_PER_WEEK_KEY, String(input.atfMinutesPerWeek));
-      }
-      if (input.scheduleBalancing !== undefined) {
-        await set(SCHEDULE_BALANCING_KEY, String(input.scheduleBalancing));
-      }
-      if (input.payrollOvertimeThresholdMinutes !== undefined) {
-        await set(PAYROLL_OVERTIME_THRESHOLD_MINUTES_KEY, String(input.payrollOvertimeThresholdMinutes));
-      }
-      if (input.attendanceReasonRequired !== undefined) {
-        await set(ATTENDANCE_REASON_REQUIRED_KEY, String(input.attendanceReasonRequired));
-      }
-      if (input.attendanceReasonToleranceMinutes !== undefined) {
-        await set(ATTENDANCE_REASON_TOLERANCE_MINUTES_KEY, String(input.attendanceReasonToleranceMinutes));
-      }
-      if (input.terminalOvertimeChoice !== undefined) {
-        await set(TERMINAL_OVERTIME_CHOICE_KEY, String(input.terminalOvertimeChoice));
-      }
-      if (input.timeKindSplit !== undefined) {
-        await set(TIME_KIND_SPLIT_KEY, String(input.timeKindSplit));
-      }
-      if (input.paxmlCodeWorked !== undefined) await set(PAXML_CODE_WORKED_KEY, input.paxmlCodeWorked);
-      if (input.paxmlCodeOvertime !== undefined) await set(PAXML_CODE_OVERTIME_KEY, input.paxmlCodeOvertime);
-      if (input.paxmlCodeOvertimeOffSchedule !== undefined) {
-        await set(PAXML_CODE_OVERTIME_OFF_SCHEDULE_KEY, input.paxmlCodeOvertimeOffSchedule);
-      }
-      if (input.paxmlCodeOvertimeComp !== undefined) {
-        await set(PAXML_CODE_OVERTIME_COMP_KEY, input.paxmlCodeOvertimeComp);
-      }
-      if (input.paxmlCodeOvertimeOffScheduleComp !== undefined) {
-        await set(PAXML_CODE_OVERTIME_OFF_SCHEDULE_COMP_KEY, input.paxmlCodeOvertimeOffScheduleComp);
-      }
-      if (input.paxmlCodeAtf !== undefined) await set(PAXML_CODE_ATF_KEY, input.paxmlCodeAtf);
-      if (input.smtpHost !== undefined) await set(SMTP_HOST_KEY, input.smtpHost);
-      if (input.smtpPort !== undefined) await set(SMTP_PORT_KEY, String(input.smtpPort));
-      if (input.smtpSecure !== undefined) await set(SMTP_SECURE_KEY, String(input.smtpSecure));
-      if (input.smtpUser !== undefined) await set(SMTP_USER_KEY, input.smtpUser);
-      // Empty string means "leave the stored password as-is" — the settings
-      // form always posts the field but never sees the current value.
-      if (input.smtpPassword !== undefined && input.smtpPassword !== "") {
-        await set(SMTP_PASSWORD_KEY, input.smtpPassword);
-      }
-      if (input.smtpFromName !== undefined) await set(SMTP_FROM_NAME_KEY, input.smtpFromName);
-      if (input.smtpFromEmail !== undefined) await set(SMTP_FROM_EMAIL_KEY, input.smtpFromEmail);
-      if (input.costingMaterialSource !== undefined) {
-        await set(COSTING_MATERIAL_SOURCE_KEY, input.costingMaterialSource);
-      }
-      if (input.costingPostMaterialSource !== undefined) {
-        await set(COSTING_POST_MATERIAL_SOURCE_KEY, input.costingPostMaterialSource);
-      }
-      if (input.costingSupplierPriceTier !== undefined) {
-        await set(COSTING_SUPPLIER_PRICE_TIER_KEY, input.costingSupplierPriceTier);
-      }
-      if (input.costingMoPercent !== undefined) await set(COSTING_MO_PERCENT_KEY, String(input.costingMoPercent));
-      if (input.costingLoPercent !== undefined) await set(COSTING_LO_PERCENT_KEY, String(input.costingLoPercent));
-      if (input.costingAffoPercent !== undefined) await set(COSTING_AFFO_PERCENT_KEY, String(input.costingAffoPercent));
-      if (input.costingGeneralMarkupPercent !== undefined) {
-        await set(COSTING_GENERAL_MARKUP_PERCENT_KEY, String(input.costingGeneralMarkupPercent));
-      }
-      if (input.costingMaterialMarkupPercent !== undefined) {
-        await set(COSTING_MATERIAL_MARKUP_PERCENT_KEY, String(input.costingMaterialMarkupPercent));
-      }
-      if (input.purchaseOverReceiptPercent !== undefined) {
-        await set(
-          PURCHASE_OVER_RECEIPT_PERCENT_KEY,
-          input.purchaseOverReceiptPercent === null ? "" : String(input.purchaseOverReceiptPercent)
-        );
-      }
-      if (input.salesOverDeliveryPercent !== undefined) {
-        await set(
-          SALES_OVER_DELIVERY_PERCENT_KEY,
-          input.salesOverDeliveryPercent === null ? "" : String(input.salesOverDeliveryPercent)
-        );
-      }
-      if (input.manufacturingMaterialShortage !== undefined) {
-        await set(MANUFACTURING_MATERIAL_SHORTAGE_KEY, input.manufacturingMaterialShortage);
-      }
-      if (input.palletCardCode !== undefined) await set(PALLET_CARD_CODE_KEY, input.palletCardCode);
-      if (input.palletCardAllowQuantityMismatch !== undefined) {
-        await set(PALLET_CARD_ALLOW_QUANTITY_MISMATCH_KEY, String(input.palletCardAllowQuantityMismatch));
-      }
-      if (input.planningLongOperationWeeks !== undefined) {
-        await set(PLANNING_LONG_OPERATION_WEEKS_KEY, String(input.planningLongOperationWeeks));
-      }
-      if (input.planningDefaultLeadTimeDays !== undefined) {
-        await set(PLANNING_DEFAULT_LEAD_TIME_DAYS_KEY, String(input.planningDefaultLeadTimeDays));
-      }
-      if (input.planningQueueTimeDays !== undefined) {
-        await set(PLANNING_QUEUE_TIME_DAYS_KEY, String(input.planningQueueTimeDays));
-      }
-      if (input.planningForecastHistoryMonths !== undefined) {
-        await set(PLANNING_FORECAST_HISTORY_MONTHS_KEY, String(input.planningForecastHistoryMonths));
-      }
-      if (input.planningForecastHorizonMonths !== undefined) {
-        await set(PLANNING_FORECAST_HORIZON_MONTHS_KEY, String(input.planningForecastHorizonMonths));
-      }
-      if (input.planningAbcPeriodMonths !== undefined) {
-        await set(PLANNING_ABC_PERIOD_MONTHS_KEY, String(input.planningAbcPeriodMonths));
-      }
-      // The schema guarantees the pair arrives together with A < B.
-      if (input.planningAbcClassAPercent !== undefined) {
-        await set(PLANNING_ABC_CLASS_A_PERCENT_KEY, String(input.planningAbcClassAPercent));
-      }
-      if (input.planningAbcClassBPercent !== undefined) {
-        await set(PLANNING_ABC_CLASS_B_PERCENT_KEY, String(input.planningAbcClassBPercent));
-      }
-      if (input.supplierDeliveryDayMode !== undefined) {
-        await set(DELIVERY_SETTING_KEYS.supplierMode, input.supplierDeliveryDayMode);
-      }
-      if (input.supplierTransitDays !== undefined) {
-        await set(DELIVERY_SETTING_KEYS.supplierTransit, String(input.supplierTransitDays));
-      }
-      if (input.customerDeliveryDayMode !== undefined) {
-        await set(DELIVERY_SETTING_KEYS.customerMode, input.customerDeliveryDayMode);
-      }
-      if (input.customerTransitDays !== undefined) {
-        await set(DELIVERY_SETTING_KEYS.customerTransit, String(input.customerTransitDays));
-      }
-      // Aviseringar.
-      if (input.alertDigestTime !== undefined) await set(ALERT_DIGEST_TIME_KEY, input.alertDigestTime);
-      if (input.alertSupplierInvoiceDays !== undefined) {
-        await set(ALERT_SUPPLIER_INVOICE_DAYS_KEY, String(input.alertSupplierInvoiceDays));
-      }
-      if (input.alertQuoteFollowupDays !== undefined) {
-        await set(ALERT_QUOTE_FOLLOWUP_DAYS_KEY, String(input.alertQuoteFollowupDays));
-      }
-      if (input.quoteValidityDays !== undefined) await set(QUOTE_VALIDITY_DAYS_KEY, String(input.quoteValidityDays));
-      if (input.precisionSalesLateMarginDays !== undefined) {
-        await set(PRECISION_MARGIN_KEYS.salesLate, String(input.precisionSalesLateMarginDays));
-      }
-      if (input.precisionPurchaseLateMarginDays !== undefined) {
-        await set(PRECISION_MARGIN_KEYS.purchaseLate, String(input.precisionPurchaseLateMarginDays));
-      }
-      // null = off, stored as "" (the over-receipt convention).
-      if (input.precisionSalesEarlyMarginDays !== undefined) {
-        await set(
-          PRECISION_MARGIN_KEYS.salesEarly,
-          input.precisionSalesEarlyMarginDays === null ? "" : String(input.precisionSalesEarlyMarginDays)
-        );
-      }
-      if (input.precisionPurchaseEarlyMarginDays !== undefined) {
-        await set(
-          PRECISION_MARGIN_KEYS.purchaseEarly,
-          input.precisionPurchaseEarlyMarginDays === null ? "" : String(input.precisionPurchaseEarlyMarginDays)
-        );
-      }
-      if (input.setupChargeArticleId !== undefined) {
-        if (input.setupChargeArticleId !== null && !(await repo.articleExists(input.setupChargeArticleId))) {
+        // The references first, before anything is written. The
+        // Ställkostnadsartikel is held FOR KEY SHARE until commit; Förvalt
+        // tema locks the theme row against a concurrent delete
+        // (themes.repository's lockThemeForSetting) and writes it.
+        if (input.setupChargeArticleId != null && !(await writer.lockArticle(input.setupChargeArticleId))) {
           throw new SetupChargeArticleNotFoundError(input.setupChargeArticleId);
         }
-        await set(SETUP_CHARGE_ARTICLE_KEY, input.setupChargeArticleId ?? "");
-      }
-      if (input.publicBaseUrl !== undefined) await set(PUBLIC_BASE_URL_KEY, decodePublicBaseUrl(input.publicBaseUrl));
-      if (input.postingAccountsReceivable !== undefined) {
-        await set(POSTING_ACCOUNTS_RECEIVABLE_KEY, input.postingAccountsReceivable);
-      }
-      if (input.postingAccountsPayable !== undefined) {
-        await set(POSTING_ACCOUNTS_PAYABLE_KEY, input.postingAccountsPayable);
-      }
-      if (input.postingDefaultCost !== undefined) await set(POSTING_DEFAULT_COST_KEY, input.postingDefaultCost);
-      // Kundreskontra (B3).
-      if (input.postingBank !== undefined) await set(POSTING_BANK_KEY, input.postingBank);
-      if (input.postingReminderFeeAccount !== undefined) {
-        await set(POSTING_REMINDER_FEE_ACCOUNT_KEY, input.postingReminderFeeAccount);
-      }
-      if (input.postingPaymentWriteOff !== undefined) {
-        await set(POSTING_PAYMENT_WRITEOFF_KEY, input.postingPaymentWriteOff);
-      }
-      // Momsrapport (B5).
-      if (input.postingVatSettlement !== undefined) {
-        await set(POSTING_VAT_SETTLEMENT_KEY, input.postingVatSettlement);
-      }
-      // Årsbokslut (steg 2).
-      if (input.postingInventory !== undefined) await set(POSTING_INVENTORY_KEY, input.postingInventory);
-      if (input.postingInventoryChange !== undefined) await set(POSTING_INVENTORY_CHANGE_KEY, input.postingInventoryChange);
-      // Årsbokslut, Produkter i arbete.
-      if (input.postingWip !== undefined) await set(POSTING_WIP_KEY, input.postingWip);
-      if (input.postingWipChange !== undefined) await set(POSTING_WIP_CHANGE_KEY, input.postingWipChange);
-      // Valuta.
-      if (input.postingFxGain !== undefined) await set(POSTING_FX_GAIN_KEY, input.postingFxGain);
-      if (input.postingFxLoss !== undefined) await set(POSTING_FX_LOSS_KEY, input.postingFxLoss);
-      if (input.postingBankFees !== undefined) await set(POSTING_BANK_FEES_KEY, input.postingBankFees);
-      if (input.paymentTolerance !== undefined) {
-        await set(PAYMENT_TOLERANCE_KEY, String(round2(input.paymentTolerance)));
-      }
-      if (input.reminderFee !== undefined) await set(REMINDER_FEE_KEY, String(round2(input.reminderFee)));
-      // Dröjsmålsränta och förseningsersättning.
-      if (input.lateInterestEnabled !== undefined) await set(LATE_INTEREST_ENABLED_KEY, String(input.lateInterestEnabled));
-      if (input.lateInterestMargin !== undefined) await set(LATE_INTEREST_MARGIN_KEY, String(round2(input.lateInterestMargin)));
-      if (input.lateInterestMinAmount !== undefined) {
-        await set(LATE_INTEREST_MIN_AMOUNT_KEY, String(round2(input.lateInterestMinAmount)));
-      }
-      if (input.lateFeeEnabled !== undefined) await set(LATE_FEE_ENABLED_KEY, String(input.lateFeeEnabled));
-      if (input.postingLateInterest !== undefined) await set(POSTING_LATE_INTEREST_KEY, input.postingLateInterest);
-      if (input.postingLateFee !== undefined) await set(POSTING_LATE_FEE_KEY, input.postingLateFee);
+        if (input.defaultTheme !== undefined) {
+          if (!(await writer.setDefaultTheme(input.defaultTheme))) throw new UnknownThemeError(input.defaultTheme);
+          changedKeys.push(DEFAULT_THEME_KEY);
+        }
+        if (input.themeChoiceLocked !== undefined) await set(THEME_CHOICE_LOCKED_KEY, String(input.themeChoiceLocked));
+
+        if (input.allowMultipleStamps !== undefined) {
+          await set(ALLOW_MULTIPLE_STAMPS_KEY, String(input.allowMultipleStamps));
+        }
+        if (input.showRevisionsOnDocuments !== undefined) {
+          await set(SHOW_REVISIONS_ON_DOCUMENTS_KEY, String(input.showRevisionsOnDocuments));
+        }
+        if (input.showOrderRevisionOnDocuments !== undefined) {
+          await set(SHOW_ORDER_REVISION_ON_DOCUMENTS_KEY, String(input.showOrderRevisionOnDocuments));
+        }
+        if (input.purchaseOrderBarcode !== undefined) {
+          await set(PURCHASE_ORDER_BARCODE_KEY, String(input.purchaseOrderBarcode));
+        }
+        if (input.extraDescriptionDocuments !== undefined) {
+          // Stored in the catalog's order, without duplicates.
+          const chosen = new Set(input.extraDescriptionDocuments);
+          await set(
+            EXTRA_DESCRIPTION_DOCUMENTS_KEY,
+            JSON.stringify(EXTRA_DESCRIPTION_DOCUMENTS.filter((kind) => chosen.has(kind)))
+          );
+        }
+        if (input.atfMinutesPerWeek !== undefined) {
+          await set(ATF_MINUTES_PER_WEEK_KEY, String(input.atfMinutesPerWeek));
+        }
+        if (input.scheduleBalancing !== undefined) {
+          await set(SCHEDULE_BALANCING_KEY, String(input.scheduleBalancing));
+        }
+        if (input.payrollOvertimeThresholdMinutes !== undefined) {
+          await set(PAYROLL_OVERTIME_THRESHOLD_MINUTES_KEY, String(input.payrollOvertimeThresholdMinutes));
+        }
+        if (input.attendanceReasonRequired !== undefined) {
+          await set(ATTENDANCE_REASON_REQUIRED_KEY, String(input.attendanceReasonRequired));
+        }
+        if (input.attendanceReasonToleranceMinutes !== undefined) {
+          await set(ATTENDANCE_REASON_TOLERANCE_MINUTES_KEY, String(input.attendanceReasonToleranceMinutes));
+        }
+        if (input.terminalOvertimeChoice !== undefined) {
+          await set(TERMINAL_OVERTIME_CHOICE_KEY, String(input.terminalOvertimeChoice));
+        }
+        if (input.timeKindSplit !== undefined) {
+          await set(TIME_KIND_SPLIT_KEY, String(input.timeKindSplit));
+        }
+        if (input.paxmlCodeWorked !== undefined) await set(PAXML_CODE_WORKED_KEY, input.paxmlCodeWorked);
+        if (input.paxmlCodeOvertime !== undefined) await set(PAXML_CODE_OVERTIME_KEY, input.paxmlCodeOvertime);
+        if (input.paxmlCodeOvertimeOffSchedule !== undefined) {
+          await set(PAXML_CODE_OVERTIME_OFF_SCHEDULE_KEY, input.paxmlCodeOvertimeOffSchedule);
+        }
+        if (input.paxmlCodeOvertimeComp !== undefined) {
+          await set(PAXML_CODE_OVERTIME_COMP_KEY, input.paxmlCodeOvertimeComp);
+        }
+        if (input.paxmlCodeOvertimeOffScheduleComp !== undefined) {
+          await set(PAXML_CODE_OVERTIME_OFF_SCHEDULE_COMP_KEY, input.paxmlCodeOvertimeOffScheduleComp);
+        }
+        if (input.paxmlCodeAtf !== undefined) await set(PAXML_CODE_ATF_KEY, input.paxmlCodeAtf);
+        if (input.smtpHost !== undefined) await set(SMTP_HOST_KEY, input.smtpHost);
+        if (input.smtpPort !== undefined) await set(SMTP_PORT_KEY, String(input.smtpPort));
+        if (input.smtpSecure !== undefined) await set(SMTP_SECURE_KEY, String(input.smtpSecure));
+        if (input.smtpUser !== undefined) await set(SMTP_USER_KEY, input.smtpUser);
+        // Empty string means "leave the stored password as-is" — the settings
+        // form always posts the field but never sees the current value.
+        if (input.smtpPassword !== undefined && input.smtpPassword !== "") {
+          await set(SMTP_PASSWORD_KEY, input.smtpPassword);
+        }
+        if (input.smtpFromName !== undefined) await set(SMTP_FROM_NAME_KEY, input.smtpFromName);
+        if (input.smtpFromEmail !== undefined) await set(SMTP_FROM_EMAIL_KEY, input.smtpFromEmail);
+        if (input.costingMaterialSource !== undefined) {
+          await set(COSTING_MATERIAL_SOURCE_KEY, input.costingMaterialSource);
+        }
+        if (input.costingPostMaterialSource !== undefined) {
+          await set(COSTING_POST_MATERIAL_SOURCE_KEY, input.costingPostMaterialSource);
+        }
+        if (input.costingSupplierPriceTier !== undefined) {
+          await set(COSTING_SUPPLIER_PRICE_TIER_KEY, input.costingSupplierPriceTier);
+        }
+        if (input.costingMoPercent !== undefined) await set(COSTING_MO_PERCENT_KEY, String(input.costingMoPercent));
+        if (input.costingLoPercent !== undefined) await set(COSTING_LO_PERCENT_KEY, String(input.costingLoPercent));
+        if (input.costingAffoPercent !== undefined) await set(COSTING_AFFO_PERCENT_KEY, String(input.costingAffoPercent));
+        if (input.costingGeneralMarkupPercent !== undefined) {
+          await set(COSTING_GENERAL_MARKUP_PERCENT_KEY, String(input.costingGeneralMarkupPercent));
+        }
+        if (input.costingMaterialMarkupPercent !== undefined) {
+          await set(COSTING_MATERIAL_MARKUP_PERCENT_KEY, String(input.costingMaterialMarkupPercent));
+        }
+        if (input.purchaseOverReceiptPercent !== undefined) {
+          await set(
+            PURCHASE_OVER_RECEIPT_PERCENT_KEY,
+            input.purchaseOverReceiptPercent === null ? "" : String(input.purchaseOverReceiptPercent)
+          );
+        }
+        if (input.salesOverDeliveryPercent !== undefined) {
+          await set(
+            SALES_OVER_DELIVERY_PERCENT_KEY,
+            input.salesOverDeliveryPercent === null ? "" : String(input.salesOverDeliveryPercent)
+          );
+        }
+        if (input.manufacturingMaterialShortage !== undefined) {
+          await set(MANUFACTURING_MATERIAL_SHORTAGE_KEY, input.manufacturingMaterialShortage);
+        }
+        if (input.palletCardCode !== undefined) await set(PALLET_CARD_CODE_KEY, input.palletCardCode);
+        if (input.palletCardAllowQuantityMismatch !== undefined) {
+          await set(PALLET_CARD_ALLOW_QUANTITY_MISMATCH_KEY, String(input.palletCardAllowQuantityMismatch));
+        }
+        if (input.planningLongOperationWeeks !== undefined) {
+          await set(PLANNING_LONG_OPERATION_WEEKS_KEY, String(input.planningLongOperationWeeks));
+        }
+        if (input.planningDefaultLeadTimeDays !== undefined) {
+          await set(PLANNING_DEFAULT_LEAD_TIME_DAYS_KEY, String(input.planningDefaultLeadTimeDays));
+        }
+        if (input.planningQueueTimeDays !== undefined) {
+          await set(PLANNING_QUEUE_TIME_DAYS_KEY, String(input.planningQueueTimeDays));
+        }
+        if (input.planningForecastHistoryMonths !== undefined) {
+          await set(PLANNING_FORECAST_HISTORY_MONTHS_KEY, String(input.planningForecastHistoryMonths));
+        }
+        if (input.planningForecastHorizonMonths !== undefined) {
+          await set(PLANNING_FORECAST_HORIZON_MONTHS_KEY, String(input.planningForecastHorizonMonths));
+        }
+        if (input.planningAbcPeriodMonths !== undefined) {
+          await set(PLANNING_ABC_PERIOD_MONTHS_KEY, String(input.planningAbcPeriodMonths));
+        }
+        // The schema guarantees the pair arrives together with A < B.
+        if (input.planningAbcClassAPercent !== undefined) {
+          await set(PLANNING_ABC_CLASS_A_PERCENT_KEY, String(input.planningAbcClassAPercent));
+        }
+        if (input.planningAbcClassBPercent !== undefined) {
+          await set(PLANNING_ABC_CLASS_B_PERCENT_KEY, String(input.planningAbcClassBPercent));
+        }
+        if (input.supplierDeliveryDayMode !== undefined) {
+          await set(DELIVERY_SETTING_KEYS.supplierMode, input.supplierDeliveryDayMode);
+        }
+        if (input.supplierTransitDays !== undefined) {
+          await set(DELIVERY_SETTING_KEYS.supplierTransit, String(input.supplierTransitDays));
+        }
+        if (input.customerDeliveryDayMode !== undefined) {
+          await set(DELIVERY_SETTING_KEYS.customerMode, input.customerDeliveryDayMode);
+        }
+        if (input.customerTransitDays !== undefined) {
+          await set(DELIVERY_SETTING_KEYS.customerTransit, String(input.customerTransitDays));
+        }
+        // Aviseringar.
+        if (input.alertDigestTime !== undefined) await set(ALERT_DIGEST_TIME_KEY, input.alertDigestTime);
+        if (input.alertSupplierInvoiceDays !== undefined) {
+          await set(ALERT_SUPPLIER_INVOICE_DAYS_KEY, String(input.alertSupplierInvoiceDays));
+        }
+        if (input.alertQuoteFollowupDays !== undefined) {
+          await set(ALERT_QUOTE_FOLLOWUP_DAYS_KEY, String(input.alertQuoteFollowupDays));
+        }
+        if (input.quoteValidityDays !== undefined) await set(QUOTE_VALIDITY_DAYS_KEY, String(input.quoteValidityDays));
+        if (input.precisionSalesLateMarginDays !== undefined) {
+          await set(PRECISION_MARGIN_KEYS.salesLate, String(input.precisionSalesLateMarginDays));
+        }
+        if (input.precisionPurchaseLateMarginDays !== undefined) {
+          await set(PRECISION_MARGIN_KEYS.purchaseLate, String(input.precisionPurchaseLateMarginDays));
+        }
+        // null = off, stored as "" (the over-receipt convention).
+        if (input.precisionSalesEarlyMarginDays !== undefined) {
+          await set(
+            PRECISION_MARGIN_KEYS.salesEarly,
+            input.precisionSalesEarlyMarginDays === null ? "" : String(input.precisionSalesEarlyMarginDays)
+          );
+        }
+        if (input.precisionPurchaseEarlyMarginDays !== undefined) {
+          await set(
+            PRECISION_MARGIN_KEYS.purchaseEarly,
+            input.precisionPurchaseEarlyMarginDays === null ? "" : String(input.precisionPurchaseEarlyMarginDays)
+          );
+        }
+        if (input.setupChargeArticleId !== undefined) await set(SETUP_CHARGE_ARTICLE_KEY, input.setupChargeArticleId ?? "");
+        if (input.publicBaseUrl !== undefined) await set(PUBLIC_BASE_URL_KEY, decodePublicBaseUrl(input.publicBaseUrl));
+        if (input.postingAccountsReceivable !== undefined) {
+          await set(POSTING_ACCOUNTS_RECEIVABLE_KEY, input.postingAccountsReceivable);
+        }
+        if (input.postingAccountsPayable !== undefined) {
+          await set(POSTING_ACCOUNTS_PAYABLE_KEY, input.postingAccountsPayable);
+        }
+        if (input.postingDefaultCost !== undefined) await set(POSTING_DEFAULT_COST_KEY, input.postingDefaultCost);
+        // Kundreskontra (B3).
+        if (input.postingBank !== undefined) await set(POSTING_BANK_KEY, input.postingBank);
+        if (input.postingReminderFeeAccount !== undefined) {
+          await set(POSTING_REMINDER_FEE_ACCOUNT_KEY, input.postingReminderFeeAccount);
+        }
+        if (input.postingPaymentWriteOff !== undefined) {
+          await set(POSTING_PAYMENT_WRITEOFF_KEY, input.postingPaymentWriteOff);
+        }
+        // Momsrapport (B5).
+        if (input.postingVatSettlement !== undefined) {
+          await set(POSTING_VAT_SETTLEMENT_KEY, input.postingVatSettlement);
+        }
+        // Årsbokslut (steg 2).
+        if (input.postingInventory !== undefined) await set(POSTING_INVENTORY_KEY, input.postingInventory);
+        if (input.postingInventoryChange !== undefined) await set(POSTING_INVENTORY_CHANGE_KEY, input.postingInventoryChange);
+        // Årsbokslut, Produkter i arbete.
+        if (input.postingWip !== undefined) await set(POSTING_WIP_KEY, input.postingWip);
+        if (input.postingWipChange !== undefined) await set(POSTING_WIP_CHANGE_KEY, input.postingWipChange);
+        // Valuta.
+        if (input.postingFxGain !== undefined) await set(POSTING_FX_GAIN_KEY, input.postingFxGain);
+        if (input.postingFxLoss !== undefined) await set(POSTING_FX_LOSS_KEY, input.postingFxLoss);
+        if (input.postingBankFees !== undefined) await set(POSTING_BANK_FEES_KEY, input.postingBankFees);
+        if (input.paymentTolerance !== undefined) {
+          await set(PAYMENT_TOLERANCE_KEY, String(round2(input.paymentTolerance)));
+        }
+        if (input.reminderFee !== undefined) await set(REMINDER_FEE_KEY, String(round2(input.reminderFee)));
+        // Dröjsmålsränta och förseningsersättning.
+        if (input.lateInterestEnabled !== undefined) await set(LATE_INTEREST_ENABLED_KEY, String(input.lateInterestEnabled));
+        if (input.lateInterestMargin !== undefined) await set(LATE_INTEREST_MARGIN_KEY, String(round2(input.lateInterestMargin)));
+        if (input.lateInterestMinAmount !== undefined) {
+          await set(LATE_INTEREST_MIN_AMOUNT_KEY, String(round2(input.lateInterestMinAmount)));
+        }
+        if (input.lateFeeEnabled !== undefined) await set(LATE_FEE_ENABLED_KEY, String(input.lateFeeEnabled));
+        if (input.postingLateInterest !== undefined) await set(POSTING_LATE_INTEREST_KEY, input.postingLateInterest);
+        if (input.postingLateFee !== undefined) await set(POSTING_LATE_FEE_KEY, input.postingLateFee);
+        return changedKeys;
+      });
 
       if (changedKeys.length > 0) {
         await audit.log({ entityType: "system_settings", entityId: null, action: "updated", detail: { changedKeys }, userId });

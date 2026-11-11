@@ -26,12 +26,14 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — races med litet fönster
 
-- [ ] **Reservplatsen `***`:** `getOrCreateFallbackLocation` läser först och skapar sedan utan konfliktskydd — två samtidiga första användningar ger 500 (`copied-articles.test.ts` föll en gång på det). `lagergranskning.test.ts` ("an inflow onto a temporary place being retired…") läser `pg_locks` utan databasfilter och kan falla med parallella arbetare. Två samtidiga Aktivera på olika revisioner ger 409 med den missvisande texten "Revision … already exists" (artikelgranskningen 2026-11-11).
+- [ ] **Reservplatsen `***`:** `getOrCreateFallbackLocation` läser först och skapar sedan utan konfliktskydd — två samtidiga första användningar ger 500 (`copied-articles.test.ts` föll en gång på det). Två samtidiga Aktivera på olika revisioner ger 409 med den missvisande texten "Revision … already exists" (artikelgranskningen 2026-11-11).
 - [ ] **Konfigurerade rader i behovsberäkningen och Leveranstidskontrollen** (`planning.service.ts` ~1166–1186, ~2002, ~3045) utvärderar sparade val utan att jämföra nyckeln — ett förval tillagt i mallen efteråt ger materialbehov för det nya förvalet tills Ändra konfiguration körs (TO-skapandet vägrar redan; `variantPrice` rättat i artikelgranskningen).
 
 - [ ] **Löneperiodens Lås mot odaterade ändringar:** personalkortet (standardschema, övertidsförval, Anställd från/till), dags- och veckoscheman, OB-regler, frånvarokoder och inställningarna kan ändras medan Lås räknar underlaget (tidgranskningen serialiserade bara de daterade skrivarna, `payroll-period-guard.ts`); `attest` läser öppen närvaro utanför transaktionen. OB-regelns namn har inget unikt index (förkontrollen ensam).
 
 ### Låga — otydliga fel, texter och småbeteenden
+
+- [ ] **Systemgranskningens rester (2026-11-11):** en nummerserie nära 20 tecken kan växa förbi kolumnen senare (9999 → 10000) och ger då 500 (22001 säger inte vilken kolumn); ett krockande LF-nummer får `DuplicateSupplierInvoiceNumberError`s text i stället för `document-number-taken`; backupen kan leverera en avkortad dump som lyckad om pg_dump avslutar med fel efter att stdout tagit slut; inköpets fakturaunderlag (`listInvoiceBasis`) läser bara lagerrader, så lego-/tjänsterader får ett ungefärligt mottagningsdatum.
 
 - [ ] **Importens igenkänning:** kundens/leverantörens adressmall utan Adressnamn och Förvald (bara nummer + Adressrad 1/Postnummer/Stad) känns igen som kund-/leverantörsfil och skriver adressen över motpartens egen — tvetydig mot kundmallen, så den rättades inte i importgranskningen (guiden visar typen före commit).
 

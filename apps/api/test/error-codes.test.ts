@@ -370,8 +370,13 @@ import {
   RiksbankUnavailableError,
 } from "../src/modules/system/service/exchange-rates.js";
 
-import { SeriesExhaustedError } from "../src/modules/system/service/number-series.js";
-import { BuiltInNumberSeriesError, DuplicateNumberSeriesNameError } from "../src/modules/system/service/system.service.js";
+import { DocumentNumberTakenError, SeriesExhaustedError } from "../src/modules/system/service/number-series.js";
+import {
+  BuiltInNumberSeriesError,
+  DuplicateNumberSeriesNameError,
+  NumberSeriesNumberTakenError,
+  NumberSeriesTooLongError,
+} from "../src/modules/system/service/system.service.js";
 import {
   InvalidOperationFileTypeError,
   NotSubcontractOperationError,
@@ -721,6 +726,9 @@ const cases: Array<[Error, string]> = [
   [new SeriesExhaustedError("customer"), ERROR_CODES.SERIES_EXHAUSTED],
   [new DuplicateNumberSeriesNameError("Plåt"), ERROR_CODES.DUPLICATE_NUMBER_SERIES_NAME],
   [new BuiltInNumberSeriesError("article", "delete"), ERROR_CODES.BUILT_IN_NUMBER_SERIES],
+  [new NumberSeriesTooLongError("purchase_order", "INKÖPSORDERNUMMER-1004", 20), ERROR_CODES.NUMBER_SERIES_TOO_LONG],
+  [new NumberSeriesNumberTakenError("purchase_order", "IO-1004"), ERROR_CODES.NUMBER_SERIES_NUMBER_TAKEN],
+  [new DocumentNumberTakenError("purchase_orders"), ERROR_CODES.DOCUMENT_NUMBER_TAKEN],
   [new DemoDataNotAvailableError(["customers"]), ERROR_CODES.DEMO_DATA_NOT_AVAILABLE],
   [new OrderRegisterTooLargeError(), ERROR_CODES.ORDER_REGISTER_TOO_LARGE],
   [new QuoteFollowupTooLargeError(), ERROR_CODES.QUOTE_FOLLOWUP_TOO_LARGE],
