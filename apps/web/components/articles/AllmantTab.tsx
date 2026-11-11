@@ -21,7 +21,16 @@ import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 import { SectionHeading } from "../ui/SectionHeading";
 import { apiErrorMessage } from "../../lib/errorMessages";
 
-export function AllmantTab({ article, groups }: { article: Article; groups: ArticleGroup[] }) {
+export function AllmantTab({
+  article,
+  groups,
+  onDirtyChange,
+}: {
+  article: Article;
+  groups: ArticleGroup[];
+  // The card's tab strip keeps this tab mounted and guards leaving the page.
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
   const router = useRouter();
 
   const [articleNumber, setArticleNumber] = useState(article.articleNumber);
@@ -88,47 +97,67 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
   const [costError, setCostError] = useState<string | null>(null);
   const [costPending, setCostPending] = useState(false);
 
+  // Everything Allmänt's Spara can write, as the API wants it.
+  const detailsValues: Record<string, unknown> = {
+    articleNumber,
+    type,
+    isPhantom,
+    name,
+    // "" clears it.
+    barcode: barcode.trim(),
+    unitId,
+    purchaseUnitId: purchaseUnitId === "" ? null : purchaseUnitId,
+    salesUnitId: salesUnitId === "" ? null : salesUnitId,
+    active,
+    salesPrice: salesPrice.trim() === "" ? null : Number(salesPrice),
+    groupId: groupId === "" ? null : groupId,
+    articleCodeId: articleCodeId === "" ? null : articleCodeId,
+    weight: weight.trim() === "" ? null : Number(weight),
+    length: length.trim() === "" ? null : Number(length),
+    width: width.trim() === "" ? null : Number(width),
+    height: height.trim() === "" ? null : Number(height),
+    surfaceTreatment: surfaceTreatment.trim() === "" ? null : surfaceTreatment,
+    colour: colour.trim() === "" ? null : colour,
+    // "" clears it; the newlines are kept.
+    extraDescription: extraDescription.trim() === "" ? "" : extraDescription,
+    // The English texts used on English documents; "" clears them.
+    nameEn: nameEn.trim(),
+    extraDescriptionEn: extraDescriptionEn.trim() === "" ? "" : extraDescriptionEn,
+    quantityPerPackage: quantityPerPackage.trim() === "" ? null : Number(quantityPerPackage),
+    packageTypeId: packageTypeId === "" ? null : packageTypeId,
+    parcelKind: parcelKind === "" ? null : parcelKind,
+    stackable,
+    palletSpaces: palletSpaces.trim() === "" ? null : Number(palletSpaces),
+    loadingMeters: loadingMeters.trim() === "" ? null : Number(loadingMeters),
+  };
+  // What the form started from (and, after a save, what was saved). Spara
+  // sends only the fields that differ from it (webbgranskningen 2026-11-11):
+  // sending all ~30 wrote a price set meanwhile by Kalkyl → Sätt
+  // försäljningspris or an import back to the old one (and its history got
+  // 120 → 100), and an untouched empty Flakmeter went as null so the server
+  // never derived it from Pallplatser.
+  const [savedDetails, setSavedDetails] = useState<Record<string, unknown>>(() => detailsValues);
+  const changedDetails = Object.fromEntries(
+    Object.entries(detailsValues).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(savedDetails[key]))
+  );
+  const detailsDirty = Object.keys(changedDetails).length > 0;
+  const [savedStandardCost, setSavedStandardCost] = useState(article.standardCost ?? "");
+
   async function saveDetails(e: FormEvent) {
     e.preventDefault();
     setDetailsError(null);
     setDetailsSaved(false);
+    if (!detailsDirty) {
+      setDetailsSaved(true);
+      return;
+    }
     setDetailsPending(true);
     try {
       await apiFetch(`/api/v1/articles/${article.id}`, {
         method: "PATCH",
-        body: JSON.stringify({
-          articleNumber,
-          type,
-          isPhantom,
-          name,
-          // "" clears it.
-          barcode: barcode.trim(),
-          unitId,
-          purchaseUnitId: purchaseUnitId === "" ? null : purchaseUnitId,
-          salesUnitId: salesUnitId === "" ? null : salesUnitId,
-          active,
-          salesPrice: salesPrice.trim() === "" ? null : Number(salesPrice),
-          groupId: groupId === "" ? null : groupId,
-          articleCodeId: articleCodeId === "" ? null : articleCodeId,
-          weight: weight.trim() === "" ? null : Number(weight),
-          length: length.trim() === "" ? null : Number(length),
-          width: width.trim() === "" ? null : Number(width),
-          height: height.trim() === "" ? null : Number(height),
-          surfaceTreatment: surfaceTreatment.trim() === "" ? null : surfaceTreatment,
-          colour: colour.trim() === "" ? null : colour,
-          // "" clears it; the newlines are kept.
-          extraDescription: extraDescription.trim() === "" ? "" : extraDescription,
-          // The English texts used on English documents; "" clears them.
-          nameEn: nameEn.trim(),
-          extraDescriptionEn: extraDescriptionEn.trim() === "" ? "" : extraDescriptionEn,
-          quantityPerPackage: quantityPerPackage.trim() === "" ? null : Number(quantityPerPackage),
-          packageTypeId: packageTypeId === "" ? null : packageTypeId,
-          parcelKind: parcelKind === "" ? null : parcelKind,
-          stackable,
-          palletSpaces: palletSpaces.trim() === "" ? null : Number(palletSpaces),
-          loadingMeters: loadingMeters.trim() === "" ? null : Number(loadingMeters),
-        }),
+        body: JSON.stringify(changedDetails),
       });
+      setSavedDetails(detailsValues);
       setDetailsSaved(true);
       router.refresh();
     } catch (err) {
@@ -148,6 +177,7 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
         method: "PATCH",
         body: JSON.stringify({ standardCost: Number(standardCost) }),
       });
+      setSavedStandardCost(standardCost);
       setCostSaved(true);
       router.refresh();
     } catch (err) {
@@ -157,10 +187,21 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
     }
   }
 
+  const costDirty = standardCost !== savedStandardCost;
+  const dirty = detailsDirty || costDirty;
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  // The alternative units are stored against the SAVED base unit — an
+  // unsaved switch (st → kg) would have made "1 kg = 2 m" mean 1 st = 2 m.
+  const savedBaseUnitId = String(savedDetails.unitId);
+  const savedBaseUnitCode = allUnits.find((u) => u.id === savedBaseUnitId)?.code ?? article.unit;
+  const baseUnitUnsaved = unitId !== savedBaseUnitId;
+
   return (
     <Card maxWidth={960}>
       <Form className={styles.block} onSubmit={saveDetails}>
-        <FormError>{detailsError}</FormError>
 
         <section className={styles.section}>
           <SectionHeading>Identitet</SectionHeading>
@@ -423,16 +464,19 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
           </div>
         </section>
 
+        {/* Next to Spara — at the top of the card the error sat six sections
+            away (webbgranskningen 2026-11-11). */}
+        <FormError>{detailsError}</FormError>
         <FormActions>
           <Button type="submit" variant="primary" disabled={detailsPending}>
             {detailsPending ? "Sparar…" : "Spara"}
           </Button>
-          {detailsSaved && !detailsPending && <span>Sparat ✓</span>}
+          {detailsDirty && !detailsPending && <span>Osparade ändringar</span>}
+          {detailsSaved && !detailsPending && !detailsDirty && <span>Sparat ✓</span>}
         </FormActions>
       </Form>
 
       <Form className={styles.block} onSubmit={saveStandardCost}>
-        <FormError>{costError}</FormError>
 
         <section className={styles.section}>
           <SectionHeading>Kalkyl</SectionHeading>
@@ -458,14 +502,19 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
           <Button type="submit" variant="secondary" disabled={costPending}>
             {costPending ? "Sparar…" : "Spara standardkostnad"}
           </Button>
-          {costSaved && !costPending && <span>Sparat ✓</span>}
+          {costDirty && !costPending && <span>Osparade ändringar</span>}
+          {costSaved && !costPending && !costDirty && <span>Sparat ✓</span>}
           <PriceHistoryButton articleId={article.id} kind="standardCost" />
         </FormActions>
+        <FormError>{costError}</FormError>
       </Form>
 
+      {baseUnitUnsaved && (
+        <FormHint>Grundenheten är ändrad men inte sparad — spara Allmänt innan du lägger till alternativa enheter.</FormHint>
+      )}
       <EnheterSection
         articleId={article.id}
-        baseUnitCode={baseUnitCode}
+        baseUnitCode={savedBaseUnitCode}
         allUnits={allUnits}
         articleUnits={articleUnits}
         onChanged={() => {

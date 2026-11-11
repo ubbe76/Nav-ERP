@@ -10,7 +10,7 @@ import { MARKUP_LEVEL_WORDS, type MarkupLevel } from "../../lib/markupLevels";
 import { Button } from "../ui/Button";
 import { FormActions, FormError, FormHint, FormSaved } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
-import { formatMoney } from "../../lib/format";
+import { formatMoney, formatUnitPrice } from "../../lib/format";
 import { formatRate } from "../../lib/currency";
 import { formatQuantity } from "../../lib/format";
 import { OLD_CALCULATION_NOTICE, PRELIMINARY_NOTICE, hasRateDeviation, isZeroAmount } from "../../lib/costVariance";
@@ -37,6 +37,11 @@ const SOURCE_LABELS: Record<CostingMaterialSource, string> = {
   standard: "Standardpris",
   actual: "Verklig kostnad",
 };
+
+// A unit price (numeric(14,4)): up to four decimals, never rounded to öre.
+function unitMoney(value: string | number) {
+  return `${formatUnitPrice(value)} kr`;
+}
 
 function money(value: string | number) {
   return `${formatMoney(value)} kr`;
@@ -186,8 +191,9 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
                     case "unitCode":
                       return row.unitCode;
                     case "unitCost":
+                      return unitMoney(row.unitCost);
                     case "amount":
-                      return money(row[key]);
+                      return money(row.amount);
                     case "overheadAmount":
                       return row.kind === "semi" ? money(row.overheadAmount) : "—";
                     case "materialMarkupAmount":
@@ -288,10 +294,10 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
             </FormActions>
             <FormHint>
               <strong>Sätt standardpris</strong> skriver kalkylens tillverkningskostnad{" "}
-              {money(figures.manufacturing)}/st (utan TO-påslag) till artikelns{" "}
+              {unitMoney(figures.manufacturing)}/st (utan TO-påslag) till artikelns{" "}
               <strong>Standardkostnad</strong> och loggar ändringen i standardprishistoriken. Fältet styr även
               lagervärdet och värdet på tillverkningsinleveranser. <strong>Sätt försäljningspris</strong> skriver{" "}
-              {money(figures.sales)}/st till artikelns <strong>Försäljningspris</strong> — grundpriset
+              {unitMoney(figures.sales)}/st till artikelns <strong>Försäljningspris</strong> — grundpriset
               längst ned i priskedjan.
             </FormHint>
             <FormError>{applyError}</FormError>
@@ -375,11 +381,11 @@ function VarianceSection({ analysis }: { analysis: CostVarianceAnalysis | null }
                 case "baseQuantity":
                   return qty(row.baseQuantity);
                 case "baseUnitCost":
-                  return row.baseUnitCost === null ? "—" : money(row.baseUnitCost);
+                  return row.baseUnitCost === null ? "—" : unitMoney(row.baseUnitCost);
                 case "quantity":
                   return qty(row.quantity);
                 case "unitCost":
-                  return money(row.unitCost);
+                  return unitMoney(row.unitCost);
                 case "price":
                   return <Deviation value={row.parts.price} />;
                 case "quantityPart":

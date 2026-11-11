@@ -1,12 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { fetchCopiedCount } from "../../lib/copiedArticles";
 import { confirmDialog } from "../../lib/confirm";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { formatMoney, formatPercent, formatSignedMoney } from "../../lib/format";
+import { formatMoney, formatPercent, formatSignedMoney, formatUnitPrice } from "../../lib/format";
 import { ARTICLE_TYPE_LABELS, type ArticleGroup, type ArticleType, type RegisterEntry } from "../../lib/types";
 import { ArticleNumberInput } from "../ui/ArticleNumberInput";
 import { Button } from "../ui/Button";
@@ -73,7 +72,7 @@ interface RangeRow {
 const MAX_RANGES = 20;
 const emptyRange = (): RangeRow => ({ from: "", to: "" });
 
-const money = (v: number | null) => (v === null ? "—" : formatMoney(v));
+const money = (v: number | null) => (v === null ? "—" : formatUnitPrice(v));
 const QUANTITY_SOURCE_LABELS: Record<BatchRow["quantitySource"], string> = {
   latest: "senaste förkalkyl",
   fallback: "valt antal",
@@ -278,6 +277,7 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
 
   function onPreview() {
     if (!quantityValid) return;
+    setListError(null);
     void runPreview({ body: { ...selectionBody(), fallbackQuantity: Number(fallbackQuantity) }, multiLevel }, false);
   }
 
@@ -376,7 +376,7 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
           />
         );
       case "articleNumber":
-        return <Link href={`/artiklar/${r.id}`}>{r.articleNumber}</Link>;
+        return <GatedLink href={`/artiklar/${r.id}`}>{r.articleNumber}</GatedLink>;
       case "name":
         return (
           <span className={styles.value}>
@@ -421,7 +421,7 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
       case "prevTvk":
         return r.previous && r.previous.manufacturingCostPerUnit !== null ? (
           <span className={styles.value}>
-            {formatMoney(r.previous.manufacturingCostPerUnit)}
+            {formatUnitPrice(r.previous.manufacturingCostPerUnit)}
             <span className={styles.sub}>{dateOf(r.previous.calculatedAt)}</span>
           </span>
         ) : (
@@ -469,7 +469,7 @@ export function PreCalculationBatchPageClient({ initialSource }: { initialSource
           </div>
           {copiedDisabled && (
             <FormHint>
-              Kopierat är tomt. Kopiera artiklar i <Link href="/artiklar/register">artikelregistret</Link> eller lägg till dem på sidan{" "}
+              Kopierat är tomt. Kopiera artiklar i <GatedLink href="/artiklar/register">artikelregistret</GatedLink> eller lägg till dem på sidan{" "}
               <GatedLink href="/artiklar/kopierat">Kopierat</GatedLink> först.
             </FormHint>
           )}

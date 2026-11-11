@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
@@ -165,7 +164,7 @@ export function CopiedArticlesPageClient() {
       case "position":
         return <span className={styles.position}>{r.position}</span>;
       case "articleNumber":
-        return <Link href={`/artiklar/${r.id}`}>{r.articleNumber}</Link>;
+        return <GatedLink href={`/artiklar/${r.id}`}>{r.articleNumber}</GatedLink>;
       case "name":
         return r.name;
       case "type":
@@ -224,7 +223,7 @@ export function CopiedArticlesPageClient() {
             </div>
           </div>
           <p className={styles.hint}>
-            Artikeln läggs sist i listan. Fler på en gång kopierar du från <Link href="/artiklar/register">artikelregistret</Link>, behovsberäkningen eller en
+            Artikeln läggs sist i listan. Fler på en gång kopierar du från <GatedLink href="/artiklar/register">artikelregistret</GatedLink>, behovsberäkningen eller en
             artikels struktur.
           </p>
           {notice && <FormNotice role="status">{notice}</FormNotice>}

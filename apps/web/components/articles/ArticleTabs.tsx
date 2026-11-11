@@ -1,5 +1,6 @@
 "use client";
 
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { useState } from "react";
 import type {
   Article,
@@ -65,7 +66,18 @@ export function ArticleTabs({
   articleLocations,
 }: ArticleTabsProps) {
   const tabs = tabsForType(article.type);
-  const [activeTab, setActiveTab] = useState<string>("Allmänt");
+  const [activeTab, setActiveTabState] = useState<string>("Allmänt");
+  // Allmänt and Lager stay mounted (hidden) once opened, so a half-typed form
+  // survives a tab switch — before, switching to Lager dropped Allmänt's
+  // changes without a word (webbgranskningen 2026-11-11, same as the partner
+  // card). Allmänt reports unsaved changes; leaving the page asks first.
+  const [openedTabs, setOpenedTabs] = useState<Set<string>>(() => new Set(["Allmänt"]));
+  const setActiveTab = (tab: string) => {
+    setActiveTabState(tab);
+    setOpenedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
+  };
+  const [allmantDirty, setAllmantDirty] = useState(false);
+  useUnsavedGuard(allmantDirty);
   // Tillägg add their own tabs last.
   const pluginTabs = usePluginTabs("article");
   const activePluginTab = pluginTabs.find((t) => pluginTabId(t) === activeTab);
@@ -98,7 +110,11 @@ export function ArticleTabs({
         ))}
       </div>
 
-      {activeTab === "Allmänt" && <AllmantTab article={article} groups={groups} />}
+      {openedTabs.has("Allmänt") && (
+        <div hidden={activeTab !== "Allmänt"}>
+          <AllmantTab article={article} groups={groups} onDirtyChange={setAllmantDirty} />
+        </div>
+      )}
       {activeTab === "Konfigurator" && tabs.includes("Konfigurator") && <KonfiguratorTab article={article} />}
       {activeTab === "Beredning" && tabs.includes("Beredning") && (
         <BeredningTab
@@ -111,7 +127,11 @@ export function ArticleTabs({
         />
       )}
       {activeTab === "Inköp" && tabs.includes("Inköp") && <InkopTab articleId={article.id} />}
-      {activeTab === "Lager" && tabs.includes("Lager") && <LagerTab article={article} balances={balances} articleLocations={articleLocations} />}
+      {openedTabs.has("Lager") && tabs.includes("Lager") && (
+        <div hidden={activeTab !== "Lager"}>
+          <LagerTab article={article} balances={balances} articleLocations={articleLocations} />
+        </div>
+      )}
       {activeTab === "Kalkyl" && (
         <KalkylTab articleId={article.id} calculations={calculations} salesPrice={article.salesPrice} />
       )}

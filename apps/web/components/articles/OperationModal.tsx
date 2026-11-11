@@ -11,7 +11,7 @@ import { Checkbox, Field, Input, Select } from "../ui/Field";
 import { SegmentedToggle } from "../ui/SegmentedToggle";
 import fieldStyles from "../ui/Field.module.css";
 import styles from "./OperationModal.module.css";
-import { API_URL, apiFetch } from "../../lib/api";
+import { API_URL, ApiError, apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { OPERATION_TIME_UNIT_LABELS, runTimeInUnit, runTimeToMinutes, type OperationTimeUnit } from "../../lib/units";
 import type { ArticleDrawing, ArticleFile, MOOperation, MOOperationResource, Paged, RoutingOperation, Supplier, WorkCenter } from "../../lib/types";
@@ -36,6 +36,9 @@ interface OperationModalProps {
   // so a resource switch warns that the time is costed at the new rate.
   reportedTime?: boolean;
   onSaved: () => void;
+  // The list behind the dialog changed without the dialog closing (a lego
+  // operation saved but its drawing upload refused) — reload it.
+  onChanged?: () => void;
 }
 
 // What the form sends — the fields the routing and the MO operation share, plus
@@ -79,6 +82,9 @@ interface AlternativeRow {
   workCenterId: string;
   setupTime: string;
   runTimePerUnit: string;
+  // The stored minutes while the run-time text is untouched — saved as they
+  // are, never re-derived from the shown st/h or sek (see exactRunMinutes).
+  exactRunMinutes?: number | null;
 }
 
 export function OperationModal({
@@ -90,6 +96,7 @@ export function OperationModal({
   defaultSequenceNo,
   reportedTime,
   onSaved,
+  onChanged,
   onSubmit,
 }: OperationModalProps) {
   // Resources are a Tillverkning register; an Artiklar-only user gets the
@@ -126,6 +133,7 @@ export function OperationModal({
           defaultSequenceNo={defaultSequenceNo}
           reportedTime={reportedTime}
           onSaved={onSaved}
+          onChanged={onChanged}
           onSubmit={onSubmit}
         />
       )}
@@ -148,8 +156,12 @@ function OperationForm({
   defaultSequenceNo,
   reportedTime,
   onSaved,
+  onChanged,
   onSubmit,
 }: Omit<OperationModalProps, "open" | "onClose">) {
+  // A new operation that was created but whose drawing upload failed: the next
+  // Spara updates it instead of creating a second one (409 duplicate-sequence-no).
+  const [createdId, setCreatedId] = useState<string | null>(null);
   // MO mode: an order's operation has no Kalkyl flag and no routing file.
   const moMode = onSubmit !== undefined;
   // Routing-only fields exist on the beredning's row, not on an MO operation.
@@ -177,12 +189,23 @@ function OperationForm({
   const [runTimePerUnit, setRunTimePerUnit] = useState(() =>
     editing ? shownInUnit(Number(editing.runTimePerUnit), editing.timeUnit) : "0"
   );
+  // The stored minutes behind an untouched Tid/enhet (webbgranskningen
+  // 2026-11-11): the field shows st/h or sek rounded, and converting that back
+  // on every save drifted the stored time — 13 min/st shown as 4,62 st/h came
+  // back as 12,987 min when only the Kommentar was edited. Typing clears it;
+  // the MO mode's resource switch sets it to that resource's minutes.
+  const [exactRunMinutes, setExactRunMinutes] = useState<number | null>(() =>
+    editing ? Number(editing.runTimePerUnit) : null
+  );
   // Cykeltid — typed in the SAME unit as Tid/enhet; "" = not set.
   const [cycleTime, setCycleTime] = useState(() => {
     const stored = routingEditing?.cycleTimePerUnit;
     if (stored == null) return "";
     return shownInUnit(Number(stored), editing?.timeUnit ?? "minutes_per_unit");
   });
+  const [exactCycleMinutes, setExactCycleMinutes] = useState<number | null>(() =>
+    routingEditing?.cycleTimePerUnit == null ? null : Number(routingEditing.cycleTimePerUnit)
+  );
   const [costingOnly, setCostingOnly] = useState(routingEditing?.costingOnly ?? false);
   // --- Alternativa resurser, beredningen: the set in rank order. ---
   const nextAltKey = useRef(0);
@@ -192,6 +215,7 @@ function OperationForm({
       workCenterId: alt.workCenterId,
       setupTime: alt.setupTime == null ? "" : String(Number(alt.setupTime)),
       runTimePerUnit: alt.runTimePerUnit == null ? "" : shownInUnit(Number(alt.runTimePerUnit), editing?.timeUnit ?? "minutes_per_unit"),
+      exactRunMinutes: alt.runTimePerUnit == null ? null : Number(alt.runTimePerUnit),
     })),
   );
   // --- Alternativa resurser, tillverkningsordern: the operation's resources
@@ -296,7 +320,10 @@ function OperationForm({
       const row = moResources.find((r) => r.workCenterId === id);
       if (row) {
         if (!setupTouched.current) setSetupTime(String(Number(row.setupTime)));
-        if (!runTouched.current) setRunTimePerUnit(shownInUnit(Number(row.runTimePerUnit), timeUnit));
+        if (!runTouched.current) {
+          setRunTimePerUnit(shownInUnit(Number(row.runTimePerUnit), timeUnit));
+          setExactRunMinutes(Number(row.runTimePerUnit));
+        }
       }
       if (!lockedTouched.current && moResources.length > 0) setResourceLocked(id !== editing.workCenterId ? true : initialLocked);
     }
@@ -304,7 +331,7 @@ function OperationForm({
     // ordinarie takes its place in the list (a swap), with its own times.
     if (!moMode && previousId !== id && alternatives.some((a) => a.workCenterId === id)) {
       setAlternatives((rows) =>
-        rows.map((a) => (a.workCenterId === id ? { ...a, workCenterId: previousId, setupTime: "", runTimePerUnit: "" } : a)),
+        rows.map((a) => (a.workCenterId === id ? { ...a, workCenterId: previousId, setupTime: "", runTimePerUnit: "", exactRunMinutes: null } : a)),
       );
     }
     const center = workCenters.find((wc) => wc.id === id);
@@ -348,14 +375,14 @@ function OperationForm({
         setupTime: isLego ? 0 : Number(setupTime),
         // Canonical storage is always minutes per unit — st/h and sek/st are
         // converted here, once, at the submit boundary.
-        runTimePerUnit: isLego ? 0 : runTimeToMinutes(Number(runTimePerUnit), timeUnit),
+        runTimePerUnit: isLego ? 0 : (exactRunMinutes ?? runTimeToMinutes(Number(runTimePerUnit), timeUnit)),
         // Cykeltid: same conversion as Tid/enhet; empty = null (clears). Lego
         // has no times, so it always clears; an MO operation has no field.
         ...(moMode
           ? {}
           : {
               cycleTimePerUnit:
-                isLego || cycleTime.trim() === "" ? null : runTimeToMinutes(Number(cycleTime), timeUnit),
+                isLego || cycleTime.trim() === "" ? null : (exactCycleMinutes ?? runTimeToMinutes(Number(cycleTime), timeUnit)),
             }),
         // Lego hides the time fields entirely, so it always forces minutes —
         // a stray st/h preference from before the resource switch must not
@@ -385,7 +412,10 @@ function OperationForm({
                 ? alternatives.map((row) => ({
                     workCenterId: row.workCenterId,
                     setupTime: row.setupTime.trim() === "" ? null : Number(row.setupTime),
-                    runTimePerUnit: row.runTimePerUnit.trim() === "" ? null : runTimeToMinutes(Number(row.runTimePerUnit), timeUnit),
+                    runTimePerUnit:
+                      row.runTimePerUnit.trim() === ""
+                        ? null
+                        : (row.exactRunMinutes ?? runTimeToMinutes(Number(row.runTimePerUnit), timeUnit)),
                   }))
                 : [],
             }),
@@ -395,9 +425,9 @@ function OperationForm({
         onSaved();
         return;
       }
-      let operationId = editing?.id;
-      if (editing) {
-        await apiFetch(`/api/v1/articles/${articleId}/routing/${editing.id}`, {
+      let operationId = editing?.id ?? createdId ?? undefined;
+      if (operationId) {
+        await apiFetch(`/api/v1/articles/${articleId}/routing/${operationId}`, {
           method: "PATCH",
           body: JSON.stringify(payload),
         });
@@ -423,10 +453,19 @@ function OperationForm({
           body,
         });
         if (!res.ok) {
-          const uploadError = await res.json().catch(() => ({}));
-          throw new Error(
-            (uploadError as { error?: string }).error ?? "Operationen sparades men ritningen kunde inte laddas upp"
+          const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+          // The operation itself is saved: keep the dialog on it (the next
+          // Spara updates, never creates again), show it in the list and say
+          // why the file was refused — with the code, so the text is Swedish.
+          if (!editing) setCreatedId(operationId);
+          onChanged?.();
+          setError(
+            `Operationen sparades, men ritningen kunde inte laddas upp: ${apiErrorMessage(
+              new ApiError(body.error ?? "Upload failed", res.status, body.code, body),
+              "okänt fel"
+            )}`
           );
+          return;
         }
       }
       onSaved();
@@ -646,10 +685,14 @@ function OperationForm({
                 type="number"
                 size="sm"
                 min="0"
-                step="0.01"
+                step="any"
                 required
                 value={runTimePerUnit}
-                onChange={(e) => { runTouched.current = true; setRunTimePerUnit(e.target.value); }}
+                onChange={(e) => {
+                  runTouched.current = true;
+                  setExactRunMinutes(null);
+                  setRunTimePerUnit(e.target.value);
+                }}
               />
               <SegmentedToggle
                 value={timeUnit}
@@ -675,7 +718,10 @@ function OperationForm({
               min="0"
               step="any"
               value={cycleTime}
-              onChange={(e) => setCycleTime(e.target.value)}
+              onChange={(e) => {
+                setExactCycleMinutes(null);
+                setCycleTime(e.target.value);
+              }}
             />
           </Field>
           <FormHint attached>
@@ -805,9 +851,12 @@ function OperationForm({
         utskriften Skriv ut TO (PDF) och visas i stämpelterminalen, oavsett Skriv ut på arbetskortet.
       </FormHint>
 
+      {/* Again next to the button — the dialog scrolls, and the error at the
+          top was out of sight (webbgranskningen 2026-11-11). */}
+      <FormError>{error}</FormError>
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>
-          {pending ? "Sparar…" : editing ? "Spara ändringar" : "Lägg till operation"}
+          {pending ? "Sparar…" : editing || createdId ? "Spara ändringar" : "Lägg till operation"}
         </Button>
       </FormActions>
     </Form>
@@ -899,7 +948,7 @@ function AlternativesSection({
                 step="any"
                 placeholder="Som ordinarie"
                 value={row.runTimePerUnit}
-                onChange={(e) => update(row.key, { runTimePerUnit: e.target.value })}
+                onChange={(e) => update(row.key, { runTimePerUnit: e.target.value, exactRunMinutes: null })}
               />
             </Field>
           </FormRow>

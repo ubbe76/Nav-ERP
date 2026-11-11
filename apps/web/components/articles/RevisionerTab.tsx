@@ -223,6 +223,8 @@ function useRevisionRegisters(articleId: string) {
           onCancel={() => setDialog(null)}
           onSave={async (choice) => {
             await saveRevisionFile(dialog.drawing, dialog.revision.id, choice);
+            // The file the earlier "lades till, men inte filen" error was about is in.
+            setError(null);
             setDialog(null);
             await load();
           }}

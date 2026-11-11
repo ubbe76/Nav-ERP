@@ -4,7 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { formatMoney, formatSignedMoney } from "../../lib/format";
+import { formatMoney, formatSignedMoney, formatUnitPrice } from "../../lib/format";
 import { formatRate, SEK } from "../../lib/currency";
 import { draftLines } from "../../lib/configurationLines";
 import type {
@@ -232,7 +232,7 @@ function ConfigureForm({ template, customerId, showPrice, quantity, currency, ex
           {showPrice && (
             <dl className={styles.prices}>
               <dt>Grundpris</dt>
-              <dd>{result.price.base === null ? "—" : formatMoney(result.price.base)}</dd>
+              <dd>{result.price.base === null ? "—" : formatUnitPrice(result.price.base)}</dd>
               {result.price.additions.map((a) => (
                 <Fragment key={`${a.groupCode}-${a.label}`}>
                   <dt>{a.label}</dt>
@@ -240,7 +240,7 @@ function ConfigureForm({ template, customerId, showPrice, quantity, currency, ex
                 </Fragment>
               ))}
               <dt className={styles.total}>Pris</dt>
-              <dd className={styles.total}>{result.price.unitPrice === null ? "—" : formatMoney(result.price.unitPrice)}</dd>
+              <dd className={styles.total}>{result.price.unitPrice === null ? "—" : formatUnitPrice(result.price.unitPrice)}</dd>
               {result.price.discountPercent > 0 && (
                 <>
                   <dt>Rabatt</dt>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArticleOverviewButton } from "./ArticleOverviewButton";
@@ -16,6 +16,7 @@ import buttonStyles from "../ui/Button.module.css";
 import { NewArticleForm } from "./NewArticleForm";
 import { useCan } from "../PermissionsProvider";
 import { apiFetch } from "../../lib/api";
+import { formatUnitPrice } from "../../lib/format";
 import { navigateTo } from "../../lib/tabNavigation";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { confirmLeave, useUnsavedGuard } from "../../lib/unsavedGuard";
@@ -57,6 +58,7 @@ export function ArticlesPageClient({
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const canEdit = useCan()(["artiklar"]);
+  const canImport = useCan()(["admin"]);
   // The list is read-only until Redigera is pressed; the mode survives
   // paging and search, and ends with Avsluta redigering or a clean save.
   const [editing, setEditing] = useState(false);
@@ -93,8 +95,11 @@ export function ArticlesPageClient({
   // exist) replaces the rows and starts clean.
   useEffect(() => {
     setRows(articles.rows);
-    setDrafts({});
-    setRowErrors({});
+    // A refresh (router.refresh after a Kopierat action, say) keeps unsaved
+    // drafts for rows still on the page; the rest start clean.
+    const ids = new Set(articles.rows.map((r) => r.id));
+    setDrafts((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => ids.has(id))));
+    setRowErrors((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => ids.has(id))));
     setSaveError(null);
     setHighlighted(null);
     setSelected(new Set());
@@ -411,9 +416,11 @@ export function ArticlesPageClient({
               Töm Kopierat
             </Button>
           )}
-          <Link href="/artiklar/import" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
-            Importera
-          </Link>
+          {canImport && (
+            <Link href="/artiklar/import" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
+              Importera
+            </Link>
+          )}
           {canEdit &&
             (editing ? (
               <Button type="button" variant="secondary" onClick={stopEditing} disabled={saving}>
@@ -486,6 +493,7 @@ export function ArticlesPageClient({
           highlightedRowId={highlighted === null ? null : rows[highlighted]?.id ?? null}
           emptyText={copiedView && copiedCount === 0 ? "Kopierat är tomt" : "Inga artiklar matchar sökningen"}
           renderCell={(article, key) => {
+            const cell = ((): ReactNode => {
             const index = rows.indexOf(article);
             const marked = (field: EditField) => drafts[article.id]?.[field] !== undefined;
             switch (key) {
@@ -600,7 +608,7 @@ export function ArticlesPageClient({
               case "abcClass":
                 return article.abcClass ?? "–";
               case "standardCost":
-                return article.standardCost ? `${Number(article.standardCost).toFixed(2)} kr` : "–";
+                return article.standardCost ? `${formatUnitPrice(article.standardCost)} kr` : "–";
               case "active":
                 return article.active ? (
                   <StatusPill status="running" label="Aktiv" compact />
@@ -610,6 +618,20 @@ export function ArticlesPageClient({
               default:
                 return null;
             }
+            })();
+            // A refused row's error normally sits under Benämning; with that
+            // column hidden it goes under the row's first visible cell.
+            const nameShown = view.columns.some((c) => c.key === "name");
+            const firstKey = view.columns.find((c) => c.key !== "select")?.key;
+            if (editable && !nameShown && key === firstKey && rowErrors[article.id]) {
+              return (
+                <div>
+                  {cell}
+                  <FormError>{rowErrors[article.id]}</FormError>
+                </div>
+              );
+            }
+            return cell;
           }}
         />
       </div>

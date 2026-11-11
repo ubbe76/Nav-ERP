@@ -75,6 +75,9 @@ export function KalkylTab({
     quantity: string;
     multiLevel: boolean;
     markups: TryMarkups;
+    // The text of the two markup fields it was computed for.
+    generalText: string;
+    materialText: string;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -131,12 +134,14 @@ export function KalkylTab({
     const requestedQuantity = quantity;
     const requestedMultiLevel = multiLevel;
     const requestedMarkups = tryMarkups();
+    const requestedGeneral = generalTry;
+    const requestedMaterial = materialTry;
     try {
       const result = await apiFetch<{ calculation: CostCalculationDraft; warnings: string[] }>(
         `/api/v1/articles/${articleId}/cost-calculations/pre-calculate`,
         { method: "POST", body: JSON.stringify({ quantity: Number(requestedQuantity), multiLevel: requestedMultiLevel, ...markupsBody(requestedMarkups) }) }
       );
-      setPreview({ ...result, quantity: requestedQuantity, multiLevel: requestedMultiLevel, markups: requestedMarkups });
+      setPreview({ ...result, quantity: requestedQuantity, multiLevel: requestedMultiLevel, markups: requestedMarkups, generalText: requestedGeneral, materialText: requestedMaterial });
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte beräkna kalkylen"));
     } finally {
@@ -279,7 +284,7 @@ export function KalkylTab({
         {/* Only render while the preview's inputs still match the form —
             otherwise a superseded response would show figures for a quantity
             or a level setting the user has already moved past. */}
-        {preview && preview.quantity === quantity && preview.multiLevel === multiLevel && (
+        {preview && preview.quantity === quantity && preview.multiLevel === multiLevel && preview.generalText === generalTry && preview.materialText === materialTry && (
           <Card maxWidth={360}>
             <FormStack>
               <FormHint>

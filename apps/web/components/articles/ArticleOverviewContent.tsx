@@ -7,6 +7,7 @@ import { StatusPill } from "../ui/StatusPill";
 import { Table } from "../ui/Table";
 import { FormError } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
+import { articleFileHref } from "../../lib/articleFiles";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { useCanOpen } from "../PermissionsProvider";
 import { ARTICLE_TYPE_LABELS, OVERVIEW_KIND_LABELS, type ArticleFile, type ArticleOverview, type ArticleOverviewRow } from "../../lib/types";
@@ -89,7 +90,8 @@ export function ArticleOverviewContent({ articleId, onChangeArticle, pickerId }:
       .then(([res, fileRows]) => {
         if (cancelled) return;
         setData(res);
-        setFiles(fileRows);
+        // Files of superseded drawing revisions are left out.
+        setFiles(fileRows.filter((f) => !f.drawingRevisionId || f.revisionActive));
         setPicked({ id: res.article.articleId, articleNumber: res.article.articleNumber, name: res.article.name });
       })
       .catch((err: unknown) => {
@@ -205,7 +207,7 @@ export function ArticleOverviewContent({ articleId, onChangeArticle, pickerId }:
                     {files.map((f) => (
                       <a
                         key={f.id}
-                        href={`/api/v1/articles/${data.article.articleId}/files/${f.id}`}
+                        href={articleFileHref(data.article.articleId, f.id)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className={styles.rowLink}

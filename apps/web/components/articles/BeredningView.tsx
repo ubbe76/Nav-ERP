@@ -1,7 +1,7 @@
 "use client";
 
 import { confirmDelete } from "../../lib/confirm";
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Button } from "../ui/Button";
 import { SectionHeading } from "../ui/SectionHeading";
 import { SegmentedToggle } from "../ui/SegmentedToggle";
@@ -15,6 +15,7 @@ import { useCan } from "../PermissionsProvider";
 import { apiFetch } from "../../lib/api";
 import { copiedNotice, copyArticles } from "../../lib/copiedArticles";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { formatQuantity, formatUnitPrice } from "../../lib/format";
 import { OPERATION_TIME_UNIT_LABELS, minutesPerUnitToSecondsPerUnit, minutesPerUnitToUnitsPerHour, toUnitQuantity } from "../../lib/units";
 import { operationLabel } from "./operation-label";
 import { bomDuplicateText, bomDuplicates } from "../../lib/bomDuplicates";
@@ -91,14 +92,21 @@ export function BeredningView({
     open: false,
     op: null,
   });
-  // Errors from the delete buttons — the modals carry their own.
+  // Errors from the row actions (Ta bort, tidsenhet) — shown at the end of the
+  // list, scrolled into view; the modals carry their own.
   const [error, setError] = useState<string | null>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ block: "nearest" });
+  }, [error]);
+  // Kopiera komponenter reports at the top, next to its button.
+  const [copyError, setCopyError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   // Kopierat (#28): a personal list, so no write permission is needed.
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
 
   async function copyComponents() {
-    setError(null);
+    setCopyError(null);
     setCopyNotice(null);
     setPending(true);
     try {
@@ -106,7 +114,7 @@ export function BeredningView({
       const copied = await copyArticles({ articleIds: ids });
       if (copied) setCopyNotice(copiedNotice(copied.count));
     } catch (err) {
-      setError(apiErrorMessage(err, "Kunde inte kopiera komponenterna"));
+      setCopyError(apiErrorMessage(err, "Kunde inte kopiera komponenterna"));
     } finally {
       setPending(false);
     }
@@ -222,7 +230,7 @@ export function BeredningView({
         </span>
         <span className={styles.prepCell} data-align="right" />
         <span className={`${styles.prepCell} num`} data-align="right" data-label="Antal">
-          {toUnitQuantity(Number(row.quantity), row.unitFactor)} {row.unitCode}
+          {formatQuantity(toUnitQuantity(Number(row.quantity), row.unitFactor))} {row.unitCode}
         </span>
         <span className={`${styles.prepCell} ${styles.actionsCell}`}>
           <Button
@@ -270,7 +278,7 @@ export function BeredningView({
         Beredning
       </SectionHeading>
 
-      <FormError>{error}</FormError>
+      <FormError>{copyError}</FormError>
       {copyNotice && <FormNotice>{copyNotice}</FormNotice>}
 
       {duplicates.length > 0 && (
@@ -385,7 +393,7 @@ export function BeredningView({
                   >
                     {op.workCenterType === "subcontract" ? (
                       op.unitPrice != null ? (
-                        `${Number(op.unitPrice).toLocaleString("sv-SE")} kr`
+                        `${formatUnitPrice(op.unitPrice)} kr`
                       ) : (
                         "—"
                       )
@@ -477,6 +485,9 @@ export function BeredningView({
           </>
         )}
       </div>
+      <div ref={errorRef}>
+        <FormError>{error}</FormError>
+      </div>
 
       <OperationModal
         open={opModal.open}
@@ -489,6 +500,7 @@ export function BeredningView({
           setOpModal({ open: false, editing: null });
           onChanged();
         }}
+        onChanged={onChanged}
       />
 
       <BomComponentModal

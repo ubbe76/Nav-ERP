@@ -63,7 +63,11 @@ export function GroupModal({
   // dialog (X, Escape, backdrop, Stäng, Spara) saves pending edits first and
   // stays open, with the error shown, when a save fails.
   const flushRef = useRef<(() => Promise<boolean>) | null>(null);
+  const groupFlushRef = useRef<(() => Promise<boolean>) | null>(null);
   const requestClose = async () => {
+    // The group's own fields first, then the alternatives; either failing
+    // keeps the dialog open with its error shown.
+    if (groupFlushRef.current && !(await groupFlushRef.current())) return;
     const ok = flushRef.current ? await flushRef.current() : true;
     if (ok) onClose();
   };
@@ -74,6 +78,7 @@ export function GroupModal({
         articleId={articleId}
         group={group}
         flushRef={flushRef}
+        groupFlushRef={groupFlushRef}
         onClose={requestClose}
         onChanged={onChanged}
         onCreated={onCreated}
@@ -86,11 +91,13 @@ function GroupForm({
   articleId,
   group,
   flushRef,
+  groupFlushRef,
   onClose,
   onChanged,
   onCreated,
 }: Omit<GroupModalProps, "open" | "onClose"> & {
   flushRef: { current: (() => Promise<boolean>) | null };
+  groupFlushRef: { current: (() => Promise<boolean>) | null };
   onClose: () => void | Promise<void>;
 }) {
   const base = `/api/v1/articles/${articleId}/configurator/groups`;
@@ -171,6 +178,36 @@ function GroupForm({
     return patch;
   }
 
+  // Saves the group's changed fields (edit mode). False = failed, error shown.
+  async function saveGroupPatch(): Promise<boolean> {
+    if (!group) return true;
+    const patch = patchBody(group);
+    if (Object.keys(patch).length === 0) return true;
+    setError(null);
+    setPending(true);
+    try {
+      await apiFetch(`${base}/${group.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+      await onChanged();
+      return true;
+    } catch (err) {
+      setError(apiErrorMessage(err, "Kunde inte spara valgruppen"));
+      return false;
+    } finally {
+      setPending(false);
+    }
+  }
+
+  // Registered every render so it always sees the current field values.
+  useEffect(() => {
+    groupFlushRef.current = group ? saveGroupPatch : null;
+    return () => {
+      groupFlushRef.current = null;
+    };
+  });
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -187,14 +224,7 @@ function GroupForm({
         if (kind === "choice") onCreated(created.id);
         else await onClose();
       } else {
-        const patch = patchBody(group);
-        if (Object.keys(patch).length > 0) {
-          await apiFetch(`${base}/${group.id}`, {
-            method: "PATCH",
-            body: JSON.stringify(patch),
-          });
-          await onChanged();
-        }
+        // Closing saves the changed fields first (saveGroupPatch).
         await onClose();
       }
     } catch (err) {

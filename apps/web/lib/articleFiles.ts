@@ -1,4 +1,4 @@
-import { API_URL } from "./api";
+import { API_URL, ApiError } from "./api";
 
 // Artikelfiler (fliken Filer, ritningsrevisionernas filer): PDF, JPEG, PNG,
 // max 20 MB. Multipart upload — apiFetch sets a JSON content type, so this
@@ -24,7 +24,7 @@ export async function uploadArticleFile(articleId: string, file: File, drawingRe
   });
   if (!res.ok) {
     const payload = await res.json().catch(() => ({}));
-    throw new Error(payload.error ?? "Uppladdningen misslyckades");
+    throw new ApiError(payload.error ?? "Uppladdningen misslyckades", res.status, payload.code, payload);
   }
 }
 

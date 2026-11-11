@@ -1,14 +1,14 @@
 "use client";
 
 import { Fragment } from "react";
-import { formatMoney } from "../../lib/format";
+import { formatUnitPrice } from "../../lib/format";
 import type { VariantPreviewRow } from "../../lib/configurator";
 import { GatedLink } from "../ui/GatedLink";
 import { FormHint } from "../ui/Form";
 import styles from "./Variants.module.css";
 
 function money(v: number | null): string {
-  return v === null ? "—" : formatMoney(v);
+  return v === null ? "—" : formatUnitPrice(v);
 }
 
 function StatusCell({ row }: { row: VariantPreviewRow }) {

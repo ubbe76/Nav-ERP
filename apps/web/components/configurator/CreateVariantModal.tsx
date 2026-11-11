@@ -12,6 +12,8 @@ import { Modal } from "../ui/Modal";
 import { parseDecimal } from "./parseDecimal";
 import { VariantPreviewTable } from "./VariantPreviewTable";
 
+export const VARIANTS_CHANGED_EVENT = "configurator-variants-changed";
+
 interface Props {
   open: boolean;
   articleId: string;
@@ -88,6 +90,8 @@ function CreateVariantForm({ articleId, selection, defaultQuantity, onClose }: P
     try {
       const rows = await apiFetch<VariantPreviewRow[]>(base, { method: "POST", body: body(quantity) });
       setRow(rows[0] ?? null);
+      // The Varianter list is a sibling section: tell it to reload.
+      window.dispatchEvent(new CustomEvent(VARIANTS_CHANGED_EVENT, { detail: { articleId } }));
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte skapa varianten"));
     } finally {
