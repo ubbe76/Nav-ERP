@@ -12,6 +12,8 @@ import { SectionHeading } from "../ui/SectionHeading";
 import { SieVerificationImport } from "./SieVerificationImport";
 import styles from "./Sie.module.css";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { currentFiscalYear } from "../../lib/fiscalYear";
+import { stockholmToday } from "../../lib/date";
 
 // POST /sie/opening-balances's 201 body (economy.routes.ts's
 // "--- SIE (B6b) ---" section / sie.service.ts's importOpeningBalances).
@@ -28,8 +30,8 @@ const SIE_TABS: SieTab[] = ["Export och ingående balanser", "Importera verifika
 export function SiePageClient({ fiscalYears }: { fiscalYears: FiscalYear[] }) {
   const [tab, setTab] = useState<SieTab>(SIE_TABS[0]!);
   // Two independent selections — export and import act on different years.
-  const [exportYearId, setExportYearId] = useState(fiscalYears[0]?.id ?? "");
-  const [importYearId, setImportYearId] = useState(fiscalYears[0]?.id ?? "");
+  const [exportYearId, setExportYearId] = useState(() => currentFiscalYear(fiscalYears, stockholmToday())?.id ?? "");
+  const [importYearId, setImportYearId] = useState(() => currentFiscalYear(fiscalYears, stockholmToday())?.id ?? "");
   const [file, setFile] = useState<File | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);

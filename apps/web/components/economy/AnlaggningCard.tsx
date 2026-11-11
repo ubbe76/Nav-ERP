@@ -27,16 +27,23 @@ export function AnlaggningCard({ asset, categories, accounts }: { asset: FixedAs
   const [editOpen, setEditOpen] = useState(false);
   const [disposeOpen, setDisposeOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
   const locked = asset.bookedMonthCount > 0;
   const disposed = asset.status === "disposed";
 
   async function remove() {
-    if (!(await confirmDelete(`Ta bort ${asset.assetNumber} ${asset.name}?`))) return;
+    if (removing) return;
+    setRemoving(true);
     try {
+      if (!(await confirmDelete(`Ta bort ${asset.assetNumber} ${asset.name}?`))) {
+        setRemoving(false);
+        return;
+      }
       await apiFetch<void>(`/api/v1/fixed-assets/${asset.id}`, { method: "DELETE" });
       router.push("/ekonomi/anlaggningar");
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte ta bort anläggningen"));
+      setRemoving(false);
     }
   }
 
@@ -57,7 +64,7 @@ export function AnlaggningCard({ asset, categories, accounts }: { asset: FixedAs
               Redigera
             </Button>
             {!disposed && asset.depreciations.length === 0 && (
-              <Button type="button" variant="danger" size="small" onClick={remove}>
+              <Button type="button" variant="danger" size="small" disabled={removing} onClick={remove}>
                 Ta bort
               </Button>
             )}

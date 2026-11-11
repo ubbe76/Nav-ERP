@@ -13,6 +13,7 @@ import { HelpLink } from "../ui/HelpLink";
 import { ListFilterSelect, ListToolbar, Pagination, useListNavigation } from "../ui/ListControls";
 import { useListColumns } from "../ui/ListColumns";
 import { apiFetch } from "../../lib/api";
+import { isIsoDate } from "../../lib/bankReconciliation";
 import { confirmDialog } from "../../lib/confirm";
 import { COMMON_CURRENCIES, formatRate } from "../../lib/currency";
 import { addDaysIso, formatStockholmDate, stockholmToday } from "../../lib/date";
@@ -38,13 +39,22 @@ function daysBetween(from: string, to: string): number {
 // Date-range filter bound to ?from=&to= — same idiom as the Händelselogg.
 function DateRangeFilter() {
   const { params, setFilter } = useListNavigation();
+  // Local field values: Chrome sends partial years ("0002-10-11") while typing,
+  // which the API refuses, so only a complete in-range date is navigated to.
+  const [from, setFrom] = useState(params.get("from") ?? "");
+  const [to, setTo] = useState(params.get("to") ?? "");
+  const change = (key: "from" | "to", value: string) => {
+    (key === "from" ? setFrom : setTo)(value);
+    if (value === "") void setFilter(key, null);
+    else if (isIsoDate(value)) void setFilter(key, value);
+  };
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
       <Field label="Från" htmlFor="ratesFrom">
-        <Input id="ratesFrom" type="date" size="sm" value={params.get("from") ?? ""} onChange={(e) => setFilter("from", e.target.value || null)} />
+        <Input id="ratesFrom" type="date" size="sm" value={from} onChange={(e) => change("from", e.target.value)} />
       </Field>
       <Field label="Till" htmlFor="ratesTo">
-        <Input id="ratesTo" type="date" size="sm" value={params.get("to") ?? ""} onChange={(e) => setFilter("to", e.target.value || null)} />
+        <Input id="ratesTo" type="date" size="sm" value={to} onChange={(e) => change("to", e.target.value)} />
       </Field>
     </div>
   );

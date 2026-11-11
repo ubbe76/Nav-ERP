@@ -12,6 +12,8 @@ import { formatMoney } from "../../lib/format";
 import buttonStyles from "../ui/Button.module.css";
 import type { BalanceSheetResponse, FiscalYear } from "../../lib/types";
 import { stockholmToday } from "../../lib/date";
+import { currentFiscalYear } from "../../lib/fiscalYear";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // One flat row per printed line — the same discriminated-row technique the
 // momsrapport uses, except the labels come from the API because the lines are
@@ -74,9 +76,10 @@ export function BalansrakningPageClient({
   const pathname = usePathname();
 
   // The API derives the fiscal year from the date, so the date is the only
-  // control. Default to the latest fiscal year's end, falling back to today.
+  // control. Default to the end of the fiscal year covering today (not a
+  // future one), falling back to today.
   const initialAsOf = useMemo(
-    () => defaultAsOf ?? fiscalYears[0]?.endDate ?? stockholmToday(),
+    () => defaultAsOf ?? currentFiscalYear(fiscalYears, stockholmToday())?.endDate ?? stockholmToday(),
     [defaultAsOf, fiscalYears]
   );
   const [asOf, setAsOf] = useState(initialAsOf);
@@ -85,6 +88,8 @@ export function BalansrakningPageClient({
   const [pending, setPending] = useState(false);
 
   useEffect(() => {
+    // An emptied date field would make the API answer a validation error.
+    if (!asOf) return;
     let cancelled = false;
     setPending(true);
     setError(null);
@@ -93,10 +98,10 @@ export function BalansrakningPageClient({
         if (cancelled) return;
         setReport(data);
       })
-      .catch((err: Error) => {
+      .catch((err: unknown) => {
         if (cancelled) return;
         setReport(null);
-        setError(err.message);
+        setError(apiErrorMessage(err, "Kunde inte hämta balansräkningen."));
       })
       .finally(() => {
         if (!cancelled) setPending(false);

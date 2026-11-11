@@ -482,7 +482,7 @@ function ReporterCard({ summary, onSaved }: { summary: PeriodicSummaryResponse; 
           />
         </Field>
         <FormHint>
-          Skatteverket kräver kontaktperson (högst 35 tecken) och telefon (högst 17 tecken: siffror med bindestreck
+          Skatteverket kräver kontaktperson (5–35 tecken) och telefon (högst 17 tecken: siffror med bindestreck
           efter riktnumret, till exempel 08-1234567, eller inledande + för ett utlandsnummer); e-post är frivillig.
           Uppgifterna sparas i inställningarna och följer med varje fil.
         </FormHint>

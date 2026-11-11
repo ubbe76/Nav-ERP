@@ -34,7 +34,7 @@ export function defaultPeriod(): { from: string; to: string } {
 }
 
 export function isIsoDate(value: string | undefined | null): value is string {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
+  return typeof value === "string" && /^(19|2\d)\d\d-\d\d-\d\d$/.test(value) && !Number.isNaN(Date.parse(value));
 }
 
 // POST of a multipart form (the file upload endpoints). apiFetch always sets

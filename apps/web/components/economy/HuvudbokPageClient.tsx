@@ -68,11 +68,15 @@ function ledgerColumns(withCostCenter: boolean, withProject: boolean) {
   ];
 }
 
+const isValidAccountBound = (value: string) => value === "" || /^[0-9]{4}$/.test(value);
+
 export function HuvudbokPageClient({
   accounts,
   defaultAccountId,
   defaultFrom,
   defaultTo,
+  defaultCostCenterId = "",
+  defaultProjectId = "",
 }: {
   accounts: Account[];
   // All three are pre-resolved server-side (page.tsx): the URL's own
@@ -81,6 +85,8 @@ export function HuvudbokPageClient({
   defaultAccountId: string;
   defaultFrom: string;
   defaultTo: string;
+  defaultCostCenterId?: string;
+  defaultProjectId?: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -96,8 +102,8 @@ export function HuvudbokPageClient({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dims = useDimensions();
-  const [costCenterId, setCostCenterId] = useState("");
-  const [projectId, setProjectId] = useState("");
+  const [costCenterId, setCostCenterId] = useState(defaultCostCenterId);
+  const [projectId, setProjectId] = useState(defaultProjectId);
   const showDimensionFilters = dims.allCostCenters.length > 0 || dims.allProjects.length > 0;
 
   // The Kostnadsställe/Projekt filter, appended to every ledger request.
@@ -122,6 +128,9 @@ export function HuvudbokPageClient({
 
   useEffect(() => {
     if (mode !== "range" || !from || !to) return;
+    // The API wants exactly 4 digits (or none) — wait while one is half typed,
+    // keeping the table and showing no error meanwhile.
+    if (!isValidAccountBound(accountFrom) || !isValidAccountBound(accountTo)) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -231,10 +240,10 @@ export function HuvudbokPageClient({
         {showDimensionFilters && (
           <FormRow columns={2}>
             <Field label="Kostnadsställe" htmlFor="ledgerCostCenter">
-              <CostCenterSelect id="ledgerCostCenter" all={dims.allCostCenters} value={costCenterId} onChange={setCostCenterId} emptyLabel="Alla kostnadsställen" />
+              <CostCenterSelect id="ledgerCostCenter" all={dims.allCostCenters} value={costCenterId} onChange={setCostCenterId} emptyLabel="Alla kostnadsställen" includeInactive />
             </Field>
             <Field label="Projekt" htmlFor="ledgerProject">
-              <ProjectSelect id="ledgerProject" all={dims.allProjects} value={projectId} onChange={setProjectId} emptyLabel="Alla projekt" />
+              <ProjectSelect id="ledgerProject" all={dims.allProjects} value={projectId} onChange={setProjectId} emptyLabel="Alla projekt" includeInactive />
             </Field>
           </FormRow>
         )}

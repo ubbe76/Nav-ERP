@@ -164,6 +164,10 @@ export function BankavstamningPageClient({
 
   function match() {
     if (!view || !canMatch) return;
+    if (chosenEntries.length > 200 || chosenRows.length > 200) {
+      setError("Markera högst 200 poster och 200 verifikatrader åt gången.");
+      return;
+    }
     void run(async () => {
       await apiFetch<BankMatch>("/api/v1/bank-matches", {
         method: "POST",
@@ -242,6 +246,10 @@ export function BankavstamningPageClient({
 
   async function bookByRule() {
     if (ruleEntries.length === 0) return;
+    if (ruleEntries.length > 500) {
+      setError("Markera högst 500 poster åt gången.");
+      return;
+    }
     const ok = await confirmDialog(
       `Bokför ${ruleEntries.length} ${ruleEntries.length === 1 ? "post" : "poster"} enligt bankreglerna? Ett verifikat skapas per post.`,
       { confirmLabel: "Bokför" }
@@ -351,8 +359,8 @@ export function BankavstamningPageClient({
     lines.push(...result.warnings);
     setNotice(
       <>
-        {lines.map((l) => (
-          <div key={l}>{l}</div>
+        {lines.map((l, i) => (
+          <div key={`${i}-${l}`}>{l}</div>
         ))}
       </>
     );
@@ -428,8 +436,8 @@ export function BankavstamningPageClient({
       <FormError>{error}</FormError>
       {failures.length > 0 && (
         <FormError>
-          {failures.map((f) => (
-            <div key={f}>{f}</div>
+          {failures.map((f, i) => (
+            <div key={`${i}-${f}`}>{f}</div>
           ))}
         </FormError>
       )}

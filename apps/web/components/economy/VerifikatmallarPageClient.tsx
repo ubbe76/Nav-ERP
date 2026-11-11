@@ -129,13 +129,16 @@ export function VerifikatmallarPageClient({
             case "id":
               return (
                 <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                  <Link
-                    href={`/ekonomi/verifikat/nytt?mall=${t.id}`}
-                    style={{ alignSelf: "center" }}
-                    aria-label={`Använd mallen ${t.name}`}
-                  >
-                    Använd
-                  </Link>
+                  {/* verifikat/nytt only fetches active templates — an inactive one would open an empty form. */}
+                  {t.active && (
+                    <Link
+                      href={`/ekonomi/verifikat/nytt?mall=${t.id}`}
+                      style={{ alignSelf: "center" }}
+                      aria-label={`Använd mallen ${t.name}`}
+                    >
+                      Använd
+                    </Link>
+                  )}
                   <Button type="button" size="small" variant="ghost" disabled={editing !== null} onClick={() => setEditing(t)}>
                     Ändra
                   </Button>

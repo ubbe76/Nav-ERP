@@ -126,10 +126,10 @@ export function BankreglerPageClient({ rules, accounts }: { rules: BankRule[]; a
                   <Button type="button" size="small" variant="ghost" disabled={editing !== null} onClick={() => setEditing(r)}>
                     Ändra
                   </Button>
-                  <Button type="button" size="small" variant="ghost" disabled={pending} onClick={() => void toggleActive(r)}>
+                  <Button type="button" size="small" variant="ghost" disabled={pending || editing !== null} onClick={() => void toggleActive(r)}>
                     {r.active ? "Inaktivera" : "Aktivera"}
                   </Button>
-                  <Button type="button" size="small" variant="danger" disabled={pending} onClick={() => void remove(r)}>
+                  <Button type="button" size="small" variant="danger" disabled={pending || editing !== null} onClick={() => void remove(r)}>
                     Ta bort
                   </Button>
                 </span>

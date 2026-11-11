@@ -79,6 +79,9 @@ function PaymentBatchCardBody({
   const writable = can(["inkop"]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // Errors from the edit / reject dialogs are shown inside them — an error on
+  // the card would sit behind the open <dialog>.
+  const [modalError, setModalError] = useState<string | null>(null);
   const [editing, setEditing] = useState<PaymentBatchItem | null>(null);
   const [rejecting, setRejecting] = useState<PaymentBatchItem | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -95,15 +98,18 @@ function PaymentBatchCardBody({
   const exportBlocked = batch.status === "draft" && (batch.problems.length > 0 || itemProblems.length > 0);
   const reported = batch.items.filter((i) => i.status !== "cancelled" && i.regulatoryReporting);
 
-  async function act(path: string, init: RequestInit, after?: (body: unknown) => void) {
+  async function act(path: string, init: RequestInit, after?: (body: unknown) => void, inModal = false) {
     setPending(true);
     setError(null);
+    setModalError(null);
     try {
       const body = await apiFetch<unknown>(`/api/v1/payment-batches/${batch.id}${path}`, init);
       after?.(body);
       router.refresh();
     } catch (err) {
-      setError(apiErrorMessage(err, "Åtgärden misslyckades."));
+      const message = apiErrorMessage(err, "Åtgärden misslyckades.");
+      if (inModal) setModalError(message);
+      else setError(message);
     } finally {
       setPending(false);
     }
@@ -266,13 +272,13 @@ function PaymentBatchCardBody({
               if (batch.status === "draft") {
                 return (
                   <span style={{ display: "flex", gap: 8 }}>
-                    <Button size="small" variant="secondary" onClick={() => setEditing(item)}>Ändra</Button>
-                    <Button size="small" variant="ghost" onClick={() => act(`/items/${item.id}`, { method: "DELETE" })}>Ta bort</Button>
+                    <Button size="small" variant="secondary" onClick={() => { setModalError(null); setEditing(item); }}>Ändra</Button>
+                    <Button size="small" variant="ghost" disabled={pending} onClick={() => act(`/items/${item.id}`, { method: "DELETE" })}>Ta bort</Button>
                   </span>
                 );
               }
               if (batch.status === "exported" && item.status === "exported") {
-                return <Button size="small" variant="ghost" onClick={() => setRejecting(item)}>Markera som avvisad</Button>;
+                return <Button size="small" variant="ghost" onClick={() => { setModalError(null); setRejecting(item); }}>Markera som avvisad</Button>;
               }
               return null;
             default:
@@ -285,8 +291,10 @@ function PaymentBatchCardBody({
         <ItemEditModal
           key={editing.id}
           item={editing}
+          error={modalError}
+          pending={pending}
           onClose={() => setEditing(null)}
-          onSave={(body) => act(`/items/${editing.id}`, { method: "PATCH", body: JSON.stringify(body) }, () => setEditing(null))}
+          onSave={(body) => act(`/items/${editing.id}`, { method: "PATCH", body: JSON.stringify(body) }, () => setEditing(null), true)}
         />
       )}
       {rejecting && (
@@ -294,8 +302,10 @@ function PaymentBatchCardBody({
           key={rejecting.id}
           title={`Markera ${rejecting.endToEndId} som avvisad`}
           label="Orsak"
+          error={modalError}
+          pending={pending}
           onClose={() => setRejecting(null)}
-          onSave={(reason) => act(`/items/${rejecting.id}/reject`, { method: "POST", body: JSON.stringify({ reason }) }, () => setRejecting(null))}
+          onSave={(reason) => act(`/items/${rejecting.id}/reject`, { method: "POST", body: JSON.stringify({ reason }) }, () => setRejecting(null), true)}
         />
       )}
       <Modal open={exportOpen} onClose={() => setExportOpen(false)} title={`Exportera ${batch.batchNumber}`}>
@@ -351,7 +361,7 @@ function PaymentBatchCardBody({
 // Only what changed is sent: an old draft row whose payment day has passed
 // (the export moves it to today) could otherwise not have its amount
 // changed — the server refuses a payment day before today.
-function ItemEditModal({ item, onClose, onSave }: { item: PaymentBatchItem; onClose: () => void; onSave: (body: { amount?: number; executionDate?: string }) => void }) {
+function ItemEditModal({ item, error, pending, onClose, onSave }: { item: PaymentBatchItem; error: string | null; pending: boolean; onClose: () => void; onSave: (body: { amount?: number; executionDate?: string }) => void }) {
   const [amount, setAmount] = useState(String(item.amount));
   const [date, setDate] = useState(item.executionDate);
   const changed = { ...(Number(amount) !== item.amount ? { amount: Number(amount) } : {}), ...(date !== item.executionDate ? { executionDate: date } : {}) };
@@ -376,15 +386,16 @@ function ItemEditModal({ item, onClose, onSave }: { item: PaymentBatchItem; onCl
         {item.executionDate < stockholmToday() && date === item.executionDate && (
           <FormHint>Betalningsdagen har passerat och flyttas till idag när filen exporteras.</FormHint>
         )}
+        <FormError>{error}</FormError>
         <FormActions>
-          <Button type="submit">Spara</Button>
+          <Button type="submit" disabled={pending}>Spara</Button>
         </FormActions>
       </Form>
     </Modal>
   );
 }
 
-function ReasonModal({ title, label, onClose, onSave }: { title: string; label: string; onClose: () => void; onSave: (reason: string) => void }) {
+function ReasonModal({ title, label, error, pending, onClose, onSave }: { title: string; label: string; error: string | null; pending: boolean; onClose: () => void; onSave: (reason: string) => void }) {
   const [reason, setReason] = useState("");
   return (
     <Modal open onClose={onClose} title={title}>
@@ -397,8 +408,9 @@ function ReasonModal({ title, label, onClose, onSave }: { title: string; label: 
         <Field label={label} htmlFor="reason">
           <Input id="reason" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={255} />
         </Field>
+        <FormError>{error}</FormError>
         <FormActions>
-          <Button type="submit" disabled={!reason.trim()}>Spara</Button>
+          <Button type="submit" disabled={pending || !reason.trim()}>Spara</Button>
         </FormActions>
       </Form>
     </Modal>
@@ -708,6 +720,7 @@ function AddInvoicesModal({ batchId, onClose, onAdded }: { batchId: string; onCl
   const [rows, setRows] = useState<OpenSupplierInvoiceRow[] | null>(null);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   useEffect(() => {
@@ -719,7 +732,10 @@ function AddInvoicesModal({ batchId, onClose, onAdded }: { batchId: string; onCl
     setRows(null);
     fetchPayableInvoices(search, () => cancelled)
       .then((payable) => {
-        if (!cancelled) setRows(payable);
+        if (!cancelled) {
+          setRows(payable);
+          setError(null);
+        }
       })
       .catch((err) => {
         if (!cancelled) setError(apiErrorMessage(err, "Öppna poster kunde inte hämtas."));
@@ -769,17 +785,20 @@ function AddInvoicesModal({ batchId, onClose, onAdded }: { batchId: string; onCl
       ))}
       <FormActions>
         <Button
-          disabled={chosen.size === 0}
+          disabled={chosen.size === 0 || adding}
           onClick={async () => {
+            setAdding(true);
+            setError(null);
             try {
               await apiFetch(`/api/v1/payment-batches/${batchId}/items`, { method: "POST", body: JSON.stringify({ invoiceIds: [...chosen] }) });
               onAdded();
             } catch (err) {
               setError(apiErrorMessage(err, "Fakturorna kunde inte läggas till."));
+              setAdding(false);
             }
           }}
         >
-          Lägg till
+          {adding ? "Lägger till…" : "Lägg till"}
         </Button>
       </FormActions>
     </Modal>

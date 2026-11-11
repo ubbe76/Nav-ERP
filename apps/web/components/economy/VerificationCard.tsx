@@ -86,9 +86,16 @@ export function VerificationCard({
   // An omföring's rows mirror its source (the API answers 409
   // reversal-rows-locked): the draft keeps its header form, Bokför and Ta bort.
   const rowsEditable = editable && !verification.reversesVerificationId;
-  const [error, setError] = useState<string | null>(null);
+  // Errors are shown where the click was (webbgranskningen 2026-11-11): the
+  // rows' Spara under the table, Bokför/Kopiera/Omför/Ta bort in the Åtgärder
+  // card, the header's own save in the header form — one error at the top of
+  // the page was ~900 px away from the buttons on a long verifikat.
+  const [rowsError, setRowsError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [headerError, setHeaderError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [headerSaved, setHeaderSaved] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [allocateOpen, setAllocateOpen] = useState(false);
@@ -101,7 +108,19 @@ export function VerificationCard({
     editable ? withSpareRows(rowsFromVerification(verification.rows)) : []
   );
   const [savedSignature, setSavedSignature] = useState(() => rowsSignature(rowsFromVerification(verification.rows)));
-  const dirty = editable && rowsSignature(rows) !== savedSignature;
+  const rowsDirty = editable && rowsSignature(rows) !== savedSignature;
+  // The header (Serie, Datum, Beskrivning) is state of the card too, so
+  // Bokför books what is on screen and leaving the page asks about it —
+  // before, Bokför booked the STORED date and series while the form showed
+  // another (webbgranskningen 2026-11-11).
+  const [header, setHeader] = useState<HeaderValues>(() => headerOf(verification));
+  const [savedHeader, setSavedHeader] = useState<HeaderValues>(() => headerOf(verification));
+  const headerDirty =
+    editable &&
+    (header.seriesId !== savedHeader.seriesId ||
+      header.date !== savedHeader.date ||
+      header.description.trim() !== savedHeader.description);
+  const dirty = rowsDirty || headerDirty;
   useUnsavedGuard(dirty);
 
   useEffect(() => {
@@ -129,15 +148,11 @@ export function VerificationCard({
   const filledRows = editable ? rows.filter((r) => rowsSignature([r]) !== "[]").length : verification.rows.length;
   const canBook = editable && diff === 0 && filledRows >= 2;
 
-  // PUT the whole table; returns false (and sets the error) when it is
-  // invalid or refused.
-  async function saveRows(): Promise<boolean> {
+  // PUT the whole table; returns the error text when it is invalid or
+  // refused (the caller shows it where the click was), null when saved.
+  async function saveRows(): Promise<string | null> {
     const body = toVerificationApiRows(rows, accounts);
-    if (body.error !== null) {
-      setError(body.error);
-      return false;
-    }
-    setError(null);
+    if (body.error !== null) return body.error;
     setSaved(false);
     try {
       const detail = await apiFetch<VerificationDetail>(`/api/v1/verifications/${verification.id}/rows`, {
@@ -149,18 +164,47 @@ export function VerificationCard({
       setSavedSignature(rowsSignature(next));
       setSaved(true);
       router.refresh();
-      return true;
+      return null;
     } catch (err) {
-      setError(formatVerificationError(err));
-      return false;
+      return formatVerificationError(err);
+    }
+  }
+
+  // PATCH the header; same contract as saveRows.
+  async function saveHeader(): Promise<string | null> {
+    const sent = { seriesId: header.seriesId, date: header.date, description: header.description.trim() };
+    if (sent.date === "") return "Ange ett datum.";
+    if (sent.description === "") return "Ange en beskrivning.";
+    setHeaderSaved(false);
+    try {
+      await apiFetch(`/api/v1/verifications/${verification.id}`, { method: "PATCH", body: JSON.stringify(sent) });
+      setSavedHeader(sent);
+      setHeader(sent);
+      setHeaderSaved(true);
+      router.refresh();
+      return null;
+    } catch (err) {
+      return formatVerificationError(err);
     }
   }
 
   async function runSave() {
     if (!editable || pending) return;
+    setRowsError(null);
     setPending(true);
     try {
-      await saveRows();
+      setRowsError(await saveRows());
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function runSaveHeader() {
+    if (!editable || pending) return;
+    setHeaderError(null);
+    setPending(true);
+    try {
+      setHeaderError(await saveHeader());
     } finally {
       setPending(false);
     }
@@ -168,15 +212,23 @@ export function VerificationCard({
 
   async function bookVerification() {
     if (!(await confirmDialog("Verifikatet får nummer och låses. Fortsätt?"))) return;
-    setError(null);
+    setActionError(null);
     setPending(true);
     try {
-      // Unsaved row edits are saved first so the booking is what is on screen.
-      if (dirty && !(await saveRows())) return;
+      // Unsaved edits — header and rows — are saved first so the booking is
+      // what is on screen.
+      if (headerDirty) {
+        const failed = await saveHeader();
+        if (failed) return setActionError(failed);
+      }
+      if (rowsDirty) {
+        const failed = await saveRows();
+        if (failed) return setActionError(failed);
+      }
       await apiFetch(`/api/v1/verifications/${verification.id}/book`, { method: "POST" });
       router.refresh();
     } catch (err) {
-      setError(formatVerificationError(err));
+      setActionError(formatVerificationError(err));
     } finally {
       setPending(false);
     }
@@ -184,20 +236,20 @@ export function VerificationCard({
 
   async function removeVerification() {
     if (!(await confirmDelete("Ta bort verifikatet permanent?"))) return;
-    setError(null);
+    setActionError(null);
     setPending(true);
     try {
       await apiFetch(`/api/v1/verifications/${verification.id}`, { method: "DELETE" });
       router.push("/ekonomi/verifikat");
     } catch (err) {
-      setError(formatVerificationError(err));
+      setActionError(formatVerificationError(err));
       setPending(false);
     }
   }
 
   async function reverseVerification() {
     if (!(await confirmDialog("Skapa en omföring av det här verifikatet?"))) return;
-    setError(null);
+    setActionError(null);
     setPending(true);
     try {
       const draft = await apiFetch<VerificationDetail>(`/api/v1/verifications/${verification.id}/reverse`, {
@@ -208,13 +260,13 @@ export function VerificationCard({
         router.refresh();
       }
     } catch (err) {
-      setError(formatVerificationError(err));
+      setActionError(formatVerificationError(err));
       setPending(false);
     }
   }
 
   async function copyVerification() {
-    setError(null);
+    setActionError(null);
     setPending(true);
     try {
       const result = await apiFetch<VerificationCopyResult>(`/api/v1/verifications/${verification.id}/copy`, {
@@ -232,7 +284,7 @@ export function VerificationCard({
         router.refresh();
       }
     } catch (err) {
-      setError(formatVerificationError(err));
+      setActionError(formatVerificationError(err));
       setPending(false);
     }
   }
@@ -285,7 +337,6 @@ export function VerificationCard({
         )}
       </div>
 
-      <FormError>{error}</FormError>
       {(warnings.length > 0 || (verification.warnings ?? []).length > 0) && (
         <FormNotice style={{ marginBottom: 16 }}>
           {[...warnings, ...(verification.warnings ?? [])].map((w) => (
@@ -295,7 +346,19 @@ export function VerificationCard({
       )}
 
       {editable ? (
-        <HeaderForm verification={verification} series={series} onSaved={() => router.refresh()} />
+        <HeaderForm
+          values={header}
+          series={series}
+          onChange={(next) => {
+            setHeader(next);
+            setHeaderSaved(false);
+          }}
+          onSave={() => void runSaveHeader()}
+          pending={pending}
+          dirty={headerDirty}
+          saved={headerSaved && !headerDirty}
+          error={headerError}
+        />
       ) : (
         <Card maxWidth={520} style={{ marginBottom: 20 }}>
           <FormStack>
@@ -338,12 +401,13 @@ export function VerificationCard({
             disabled={pending}
           />
           <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 12, flexWrap: "wrap" }}>
-            <Button type="button" variant="primary" disabled={pending || !dirty} onClick={() => void runSave()}>
+            <Button type="button" variant="primary" disabled={pending || !rowsDirty} onClick={() => void runSave()}>
               {pending ? "Sparar…" : "Spara"}
             </Button>
-            {dirty && <span>Osparade ändringar</span>}
-            {saved && !dirty && <FormSaved>Sparat</FormSaved>}
+            {rowsDirty && <span>Osparade ändringar</span>}
+            {saved && !rowsDirty && <FormSaved>Sparat</FormSaved>}
           </div>
+          <FormError>{rowsError}</FormError>
         </>
       ) : (
         <>
@@ -374,6 +438,7 @@ export function VerificationCard({
         <Card maxWidth={320}>
           <FormStack>
             <strong>Åtgärder</strong>
+            <FormError>{actionError}</FormError>
             {editable && (
               <>
                 <Button type="button" variant="primary" disabled={!canBook || pending} onClick={bookVerification}>
@@ -392,7 +457,7 @@ export function VerificationCard({
               type="button"
               variant="secondary"
               disabled={pending || dirty}
-              title={dirty ? "Spara raderna först" : undefined}
+              title={dirty ? "Spara ändringarna först" : undefined}
               onClick={() => void copyVerification()}
             >
               Kopiera
@@ -401,12 +466,12 @@ export function VerificationCard({
               type="button"
               variant="secondary"
               disabled={pending || dirty}
-              title={dirty ? "Spara raderna först" : undefined}
+              title={dirty ? "Spara ändringarna först" : undefined}
               onClick={() => setTemplateOpen(true)}
             >
               Spara som mall
             </Button>
-            {dirty && <FormHint attached>Spara raderna först för att kopiera eller spara som mall.</FormHint>}
+            {dirty && <FormHint attached>Spara ändringarna först för att kopiera eller spara som mall.</FormHint>}
             {!editable && (
               <Button type="button" variant="secondary" disabled={pending} onClick={() => setAllocateOpen(true)}>
                 Fördela över perioder
@@ -494,39 +559,36 @@ function SaveAsTemplateForm({ verificationId, defaultName }: { verificationId: s
   );
 }
 
-function HeaderForm({
-  verification,
-  series,
-  onSaved,
-}: {
-  verification: VerificationDetail;
-  series: VerificationSeries[];
-  onSaved: () => void;
-}) {
-  const [seriesId, setSeriesId] = useState(verification.seriesId);
-  const [date, setDate] = useState(verification.date);
-  const [description, setDescription] = useState(verification.description);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-  const [saved, setSaved] = useState(false);
+type HeaderValues = { seriesId: string; date: string; description: string };
 
-  async function save(e: FormEvent) {
+function headerOf(verification: VerificationDetail): HeaderValues {
+  return { seriesId: verification.seriesId, date: verification.date, description: verification.description };
+}
+
+// Controlled by the card (its header state is what Bokför saves first and
+// what the unsaved-changes guard watches).
+function HeaderForm({
+  values,
+  series,
+  onChange,
+  onSave,
+  pending,
+  dirty,
+  saved,
+  error,
+}: {
+  values: HeaderValues;
+  series: VerificationSeries[];
+  onChange: (next: HeaderValues) => void;
+  onSave: () => void;
+  pending: boolean;
+  dirty: boolean;
+  saved: boolean;
+  error: string | null;
+}) {
+  function save(e: FormEvent) {
     e.preventDefault();
-    setError(null);
-    setSaved(false);
-    setPending(true);
-    try {
-      await apiFetch(`/api/v1/verifications/${verification.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ seriesId, date, description: description.trim() }),
-      });
-      setSaved(true);
-      onSaved();
-    } catch (err) {
-      setError(formatVerificationError(err));
-    } finally {
-      setPending(false);
-    }
+    onSave();
   }
 
   return (
@@ -535,7 +597,7 @@ function HeaderForm({
         <FormError>{error}</FormError>
         <FormRow>
           <Field label="Serie" htmlFor="hdrSeries">
-            <Select id="hdrSeries" value={seriesId} onChange={(e) => setSeriesId(e.target.value)}>
+            <Select id="hdrSeries" value={values.seriesId} onChange={(e) => onChange({ ...values, seriesId: e.target.value })}>
               {series.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.code} — {s.name}
@@ -544,7 +606,14 @@ function HeaderForm({
             </Select>
           </Field>
           <Field label="Datum" htmlFor="hdrDate">
-            <Input id="hdrDate" type="date" required size="sm" value={date} onChange={(e) => setDate(e.target.value)} />
+            <Input
+              id="hdrDate"
+              type="date"
+              required
+              size="sm"
+              value={values.date}
+              onChange={(e) => onChange({ ...values, date: e.target.value })}
+            />
           </Field>
         </FormRow>
         <Field label="Beskrivning" htmlFor="hdrDescription">
@@ -552,14 +621,15 @@ function HeaderForm({
             id="hdrDescription"
             required
             maxLength={255}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            value={values.description}
+            onChange={(e) => onChange({ ...values, description: e.target.value })}
           />
         </Field>
         <FormActions>
-          <Button type="submit" variant="primary" disabled={pending}>
+          <Button type="submit" variant="primary" disabled={pending || !dirty}>
             {pending ? "Sparar…" : "Spara verifikat"}
           </Button>
+          {dirty && <span style={{ alignSelf: "center" }}>Osparade ändringar</span>}
           {saved && <span style={{ alignSelf: "center" }}>Sparat</span>}
         </FormActions>
       </Form>

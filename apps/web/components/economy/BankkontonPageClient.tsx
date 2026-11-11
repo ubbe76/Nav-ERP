@@ -114,7 +114,7 @@ export function BankkontonPageClient({ bankAccounts, accounts }: { bankAccounts:
                   <Button type="button" size="small" variant="ghost" disabled={editing !== null} onClick={() => setEditing(a)}>
                     Ändra
                   </Button>
-                  <Button type="button" size="small" variant="ghost" disabled={pending} onClick={() => void toggleActive(a)}>
+                  <Button type="button" size="small" variant="ghost" disabled={pending || editing !== null} onClick={() => void toggleActive(a)}>
                     {a.active ? "Inaktivera" : "Aktivera"}
                   </Button>
                 </span>

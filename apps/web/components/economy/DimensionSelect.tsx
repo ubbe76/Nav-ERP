@@ -7,6 +7,8 @@ import type { CostCenter, Project } from "../../lib/types";
 // Pickers for the two accounting dimensions. A selected value that is no
 // longer offered (a deactivated cost centre, a closed project) stays in the
 // list marked as such, so opening an old document never silently changes it.
+// Report filters pass includeInactive: they must be able to select a
+// deactivated cost centre or closed project that still carries booked history.
 // Select value for an explicit "no cost center" — distinct from "" (leave it
 // to the server's default), so a form can send null instead of omitting.
 export const NO_OBJECT = "__none__";
@@ -24,15 +26,16 @@ export function CostCenterSelect({
   noneLabel,
   all,
   size,
+  includeInactive = false,
   ...rest
-}: Common & { all: CostCenter[]; size?: "xs" | "sm" | "md"; noneLabel?: string }) {
+}: Common & { all: CostCenter[]; size?: "xs" | "sm" | "md"; noneLabel?: string; includeInactive?: boolean }) {
   const current = value && value !== NO_OBJECT ? all.find((c) => c.id === value) : undefined;
   return (
     <Select size={size} value={value} onChange={(e) => onChange(e.target.value)} {...rest}>
       <option value="">{emptyLabel}</option>
       {noneLabel && <option value={NO_OBJECT}>{noneLabel}</option>}
       {all
-        .filter((c) => c.active || c.id === value)
+        .filter((c) => includeInactive || c.active || c.id === value)
         .map((c) => (
           <option key={c.id} value={c.id}>
             {c.code} · {c.name}
@@ -51,15 +54,16 @@ export function ProjectSelect({
   noneLabel,
   all,
   size,
+  includeInactive = false,
   ...rest
-}: Common & { all: Project[]; size?: "xs" | "sm" | "md"; noneLabel?: string }) {
+}: Common & { all: Project[]; size?: "xs" | "sm" | "md"; noneLabel?: string; includeInactive?: boolean }) {
   const current = value && value !== NO_OBJECT ? all.find((p) => p.id === value) : undefined;
   return (
     <Select size={size} value={value} onChange={(e) => onChange(e.target.value)} {...rest}>
       <option value="">{emptyLabel}</option>
       {noneLabel && <option value={NO_OBJECT}>{noneLabel}</option>}
       {all
-        .filter((p) => (p.active && p.status === "open") || p.id === value)
+        .filter((p) => includeInactive || (p.active && p.status === "open") || p.id === value)
         .map((p) => (
           <option key={p.id} value={p.id}>
             {p.code} · {p.name}

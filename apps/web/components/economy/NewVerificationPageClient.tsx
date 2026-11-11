@@ -114,7 +114,6 @@ export function NewVerificationPageClient({
 
   return (
     <div>
-      <FormError>{error}</FormError>
       {createdId && (
         <p>
           <Link href={`/ekonomi/verifikat/${createdId}`}>Öppna verifikatet</Link>
@@ -215,6 +214,11 @@ export function NewVerificationPageClient({
         </FormStack>
       </Card>
 
+      {/* Next to the buttons — at the top of the page it was out of sight on
+          a long verifikat (webbgranskningen 2026-11-11). */}
+      <div style={{ marginTop: 16 }}>
+        <FormError>{error}</FormError>
+      </div>
       <FormActions style={{ marginTop: 16 }}>
         <Button type="button" variant="primary" disabled={pending || createdId !== null} onClick={() => void save(false)}>
           {pending ? "Sparar…" : "Spara"}

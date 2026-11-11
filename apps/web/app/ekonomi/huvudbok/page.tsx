@@ -4,6 +4,7 @@ import { HuvudbokPageClient } from "../../../components/economy/HuvudbokPageClie
 import { HelpLink } from "../../../components/ui/HelpLink";
 import { apiGet, getCurrentUser } from "../../../lib/api";
 import { stockholmToday, stockholmYear } from "../../../lib/date";
+import { currentFiscalYear } from "../../../lib/fiscalYear";
 import type { PageSearchParams } from "../../../lib/listQuery";
 import type { Account, FiscalYear, Paged } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
@@ -54,8 +55,7 @@ export default async function HuvudbokPage(props: { searchParams: Promise<PageSe
   // MomsrapportPageClient's initialYearId. Falls back to the latest year
   // when none covers today (e.g. no fiscal year registered yet).
   const today = stockholmToday();
-  const currentYear = fiscalYears.find((year) => year.startDate <= today && today <= year.endDate);
-  const latestYear = currentYear ?? fiscalYears[0];
+  const latestYear = currentFiscalYear(fiscalYears, today);
   const calendarYear = currentCalendarYearBounds();
 
   return (
@@ -73,6 +73,8 @@ export default async function HuvudbokPage(props: { searchParams: Promise<PageSe
         defaultAccountId={singleParam(searchParams.accountId) ?? accounts.rows[0]?.id ?? ""}
         defaultFrom={singleParam(searchParams.from) ?? latestYear?.startDate ?? calendarYear.start}
         defaultTo={singleParam(searchParams.to) ?? latestYear?.endDate ?? calendarYear.end}
+        defaultCostCenterId={singleParam(searchParams.costCenterId) ?? ""}
+        defaultProjectId={singleParam(searchParams.projectId) ?? ""}
       />
     </AppShell>
   );

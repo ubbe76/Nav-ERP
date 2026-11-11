@@ -9,7 +9,8 @@ import { FormError, FormHint, FormRow } from "../ui/Form";
 import { Table } from "../ui/Table";
 import { API_URL, apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { stockholmYear } from "../../lib/date";
+import { stockholmToday, stockholmYear } from "../../lib/date";
+import { currentFiscalYear } from "../../lib/fiscalYear";
 import { formatMoney, formatPercent } from "../../lib/format";
 import buttonStyles from "../ui/Button.module.css";
 import { useDimensions } from "../../lib/dimensions";
@@ -87,14 +88,17 @@ export function ResultatrakningPageClient({
   const router = useRouter();
   const pathname = usePathname();
 
-  // Same default as the huvudbok page: the latest fiscal year's bounds,
-  // falling back to the current calendar year when none exists yet.
+  // Same default as the huvudbok page: the fiscal year covering today (not a
+  // pre-registered future one), else the newest, else the calendar year.
   const fallbackYear = stockholmYear();
   const initial = useMemo(
-    () => ({
-      from: defaultFrom ?? fiscalYears[0]?.startDate ?? `${fallbackYear}-01-01`,
-      to: defaultTo ?? fiscalYears[0]?.endDate ?? `${fallbackYear}-12-31`,
-    }),
+    () => {
+      const year = currentFiscalYear(fiscalYears, stockholmToday());
+      return {
+        from: defaultFrom ?? year?.startDate ?? `${fallbackYear}-01-01`,
+        to: defaultTo ?? year?.endDate ?? `${fallbackYear}-12-31`,
+      };
+    },
     [defaultFrom, defaultTo, fiscalYears, fallbackYear]
   );
   const [from, setFrom] = useState(initial.from);
@@ -129,6 +133,9 @@ export function ResultatrakningPageClient({
   if (budgetId && !budgetBlocked) query.set("budgetId", budgetId);
   const queryString = query.toString();
   const urlQueryString = urlQuery.toString();
+  // Account links into the huvudbok carry the report's dimension filter.
+  const ledgerFilter =
+    (costCenterId ? `&costCenterId=${costCenterId}` : "") + (projectId ? `&projectId=${projectId}` : "");
   const showDimensionControls = dims.allCostCenters.length > 0 || dims.allProjects.length > 0 || groupBy !== "";
 
   // The budgets of the fiscal year that contains `from`.
@@ -161,7 +168,8 @@ export function ResultatrakningPageClient({
   }, [budgetYearId]);
 
   useEffect(() => {
-    if (!budgetsLoaded) return;
+    // A momentarily-cleared date field would fail the API's date validation.
+    if (!budgetsLoaded || !from || !to) return;
     let cancelled = false;
     setPending(true);
     setError(null);
@@ -181,6 +189,7 @@ export function ResultatrakningPageClient({
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- from/to are inside queryString
   }, [queryString, budgetsLoaded]);
 
   useEffect(() => {
@@ -223,10 +232,10 @@ export function ResultatrakningPageClient({
           <>
           <FormRow columns={2}>
             <Field label="Kostnadsställe" htmlFor="incomeCostCenter">
-              <CostCenterSelect id="incomeCostCenter" all={dims.allCostCenters} value={costCenterId} onChange={setCostCenterId} emptyLabel="Alla kostnadsställen" />
+              <CostCenterSelect id="incomeCostCenter" all={dims.allCostCenters} value={costCenterId} onChange={setCostCenterId} emptyLabel="Alla kostnadsställen" includeInactive />
             </Field>
             <Field label="Projekt" htmlFor="incomeProject">
-              <ProjectSelect id="incomeProject" all={dims.allProjects} value={projectId} onChange={setProjectId} emptyLabel="Alla projekt" />
+              <ProjectSelect id="incomeProject" all={dims.allProjects} value={projectId} onChange={setProjectId} emptyLabel="Alla projekt" includeInactive />
             </Field>
           </FormRow>
           <FormRow columns={2} style={{ marginTop: "var(--space-4)" }}>
@@ -270,9 +279,9 @@ export function ResultatrakningPageClient({
 
       {error && <FormError>{error}</FormError>}
 
-      {report && !pending && columns && <ObjectMatrix report={report} columns={columns} from={from} to={to} />}
+      {report && !pending && columns && <ObjectMatrix report={report} columns={columns} from={from} to={to} ledgerFilter={ledgerFilter} />}
 
-      {report && !pending && !columns && report.budget && <BudgetStatement report={report} from={from} to={to} />}
+      {report && !pending && !columns && report.budget && <BudgetStatement report={report} from={from} to={to} ledgerFilter={ledgerFilter} />}
 
       {report && !pending && !columns && !report.budget && (
         <Card>
@@ -288,7 +297,7 @@ export function ResultatrakningPageClient({
                 switch (key) {
                   case "account":
                     return row.accountId ? (
-                      <Link href={`/ekonomi/huvudbok?accountId=${row.accountId}&from=${from}&to=${to}`}>
+                      <Link href={`/ekonomi/huvudbok?accountId=${row.accountId}&from=${from}&to=${to}${ledgerFilter}`}>
                         {row.accountNumber}
                       </Link>
                     ) : (
@@ -328,7 +337,19 @@ export function ResultatrakningPageClient({
 
 // One column per object (and "Utan") plus the sum. Scrolls sideways inside its
 // own box on narrow screens.
-function ObjectMatrix({ report, columns, from, to }: { report: IncomeStatementResponse; columns: IncomeStatementColumn[]; from: string; to: string }) {
+function ObjectMatrix({
+  report,
+  columns,
+  from,
+  to,
+  ledgerFilter,
+}: {
+  report: IncomeStatementResponse;
+  columns: IncomeStatementColumn[];
+  from: string;
+  to: string;
+  ledgerFilter: string;
+}) {
   const money = (n: number | undefined) => (n === undefined ? "" : formatMoney(n));
   return (
     <Card maxWidth="none">
@@ -365,7 +386,7 @@ function ObjectMatrix({ report, columns, from, to }: { report: IncomeStatementRe
                   <tr key={`a-${entry.key}-${a.accountNumber}`} className={styles.accountRow}>
                     <td className={styles.labelCell}>
                       {a.accountId ? (
-                        <Link href={`/ekonomi/huvudbok?accountId=${a.accountId}&from=${from}&to=${to}`}>{a.accountNumber}</Link>
+                        <Link href={`/ekonomi/huvudbok?accountId=${a.accountId}&from=${from}&to=${to}${ledgerFilter}`}>{a.accountNumber}</Link>
                       ) : (
                         a.accountNumber
                       )}{" "}
@@ -426,7 +447,7 @@ function flattenBudget(report: IncomeStatementResponse): BudgetRow[] {
 // With a budget: Utfall, Budget, Avvikelse and Avvikelse % for the period, and
 // the same accumulated from the start of the fiscal year when the period does
 // not begin there. A negative variance is marked with the stopped colour.
-function BudgetStatement({ report, from, to }: { report: IncomeStatementResponse; from: string; to: string }) {
+function BudgetStatement({ report, from, to, ledgerFilter }: { report: IncomeStatementResponse; from: string; to: string; ledgerFilter: string }) {
   const showAccumulated = report.accumulatedFrom !== undefined && from !== report.accumulatedFrom;
   const rows = flattenBudget(report);
   const money = (n: number | undefined) => formatMoney(n ?? 0);
@@ -468,7 +489,7 @@ function BudgetStatement({ report, from, to }: { report: IncomeStatementResponse
                   {row.kind === "account" ? (
                     <>
                       {row.accountId ? (
-                        <Link href={`/ekonomi/huvudbok?accountId=${row.accountId}&from=${from}&to=${to}`}>{row.accountNumber}</Link>
+                        <Link href={`/ekonomi/huvudbok?accountId=${row.accountId}&from=${from}&to=${to}${ledgerFilter}`}>{row.accountNumber}</Link>
                       ) : (
                         row.accountNumber
                       )}{" "}

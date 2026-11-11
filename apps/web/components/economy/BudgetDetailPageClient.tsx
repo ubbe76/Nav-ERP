@@ -20,6 +20,7 @@ import {
   parseAmount,
   rowSum,
   rowsSignature,
+  distributePending,
   sumOf,
   toPutLines,
   type BudgetEditRow,
@@ -230,7 +231,10 @@ export function BudgetDetailPageClient({
     setSaved(false);
     const trimmed = name.trim();
     if (trimmed === "") return setError("Ange ett namn.");
-    const put = rowsDirty ? toPutLines(rows) : null;
+    // A typed annual amount is spread first, as the field's blur/Enter does —
+    // Ctrl+Enter from the Summa field saves before blur has applied it.
+    const effectiveRows = rows.map(distributePending);
+    const put = rowsDirty ? toPutLines(effectiveRows) : null;
     if (put?.error) return setError(put.error);
     setPending(true);
     try {
