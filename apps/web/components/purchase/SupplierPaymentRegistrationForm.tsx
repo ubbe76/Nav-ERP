@@ -485,6 +485,7 @@ export function SupplierPaymentRegistrationForm({
           <Input id="supplierPaymentNote" value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
 
+        <FormError>{error}</FormError>
         <FormActions>
           <Button type="submit" variant="primary" disabled={pending}>
             {pending ? "Registrerar…" : "Registrera betalning"}

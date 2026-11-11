@@ -4,7 +4,7 @@ import { AppShell } from "../../../components/AppShell";
 import { Pagination } from "../../../components/ui/ListControls";
 import { StockBalancesList, type StockBalanceRow } from "../../../components/stock/StockBalancesList";
 import buttonStyles from "../../../components/ui/Button.module.css";
-import { apiGet } from "../../../lib/api";
+import { apiGet, getCurrentUser } from "../../../lib/api";
 import { listApiQuery, type PageSearchParams } from "../../../lib/listQuery";
 import { getListPageSize } from "../../../lib/listPageSize";
 import type { Paged, StockBalance } from "../../../lib/types";
@@ -16,6 +16,8 @@ export default async function StockPage(props: { searchParams: Promise<PageSearc
   const searchParams = await props.searchParams;
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const pageSize = await getListPageSize();
+  // Inventering is admin-only (the page and the API), so the button is too.
+  const user = await getCurrentUser(cookieHeader);
   const balancesPage = await apiGet<Paged<StockBalance>>(
     `/api/v1/stock/balances${listApiQuery(searchParams, ["blocked", "locationId"], pageSize)}`,
     cookieHeader
@@ -47,9 +49,11 @@ export default async function StockPage(props: { searchParams: Promise<PageSearc
           <Link href="/lager/justering" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
             + Justering
           </Link>
-          <Link href="/lager/inventering" className={`${buttonStyles.button} ${buttonStyles.primary}`}>
-            Inventering
-          </Link>
+          {user?.role === "admin" && (
+            <Link href="/lager/inventering" className={`${buttonStyles.button} ${buttonStyles.primary}`}>
+              Inventering
+            </Link>
+          )}
           <HelpLink chapter="lager" anchor="saldon" label="Hjälp om lagersaldon" />
         </div>
       </div>

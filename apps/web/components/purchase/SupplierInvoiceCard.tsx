@@ -3,8 +3,9 @@
 import { CostCenterSelect, ProjectSelect, DimensionFields, NO_OBJECT } from "../economy/DimensionSelect";
 import { VerificationRef } from "../economy/VerificationRef";
 import { dimensionText, headerDimensionFields, useDimensions } from "../../lib/dimensions";
-import { confirmDelete } from "../../lib/confirm";
-import { useState, type FormEvent } from "react";
+import { confirmDelete, confirmDialog } from "../../lib/confirm";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Table } from "../ui/Table";
@@ -83,14 +84,40 @@ export function SupplierInvoiceCard({
     : null;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // Godkänn books the STORED draft (webbgranskningen 2026-11-11): a header
+  // changed but not saved (moms 250, another momskod, a rate, another
+  // supplier) was booked as it was stored, and only Avbryt (an omföring) and
+  // a new invoice could undo it. The header saves first; a filled-in row not
+  // yet added stops Godkänn; leaving the page asks.
+  const [headerDirty, setHeaderDirty] = useState(false);
+  const headerSave = useRef<(() => Promise<string | null>) | null>(null);
+  const [addRowFilled, setAddRowFilled] = useState(false);
+  useUnsavedGuard(editable && (headerDirty || addRowFilled));
+  const approveBlocker = addRowFilled ? "Lägg till eller töm raden under tabellen först." : null;
   const dims = useDimensions();
   const showObjects =
     dims.allCostCenters.length > 0 || dims.allProjects.length > 0 || invoice.rows.some((r) => r.costCenter || r.project);
 
   async function statusAction(action: "approve" | "cancel") {
+    if (action === "approve" && approveBlocker) return setError(approveBlocker);
+    if (
+      action === "cancel" &&
+      !(await confirmDialog(
+        invoice.status === "approved"
+          ? "Avbryta fakturan? Bokföringen omförs med ett nytt verifikat, och en avbruten faktura kan inte öppnas igen."
+          : "Avbryta fakturautkastet? En avbruten faktura kan inte öppnas igen.",
+        { confirmLabel: "Avbryt faktura", danger: true }
+      ))
+    ) {
+      return;
+    }
     setError(null);
     setPending(true);
     try {
+      if (action === "approve" && headerDirty && headerSave.current) {
+        const failed = await headerSave.current();
+        if (failed) return setError(failed);
+      }
       await apiFetch(`/api/v1/supplier-invoices/${invoice.id}/${action}`, { method: "POST" });
       router.refresh();
     } catch (err) {
@@ -145,8 +172,6 @@ export function SupplierInvoiceCard({
         )}
       </div>
 
-      <FormError>{error}</FormError>
-
       {/* Valuta: a foreign draft saved before rates existed and never given one
           cannot be approved until the rate is confirmed — the form fetches the
           one for the invoice date (Spara faktura saves it) or takes an own. */}
@@ -192,6 +217,8 @@ export function SupplierInvoiceCard({
           invoice={invoice}
           vatCodes={vatCodes}
           onSaved={() => router.refresh()}
+          onDirtyChange={setHeaderDirty}
+          saveRef={headerSave}
         />
       ) : (
         <Card maxWidth={520} style={{ marginBottom: 20 }}>
@@ -360,17 +387,29 @@ export function SupplierInvoiceCard({
             supplierName={invoice.supplierName}
             purchaseOrderNumber={invoice.purchaseOrderNumber ?? null}
             onDone={() => router.refresh()}
+            onFilledChange={setAddRowFilled}
           />
         )}
 
         <Card maxWidth={320}>
           <FormStack>
             <strong>Åtgärder</strong>
+            {/* Here, next to the buttons — at the top of the card it sat
+                after the header, underlag, rows and payments. */}
+            <FormError>{error}</FormError>
             {invoice.status === "draft" && (
-              <Button type="button" variant="primary" disabled={pending} onClick={() => statusAction("approve")}>
+              <Button
+                type="button"
+                variant="primary"
+                disabled={pending || approveBlocker !== null}
+                title={approveBlocker ?? undefined}
+                onClick={() => statusAction("approve")}
+              >
                 Godkänn
               </Button>
             )}
+            {invoice.status === "draft" && headerDirty && <FormHint attached>Ändringarna i fakturahuvudet sparas först.</FormHint>}
+            {approveBlocker && <FormHint attached>{approveBlocker}</FormHint>}
             {/* "Betala" no longer exists (B4) — betald is set by registering
                 a payment against the open amount instead. */}
             {invoice.status === "approved" && invoice.openAmount !== 0 && (
@@ -420,10 +459,16 @@ function HeaderForm({
   invoice,
   vatCodes,
   onSaved,
+  onDirtyChange,
+  saveRef,
 }: {
   invoice: SupplierInvoiceDetail;
   vatCodes: VatCodeView[];
   onSaved: () => void;
+  // The card's Godkänn saves a changed header first (it books the stored
+  // draft) and the unsaved-changes guard watches it.
+  onDirtyChange?: (dirty: boolean) => void;
+  saveRef?: { current: (() => Promise<string | null>) | null };
 }) {
   const [supplier, setSupplier] = useState<SupplierOption | null>({ id: invoice.supplierId, name: invoice.supplierName });
   const [invoiceNumber, setInvoiceNumber] = useState(invoice.invoiceNumber);
@@ -485,47 +530,75 @@ function HeaderForm({
       ? documentSekAmounts({ rate: rateNumber, grossAmount: Number(grossAmount) || 0, vatAmount: Number(vatAmount) || 0, rows: [] })
       : null;
 
-  async function save(e: FormEvent) {
-    e.preventDefault();
-    if (!supplier) {
-      setError("Välj leverantören som fakturan ska betalas till");
-      return;
-    }
+  // The plain fields as the API wants them. Spara faktura sends only those
+  // that differ from what the form started from (webbgranskningen
+  // 2026-11-11): sending all of them wrote back a Projekt a colleague had
+  // changed meanwhile — the API had just learned to write the objects only
+  // when sent. The supplier, momskod and rate keep their own rules below.
+  const plainValues: Record<string, unknown> = {
+    invoiceNumber,
+    invoiceDate,
+    dueDate: dueDate.trim() || null,
+    netAmount: Number(netAmount),
+    vatAmount: Number(vatAmount),
+    grossAmount: Number(grossAmount),
+    note: note.trim() || null,
+    costCenterId: costCenterId || null,
+    projectId: projectId || null,
+  };
+  const [savedPlain, setSavedPlain] = useState<Record<string, unknown>>(() => plainValues);
+  const changedPlain = Object.fromEntries(
+    Object.entries(plainValues).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(savedPlain[key]))
+  );
+  const rateChange = foreign && !currencyChanging ? invoiceRate.patchValue : undefined;
+  const dirty =
+    Object.keys(changedPlain).length > 0 ||
+    (supplier !== null && supplier.id !== invoice.supplierId) ||
+    vatCodeId !== invoice.vatCodeId ||
+    rateChange !== undefined;
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  // Saves the header; returns the error text, null when saved.
+  async function doSave(): Promise<string | null> {
+    if (!supplier) return "Välj leverantören som fakturan ska betalas till";
     if (foreign && !currencyChanging && invoiceRate.typedInvalid) {
-      setError("Ange en kurs större än 0 — eller välj Använd kursen för fakturadatumet");
-      return;
+      return "Ange en kurs större än 0 — eller välj Använd kursen för fakturadatumet";
     }
-    setError(null);
     setSaved(false);
-    setPending(true);
     try {
       await apiFetch(`/api/v1/supplier-invoices/${invoice.id}`, {
         method: "PATCH",
         body: JSON.stringify({
+          ...changedPlain,
           // Only sent when changed, so an ordinary save never logs a change.
           supplierId: supplier.id !== invoice.supplierId ? supplier.id : undefined,
-          invoiceNumber,
-          invoiceDate,
-          dueDate: dueDate.trim() || null,
-          netAmount: Number(netAmount),
-          vatAmount: Number(vatAmount),
-          grossAmount: Number(grossAmount),
           // Only sent when changed (the stored code may even be inactive now).
           vatCodeId: vatCodeId !== invoice.vatCodeId ? vatCodeId : undefined,
           // number = a rate typed in, null = back to the automatic rate, left
           // out = the API's own rules (it looks the rate up again for a new
           // currency or date, and for a rate that is missing). Not sent when
           // the supplier change gives the invoice another currency.
-          exchangeRate: foreign && !currencyChanging ? invoiceRate.patchValue : undefined,
-          note: note.trim() || null,
-          costCenterId: costCenterId || null,
-          projectId: projectId || null,
+          exchangeRate: rateChange,
         }),
       });
+      setSavedPlain(plainValues);
       setSaved(true);
       onSaved();
+      return null;
     } catch (err) {
-      setError(apiErrorMessage(err, "Kunde inte spara fakturan"));
+      return apiErrorMessage(err, "Kunde inte spara fakturan");
+    }
+  }
+  if (saveRef) saveRef.current = doSave;
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setPending(true);
+    try {
+      setError(await doSave());
     } finally {
       setPending(false);
     }
@@ -618,7 +691,8 @@ function HeaderForm({
           <Button type="submit" variant="primary" disabled={pending}>
             {pending ? "Sparar…" : "Spara faktura"}
           </Button>
-          {saved && <span style={{ alignSelf: "center" }}>Sparat</span>}
+          {dirty && <span style={{ alignSelf: "center" }}>Osparade ändringar</span>}
+          {saved && !dirty && <span style={{ alignSelf: "center" }}>Sparat</span>}
         </FormActions>
       </Form>
     </Card>
@@ -636,6 +710,7 @@ function AddRowForm({
   supplierName,
   purchaseOrderNumber,
   onDone,
+  onFilledChange,
 }: {
   invoiceId: string;
   vatCodes: VatCodeView[];
@@ -643,6 +718,8 @@ function AddRowForm({
   supplierName: string;
   purchaseOrderNumber: string | null;
   onDone: () => void;
+  // Tells the card a row is being filled in (Godkänn waits for it).
+  onFilledChange?: (filled: boolean) => void;
 }) {
   const [description, setDescription] = useState("");
   const [article, setArticle] = useState<Article | null>(null);
@@ -657,17 +734,25 @@ function AddRowForm({
   const [matchOptions, setMatchOptions] = useState<PriceHistoryEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const filled = description.trim() !== "" || article !== null || unitPrice.trim() !== "";
+  useEffect(() => {
+    onFilledChange?.(filled);
+  }, [filled, onFilledChange]);
+  // A late answer for article A must not offer A's order rows while B is chosen.
+  const matchSeq = useRef(0);
 
   // Picking an article offers its purchase-order rows as match candidates (price-history rows carry the PO row id).
   async function handleArticleChange(next: Article | null) {
     setArticle(next);
     setPoRowId("");
     setMatchOptions([]);
+    const seq = ++matchSeq.current;
     if (!next) return;
     try {
       const history = await apiFetch<Paged<PriceHistoryEntry>>(
         `/api/v1/price-history?articleId=${next.id}&limit=100`
       );
+      if (seq !== matchSeq.current) return;
       setMatchOptions(
         history.rows.filter((r) => r.supplierName === supplierName || r.orderNumber === purchaseOrderNumber)
       );

@@ -3,7 +3,7 @@
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
 import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { openDocument } from "../../lib/tabNavigation";
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
@@ -17,6 +17,7 @@ import { DocumentActionBar } from "../documents/DocumentActionBar";
 import { TermsFields, termsFrom, termsLabel, termsPayload, type TermsRegisters, type TermsValue } from "../documents/TermsFields";
 import { toUnitPrice, toUnitQuantity } from "../../lib/units";
 import { formatMoney, formatUnitPrice } from "../../lib/format";
+import { currencyLabel } from "../../lib/currency";
 import { apiFetch } from "../../lib/api";
 import {
   INQUIRY_STATUS_PILL,
@@ -55,6 +56,9 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
   // Info banner for "Uppdatera beredningens legopris" — a success message
   // rather than a router.refresh()-worthy new view.
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  // Row Spara/Ta bort errors under the table, next to the buttons; the flow
+  // buttons' errors at the action bar.
+  const [rowError, setRowError] = useState<string | null>(null);
   // Row being edited, and its drafts. Quantities/prices are edited in the
   // row's unit; the article is fetched so the unit dropdown knows the
   // base + alternative units.
@@ -75,7 +79,25 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
       editUnitId !== editStart.unitId ||
       editSetupPrice !== editStart.setup);
   useUnsavedGuard(rowEditDirty);
-  const editUnitOptions = useUnitOptions(editArticle);
+  // A row open in Ändra blocks the flow buttons (Gör till inköpsorder
+  // converted the SAVED row — an unsaved answer of 125 kr became 0 kr on the
+  // order — and dropped the edit; webbgranskningen 2026-11-11).
+  const rowEditOpen = editingRowId !== null;
+  const rowEditTitle = rowEditOpen ? "Spara eller avbryt raden du ändrar först" : undefined;
+  const rawEditUnitOptions = useUnitOptions(editArticle);
+  // The row's own unit counts with the factor SAVED on the row until the
+  // unit is switched — the article's factor may have changed since.
+  const savedRowFactor = rows.find((r) => r.id === editingRowId)?.unitFactor ?? null;
+  const savedRowUnitId = editStart?.unitId ?? null;
+  const editUnitOptions = useMemo(
+    () =>
+      savedRowUnitId === null
+        ? rawEditUnitOptions
+        : rawEditUnitOptions.map((o) =>
+            o.value === savedRowUnitId ? { ...o, factor: savedRowFactor != null ? Number(savedRowFactor) : 1 } : o
+          ),
+    [rawEditUnitOptions, savedRowUnitId, savedRowFactor]
+  );
   const editFactor = editUnitOptions.find((o) => o.value === editUnitId)?.factor ?? 1;
 
   // Unanswered rows have no price yet, so the total only covers the answered
@@ -94,7 +116,9 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
     router.refresh();
   }
 
-  function startEditRow(row: InquiryRow) {
+  async function startEditRow(row: InquiryRow) {
+    if (rowEditDirty && !(await confirmDialog("Raden du ändrar har osparade ändringar. Släppa dem?"))) return;
+    setRowError(null);
     setEditingRowId(row.id);
     setEditQuantity(String(toUnitQuantity(Number(row.quantity), row.unitFactor)));
     setEditPrice(row.unitPrice !== null ? String(toUnitPrice(Number(row.unitPrice), row.unitFactor)) : "");
@@ -144,22 +168,33 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
   }
 
   async function saveRow(row: InquiryRow) {
-    setError(null);
+    if (!editStart) return;
+    // Only what was changed — an untouched quantity, unit or price is never
+    // re-expressed with the article's current factor (webbgranskningen
+    // 2026-11-11, as on the IO and kundorder cards).
+    const unitChanged = editUnitId !== editStart.unitId;
+    const body: Record<string, unknown> = {};
+    if (unitChanged || editQuantity !== editStart.quantity) body.quantity = Number(editQuantity);
+    if (unitChanged) body.unitId = editUnitId === "" ? null : editUnitId;
+    if (unitChanged || editPrice !== editStart.price) body.unitPrice = editPrice.trim() === "" ? null : Number(editPrice);
+    if (isLegoRow(row) && editSetupPrice !== editStart.setup) body.setupPrice = editSetupPrice.trim() === "" ? null : Number(editSetupPrice);
+    if (Object.keys(body).length === 0) {
+      setEditingRowId(null);
+      setEditStart(null);
+      return;
+    }
+    setRowError(null);
     setPending(true);
     try {
       await apiFetch(`/api/v1/inquiries/${inquiry.id}/rows/${row.id}`, {
         method: "PATCH",
-        body: JSON.stringify({
-          quantity: Number(editQuantity),
-          unitPrice: editPrice.trim() === "" ? null : Number(editPrice),
-          unitId: editUnitId === "" ? null : editUnitId,
-          ...(isLegoRow(row) ? { setupPrice: editSetupPrice.trim() === "" ? null : Number(editSetupPrice) } : {}),
-        }),
+        body: JSON.stringify(body),
       });
       setEditingRowId(null);
+      setEditStart(null);
       router.refresh();
     } catch (err) {
-      setError(apiErrorMessage(err, "Kunde inte spara raden"));
+      setRowError(apiErrorMessage(err, "Kunde inte spara raden"));
     } finally {
       setPending(false);
     }
@@ -167,13 +202,13 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
 
   async function removeRow(row: InquiryRow) {
     if (!(await confirmDelete(`Ta bort ${row.articleNumber} ur förfrågan?`))) return;
-    setError(null);
+    setRowError(null);
     setPending(true);
     try {
       await apiFetch(`/api/v1/inquiries/${inquiry.id}/rows/${row.id}`, { method: "DELETE" });
       router.refresh();
     } catch (err) {
-      setError(apiErrorMessage(err, "Kunde inte ta bort raden"));
+      setRowError(apiErrorMessage(err, "Kunde inte ta bort raden"));
     } finally {
       setPending(false);
     }
@@ -184,21 +219,22 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
       <DocumentActionBar
         label={inquiry.inquiryNumber}
         pill={pill}
+        error={error}
       >
         {editable && (
-          <Button type="button" variant="secondary" onClick={() => setModal("addRow")}>
+          <Button type="button" variant="secondary" disabled={rowEditOpen} title={rowEditTitle} onClick={() => setModal("addRow")}>
             Lägg till rad
           </Button>
         )}
 
         {inquiry.status === "draft" && (
-          <Button type="button" variant="primary" disabled={pending} onClick={() => action("send")}>
+          <Button type="button" variant="primary" disabled={pending || rowEditOpen} title={rowEditTitle} onClick={() => action("send")}>
             Skicka förfrågan
           </Button>
         )}
 
         {inquiry.status === "sent" && (
-          <Button type="button" variant="primary" disabled={pending} onClick={() => action("mark-answered")}>
+          <Button type="button" variant="primary" disabled={pending || rowEditOpen} title={rowEditTitle} onClick={() => action("mark-answered")}>
             Markera besvarad
           </Button>
         )}
@@ -207,7 +243,8 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
           <Button
             type="button"
             variant="primary"
-            disabled={pending}
+            disabled={pending || rowEditOpen}
+            title={rowEditTitle}
             onClick={() =>
               action("convert-to-order", (result) => {
                 const order = result as PurchaseOrder;
@@ -220,7 +257,22 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
         )}
 
         {editable && (
-          <Button type="button" variant="danger" disabled={pending} onClick={() => action("cancel")}>
+          <Button
+            type="button"
+            variant="danger"
+            disabled={pending || rowEditOpen}
+            title={rowEditTitle}
+            onClick={async () => {
+              if (
+                await confirmDialog(`Avbryta ${inquiry.inquiryNumber}? En avbruten förfrågan kan inte öppnas igen.`, {
+                  confirmLabel: "Avbryt förfrågan",
+                  danger: true,
+                })
+              ) {
+                void action("cancel");
+              }
+            }}
+          >
             Avbryt förfrågan
           </Button>
         )}
@@ -249,7 +301,6 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
         onEdit={editable ? () => setModal("header") : undefined}
       />
 
-      <FormError margin="below">{error}</FormError>
       {infoMessage && <FormSaved>{infoMessage}</FormSaved>}
 
       {rows.length > 0 ? (
@@ -357,7 +408,7 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
                       <Button type="button" size="small" variant="primary" disabled={pending} onClick={() => saveRow(row)}>
                         Spara
                       </Button>
-                      <Button type="button" size="small" variant="ghost" onClick={() => setEditingRowId(null)}>
+                      <Button type="button" size="small" variant="ghost" onClick={() => { setEditingRowId(null); setEditStart(null); setRowError(null); }}>
                         Avbryt
                       </Button>
                     </span>
@@ -378,7 +429,7 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
                   <span style={{ display: "inline-flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 8 }}>
                     {editable && (
                       <>
-                        <Button type="button" size="small" variant="ghost" onClick={() => startEditRow(row)}>
+                        <Button type="button" size="small" variant="ghost" onClick={() => void startEditRow(row)}>
                           Ändra
                         </Button>
                         <Button type="button" size="small" variant="danger" disabled={pending} onClick={() => removeRow(row)}>
@@ -402,6 +453,7 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
       ) : (
         <p>Inga rader tillagda än.</p>
       )}
+      <FormError>{rowError}</FormError>
 
 
       <Modal open={modal === "header"} onClose={() => setModal(null)} title="Ändra villkor och frakt">
@@ -599,7 +651,7 @@ function AddInquiryRowForm({
         <Field label="Enhet" htmlFor="inquiryRowUnit">
           <UnitSelect id="inquiryRowUnit" options={unitOptions} value={unitId} onChange={handleUnitChange} />
         </Field>
-        <Field label={unitCode ? `Á-pris (kr/${unitCode})` : "Á-pris (valfritt)"} htmlFor="inquiryRowPrice">
+        <Field label={unitCode ? `Á-pris (${currencyLabel(currency)}/${unitCode})` : `Á-pris (${currencyLabel(currency)}, valfritt)`} htmlFor="inquiryRowPrice">
           <Input
             id="inquiryRowPrice"
             type="number"

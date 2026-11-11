@@ -55,6 +55,11 @@ export function NewPurchaseOrderForm({
   // API when the order is created — shown here as the placeholder. Only a
   // typed rate is sent.
   const [exchangeRate, setExchangeRate] = useState("");
+  // A typed rate belongs to the currency it was typed for.
+  const pickSupplier = (next: Supplier | null) => {
+    if ((next?.currency ?? "SEK") !== supplierCurrency) setExchangeRate("");
+    setSupplier(next);
+  };
   const supplierCurrency = supplier?.currency ?? "SEK";
   const foreign = supplierCurrency !== "SEK";
   const rateLookup = useExchangeRateLookup(foreign ? supplierCurrency : null, stockholmToday());
@@ -126,7 +131,7 @@ export function NewPurchaseOrderForm({
             id="supplierId"
             endpoint="/api/v1/suppliers"
             value={supplier}
-            onChange={setSupplier}
+            onChange={pickSupplier}
             formatLabel={(s) => `${s.supplierNumber} — ${s.name} (${s.currency})`}
             placeholder="Sök leverantörnummer eller namn…"
             emptyText="Inga leverantörer matchar sökningen"

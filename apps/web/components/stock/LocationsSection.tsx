@@ -55,9 +55,14 @@ export function LocationsSection({
   const [notice, setNotice] = useState<string | null>(null);
   const [newBlocked, setNewBlocked] = useState(false);
   const [newBlockedNote, setNewBlockedNote] = useState("");
-  const [warehouseId, setWarehouseId] = useState(warehouses[0]?.id ?? "");
+  const [pickedWarehouseId, setWarehouseId] = useState("");
+  // The first warehouse until one is picked — a warehouse created a moment ago
+  // (the list arrives with the refresh) is usable without a reload.
+  const warehouseId = pickedWarehouseId || warehouses[0]?.id || "";
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // The create form's own error, shown at the form (the others show at the top).
+  const [createError, setCreateError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   // Row being edited, and its drafts.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -398,7 +403,7 @@ export function LocationsSection({
         <Card maxWidth={420} style={{ marginTop: 16 }}>
           <Form onSubmit={async (e: FormEvent) => {
               e.preventDefault();
-              setError(null);
+              setCreateError(null);
               setPending(true);
               try {
                 await apiFetch("/api/v1/stock/locations", {
@@ -416,7 +421,7 @@ export function LocationsSection({
                 setNewBlockedNote("");
                 router.refresh();
               } catch (err) {
-                setError(apiErrorMessage(err, "Kunde inte skapa lagerplatsen"));
+                setCreateError(apiErrorMessage(err, "Kunde inte skapa lagerplatsen"));
               } finally {
                 setPending(false);
               }
@@ -462,6 +467,7 @@ export function LocationsSection({
               tas aldrig med Automatiskt. Det värderas som vanligt.
             </FormHint>
 
+            <FormError>{createError}</FormError>
             <FormActions>
               <Button type="submit" variant="secondary" disabled={pending}>
                 {pending ? "Skapar…" : "Skapa lagerplats"}

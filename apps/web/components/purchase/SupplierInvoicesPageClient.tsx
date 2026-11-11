@@ -203,9 +203,16 @@ export function NewSupplierInvoiceForm({
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const [qtyBasis, setQtyBasis] = useState<"received" | "ordered">("received");
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
+  // The order the rows were fetched from — what the invoice is matched to,
+  // whatever the select shows now. Changing the order or Antal drops the rows
+  // (and the Nettobelopp the rows filled in, if it was not touched since).
+  const [basisOrderId, setBasisOrderId] = useState("");
+  const basisSeq = useRef(0);
+  const netAmountNow = useRef("");
+  const basisNetFilled = useRef<string | null>(null);
   // Valuta, continued: with basis from a purchase order the API falls back on
   // that order's rate when the date has none — the field shows it too.
-  const basisOrder = previewRows.length > 0 ? (orders.find((o) => o.id === selectedOrderId) ?? null) : null;
+  const basisOrder = previewRows.length > 0 ? (orders.find((o) => o.id === basisOrderId) ?? null) : null;
   const invoiceRate = useInvoiceRate({
     currency: foreignCurrency ? invoiceCurrency : null,
     date: invoiceDate,
@@ -262,6 +269,7 @@ export function NewSupplierInvoiceForm({
     invoiceSupplier.currency.trim().toUpperCase() !== "SEK" &&
     invoiceSupplier.country.trim().toUpperCase() === "SE";
 
+  netAmountNow.current = netAmount;
   const rateNumber = Number(invoiceRate.rate.replace(",", "."));
   const sekPreview =
     foreignCurrency && Number.isFinite(rateNumber) && rateNumber > 0 && grossAmount.trim() !== ""
@@ -289,7 +297,7 @@ export function NewSupplierInvoiceForm({
   // Load the supplier's inlevererade orders whenever the supplier changes.
   useEffect(() => {
     setSelectedOrderId("");
-    setPreviewRows([]);
+    dropBasis();
     setOrders([]);
     if (!supplierId) return;
     let cancelled = false;
@@ -321,15 +329,34 @@ export function NewSupplierInvoiceForm({
   async function fetchBasis(orderId = selectedOrderId) {
     if (!orderId) return;
     setError(null);
+    const seq = ++basisSeq.current;
     try {
       const built = await fetchPurchaseOrderBasis(orderId, qtyBasis);
+      if (seq !== basisSeq.current) return;
       setPreviewRows(built);
+      setBasisOrderId(orderId);
       // Fill the net amount from the row sum when it is still empty — the
-      // VAT and gross follow from it (see the prefill effect above).
-      if (isEmptyAmount(netAmount)) setNetAmount(String(basisRowsSum(built)));
+      // VAT and gross follow from it (see the prefill effect above). Read
+      // when the answer lands: a figure typed meanwhile wins.
+      if (isEmptyAmount(netAmountNow.current)) {
+        const filled = String(basisRowsSum(built));
+        basisNetFilled.current = filled;
+        setNetAmount(filled);
+      }
     } catch (err) {
-      setError(apiErrorMessage(err, "Kunde inte hämta orderraderna"));
+      if (seq === basisSeq.current) setError(apiErrorMessage(err, "Kunde inte hämta orderraderna"));
     }
+  }
+
+  // The rows belong to the order and Antal they were fetched with — a change
+  // of either drops them, and the net amount they filled in unless it was
+  // edited since. A fetch on its way is cancelled.
+  function dropBasis() {
+    basisSeq.current++;
+    setPreviewRows([]);
+    setBasisOrderId("");
+    if (basisNetFilled.current !== null && netAmountNow.current === basisNetFilled.current) setNetAmount("");
+    basisNetFilled.current = null;
   }
 
   function removePreviewRow(id: string) {
@@ -346,6 +373,10 @@ export function NewSupplierInvoiceForm({
       setError("Välj leverantören som fakturan ska betalas till");
       return;
     }
+    if (foreignCurrency && invoiceRate.typedInvalid) {
+      setError("Ange en kurs större än 0 — eller välj Använd kursen för fakturadatumet");
+      return;
+    }
     setError(null);
     setPending(true);
     try {
@@ -360,7 +391,7 @@ export function NewSupplierInvoiceForm({
           vatAmount: vatAmount.trim() ? Number(vatAmount) : 0,
           grossAmount: grossAmount.trim() ? Number(grossAmount) : 0,
           note: note.trim() || undefined,
-          purchaseOrderId: previewRows.length > 0 ? selectedOrderId : undefined,
+          purchaseOrderId: previewRows.length > 0 && basisOrderId ? basisOrderId : undefined,
           vatCodeId: vatCodeId || undefined,
           // Only a rate typed in; otherwise the API looks it up for the date.
           exchangeRate:
@@ -415,7 +446,14 @@ export function NewSupplierInvoiceForm({
         <>
           <FormRow>
             <Field label="Hämta underlag från inköpsorder" htmlFor="invoiceOrder">
-              <Select id="invoiceOrder" value={selectedOrderId} onChange={(e) => setSelectedOrderId(e.target.value)}>
+              <Select
+                id="invoiceOrder"
+                value={selectedOrderId}
+                onChange={(e) => {
+                  setSelectedOrderId(e.target.value);
+                  dropBasis();
+                }}
+              >
                 <option value="">— Ingen —</option>
                 {orders.map((o) => (
                   <option key={o.id} value={o.id}>
@@ -428,7 +466,10 @@ export function NewSupplierInvoiceForm({
               <Select
                 id="invoiceQtyBasis"
                 value={qtyBasis}
-                onChange={(e) => setQtyBasis(e.target.value as "received" | "ordered")}
+                onChange={(e) => {
+                  setQtyBasis(e.target.value as "received" | "ordered");
+                  dropBasis();
+                }}
               >
                 <option value="received">Mottaget antal</option>
                 <option value="ordered">Beställt antal</option>
@@ -636,6 +677,7 @@ export function NewSupplierInvoiceForm({
         <FormHint>PDF, JPEG eller PNG, max 20 MB per fil. Sparas som räkenskapsinformation på fakturan.</FormHint>
       </Field>
 
+      <FormError>{error}</FormError>
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>
           {pending ? "Skapar…" : "Skapa faktura"}

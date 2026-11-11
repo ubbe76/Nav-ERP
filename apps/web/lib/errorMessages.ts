@@ -129,7 +129,12 @@ const MESSAGES: Record<string, MessageEntry> = {
   "vat-accounts-not-distinct":
     "Redovisningskontot för moms eller Öres- och kronutjämning har en momsruta som momsomföringen tömmer — välj ett konto utan momsruta under Konteringsregler.",
   "accounting-period-locked": "Perioden för det här datumet är låst för bokföring",
-  "zero-amount-posting": "Ingen moms att omföra i perioden.",
+  // Thrown by many postings (momsomföring, fakturor och betalningar med belopp 0, avgifter) — one text for all.
+  "zero-amount-posting": "Det finns inget belopp att bokföra — kontrollera beloppen eller att perioden har något att omföra.",
+  "unknown-vat-rate": "En rad har en momssats som saknar momskonto — använd 25, 12, 6 eller 0 procent.",
+  "supplier-invoice-amount-mismatch":
+    "Netto + moms stämmer inte med brutto — kontrollera beloppen på leverantörsfakturan.",
+  "po-match-mismatch": "Raden stämmer inte med inköpsordern den pekar på — kontrollera ordern och raden.",
   "no-accounting-period": "Ingen period täcker det valda datumet",
   "no-accounting-period-for-posting": "Ingen period täcker det valda datumet",
   "missing-posting-account": "Ett konto saknas eller är inaktivt i kontoplanen — kontrollera standardkontona eller anläggningsgruppens konton.",
@@ -419,6 +424,13 @@ const MESSAGES: Record<string, MessageEntry> = {
   "row-has-invoice-rows": "Raden finns på en faktura (även makulerad eller krediterad) och kan inte tas bort.",
   "credit-exceeds-invoice": "Kreditfakturorna skulle överstiga beloppet på fakturan de krediterar.",
   "purchase-order-exchange-rate": "En inköpsorder i SEK har alltid kursen 1.",
+  "inquiry-not-found": "Förfrågan hittades inte",
+  "inquiry-row-not-found": "Förfrågningsraden hittades inte",
+  "lego-operation-not-found": "Legooperationen hittades inte",
+  "stock-count-not-found": "Inventeringen hittades inte",
+  "stock-count-row-not-found": "Inventeringsraden hittades inte",
+  "supplier-payment-row-mismatch":
+    "En betalningsrad stämmer inte — raden reglerar ingenting, fakturan tillhör en annan leverantör eller beloppet pekar åt fel håll.",
   "lego-operation-article-mismatch": "Legooperationen tillhör en annan artikel än raden.",
   "not-lego-operation": "Operationen ligger inte på en legoresurs.",
   "lego-operation-closed": "Legooperationen är inte öppen — den är klar eller tillverkningsordern är inte frisläppt eller pågående.",

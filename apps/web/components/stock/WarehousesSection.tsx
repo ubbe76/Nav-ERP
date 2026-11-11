@@ -17,6 +17,8 @@ export function WarehousesSection({ warehouses }: { warehouses: Warehouse[] }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // The create form's own error, shown at the form (the edit's shows at the top).
+  const [createError, setCreateError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   // Row being edited, and its drafts.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -25,7 +27,7 @@ export function WarehousesSection({ warehouses }: { warehouses: Warehouse[] }) {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    setError(null);
+    setCreateError(null);
     setPending(true);
     try {
       await apiFetch("/api/v1/stock/warehouses", {
@@ -35,7 +37,7 @@ export function WarehousesSection({ warehouses }: { warehouses: Warehouse[] }) {
       setName("");
       router.refresh();
     } catch (err) {
-      setError(apiErrorMessage(err, "Kunde inte skapa lagret"));
+      setCreateError(apiErrorMessage(err, "Kunde inte skapa lagret"));
     } finally {
       setPending(false);
     }
@@ -127,6 +129,7 @@ export function WarehousesSection({ warehouses }: { warehouses: Warehouse[] }) {
             <Input id="warehouseName" required value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
 
+          <FormError>{createError}</FormError>
           <FormActions>
             <Button type="submit" variant="secondary" disabled={pending}>
               {pending ? "Skapar…" : "Skapa lager"}

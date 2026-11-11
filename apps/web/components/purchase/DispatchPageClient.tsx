@@ -14,6 +14,7 @@ import { HelpLink } from "../ui/HelpLink";
 import { PalletCardDialog } from "../documents/PalletCardDialog";
 import { DispatchesSection } from "./DispatchesSection";
 import { apiFetch } from "../../lib/api";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatQuantity, round4 } from "../../lib/format";
 import { toBaseQuantity, toUnitQuantity } from "../../lib/units";
@@ -73,6 +74,7 @@ export function DispatchPageClient({
     Record<string, { quantity?: string; parcels?: string }>
   >({});
   const [note, setNote] = useState("");
+  useUnsavedGuard(Object.keys(edits).length > 0);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);

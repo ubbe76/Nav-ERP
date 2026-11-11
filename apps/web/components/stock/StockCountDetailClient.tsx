@@ -29,6 +29,7 @@ import {
   type StockCountRow,
 } from "../../lib/types";
 import { formatQuantity, round4 } from "../../lib/format";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 
 const PILL_STATUS = { open: "running", posted: "done", cancelled: "stopped" } as const;
 
@@ -69,9 +70,32 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
   const focusWhenLoaded = useRef<string | null>(null);
   // The props the queued scan handler reads — it may run after a refresh.
   const latest = useRef(session);
+  // A queued scan that navigates waits here until the new session has loaded,
+  // so the next scan in the queue is not counted against the old one.
+  const loadWaiter = useRef<{ test: (s: StockCountDetail) => boolean; resolve: () => void } | null>(null);
   useEffect(() => {
     latest.current = session;
+    const waiter = loadWaiter.current;
+    if (waiter && waiter.test(session)) {
+      loadWaiter.current = null;
+      waiter.resolve();
+    }
   });
+  function waitForLoad(test: (s: StockCountDetail) => boolean): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        loadWaiter.current = null;
+        resolve();
+      }, 5000);
+      loadWaiter.current = {
+        test,
+        resolve: () => {
+          clearTimeout(timer);
+          resolve();
+        },
+      };
+    });
+  }
 
   function focusCount(rowId: string) {
     setMarkedRowId(rowId);
@@ -111,6 +135,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
   );
   const dirtyRowsRef = useRef(0);
   dirtyRowsRef.current = dirtyRows.length;
+  useUnsavedGuard(dirtyRows.length > 0);
 
   async function saveCounts() {
     setError(null);
@@ -195,7 +220,9 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
         ) {
           return;
         }
+        const fromId = current.id;
         router.push(href);
+        await waitForLoad((s) => s.id !== fromId);
         return;
       }
       case "row":
@@ -211,7 +238,9 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
           });
           warn(`${articleLabel(article)} fanns inte på underlaget och lades till — skriv räknat antal`);
           focusCount(row.id);
+          const loaded = waitForLoad((s) => s.rows.some((r) => r.id === row.id));
           router.refresh();
+          await loaded;
         } catch (err) {
           warn(apiErrorMessage(err, "Kunde inte lägga till artikeln"));
         }

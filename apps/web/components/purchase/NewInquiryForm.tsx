@@ -12,6 +12,7 @@ import { apiFetch } from "../../lib/api";
 import type { Article, Inquiry, Supplier } from "../../lib/types";
 import { Form, FormActions, FormError, FormLineRow, FormLineRowTop, FormNotice, FormRow } from "../ui/Form";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { currencyLabel } from "../../lib/currency";
 
 interface InquiryFormRow {
   article: Article | null;
@@ -132,6 +133,7 @@ export function NewInquiryForm({
               row={row}
               otherRows={rows.filter((_, i) => i !== index).map((r) => ({ articleId: r.article?.id ?? "" }))}
               canRemove={rows.length > 1}
+              currency={supplier?.currency ?? "SEK"}
               onChange={(patch) => updateRow(index, patch)}
               onRemove={() => removeRow(index)}
             />
@@ -161,6 +163,7 @@ function InquiryRowFields({
   row,
   otherRows,
   canRemove,
+  currency,
   onChange,
   onRemove,
 }: {
@@ -169,6 +172,7 @@ function InquiryRowFields({
   // The article ids of the form's other rows, for the "already on" notice.
   otherRows: { articleId: string }[];
   canRemove: boolean;
+  currency: string;
   onChange: (patch: Partial<InquiryFormRow>) => void;
   onRemove: () => void;
 }) {
@@ -230,7 +234,7 @@ function InquiryRowFields({
             onChange={handleUnitChange}
           />
         </Field>
-        <Field label={unitCode ? `Á-pris (kr/${unitCode})` : "Á-pris (valfritt)"} htmlFor={`inquiryPrice-${index}`}>
+        <Field label={unitCode ? `Á-pris (${currencyLabel(currency)}/${unitCode})` : "Á-pris (valfritt)"} htmlFor={`inquiryPrice-${index}`}>
           <Input
             id={`inquiryPrice-${index}`}
             type="number"
