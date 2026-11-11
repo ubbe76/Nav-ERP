@@ -7,7 +7,10 @@ import {
   CsvRowLimitError,
   EmptyCsvError,
   MAX_IMPORT_ROWS,
+  MAX_XLSX_UNPACKED_BYTES,
   UnreadableImportFileError,
+  XlsxTooLargeError,
+  stripControlCharacters,
 } from "./csv.js";
 
 export type ParsedXlsx = {
@@ -35,7 +38,9 @@ export function decodeOoxmlText(value: string): string {
 // stringified here — losslessly and locale-free.
 function cellToString(value: unknown): string {
   if (value === null || value === undefined) return "";
-  if (typeof value === "string") return decodeOoxmlText(value).trim();
+  // decodeOoxmlText turns "_x0000_" into NUL — stripped with the other
+  // control characters Postgres text cannot hold or the user cannot see.
+  if (typeof value === "string") return stripControlCharacters(decodeOoxmlText(value)).trim();
   // String(2.5) is "2.5" — a dot decimal, which normalizeDecimal handles.
   if (typeof value === "number") return String(value);
   // Matches the Ja/Nej/1/0/true/false vocabulary the boolean fields accept.
@@ -44,7 +49,44 @@ function cellToString(value: unknown): string {
   return String(value);
 }
 
+// The zip's central directory, read without unpacking anything: the summed
+// uncompressed size of its parts. null when the buffer has no readable
+// central directory (the reader then fails on its own). ZIP64 sizes
+// (0xFFFFFFFF) count as too large — no import file needs them.
+export function zipUnpackedBytes(buf: Buffer): number | null {
+  const EOCD = 0x06054b50;
+  const CENTRAL = 0x02014b50;
+  const min = Math.max(0, buf.length - 65557);
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= min; i--) {
+    if (buf.readUInt32LE(i) === EOCD) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd === -1) return null;
+  const entries = buf.readUInt16LE(eocd + 10);
+  let offset = buf.readUInt32LE(eocd + 16);
+  let unpackedBytes = 0;
+  for (let n = 0; n < entries; n++) {
+    if (offset + 46 > buf.length || buf.readUInt32LE(offset) !== CENTRAL) return null;
+    const size = buf.readUInt32LE(offset + 24);
+    const nameLength = buf.readUInt16LE(offset + 28);
+    const extraLength = buf.readUInt16LE(offset + 30);
+    const commentLength = buf.readUInt16LE(offset + 32);
+    unpackedBytes += size === 0xffffffff ? Number.POSITIVE_INFINITY : size;
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+  return unpackedBytes;
+}
+
 export async function parseXlsxBuffer(buf: Buffer): Promise<ParsedXlsx> {
+  // Bounded before anything is unpacked: a 20 MB upload can unpack to
+  // gigabytes, and the reader unpacks and parses every sheet before the
+  // 10 000-row limit is even looked at.
+  const unpacked = zipUnpackedBytes(buf);
+  if (unpacked !== null && unpacked > MAX_XLSX_UNPACKED_BYTES) throw new XlsxTooLargeError();
+
   let sheets: { sheet: string; data: unknown[][] }[];
   try {
     // One call returns every sheet with its name, so the sheet count for the

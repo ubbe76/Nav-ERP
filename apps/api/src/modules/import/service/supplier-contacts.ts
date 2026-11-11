@@ -61,6 +61,8 @@ const emailSchema = z.string().email();
 export const SUPPLIER_CONTACT_HEADER_ALIASES: Record<string, string> = {
   leverantor: "supplierNumber",
   leverantorsnummer: "supplierNumber",
+  // "Leverantörsnr" — the detector keys on it (detect.ts), so the mapping must too.
+  leverantorsnr: "supplierNumber",
   levnr: "supplierNumber",
   // The Excel template's heading (field-help.ts) — the bare "Namn" stays
   // unaliased on purpose (it is the supplier's name in the Referenser export).

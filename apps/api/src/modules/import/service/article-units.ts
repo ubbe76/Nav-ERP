@@ -8,7 +8,10 @@
 // unit" — so the stored factor is 1 / Omr.faktor. The row whose factor is 1
 // is the base unit itself: it is verified against the article's base unit
 // and reported as skipped, never imported. Inköpsorder/Kundorder = true on
-// an alternative row makes it the article's default purchase/sales unit.
+// an alternative row makes it the article's default purchase/sales unit; on
+// the base-unit row it makes the grundenhet the default again (null), so an
+// alternative unit chosen by an earlier import is cleared. At most one row
+// per article may say Ja in each column — base row included.
 //
 // Upsert by (article, unit): an existing alternative unit gets its factor
 // updated, with skipExisting it is left alone instead.
@@ -101,10 +104,14 @@ export interface ArticleUnitUpdatePlan {
 
 // Default purchase/sales unit per article, from the Inköpsorder/Kundorder
 // flags on alternative rows. Codes, resolved in the transaction.
+// The article's förvalda inköps-/försäljningsenhet from the file's
+// Inköpsorder/Kundorder columns: a unit code, or null for the grundenhet
+// (articles.purchase_unit_id / sales_unit_id null = the base unit). An
+// absent key leaves the article's choice alone.
 export interface ArticleUnitDefaultsPlan {
   articleId: string;
-  purchaseUnitCode?: string;
-  salesUnitCode?: string;
+  purchaseUnitCode?: string | null;
+  salesUnitCode?: string | null;
 }
 
 export interface ArticleUnitImportPlan {
@@ -206,9 +213,47 @@ export async function planArticleUnitImport(
         // imported — article_units holds alternative units only.
         if (!isBaseCode) {
           warnings.push(`Grundenheten i filen (${unitCode}) avviker från artikelns grundenhet (${article.unitCode})`);
+          rows.push({
+            ...skippedRow(rowNumber, "Grundenhet (faktor 1) — ingen alternativ enhet", { ...record }),
+            warnings,
+          });
+          return;
         }
+        // Ja on the grundenhet's own row: the base unit is the default, so
+        // an alternative unit chosen earlier is cleared (null = grundenhet).
+        // Same one-Ja-per-article rule as between two alternative rows — the
+        // row that says it second is the error, whichever kind it is.
+        const defaults = defaultsByArticle.get(article.id) ?? { articleId: article.id };
+        const chosen: string[] = [];
+        if (flags.isPurchaseUnit) {
+          if (defaults.purchaseUnitCode !== undefined) {
+            errors.push(`Artikel ${articleNumber} har flera enheter markerade Inköpsorder i filen`);
+          } else {
+            defaults.purchaseUnitCode = null;
+            chosen.push("Inköpsorder");
+          }
+        }
+        if (flags.isSalesUnit) {
+          if (defaults.salesUnitCode !== undefined) {
+            errors.push(`Artikel ${articleNumber} har flera enheter markerade Kundorder i filen`);
+          } else {
+            defaults.salesUnitCode = null;
+            chosen.push("Kundorder");
+          }
+        }
+        if (errors.length > 0) {
+          rows.push({ rowNumber, action: "create", errors, warnings, values });
+          return;
+        }
+        if (chosen.length > 0) defaultsByArticle.set(article.id, defaults);
         rows.push({
-          ...skippedRow(rowNumber, "Grundenhet (faktor 1) — ingen alternativ enhet", { ...record }),
+          ...skippedRow(
+            rowNumber,
+            chosen.length > 0
+              ? `Grundenhet (faktor 1) — ingen alternativ enhet; grundenheten gäller för ${chosen.join(" och ")}`
+              : "Grundenhet (faktor 1) — ingen alternativ enhet",
+            { ...record }
+          ),
           warnings,
         });
         return;

@@ -137,13 +137,13 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det 
 
 ## Lagersaldon
 
-[Ladda ned mallen](/importmallar/importmall-lagersaldon.xlsx) — importeras på **Artiklar → Importera**, fliken **Lagersaldon**. Reglerna beskrivs i [lager](/hjalp/lager#importera-lagersaldon).
+[Ladda ned mallen](/importmallar/importmall-lagersaldon.xlsx) — importeras på **Artiklar → Importera**, fliken **Lagersaldon**. Reglerna beskrivs i [Lager](/hjalp/lager#importera-lagersaldon).
 
 | Kolumn | Obligatorisk | Förklaring | Exempel |
 | --- | --- | --- | --- |
 | **Artikelnummer** | Ja | Numret på en artikel som redan finns i artikelregistret och lagerhålls — inte en tjänst eller en fantomartikel. Samma artikel får bara förekomma en gång per lagerplats i filen. | RS-12 |
 | **Lager** | Nej | Lagrets namn, max 100 tecken. Ett lager som saknas skapas. Kräver Lagerplats. Lämna både Lager och Lagerplats tomma för att lägga saldot där en inleverans utan vald plats hamnar (se Lagerplats). | Huvudlager |
-| **Lagerplats** | Nej | Lagerplatsens namn i lagret, max 100 tecken. En plats som saknas skapas i lagret. Utan Lager måste platsnamnet finnas och vara unikt. Tom (och Lager tomt) betyder artikelns huvudplats (en spärrad hoppas över), annars första alternativa platsen, annars reservplatsen ***. | A1-03 |
+| **Lagerplats** | Nej | Lagerplatsens namn i lagret, max 100 tecken. En plats som saknas skapas i lagret. Utan Lager måste platsnamnet finnas och vara unikt. Tom (och Lager tomt) betyder artikelns huvudplats (en spärrad hoppas över), annars första alternativa platsen, annars reservplatsen ***. Lagerplatsen *** är alltid reservplatsen, oavsett Lager. | A1-03 |
 | **Antal** | Ja | Saldot på lagerplatsen efter importen, i artikelns grundenhet, 0 eller mer, decimalkomma eller punkt. Skillnaden mot dagens saldo bokas som en lagerjustering — samma fil två gånger ändrar inget, och 0 tömmer platsen. | 120 |
 | **À-pris** | Nej | Värdet per grundenhet i kronor för det som läggs till, decimalkomma eller punkt. Tom cell betyder artikelns standardkostnad. Används bara när saldot ökar. | 24,50 |
 
@@ -217,7 +217,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det 
 | **Adressrad 3** | Nej | Tredje adressraden, valfri — slås ihop med Adressrad 1. | Port 3 |
 | **Postnummer** | Nej | Max 20 tecken. | 123 42 |
 | **Stad** | Nej | Max 100 tecken. | Exempelby |
-| **Land** | Nej | Landskod med två bokstäver (t.ex. SE); små bokstäver godtas. Tom cell ger SE. | SE |
+| **Land** | Nej | Landskod med två bokstäver (t.ex. SE); små bokstäver godtas. Tom cell ger kundens eget land. | SE |
 | **Förvald** | Nej | Ja/Nej, 1/0, X eller true/false — Ja gör adressen till kundens förvalda leveransadress. Är kolumnen med avgör den per rad i stället för kryssrutan Sätt som förvald leveransadress; har kunden redan en förvald adress blir det en varning och adressen läggs till utan att vara förvald. | Nej |
 
 ## Leverantörer

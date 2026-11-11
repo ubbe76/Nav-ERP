@@ -278,6 +278,11 @@ export function convertCycleTime(unit: RoutingFileTimeUnit, value: number): numb
   }
 }
 
+// Same meaning as the web's text for 409 operation-has-linked-material
+// (apps/web/lib/errorMessages.ts).
+export const OPERATION_HAS_LINKED_MATERIAL_MESSAGE =
+  "Operationen har material kopplat till sig och kan inte märkas Kalkyl — ta bort operationskopplingen på strukturraden först";
+
 // Narrow lookups the planner runs against — implemented structurally by
 // createImportRepository, stubbed with Maps in tests. `type` on the work
 // centre is what tells a legoresurs apart — lego operations carry no times.
@@ -288,7 +293,20 @@ export interface RoutingImportDeps {
   routingOperationsByArticle(
     articleIds: string[]
   ): Promise<
-    Map<string, Map<number, { id: string; costingOnly: boolean; hasLegoFields?: boolean; alternativeWorkCenterIds?: string[] }>>
+    Map<
+      string,
+      Map<
+        number,
+        {
+          id: string;
+          costingOnly: boolean;
+          hasLegoFields?: boolean;
+          alternativeWorkCenterIds?: string[];
+          /** Ordinary (not Kalkyl) structure rows linked to the operation. */
+          linkedMaterialCount?: number;
+        }
+      >
+    >
   >;
 }
 
@@ -438,6 +456,7 @@ export async function planRoutingImport(
     let existingOperationId: string | null = null;
     let existingHasLegoFields = false;
     let existingAlternativeIds: string[] = [];
+    let existingLinkedMaterialCount = 0;
     if (article && sequenceNo !== null) {
       const key = `${article.id}#${sequenceNo}`;
       const existingOperation = existingOperations.get(article.id)?.get(sequenceNo);
@@ -461,6 +480,7 @@ export async function planRoutingImport(
           existingOperationId = existingOperation.id;
           existingHasLegoFields = existingOperation.hasLegoFields === true;
           existingAlternativeIds = existingOperation.alternativeWorkCenterIds ?? [];
+          existingLinkedMaterialCount = existingOperation.linkedMaterialCount ?? 0;
         } else {
           errors.push(`Operation ${sequenceNo} finns redan på artikel ${articleNumber} — ta bort raden ur filen`);
         }
@@ -568,6 +588,15 @@ export async function planRoutingImport(
       } else {
         costingOnly = parsed;
       }
+    }
+
+    // An operation that draws material cannot become a Kalkyl operation —
+    // the card's 409 operation-has-linked-material (updateRoutingOperation),
+    // which the import's direct UPDATE would otherwise walk past and leave
+    // ordinary structure rows linked to a Kalkyl operation. Only an existing
+    // operation can have rows linked; a new one has none.
+    if (existingOperationId && costingOnly && existingLinkedMaterialCount > 0) {
+      errors.push(OPERATION_HAS_LINKED_MATERIAL_MESSAGE);
     }
 
     // Alternativa resurser (#15): the file has no column for them (the

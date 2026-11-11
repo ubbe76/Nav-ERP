@@ -28,6 +28,7 @@ import {
 } from "@navet/db";
 import { getOrCreateFallbackLocation } from "../../stock/service/location-resolver.js";
 import { recordStandardCostHistory } from "../../article/repository/article.repository.js";
+import { bomRowCreatedAt } from "../../article/repository/bom-write.js";
 import type { ArticleImportPlan, ExistingArticle } from "../service/articles.js";
 import { applyImportedRevisions, type ImportedRevisions } from "./article-revisions.js";
 import { applyPrimarySupplierLeadTimes, applyPrimarySuppliers } from "./article-primary-suppliers.js";
@@ -415,6 +416,8 @@ export interface ExistingRoutingOperation {
   costingOnly: boolean;
   hasLegoFields: boolean;
   alternativeWorkCenterIds: string[];
+  /** Ordinary (not Kalkyl) structure rows linked to the operation. */
+  linkedMaterialCount: number;
 }
 
 export function createImportRepository(db: Db | Tx) {
@@ -521,20 +524,26 @@ export function createImportRepository(db: Db | Tx) {
           createdUnits.push(...rows.map((row) => row.code));
         }
 
+        // Varugrupper: name = code, but the names are unique too. A code
+        // whose name another group already carries (group "30" is called
+        // "3", the file has Varugrupp 3) would be swallowed by the conflict
+        // guard and its articles left without a group, without an error — so
+        // it gets a suffixed name ("3 (2)", freeName).
         const createdGroups: string[] = [];
-        for (const part of chunk(plan.willCreate.articleGroups)) {
-          if (part.length === 0) continue;
-          const rows = await tx
-            .insert(articleGroups)
-            .values(part.map((code) => ({ code, name: code }))) // name = code
-            .onConflictDoNothing()
-            .returning({ code: articleGroups.code });
-          createdGroups.push(...rows.map((row) => row.code));
+        if (plan.willCreate.articleGroups.length > 0) {
+          const taken = new Set((await tx.select({ name: articleGroups.name }).from(articleGroups)).map((row) => row.name));
+          for (const part of chunk(plan.willCreate.articleGroups)) {
+            if (part.length === 0) continue;
+            const rows = await tx
+              .insert(articleGroups)
+              .values(part.map((code) => ({ code, name: freeName(code, taken) })))
+              .onConflictDoNothing()
+              .returning({ code: articleGroups.code });
+            createdGroups.push(...rows.map((row) => row.code));
+          }
         }
 
-        // Artikelkoder the same way (name = code). A code whose name is
-        // already another code's is skipped by the conflict guard and then
-        // fails to resolve below — so it is given a suffixed name instead.
+        // Artikelkoder the same way (name = code, suffixed when taken).
         const createdArticleCodes: string[] = [];
         if (plan.willCreate.articleCodes.length > 0) {
           const taken = new Set((await tx.select({ name: articleCodes.name }).from(articleCodes)).map((row) => row.name));
@@ -1076,6 +1085,10 @@ export function createImportRepository(db: Db | Tx) {
     // alternativeWorkCenterIds: the operation's alternativa resurser (#15) —
     // the routing import refuses an update that would break them (same
     // texts as the beredning); the import never writes the alternatives.
+    // linkedMaterialCount: the ordinary structure rows that draw their
+    // material at the operation (countBomComponentsForOperation's rule — a
+    // Kalkyl row does not count); the routing import refuses to mark such an
+    // operation Kalkyl, like the card.
     async routingOperationsByArticle(
       articleIds: string[]
     ): Promise<Map<string, Map<number, ExistingRoutingOperation>>> {
@@ -1093,6 +1106,7 @@ export function createImportRepository(db: Db | Tx) {
             // join-less select unqualified, and inside the subquery "id"
             // would be the alternative's own.
             alternativeWorkCenterIds: sql<string[]>`coalesce((select array_agg(a.work_center_id::text order by a.rank) from routing_operation_alternatives a where a.routing_operation_id = "routing_operations"."id"), '{}')`,
+            linkedMaterialCount: sql<number>`(select count(*)::int from bom_components b where b.routing_operation_id = "routing_operations"."id" and not b.costing_only)`,
           })
           .from(routingOperations)
           .where(inArray(routingOperations.articleId, part));
@@ -1103,6 +1117,7 @@ export function createImportRepository(db: Db | Tx) {
             costingOnly: row.costingOnly,
             hasLegoFields: row.hasLegoFields,
             alternativeWorkCenterIds: row.alternativeWorkCenterIds,
+            linkedMaterialCount: row.linkedMaterialCount,
           });
           map.set(row.articleId, perArticle);
         }
@@ -1169,16 +1184,34 @@ export function createImportRepository(db: Db | Tx) {
             .set({ quantityPerBase: String(update.quantityPerBase) })
             .where(and(eq(articleUnits.articleId, update.articleId), eq(articleUnits.unitId, update.unitId)));
         }
+        // Ja on the grundenhet's row (code null) clears the article's choice
+        // — null is the base unit. The export lists the base unit on every
+        // article, so these go as one statement per chunk and touch only the
+        // articles that had another unit chosen.
+        const clearPurchase = plan.articleDefaults.filter((d) => d.purchaseUnitCode === null).map((d) => d.articleId);
+        const clearSales = plan.articleDefaults.filter((d) => d.salesUnitCode === null).map((d) => d.articleId);
+        for (const part of chunk(clearPurchase)) {
+          await tx
+            .update(articles)
+            .set({ purchaseUnitId: null, updatedAt: new Date() })
+            .where(and(inArray(articles.id, part), isNotNull(articles.purchaseUnitId)));
+        }
+        for (const part of chunk(clearSales)) {
+          await tx
+            .update(articles)
+            .set({ salesUnitId: null, updatedAt: new Date() })
+            .where(and(inArray(articles.id, part), isNotNull(articles.salesUnitId)));
+        }
         for (const defaults of plan.articleDefaults) {
+          const { purchaseUnitCode, salesUnitCode } = defaults;
+          if (typeof purchaseUnitCode !== "string" && typeof salesUnitCode !== "string") continue;
           await tx
             .update(articles)
             .set({
-              ...(defaults.purchaseUnitCode !== undefined
-                ? { purchaseUnitId: resolveNewUnitId(unitIds, defaults.purchaseUnitCode) }
+              ...(typeof purchaseUnitCode === "string"
+                ? { purchaseUnitId: resolveNewUnitId(unitIds, purchaseUnitCode) }
                 : {}),
-              ...(defaults.salesUnitCode !== undefined
-                ? { salesUnitId: resolveNewUnitId(unitIds, defaults.salesUnitCode) }
-                : {}),
+              ...(typeof salesUnitCode === "string" ? { salesUnitId: resolveNewUnitId(unitIds, salesUnitCode) } : {}),
               updatedAt: new Date(),
             })
             .where(eq(articles.id, defaults.articleId));
@@ -1570,9 +1603,14 @@ export function createImportRepository(db: Db | Tx) {
         }
 
         // 3. The structure rows — componentArticleId === null resolves now.
+        //    File order is the structure's order: one running index across
+        //    the chunks (bomRowCreatedAt — without it every row carries the
+        //    transaction's start time and the order is the uuid's).
+        let rowIndex = 0;
         for (const part of chunk(plan.creates)) {
           await tx.insert(bomComponents).values(
             part.map((row) => ({
+              createdAt: bomRowCreatedAt(rowIndex++),
               parentArticleId: row.parentArticleId,
               componentArticleId: row.componentArticleId ?? idByNumber.get(row.componentNumber)!,
               quantity: String(row.quantity),

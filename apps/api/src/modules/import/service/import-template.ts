@@ -288,6 +288,7 @@ function chapterTitle(link: string): string {
     inkop: "Inköp",
     forsaljning: "Försäljning",
     tillverkning: "Tillverkning",
+    lager: "Lager",
   };
   return titles[slug] ?? slug;
 }

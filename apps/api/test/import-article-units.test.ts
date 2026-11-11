@@ -118,13 +118,17 @@ describe("planArticleUnitImport", () => {
       fakeDeps([article("S235JR-12", "id-1", "kg")])
     );
     expect(plan.hasErrors).toBe(false);
-    expect(plan.rows[0]).toMatchObject({ action: "skip", skipReason: "Grundenhet (faktor 1) — ingen alternativ enhet" });
+    expect(plan.rows[0]).toMatchObject({
+      action: "skip",
+      skipReason: "Grundenhet (faktor 1) — ingen alternativ enhet; grundenheten gäller för Inköpsorder och Kundorder",
+    });
     expect(plan.rows[0]!.warnings).toEqual([]);
     expect(plan.rows[1]!.action).toBe("create");
     expect(plan.summary).toEqual({ create: 1, update: 0, skip: 1, error: 0, warning: 0 });
     expect(plan.creates).toEqual([{ articleId: "id-1", unitCode: "m", quantityPerBase: 1.123596 }]);
     expect(plan.updates).toEqual([]);
-    expect(plan.articleDefaults).toEqual([]);
+    // Ja on the grundenhet's row: null = the base unit is the default again.
+    expect(plan.articleDefaults).toEqual([{ articleId: "id-1", purchaseUnitCode: null, salesUnitCode: null }]);
     expect(plan.willCreate).toEqual({ units: [], articleGroups: [] });
   });
 

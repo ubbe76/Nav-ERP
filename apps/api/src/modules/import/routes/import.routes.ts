@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
+import type { MultipartFile } from "@fastify/multipart";
 import { importBatchPreviewSchema, importCommitSchema, importEntitySchema, type ImportEntity } from "@navet/shared";
 import { requireRole } from "../../auth/middleware/auth.middleware.js";
 import { ImportFileError } from "../service/csv.js";
@@ -22,6 +23,23 @@ const IMPORT_BATCH_BODY_LIMIT = 64 * 1024 * 1024;
 
 // CSV import (Monitor G5). All three endpoints are admin-only — imports can
 // create register rows and overwrite article data in bulk.
+const FILE_TOO_LARGE = "Filen är för stor — max 20 MB";
+
+// The upload as a buffer, or null over the 20 MB app limit. @fastify/multipart
+// throws from toBuffer() at the limit (throwFileSizeLimit is on by default) —
+// the truncated check alone was never reached and the client got the
+// library's English 413. Both are kept: a truncated file must never be
+// half-imported.
+async function uploadedBuffer(file: MultipartFile): Promise<Buffer | null> {
+  try {
+    const data = await file.toBuffer();
+    return file.file.truncated ? null : data;
+  } catch (err) {
+    if ((err as { code?: unknown }).code === "FST_REQ_FILE_TOO_LARGE") return null;
+    throw err;
+  }
+}
+
 export async function importRoutes(app: FastifyInstance, opts: { service: ImportService }) {
   const { service } = opts;
 
@@ -55,10 +73,8 @@ export async function importRoutes(app: FastifyInstance, opts: { service: Import
   app.post("/imports/detect", { preHandler: requireRole("admin") }, async (req, reply) => {
     const file = await req.file();
     if (!file) return reply.code(400).send({ error: "Ingen fil bifogad" });
-    const data = await file.toBuffer();
-    if (file.file.truncated) {
-      return reply.code(400).send({ error: "Filen är för stor — max 20 MB" });
-    }
+    const data = await uploadedBuffer(file);
+    if (data === null) return reply.code(400).send({ error: FILE_TOO_LARGE });
     try {
       return await service.detect(data);
     } catch (err) {
@@ -77,12 +93,8 @@ export async function importRoutes(app: FastifyInstance, opts: { service: Import
       if (!entity) return reply;
       const file = await req.file();
       if (!file) return reply.code(400).send({ error: "Ingen fil bifogad" });
-      const data = await file.toBuffer();
-      // fastify-multipart truncates instead of throwing once the 20 MB app
-      // limit is hit — a truncated CSV must never be half-imported.
-      if (file.file.truncated) {
-        return reply.code(400).send({ error: "Filen är för stor — max 20 MB" });
-      }
+      const data = await uploadedBuffer(file);
+      if (data === null) return reply.code(400).send({ error: FILE_TOO_LARGE });
       try {
         return await service.parse(entity, data);
       } catch (err) {

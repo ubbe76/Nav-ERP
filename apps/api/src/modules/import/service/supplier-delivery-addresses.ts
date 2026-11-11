@@ -59,6 +59,8 @@ const FIELD_LABELS: Record<SupplierDeliveryAddressImportField, string> = {
 export const SUPPLIER_DELIVERY_ADDRESS_HEADER_ALIASES: Record<string, string> = {
   leverantor: "supplierNumber",
   leverantorsnummer: "supplierNumber",
+  // "Leverantörsnr" — the detector keys on it (detect.ts), so the mapping must too.
+  leverantorsnr: "supplierNumber",
   levnr: "supplierNumber",
   leveransadressnamn: "label",
   // The Excel template's heading (field-help.ts).

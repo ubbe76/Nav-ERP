@@ -268,8 +268,11 @@ export async function planCustomerDeliveryAddressImport(
       }
     }
 
+    // Empty Land = the customer's own country (a German customer's delivery
+    // address is German) — SE was hard-wired, so a foreign customer's own
+    // address never matched skip rule 1 and the e-faktura's Delivery got SE.
     const countryCell = record["country"] ?? "";
-    let country = "SE";
+    let country = existingCustomer?.country ?? "SE";
     if (countryCell !== "") {
       const normalized = countryCell.trim().toUpperCase();
       if (!COUNTRY_PATTERN.test(normalized)) {

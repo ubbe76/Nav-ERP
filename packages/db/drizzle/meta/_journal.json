@@ -1450,6 +1450,13 @@
       "when": 1794337339762,
       "tag": "0206_bankgranskning",
       "breakpoints": true
+    },
+    {
+      "idx": 207,
+      "version": "7",
+      "when": 1794376828392,
+      "tag": "0207_strukturradernas_ordning",
+      "breakpoints": true
     }
   ]
 }
