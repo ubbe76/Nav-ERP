@@ -103,8 +103,11 @@ export function withSpareRows(rows: EditorRow[], minimum = 2): EditorRow[] {
 }
 
 export function rowTotals(rows: EditorRow[]): { debit: number; credit: number; diff: number } {
-  const debit = round2(rows.reduce((sum, r) => sum + amountOf(r.debit), 0));
-  const credit = round2(rows.reduce((sum, r) => sum + amountOf(r.credit), 0));
+  // Per row, as the server and toVerificationApiRows do — rounding only the
+  // sum would show 0,00 for 10,004 + 10,004 against 20,01 where the server
+  // (10,00 + 10,00 vs 20,01) answers 409.
+  const debit = round2(rows.reduce((sum, r) => sum + round2(amountOf(r.debit)), 0));
+  const credit = round2(rows.reduce((sum, r) => sum + round2(amountOf(r.credit)), 0));
   return { debit, credit, diff: round2(debit - credit) };
 }
 

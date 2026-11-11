@@ -42,7 +42,7 @@ Sidan **Nytt verifikat** (**Ekonomi → Verifikat → + Nytt verifikat**) har et
 
 ### Utkast
 
-Ett utkasts huvud (**Serie**, **Datum**, **Beskrivning**) är redigerbart tills det bokförs — ändra fälten och klicka **Spara verifikat**. Raderna redigeras i tabellen **Rader** och sparas för hela verifikatet på en gång med knappen **Spara** (eller **Ctrl+Enter**). Ändrar du något och lämnar sidan innan du sparat frågar Nav först. **Bokför** sparar osparade rader innan verifikatet bokförs.
+Ett utkasts huvud (**Serie**, **Datum**, **Beskrivning**) är redigerbart tills det bokförs — ändra fälten och klicka **Spara verifikat**. Raderna redigeras i tabellen **Rader** och sparas för hela verifikatet på en gång med knappen **Spara** (eller **Ctrl+Enter**). Ändrar du något — i huvudet eller på raderna — och lämnar sidan innan du sparat frågar Nav först. **Bokför** sparar osparade ändringar i huvudet och på raderna innan verifikatet bokförs, så det som bokförs är det du ser. **Kopiera** och **Spara som mall** utgår från det sparade verifikatet och kräver därför att ändringarna sparats först.
 
 Tabellen har kolumnerna **Konto**, **Beskrivning**, **Momskod**, **Debet** och **Kredit**:
 
@@ -159,7 +159,7 @@ Knapparna på varje post:
 
 ## Huvudbok
 
-**Ekonomi → Huvudbok** visar ett valt kontos alla bokförda rader inom ett datumintervall, med ingående och utgående saldo. Välj **Konto** i listan (t.ex. **"1930 · Företagskonto"**) och ange **Från**- och **Till**-datum — fälten är förifyllda med det senaste räkenskapsårets start- och slutdatum (innevarande kalenderår om inget räkenskapsår är upplagt än). Huvudboken hämtas om automatiskt så fort kontot eller intervallet ändras — det finns ingen separat sökknapp.
+**Ekonomi → Huvudbok** visar ett valt kontos alla bokförda rader inom ett datumintervall, med ingående och utgående saldo. Välj **Konto** i listan (t.ex. **"1930 · Företagskonto"**) och ange **Från**- och **Till**-datum — fälten är förifyllda med start- och slutdatum för det räkenskapsår som gäller idag (det senaste om inget täcker dagens datum) (innevarande kalenderår om inget räkenskapsår är upplagt än). Huvudboken hämtas om automatiskt så fort kontot eller intervallet ändras — det finns ingen separat sökknapp.
 
 Radtabellen inleds med raden **Ingående saldo** — kontots saldo före **Från**-datumet; för ett resultatkonto (kontoklass 3–8) räknas det bara från början av det räkenskapsår **Från**-datumet ligger i, eftersom resultatkontona börjar om på 0 varje år (ligger datumet utanför alla räkenskapsår räknas hela historiken) — följt av varje bokförd rad på kontot i datumordning, och inom samma dag efter verifikatserie och nummer (A-3 före F-1): **Datum**, **Verifikat** (en länk till verifikatkortet), **Text**, **Debet**, **Kredit** och det löpande **Saldo**t efter raden. Tabellen avslutas med raden **Utgående saldo**. Bara bokförda verifikat räknas med — ett utkast syns aldrig i huvudboken. **Ingående saldo** och **Utgående saldo** visas alltid, även när kontot saknar rader i det valda intervallet: ett konto med ett ingående saldo men ingen rörelse är inte ett tomt konto. Först när kontot varken har rader eller något saldo visas texten **"Inga bokförda rader på kontot i intervallet."**
 
@@ -177,7 +177,7 @@ Resultatet visas som ett block per konto, i kontonummerordning, med samma tabell
 
 **Ekonomi → Balansräkning** visar företagets tillgångar, eget kapital och skulder vid ett givet datum. Kräver rättigheten **Ekonomi**, som resten av modulen.
 
-Sidan har ett enda styrfält, datumfältet **Per datum** — förifyllt med slutdatumet för det senaste räkenskapsåret. Rapporten hämtas om automatiskt så fort datumet ändras, det finns ingen sökknapp. Räkenskapsåret som datumet faller inom härleds och visas som **"Räkenskapsår 2026"** ovanför tabellen.
+Sidan har ett enda styrfält, datumfältet **Per datum** — förifyllt med slutdatumet för det räkenskapsår som gäller idag (det senaste om inget täcker dagens datum). Rapporten hämtas om automatiskt så fort datumet ändras, det finns ingen sökknapp. Räkenskapsåret som datumet faller inom härleds och visas som **"Räkenskapsår 2026"** ovanför tabellen.
 
 Tabellen har kolumnerna **Konto**, **Benämning** och **Belopp**. En kontorad länkar till huvudboken med kontot och räkenskapsårets start–**Per datum** förifyllt som intervall.
 
@@ -198,7 +198,7 @@ Bara **bokförda** verifikat räknas med, ett utkast syns aldrig. Rapporten skri
 
 ## Resultaträkning
 
-**Ekonomi → Resultaträkning** visar rörelsens intäkter och kostnader för en period. Fälten **Från** och **Till** är förifyllda med det senaste räkenskapsårets start- och slutdatum, och rapporten hämtas om automatiskt så fort något av dem ändras.
+**Ekonomi → Resultaträkning** visar rörelsens intäkter och kostnader för en period. Fälten **Från** och **Till** är förifyllda med start- och slutdatum för det räkenskapsår som gäller idag (det senaste om inget täcker dagens datum), och rapporten hämtas om automatiskt så fort något av dem ändras.
 
 Raderna kommer i fast ordning med fem delsummerader: **Rörelseresultat**, **Resultat efter finansiella poster**, **Resultat före skatt**, **Årets resultat** och **Beräknat resultat**. Varje delsumma är en löpande summering av **alla** rader ovanför den, inte bara raderna sedan föregående delsumma.
 
@@ -537,7 +537,7 @@ Första gången du öppnar registret läggs ett bankkonto upp åt dig ur IBAN un
 Klicka **Importera kontoutdrag** och välj filen. Nav läser den och visar en **förhandsgranskning** — inget sparas förrän du klickar **Importera**.
 
 - **camt.053** är kontoutdraget som XML-fil, som Handelsbanken, SEB, Swedbank och Nordea kan lämna via filöverföring eller internetbanken. Filen innehåller kontots nummer, perioden, **Ingående saldo** och **Utgående saldo** samt varje post. Känner Nav inte igen kontonumret (det är inte angivet på något bankkonto) frågar dialogen **Bankkonto** vilket konto det är, och numret sparas på kontot.
-- **CSV** är den export som internetbanken ger för den som inte har något filöverföringsavtal. En CSV-fil saknar kontonummer, så välj **Bankkonto**. Under **Kolumnmappning för CSV-filen** anger du **Avgränsare**, hur många **Rader att hoppa över överst** och vilka kolumner som är **Bokföringsdag**, **Belopp** och **Text** (och valfritt **Saldo**, **Valutadag** och **Referens**), samt om beloppen skrivs med decimalkomma. Ett positivt belopp är en insättning och ett negativt ett uttag. Är avgränsaren fel visas rubrikerna som en enda kolumn — ändra **Avgränsare** och klicka **Läs om rubriker**. Klicka **Förhandsgranska** när mappningen stämmer. Mappningen sparas på bankkontot, så nästa fil från samma bank behöver bara ett klick. Filens ordning (nyaste eller äldsta rad först) avgörs av datumen, och inom en och samma dag av saldokolumnen; följer saldot inte beloppen rad för rad visas en varning. Ett belopp som *1.234* utan angiven decimalkonvention läses som 1,23 och ger en varning — ange decimalkomma eller decimalpunkt i mappningen så blir det entydigt.
+- **CSV** är den export som internetbanken ger för den som inte har något filöverföringsavtal. En CSV-fil saknar kontonummer, så välj **Bankkonto**. Under **Kolumnmappning för CSV-filen** anger du **Avgränsare**, hur många **Rader att hoppa över överst** och vilka kolumner som är **Bokföringsdag**, **Belopp** och **Text** (och valfritt **Saldo**, **Valutadag** och **Referens**), samt om beloppen skrivs med decimalkomma. Ett positivt belopp är en insättning och ett negativt ett uttag. Är avgränsaren fel visas rubrikerna som en enda kolumn — ändra **Avgränsare** och klicka **Läs om rubriker**. Klicka **Förhandsgranska** när mappningen stämmer. Ändrar du kolumnerna eller bankkontot efter förhandsgranskningen måste du klicka **Förhandsgranska** igen innan **Importera** går att använda — det som importeras är alltid det du har sett. Mappningen sparas på bankkontot, så nästa fil från samma bank behöver bara ett klick. Filens ordning (nyaste eller äldsta rad först) avgörs av datumen, och inom en och samma dag av saldokolumnen; följer saldot inte beloppen rad för rad visas en varning. Ett belopp som *1.234* utan angiven decimalkonvention läses som 1,23 och ger en varning — ange decimalkomma eller decimalpunkt i mappningen så blir det entydigt.
 
 Förhandsgranskningen visar per kontoutdrag konto, period, saldon och antalet poster, **nya** och **dubbletter**, och de första posterna med status **Ny** eller **Dubblett** (**Ny · regel** när en [bankregel](#bankregler) känner igen posten). Varningar visas i gult och fel som stoppar importen i rött.
 

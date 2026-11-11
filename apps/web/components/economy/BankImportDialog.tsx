@@ -29,6 +29,12 @@ const SHOWN_ENTRIES = 100;
 // Importera kontoutdrag: pick a camt.053 file from the bank (or a CSV export
 // from the internet bank), read the preview, then Importera. Nothing is
 // written before Importera; the same file twice only gives duplicates.
+// Order-independent key of a mapping as the API would receive it.
+function mappingKey(mapping: BankCsvMapping): string {
+  const clean: Record<string, unknown> = { ...cleanCsvMapping(mapping) };
+  return JSON.stringify(Object.keys(clean).sort().map((key) => [key, clean[key]]));
+}
+
 export function BankImportDialog({
   open,
   bankAccounts,
@@ -70,6 +76,13 @@ function ImportForm({
   const [bankAccountId, setBankAccountId] = useState("");
   const [mapping, setMapping] = useState<BankCsvMapping | null>(null);
   const [preview, setPreview] = useState<BankStatementPreview | null>(null);
+  // What the shown preview was computed FOR. Importera sends the current
+  // account and mapping, and the API re-parses the file with them, saves the
+  // mapping on the account and runs the rules — so a mapping or account
+  // changed after Förhandsgranska (Belopp → the Saldo column) imported
+  // something nobody had seen (webbgranskningen 2026-11-11). Importera now
+  // requires the preview to be of exactly what is chosen.
+  const [previewedFor, setPreviewedFor] = useState<{ accountId: string; mapping: string | null } | null>(null);
   const [autoMatch, setAutoMatch] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"preview" | "import" | null>(null);
@@ -87,6 +100,9 @@ function ImportForm({
       if (map) form.append("csvMapping", JSON.stringify(cleanCsvMapping(map)));
       const result = await postMultipart<BankStatementPreview>("/api/v1/bank-statements/preview", form);
       setPreview(result);
+      // Without a mapping the API reads a CSV with the account's saved one.
+      const usedMapping = map ?? (accountId ? (account(accountId)?.csvMapping ?? null) : null);
+      setPreviewedFor({ accountId, mapping: usedMapping ? mappingKey(usedMapping) : null });
       if (result.format === "csv" && result.csvHeaders) {
         // First look at a CSV: start from the account the page is showing —
         // its saved mapping or a guess from the header names. Later previews
@@ -97,6 +113,7 @@ function ImportForm({
       }
     } catch (err) {
       setPreview(null);
+      setPreviewedFor(null);
       setError(apiErrorMessage(err, "Filen kunde inte läsas."));
     } finally {
       setBusy(null);
@@ -106,6 +123,7 @@ function ImportForm({
   function pickFile(next: File | null) {
     setFile(next);
     setPreview(null);
+    setPreviewedFor(null);
     setMapping(null);
     setError(null);
     // A camt.053 names its own account; a CSV needs one chosen (preselected
@@ -130,6 +148,12 @@ function ImportForm({
   // learns its identifier. With several unknown accounts nothing can be
   // chosen: the blocker says to create them under Bankkonton first.
   const needsAccount = preview !== null && (isCsv || preview.unknownAccounts.length === 1);
+  // The preview is of what is chosen now: the same account (when one is
+  // needed) and, for a CSV, the same mapping.
+  const previewCurrent =
+    previewedFor !== null &&
+    (!needsAccount || previewedFor.accountId === bankAccountId) &&
+    (!isCsv || (mapping !== null && previewedFor.mapping === mappingKey(mapping)));
   const newTotal = preview?.statements.reduce((sum, s) => sum + s.newEntryCount, 0) ?? 0;
   const duplicateTotal = preview?.statements.reduce((sum, s) => sum + s.duplicateCount, 0) ?? 0;
   const canImport =
@@ -139,6 +163,7 @@ function ImportForm({
     preview.statements.length > 0 &&
     newTotal > 0 &&
     (!needsAccount || bankAccountId !== "") &&
+    previewCurrent &&
     busy === null;
 
   async function runImport() {
@@ -232,6 +257,9 @@ function ImportForm({
             />
           )}
 
+          {!preview.needsMapping && preview.statements.length > 0 && !previewCurrent && busy === null && (
+            <FormNotice>Kontot eller kolumnerna har ändrats sedan förhandsgranskningen — klicka Förhandsgranska igen innan du importerar.</FormNotice>
+          )}
           {preview.blockers.length > 0 && (
             <FormError>
               {preview.blockers.map((b) => (

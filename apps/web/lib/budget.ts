@@ -94,6 +94,17 @@ export function distributeRow(row: BudgetEditRow): BudgetEditRow {
   return { ...row, amounts: distributeAnnual(total, row.amounts.length).map(amountText), annual: null };
 }
 
+// A typed annual amount that distributeRow would still spread over the months.
+export function hasPendingAnnual(row: BudgetEditRow): boolean {
+  return row.annual !== null && row.annual.trim() !== "" && parseAmount(row.annual) !== 0;
+}
+
+// distributeRow only for rows with a pending annual — an emptied Summa field
+// must not re-spread the months.
+export function distributePending(row: BudgetEditRow): BudgetEditRow {
+  return hasPendingAnnual(row) ? distributeRow(row) : row;
+}
+
 export interface BudgetMonthSums {
   revenue: number[];
   costs: number[];
@@ -122,8 +133,9 @@ export function sumOf(values: number[]): number {
 export function rowsSignature(rows: BudgetEditRow[]): string {
   return JSON.stringify(
     rows
-      .filter((r) => r.accountNumber !== "" || r.amounts.some((a) => parseAmount(a) !== 0))
-      .map((r) => [r.accountNumber, r.amounts.map((a) => parseAmount(a))])
+      .filter((r) => r.accountNumber !== "" || r.amounts.some((a) => parseAmount(a) !== 0) || hasPendingAnnual(r))
+      // A typed but not yet distributed annual amount is an unsaved change too.
+      .map((r) => [r.accountNumber, r.amounts.map((a) => parseAmount(a)), ...(hasPendingAnnual(r) ? [parseAmount(r.annual ?? "")] : [])])
   );
 }
 

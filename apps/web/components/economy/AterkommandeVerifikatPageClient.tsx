@@ -1,7 +1,7 @@
 "use client";
 
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
@@ -77,11 +77,16 @@ export function AterkommandeVerifikatPageClient({
   const [allocateOpen, setAllocateOpen] = useState(false);
   const [selected, setSelected] = useState<RecurringVerificationDetail | null>(null);
 
+  // Request sequence: two quick clicks must not show the first post's
+  // history when the slower response lands last.
+  const detailSeq = useRef(0);
   async function loadDetail(id: string) {
+    const seq = ++detailSeq.current;
     try {
-      setSelected(await apiFetch<RecurringVerificationDetail>(`/api/v1/recurring-verifications/${id}`));
+      const detail = await apiFetch<RecurringVerificationDetail>(`/api/v1/recurring-verifications/${id}`);
+      if (seq === detailSeq.current) setSelected(detail);
     } catch (err) {
-      setError(apiErrorMessage(err, "Körningarna kunde inte hämtas"));
+      if (seq === detailSeq.current) setError(apiErrorMessage(err, "Körningarna kunde inte hämtas"));
     }
   }
 

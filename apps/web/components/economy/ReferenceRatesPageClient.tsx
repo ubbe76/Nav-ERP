@@ -43,18 +43,23 @@ export function ReferenceRatesPageClient({ rates, today }: { rates: Paged<Refere
   const [newOpen, setNewOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
   const hasRiksbankRates = rates.rows.some((rate) => rate.source === "riksbank");
 
   async function remove(rate: ReferenceRateEntry) {
-    if (!(await confirmDelete(`Ta bort den egna räntan för ${halfYearLabel(rate.validFrom)} (${formatRatePercent(rate.rate)})?`))) {
-      return;
-    }
-    setError(null);
+    if (removingId) return;
+    setRemovingId(rate.id);
     try {
+      if (!(await confirmDelete(`Ta bort den egna räntan för ${halfYearLabel(rate.validFrom)} (${formatRatePercent(rate.rate)})?`))) {
+        return;
+      }
+      setError(null);
       await apiFetch(`/api/v1/reference-rates/${rate.id}`, { method: "DELETE" });
       router.refresh();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte ta bort räntan"));
+    } finally {
+      setRemovingId(null);
     }
   }
 
@@ -105,7 +110,7 @@ export function ReferenceRatesPageClient({ rates, today }: { rates: Paged<Refere
               return SOURCE_LABELS[rate.source];
             case "actions":
               return rate.source === "manual" ? (
-                <Button type="button" size="small" variant="danger" onClick={() => remove(rate)}>
+                <Button type="button" size="small" variant="danger" disabled={removingId !== null} onClick={() => remove(rate)}>
                   Ta bort
                 </Button>
               ) : null;

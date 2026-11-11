@@ -160,8 +160,11 @@ export function VerificationRowsEditor({
     "debit",
     "credit",
   ];
-  // Desktop grid; the stacked card layout takes over below the breakpoints
-  // in the stylesheet.
+  // Desktop grid; the stacked card layout takes over when the editor is
+  // narrower than the grid's minimum (container queries in the stylesheet,
+  // one class per column variant — keep both in step with the minmax() floors).
+  const stackClass =
+    withDims && withVat ? styles.stack908 : withDims ? styles.stack770 : withVat ? styles.stack796 : styles.stack640;
   const gridColumns = [
     withDims ? "minmax(150px, 1.3fr)" : "minmax(190px, 1.5fr)",
     withDims ? "minmax(100px, 1fr)" : "minmax(120px, 1fr)",
@@ -317,7 +320,7 @@ export function VerificationRowsEditor({
     <div>
       <div
         ref={containerRef}
-        className={`${styles.editor} ${withDims ? styles.withDims : ""}`}
+        className={`${styles.editor} ${stackClass}`}
         style={{ "--editor-cols": gridColumns } as React.CSSProperties}
         role="group"
         aria-label="Verifikatrader"

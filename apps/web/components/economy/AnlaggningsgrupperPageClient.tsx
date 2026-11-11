@@ -73,13 +73,17 @@ export function AnlaggningsgrupperPageClient({ categories, accounts }: { categor
   }
 
   async function remove(category: FixedAssetCategory) {
-    if (!(await confirmDelete(`Ta bort gruppen ${category.name}?`))) return;
-    setNotice(null);
+    if (busy) return;
+    setBusy(true);
     try {
+      if (!(await confirmDelete(`Ta bort gruppen ${category.name}?`))) return;
+      setNotice(null);
       await apiFetch<void>(`/api/v1/fixed-asset-categories/${category.id}`, { method: "DELETE" });
       router.refresh();
     } catch (err) {
       setNotice(apiErrorMessage(err, "Kunde inte ta bort gruppen"));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -138,7 +142,7 @@ export function AnlaggningsgrupperPageClient({ categories, accounts }: { categor
               return category.assetCount.toLocaleString("sv-SE");
             case "actions":
               return (
-                <Button type="button" variant="ghost" size="small" disabled={category.assetCount > 0} onClick={() => remove(category)}>
+                <Button type="button" variant="ghost" size="small" disabled={category.assetCount > 0 || busy} onClick={() => remove(category)}>
                   Ta bort
                 </Button>
               );
@@ -148,7 +152,7 @@ export function AnlaggningsgrupperPageClient({ categories, accounts }: { categor
         }}
       />
 
-      <CategoryModal open={createOpen} onClose={() => setCreateOpen(false)} accounts={accounts} category={null} />
+      {createOpen && <CategoryModal open onClose={() => setCreateOpen(false)} accounts={accounts} category={null} />}
       <CategoryModal key={editing?.id ?? "none"} open={editing !== null} onClose={() => setEditing(null)} accounts={accounts} category={editing} />
     </>
   );

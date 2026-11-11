@@ -7,6 +7,7 @@ import { Input, Select } from "../../ui/Field";
 import { FormActions, FormError, FormHint, FormNotice } from "../../ui/Form";
 import { Table } from "../../ui/Table";
 import { apiFetch } from "../../../lib/api";
+import { confirmDialog } from "../../../lib/confirm";
 import type { Account, YearEndClosingDetail } from "../../../lib/types";
 import {
   DEFAULT_BALANCE_ACCOUNT,
@@ -123,6 +124,17 @@ export function AccrualsCard({ closing, accounts }: { closing: YearEndClosingDet
   }
 
   async function book(set: Draft[]) {
+    const discardsDraft = set.length === 0 && rows.length > 0;
+    if (step.verification || discardsDraft) {
+      const parts: string[] = [];
+      if (step.verification) parts.push("De bokförda periodiseringarna och deras återföring omförs och ersätts av nya verifikat.");
+      if (discardsDraft && !step.verification) parts.push("Raderna du har fyllt i sparas inte — inga periodiseringar bokförs.");
+      else if (discardsDraft) parts.push("Raderna du har fyllt i kastas — inga nya periodiseringar bokförs.");
+      const ok = await confirmDialog(`${parts.join(" ")} Fortsätt?`, {
+        confirmLabel: set.length === 0 ? "Inga periodiseringar" : "Bokför igen",
+      });
+      if (!ok) return;
+    }
     await action.run(async () => {
       const result = await apiFetch<{ verification: { displayNumber: string } | null; unchanged: boolean }>(
         `/api/v1/year-end-closings/${closing.id}/accruals`,

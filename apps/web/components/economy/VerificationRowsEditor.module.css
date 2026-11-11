@@ -1,6 +1,7 @@
 /* The verification rows table: one grid per row so the account dropdown can
-   overflow the table (no overflow clipping on the container). Below 760px
-   every row becomes a stacked card — the page never scrolls sideways. */
+   overflow the table (no overflow clipping on the container). When the
+   editor is too narrow for the grid every row becomes a stacked card (see the
+   container queries below) — the page never scrolls sideways. */
 .editor {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -201,118 +202,242 @@
   color: var(--color-text-muted);
 }
 
-/* Kostnadsställe and Projekt add two columns, so the stacked card layout
-   starts earlier when they are shown. */
-@media (max-width: 1040px) {
-  .withDims .headerRow {
-    display: none;
-  }
-
-  .withDims .row {
-    grid-template-columns: 1fr 1fr 34px;
-    padding: 12px 14px;
-    gap: 8px 10px;
-  }
-
-  /* Konto, Beskrivning and Momskod take the full width; Kostnadsställe and
-     Projekt sit side by side; Debet and Kredit sit side by side with the
-     remove button at the end of that line. */
-  .withDims .cellAccount,
-  .withDims .cellDescription,
-  .withDims .cellVat {
-    grid-column: 1 / -1;
-  }
-
-  .withDims .cellCostCenter {
-    grid-column: 1;
-  }
-
-  .withDims .cellProject {
-    grid-column: 2 / -1;
-  }
-
-  .withDims .cellDebit {
-    grid-column: 1;
-  }
-
-  .withDims .cellCredit {
-    grid-column: 2;
-  }
-
-  .withDims .cellRemove {
-    grid-column: 3;
-    align-self: end;
-  }
-
-  .withDims .mobileLabel {
-    display: block;
-    font-family: var(--font-body);
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--color-text-muted);
-    margin-bottom: 3px;
-  }
-
-  .withDims .list {
-    max-width: calc(100vw - 64px);
-  }
+/* The stacked card layout is chosen by the editor's own width (a container
+   query), not the viewport's: the sidebar and the page padding eat a varying
+   share of the viewport, so a viewport breakpoint left the grid wider than the
+   page on an iPad. Each variant stacks just below the grid's real minimum
+   (the minmax() floors in gridColumns plus gaps and padding): 636px plain,
+   794px with Momskod, 768px with Kostnadsställe/Projekt, 906px with both.
+   The container class carries the variant; keep the numbers in step with
+   gridColumns in VerificationRowsEditor.tsx. */
+.editor {
+  container-type: inline-size;
 }
 
-@media (max-width: 760px) {
-  .headerRow {
-    display: none;
-  }
+@container (max-width: 640px) {
+    .stack640 .headerRow {
+      display: none;
+    }
 
-  .row {
-    grid-template-columns: 1fr 1fr 34px;
-    padding: 12px 14px;
-    gap: 8px 10px;
-  }
+    .stack640 .row {
+      grid-template-columns: 1fr 1fr 34px;
+      padding: 12px 14px;
+      gap: 8px 10px;
+    }
 
-  /* Konto, Beskrivning and Momskod take the full width; Kostnadsställe and
-     Projekt sit side by side; Debet and Kredit sit side by side with the
-     remove button at the end of that line. */
-  .cellAccount,
-  .cellDescription,
-  .cellVat {
-    grid-column: 1 / -1;
-  }
+    /* Konto, Beskrivning and Momskod take the full width; Kostnadsställe and
+       Projekt sit side by side; Debet and Kredit sit side by side with the
+       remove button at the end of that line. */
+    .stack640 .cellAccount,
+    .stack640 .cellDescription,
+    .stack640 .cellVat {
+      grid-column: 1 / -1;
+    }
 
-  .cellCostCenter {
-    grid-column: 1;
-  }
+    .stack640 .cellCostCenter {
+      grid-column: 1;
+    }
 
-  .cellProject {
-    grid-column: 2 / -1;
-  }
+    .stack640 .cellProject {
+      grid-column: 2 / -1;
+    }
 
-  .cellDebit {
-    grid-column: 1;
-  }
+    .stack640 .cellDebit {
+      grid-column: 1;
+    }
 
-  .cellCredit {
-    grid-column: 2;
-  }
+    .stack640 .cellCredit {
+      grid-column: 2;
+    }
 
-  .cellRemove {
-    grid-column: 3;
-    align-self: end;
-  }
+    .stack640 .cellRemove {
+      grid-column: 3;
+      align-self: end;
+    }
 
-  .mobileLabel {
-    display: block;
-    font-family: var(--font-body);
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--color-text-muted);
-    margin-bottom: 3px;
-  }
+    .stack640 .mobileLabel {
+      display: block;
+      font-family: var(--font-body);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--color-text-muted);
+      margin-bottom: 3px;
+    }
 
-  .list {
-    max-width: calc(100vw - 64px);
-  }
+    .stack640 .list {
+      max-width: calc(100vw - 64px);
+    }
+}
+
+@container (max-width: 796px) {
+    .stack796 .headerRow {
+      display: none;
+    }
+
+    .stack796 .row {
+      grid-template-columns: 1fr 1fr 34px;
+      padding: 12px 14px;
+      gap: 8px 10px;
+    }
+
+    /* Konto, Beskrivning and Momskod take the full width; Kostnadsställe and
+       Projekt sit side by side; Debet and Kredit sit side by side with the
+       remove button at the end of that line. */
+    .stack796 .cellAccount,
+    .stack796 .cellDescription,
+    .stack796 .cellVat {
+      grid-column: 1 / -1;
+    }
+
+    .stack796 .cellCostCenter {
+      grid-column: 1;
+    }
+
+    .stack796 .cellProject {
+      grid-column: 2 / -1;
+    }
+
+    .stack796 .cellDebit {
+      grid-column: 1;
+    }
+
+    .stack796 .cellCredit {
+      grid-column: 2;
+    }
+
+    .stack796 .cellRemove {
+      grid-column: 3;
+      align-self: end;
+    }
+
+    .stack796 .mobileLabel {
+      display: block;
+      font-family: var(--font-body);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--color-text-muted);
+      margin-bottom: 3px;
+    }
+
+    .stack796 .list {
+      max-width: calc(100vw - 64px);
+    }
+}
+
+@container (max-width: 770px) {
+    .stack770 .headerRow {
+      display: none;
+    }
+
+    .stack770 .row {
+      grid-template-columns: 1fr 1fr 34px;
+      padding: 12px 14px;
+      gap: 8px 10px;
+    }
+
+    /* Konto, Beskrivning and Momskod take the full width; Kostnadsställe and
+       Projekt sit side by side; Debet and Kredit sit side by side with the
+       remove button at the end of that line. */
+    .stack770 .cellAccount,
+    .stack770 .cellDescription,
+    .stack770 .cellVat {
+      grid-column: 1 / -1;
+    }
+
+    .stack770 .cellCostCenter {
+      grid-column: 1;
+    }
+
+    .stack770 .cellProject {
+      grid-column: 2 / -1;
+    }
+
+    .stack770 .cellDebit {
+      grid-column: 1;
+    }
+
+    .stack770 .cellCredit {
+      grid-column: 2;
+    }
+
+    .stack770 .cellRemove {
+      grid-column: 3;
+      align-self: end;
+    }
+
+    .stack770 .mobileLabel {
+      display: block;
+      font-family: var(--font-body);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--color-text-muted);
+      margin-bottom: 3px;
+    }
+
+    .stack770 .list {
+      max-width: calc(100vw - 64px);
+    }
+}
+
+@container (max-width: 908px) {
+    .stack908 .headerRow {
+      display: none;
+    }
+
+    .stack908 .row {
+      grid-template-columns: 1fr 1fr 34px;
+      padding: 12px 14px;
+      gap: 8px 10px;
+    }
+
+    /* Konto, Beskrivning and Momskod take the full width; Kostnadsställe and
+       Projekt sit side by side; Debet and Kredit sit side by side with the
+       remove button at the end of that line. */
+    .stack908 .cellAccount,
+    .stack908 .cellDescription,
+    .stack908 .cellVat {
+      grid-column: 1 / -1;
+    }
+
+    .stack908 .cellCostCenter {
+      grid-column: 1;
+    }
+
+    .stack908 .cellProject {
+      grid-column: 2 / -1;
+    }
+
+    .stack908 .cellDebit {
+      grid-column: 1;
+    }
+
+    .stack908 .cellCredit {
+      grid-column: 2;
+    }
+
+    .stack908 .cellRemove {
+      grid-column: 3;
+      align-self: end;
+    }
+
+    .stack908 .mobileLabel {
+      display: block;
+      font-family: var(--font-body);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--color-text-muted);
+      margin-bottom: 3px;
+    }
+
+    .stack908 .list {
+      max-width: calc(100vw - 64px);
+    }
 }

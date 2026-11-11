@@ -144,14 +144,18 @@ function DepreciationSection({ runs }: { runs: Paged<DepreciationRun> }) {
   const [preview, setPreview] = useState<DepreciationPreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [booking, setBooking] = useState(false);
+  const [undoing, setUndoing] = useState(false);
+  // Shown inside the preview modal — an error in the card would hide behind it.
+  const [bookError, setBookError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
-  const latest = runs.rows.find((run) => !run.reversalVerification) ?? null;
+  const latest = runs.rows.find((run) => !run.reversalVerification && !run.disposalAssetNumber) ?? null;
   const undoable = runs.rows.find((run) => run.undoable) ?? null;
 
   async function openPreview() {
     setLoading(true);
     setError(null);
+    setBookError(null);
     try {
       setPreview(await apiFetch<DepreciationPreview>(`/api/v1/fixed-asset-depreciation-runs/preview?throughMonth=${throughMonth}`));
     } catch (err) {
@@ -163,7 +167,7 @@ function DepreciationSection({ runs }: { runs: Paged<DepreciationRun> }) {
 
   async function book() {
     setBooking(true);
-    setError(null);
+    setBookError(null);
     try {
       const booked = await apiFetch<DepreciationRunResult>("/api/v1/fixed-asset-depreciation-runs", {
         method: "POST",
@@ -173,22 +177,25 @@ function DepreciationSection({ runs }: { runs: Paged<DepreciationRun> }) {
       setPreview(null);
       router.refresh();
     } catch (err) {
-      setError(apiErrorMessage(err, "Kunde inte bokföra avskrivningarna"));
+      setBookError(apiErrorMessage(err, "Kunde inte bokföra avskrivningarna"));
     } finally {
       setBooking(false);
     }
   }
 
   async function undo() {
-    if (!undoable) return;
-    if (!(await confirmDialog(`Ångra körningen t.o.m. ${monthLabel(undoable.throughMonth)} (${undoable.verification.displayNumber})? En omföring bokförs på körningens datum.`))) return;
-    setError(null);
+    if (!undoable || undoing) return;
+    setUndoing(true);
     try {
+      if (!(await confirmDialog(`Ångra körningen t.o.m. ${monthLabel(undoable.throughMonth)} (${undoable.verification.displayNumber})? En omföring bokförs på körningens datum.`))) return;
+      setError(null);
       const undone = await apiFetch<{ reversalVerification: { displayNumber: string } }>(`/api/v1/fixed-asset-depreciation-runs/${undoable.id}/undo`, { method: "POST" });
       setResult(`Körningen ångrad — Omföring ${undone.reversalVerification.displayNumber}`);
       router.refresh();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte ångra körningen"));
+    } finally {
+      setUndoing(false);
     }
   }
 
@@ -213,7 +220,7 @@ function DepreciationSection({ runs }: { runs: Paged<DepreciationRun> }) {
           {loading ? "Hämtar…" : "Bokför avskrivningar"}
         </Button>
         {undoable && (
-          <Button type="button" variant="secondary" onClick={undo}>
+          <Button type="button" variant="secondary" disabled={undoing} onClick={undo}>
             Ångra senaste körning
           </Button>
         )}
@@ -315,6 +322,7 @@ function DepreciationSection({ runs }: { runs: Paged<DepreciationRun> }) {
                 )}
               </>
             )}
+            <FormError margin="above">{bookError}</FormError>
             <FormActions>
               <Button type="button" variant="secondary" onClick={() => setPreview(null)}>
                 Avbryt
@@ -344,6 +352,8 @@ function NewAssetModal({
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Start month follows the acquisition date until the user sets it themselves.
+  const [startTouched, setStartTouched] = useState(false);
   const [form, setForm] = useState({
     name: "",
     categoryId: categories[0]?.id ?? "",
@@ -425,12 +435,16 @@ function NewAssetModal({
               id="asset-date"
               type="date"
               value={form.acquisitionDate}
-              onChange={(e) => set({ acquisitionDate: e.target.value, depreciationStartMonth: form.depreciationStartMonth || e.target.value.slice(0, 7) })}
+              onChange={(e) => set(startTouched ? { acquisitionDate: e.target.value } : { acquisitionDate: e.target.value, depreciationStartMonth: e.target.value.slice(0, 7) })}
               required
             />
           </Field>
           <Field label="Avskrivningsstart" htmlFor="asset-start">
-            <Input id="asset-start" type="month" value={form.depreciationStartMonth} min={form.acquisitionDate.slice(0, 7)} onChange={(e) => set({ depreciationStartMonth: e.target.value })} />
+            <Input id="asset-start" type="month" value={form.depreciationStartMonth} min={form.acquisitionDate.slice(0, 7)} onChange={(e) => {
+                setStartTouched(e.target.value !== "");
+                set({ depreciationStartMonth: e.target.value });
+              }}
+            />
           </Field>
         </FormRow>
         <FormRow columns={3}>
