@@ -87,6 +87,17 @@ export function clockToMs(date: string, clock: string): number {
 }
 
 /**
+ * An OB window's end clock: 00:00 is the day's end (24:00). A window may not
+ * cross midnight and its end must come after its start, so an end of 00:00
+ * could never be saved before — it is free to mean midnight, which a clock
+ * field cannot otherwise express (22:00–23:59 lost the last minute). The ONE
+ * rule — the engine and validateObWindow both call it.
+ */
+export function obWindowEndClock(clock: string): string {
+  return /^00:00(:00)?$/.test(clock) ? "24:00" : clock;
+}
+
+/**
  * [00:00 Stockholm, the next Stockholm day's 00:00). The end is the next
  * date's own midnight rather than 24h of milliseconds later, so DST
  * transition days keep their wall-clock length (23 or 25 hours).
@@ -235,7 +246,7 @@ export function computeEmployeeDay(input: DayComputationInput): DayComputation {
       code: r.code,
       paxmlCode: r.paxmlCode,
       minutes: overlapMinutes(workedIntervals, [
-        { start: clockToMs(input.date, r.startTime), end: clockToMs(input.date, r.endTime) },
+        { start: clockToMs(input.date, r.startTime), end: clockToMs(input.date, obWindowEndClock(r.endTime)) },
       ]),
     }))
     .filter((r) => r.minutes > 0);

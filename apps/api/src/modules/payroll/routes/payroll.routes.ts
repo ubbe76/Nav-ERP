@@ -86,6 +86,12 @@ function isStatusConflict(err: unknown): err is Error {
 // app.ts); the requireRole guards below still run after that gate. The
 // register writes (frånvarokoder, OB-regler, avvikelseorsaker, incl. the
 // standard seeder) are admin-only, same split as the system module.
+
+// YYYY-MM-DD that is a real calendar date (the regex these replaced let
+// 2026-02-31 and 2026-13-01 through to Postgres, which answered 500).
+const calendarDateSchema = z.string().date();
+const calendarRangeSchema = z.object({ from: calendarDateSchema.optional(), to: calendarDateSchema.optional() });
+
 export async function payrollRoutes(app: FastifyInstance, opts: { service: PayrollService }) {
   const { service } = opts;
 
@@ -184,11 +190,9 @@ export async function payrollRoutes(app: FastifyInstance, opts: { service: Payro
     "/employees/:id/absences",
     { preHandler: requireRole("admin", "supervisor") },
     async (req, reply) => {
-      const { from, to } = req.query;
-      const isDateString = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
-      if ((from && !isDateString(from)) || (to && !isDateString(to))) {
-        return reply.code(400).send({ error: "Query params 'from' and 'to' must be YYYY-MM-DD dates" });
-      }
+      // A calendar date, not just its shape: 2026-02-31 reached Postgres and
+      // came back as a 500 (ZodError ⇒ 400 validation-failed).
+      const { from, to } = calendarRangeSchema.parse(req.query);
       return handle(reply, () => service.listEmployeeAbsences(req.params.id, from, to));
     }
   );
@@ -221,12 +225,10 @@ export async function payrollRoutes(app: FastifyInstance, opts: { service: Payro
     "/employees/:id/overtime-disposition/:date",
     { preHandler: requireRole("admin", "supervisor") },
     async (req, reply) => {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(req.params.date)) {
-        return reply.code(400).send({ error: "Param 'date' must be a YYYY-MM-DD date" });
-      }
+      const date = calendarDateSchema.parse(req.params.date);
       const input = setOvertimeDispositionSchema.parse(req.body);
       return handle(reply, async () =>
-        reply.send(await service.setOvertimeDisposition(req.params.id, req.params.date, input.disposition, req.user!.id))
+        reply.send(await service.setOvertimeDisposition(req.params.id, date, input.disposition, req.user!.id))
       );
     }
   );
@@ -235,11 +237,9 @@ export async function payrollRoutes(app: FastifyInstance, opts: { service: Payro
     "/employees/:id/overtime-disposition/:date",
     { preHandler: requireRole("admin", "supervisor") },
     async (req, reply) => {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(req.params.date)) {
-        return reply.code(400).send({ error: "Param 'date' must be a YYYY-MM-DD date" });
-      }
+      const date = calendarDateSchema.parse(req.params.date);
       return handle(reply, async () => {
-        await service.clearOvertimeDisposition(req.params.id, req.params.date, req.user!.id);
+        await service.clearOvertimeDisposition(req.params.id, date, req.user!.id);
         return reply.code(204).send(null);
       });
     }

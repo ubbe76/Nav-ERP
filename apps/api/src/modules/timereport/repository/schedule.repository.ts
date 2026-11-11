@@ -10,6 +10,19 @@ import {
   type Db,
 } from "@navet/db";
 import type { CreateHolidayInput, ScheduleBreakInput, WeekScheduleDayInput } from "@navet/shared";
+// Leaf in the payroll module (schema + error only) — no cycle.
+import {
+  assertPayrollPeriodsOpenInTx,
+  sharePayrollPeriodsInTx,
+} from "../../payroll/repository/payroll-period-guard.js";
+import { isoWeekRange } from "../service/iso-week.js";
+
+// A week override moves every day of its ISO week, which can straddle two
+// calendar months — the Monday and the Sunday cover both.
+const weekGuardDates = (isoYear: number, isoWeek: number) => {
+  const { monday, sunday } = isoWeekRange(isoYear, isoWeek);
+  return [monday, sunday];
+};
 
 // Postgres `time` columns come back as "HH:MM:SS" — the API speaks "HH:MM".
 const hhmm = (t: string) => t.slice(0, 5);
@@ -297,12 +310,20 @@ export function createScheduleRepository(db: Db) {
       return db.select().from(holidays).where(between(holidays.date, from, to));
     },
 
+    // Holidays and calendar overrides move the scheduled minutes of their
+    // days, so every write below starts with the payroll-period guard
+    // (payroll-period-guard.ts): the months are open and stay open until the
+    // commit. Dates are read without a row lock before the guard on the
+    // deletes — a holiday's date and an override's day/week never change.
     async createHoliday(input: CreateHolidayInput) {
-      const [row] = await db
-        .insert(holidays)
-        .values({ date: input.date, name: input.name, dayScheduleId: input.dayScheduleId ?? null })
-        .returning();
-      return row!;
+      return db.transaction(async (tx) => {
+        await assertPayrollPeriodsOpenInTx(tx, [input.date]);
+        const [row] = await tx
+          .insert(holidays)
+          .values({ date: input.date, name: input.name, dayScheduleId: input.dayScheduleId ?? null })
+          .returning();
+        return row!;
+      });
     },
 
     // Read before delete — the period-lock guard needs the holiday's date.
@@ -312,14 +333,28 @@ export function createScheduleRepository(db: Db) {
     },
 
     async deleteHoliday(id: string) {
-      const [row] = await db.delete(holidays).where(eq(holidays.id, id)).returning();
-      return row ?? null;
+      return db.transaction(async (tx) => {
+        const [existing] = await tx.select({ date: holidays.date }).from(holidays).where(eq(holidays.id, id));
+        if (!existing) return null;
+        await assertPayrollPeriodsOpenInTx(tx, [existing.date]);
+        const [row] = await tx.delete(holidays).where(eq(holidays.id, id)).returning();
+        return row ?? null;
+      });
     },
 
-    // Bulk seed: existing dates keep their (possibly customized) holiday row.
+    // Bulk seed: existing dates keep their (possibly customized) holiday row,
+    // and dates in a locked payroll period are skipped (decided under the
+    // period guard, in the insert's transaction).
     async createHolidaysIfMissing(rows: { date: string; name: string }[]) {
       if (rows.length === 0) return [];
-      return db.insert(holidays).values(rows).onConflictDoNothing({ target: holidays.date }).returning();
+      return db.transaction(async (tx) => {
+        const lockedMonths = new Set(
+          (await sharePayrollPeriodsInTx(tx, rows.map((r) => r.date))).map((date) => date.slice(0, 7))
+        );
+        const insertable = rows.filter((r) => !lockedMonths.has(r.date.slice(0, 7)));
+        if (insertable.length === 0) return [];
+        return tx.insert(holidays).values(insertable).onConflictDoNothing({ target: holidays.date }).returning();
+      });
     },
 
     // --- Kalenderavvikelser ---
@@ -341,15 +376,18 @@ export function createScheduleRepository(db: Db) {
     },
 
     async upsertWeekOverride(employeeId: string, isoYear: number, isoWeek: number, weekScheduleId: string) {
-      const [row] = await db
-        .insert(employeeWeekOverrides)
-        .values({ employeeId, isoYear, isoWeek, weekScheduleId })
-        .onConflictDoUpdate({
-          target: [employeeWeekOverrides.employeeId, employeeWeekOverrides.isoYear, employeeWeekOverrides.isoWeek],
-          set: { weekScheduleId },
-        })
-        .returning();
-      return row!;
+      return db.transaction(async (tx) => {
+        await assertPayrollPeriodsOpenInTx(tx, weekGuardDates(isoYear, isoWeek));
+        const [row] = await tx
+          .insert(employeeWeekOverrides)
+          .values({ employeeId, isoYear, isoWeek, weekScheduleId })
+          .onConflictDoUpdate({
+            target: [employeeWeekOverrides.employeeId, employeeWeekOverrides.isoYear, employeeWeekOverrides.isoWeek],
+            set: { weekScheduleId },
+          })
+          .returning();
+        return row!;
+      });
     },
 
     // Read before delete — the period-lock guard needs the overridden week.
@@ -362,11 +400,17 @@ export function createScheduleRepository(db: Db) {
     },
 
     async deleteWeekOverride(employeeId: string, overrideId: string) {
-      const [row] = await db
-        .delete(employeeWeekOverrides)
-        .where(and(eq(employeeWeekOverrides.id, overrideId), eq(employeeWeekOverrides.employeeId, employeeId)))
-        .returning();
-      return row ?? null;
+      return db.transaction(async (tx) => {
+        const where = and(eq(employeeWeekOverrides.id, overrideId), eq(employeeWeekOverrides.employeeId, employeeId));
+        const [existing] = await tx
+          .select({ isoYear: employeeWeekOverrides.isoYear, isoWeek: employeeWeekOverrides.isoWeek })
+          .from(employeeWeekOverrides)
+          .where(where);
+        if (!existing) return null;
+        await assertPayrollPeriodsOpenInTx(tx, weekGuardDates(existing.isoYear, existing.isoWeek));
+        const [row] = await tx.delete(employeeWeekOverrides).where(where).returning();
+        return row ?? null;
+      });
     },
 
     async listDayOverrides(employeeId: string) {
@@ -392,15 +436,18 @@ export function createScheduleRepository(db: Db) {
     },
 
     async upsertDayOverride(employeeId: string, date: string, dayScheduleId: string | null) {
-      const [row] = await db
-        .insert(employeeDayOverrides)
-        .values({ employeeId, date, dayScheduleId })
-        .onConflictDoUpdate({
-          target: [employeeDayOverrides.employeeId, employeeDayOverrides.date],
-          set: { dayScheduleId },
-        })
-        .returning();
-      return row!;
+      return db.transaction(async (tx) => {
+        await assertPayrollPeriodsOpenInTx(tx, [date]);
+        const [row] = await tx
+          .insert(employeeDayOverrides)
+          .values({ employeeId, date, dayScheduleId })
+          .onConflictDoUpdate({
+            target: [employeeDayOverrides.employeeId, employeeDayOverrides.date],
+            set: { dayScheduleId },
+          })
+          .returning();
+        return row!;
+      });
     },
 
     // Read before delete — the period-lock guard needs the overridden date.
@@ -413,11 +460,14 @@ export function createScheduleRepository(db: Db) {
     },
 
     async deleteDayOverride(employeeId: string, overrideId: string) {
-      const [row] = await db
-        .delete(employeeDayOverrides)
-        .where(and(eq(employeeDayOverrides.id, overrideId), eq(employeeDayOverrides.employeeId, employeeId)))
-        .returning();
-      return row ?? null;
+      return db.transaction(async (tx) => {
+        const where = and(eq(employeeDayOverrides.id, overrideId), eq(employeeDayOverrides.employeeId, employeeId));
+        const [existing] = await tx.select({ date: employeeDayOverrides.date }).from(employeeDayOverrides).where(where);
+        if (!existing) return null;
+        await assertPayrollPeriodsOpenInTx(tx, [existing.date]);
+        const [row] = await tx.delete(employeeDayOverrides).where(where).returning();
+        return row ?? null;
+      });
     },
   };
 }

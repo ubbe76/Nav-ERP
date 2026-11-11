@@ -99,9 +99,12 @@ export async function lockEmployee(tx: Tx, employeeId: string) {
 
 // No history: the row goes. Schedule overrides and Förvalda stationer
 // cascade; mo_reports/mo_operation_scrap keep the report without a name
-// (ON DELETE SET NULL).
+// (ON DELETE SET NULL). The audit trail can still hold free text about the
+// employee — a reason typed at the terminal whose attendance row was later
+// deleted — so it is scrubbed as in the anonymization.
 export async function deleteEmployeeInTx(tx: Tx, employeeId: string) {
   await tx.delete(employees).where(eq(employees.id, employeeId));
+  return { auditEntriesScrubbed: await scrubAuditFreeText(tx, employeeId) };
 }
 
 // Drops every free-text key (note, startNote, stopNote) wherever it sits in
@@ -168,7 +171,12 @@ export async function anonymizeEmployeeInTx(tx: Tx, employeeId: string) {
       from jsonb_array_elements(detail->'snapshot'->'employees') with ordinality as t(e, ord)))
     where ${unlockedSnapshotNamingSql(employeeId)}`);
 
-  // The audit trail keeps what happened, not what was written in free text.
+  return { auditEntriesScrubbed: await scrubAuditFreeText(tx, employeeId) };
+}
+
+// The audit trail keeps what happened, not what was written in free text —
+// both erasure paths (Radera and Anonymisera).
+async function scrubAuditFreeText(tx: Tx, employeeId: string): Promise<number> {
   const entries = await tx
     .select({ id: auditLog.id, detail: auditLog.detail })
     .from(auditLog)
@@ -177,5 +185,5 @@ export async function anonymizeEmployeeInTx(tx: Tx, employeeId: string) {
   for (const entry of changed) {
     await tx.update(auditLog).set({ detail: withoutFreeText(entry.detail) }).where(eq(auditLog.id, entry.id));
   }
-  return { auditEntriesScrubbed: changed.length };
+  return changed.length;
 }

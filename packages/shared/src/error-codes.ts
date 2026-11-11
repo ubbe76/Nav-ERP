@@ -46,6 +46,11 @@ export const ERROR_CODES = {
   SCHEDULE_BALANCING_OFF: "schedule-balancing-off",
   // A supervisor's correction raced a stamp that changed the session
   ATTENDANCE_SESSION_CHANGED: "attendance-session-changed",
+  // Attesteringens rättning: a start time in the future, and Ta bort on an
+  // attendance that is still open (its work would keep running)
+  ATTENDANCE_START_IN_FUTURE: "attendance-start-in-future",
+  ATTENDANCE_SESSION_OPEN: "attendance-session-open",
+  DUPLICATE_EMPLOYEE_NUMBER: "duplicate-employee-number",
   INVALID_STOP_TIME: "invalid-stop-time",
   STAMP_SESSION_ALREADY_STOPPED: "stamp-session-already-stopped",
   STOP_TIME_NOT_ALLOWED: "stop-time-not-allowed",

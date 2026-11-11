@@ -49,7 +49,7 @@ När **Tillåt ATF-uttag via schemat** är på (under [Lön, PAXml & schema](#lo
 
 OB-tillägg (ersättning för obekväm arbetstid) definierar tidsfönster som ger ett lönetillägg utöver ordinarie arbetstid. Varje regel har **Kod**, **Namn**, **Dagtyp** (Vardag, Lördag, Söndag eller Helgdag — en helgdag räknas alltid som Helgdag, oavsett veckodag), **Från**/**Till** (klockslag i 24-timmarsformat) och **PAXml-kod**.
 
-Ett tidsfönster får inte gå över midnatt. Ett OB-tillägg som ska gälla natten mot nästa dag läggs därför upp som två rader, t.ex. 22:00–23:59 och 00:00–06:00.
+Ett tidsfönster får inte gå över midnatt, och **Till** 00:00 betyder midnatt (dygnets slut). Ett OB-tillägg som ska gälla natten mot nästa dag läggs därför upp som två rader, t.ex. 22:00–00:00 och 00:00–06:00, och 00:00–00:00 gäller hela dygnet. En äldre regel som slutar 23:59 ger ingen OB för den sista minuten före midnatt — ändra **Till** till 00:00.
 
 ### Avvikelseorsaker
 
@@ -104,6 +104,8 @@ Tabellen har en rad per anställd med kolumnerna **Anställd**, **Schema**, **Ar
 
 **Ofördelat** är schemalagd tid som varken täcks av arbetad tid, frånvaro eller ATF-uttag — den markeras i rött och är det som ska redas ut innan du attesterar. Antingen saknas en stämpling (korrigera närvaron) eller så saknas en frånvaropost (registrera frånvaron).
 
+Dagar före personalkortets **Anställd från** och efter **Anställd till** har inget schema: de ger varken schemalagd tid, **Ofördelat** eller avvikelser, och personalkortets kalender visar dem som **Ej anställd**. Stämplad närvaro en sådan dag räknas ändå som arbetad tid. En aktiv anställd som inte är anställd någon dag i perioden och saknar närvaro, frånvaro och ATF-uttag i den visas inte i tabellen och behöver inte attesteras. Är datumen tomma gäller schemat alla dagar.
+
 Statusen visas som en av tre:
 
 - **Ej attesterad** — underlaget är inte granskat klart.
@@ -116,8 +118,8 @@ Statusen visas som en av tre:
 
 - Tabellen har kolumnen **Avvikelser**: antal dagar med sen ankomst eller tidig hemgång (till exempel "3 dagar") och, i varningsfärg, "{n} utan anledning" för dagar över marginalen där anledning saknas (inställningen var av eller tiden har korrigerats). Låsta perioder från före funktionen visar "–".
 - Under varje närvarostämpling står avvikelsen och anledningen, till exempel "Kom 07:12 (12 min sent) — Trafik/resa: kö på E4" och "Gick 15:20 (40 min tidigt) — Läkar-/tandläkarbesök". Minuterna räknas alltid om ur schemat och stämplingens tider, så en korrigerad tid ger rätt siffra direkt.
-- **Ändra** på en närvarostämpling visar start- och sluttid som redigerbara fält; **Spara** skriver den korrigerade tiden. Sluttiden måste vara efter starttiden. Samma formulär har en anledning och en kommentar för ankomsten respektive hemgången (valet **— Ingen —** tar bort anledningen); inaktiva anledningar visas bara om de redan är valda. Anledningarna ändras inte i en låst period. Har närvaron ändrats medan formuläret var öppet (till exempel stämplats ut med **Gå hem** i terminalen) sparas ingenting — öppna den igen och gör om ändringen. Töms sluttiden öppnas stämplingen igen — den räknas då som en pågående närvaro och visas som **Öppen närvaro**, vilket blockerar attesteringen tills den avslutas. Stänger du en öppen närvaro, eller flyttar sluttiden, följer den anställdes arbeten med: öppna arbeten pausas vid sluttiden (som om personen hade tryckt **Gå hem** då) och ett arbete som fortfarande är pausat sedan den gamla sluttiden får pausen flyttad. Kvittensen visar hur många arbeten som berördes.
-- **Ta bort** raderar en felaktig närvarostämpling eller frånvaropost (borttag av stämpling bekräftas i en dialog).
+- **Ändra** på en närvarostämpling visar start- och sluttid som redigerbara fält; **Spara** skriver den korrigerade tiden. Sluttiden måste vara efter starttiden, och ingen av dem får ligga i framtiden. Samma formulär har en anledning och en kommentar för ankomsten respektive hemgången (valet **— Ingen —** tar bort anledningen); inaktiva anledningar visas bara om de redan är valda. Anledningarna ändras inte i en låst period. Har närvaron ändrats medan formuläret var öppet (till exempel stämplats ut med **Gå hem** i terminalen) sparas ingenting — öppna den igen och gör om ändringen. Töms sluttiden öppnas stämplingen igen — den räknas då som en pågående närvaro och visas som **Öppen närvaro**, vilket blockerar attesteringen tills den avslutas. Stänger du en öppen närvaro, eller flyttar sluttiden, följer den anställdes arbeten med: öppna arbeten pausas vid sluttiden (som om personen hade tryckt **Gå hem** då) och ett arbete som fortfarande är pausat sedan den gamla sluttiden får pausen flyttad. Kvittensen visar hur många arbeten som berördes.
+- **Ta bort** raderar en felaktig närvarostämpling eller frånvaropost (borttag av stämpling bekräftas i en dialog). En närvaro som fortfarande pågår går inte att ta bort — sätt en sluttid med **Ändra** först, så pausas den anställdes arbeten, och ta sedan bort stämplingen.
 - Kortet **Registrera frånvaro** längst ned har samma fält som personalkortet — **Frånvarokod**, **Datum**, **Timmar** och **Anteckning**. Datum och Timmar är förifyllda med den första dagen som har ofördelad tid och antalet ofördelade timmar, så en hel dags frånvaro registreras med ett klick på **Registrera**.
 
 **Stäng** stänger dagvyn. Varje korrigering räknar om underlaget direkt.

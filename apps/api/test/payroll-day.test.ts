@@ -3,6 +3,7 @@ import {
   clockToMs,
   computeEmployeeDay,
   mergeIntervals,
+  obWindowEndClock,
   periodDates,
   periodRange,
   subtractIntervals,
@@ -162,6 +163,28 @@ describe("payroll day engine — computeEmployeeDay", () => {
     });
 
     expect(result.ob).toEqual([{ code: "OBHOL", paxmlCode: "OBHOL", minutes: 360 }]);
+  });
+
+  // Natt-OB 22:00–00:00: the end 00:00 is midnight, so the last minute
+  // before it counts (22:00–23:59 lost it, one minute per night).
+  it("8b. an OB window ending 00:00 runs to midnight — also on the autumn switch day", () => {
+    const night = (date: string, next: string) =>
+      computeEmployeeDay({
+        date,
+        isHoliday: false,
+        schedule: null,
+        attendance: [{ start: clockToMs(date, "22:00"), end: clockToMs(next, "06:00") }],
+        absences: [],
+        atfMinutes: 0,
+        obRules: [{ code: "OBN", paxmlCode: "OBN", dayKind: date === "2026-10-25" ? "sunday" : "weekday", startTime: "22:00", endTime: "00:00" }],
+        overtimeThresholdMinutes: 15,
+      }).ob;
+    expect(night(DAY, NEXT_DAY)).toEqual([{ code: "OBN", paxmlCode: "OBN", minutes: 120 }]);
+    // Sunday 25 Oct 2026 (summer time ends at 03:00): 22:00–24:00 is still two hours.
+    expect(night("2026-10-25", "2026-10-26")).toEqual([{ code: "OBN", paxmlCode: "OBN", minutes: 120 }]);
+    // The stored form from Postgres' time column.
+    expect(obWindowEndClock("00:00:00")).toBe("24:00");
+    expect(obWindowEndClock("23:59")).toBe("23:59");
   });
 
   it("9. overnight session is clipped at the day boundary: worked 180", () => {

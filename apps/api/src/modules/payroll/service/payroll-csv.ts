@@ -64,8 +64,9 @@ export function buildPayrollCsv(summary: PeriodSummary): string {
     const absence = minutesByCode(employee.absence);
     const ob = minutesByCode(employee.ob);
     return [
-      employee.employeeNumber,
-      // Free-text field — formula-injection guard, same as the generic export.
+      // Both are free text (the number too: any string up to 50 characters)
+      // — formula-injection guard, same as the generic export.
+      guardFormulaInjection(employee.employeeNumber),
       guardFormulaInjection(employee.name),
       employee.employmentType === null ? "" : (EMPLOYMENT_LABELS[employee.employmentType] ?? ""),
       hours(employee.scheduledMinutes),

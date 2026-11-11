@@ -97,10 +97,21 @@ describe("buildPaxmlXml", () => {
     const xml = buildPaxmlXml(paxmlInput());
     expect(xml).toContain("<format>LÖNIN</format>");
     expect(xml).toContain("<version>2.2</version>");
-    // header/datum is xs:dateTime in the XSD, not xs:date.
-    expect(xml).toContain("<datum>2026-07-26T08:30:00</datum>");
+    // header/datum is xs:dateTime in the XSD, not xs:date — Stockholm's wall
+    // clock (08:30 UTC is 10:30 summer time), since it carries no zone.
+    expect(xml).toContain("<datum>2026-07-26T10:30:00</datum>");
     expect(xml).toContain("<foretagorgnr>556000-0000</foretagorgnr>");
     expect(xml.indexOf("<version>")).toBeLessThan(xml.indexOf("<datum>"));
+  });
+
+  it("writes the export stamp as Stockholm time, also around midnight and in winter", () => {
+    // 23:30 UTC on 31 Oct is 00:30 on 1 Nov in Stockholm (winter time, +1).
+    expect(buildPaxmlXml({ ...paxmlInput(), exportDate: "2026-10-31T23:30:00.000Z" })).toContain(
+      "<datum>2026-11-01T00:30:00</datum>"
+    );
+    expect(buildPaxmlXml({ ...paxmlInput(), exportDate: "2026-01-15T11:05:09.000Z" })).toContain(
+      "<datum>2026-01-15T12:05:09</datum>"
+    );
   });
 
   it("escapes the company name", () => {
@@ -342,6 +353,13 @@ describe("buildPayrollCsv", () => {
   it("quotes values containing the separator", () => {
     const csv = buildPayrollCsv(periodSummary([employeeSummary({ name: 'Ove; "Ovesson"' })]));
     expect(csv).toContain('"Ove; ""Ovesson"""');
+  });
+
+  it("guards the employee number against formula injection like the name", () => {
+    const line = buildPayrollCsv(periodSummary([employeeSummary({ employeeNumber: "=HYPERLINK(1)", name: "+Ove" })])).split(
+      "\r\n"
+    )[1]!;
+    expect(line.startsWith("'=HYPERLINK(1);'+Ove;")).toBe(true);
   });
 
   it("emits only the header row for an empty period", () => {

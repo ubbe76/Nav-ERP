@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import {
   createDayScheduleSchema,
   createHolidaySchema,
@@ -164,10 +165,9 @@ export async function scheduleRoutes(app: FastifyInstance, opts: { service: Sche
     "/employees/:id/schedule-calendar",
     { config: { access: TERMINAL_READ } },
     async (req, reply) => {
-      const { from, to } = req.query;
-      if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
-        return reply.code(400).send({ error: "Query params 'from' and 'to' must be YYYY-MM-DD dates" });
-      }
+      // Real calendar dates (ZodError ⇒ 400 validation-failed): the regex
+      // this replaced let 2026-02-30 and 2026-13-01 through to a 500.
+      const { from, to } = z.object({ from: z.string().date(), to: z.string().date() }).parse(req.query);
       // Frånvaro is health data (as absentToday in GET /stamp-sessions): only
       // admin/supervisor get a calendar that reflects absence — balance's
       // lostAtfMinutes and the lengthened last workday of a balanced week.

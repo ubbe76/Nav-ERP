@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
 import { Checkbox, Field, Input, Select, Toggle } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
+import { apiErrorMessage } from "../../lib/errorMessages";
 import {
   ATF_MODE_LABELS,
   ATF_TRANSACTION_TYPE_LABELS,
@@ -181,7 +182,7 @@ function AllmantTab({ employee, stations }: { employee: Employee; stations: Term
       setSaved(true);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara");
+      setError(apiErrorMessage(err, "Kunde inte spara"));
     } finally {
       setPending(false);
     }
@@ -294,7 +295,7 @@ function AnstallningTab({ employee }: { employee: Employee }) {
       setSaved(true);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara");
+      setError(apiErrorMessage(err, "Kunde inte spara"));
     } finally {
       setPending(false);
     }
@@ -387,6 +388,7 @@ const WEEKDAY_SHORT = ["Mån", "Tis", "Ons", "Tor", "Fre", "Lör", "Sön"];
 
 // Where a resolved day's schedule came from, for the preview.
 function sourceLabel(day: ResolvedCalendarDay): string {
+  if (day.outsideEmployment) return "Ej anställd";
   switch (day.source) {
     case "day-override":
       return "Dagsavvikelse";
@@ -439,7 +441,7 @@ function SchemaTab({
       router.refresh();
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : fallbackMessage);
+      setError(apiErrorMessage(err, fallbackMessage));
       return false;
     }
   }
@@ -756,7 +758,7 @@ function AtfTab({
       setSaved(true);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara ATF-inställningarna");
+      setError(apiErrorMessage(err, "Kunde inte spara ATF-inställningarna"));
     } finally {
       setPending(false);
     }
@@ -784,7 +786,7 @@ function AtfTab({
       setTxNote("");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte registrera transaktionen");
+      setError(apiErrorMessage(err, "Kunde inte registrera transaktionen"));
     }
   }
 
@@ -794,7 +796,7 @@ function AtfTab({
       await apiFetch(`/api/v1/employees/${employee.id}/atf-transactions/${id}`, { method: "DELETE" });
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ta bort transaktionen");
+      setError(apiErrorMessage(err, "Kunde inte ta bort transaktionen"));
     }
   }
 

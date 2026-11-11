@@ -24,6 +24,7 @@ import { EmployeeNotFoundError, WeekScheduleNotFoundError } from "./timereport.s
 // Leaf file in the payroll module — no import cycle (see period-lock.ts).
 import { PayrollPeriodLockedError, type PeriodLockChecker } from "../../payroll/service/period-lock.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
+import { isoWeekRange } from "./iso-week.js";
 
 export class DayScheduleNotFoundError extends Error {
   constructor(id: string) {
@@ -147,16 +148,9 @@ function easterSunday(year: number): Date {
 const addDaysUTC = (date: Date, days: number) => new Date(date.getTime() + days * 86_400_000);
 const toDateString = (date: Date) => date.toISOString().slice(0, 10);
 
-// Inverse of isoWeekOf: the Monday and Sunday bounding an ISO week. Jan 4 is
-// by definition in ISO week 1, so week 1's Monday is the Monday on or before
-// it. Used by the period-lock guard — a week override may straddle two
-// calendar months, and both have to be checked.
-export function isoWeekRange(isoYear: number, isoWeek: number): { monday: string; sunday: string } {
-  const jan4 = new Date(Date.UTC(isoYear, 0, 4));
-  const week1Monday = addDaysUTC(jan4, -((jan4.getUTCDay() || 7) - 1));
-  const monday = addDaysUTC(week1Monday, (isoWeek - 1) * 7);
-  return { monday: toDateString(monday), sunday: toDateString(addDaysUTC(monday, 6)) };
-}
+// isoWeekRange (the inverse of isoWeekOf) lives in the pure iso-week.ts so
+// the schedule repository's period guard can use it too.
+export { isoWeekRange };
 
 // First Saturday within [from, from + 6] — midsommardagen (Sat 20–26 June)
 // and alla helgons dag (Sat 31 Oct–6 Nov) are defined this way.
@@ -193,9 +187,31 @@ export function swedishHolidays(year: number): { date: string; name: string }[] 
 }
 
 // The employee register lives in the timereport service; the schedule service
-// only needs to check existence.
+// only needs to check existence — and reads the employment dates (Anställd
+// från/till) the calendar is clipped to (optional for stubs: none = always
+// employed).
 export interface EmployeeReader {
-  findEmployeeById(id: string): Promise<{ id: string; defaultWeekScheduleId: string | null } | null>;
+  findEmployeeById(id: string): Promise<{
+    id: string;
+    defaultWeekScheduleId: string | null;
+    employedFrom?: string | null;
+    employedTo?: string | null;
+  } | null>;
+}
+
+// Anställd från/till, both inclusive; an empty date is open-ended. The ONE
+// rule — the calendar resolver and the löneunderlag's inclusion both call it.
+export function isEmployedOn(employment: { employedFrom?: string | null; employedTo?: string | null }, date: string): boolean {
+  return (!employment.employedFrom || date >= employment.employedFrom) && (!employment.employedTo || date <= employment.employedTo);
+}
+
+// Employed at least one day of [from, to].
+export function isEmployedInRange(
+  employment: { employedFrom?: string | null; employedTo?: string | null },
+  from: string,
+  to: string
+): boolean {
+  return (!employment.employedFrom || employment.employedFrom <= to) && (!employment.employedTo || employment.employedTo >= from);
 }
 
 // Utjämning reads the system setting (systemService satisfies it) and the
@@ -219,6 +235,9 @@ export interface ResolvedDay {
   weekday: number;
   source: CalendarDaySource | null;
   holidayName?: string;
+  // The day lies outside the employment (before Anställd från or after
+  // Anställd till): no schedule, whatever the calendar says.
+  outsideEmployment?: true;
   // netMinutes/endTime are what the day is worth: on a balanced week's last
   // workday the computed values (schedule-balancing.ts), otherwise the day
   // schedule's own — which scheduleNetMinutes/scheduleEndTime always hold.
@@ -588,6 +607,9 @@ export function createScheduleService(
     // read — so a balanced week's last workday (utjämning) is computed here
     // and nowhere else.
     //
+    // Days outside the employment (Anställd från/till on the personnel card)
+    // resolve to no schedule, and drop out of a balanced week like holidays.
+    //
     // Frånvaro is health data: includeAbsence false (the route's choice for
     // callers who may not see absence) resolves as if no absence existed, so
     // neither balance.lostAtfMinutes nor a lengthened last workday reveals it.
@@ -684,7 +706,9 @@ export function createScheduleService(
             const dayScheduleId = dayScheduleByWeekAndWeekday.get(`${weekScheduleId}:${weekday}`);
             const schedule = dayScheduleId ? daySchedulesById.get(dayScheduleId) : undefined;
             if (schedule) weekDaySchedules.push({ weekday, schedule });
-            if (holidayByDate.has(date)) holidayWeekdays.push(weekday);
+            // A day outside the employment drops out of the week like a
+            // holiday: the week's last EMPLOYED workday is the balanced one.
+            if (holidayByDate.has(date) || !isEmployedOn(employee, date)) holidayWeekdays.push(weekday);
             const absent = absenceByDate.get(date);
             if (absent) nonEarningAbsenceMinutes.set(weekday, absent);
           }
@@ -704,6 +728,14 @@ export function createScheduleService(
       for (let cursor = new Date(fromDate); cursor <= toDate; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
         const date = cursor.toISOString().slice(0, 10);
         const weekday = cursor.getUTCDay() || 7;
+
+        // Outside the employment there is no schedule at all — no scheduled
+        // time, no Ofördelat, no sen ankomst/tidig hemgång. It wins over
+        // every source, a day override included.
+        if (!isEmployedOn(employee, date)) {
+          days.push({ date, weekday, source: null, daySchedule: null, outsideEmployment: true });
+          continue;
+        }
 
         let source: CalendarDaySource | null = null;
         let dayScheduleId: string | null = null;

@@ -22,6 +22,12 @@ import type {
   UpdateAbsenceTypeInput,
   UpdateObRuleInput,
 } from "@navet/shared";
+import { PayrollPeriodLockedError } from "../service/period-lock.js";
+import {
+  assertPayrollPeriodsOpenInTx,
+  lockPayrollPeriodExclusivelyInTx,
+  payrollPeriodFirstDay,
+} from "./payroll-period-guard.js";
 
 // Postgres `time` columns come back as "HH:MM:SS" — the API speaks "HH:MM".
 const hhmm = (t: string) => t.slice(0, 5);
@@ -216,24 +222,39 @@ export function createPayrollRepository(db: Db) {
       return row ?? null;
     },
 
+    // The writes below that feed the löneunderlag (frånvaro, övertidsval,
+    // attest) each run in a transaction that STARTS with the period guard
+    // (payroll-period-guard.ts): the month is open and stays open until the
+    // write has committed, so Lås never freezes a basis without it. A locked
+    // month ⇒ PayrollPeriodLockedError.
     async createAbsence(employeeId: string, input: CreateAbsenceInput, createdBy: string) {
-      const [row] = await db
-        .insert(absences)
-        .values({
-          employeeId,
-          absenceTypeId: input.absenceTypeId,
-          date: input.date,
-          minutes: input.minutes,
-          note: input.note,
-          createdBy,
-        })
-        .returning();
-      return row!;
+      return db.transaction(async (tx) => {
+        await assertPayrollPeriodsOpenInTx(tx, [input.date]);
+        const [row] = await tx
+          .insert(absences)
+          .values({
+            employeeId,
+            absenceTypeId: input.absenceTypeId,
+            date: input.date,
+            minutes: input.minutes,
+            note: input.note,
+            createdBy,
+          })
+          .returning();
+        return row!;
+      });
     },
 
+    // The date is read (no row lock) before the guard — an absence's date
+    // never changes.
     async deleteAbsence(id: string) {
-      const [row] = await db.delete(absences).where(eq(absences.id, id)).returning();
-      return row ?? null;
+      return db.transaction(async (tx) => {
+        const [existing] = await tx.select({ date: absences.date }).from(absences).where(eq(absences.id, id));
+        if (!existing) return null;
+        await assertPayrollPeriodsOpenInTx(tx, [existing.date]);
+        const [row] = await tx.delete(absences).where(eq(absences.id, id)).returning();
+        return row ?? null;
+      });
     },
 
     // --- Övertidsdispositioner (per-dag-avvikelse från personalkortets default) ---
@@ -257,15 +278,21 @@ export function createPayrollRepository(db: Db) {
       disposition: OvertimeDisposition,
       createdBy: string
     ) {
-      return upsertOvertimeDispositionInTx(db, employeeId, date, disposition, createdBy);
+      return db.transaction(async (tx) => {
+        await assertPayrollPeriodsOpenInTx(tx, [date]);
+        return upsertOvertimeDispositionInTx(tx, employeeId, date, disposition, createdBy);
+      });
     },
 
     async deleteOvertimeDisposition(employeeId: string, date: string) {
-      const [row] = await db
-        .delete(overtimeDispositions)
-        .where(and(eq(overtimeDispositions.employeeId, employeeId), eq(overtimeDispositions.date, date)))
-        .returning();
-      return row ?? null;
+      return db.transaction(async (tx) => {
+        await assertPayrollPeriodsOpenInTx(tx, [date]);
+        const [row] = await tx
+          .delete(overtimeDispositions)
+          .where(and(eq(overtimeDispositions.employeeId, employeeId), eq(overtimeDispositions.date, date)))
+          .returning();
+        return row ?? null;
+      });
     },
 
     // --- Löneperioder (period summary/lock) ---
@@ -308,22 +335,75 @@ export function createPayrollRepository(db: Db) {
 
     // --- Attestering ---
 
+    // Attest and its undo under the period guard: an attestation never
+    // appears in, or disappears from, a period that Lås is freezing.
     async createAttestation(periodId: string, employeeId: string, attestedBy: string) {
-      const [row] = await db.insert(payrollAttestations).values({ periodId, employeeId, attestedBy }).returning();
-      return row!;
+      return db.transaction(async (tx) => {
+        await assertPeriodOpenByIdInTx(tx, periodId);
+        const [row] = await tx.insert(payrollAttestations).values({ periodId, employeeId, attestedBy }).returning();
+        return row!;
+      });
     },
 
     async deleteAttestation(periodId: string, employeeId: string) {
-      const [row] = await db
-        .delete(payrollAttestations)
-        .where(and(eq(payrollAttestations.periodId, periodId), eq(payrollAttestations.employeeId, employeeId)))
-        .returning();
-      return row ?? null;
+      return db.transaction(async (tx) => {
+        await assertPeriodOpenByIdInTx(tx, periodId);
+        const [row] = await tx
+          .delete(payrollAttestations)
+          .where(and(eq(payrollAttestations.periodId, periodId), eq(payrollAttestations.employeeId, employeeId)))
+          .returning();
+        return row ?? null;
+      });
     },
 
-    // Låsning: freezes the period and stores the computed basis verbatim.
-    // `summary` is plain JSON (a PeriodSummary) — this repository is its only
-    // writer, which is what lets the read path cast it back unchecked.
+    // Lås: ONE transaction that takes the month exclusively (waiting for
+    // every guarded writer still in flight — they are in the basis once they
+    // commit; later ones wait here and are then refused), reads the status
+    // again, lets `build` compute the basis and check its blockers (it reads
+    // through the pool, AFTER the lock is held; a throw rolls everything
+    // back), writes conditionally on `open` and logs `locked` in the same
+    // transaction (like the unlock — not via AuditWriter). Two simultaneous
+    // Lås: the second waits and gets PayrollPeriodLockedError.
+    //
+    // The transaction's connection sits idle while `build` runs on others.
+    // Should every other pool connection be a writer waiting for this month,
+    // `build` could never get one — the idle timeout then ends this
+    // transaction (the lock is released, Lås fails) instead of hanging the
+    // API.
+    async lockPayrollPeriodGuarded<T>(
+      year: number,
+      month: number,
+      build: () => Promise<{ summary: T; lockedAt: Date; employeeCount: number }>,
+      entry: { entityId: string; userId: string }
+    ): Promise<T> {
+      return db.transaction(async (tx) => {
+        await tx.execute(sql`set local idle_in_transaction_session_timeout = '60s'`);
+        await lockPayrollPeriodExclusivelyInTx(tx, year, month);
+        const where = and(eq(payrollPeriods.year, year), eq(payrollPeriods.month, month));
+        const [period] = await tx.select({ status: payrollPeriods.status }).from(payrollPeriods).where(where);
+        if (!period || period.status !== "open") throw new PayrollPeriodLockedError(payrollPeriodFirstDay(year, month));
+
+        const { summary, lockedAt, employeeCount } = await build();
+        const [row] = await tx
+          .update(payrollPeriods)
+          .set({ status: "locked", summary, lockedAt, lockedBy: entry.userId })
+          .where(and(where, eq(payrollPeriods.status, "open")))
+          .returning({ id: payrollPeriods.id });
+        if (!row) throw new PayrollPeriodLockedError(payrollPeriodFirstDay(year, month));
+        await tx.insert(auditLog).values({
+          entityType: "payroll_period",
+          entityId: entry.entityId,
+          action: "locked",
+          detail: { year, month, employeeCount },
+          userId: entry.userId,
+        });
+        return summary;
+      });
+    },
+
+    // The plain write behind a lock — the test fixtures' primitive (a period
+    // locked with a hand-made basis); the service locks through
+    // lockPayrollPeriodGuarded.
     async lockPayrollPeriod(periodId: string, summary: unknown, lockedAt: Date, lockedBy: string) {
       const [row] = await db
         .update(payrollPeriods)
@@ -419,6 +499,15 @@ export function createPayrollRepository(db: Db) {
 }
 
 export type PayrollRepository = ReturnType<typeof createPayrollRepository>;
+
+// The period guard for a write keyed by the period row (attestations).
+async function assertPeriodOpenByIdInTx(tx: Tx, periodId: string) {
+  const [period] = await tx
+    .select({ year: payrollPeriods.year, month: payrollPeriods.month })
+    .from(payrollPeriods)
+    .where(eq(payrollPeriods.id, periodId));
+  if (period) await assertPayrollPeriodsOpenInTx(tx, [payrollPeriodFirstDay(period.year, period.month)]);
+}
 
 // An unlock entry of the period that kept its basis as an object.
 function unlockedSnapshotWhere(entityId: string) {

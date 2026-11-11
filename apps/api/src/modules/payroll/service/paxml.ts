@@ -51,11 +51,25 @@ const VERSION = "2.2";
 const FORMAT = "LÖNIN";
 
 // xs:dateTime without fractional seconds or a timezone designator —
-// "2026-07-26T08:30:00". Accepts anything Date can parse.
+// "2026-07-26T10:30:00". A dateTime without a zone is read as local time by
+// the payroll program, so the export instant is written as Stockholm's wall
+// clock (not UTC: an export just after midnight landed on the day before).
+// Accepts anything Date can parse.
+const STOCKHOLM_PARTS = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Europe/Stockholm",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
 function toXsDateTime(value: string): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toISOString().slice(0, 19);
+  const p = Object.fromEntries(STOCKHOLM_PARTS.formatToParts(parsed).map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}`;
 }
 
 // personnummerTYPE demands exactly 12 characters (yyyymmddnnnn), so the

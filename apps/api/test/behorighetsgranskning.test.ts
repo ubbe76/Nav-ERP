@@ -165,10 +165,11 @@ describe("GET /attendance-sessions: present now for the shop floor, history and 
       expect(open.body).toHaveLength(1);
       expect(open.body[0]).toMatchObject({ startNote: "Försovning", startReasonId: null, stopReasonId: null, stopNote: null });
 
+      // The history is in the list pattern (tidgranskningen).
       const all = await call(cookie, "GET", "/attendance-sessions");
       expect(all.status).toBe(200);
-      expect(all.body).toHaveLength(2);
-      expect(all.body.map((r: { stopNote: string | null }) => r.stopNote).sort()).toEqual(["Läkarbesök", null].sort());
+      expect(all.body.total).toBe(2);
+      expect(all.body.rows.map((r: { stopNote: string | null }) => r.stopNote).sort()).toEqual(["Läkarbesök", null].sort());
     }
   });
 });

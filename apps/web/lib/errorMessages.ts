@@ -99,13 +99,16 @@ const MESSAGES: Record<string, MessageEntry> = {
     "Ordinarie arbetstid och ATF på veckoschemat kräver att Tillåt ATF-uttag via schemat är på under Personal & lön → Lön, PAXml & schema.",
   "attendance-session-changed":
     "Närvaron ändrades under tiden (till exempel stämplades den ut i terminalen). Öppna den igen och gör om ändringen.",
+  "attendance-start-in-future": "Starttiden kan inte ligga i framtiden.",
+  "attendance-session-open": "Närvaron pågår — sätt en sluttid innan du tar bort den.",
+  "duplicate-employee-number": "Anställningsnumret används redan av en annan anställd.",
   "invalid-stop-time": "Sluttiden måste vara efter instämplingen och inte i framtiden.",
   "stamp-session-already-stopped":
     "Stämplingen är redan utstämplad — operationen kan ha blivit klar. Rapportera antalet på tillverkningsordern.",
   "stop-time-not-allowed": "Bara arbetsledare och administratörer kan ange sluttid.",
   "duplicate-absence": "Frånvaro med samma kod finns redan på det datumet",
   "duplicate-payroll-code": "Koden eller namnet finns redan",
-  "invalid-ob-window": "Sluttiden måste vara efter starttiden",
+  "invalid-ob-window": "Sluttiden måste vara efter starttiden (00:00 betyder midnatt)",
   // economy
   "overlapping-fiscal-year": "Räkenskapsåret överlappar ett befintligt räkenskapsår",
   "fiscal-year-before-closed-year": "Räkenskapsåret ligger före ett stängt räkenskapsår — ett år kan inte läggas upp före ett stängt år",

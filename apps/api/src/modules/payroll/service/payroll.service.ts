@@ -21,10 +21,11 @@ import { EmployeeNotFoundError } from "../../timereport/service/timereport.servi
 // listEmployees() already returns the full employee register row — reused
 // as-is rather than building a second employee lister for payroll.
 import type { TimeReportRepository } from "../../timereport/repository/timereport.repository.js";
-import type { ResolvedDay } from "../../timereport/service/schedule.service.js";
+import { isEmployedInRange, type ResolvedDay } from "../../timereport/service/schedule.service.js";
 import {
   clockToMs,
   computeEmployeeDay,
+  obWindowEndClock,
   dayBounds,
   periodDates,
   overlapsScheduleWindow,
@@ -226,6 +227,18 @@ function duplicateDeviationReason(err: unknown, input: { code?: string; name?: s
   return null;
 }
 
+// The same for frånvarokoder and OB-regler: two admins saving the same code
+// (or frånvarokod name) at once both pass the pre-checks, and the loser's
+// unique violation was a 500. OB-regler have no unique name — the pre-check
+// alone guards it (two rules of one name are harmless, the code is the key).
+function duplicatePayrollCode(err: unknown, table: "absence_types" | "ob_rules", input: { code?: string; name?: string }) {
+  if (isUniqueViolation(err, `${table}_code_unique`)) return new DuplicatePayrollCodeError("code", input.code ?? "");
+  if (table === "absence_types" && isUniqueViolation(err, "absence_types_name_unique")) {
+    return new DuplicatePayrollCodeError("name", input.name ?? "");
+  }
+  return null;
+}
+
 function sumBy<T>(items: T[], selector: (item: T) => number): number {
   return items.reduce((total, item) => total + selector(item), 0);
 }
@@ -385,7 +398,8 @@ export class DuplicatePayrollCodeError extends Error {
 
 // Semantic validation failure — OB window's end time not after its start
 // time. Windows may not cross midnight (same v1 rule as day_schedules);
-// night OB is entered as two rows (22–24 and 00–06).
+// night OB is entered as two rows, 22:00–00:00 and 00:00–06:00 — an end time
+// of 00:00 is the day's end (obWindowEndClock in payroll-day.ts).
 export class InvalidObWindowError extends Error {
   constructor(message: string) {
     super(message);
@@ -538,7 +552,7 @@ const toMinutes = (clockTime: string) => {
 };
 
 function validateObWindow(startTime: string, endTime: string) {
-  if (toMinutes(endTime) <= toMinutes(startTime)) {
+  if (toMinutes(obWindowEndClock(endTime)) <= toMinutes(startTime)) {
     throw new InvalidObWindowError(
       "OB window end time must be after its start time (windows may not cross midnight)"
     );
@@ -668,7 +682,7 @@ export function createPayrollService(
     const attestationByEmployee = new Map(attestations.map((a) => [a.employeeId, a]));
 
     // Compute every employee's days unconditionally, then filter — the
-    // inclusion rule (active OR has data) can only be decided after the
+    // inclusion rule (active and employed, OR has data) can only be decided after the
     // period's absences/attendance/ATF are known.
     const built = await Promise.all(
       allEmployees.map(async (employee) => {
@@ -726,8 +740,12 @@ export function createPayrollService(
           days,
         };
 
+        // Active AND employed some day of the month, or has data: an employee
+        // registered ahead of next month, or one who has left but is still
+        // active, has no schedule here (the calendar is clipped to Anställd
+        // från/till) and nothing to attest — they must not block Lås.
         const hasData = employeeSessions.length > 0 || employeeAtf.length > 0 || employeeAbsences.length > 0;
-        return { summary, include: employee.active || hasData };
+        return { summary, include: (employee.active && isEmployedInRange(employee, from, to)) || hasData };
       })
     );
 
@@ -751,7 +769,11 @@ export function createPayrollService(
     async createAbsenceType(input: CreateAbsenceTypeInput) {
       if (await repo.findAbsenceTypeByCode(input.code)) throw new DuplicatePayrollCodeError("code", input.code);
       if (await repo.findAbsenceTypeByName(input.name)) throw new DuplicatePayrollCodeError("name", input.name);
-      return repo.createAbsenceType(input);
+      try {
+        return await repo.createAbsenceType(input);
+      } catch (err) {
+        throw duplicatePayrollCode(err, "absence_types", input) ?? err;
+      }
     },
 
     async updateAbsenceType(id: string, input: UpdateAbsenceTypeInput) {
@@ -763,7 +785,12 @@ export function createPayrollService(
         const byName = await repo.findAbsenceTypeByName(input.name);
         if (byName && byName.id !== id) throw new DuplicatePayrollCodeError("name", input.name);
       }
-      const row = await repo.updateAbsenceType(id, input);
+      let row;
+      try {
+        row = await repo.updateAbsenceType(id, input);
+      } catch (err) {
+        throw duplicatePayrollCode(err, "absence_types", input) ?? err;
+      }
       if (!row) throw new AbsenceTypeNotFoundError(id);
       return row;
     },
@@ -829,7 +856,11 @@ export function createPayrollService(
       validateObWindow(input.startTime, input.endTime);
       if (await repo.findObRuleByCode(input.code)) throw new DuplicatePayrollCodeError("code", input.code);
       if (await repo.findObRuleByName(input.name)) throw new DuplicatePayrollCodeError("name", input.name);
-      return repo.createObRule(input);
+      try {
+        return await repo.createObRule(input);
+      } catch (err) {
+        throw duplicatePayrollCode(err, "ob_rules", input) ?? err;
+      }
     },
 
     async updateObRule(id: string, input: UpdateObRuleInput) {
@@ -846,7 +877,12 @@ export function createPayrollService(
         const byName = await repo.findObRuleByName(input.name);
         if (byName && byName.id !== id) throw new DuplicatePayrollCodeError("name", input.name);
       }
-      const row = await repo.updateObRule(id, input);
+      let row;
+      try {
+        row = await repo.updateObRule(id, input);
+      } catch (err) {
+        throw duplicatePayrollCode(err, "ob_rules", input) ?? err;
+      }
       if (!row) throw new ObRuleNotFoundError(id);
       return row;
     },
@@ -1180,7 +1216,8 @@ export function createPayrollService(
 
     // Freeze the period: computes the basis one last time, stores it verbatim
     // as the snapshot every later read is served from, and blocks all writes
-    // to dates inside the month (via PeriodLockChecker).
+    // to dates inside the month (the period guard in the writers'
+    // transactions; PeriodLockChecker is the cheap pre-check in front of it).
     async lockPeriod(year: number, month: number, userId: string): Promise<PeriodSummary> {
       const { from, to } = periodRange(year, month);
       // Locking a period that is still running would freeze a basis that is
@@ -1190,29 +1227,33 @@ export function createPayrollService(
       const period = await repo.ensurePayrollPeriod(year, month);
       if (period.status === "locked") throw new PayrollPeriodLockedError(from);
 
-      const summary = await computeLivePeriodSummary(year, month);
-      // Open attendance blocks attestation too, so an employee flagged here
-      // can never also be attested — both belong in the same blocker list.
-      const blockers = summary.employees.filter((e) => !e.attested || e.openAttendance).map((e) => e.name);
-      if (blockers.length > 0) throw new UnattestedEmployeesError(blockers);
+      // The basis is computed inside the repository's lock transaction,
+      // AFTER the month is held exclusively: every guarded writer
+      // (payroll-period-guard.ts) has then either committed — and is read
+      // here — or waits and is refused. The `locked` log entry is written in
+      // that transaction too.
+      return repo.lockPayrollPeriodGuarded(
+        year,
+        month,
+        async () => {
+          const summary = await computeLivePeriodSummary(year, month);
+          // Open attendance blocks attestation too, so an employee flagged
+          // here can never also be attested — both belong in the same
+          // blocker list.
+          const blockers = summary.employees.filter((e) => !e.attested || e.openAttendance).map((e) => e.name);
+          if (blockers.length > 0) throw new UnattestedEmployeesError(blockers);
 
-      const lockedAt = new Date();
-      // The stored JSON must stand on its own: getPeriodSummary hands it back
-      // verbatim, so its own status/lockedAt have to describe the locked
-      // period rather than the open one it was computed from. Shallow copy —
-      // the engine's arrays are never mutated (see payroll-day.ts).
-      const snapshot: PeriodSummary = { ...summary, status: "locked", lockedAt: lockedAt.toISOString() };
-
-      await repo.lockPayrollPeriod(period.id, snapshot, lockedAt, userId);
-      await audit.log({
-        entityType: "payroll_period",
-        entityId: periodKey(year, month),
-        action: "locked",
-        detail: { year, month, employeeCount: snapshot.employees.length },
-        userId,
-      });
-
-      return snapshot;
+          const lockedAt = new Date();
+          // The stored JSON must stand on its own: getPeriodSummary hands it
+          // back verbatim, so its own status/lockedAt have to describe the
+          // locked period rather than the open one it was computed from.
+          // Shallow copy — the engine's arrays are never mutated (see
+          // payroll-day.ts).
+          const snapshot: PeriodSummary = { ...summary, status: "locked", lockedAt: lockedAt.toISOString() };
+          return { summary: snapshot, lockedAt, employeeCount: snapshot.employees.length };
+        },
+        { entityId: periodKey(year, month), userId }
+      );
     },
 
     // Reopen a locked period: drops the snapshot (the summary is computed

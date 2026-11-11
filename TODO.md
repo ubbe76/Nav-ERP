@@ -26,6 +26,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — races med litet fönster
 
+- [ ] **Löneperiodens Lås mot odaterade ändringar:** personalkortet (standardschema, övertidsförval, Anställd från/till), dags- och veckoscheman, OB-regler, frånvarokoder och inställningarna kan ändras medan Lås räknar underlaget (tidgranskningen serialiserade bara de daterade skrivarna, `payroll-period-guard.ts`); `attest` läser öppen närvaro utanför transaktionen. OB-regelns namn har inget unikt index (förkontrollen ensam).
 
 ### Låga — otydliga fel, texter och småbeteenden
 

@@ -1,5 +1,14 @@
 import { z } from "zod";
+import { listQuerySchema } from "./list.js";
 import { materialShortageOverrideSchema } from "./manufacturing.js";
+
+// The stamp and attendance history (GET /stamp-sessions and
+// GET /attendance-sessions without ?open=true): the list pattern, search on
+// the employee (and for stamps the order number), filter on one employee.
+export const sessionHistoryQuerySchema = listQuerySchema.extend({
+  employeeId: z.string().uuid().optional(),
+});
+export type SessionHistoryQuery = z.infer<typeof sessionHistoryQuerySchema>;
 
 export const createEmployeeSchema = z.object({
   employeeNumber: z.string().min(1).max(50),
