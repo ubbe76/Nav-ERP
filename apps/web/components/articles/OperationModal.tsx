@@ -565,7 +565,7 @@ function OperationForm({
               <Input id="setupPrice" type="number" size="sm" min="0" step="0.01" value={setupPrice} onChange={(e) => setSetupPrice(e.target.value)} />
             </Field>
             <Field label="Styckpris" htmlFor="unitPrice">
-              <Input id="unitPrice" type="number" size="sm" min="0" step="0.01" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
+              <Input id="unitPrice" type="number" size="sm" min="0" step="any" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
             </Field>
           </FormRow>
           <FormRow>

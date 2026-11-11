@@ -272,6 +272,16 @@ describe("samlingsfakturering — run", () => {
     expect(results[2]).toMatchObject({ customerId: flagged.id, status: "draft", rowCount: 1, error: null });
   });
 
+  it("reports a locked accounting period as Swedish text, keeping the draft", async () => {
+    const c1 = await makeCustomer({ collectiveInvoicing: true });
+    await makeDeliveredOrderRow({ customer: c1, quantity: 1, unitPrice: 10 });
+    await db.execute(sql`UPDATE accounting_periods SET status = 'locked', locked_at = now()`);
+
+    const { results } = await invoiceService.runCollectiveInvoicing({ customerIds: [c1.id], issue: true }, biller);
+    expect(results[0]!.error).toBe("Bokföringsperioden för fakturadatumet är låst");
+    expect(results[0]!.status).toBe("draft");
+  });
+
   it("skips a flagged customer with nothing to invoice", async () => {
     const flagged = await makeCustomer({ collectiveInvoicing: true });
     const { results } = await invoiceService.runCollectiveInvoicing({ customerIds: [flagged.id], issue: true }, biller);

@@ -4,7 +4,7 @@ import { ConfigurationLines } from "../configurator/ConfigurationLines";
 import { VerificationRef } from "../economy/VerificationRef";
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
 import { openDocument } from "../../lib/tabNavigation";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
@@ -19,7 +19,8 @@ import { CostCenterSelect, NO_OBJECT, ProjectSelect } from "../economy/Dimension
 import { dimensionText, useDimensions } from "../../lib/dimensions";
 import { apiFetch } from "../../lib/api";
 import { isEInvoiceAutoSendProblem, type EInvoiceAutoSendOutcome } from "../../lib/einvoice";
-import { formatMoney } from "../../lib/format";
+import { formatMoney, formatUnitPrice } from "../../lib/format";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { formatRate, SEK } from "../../lib/currency";
 import { SekAmountsLine } from "../purchase/InvoiceRateField";
 import { toBasePrice, toBaseQuantity, toUnitPrice, toUnitQuantity } from "../../lib/units";
@@ -58,6 +59,26 @@ import { formatStockholmDateTime } from "../../lib/date";
 // A cancelled (makulerad) payment reads as struck through, like an undone
 // receipt or report elsewhere — the Makulerad pill alone is just another colour.
 const CANCELLED_TEXT = { color: "var(--color-text-muted)", textDecoration: "line-through" } as const;
+
+type InvoiceHeaderValues = { paymentTermId: string; note: string; rate: string };
+
+function invoiceHeaderOf(invoice: InvoiceDetail): InvoiceHeaderValues {
+  return {
+    paymentTermId: invoice.paymentTermId ?? "",
+    note: invoice.note ?? "",
+    // "" = automatic: the invoice date's rate is fetched at Utfärda.
+    rate: invoice.exchangeRateManual && invoice.exchangeRate !== null ? String(Number(invoice.exchangeRate)) : "",
+  };
+}
+
+type RowEditValues = {
+  quantity: string;
+  unitPrice: string;
+  vatCodeId: string;
+  deliveryDate: string;
+  costCenterId: string;
+  projectId: string;
+};
 
 export function InvoiceCard({
   invoice,
@@ -107,8 +128,28 @@ export function InvoiceCard({
   // booked.
   const foreign = invoice.currency !== SEK;
   const [error, setError] = useState<string | null>(null);
+  // Row Spara/Ta bort errors are shown under the row table, next to the
+  // buttons (the action bar's error sits at the top of the card).
+  const [rowError, setRowError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // The header (Betalningsvillkor, Notering, Kurs) is state of the card so
+  // Utfärda can save it first — before, Utfärda issued and booked the STORED
+  // terms and rate while the form showed others, and only a credit note could
+  // undo it (webbgranskningen 2026-11-11).
+  const [header, setHeader] = useState<InvoiceHeaderValues>(() => invoiceHeaderOf(invoice));
+  const [savedHeader, setSavedHeader] = useState<InvoiceHeaderValues>(() => invoiceHeaderOf(invoice));
+  const [headerError, setHeaderError] = useState<string | null>(null);
+  const [headerSaved, setHeaderSaved] = useState(false);
+  const headerDirty =
+    editable &&
+    (header.paymentTermId !== savedHeader.paymentTermId ||
+      header.note.trim() !== savedHeader.note ||
+      header.rate.trim() !== savedHeader.rate);
+  // A row in Ändra with changes, or a filled-in row not yet added: Utfärda
+  // waits for them (the issue would leave them out).
+  const [addRowFilled, setAddRowFilled] = useState(false);
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
+  const [editStart, setEditStart] = useState<RowEditValues | null>(null);
   const [editQuantity, setEditQuantity] = useState("");
   const [editUnitPrice, setEditUnitPrice] = useState("");
   const [editVatCodeId, setEditVatCodeId] = useState("");
@@ -124,6 +165,23 @@ export function InvoiceCard({
   // e-invoice (null = nothing to say).
   const [autoSend, setAutoSend] = useState<EInvoiceAutoSendOutcome | null>(null);
 
+  const editValues: RowEditValues = {
+    quantity: editQuantity,
+    unitPrice: editUnitPrice,
+    vatCodeId: editVatCodeId,
+    deliveryDate: editDeliveryDate,
+    costCenterId: editCostCenterId,
+    projectId: editProjectId,
+  };
+  const rowEditDirty =
+    editable && editingRowId !== null && editStart !== null && JSON.stringify(editValues) !== JSON.stringify(editStart);
+  useUnsavedGuard(headerDirty || rowEditDirty || (editable && addRowFilled));
+  const issueBlocker = rowEditDirty
+    ? "Spara eller avbryt den ändrade raden först."
+    : addRowFilled
+      ? "Lägg till eller töm raden under tabellen först."
+      : null;
+
   const netAmount = invoice.rows.reduce((sum, r) => sum + Number(r.lineAmount), 0);
   const vatAmount = invoice.rows.reduce((sum, r) => sum + Number(r.vatAmount), 0);
   const grossAmount = netAmount + vatAmount;
@@ -137,17 +195,70 @@ export function InvoiceCard({
   const lateInterestCharges = invoice.lateInterestCharges ?? [];
   const lateFeeCharged = lateInterestCharges.some((c) => c.active && Number(c.fee) > 0);
 
+  // PATCH the header; returns the error text, null when saved.
+  async function saveHeader(): Promise<string | null> {
+    const typedRate = header.rate.trim() === "" ? null : Number(header.rate.replace(",", "."));
+    if (foreign && !isCredit && typedRate !== null && !(Number.isFinite(typedRate) && typedRate > 0)) {
+      return "Kursen måste vara ett positivt tal";
+    }
+    setHeaderSaved(false);
+    try {
+      await apiFetch(`/api/v1/invoices/${invoice.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          paymentTermId: header.paymentTermId || null,
+          note: header.note.trim() || null,
+          // null = automatic again (the invoice date's rate at Utfärda).
+          ...(foreign && !isCredit ? { exchangeRate: typedRate } : {}),
+        }),
+      });
+      const sent = { paymentTermId: header.paymentTermId, note: header.note.trim(), rate: header.rate.trim() };
+      setSavedHeader(sent);
+      setHeader(sent);
+      setHeaderSaved(true);
+      router.refresh();
+      return null;
+    } catch (err) {
+      return apiErrorMessage(err, "Kunde inte spara fakturan");
+    }
+  }
+
+  async function runSaveHeader() {
+    if (pending) return;
+    setHeaderError(null);
+    setPending(true);
+    try {
+      setHeaderError(await saveHeader());
+    } finally {
+      setPending(false);
+    }
+  }
+
   async function statusAction(action: "issue" | "cancel") {
     if (action === "issue") {
+      if (issueBlocker) return setError(issueBlocker);
+      // The rate the issue will use: the one typed in (saved first below),
+      // else the invoice date's.
+      const manualRate = headerDirty ? header.rate.trim() !== "" : invoice.exchangeRateManual;
       const rateNote =
-        foreign && !invoice.exchangeRateManual && !isCredit
-          ? ` Kursen sätts till fakturadatumets (dagens) kurs för ${invoice.currency}.`
-          : "";
-      if (!(await confirmDialog(`Fakturan får nummer och låses.${rateNote} Fortsätta?`))) return;
+        foreign && !manualRate && !isCredit ? ` Kursen sätts till fakturadatumets (dagens) kurs för ${invoice.currency}.` : "";
+      const saveNote = headerDirty ? " Ändringarna i fakturahuvudet sparas först." : "";
+      if (!(await confirmDialog(`Fakturan får nummer och låses.${rateNote}${saveNote} Fortsätta?`))) return;
+    } else if (
+      !(await confirmDialog("Avbryta fakturautkastet? En avbruten faktura kan inte öppnas igen.", {
+        confirmLabel: "Avbryt faktura",
+        danger: true,
+      }))
+    ) {
+      return;
     }
     setError(null);
     setPending(true);
     try {
+      if (action === "issue" && headerDirty) {
+        const failed = await saveHeader();
+        if (failed) return setError(failed);
+      }
       const result = await apiFetch<{ einvoiceAutoSend?: EInvoiceAutoSendOutcome | null } | null>(`/api/v1/invoices/${invoice.id}/${action}`, {
         method: "POST",
       });
@@ -184,40 +295,62 @@ export function InvoiceCard({
     }
   }
 
-  function startEditRow(row: InvoiceRow) {
-    setEditingRowId(row.id);
+  async function startEditRow(row: InvoiceRow) {
+    // Switching rows would drop the first row's changes without a word.
+    if (rowEditDirty && !(await confirmDialog("Raden du ändrar har osparade ändringar. Släppa dem?"))) return;
     // Quantity/unitPrice are stored in the article's base unit — shown (and
     // edited) in the row's own display unit, same as the sales order card.
-    setEditQuantity(String(toUnitQuantity(Number(row.quantity), row.unitFactor)));
-    setEditUnitPrice(String(toUnitPrice(Number(row.unitPrice), row.unitFactor)));
-    setEditVatCodeId(row.vatCodeId);
-    setEditDeliveryDate(row.deliveryDate ?? "");
-    setEditCostCenterId(row.costCenterId ?? row.costCenter?.id ?? "");
-    setEditProjectId(row.projectId ?? row.project?.id ?? "");
+    const start: RowEditValues = {
+      quantity: String(toUnitQuantity(Number(row.quantity), row.unitFactor)),
+      unitPrice: String(toUnitPrice(Number(row.unitPrice), row.unitFactor)),
+      vatCodeId: row.vatCodeId,
+      deliveryDate: row.deliveryDate ?? "",
+      costCenterId: row.costCenterId ?? row.costCenter?.id ?? "",
+      projectId: row.projectId ?? row.project?.id ?? "",
+    };
+    setRowError(null);
+    setEditingRowId(row.id);
+    setEditStart(start);
+    setEditQuantity(start.quantity);
+    setEditUnitPrice(start.unitPrice);
+    setEditVatCodeId(start.vatCodeId);
+    setEditDeliveryDate(start.deliveryDate);
+    setEditCostCenterId(start.costCenterId);
+    setEditProjectId(start.projectId);
+  }
+
+  function cancelEditRow() {
+    setEditingRowId(null);
+    setEditStart(null);
+    setRowError(null);
   }
 
   async function saveRow(row: InvoiceRow) {
-    setError(null);
+    if (!editStart) return;
+    // Only what was changed: the display-unit round trip is not exact
+    // (12 st/förp: 24 st → 2 → 24,0001), so re-sending an untouched quantity
+    // or price rewrote it — or gave a linked row 409 over-invoicing — when
+    // only the momskod was changed.
+    const body: Record<string, unknown> = {};
+    // Convert back from the display unit to the stored base unit.
+    if (editQuantity !== editStart.quantity) body.quantity = toBaseQuantity(Number(editQuantity), row.unitFactor);
+    if (editUnitPrice !== editStart.unitPrice) body.unitPrice = toBasePrice(Number(editUnitPrice), row.unitFactor);
+    // The momskod decides the VAT — never the bare rate, which would give an
+    // EU customer svensk moms.
+    if (editVatCodeId !== editStart.vatCodeId) body.vatCodeId = editVatCodeId;
+    if (editDeliveryDate !== editStart.deliveryDate) body.deliveryDate = editDeliveryDate.trim() || null;
+    if (editCostCenterId !== editStart.costCenterId) body.costCenterId = editCostCenterId || null;
+    if (editProjectId !== editStart.projectId) body.projectId = editProjectId || null;
+    if (Object.keys(body).length === 0) return cancelEditRow();
+    setRowError(null);
     setPending(true);
     try {
-      await apiFetch(`/api/v1/invoices/${invoice.id}/rows/${row.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          // Convert back from the display unit to the stored base unit.
-          quantity: toBaseQuantity(Number(editQuantity), row.unitFactor),
-          unitPrice: toBasePrice(Number(editUnitPrice), row.unitFactor),
-          // The momskod decides the VAT — never the bare rate, which would
-          // give an EU customer svensk moms.
-          vatCodeId: editVatCodeId,
-          deliveryDate: editDeliveryDate.trim() || null,
-          costCenterId: editCostCenterId || null,
-          projectId: editProjectId || null,
-        }),
-      });
+      await apiFetch(`/api/v1/invoices/${invoice.id}/rows/${row.id}`, { method: "PATCH", body: JSON.stringify(body) });
       setEditingRowId(null);
+      setEditStart(null);
       router.refresh();
     } catch (err) {
-      setError(apiErrorMessage(err, "Kunde inte spara raden"));
+      setRowError(apiErrorMessage(err, "Kunde inte spara raden"));
     } finally {
       setPending(false);
     }
@@ -225,13 +358,13 @@ export function InvoiceCard({
 
   async function removeRow(row: InvoiceRow) {
     if (!(await confirmDelete(`Ta bort raden "${row.description}"?`))) return;
-    setError(null);
+    setRowError(null);
     setPending(true);
     try {
       await apiFetch(`/api/v1/invoices/${invoice.id}/rows/${row.id}`, { method: "DELETE" });
       router.refresh();
     } catch (err) {
-      setError(apiErrorMessage(err, "Kunde inte ta bort raden"));
+      setRowError(apiErrorMessage(err, "Kunde inte ta bort raden"));
     } finally {
       setPending(false);
     }
@@ -255,7 +388,13 @@ export function InvoiceCard({
       {hasActions ? (
         <DocumentActionBar label={invoice.invoiceNumber ?? "Utkast"} pill={pill} error={error}>
           {canIssue && (
-            <Button type="button" variant="primary" disabled={pending} onClick={() => statusAction("issue")}>
+            <Button
+              type="button"
+              variant="primary"
+              disabled={pending || issueBlocker !== null}
+              title={issueBlocker ?? undefined}
+              onClick={() => statusAction("issue")}
+            >
               Utfärda
             </Button>
           )}
@@ -279,9 +418,10 @@ export function InvoiceCard({
           )}
           {canIssue && (
             <Button type="button" variant="danger" disabled={pending} onClick={() => statusAction("cancel")}>
-              Avbryt
+              Avbryt faktura
             </Button>
           )}
+          {canIssue && issueBlocker && <span style={{ alignSelf: "center" }}>{issueBlocker}</span>}
         </DocumentActionBar>
       ) : (
         <FormError margin="below">{error}</FormError>
@@ -405,7 +545,20 @@ export function InvoiceCard({
 
       {/* Header — editable in draft, read-only otherwise (snapshot address once issued). */}
       {editable ? (
-        <HeaderForm invoice={invoice} paymentTerms={paymentTerms} onSaved={() => router.refresh()} />
+        <HeaderForm
+          invoice={invoice}
+          paymentTerms={paymentTerms}
+          values={header}
+          onChange={(next) => {
+            setHeader(next);
+            setHeaderSaved(false);
+          }}
+          onSave={() => void runSaveHeader()}
+          pending={pending}
+          dirty={headerDirty}
+          saved={headerSaved && !headerDirty}
+          error={headerError}
+        />
       ) : (
         <Card maxWidth={520} style={{ marginBottom: 20 }}>
           <FormStack>
@@ -500,14 +653,14 @@ export function InvoiceCard({
                 return isEditing ? (
                   <Input
                     type="number"
-                    step="0.01"
+                    step="any"
                     size="sm"
                     aria-label="À-pris"
                     value={editUnitPrice}
                     onChange={(e) => setEditUnitPrice(e.target.value)}
                   />
                 ) : (
-                  formatMoney(toUnitPrice(Number(row.unitPrice), row.unitFactor))
+                  formatUnitPrice(toUnitPrice(Number(row.unitPrice), row.unitFactor))
                 );
               case "vatCode":
                 return isEditing ? (
@@ -578,13 +731,13 @@ export function InvoiceCard({
                     <Button type="button" size="small" variant="primary" disabled={pending} onClick={() => saveRow(row)}>
                       Spara
                     </Button>
-                    <Button type="button" size="small" variant="ghost" onClick={() => setEditingRowId(null)}>
+                    <Button type="button" size="small" variant="ghost" onClick={cancelEditRow}>
                       Avbryt
                     </Button>
                   </span>
                 ) : (
                   <span style={{ display: "inline-flex", gap: 8 }}>
-                    <Button type="button" size="small" variant="ghost" onClick={() => startEditRow(row)}>
+                    <Button type="button" size="small" variant="ghost" disabled={pending} onClick={() => void startEditRow(row)}>
                       Ändra
                     </Button>
                     <Button type="button" size="small" variant="danger" disabled={pending} onClick={() => removeRow(row)}>
@@ -600,6 +753,7 @@ export function InvoiceCard({
       ) : (
         <p>Inga rader tillagda än.</p>
       )}
+      <FormError>{rowError}</FormError>
 
       <div style={{ display: "flex", gap: 24, marginTop: 12, flexWrap: "wrap" }}>
         <span>Nettobelopp: {formatMoney(netAmount)} {invoice.currency}</span>
@@ -763,6 +917,7 @@ export function InvoiceCard({
             vatCodes={vatCodes}
             customerVat={customerVat}
             onDone={() => router.refresh()}
+            onFilledChange={setAddRowFilled}
           />
         </div>
       )}
@@ -916,55 +1071,38 @@ function ReminderDialog({
   );
 }
 
+// Controlled by the card (its header state is what Utfärda saves first and
+// what the unsaved-changes guard watches).
 function HeaderForm({
   invoice,
   paymentTerms,
-  onSaved,
+  values,
+  onChange,
+  onSave,
+  pending,
+  dirty,
+  saved,
+  error,
 }: {
   invoice: InvoiceDetail;
   paymentTerms: RegisterEntry[];
-  onSaved: () => void;
+  values: InvoiceHeaderValues;
+  onChange: (next: InvoiceHeaderValues) => void;
+  onSave: () => void;
+  pending: boolean;
+  dirty: boolean;
+  saved: boolean;
+  error: string | null;
 }) {
-  const [paymentTermId, setPaymentTermId] = useState(invoice.paymentTermId ?? "");
-  const [note, setNote] = useState(invoice.note ?? "");
   // Valuta: a rate typed in on the draft ("" = automatic: the invoice date's
   // rate is fetched at Utfärda). A credit note has its source invoice's rate.
   const foreign = invoice.currency !== SEK;
   const isCredit = invoice.type === "credit";
-  const [rate, setRate] = useState(
-    invoice.exchangeRateManual && invoice.exchangeRate !== null ? String(Number(invoice.exchangeRate)) : ""
-  );
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const rate = values.rate;
 
-  async function save(e: FormEvent) {
+  function save(e: FormEvent) {
     e.preventDefault();
-    setError(null);
-    setSaved(false);
-    const typedRate = rate.trim() === "" ? null : Number(rate.replace(",", "."));
-    if (foreign && !isCredit && typedRate !== null && !(Number.isFinite(typedRate) && typedRate > 0)) {
-      setError("Kursen måste vara ett positivt tal");
-      return;
-    }
-    setPending(true);
-    try {
-      await apiFetch(`/api/v1/invoices/${invoice.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          paymentTermId: paymentTermId || null,
-          note: note.trim() || null,
-          // null = automatic again (the invoice date's rate at Utfärda).
-          ...(foreign && !isCredit ? { exchangeRate: typedRate } : {}),
-        }),
-      });
-      setSaved(true);
-      onSaved();
-    } catch (err) {
-      setError(apiErrorMessage(err, "Kunde inte spara fakturan"));
-    } finally {
-      setPending(false);
-    }
+    onSave();
   }
 
   return (
@@ -972,7 +1110,7 @@ function HeaderForm({
       <Form onSubmit={save}>
         <FormError>{error}</FormError>
         <Field label="Betalningsvillkor" htmlFor="hdrPaymentTerm">
-          <Select id="hdrPaymentTerm" value={paymentTermId} onChange={(e) => setPaymentTermId(e.target.value)}>
+          <Select id="hdrPaymentTerm" value={values.paymentTermId} onChange={(e) => onChange({ ...values, paymentTermId: e.target.value })}>
             <option value="">— Ingen —</option>
             {paymentTerms.map((t) => (
               <option key={t.id} value={t.id}>
@@ -982,7 +1120,7 @@ function HeaderForm({
           </Select>
         </Field>
         <Field label="Notering" htmlFor="hdrNote">
-          <Input id="hdrNote" value={note} onChange={(e) => setNote(e.target.value)} />
+          <Input id="hdrNote" value={values.note} onChange={(e) => onChange({ ...values, note: e.target.value })} />
         </Field>
         {foreign && !isCredit && (
           <>
@@ -995,7 +1133,7 @@ function HeaderForm({
                 size="sm"
                 placeholder="Automatisk"
                 value={rate}
-                onChange={(e) => setRate(e.target.value)}
+                onChange={(e) => onChange({ ...values, rate: e.target.value })}
               />
               <FormHint>
                 {rate.trim() === ""
@@ -1007,7 +1145,7 @@ function HeaderForm({
             </Field>
             {rate.trim() !== "" && (
               <div>
-                <Button type="button" variant="ghost" size="small" onClick={() => setRate("")}>
+                <Button type="button" variant="ghost" size="small" onClick={() => onChange({ ...values, rate: "" })}>
                   Använd automatisk kurs
                 </Button>
               </div>
@@ -1026,9 +1164,10 @@ function HeaderForm({
           </Field>
         )}
         <FormActions>
-          <Button type="submit" variant="primary" disabled={pending}>
+          <Button type="submit" variant="primary" disabled={pending || !dirty}>
             {pending ? "Sparar…" : "Spara faktura"}
           </Button>
+          {dirty && <span style={{ alignSelf: "center" }}>Osparade ändringar</span>}
           {saved && <span style={{ alignSelf: "center" }}>Sparat</span>}
         </FormActions>
       </Form>
@@ -1043,6 +1182,7 @@ function AddRowForm({
   vatCodes,
   customerVat,
   onDone,
+  onFilledChange,
 }: {
   invoiceId: string;
   // Valuta: the invoice's currency — the unit price is typed in it.
@@ -1050,6 +1190,8 @@ function AddRowForm({
   vatCodes: VatCodeView[];
   customerVat: SalesVatCustomer | null;
   onDone: () => void;
+  // Tells the card a row is being filled in (Utfärda waits for it).
+  onFilledChange?: (filled: boolean) => void;
 }) {
   const [description, setDescription] = useState("");
   const [article, setArticle] = useState<Article | null>(null);
@@ -1072,6 +1214,10 @@ function AddRowForm({
   const dims = useDimensions();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const filled = description.trim() !== "" || article !== null || unitPrice.trim() !== "";
+  useEffect(() => {
+    onFilledChange?.(filled);
+  }, [filled, onFilledChange]);
 
   function handleArticleChange(next: Article | null) {
     setArticle(next);
@@ -1169,7 +1315,7 @@ function AddRowForm({
             label={`${currency === SEK ? "À-pris" : `À-pris (${currency})`}${article && unitCode ? ` per ${unitCode}` : ""}`}
             htmlFor="rowUnitPrice"
           >
-            <Input id="rowUnitPrice" type="number" step="0.01" size="sm" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
+            <Input id="rowUnitPrice" type="number" step="any" size="sm" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
           </Field>
         </FormRow>
 

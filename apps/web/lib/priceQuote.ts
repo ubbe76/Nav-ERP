@@ -117,13 +117,18 @@ export function omitUnitPriceOnCreate(priceTouched: boolean, quote: CalculatedQu
   return !priceTouched && isChainQuote(quote);
 }
 
-// Ändra: only when the quantity changed (the chain's price depends on it) and
-// the fields are untouched. With the same quantity the price and the rabatt
-// are sent as they are, which keeps the row's origin.
+// Ändra: untouched fields are left out. With the same quantity the server
+// keeps the row's price, rabatt and origin; with a new quantity and a chain
+// suggestion it re-prices the row itself. Sending the untouched price "as it
+// is" went through the display unit (0,1947 kr/g back to 194,70 kr/kg for a
+// stored 194,68) and made the row handwritten when only the date was changed
+// (webbgranskningen 2026-11-11). A new quantity without a chain suggestion
+// still sends the shown price.
 export function omitUnitPriceOnEdit(options: {
   priceTouched: boolean;
   quantityChanged: boolean;
   quote: CalculatedQuoteLike | null | undefined;
 }): boolean {
-  return options.quantityChanged && !options.priceTouched && isChainQuote(options.quote);
+  if (options.priceTouched) return false;
+  return !options.quantityChanged || isChainQuote(options.quote);
 }

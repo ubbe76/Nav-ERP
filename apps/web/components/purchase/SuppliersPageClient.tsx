@@ -15,6 +15,7 @@ import type { Paged, Supplier } from "../../lib/types";
 import { safeReturnTo, SUPPLIER_PREFILL_KEYS, type SupplierPrefill } from "../../lib/invoiceScan";
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
+import { useCan } from "../PermissionsProvider";
 
 export function SuppliersPageClient({ suppliers, pageSize }: { suppliers: Paged<Supplier>; pageSize: number }) {
   const router = useRouter();
@@ -32,6 +33,7 @@ export function SuppliersPageClient({ suppliers, pageSize }: { suppliers: Paged<
     return values;
   });
   const [returnTo] = useState(() => safeReturnTo(searchParams.get("returnTo")));
+  const canImport = useCan()(["admin"]);
   const [modalOpen, setModalOpen] = useState(prefill !== null);
   const [usePrefill, setUsePrefill] = useState(prefill !== null);
 
@@ -54,9 +56,11 @@ export function SuppliersPageClient({ suppliers, pageSize }: { suppliers: Paged<
           <Link href="/inkop/ordrar" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
             Inköpsordrar
           </Link>
-          <Link href="/leverantorer/import" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
-            Importera
-          </Link>
+          {canImport && (
+            <Link href="/leverantorer/import" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
+              Importera
+            </Link>
+          )}
           <Button
             type="button"
             variant="primary"

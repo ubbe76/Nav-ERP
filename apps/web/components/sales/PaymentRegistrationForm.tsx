@@ -81,6 +81,7 @@ export function PaymentRegistrationForm({
   const [customerId, setCustomerId] = useState("");
   const [rows, setRows] = useState<OpenInvoiceRow[]>([]);
   const [rowsLoading, setRowsLoading] = useState(false);
+  const [rowsError, setRowsError] = useState<string | null>(null);
   const [includedIds, setIncludedIds] = useState<Set<string>>(new Set());
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [ocrValue, setOcrValue] = useState("");
@@ -127,6 +128,7 @@ export function PaymentRegistrationForm({
     setAmountSek("");
     setAmountSekTouched(false);
     setBankFee("");
+    setRowsError(null);
     if (!customerId) return;
     let cancelled = false;
     setRowsLoading(true);
@@ -141,8 +143,10 @@ export function PaymentRegistrationForm({
         }
         pendingPreselectRef.current = null;
       })
-      .catch(() => {
-        if (!cancelled) setRows([]);
+      .catch((err) => {
+        if (cancelled) return;
+        setRows([]);
+        setRowsError(apiErrorMessage(err, "Kunde inte hämta kundens öppna poster"));
       })
       .finally(() => {
         if (!cancelled) setRowsLoading(false);
@@ -327,8 +331,6 @@ export function PaymentRegistrationForm({
   return (
     <Card maxWidth="none" style={{ marginBottom: 20 }}>
       <Form onSubmit={submit}>
-        <FormError>{error}</FormError>
-
         <FormRow>
           <Field label="Kund" htmlFor="paymentCustomer">
             <Select
@@ -355,6 +357,13 @@ export function PaymentRegistrationForm({
                 size="md"
                 value={ocrValue}
                 onChange={(e) => setOcrValue(e.target.value)}
+                onKeyDown={(e) => {
+                  // A barcode scanner ends with Enter — fetch the invoice, never submit the payment.
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void fetchByOcr();
+                  }
+                }}
                 placeholder="OCR-nummer"
               />
               <Button type="button" variant="secondary" onClick={fetchByOcr}>
@@ -366,7 +375,8 @@ export function PaymentRegistrationForm({
         <FormError>{ocrError}</FormError>
 
         {customerId && rowsLoading && <TableSkeleton label="Hämtar öppna poster…" rows={3} />}
-        {customerId && !rowsLoading && rows.length === 0 && <p>Kunden har inga öppna poster.</p>}
+        {customerId && !rowsLoading && rowsError && <FormError>{rowsError}</FormError>}
+        {customerId && !rowsLoading && !rowsError && rows.length === 0 && <p>Kunden har inga öppna poster.</p>}
 
         {rows.length > 0 && (
           <Table<OpenInvoiceRow>
@@ -551,6 +561,7 @@ export function PaymentRegistrationForm({
           <Input id="paymentNote" value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
 
+        <FormError>{error}</FormError>
         <FormActions>
           <Button type="submit" variant="primary" disabled={pending || hasInvalidAmount}>
             {pending ? "Registrerar…" : "Registrera betalning"}

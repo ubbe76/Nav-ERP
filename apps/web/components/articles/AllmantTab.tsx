@@ -339,7 +339,7 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
                 type="number"
                 size="sm"
                 min="0"
-                step="0.01"
+                step="any"
                 value={salesPrice}
                 onChange={(e) => setSalesPrice(e.target.value)}
               />

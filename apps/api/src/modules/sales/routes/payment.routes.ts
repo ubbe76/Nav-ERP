@@ -13,6 +13,7 @@ import type { PaymentService } from "../service/payment.service.js";
 import {
   CustomerPaymentAmountSekError,
   InvalidOcrError,
+  OpenInvoiceNotFoundByOcrError,
   InvoiceNotOpenError,
   PaymentMixedCurrenciesError,
   PaymentAlreadyCancelledError,
@@ -110,7 +111,7 @@ export async function paymentRoutes(app: FastifyInstance, opts: { service: Payme
   app.get<{ Params: { ocr: string } }>("/open-invoices/by-ocr/:ocr", async (req, reply) => {
     try {
       const invoice = await service.findOpenByOcr(req.params.ocr);
-      if (!invoice) return reply.code(404).send({ error: "No open invoice carries that OCR reference" });
+      if (!invoice) return reply.code(404).send(errorBody(new OpenInvoiceNotFoundByOcrError(req.params.ocr)));
       return invoice;
     } catch (err) {
       return paymentError(err, reply);

@@ -17,7 +17,7 @@ import { SearchPicker } from "../ui/SearchPicker";
 import { API_URL, apiFetch } from "../../lib/api";
 import { documentRateSourceText, documentSekAmounts, formatRate, SEK } from "../../lib/currency";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { formatMoney, formatQuantity } from "../../lib/format";
+import { formatMoney, formatUnitPrice, formatQuantity } from "../../lib/format";
 import { useInvoiceRate } from "../../lib/useExchangeRate";
 import { purchaseOrderFallbackRate } from "../../lib/purchaseOrderFallbackRate";
 import {
@@ -266,7 +266,7 @@ export function SupplierInvoiceCard({
               case "quantity":
                 return formatQuantity(row.quantity);
               case "unitPrice":
-                return formatMoney(row.unitPrice);
+                return formatUnitPrice(row.unitPrice);
               case "lineAmount":
                 return formatMoney(row.lineAmount);
               case "vatCode":
@@ -737,7 +737,7 @@ function AddRowForm({
             <Input id="rowQuantity" type="number" min="0" step="any" size="sm" required value={quantity} onChange={(e) => setQuantity(e.target.value)} />
           </Field>
           <Field label="À-pris" htmlFor="rowUnitPrice">
-            <Input id="rowUnitPrice" type="number" step="0.01" size="sm" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
+            <Input id="rowUnitPrice" type="number" step="any" size="sm" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
           </Field>
         </FormRow>
 
@@ -777,7 +777,7 @@ function AddRowForm({
               <option value="">— Ingen matchning —</option>
               {matchOptions.map((o) => (
                 <option key={o.id} value={o.id}>
-                  {o.orderNumber} · {formatQuantity(o.quantity)} à {formatMoney(o.unitPrice)} {o.currency}
+                  {o.orderNumber} · {formatQuantity(o.quantity)} à {formatUnitPrice(o.unitPrice)} {o.currency}
                   {o.deliveryDate ? ` · leverans ${o.deliveryDate}` : ""}
                 </option>
               ))}

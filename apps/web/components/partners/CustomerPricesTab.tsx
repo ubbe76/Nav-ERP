@@ -13,6 +13,7 @@ import { currencyLabel, SEK } from "../../lib/currency";
 import type { Article, ArticleGroup, CustomerPrice } from "../../lib/types";
 import { Form, FormActions, FormError } from "../ui/Form";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { formatUnitPrice } from "../../lib/format";
 
 // C3 Kundpriser — fliken Priser: kundens egna pris-/rabattregler
 // (customer_prices). Server-fetched like KontakterTab (prices/articleGroups
@@ -81,10 +82,7 @@ export function CustomerPricesTab({
               return Number(price.fromQuantity).toLocaleString("sv-SE");
             case "unitPrice":
               return price.unitPrice != null
-                ? Number(price.unitPrice).toLocaleString("sv-SE", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })
+                ? formatUnitPrice(price.unitPrice)
                 : "–";
             case "discountPercent":
               return price.discountPercent != null
@@ -92,10 +90,7 @@ export function CustomerPricesTab({
                 : "–";
             case "setupPrice":
               return price.setupPrice != null && Number(price.setupPrice) > 0
-                ? Number(price.setupPrice).toLocaleString("sv-SE", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })
+                ? formatUnitPrice(price.setupPrice)
                 : "—";
             case "id":
               return (
@@ -340,7 +335,7 @@ function CustomerPriceForm({
             id="customerPriceUnitPrice"
             type="number"
             min="0"
-            step="0.01"
+            step="any"
             size="sm"
             value={unitPrice}
             onChange={(e) => setUnitPrice(e.target.value)}
@@ -365,7 +360,7 @@ function CustomerPriceForm({
           id="customerPriceSetupPrice"
           type="number"
           min="0"
-          step="0.01"
+          step="any"
           size="sm"
           value={setupPrice}
           onChange={(e) => setSetupPrice(e.target.value)}

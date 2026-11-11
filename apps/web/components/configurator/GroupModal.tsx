@@ -348,7 +348,7 @@ function GroupForm({
                   id="cfg-group-ppu"
                   type="number"
                   min="0"
-                  step="0.01"
+                  step="any"
                   value={pricePerUnit}
                   onChange={(e) => setPricePerUnit(e.target.value)}
                 />

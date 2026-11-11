@@ -16,7 +16,7 @@ import { DocumentHeaderCard } from "../documents/DocumentHeaderCard";
 import { DocumentActionBar } from "../documents/DocumentActionBar";
 import { TermsFields, termsFrom, termsLabel, termsPayload, type TermsRegisters, type TermsValue } from "../documents/TermsFields";
 import { toUnitPrice, toUnitQuantity } from "../../lib/units";
-import { formatMoney } from "../../lib/format";
+import { formatMoney, formatUnitPrice } from "../../lib/format";
 import { apiFetch } from "../../lib/api";
 import {
   INQUIRY_STATUS_PILL,
@@ -320,13 +320,13 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
                   <Input
                     type="number"
                     min="0"
-                    step="0.01"
+                    step="any"
                     size="sm"
                     value={editPrice}
                     onChange={(e) => setEditPrice(e.target.value)}
                   />
                 ) : row.unitPrice !== null ? (
-                  formatMoney(toUnitPrice(Number(row.unitPrice), row.unitFactor))
+                  formatUnitPrice(toUnitPrice(Number(row.unitPrice), row.unitFactor))
                 ) : (
                   "–"
                 );
@@ -604,7 +604,7 @@ function AddInquiryRowForm({
             id="inquiryRowPrice"
             type="number"
             min="0"
-            step="0.01"
+            step="any"
             size="sm"
             value={unitPrice}
             onChange={(e) => setUnitPrice(e.target.value)}

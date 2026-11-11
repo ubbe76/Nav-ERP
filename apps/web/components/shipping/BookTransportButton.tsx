@@ -25,7 +25,14 @@ export function BookTransportButton({
   const can = useCan();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The shipment this button created: a second click would be refused (the
+  // delivery is on a shipment), so the link replaces the button at once — also
+  // when the shipment opened in a new tab and this page stays.
+  const [created, setCreated] = useState<{ id: string; number: string } | null>(null);
 
+  if (!shipment && created) {
+    return <Link href={`/forsaljning/forsandelser/${created.id}`}>{created.number}</Link>;
+  }
   if (shipment) {
     return (
       <Link href={`/forsaljning/forsandelser/${shipment.shipmentId}`}>
@@ -47,6 +54,7 @@ export function BookTransportButton({
           body: JSON.stringify({ deliveryIds: [deliveryId] }),
         }
       );
+      setCreated({ id: created.id, number: created.shipmentNumber });
       if (openDocument(`/forsaljning/forsandelser/${created.id}`, (href) => router.push(href), "Försändelse")) {
         setPending(false);
         router.refresh();

@@ -4,7 +4,7 @@ import { confirmDelete } from "../../lib/confirm";
 import { useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { formatMoney } from "../../lib/format";
+import { formatMoney, formatUnitPrice } from "../../lib/format";
 import type { ConfiguratorGroupDetail, ConfiguratorOperationDetail } from "../../lib/configurator";
 import { Button } from "../ui/Button";
 import { FormError } from "../ui/Form";
@@ -92,7 +92,7 @@ export function OperationSection({ articleId, groups, operations, canEdit, onCha
               return (
                 <>
                   {timeCell(op.runTimePerUnit, op.runFormula)}
-                  {op.unitPrice !== null && <div className={styles.muted}>Styckpris {formatMoney(op.unitPrice)}</div>}
+                  {op.unitPrice !== null && <div className={styles.muted}>Styckpris {formatUnitPrice(op.unitPrice)}</div>}
                 </>
               );
             case "actions":

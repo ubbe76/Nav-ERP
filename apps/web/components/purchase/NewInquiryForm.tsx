@@ -235,7 +235,7 @@ function InquiryRowFields({
             id={`inquiryPrice-${index}`}
             type="number"
             min="0"
-            step="0.01"
+            step="any"
             size="sm"
             value={row.unitPrice}
             onChange={(e) => onChange({ unitPrice: e.target.value })}

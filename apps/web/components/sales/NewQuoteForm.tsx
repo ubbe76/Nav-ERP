@@ -63,6 +63,10 @@ interface QuoteRow {
   // decides whether unitPrice is left out of the create call, and it carries
   // the text and the warning shown under the price.
   quote?: PriceQuote | null;
+  // A price suggestion for the row's article/quantity is being fetched: Lägg
+  // till rad and the submit button wait for it so a half-priced row is never
+  // saved.
+  pricing?: boolean;
   // Set when the article came from Konfigurera (Varianten … skapades / fanns redan).
   variantInfo: { articleNumber: string; created: boolean } | null;
   // Beställningsvara (to_order): the template stays the row's article, the choices travel with the row.
@@ -233,6 +237,18 @@ export function NewQuoteForm({
     setRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   }
 
+  // A new customer prices every untouched row again: the old customer's
+  // price and discount must not stay behind as if typed in by hand when the
+  // new customer's chain has no match.
+  function handleCustomerChange(next: Customer | null) {
+    setCustomer(next);
+    setRows((prev) =>
+      prev.map((r) => (r.priceTouched || r.configuration ? r : { ...r, unitPrice: "0", discountPercent: "0", quote: null })),
+    );
+  }
+
+  const pricingInFlight = rows.some((r) => r.pricing);
+
   function addRow() {
     setRows((prev) => [
       ...prev,
@@ -250,6 +266,7 @@ export function NewQuoteForm({
       setError("Välj kund");
       return;
     }
+    if (pricingInFlight) return;
     if (rows.some((r) => r.article === null)) {
       setError("Välj artikel på alla rader");
       return;
@@ -321,7 +338,7 @@ export function NewQuoteForm({
             id="customerId"
             endpoint="/api/v1/customers"
             value={customer}
-            onChange={setCustomer}
+            onChange={handleCustomerChange}
             formatLabel={(c) => `${c.customerNumber} — ${c.name}`}
             placeholder="Sök kundnummer eller namn…"
             emptyText="Inga kunder matchar sökningen"
@@ -458,14 +475,14 @@ export function NewQuoteForm({
           <span>Eget leveransdatum per rad</span>
         </label>
         <div style={{ marginTop: 10 }}>
-          <Button type="button" variant="secondary" size="small" onClick={addRow}>
+          <Button type="button" variant="secondary" size="small" disabled={pricingInFlight} onClick={addRow}>
             + Lägg till rad
           </Button>
         </div>
       </div>
 
       <FormActions>
-        <Button type="submit" variant="primary" disabled={pending}>
+        <Button type="submit" variant="primary" disabled={pending || pricingInFlight}>
           {pending ? "Skapar…" : mode === "order" ? "Skapa kundorder" : "Skapa offert"}
         </Button>
       </FormActions>
@@ -559,7 +576,10 @@ function QuoteRowFields({
         article: article.configuratorMode === "to_order" ? article : null,
         unitId: article.salesUnitId ?? "",
         priceTouched: false,
+        unitPrice: "0",
+        discountPercent: "0",
         quote: null,
+        pricing: false,
         variantInfo: null,
         configuration: null,
       });
@@ -568,7 +588,19 @@ function QuoteRowFields({
       setConfigureKey((k) => k + 1);
       return;
     }
-    onChange({ article, unitId: article?.salesUnitId ?? "", priceTouched: false, quote: null, variantInfo: null, configuration: null });
+    // The previous article's price and discount go: they would otherwise be
+    // saved as if typed in by hand on the new article.
+    onChange({
+      article,
+      unitId: article?.salesUnitId ?? "",
+      priceTouched: false,
+      unitPrice: "0",
+      discountPercent: "0",
+      quote: null,
+      pricing: article !== null,
+      variantInfo: null,
+      configuration: null,
+    });
   }
 
   function handleConfigured(draft: RowConfigurationDraft) {
@@ -591,7 +623,10 @@ function QuoteRowFields({
       article: variant,
       unitId: variant.salesUnitId ?? "",
       priceTouched: false, // the price-quote effect now prices the variant through its chain
+      unitPrice: "0",
+      discountPercent: "0",
       quote: null,
+      pricing: true,
       variantInfo: { articleNumber: variant.articleNumber, created },
     });
   }
@@ -619,24 +654,33 @@ function QuoteRowFields({
   const selfCostPerUnit = row.configuration ? configuredSelfCost : templateSelfCost;
 
   useEffect(() => {
-    if (row.priceTouched || !articleId || !customerId || baseQuantity === null || row.configuration || !pricingKnown) return;
+    if (row.priceTouched || !articleId || !customerId || baseQuantity === null || row.configuration || !pricingKnown) {
+      // Nothing to price (or the operator took over): drop a request in flight
+      // and release the buttons.
+      requestSeq.current++;
+      if (row.pricing) onChange({ pricing: false });
+      return;
+    }
     const seq = ++requestSeq.current;
+    if (!row.pricing) onChange({ pricing: true });
     apiFetch<PriceQuote>(priceQuotePath({ customerId, articleId, quantity: baseQuantity, currency, exchangeRate }))
       .then((quote) => {
         if (seq !== requestSeq.current) return; // superseded by a newer article/quantity edit
         if (priceTouchedNow.current) return;
         if (!quote.price) {
-          onChange({ quote }); // no chain match — the fields stay as they are, only a warning may show
+          onChange({ quote, pricing: false }); // no chain match — the fields stay as they are, only a warning may show
           return;
         }
         onChange({
           quote,
+          pricing: false,
           unitPrice: String(toUnitPrice(quote.price.unitPrice, currentFactor)),
           discountPercent: String(quote.price.discountPercent),
         });
       })
       .catch(() => {
         // Best-effort prefill — silently leave the fields untouched on error.
+        if (seq === requestSeq.current) onChange({ pricing: false });
       });
     // currentFactor is a dep too — a unit switch mid-flight must bump seq so
     // a response computed for the OLD factor never lands in a field now
@@ -651,6 +695,7 @@ function QuoteRowFields({
   useEffect(() => {
     if (!configuredSelection || !articleId || baseQuantity === null || !pricingKnown) return;
     const seq = ++requestSeq.current;
+    onChange({ pricing: true });
     apiFetch<ConfiguratorEvaluation>(`/api/v1/configurator/${articleId}/evaluate`, {
       method: "POST",
       body: JSON.stringify({
@@ -664,15 +709,20 @@ function QuoteRowFields({
     })
       .then((evaluation) => {
         if (seq !== requestSeq.current) return;
-        if (priceTouchedNow.current || evaluation.price.unitPrice === null) return;
+        if (priceTouchedNow.current || evaluation.price.unitPrice === null) {
+          onChange({ pricing: false });
+          return;
+        }
         onChange({
           quote: null,
+          pricing: false,
           unitPrice: String(toUnitPrice(evaluation.price.unitPrice, currentFactor)),
           discountPercent: String(evaluation.price.discountPercent),
         });
       })
       .catch(() => {
         // Best-effort, like the price-quote prefill.
+        if (seq === requestSeq.current) onChange({ pricing: false });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configuredSelection, articleId, baseQuantity, customerId, row.priceTouched, currentFactor, currency, exchangeRate, pricingKnown]);
@@ -754,11 +804,11 @@ function QuoteRowFields({
             id={`unitPrice-${index}`}
             type="number"
             min="0"
-            step="0.01"
+            step="any"
             size="sm"
             required
             value={row.unitPrice}
-            onChange={(e) => onChange({ unitPrice: e.target.value, priceTouched: true })}
+            onChange={(e) => onChange({ unitPrice: e.target.value, priceTouched: true, pricing: false })}
           />
         </Field>
         <Field label="Rabatt (%)" htmlFor={`discountPercent-${index}`}>
@@ -769,7 +819,7 @@ function QuoteRowFields({
             step="any"
             size="xs"
             value={row.discountPercent}
-            onChange={(e) => onChange({ discountPercent: e.target.value, priceTouched: true })}
+            onChange={(e) => onChange({ discountPercent: e.target.value, priceTouched: true, pricing: false })}
           />
         </Field>
       </FormRow>

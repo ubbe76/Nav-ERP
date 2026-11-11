@@ -1,7 +1,7 @@
 "use client";
 
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCan } from "../PermissionsProvider";
@@ -17,6 +17,7 @@ import { Table } from "../ui/Table";
 import { ParcelsTable, newParcelDraft, toParcelPayload, type ParcelDraft } from "./ParcelsTable";
 import { RatesDialog } from "./RatesDialog";
 import { apiFetch } from "../../lib/api";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import {
   errorBody,
   formatDate,
@@ -62,6 +63,11 @@ function Facts({ rows }: { rows: { label: string; value: ReactNode }[] }) {
 // "Postnummer Ort" as one line, skipping whichever part is missing.
 const postalLine = (postalCode: string | null, city: string | null) => [postalCode, city].filter(Boolean).join(" ");
 
+// The parcels as the API would get them — what "unsaved" compares.
+function parcelsKey(parcels: ParcelDraft[]): string {
+  return JSON.stringify(parcels.map(toParcelPayload));
+}
+
 export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
   const router = useRouter();
   const [s, setS] = useState(initial);
@@ -80,7 +86,29 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
 
   // Parcels editor
   const [parcels, setParcels] = useState<ParcelDraft[]>(toDrafts(initial));
+  const [parcelsError, setParcelsError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
+
+  // Unsaved edits (webbgranskningen 2026-11-11): Hämta priser and Boka send
+  // nothing — the API prices and books the SAVED parcels, recipient and
+  // pickup — so a weight changed from 10 to 25 kg but not saved was booked at
+  // 10 kg. They wait until the edits are saved, and saving another part of
+  // the card no longer overwrites unsaved parcels.
+  const parcelsDirty = draft && parcelsKey(parcels) !== parcelsKey(toDrafts(s));
+  const parcelsDirtyNow = useRef(parcelsDirty);
+  parcelsDirtyNow.current = parcelsDirty;
+  const recipientKey = `recipient-${s.id}-${JSON.stringify([s.recipientName, s.recipientAddressLine1, s.recipientAddressLine2, s.recipientPostalCode, s.recipientCity, s.recipientCountry, s.recipientContactName, s.recipientPhone, s.recipientEmail, s.recipientPrivatePerson, s.senderReference, s.receiverReference])}`;
+  const pickupKey = `pickup-${s.pickupDate}-${s.pickupFrom}-${s.pickupTo}`;
+  const [recipientDirty, setRecipientDirty] = useState(false);
+  const [pickupDirty, setPickupDirty] = useState(false);
+  // A new key re-mounts the form with the stored values — nothing unsaved then.
+  useEffect(() => setRecipientDirty(false), [recipientKey]);
+  useEffect(() => setPickupDirty(false), [pickupKey]);
+  const unsaved = draft && (parcelsDirty || recipientDirty || pickupDirty);
+  useUnsavedGuard(unsaved);
+  const unsavedText = unsaved
+    ? `Spara ${[parcelsDirty && "kollina", recipientDirty && "mottagaren", pickupDirty && "upphämtningen"].filter(Boolean).join(", ")} innan du hämtar priser eller bokar — Sendify får det som är sparat.`
+    : null;
 
   // Add följesedel
   const [openDeliveries, setOpenDeliveries] = useState<OpenDelivery[]>([]);
@@ -92,9 +120,11 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
       .catch(() => setOpenDeliveries([]));
   }, [draft, s.customerId, s.deliveries.length]);
 
-  function apply(next: ShipmentDetail) {
+  // replaceParcels: the call changed the parcels (Spara kollin, Föreslå igen,
+  // a följesedel added or removed). Otherwise unsaved parcel edits stay.
+  function apply(next: ShipmentDetail, replaceParcels = false) {
     setS(next);
-    setParcels(toDrafts(next));
+    if (replaceParcels || !parcelsDirtyNow.current) setParcels(toDrafts(next));
     setRates(next.rates);
   }
 
@@ -190,19 +220,23 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
   }
 
   async function saveParcels() {
-    const next = await run(
-      () =>
-        apiFetch<ShipmentDetail>(`/api/v1/shipments/${s.id}/parcels`, {
-          method: "PUT",
-          body: JSON.stringify({
-            parcels: parcels.map(toParcelPayload),
-          }),
+    // The error next to Spara kollin, at the bottom of the card.
+    setParcelsError(null);
+    setNotice(null);
+    setPending(true);
+    try {
+      const next = await apiFetch<ShipmentDetail>(`/api/v1/shipments/${s.id}/parcels`, {
+        method: "PUT",
+        body: JSON.stringify({
+          parcels: parcels.map(toParcelPayload),
         }),
-      "Kunde inte spara kollina"
-    );
-    if (next) {
-      apply(next);
+      });
+      apply(next, true);
       setNotice("Kollina sparade");
+    } catch (err) {
+      setParcelsError(shippingErrorText(err, "Kunde inte spara kollina"));
+    } finally {
+      setPending(false);
     }
   }
 
@@ -210,26 +244,33 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
     if (!(await confirmDialog("Ersätta kollina med ett nytt förslag?"))) return;
     const result = await run(() => post<{ shipment: ShipmentDetail; warnings: string[] }>("/parcels/suggest"), "Kunde inte föreslå kollin");
     if (result) {
-      apply(result.shipment);
+      apply(result.shipment, true);
       setWarnings(result.warnings);
     }
   }
 
+  // A följesedel added or removed gives a new parcel suggestion.
+  async function confirmParcelsReplaced(): Promise<boolean> {
+    return !parcelsDirty || confirmDialog("Kollina föreslås om när följesedlarna ändras, och dina osparade ändringar i kollina försvinner. Fortsätta?");
+  }
+
   async function addDelivery(deliveryId: string) {
+    if (!(await confirmParcelsReplaced())) return;
     const result = await run(() => post<{ shipment: ShipmentDetail; warnings: string[] }>("/deliveries", { deliveryId }), "Kunde inte lägga till följesedeln");
     if (result) {
-      apply(result.shipment);
+      apply(result.shipment, true);
       setWarnings(result.warnings);
     }
   }
 
   async function removeDelivery(deliveryId: string) {
+    if (!(await confirmParcelsReplaced())) return;
     const result = await run(
       () => apiFetch<{ shipment: ShipmentDetail; warnings: string[] }>(`/api/v1/shipments/${s.id}/deliveries/${deliveryId}`, { method: "DELETE" }),
       "Kunde inte ta bort följesedeln"
     );
     if (result) {
-      apply(result.shipment);
+      apply(result.shipment, true);
       setWarnings(result.warnings);
     }
   }
@@ -258,6 +299,7 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
     );
     if (next) {
       apply(next);
+      setRecipientDirty(false);
       setNotice("Sparat");
     }
   }
@@ -271,7 +313,10 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
         ? { pickupDate: date }
         : { pickupFrom: String(f.get("pickupFrom")), pickupTo: String(f.get("pickupTo")) };
     const next = await run(() => patch(body), "Kunde inte spara upphämtningen");
-    if (next) apply(next);
+    if (next) {
+      apply(next);
+      setPickupDirty(false);
+    }
   }
 
   async function saveCustomerPrice(e: FormEvent<HTMLFormElement>) {
@@ -293,11 +338,11 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
         <span className={styles.toolbarSpacer} />
         {draft && (
           <>
-            <Button type="button" variant="primary" disabled={pending || s.bookingInProgress} onClick={fetchRates}>
+            <Button type="button" variant="primary" disabled={pending || s.bookingInProgress || unsaved} title={unsavedText ?? undefined} onClick={fetchRates}>
               Hämta priser
             </Button>
             {s.freightProduct && (
-              <Button type="button" variant="secondary" disabled={pending || s.bookingInProgress} onClick={() => book({ useSelection: true })}>
+              <Button type="button" variant="secondary" disabled={pending || s.bookingInProgress || unsaved} title={unsavedText ?? undefined} onClick={() => book({ useSelection: true })}>
                 Boka vald produkt
               </Button>
             )}
@@ -325,6 +370,7 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
       </div>
       <div className={styles.messages}>
         {s.bookingInProgress && <FormHint>Bokning pågår…</FormHint>}
+        {unsavedText && <FormHint>{unsavedText}</FormHint>}
         <FormError>{error}</FormError>
         {notice && <FormHint>{notice}</FormHint>}
         {s.status === "cancelled" && <FormHint>Avbruten {s.cancelledAt ? formatDateTime(s.cancelledAt) : ""}.</FormHint>}
@@ -335,7 +381,7 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
           <Card maxWidth="none" className={styles.panel}>
             <SectionHeading>Mottagare</SectionHeading>
             {draft ? (
-              <Form onSubmit={saveRecipient} key={`recipient-${s.id}-${JSON.stringify([s.recipientName, s.recipientAddressLine1, s.recipientAddressLine2, s.recipientPostalCode, s.recipientCity, s.recipientCountry, s.recipientContactName, s.recipientPhone, s.recipientEmail, s.recipientPrivatePerson, s.senderReference, s.receiverReference])}`}>
+              <Form onSubmit={saveRecipient} onChange={() => setRecipientDirty(true)} key={recipientKey}>
                 <fieldset disabled={pending} style={{ border: "none", padding: 0, margin: 0, minWidth: 0 }}>
                   <div className={styles.stack}>
                     {/* The company name is the longest text on the card — the full width is its. */}
@@ -442,7 +488,7 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
           <Card maxWidth="none" className={styles.panel}>
             <SectionHeading>Upphämtning</SectionHeading>
             {draft ? (
-              <Form onSubmit={savePickup} key={`pickup-${s.pickupDate}-${s.pickupFrom}-${s.pickupTo}`}>
+              <Form onSubmit={savePickup} onChange={() => setPickupDirty(true)} key={pickupKey}>
                 <fieldset disabled={pending} style={{ border: "none", padding: 0, margin: 0, minWidth: 0 }}>
                   <div className={styles.stack}>
                     <FormRow columns={3}>
@@ -552,11 +598,15 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
       {warnings.length > 0 && <FormHint>{warnings.join(" · ")}</FormHint>}
       <ParcelsTable parcels={parcels} editable={draft} disabled={pending} onChange={setParcels} />
       {draft && (
-        <FormActions>
-          <Button type="button" variant="secondary" disabled={pending} onClick={saveParcels}>
-            Spara kollin
-          </Button>
-        </FormActions>
+        <>
+          <FormError>{parcelsError}</FormError>
+          <FormActions>
+            <Button type="button" variant="secondary" disabled={pending || !parcelsDirty} onClick={saveParcels}>
+              Spara kollin
+            </Button>
+            {parcelsDirty && <span style={{ alignSelf: "center" }}>Osparade ändringar</span>}
+          </FormActions>
+        </>
       )}
 
       {tracked && (

@@ -118,6 +118,15 @@ export class InvalidOcrError extends Error {
   }
 }
 
+// A well-formed OCR reference that no open item carries — 404 with a code, so
+// the web shows its own Swedish text.
+export class OpenInvoiceNotFoundByOcrError extends Error {
+  constructor(ocr: string) {
+    super(`No open invoice carries the OCR reference ${ocr}`);
+    this.name = "OpenInvoiceNotFoundByOcrError";
+  }
+}
+
 // An unbooked manual omföring already exists on the payment's verification, so
 // the cancellation's own omföring collided with the partial unique index. Same
 // condition (and same name) as the supplier invoice's cancellation.
