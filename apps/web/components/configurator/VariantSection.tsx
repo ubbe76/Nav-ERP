@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { formatMoney } from "../../lib/format";
+import { formatUnitPrice } from "../../lib/format";
 import { formatQuantity } from "../../lib/stampSessions";
 import type { ConfiguratorGroupDetail, VariantListRow } from "../../lib/configurator";
 import { Button } from "../ui/Button";
@@ -12,6 +12,7 @@ import { GatedLink } from "../ui/GatedLink";
 import { HelpLink } from "../ui/HelpLink";
 import { SectionHeading } from "../ui/SectionHeading";
 import { Table } from "../ui/Table";
+import { VARIANTS_CHANGED_EVENT } from "./CreateVariantModal";
 import { CreateVariantsModal } from "./CreateVariantsModal";
 
 interface Props {
@@ -40,6 +41,15 @@ export function VariantSection({ articleId, groups, defaultQuantity, canEdit }: 
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // A variant created from Testa konfiguration (a sibling section).
+  useEffect(() => {
+    const onChanged = (e: Event) => {
+      if ((e as CustomEvent<{ articleId?: string }>).detail?.articleId === articleId) void reload();
+    };
+    window.addEventListener(VARIANTS_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(VARIANTS_CHANGED_EVENT, onChanged);
+  }, [articleId, reload]);
 
   return (
     <div>
@@ -86,9 +96,9 @@ export function VariantSection({ articleId, groups, defaultQuantity, canEdit }: 
             case "name":
               return r.name;
             case "salesPrice":
-              return r.salesPrice === null ? "—" : formatMoney(r.salesPrice);
+              return r.salesPrice === null ? "—" : formatUnitPrice(r.salesPrice);
             case "standardCost":
-              return r.standardCost === null ? "—" : formatMoney(r.standardCost);
+              return r.standardCost === null ? "—" : formatUnitPrice(r.standardCost);
             case "onHand":
               return formatQuantity(Number(r.onHand));
             case "active":

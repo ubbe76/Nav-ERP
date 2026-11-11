@@ -185,12 +185,12 @@ export function TestConfigurationPanel({
             )}
             <dl className={styles.prices}>
               <dt>Grundpris</dt>
-              <dd>{result.price.base === null ? "—" : formatMoney(result.price.base)}</dd>
+              <dd>{result.price.base === null ? "—" : formatUnitPrice(result.price.base)}</dd>
               {result.price.additions.map((a) => (
                 <PriceLine key={`${a.groupCode}-${a.label}`} label={a.label} amount={a.amount} />
               ))}
               <dt className={styles.total}>Totalt</dt>
-              <dd className={styles.total}>{result.price.unitPrice === null ? "—" : formatMoney(result.price.unitPrice)}</dd>
+              <dd className={styles.total}>{result.price.unitPrice === null ? "—" : formatUnitPrice(result.price.unitPrice)}</dd>
               {result.price.discountPercent > 0 && (
                 <DiscountLines unitPrice={result.price.unitPrice} discountPercent={result.price.discountPercent} />
               )}
@@ -382,7 +382,7 @@ function DerivationView({ derivation, stale }: { derivation: ConfiguratorDerivat
             <dt className={styles.total}>Tillverkningskostnad</dt>
             <dd className={styles.total}>{formatMoney(costing.manufacturingCost)}</dd>
             <dt>Tillverkningskostnad per st</dt>
-            <dd>{formatMoney(costing.manufacturingCostPerUnit)}</dd>
+            <dd>{formatUnitPrice(costing.manufacturingCostPerUnit)}</dd>
             {/* TO sits outside TVK — it is added to the sales price last. */}
             <dt>TO-påslag</dt>
             <dd>{formatMoney(costing.overhead)}</dd>

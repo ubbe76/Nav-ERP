@@ -1,5 +1,7 @@
 "use client";
 
+import { confirmLeave } from "../../lib/unsavedGuard";
+import { formatQuantity } from "../../lib/format";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
@@ -40,7 +42,13 @@ export function ArticleCardHeader({ article, totalOnHand, blockedOnHand = 0 }: {
             formatLabel={(picked) => picked.articleNumber}
             onChange={(next) => {
               // null = the user cleared/started typing; only navigate on a pick.
-              if (next && next.id !== article.id) router.push(`/artiklar/${next.id}`);
+              // Through the unsaved-changes guard: router.push skipped it, so
+              // an unsaved Allmänt went without a question.
+              if (next && next.id !== article.id) {
+                void confirmLeave().then((leave) => {
+                  if (leave) router.push(`/artiklar/${next.id}`);
+                });
+              }
             }}
           />
         </div>
@@ -62,12 +70,12 @@ export function ArticleCardHeader({ article, totalOnHand, blockedOnHand = 0 }: {
         <div className={styles.field}>
           <div className={styles.label}>Lagersaldo</div>
           <div className={`${styles.value} num`}>
-            {totalOnHand.toLocaleString("sv-SE", { maximumFractionDigits: 3 })}{" "}
+            {formatQuantity(totalOnHand)}{" "}
             <span className={styles.unit}>{article.unit}</span>
           </div>
           {blockedOnHand > 0 && (
             <div className={styles.blockedNote}>
-              varav spärrat {blockedOnHand.toLocaleString("sv-SE", { maximumFractionDigits: 3 })} {article.unit}
+              varav spärrat {formatQuantity(blockedOnHand)} {article.unit}
             </div>
           )}
         </div>

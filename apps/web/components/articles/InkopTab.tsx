@@ -333,6 +333,19 @@ function ArticleSupplierForm({
   );
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // The prices are per base unit (grundenhet) — shown in the labels.
+  const [baseUnit, setBaseUnit] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ unit: string }>(`/api/v1/articles/${articleId}`)
+      .then((a) => {
+        if (!cancelled) setBaseUnit(a.unit);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [articleId]);
 
   // Default the currency to the chosen supplier's currency.
   function handleSupplierChange(s: Supplier | null) {
@@ -346,18 +359,29 @@ function ArticleSupplierForm({
 
   // Quantity 1 is the Pris field itself, so a step must start above 1 and
   // the quantities must be distinct — the same rules the API enforces.
-  function parseBreaks(): { fromQuantity: number; price: number }[] | null {
+  function parseBreaks(): { breaks: { fromQuantity: number; price: number }[] } | { error: string } {
     // A row added with + Lägg till steg and left blank is simply dropped.
-    const parsed = breaks
-      .filter((b) => b.fromQuantity.trim() !== "" || b.price.trim() !== "")
-      .map((b) => ({ fromQuantity: Number(b.fromQuantity), price: Number(b.price) }));
+    const parsed: { fromQuantity: number; price: number }[] = [];
     const quantities = new Set<number>();
-    for (const b of parsed) {
-      if (!Number.isFinite(b.fromQuantity) || b.fromQuantity <= 1 || quantities.has(b.fromQuantity)) return null;
-      if (!Number.isFinite(b.price) || b.price < 0) return null;
-      quantities.add(b.fromQuantity);
+    for (const [index, b] of breaks.entries()) {
+      const qtyText = b.fromQuantity.trim();
+      const priceText = b.price.trim();
+      if (qtyText === "" && priceText === "") continue;
+      const step = `Staffelsteg ${index + 1}`;
+      if (qtyText === "" || priceText === "") {
+        return { error: `${step}: fyll i både Från antal och Pris, eller ta bort steget` };
+      }
+      const fromQuantity = Number(qtyText);
+      const price = Number(priceText);
+      if (!Number.isFinite(fromQuantity) || fromQuantity <= 1) {
+        return { error: `${step}: Från antal måste vara större än 1` };
+      }
+      if (quantities.has(fromQuantity)) return { error: `${step}: Från antal används redan av ett annat steg` };
+      if (!Number.isFinite(price) || price < 0) return { error: `${step}: Pris måste vara ett tal som inte är negativt` };
+      quantities.add(fromQuantity);
+      parsed.push({ fromQuantity, price });
     }
-    return parsed;
+    return { breaks: parsed };
   }
 
   async function submit(e: FormEvent) {
@@ -366,11 +390,12 @@ function ArticleSupplierForm({
       setError("Välj en leverantör");
       return;
     }
-    const priceBreaks = parseBreaks();
-    if (!priceBreaks) {
-      setError("Från antal i staffeln måste vara större än 1 och unikt, och priset ett tal");
+    const result = parseBreaks();
+    if ("error" in result) {
+      setError(result.error);
       return;
     }
+    const priceBreaks = result.breaks;
     if (priceBreaks.length > SUPPLIER_PRICE_BREAKS_MAX) {
       setError(`Staffeln kan ha högst ${SUPPLIER_PRICE_BREAKS_MAX} steg`);
       return;
@@ -413,8 +438,6 @@ function ArticleSupplierForm({
 
   return (
     <Form onSubmit={submit}>
-      <FormError>{error}</FormError>
-
       {existing ? (
         <Field label="Leverantör">
           <Input value={existing.supplierName} disabled />
@@ -443,7 +466,7 @@ function ArticleSupplierForm({
       </Field>
 
       <FormRow>
-        <Field label="Pris" htmlFor="articleSupplierPrice">
+        <Field label={baseUnit ? `Pris (${currency}/${baseUnit})` : "Pris"} htmlFor="articleSupplierPrice">
           <Input
             id="articleSupplierPrice"
             type="number"
@@ -479,8 +502,8 @@ function ArticleSupplierForm({
                 min="0"
                 step="any"
                 size="sm"
-                placeholder="Från antal"
-                aria-label="Från antal"
+                placeholder={baseUnit ? `Från antal (${baseUnit})` : "Från antal"}
+                aria-label={baseUnit ? `Från antal (${baseUnit})` : "Från antal"}
                 value={b.fromQuantity}
                 onChange={(e) => updateBreak(index, { fromQuantity: e.target.value })}
               />
@@ -489,8 +512,8 @@ function ArticleSupplierForm({
                 min="0"
                 step="any"
                 size="sm"
-                placeholder="Pris"
-                aria-label="Pris"
+                placeholder={baseUnit ? `Pris (${currency}/${baseUnit})` : "Pris"}
+                aria-label={baseUnit ? `Pris (${currency}/${baseUnit})` : "Pris"}
                 value={b.price}
                 onChange={(e) => updateBreak(index, { price: e.target.value })}
               />
@@ -542,6 +565,7 @@ function ArticleSupplierForm({
         </Field>
       </FormRow>
 
+      <FormError>{error}</FormError>
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>
           {pending ? "Sparar…" : existing ? "Spara" : "Lägg till"}

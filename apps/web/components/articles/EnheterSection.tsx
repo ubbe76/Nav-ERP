@@ -29,14 +29,19 @@ export function EnheterSection({
   onChanged: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
 
   async function removeRow(row: ArticleUnit) {
+    if (removing) return;
     setError(null);
+    setRemoving(true);
     try {
       await apiFetch(`/api/v1/articles/${articleId}/units/${row.id}`, { method: "DELETE" });
       onChanged();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte ta bort enheten"));
+    } finally {
+      setRemoving(false);
     }
   }
 
@@ -61,6 +66,7 @@ export function EnheterSection({
               row={row}
               onChanged={onChanged}
               onRemove={() => removeRow(row)}
+              removing={removing}
             />
           ))
         )}
@@ -91,12 +97,14 @@ function ArticleUnitRow({
   row,
   onChanged,
   onRemove,
+  removing,
 }: {
   articleId: string;
   baseUnitCode: string;
   row: ArticleUnit;
   onChanged: () => void;
   onRemove: () => void;
+  removing: boolean;
 }) {
   const [factor, setFactor] = useState(String(Number(row.quantityPerBase)));
   const [pending, setPending] = useState(false);
@@ -148,7 +156,7 @@ function ArticleUnitRow({
             {pending ? "Sparar…" : "Spara"}
           </Button>
         )}
-        <Button type="button" variant="secondary" onClick={onRemove}>
+        <Button type="button" variant="secondary" onClick={onRemove} disabled={removing}>
           Ta bort
         </Button>
       </div>

@@ -49,6 +49,10 @@ export function RuleModal({ open, onClose, rule, ...rest }: RuleModalProps) {
   );
 }
 
+// The Kräver target shares the condition row form; its key must not collide
+// with the conditions' 0, 1, … (ids are built from it).
+const TARGET_KEY = -1;
+
 function RuleForm({ articleId, groups, rule, onClose, onChanged }: Omit<RuleModalProps, "open">) {
   const [effect, setEffect] = useState<ConfiguratorRuleEffect>(rule?.effect ?? "exclude");
   const [conditions, setConditions] = useState<ConditionDraft[]>(
@@ -64,7 +68,7 @@ function RuleForm({ articleId, groups, rule, onClose, onChanged }: Omit<RuleModa
   const [max, setMax] = useState(limitTarget?.max === undefined ? "" : String(limitTarget.max));
   // require target — a condition in the same row form
   const [requireTarget, setRequireTarget] = useState<ConditionDraft>(
-    rule?.effect === "require" ? fromCondition(0, rule.target as ConfiguratorCondition) : emptyDraft(0),
+    rule?.effect === "require" ? fromCondition(TARGET_KEY, rule.target as ConfiguratorCondition) : emptyDraft(TARGET_KEY),
   );
   const [message, setMessage] = useState(rule?.message ?? "");
   const [error, setError] = useState<string | null>(null);

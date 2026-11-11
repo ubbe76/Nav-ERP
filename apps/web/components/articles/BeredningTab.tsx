@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "../../lib/api";
+import { formatQuantity } from "../../lib/format";
 import { DrawingsPanel } from "./RevisionerTab";
 import { SectionHeading } from "../ui/SectionHeading";
 import { BeredningView } from "./BeredningView";
@@ -62,7 +63,7 @@ function TreeNode({
           {node.isPhantom ? " · Fantom" : ""}
         </span>
         {node.costingOnly && <span className={styles.kalkylBadge}>Kalkyl</span>}
-        {node.quantity !== null && <span className={styles.treeQty}>× {Number(node.quantity)}</span>}
+        {node.quantity !== null && <span className={styles.treeQty}>× {formatQuantity(node.quantity)}</span>}
       </button>
       {node.children.map((child) => (
         <TreeNode

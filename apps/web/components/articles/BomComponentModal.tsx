@@ -84,10 +84,17 @@ function ComponentForm({
   onNewArticle,
 }: Omit<BomComponentModalProps, "open" | "onClose">) {
   const [component, setComponent] = useState<Article | null>(null);
-  const [quantity, setQuantity] = useState(
-    editing ? String(toUnitQuantity(Number(editing.quantity), editing.unitFactor)) : "1"
-  );
-  const [unitId, setUnitId] = useState(editing?.unitId ?? ""); // "" = the component's base unit
+  // What Ändra opened with: the row's quantity shown with the factor SAVED on
+  // the row (its snapshot), and the row's unit. An untouched quantity and unit
+  // are never sent back (webbgranskningen 2026-11-11) — the server re-reads
+  // the unit's CURRENT factor for a sent unit, so a factor changed since
+  // (5 → 6) turned 50 kg = 10 st into 8,3333 st when only Pos. was edited,
+  // and a factor under 1 drifted on every save (0,3333 kg → 0,0133 rulle →
+  // 0,3325 kg).
+  const startQuantity = editing ? String(toUnitQuantity(Number(editing.quantity), editing.unitFactor)) : "1";
+  const startUnitId = editing?.unitId ?? "";
+  const [quantity, setQuantity] = useState(startQuantity);
+  const [unitId, setUnitId] = useState(startUnitId); // "" = the component's base unit
   const [operationId, setOperationId] = useState(editing ? (editing.routingOperationId ?? "") : presetOperationId);
   const [position, setPosition] = useState(editing?.position ?? "");
   const [costingOnly, setCostingOnly] = useState(editing?.costingOnly ?? false);
@@ -116,7 +123,12 @@ function ComponentForm({
 
   const unitOptions = useUnitOptions(component);
   const alreadyInStructure = !editing && component ? alreadyInStructureText(bom, component.id) : null;
-  const currentFactor = unitOptions.find((o) => o.value === unitId)?.factor ?? 1;
+  // The factor the shown quantity is expressed in: the row's own snapshot
+  // until the unit is switched (the unit's current factor may differ).
+  const currentFactor =
+    editing && unitId === startUnitId
+      ? (editing.unitFactor !== null && editing.unitFactor !== undefined ? Number(editing.unitFactor) : 1)
+      : (unitOptions.find((o) => o.value === unitId)?.factor ?? 1);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -128,11 +140,14 @@ function ComponentForm({
     setPending(true);
     try {
       if (editing) {
+        const unitChanged = unitId !== startUnitId;
         await apiFetch(`/api/v1/articles/${articleId}/bom/${editing.id}`, {
           method: "PATCH",
           body: JSON.stringify({
-            quantity: Number(quantity),
-            unitId: unitId === "" ? null : unitId,
+            // The quantity is in the shown unit; with a changed unit the
+            // server converts with that unit's current factor, as intended.
+            ...(unitChanged || quantity !== startQuantity ? { quantity: Number(quantity) } : {}),
+            ...(unitChanged ? { unitId: unitId === "" ? null : unitId } : {}),
             routingOperationId: operationId || null,
             position: position.trim(),
             costingOnly,

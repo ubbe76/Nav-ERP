@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
 import { Field, Input, Select, Toggle } from "../ui/Field";
@@ -63,6 +63,19 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
     setGroupId(next);
     if (!seriesTouched) setSeriesKey(groups.find((g) => g.id === next)?.numberSeriesKey ?? "");
   }
+  // What the last "Kopiera från → Information" pre-filled, per field.
+  const prefilled = useRef<{
+    type?: ArticleType;
+    isPhantom?: boolean;
+    unitId?: string;
+    standardCost?: string;
+    groupId?: string;
+    articleCodeId?: string;
+    defaultLocationId?: string;
+  }>({});
+  // Set once the article exists, so a retry after a failed "Skapa och koppla"
+  // only redoes the link and never creates a second article.
+  const createdArticle = useRef<Article | null>(null);
   const [quantity, setQuantity] = useState("1");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -97,19 +110,51 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
   function confirmCopy(source: Article, chosenParts: ArticleCopyPart[]) {
     const informationIsNew =
       chosenParts.includes("information") && (copySource?.id !== source.id || !copyParts.includes("information"));
-    // Safety net: only parts that apply to the type the article ends up with.
-    const resultingType = informationIsNew ? source.type : type;
-    const parts = chosenParts.filter((part) => articleCopyPartAllowed(part, resultingType));
+    // A field the user filled in themselves wins over the source's value: it
+    // counts as the user's when it differs from both the form's default and
+    // what an earlier pick pre-filled.
+    const applied = prefilled.current;
+    const free = (current: string | boolean, def: string | boolean, key: keyof typeof applied) =>
+      current === def || current === applied[key];
+    const next: typeof applied = {};
+    let resultingType = type;
     if (informationIsNew) {
-      setType(source.type);
-      setIsPhantom(source.isPhantom);
-      setUnitId(source.unit === "st" ? "" : source.unitId);
-      setStandardCost(source.standardCost === null ? "" : String(Number(source.standardCost)));
-      changeGroup(source.groupId ?? "");
-      setArticleCodeId(source.articleCodeId ?? "");
-      // Only an active location is in the list; otherwise *** (standard).
-      setDefaultLocationId(locations.some((l) => l.id === source.defaultLocationId) ? source.defaultLocationId! : "");
+      if (free(type, "purchased", "type")) {
+        resultingType = source.type;
+        next.type = source.type;
+        setType(source.type);
+      }
+      if (free(isPhantom, false, "isPhantom")) {
+        next.isPhantom = source.isPhantom;
+        setIsPhantom(source.isPhantom);
+      }
+      if (free(unitId, "", "unitId")) {
+        next.unitId = source.unit === "st" ? "" : source.unitId;
+        setUnitId(next.unitId);
+      }
+      if (free(standardCost, "", "standardCost")) {
+        next.standardCost = source.standardCost === null ? "" : String(Number(source.standardCost));
+        setStandardCost(next.standardCost);
+      }
+      if (free(groupId, "", "groupId")) {
+        next.groupId = source.groupId ?? "";
+        changeGroup(next.groupId);
+      }
+      if (free(articleCodeId, "", "articleCodeId")) {
+        next.articleCodeId = source.articleCodeId ?? "";
+        setArticleCodeId(next.articleCodeId);
+      }
+      // Only an active, unblocked location is offered; otherwise *** (standard).
+      if (free(defaultLocationId, "", "defaultLocationId")) {
+        next.defaultLocationId = outflowLocationChoices(locations).some((l) => l.id === source.defaultLocationId)
+          ? source.defaultLocationId!
+          : "";
+        setDefaultLocationId(next.defaultLocationId);
+      }
+      prefilled.current = { ...applied, ...next };
     }
+    // Safety net: only parts that apply to the type the article ends up with.
+    const parts = chosenParts.filter((part) => articleCopyPartAllowed(part, resultingType));
     setCopySource(source);
     setCopyParts(parts);
     setDroppedParts([]);
@@ -136,10 +181,14 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    if (attachToArticleId && !(Number(quantity) > 0)) {
+      setError("Antal i strukturen måste vara större än 0");
+      return;
+    }
     setPending(true);
     let article: Article;
     try {
-      article = await apiFetch<Article>("/api/v1/articles", {
+      article = createdArticle.current ?? await apiFetch<Article>("/api/v1/articles", {
         method: "POST",
         body: JSON.stringify({
           articleNumber: articleNumber.trim() === "" ? undefined : articleNumber.trim(),
@@ -157,6 +206,7 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
           copyFrom: copySource && copyParts.length > 0 ? { articleId: copySource.id, parts: copyParts } : undefined,
         }),
       });
+      createdArticle.current = article;
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte skapa artikeln"));
       setPending(false);
@@ -171,7 +221,7 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
         });
       } catch (err) {
         setError(
-          `Artikeln skapades men kunde inte kopplas in i strukturen: ${apiErrorMessage(err, "okänt fel")}`
+          `Artikeln skapades men kunde inte kopplas in i strukturen: ${apiErrorMessage(err, "okänt fel")}. Försök igen — artikeln skapas inte på nytt.`
         );
         setPending(false);
         return;
@@ -219,7 +269,6 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
   return (
     <>
       <Form onSubmit={handleSubmit}>
-        <FormError>{error}</FormError>
 
         <FormRow>
           <Field label="Artikelnummer" htmlFor="articleNumber">
@@ -380,6 +429,7 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
           </Field>
         )}
 
+        <FormError>{error}</FormError>
         <FormActions>
           <Button type="submit" variant="primary" disabled={pending}>
             {pending ? "Skapar…" : attachToArticleId ? "Skapa och koppla" : "Skapa artikel"}
