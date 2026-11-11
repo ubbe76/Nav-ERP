@@ -29,6 +29,8 @@ import {
 import { getOrCreateFallbackLocation } from "../../stock/service/location-resolver.js";
 import { recordStandardCostHistory } from "../../article/repository/article.repository.js";
 import { bomRowCreatedAt } from "../../article/repository/bom-write.js";
+import { getOrCreateDefaultUnitId } from "../../article/repository/default-unit.js";
+import { gtinForms, gtinKey } from "@navet/shared";
 import type { ArticleImportPlan, ExistingArticle } from "../service/articles.js";
 import { applyImportedRevisions, type ImportedRevisions } from "./article-revisions.js";
 import { applyPrimarySupplierLeadTimes, applyPrimarySuppliers } from "./article-primary-suppliers.js";
@@ -426,16 +428,22 @@ export function createImportRepository(db: Db | Tx) {
     ...createStockBalanceImportRepository(db),
     // Everything the plan builder needs about the numbers that occur in the
     // file. Chunked like the inserts — the file may hold 10 000 numbers.
-    // Streckkod (#4): barcode -> the article number that has it.
+    // Streckkod (#4): the GTIN (gtinKey — a UPC-A and the EAN-13 with a
+    // leading 0 are one code) -> the article number that has it, in any of
+    // its stored forms. Codes that are no valid GTIN are not looked up (the
+    // planner refuses them).
     async articlesByBarcode(codes: string[]): Promise<Map<string, string>> {
       const map = new Map<string, string>();
-      for (const part of chunk([...new Set(codes)])) {
+      for (const part of chunk([...new Set(codes.flatMap((code) => gtinForms(code)))])) {
         if (part.length === 0) continue;
         const rows = await db
           .select({ barcode: articles.barcode, articleNumber: articles.articleNumber })
           .from(articles)
           .where(inArray(articles.barcode, part));
-        for (const row of rows) if (row.barcode) map.set(row.barcode, row.articleNumber);
+        for (const row of rows) {
+          const key = row.barcode ? gtinKey(row.barcode) : null;
+          if (key) map.set(key, row.articleNumber);
+        }
       }
       return map;
     },
@@ -500,12 +508,12 @@ export function createImportRepository(db: Db | Tx) {
 
     // The same fallbacks createArticle resolves per article, resolved ONCE
     // per import: the "st" unit and the "***" location, both created on
-    // first use (mirrors article.repository's getOrCreateDefaultUnitId).
+    // first use — the article module's getOrCreateDefaultUnitId, the ONE
+    // implementation (also when "Styck" is already another unit's name).
     async resolveDefaults(): Promise<{ unitId: string; locationId: string }> {
-      await db.insert(units).values({ code: "st", name: "Styck" }).onConflictDoNothing();
-      const [st] = await db.select({ id: units.id }).from(units).where(eq(units.code, "st"));
+      const unitId = await getOrCreateDefaultUnitId(db);
       const locationId = await getOrCreateFallbackLocation(db);
-      return { unitId: st!.id, locationId };
+      return { unitId, locationId };
     },
 
     // The whole import is ONE transaction: register auto-creation, creates

@@ -338,8 +338,13 @@ describe("configurator routes", () => {
       expect([invalid.statusCode, invalid.json().code]).toEqual([400, "configurator-invalid-configuration"]);
       expect(invalid.json().details.length).toBeGreaterThan(0);
 
+      // Konfiguratorgranskningen 2026-11-11: a malformed selection is the
+      // engine's 400 with the message as details on every resolve path (it
+      // was invalid-configurator-variant-set, and a 500 on the order rows).
       const unknownGroup = await app.inject({ method: "POST", url: `/configurator/${article.id}/variant`, payload: { selection: { NOPE: "A" } } });
-      expect([unknownGroup.statusCode, unknownGroup.json().code]).toEqual([400, "invalid-configurator-variant-set"]);
+      expect([unknownGroup.statusCode, unknownGroup.json().code, unknownGroup.json().details]).toEqual([
+        400, "configurator-invalid-configuration", ["Valgruppen NOPE finns inte"],
+      ]);
 
       const other = await makeArticle({ salesPrice: 1000 });
       await app.inject({ method: "POST", url: `/articles/${other.id}/configurator`, payload: { mode: "to_order" } });

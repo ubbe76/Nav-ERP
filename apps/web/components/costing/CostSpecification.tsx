@@ -28,6 +28,7 @@ import type {
 } from "../../lib/types";
 import styles from "./CostSpecification.module.css";
 import { SectionHeading } from "../ui/SectionHeading";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // Typed as a total Record rather than `as const`: a new member of the enum then
 // fails to compile here instead of rendering "undefined" into the sentence.
@@ -80,7 +81,7 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
         if (!cancelled) setDetail(d);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Kunde inte hämta kalkylen");
+        if (!cancelled) setError(apiErrorMessage(err, "Kunde inte hämta kalkylen"));
       });
     return () => {
       cancelled = true;
@@ -109,7 +110,7 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
       setApplied(target === "standard" ? "Standardpriset är uppdaterat." : "Försäljningspriset är uppdaterat.");
       onApplied?.();
     } catch (err) {
-      setApplyError(err instanceof Error ? err.message : `Kunde inte uppdatera ${label}`);
+      setApplyError(apiErrorMessage(err, `Kunde inte uppdatera ${label}`));
     } finally {
       setApplying(null);
     }

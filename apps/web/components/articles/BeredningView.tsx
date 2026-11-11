@@ -127,7 +127,7 @@ export function BeredningView({
       await apiFetch(`/api/v1/articles/${articleId}/routing/${op.id}`, { method: "DELETE" });
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ta bort operationen");
+      setError(apiErrorMessage(err, "Kunde inte ta bort operationen"));
     } finally {
       setPending(false);
     }
@@ -146,7 +146,7 @@ export function BeredningView({
       });
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte byta tidsenhet");
+      setError(apiErrorMessage(err, "Kunde inte byta tidsenhet"));
     } finally {
       setPending(false);
     }
@@ -160,7 +160,7 @@ export function BeredningView({
       await apiFetch(`/api/v1/articles/${articleId}/bom/${row.id}`, { method: "DELETE" });
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ta bort komponenten");
+      setError(apiErrorMessage(err, "Kunde inte ta bort komponenten"));
     } finally {
       setPending(false);
     }

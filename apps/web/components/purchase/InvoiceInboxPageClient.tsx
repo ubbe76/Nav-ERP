@@ -28,6 +28,7 @@ import {
 import type { Paged } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import styles from "./InvoiceInboxPageClient.module.css";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 const STATUS_WORDS: Record<string, string> = {
   new: "Ny",
@@ -75,7 +76,7 @@ export function InvoiceInboxPageClient({ scans, pageSize }: { scans: Paged<Invoi
       setResult(await uploadScans(list));
       router.refresh();
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Uppladdningen misslyckades");
+      setUploadError(apiErrorMessage(err, "Uppladdningen misslyckades"));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";

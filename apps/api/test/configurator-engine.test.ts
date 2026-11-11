@@ -403,8 +403,14 @@ describe("null i valen (delprojekt 5)", () => {
     expect(group(resolve(templateWithExclude, { AVLOPP: true }), "LOCK")).toMatchObject({ value: null, defaulted: false, errors: [] });
   });
 
-  it("null på en okänd kod räknas fortfarande som okänd valgrupp", () => {
-    const r = resolve(template, { XYZ: null });
-    expect(r.errors).toEqual(["Okänd valgrupp: XYZ"]);
+  // Konfiguratorgranskningen 2026-11-11: an EMPTY value (null, or an
+  // unchecked ja/nej's false) in a group the template does not have is
+  // ignored — the code lock lets such a group be renamed or deleted, and a
+  // stored selection must still evaluate. A filled value is still unknown.
+  it("null/false på en okänd kod ignoreras; ett ifyllt värde är fortfarande okänd valgrupp", () => {
+    const empty = resolve(template, { XYZ: null, ABC: false });
+    expect(empty.errors).toEqual([]);
+    expect(empty.key).toBe(resolve(template, {}).key);
+    for (const value of ["A", true, 0]) expect(resolve(template, { XYZ: value }).errors).toEqual(["Okänd valgrupp: XYZ"]);
   });
 });

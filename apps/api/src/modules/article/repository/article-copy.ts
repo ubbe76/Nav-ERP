@@ -73,9 +73,10 @@ export function applyInformation(
 }
 
 // Copies the chosen parts after the new article row exists. Order matters
-// for the remapping: drawings before the routing (an operation's chosen
-// drawings follow by drawing number, copyRouting), routing before BOM,
-// catalog rows before their price breaks.
+// for the remapping: files and drawings before the routing (an operation's
+// chosen drawings follow by drawing number and its files by the copied
+// file's id, copyRouting), routing before BOM, catalog rows before their
+// price breaks.
 export async function copyArticleParts(
   tx: Tx,
   sourceId: string,
@@ -88,31 +89,51 @@ export async function copyArticleParts(
       INSERT INTO article_units (article_id, unit_id, quantity_per_base)
       SELECT ${targetId}, unit_id, quantity_per_base FROM article_units WHERE article_id = ${sourceId}`);
   }
+  // Source file id → the copy's id, for the operations' file links.
+  let copiedFiles = new Map<string, string>();
   if (parts.includes("filer")) {
-    // The files in force — loose ones and the drawings' active revisions' —
-    // as loose files: revisions are never copied, so an active revision's
-    // file has no revision to sit on, and an older revision's is left
-    // behind (drawing-files.ts).
-    await tx.execute(sql`
-      INSERT INTO article_files (article_id, filename, content_type, size_bytes, data)
-      SELECT ${targetId}, f.filename, f.content_type, f.size_bytes, f.data
-      FROM article_files f WHERE f.article_id = ${sourceId} AND ${currentArticleFileSql}
-      ORDER BY f.created_at, f.id`);
+    copiedFiles = await copyCurrentFiles(tx, sourceId, targetId);
     // Drawing numbers only — their revision registers are revisions, which
     // are never copied.
     await tx.execute(sql`
       INSERT INTO article_drawings (article_id, drawing_number)
       SELECT ${targetId}, drawing_number FROM article_drawings WHERE article_id = ${sourceId} ORDER BY created_at, id`);
   }
-  if (parts.includes("beredning")) await copyBeredning(tx, sourceId, targetId);
+  if (parts.includes("beredning")) await copyBeredning(tx, sourceId, targetId, copiedFiles);
   if (parts.includes("inkop")) await copySupplierCatalog(tx, sourceId, targetId);
+}
+
+// The files in force — loose ones and the drawings' active revisions' — as
+// loose files: revisions are never copied, so an active revision's file has
+// no revision to sit on, and an older revision's is left behind
+// (drawing-files.ts). Returns source file id → the copy's id: the new ids are
+// drawn up front in a materialized CTE, so ONE statement copies the bytes
+// (they never leave the database) and still says which copy is whose — the
+// operations' file links follow by id, not by file name (two files in force
+// may share a name).
+async function copyCurrentFiles(tx: Tx, sourceId: string, targetId: string): Promise<Map<string, string>> {
+  const result = await tx.execute(sql`
+    WITH pairs AS MATERIALIZED (
+      SELECT f.id AS from_id, gen_random_uuid() AS to_id, f.created_at, f.id AS sort_id
+      FROM article_files f WHERE f.article_id = ${sourceId} AND ${currentArticleFileSql}
+    ), copied AS (
+      INSERT INTO article_files (id, article_id, filename, content_type, size_bytes, data)
+      SELECT p.to_id, ${targetId}, f.filename, f.content_type, f.size_bytes, f.data
+      FROM pairs p JOIN article_files f ON f.id = p.from_id
+      ORDER BY p.created_at, p.sort_id
+      RETURNING id
+    )
+    SELECT p.from_id, p.to_id FROM pairs p JOIN copied c ON c.id = p.to_id`);
+  return new Map(([...result] as { from_id: string; to_id: string }[]).map((row) => [row.from_id, row.to_id]));
 }
 
 // Beredning: the routing (with the lego operation's own file) first via the
 // manufacturing module's copyRouting, then BOM rows whose material→operation
-// link is remapped to the NEW operation via the old→new id map.
-async function copyBeredning(tx: Tx, sourceId: string, targetId: string) {
-  const operationMap = await copyRouting(tx, sourceId, targetId);
+// link is remapped to the NEW operation via the old→new id map. `copiedFiles`
+// (source file → copy, empty without Ritningar och filer) carries the
+// operations' chosen files over.
+async function copyBeredning(tx: Tx, sourceId: string, targetId: string, copiedFiles: ReadonlyMap<string, string>) {
+  const operationMap = await copyRouting(tx, sourceId, targetId, copiedFiles);
 
   const bomRows = await tx
     .select()

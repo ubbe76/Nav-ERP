@@ -1,4 +1,4 @@
-import { formatLocationLabelCode, normalizeScanCode, parseLocationLabelCode, type ScanMatch } from "@navet/shared";
+import { formatLocationLabelCode, gtinForms, normalizeScanCode, parseLocationLabelCode, type ScanMatch } from "@navet/shared";
 import type { ScanRepository } from "../repository/scan.repository.js";
 
 // Skanning (#4; spec 2026-10-29-skanning-design.md): what a scanned code is.
@@ -30,15 +30,22 @@ export function createScanService(repo: ScanRepository) {
         }
       }
 
+      // A GTIN in any of its forms (12-digit UPC-A = EAN-13 with a leading
+      // 0, gtinKey): every stored form is asked for. A code that is no valid
+      // GTIN matches no barcode (they are all valid — articleBarcodeSchema).
+      const barcodeForms = gtinForms(code);
       const [articleRows, purchaseOrder, salesOrder, manufacturingOrder] = await Promise.all([
-        repo.articlesByCode(code),
+        repo.articlesByCode(code, barcodeForms),
         repo.purchaseOrderByNumber(code),
         repo.salesOrderByNumber(code),
         repo.manufacturingOrderByNumber(code),
       ]);
       // EAN first: a package's code is the more specific answer.
-      const byBarcode = articleRows.filter((a) => a.barcode === code);
-      const byNumber = articleRows.filter((a) => a.articleNumber === code && a.barcode !== code);
+      // Two articles holding the same GTIN in two forms (saved before the
+      // duplicate check compared keys) both come back — the Skanna page
+      // shows them; the routines pick by kind.
+      const byBarcode = articleRows.filter((a) => a.barcode !== null && barcodeForms.includes(a.barcode));
+      const byNumber = articleRows.filter((a) => a.articleNumber === code && !byBarcode.includes(a));
       for (const [rows, matchedBy] of [
         [byBarcode, "barcode"],
         [byNumber, "articleNumber"],

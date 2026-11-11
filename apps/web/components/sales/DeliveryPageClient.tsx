@@ -364,7 +364,7 @@ export function DeliveryPageClient({
       // in the result block is the always-there fallback.
       window.open(`/api/v1/deliveries/${result.deliveryId}/pallet-card`, "_blank", "noopener");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Kunde inte leverera";
+      const message = apiErrorMessage(err, "Kunde inte leverera");
       // The batch error has no structured per-row attribution — but
       // SalesOrderRowNotFoundError's message embeds the row id, so a match
       // still gets shown inline (the raw message — that's what carries the

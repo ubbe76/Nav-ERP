@@ -97,7 +97,7 @@ export function NewVerificationPageClient({
         try {
           await uploadUnderlag(`/api/v1/verifications/${created.id}/files`, file);
         } catch (err) {
-          failed.push(err instanceof Error ? err.message : file.name);
+          failed.push(apiErrorMessage(err, file.name));
         }
       }
       if (failed.length > 0) {

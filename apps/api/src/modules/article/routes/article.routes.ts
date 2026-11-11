@@ -37,6 +37,7 @@ import type { ArticleService } from "../service/article.service.js";
 import {
   ArticleCopyPartNotAllowedError,
   ArticleDrawingNotFoundError,
+  ArticleHasStockError,
   ArticleFileNotFoundError,
   DrawingFileNotLooseError,
   ArticleGroupNotFoundError,
@@ -184,6 +185,7 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
       if (err instanceof InvalidReferenceError) return reply.code(400).send(errorBody(err));
       if (err instanceof ConfiguratorModeNotAllowedError) return reply.code(400).send(errorBody(err));
       if (err instanceof DefaultLocationBlockedError) return reply.code(400).send(errorBody(err));
+      if (err instanceof ArticleHasStockError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });

@@ -27,6 +27,7 @@ import {
   type ParseResponse,
   type PreviewResponse,
 } from "./importTypes";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 export type { ImportOptionConfig } from "./ImportOptionsPanel";
 
@@ -105,7 +106,7 @@ export function ImportWizard({
       setResult(null);
       setStep("Kolumner");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Filen kunde inte läsas");
+      setError(apiErrorMessage(err, "Filen kunde inte läsas"));
     } finally {
       setPending(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -137,7 +138,7 @@ export function ImportWizard({
       );
       setStep("Förhandsgranska");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Förhandsgranskningen misslyckades");
+      setError(apiErrorMessage(err, "Förhandsgranskningen misslyckades"));
     } finally {
       setPending(false);
     }
@@ -155,7 +156,7 @@ export function ImportWizard({
       );
       setStep("Resultat");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Importen misslyckades");
+      setError(apiErrorMessage(err, "Importen misslyckades"));
       // A row error on commit answers 400 with the whole preview payload
       // (ImportValidationError.payload). Render it instead of just the
       // message — commit re-plans server-side, so it can find rows the

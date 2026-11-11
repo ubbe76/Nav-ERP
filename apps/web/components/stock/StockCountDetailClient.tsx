@@ -138,7 +138,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
       setMessage("Räknade antal sparade.");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara räkningen");
+      setError(apiErrorMessage(err, "Kunde inte spara räkningen"));
     } finally {
       setPending(false);
     }
@@ -253,7 +253,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
       setMessage(result.valuedOn && offerBookOn ? `${booked} per ${result.valuedOn}.` : `${booked}.`);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte registrera inventeringen");
+      setError(apiErrorMessage(err, "Kunde inte registrera inventeringen"));
     } finally {
       setPending(false);
     }
@@ -268,7 +268,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
       await apiFetch(`/api/v1/stock-counts/${session.id}/cancel`, { method: "POST" });
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte avbryta inventeringen");
+      setError(apiErrorMessage(err, "Kunde inte avbryta inventeringen"));
     } finally {
       setPending(false);
     }
@@ -287,7 +287,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
       setAddArticle(null);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte lägga till artikeln");
+      setError(apiErrorMessage(err, "Kunde inte lägga till artikeln"));
     } finally {
       setPending(false);
     }
@@ -301,7 +301,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
       await apiFetch(`/api/v1/stock-counts/${session.id}/rows/${row.id}`, { method: "DELETE" });
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ta bort raden");
+      setError(apiErrorMessage(err, "Kunde inte ta bort raden"));
     }
   }
 

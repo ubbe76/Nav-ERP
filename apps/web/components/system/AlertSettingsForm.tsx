@@ -4,6 +4,7 @@ import { useState } from "react";
 import { apiFetch } from "../../lib/api";
 import type { SystemSettings } from "../../lib/types";
 import styles from "./SettingsForm.module.css";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // Aviseringar: the three system settings behind the alert list and the daily
 // digest mail. Each field saves when it is left.
@@ -41,7 +42,7 @@ export function AlertSettingsForm({ settings }: { settings: SystemSettings }) {
       });
       setSaved(field);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara inställningen");
+      setError(apiErrorMessage(err, "Kunde inte spara inställningen"));
     } finally {
       setPending(false);
     }

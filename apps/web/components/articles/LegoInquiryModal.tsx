@@ -10,6 +10,7 @@ import { createLegoInquiries } from "../../lib/legoInquiries";
 import { SupplierCheckboxList } from "../purchase/SupplierCheckboxList";
 import { CreatedInquiriesPanel } from "../purchase/CreatedInquiriesPanel";
 import type { CreatedInquiry, MOOperation, Paged, RoutingOperation, Supplier } from "../../lib/types";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // What the förfrågan asks a price for: the beredning's routing operation (a
 // TO-less price inquiry) or one TO's lego operation — the row is then linked
@@ -106,7 +107,7 @@ function LegoInquiryForm({ articleId, articleNumber, target, onClose, onCreated 
       setResult(res);
       if (res.created.length > 0) onCreated?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Förfrågan kunde inte skapas");
+      setError(apiErrorMessage(err, "Förfrågan kunde inte skapas"));
     } finally {
       setPending(false);
     }

@@ -96,6 +96,7 @@ import {
   ConfiguratorInvalidConfigurationError,
   ConfiguratorModeChangedError,
   ConfiguratorNotToOrderModeError,
+  ConfiguratorTemplateNotFoundError,
 } from "../../configurator/service/configurator.errors.js";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
@@ -387,7 +388,14 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
       if (err instanceof ConfigurationRequiredError) return reply.code(409).send(errorBody(err));
       if (err instanceof ConfigurationNotAllowedError) return reply.code(400).send(errorBody(err));
       if (err instanceof RowConfigurationChangedError) return reply.code(409).send(errorBody(err));
-      if (err instanceof ConfiguratorNotToOrderModeError || err instanceof ConfiguratorModeChangedError) return reply.code(409).send(errorBody(err));
+      // The template was removed between the article read and the derivation
+      // (deriveForManufacturing) — the same race as a mode change, so 409.
+      if (
+        err instanceof ConfiguratorNotToOrderModeError || err instanceof ConfiguratorModeChangedError ||
+        err instanceof ConfiguratorTemplateNotFoundError
+      ) {
+        return reply.code(409).send(errorBody(err));
+      }
       if (err instanceof ConfiguratorInvalidConfigurationError) return reply.code(400).send({ ...errorBody(err), details: err.details });
       // Avvikelser: the case cannot take the link (closed, wrong type).
       if (err instanceof DeviationLinkNotAllowedError) return reply.code(409).send(errorBody(err));
@@ -425,7 +433,13 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
         if (err instanceof ConfigurationRequiredError) return reply.code(409).send(errorBody(err));
         if (err instanceof ConfigurationNotAllowedError) return reply.code(400).send(errorBody(err));
         if (err instanceof RowConfigurationChangedError) return reply.code(409).send(errorBody(err));
-        if (err instanceof ConfiguratorNotToOrderModeError || err instanceof ConfiguratorModeChangedError) return reply.code(409).send(errorBody(err));
+        // The template was removed between the article read and the derivation — 409 like a mode change.
+        if (
+          err instanceof ConfiguratorNotToOrderModeError || err instanceof ConfiguratorModeChangedError ||
+          err instanceof ConfiguratorTemplateNotFoundError
+        ) {
+          return reply.code(409).send(errorBody(err));
+        }
         if (err instanceof ConfiguratorInvalidConfigurationError) return reply.code(400).send({ ...errorBody(err), details: err.details });
         throw err;
       }

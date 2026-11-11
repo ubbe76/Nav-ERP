@@ -14,6 +14,7 @@ import buttonStyles from "../ui/Button.module.css";
 import fieldStyles from "../ui/Field.module.css";
 import { Form, FormActions, FormError } from "../ui/Form";
 import { formatStockholmDateTime } from "../../lib/date";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 export interface SendButtonConfig {
   label: string; // e.g. "Skicka via e-post", "Skicka offert"
@@ -205,7 +206,7 @@ export function SendEmailModal({
       });
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Mejlet kunde inte skickas");
+      setError(apiErrorMessage(err, "Mejlet kunde inte skickas"));
     } finally {
       setPending(false);
     }

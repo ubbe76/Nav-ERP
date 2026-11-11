@@ -1,6 +1,6 @@
 // apps/api/src/modules/configurator/service/variant-expand.ts
 import type { ConfiguratorSelection } from "@navet/shared";
-import type { EngineGroup, EngineTemplate } from "./configurator-engine.js";
+import { isEmptySelectionValue, type EngineGroup, type EngineTemplate } from "./configurator-engine.js";
 
 // Produktkonfigurator — lagerförda varianter: expands the user's value sets (per group code, same form as the
 // engine's `selection`) into one selection per combination. Pure (no DB imports). The Cartesian product runs
@@ -31,8 +31,11 @@ export class TooManyCombinationsError extends Error {
 export function expandCombinations(template: EngineTemplate, sets: VariantSets): ConfiguratorSelection[] {
   const groups = [...template.groups].sort((a, b) => a.sortOrder - b.sortOrder || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
   const byCode = new Map(groups.map((g) => [g.code, g]));
-  for (const code of Object.keys(sets)) {
-    if (!byCode.has(code)) throw new VariantSetError(`Valgruppen ${code} finns inte`);
+  // The engine's step-1 rule: only empty values (null / false) in a group the
+  // template does not have are ignored — the same selection is judged alike
+  // whether the template is in variants or to_order (POST /quotes).
+  for (const [code, raw] of Object.entries(sets)) {
+    if (!byCode.has(code) && !(raw.length > 0 && raw.every(isEmptySelectionValue))) throw new VariantSetError(`Valgruppen ${code} finns inte`);
   }
 
   // Validate every set before multiplying so the cap error reports the real count of a well-formed request.

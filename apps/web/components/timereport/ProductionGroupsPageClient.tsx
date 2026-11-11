@@ -16,6 +16,7 @@ import formStyles from "./EmployeeTabs.module.css";
 import styles from "../../app/tillverkning/tidrapporter/page.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 const TYPE_LABELS: Record<WorkCenter["type"], string> = {
   machine: "Maskin",
@@ -42,7 +43,7 @@ export function ProductionGroupsPageClient({
     try {
       setEditing(await apiFetch<ProductionGroupDetail>(`/api/v1/production-groups/${id}`));
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Kunde inte hämta gruppen");
+      setLoadError(apiErrorMessage(err, "Kunde inte hämta gruppen"));
     }
   }
 
@@ -190,7 +191,7 @@ function GroupForm({
       });
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara gruppen");
+      setError(apiErrorMessage(err, "Kunde inte spara gruppen"));
       setPending(false);
     }
   }

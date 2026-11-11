@@ -9,6 +9,7 @@ import { apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import type { MOReport } from "../../lib/types";
 import { formatStockholmDateTime } from "../../lib/date";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // Rapporteringar on the TO card: every stamp-out, Slutför operation, lego
 // receipt, Slutför order and manual material draw, newest first. Ångra
@@ -78,7 +79,7 @@ export function ReportsSection({
       await apiFetch(`/api/v1/manufacturing-orders/${orderId}/reports/${report.id}/undo`, { method: "POST" });
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ångra rapporteringen");
+      setError(apiErrorMessage(err, "Kunde inte ångra rapporteringen"));
     } finally {
       setPendingId(null);
     }

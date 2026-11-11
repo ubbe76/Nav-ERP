@@ -11,6 +11,7 @@ import { apiFetch } from "../../lib/api";
 import type { CompanyCarrier, RegisterEntry } from "../../lib/types";
 import { Card } from "../ui/Card";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // The company's own customer numbers at each carrier — a list under
 // Företagsinformation. Mirrors the sub-list pattern (PartnerTabs KontakterTab).
@@ -33,7 +34,7 @@ export function CompanyCarriersSection({
       await apiFetch(`/api/v1/company-carriers/${row.id}`, { method: "DELETE" });
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ta bort speditören");
+      setError(apiErrorMessage(err, "Kunde inte ta bort speditören"));
     }
   }
 
@@ -165,7 +166,7 @@ function CompanyCarrierForm({
       }
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara speditören");
+      setError(apiErrorMessage(err, "Kunde inte spara speditören"));
       setPending(false);
     }
   }

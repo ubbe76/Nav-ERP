@@ -171,7 +171,7 @@ function AbsenceTypesTab({
       );
       router.refresh();
     } catch (err) {
-      setSeedNotice(err instanceof Error ? err.message : "Kunde inte förifylla");
+      setSeedNotice(apiErrorMessage(err, "Kunde inte förifylla"));
     } finally {
       setSeeding(false);
     }

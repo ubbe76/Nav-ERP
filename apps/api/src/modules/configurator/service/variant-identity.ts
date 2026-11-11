@@ -107,8 +107,12 @@ export function variantArticleFields(
 // value comes back as `null` — "deliberately empty" to the engine (delprojekt
 // 5) — so a saved row/variant keeps the group empty even if the template later
 // gets a default for it; an unchecked ja/nej stays `false`. The key is
-// unaffected: an empty group contributes nothing to it either way. Mirrored in
-// apps/web/lib/configurator.ts.
+// unaffected: an empty group contributes nothing to it either way. An empty
+// entry whose group has since been renamed or deleted (the code lock allows
+// that, codesUsedByVariants) is ignored by the engine's step 1 — every reader
+// of a stored selection (sales, manufacturing, planning, variantPrice and the
+// web's evaluate) goes through it, so the rule lives there, not here. Mirrored
+// in apps/web/lib/configurator.ts.
 export function selectionFromEntries(entries: VariantSelectionEntry[]): ConfiguratorSelection {
   const selection: ConfiguratorSelection = {};
   for (const e of entries) selection[e.groupCode] = e.value;

@@ -808,13 +808,38 @@ async function releaseInTx(tx: Tx, moId: string) {
       .orderBy(asc(articles.name), asc(moMaterialConsumptions.id));
     warnings = await shortageWarnings(tx, written, new Map(written.map((r) => [r.componentArticleId, r.componentName])));
   } else if (exploded.length > 0) {
+    // explodeBom merged per (component, routing operation); the material row
+    // is unique per (TO, component, TO operation) with NULLS NOT DISTINCT
+    // (mo_material_unique_per_operation). Two lines that land on the same TO
+    // operation — e.g. one whose link is not on this TO (a Kalkyl operation)
+    // and one unlinked — are merged here, summed, the base unit when the
+    // display units differ: a guard, so a link the explosion could not place
+    // never turns the release into a 500.
+    const lines = new Map<
+      string,
+      { componentArticleId: string; moOperationId: string | null; totalQuantity: number; unitId: string | null; unitFactor: string | null }
+    >();
+    for (const c of exploded) {
+      const moOperationId = c.routingOperationId ? (operationByRoutingId.get(c.routingOperationId) ?? null) : null;
+      const key = `${c.componentArticleId}:${moOperationId ?? ""}`;
+      const existing = lines.get(key);
+      if (!existing) {
+        lines.set(key, { componentArticleId: c.componentArticleId, moOperationId, totalQuantity: c.totalQuantity, unitId: c.unitId, unitFactor: c.unitFactor });
+        continue;
+      }
+      existing.totalQuantity += c.totalQuantity;
+      if (existing.unitId !== c.unitId || existing.unitFactor !== c.unitFactor) {
+        existing.unitId = null;
+        existing.unitFactor = null;
+      }
+    }
     const materialRows = await tx
       .insert(moMaterialConsumptions)
       .values(
-        exploded.map((c) => ({
+        [...lines.values()].map((c) => ({
           manufacturingOrderId: moId,
           componentArticleId: c.componentArticleId,
-          moOperationId: c.routingOperationId ? operationByRoutingId.get(c.routingOperationId) ?? null : null,
+          moOperationId: c.moOperationId,
           quantityPlanned: String(c.totalQuantity),
           // Display unit snapshot from the BOM row — quantities stay in
           // the base unit.

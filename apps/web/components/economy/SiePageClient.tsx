@@ -11,6 +11,7 @@ import type { FiscalYear } from "../../lib/types";
 import { SectionHeading } from "../ui/SectionHeading";
 import { SieVerificationImport } from "./SieVerificationImport";
 import styles from "./Sie.module.css";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // POST /sie/opening-balances's 201 body (economy.routes.ts's
 // "--- SIE (B6b) ---" section / sie.service.ts's importOpeningBalances).
@@ -55,7 +56,7 @@ export function SiePageClient({ fiscalYears }: { fiscalYears: FiscalYear[] }) {
       }
       setResult(await res.json());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Importen misslyckades");
+      setError(apiErrorMessage(err, "Importen misslyckades"));
     } finally {
       setPending(false);
     }

@@ -28,6 +28,7 @@ import {
 } from "../../lib/types";
 import { alreadyOnDocumentText } from "../../lib/orderRowDuplicates";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormSaved } from "../ui/Form";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 interface InquiryDetailProps {
   inquiry: Inquiry;
@@ -124,7 +125,7 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
       if (after) after(result);
       else router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Åtgärden misslyckades");
+      setError(apiErrorMessage(err, "Åtgärden misslyckades"));
     } finally {
       setPending(false);
     }
@@ -158,7 +159,7 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
       setEditingRowId(null);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara raden");
+      setError(apiErrorMessage(err, "Kunde inte spara raden"));
     } finally {
       setPending(false);
     }
@@ -172,7 +173,7 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
       await apiFetch(`/api/v1/inquiries/${inquiry.id}/rows/${row.id}`, { method: "DELETE" });
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ta bort raden");
+      setError(apiErrorMessage(err, "Kunde inte ta bort raden"));
     } finally {
       setPending(false);
     }
@@ -452,7 +453,7 @@ function EditHeaderForm({
       });
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara");
+      setError(apiErrorMessage(err, "Kunde inte spara"));
     } finally {
       setPending(false);
     }
@@ -567,7 +568,7 @@ function AddInquiryRowForm({
       });
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte lägga till raden");
+      setError(apiErrorMessage(err, "Kunde inte lägga till raden"));
     } finally {
       setPending(false);
     }

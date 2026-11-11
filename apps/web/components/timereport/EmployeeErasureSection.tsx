@@ -10,6 +10,7 @@ import { apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import type { EmployeeErasurePlan, EmployeeErasureBlocker } from "../../lib/types";
 import styles from "./EmployeeTabs.module.css";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // "2026-02" → "februari 2026"
 function monthLabel(month: string): string {
@@ -45,7 +46,7 @@ export function EmployeeErasureSection({ employeeId, employeeName }: { employeeI
         if (!cancelled) setPlan(p);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Kunde inte läsa om den anställde kan raderas");
+        if (!cancelled) setError(apiErrorMessage(err, "Kunde inte läsa om den anställde kan raderas"));
       });
     return () => {
       cancelled = true;
@@ -73,7 +74,7 @@ export function EmployeeErasureSection({ employeeId, employeeName }: { employeeI
         router.refresh();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Det gick inte");
+      setError(apiErrorMessage(err, "Det gick inte"));
       setPending(false);
     }
   }

@@ -15,6 +15,7 @@ import { apiFetch } from "../../lib/api";
 import { WORK_CENTER_TYPE_LABELS, type ProductionGroup, type WeekSchedule, type WorkCenter } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // The row-edit draft (NOTES.md #5): the fields a planner tunes often —
 // cost rate, TO markup, group and capacity — editable straight in the list.
@@ -105,7 +106,7 @@ export function WorkCentersPageClient({
       cancelEdit();
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara resursen");
+      setError(apiErrorMessage(err, "Kunde inte spara resursen"));
     } finally {
       setPending(false);
     }

@@ -44,6 +44,10 @@ const ALLOWED: Record<string, { reads: number; why: string }> = {
     why: "physical per place: the count freezes and lists what stands on the shelf",
   },
   "modules/stock/service/location-lifecycle.ts": { reads: 1, why: "physical per place: locationHoldsStock" },
+  "modules/stock/service/stocked-article.ts": {
+    reads: 1,
+    why: "physical per place: articleHoldsStock — a type change to Tjänst is refused while the article holds stock on any place, a blocked one too",
+  },
   "modules/stock/service/outflow-locations.ts": {
     reads: 2,
     why: "per-place balances for Automatiskt; a blocked place is a skipped candidate there",

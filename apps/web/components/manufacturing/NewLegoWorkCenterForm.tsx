@@ -7,6 +7,7 @@ import { apiFetch } from "../../lib/api";
 import type { Supplier, WorkCenter } from "../../lib/types";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 import { findCodeClash, WorkCenterCodeField, WorkCenterCodeHint } from "./WorkCenterCodeField";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // Creates a legoresurs (work center of type "subcontract"), or edits one
 // when `workCenter` is passed. Shares the 3-digit code series with the
@@ -70,7 +71,7 @@ export function NewLegoWorkCenterForm({
       }
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara legoresursen");
+      setError(apiErrorMessage(err, "Kunde inte spara legoresursen"));
       setPending(false);
     }
   }

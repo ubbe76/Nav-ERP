@@ -72,7 +72,7 @@ export function FranvaroTab({ employeeId, employeeName, absenceTypes, initialAbs
       }
       setHours(minutesToHoursInput(day.daySchedule.netMinutes));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte hämta schemat");
+      setError(apiErrorMessage(err, "Kunde inte hämta schemat"));
     }
   }
 

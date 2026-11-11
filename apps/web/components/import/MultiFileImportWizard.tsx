@@ -23,6 +23,7 @@ import {
   type ParseResponse,
   type PreviewResponse,
 } from "./importTypes";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 const STEPS = ["Filer", "Kolumner", "Förhandsgranska", "Resultat"] as const;
 type Step = (typeof STEPS)[number];
@@ -185,7 +186,7 @@ export function MultiFileImportWizard({ title, backHref, entities, order, intro 
       });
       setFiles((current) => sortFiles(current, order));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Filen kunde inte läsas");
+      setError(apiErrorMessage(err, "Filen kunde inte läsas"));
     } finally {
       setPending(null);
     }
@@ -261,7 +262,7 @@ export function MultiFileImportWizard({ title, backHref, entities, order, intro 
       });
       setStep("Förhandsgranska");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Förhandsgranskningen misslyckades");
+      setError(apiErrorMessage(err, "Förhandsgranskningen misslyckades"));
     } finally {
       setPending(null);
     }
@@ -290,7 +291,7 @@ export function MultiFileImportWizard({ title, backHref, entities, order, intro 
         patchFile(fileState.id, {
           status: "failed",
           result: null,
-          error: err instanceof Error ? err.message : "Importen misslyckades",
+          error: apiErrorMessage(err, "Importen misslyckades"),
           preview: err instanceof ApiError && isPreviewResponse(err.body) ? err.body : fileState.preview,
         });
       }

@@ -33,7 +33,15 @@ export async function insertRoutingOperations(
 // → new id, so the caller can remap bom_components.routing_operation_id. The
 // bytes are copied with INSERT … SELECT and never leave the database. The
 // caller's transaction decides the snapshot (Kopiera från uses repeatable read).
-export async function copyRouting(tx: Tx, sourceArticleId: string, targetArticleId: string): Promise<Map<string, string>> {
+// `copiedFiles`: the source article's files in force → their copies on the
+// target (Kopiera från's Ritningar och filer, copied first; empty = none),
+// so the operations' chosen files follow (copyRoutingFileLinks).
+export async function copyRouting(
+  tx: Tx,
+  sourceArticleId: string,
+  targetArticleId: string,
+  copiedFiles: ReadonlyMap<string, string> = new Map()
+): Promise<Map<string, string>> {
   const operations = await tx
     .select()
     .from(routingOperations)
@@ -54,7 +62,7 @@ export async function copyRouting(tx: Tx, sourceArticleId: string, targetArticle
   const pairs = [...operationMap].map(([from, to]) => ({ from, to }));
   await copyRoutingAlternatives(tx, pairs);
   await copyRoutingDrawingLinks(tx, pairs, targetArticleId);
-  await copyRoutingFileLinks(tx, pairs, targetArticleId);
+  await copyRoutingFileLinks(tx, pairs, copiedFiles);
   return operationMap;
 }
 
@@ -123,26 +131,46 @@ export async function copyRoutingDrawingLinks(
     ON CONFLICT DO NOTHING`);
 }
 
-// Filer per operation (0201): a chosen loose file follows to the copy where
-// the target article has a loose file with the same name (Kopiera från
-// copies the files first); otherwise the link is dropped.
+// Filer per operation (0201) for Kopiera från: the copy's operation gets the
+// SAME files as the source's. The copy has the source's files in force as
+// loose files and its drawings without revisions (article-copy.ts), so a
+// chosen drawing's link alone (copyRoutingDrawingLinks — kept, for the
+// printout's Ritning: line) gave the copied operation no file at all: a
+// drawing without a revision has none, and with something chosen the
+// operation gets exactly that (drawing-files.ts). Each copied operation
+// therefore links, as loose files:
+//   - the copies of its chosen loose files (only while still loose), and
+//   - the copies of its chosen drawings' active revisions' files.
+// Matched by the copy's id (`copiedFiles`, source file → copy), never by
+// file name — two files in force may share one, and both got the link.
+// Without copied files (Ritningar och filer not chosen) nothing follows.
 export async function copyRoutingFileLinks(
   tx: Tx,
   pairs: { from: string; to: string }[],
-  targetArticleId: string
+  copiedFiles: ReadonlyMap<string, string>
 ): Promise<void> {
-  if (pairs.length === 0) return;
-  const values = sql.join(
+  if (pairs.length === 0 || copiedFiles.size === 0) return;
+  const operations = sql.join(
     pairs.map((p) => sql`(${p.from}::uuid, ${p.to}::uuid)`),
+    sql`, `
+  );
+  const files = sql.join(
+    [...copiedFiles].map(([from, to]) => sql`(${from}::uuid, ${to}::uuid)`),
     sql`, `
   );
   await tx.execute(sql`
     INSERT INTO routing_operation_article_files (routing_operation_id, article_file_id)
-    SELECT v.to_id, tf.id
-    FROM (VALUES ${values}) AS v(from_id, to_id)
-    JOIN routing_operation_article_files l ON l.routing_operation_id = v.from_id
-    JOIN article_files sf ON sf.id = l.article_file_id AND sf.drawing_revision_id IS NULL
-    JOIN article_files tf ON tf.article_id = ${targetArticleId} AND tf.drawing_revision_id IS NULL AND tf.filename = sf.filename
+    SELECT DISTINCT op.to_id, fm.to_id
+    FROM (VALUES ${operations}) AS op(from_id, to_id)
+    CROSS JOIN (VALUES ${files}) AS fm(from_id, to_id)
+    JOIN article_files sf ON sf.id = fm.from_id
+    WHERE (sf.drawing_revision_id IS NULL AND EXISTS (
+            SELECT 1 FROM routing_operation_article_files l
+            WHERE l.routing_operation_id = op.from_id AND l.article_file_id = sf.id))
+       OR EXISTS (
+            SELECT 1 FROM routing_operation_drawings ld
+            JOIN article_drawing_revisions r ON r.drawing_id = ld.drawing_id AND r.is_active
+            WHERE ld.routing_operation_id = op.from_id AND r.id = sf.drawing_revision_id)
     ON CONFLICT DO NOTHING`);
 }
 

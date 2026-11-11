@@ -8,6 +8,7 @@ import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../u
 import { CostChain, type CostChainLine } from "../ui/CostChain";
 import { apiFetch } from "../../lib/api";
 import type { CostingMaterialSource, CostingSupplierPriceTier, SystemSettings } from "../../lib/types";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // Fixed example amounts for the live preview, so the numbers below move only
 // with the percentages the user is typing. TO is included because it is part
@@ -69,7 +70,7 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
       });
       setSaved(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara kalkylinställningarna");
+      setError(apiErrorMessage(err, "Kunde inte spara kalkylinställningarna"));
     } finally {
       setPending(false);
     }

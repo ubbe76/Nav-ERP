@@ -209,7 +209,7 @@ function PeriodDetail({
   }, [employeeId, year, month, periodLocked]);
 
   useEffect(() => {
-    load().catch((err) => setError(err instanceof Error ? err.message : "Kunde inte hämta dagvyn"));
+    load().catch((err) => setError(apiErrorMessage(err, "Kunde inte hämta dagvyn")));
   }, [load]);
 
   // Every mutation reloads the modal's own data and the server-rendered

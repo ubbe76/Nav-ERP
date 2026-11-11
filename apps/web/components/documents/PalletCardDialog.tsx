@@ -8,6 +8,7 @@ import { Field, Input } from "../ui/Field";
 import { FormActions, FormError } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import type { DeliveryRowsResponse } from "../../lib/types";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // GET /purchase-orders/:id/dispatches/:dispatchId/rows — the delivery's shape
 // (quantities in the row's unit) plus the parcel count saved with the dispatch.
@@ -269,7 +270,7 @@ function DeliveryForm({ deliveryId, onClose }: { deliveryId: string; onClose: ()
         setStates(Object.fromEntries(res.rows.map((r) => [r.id, initialParcels(r.quantity)])));
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Kunde inte hämta följesedelns rader");
+        if (!cancelled) setError(apiErrorMessage(err, "Kunde inte hämta följesedelns rader"));
       });
     return () => {
       cancelled = true;
@@ -341,7 +342,7 @@ function DispatchForm({ orderId, dispatchId, onClose }: { orderId: string; dispa
         setStates(Object.fromEntries(res.rows.map((r) => [r.id, initialParcels(r.quantity, r.parcels)])));
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Kunde inte hämta avsändningens rader");
+        if (!cancelled) setError(apiErrorMessage(err, "Kunde inte hämta avsändningens rader"));
       });
     return () => {
       cancelled = true;

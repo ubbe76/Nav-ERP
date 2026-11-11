@@ -14,6 +14,7 @@ import { StatusPill } from "../ui/StatusPill";
 import { CostSpecification } from "./CostSpecification";
 import { perUnitDivisor, type PerUnitDivisorSource } from "../../lib/calculationDivisor";
 import styles from "./CostCalculationList.module.css";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 const TYPE_LABELS: Record<CostCalculation["type"], string> = { pre: "Förkalkyl", post: "Efterkalkyl" };
 
@@ -99,7 +100,7 @@ export function CostCalculationList({
       await apiFetch(`/api/v1/cost-calculations/${row.id}`, { method: "DELETE" });
       onDeleted?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ta bort kalkylen");
+      setError(apiErrorMessage(err, "Kunde inte ta bort kalkylen"));
     } finally {
       setDeletingId(null);
     }

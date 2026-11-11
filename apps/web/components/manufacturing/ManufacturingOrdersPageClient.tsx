@@ -28,6 +28,7 @@ import styles from "../../app/tillverkning/ordrar/page.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { plannedWeekLabel } from "../../lib/planning";
 import { useCan, useCanOpen } from "../PermissionsProvider";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 const BULK_ACTIONS: OrderAction[] = ["release", "close", "cancel"];
 
@@ -93,7 +94,7 @@ export function ManufacturingOrdersPageClient({
       toggleRow(order.id, false);
       router.refresh();
     } catch (err) {
-      setFailures([{ orderNumber: order.orderNumber, message: err instanceof Error ? err.message : "Åtgärden misslyckades" }]);
+      setFailures([{ orderNumber: order.orderNumber, message: apiErrorMessage(err, "Åtgärden misslyckades") }]);
     } finally {
       setPendingId(null);
     }
@@ -116,7 +117,7 @@ export function ManufacturingOrdersPageClient({
           // so a bulk release still tells which TO is short.
           collectedWarnings.push(...(await runOrderAction(order.id, action)).map((w) => `${order.orderNumber}: ${w}`));
         } catch (err) {
-          failed.push({ orderNumber: order.orderNumber, message: err instanceof Error ? err.message : "Åtgärden misslyckades" });
+          failed.push({ orderNumber: order.orderNumber, message: apiErrorMessage(err, "Åtgärden misslyckades") });
           failedIds.add(order.id);
         }
       }

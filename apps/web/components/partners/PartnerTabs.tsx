@@ -46,6 +46,7 @@ import {
   vatCodesFor,
 } from "../../lib/vatCodes";
 import { useVatCodes } from "../../lib/useVatCodes";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // Prefixes https:// onto a bare domain (no "://" scheme) so the Webbsida
 // link always navigates instead of being treated as a relative path.
@@ -296,7 +297,7 @@ function AllmantTab({
       setSaved(true);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara");
+      setError(apiErrorMessage(err, "Kunde inte spara"));
     } finally {
       setPending(false);
     }
@@ -579,7 +580,7 @@ function AdresserTab({
       setSaved(true);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara");
+      setError(apiErrorMessage(err, "Kunde inte spara"));
     } finally {
       setPending(false);
     }
@@ -600,7 +601,7 @@ function AdresserTab({
       await apiFetch(`${addressesBase}/${address.id}`, { method: "DELETE" });
       router.refresh();
     } catch (err) {
-      setListError(err instanceof Error ? err.message : "Kunde inte ta bort leveransadressen");
+      setListError(apiErrorMessage(err, "Kunde inte ta bort leveransadressen"));
     }
   }
 
@@ -825,7 +826,7 @@ function DeliveryAddressForm({
       }
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara leveransadressen");
+      setError(apiErrorMessage(err, "Kunde inte spara leveransadressen"));
       setPending(false);
     }
   }
@@ -1159,7 +1160,7 @@ function VillkorTab({
       setSaved(true);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara");
+      setError(apiErrorMessage(err, "Kunde inte spara"));
     } finally {
       setPending(false);
     }
@@ -1533,7 +1534,7 @@ function KontakterTab({ contacts, contactsBase }: { contacts: PartnerContact[]; 
       await apiFetch(`${contactsBase}/${contact.id}`, { method: "DELETE" });
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ta bort kontakten");
+      setError(apiErrorMessage(err, "Kunde inte ta bort kontakten"));
     }
   }
 
@@ -1669,7 +1670,7 @@ function ContactForm({
       }
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara kontakten");
+      setError(apiErrorMessage(err, "Kunde inte spara kontakten"));
       setPending(false);
     }
   }

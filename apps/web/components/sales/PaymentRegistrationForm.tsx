@@ -198,7 +198,7 @@ export function PaymentRegistrationForm({
       }
       setOcrValue("");
     } catch (err) {
-      setOcrError(err instanceof Error ? err.message : "Ingen öppen post hittades för det OCR-numret");
+      setOcrError(apiErrorMessage(err, "Ingen öppen post hittades för det OCR-numret"));
     }
   }
 

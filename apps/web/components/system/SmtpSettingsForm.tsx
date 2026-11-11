@@ -7,6 +7,7 @@ import { apiFetch } from "../../lib/api";
 import type { SystemSettings } from "../../lib/types";
 import cardStyles from "./SettingsForm.module.css";
 import { Form, FormActions, FormError, FormRow } from "../ui/Form";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // SMTP settings for outgoing document email (förfrågan/inköpsorder/offert/
 // orderbekräftelse). The stored password is never shown — leaving the field
@@ -57,7 +58,7 @@ export function SmtpSettingsForm({ settings }: { settings: SystemSettings }) {
       setPassword("");
       setSaved(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara inställningarna");
+      setError(apiErrorMessage(err, "Kunde inte spara inställningarna"));
     } finally {
       setPending(false);
     }
@@ -70,7 +71,7 @@ export function SmtpSettingsForm({ settings }: { settings: SystemSettings }) {
       await apiFetch("/api/v1/mail/test", { method: "POST", body: JSON.stringify({ to: testTo }) });
       setTestResult({ ok: true, text: `Testmejl skickat till ${testTo}` });
     } catch (err) {
-      setTestResult({ ok: false, text: err instanceof Error ? err.message : "Testmejlet kunde inte skickas" });
+      setTestResult({ ok: false, text: apiErrorMessage(err, "Testmejlet kunde inte skickas") });
     } finally {
       setTestPending(false);
     }

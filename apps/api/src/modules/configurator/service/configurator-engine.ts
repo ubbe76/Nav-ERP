@@ -34,6 +34,12 @@ const STEP_TOLERANCE = 1e-9;
 // value = alternative code / boolean / number; null = no value.
 export type EffectiveValue = { value: string | boolean | number | null; valueId: string | null; defaulted: boolean };
 
+// The one rule for "this value contributes nothing to the key": no value, or
+// an unchecked ja/nej. canonicalKey leaves such groups out, the code lock does
+// not count them (codesUsedByVariants), and step 1 ignores them in a group
+// the template no longer has.
+export const isEmptySelectionValue = (v: unknown): v is null | false => v === null || v === false;
+
 // Exact: an absolute tolerance on n×10⁴ misjudges large numbers.
 const hasAtMost4Decimals = (n: number) => Number(n.toFixed(4)) === n;
 const sv = (n: number) => String(Number(n.toFixed(4))).replace(".", ",");
@@ -109,8 +115,15 @@ export function resolveConfiguration(
   const groupErrors = new Map<string, string[]>(groups.map((g) => [g.id, []]));
   const addError = (groupId: string, message: string) => groupErrors.get(groupId)!.push(message);
 
-  // 1. unknown codes
-  for (const code of Object.keys(selection)) if (!byCode.has(code)) errors.push(`Okänd valgrupp: ${code}`);
+  // 1. unknown codes. An EMPTY value (null, or an unchecked ja/nej's false)
+  // in a group the template does not have is ignored: it adds nothing to the
+  // key, and the code lock (codesUsedByVariants) lets such a group be renamed
+  // or deleted — a stored selection (selectionFromEntries writes every group)
+  // must still evaluate afterwards (konfiguratorgranskningen 2026-11-11). A
+  // FILLED value in an unknown group is still an error.
+  for (const [code, raw] of Object.entries(selection)) {
+    if (!byCode.has(code) && !isEmptySelectionValue(raw)) errors.push(`Okänd valgrupp: ${code}`);
+  }
 
   // 2. effective values
   // Delprojekt 5: null = medvetet tomt (slår ut förvalet); saknad nyckel = förval.
@@ -260,7 +273,7 @@ function canonicalKey(groups: EngineGroup[], effective: Map<string, EffectiveVal
     .sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0))
     .flatMap((g) => {
       const v = effective.get(g.id)!.value;
-      if (v === null || v === false) return [];
+      if (isEmptySelectionValue(v)) return [];
       if (v === true) return [g.code];
       return [`${g.code}=${typeof v === "number" ? normalizeNumber(v) : v}`];
     })

@@ -11,6 +11,7 @@ import { defaultReportKind } from "../../lib/moSuggestions";
 import type { TimeKind, EmployeeDirectoryEntry, ManufacturingOrder, MOOperation } from "../../lib/types";
 import { Form, FormActions, FormError, FormRow } from "../ui/Form";
 import { useCanOpenPersonal } from "../PermissionsProvider";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 function today() {
   return stockholmToday();
@@ -100,7 +101,7 @@ export function NewTimeReportForm({
       });
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte skapa tidrapporten");
+      setError(apiErrorMessage(err, "Kunde inte skapa tidrapporten"));
       setPending(false);
     }
   }

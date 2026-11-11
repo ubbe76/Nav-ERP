@@ -19,6 +19,9 @@ export const ERROR_CODES = {
   ARTICLE_COPY_PART_NOT_ALLOWED: "article-copy-part-not-allowed",
   // Produktkonfigurator: a template in mode variants on a new order row
   ARTICLE_IS_TEMPLATE: "article-is-template",
+  // A type change to Tjänst while the article holds stock on some place (409;
+  // also a row in the register's inline editing)
+  ARTICLE_HAS_STOCK: "article-has-stock",
 
   // payroll / timereport
   UNFINISHED_ATTENDANCE: "unfinished-attendance",

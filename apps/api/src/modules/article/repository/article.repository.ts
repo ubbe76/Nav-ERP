@@ -46,8 +46,12 @@ import {
   type UpdateArticleRevisionInput,
 } from "@navet/shared";
 import { getOrCreateFallbackLocation } from "../../stock/service/location-resolver.js";
+import { articleHoldsStock } from "../../stock/service/stocked-article.js";
 import { applyInformation, copyArticleParts, readCopySource } from "./article-copy.js";
 import { articleVatRateSql } from "./article-vat-rate.js";
+import { getOrCreateDefaultUnitId } from "./default-unit.js";
+import { assertBarcodeFree } from "./article-barcode.js";
+import { BOM_STRUCTURE_LOCK_SQL, bomReaches } from "./bom-write.js";
 import { clearCopiedArticles, listCopiedArticleIds, listCopiedArticleRows, removeCopiedArticles, setCopiedArticles } from "./copied-articles.js";
 
 // Append-only write for article_standard_cost_history (D1) — called by the
@@ -146,6 +150,8 @@ export async function insertArticle(tx: Tx, input: InsertArticleInput): Promise<
   if (copy && source && copy.parts.includes("information")) {
     applyInformation(values as Record<string, unknown>, input, source, copyUnits);
   }
+  // Streckkod: the same GTIN in another form (UPC-A/EAN-13) is a duplicate too.
+  if (input.barcode) await assertBarcodeFree(tx, input.barcode, null);
   const [row] = await tx.insert(articles).values(values).returning();
   if (input.standardCost !== undefined) {
     // No createdBy: the article routes don't thread a user id through this
@@ -179,6 +185,8 @@ async function updateArticleRow(dbc: Db | Tx, id: string, input: UpdateArticleIn
     ...rest
   } = input;
   const numeric = (v: number | null | undefined) => (v === undefined ? undefined : v === null ? null : String(v));
+  // Streckkod: the same GTIN in another form on ANOTHER article is a duplicate.
+  if (input.barcode) await assertBarcodeFree(dbc, input.barcode, id);
   const [row] = await dbc
     .update(articles)
     .set({
@@ -252,10 +260,19 @@ export function createArticleRepository(db: Db) {
       return getOrCreateFallbackLocation(db);
     },
 
-    // Spärrad lagerplats (0185): may not be chosen as an article's Lagerplats.
-    async isLocationBlocked(locationId: string) {
+    // A chosen Lagerplats: null = no such place (the service's 404 — the FK
+    // violation was a 500); `blocked` (0185) may not be newly chosen.
+    async findLocationFlags(locationId: string): Promise<{ blocked: boolean } | null> {
       const [row] = await db.select({ blocked: stockLocations.blocked }).from(stockLocations).where(eq(stockLocations.id, locationId));
-      return row?.blocked === true;
+      return row ?? null;
+    },
+
+    // Tjänster lagerförs inte: a type change to Tjänst is refused while the
+    // article holds stock on any place (stock module's leaf, physical, a
+    // blocked place too). Read in the transaction that holds the article
+    // row FOR UPDATE (lockArticle).
+    async articleHoldsStock(tx: Tx, articleId: string): Promise<boolean> {
+      return articleHoldsStock(tx, articleId);
     },
 
     // Wrapped in a transaction around insertArticle. With copyFrom the source
@@ -313,10 +330,17 @@ export function createArticleRepository(db: Db) {
     // read here, and the task instructs not to add new plumbing for it.
     async updateStandardCost(id: string, standardCost: number) {
       return db.transaction(async (tx) => {
+        // FOR NO KEY UPDATE (the UPDATE's own lock mode, so a TO or stock
+        // row referencing the article is not held up): two concurrent
+        // changes otherwise both compared against the value before either —
+        // with the cost at 10, one setting 20 and one setting 10 left the
+        // latter deciding "unchanged", and the history's latest row said 20
+        // while the article said 10.
         const [current] = await tx
           .select({ standardCost: articles.standardCost })
           .from(articles)
-          .where(eq(articles.id, id));
+          .where(eq(articles.id, id))
+          .for("no key update");
         const [row] = await tx
           .update(articles)
           .set({ standardCost: String(standardCost), updatedAt: new Date() })
@@ -452,11 +476,9 @@ export function createArticleRepository(db: Db) {
     // --- Units (enheter) ---
 
     // Fallback for new articles without an explicit base unit — mirrors the
-    // "***" location: the st unit is created on first use.
+    // "***" location: the st unit is created on first use (default-unit.ts).
     async getOrCreateDefaultUnitId() {
-      await db.insert(units).values({ code: "st", name: "Styck" }).onConflictDoNothing();
-      const [row] = await db.select({ id: units.id }).from(units).where(eq(units.code, "st"));
-      return row!.id;
+      return getOrCreateDefaultUnitId(db);
     },
 
     async findUnitById(id: string) {
@@ -617,25 +639,40 @@ export function createArticleRepository(db: Db) {
     },
 
     // quantity arrives already converted to the component's base unit; the
-    // unit fields are the display snapshot (null = base unit).
+    // unit fields are the display snapshot (null = base unit). The cycle
+    // check and the INSERT run in ONE transaction under the structure lock
+    // (bom-write.ts), so two concurrent adds A → B and B → A cannot both
+    // pass. null = the row would close a cycle (nothing is written).
     async addBomComponent(
       parentArticleId: string,
       input: Omit<CreateBomComponentInput, "unitId"> & { unitId: string | null; unitFactor: number | null }
     ) {
-      const [row] = await db
-        .insert(bomComponents)
-        .values({
-          parentArticleId,
-          componentArticleId: input.componentArticleId,
-          quantity: String(input.quantity),
-          unitId: input.unitId,
-          unitFactor: input.unitFactor !== null ? String(input.unitFactor) : null,
-          routingOperationId: input.routingOperationId ?? null,
-          position: input.position ?? null,
-          costingOnly: input.costingOnly ?? false,
-        })
-        .returning();
-      return row;
+      return db.transaction(async (tx) => {
+        await tx.execute(BOM_STRUCTURE_LOCK_SQL);
+        if (await bomReaches(tx, input.componentArticleId, parentArticleId)) return null;
+        const [row] = await tx
+          .insert(bomComponents)
+          .values({
+            parentArticleId,
+            componentArticleId: input.componentArticleId,
+            quantity: String(input.quantity),
+            unitId: input.unitId,
+            unitFactor: input.unitFactor !== null ? String(input.unitFactor) : null,
+            routingOperationId: input.routingOperationId ?? null,
+            position: input.position ?? null,
+            costingOnly: input.costingOnly ?? false,
+          })
+          .returning();
+        return row!;
+      });
+    },
+
+    // Is `targetArticleId` reachable walking down from `articleId`'s
+    // structure (itself included)? Read without the lock — the configurator's
+    // check of a configurator row (an advisory answer; the variants' rows go
+    // to a new article, which nothing contains).
+    async bomReaches(articleId: string, targetArticleId: string) {
+      return bomReaches(db, articleId, targetArticleId);
     },
 
     async findBomComponentRow(parentArticleId: string, rowId: string) {
@@ -902,8 +939,20 @@ export function createArticleRepository(db: Db) {
       });
     },
 
+    // The revision is locked (and found) FIRST: an id that is not this
+    // article's must not get as far as deactivating the one in force — the
+    // transaction committed that with nothing activated. FOR NO KEY UPDATE
+    // (the UPDATE's own lock mode): a concurrent delete of it waits, while a
+    // TO's revision snapshot (an FK's FOR KEY SHARE on drawing revisions) is
+    // not held up.
     async updateRevision(articleId: string, revisionId: string, input: UpdateArticleRevisionInput) {
       return db.transaction(async (tx) => {
+        const [target] = await tx
+          .select({ id: articleRevisions.id })
+          .from(articleRevisions)
+          .where(and(eq(articleRevisions.id, revisionId), eq(articleRevisions.articleId, articleId)))
+          .for("no key update");
+        if (!target) return null;
         if (input.isActive === true) {
           await tx
             .update(articleRevisions)
@@ -1018,8 +1067,16 @@ export function createArticleRepository(db: Db) {
       });
     },
 
+    // Like updateRevision: the revision is locked and found before the
+    // drawing's active one is switched off.
     async updateDrawingRevision(drawingId: string, revisionId: string, input: UpdateArticleRevisionInput) {
       return db.transaction(async (tx) => {
+        const [target] = await tx
+          .select({ id: articleDrawingRevisions.id })
+          .from(articleDrawingRevisions)
+          .where(and(eq(articleDrawingRevisions.id, revisionId), eq(articleDrawingRevisions.drawingId, drawingId)))
+          .for("no key update");
+        if (!target) return null;
         if (input.isActive === true) {
           await tx
             .update(articleDrawingRevisions)

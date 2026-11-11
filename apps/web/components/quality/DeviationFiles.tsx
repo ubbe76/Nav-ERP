@@ -50,7 +50,7 @@ export function DeviationFilesSection({
     try {
       for (const file of Array.from(list)) await uploadUnderlag(filesUrl, file);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Uppladdningen misslyckades");
+      setError(apiErrorMessage(err, "Uppladdningen misslyckades"));
     } finally {
       setPending(false);
       if (pickRef.current) pickRef.current.value = "";

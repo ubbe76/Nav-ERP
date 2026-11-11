@@ -936,7 +936,12 @@ export function createCostingService(
   // swapped for the derived ones through a SubAssemblyPort. Every other article
   // (halvfabrikat) delegates to the repository, so sub-levels are costed with
   // the same markups, material source and supplier tier. Nothing is saved.
-  async function previewStructure(articleId: string, quantity: number, structure: PreviewStructure): Promise<DerivedCosting> {
+  // opts.rates: the rate reader for this run instead of the service's own —
+  // the configurator's variant creation costs inside its template
+  // transaction and hands a reader that never calls Riksbanken (configurator.md).
+  async function previewStructure(
+    articleId: string, quantity: number, structure: PreviewStructure, opts: { rates?: Pick<ExchangeRateReader, "getRate"> } = {}
+  ): Promise<DerivedCosting> {
     const warnings: string[] = [];
     const { source: configured, supplierPriceTier, markups: company } = await loadCostingConfig(settings);
     const source = preCalculationSource(configured, warnings);
@@ -954,7 +959,7 @@ export function createCostingService(
     );
 
     const port: SubAssemblyPort = {
-      ...ratedPort(repo, createRateAttacher(rates, source, today())),
+      ...ratedPort(repo, createRateAttacher(opts.rates ?? rates, source, today())),
       explodeBom: async (id, q) => {
         if (id !== articleId) return repo.explodeBom(id, q);
         // Phantoms dissolved, merged per (article, operation) — the configurator module's pure helper.

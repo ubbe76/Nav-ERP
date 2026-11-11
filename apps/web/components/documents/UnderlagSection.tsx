@@ -9,6 +9,7 @@ import { SectionHeading } from "../ui/SectionHeading";
 import { FormError, FormHint } from "../ui/Form";
 import { API_URL, apiFetch } from "../../lib/api";
 import { formatStockholmDateTime } from "../../lib/date";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // Same shape for every underlag table (supplier_invoice_files,
 // verification_files) — the listing never carries the bytes.
@@ -73,7 +74,7 @@ export function UnderlagSection({
     try {
       for (const file of Array.from(list)) await uploadUnderlag(filesUrl, file);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Uppladdningen misslyckades");
+      setError(apiErrorMessage(err, "Uppladdningen misslyckades"));
     } finally {
       setPending(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -89,7 +90,7 @@ export function UnderlagSection({
       await apiFetch(`${filesUrl}/${file.id}`, { method: "DELETE" });
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ta bort filen");
+      setError(apiErrorMessage(err, "Kunde inte ta bort filen"));
     } finally {
       setPending(false);
     }

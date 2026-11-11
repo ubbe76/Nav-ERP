@@ -111,9 +111,13 @@ export type OperationFields = {
 };
 
 // What a line may link to: the template's own route and its conditional operations.
+// costingOnlyRoutingOperationIds: the route's "Kalkyl" operations — never a
+// TO operation, so a line (always an ordinary row) may not draw there (the
+// article module's Länkregeln, CostingOnlyOperationLinkError).
 export type LineContext = {
   templateArticleId: string;
   routingOperationIds: ReadonlySet<string>;
+  costingOnlyRoutingOperationIds: ReadonlySet<string>;
   configuratorOperationIds: ReadonlySet<string>;
 };
 // Numbers an operation may not take: the ordinary route's and the OTHER conditional operations'.
@@ -124,6 +128,7 @@ export type OperationContext = {
 
 export const TEMPLATE_IN_COMPONENT = "Komponenten kan inte innehålla mallen själv";
 export const TEMPLATE_IN_VALUE_ARTICLE = "Alternativets artikel kan inte innehålla mallen själv";
+export const COSTING_ONLY_OPERATION_LINK = "Operationen är en kalkyloperation och kan inte dra material";
 
 export function formulaGroups(template: EngineTemplate): FormulaGroupInfo[] {
   return template.groups.map((g) => ({ code: g.code, kind: g.kind, valueCodes: g.values.map((v) => v.code) }));
@@ -159,6 +164,9 @@ export function validateLineInput(template: EngineTemplate, line: LineFields, ct
   if (line.routingOperationId && line.configuratorOperationId) throw new InvalidConfiguratorLineError("Högst en operationskoppling");
   if (line.routingOperationId && !ctx.routingOperationIds.has(line.routingOperationId)) {
     throw new InvalidConfiguratorLineError("Operationen finns inte i mallens rutt");
+  }
+  if (line.routingOperationId && ctx.costingOnlyRoutingOperationIds.has(line.routingOperationId)) {
+    throw new InvalidConfiguratorLineError(COSTING_ONLY_OPERATION_LINK);
   }
   if (line.configuratorOperationId && !ctx.configuratorOperationIds.has(line.configuratorOperationId)) {
     throw new InvalidConfiguratorLineError("Operationen finns inte bland mallens villkorade operationer");

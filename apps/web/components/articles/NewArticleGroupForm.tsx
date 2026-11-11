@@ -9,6 +9,7 @@ import type { ArticleGroup, ArticleNumberSeriesOption } from "../../lib/types";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 import { useDimensions } from "../../lib/dimensions";
 import { CostCenterSelect } from "../economy/DimensionSelect";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // Creates a varugrupp (article group), or renames one when `group` is passed.
 export function NewArticleGroupForm({ group, onSuccess }: { group?: ArticleGroup; onSuccess: () => void }) {
@@ -55,7 +56,7 @@ export function NewArticleGroupForm({ group, onSuccess }: { group?: ArticleGroup
       }
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara varugruppen");
+      setError(apiErrorMessage(err, "Kunde inte spara varugruppen"));
       setPending(false);
     }
   }

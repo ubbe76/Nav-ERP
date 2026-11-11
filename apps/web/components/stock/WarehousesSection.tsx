@@ -11,6 +11,7 @@ import type { Warehouse } from "../../lib/types";
 import { Form, FormActions, FormError } from "../ui/Form";
 import { Card } from "../ui/Card";
 import { SectionHeading } from "../ui/SectionHeading";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 export function WarehousesSection({ warehouses }: { warehouses: Warehouse[] }) {
   const router = useRouter();
@@ -34,7 +35,7 @@ export function WarehousesSection({ warehouses }: { warehouses: Warehouse[] }) {
       setName("");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte skapa lagret");
+      setError(apiErrorMessage(err, "Kunde inte skapa lagret"));
     } finally {
       setPending(false);
     }
@@ -51,7 +52,7 @@ export function WarehousesSection({ warehouses }: { warehouses: Warehouse[] }) {
       setEditingId(null);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara lagret");
+      setError(apiErrorMessage(err, "Kunde inte spara lagret"));
     } finally {
       setPending(false);
     }

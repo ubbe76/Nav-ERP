@@ -95,7 +95,7 @@ export function LocationsSection({
       setEditingId(null);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara lagerplatsen");
+      setError(apiErrorMessage(err, "Kunde inte spara lagerplatsen"));
     } finally {
       setPending(false);
     }
@@ -416,7 +416,7 @@ export function LocationsSection({
                 setNewBlockedNote("");
                 router.refresh();
               } catch (err) {
-                setError(err instanceof Error ? err.message : "Kunde inte skapa lagerplatsen");
+                setError(apiErrorMessage(err, "Kunde inte skapa lagerplatsen"));
               } finally {
                 setPending(false);
               }

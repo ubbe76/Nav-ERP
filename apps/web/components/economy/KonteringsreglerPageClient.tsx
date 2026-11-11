@@ -272,7 +272,7 @@ function StandardAccountsSection({ settings, accounts }: { settings: SystemSetti
       setInitial(resolved);
       setSaved(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara standardkontona");
+      setError(apiErrorMessage(err, "Kunde inte spara standardkontona"));
     } finally {
       setPending(false);
     }
@@ -377,7 +377,7 @@ function KundreskontraSection({ settings }: { settings: SystemSettings }) {
       setInitial(resolved);
       setSaved(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara kundreskontrainställningarna");
+      setError(apiErrorMessage(err, "Kunde inte spara kundreskontrainställningarna"));
     } finally {
       setPending(false);
     }
@@ -625,7 +625,7 @@ function PostingRulesSection({
       await apiFetch(`/api/v1/posting-rules/${rule.id}`, { method: "DELETE" });
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ta bort regeln");
+      setError(apiErrorMessage(err, "Kunde inte ta bort regeln"));
     }
   }
 

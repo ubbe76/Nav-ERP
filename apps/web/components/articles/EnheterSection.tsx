@@ -8,6 +8,7 @@ import type { ArticleUnit, RegisterEntry } from "../../lib/types";
 import styles from "./ArticleForm.module.css";
 import { FormError, FormStack } from "../ui/Form";
 import { SectionHeading } from "../ui/SectionHeading";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // Alternative units (alternativa enheter) on the article card's Allmänt tab.
 // Factor direction: "1 {base unit} = X {alternative unit}" — an article
@@ -34,7 +35,7 @@ export function EnheterSection({
       await apiFetch(`/api/v1/articles/${articleId}/units/${row.id}`, { method: "DELETE" });
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ta bort enheten");
+      setError(apiErrorMessage(err, "Kunde inte ta bort enheten"));
     }
   }
 
@@ -112,7 +113,7 @@ function ArticleUnitRow({
       });
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara");
+      setError(apiErrorMessage(err, "Kunde inte spara"));
     } finally {
       setPending(false);
     }
@@ -190,7 +191,7 @@ function AddArticleUnitForm({
       setFactor("");
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte lägga till enheten");
+      setError(apiErrorMessage(err, "Kunde inte lägga till enheten"));
     } finally {
       setPending(false);
     }

@@ -80,7 +80,7 @@ export function PriceListDetail({ priceList }: { priceList: PriceListWithRows })
       await apiFetch(`/api/v1/price-lists/${priceList.id}`, { method: "DELETE" });
       router.push("/forsaljning/prislistor");
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : "Kunde inte ta bort prislistan");
+      setDeleteError(apiErrorMessage(err, "Kunde inte ta bort prislistan"));
       setDeleting(false);
     }
   }
@@ -92,7 +92,7 @@ export function PriceListDetail({ priceList }: { priceList: PriceListWithRows })
       await apiFetch(`/api/v1/price-lists/${priceList.id}/rows/${row.id}`, { method: "DELETE" });
       router.refresh();
     } catch (err) {
-      setRowError(err instanceof Error ? err.message : "Kunde inte ta bort raden");
+      setRowError(apiErrorMessage(err, "Kunde inte ta bort raden"));
     }
   }
 
@@ -326,7 +326,7 @@ function PriceListRowForm({
       }
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara raden");
+      setError(apiErrorMessage(err, "Kunde inte spara raden"));
       setPending(false);
     }
   }

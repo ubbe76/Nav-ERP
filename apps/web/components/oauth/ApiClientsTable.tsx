@@ -9,6 +9,7 @@ import { apiFetch } from "../../lib/api";
 import type { ApiClient } from "../../lib/types";
 import { API_CLIENT_SCOPE_LABELS, API_CLIENT_SCOPES } from "../../lib/apiClientScopes";
 import { formatStockholmDate } from "../../lib/date";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // All rights and no customer — what clients created before 4.9 got.
 function hasFullAccess(client: ApiClient) {
@@ -82,7 +83,7 @@ function RevokeButton({ client, onDone }: { client: ApiClient; onDone: () => voi
       await apiFetch(`/api/v1/api-clients/${client.id}/revoke`, { method: "POST" });
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte återkalla klienten");
+      setError(apiErrorMessage(err, "Kunde inte återkalla klienten"));
       setPending(false);
     }
   }

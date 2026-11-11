@@ -55,8 +55,9 @@ export function manufacturingOperations(routing: VariantRoutingRow[]): Manufactu
 
 // `operationId` on an exploded row is the DERIVED operation's id (template
 // routing id or configurator operation id). A row whose operation is not one
-// of the kept operations — a phantom part's link to the phantom's own route,
-// or a costing-only operation — is unlinked and drawn at final reporting,
+// of the kept operations — a costing-only operation (a phantom part never
+// carries the phantom's own link: explodeBom ignores it) — is unlinked and
+// drawn at final reporting,
 // exactly as release treats an unknown routing id today.
 //
 // The explosion merged per (article, DERIVED operation id); two rows of one

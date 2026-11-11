@@ -20,7 +20,7 @@ import {
   createConfiguratorRepository, type BomLineWrite, type GroupInsert, type GroupPatch, type OperationWrite, type SortTable, type ValuePatch,
 } from "../repository/configurator.repository.js";
 import { deriveStructure, type BaseBomRow, type BaseOperation, type DeriveBomLine, type DeriveOperation, type DerivedStructureCore } from "./configurator-derive.js";
-import { resolveConfiguration, type EngineCustomerPrice, type EngineTemplate } from "./configurator-engine.js";
+import { isEmptySelectionValue, resolveConfiguration, type EngineCustomerPrice, type EngineTemplate } from "./configurator-engine.js";
 import { explodeDerivedMaterials } from "./configurator-explode.js";
 import { toPublicTemplate, toPublicTemplateSummary } from "./public-template.js";
 import { coverageWarnings, findCoverageGaps } from "./structure-coverage.js";
@@ -44,7 +44,7 @@ import { expandCombinations, MAX_VARIANT_COMBINATIONS, TooManyCombinationsError,
 import { selectionEntries, selectionFromEntries, variantArticleFields, variantIdentity, type VariantArticleFields } from "./variant-identity.js";
 import { mergeVariantMaterials, variantRoutingRows, type VariantBomRow, type VariantRoutingRow } from "./variant-structure.js";
 import { pluginEvents } from "../../system/service/plugin-events.js";
-import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
+import { ExchangeRateUnavailableError, type ExchangeRateLookup, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
 import { stockholmToday } from "../../system/service/delivery-days.js";
 
 // Produktkonfigurator — the service owns every template mutation. Each write
@@ -120,9 +120,20 @@ export type CostingPreview = {
       operations: {
         sequenceNo: number; workCenterId: string; setupTime: number; runTimePerUnit: number; setupPrice: number | null; unitPrice: number | null;
       }[];
-    }
+    },
+    // The rate reader for this run (default the costing's own). The variant
+    // creation hands it one that never calls out (withPrefetchedRates).
+    opts?: { rates?: Pick<ExchangeRateReader, "getRate"> }
   ): Promise<DerivedCosting>;
 };
+
+// The variant costing inside the template transaction: the reader the costing
+// gets, and the check that rolls the transaction back when it met a rate that
+// was not fetched beforehand (withPrefetchedRates).
+type PrefetchedRates = { reader: Pick<ExchangeRateReader, "getRate">; assertComplete(): void };
+
+// Internal: thrown by PrefetchedRates.assertComplete, caught by withPrefetchedRates.
+class RatesNotPrefetchedError extends Error {}
 
 // The owning modules' Tx writers a variant is created with — article
 // (insertArticle, insertBomRows) and manufacturing (insertRoutingOperations) —
@@ -233,7 +244,9 @@ function variantUsageLabel(articleNumbers: string[]): string {
 
 // Group codes and `GRUPP=ALTERNATIV` pairs the variants' keys spell, each with
 // the variants' article numbers. A group with no value in a variant (empty
-// choice, unchecked ja/nej) is not in that variant's key and so not locked by it.
+// choice, unchecked ja/nej) is not in that variant's key and so not locked by it
+// — and the engine ignores such an entry once its group is gone (step 1), so a
+// stored selection still evaluates after the rename (isEmptySelectionValue).
 // Konfigurator 4b: a configured order row's stored selection counts the same
 // way — its "article number" is the readable source `orderrad KO-1024`.
 function codesUsedByVariants(
@@ -248,7 +261,7 @@ function codesUsedByVariants(
   };
   for (const v of variants) {
     for (const entry of v.selection) {
-      if (entry.value === null || entry.value === false) continue;
+      if (isEmptySelectionValue(entry.value)) continue;
       add(groupCodes, entry.groupCode, v.articleNumber);
       if (entry.kind === "choice" && entry.valueCode !== null) add(pairs, `${entry.groupCode}=${entry.valueCode}`, v.articleNumber);
     }
@@ -617,6 +630,7 @@ export function createConfiguratorService(deps: {
     validateLineInput(toEngineTemplate(template), line, {
       templateArticleId: articleId,
       routingOperationIds: new Set(routing.map((o) => o.id)),
+      costingOnlyRoutingOperationIds: new Set(routing.filter((o) => o.costingOnly).map((o) => o.id)),
       configuratorOperationIds: new Set(template.operations.map((o) => o.id)),
     });
     if (line.source === "article" && line.componentArticleId) {
@@ -687,7 +701,10 @@ export function createConfiguratorService(deps: {
   }
 
   // The pre-costing of a derived structure, exactly as derive feeds it.
-  function costStructure(articleId: string, quantity: number, core: DerivedStructureCore) {
+  // `rates`: the variant creation's prefetched reader (withPrefetchedRates);
+  // omitted = the costing's own, which may call Riksbanken — only outside a
+  // transaction.
+  function costStructure(articleId: string, quantity: number, core: DerivedStructureCore, rates?: Pick<ExchangeRateReader, "getRate">) {
     return deps.costing.previewStructure(articleId, quantity, {
       components: core.materials.map((m) => ({
         componentArticleId: m.componentArticleId, quantity: m.quantity, unitId: m.unitId, unitFactor: m.unitFactor,
@@ -697,7 +714,59 @@ export function createConfiguratorService(deps: {
         sequenceNo: o.sequenceNo, workCenterId: o.workCenterId, setupTime: o.setupTime, runTimePerUnit: o.runTimePerUnit,
         setupPrice: o.setupPrice, unitPrice: o.unitPrice,
       })),
-    });
+    }, rates ? { rates } : undefined);
+  }
+
+  // A rate fetched outside any transaction: null when there is none (the
+  // costing then falls back to the standard price with a warning, as
+  // createRateAttacher does); any other failure propagates.
+  async function lookupRate(currency: string, date: string): Promise<ExchangeRateLookup | null> {
+    if (!deps.rates) return null;
+    try {
+      return await deps.rates.getRate(currency, date);
+    } catch (err) {
+      if (err instanceof ExchangeRateUnavailableError) return null;
+      throw err;
+    }
+  }
+
+  // createVariants/resolveVariant cost the new variants INSIDE the template
+  // transaction (the plan is never trusted from outside it), but getRate may
+  // call Riksbanken and no transaction is held across HTTP (CLAUDE.md,
+  // currency.md). So the costing there gets `reader`, which answers only from
+  // rates fetched before the transaction; a (currency, day) it has not seen is
+  // recorded and answered "no rate". `assertComplete` — called right after
+  // planCombinations, before anything is written — rolls the transaction back
+  // when the first attempt recorded any; the rates are then fetched here,
+  // outside it, and the transaction runs once more. A rate still missing on the
+  // second attempt (a catalog row added in between, midnight) stays "no rate":
+  // the costing's own fallback (standard price + warning), never a third run.
+  // Nothing foreign to cost (or the source is not "supplier") = one attempt.
+  async function withPrefetchedRates<T>(run: (rates: PrefetchedRates) => Promise<T>): Promise<T> {
+    const known = new Map<string, ExchangeRateLookup | null>();
+    for (let attempt = 1; ; attempt++) {
+      const missing = new Map<string, { currency: string; date: string }>();
+      const reader: PrefetchedRates["reader"] = {
+        async getRate(currency, date) {
+          const key = `${currency}|${date}`;
+          const hit = known.get(key);
+          if (hit) return hit;
+          if (hit === undefined && attempt === 1) missing.set(key, { currency, date });
+          throw new ExchangeRateUnavailableError(currency, date);
+        },
+      };
+      try {
+        return await run({
+          reader,
+          assertComplete: () => {
+            if (missing.size > 0) throw new RatesNotPrefetchedError();
+          },
+        });
+      } catch (err) {
+        if (!(err instanceof RatesNotPrefetchedError)) throw err;
+      }
+      for (const [key, { currency, date }] of missing) known.set(key, await lookupRate(currency, date));
+    }
   }
 
   // Konfigurator 4c: one configuration's structure as a TO's own rows, at the
@@ -809,8 +878,11 @@ export function createConfiguratorService(deps: {
   // derived and identified, then checked against the template's existing
   // variants (key) and the article register (number). Reads only; create
   // runs it inside its transaction so the preview is never trusted.
+  // `rates`: inside the template transaction, the prefetched reader
+  // (withPrefetchedRates) — the preview, outside any transaction, omits it.
   async function planCombinations(
-    ex: Db | Tx, articleId: string, templateArticle: { articleNumber: string; name: string }, input: { sets: VariantSets; calcQuantity: number }
+    ex: Db | Tx, articleId: string, templateArticle: { articleNumber: string; name: string }, input: { sets: VariantSets; calcQuantity: number },
+    rates?: Pick<ExchangeRateReader, "getRate">
   ): Promise<PlannedCombination[]> {
     const loaded = await loadDerivationInput(ex, articleId);
     if (loaded.detail.mode !== "variants") throw new ConfiguratorNotVariantModeError();
@@ -845,19 +917,25 @@ export function createConfiguratorService(deps: {
         row.structureErrors = [...structure.errors];
         continue;
       }
+      // An existing combination stays `exists` even if the template was
+      // renamed past the length limits since — and shows the variant as it
+      // is stored (number, name, prices), never what the template would
+      // spell or price today.
+      const existing = existingByKey.get(evaluation.key!);
+      if (existing) {
+        row.status = "exists";
+        row.articleId = existing.articleId;
+        row.articleNumber = existing.articleNumber;
+        row.name = existing.name;
+        row.salesPrice = toNumber(existing.salesPrice);
+        row.standardCost = toNumber(existing.standardCost);
+        continue;
+      }
       const identity = variantIdentity(template, templateArticle, effective);
       row.articleNumber = identity.articleNumber;
       row.name = identity.name;
       row.salesPrice = evaluation.price.unitPrice;
       if (row.salesPrice === null) row.warnings.push(MISSING_BASE_PRICE);
-      // An existing combination stays `exists` even if the template was renamed past the length limits since.
-      const existing = existingByKey.get(evaluation.key!);
-      if (existing) {
-        row.status = "exists";
-        row.articleId = existing.articleId;
-        row.standardCost = toNumber(existing.standardCost);
-        continue;
-      }
       if (!structure.derivable) {
         row.status = "invalid";
         row.notDerivable = true;
@@ -907,7 +985,7 @@ export function createConfiguratorService(deps: {
       row.bom = merged.rows;
       row.warnings.push(...merged.warnings);
       row.routing = variantRoutingRows(structure.operations, routingById, workCenters);
-      const costing = await costStructure(articleId, input.calcQuantity, structure);
+      const costing = await costStructure(articleId, input.calcQuantity, structure, rates);
       const perUnit = costing.manufacturingCostPerUnit;
       const costed = costing.materialRows.length + costing.operationRows.length > 0 && Number.isFinite(perUnit) && perUnit > 0;
       row.standardCost = costed ? round4(perUnit) : null;
@@ -1372,20 +1450,24 @@ export function createConfiguratorService(deps: {
     // SHARE, then everything is planned afresh inside it (the preview is
     // never trusted) and every "new" combination becomes an article with the
     // derived route, the merged structure and its link row — all or nothing.
-    // The other statuses are reported unchanged.
+    // The other statuses are reported unchanged. The standard cost's rates are
+    // fetched outside the transaction (withPrefetchedRates).
     async createVariants(articleId: string, input: VariantRequest, userId: string | null): Promise<VariantPreviewRow[]> {
       return mapVariantRace(() =>
-        write(articleId, async (tx) => {
-          const templateArticle = await lockedTemplateArticle(tx, articleId, "variants");
-          const plan = await planCombinations(tx, articleId, templateArticle, input);
-          for (const row of plan) {
-            if (row.status !== "new") continue;
-            const created = await createPlannedVariant(tx, articleId, templateArticle, row, input.calcQuantity, userId);
-            row.status = "created";
-            row.articleId = created.id;
-          }
-          return plan.map(toPreviewRow);
-        })
+        withPrefetchedRates((rates) =>
+          write(articleId, async (tx) => {
+            const templateArticle = await lockedTemplateArticle(tx, articleId, "variants");
+            const plan = await planCombinations(tx, articleId, templateArticle, input, rates.reader);
+            rates.assertComplete();
+            for (const row of plan) {
+              if (row.status !== "new") continue;
+              const created = await createPlannedVariant(tx, articleId, templateArticle, row, input.calcQuantity, userId);
+              row.status = "created";
+              row.articleId = created.id;
+            }
+            return plan.map(toPreviewRow);
+          })
+        )
       );
     },
 
@@ -1393,12 +1475,27 @@ export function createConfiguratorService(deps: {
     // Same lock, same plan and same writers as createVariants; the calc quantity
     // is the template's order quantity (never the row's), so the variant's
     // standard cost does not depend on which order happened to create it.
+    // A malformed selection (unknown group, a value of the wrong type, an
+    // alternative the group does not have) is the engine's 400
+    // configurator-invalid-configuration with the message as details — the
+    // same answer a beställningsvara gets — on every path that resolves a
+    // variant (Konfigurera, the order rows, Ändra konfiguration, POST /quotes);
+    // the preview's own InvalidConfiguratorVariantSetError is mapped only by
+    // the configurator routes.
     async resolveVariant(articleId: string, selection: ConfiguratorSelection, userId: string | null): Promise<ResolveVariantResult> {
       const outcome = await mapVariantRace(() =>
-        write(articleId, async (tx) => {
+        withPrefetchedRates((rates) => write(articleId, async (tx) => {
           const templateArticle = await lockedTemplateArticle(tx, articleId, "variants");
           const calcQuantity = templateArticle.orderQuantity !== null ? Number(templateArticle.orderQuantity) : 1;
-          const [row] = await planCombinations(tx, articleId, templateArticle, { sets: setsFromSelection(selection), calcQuantity });
+          let plan: PlannedCombination[];
+          try {
+            plan = await planCombinations(tx, articleId, templateArticle, { sets: setsFromSelection(selection), calcQuantity }, rates.reader);
+          } catch (err) {
+            if (err instanceof InvalidConfiguratorVariantSetError) throw new ConfiguratorInvalidConfigurationError([err.message]);
+            throw err;
+          }
+          rates.assertComplete();
+          const [row] = plan;
           // One value per group always expands to exactly one combination.
           if (!row) throw new ConfiguratorInvalidConfigurationError([]);
           switch (row.status) {
@@ -1420,7 +1517,7 @@ export function createConfiguratorService(deps: {
             default:
               throw new ConfiguratorInvalidConfigurationError(row.errors);
           }
-        })
+        }))
       );
       const article = await deps.articles.find(outcome.articleId);
       if (!article) throw new ArticleNotFoundError(outcome.articleId);
@@ -1492,8 +1589,11 @@ export function createConfiguratorService(deps: {
     // Konfigurator 4a (beslut C): the variant's price through the template —
     // the customer's chain on the TEMPLATE (deps.prices, which has no variant
     // step of its own) plus the stored configuration's additions. undefined: not
-    // a variant; null: the stored selection no longer validates or the template
-    // has no base price — resolvePrice then continues down the variant's own chain.
+    // a variant; null: the stored selection no longer validates, resolves to
+    // another key than the variant's (a förval added to the template since —
+    // the price would include a choice the variant does not have; the same rule
+    // as updateRow's row-configuration-outdated), or the template has no base
+    // price — resolvePrice then continues down the variant's own chain.
     // Valuta: in the order's currency (q.currency/exchangeRate, omitted = SEK).
     async variantPrice(
       q: { customerId: string; variantArticleId: string; quantity: number } & ConfigurationCurrency
@@ -1514,7 +1614,8 @@ export function createConfiguratorService(deps: {
         templatePrice?.price ?? null,
         rateOf(q)
       );
-      if (!evaluation.valid || evaluation.price.unitPrice === null || evaluation.price.source === null) return null;
+      if (!evaluation.valid || evaluation.key !== link.configKey) return null;
+      if (evaluation.price.unitPrice === null || evaluation.price.source === null) return null;
       return { unitPrice: evaluation.price.unitPrice, discountPercent: evaluation.price.discountPercent, source: evaluation.price.source };
     },
   };

@@ -57,9 +57,17 @@ export async function findArticleNumberSeries(db: Db, key: string) {
 }
 
 // What Ny artikel shows under the field: the number the next article would
-// get right now. A preview only — nothing is reserved.
-export async function previewArticleNumber(db: Db, series: SeriesRow) {
-  return (await firstFree(db, series, series.nextNumber)).articleNumber;
+// get right now. A preview only — nothing is reserved. null = the series is
+// full (10 000 taken in a row): the list of series must still load — one
+// full series made GET /article-number-series a 500 for every series — and
+// only an article actually drawn from it is refused (409 series-exhausted).
+export async function previewArticleNumber(db: Db, series: SeriesRow): Promise<string | null> {
+  try {
+    return (await firstFree(db, series, series.nextNumber)).articleNumber;
+  } catch (err) {
+    if (err instanceof SeriesExhaustedError) return null;
+    throw err;
+  }
 }
 
 // Issues a number: finds the first free one and claims it with a

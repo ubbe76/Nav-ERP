@@ -7,6 +7,7 @@ import { apiFetch } from "../../lib/api";
 import { DOCUMENT_LANGUAGES, DOCUMENT_LANGUAGE_LABELS, type DocumentLanguage } from "../../lib/documentLanguage";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 import { CurrencyInput } from "../ui/CurrencyInput";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // Creates a customer — editing happens on the customer card (/kunder/[id]).
 export function NewCustomerForm({ onSuccess }: { onSuccess: () => void }) {
@@ -42,7 +43,7 @@ export function NewCustomerForm({ onSuccess }: { onSuccess: () => void }) {
       });
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte skapa kunden");
+      setError(apiErrorMessage(err, "Kunde inte skapa kunden"));
       setPending(false);
     }
   }

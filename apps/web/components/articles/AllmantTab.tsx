@@ -19,6 +19,7 @@ import styles from "./ArticleForm.module.css";
 import { Card } from "../ui/Card";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 import { SectionHeading } from "../ui/SectionHeading";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 export function AllmantTab({ article, groups }: { article: Article; groups: ArticleGroup[] }) {
   const router = useRouter();
@@ -131,7 +132,7 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
       setDetailsSaved(true);
       router.refresh();
     } catch (err) {
-      setDetailsError(err instanceof Error ? err.message : "Kunde inte spara");
+      setDetailsError(apiErrorMessage(err, "Kunde inte spara"));
     } finally {
       setDetailsPending(false);
     }
@@ -150,7 +151,7 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
       setCostSaved(true);
       router.refresh();
     } catch (err) {
-      setCostError(err instanceof Error ? err.message : "Kunde inte spara");
+      setCostError(apiErrorMessage(err, "Kunde inte spara"));
     } finally {
       setCostPending(false);
     }
