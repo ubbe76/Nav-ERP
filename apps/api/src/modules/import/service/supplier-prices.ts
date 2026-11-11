@@ -29,6 +29,7 @@ import {
   type ImportRowResult,
   type ImportSummary,
 } from "./import.service.js";
+import { round4 } from "@navet/shared";
 
 // Mappable target fields, in the order the wizard lists them.
 export const SUPPLIER_PRICE_IMPORT_FIELDS = [
@@ -103,11 +104,6 @@ function parseFlag(raw: string): boolean | null {
   if (["ja", "j", "1", "true", "sant", "x"].includes(value)) return true;
   if (["nej", "n", "0", "false", "falskt"].includes(value)) return false;
   return null;
-}
-
-// numeric(14,4) — the price columns' scale.
-function round4(n: number): number {
-  return Math.round(n * 10000) / 10000;
 }
 
 // Pris × (1 − Rabatt/100). Exported for the customer price import, which

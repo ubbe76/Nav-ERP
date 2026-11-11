@@ -27,7 +27,7 @@ import { stockholmToday } from "../../system/service/delivery-days.js";
 // Append-only audit trail (same interface payroll/timereport already write
 // to) — wired for Task 4's fiscal year period locking (lock/unlock).
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
-import { isUniqueViolation } from "../../system/service/db-errors.js";
+import { isExclusionViolation, isUniqueViolation } from "../../system/service/db-errors.js";
 import { BAS_STANDARD_ACCOUNTS, defaultVatBox } from "./bas-accounts.js";
 import { classifyAccount } from "./bas-report-lines.js";
 // AccountingPeriodLockedError lives in the leaf file (no dependency on this
@@ -540,11 +540,12 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
 
     // --- Räkenskapsår & periods ---
 
-    // Overlap check happens here (not a DB constraint, mirroring
-    // OverlappingFiscalYearError living in this file): two years overlap iff
-    // the new range and an existing one share at least one day — edge-to-edge
-    // (new start = existing end + 1 day) is fine. Month generation itself is
-    // pure and runs inside the repo's create transaction.
+    // Overlap check happens here for the error message, and again in the
+    // database (fiscal_years_no_overlap, migration 0208 — two concurrent
+    // creates both passed this read): two years overlap iff the new range and
+    // an existing one share at least one day — edge-to-edge (new start =
+    // existing end + 1 day) is fine. Month generation itself is pure and runs
+    // inside the repo's create transaction.
     async createFiscalYear(input: CreateFiscalYearInput) {
       const existing = await repo.listFiscalYears();
       const overlaps = existing.some((year) => input.startDate <= year.endDate && input.endDate >= year.startDate);
@@ -555,6 +556,7 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
         return await repo.createFiscalYearWithPeriods(input);
       } catch (err) {
         if (isUniqueViolation(err)) throw new DuplicateFiscalYearLabelError(input.label);
+        if (isExclusionViolation(err, "fiscal_years_no_overlap")) throw new OverlappingFiscalYearError(input.label);
         throw err;
       }
     },

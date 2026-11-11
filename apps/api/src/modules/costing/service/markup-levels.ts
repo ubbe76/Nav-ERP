@@ -1,4 +1,5 @@
 import type { CalculatedPriceUnavailable, CostCalculationMarkupLevel, CostingMarkupLevel, OrderMarkupLevel } from "@navet/shared";
+import { round2, round4 } from "@navet/shared";
 
 // Påslag per nivå (#16) — the ONE rule for which price markup applies. Pure:
 // no DB, no settings lookup, so every reader (förkalkyl, efterkalkyl, the
@@ -61,7 +62,7 @@ const LEVEL_ORDER = ["trial", "order", "customer", "group"] as const;
 // review of etapp 1). Every reader goes through effectiveMarkups, so the
 // amounts and the stored percentage can no longer differ.
 export function roundPercent(value: number): number {
-  return Math.round(value * 100) / 100;
+  return round2(value);
 }
 
 function resolveField(levels: MarkupLevels, field: keyof LevelMarkups): ResolvedMarkup {
@@ -199,7 +200,7 @@ export function calculatedUnitPrice(calculation: CalculationForPrice, generalPer
     calculation.salesPrice +
     (calculation.selfCost * generalDelta) / 100 +
     ((calculation.materialMarkupBase ?? 0) * materialDelta) / 100;
-  return { unitPrice: Math.round((total / calculation.quantity) * 10000) / 10000 };
+  return { unitPrice: round4(total / calculation.quantity) };
 }
 
 // A nullable numeric(6,2) column as Drizzle hands it back ("40.00" | null).

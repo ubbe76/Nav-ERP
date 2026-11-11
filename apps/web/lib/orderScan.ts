@@ -1,3 +1,5 @@
+import { round4 } from "./format";
+
 // Skanning mot en order (#4) — the pure rules the scanning routines share:
 // Inleverans counts what arrives against an inköpsorder (etapp 2), Utleverans
 // counts what is picked against a kundorder (etapp 3). What a scanned code
@@ -137,7 +139,7 @@ export function hasCounted(state: OrderCountState): boolean {
 export function leftToCount(row: OrderScanRow, state: OrderCountState): number | null {
   if (!row.scannable) return null;
   const left = row.remaining - (Number(enteredQuantity(row, state)) || 0);
-  return Math.max(0, Math.round(left * 10000) / 10000);
+  return Math.max(0, round4(left));
 }
 
 export type CountOutcome =
@@ -176,7 +178,7 @@ export function countScan(rows: OrderScanRow[], state: OrderCountState, articleI
     return { counted: false, full: true, rowId: first.id, quantity: current(first), remaining: first.remaining };
   }
   const next = row.max === null ? current(row) + 1 : Math.min(current(row) + 1, row.max);
-  const quantity = Math.round(next * 10000) / 10000;
+  const quantity = round4(next);
   return {
     counted: true,
     state: { counting: true, quantities: { ...state.quantities, [row.id]: String(quantity) } },

@@ -9,6 +9,7 @@ import styles from "./ArticleForm.module.css";
 import { FormError, FormStack } from "../ui/Form";
 import { SectionHeading } from "../ui/SectionHeading";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { round4 } from "../../lib/format";
 
 // Alternative units (alternativa enheter) on the article card's Allmänt tab.
 // Factor direction: "1 {base unit} = X {alternative unit}" — an article
@@ -80,7 +81,7 @@ function factorHint(baseUnitCode: string, unitCode: string, factor: string): str
   const n = Number(factor);
   if (!Number.isFinite(n) || n <= 0) return null;
   const inverse = 1 / n;
-  const rounded = Math.round(inverse * 10000) / 10000;
+  const rounded = round4(inverse);
   return `1 ${unitCode} = ${rounded.toLocaleString("sv-SE")} ${baseUnitCode}`;
 }
 

@@ -55,7 +55,10 @@ export const STEP_STATUS_PILL: Record<"done" | "stale" | "not_done" | "missing" 
 };
 
 function round2(value: number): number {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
+  // Half away from zero, cut to 15 significant digits first — @navet/shared
+  // money.ts's roundToDecimals (the web can't import the package).
+  const magnitude = Math.round(Number((Math.abs(value) * 100).toPrecision(15))) / 100;
+  return value < 0 && magnitude !== 0 ? -magnitude : magnitude;
 }
 
 // The accrual verification as the guide will book it, netted per account —

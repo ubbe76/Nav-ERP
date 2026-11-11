@@ -41,6 +41,7 @@ import {
   type WipRowAmounts,
   type WipTotals,
 } from "./work-in-progress.js";
+import { round4 } from "@navet/shared";
 
 export interface WorkInProgressRow extends WipRowAmounts {
   manufacturingOrderId: string;
@@ -89,10 +90,6 @@ function groupBy<T>(rows: T[], key: (row: T) => string): Map<string, T[]> {
     else map.set(k, [row]);
   }
   return map;
-}
-
-function round4(n: number): number {
-  return Math.round((n + Number.EPSILON) * 10000) / 10000;
 }
 
 // Every database read the report needs, from one executor. Sequential: the

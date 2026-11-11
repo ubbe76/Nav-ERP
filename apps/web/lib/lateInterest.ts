@@ -29,7 +29,12 @@ export interface LateInterestSelection {
   fee: ReadonlySet<string>;
 }
 
-const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
+// Half away from zero, cut to 15 significant digits first — @navet/shared
+// money.ts's roundToDecimals (the web can't import the package).
+const round2 = (n: number): number => {
+  const magnitude = Math.round(Number((Math.abs(n) * 100).toPrecision(15))) / 100;
+  return n < 0 && magnitude !== 0 ? -magnitude : magnitude;
+};
 
 // Interest that can be charged at all: a rate exists and the amount is above 0.
 export function hasChargeableInterest(row: Pick<LateInterestRow, "interest" | "rateMissing">): boolean {

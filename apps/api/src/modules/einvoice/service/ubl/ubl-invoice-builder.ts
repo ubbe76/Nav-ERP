@@ -57,6 +57,7 @@
 //     The service's unit conversion is therefore never a reason for a refused
 //     document; the residual is still reported by ubl-check if it cannot be
 //     brought under 0.02 (quantity ≤ 0, pathological data).
+import { round2 } from "@navet/shared";
 import { el, renderXml, type XmlChild, type XmlElement } from "../../../banking/service/iso20022/xml-writer.js";
 import { unitCodeFor } from "./unit-codes.js";
 import type { UblBuyer, UblInvoiceInput, UblLine, UblPostalAddress, UblSeller } from "./ubl-types.js";
@@ -83,9 +84,9 @@ const SLACK = 0.015;
 
 // ---- amounts ---------------------------------------------------------------
 
-// Same rounding as @navet/shared round2 (Math.round((n + EPSILON) × 100)),
-// kept in integer öre so sums are exact. Exported for ubl-check and the tests.
-export const toCents = (amount: number): number => Math.round((amount + Number.EPSILON) * 100);
+// @navet/shared round2 (half away from zero), kept in integer öre so sums are
+// exact. Exported for ubl-check and the tests.
+export const toCents = (amount: number): number => Math.round(round2(amount) * 100);
 export const formatAmount = (amount: number): string => (toCents(amount) / 100).toFixed(2);
 const formatCents = (cents: number): string => (cents / 100).toFixed(2);
 

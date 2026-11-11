@@ -22,6 +22,7 @@ import {
 } from "./requirements-calc.js";
 import type { PartnerDeliveryFields } from "../../system/service/delivery-days.js";
 import { forecastWeeklyDemands, type ArticleForecastInput, type DatedDemand, type ForecastCalendar } from "./forecast.js";
+import { round4 } from "@navet/shared";
 
 export interface OverviewArticle {
   articleId: string;
@@ -234,13 +235,6 @@ export function compareOverviewRows(a: ArticleOverviewRow, b: ArticleOverviewRow
   if (KIND_ORDER[a.kind] !== KIND_ORDER[b.kind]) return KIND_ORDER[a.kind] - KIND_ORDER[b.kind];
   if (a.documentNumber !== b.documentNumber) return compareStrings(a.documentNumber, b.documentNumber);
   return compareStrings(a.id, b.id);
-}
-
-// Quantities are numeric(14,4); summing floats in JS leaves noise like
-// 0.30000000000000004 that would render as such. Same scale as the units
-// helpers (QUANTITY_SCALE = 4).
-function round4(n: number): number {
-  return Math.round((n + Number.EPSILON) * 1e4) / 1e4;
 }
 
 // One BOM index per edge list. A batch of overviews (pegParents behind the

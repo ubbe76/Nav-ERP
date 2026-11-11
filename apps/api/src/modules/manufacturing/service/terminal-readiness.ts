@@ -1,3 +1,5 @@
+import { round4 } from "@navet/shared";
+
 // Terminal readiness (beredskap) for MO operations — pure, no DB imports.
 // The first operation (lowest sequence number) is always ready; any other
 // one is ready when the nearest previous operation is done, partially ready
@@ -9,8 +11,6 @@ export type Readiness = "ready" | "partial" | "not_ready";
 export interface ReadinessInput { id: string; sequenceNo: number; status: "pending" | "done"; quantityCompleted: string | null }
 export interface ReadinessResult { readiness: Readiness; available: number }
 
-// Rounded to 4 decimals so float noise never reaches String() in the service.
-const round4 = (x: number) => Math.round(x * 1e4) / 1e4;
 const ok = (op: ReadinessInput) => Number(op.quantityCompleted ?? 0);
 
 export function computeReadiness(orderQuantity: number, operations: ReadinessInput[]): Map<string, ReadinessResult> {

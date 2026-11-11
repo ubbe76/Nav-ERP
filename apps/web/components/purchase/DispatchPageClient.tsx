@@ -15,7 +15,7 @@ import { PalletCardDialog } from "../documents/PalletCardDialog";
 import { DispatchesSection } from "./DispatchesSection";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { formatQuantity } from "../../lib/format";
+import { formatQuantity, round4 } from "../../lib/format";
 import { toBaseQuantity, toUnitQuantity } from "../../lib/units";
 import {
   PURCHASE_ORDER_STATUS_PILL,
@@ -34,8 +34,6 @@ const OPEN: PurchaseOrderStatus[] = [
   "partially_received",
 ];
 
-// Rounded so 0.1 + 0.2 style float noise never shows in a prefilled field.
-const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
 const legoReference = (r: PurchaseOrderRow) =>
   r.moOrderNumber

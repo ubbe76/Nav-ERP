@@ -18,7 +18,7 @@
 // the "trial" base). runDeliveryTimeChecks/deliveryTimeAnswer below compose
 // the answer: the alternatives count only when they give an earlier
 // delivery date.
-import { roundUpToMultiple } from "@navet/shared";
+import { round4, roundUpToMultiple, roundToDecimals } from "@navet/shared";
 import { explodeOneLevel, type BomEdge } from "./requirements-calc.js";
 import { isFirmOverviewRow, type ArticleOverviewRow } from "./article-overview.js";
 import {
@@ -246,7 +246,6 @@ interface Resolution {
 }
 
 const EPS = 1e-9;
-const round4 = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
 const maxDate = (a: string, b: string) => (a > b ? a : b);
 
 // A row's notes. The repeating kinds — resources without a week schedule,
@@ -815,7 +814,7 @@ function runCheck(input: DeliveryTimeCheckInput, options: CheckOptions): CheckRu
     const minutes = book.undatedMinutes(wcId);
     if (minutes > EPS) {
       const wc = input.workCenters.get(wcId)!;
-      const hours = (Math.round((minutes / 60) * 10) / 10).toLocaleString("sv-SE");
+      const hours = roundToDecimals(minutes / 60, 1).toLocaleString("sv-SE");
       globalNotes.add(`Resurs ${wc.code} har ${hours} h beläggning utan datum som inte räknas`);
     }
   }

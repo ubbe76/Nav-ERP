@@ -28,6 +28,7 @@ import { createTimeReportService } from "../src/modules/timereport/service/timer
 import { ExchangeRateUnavailableError } from "../src/modules/system/service/exchange-rates.js";
 import { parsed } from "./helpers/parsed.js";
 import { unwiredPreCalculationBatch, unwiredSalesOrderLinks } from "./helpers/unwired";
+import { editStockLog } from "./helpers/stock-log.js";
 
 // Produkter i arbete (#25) against Postgres: every source bounded to D, the
 // orders that count, avräknat at the stock price. "Before D" is made by
@@ -134,7 +135,7 @@ async function makeOrder(product: Awaited<ReturnType<typeof makeProduct>>, quant
 
 // Everything the order has logged so far moves onto BEFORE (on or before D).
 async function moveBeforeD(orderId: string) {
-  await db.execute(sql`UPDATE stock_transactions SET created_at = ${BEFORE}::timestamptz WHERE reference_id = ${orderId}`);
+  await editStockLog((tx) => tx.execute(sql`UPDATE stock_transactions SET created_at = ${BEFORE}::timestamptz WHERE reference_id = ${orderId}`));
   await db.execute(sql`UPDATE mo_reports SET created_at = ${BEFORE}::timestamptz WHERE manufacturing_order_id = ${orderId}`);
 }
 
@@ -269,8 +270,10 @@ describe("Produkter i arbete per datum — the sources", () => {
     await purchaseService.undoReceipt(io.id, receipt!.id, user.id);
     // Received before D, undone after D; the TO receipt before D, its reversal after.
     await db.execute(sql`UPDATE purchase_receipts SET created_at = ${BEFORE}::timestamptz WHERE id = ${receipt!.id}`);
-    await db.execute(
-      sql`UPDATE stock_transactions SET created_at = ${BEFORE}::timestamptz WHERE reference_id = ${order.id} AND transaction_type = 'mo_receipt' AND quantity_delta > 0`
+    await editStockLog((tx) =>
+      tx.execute(
+        sql`UPDATE stock_transactions SET created_at = ${BEFORE}::timestamptz WHERE reference_id = ${order.id} AND transaction_type = 'mo_receipt' AND quantity_delta > 0`
+      )
     );
     costingSettings.costingLoPercent = 10;
 
@@ -322,8 +325,10 @@ describe("Produkter i arbete per datum — material sources", () => {
     const product = await makeProduct(50);
     const { order, material } = await makeOrder(product, 5, user.id);
     // The opening stock arrived before the draw, at 15 (not the standard cost 12).
-    await db.execute(
-      sql`UPDATE stock_transactions SET unit_cost = 15, created_at = '2025-06-01T10:00:00Z' WHERE article_id = ${product.component.id} AND transaction_type = 'inventory_adjustment'`
+    await editStockLog((tx) =>
+      tx.execute(
+        sql`UPDATE stock_transactions SET unit_cost = 15, created_at = '2025-06-01T10:00:00Z' WHERE article_id = ${product.component.id} AND transaction_type = 'inventory_adjustment'`
+      )
     );
     await mfgService.consumeMaterial(order.id, material.id, { locationId: product.location.id, quantity: 6 }, user.id);
     await moveBeforeD(order.id);

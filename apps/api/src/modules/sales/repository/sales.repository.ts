@@ -91,6 +91,7 @@ import { loadDeliveryContext } from "../../system/repository/delivery-context.js
 import { getInvoicedQuantitiesWith } from "./invoice.repository.js";
 import { loadVatCodeBook } from "../../economy/repository/vat-codes.js";
 import { articleVatRateSql } from "../../article/repository/article-vat-rate.js";
+import { round4 } from "@navet/shared";
 
 // users joined a second time for "who marked the quote lost" (the order's
 // created_by is not the same person).
@@ -98,7 +99,6 @@ const lostByUser = alias(users, "lost_by_user");
 // Kostnadsställen och projekt: the order header's objects as { id, code, name }.
 const orderCostCenters = alias(costCenters, "order_cost_centers");
 const orderProjects = alias(projects, "order_projects");
-
 
 // A plain sales_orders row (from insert/update … returning) with its derived
 // document kind, so every write path answers in the same shape as the reads.
@@ -402,11 +402,6 @@ async function rowHistory(tx: Tx, rowIds: string[]) {
     delivered: new Set(delivered.map((r) => r.rowId)),
     invoiced: new Set(invoiced.map((r) => r.rowId).filter((id): id is string => id !== null)),
   };
-}
-
-// Quantities live in numeric(14,4) — compare and store at that precision.
-function round4(n: number): number {
-  return Math.round((n + Number.EPSILON) * 10000) / 10000;
 }
 
 // Ny leveransadress on an order (create or header PATCH), inside the order's

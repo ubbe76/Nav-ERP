@@ -13,7 +13,7 @@ import type {
   Paged,
 } from "@navet/shared";
 import type { Tx } from "@navet/db";
-import { roundUpToMultiple } from "@navet/shared";
+import { round4, roundToDecimals, roundUpToMultiple } from "@navet/shared";
 import type { CoverageParentsLoad, PlanningRepository } from "../repository/planning.repository.js";
 import { pegOverview, type PegAllocation, type PegSupplyKind, type Pegging } from "./pegging.js";
 import {
@@ -672,7 +672,6 @@ export interface ApplyDeliveryTimeResult {
   warnings: string[];
 }
 
-
 export interface CreatedOrdersResult {
   // supplierId travels with the order so the caller can look the supplier's
   // email up — the behovsberäkning offers to mail the draft straight away.
@@ -709,9 +708,6 @@ function latestHorizonEnd(latest: NonNullable<ListRequirementsQuery["latest"]>, 
   }
 }
 
-// Same scale as the calc (numeric(14,4)).
-const round4 = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
-
 // Skapa ordrar: a proposal the fresh recomputation no longer has.
 export const STALE_PROPOSAL_MESSAGE = "Förslaget finns inte längre — uppdatera behovsberäkningen";
 
@@ -726,8 +722,7 @@ export function legoPriceConverter(order: { currency?: string; exchangeRate?: st
   return (sek: number, decimals: 2 | 4): number => {
     if (order.currency === undefined || order.currency === "SEK") return sek;
     if (!Number.isFinite(rate) || rate <= 0) return 0;
-    const f = 10 ** decimals;
-    return Math.round((sek / rate + Number.EPSILON) * f) / f;
+    return roundToDecimals(sek / rate, decimals);
   };
 }
 
@@ -1567,7 +1562,6 @@ export function createPlanningService(
     return summaries;
   }
 
-
   // --- Pegging (#9) ----------------------------------------------------
   // The coverage for a set of parent TOs in a fixed number of loads: the
   // parents' component articles (their material rows with rest) → their
@@ -2348,7 +2342,7 @@ export function createPlanningService(
       const to = lastDayOf(months[months.length - 1]!);
       const [articles, consumption] = await Promise.all([repo.abcArticles(), repo.consumptionByMonth(null, from, to)]);
       const consumed = new Map<string, number>();
-      for (const r of consumption) consumed.set(r.articleId, Math.round(((consumed.get(r.articleId) ?? 0) + r.consumed) * 1e4) / 1e4);
+      for (const r of consumption) consumed.set(r.articleId, round4((consumed.get(r.articleId) ?? 0) + r.consumed));
       const classified = classifyAbc(
         articles.map((a) => ({ ...a, consumed: consumed.get(a.articleId) ?? 0 })),
         settings

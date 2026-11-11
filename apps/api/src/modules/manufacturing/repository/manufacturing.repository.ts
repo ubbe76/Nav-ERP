@@ -48,6 +48,7 @@ import {
   type UpdateProductionGroupInput,
   type UpdateRoutingOperationInput,
   type UpdateWorkCenterInput,
+  round4,
 } from "@navet/shared";
 import type { SQL } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
@@ -206,13 +207,6 @@ export interface ReportOperationQuantitiesInput {
 export interface PurchaseReceiptLink {
   claim(tx: Tx): Promise<void>;
   link(tx: Tx, reportId: string): Promise<void>;
-}
-
-// Quantities are numeric(14,4): compare and store at 4 decimals, so float
-// noise (0.1 + 0.2, 0.1 × 3) never refuses a draw that lands exactly on the
-// plan nor books a draw of 5e-17 (purchase.repository.ts's receipt does the same).
-function round4(value: number): number {
-  return Math.round(value * 10000) / 10000;
 }
 
 // Draws the material rows matching `operationFilter` up to what the reported

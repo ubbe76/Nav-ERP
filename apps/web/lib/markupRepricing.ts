@@ -1,4 +1,5 @@
 import type { MarkupRepricingKeptReason, MarkupRepricingPlan } from "./types";
+import { round2 } from "./format";
 
 // Påslag på offert och order (#16): the header form's two percent fields and
 // the confirmation shown before a save that reprices rows — the rows the
@@ -12,7 +13,7 @@ export function parseMarkupField(text: string): number | null {
   if (trimmed === "") return null;
   const n = Number(trimmed.replace(",", "."));
   if (!Number.isFinite(n) || n < 0 || n > 1000) return Number.NaN;
-  return Math.round(n * 100) / 100;
+  return round2(n);
 }
 
 // What the PATCH carries: only a field that differs from the order's stored

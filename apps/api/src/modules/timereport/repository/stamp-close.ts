@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { moOperations, payrollPeriods, stampSessions, timeReports, type Db, type Tx } from "@navet/db";
+import { round2 } from "@navet/shared";
 
 // Leaf on purpose: the manufacturing repository calls closeStampSessionsInTx
 // inside its own report/complete transactions (an operation or order turning
@@ -18,7 +19,7 @@ export function stampedHours(session: StampTimes, stoppedAt: Date): number {
   const ongoingPauseMs = session.pausedAt ? Math.max(stoppedAt.getTime() - session.pausedAt.getTime(), 0) : 0;
   const pausedMs = Number(session.pausedSeconds) * 1000 + ongoingPauseMs;
   const elapsedHours = (stoppedAt.getTime() - session.startedAt.getTime() - pausedMs) / 3_600_000;
-  return Math.max(0.01, Math.round(elapsedHours * 100) / 100);
+  return Math.max(0.01, round2(elapsedHours));
 }
 
 // A paused stamp (gone home and never back) stopped when the pause began.

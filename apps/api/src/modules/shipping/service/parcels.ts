@@ -1,4 +1,5 @@
 import type { ParcelKind } from "@navet/shared";
+import { round2 } from "@navet/shared";
 
 // Kolliförslag — pure (no DB imports), ported from ERPNext Sverige Frakt's
 // kollin.py. Input rows are delivered quantities in the BASE unit; the same
@@ -46,7 +47,6 @@ export interface ParcelDraft {
 export type FreightMode = "package" | "own" | "none";
 
 const DESCRIPTION_MAX = 100;
-const round2 = (n: number) => Math.round(n * 100) / 100;
 // mm → cm with one decimal (shipment_parcels is numeric(8,1)).
 const mmToCm = (mm: number | null) => (mm === null ? 0 : Math.round(mm) / 10);
 const hasAllDimensions = (l: number | null, w: number | null, h: number | null) => !!l && !!w && !!h;

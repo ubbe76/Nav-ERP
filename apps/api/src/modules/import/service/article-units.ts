@@ -26,6 +26,7 @@ import {
   type ImportRowResult,
   type ImportSummary,
 } from "./import.service.js";
+import { roundToDecimals } from "@navet/shared";
 
 // Mappable target fields, in the order the wizard lists them.
 export const ARTICLE_UNIT_IMPORT_FIELDS = [
@@ -128,7 +129,7 @@ export interface ArticleUnitImportPlan {
 
 // quantity_per_base is numeric(16,6).
 function invertFactor(factor: number): number {
-  return Math.round((1 / factor) * 1_000_000) / 1_000_000;
+  return roundToDecimals(1 / factor, 6);
 }
 
 // The SAME builder runs for preview and commit — commit never trusts the

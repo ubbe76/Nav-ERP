@@ -6,7 +6,7 @@ export const createContactSchema = z.object({
   name: z.string().min(1).max(255),
   phone: z.string().max(50).optional(),
   mobile: z.string().max(50).optional(),
-  email: z.string().email().optional(),
+  email: z.string().email().max(255).optional(),
   comment: z.string().optional(),
   isPrimary: z.boolean().default(false),
 });
@@ -17,7 +17,7 @@ export const updateContactSchema = z
     name: z.string().min(1).max(255).optional(),
     phone: z.string().max(50).nullable().optional(),
     mobile: z.string().max(50).nullable().optional(),
-    email: z.string().email().nullable().optional(),
+    email: z.string().email().max(255).nullable().optional(),
     comment: z.string().nullable().optional(),
     isPrimary: z.boolean().optional(),
   })

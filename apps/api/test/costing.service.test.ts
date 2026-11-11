@@ -30,6 +30,7 @@ import { ExchangeRateUnavailableError } from "../src/modules/system/service/exch
 import { stockholmDateOf } from "../src/modules/system/service/delivery-days.js";
 import { parsed } from "./helpers/parsed.js";
 import { unwiredSalesOrderLinks } from "./helpers/unwired";
+import { editStockLog } from "./helpers/stock-log.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -1006,7 +1007,7 @@ describe("costing service — post-calculation priced at the withdrawal", () => 
   // Moves the order's withdrawals and every recorded price of the component
   // onto fixed days, so "as of the withdrawal" can be told apart from "now".
   async function backdate(orderId: string, componentId: string, drawnAt: string, firstPriceAt: string) {
-    await db.execute(sql`update stock_transactions set created_at = ${drawnAt}::timestamptz where reference_id = ${orderId} and transaction_type = 'mo_consumption'`);
+    await editStockLog((tx) => tx.execute(sql`update stock_transactions set created_at = ${drawnAt}::timestamptz where reference_id = ${orderId} and transaction_type = 'mo_consumption'`));
     await db.execute(sql`update article_standard_cost_history set valid_from = ${firstPriceAt}::timestamptz where article_id = ${componentId}`);
     await db.execute(sql`update article_supplier_price_history set valid_from = ${firstPriceAt}::timestamptz where article_id = ${componentId}`);
   }
@@ -1396,7 +1397,7 @@ describe("costing service — variance analysis", () => {
 
   it("prices the efterkalkyl with its own source (actual) and the base with the förkalkyl's (standard)", async () => {
     const f = await makeFixture();
-    await db.execute(sql`update stock_transactions set unit_cost = 14 where article_id = ${f.component.id} and transaction_type = 'inventory_adjustment'`);
+    await editStockLog((tx) => tx.execute(sql`update stock_transactions set unit_cost = 14 where article_id = ${f.component.id} and transaction_type = 'inventory_adjustment'`));
     await mfgService.consumeMaterial(f.order.id, f.materialRow.id, { locationId: f.location.id, quantity: 10 }, f.user.id);
     await mfgService.complete(f.order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
     Object.assign(costingSettings, { costingPostMaterialSource: "actual" });

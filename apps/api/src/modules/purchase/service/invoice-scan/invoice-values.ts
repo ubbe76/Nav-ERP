@@ -1,5 +1,9 @@
 // Fakturaskanning — reading dates and amounts the way Swedish and English
 // invoices print them (spec §3.3 punkt 4–5). Pure.
+import { round2 } from "@navet/shared";
+
+// Öre rounding — the one shared rule (money.ts); re-exported for the scan modules.
+export { round2 };
 
 const MONTHS: Record<string, number> = {
   januari: 1, january: 1, jan: 1,
@@ -110,6 +114,3 @@ export function formatAmountSv(value: number): string {
   return value.toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace("−", "-");
 }
 
-export function round2(value: number): number {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
-}

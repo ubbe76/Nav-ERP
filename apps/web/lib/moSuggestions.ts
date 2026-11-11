@@ -1,4 +1,5 @@
 import { toUnitQuantity, type UnitFactor } from "./units";
+import { round2 } from "./format";
 
 // Suggestions for the TO card's Förbruka material and Rapportera tid forms:
 // what theoretically remains to be drawn/worked. "" = no suggestion (nothing
@@ -40,7 +41,7 @@ export function suggestedReportHours(
   const reportedHours = timeReports
     .filter((r) => r.moOperationId === operation.id && (!kind || r.kind === kind))
     .reduce((sum, r) => sum + Number(r.hours), 0);
-  const remaining = Math.round((plannedMinutes / 60 - reportedHours) * 100) / 100;
+  const remaining = round2(plannedMinutes / 60 - reportedHours);
   return remaining > 0 ? String(remaining) : "";
 }
 

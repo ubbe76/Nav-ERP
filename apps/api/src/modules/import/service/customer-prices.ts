@@ -43,6 +43,7 @@ import {
   type ImportRowResult,
   type ImportSummary,
 } from "./import.service.js";
+import { round4 } from "@navet/shared";
 
 // Mappable target fields, in the order the wizard lists them.
 export const CUSTOMER_PRICE_IMPORT_FIELDS = [
@@ -110,11 +111,6 @@ export const CUSTOMER_PRICE_SECONDARY_HEADER_ALIASES: Record<string, string> = {
 
 export function suggestCustomerPriceMapping(headers: string[]): Record<string, string | null> {
   return suggestMapping(headers, CUSTOMER_PRICE_HEADER_ALIASES, CUSTOMER_PRICE_SECONDARY_HEADER_ALIASES);
-}
-
-// numeric(14,4) — the price columns' scale.
-function round4(n: number): number {
-  return Math.round(n * 10000) / 10000;
 }
 
 // Narrow lookups the planner runs against — implemented structurally by

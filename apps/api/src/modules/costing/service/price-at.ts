@@ -1,4 +1,5 @@
 import { stockholmDateOf } from "../../system/service/delivery-days.js";
+import { round2 } from "@navet/shared";
 
 // Prishistorik as of a moment — what a price WAS when the material was taken
 // out, for the efterkalkyl and Produkter i arbete. Pure: the repository hands
@@ -242,6 +243,6 @@ export function laborAtWorkDays(
   }
   const hours = totalHundredths / 100;
   if (rates.size === 0) return { hours: 0, laborAmount: 0, hourlyRate: currentRate };
-  const hourlyRate = rates.size === 1 ? [...rates][0]! : hours !== 0 ? Math.round((laborAmount / hours) * 100) / 100 : currentRate;
+  const hourlyRate = rates.size === 1 ? [...rates][0]! : hours !== 0 ? round2(laborAmount / hours) : currentRate;
   return { hours, laborAmount, hourlyRate };
 }

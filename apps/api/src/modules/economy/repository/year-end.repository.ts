@@ -18,6 +18,7 @@ import {
 import type { ValuationMethod, WipBasis } from "@navet/shared";
 import { OPENING_BALANCE_SERIES } from "../service/verification-poster.js";
 import { addDays } from "../service/year-end-calc.js";
+import { round2 } from "@navet/shared";
 
 // Årsbokslut — executor-based (Db | Tx) functions, same seam as
 // vat-settlement.repository.ts: the service passes its own transaction.
@@ -211,7 +212,7 @@ export async function accountBalance(executor: Executor, accountId: string, thro
     .from(verificationRows)
     .innerJoin(verifications, eq(verifications.id, verificationRows.verificationId))
     .where(and(eq(verificationRows.accountId, accountId), eq(verifications.status, "booked"), lte(verifications.date, through)));
-  return Math.round(Number(row?.net ?? 0) * 100) / 100;
+  return round2(Number(row?.net ?? 0));
 }
 
 // Debit − credit of ONE verification on one account (the live step's share).
@@ -220,7 +221,7 @@ export async function verificationAmountOnAccount(executor: Executor, verificati
     .select({ net: sql<string>`COALESCE(SUM(${verificationRows.debit} - ${verificationRows.credit}), 0)` })
     .from(verificationRows)
     .where(and(eq(verificationRows.verificationId, verificationId), eq(verificationRows.accountId, accountId)));
-  return Math.round(Number(row?.net ?? 0) * 100) / 100;
+  return round2(Number(row?.net ?? 0));
 }
 
 // Debit − credit per account of ONE verification (the live valutaomvärdering
@@ -234,7 +235,7 @@ export async function verificationAmounts(executor: Executor, verificationId: st
     .from(verificationRows)
     .where(eq(verificationRows.verificationId, verificationId))
     .groupBy(verificationRows.accountId);
-  return rows.map((row) => ({ accountId: row.accountId, amount: Math.round(Number(row.net) * 100) / 100 }));
+  return rows.map((row) => ({ accountId: row.accountId, amount: round2(Number(row.net)) }));
 }
 
 // The inventory method of the latest CLOSED closing before this year — the

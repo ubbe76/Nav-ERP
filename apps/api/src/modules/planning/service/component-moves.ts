@@ -26,6 +26,7 @@
 import { compareOverviewRows, type ArticleOverview, type ArticleOverviewRow } from "./article-overview.js";
 import { suggestDueDate } from "./due-date-suggestion.js";
 import type { PegDemand, Pegging } from "./pegging.js";
+import { round4 } from "@navet/shared";
 
 export type MoveReason = "late" | "needed_earlier" | "later_possible" | "undated";
 
@@ -58,8 +59,6 @@ export interface MoveCandidate {
   exclusive: boolean;
   lateForParent: boolean;
 }
-
-const round4 = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
 
 // The TO supplies in one article's pegging that cover a demand `isParentDemand`
 // accepts, in supply order.

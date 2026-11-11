@@ -6,7 +6,7 @@
 // line table and round2, so all of it is unit-testable in milliseconds —
 // and there is exactly ONE implementation of each rule (CLAUDE.md: rena
 // beräkningsfiler), used by the reports, the grid, Kopiera utfall and CSV.
-import { round2 } from "@navet/shared";
+import { round2, roundToDecimals } from "@navet/shared";
 import { INCOME_STATEMENT_ENTRIES, classifyAccount } from "./bas-report-lines.js";
 
 // `budget_lines.amount` carries the account's NATURAL sign: positive = normal
@@ -178,7 +178,7 @@ export interface BudgetedIncomeStatementInput {
 
 export function variancePercentOf(variance: number, budget: number): number | null {
   if (budget === 0) return null;
-  return Math.round((variance / Math.abs(budget)) * 1000) / 10;
+  return roundToDecimals((variance / Math.abs(budget)) * 100, 1);
 }
 
 function figures(amount: number, budget: number, accumulated: number, accumulatedBudget: number): BudgetedFigures {

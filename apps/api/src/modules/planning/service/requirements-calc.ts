@@ -17,7 +17,7 @@
 // rounding helper — deliberately the SAME function the order services apply
 // to row quantities, so a proposal and the order it becomes agree — and the
 // calendar rules in the delivery-days leaf (one implementation).
-import { roundUpToMultiple } from "@navet/shared";
+import { round4, roundUpToMultiple } from "@navet/shared";
 import {
   decodeDeliveryDefaults,
   effectiveDeliverySettings,
@@ -495,10 +495,6 @@ function pushDemand(map: Map<string, Demand[]>, articleId: string, demand: Deman
   if (list) list.push(demand);
   else map.set(articleId, [demand]);
 }
-
-// Same scale as the stored quantities (numeric(14,4)) — keeps float noise
-// from turning an exactly covered demand into a 1e-15 proposal.
-const round4 = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
 
 // The proposal quantity for an uncovered quantity: whole order-quantity
 // multiples first, Avrundning LAST on top (100 kg in 7.38 kg bars is 103.32

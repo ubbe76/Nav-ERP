@@ -17,16 +17,14 @@ import {
   type QuoteFollowupQuote,
   type QuoteOutcome,
   type SalesOrderStatus,
+  round2,
+  round4,
 } from "@navet/shared";
 import type { QuoteFollowupSourceRow } from "../repository/quote-followup.repository.js";
 
 export const NO_LOSS_REASON_LABEL = "Ingen orsak angiven";
 
 const WON_STATUSES: ReadonlySet<string> = new Set(["confirmed", "in_production", "delivered", "invoiced"]);
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
-// Shares and hit rates as fractions with 4 decimals (0.6667).
-const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
 export function quoteOutcome(status: string): QuoteOutcome {
   if (WON_STATUSES.has(status)) return "won";

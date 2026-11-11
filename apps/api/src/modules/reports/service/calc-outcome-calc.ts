@@ -22,6 +22,7 @@
 // only counted.
 import type { CalculationOutcomeGrouping, CostVarianceAnalysis, CostVarianceParts } from "@navet/shared";
 import { manufacturingCost, type ManufacturingCostBuckets as Buckets } from "../../costing/service/cost-figures.js";
+import { roundToDecimals } from "@navet/shared";
 
 // One TO's latest efterkalkyl in the period.
 export interface OutcomePostCalculation extends Buckets {
@@ -177,7 +178,7 @@ export function preCalculationOutcome(
       calculatedTvkPerUnit: final ? final.base / final.outputQuantity : null,
       postTvkPerUnit,
       deltaPerUnit,
-      deltaPct: pre.perUnit !== 0 ? Math.round((deltaPerUnit / pre.perUnit) * 1000) / 10 : null,
+      deltaPct: pre.perUnit !== 0 ? roundToDecimals((deltaPerUnit / pre.perUnit) * 100, 1) : null,
       preMultiLevel: pre.multiLevel,
       preCalculatedAt: pre.calculatedAt,
       postCalculatedAt: post.calculatedAt,
@@ -194,7 +195,7 @@ export function preCalculationOutcome(
       count: rows.length,
       avgDeviationPct:
         withPct.length > 0
-          ? Math.round((withPct.reduce((sum, r) => sum + r.deltaPct!, 0) / withPct.length) * 10) / 10
+          ? roundToDecimals(withPct.reduce((sum, r) => sum + r.deltaPct!, 0) / withPct.length, 1)
           : null,
     },
     notComparable,
@@ -243,7 +244,7 @@ function amounts(money: Money): OutcomeAmounts {
     base: money.base / 100,
     actual: money.actual / 100,
     deviation: deviation / 100,
-    deviationPct: money.base !== 0 ? Math.round((deviation / money.base) * 1000) / 10 : null,
+    deviationPct: money.base !== 0 ? roundToDecimals((deviation / money.base) * 100, 1) : null,
     parts,
   };
 }

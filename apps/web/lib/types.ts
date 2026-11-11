@@ -1040,7 +1040,8 @@ export interface PurchaseOrderRow {
 // books no purchase stock, and moReportId links a lego receipt's TO report.
 export interface PurchaseReceipt {
   id: string;
-  purchaseOrderRowId: string;
+  // null: an undone receipt whose IO row has since been deleted (migration 0208).
+  purchaseOrderRowId: string | null;
   quantity: string;
   locationName: string | null;
   moReportId: string | null;

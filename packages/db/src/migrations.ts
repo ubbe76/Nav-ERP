@@ -36,9 +36,13 @@ const MIGRATION_LOCK_KEY = 4_810_270_190;
 // migration that adds an enum value and uses it in the same file still needs
 // to be split in two.
 export async function runMigrations(connectionString?: string) {
-  const client = postgres(connectionString ?? process.env.DATABASE_URL ?? DEFAULT_CONNECTION_STRING, { max: 1 });
+  // max_lifetime null: postgres.js otherwise recycles a connection after
+  // 30–60 minutes, and a new connection would silently drop the session's
+  // advisory lock between two migrations of a long run.
+  const client = postgres(connectionString ?? process.env.DATABASE_URL ?? DEFAULT_CONNECTION_STRING, { max: 1, max_lifetime: null });
   try {
     const migrations = readMigrationFiles({ migrationsFolder: MIGRATIONS_FOLDER });
+    assertAscendingJournal(migrations.map((m) => m.folderMillis));
     await client`select pg_advisory_lock(${MIGRATION_LOCK_KEY})`;
     try {
       await client`CREATE SCHEMA IF NOT EXISTS drizzle`;
@@ -70,5 +74,20 @@ export async function runMigrations(connectionString?: string) {
     }
   } finally {
     await client.end();
+  }
+}
+
+// "Runs when newer than the newest recorded" only works on a strictly
+// ascending journal: a migration renumbered after a merge but keeping an
+// older `when` would be skipped on every upgraded database while a fresh
+// install ran it (delatgranskningen 2026-11-11). Refuse before touching
+// the database. Exported for its test.
+export function assertAscendingJournal(folderMillis: number[]): void {
+  for (let i = 1; i < folderMillis.length; i++) {
+    if (!(folderMillis[i]! > folderMillis[i - 1]!)) {
+      throw new Error(
+        `drizzle/meta/_journal.json is not strictly ascending: entry ${i} (when ${folderMillis[i]}) is not after entry ${i - 1} (when ${folderMillis[i - 1]})`
+      );
+    }
   }
 }

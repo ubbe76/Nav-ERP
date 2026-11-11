@@ -26,7 +26,7 @@ import { ManualStatusChange } from "../documents/ManualStatusChange";
 import { TermsFields, termsFrom, termsLabel, termsPayload, type TermsRegisters, type TermsValue } from "../documents/TermsFields";
 import { toBaseQuantity, toUnitPrice, toUnitQuantity } from "../../lib/units";
 import { requoteFor } from "../../lib/rowRequote";
-import { formatMoney, formatQuantity } from "../../lib/format";
+import { formatMoney, formatQuantity, round2 } from "../../lib/format";
 import { apiFetch } from "../../lib/api";
 import { useSupplierDeliveryDateSuggestion } from "../../lib/useDeliveryDateSuggestion";
 import { DeliveryDateHint } from "../ui/DeliveryDateHint";
@@ -187,7 +187,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
     Number(r.quantityOrdered) * Number(r.unitPrice) + (r.setupPrice != null ? Number(r.setupPrice) : 0);
   const total = rows.reduce((sum, r) => sum + rowAmount(r), 0);
   // Rounded to öre like the PDF's printed figure.
-  const vatAmount = order.vat ? Math.round(total * order.vat.rate) / 100 : 0;
+  const vatAmount = order.vat ? round2((total * order.vat.rate) / 100) : 0;
 
   function refresh() {
     setModal(null);

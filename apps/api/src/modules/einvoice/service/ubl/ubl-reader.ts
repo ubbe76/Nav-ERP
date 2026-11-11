@@ -9,6 +9,7 @@ import type {
   ReceivedEInvoiceParty,
   ReceivedEInvoiceVatBreakdown,
 } from "./received-einvoice.js";
+import { round2 } from "@navet/shared";
 
 // The pure UBL reader (spec 2026-11-05-e-faktura-mottagning): UBL 2.1
 // Invoice and CreditNote — Peppol BIS Billing 3 and any other EN 16931
@@ -157,7 +158,7 @@ function sumAllowanceCharges(nodes: XmlNode[], charge: boolean): number {
     if (isCharge !== charge) continue;
     sum += amountOf(node, "Amount") ?? 0;
   }
-  return Math.round(sum * 100) / 100;
+  return round2(sum);
 }
 
 function line(node: XmlNode, credit: boolean, index: number): ReceivedEInvoiceLine {

@@ -126,7 +126,7 @@ export const createCustomerSchema = z.object({
   // Manually chosen numbers must be unique (409 on duplicates).
   customerNumber: z.string().trim().min(1).max(50).optional(),
   contactName: z.string().max(255).optional(),
-  email: z.string().email().optional(),
+  email: z.string().email().max(255).optional(),
   phone: z.string().max(50).optional(),
   // Besöksadress — invoice and delivery addresses are separate.
   address: z.string().optional(),
@@ -205,7 +205,7 @@ export const updateCustomerSchema = z
     // Optional but NOT nullable — a customer always has a number.
     customerNumber: z.string().trim().min(1).max(50).optional(),
     contactName: z.string().max(255).nullable().optional(),
-    email: z.string().email().nullable().optional(),
+    email: z.string().email().max(255).nullable().optional(),
     phone: z.string().max(50).nullable().optional(),
     address: z.string().nullable().optional(),
     postalCode: z.string().max(20).nullable().optional(),
@@ -569,7 +569,7 @@ export const invoiceRowInputSchema = z.object({
   shipmentId: z.string().uuid().optional(),
   description: z.string().min(1).max(255),
   quantity: z.coerce.number().positive(),
-  unitPrice: z.coerce.number(),
+  unitPrice: blankSafe(z.coerce.number()),
   discountPercent: blankSafe(z.coerce.number().min(0).max(100)).optional(),
   vatRate: vatRateSchema.optional(),
   vatCodeId: z.string().uuid().optional(),

@@ -1,4 +1,4 @@
-import { gtinKey, normalizeScanCode } from "@navet/shared";
+import { gtinKey, normalizeScanCode, round4, roundToDecimals } from "@navet/shared";
 // Article import (Monitor G5 CSV): builds an execution plan from mapped
 // rows. The SAME builder runs for preview and commit — commit never trusts
 // the preview round-trip and re-plans from scratch. The customer/supplier
@@ -652,7 +652,7 @@ export async function planArticleImport(
       else {
         // numeric(14,3): more decimals are rounded, with a warning rather
         // than a refusal — 28,86000111 in the real export is 28,86.
-        const rounded = Math.round(parsed * 1000) / 1000;
+        const rounded = roundToDecimals(parsed, 3);
         if (rounded !== parsed) warnings.push(`Avrundningen ${roundingCell} avrundas till ${rounded} (högst 3 decimaler)`);
         planning.rounding = rounded === 0 ? null : rounded;
         values["rounding"] = planning.rounding;
@@ -667,7 +667,7 @@ export async function planArticleImport(
       if (parsed === null) errors.push(`Ogiltigt säkerhetslager: "${safetyStockCell}"`);
       else if (parsed < 0) errors.push("Säkerhetslagret kan inte vara negativt");
       else {
-        safetyStock = parsed === 0 ? null : Math.round(parsed * 10000) / 10000;
+        safetyStock = parsed === 0 ? null : round4(parsed);
         values["safetyStock"] = safetyStock;
       }
     }
@@ -765,7 +765,7 @@ export async function planArticleImport(
       if (parsed === null) errors.push(`Ogiltigt antal per förpackning: "${packageCell}"`);
       else if (parsed < 0) errors.push("Antal per förpackning kan inte vara negativt");
       else {
-        const rounded = Math.round(parsed * 10000) / 10000;
+        const rounded = round4(parsed);
         if (rounded !== parsed) warnings.push(`Antal per förpackning ${packageCell} avrundas till ${rounded} (högst 4 decimaler)`);
         quantityPerPackage = rounded === 0 ? null : rounded;
         values["quantityPerPackage"] = quantityPerPackage;

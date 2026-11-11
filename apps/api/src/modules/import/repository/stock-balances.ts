@@ -4,6 +4,7 @@ import { FALLBACK_LOCATION_NAME, getOrCreateFallbackLocation, resolveStockLocati
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { STOCK_IMPORT_NOTE, type StockBalanceImportPlan } from "../service/stock-balances.js";
+import { round4 } from "@navet/shared";
 
 // Lagersaldon (#3) — the import repository's stock half: the planner's
 // lookups (StockBalanceImportDeps, structurally) and the commit. Kept in its
@@ -124,7 +125,7 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
             .from(stockTransactions)
             .where(and(eq(stockTransactions.articleId, row.articleId), eq(stockTransactions.locationId, locationId)));
           const current = Number(balance!.quantity);
-          const delta = Math.round((row.quantity - current) * 10_000) / 10_000;
+          const delta = round4(row.quantity - current);
           if (delta === 0) continue;
           await tx.insert(stockTransactions).values({
             articleId: row.articleId,

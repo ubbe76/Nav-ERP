@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { round2 } from "./money.js";
 import { blankSafe } from "./coerce.js";
 import { businessDateSchema } from "./business-date.js";
 import { listQuerySchema } from "./list.js";
@@ -39,7 +40,7 @@ export function deriveLoadingMeters(
 ): number | null | undefined {
   if (typeof loadingMeters === "number") return loadingMeters;
   if (typeof palletSpaces === "number" && palletSpaces > 0) {
-    return Math.round(palletSpaces * PALLET_SPACE_LOADING_METERS * 100) / 100;
+    return round2(palletSpaces * PALLET_SPACE_LOADING_METERS);
   }
   return loadingMeters;
 }

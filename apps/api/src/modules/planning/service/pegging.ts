@@ -27,6 +27,7 @@
 // the holiday set is the caller's.
 import { workingDaysBetween } from "../../system/service/delivery-days.js";
 import { isFirmOverviewRow, type ArticleOverview, type ArticleOverviewRow, type OverviewRowKind } from "./article-overview.js";
+import { round4 } from "@navet/shared";
 
 // The stock pseudo-row's id on both sides: the supply "stock" (onHand > 0)
 // and the demand "stock" (onHand < 0) can never both exist.
@@ -80,10 +81,6 @@ export interface PegOptions {
   // Full-day holidays for daysLate; omitted = weekends only.
   offDays?: ReadonlySet<string>;
 }
-
-// Same scale as the overview (numeric(14,4)) — keeps float noise from
-// turning an exactly covered demand into a 1e-15 shortage.
-const round4 = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
 
 export function pegOverview(overview: ArticleOverview, opts: PegOptions): Pegging {
   const offDays = opts.offDays ?? new Set<string>();

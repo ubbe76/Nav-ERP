@@ -50,6 +50,19 @@ export function isForeignKeyViolation(err: unknown, constraintName?: string): bo
   return directConstraint === constraintName || causeObj?.constraint_name === constraintName;
 }
 
+// Postgres exclusion-constraint violation (23P01) — räkenskapsåren's
+// fiscal_years_no_overlap (migration 0208). Same two-level code/cause check.
+export function isExclusionViolation(err: unknown, constraintName?: string): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const { code, cause } = err as { code?: string; cause?: unknown };
+  const causeObj =
+    typeof cause === "object" && cause !== null ? (cause as { code?: string; constraint_name?: string }) : undefined;
+  if (code !== "23P01" && causeObj?.code !== "23P01") return false;
+  if (constraintName === undefined) return true;
+  const directConstraint = (err as { constraint_name?: string }).constraint_name;
+  return directConstraint === constraintName || causeObj?.constraint_name === constraintName;
+}
+
 // Postgres check-constraint violation (23514) — same two-level code/cause
 // check and optional constraint name as above, for a service whose pre-check
 // ran on a read that a concurrent write made stale (the CHECK is the

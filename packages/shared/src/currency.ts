@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { roundToDecimals } from "./money.js";
 import { businessDateSchema } from "./business-date.js";
 import { listQuerySchema } from "./list.js";
 
@@ -33,7 +34,7 @@ export const exchangeRateValueSchema = z.coerce
   .number()
   .positive()
   .max(99_999_999)
-  .transform((value) => Math.round(value * 1e6) / 1e6)
+  .transform((value) => roundToDecimals(value, 6))
   .refine((value) => value > 0, "Must be at least 0.000001");
 
 const MICRO_PER_UNIT = 1_000_000n;

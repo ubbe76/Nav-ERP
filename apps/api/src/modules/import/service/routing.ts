@@ -15,7 +15,7 @@
 // orders are unaffected either way: their mo_operations snapshot is never
 // touched, same rule as PATCH on the article card.
 import type { ImportCommitInput, OperationTimeUnit } from "@navet/shared";
-import { unitsPerHourToMinutesPerUnit } from "@navet/shared";
+import { unitsPerHourToMinutesPerUnit, round2, round4, roundToDecimals } from "@navet/shared";
 import { normalizeDecimal } from "./csv.js";
 import type { ExistingArticle } from "./articles.js";
 import { padWorkCenterCode } from "./work-centers.js";
@@ -238,8 +238,6 @@ export function convertRoutingTimes(
   setup: number,
   run: number
 ): { setupTime: number; runTimePerUnit: number; timeUnit: OperationTimeUnit; warning?: string } {
-  const round2 = (n: number) => Math.round(n * 100) / 100;
-  const round4 = (n: number) => Math.round(n * 10000) / 10000;
   switch (unit) {
     case "minutes_per_unit":
       return { setupTime: round2(setup), runTimePerUnit: round4(run), timeUnit: "minutes_per_unit" };
@@ -265,7 +263,6 @@ export function convertRoutingTimes(
 // Monitor's "none" (most rows) and stores nothing.
 export function convertCycleTime(unit: RoutingFileTimeUnit, value: number): number | null {
   if (value === 0) return null;
-  const round4 = (n: number) => Math.round(n * 10000) / 10000;
   switch (unit) {
     case "minutes_per_unit":
       return round4(value);
@@ -695,8 +692,7 @@ export async function planRoutingImport(
         } else if (parsed < 0) {
           errors.push(`${price.the} kan inte vara ${price.negative}`);
         } else {
-          const factor = 10 ** price.decimals;
-          const rounded = Math.round(parsed * factor) / factor;
+          const rounded = roundToDecimals(parsed, price.decimals);
           if (rounded !== parsed) {
             warnings.push(`${price.the} ${price.raw} avrundas till ${rounded}`);
           }

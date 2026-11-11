@@ -1,4 +1,4 @@
-import { emptyInvoiceScanResult, emptyScanField, isLuhnValid, isValidIban, type InvoiceScanResult, type InvoiceScanRow, type ScanField } from "@navet/shared";
+import { emptyInvoiceScanResult, emptyScanField, isLuhnValid, isValidIban, type InvoiceScanResult, type InvoiceScanRow, type ScanField, round4 } from "@navet/shared";
 import type { ReceivedEInvoice } from "../../../einvoice/service/ubl/received-einvoice.js";
 import { isValidOcr, isValidOrgNumber, normalizeGiro, normalizeIban, normalizeOrgNumber, normalizeVatNumber } from "./identifiers.js";
 import { formatAmountSv, round2 } from "./invoice-values.js";
@@ -172,7 +172,7 @@ export function interpretEInvoice(input: EInvoiceResultInput): InvoiceScanResult
   result.rows = doc.lines.map((line): InvoiceScanRow => {
     const adjusted = line.allowanceAmount !== 0 || line.chargeAmount !== 0;
     let unitPrice: number | null = line.unitPrice;
-    if ((adjusted || unitPrice === null) && line.quantity !== 0) unitPrice = Math.round((line.lineAmount / line.quantity) * 10_000) / 10_000;
+    if ((adjusted || unitPrice === null) && line.quantity !== 0) unitPrice = round4(line.lineAmount / line.quantity);
     return {
       description: (line.description || line.sellerItemNumber || `Rad ${line.id}`).slice(0, 500),
       quantity: line.quantity,

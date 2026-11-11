@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { blankSafe } from "./coerce.js";
 
 // Swedish VAT rates (moms) — the single source of truth since B5. A flat
 // value list rather than a database register: the set is fixed by law and
@@ -17,9 +18,12 @@ export function isVatRate(value: number): value is VatRate {
 // Free (article-less) invoice rows fall back to the standard rate.
 export const DEFAULT_VAT_RATE: VatRate = 25;
 
-export const vatRateSchema = z.coerce
-  .number()
-  .refine(isVatRate, { message: "vatRate must be one of 25, 12, 6, 0" });
+// blankSafe: "" and null are NOT 0 % — `vatRate: null` on an invoice row
+// came out as momskod MF instead of "not given" (delatgranskningen
+// 2026-11-11). Where null means something, .nullable() goes outside.
+export const vatRateSchema = blankSafe(z.coerce.number()).refine(isVatRate, {
+  message: "vatRate must be one of 25, 12, 6, 0",
+});
 
 // Posting-rule / report variant. Coercion is kept (query params and form
 // inputs arrive as strings), but a blank string is rejected rather than
