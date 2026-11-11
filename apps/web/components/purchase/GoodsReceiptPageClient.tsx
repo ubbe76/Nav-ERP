@@ -16,6 +16,7 @@ import { locationOptionLabel } from "../../lib/stockLocations";
 import { confirmDialog } from "../../lib/confirm";
 import { notify } from "../../lib/notice";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import { toBaseQuantity, toUnitQuantity } from "../../lib/units";
 import {
@@ -102,6 +103,7 @@ export function GoodsReceiptPageClient({
   // receipt into it reactivates it), added to the select so it can be shown.
   const [scannedLocation, setScannedLocation] = useState<LocationOption | null>(null);
   const { count, countRef, setCount } = useCountState(NO_COUNT);
+  useUnsavedGuard(hasCounted(count));
   const { feedback, ok, warn, clear: clearFeedback } = useScanFeedback();
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [pending, setPending] = useState(false);
@@ -113,11 +115,34 @@ export function GoodsReceiptPageClient({
   // The scan that chose the order: counted once the order's rows have loaded.
   const pendingCount = useRef<{ orderId: string; article: ArticleMatch } | null>(null);
   const scanField = useRef<HTMLInputElement>(null);
+  // A queued scan that switched order waits here until the new order has
+  // loaded, so the next scan in the queue counts against it, not the old one.
+  const orderWaiter = useRef<{ orderId: string; resolve: () => void } | null>(null);
+  function waitForOrder(orderId: string): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        orderWaiter.current = null;
+        resolve();
+      }, 5000);
+      orderWaiter.current = {
+        orderId,
+        resolve: () => {
+          clearTimeout(timer);
+          resolve();
+        },
+      };
+    });
+  }
   // The props the queued scan handlers read — a handler may run after a
   // navigation it did not see.
   const latest = useRef({ order, openRows, scanRows, rows });
   useEffect(() => {
     latest.current = { order, openRows, scanRows, rows };
+    const waiter = orderWaiter.current;
+    if (waiter && waiter.orderId === selectedId) {
+      orderWaiter.current = null;
+      waiter.resolve();
+    }
   });
 
   const locationOptions: LocationOption[] =
@@ -134,8 +159,17 @@ export function GoodsReceiptPageClient({
 
   // The SearchPicker also fires onChange(null) while the user is typing (it
   // invalidates the previous pick) — only a definite pick should navigate.
-  function selectOrder(next: PurchaseOrder | null) {
+  async function selectOrder(next: PurchaseOrder | null) {
     if (!next) return;
+    // The same question as switching by scanning — the counted quantities
+    // would go without a word.
+    if (
+      next.id !== latest.current.order?.id &&
+      hasCounted(countRef.current) &&
+      !(await confirmDialog(`Byta till ${next.orderNumber}? Det du har räknat på ${latest.current.order?.orderNumber ?? "ordern"} tas inte emot.`, { confirmLabel: "Byt order" }))
+    ) {
+      return;
+    }
     pendingCount.current = null;
     clearFeedback();
     goToOrder(next.id);
@@ -201,6 +235,7 @@ export function GoodsReceiptPageClient({
         pendingCount.current = null;
         ok(`${m.orderNumber} — ${m.partyName}`);
         goToOrder(m.id);
+        await waitForOrder(m.id);
         return;
       }
       case "articleManual":
@@ -232,6 +267,7 @@ export function GoodsReceiptPageClient({
         if (found.length === 1) {
           pendingCount.current = { orderId: found[0]!.id, article };
           goToOrder(found[0]!.id);
+          await waitForOrder(found[0]!.id);
           return;
         }
         setArticleOrders({ article, orders: found });
@@ -272,6 +308,12 @@ export function GoodsReceiptPageClient({
     setPending(true);
     const errors: Record<string, string> = {};
     let booked = 0;
+    // The rows this run booked — after a partial failure they are set to 0 so
+    // a second Rapportera after fixing the failed row never receives them
+    // again (webbgranskningen 2026-11-11: the 5 counted on row A stood in Ta
+    // emot nu and were received a second time; the API has no such guard —
+    // every /receive is a new receipt).
+    const bookedRowIds: string[] = [];
     let reportedOperations = 0;
     // The receipts this run booked — the notice's Ångra takes them back.
     const receiptIds: string[] = [];
@@ -302,6 +344,7 @@ export function GoodsReceiptPageClient({
           continue;
         }
         booked += 1;
+        bookedRowIds.push(row.id);
         if (result.receiptId) receiptIds.push(result.receiptId);
         // Lego row: the receipt auto-reports the linked TO operation. The
         // receipt itself stands even when the report fails (e.g. the TO is
@@ -328,6 +371,11 @@ export function GoodsReceiptPageClient({
       setCount(NO_COUNT);
       setLastRowId(null);
       clearFeedback();
+    } else if (bookedRowIds.length > 0) {
+      setCount({
+        ...countRef.current,
+        quantities: { ...countRef.current.quantities, ...Object.fromEntries(bookedRowIds.map((id) => [id, "0"])) },
+      });
     }
     setPending(false);
     // Återkoppling (punkt 7): Ångra takes back every receipt of this run, last

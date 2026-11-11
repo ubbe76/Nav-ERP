@@ -86,6 +86,7 @@ export function DimensionFields({
   onCostCenterChange,
   onProjectChange,
   withCostCenter = true,
+  costCenterEmptyLabel,
   costCenterLabel = "Kostnadsställe",
   projectLabel = "Projekt",
 }: {
@@ -96,6 +97,7 @@ export function DimensionFields({
   onCostCenterChange: (id: string) => void;
   onProjectChange: (id: string) => void;
   withCostCenter?: boolean;
+  costCenterEmptyLabel?: string;
   costCenterLabel?: string;
   projectLabel?: string;
 }) {
@@ -110,7 +112,13 @@ export function DimensionFields({
     <>
       {withCostCenter && (
         <Field label={costCenterLabel} htmlFor={`${idPrefix}CostCenter`}>
-          <CostCenterSelect id={`${idPrefix}CostCenter`} all={lists.allCostCenters} value={costCenterId} onChange={onCostCenterChange} />
+          <CostCenterSelect
+            id={`${idPrefix}CostCenter`}
+            all={lists.allCostCenters}
+            value={costCenterId}
+            onChange={onCostCenterChange}
+            emptyLabel={costCenterEmptyLabel}
+          />
         </Field>
       )}
       <Field label={projectLabel} htmlFor={`${idPrefix}Project`}>

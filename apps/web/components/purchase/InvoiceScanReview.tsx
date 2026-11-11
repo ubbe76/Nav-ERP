@@ -532,6 +532,27 @@ function ReviewForm({
   const netRef = useRef(netAmount);
   netRef.current = netAmount;
   const basisSeq = useRef(0);
+  // The net amount a fetched order basis filled in — taken back when the order
+  // or Antal changes and the field is still what the rows put there.
+  const basisNetFilled = useRef<string | null>(null);
+
+  // The order rows belong to the order and Antal they were fetched with: a
+  // change of either drops the rows with origin "order" (and the links other
+  // rows have to the old order's rows) and the net amount they filled in. A
+  // fetch on its way is cancelled.
+  function dropOrderBasis(links: boolean) {
+    basisSeq.current += 1;
+    wantBasisRef.current = null;
+    setRows((all) => {
+      const kept = all.filter((row) => row.origin !== "order");
+      return links ? kept.map((row) => ({ ...row, purchaseOrderRowId: null })) : kept;
+    });
+    if (basisNetFilled.current !== null && netRef.current === basisNetFilled.current && !isTouched("net")) {
+      setNetAmount("");
+      deriveAmounts({ net: "", rate: vatRate });
+    }
+    basisNetFilled.current = null;
+  }
 
   // Writes a new net/vat/gross triple the way the dialog derives them: VAT
   // follows net × rate and gross follows net + VAT, each until typed in.
@@ -571,6 +592,7 @@ function ReviewForm({
       // filled from the row sum, the VAT and gross follow from it.
       if (isEmptyAmount(netRef.current) && !isTouched("net")) {
         const sum = String(basisRowsSum(built));
+        basisNetFilled.current = sum;
         setNetAmount(sum);
         deriveAmounts({ net: sum, rate: vatRate });
       }
@@ -703,6 +725,14 @@ function ReviewForm({
         })
       : null;
 
+  // Left empty, the API books the supplier's Kostnadsställe (förval) — say so.
+  const supplierCostCenter = supplier?.defaultCostCenterId
+    ? dims.allCostCenters.find((c) => c.id === supplier.defaultCostCenterId)
+    : undefined;
+  const supplierCostCenterLabel = supplierCostCenter
+    ? `Leverantörens förval (${supplierCostCenter.code} · ${supplierCostCenter.name})`
+    : "Leverantörens förval";
+
   const dirty = touched.current.size > 0 && !navigating;
   useUnsavedGuard(dirty);
 
@@ -764,6 +794,10 @@ function ReviewForm({
         return;
       }
     }
+    if (foreignCurrency && invoiceRate.typedInvalid) {
+      setError("Ange en kurs större än 0 — eller välj Använd kursen för fakturadatumet");
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
@@ -798,6 +832,15 @@ function ReviewForm({
       });
       setNavigating(true);
       if (openDocument(`/inkop/leverantorsfakturor/${invoice.id}`, (href) => router.push(href), "Leverantörsfaktura")) {
+        // The invoice opened in a tab of its own and this page stays: the
+        // inbox item is converted now, so show it as such instead of a form
+        // that would create the invoice a second time.
+        touched.current.clear();
+        try {
+          setScan(await apiFetch<InvoiceScanDetail>(`/api/v1/invoice-scans/${scan.id}`));
+        } catch {
+          setError("Leverantörsfakturan är skapad — ladda om sidan för att se Fakturainkorgens nya status");
+        }
         setNavigating(false);
         setSubmitting(false);
         router.refresh();
@@ -1022,7 +1065,9 @@ function ReviewForm({
                 value={orderId}
                 onChange={(e) => {
                   touch("order");
+                  touch("rows");
                   setOrderId(e.target.value);
+                  dropOrderBasis(true);
                 }}
               >
                 <option value="">— Ingen —</option>
@@ -1035,7 +1080,14 @@ function ReviewForm({
               <FieldNote field={result?.purchaseOrderId} touched={isTouched("order")} />
             </Field>
             <Field label="Antal" htmlFor="scanQtyBasis">
-              <Select id="scanQtyBasis" value={qtyBasis} onChange={(e) => setQtyBasis(e.target.value as BasisQuantity)}>
+              <Select
+                id="scanQtyBasis"
+                value={qtyBasis}
+                onChange={(e) => {
+                  setQtyBasis(e.target.value as BasisQuantity);
+                  dropOrderBasis(false);
+                }}
+              >
                 <option value="received">Mottaget antal</option>
                 <option value="ordered">Beställt antal</option>
               </Select>
@@ -1178,6 +1230,7 @@ function ReviewForm({
 
       <DimensionFields
         idPrefix="scan"
+        costCenterEmptyLabel={supplierCostCenterLabel}
         lists={dims}
         costCenterId={costCenterId}
         projectId={projectId}
@@ -1279,6 +1332,7 @@ function ReviewForm({
         </div>
       ))}
 
+      <FormError>{error}</FormError>
       {canWrite && (
         <FormActions>
           <Button type="submit" variant="primary" disabled={busy}>

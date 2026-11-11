@@ -8,7 +8,8 @@ import { FormError, FormHint, FormRow, FormStack } from "../ui/Form";
 import { Table } from "../ui/Table";
 import { API_URL, apiFetch } from "../../lib/api";
 import { stockholmToday } from "../../lib/date";
-import { formatMoney } from "../../lib/format";
+import { apiErrorMessage } from "../../lib/errorMessages";
+import { formatMoney, formatQuantity, formatUnitPrice } from "../../lib/format";
 import buttonStyles from "../ui/Button.module.css";
 import {
   VALUATION_METHOD_LABELS,
@@ -104,17 +105,23 @@ export function VarderingPageClient({
 
   useEffect(() => {
     let cancelled = false;
-    setPending(true);
     setError(null);
+    // A cleared Per datum has nothing to value — no request.
+    if (!asOf) {
+      setReport(null);
+      setPending(false);
+      return;
+    }
+    setPending(true);
     apiFetch<ValuationResponse>(`/api/v1/stock/valuation?${queryString()}`)
       .then((data) => {
         if (cancelled) return;
         setReport(data);
       })
-      .catch((err: Error) => {
+      .catch((err: unknown) => {
         if (cancelled) return;
         setReport(null);
-        setError(err.message);
+        setError(apiErrorMessage(err, "Kunde inte hämta lagervärderingen"));
       })
       .finally(() => {
         if (!cancelled) setPending(false);
@@ -221,12 +228,12 @@ export function VarderingPageClient({
                   case "quantity":
                     return (
                       <span className="num">
-                        {row.quantity.toLocaleString("sv-SE")} {row.unit}
+                        {formatQuantity(row.quantity)} {row.unit}
                       </span>
                     );
                   case "unitCost":
                     return row.unitCost !== null ? (
-                      <span className="num">{formatMoney(row.unitCost)}</span>
+                      <span className="num">{formatUnitPrice(row.unitCost)}</span>
                     ) : (
                       <span className="num" style={{ color: "var(--color-text-muted)" }}>
                         pris saknas

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Table } from "../ui/Table";
 import { StatusPill } from "../ui/StatusPill";
 import { Modal } from "../ui/Modal";
@@ -16,7 +17,8 @@ import styles from "../../app/inkop/ordrar/page.module.css";
 import { HelpLink } from "../ui/HelpLink";
 
 export function PurchaseOrdersPageClient({ orders, pageSize }: { orders: Paged<PurchaseOrder>; pageSize: number }) {
-  const [modalOpen, setModalOpen] = useState(false);
+  // ?ny=1 (the "+ Ny inköpsorder" link on the Inköp page) opens the form at once.
+  const [modalOpen, setModalOpen] = useState(useSearchParams().get("ny") === "1");
 
   const view = useListColumns([
     { key: "orderNumber", label: "Ordernummer", width: "140px" },

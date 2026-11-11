@@ -31,6 +31,11 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
   // always in the article's base unit.
   const baseDelta = toBaseQuantity(Number(quantityDelta) || 0, currentFactor);
 
+  // A negative adjustment takes goods from a place: with "Artikelns lagerplats"
+  // the API resolves the place by the inflow rule, which may not be where the
+  // stock lies — so the place must be chosen.
+  const needsLocation = baseDelta < 0 && locationId === "";
+
   if (locations.length === 0) {
     return (
       <Card>
@@ -43,6 +48,10 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
     e.preventDefault();
     if (!article) {
       setError("Välj en artikel");
+      return;
+    }
+    if (needsLocation) {
+      setError("Välj vilken lagerplats varorna tas från");
       return;
     }
     setError(null);
@@ -122,6 +131,7 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
         </div>
         <FormHint attached>
           Positivt tal ökar saldot, negativt minskar det.
+          {needsLocation && " Välj vilken lagerplats varorna tas från."}
           {unitId !== "" && ` Bokförs som ${baseDelta} ${baseUnitCode} — saldot räknas alltid i grundenheten.`}
         </FormHint>
 
@@ -130,7 +140,7 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
         </Field>
 
         <FormActions>
-          <Button type="submit" variant="primary" disabled={pending}>
+          <Button type="submit" variant="primary" disabled={pending || needsLocation}>
             {pending ? "Registrerar…" : "Registrera justering"}
           </Button>
         </FormActions>

@@ -8,6 +8,7 @@ import { Field, Input } from "../ui/Field";
 import { Table } from "../ui/Table";
 import { useCan } from "../PermissionsProvider";
 import { locationOptionLabel } from "../../lib/stockLocations";
+import { formatUnitPrice } from "../../lib/format";
 import {
   STOCK_TRANSACTION_TYPE_LABELS,
   type Paged,
@@ -52,6 +53,10 @@ const quantity = (n: number) => n.toLocaleString("sv-SE", { maximumFractionDigit
 const signed = (n: number) => n.toLocaleString("sv-SE", { maximumFractionDigits: 4, signDisplay: "exceptZero" });
 const money = (value: string | null) =>
   value === null ? "—" : Number(value).toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// À-pris/à-kostnad keep their up to four decimals (formatUnitPrice); a total
+// value stays at two.
+const unitPrice = (value: string | null) => (value === null ? "—" : formatUnitPrice(value));
 
 export function StockTransactionsView({ transactions, locations, article, pageSize }: Props) {
   const { params, setFilter } = useListNavigation();
@@ -182,7 +187,7 @@ export function StockTransactionsView({ transactions, locations, article, pageSi
             case "createdByName":
               return row.createdByName ?? "—";
             case "unitCost":
-              return money(row.unitCost);
+              return unitPrice(row.unitCost);
             case "value":
               return money(row.value);
             case "note":

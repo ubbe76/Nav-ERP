@@ -43,6 +43,15 @@ export function LabelPrintDialog({
       setError("Antal per etikett måste vara mellan 1 och 100");
       return;
     }
+    // Same limits as articleLabelsSchema/locationLabelsSchema in packages/shared.
+    if (ids.length > 500) {
+      setError("Högst 500 valda per utskrift");
+      return;
+    }
+    if (ids.length * copiesNumber > 2000) {
+      setError("Högst 2 000 etiketter per utskrift");
+      return;
+    }
     if (format === "a4" && (!Number.isInteger(startNumber) || startNumber < 1 || startNumber > 24)) {
       setError("Börja på etikett måste vara mellan 1 och 24");
       return;
