@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gt, ilike, inArray, isNotNull, isNull, lt, ne, or, sql, getTableColumns } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, ilike, inArray, isNotNull, isNull, lt, ne, or, sql, getTableColumns, type SQL } from "drizzle-orm";
 import {
   absences,
   articles,
@@ -31,6 +31,9 @@ import {
   readErasureFacts,
   type ErasureFacts,
 } from "./employee-erasure.js";
+import { localDateOf } from "./stamp-close.js";
+// Leaf in the payroll module (schema + error only) — no cycle.
+import { assertPayrollPeriodsOpenInTx } from "../../payroll/repository/payroll-period-guard.js";
 
 // What the stamp-in asks again on the locked rows (createStampSession).
 export interface StampTargetState {
@@ -68,7 +71,71 @@ const NO_REASON: StampReason = { reasonId: null, note: null };
 export const ONE_OPEN_ATTENDANCE = "attendance_sessions_one_open_per_employee";
 export const ONE_OPEN_STAMP = "stamp_sessions_one_open_per_operation";
 
+// "Still the times that were read", to the millisecond (JS dates have ms,
+// Postgres µs) — the condition of the attendance writes that validated or
+// guarded against an earlier read.
+function unchangedTimes(expected: { startedAt: Date; stoppedAt: Date | null }) {
+  return and(
+    sql`abs(extract(epoch from (${attendanceSessions.startedAt} - ${expected.startedAt.toISOString()}::timestamptz))) < 0.001`,
+    expected.stoppedAt === null
+      ? isNull(attendanceSessions.stoppedAt)
+      : sql`abs(extract(epoch from (${attendanceSessions.stoppedAt} - ${expected.stoppedAt.toISOString()}::timestamptz))) < 0.001`
+  );
+}
+
 export function createTimeReportRepository(db: Db) {
+  // The stamp list's row: the session with what the terminal and Pågående
+  // arbete show around it. Shared by the open list and the paged history.
+  function stampSessionRows(where: SQL | undefined, absenceDate?: string) {
+    return db
+      .select({
+        ...getTableColumns(stampSessions),
+        employeeName: employees.name,
+        employeeNumber: employees.employeeNumber,
+        manufacturingOrderId: moOperations.manufacturingOrderId,
+        manufacturingOrderNumber: manufacturingOrders.orderNumber,
+        operationSequenceNo: moOperations.sequenceNo,
+        workCenterName: workCenters.name,
+        articleName: articles.name,
+        // Shop-floor packing instructions for the current operation —
+        // shown in the terminal's stamp-out view when set.
+        packingInstructions: moOperations.packingInstructions,
+        // Planned vs. already reported on the operation, so the stamp-out
+        // view can show what remains to manufacture (planned − OK).
+        orderQuantity: manufacturingOrders.quantity,
+        operationQuantityCompleted: moOperations.quantityCompleted,
+        operationQuantityScrapped: moOperations.quantityScrapped,
+        // Joined query, so the column references render qualified (the
+        // single-table drizzle pitfall does not apply here).
+        absentToday: absenceDate
+          ? sql<boolean>`exists (select 1 from ${absences} where ${absences.employeeId} = ${stampSessions.employeeId} and ${absences.date} = ${absenceDate})`
+          : sql<boolean>`false`,
+      })
+      .from(stampSessions)
+      .innerJoin(employees, eq(employees.id, stampSessions.employeeId))
+      .innerJoin(moOperations, eq(moOperations.id, stampSessions.moOperationId))
+      .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+      .innerJoin(workCenters, eq(workCenters.id, moOperations.workCenterId))
+      .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))
+      .where(where)
+      .orderBy(desc(stampSessions.startedAt), desc(stampSessions.id))
+      .$dynamic();
+  }
+
+  function attendanceSessionRows(where: SQL | undefined) {
+    return db
+      .select({
+        ...getTableColumns(attendanceSessions),
+        employeeName: employees.name,
+        employeeNumber: employees.employeeNumber,
+      })
+      .from(attendanceSessions)
+      .innerJoin(employees, eq(employees.id, attendanceSessions.employeeId))
+      .where(where)
+      .orderBy(desc(attendanceSessions.startedAt), desc(attendanceSessions.id))
+      .$dynamic();
+  }
+
   // Conditional: only a still-open attendance is closed, so two Gå hem at
   // once (double tap, two terminals) close it once — null tells the caller.
   async function closeAttendanceSession(id: string, stoppedAt: Date, reason: StampReason = NO_REASON, dbc: Db | Tx = db) {
@@ -128,8 +195,7 @@ export function createTimeReportRepository(db: Db) {
         if (!employee) return null;
         const action = decide(employee, await readErasureFacts(tx, id));
         if (action === "delete") {
-          await deleteEmployeeInTx(tx, id);
-          return { action, employee, auditEntriesScrubbed: 0 };
+          return { action, employee, ...(await deleteEmployeeInTx(tx, id)) };
         }
         return { action, employee, ...(await anonymizeEmployeeInTx(tx, id)) };
       });
@@ -341,43 +407,37 @@ export function createTimeReportRepository(db: Db) {
     // Joined view for the terminal: who is stamped in, on which operation of
     // which order/article, since when.
     async listStampSessions(onlyOpen: boolean, opts: { employeeId?: string; absenceDate?: string } = {}) {
-      return db
-        .select({
-          ...getTableColumns(stampSessions),
-          employeeName: employees.name,
-          employeeNumber: employees.employeeNumber,
-          manufacturingOrderId: moOperations.manufacturingOrderId,
-          manufacturingOrderNumber: manufacturingOrders.orderNumber,
-          operationSequenceNo: moOperations.sequenceNo,
-          workCenterName: workCenters.name,
-          articleName: articles.name,
-          // Shop-floor packing instructions for the current operation —
-          // shown in the terminal's stamp-out view when set.
-          packingInstructions: moOperations.packingInstructions,
-          // Planned vs. already reported on the operation, so the stamp-out
-          // view can show what remains to manufacture (planned − OK).
-          orderQuantity: manufacturingOrders.quantity,
-          operationQuantityCompleted: moOperations.quantityCompleted,
-          operationQuantityScrapped: moOperations.quantityScrapped,
-          // Joined query, so the column references render qualified (the
-          // single-table drizzle pitfall does not apply here).
-          absentToday: opts.absenceDate
-            ? sql<boolean>`exists (select 1 from ${absences} where ${absences.employeeId} = ${stampSessions.employeeId} and ${absences.date} = ${opts.absenceDate})`
-            : sql<boolean>`false`,
-        })
-        .from(stampSessions)
-        .innerJoin(employees, eq(employees.id, stampSessions.employeeId))
-        .innerJoin(moOperations, eq(moOperations.id, stampSessions.moOperationId))
-        .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
-        .innerJoin(workCenters, eq(workCenters.id, moOperations.workCenterId))
-        .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))
-        .where(
-          and(
-            onlyOpen ? isNull(stampSessions.stoppedAt) : undefined,
-            opts.employeeId ? eq(stampSessions.employeeId, opts.employeeId) : undefined
-          )
-        )
-        .orderBy(desc(stampSessions.startedAt));
+      return stampSessionRows(
+        and(
+          onlyOpen ? isNull(stampSessions.stoppedAt) : undefined,
+          opts.employeeId ? eq(stampSessions.employeeId, opts.employeeId) : undefined
+        ),
+        opts.absenceDate
+      );
+    },
+
+    // The history (GET /stamp-sessions without ?open=true) in the list
+    // pattern: one where for the page and its count. Search on the
+    // employee's name/number and the order number.
+    async pageStampSessions(query: { employeeId?: string; search?: string; limit: number; offset: number; absenceDate?: string }) {
+      const pattern = query.search ? ilikePattern(query.search) : null;
+      const where = and(
+        query.employeeId ? eq(stampSessions.employeeId, query.employeeId) : undefined,
+        pattern
+          ? or(ilike(employees.name, pattern), ilike(employees.employeeNumber, pattern), ilike(manufacturingOrders.orderNumber, pattern))
+          : undefined
+      );
+      const [rows, [totalRow]] = await Promise.all([
+        stampSessionRows(where, query.absenceDate).limit(query.limit).offset(query.offset),
+        db
+          .select({ total: count() })
+          .from(stampSessions)
+          .innerJoin(employees, eq(employees.id, stampSessions.employeeId))
+          .innerJoin(moOperations, eq(moOperations.id, stampSessions.moOperationId))
+          .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+          .where(where),
+      ]);
+      return { rows, total: totalRow?.total ?? 0 };
     },
 
     // Conditional: a stamp closed in between (regel 10 stamping it out when
@@ -564,16 +624,26 @@ export function createTimeReportRepository(db: Db) {
     },
 
     async listAttendanceSessions(onlyOpen: boolean) {
-      return db
-        .select({
-          ...getTableColumns(attendanceSessions),
-          employeeName: employees.name,
-          employeeNumber: employees.employeeNumber,
-        })
-        .from(attendanceSessions)
-        .innerJoin(employees, eq(employees.id, attendanceSessions.employeeId))
-        .where(onlyOpen ? isNull(attendanceSessions.stoppedAt) : undefined)
-        .orderBy(desc(attendanceSessions.startedAt));
+      return attendanceSessionRows(onlyOpen ? isNull(attendanceSessions.stoppedAt) : undefined);
+    },
+
+    // The history (GET /attendance-sessions without ?open=true) in the list
+    // pattern; search on the employee's name/number.
+    async pageAttendanceSessions(query: { employeeId?: string; search?: string; limit: number; offset: number }) {
+      const pattern = query.search ? ilikePattern(query.search) : null;
+      const where = and(
+        query.employeeId ? eq(attendanceSessions.employeeId, query.employeeId) : undefined,
+        pattern ? or(ilike(employees.name, pattern), ilike(employees.employeeNumber, pattern)) : undefined
+      );
+      const [rows, [totalRow]] = await Promise.all([
+        attendanceSessionRows(where).limit(query.limit).offset(query.offset),
+        db
+          .select({ total: count() })
+          .from(attendanceSessions)
+          .innerJoin(employees, eq(employees.id, attendanceSessions.employeeId))
+          .where(where),
+      ]);
+      return { rows, total: totalRow?.total ?? 0 };
     },
 
     // Sessions overlapping [from, to), including still-open ones (a null
@@ -660,12 +730,15 @@ export function createTimeReportRepository(db: Db) {
         | null
     ) {
       return db.transaction(async (tx) => {
-        const unchangedStart = sql`abs(extract(epoch from (${attendanceSessions.startedAt} - ${expected.startedAt.toISOString()}::timestamptz))) < 0.001`;
-        const unchangedStop =
-          expected.stoppedAt === null
-            ? isNull(attendanceSessions.stoppedAt)
-            : sql`abs(extract(epoch from (${attendanceSessions.stoppedAt} - ${expected.stoppedAt.toISOString()}::timestamptz))) < 0.001`;
-        const where = and(eq(attendanceSessions.id, id), unchangedStart, unchangedStop);
+        // The period guard first, before any row lock: every Stockholm day
+        // the session touched or will touch (the write below is conditional
+        // on the expected times, so these are the row's real days) lies in
+        // an open payroll period that stays open until the commit.
+        await assertPayrollPeriodsOpenInTx(
+          tx,
+          [expected.startedAt, expected.stoppedAt, patch.startedAt, patch.stoppedAt].flatMap((t) => (t ? [localDateOf(t)] : []))
+        );
+        const where = and(eq(attendanceSessions.id, id), unchangedTimes(expected));
         const [session] =
           Object.keys(patch).length === 0
             ? await tx.select().from(attendanceSessions).where(where).for("update")
@@ -724,10 +797,19 @@ export function createTimeReportRepository(db: Db) {
       reason: StampReason = NO_REASON
     ) {
       return db.transaction(async (tx) => {
+        // The period guard first (the forgotten attendance may lie in last
+        // month): its start is read without a row lock, and the close below
+        // only takes the attendance while that start still stands.
+        const [stale] = await tx
+          .select({ startedAt: attendanceSessions.startedAt })
+          .from(attendanceSessions)
+          .where(and(eq(attendanceSessions.id, staleId), isNull(attendanceSessions.stoppedAt)));
+        if (!stale) return null;
+        await assertPayrollPeriodsOpenInTx(tx, [localDateOf(stale.startedAt), localDateOf(forgottenStoppedAt)]);
         const closed = await tx
           .update(attendanceSessions)
           .set({ stoppedAt: forgottenStoppedAt })
-          .where(and(eq(attendanceSessions.id, staleId), isNull(attendanceSessions.stoppedAt)))
+          .where(and(eq(attendanceSessions.id, staleId), unchangedTimes({ startedAt: stale.startedAt, stoppedAt: null })))
           .returning({ id: attendanceSessions.id });
         if (closed.length === 0) return null;
         await tx
@@ -752,9 +834,31 @@ export function createTimeReportRepository(db: Db) {
 
     // Does not touch stamp_sessions — work stamps are independent of
     // attendance, and pause bookkeeping on them stays historical.
+    //
+    // Under the period guard: the row's days are read without a row lock,
+    // their months are taken, and the delete only removes the row those
+    // days were read from — a correction that moved it in between is read
+    // again (its new months guarded too).
     async deleteAttendanceSession(id: string) {
-      const [row] = await db.delete(attendanceSessions).where(eq(attendanceSessions.id, id)).returning();
-      return row ?? null;
+      return db.transaction(async (tx) => {
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const [existing] = await tx
+            .select({ startedAt: attendanceSessions.startedAt, stoppedAt: attendanceSessions.stoppedAt })
+            .from(attendanceSessions)
+            .where(eq(attendanceSessions.id, id));
+          if (!existing) return null;
+          // Only a closed attendance (the service refuses an open one; a
+          // re-opening in between is caught here).
+          if (existing.stoppedAt === null) return "open" as const;
+          await assertPayrollPeriodsOpenInTx(tx, [localDateOf(existing.startedAt), localDateOf(existing.stoppedAt)]);
+          const [row] = await tx
+            .delete(attendanceSessions)
+            .where(and(eq(attendanceSessions.id, id), unchangedTimes(existing)))
+            .returning();
+          if (row) return row;
+        }
+        throw new Error(`Attendance session ${id} kept changing while it was being deleted`);
+      });
     },
 
     async listOpenStampSessionIdsByEmployee(employeeId: string) {

@@ -3086,6 +3086,8 @@ export interface ResolvedCalendarDay {
   weekday: number;
   source: "day-override" | "holiday" | "week-override" | "standard" | null;
   holidayName?: string;
+  // Before Anställd från or after Anställd till: no schedule.
+  outsideEmployment?: true;
   daySchedule: {
     id: string;
     code: string;

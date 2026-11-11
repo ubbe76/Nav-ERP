@@ -505,8 +505,8 @@ function ObRuleForm({ obRule, onDone }: { obRule?: ObRule; onDone: () => void })
         </Field>
       </FormRow>
       <FormHint>
-        Tidsfönstret får inte gå över midnatt. Ett tillägg som gäller natten mot nästa dag läggs som två rader,
-        t.ex. 22:00–23:59 och 00:00–06:00.
+        Tidsfönstret får inte gå över midnatt, och Till 00:00 betyder midnatt (dygnets slut). Ett tillägg som gäller
+        natten mot nästa dag läggs som två rader, t.ex. 22:00–00:00 och 00:00–06:00.
       </FormHint>
 
       <Field label="PAXml-tidkod" htmlFor="obPaxmlCode">

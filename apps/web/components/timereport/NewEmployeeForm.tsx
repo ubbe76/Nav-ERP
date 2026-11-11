@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { Button } from "../ui/Button";
 import { Field, Input, Toggle } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
+import { apiErrorMessage } from "../../lib/errorMessages";
 import { Form, FormActions, FormError } from "../ui/Form";
 
 export function NewEmployeeForm({ onSuccess }: { onSuccess: () => void }) {
@@ -24,7 +25,8 @@ export function NewEmployeeForm({ onSuccess }: { onSuccess: () => void }) {
       });
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte skapa den anställda");
+      // Through the dictionary: a taken number is 409 duplicate-employee-number.
+      setError(apiErrorMessage(err, "Kunde inte skapa den anställda"));
       setPending(false);
     }
   }

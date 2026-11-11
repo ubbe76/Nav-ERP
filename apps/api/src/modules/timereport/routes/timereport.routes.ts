@@ -6,6 +6,7 @@ import {
   createEmployeeSchema,
   createTimeReportSchema,
   listQuerySchema,
+  sessionHistoryQuerySchema,
   satisfiesRule,
   stampInSchema,
   stampOutSchema,
@@ -21,6 +22,8 @@ import {
   AttendanceSessionAlreadyStoppedError,
   AttendanceSessionChangedError,
   AttendanceSessionNotFoundError,
+  AttendanceSessionOpenError,
+  AttendanceStartInFutureError,
   DuplicateEmployeeNumberError,
   EmployeeAnonymizedError,
   EmployeeErasureBlockedError,
@@ -88,8 +91,13 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
   // Writes are Personal too: PATCH echoes the full row (personnummer, wage).
   app.post("/employees", { config: { access: PERSONAL }, preHandler: requireRole("admin", "supervisor") }, async (req, reply) => {
     const input = createEmployeeSchema.parse(req.body);
-    const employee = await service.createEmployee(input);
-    return reply.code(201).send(employee);
+    try {
+      return reply.code(201).send(await service.createEmployee(input));
+    } catch (err) {
+      // A taken employee number was a 500 here (PATCH already mapped it).
+      if (err instanceof DuplicateEmployeeNumberError) return reply.code(409).send(errorBody(err));
+      throw err;
+    }
   });
 
   app.patch<{ Params: { id: string } }>(
@@ -176,7 +184,14 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
       const report = await service.createTimeReport(input, req.user!.id);
       return reply.code(201).send(report);
     } catch (err) {
-      if (err instanceof PayrollPeriodLockedError) return reply.code(409).send(errorBody(err));
+      if (err instanceof PayrollPeriodLockedError || err instanceof InvalidStatusTransitionError) {
+        return reply.code(409).send(errorBody(err));
+      }
+      // Unknown references in the body — a bad request, not a missing
+      // resource at the path (and no longer the FK violation's 500).
+      if (err instanceof EmployeeNotFoundError || err instanceof MOOperationNotFoundError) {
+        return reply.code(400).send(errorBody(err));
+      }
       throw err;
     }
   });
@@ -185,17 +200,22 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
     return service.listTimeReportsByManufacturingOrder(req.params.id);
   });
 
-  // Stämplingar — the stamp terminal's endpoints.
+  // Stämplingar — the stamp terminal's endpoints. ?open=true is the
+  // terminal's and Pågående arbete's list (an array, bounded by who is at
+  // work); without it the history in the list pattern ({ rows, total },
+  // search/limit/offset) — it used to return every stamp ever made.
   app.get<{ Querystring: { open?: string; employeeId?: string } }>(
     "/stamp-sessions",
     { config: { access: TERMINAL_READ } },
     async (req) => {
-      const employeeId = z.string().uuid().optional().parse(req.query.employeeId);
       const role = req.user!.role;
-      return service.listStampSessions(req.query.open === "true", {
-        employeeId,
-        includeAbsence: role === "admin" || role === "supervisor",
-      });
+      const includeAbsence = role === "admin" || role === "supervisor";
+      if (req.query.open === "true") {
+        const employeeId = z.string().uuid().optional().parse(req.query.employeeId);
+        return service.listStampSessions(true, { employeeId, includeAbsence });
+      }
+      const { open: _open, ...query } = req.query;
+      return service.pageStampSessions(sessionHistoryQuerySchema.parse(query), { includeAbsence });
     }
   );
 
@@ -259,7 +279,12 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
     const onlyOpen = req.query.open === "true";
     const personal = satisfiesRule(req.user!, PERSONAL);
     if (!onlyOpen && !personal) return reply.code(403).send(errorBody(new ForbiddenError()));
-    const sessions = await service.listAttendanceSessions(onlyOpen);
+    // The history in the list pattern (Personal & lön only, reasons included).
+    if (!onlyOpen) {
+      const { open: _open, ...query } = req.query as Record<string, unknown>;
+      return service.pageAttendanceSessions(sessionHistoryQuerySchema.parse(query));
+    }
+    const sessions = await service.listAttendanceSessions(true);
     if (personal) return sessions;
     return sessions.map(({ startReasonId: _a, startNote: _b, stopReasonId: _c, stopNote: _d, ...rest }) => rest);
   });
@@ -318,7 +343,11 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
         return await service.updateAttendanceSession(req.params.id, input, req.user!.id);
       } catch (err) {
         if (err instanceof AttendanceSessionNotFoundError) return reply.code(404).send(errorBody(err));
-        if (err instanceof InvalidAttendanceIntervalError || err instanceof AttendanceReasonInvalidError) {
+        if (
+          err instanceof InvalidAttendanceIntervalError ||
+          err instanceof AttendanceStartInFutureError ||
+          err instanceof AttendanceReasonInvalidError
+        ) {
           return reply.code(400).send(errorBody(err));
         }
         if (
@@ -342,7 +371,9 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
         return reply.code(204).send(null);
       } catch (err) {
         if (err instanceof AttendanceSessionNotFoundError) return reply.code(404).send(errorBody(err));
-        if (err instanceof PayrollPeriodLockedError) return reply.code(409).send(errorBody(err));
+        if (err instanceof PayrollPeriodLockedError || err instanceof AttendanceSessionOpenError) {
+          return reply.code(409).send(errorBody(err));
+        }
         throw err;
       }
     }

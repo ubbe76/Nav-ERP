@@ -572,7 +572,7 @@ Administratörer och arbetsledare har en knapp **Stämpla ut** på varje rad, f�
 
 ## Tidrapporter
 
-**Tillverkning → Tidrapporter** listar all rapporterad tid (sök på anställd eller ordernummer) med källa **Stämpling** (från terminalen) eller **Manuell**. **+ Ny tidrapport** registrerar tid manuellt: anställd, order, operation, datum och timmar.
+**Tillverkning → Tidrapporter** listar all rapporterad tid (sök på anställd eller ordernummer) med källa **Stämpling** (från terminalen) eller **Manuell**. **+ Ny tidrapport** registrerar tid manuellt: anställd, order, operation, datum och timmar. Tid kan rapporteras på en order som är frisläppt, pågår eller är klar (efterrapportering), men inte på en planerad, stängd eller makulerad order.
 
 Varje tidrapport sparar resursen tiden gjordes på, och listan visar den. En stämpling får resursen operationen hade när du stämplade in (den kan inte bytas medan någon är instämplad), och en manuell tidrapport får operationens resurs när den registreras — även när den gäller en dag före ett byte. Resursen går inte att ändra i efterhand. Tid som rapporterades innan resursen sparades visar operationens nuvarande resurs.
 

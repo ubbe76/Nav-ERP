@@ -6,6 +6,7 @@ import type {
   CreateEmployeeInput,
   CreateTimeReportInput,
   ListQuery,
+  SessionHistoryQuery,
   StampInInput,
   StampOutInput,
   UpdateAttendanceSessionInput,
@@ -37,6 +38,11 @@ import {
   type DeviationDaySchedule,
   type OvertimeQuestion,
 } from "./attendance-deviation.js";
+
+// The order statuses a manual time report may be written on — those the
+// rapportering accepts (manufacturing.repository.ts: released, in progress,
+// and done for efterrapportering på Klar).
+const TIME_REPORTABLE_ORDER_STATUSES: ReadonlySet<string> = new Set(["released", "in_progress", "done"]);
 
 export class EmployeeNotFoundError extends Error {
   constructor(id: string) {
@@ -155,6 +161,25 @@ export class InvalidAttendanceIntervalError extends Error {
   constructor() {
     super("Stopped time must be after started time");
     this.name = "InvalidAttendanceIntervalError";
+  }
+}
+
+// A corrected start time in the future: Gå hem on that (open) attendance
+// would then stop it before it started.
+export class AttendanceStartInFutureError extends Error {
+  constructor() {
+    super("The start time cannot lie in the future");
+    this.name = "AttendanceStartInFutureError";
+  }
+}
+
+// Deleting an attendance that is still open would leave the employee's work
+// stamps running with nothing to pause them — set a stop time first (which
+// pauses them), then delete.
+export class AttendanceSessionOpenError extends Error {
+  constructor() {
+    super("The attendance is still open — set a stop time before deleting it");
+    this.name = "AttendanceSessionOpenError";
   }
 }
 
@@ -476,7 +501,13 @@ export function createTimeReportService(
 
   return {
     async createEmployee(input: CreateEmployeeInput) {
-      return repo.createEmployee(input);
+      try {
+        return await repo.createEmployee(input);
+      } catch (err) {
+        // The number is unique (as in updateEmployee) — a 500 before.
+        if (isUniqueViolation(err)) throw new DuplicateEmployeeNumberError(input.employeeNumber);
+        throw err;
+      }
     },
 
     async getEmployee(id: string) {
@@ -504,7 +535,20 @@ export function createTimeReportService(
     // locked period — a period is only lockable once its last day has
     // passed), a paused stamp's pause start (today when that day is locked)
     // or a supervisor's stop time, checked there.
+    //
+    // The order must take reports — released, in progress or done
+    // (efterrapportering på Klar), the statuses rapporteringen accepts; a
+    // cancelled, closed or not yet released order is refused like a stamp-in
+    // on it. An unknown employee or operation is a bad body (400), not the
+    // FK violation's 500 it used to be.
     async createTimeReport(input: CreateTimeReportInput, createdBy: string) {
+      if (!(await repo.findEmployeeById(input.employeeId))) throw new EmployeeNotFoundError(input.employeeId);
+      const operation = await manufacturing.getOperation(input.moOperationId);
+      if (!operation) throw new MOOperationNotFoundError(input.moOperationId);
+      const order = await manufacturing.getManufacturingOrder(operation.manufacturingOrderId);
+      if (!order || !TIME_REPORTABLE_ORDER_STATUSES.has(order.status)) {
+        throw new InvalidStatusTransitionError("Time can only be reported while the order is released, in progress or done");
+      }
       if (await periodLocks.isDateLocked(input.date)) throw new PayrollPeriodLockedError(input.date);
       return repo.createTimeReport(input, createdBy);
     },
@@ -525,6 +569,17 @@ export function createTimeReportService(
         absenceDate: opts.includeAbsence ? localDateOf(new Date()) : undefined,
       });
       return opts.includeAbsence ? rows : rows.map(({ absentToday: _absent, ...row }) => row);
+    },
+
+    // The history, paged (the list pattern); absentToday as in the open list.
+    async pageStampSessions(query: SessionHistoryQuery, opts: { includeAbsence?: boolean } = {}) {
+      const page = await repo.pageStampSessions({
+        ...query,
+        absenceDate: opts.includeAbsence ? localDateOf(new Date()) : undefined,
+      });
+      return opts.includeAbsence
+        ? page
+        : { rows: page.rows.map(({ absentToday: _absent, ...row }) => row), total: page.total };
     },
 
     // Stämpla in: clock an employee in on an MO operation. Stamping in on a
@@ -670,6 +725,12 @@ export function createTimeReportService(
 
     async listAttendanceSessions(onlyOpen: boolean) {
       return repo.listAttendanceSessions(onlyOpen);
+    },
+
+    // The history, paged (the list pattern) — the open list above is bounded
+    // by the number of people present.
+    async pageAttendanceSessions(query: SessionHistoryQuery) {
+      return repo.pageAttendanceSessions(query);
     },
 
     // Närvarostämpling kom: attendance is independent of work stamps and
@@ -860,6 +921,11 @@ export function createTimeReportService(
       if (newStoppedAt !== null && newStoppedAt <= newStartedAt) {
         throw new InvalidAttendanceIntervalError();
       }
+      // Nor a start time (same minute of slack): on an open attendance the
+      // next Gå hem would stop it before it started.
+      if (input.startedAt !== undefined && newStartedAt.getTime() > Date.now() + 60_000) {
+        throw new AttendanceStartInFutureError();
+      }
       // A stop time can't lie in the future (one minute of slack for clock
       // skew, as regel 6): it would pause work that is still going on.
       if (newStoppedAt !== null && newStoppedAt.getTime() > Date.now() + 60_000) {
@@ -945,10 +1011,14 @@ export function createTimeReportService(
 
     // Deleting does NOT touch stamp sessions — work stamps are independent
     // of attendance and pause bookkeeping on them is historical, so nothing
-    // needs to be re-linked or re-paused.
+    // needs to be re-linked or re-paused. Which is why an OPEN attendance is
+    // refused: its work would keep running with nothing left to pause it at
+    // the next Gå hem (the night counted as worked time). Setting a stop time
+    // pauses the work; the closed row can then be deleted.
     async deleteAttendanceSession(id: string, userId: string) {
       const existing = await repo.findAttendanceSessionById(id);
       if (!existing) throw new AttendanceSessionNotFoundError(id);
+      if (existing.stoppedAt === null) throw new AttendanceSessionOpenError();
 
       const datesToCheck = new Set<string>([localDateOf(existing.startedAt)]);
       if (existing.stoppedAt) datesToCheck.add(localDateOf(existing.stoppedAt));
@@ -957,6 +1027,10 @@ export function createTimeReportService(
       }
 
       const deleted = await repo.deleteAttendanceSession(id);
+      // Someone else deleted it in between.
+      if (!deleted) throw new AttendanceSessionNotFoundError(id);
+      // …or re-opened it (the repository deletes only a closed row).
+      if (deleted === "open") throw new AttendanceSessionOpenError();
       await audit.log({
         entityType: "attendance_session",
         entityId: id,
@@ -964,7 +1038,7 @@ export function createTimeReportService(
         detail: { employeeId: existing.employeeId, startedAt: existing.startedAt, stoppedAt: existing.stoppedAt },
         userId,
       });
-      return deleted!;
+      return deleted;
     },
 
     // Supervisor correction of a manually entered or terminal-materialized

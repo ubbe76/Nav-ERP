@@ -111,6 +111,29 @@ describe("Radera — an employee without history", () => {
     expect(JSON.stringify(entry!.detail)).not.toContain("Anna");
   });
 
+  // The reason typed at Gå hem stays in the audit trail after its attendance
+  // row is deleted — the employee then has no history and is deleted, and the
+  // free text must go as it does in an anonymization.
+  it("scrubs the free text an audit entry still holds about the deleted employee", async () => {
+    const id = await makeEmployee("501");
+    const [entry] = await db
+      .insert(auditLog)
+      .values({
+        entityType: "attendance_session",
+        entityId: "00000000-0000-4000-8000-000000000001",
+        action: "attendance_stopped",
+        detail: { employeeId: id, stopNote: "Läkarbesök", stopReasonId: null },
+      })
+      .returning();
+
+    expect((await call("DELETE", `/employees/${id}`)).statusCode).toBe(204);
+
+    const [scrubbed] = await db.select().from(auditLog).where(eq(auditLog.id, entry!.id));
+    expect(scrubbed!.detail).toEqual({ employeeId: id, stopReasonId: null });
+    const [deleted] = await db.select().from(auditLog).where(eq(auditLog.entityId, id));
+    expect(deleted).toMatchObject({ action: "deleted", detail: { employeeNumber: "501", auditEntriesScrubbed: 1 } });
+  });
+
   it("refuses while the employee is active", async () => {
     const id = await makeEmployee("501", true);
     const res = await call("DELETE", `/employees/${id}`);

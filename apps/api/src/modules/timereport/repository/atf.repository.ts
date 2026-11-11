@@ -1,6 +1,8 @@
 import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { atfTransactions, type Db } from "@navet/db";
 import type { CreateAtfTransactionInput } from "@navet/shared";
+// Leaf in the payroll module (schema + error only) — no cycle.
+import { assertPayrollPeriodsOpenInTx } from "../../payroll/repository/payroll-period-guard.js";
 
 export function createAtfRepository(db: Db) {
   return {
@@ -12,19 +14,25 @@ export function createAtfRepository(db: Db) {
         .orderBy(desc(atfTransactions.date), desc(atfTransactions.createdAt));
     },
 
+    // Both writes start with the period guard (payroll-period-guard.ts):
+    // the transaction's month is open and stays open until the commit, so
+    // Lås never freezes a basis without a withdrawal that was being saved.
     async createAtfTransaction(employeeId: string, input: CreateAtfTransactionInput, createdBy: string) {
-      const [row] = await db
-        .insert(atfTransactions)
-        .values({
-          employeeId,
-          date: input.date,
-          type: input.type,
-          minutes: input.minutes,
-          note: input.note,
-          createdBy,
-        })
-        .returning();
-      return row!;
+      return db.transaction(async (tx) => {
+        await assertPayrollPeriodsOpenInTx(tx, [input.date]);
+        const [row] = await tx
+          .insert(atfTransactions)
+          .values({
+            employeeId,
+            date: input.date,
+            type: input.type,
+            minutes: input.minutes,
+            note: input.note,
+            createdBy,
+          })
+          .returning();
+        return row!;
+      });
     },
 
     // Read before delete — the period-lock guard needs the row's date.
@@ -36,12 +44,17 @@ export function createAtfRepository(db: Db) {
       return row ?? null;
     },
 
+    // The date is read (no row lock) before the guard — a transaction's
+    // date never changes.
     async deleteAtfTransaction(employeeId: string, id: string) {
-      const [row] = await db
-        .delete(atfTransactions)
-        .where(and(eq(atfTransactions.id, id), eq(atfTransactions.employeeId, employeeId)))
-        .returning();
-      return row ?? null;
+      return db.transaction(async (tx) => {
+        const where = and(eq(atfTransactions.id, id), eq(atfTransactions.employeeId, employeeId));
+        const [existing] = await tx.select({ date: atfTransactions.date }).from(atfTransactions).where(where);
+        if (!existing) return null;
+        await assertPayrollPeriodsOpenInTx(tx, [existing.date]);
+        const [row] = await tx.delete(atfTransactions).where(where).returning();
+        return row ?? null;
+      });
     },
 
     // Withdrawals in a date range, all employees — feeds the payroll period
