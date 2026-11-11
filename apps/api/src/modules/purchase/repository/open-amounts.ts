@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { supplierInvoices, supplierPaymentRows, supplierPayments, type Db, type Tx } from "@navet/db";
+import { round2 } from "@navet/shared";
 
 // Leverantörsreskontra (B4): THE aggregation authority for "what is still
 // open on this supplier invoice" — mirrors sales' open-amounts.ts (B3), same
@@ -205,7 +206,7 @@ export async function payablesTotalAsOf(executor: Db | Tx, date: string): Promis
   `);
   // postgres-js: db.execute returns an array of rows.
   const [row] = [...rows] as { total: string }[];
-  return Math.round(Number(row?.total ?? 0) * 100) / 100;
+  return round2(Number(row?.total ?? 0));
 }
 
 // One open supplier invoice per a date, for the valutaomvärdering — the

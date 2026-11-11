@@ -6,8 +6,17 @@ import { z } from "zod";
 // strings to NaN makes them FAIL coercion instead, so the caller gets a 400
 // rather than a phantom zero amount/quantity. First hardened in vat.ts (B5)
 // and stock.ts (D2); this is the one shared authority.
+//
+// null is blank too: Number(null) is 0, so `"unitPrice": null` from an API
+// client (the template's evaluate answers null when there is no base price)
+// was stored as a 0 kr manual price (delatgranskningen 2026-11-11). Where
+// null MEANS something, put .nullable() OUTSIDE — blankSafe(x).nullable()
+// lets null through before this preprocess runs.
 export const blankSafe = <T extends z.ZodTypeAny>(inner: T) =>
-  z.preprocess((value) => (typeof value === "string" && value.trim() === "" ? Number.NaN : value), inner);
+  z.preprocess(
+    (value) => (value === null || (typeof value === "string" && value.trim() === "") ? Number.NaN : value),
+    inner
+  );
 
 // Optional free text. A blanked input arrives as "" and is normalized to
 // null here rather than in each writer, so "not filled in" has exactly one

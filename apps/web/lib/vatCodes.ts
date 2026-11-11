@@ -1,5 +1,12 @@
 import type { VatBoxSetting } from "./vatBoxes";
 
+// Same rule as @navet/shared money.ts's round2 (half away from zero, cut to 15
+// significant digits first) — local copy, this mirror imports no runtime code.
+function round2(n: number): number {
+  const magnitude = Math.round(Number((Math.abs(n) * 100).toPrecision(15))) / 100;
+  return n < 0 && magnitude !== 0 ? -magnitude : magnitude;
+}
+
 // Mirror of @navet/shared's momskod catalog (packages/shared/src/vat-codes.ts) —
 // the web cannot import @navet/shared (Turbopack vs .js-suffix imports). Kept
 // in sync by apps/api/test/vat-codes.shared.test.ts, which compares the
@@ -400,8 +407,8 @@ export function vatCodeAllowedOn(code: VatCode, document: "sales" | "purchase" |
 // Computed (omvänd) VAT, rounded half away from zero to öre — the same
 // arithmetic the poster books, so the importmoms preview matches the verifikat.
 export function computedVatAmount(base: number, rate: number): number {
-  const magnitude = Math.round(Math.abs(base) * rate + 1e-9) / 100;
-  return base < 0 ? -magnitude : magnitude;
+  const magnitude = Math.round(Number((Math.abs(base) * rate).toPrecision(15))) / 100;
+  return base < 0 && magnitude !== 0 ? -magnitude : magnitude;
 }
 
 export type ReverseVatPreviewInput = {
@@ -416,13 +423,13 @@ export type ReverseVatPreviewLine = { code: VatCode; base: number; vat: number }
 export function reverseVatPreview(input: ReverseVatPreviewInput): ReverseVatPreviewLine[] {
   const baseByCode = new Map<VatCode, number>();
   const add = (code: VatCode, amount: number) =>
-    baseByCode.set(code, Math.round(((baseByCode.get(code) ?? 0) + amount) * 100) / 100);
+    baseByCode.set(code, round2((baseByCode.get(code) ?? 0) + amount));
   let rowTotal = 0;
   for (const row of input.rows) {
     add(row.code ?? input.headerCode, row.lineAmount);
     rowTotal += row.lineAmount;
   }
-  const remainder = Math.round((input.netAmount - rowTotal) * 100) / 100;
+  const remainder = round2(input.netAmount - rowTotal);
   if (remainder !== 0) add(input.headerCode, remainder);
 
   return VAT_CODE_CATALOG.flatMap((entry) => {

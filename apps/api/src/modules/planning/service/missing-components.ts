@@ -38,6 +38,7 @@ import type { BomEdge } from "./requirements-calc.js";
 import { explodeFromIndex, orderQuantityFor } from "./requirements-calc.js";
 import { suggestDueDate } from "./due-date-suggestion.js";
 import { subtractWorkingDays } from "../../system/service/delivery-days.js";
+import { round4 } from "@navet/shared";
 
 export const MISSING_MAX_DEPTH = 10;
 
@@ -100,8 +101,6 @@ export interface MissingComponentsInput {
   leadDaysFor: (articleId: string, quantity: number) => number;
   maxDepth?: number;
 }
-
-const round4 = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
 
 const formatQuantity = (n: number) => String(round4(n));
 

@@ -4,6 +4,7 @@
 // on-time / late rule (classifyDelivery, with the side's margins — #29),
 // month bucketing over the requested range and the not-measurable counters.
 import type { PrecisionMargins } from "../../system/service/precision-settings.js";
+import { roundToDecimals } from "@navet/shared";
 
 export type { PrecisionMargins };
 
@@ -79,7 +80,7 @@ export function finishCounts(b: PrecisionCounts) {
     onTime: b.onTime,
     late: b.late,
     precisionPct: b.total > 0 ? Math.round((b.onTime / b.total) * 100) : null,
-    avgDaysLate: b.late > 0 ? Math.round((b.lateDays / b.late) * 10) / 10 : null,
+    avgDaysLate: b.late > 0 ? roundToDecimals(b.lateDays / b.late, 1) : null,
   };
 }
 

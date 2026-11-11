@@ -135,7 +135,7 @@ export const createSupplierSchema = z.object({
   // series. Manually chosen numbers must be unique (409 on duplicates).
   supplierNumber: z.string().trim().min(1).max(50).optional(),
   contactName: z.string().max(255).optional(),
-  email: z.string().email().optional(),
+  email: z.string().email().max(255).optional(),
   phone: z.string().max(50).optional(),
   address: z.string().optional(),
   postalCode: z.string().max(20).optional(),
@@ -171,7 +171,7 @@ export const updateSupplierSchema = z
     // Optional but NOT nullable — a supplier always has a number.
     supplierNumber: z.string().trim().min(1).max(50).optional(),
     contactName: z.string().max(255).nullable().optional(),
-    email: z.string().email().nullable().optional(),
+    email: z.string().email().max(255).nullable().optional(),
     phone: z.string().max(50).nullable().optional(),
     address: z.string().nullable().optional(),
     postalCode: z.string().max(20).nullable().optional(),

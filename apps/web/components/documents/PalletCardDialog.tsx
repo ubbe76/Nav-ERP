@@ -9,6 +9,7 @@ import { FormActions, FormError } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import type { DeliveryRowsResponse } from "../../lib/types";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { round4 } from "../../lib/format";
 
 // GET /purchase-orders/:id/dispatches/:dispatchId/rows — the delivery's shape
 // (quantities in the row's unit) plus the parcel count saved with the dispatch.
@@ -35,10 +36,6 @@ const MAX_PARCELS = 50;
 function num(value: string): number {
   const n = Number(value.replace(",", "."));
   return Number.isFinite(n) ? n : 0;
-}
-
-function round4(n: number): number {
-  return Math.round(n * 10000) / 10000;
 }
 
 // Even split: whole totals round down per kolli with the rest on the last one;

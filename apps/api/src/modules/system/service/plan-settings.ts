@@ -1,3 +1,5 @@
+import { roundToDecimals } from "@navet/shared";
+
 // Orimligt mycket tid (Planera, ny TO): how many normal weeks of its
 // resource's capacity one operation's remaining time may fill before the
 // planner warns. A leaf like posting-settings.ts — the key, the default and
@@ -34,7 +36,7 @@ export function decodeLeadTimeSettingDays(raw: string | null | undefined, fallba
   if (raw == null || raw.trim() === "") return fallback;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > MAX_LEAD_TIME_SETTING_DAYS) return fallback;
-  return Math.round(parsed * 10) / 10;
+  return roundToDecimals(parsed, 1);
 }
 
 // The pair as manufacturing-lead-time.ts takes it (LeadTimeDefaults), from

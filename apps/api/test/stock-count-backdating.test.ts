@@ -19,6 +19,7 @@ import { postingPeriodLockOn } from "../src/modules/economy/service/verification
 import { createUser, createCalendarYear, resetYearEnd } from "./helpers/year-end.js";
 import { testEconomyService } from "./helpers/services.js";
 import { parsed } from "./helpers/parsed.js";
+import { editStockLog } from "./helpers/stock-log.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -58,10 +59,12 @@ async function makeArticle(number: string, standardCost?: number) {
 // Stock on the location, registered before the freeze.
 async function stockBeforeFreeze(articleId: string, locationId: string, quantity: number, unitCost = "10") {
   const row = await stockService.recordTransaction({ articleId, locationId, quantityDelta: quantity, transactionType: "inventory_adjustment" });
-  await db
-    .update(stockTransactions)
-    .set({ createdAt: BEFORE_FREEZE, unitCost })
-    .where(eq(stockTransactions.id, (row as { id: string }).id));
+  await editStockLog((tx) =>
+    tx
+      .update(stockTransactions)
+      .set({ createdAt: BEFORE_FREEZE, unitCost })
+      .where(eq(stockTransactions.id, (row as { id: string }).id))
+  );
 }
 
 // A count frozen at FREEZE (its rows were seeded from the balances above).

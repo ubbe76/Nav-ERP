@@ -18,11 +18,9 @@
 //   class is decided on the exact cumulative sum).
 import type { AbcClass } from "@navet/shared";
 import type { AbcLimits } from "../../system/service/plan-settings.js";
+import { round2, round4 } from "@navet/shared";
 
 export type { AbcClass };
-
-const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
-const round4 = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
 
 export interface AbcInputRow {
   articleId: string;

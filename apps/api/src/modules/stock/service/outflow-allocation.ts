@@ -17,6 +17,7 @@
 //      every outflow did before the split.
 //
 // Quantities are the stock column's 4 decimals; a part is never 0.
+import { round4 } from "@navet/shared";
 
 export interface OutflowCandidate {
   locationId: string;
@@ -57,8 +58,6 @@ export function articlePlacePreference(place: { locationName: string; isPrimary:
   if (place.isPrimary) return 0;
   return place.sortOrder;
 }
-
-const round4 = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
 
 // Pick-list order: the article's own places first (huvudplats, then the
 // alternatives in order — `preference` from articlePlacePreference), then by

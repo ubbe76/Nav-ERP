@@ -9,6 +9,7 @@ import {
   type PrecisionMargins,
   type PrecisionOrderInput,
 } from "./delivery-precision-calc.js";
+import { round2, round4 } from "@navet/shared";
 
 // Leveransprecision — Gruppera: Motpart (Kvalitet). Pure: per supplier
 // (inköp) or customer (försäljning) the same precision columns as the month
@@ -63,9 +64,6 @@ export interface CounterpartyPrecisionRow {
 }
 
 export type CounterpartyPrecisionTotals = Omit<CounterpartyPrecisionRow, "counterpartyId" | "counterpartyName">;
-
-const round4 = (v: number) => Math.round(v * 10_000) / 10_000;
-const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100;
 
 // The ids of the orders the precision measures in the range — the
 // population of Order med avvikelse.

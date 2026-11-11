@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Select } from "./Field";
 import { apiFetch } from "../../lib/api";
 import type { Article, ArticleUnit } from "../../lib/types";
+import { round4 } from "../../lib/format";
 
 // Unit choice on an order/BOM row: the article's base unit plus its
 // alternative units. `value` is the unit's register id, "" = the base unit.
@@ -43,10 +44,6 @@ export function useUnitOptions(article: Pick<Article, "id" | "unit"> | null): Un
   }, [articleId, baseCode]);
 
   return options;
-}
-
-function round4(n: number): number {
-  return Math.round(n * 10000) / 10000;
 }
 
 // Re-expresses an entered quantity when the row's unit is switched

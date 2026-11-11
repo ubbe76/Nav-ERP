@@ -28,7 +28,7 @@ import {
   type StockCountPostResult,
   type StockCountRow,
 } from "../../lib/types";
-import { formatQuantity } from "../../lib/format";
+import { formatQuantity, round4 } from "../../lib/format";
 
 const PILL_STATUS = { open: "running", posted: "done", cancelled: "stopped" } as const;
 
@@ -310,7 +310,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
     if (entered === "") return "—";
     // Round to the quantity scale (4 decimals) — the raw float difference
     // renders artifacts like "+0.1999999999999993" for 8.2 − 8.
-    const diff = Math.round((Number(entered) - Number(row.snapshotQuantity)) * 1e4) / 1e4;
+    const diff = round4(Number(entered) - Number(row.snapshotQuantity));
     if (Number.isNaN(diff)) return "—";
     if (diff === 0) return "0";
     return diff > 0 ? `+${diff}` : String(diff);

@@ -4,7 +4,10 @@
 // ONE implementation of the distribution, the sign rule and the row maths.
 
 function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
+  // Half away from zero, cut to 15 significant digits first — @navet/shared
+  // money.ts's roundToDecimals (the web can't import the package).
+  const magnitude = Math.round(Number((Math.abs(n) * 100).toPrecision(15))) / 100;
+  return n < 0 && magnitude !== 0 ? -magnitude : magnitude;
 }
 
 // Fördela årsbelopp jämnt: whole kronor per month, rounded DOWN (towards zero

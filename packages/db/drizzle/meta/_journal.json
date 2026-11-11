@@ -1457,6 +1457,13 @@
       "when": 1794376828392,
       "tag": "0207_strukturradernas_ordning",
       "breakpoints": true
+    },
+    {
+      "idx": 208,
+      "version": "7",
+      "when": 1794409973585,
+      "tag": "0208_delatgranskning",
+      "breakpoints": true
     }
   ]
 }

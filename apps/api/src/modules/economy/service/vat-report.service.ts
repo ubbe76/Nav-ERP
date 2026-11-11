@@ -7,6 +7,7 @@ import {
   VAT_SETTLED_BOXES,
   isVatCode,
   round2,
+  roundToDecimals,
   vatCodeEntry,
   type UpdateVatReportingSettingsInput,
   type VatBox,
@@ -137,8 +138,7 @@ export function bucketMovements(movements: Pick<VatAccountMovement, "vatBox" | "
 // Hela kronor, half away from zero (the declaration is stated in whole
 // kronor). Exported for its unit test.
 export function roundToKronor(amount: number): number {
-  const magnitude = Math.round(Math.abs(amount) + 1e-9);
-  return amount < 0 && magnitude !== 0 ? -magnitude : magnitude;
+  return roundToDecimals(amount, 0);
 }
 
 // Every box rounded to whole kronor; ruta 49 is computed from the ROUNDED

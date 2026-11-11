@@ -1,4 +1,6 @@
 import type { DeviationCostKind } from "@navet/shared";
+import { round2 } from "@navet/shared";
+export { round2 } from "@navet/shared";
 
 // Avvikelsens kostnader — pure. The ONE place the net cost is computed: the
 // card, the list, the CSV and the leveransprecision's Avvikelsekostnad all go
@@ -14,8 +16,6 @@ export interface DeviationCostLine {
   kind: DeviationCostKind;
   amount: number; // SEK, positive
 }
-
-export const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 export function isRecovery(kind: DeviationCostKind): boolean {
   return kind === "recovery";

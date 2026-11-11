@@ -7,6 +7,8 @@ import {
   type FetchExchangeRatesInput,
   type ListExchangeRatesQuery,
   type UpdateExchangeRateSettingsInput,
+  round2,
+  roundToDecimals,
 } from "@navet/shared";
 import type { AuditWriter } from "../repository/audit.repository.js";
 import {
@@ -185,7 +187,7 @@ function parseObservations(text: string, opts: { allowNonPositive: boolean }): O
     if (typeof entry?.date !== "string" || !ISO_DATE.test(entry.date)) return null;
     if (typeof entry.value !== "number" || !Number.isFinite(entry.value)) return null;
     if (!opts.allowNonPositive && entry.value <= 0) return null;
-    observations.push({ date: entry.date, value: Math.round(entry.value * 1e6) / 1e6 });
+    observations.push({ date: entry.date, value: roundToDecimals(entry.value, 6) });
   }
   return observations;
 }
@@ -302,7 +304,7 @@ export function createExchangeRateService(deps: ExchangeRateServiceDeps) {
     const result = await fetchSeries(REFERENCE_RATE_SERIES, REFERENCE_RATE_SERIES, validFrom, addDays(validFrom, REFERENCE_RATE_WINDOW_DAYS), apiKey);
     if (!result.ok) return result;
     const first = [...result.observations].sort((a, b) => a.date.localeCompare(b.date))[0];
-    return { ok: true, rate: first ? Math.round(first.value * 100) / 100 : null };
+    return { ok: true, rate: first ? round2(first.value) : null };
   }
 
   // The half-years Hämta från Riksbanken takes: [from, to] when given, else

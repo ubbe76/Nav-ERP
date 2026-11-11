@@ -36,14 +36,17 @@ export interface SplitVatResult {
 }
 
 function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
+  // Half away from zero, cut to 15 significant digits first — @navet/shared
+  // money.ts's roundToDecimals (the web can't import the package).
+  const magnitude = Math.round(Number((Math.abs(n) * 100).toPrecision(15))) / 100;
+  return n < 0 && magnitude !== 0 ? -magnitude : magnitude;
 }
 
 // Same arithmetic as the server's computedVatAmount (omvänd moms): half away
 // from zero to öre.
 function computedVat(base: number, rate: number): number {
-  const magnitude = Math.round(Math.abs(base) * rate + 1e-9) / 100;
-  return base < 0 ? -magnitude : magnitude;
+  const magnitude = Math.round(Number((Math.abs(base) * rate).toPrecision(15))) / 100;
+  return base < 0 && magnitude !== 0 ? -magnitude : magnitude;
 }
 
 // Which codes the Momskod cell offers: domestic codes that carry VAT and the

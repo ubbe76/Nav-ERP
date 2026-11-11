@@ -22,7 +22,7 @@ import {
   units,
   type Db,
 } from "@navet/db";
-import { round2, type ValuationGroupBy, type ValuationMethod, type ValuationQuery } from "@navet/shared";
+import { round4, round2, type ValuationGroupBy, type ValuationMethod, type ValuationQuery } from "@navet/shared";
 import { computeMovingAverage, type MovingAverageRow } from "./moving-average.js";
 import { computeFifo, type FifoRow } from "./fifo.js";
 import { stockValuedAt, stockValuedOnOrBefore } from "../repository/valued-at.js";
@@ -77,9 +77,6 @@ export const METHOD_LABELS: Record<ValuationMethod, string> = {
 // corrupt fractional stock. Same helper as moving-average.ts/units.ts, kept
 // local rather than shared: three modules independently agreeing to round a
 // numeric(14,4) to 4 decimals is not worth a shared dependency.
-function round4(n: number): number {
-  return Math.round((n + Number.EPSILON) * 10000) / 10000;
-}
 
 export interface ValuationPdfRenderer {
   renderFinancialStatement(input: FinancialStatementPdfInput): Promise<Buffer>;

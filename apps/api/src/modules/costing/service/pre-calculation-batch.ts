@@ -1,18 +1,10 @@
 import { manufacturingCost, perUnit, selfCost, type CostBuckets } from "./cost-figures.js";
+import { roundToDecimals } from "@navet/shared";
 
 // Förkalkylera flera (#27) — the pure rules of the batch, no DB imports:
 // which quantity an article is calculated with, the per-unit figures of a
 // calculation and the change against the previous one. The DB work and the
 // sequential run live in pre-calculation-batch.service.ts.
-
-// Four decimals — the article's standard_cost/sales_price scale, and exactly
-// the rounding applyStandardCostFromCalculation/applySalesPriceFromCalculation
-// do before writing (costing.service.ts), so a previewed TVK/st IS the
-// standard cost Sätt standardpris would write.
-function round(value: number, decimals: number): number {
-  const factor = 10 ** decimals;
-  return Math.round(value * factor) / factor;
-}
 
 export type QuantitySource = "latest" | "fallback" | "manual";
 
@@ -56,9 +48,9 @@ export function perUnitFigures(c: CostBuckets & { salesPrice: number | string; q
   const sales = perUnit(Number(c.salesPrice), c.quantity);
   if (manufacturing === null || self === null || sales === null) return null;
   return {
-    manufacturingCostPerUnit: round(manufacturing, 4),
-    selfCostPerUnit: round(self, 4),
-    salesPricePerUnit: round(sales, 4),
+    manufacturingCostPerUnit: roundToDecimals(manufacturing, 4),
+    selfCostPerUnit: roundToDecimals(self, 4),
+    salesPricePerUnit: roundToDecimals(sales, 4),
   };
 }
 
@@ -72,5 +64,5 @@ export function manufacturingCostChange(
 ): { amount: number; percent: number } | null {
   if (previousPerUnit === null || previousPerUnit === undefined || previousPerUnit === 0) return null;
   const amount = current - previousPerUnit;
-  return { amount: round(amount, 2), percent: round((amount / previousPerUnit) * 100, 2) };
+  return { amount: roundToDecimals(amount, 2), percent: roundToDecimals((amount / previousPerUnit) * 100, 2) };
 }

@@ -108,27 +108,39 @@ export async function usableArticleLocations(db: Db | Tx, articleIds: string[]):
 // ONE definition, in the pure allocation file (it cannot import this one).
 export { FALLBACK_LOCATION_NAME } from "./outflow-allocation.js";
 
+// Two first-ever writers (an import and a new article at the same moment)
+// both saw no `***`: each insert is ON CONFLICT DO NOTHING against the
+// partial unique indexes from migration 0208, and the place is read back —
+// the loser gets the winner's row. Read in id order so an installation that
+// predates the index and has two still resolves the same one every time.
 export async function getOrCreateFallbackLocation(db: Db | Tx): Promise<string> {
-  const [existing] = await db
-    .select({ id: stockLocations.id })
-    .from(stockLocations)
-    .where(eq(stockLocations.name, FALLBACK_LOCATION_NAME))
-    .limit(1);
-  if (existing) return existing.id;
+  const findLocation = async () =>
+    (
+      await db
+        .select({ id: stockLocations.id })
+        .from(stockLocations)
+        .where(eq(stockLocations.name, FALLBACK_LOCATION_NAME))
+        .orderBy(stockLocations.id)
+        .limit(1)
+    )[0]?.id;
+  const existing = await findLocation();
+  if (existing) return existing;
 
-  const [existingWarehouse] = await db
-    .select({ id: warehouses.id })
-    .from(warehouses)
-    .where(eq(warehouses.name, FALLBACK_LOCATION_NAME))
-    .limit(1);
-  const warehouseId =
-    existingWarehouse?.id ??
-    (await db.insert(warehouses).values({ name: FALLBACK_LOCATION_NAME, active: true }).returning({ id: warehouses.id }))[0]!
-      .id;
+  const findWarehouse = async () =>
+    (
+      await db
+        .select({ id: warehouses.id })
+        .from(warehouses)
+        .where(eq(warehouses.name, FALLBACK_LOCATION_NAME))
+        .orderBy(warehouses.id)
+        .limit(1)
+    )[0]?.id;
+  let warehouseId = await findWarehouse();
+  if (!warehouseId) {
+    await db.insert(warehouses).values({ name: FALLBACK_LOCATION_NAME, active: true }).onConflictDoNothing();
+    warehouseId = (await findWarehouse())!;
+  }
 
-  const [location] = await db
-    .insert(stockLocations)
-    .values({ warehouseId, name: FALLBACK_LOCATION_NAME, active: true })
-    .returning({ id: stockLocations.id });
-  return location!.id;
+  await db.insert(stockLocations).values({ warehouseId, name: FALLBACK_LOCATION_NAME, active: true }).onConflictDoNothing();
+  return (await findLocation())!;
 }

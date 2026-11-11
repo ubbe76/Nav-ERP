@@ -66,6 +66,7 @@ import {
   type UpdatePurchaseOrderHeaderInput,
   type UpdatePurchaseOrderRowInput,
   type UpdateSupplierInput,
+  round4,
 } from "@navet/shared";
 import { purchaseOrderLate } from "../../planning/repository/late-orders.js";
 import { getNextOrderNumber, insertWithSeriesNumber } from "../../system/service/number-series.js";
@@ -78,10 +79,6 @@ import { isStockedArticle } from "../../stock/service/stocked-article.js";
 import { loadVatCodeBook } from "../../economy/repository/vat-codes.js";
 import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions } from "../../economy/service/dimension-check.js";
 import { purchaseRowArrivalDate } from "../../planning/repository/effective-dates.js";
-
-function round4(value: number): number {
-  return Math.round(value * 10000) / 10000;
-}
 
 export type ReceiveGoodsResult =
   | { ok: true; row: typeof purchaseOrderRows.$inferSelect; orderStatus: PurchaseOrderStatus; receiptId: string }
@@ -1439,6 +1436,9 @@ export function createPurchaseRepository(db: Db) {
           .for("update");
         if (!receipt) return { ok: false, reason: "receipt_not_found" };
         if (receipt.undoneAt) return { ok: false, reason: "already_undone" };
+        // Only an undone receipt outlives its row (migration 0208), so a live
+        // one always has it.
+        if (!receipt.purchaseOrderRowId) return { ok: false, reason: "receipt_not_found" };
 
         const [row] = await tx
           .select()

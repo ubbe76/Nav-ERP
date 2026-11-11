@@ -9,6 +9,7 @@ import {
   type CostVarianceAnalysis,
   type DerivedCosting,
   type TrialMarkups,
+  roundToDecimals,
 } from "@navet/shared";
 import type { Db, Tx } from "@navet/db";
 import type {
@@ -309,11 +310,6 @@ interface MarkupLevelsOfHeader {
 // "50.00125" up to "50.0013". Rounding once here, in toHeader, before either
 // path sees the number, means both consume an already-decided value and can
 // no longer disagree.
-function round(value: number, decimals: number): number {
-  const factor = 10 ** decimals;
-  return Math.round(value * factor) / factor;
-}
-
 // The draft's string form of an already-rounded header number — just format,
 // not round again.
 function money(value: number): string {
@@ -330,7 +326,7 @@ function percent(value: number): string {
 // an old calculation stays explainable after the settings change — with the
 // level each price markup came from (#16). Every field is rounded to its
 // column's scale here — the one and only rounding — so the draft and the
-// saved row can never diverge on it (see `round` above).
+// saved row can never diverge on it (see the note above).
 function toHeader(
   identity: {
     articleId: string;
@@ -349,30 +345,30 @@ function toHeader(
   return {
     articleId: identity.articleId,
     manufacturingOrderId: identity.manufacturingOrderId,
-    quantity: round(identity.quantity, 4),
+    quantity: roundToDecimals(identity.quantity, 4),
     type: identity.type,
-    materialCost: round(costs.materialCost, 4),
-    materialOverhead: round(costs.materialOverhead, 4),
-    laborCost: round(costs.laborCost, 4),
-    overhead: round(costs.overhead, 4),
-    subcontractCost: round(costs.subcontractCost, 4),
-    subcontractOverhead: round(costs.subcontractOverhead, 4),
-    semiFinishedCost: round(costs.semiFinishedCost, 4),
-    businessOverhead: round(costs.businessOverhead, 4),
-    generalMarkup: round(costs.generalMarkup, 4),
-    materialMarkup: round(costs.materialMarkup, 4),
-    salesPrice: round(costs.salesPrice, 4),
+    materialCost: roundToDecimals(costs.materialCost, 4),
+    materialOverhead: roundToDecimals(costs.materialOverhead, 4),
+    laborCost: roundToDecimals(costs.laborCost, 4),
+    overhead: roundToDecimals(costs.overhead, 4),
+    subcontractCost: roundToDecimals(costs.subcontractCost, 4),
+    subcontractOverhead: roundToDecimals(costs.subcontractOverhead, 4),
+    semiFinishedCost: roundToDecimals(costs.semiFinishedCost, 4),
+    businessOverhead: roundToDecimals(costs.businessOverhead, 4),
+    generalMarkup: roundToDecimals(costs.generalMarkup, 4),
+    materialMarkup: roundToDecimals(costs.materialMarkup, 4),
+    salesPrice: roundToDecimals(costs.salesPrice, 4),
     materialSource: source,
     multiLevel: identity.multiLevel,
-    moPercent: round(markups.moPercent, 2),
-    loPercent: round(markups.loPercent, 2),
-    affoPercent: round(markups.affoPercent, 2),
-    generalMarkupPercent: round(markups.generalMarkupPercent, 2),
-    materialMarkupPercent: round(markups.materialMarkupPercent, 2),
+    moPercent: roundToDecimals(markups.moPercent, 2),
+    loPercent: roundToDecimals(markups.loPercent, 2),
+    affoPercent: roundToDecimals(markups.affoPercent, 2),
+    generalMarkupPercent: roundToDecimals(markups.generalMarkupPercent, 2),
+    materialMarkupPercent: roundToDecimals(markups.materialMarkupPercent, 2),
     generalMarkupLevel: levels.generalMarkupLevel,
     materialMarkupLevel: levels.materialMarkupLevel,
-    materialMarkupBase: round(costs.materialMarkupBase, 4),
-    outputQuantity: variance ? round(variance.outputQuantity, 4) : null,
+    materialMarkupBase: roundToDecimals(costs.materialMarkupBase, 4),
+    outputQuantity: variance ? roundToDecimals(variance.outputQuantity, 4) : null,
     preliminary: variance?.preliminary ?? null,
     basePricedAt: variance?.basePricedAt ?? null,
     baseMaterialSource: variance?.baseMaterialSource ?? null,
@@ -1070,7 +1066,7 @@ export function createCostingService(
       // förkalkyl, N = the received quantity on a final efterkalkyl. A
       // preliminary efterkalkyl, or one with nothing received, writes nothing.
       const perUnitCost = manufacturingCost(calculation) / writeBackDivisor(calculation);
-      return articles.updateStandardCost(calculation.articleId, round(perUnitCost, 4));
+      return articles.updateStandardCost(calculation.articleId, roundToDecimals(perUnitCost, 4));
     },
 
     // Pröva påslag (#16, the review of etapp 1): a calculation saved with a
@@ -1085,7 +1081,7 @@ export function createCostingService(
       const tried = calculation.generalMarkupLevel === "trial" || calculation.materialMarkupLevel === "trial";
       if (tried && opts.mayApplyTrial === false) throw new TrialSalesPriceNotAllowedError(id);
       const perUnitPrice = Number(calculation.salesPrice) / writeBackDivisor(calculation);
-      return articles.updateSalesPrice(calculation.articleId, round(perUnitPrice, 4));
+      return articles.updateSalesPrice(calculation.articleId, roundToDecimals(perUnitPrice, 4));
     },
 
     // Kalkylpris (#16 etapp 2) — the price chain's step after the price list

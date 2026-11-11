@@ -7,7 +7,7 @@
 //   purchase row: antal × à-pris + ställpris (once per row)
 // The rest value takes the undelivered/unreceived quantity; a purchase row's
 // ställpris counts as rest until anything on the row has been received.
-import { toUnitPrice, toUnitQuantity } from "@navet/shared";
+import { toUnitPrice, toUnitQuantity, round2 } from "@navet/shared";
 import type { OrderRegisterSourceRow } from "../repository/order-register.repository.js";
 
 export interface OrderRegisterRow {
@@ -52,8 +52,6 @@ export interface OrderRegisterTotals {
   // are converted.
   converted: boolean;
 }
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
 
 function minDate(dates: (string | null)[]): string | null {
   const present = dates.filter((d): d is string => d !== null);

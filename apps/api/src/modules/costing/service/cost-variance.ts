@@ -25,6 +25,7 @@ import {
   type CostVarianceMaterialRow,
   type CostVarianceOperationRow,
   type CostVarianceParts,
+  round4,
 } from "@navet/shared";
 import { manufacturingCost, type ManufacturingCostBuckets } from "./cost-figures.js";
 
@@ -223,11 +224,11 @@ function oreAsStored(kronor: number): number {
 // A header bucket at its column's scale, as toHeader (costing.service.ts)
 // rounds it before it is stored.
 function fourDecimals(value: number): number {
-  return Math.round(value * 10000) / 10000;
+  return round4(value);
 }
 
 function hours4(value: number): number {
-  return Math.round(value * 10000) / 10000;
+  return round4(value);
 }
 
 type OreParts = { [K in keyof CostVarianceParts]: number };

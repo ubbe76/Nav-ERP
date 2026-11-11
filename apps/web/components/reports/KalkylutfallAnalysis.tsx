@@ -8,7 +8,7 @@ import { FormHint } from "../ui/Form";
 import { Table } from "../ui/Table";
 import { Deviation } from "../costing/VarianceSummary";
 import { deviationTone, isZeroAmount, type DeviationTone } from "../../lib/costVariance";
-import { formatMoney, formatQuantity, formatSignedMoney } from "../../lib/format";
+import { formatMoney, formatQuantity, formatSignedMoney, round4 } from "../../lib/format";
 import type {
   CalculationAnalysisResponse,
   CalculationOutcomeGrouping,
@@ -271,7 +271,7 @@ function WorkCenterTable({ rows }: { rows: Array<OutcomeWorkCenterRow & { id: st
   const timeRows = rows.filter((r) => r.kind === "time");
   const legoRows = rows.filter((r) => r.kind === "subcontract");
   const sum = (pick: (r: OutcomeWorkCenterRow) => number | null) =>
-    Math.round(timeRows.reduce((t, r) => t + (pick(r) ?? 0), 0) * 1e4) / 1e4;
+    round4(timeRows.reduce((t, r) => t + (pick(r) ?? 0), 0));
   const footer: Record<string, ReactNode> = {
     resource: <strong>Totalt</strong>,
     timeDeviation: <Foot label="Tidsavvikelse (kr)"><Dev value={timeRows.reduce((t, r) => t + (r.timeDeviation ?? 0), 0)} /></Foot>,

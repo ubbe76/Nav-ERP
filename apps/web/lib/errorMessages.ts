@@ -871,6 +871,46 @@ const MESSAGES: Record<string, MessageEntry> = {
     const today = (err.body as { today?: unknown } | undefined)?.today;
     return typeof today === "string" ? `Avstämd t.o.m. kan inte ligga i framtiden — välj senast ${today}.` : "Avstämd t.o.m. kan inte ligga i framtiden.";
   },
+  // Dubbletter och "används redan" (granskningen 2026-11-11). API:ts felkropp
+  // bär bara koden och den engelska texten, så numret/namnet nämns inte här.
+  "duplicate-article-number": "Artikelnumret används redan av en annan artikel.",
+  "duplicate-customer-number": "Kundnumret används redan av en annan kund.",
+  "duplicate-supplier-number": "Leverantörsnumret används redan av en annan leverantör.",
+  "duplicate-supplier-invoice-number": "Leverantören har redan en faktura med det fakturanumret.",
+  "duplicate-email": "E-postadressen används redan av en annan användare.",
+  "duplicate-work-center-code": "Resurskoden används redan av en annan resurs.",
+  "duplicate-sequence-no": "Artikelns beredning har redan en operation med det operationsnumret.",
+  "duplicate-price-list": "Det finns redan en prislista med den koden eller det namnet.",
+  "duplicate-customer-price": "Kunden har redan ett pris för den artikeln eller varugruppen från den kvantiteten.",
+  "duplicate-article-supplier": "Leverantören finns redan på artikelns leverantörslista.",
+  "duplicate-article-group": "Det finns redan en artikelgrupp med den koden eller det namnet.",
+  "duplicate-article-unit": "Artikeln har redan den alternativa enheten.",
+  "duplicate-company-carrier": "Fraktbolaget finns redan i företagets lista.",
+  "duplicate-fiscal-year-label": "Det finns redan ett räkenskapsår med den beteckningen.",
+  "duplicate-holiday-date": "Det finns redan en röd dag på det datumet.",
+  "duplicate-production-group-code": "Produktionsgruppens kod används redan.",
+  "duplicate-register-entry": "Det finns redan en post med den koden eller det namnet.",
+  "duplicate-schedule-code": "Det finns redan ett schema med den koden.",
+  "duplicate-verification-series": "Det finns redan en verifikationsserie med den koden.",
+  "base-unit-conflict": "Standardenheten kan inte läggas till som alternativ enhet.",
+  "article-unit-in-use": "Enheten är artikelns inköps- eller försäljningsenhet och kan inte tas bort.",
+  "series-code-locked": "Serien har verifikat och koden kan inte längre ändras.",
+  "period-already-locked": "Perioden är redan låst.",
+  // Leverantörsreskontra / fakturor
+  "supplier-payment-exceeds-open-amount":
+    "Betalningen är större än fakturans öppna belopp (utöver betalningstoleransen).",
+  "supplier-invoice-has-payments": "Fakturan har registrerade betalningar — ångra dem först.",
+  "supplier-inactive": "Leverantören är inaktiv.",
+  "payment-already-cancelled": "Betalningen är redan ångrad — ladda om sidan.",
+  "not-creditable": "Bara en utfärdad eller betald faktura kan krediteras, och inte en kreditfaktura.",
+  "row-has-manufacturing-orders": "Raden har kopplade tillverkningsorder och kan inte tas bort.",
+  "post-calculation-locked": "En efterkalkyl kan inte raderas.",
+  // Terminalen / närvaro
+  "already-stamped-in": "Medarbetaren är redan instämplad på operationen.",
+  "inactive-employee": "Medarbetaren är inaktiv och kan inte stämpla in.",
+  "attendance-session-already-stopped": "Närvaron är redan avslutad — ladda om sidan.",
+  "stamp-session-not-found": "Stämplingen finns inte längre — ladda om listan.",
+  "inactive-absence-type": "Frånvarotypen är inaktiv — välj en annan.",
   // generic (thrown by the zod/body-parsing layer, not a named domain error)
   "validation-failed": "Ogiltiga uppgifter — kontrollera fälten.",
   "invalid-request-body": "Ogiltig förfrågan.",

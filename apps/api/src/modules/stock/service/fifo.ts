@@ -8,6 +8,7 @@
 // NEWEST inflows, back until the quantity on hand is covered. Outflows never
 // need to be matched to layers one by one: the remaining quantity is the sum
 // of every delta, and it is priced from the newest layers backwards.
+import { round4, round2 } from "@navet/shared";
 
 export interface FifoRow {
   quantityDelta: number;
@@ -88,6 +89,3 @@ export function computeFifo(rows: FifoRow[]): FifoResult {
 }
 
 // Quantities live in numeric(14,4) — same local helper as moving-average.ts.
-function round4(n: number): number {
-  return Math.round((n + Number.EPSILON) * 10000) / 10000;
-}

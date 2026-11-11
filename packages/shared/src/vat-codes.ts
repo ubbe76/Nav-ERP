@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { round2 } from "./money.js";
 import type { VatBoxSetting } from "./economy.js";
 import { isVatRate, type VatRate } from "./vat.js";
 
@@ -448,9 +449,12 @@ export function vatCodeAllowedOn(code: VatCode, document: "sales" | "purchase" |
 // ingående moms. Rounded half away from zero to öre, so a supplier credit
 // note computes the exact mirror of the invoice it reverses.
 export function computedVatAmount(base: number, rate: number): number {
-  // |base| × rate is the VAT in öre (kr × % / 100 × 100).
-  const magnitude = Math.round(Math.abs(base) * rate + 1e-9) / 100;
-  return base < 0 ? -magnitude : magnitude;
+  // |base| × rate is the VAT in öre (kr × % / 100 × 100). Cut to 15
+  // significant digits before rounding, as money.ts's roundToDecimals: a
+  // `+ 1e-9` nudge is smaller than a float's spacing above ~1 MSEK, so
+  // 1 049 385,90 × 25 % came out 262 346,47 (delatgranskningen 2026-11-11).
+  const magnitude = Math.round(Number((Math.abs(base) * rate).toPrecision(15))) / 100;
+  return base < 0 && magnitude !== 0 ? -magnitude : magnitude;
 }
 
 // Förhandsvisning av beräknad (omvänd) moms on a supplier invoice — the ONE
@@ -468,13 +472,13 @@ export type ReverseVatPreviewLine = { code: VatCode; base: number; vat: number }
 export function reverseVatPreview(input: ReverseVatPreviewInput): ReverseVatPreviewLine[] {
   const baseByCode = new Map<VatCode, number>();
   const add = (code: VatCode, amount: number) =>
-    baseByCode.set(code, Math.round(((baseByCode.get(code) ?? 0) + amount) * 100) / 100);
+    baseByCode.set(code, round2((baseByCode.get(code) ?? 0) + amount));
   let rowTotal = 0;
   for (const row of input.rows) {
     add(row.code ?? input.headerCode, row.lineAmount);
     rowTotal += row.lineAmount;
   }
-  const remainder = Math.round((input.netAmount - rowTotal) * 100) / 100;
+  const remainder = round2(input.netAmount - rowTotal);
   if (remainder !== 0) add(input.headerCode, remainder);
 
   return VAT_CODE_CATALOG.flatMap((entry) => {

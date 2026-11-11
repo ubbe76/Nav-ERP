@@ -4,12 +4,7 @@
 // per D (material, lön, lego and — with Tillverkningskostnad — MO and LO)
 // less what it has already received into stock, valued at the price it went
 // into stock with (avräknat). Nothing is stored: the logs are the record.
-import { round2, type WipBasis } from "@navet/shared";
-
-// Quantities are numeric(14,4); same local helper as fifo.ts/moving-average.ts.
-function round4(n: number): number {
-  return Math.round((n + Number.EPSILON) * 10000) / 10000;
-}
+import { round4, round2, type WipBasis } from "@navet/shared";
 
 // One mo_receipt row of the order valued on or before D, in värderingsdatum
 // order: a receipt (positive, unit_cost = the standard cost at the receipt or

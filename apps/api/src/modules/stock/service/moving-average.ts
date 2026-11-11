@@ -3,7 +3,7 @@
 // chronological order and gets the quantity and average unit cost at the
 // report date back. Nothing is ever stored: the rows are the record and the
 // average is always derived (arkitekturprincip 1).
-import { round2 } from "@navet/shared";
+import { round4, round2 } from "@navet/shared";
 
 export interface MovingAverageRow {
   // Positive = inflow, negative = outflow.
@@ -53,6 +53,3 @@ export function computeMovingAverage(rows: MovingAverageRow[]): MovingAverageRes
 // Quantities live in numeric(14,4); rounding at 2 decimals would corrupt
 // fractional stock (0.125 kg), so quantity keeps 4 decimals while the
 // average (money) keeps the house's öre-level round2.
-function round4(n: number): number {
-  return Math.round((n + Number.EPSILON) * 10000) / 10000;
-}

@@ -24,6 +24,7 @@ import {
   type WeekScheduleDayRow,
 } from "./capacity-calc.js";
 import { addDays, addWorkingDays } from "../../system/service/delivery-days.js";
+import { round2 } from "@navet/shared";
 
 // Capacity is searched this many weeks ahead before an operation gives up
 // (the check's "Kapaciteten räcker inte inom två år").
@@ -110,7 +111,6 @@ export function roundPlanWeeks(weeks: PlannedWeek[]): PlannedWeek[] {
   for (const w of weeks) byMonday.set(w.monday, (byMonday.get(w.monday) ?? 0) + w.minutes);
   const sorted = [...byMonday].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   const total = sorted.reduce((sum, [, minutes]) => sum + minutes, 0);
-  const round2 = (n: number) => Math.round(n * 100) / 100;
   const kept: PlannedWeek[] = [];
   let carry = 0;
   for (const [monday, raw] of sorted) {

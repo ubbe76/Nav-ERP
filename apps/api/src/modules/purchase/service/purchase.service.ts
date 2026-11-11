@@ -11,6 +11,7 @@ import {
   toUnitQuantity,
   type ExtraDescriptionDocument,
   type SupplierPaymentDetails,
+  round4,
 } from "@navet/shared";
 import { linkDeviationInTx } from "../../quality/repository/deviation-link-tx.js";
 import type {
@@ -56,7 +57,7 @@ import type { RegisterReferenceReader } from "../../register/service/register.se
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import type { MailService } from "../../mail/service/mail.service.js";
 import type { DeliveryAddressBlock, DocumentPdfService, PalletCardPdfInput } from "../../mail/service/document-pdf.js";
-import { documentLanguageOf, localized, type DocumentLanguage } from "@navet/shared";
+import { documentLanguageOf, localized, round2, roundToDecimals, type DocumentLanguage } from "@navet/shared";
 import { documentTexts } from "../../mail/service/document-texts.js";
 import { mergePdfs } from "../../mail/service/pdf-merge.js";
 import type { ArticleFileReader, ArticleRevisionReader, ArticleUnitReader } from "../../article/service/article.service.js";
@@ -495,9 +496,9 @@ export interface RoutingPriceWriter {
 // 3.3333 + 3.3333 + 3.3334 (round4, so the parts add up).
 export function splitOverParcels(quantity: number, parcels: number): number[] {
   const count = Math.max(1, Math.floor(parcels));
-  const part = Math.round((quantity / count) * 10000) / 10000;
+  const part = round4(quantity / count);
   const parts = Array.from({ length: count }, () => part);
-  parts[count - 1] = Math.round((quantity - part * (count - 1)) * 10000) / 10000;
+  parts[count - 1] = round4(quantity - part * (count - 1));
   return parts;
 }
 
@@ -731,7 +732,7 @@ export function createPurchaseService(
         throw err;
       });
       const rate = await pending;
-      return rate && rate > 0 ? Math.round((sek / rate + Number.EPSILON) * 100) / 100 : null;
+      return rate && rate > 0 ? round2(sek / rate) : null;
     };
   }
   // The lego link's own rules, shared by the inquiry rows and the IO rows
@@ -1405,10 +1406,7 @@ export function createPurchaseService(
       const supplier = await repo.findSupplierById(inquiry.supplierId);
       const currency = supplier?.currency ?? "SEK";
       const rate = await orderRate(currency, undefined);
-      const inKronor = (price: number, decimals: 2 | 4) => {
-        const f = 10 ** decimals;
-        return Math.round((price * rate + Number.EPSILON) * f) / f;
-      };
+      const inKronor = (price: number, decimals: 2 | 4) => roundToDecimals(price * rate, decimals);
       const unitPrice = inKronor(Number(row.unitPrice), 4);
       const setupPrice = row.setupPrice !== null ? inKronor(Number(row.setupPrice), 2) : null;
       let updated: unknown;

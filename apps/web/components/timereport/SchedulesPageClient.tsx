@@ -27,6 +27,7 @@ import { HelpLink } from "../ui/HelpLink";
 import { useCanOpenPersonal } from "../PermissionsProvider";
 import { stockholmYear } from "../../lib/date";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
+import { round2 } from "../../lib/format";
 
 const TABS = ["Dagsscheman", "Veckoscheman", "Helgdagar"] as const;
 type Tab = (typeof TABS)[number];
@@ -520,7 +521,7 @@ function WeekScheduleForm({
   // Ordinary hours per week as typed (timmar); empty = no balancing.
   const [ordinaryHours, setOrdinaryHours] = useState(
     // Two decimals is within half a minute, so saving rounds back to the stored minutes.
-    schedule?.ordinaryMinutesPerWeek != null ? String(Math.round((schedule.ordinaryMinutesPerWeek / 60) * 100) / 100) : ""
+    schedule?.ordinaryMinutesPerWeek != null ? String(round2(schedule.ordinaryMinutesPerWeek / 60)) : ""
   );
   const [atfMinutes, setAtfMinutes] = useState(String(schedule?.atfMinutesPerWeek ?? 0));
   const [error, setError] = useState<string | null>(null);

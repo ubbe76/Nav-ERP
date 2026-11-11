@@ -28,6 +28,7 @@ import {
 import { addDays } from "../../system/service/delivery-days.js";
 import { DEFAULT_LONG_OPERATION_WEEKS } from "../../system/service/plan-settings.js";
 import { createCapacityBook, MIN_PLAN_MINUTES, roundPlanWeeks, type CapacityBook, type PlanWorkCenter } from "./capacity-book.js";
+import { roundToDecimals } from "@navet/shared";
 
 // Orimligt mycket tid: an operation whose remaining time alone would fill its
 // resource for more than `longOperationWeeks` normal weeks (the system
@@ -360,7 +361,7 @@ function longOperationWarning(
   const week = weekMinutes ?? STANDARD_WEEK_MINUTES;
   if (minutes <= limitWeeks * week) return null;
   const code = wc?.code ?? "?";
-  const remainingHours = Math.round((minutes / 60) * 10) / 10;
+  const remainingHours = roundToDecimals(minutes / 60, 1);
   const weeks = formatNumber(minutes / week);
   const scale =
     weekMinutes !== null

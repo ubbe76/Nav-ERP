@@ -28,8 +28,21 @@ export function formatPercent(value: number, decimals = 1): string {
 
 // Round to 2 decimals (öre) without landing on the classic floating-point
 // trap (e.g. 1.005 * 100 truncating to 100.49999999999999 and rounding down
-// instead of up) — the +Number.EPSILON nudge every local copy of this
-// function already used before being consolidated here.
+// instead of up). The old `+ Number.EPSILON` nudge only helped below ~2 kr
+// (2.175 → 2.17; delatgranskningen 2026-11-11).
 export function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
+  return roundToDecimals(n, 2);
+}
+
+// Half away from zero to `decimals` places, cut to 15 significant digits first
+// — @navet/shared money.ts's roundToDecimals (the web can't import the package).
+export function roundToDecimals(n: number, decimals: number): number {
+  const factor = 10 ** decimals;
+  const magnitude = Math.round(Number((Math.abs(n) * factor).toPrecision(15))) / factor;
+  return n < 0 && magnitude !== 0 ? -magnitude : magnitude;
+}
+
+// Rounds to 4 decimals — the scale of every numeric(14,4) quantity.
+export function round4(n: number): number {
+  return roundToDecimals(n, 4);
 }

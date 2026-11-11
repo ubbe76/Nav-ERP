@@ -25,6 +25,7 @@ import {
   type ImportRowResult,
   type ImportSummary,
 } from "./import.service.js";
+import { round4 } from "@navet/shared";
 
 // Mappable target fields, in the order the wizard lists them.
 export const STOCK_BALANCE_IMPORT_FIELDS = ["articleNumber", "warehouseName", "locationName", "quantity", "unitCost"] as const;
@@ -116,8 +117,6 @@ export interface StockBalanceImportPlan {
 }
 
 export const STOCK_IMPORT_NOTE = "Import av lagersaldo";
-
-const round4 = (value: number) => Math.round(value * 10_000) / 10_000;
 
 function formatQuantity(value: number): string {
   return value.toLocaleString("sv-SE", { maximumFractionDigits: 4 });

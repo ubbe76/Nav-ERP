@@ -174,9 +174,16 @@ describe("Ångra inleverans — ordinary row", () => {
     const [latest] = await receiptIds(order.id);
     await purchaseService.undoReceipt(order.id, latest!, user.id);
 
-    // Nothing received ⇒ the row may go; its undone receipts go with it.
+    // Nothing received ⇒ the row may go. Its undone receipts stay, unlinked
+    // (migration 0208): they are what marks the +10 and +3 as no purchase —
+    // with CASCADE the reversed inflows counted as real purchases again.
     await purchaseService.deleteRow(order.id, row.id, false);
-    expect(await db.select().from(purchaseReceipts).where(eq(purchaseReceipts.purchaseOrderRowId, row.id))).toHaveLength(0);
+    const kept = await db.select().from(purchaseReceipts).where(eq(purchaseReceipts.purchaseOrderId, order.id));
+    expect(kept).toHaveLength(2);
+    expect(kept.every((r) => r.purchaseOrderRowId === null && r.undoneAt !== null)).toBe(true);
+    // The inleveranslogg still leaves them out (it reads undone_at by stock row).
+    const log = await purchaseService.listArticleGoodsReceipts(row.articleId, parsed(listGoodsReceiptsQuerySchema, { articleId: row.articleId }));
+    expect(log.rows).toHaveLength(0);
   });
 
   it("is refused when the goods are no longer at the location", async () => {

@@ -371,9 +371,13 @@ export const purchaseReceipts = pgTable(
     purchaseOrderId: uuid("purchase_order_id")
       .notNull()
       .references(() => purchaseOrders.id, { onDelete: "cascade" }),
-    purchaseOrderRowId: uuid("purchase_order_row_id")
-      .notNull()
-      .references(() => purchaseOrderRows.id, { onDelete: "cascade" }),
+    // Set null when the IO row is deleted (deleteRow allows that once every
+    // receipt is undone): an undone receipt is what marks its +stock row as
+    // no purchase (valuation, FIFO, the logs read `undone_at` by
+    // stock_transaction_id), so it must outlive the row — with CASCADE the
+    // reversed inflow counted as a real purchase again (delatgranskningen
+    // 2026-11-11, migration 0208).
+    purchaseOrderRowId: uuid("purchase_order_row_id").references(() => purchaseOrderRows.id, { onDelete: "set null" }),
     quantity: numeric("quantity", { precision: 14, scale: 4 }).notNull(),
     locationId: uuid("location_id").references(() => stockLocations.id, { onDelete: "restrict" }),
     stockTransactionId: uuid("stock_transaction_id").references(() => stockTransactions.id, { onDelete: "restrict" }),

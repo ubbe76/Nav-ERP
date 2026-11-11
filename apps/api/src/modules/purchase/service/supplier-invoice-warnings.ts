@@ -1,4 +1,4 @@
-import { VAT_CODE_CATALOG, isDomesticVatCode, type VatCode } from "@navet/shared";
+import { VAT_CODE_CATALOG, isDomesticVatCode, type VatCode, round2 } from "@navet/shared";
 
 // Leverantörsfakturans varningar (Momskoder, slutgranskningen) — pure leaf,
 // read by the detail GET. Never a refusal: the attest posts what the invoice
@@ -28,13 +28,13 @@ export function supplierInvoiceWarnings(input: SupplierInvoiceWarningInput): str
     // header's code takes the rows without a code and the remainder.
     const baseByCode = new Map<VatCode, number>();
     const add = (code: VatCode, amount: number) =>
-      baseByCode.set(code, Math.round(((baseByCode.get(code) ?? 0) + amount) * 100) / 100);
+      baseByCode.set(code, round2((baseByCode.get(code) ?? 0) + amount));
     let rowTotal = 0;
     for (const row of input.rows) {
       add(row.code ?? input.headerCode, row.lineAmount);
       rowTotal += row.lineAmount;
     }
-    const remainder = Math.round((input.netAmount - rowTotal) * 100) / 100;
+    const remainder = round2(input.netAmount - rowTotal);
     if (remainder !== 0) add(input.headerCode, remainder);
 
     // The header's code first, then the rows' in catalog order.

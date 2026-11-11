@@ -59,7 +59,7 @@ export function ReceiptsSection({
   const canUndo = can(["inkop"]) && (orderStatus === "partially_received" || orderStatus === "received");
 
   async function undo(receipt: PurchaseReceipt) {
-    const row = rowById.get(receipt.purchaseOrderRowId);
+    const row = receipt.purchaseOrderRowId ? rowById.get(receipt.purchaseOrderRowId) : undefined;
     if (!(await confirmDialog(undoQuestion(receipt, row), { confirmLabel: "Ångra inleverans", danger: true }))) return;
     setError(null);
     setPendingId(receipt.id);
@@ -88,7 +88,7 @@ export function ReceiptsSection({
         ]}
         rows={receipts}
         renderCell={(receipt, key) => {
-          const row = rowById.get(receipt.purchaseOrderRowId);
+          const row = receipt.purchaseOrderRowId ? rowById.get(receipt.purchaseOrderRowId) : undefined;
           const undone = receipt.undoneAt !== null;
           const muted = undone ? { color: "var(--color-text-muted)", textDecoration: "line-through" } : undefined;
           switch (key) {
@@ -97,7 +97,7 @@ export function ReceiptsSection({
             case "purchaseOrderRowId":
               return (
                 <span style={muted}>
-                  {row ? `${row.articleNumber} — ${row.articleName}` : "–"}
+                  {row ? `${row.articleNumber} — ${row.articleName}` : receipt.purchaseOrderRowId === null ? "Borttagen rad" : "–"}
                   {row?.moOperationId && (
                     <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
                       Lego för {row.moOrderNumber ?? "TO"}

@@ -8,6 +8,7 @@ import { isoWeekOf, isoWeekRange } from "../../timereport/service/schedule.servi
 import { addWorkingDays, isWorkingDay, nextWorkingDayOnOrAfter } from "../../system/service/delivery-days.js";
 // Types only — resource-suggestions.ts computes the förslag on these rows.
 import type { OperationResourceSuggestion, ResourceSuggestion } from "./resource-suggestions.js";
+import { round2 } from "@navet/shared";
 
 export interface CapacityWorkCenter {
   workCenterId: string;
@@ -483,8 +484,6 @@ export function capacityHorizon(today: string, weeks: number): { firstMonday: st
   const firstMonday = isoWeekRange(first.isoYear, first.isoWeek).monday;
   return { firstMonday, horizonSunday: addDays(firstMonday, weeks * 7 - 1) };
 }
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
 
 function emptyCell(): CapacityCell {
   return { loadHours: 0, availableHours: null, loadPercent: null, overloaded: false, orders: [] };

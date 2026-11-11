@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { OperationTimeUnit } from "./manufacturing.js";
+import { round2, round4 } from "./money.js";
 
 // Units register (enheter) + per-article alternative units with conversion
 // factors. Factor semantics everywhere: quantity_per_base = how many of the
@@ -22,17 +23,12 @@ export type UpdateArticleUnitInput = z.infer<typeof updateArticleUnitSchema>;
 // Numeric columns come back from postgres-js as strings — accept both.
 export type UnitFactor = number | string | null | undefined;
 
-const QUANTITY_SCALE = 4; // numeric(14,4) — storage scale for quantities/prices
 
 function parseFactor(factor: UnitFactor): number {
   if (factor === null || factor === undefined) return 1;
   const n = typeof factor === "string" ? Number(factor) : factor;
   if (!Number.isFinite(n) || n <= 0) return 1;
   return n;
-}
-
-function round4(n: number): number {
-  return Math.round(n * 10 ** QUANTITY_SCALE) / 10 ** QUANTITY_SCALE;
 }
 
 // Entered quantity in the row's unit → stored base-unit quantity.
@@ -65,22 +61,22 @@ export function toUnitPrice(basePrice: number, factor: UnitFactor): number {
 // This is accepted: the drift is presentational only, never re-persisted
 // silently (a save always writes exactly what the active unit's field shows).
 export function unitsPerHourToMinutesPerUnit(unitsPerHour: number): number {
-  return Math.round((60 / unitsPerHour) * 10000) / 10000;
+  return round4(60 / unitsPerHour);
 }
 
 export function minutesPerUnitToUnitsPerHour(minutesPerUnit: number): number {
-  return Math.round((60 / minutesPerUnit) * 100) / 100;
+  return round2(60 / minutesPerUnit);
 }
 
 // Sekunder (sek/st, migration 0167): the stored minutes keep 4 decimals and
 // the shown seconds 2, so a value typed in seconds reads back unchanged —
 // 7 s → 0.1167 min → 7 s. Unlike st/h, 0 converts fine both ways.
 export function secondsPerUnitToMinutesPerUnit(secondsPerUnit: number): number {
-  return Math.round((secondsPerUnit / 60) * 10000) / 10000;
+  return round4(secondsPerUnit / 60);
 }
 
 export function minutesPerUnitToSecondsPerUnit(minutesPerUnit: number): number {
-  return Math.round(minutesPerUnit * 60 * 100) / 100;
+  return round2(minutesPerUnit * 60);
 }
 
 // The operation's run time (stored in minutes per unit) in its display unit,

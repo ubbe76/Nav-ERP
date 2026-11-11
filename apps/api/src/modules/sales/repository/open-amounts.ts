@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { customerPaymentRows, customerPayments, invoiceReminders, invoiceRows, invoices, type Db, type Tx } from "@navet/db";
+import { round2 } from "@navet/shared";
 
 // Kundreskontra (B3): THE aggregation authority for "what is still open on
 // this invoice". There is no stored balance column anywhere — the open amount
@@ -274,7 +275,7 @@ export async function receivablesTotalAsOf(executor: Db | Tx, date: string): Pro
   `);
   // postgres-js: db.execute returns an array of rows.
   const [row] = [...rows] as { total: string }[];
-  return Math.round(Number(row?.total ?? 0) * 100) / 100;
+  return round2(Number(row?.total ?? 0));
 }
 
 // One open invoice per a date — the shape both ledgers' foreign readers

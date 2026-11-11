@@ -35,11 +35,10 @@
 import { addDays, isWorkingDay } from "../../system/service/delivery-days.js";
 import { isoWeekOf } from "../../timereport/service/schedule.service.js";
 import { mondayOf } from "./capacity-calc.js";
+import { round4 } from "@navet/shared";
 
 // "YYYY-MM".
 export type ForecastMonth = string;
-
-const round4 = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
 
 export const monthOf = (date: string): ForecastMonth => date.slice(0, 7);
 export const firstDayOf = (month: ForecastMonth): string => `${month}-01`;
