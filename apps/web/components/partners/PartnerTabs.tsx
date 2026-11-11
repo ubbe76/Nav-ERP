@@ -1,7 +1,8 @@
 "use client";
 
 import { confirmDelete } from "../../lib/confirm";
-import { useEffect, useState, type FormEvent } from "react";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
 import { Table } from "../ui/Table";
@@ -113,7 +114,19 @@ export function PartnerTabs({
   articleGroups,
   deliveryDayDefaults = null,
 }: PartnerTabsProps) {
-  const [activeTab, setActiveTab] = useState<string>("Allmänt");
+  const [activeTab, setActiveTabState] = useState<string>("Allmänt");
+  // The two editable tabs stay mounted (hidden) once opened, so a half-typed
+  // form survives a tab switch; dirtiness is tracked per tab and guards leaving
+  // the page.
+  const [openedTabs, setOpenedTabs] = useState<Set<string>>(() => new Set(["Allmänt"]));
+  const [dirtyTabs, setDirtyTabs] = useState<Record<string, boolean>>({});
+  const setActiveTab = (tab: string) => {
+    setActiveTabState(tab);
+    setOpenedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
+  };
+  const setTabDirty = (tab: string) => (dirty: boolean) =>
+    setDirtyTabs((prev) => (prev[tab] === dirty ? prev : { ...prev, [tab]: dirty }));
+  useUnsavedGuard(Object.values(dirtyTabs).some(Boolean));
   const isCustomer = kind === "customer";
   // Tillägg add their own tabs last.
   const pluginTabs = usePluginTabs(isCustomer ? "customer" : "supplier");
@@ -155,8 +168,16 @@ export function PartnerTabs({
         ))}
       </div>
 
-      {activeTab === "Allmänt" && (
-        <AllmantTab partner={partner} endpointBase={endpointBase} showCurrency={showCurrency} isCustomer={isCustomer} />
+      {openedTabs.has("Allmänt") && (
+        <div hidden={activeTab !== "Allmänt"}>
+          <AllmantTab
+            partner={partner}
+            endpointBase={endpointBase}
+            showCurrency={showCurrency}
+            isCustomer={isCustomer}
+            onDirtyChange={setTabDirty("Allmänt")}
+          />
+        </div>
       )}
       {activeTab === "Adresser" && showAddresses && (
         <AdresserTab
@@ -166,15 +187,18 @@ export function PartnerTabs({
           kind={kind}
         />
       )}
-      {activeTab === "Villkor & frakt" && (
-        <VillkorTab
-          partner={partner}
-          endpointBase={endpointBase}
-          registers={registers}
-          isCustomer={isCustomer}
-          priceLists={priceLists}
-          deliveryDayDefaults={deliveryDayDefaults}
-        />
+      {openedTabs.has("Villkor & frakt") && (
+        <div hidden={activeTab !== "Villkor & frakt"}>
+          <VillkorTab
+            partner={partner}
+            endpointBase={endpointBase}
+            registers={registers}
+            isCustomer={isCustomer}
+            priceLists={priceLists}
+            deliveryDayDefaults={deliveryDayDefaults}
+            onDirtyChange={setTabDirty("Villkor & frakt")}
+          />
+        </div>
       )}
       {activeTab === "Kontakter" && (
         <KontakterTab contacts={contacts} contactsBase={`${endpointBase}/${partner.id}/contacts`} />
@@ -201,11 +225,19 @@ export function PartnerTabs({
 // Empty input = null in the register (fields are all optional).
 const orNull = (value: string) => (value.trim() === "" ? null : value.trim());
 
-function useSaveState() {
+function useSaveState(onDirtyChange?: (dirty: boolean) => void) {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
-  return { error, setError, saved, setSaved, pending, setPending };
+  // Unsaved edits: any change bubbling up from the form marks it, a successful
+  // save clears it. Reported up so the card can guard against leaving the page.
+  const [dirty, setDirty] = useState(false);
+  const onDirtyChangeRef = useRef(onDirtyChange);
+  onDirtyChangeRef.current = onDirtyChange;
+  useEffect(() => {
+    onDirtyChangeRef.current?.(dirty);
+  }, [dirty]);
+  return { error, setError, saved, setSaved, pending, setPending, setDirty };
 }
 
 function AllmantTab({
@@ -213,11 +245,13 @@ function AllmantTab({
   endpointBase,
   showCurrency,
   isCustomer,
+  onDirtyChange,
 }: {
   partner: Customer | Supplier;
   endpointBase: string;
   showCurrency: boolean;
   isCustomer: boolean;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const router = useRouter();
   // Supplier-only fields live behind this flag — the mirror of the
@@ -257,7 +291,7 @@ function AllmantTab({
   const [currency, setCurrency] = useState("currency" in partner ? partner.currency : "SEK");
   const [language, setLanguage] = useState<DocumentLanguage>(partner.language);
   const [active, setActive] = useState(partner.active);
-  const { error, setError, saved, setSaved, pending, setPending } = useSaveState();
+  const { error, setError, saved, setSaved, pending, setPending, setDirty } = useSaveState(onDirtyChange);
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -295,6 +329,7 @@ function AllmantTab({
         }),
       });
       setSaved(true);
+      setDirty(false);
       router.refresh();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte spara"));
@@ -305,7 +340,7 @@ function AllmantTab({
 
   return (
     <Card>
-      <Form onSubmit={save}>
+      <Form onSubmit={save} onChange={() => setDirty(true)}>
         <FormError>{error}</FormError>
 
         <FormRow>
@@ -410,7 +445,7 @@ function AllmantTab({
             </Field>
             <FormHint attached>
               Kundens valuta. Nya offerter och kundorder tas i den, med dagens kurs, och kundens särpriser (fliken Priser)
-              anges i den. Ordrar som redan finns behåller sin valuta. E-faktura (Peppol) går bara på SEK.
+              anges i den. Ordrar som redan finns behåller sin valuta.
             </FormHint>
           </>
         )}
@@ -1006,6 +1041,7 @@ function VillkorTab({
   isCustomer,
   priceLists,
   deliveryDayDefaults,
+  onDirtyChange,
 }: {
   partner: Customer | Supplier;
   endpointBase: string;
@@ -1013,6 +1049,7 @@ function VillkorTab({
   isCustomer: boolean;
   priceLists?: PriceList[];
   deliveryDayDefaults: DeliveryDayDefaults | null;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const router = useRouter();
   const s = partner as Supplier;
@@ -1098,7 +1135,7 @@ function VillkorTab({
       cancelled = true;
     };
   }, [isCustomer]);
-  const { error, setError, saved, setSaved, pending, setPending } = useSaveState();
+  const { error, setError, saved, setSaved, pending, setPending, setDirty } = useSaveState(onDirtyChange);
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -1158,6 +1195,7 @@ function VillkorTab({
         }),
       });
       setSaved(true);
+      setDirty(false);
       router.refresh();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte spara"));
@@ -1169,7 +1207,7 @@ function VillkorTab({
   return (
     <>
     <Card>
-      <Form onSubmit={save}>
+      <Form onSubmit={save} onChange={() => setDirty(true)}>
         <FormError>{error}</FormError>
 
         {isCustomer && (

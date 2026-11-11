@@ -1265,7 +1265,7 @@ function ReviewForm({
               <Input
                 id={`scanRowPrice-${row.key}`}
                 type="number"
-                step="0.01"
+                step="any"
                 value={row.unitPrice}
                 onChange={(e) => setRow(row.key, { unitPrice: e.target.value })}
               />

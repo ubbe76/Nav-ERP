@@ -5,6 +5,15 @@ export function formatMoney(value: string | number): string {
   return Number(value).toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// A unit price (à-pris, prislista, kundpris — numeric(14,4)): at least two
+// decimals like money, up to four when the price has them — "245,83",
+// "245,8333", "0,875". formatMoney would show 0,875 as "0,88" and the row
+// would look as if it had a different price than it carries
+// (webbgranskningen 2026-11-11).
+export function formatUnitPrice(value: string | number): string {
+  return Number(value).toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+}
+
 // A price addition: "+100,00" / "−100,00" (formatMoney already writes the
 // minus sign, so a negative amount never becomes "+−").
 export function formatSignedMoney(value: string | number): string {

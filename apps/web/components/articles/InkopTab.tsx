@@ -11,7 +11,7 @@ import { StatusPill } from "../ui/StatusPill";
 import { Field, Input, Toggle } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
 import { apiFetch } from "../../lib/api";
-import { formatMoney, formatQuantity } from "../../lib/format";
+import { formatMoney, formatUnitPrice, formatQuantity } from "../../lib/format";
 import { SUPPLIER_PRICE_BREAKS_MAX } from "../../lib/supplierPriceBreaks";
 import { formatStockholmDate, formatStockholmDateTime } from "../../lib/date";
 import {
@@ -121,12 +121,12 @@ export function InkopTab({ articleId }: { articleId: string }) {
             case "price":
               return (
                 <>
-                  {row.price !== null ? formatMoney(row.price) : "–"}
+                  {row.price !== null ? formatUnitPrice(row.price) : "–"}
                   {row.priceBreaks.length > 0 && (
                     <span
                       style={{ color: "var(--color-text-muted)", fontSize: 12, marginLeft: 6, whiteSpace: "nowrap" }}
                       title={row.priceBreaks
-                        .map((b) => `Från ${b.fromQuantity.toLocaleString("sv-SE")}: ${formatMoney(b.price)}`)
+                        .map((b) => `Från ${b.fromQuantity.toLocaleString("sv-SE")}: ${formatUnitPrice(b.price)}`)
                         .join(" · ")}
                     >
                       · {row.priceBreaks.length} staffelsteg
@@ -185,13 +185,13 @@ export function InkopTab({ articleId }: { articleId: string }) {
             case "supplierName":
               return row.supplierName ?? "(borttagen leverantör)";
             case "price":
-              return row.price === null ? "–" : formatMoney(row.price);
+              return row.price === null ? "–" : formatUnitPrice(row.price);
             case "currency":
               return row.currency;
             case "priceBreaks":
               return row.priceBreaks.length === 0
                 ? "–"
-                : row.priceBreaks.map((b) => `från ${formatQuantity(b.fromQuantity)}: ${formatMoney(b.price)}`).join(" · ");
+                : row.priceBreaks.map((b) => `från ${formatQuantity(b.fromQuantity)}: ${formatUnitPrice(b.price)}`).join(" · ");
             case "status":
               return row.removed ? "Borttagen" : row.isPrimary ? "Huvudleverantör" : "";
             default:
@@ -220,7 +220,7 @@ export function InkopTab({ articleId }: { articleId: string }) {
             case "quantity":
               return formatQuantity(row.quantity);
             case "unitPrice":
-              return `${formatMoney(row.unitPrice)} ${row.currency}`;
+              return `${formatUnitPrice(row.unitPrice)} ${row.currency}`;
             case "locationName":
               return row.locationName ?? "–";
             default:
@@ -247,7 +247,7 @@ export function InkopTab({ articleId }: { articleId: string }) {
             case "date":
               return formatDate(row.date);
             case "unitPrice":
-              return formatMoney(row.unitPrice);
+              return formatUnitPrice(row.unitPrice);
             case "quantity":
               return formatQuantity(row.quantity);
             default:
@@ -449,7 +449,7 @@ function ArticleSupplierForm({
             type="number"
             size="sm"
             min="0"
-            step="0.01"
+            step="any"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
           />
@@ -487,7 +487,7 @@ function ArticleSupplierForm({
               <Input
                 type="number"
                 min="0"
-                step="0.01"
+                step="any"
                 size="sm"
                 placeholder="Pris"
                 aria-label="Pris"

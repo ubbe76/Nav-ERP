@@ -39,7 +39,7 @@ import { toBaseQuantity, toBasePrice, toUnitPrice, toUnitQuantity } from "../../
 import { requoteFor } from "../../lib/rowRequote";
 import { marginLabel, useArticleSelfCost, useConfiguredSelfCost } from "./useArticleMargin";
 import { computeLineMargin, sumMargins } from "../../lib/margin";
-import { formatMoney } from "../../lib/format";
+import { formatMoney, formatUnitPrice } from "../../lib/format";
 import { currencyLabel, formatRate, SEK, toSek } from "../../lib/currency";
 import {
   calculatedPriceText,
@@ -163,6 +163,20 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     editStart !== null &&
     (editPriceTouched || editQuantity !== editStart.quantity || editUnitId !== editStart.unitId || editDeliveryDate !== editStart.date);
   useUnsavedGuard(rowEditDirty);
+  // A row open in Ändra blocks the flow buttons (Bekräfta, Leverera, Avbryt
+  // …): Bekräfta confirmed the offert with the unsaved quantity and dropped
+  // the edit without a word, and Leverera/Avbryt left the row's fields
+  // stranded without Spara/Avbryt (webbgranskningen 2026-11-11).
+  const rowEditOpen = editingRowId !== null;
+  const rowEditTitle = rowEditOpen ? "Spara eller avbryt raden du ändrar först" : undefined;
+  // The order left the editable statuses (delivered, cancelled …) — close an
+  // open edit so its fields and the unsaved-changes guard go with it.
+  useEffect(() => {
+    if (!rowsEditable) {
+      setEditingRowId(null);
+      setEditStart(null);
+    }
+  }, [rowsEditable]);
   // The latest price-quote answer that filled the edit fields (Kalkylpris source and text).
   const [editQuote, setEditQuote] = useState<PriceQuote | null>(null);
   // The article behind the row being edited — fetched so the unit dropdown
@@ -339,8 +353,11 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     );
   }
 
-  function startEditRow(row: SalesOrderRow) {
+  async function startEditRow(row: SalesOrderRow) {
+    // Switching rows dropped the first row's changes without a word.
+    if (rowEditDirty && !(await confirmDialog("Raden du ändrar har osparade ändringar. Släppa dem?"))) return;
     const initialQuantity = String(toUnitQuantity(Number(row.quantityOrdered), row.unitFactor));
+    setRowError(null);
     setEditingRowId(row.id);
     setEditQuantity(initialQuantity);
     // quantityOrdered is already stored in the article's base unit — the
@@ -404,6 +421,25 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   }
 
   async function saveRow(row: SalesOrderRow) {
+    if (!editStart) return;
+    // Only what was changed (webbgranskningen 2026-11-11): an untouched
+    // quantity and unit are left out, so the server never re-converts them
+    // with the article's CURRENT factor (a changed factor moved the quantity,
+    // a removed unit gave every Ändra 400 invalid-unit), and untouched price
+    // fields are left out by omitUnitPriceOnEdit.
+    const unitChanged = editUnitId !== editStart.unitId;
+    const quantityTouched = unitChanged || editQuantity !== editStart.quantity;
+    const sendPrice = !omitUnitPriceOnEdit({
+      priceTouched: editPriceTouched,
+      quantityChanged: quantityTouched && toBaseQuantity(Number(editQuantity), editFactor) !== Number(row.quantityOrdered),
+      quote: editQuote,
+    });
+    const dateChanged = editDeliveryDate !== editStart.date;
+    if (!quantityTouched && !sendPrice && !dateChanged) {
+      setEditingRowId(null);
+      setEditStart(null);
+      return;
+    }
     const bumpRevision = await askBumpRevision(order.revision);
     setRowError(null);
     setRowPending(true);
@@ -411,27 +447,21 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
       await apiFetch(`/api/v1/sales-orders/${order.id}/rows/${row.id}`, {
         method: "PATCH",
         body: JSON.stringify({
-          quantity: Number(editQuantity),
-          // Sent explicitly — except when the quantity changed and the price
-          // is an untouched chain suggestion, which the server then re-prices
-          // itself (the row keeps the chain's origin). The same quantity sends
-          // the price and the rabatt as they are, so the origin stays.
-          ...(omitUnitPriceOnEdit({
-            priceTouched: editPriceTouched,
-            quantityChanged: toBaseQuantity(Number(editQuantity), editFactor) !== Number(row.quantityOrdered),
-            quote: editQuote,
-          })
-            ? {}
-            : { unitPrice: Number(editPrice), discountPercent: Number(editDiscountPercent) }),
-          unitId: editUnitId === "" ? null : editUnitId,
-          expectedDeliveryDate: editDeliveryDate || null,
+          ...(quantityTouched ? { quantity: Number(editQuantity) } : {}),
+          ...(unitChanged ? { unitId: editUnitId === "" ? null : editUnitId } : {}),
+          ...(sendPrice ? { unitPrice: Number(editPrice), discountPercent: Number(editDiscountPercent) } : {}),
+          ...(dateChanged ? { expectedDeliveryDate: editDeliveryDate || null } : {}),
           bumpRevision,
         }),
       });
       setEditingRowId(null);
+      setEditStart(null);
       router.refresh();
     } catch (err) {
       setRowError(apiErrorMessage(err, "Kunde inte spara raden"));
+      // The order's påslag changed meanwhile: the header shows the new ones
+      // after a reload (the error text says the order has been read again).
+      if (err instanceof ApiError && err.code === "sales-order-markups-changed") router.refresh();
     } finally {
       setRowPending(false);
     }
@@ -498,6 +528,10 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   }
 
   async function runAction(action: SalesAction) {
+    if (action === "cancel") {
+      const what = order.status === "quote" ? "offerten" : "ordern";
+      if (!(await confirmDialog(`Avbryta ${what} ${order.orderNumber}? En avbruten ${what === "offerten" ? "offert" : "order"} kan inte öppnas igen.`, { confirmLabel: order.status === "quote" ? "Avbryt offert" : "Avbryt order", danger: true }))) return;
+    }
     setActionError(null);
     setActionPending(action);
     try {
@@ -528,13 +562,13 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         }
       >
         {rowsEditable && (
-          <Button type="button" variant="secondary" onClick={() => setModal("addRow")}>
+          <Button type="button" variant="secondary" disabled={rowEditOpen} title={rowEditTitle} onClick={() => setModal("addRow")}>
             Lägg till rad
           </Button>
         )}
 
         {freightEnabled && canSell && rowsEditable && (
-          <Button type="button" variant="secondary" onClick={() => setFreightOpen(true)}>
+          <Button type="button" variant="secondary" disabled={rowEditOpen} title={rowEditTitle} onClick={() => setFreightOpen(true)}>
             Kontrollera fraktpris
           </Button>
         )}
@@ -543,6 +577,8 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           <Button
             type="button"
             variant="secondary"
+            disabled={rowEditOpen}
+            title={rowEditTitle}
             onClick={() => {
               setDtcError(null);
               setDtcOpen(true);
@@ -553,7 +589,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         )}
 
         {order.status === "quote" && (
-          <Button type="button" variant="primary" disabled={actionPending !== null} onClick={() => runAction("confirm")}>
+          <Button type="button" variant="primary" disabled={actionPending !== null || rowEditOpen} title={rowEditTitle} onClick={() => runAction("confirm")}>
             {actionPending === "confirm" ? "Arbetar…" : "Bekräfta"}
           </Button>
         )}
@@ -562,7 +598,8 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           <Button
             type="button"
             variant="primary"
-            disabled={actionPending !== null}
+            disabled={actionPending !== null || rowEditOpen}
+            title={rowEditTitle}
             onClick={() => runAction("start-production")}
           >
             {actionPending === "start-production" ? "Arbetar…" : "Starta tillverkning"}
@@ -572,7 +609,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         {order.status === "in_production" && (
           <>
             {deliverable.length > 0 && (
-              <Button type="button" variant="primary" onClick={() => setModal("deliver")}>
+              <Button type="button" variant="primary" disabled={rowEditOpen} title={rowEditTitle} onClick={() => setModal("deliver")}>
                 Leverera
               </Button>
             )}
@@ -599,7 +636,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         )}
 
         {order.status === "quote" && canSell && (
-          <Button type="button" variant="secondary" disabled={actionPending !== null} onClick={() => setModal("lose")}>
+          <Button type="button" variant="secondary" disabled={actionPending !== null || rowEditOpen} title={rowEditTitle} onClick={() => setModal("lose")}>
             Förlorad…
           </Button>
         )}
@@ -611,8 +648,8 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         )}
 
         {(order.status === "quote" || order.status === "confirmed") && (
-          <Button type="button" variant="danger" disabled={actionPending !== null} onClick={() => runAction("cancel")}>
-            {actionPending === "cancel" ? "Arbetar…" : "Avbryt order"}
+          <Button type="button" variant="danger" disabled={actionPending !== null || rowEditOpen} title={rowEditTitle} onClick={() => runAction("cancel")}>
+            {actionPending === "cancel" ? "Arbetar…" : order.status === "quote" ? "Avbryt offert" : "Avbryt order"}
           </Button>
         )}
       </DocumentActionBar>
@@ -623,7 +660,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           <>
             Rev {order.revision} · {order.currency}
             {order.invoiceNumber &&
-              ` · Faktura ${order.invoiceNumber}${order.invoicedAt ? ` (${order.invoicedAt.slice(0, 10)})` : ""}`}
+              ` · Faktura ${order.invoiceNumber}${order.invoicedAt ? ` (${formatStockholmDate(order.invoicedAt)})` : ""}`}
           </>
         }
         fields={[
@@ -680,7 +717,6 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         onEdit={rowsEditable ? () => setModal("header") : undefined}
       />
 
-      <FormError margin="below">{rowError}</FormError>
       {editingRowId !== null && !editPriceTouched && editQuote && calculatedPriceText(editQuote, formatStockholmDate) && (
         <FormHint>{calculatedPriceText(editQuote, formatStockholmDate)}</FormHint>
       )}
@@ -843,7 +879,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
                   <Input
                     type="number"
                     min="0"
-                    step="0.01"
+                    step="any"
                     size="sm"
                     value={editPrice}
                     onChange={(e) => {
@@ -853,11 +889,11 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
                   />
                 ) : row.calculatedPrice ? (
                   <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-                    {`${formatMoney(toUnitPrice(Number(row.unitPrice), row.unitFactor))} ${order.currency}`}
+                    {`${formatUnitPrice(toUnitPrice(Number(row.unitPrice), row.unitFactor))} ${order.currency}`}
                     <StatusPill status="done" label="Kalkylpris" compact />
                   </span>
                 ) : (
-                  `${formatMoney(toUnitPrice(Number(row.unitPrice), row.unitFactor))} ${order.currency}`
+                  `${formatUnitPrice(toUnitPrice(Number(row.unitPrice), row.unitFactor))} ${order.currency}`
                 );
               case "discountPercent":
                 return editingRowId === row.id ? (
@@ -888,13 +924,13 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
                     <Button type="button" size="small" variant="primary" disabled={rowPending} onClick={() => saveRow(row)}>
                       Spara
                     </Button>
-                    <Button type="button" size="small" variant="ghost" onClick={() => setEditingRowId(null)}>
+                    <Button type="button" size="small" variant="ghost" onClick={() => { setEditingRowId(null); setEditStart(null); setRowError(null); }}>
                       Avbryt
                     </Button>
                   </span>
                 ) : (
                   <span style={{ display: "inline-flex", gap: 4, alignItems: "center", justifyContent: "flex-end" }}>
-                    <Button type="button" size="small" variant="ghost" onClick={() => startEditRow(row)}>
+                    <Button type="button" size="small" variant="ghost" onClick={() => void startEditRow(row)}>
                       Ändra
                     </Button>
                     <RowMenu
@@ -932,6 +968,9 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
       ) : (
         <p>Inga rader tillagda än.</p>
       )}
+      {/* Under the table, next to the rows' Spara and ⋯ → Ta bort — above it
+          the error sat 40 rows away (webbgranskningen 2026-11-11). */}
+      <FormError>{rowError}</FormError>
 
       {rows.length > 0 && foreign && (
         <FormHint>
@@ -1521,6 +1560,7 @@ function AddRowForm({
   onDone: () => void;
   onCancel: () => void;
 }) {
+  const router = useRouter();
   const [article, setArticle] = useState<Article | null>(null);
   const alreadyOnDocument = alreadyOnDocumentText(existingRows, article?.id, documentWord);
   const [quantity, setQuantity] = useState("1");
@@ -1534,6 +1574,9 @@ function AddRowForm({
   const [priceTouched, setPriceTouched] = useState(false);
   // The latest price-quote answer that filled the fields (Kalkylpris source, text, warning).
   const [quote, setQuote] = useState<PriceQuote | null>(null);
+  // A price suggestion is on its way: Lägg till rad waits for it, or the row
+  // went in with the field's old value as a handwritten price.
+  const [quoting, setQuoting] = useState(false);
   const [configureTemplate, setConfigureTemplate] = useState<Article | null>(null);
   const [configureKey, setConfigureKey] = useState(0);
   const [variantInfo, setVariantInfo] = useState<{ articleNumber: string; created: boolean } | null>(null);
@@ -1554,10 +1597,21 @@ function AddRowForm({
 
   // Picking an article pre-selects its sales unit; switching unit
   // re-expresses the entered quantity and price (500 kg ⇄ 100 st).
+  // An untouched price and rabatt start over for the next article — the
+  // previous article's price stood in the fields and, when the new article
+  // has no price in the chain, was saved as a handwritten price on it
+  // (webbgranskningen 2026-11-11).
+  function resetUntouchedPrice() {
+    if (priceTouchedNow.current) return;
+    setUnitPrice("0");
+    setDiscountPercent("0");
+  }
+
   function handleArticleChange(next: Article | null) {
     setVariantInfo(null);
     setRowConfiguration(null);
     setQuote(null);
+    resetUntouchedPrice();
     if (next?.configuratorMode === "variants" || next?.configuratorMode === "to_order") {
       // variants: Konfigurera hands back the variant article; to_order: the template stays and the choices go on the row.
       setArticle(next.configuratorMode === "to_order" ? next : null);
@@ -1585,6 +1639,7 @@ function AddRowForm({
 
   function handleResolved({ article: variant, created }: ResolveVariantResult) {
     setConfigureTemplate(null);
+    resetUntouchedPrice();
     setArticle(variant);
     setUnitId(variant.salesUnitId ?? "");
     setPriceTouched(false); // the price-quote effect now prices the variant through its chain
@@ -1618,8 +1673,12 @@ function AddRowForm({
   const selfCostPerUnit = rowConfiguration ? configuredSelfCost : templateSelfCost;
 
   useEffect(() => {
-    if (priceTouched || !articleId || baseQuantity === null || rowConfiguration) return;
+    if (priceTouched || !articleId || baseQuantity === null || rowConfiguration) {
+      setQuoting(false);
+      return;
+    }
     const seq = ++requestSeq.current;
+    setQuoting(true);
     apiFetch<PriceQuote>(
       // Valuta: salesOrderId — the order's own currency and rate decide.
       priceQuotePath({ customerId, articleId, quantity: baseQuantity, salesOrderId: orderId })
@@ -1633,6 +1692,9 @@ function AddRowForm({
       })
       .catch(() => {
         // Best-effort prefill — silently leave the fields untouched on error.
+      })
+      .finally(() => {
+        if (seq === requestSeq.current) setQuoting(false);
       });
     // currentFactor is a dep too — a unit switch mid-flight must bump seq so
     // a response computed for the OLD factor never lands in a field now
@@ -1701,6 +1763,8 @@ function AddRowForm({
       onDone();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte lägga till raden"));
+      // The order's påslag changed meanwhile — read the order again.
+      if (err instanceof ApiError && err.code === "sales-order-markups-changed") router.refresh();
     } finally {
       setPending(false);
     }
@@ -1765,7 +1829,7 @@ function AddRowForm({
             id="unitPrice"
             type="number"
             min="0"
-            step="0.01"
+            step="any"
             size="sm"
             required
             value={unitPrice}
@@ -1822,8 +1886,8 @@ function AddRowForm({
       </FormHint>
 
       <FormActions>
-        <Button type="submit" variant="primary" disabled={pending}>
-          {pending ? "Lägger till…" : "Lägg till rad"}
+        <Button type="submit" variant="primary" disabled={pending || quoting}>
+          {pending ? "Lägger till…" : quoting ? "Hämtar pris…" : "Lägg till rad"}
         </Button>
         <Button type="button" variant="ghost" onClick={onCancel}>
           Avbryt

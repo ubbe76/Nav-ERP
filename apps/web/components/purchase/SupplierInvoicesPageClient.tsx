@@ -15,7 +15,7 @@ import { HelpLink } from "../ui/HelpLink";
 import { apiFetch } from "../../lib/api";
 import { documentSekAmounts, SEK } from "../../lib/currency";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { formatMoney, round2 } from "../../lib/format";
+import { formatMoney, formatUnitPrice, round2 } from "../../lib/format";
 import { useInvoiceRate } from "../../lib/useExchangeRate";
 import { purchaseOrderFallbackRate } from "../../lib/purchaseOrderFallbackRate";
 import {
@@ -482,7 +482,7 @@ export function NewSupplierInvoiceForm({
               case "quantity":
                 return row.quantity;
               case "unitPrice":
-                return formatMoney(String(row.unitPrice));
+                return formatUnitPrice(String(row.unitPrice));
               case "lineAmount":
                 return formatMoney(String(round2(row.quantity * row.unitPrice)));
               case "id":

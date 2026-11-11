@@ -546,7 +546,7 @@ export function NewInvoiceForm({
         return (
           <Input
             type="number"
-            step="0.01"
+            step="any"
             size="sm"
             aria-label="À-pris"
             value={row.unitPrice}
@@ -816,6 +816,7 @@ export function NewInvoiceForm({
         <Input id="invoiceNote" value={note} onChange={(e) => setNote(e.target.value)} />
       </Field>
 
+      <FormError>{error}</FormError>
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending || Boolean(customer?.collectiveInvoicing)}>
           {pending ? "Skapar…" : "Skapa faktura"}

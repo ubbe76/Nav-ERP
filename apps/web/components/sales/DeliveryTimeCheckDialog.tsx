@@ -150,8 +150,6 @@ export function DeliveryTimeCheckDialog({
   return (
     <Modal open={open} onClose={onClose} title="Leveranstidskontroll" wide>
       <FormError>{error}</FormError>
-      <FormError>{useDateError}</FormError>
-      <FormError>{applyError}</FormError>
       {changedNotice && <FormNotice>{changedNotice}</FormNotice>}
       {loading && <FormHint>Kontrollerar…</FormHint>}
       {result && (
@@ -216,6 +214,8 @@ export function DeliveryTimeCheckDialog({
         </FormHint>
       )}
 
+      <FormError margin="above">{useDateError}</FormError>
+      <FormError margin="above">{applyError}</FormError>
       <FormActions>
         {withCustomer && chosenDate && !applied && (
           <Button type="button" variant="primary" disabled={busy} onClick={() => useDate(chosenDate)}>

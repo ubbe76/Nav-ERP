@@ -12,7 +12,7 @@ import { Field, Input, Select } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
 import { ScanPanel } from "../ui/ScanInput";
 import { useCountState, useScanFeedback, useScanQueue } from "../ui/useOrderScan";
-import { apiFetch } from "../../lib/api";
+import { ApiError, apiFetch } from "../../lib/api";
 import { outflowLocationChoices } from "../../lib/stockLocations";
 import { confirmDialog } from "../../lib/confirm";
 import { notify } from "../../lib/notice";
@@ -365,16 +365,28 @@ export function DeliveryPageClient({
       window.open(`/api/v1/deliveries/${result.deliveryId}/pallet-card`, "_blank", "noopener");
     } catch (err) {
       const message = apiErrorMessage(err, "Kunde inte leverera");
-      // The batch error has no structured per-row attribution — but
-      // SalesOrderRowNotFoundError's message embeds the row id, so a match
-      // still gets shown inline (the raw message — that's what carries the
-      // id); anything else (e.g. over-delivery, which names no row) falls
-      // back to a form-level message from the shared error-code dictionary.
-      const attributed = toDeliver.find(({ row }) => message.includes(row.id));
-      if (attributed) {
-        setRowErrors({ [attributed.row.id]: message });
+      // The API names the row only for sales-order-row-not-found (its English
+      // text carries the row id); over-delivery names none, but its rows are
+      // the ones whose entered amount exceeds what the row may take, so they
+      // are found the same way the scan rules find them. Anything else (a
+      // blocked location, a wrong status) stays at the button.
+      const apiCode = err instanceof ApiError ? err.code : undefined;
+      const apiText = err instanceof ApiError ? err.message : "";
+      let attributed: string[] = [];
+      if (apiCode === "sales-order-row-not-found") {
+        attributed = toDeliver.filter(({ row }) => apiText.includes(row.id)).map(({ row }) => row.id);
+      } else if (apiCode === "over-delivery") {
+        attributed = toDeliver
+          .filter(({ row, quantity }) => {
+            const max = scanRowOf(row).max;
+            return max !== null && quantity > max;
+          })
+          .map(({ row }) => row.id);
+      }
+      if (attributed.length > 0) {
+        setRowErrors(Object.fromEntries(attributed.map((id) => [id, message])));
       } else {
-        setFormError(apiErrorMessage(err, "Kunde inte leverera"));
+        setFormError(message);
       }
     }
     setPending(false);
@@ -495,8 +507,6 @@ export function DeliveryPageClient({
           onClose={() => setUndoDelivery(null)}
         />
       )}
-
-      <FormError margin="below">{formError}</FormError>
 
       {!order && (
         <div className={styles.openOrders}>
@@ -655,6 +665,7 @@ export function DeliveryPageClient({
               {pending ? "Rapporterar…" : "Rapportera utleverans"}
             </Button>
           </div>
+          <FormError margin="above">{formError}</FormError>
         </>
       )}
     </>

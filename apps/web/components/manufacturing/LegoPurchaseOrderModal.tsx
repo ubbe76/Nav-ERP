@@ -8,7 +8,7 @@ import { Form, FormActions, FormError, FormHint, FormNotice } from "../ui/Form";
 import { GatedLink } from "../ui/GatedLink";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { formatMoney, formatQuantity } from "../../lib/format";
+import { formatMoney, formatUnitPrice, formatQuantity } from "../../lib/format";
 import type { MOOperation, PlanningOrdersResult } from "../../lib/types";
 
 interface LegoPurchaseOrderModalProps {
@@ -123,7 +123,7 @@ function LegoPurchaseOrderForm({
         {operation.unitPrice != null && (
           <>
             <dt>Styckpris</dt>
-            <dd style={{ margin: 0 }}>{formatMoney(Number(operation.unitPrice))} kr/{unit}</dd>
+            <dd style={{ margin: 0 }}>{formatUnitPrice(Number(operation.unitPrice))} kr/{unit}</dd>
           </>
         )}
         {(operation.setupPrice != null || operation.transportPrice != null) && (

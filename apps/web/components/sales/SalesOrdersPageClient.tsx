@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Table } from "../ui/Table";
 import { StatusPill } from "../ui/StatusPill";
 import { Modal } from "../ui/Modal";
@@ -30,7 +31,8 @@ export function SalesOrdersPageClient({
   pageSize: number;
   kind: "quote" | "order";
 }) {
-  const [modalOpen, setModalOpen] = useState(false);
+  // ?ny=1 (the "+ Ny kundorder" link on the Försäljning page) opens the form at once.
+  const [modalOpen, setModalOpen] = useState(useSearchParams().get("ny") === "1");
   const isQuote = kind === "quote";
   const detailBase = isQuote ? "/forsaljning/offerter" : "/forsaljning/ordrar";
   const statuses = isQuote ? QUOTE_STATUSES : ORDER_STATUSES;

@@ -185,12 +185,19 @@ function Routine({
         body: JSON.stringify({ asOf, issue, items }),
       });
       setResult(res);
-      await reload();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte skapa räntefakturorna"));
       // Whatever made the run fail (someone else charged the period first,
       // a rate arrived) — show the list as it stands now.
       await reload().catch(() => undefined);
+      setRunning(false);
+      return;
+    }
+    // The invoices exist now; a failing refresh is a different error.
+    try {
+      await reload();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Räntefakturorna skapades men listan kunde inte uppdateras — ladda om sidan"));
     } finally {
       setRunning(false);
     }

@@ -26,7 +26,7 @@ import { ManualStatusChange } from "../documents/ManualStatusChange";
 import { TermsFields, termsFrom, termsLabel, termsPayload, type TermsRegisters, type TermsValue } from "../documents/TermsFields";
 import { toBaseQuantity, toUnitPrice, toUnitQuantity } from "../../lib/units";
 import { requoteFor } from "../../lib/rowRequote";
-import { formatMoney, formatQuantity, round2 } from "../../lib/format";
+import { formatMoney, formatUnitPrice, formatQuantity, round2 } from "../../lib/format";
 import { apiFetch } from "../../lib/api";
 import { useSupplierDeliveryDateSuggestion } from "../../lib/useDeliveryDateSuggestion";
 import { DeliveryDateHint } from "../ui/DeliveryDateHint";
@@ -436,7 +436,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
                     <Input
                       type="number"
                       min="0"
-                      step="0.01"
+                      step="any"
                       size="sm"
                       value={editPrice}
                       onChange={(e) => {
@@ -451,7 +451,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
                     )}
                   </>
                 ) : (
-                  `${formatMoney(toUnitPrice(Number(row.unitPrice), row.unitFactor))} ${order.currency}`
+                  `${formatUnitPrice(toUnitPrice(Number(row.unitPrice), row.unitFactor))} ${order.currency}`
                 );
               case "articleName": {
                 // Ställpris is a lego concept (a one-off charge for the
@@ -957,7 +957,7 @@ function AddRowForm({
             id="unitPrice"
             type="number"
             min="0"
-            step="0.01"
+            step="any"
             size="sm"
             required
             value={unitPrice}

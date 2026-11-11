@@ -84,6 +84,16 @@ export function FreightQuoteDialog({
     };
   }, [open, orderId]);
 
+  // Changing the parcels invalidates the prices: the API looks up rateId in
+  // the stored freight_quote, so rates for the old parcels must not stay
+  // clickable, and a request already in flight is dropped.
+  function changeParcels(next: ParcelDraft[]) {
+    requestSeq.current++;
+    setRates(null);
+    setPending(false);
+    setParcels(next);
+  }
+
   async function fetchRates() {
     const seq = ++requestSeq.current;
     setPending(true);
@@ -132,9 +142,9 @@ export function FreightQuoteDialog({
           {exchangeRate ? ` med orderns kurs (${formatRate(exchangeRate)})` : ""}.
         </FormHint>
       )}
-      <ParcelsTable parcels={parcels} editable disabled={pending || loading} onChange={setParcels} />
+      <ParcelsTable parcels={parcels} editable disabled={pending || loading} onChange={changeParcels} />
       <div style={{ display: "flex", gap: 8, margin: "10px 0" }}>
-        <Button type="button" variant="ghost" size="small" disabled={pending || loading} onClick={() => setParcels([...parcels, newParcelDraft()])}>
+        <Button type="button" variant="ghost" size="small" disabled={pending || loading} onClick={() => changeParcels([...parcels, newParcelDraft()])}>
           + Kolli
         </Button>
         <Button type="button" variant="primary" disabled={pending || loading || parcels.length === 0} onClick={fetchRates}>

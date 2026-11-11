@@ -80,6 +80,14 @@ import {
   CreditExceedsInvoiceError,
 } from "../src/modules/sales/service/invoice.service.js";
 import { LateInterestAlreadyChargedError, LateInterestDisabledError, LateInterestFutureDateError } from "../src/modules/sales/service/late-interest.service.js";
+import {
+  EmptyInvoiceError,
+  NothingToRemindError,
+  OverCreditError,
+  OverInvoicingError,
+  ReminderFeeAlreadyChargedError,
+} from "../src/modules/sales/service/invoice.service.js";
+import { MailSendError, SmtpNotConfiguredError } from "../src/modules/mail/service/mail.service.js";
 import { CustomerPaymentAmountSekError } from "../src/modules/sales/service/payment.service.js";
 import {
   PluginAccessDeniedError,
@@ -280,7 +288,7 @@ import {
   EinvoiceTransmissionNotFoundError,
 } from "../src/modules/einvoice/service/einvoice.errors.js";
 import { EinvoiceWebhookPublicUrlError } from "../src/modules/einvoice/service/einvoice-settings.service.js";
-import { InvalidOcrError, PaymentExceedsOpenAmountError, VerificationAlreadyReversedError } from "../src/modules/sales/service/payment.service.js";
+import { InvalidOcrError, OpenInvoiceNotFoundByOcrError, PaymentExceedsOpenAmountError, VerificationAlreadyReversedError } from "../src/modules/sales/service/payment.service.js";
 import {
   CollectiveInvoicingCustomerError,
   InvalidShipmentInvoiceRowError,
@@ -662,6 +670,14 @@ const cases: Array<[Error, string]> = [
   [new CustomerArticleNumberNotFoundError("x"), ERROR_CODES.CUSTOMER_ARTICLE_NUMBER_NOT_FOUND],
   [new SetupChargeArticleNotFoundError("x"), ERROR_CODES.SETUP_CHARGE_ARTICLE_NOT_FOUND],
   [new InvalidOcrError("123"), ERROR_CODES.INVALID_OCR],
+  [new OpenInvoiceNotFoundByOcrError("123"), ERROR_CODES.OPEN_INVOICE_NOT_FOUND_BY_OCR],
+  [new EmptyInvoiceError("inv-1"), ERROR_CODES.EMPTY_INVOICE],
+  [new OverInvoicingError(), ERROR_CODES.OVER_INVOICING],
+  [new OverCreditError(), ERROR_CODES.OVER_CREDIT],
+  [new NothingToRemindError("inv-1"), ERROR_CODES.NOTHING_TO_REMIND],
+  [new ReminderFeeAlreadyChargedError("inv-1"), ERROR_CODES.REMINDER_FEE_ALREADY_CHARGED],
+  [new SmtpNotConfiguredError(), ERROR_CODES.SMTP_NOT_CONFIGURED],
+  [new MailSendError("timeout"), ERROR_CODES.MAIL_SEND],
   [new PaymentExceedsOpenAmountError("F-1", 100, 150), ERROR_CODES.PAYMENT_EXCEEDS_OPEN_AMOUNT],
   [new VerificationAlreadyReversedError(), ERROR_CODES.VERIFICATION_ALREADY_REVERSED],
   [new SupplierPaymentAlreadyCancelledError("pay-1"), ERROR_CODES.SUPPLIER_PAYMENT_ALREADY_CANCELLED],

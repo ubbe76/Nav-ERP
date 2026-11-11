@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatRate } from "../../lib/currency";
-import { formatMoney, formatSignedMoney, round2 } from "../../lib/format";
+import { formatMoney, formatUnitPrice, formatSignedMoney, round2 } from "../../lib/format";
 import { formatQuantity } from "../../lib/stampSessions";
 import type { Customer } from "../../lib/types";
 import type {
@@ -360,7 +360,7 @@ function DerivationView({ derivation, stale }: { derivation: ConfiguratorDerivat
                   </td>
                   <td className={styles.num}>
                     {formatQuantity(o.runTimePerUnit)}
-                    {o.unitPrice !== null && <div className={styles.key}>Styckpris {formatMoney(o.unitPrice)}</div>}
+                    {o.unitPrice !== null && <div className={styles.key}>Styckpris {formatUnitPrice(o.unitPrice)}</div>}
                   </td>
                   <td>{o.costingOnly && <span className={styles.badge}>Bara kalkyl</span>}</td>
                 </tr>

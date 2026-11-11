@@ -14,9 +14,11 @@ import { useListColumns } from "../ui/ListColumns";
 import type { Customer, Paged } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
+import { useCan } from "../PermissionsProvider";
 
 export function CustomersPageClient({ customers, pageSize }: { customers: Paged<Customer>; pageSize: number }) {
   const router = useRouter();
+  const canImport = useCan()(["admin"]);
   const [modalOpen, setModalOpen] = useState(false);
 
   const view = useListColumns([
@@ -38,9 +40,11 @@ export function CustomersPageClient({ customers, pageSize }: { customers: Paged<
           <Link href="/forsaljning/ordrar" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
             Kundordrar
           </Link>
-          <Link href="/kunder/import" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
-            Importera
-          </Link>
+          {canImport && (
+            <Link href="/kunder/import" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
+              Importera
+            </Link>
+          )}
           <Button type="button" variant="primary" onClick={() => setModalOpen(true)}>
             + Ny kund
           </Button>

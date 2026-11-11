@@ -9,6 +9,7 @@ import { SectionHeading } from "../ui/SectionHeading";
 import { Table } from "../ui/Table";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { confirmDialog } from "../../lib/confirm";
 import { formatDateTime, shippingErrorText, WEEKDAYS } from "../../lib/shipping";
 import type { FreightProduct, FreightSettings, PickupTime } from "../../lib/types";
 import cardStyles from "../system/SettingsForm.module.css";
@@ -28,6 +29,9 @@ export function FreightSettingsForm({
 }) {
   const [enabled, setEnabled] = useState(initial.enabled);
   const [environment, setEnvironment] = useState(initial.environment);
+  // The environment as stored: the test and the product fetch use the saved
+  // values on the server, so a changed field has to be saved first.
+  const [savedEnvironment, setSavedEnvironment] = useState(initial.environment);
   const [apiKey, setApiKey] = useState("");
   const [apiKeySet, setApiKeySet] = useState(initial.apiKeySet);
   const [contactName, setContactName] = useState(initial.senderContactName);
@@ -57,6 +61,7 @@ export function FreightSettingsForm({
 
   const [products, setProducts] = useState(initialProducts);
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeError, setNoticeError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function save(e: FormEvent) {
@@ -82,6 +87,7 @@ export function FreightSettingsForm({
         }),
       });
       setApiKeySet(updated.apiKeySet);
+      setSavedEnvironment(environment);
       setLastRun(updated.lastTrackingRunAt);
       setApiKey("");
       setSaved(true);
@@ -93,6 +99,7 @@ export function FreightSettingsForm({
   }
 
   async function removeKey() {
+    if (!(await confirmDialog("API-nyckeln tas bort och frakten slutar fungera tills en ny nyckel sparas.", { confirmLabel: "Ta bort nyckel", danger: true }))) return;
     setError(null);
     try {
       const updated = await apiFetch<FreightSettings>("/api/v1/freight-settings", { method: "PATCH", body: JSON.stringify({ apiKey: null }) });
@@ -120,6 +127,7 @@ export function FreightSettingsForm({
 
   async function testConnection() {
     setNotice(null);
+    setNoticeError(null);
     setBusy(true);
     try {
       const { team } = await apiFetch<{ team: string | null }>("/api/v1/freight-settings/test", {
@@ -128,7 +136,7 @@ export function FreightSettingsForm({
       });
       setNotice(`Anslutningen fungerar${team ? ` — konto: ${team}` : ""}`);
     } catch (err) {
-      setNotice(shippingErrorText(err, "Anslutningen misslyckades"));
+      setNoticeError(shippingErrorText(err, "Anslutningen misslyckades"));
     } finally {
       setBusy(false);
     }
@@ -136,17 +144,21 @@ export function FreightSettingsForm({
 
   async function fetchProducts() {
     setNotice(null);
+    setNoticeError(null);
     setBusy(true);
     try {
       const result = await apiFetch<{ created: number; total: number }>("/api/v1/freight-settings/fetch-products", { method: "POST" });
       setProducts(await apiFetch<FreightProduct[]>("/api/v1/freight-products"));
       setNotice(`${result.created} nya transportörsprodukter, ${result.total} totalt`);
     } catch (err) {
-      setNotice(shippingErrorText(err, "Kunde inte hämta transportörsprodukter"));
+      setNoticeError(shippingErrorText(err, "Kunde inte hämta transportörsprodukter"));
     } finally {
       setBusy(false);
     }
   }
+
+  // Hämta transportörsprodukter always uses the stored key and environment.
+  const unsavedConnection = apiKey.trim() !== "" || environment !== savedEnvironment;
 
   return (
     <>
@@ -270,7 +282,7 @@ export function FreightSettingsForm({
               <Button type="button" variant="secondary" disabled={busy} onClick={testConnection}>
                 Testa anslutning
               </Button>
-              <Button type="button" variant="secondary" disabled={busy} onClick={fetchProducts}>
+              <Button type="button" variant="secondary" disabled={busy || unsavedConnection || !apiKeySet} onClick={fetchProducts}>
                 Hämta transportörsprodukter
               </Button>
             </>
@@ -278,6 +290,14 @@ export function FreightSettingsForm({
         >
           Fraktprodukter
         </SectionHeading>
+        {(unsavedConnection || !apiKeySet) && (
+          <FormHint>
+            {!apiKeySet
+              ? "Spara en API-nyckel för att hämta transportörsprodukter."
+              : "Hämta transportörsprodukter använder den sparade nyckeln och miljön — spara ändringarna först."}
+          </FormHint>
+        )}
+        <FormError>{noticeError}</FormError>
         {notice && <FormHint>{notice}</FormHint>}
         <Table<FreightProduct>
           columns={[

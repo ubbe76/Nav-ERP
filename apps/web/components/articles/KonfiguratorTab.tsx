@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { formatMoney } from "../../lib/format";
+import { formatUnitPrice } from "../../lib/format";
 import {
   CONFIGURATOR_MODE_LABELS,
   type ConfiguratorMode,
@@ -180,7 +180,7 @@ export function KonfiguratorTab({ article, onChanged }: { article: Article; onCh
         </div>
       )}
       {template.basePrice !== null ? (
-        <FormHint>Grundpris: {formatMoney(template.basePrice)} (försäljningspriset på fliken Allmänt)</FormHint>
+        <FormHint>Grundpris: {formatUnitPrice(template.basePrice)} (försäljningspriset på fliken Allmänt)</FormHint>
       ) : (
         <FormNotice>Grundpris saknas — ange försäljningspris på artikeln</FormNotice>
       )}

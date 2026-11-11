@@ -64,6 +64,7 @@ import {
 } from "../../system/service/exchange-rates.js";
 import { stockholmDateOf, stockholmToday } from "../../system/service/delivery-days.js";
 import { dueDateFromTerm } from "../../system/service/due-date.js";
+import { issueErrorText, UNEXPECTED_ISSUE_ERROR } from "./issue-error-text.js";
 import { accruedInterestText, addDays as addCalendarDays, halfYearStartsBetween, lateInterest } from "./late-interest.js";
 
 // Narrow slices of mail/pdf services — same cross-module pattern as
@@ -234,6 +235,15 @@ export class NotCreditableError extends Error {
 // collective invoicing routine only — the ordinary create() refuses them so
 // nobody bills one order by hand while the routine sweeps the rest. Credit
 // notes and row edits on an existing draft are unaffected.
+// Samlingsfakturering was asked to bill a customer that is not flagged for it —
+// reported in that customer's result row.
+export class NotCollectiveCustomerError extends Error {
+  constructor(customerNumber: string) {
+    super(`Customer ${customerNumber} is not flagged for collective invoicing`);
+    this.name = "NotCollectiveCustomerError";
+  }
+}
+
 export class CollectiveInvoicingCustomerError extends Error {
   constructor(customerId: string) {
     super(`Customer ${customerId} is billed by collective invoicing — use the samlingsfakturering routine`);
@@ -458,6 +468,28 @@ type ExistingRowState = {
   projectId?: string | null;
   revenueAccount?: string | null;
 };
+
+// Samlingsfakturering's per-customer error line, in Swedish (the error
+// classes' own messages are mostly English): bookkeeping failures through the
+// shared issueErrorText, the few classes whose message is already user-facing
+// Swedish as they are, anything else the generic text.
+export function collectiveErrorText(err: unknown): string {
+  const known = issueErrorText(err);
+  if (known) return known;
+  if (err instanceof CustomerNotFoundError) return "Kunden finns inte";
+  if (err instanceof NotCollectiveCustomerError) return "Kunden är inte markerad för samlingsfakturering";
+  if (err instanceof EmptyInvoiceError) return "Fakturan har inga rader";
+  if (err instanceof OverInvoicingError) return "Fakturerat antal skulle överstiga levererat antal på en orderrad";
+  if (
+    err instanceof ShipmentAlreadyInvoicedError ||
+    err instanceof InvalidShipmentInvoiceRowError ||
+    err instanceof InvoiceRowCurrencyMismatchError
+  ) {
+    return err.message;
+  }
+  console.error("Samlingsfakturering failed for a customer", err);
+  return UNEXPECTED_ISSUE_ERROR;
+}
 
 export function createInvoiceService(
   repo: InvoiceRepository,
@@ -1727,7 +1759,7 @@ export function createInvoiceService(
           base.name = customer.name;
           customerOnHold = customer.invoiceOnHold;
           if (!customer.collectiveInvoicing) {
-            throw new Error(`Customer ${customer.customerNumber} is not flagged for collective invoicing`);
+            throw new NotCollectiveCustomerError(customer.customerNumber);
           }
           const add = (currency: string, row: CreateInvoiceInput["rows"][number]) => {
             const list = byCurrency.get(currency) ?? [];
@@ -1766,7 +1798,7 @@ export function createInvoiceService(
             }
           }
         } catch (err) {
-          results.push({ ...base, error: err instanceof Error ? err.message : String(err) });
+          results.push({ ...base, error: collectiveErrorText(err) });
           continue;
         }
         if (byCurrency.size === 0) {
@@ -1797,7 +1829,7 @@ export function createInvoiceService(
               if (issued!.einvoiceAutoSend?.unavailable) einvoiceProviderDown = true;
             }
           } catch (err) {
-            result.error = err instanceof Error ? err.message : String(err);
+            result.error = collectiveErrorText(err);
           }
           results.push(result);
         }

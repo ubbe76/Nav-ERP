@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "../ui/Button";
 import { Field, Input } from "../ui/Field";
 import { FormHint, FormRow } from "../ui/Form";
@@ -42,7 +42,12 @@ export function PeppolFields({
   const derived = DERIVED_PEPPOL_SCHEMES[(country || "SE").toUpperCase()];
   const [result, setResult] = useState<{ text: string; environment: string | null } | null>(null);
 
+  // Request sequence: a late answer about an earlier id never overwrites the
+  // result (or the spinner) of a newer check or an edited field.
+  const seqRef = useRef(0);
+
   async function check() {
+    const seq = ++seqRef.current;
     setChecking(true);
     setResult(null);
     try {
@@ -62,11 +67,13 @@ export function PeppolFields({
       } else {
         text = r.message ?? "Kunde inte avgöra om mottagaren finns i Peppol";
       }
+      if (seq !== seqRef.current) return;
       setResult({ text, environment: r.environment === "sandbox" ? "Sandbox" : null });
     } catch (err) {
+      if (seq !== seqRef.current) return;
       setResult({ text: einvoiceErrorText(err, "Kontrollen misslyckades"), environment: null });
     } finally {
-      setChecking(false);
+      if (seq === seqRef.current) setChecking(false);
     }
   }
 
@@ -90,7 +97,13 @@ export function PeppolFields({
             size="md"
             value={peppolId}
             placeholder={derived?.example ?? "schema:värde"}
-            onChange={(e) => onPeppolIdChange(e.target.value)}
+            onChange={(e) => {
+              // The shown result was about the previous id.
+              seqRef.current++;
+              setResult(null);
+              setChecking(false);
+              onPeppolIdChange(e.target.value);
+            }}
           />
         </Field>
       </FormRow>

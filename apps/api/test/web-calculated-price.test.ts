@@ -33,11 +33,16 @@ describe("Kalkylpris helpers (web)", () => {
     expect(omitUnitPriceOnCreate(false, null)).toBe(false);
   });
 
-  it("omits the price on edit only with a changed quantity", () => {
+  it("omits untouched price fields on edit — the server keeps or re-prices", () => {
     expect(omitUnitPriceOnEdit({ priceTouched: false, quantityChanged: true, quote: calculated })).toBe(true);
     expect(omitUnitPriceOnEdit({ priceTouched: false, quantityChanged: true, quote: articlePrice })).toBe(true);
-    expect(omitUnitPriceOnEdit({ priceTouched: false, quantityChanged: false, quote: calculated })).toBe(false);
+    // Same quantity: the server keeps price, rabatt and origin (webbgranskningen
+    // 2026-11-11 — re-sending went through the display unit and drifted).
+    expect(omitUnitPriceOnEdit({ priceTouched: false, quantityChanged: false, quote: calculated })).toBe(true);
+    expect(omitUnitPriceOnEdit({ priceTouched: false, quantityChanged: false, quote: null })).toBe(true);
     expect(omitUnitPriceOnEdit({ priceTouched: true, quantityChanged: true, quote: calculated })).toBe(false);
+    expect(omitUnitPriceOnEdit({ priceTouched: true, quantityChanged: false, quote: null })).toBe(false);
+    // A new quantity without a chain suggestion sends the shown price.
     expect(omitUnitPriceOnEdit({ priceTouched: false, quantityChanged: true, quote: null })).toBe(false);
   });
 

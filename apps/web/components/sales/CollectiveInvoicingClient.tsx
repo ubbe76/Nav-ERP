@@ -244,7 +244,7 @@ export function CollectiveInvoicingClient({
                 {r.currency && r.currency !== "SEK" ? ` (${r.currency})` : ""} —{" "}
                 <StatusPill
                   {...RESULT_STATUS[r.status]}
-                  label={r.onHold ? "Utkast — Faktura i vänteläge" : undefined}
+                  {...(r.onHold ? { label: "Utkast — Faktura i vänteläge" } : {})}
                   compact
                 />
                 {r.invoiceId && (

@@ -19,6 +19,7 @@ import { currencyLabel } from "../../lib/currency";
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { useCan } from "../PermissionsProvider";
+import { formatUnitPrice } from "../../lib/format";
 
 export function PriceListDetail({ priceList }: { priceList: PriceListWithRows }) {
   const router = useRouter();
@@ -224,10 +225,7 @@ export function PriceListDetail({ priceList }: { priceList: PriceListWithRows })
             case "fromQuantity":
               return Number(row.fromQuantity).toLocaleString("sv-SE");
             case "unitPrice":
-              return Number(row.unitPrice).toLocaleString("sv-SE", {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              });
+              return formatUnitPrice(row.unitPrice);
             case "id":
               if (!canWrite) return null;
               return (
@@ -363,7 +361,7 @@ function PriceListRowForm({
             id="priceListRowUnitPrice"
             type="number"
             min="0"
-            step="0.01"
+            step="any"
             size="sm"
             required
             value={unitPrice}

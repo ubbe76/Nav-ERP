@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import Link from "next/link";
 import { AppShell } from "../../components/AppShell";
-import { Button } from "../../components/ui/Button";
+import buttonStyles from "../../components/ui/Button.module.css";
 import { HelpLink } from "../../components/ui/HelpLink";
 import { withPluginPages } from "../../lib/pluginHub";
 import { HubSections } from "../../components/ui/HubSections";
@@ -25,8 +25,8 @@ export default async function SalesPage() {
           <div className={shellStyles.meta}>Kundordrar, fakturor och reskontra</div>
         </div>
         <div className={shellStyles.topbarActions}>
-          <Link href="/forsaljning/ordrar">
-            <Button variant="primary">+ Ny kundorder</Button>
+          <Link href="/forsaljning/ordrar?ny=1" className={`${buttonStyles.button} ${buttonStyles.primary}`}>
+            + Ny kundorder
           </Link>
           <HelpLink chapter="forsaljning" anchor="oversikt" label="Hjälp om försäljningsmodulen" />
         </div>

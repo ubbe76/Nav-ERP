@@ -8,6 +8,7 @@ import { Form, FormActions, FormError, FormHint, FormNotice, FormRow } from "../
 import { SectionHeading } from "../ui/SectionHeading";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { confirmDialog } from "../../lib/confirm";
 import { formatStockholmDateTime } from "../../lib/date";
 import {
   EINVOICE_ENVIRONMENT_LABELS,
@@ -35,6 +36,13 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
   const [apiKeySet, setApiKeySet] = useState(initial.apiKeySet);
   const [accountId, setAccountId] = useState(initial.accountId);
   const [accountName, setAccountName] = useState(initial.accountName);
+  // What is stored: the account only stays valid while key and environment are
+  // the saved ones, and goes back to it when the edit is undone.
+  const [stored, setStored] = useState({
+    environment: initial.environment,
+    accountId: initial.accountId,
+    accountName: initial.accountName,
+  });
   const [interval, setIntervalMinutes] = useState(String(initial.statusIntervalMinutes));
   const [autoSend, setAutoSend] = useState(initial.autoSend);
   const [webhook, setWebhook] = useState<EInvoiceWebhook>(initial.webhook);
@@ -54,6 +62,7 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
     setEnabled(updated.enabled);
     setEnvironment(updated.environment);
     setApiKeySet(updated.apiKeySet);
+    setStored({ environment: updated.environment, accountId: updated.accountId, accountName: updated.accountName });
     setAccountId(updated.accountId);
     setAccountName(updated.accountName);
     setIntervalMinutes(String(updated.statusIntervalMinutes));
@@ -66,11 +75,17 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
 
   // A different key or environment belongs to another B2Brouter account, so
   // the stored one no longer applies until Testa anslutning has run again.
-  function forgetAccount() {
-    setAccountId(null);
-    setAccountName(null);
+  function syncAccount(nextEnvironment: EInvoiceEnvironment, nextKey: string) {
     setNotice(null);
     setVatWarning(null);
+    if (nextKey.trim() !== "" || nextEnvironment !== stored.environment) {
+      setAccountId(null);
+      setAccountName(null);
+    } else {
+      // Key cleared and environment back to the saved one: the stored account applies again.
+      setAccountId(stored.accountId);
+      setAccountName(stored.accountName);
+    }
   }
 
   async function save(e: FormEvent) {
@@ -99,6 +114,14 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
   }
 
   async function removeKey() {
+    if (
+      !(await confirmDialog("Ta bort den sparade API-nyckeln? E-faktura kan inte skickas förrän en ny nyckel är sparad.", {
+        confirmLabel: "Ta bort nyckel",
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     setError(null);
     try {
       const updated = await apiFetch<EInvoiceSettings>("/api/v1/einvoice-settings", {
@@ -188,7 +211,7 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
                 value={environment}
                 onChange={(e) => {
                   setEnvironment(e.target.value as EInvoiceEnvironment);
-                  forgetAccount();
+                  syncAccount(e.target.value as EInvoiceEnvironment, apiKey);
                 }}
               >
                 <option value="sandbox">Sandbox</option>
@@ -204,7 +227,7 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
                 value={apiKey}
                 onChange={(e) => {
                   setApiKey(e.target.value);
-                  forgetAccount();
+                  syncAccount(environment, e.target.value);
                 }}
                 placeholder={apiKeySet ? "Nyckel sparad" : ""}
                 autoComplete="new-password"

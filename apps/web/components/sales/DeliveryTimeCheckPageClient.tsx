@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Field, Input } from "../ui/Field";
@@ -38,7 +38,22 @@ export function DeliveryTimeCheckPageClient() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
+  // The result belongs to the inputs it was computed from: any change drops it
+  // (and a check still in flight), so it never sits under other inputs.
+  const checkSeq = useRef(0);
+  function invalidate() {
+    checkSeq.current++;
+    setResult(null);
+    setError(null);
+    setPending(false);
+  }
+  function changeCustomer(next: Customer | null) {
+    invalidate();
+    setCustomer(next);
+  }
+
   function updateRow(index: number, patch: Partial<CheckRow>) {
+    invalidate();
     setRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   }
 
@@ -54,6 +69,7 @@ export function DeliveryTimeCheckPageClient() {
     }
     setError(null);
     setPending(true);
+    const seq = ++checkSeq.current;
     try {
       const withCustomer = customer !== null;
       const r = await runDeliveryTimeCheck({
@@ -64,13 +80,15 @@ export function DeliveryTimeCheckPageClient() {
           ...(row.configuration ? { configuration: { selection: row.configuration.selection } } : {}),
         })),
       });
+      if (seq !== checkSeq.current) return;
       setResult(r);
       setResultWithCustomer(withCustomer);
     } catch (err) {
+      if (seq !== checkSeq.current) return;
       setResult(null);
       setError(apiErrorMessage(err, "Kunde inte kontrollera leveranstiden"));
     } finally {
-      setPending(false);
+      if (seq === checkSeq.current) setPending(false);
     }
   }
 
@@ -93,7 +111,7 @@ export function DeliveryTimeCheckPageClient() {
               id="dtcCustomer"
               endpoint="/api/v1/customers"
               value={customer}
-              onChange={setCustomer}
+              onChange={changeCustomer}
               formatLabel={(c) => `${c.customerNumber} — ${c.name}`}
               placeholder="Sök kundnummer eller namn…"
               emptyText="Inga kunder matchar sökningen"
@@ -114,12 +132,18 @@ export function DeliveryTimeCheckPageClient() {
                   customerId={customer?.id ?? null}
                   canRemove={rows.length > 1}
                   onChange={(patch) => updateRow(index, patch)}
-                  onRemove={() => setRows((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev))}
+                  onRemove={() => {
+                    invalidate();
+                    setRows((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
+                  }}
                 />
               ))}
             </div>
             <div style={{ marginTop: 10 }}>
-              <Button type="button" variant="secondary" size="small" onClick={() => setRows((prev) => [...prev, emptyRow()])}>
+              <Button type="button" variant="secondary" size="small" onClick={() => {
+                  invalidate();
+                  setRows((prev) => [...prev, emptyRow()]);
+                }}>
                 + Lägg till rad
               </Button>
             </div>

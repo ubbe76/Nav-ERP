@@ -100,8 +100,6 @@ export function PaymentCard({
         )}
       </div>
 
-      <FormError>{error}</FormError>
-
       {payment.note && (
         <p>
           <strong>Notering:</strong> {payment.note}
@@ -156,6 +154,7 @@ export function PaymentCard({
         <Card maxWidth={320}>
           <FormStack>
             <strong>Åtgärder</strong>
+            <FormError>{error}</FormError>
             {!cancelled ? (
               <Button type="button" variant="danger" disabled={pending} onClick={cancelPayment}>
                 Makulera

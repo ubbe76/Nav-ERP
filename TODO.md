@@ -29,6 +29,8 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — races med litet fönster
 
+- [ ] **Orderkortets e-post och manuell status under radredigering** (webbgranskningen 2026-11-11): medan en rad står öppen i **Ändra** spärras knappraden (Bekräfta, Leverera, Avbryt …), men **Skicka orderbekräftelse**/offertmejlet och **Ändra status manuellt** (`SalesOrderCardPage`/`ManualStatusChange`, utanför `SalesOrderDetail`) går fortfarande att klicka och skickar det sparade dokumentet utan radens ändring. Förslag: lyft `rowEditOpen` till kortsidan eller låt `useUnsavedGuard`-tillståndet spärra dokumentknapparna.
+
 - [ ] **Bokföringsspärrens triggers läser förälderns status utan lås** (delatgranskningen 2026-11-11, medvetet lämnad): `nav_verification_locked` och `nav_supplier_invoice_files_guard` (0095) läser verifikatet/fakturan med en vanlig SELECT, så en skrivare som INTE själv låser verifikatet kan lägga en rad på ett utkast samtidigt som ett annat anrop bokför det. Ingen kod gör så (`replaceRows`/`addRow`/`deleteRow`/`bookVerificationInTx` tar `FOR UPDATE` först) — bara ett skript når det. `FOR SHARE` i funktionerna rättar det men kan ge deadlock för en skrivare som lägger rader först och uppdaterar huvudet sedan; prövas mot alla bokföringsvägar innan.
 
 - [ ] **Två samtidiga Aktivera på olika revisioner** ger 409 med den missvisande texten "Revision … already exists" (artikelgranskningen 2026-11-11). (Reservplatsen `***`s race rättad i delatgranskningen, 0208.)
