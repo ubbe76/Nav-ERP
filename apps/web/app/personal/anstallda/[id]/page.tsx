@@ -33,6 +33,13 @@ function firstOfMonthMonthsBack(date: string, monthsBack: number) {
   return d.toISOString().slice(0, 10);
 }
 
+// The same date `months` months ahead (YYYY-MM-DD).
+function addMonths(date: string, months: number) {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + months);
+  return d.toISOString().slice(0, 10);
+}
+
 // Personalkort — tabbed employee view (Allmänt / Anställning / Schema),
 // same pattern as the article card. Admin/supervisor only: this is a
 // supervisor tool (users↔employees have no self-link, so a plain user has
@@ -57,7 +64,7 @@ export default async function EmployeeDetailPage(props: { params: Promise<{ id: 
   // Schema tab data: registers for the selects, the employee's calendar
   // overrides, and the resolved next four weeks as a preview. ATF tab gets
   // the derived status + the system default rate for the hint. Frånvaro tab
-  // gets the active absence-type register and the last three months' bookings.
+  // gets the active absence-type register and three months back and twelve months ahead of absence bookings.
   const today = stockholmToday();
   const [weekSchedules, daySchedules, overrides, calendar, absenceTypes, absences, atf, systemSettings, stations] =
     await Promise.all([
@@ -70,7 +77,7 @@ export default async function EmployeeDetailPage(props: { params: Promise<{ id: 
       ),
       apiGet<AbsenceType[]>("/api/v1/absence-types", cookieHeader),
       apiGet<Absence[]>(
-        `/api/v1/employees/${params.id}/absences?from=${firstOfMonthMonthsBack(today, 3)}&to=${today}`,
+        `/api/v1/employees/${params.id}/absences?from=${firstOfMonthMonthsBack(today, 3)}&to=${addMonths(today, 12)}`,
         cookieHeader
       ),
       apiGet<AtfStatus>(`/api/v1/employees/${params.id}/atf`, cookieHeader),

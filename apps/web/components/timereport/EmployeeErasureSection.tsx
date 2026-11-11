@@ -33,7 +33,16 @@ function blockerText(blocker: EmployeeErasureBlocker): string {
 // Personuppgifter (GDPR, #2) on the personalkort — admin only. The server
 // decides: Radera for an employee who never stamped or got paid, Anonymisera
 // for one with history, and lists what still blocks it.
-export function EmployeeErasureSection({ employeeId, employeeName }: { employeeId: string; employeeName: string }) {
+// `active` is only a refetch key: saving Allmänt with Aktiv off must re-read the blockers.
+export function EmployeeErasureSection({
+  employeeId,
+  employeeName,
+  active,
+}: {
+  employeeId: string;
+  employeeName: string;
+  active: boolean;
+}) {
   const router = useRouter();
   const [plan, setPlan] = useState<EmployeeErasurePlan | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +60,7 @@ export function EmployeeErasureSection({ employeeId, employeeName }: { employeeI
     return () => {
       cancelled = true;
     };
-  }, [employeeId]);
+  }, [employeeId, active]);
 
   async function run() {
     if (!plan || plan.action === "anonymized") return;

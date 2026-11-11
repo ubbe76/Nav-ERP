@@ -762,6 +762,27 @@
   opacity: 0.6;
   cursor: default;
 }
+.backButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Materialbrist i läget warn: "Rapportera ändå?" in the stamp-out step
+   itself, so a return to the keypad takes the question away with it. */
+.shortageQuestion {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-control);
+  background: var(--status-delayed-bg);
+}
+.shortageQuestion p {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--status-delayed-text);
+}
 
 /* Dela tid i ställ och produktion: Starta ställ / Starta produktion side by
    side (stacked on a phone), and Ställ klart under the stamp it belongs to. */

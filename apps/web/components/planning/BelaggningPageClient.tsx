@@ -137,10 +137,10 @@ export function BelaggningPageClient() {
         setData(res);
         setExpanded((prev) => refreshExpanded(prev, res));
       })
-      .catch((err: Error) => {
+      .catch((err: unknown) => {
         if (cancelled) return;
         setData(null);
-        setLoadError(err.message);
+        setLoadError(apiErrorMessage(err, "Kunde inte läsa beläggningen."));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

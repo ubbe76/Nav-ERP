@@ -7,6 +7,7 @@ import { Field, Select } from "../ui/Field";
 import { FormError, FormHint } from "../ui/Form";
 import { Table, TableSkeleton } from "../ui/Table";
 import { apiFetch } from "../../lib/api";
+import { apiErrorMessage } from "../../lib/errorMessages";
 import type { ScrapStatisticsResponse } from "../../lib/types";
 import { MonthRangeFields } from "./MonthRangeFields";
 import { ReportCsvLink } from "./ReportCsvLink";
@@ -59,10 +60,10 @@ export function KassationPageClient({
       .then((res) => {
         if (!cancelled) setData(res);
       })
-      .catch((err: Error) => {
+      .catch((err: unknown) => {
         if (cancelled) return;
         setData(null);
-        setError(err.message);
+        setError(apiErrorMessage(err, "Kunde inte läsa kassationsrapporten."));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

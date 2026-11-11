@@ -62,7 +62,7 @@ ATF som tas ut så här dras **inte** från ATF-saldot på personalkortet och sk
 
 ### Helgdagar
 
-Helgdagar gäller alla anställda och slår igenom oavsett schema. En helgdag kan vara **helt ledig** eller peka på ett särskilt dagsschema (t.ex. halvdag). **Förifyll svenska helgdagar** lägger in årets svenska helgdagar (inkl. rörliga som midsommar och påskdagarna); knappen är säker att köra flera gånger och skriver aldrig över egna ändringar.
+Helgdagar gäller alla anställda och slår igenom oavsett schema. En helgdag kan vara **helt ledig** eller peka på ett särskilt dagsschema (t.ex. halvdag). **Förifyll svenska helgdagar** lägger in årets svenska helgdagar (inkl. rörliga som midsommar och påskdagarna); knappen är säker att köra flera gånger och skriver aldrig över egna ändringar. **Ta bort** på en helgdag frågar först, eftersom borttagningen ändrar schemat för alla anställda.
 
 ## Schema per anställd
 
@@ -83,6 +83,7 @@ ATF tjänas in med ett schablonvärde i **minuter per vecka** för varje fullbor
 - **Intjäning från** anger från vilket datum intjäningen räknas.
 - **Uttagsläge**: **Tidbank** (uttag dras från saldot) eller **Veckouttag** (den anställde tar ut sin ATF varje vecka — ingen bank byggs upp). För ATF som tas ut som kortare arbetstid i veckoschemat, se [ATF och inarbetning i veckoschemat](#atf-och-inarbetning-i-veckoschemat).
 - Fliken visar saldot och alla transaktioner (Uttag/Justering). Uttag registreras här eller av den anställde själv i [stämpelterminalen](/hjalp/terminal); justeringar (± timmar) används för korrigeringar och kan bara registreras här på personalkortet, av en arbetsledare eller administratör med behörigheten **Personal & lön** — aldrig från terminalen. Negativt saldo tillåts men visas rött.
+- **Ta bort** på en transaktion frågar först ("Ta bort ATF-transaktionen? Den ingår i underlaget till lönesystemet.") — transaktionerna går med i löneunderlaget (PAXml).
 
 > Ändras intjäningstakten räknas hela historiken om med den nya takten — korrigera i så fall med en justeringstransaktion.
 

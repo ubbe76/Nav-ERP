@@ -8,6 +8,7 @@ import { Field, Select } from "../ui/Field";
 import { FormError, FormHint } from "../ui/Form";
 import { Table, TableSkeleton } from "../ui/Table";
 import { apiFetch } from "../../lib/api";
+import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney } from "../../lib/format";
 import type { StatisticsRow } from "../../lib/types";
 import { FillBar } from "./FillBar";
@@ -74,10 +75,10 @@ export function StatisticsPageClient({
       .then((res) => {
         if (!cancelled) setData(res);
       })
-      .catch((err: Error) => {
+      .catch((err: unknown) => {
         if (cancelled) return;
         setData(null);
-        setError(err.message);
+        setError(apiErrorMessage(err, "Kunde inte läsa statistiken."));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

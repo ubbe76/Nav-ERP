@@ -9,6 +9,10 @@ import { confirmDialog } from "./confirm";
 export const UNSAVED_MESSAGE = "Du har osparade ändringar — lämna ändå?";
 
 let hasDrafts: (() => boolean) | null = null;
+// The page's drafts live in client state that a change of ?search=, ?page=
+// or a filter keeps (Behovsberäkning: choices span pages) — then only
+// leaving the page asks.
+let draftsSurviveListNavigation = false;
 
 // A document tab's frame (punkt 5) asks the page inside before closing it.
 if (typeof window !== "undefined") {
@@ -16,12 +20,16 @@ if (typeof window !== "undefined") {
 }
 
 // Resolves true when there is nothing to lose or the user chose to leave.
-export function confirmLeave(): Promise<boolean> {
+// listNavigation: the list's own search/filter/page change on the same page.
+export function confirmLeave({ listNavigation = false }: { listNavigation?: boolean } = {}): Promise<boolean> {
   if (!hasDrafts || !hasDrafts()) return Promise.resolve(true);
+  if (listNavigation && draftsSurviveListNavigation) return Promise.resolve(true);
   return confirmDialog(UNSAVED_MESSAGE, { confirmLabel: "Lämna sidan" });
 }
 
-export function useUnsavedGuard(dirty: boolean): void {
+export function useUnsavedGuard(dirty: boolean, { survivesListNavigation = false }: { survivesListNavigation?: boolean } = {}): void {
+  const surviveRef = useRef(survivesListNavigation);
+  surviveRef.current = survivesListNavigation;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   const router = useRouter();
@@ -30,6 +38,7 @@ export function useUnsavedGuard(dirty: boolean): void {
 
   useEffect(() => {
     hasDrafts = () => dirtyRef.current;
+    draftsSurviveListNavigation = surviveRef.current;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       if (dirtyRef.current) e.preventDefault();
     };
@@ -43,6 +52,7 @@ export function useUnsavedGuard(dirty: boolean): void {
       const url = new URL(anchor.href, window.location.href);
       if (url.origin !== window.location.origin) return;
       if (url.pathname === window.location.pathname && url.search === window.location.search) return;
+      if (surviveRef.current && url.pathname === window.location.pathname) return;
       // The question is asynchronous (in-app dialog), so the click is always
       // stopped here and the navigation replayed once the user chooses to leave.
       e.preventDefault();
@@ -55,6 +65,7 @@ export function useUnsavedGuard(dirty: boolean): void {
     document.addEventListener("click", onClick, true);
     return () => {
       hasDrafts = null;
+      draftsSurviveListNavigation = false;
       window.removeEventListener("beforeunload", onBeforeUnload);
       document.removeEventListener("click", onClick, true);
     };

@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
 import { Checkbox, Field, Input, Select, Toggle } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { confirmDelete } from "../../lib/confirm";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import {
   ATF_MODE_LABELS,
   ATF_TRANSACTION_TYPE_LABELS,
@@ -70,6 +72,17 @@ export function EmployeeTabs({
   stations,
 }: EmployeeTabsProps) {
   const [activeTab, setActiveTab] = useState<Tab>("Allmänt");
+  // A tab that has been opened stays mounted (hidden), so half-typed values
+  // survive a tab switch; the editable tabs report unsaved edits upward.
+  const [openedTabs, setOpenedTabs] = useState<Set<Tab>>(() => new Set<Tab>(["Allmänt"]));
+  const [dirtyTabs, setDirtyTabs] = useState<Record<string, boolean>>({});
+  const setTabDirty = (tab: string) => (dirty: boolean) =>
+    setDirtyTabs((prev) => (prev[tab] === dirty ? prev : { ...prev, [tab]: dirty }));
+  useUnsavedGuard(Object.values(dirtyTabs).some(Boolean));
+  function openTab(tab: Tab) {
+    setOpenedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
+    setActiveTab(tab);
+  }
 
   // GDPR (#2): an anonymized employee is frozen — nothing on the card can be
   // edited, and the personal data is gone. The history stays in Attestering,
@@ -94,51 +107,79 @@ export function EmployeeTabs({
             type="button"
             className={styles.tab}
             data-active={tab === activeTab}
-            onClick={() => setActiveTab(tab)}
+            onClick={() => openTab(tab)}
           >
             {tab}
           </button>
         ))}
       </div>
 
-      {activeTab === "Allmänt" && (
-        <>
-          <AllmantTab employee={employee} stations={stations} />
-          {userRole === "admin" && <EmployeeErasureSection employeeId={employee.id} employeeName={employee.name} />}
-        </>
+      {openedTabs.has("Allmänt") && (
+        <div hidden={activeTab !== "Allmänt"}>
+          <AllmantTab employee={employee} stations={stations} onDirtyChange={setTabDirty("Allmänt")} />
+          {userRole === "admin" && (
+            <EmployeeErasureSection employeeId={employee.id} employeeName={employee.name} active={employee.active} />
+          )}
+        </div>
       )}
-      {activeTab === "Anställning" && <AnstallningTab employee={employee} />}
-      {activeTab === "Schema" && (
-        <SchemaTab
-          employee={employee}
-          weekSchedules={weekSchedules}
-          daySchedules={daySchedules}
-          overrides={overrides}
-          calendar={calendar}
-        />
+      {openedTabs.has("Anställning") && (
+        <div hidden={activeTab !== "Anställning"}>
+          <AnstallningTab employee={employee} onDirtyChange={setTabDirty("Anställning")} />
+        </div>
       )}
-      {activeTab === "Frånvaro" && (
-        <FranvaroTab
-          employeeId={employee.id}
-          employeeName={employee.name}
-          absenceTypes={absenceTypes}
-          initialAbsences={initialAbsences}
-          userRole={userRole}
-        />
+      {openedTabs.has("Schema") && (
+        <div hidden={activeTab !== "Schema"}>
+          <SchemaTab
+            employee={employee}
+            weekSchedules={weekSchedules}
+            daySchedules={daySchedules}
+            overrides={overrides}
+            calendar={calendar}
+          />
+        </div>
       )}
-      {activeTab === "ATF" && <AtfTab employee={employee} atf={atf} systemSettings={systemSettings} />}
+      {openedTabs.has("Frånvaro") && (
+        <div hidden={activeTab !== "Frånvaro"}>
+          <FranvaroTab
+            employeeId={employee.id}
+            employeeName={employee.name}
+            absenceTypes={absenceTypes}
+            initialAbsences={initialAbsences}
+            userRole={userRole}
+          />
+        </div>
+      )}
+      {openedTabs.has("ATF") && (
+        <div hidden={activeTab !== "ATF"}>
+          <AtfTab employee={employee} atf={atf} systemSettings={systemSettings} onDirtyChange={setTabDirty("ATF")} />
+        </div>
+      )}
     </div>
   );
 }
 
-function useSaveState() {
+function useSaveState(onDirtyChange?: (dirty: boolean) => void) {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
-  return { error, setError, saved, setSaved, pending, setPending };
+  const [dirty, setDirty] = useState(false);
+  const onDirtyChangeRef = useRef(onDirtyChange);
+  onDirtyChangeRef.current = onDirtyChange;
+  useEffect(() => {
+    onDirtyChangeRef.current?.(dirty);
+  }, [dirty]);
+  return { error, setError, saved, setSaved, pending, setPending, setDirty };
 }
 
-function AllmantTab({ employee, stations }: { employee: Employee; stations: TerminalStation[] }) {
+function AllmantTab({
+  employee,
+  stations,
+  onDirtyChange,
+}: {
+  employee: Employee;
+  stations: TerminalStation[];
+  onDirtyChange: (dirty: boolean) => void;
+}) {
   const router = useRouter();
   const [employeeNumber, setEmployeeNumber] = useState(employee.employeeNumber);
   const [name, setName] = useState(employee.name);
@@ -153,7 +194,7 @@ function AllmantTab({ employee, stations }: { employee: Employee; stations: Term
   const [defaultWorkCenterIds, setDefaultWorkCenterIds] = useState<string[]>(() =>
     (employee.defaultWorkCenterIds ?? []).filter((id) => stations.some((s) => s.id === id))
   );
-  const { error, setError, saved, setSaved, pending, setPending } = useSaveState();
+  const { error, setError, saved, setSaved, pending, setPending, setDirty } = useSaveState(onDirtyChange);
 
   function toggleStation(id: string, checked: boolean) {
     setDefaultWorkCenterIds((prev) => (checked ? [...prev, id] : prev.filter((x) => x !== id)));
@@ -163,22 +204,30 @@ function AllmantTab({ employee, stations }: { employee: Employee; stations: Term
     e.preventDefault();
     setError(null);
     setSaved(false);
+    // Only fields that differ from the loaded values are sent, so another
+    // user's concurrent change to a field left alone here is not written back.
+    const startStations = (employee.defaultWorkCenterIds ?? []).filter((id) => stations.some((s) => s.id === id));
+    const sameStations =
+      startStations.length === defaultWorkCenterIds.length && startStations.every((id) => defaultWorkCenterIds.includes(id));
+    const patch: Record<string, unknown> = {};
+    if (employeeNumber !== employee.employeeNumber) patch.employeeNumber = employeeNumber;
+    if (name !== employee.name) patch.name = name;
+    if (active !== employee.active) patch.active = active;
+    if (!sameStations) patch.defaultWorkCenterIds = defaultWorkCenterIds;
+    if (orNull(phone) !== (employee.phone ?? null)) patch.phone = orNull(phone);
+    if (orNull(email) !== (employee.email ?? null)) patch.email = orNull(email);
+    if (orNull(address) !== (employee.address ?? null)) patch.address = orNull(address);
+    if (orNull(postalCode) !== (employee.postalCode ?? null)) patch.postalCode = orNull(postalCode);
+    if (orNull(city) !== (employee.city ?? null)) patch.city = orNull(city);
+    if (Object.keys(patch).length === 0) {
+      setDirty(false);
+      setSaved(true);
+      return;
+    }
     setPending(true);
     try {
-      await apiFetch(`/api/v1/employees/${employee.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          employeeNumber,
-          name,
-          active,
-          defaultWorkCenterIds,
-          phone: orNull(phone),
-          email: orNull(email),
-          address: orNull(address),
-          postalCode: orNull(postalCode),
-          city: orNull(city),
-        }),
-      });
+      await apiFetch(`/api/v1/employees/${employee.id}`, { method: "PATCH", body: JSON.stringify(patch) });
+      setDirty(false);
       setSaved(true);
       router.refresh();
     } catch (err) {
@@ -190,7 +239,7 @@ function AllmantTab({ employee, stations }: { employee: Employee; stations: Term
 
   return (
     <Card>
-      <Form onSubmit={save}>
+      <Form onSubmit={save} onChange={() => setDirty(true)}>
         <FormError>{error}</FormError>
 
         <FormRow>
@@ -261,7 +310,7 @@ function AllmantTab({ employee, stations }: { employee: Employee; stations: Term
   );
 }
 
-function AnstallningTab({ employee }: { employee: Employee }) {
+function AnstallningTab({ employee, onDirtyChange }: { employee: Employee; onDirtyChange: (dirty: boolean) => void }) {
   const router = useRouter();
   const [personalIdentityNumber, setPersonalIdentityNumber] = useState(employee.personalIdentityNumber ?? "");
   const [employedFrom, setEmployedFrom] = useState(employee.employedFrom ?? "");
@@ -272,26 +321,34 @@ function AnstallningTab({ employee }: { employee: Employee }) {
   const [overtimeCompensation, setOvertimeCompensation] = useState<OvertimeCompensation>(
     employee.overtimeCompensation
   );
-  const { error, setError, saved, setSaved, pending, setPending } = useSaveState();
+  const { error, setError, saved, setSaved, pending, setPending, setDirty } = useSaveState(onDirtyChange);
 
   async function save(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setSaved(false);
+    // Only changed fields are sent (see AllmantTab).
+    const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
+    const startNum = (v: string | number | null | undefined) => (v === null || v === undefined || v === "" ? null : Number(v));
+    const patch: Record<string, unknown> = {};
+    if (orNull(personalIdentityNumber) !== (employee.personalIdentityNumber ?? null))
+      patch.personalIdentityNumber = orNull(personalIdentityNumber);
+    if (orNull(employedFrom) !== (employee.employedFrom ?? null)) patch.employedFrom = orNull(employedFrom);
+    if (orNull(employedTo) !== (employee.employedTo ?? null)) patch.employedTo = orNull(employedTo);
+    if ((employmentType === "" ? null : employmentType) !== (employee.employmentType ?? null))
+      patch.employmentType = employmentType === "" ? null : employmentType;
+    if (numOrNull(wage) !== startNum(employee.wage)) patch.wage = numOrNull(wage);
+    if (numOrNull(weeklyHours) !== startNum(employee.weeklyHours)) patch.weeklyHours = numOrNull(weeklyHours);
+    if (overtimeCompensation !== employee.overtimeCompensation) patch.overtimeCompensation = overtimeCompensation;
+    if (Object.keys(patch).length === 0) {
+      setDirty(false);
+      setSaved(true);
+      return;
+    }
     setPending(true);
     try {
-      await apiFetch(`/api/v1/employees/${employee.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          personalIdentityNumber: orNull(personalIdentityNumber),
-          employedFrom: orNull(employedFrom),
-          employedTo: orNull(employedTo),
-          employmentType: employmentType === "" ? null : employmentType,
-          wage: wage.trim() === "" ? null : Number(wage),
-          weeklyHours: weeklyHours.trim() === "" ? null : Number(weeklyHours),
-          overtimeCompensation,
-        }),
-      });
+      await apiFetch(`/api/v1/employees/${employee.id}`, { method: "PATCH", body: JSON.stringify(patch) });
+      setDirty(false);
       setSaved(true);
       router.refresh();
     } catch (err) {
@@ -303,7 +360,7 @@ function AnstallningTab({ employee }: { employee: Employee }) {
 
   return (
     <Card>
-      <Form onSubmit={save}>
+      <Form onSubmit={save} onChange={() => setDirty(true)}>
         <FormError>{error}</FormError>
 
         <Field label="Personnummer" htmlFor="pin">
@@ -349,7 +406,7 @@ function AnstallningTab({ employee }: { employee: Employee }) {
             <Input
               id="weeklyHours"
               type="number"
-              step="0.5"
+              step="any"
               min="0"
               max="168"
               value={weeklyHours}
@@ -718,10 +775,12 @@ function AtfTab({
   employee,
   atf,
   systemSettings,
+  onDirtyChange,
 }: {
   employee: Employee;
   atf: AtfStatus;
   systemSettings: SystemSettings;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -734,6 +793,13 @@ function AtfTab({
   const [startDate, setStartDate] = useState(employee.atfStartDate ?? "");
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
+  const [txPending, setTxPending] = useState(false);
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const onDirtyChangeRef = useRef(onDirtyChange);
+  onDirtyChangeRef.current = onDirtyChange;
+  useEffect(() => {
+    onDirtyChangeRef.current(settingsDirty);
+  }, [settingsDirty]);
 
   // Ny transaktion
   const [txDate, setTxDate] = useState(stockholmToday());
@@ -755,6 +821,7 @@ function AtfTab({
           atfStartDate: startDate === "" ? null : startDate,
         }),
       });
+      setSettingsDirty(false);
       setSaved(true);
       router.refresh();
     } catch (err) {
@@ -772,6 +839,7 @@ function AtfTab({
       setError("Ange antal timmar (t.ex. 4 eller 0,5)");
       return;
     }
+    setTxPending(true);
     try {
       await apiFetch(`/api/v1/employees/${employee.id}/atf-transactions`, {
         method: "POST",
@@ -787,10 +855,14 @@ function AtfTab({
       router.refresh();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte registrera transaktionen"));
+    } finally {
+      setTxPending(false);
     }
   }
 
   async function deleteTransaction(id: string) {
+    // The transaction goes to the PAXml export, so ask first.
+    if (!(await confirmDelete("Ta bort ATF-transaktionen? Den ingår i underlaget till lönesystemet."))) return;
     setError(null);
     try {
       await apiFetch(`/api/v1/employees/${employee.id}/atf-transactions/${id}`, { method: "DELETE" });
@@ -829,7 +901,7 @@ function AtfTab({
       </Card>
 
       <Card>
-        <Form onSubmit={saveSettings}>
+        <Form onSubmit={saveSettings} onChange={() => setSettingsDirty(true)}>
           <strong>Inställningar</strong>
           <FormRow>
             <Field label="Uttagsläge" htmlFor="atfMode">
@@ -910,7 +982,7 @@ function AtfTab({
               <Input
                 id="txHours"
                 type="number"
-                step="0.25"
+                step="any"
                 required
                 placeholder={txType === "withdrawal" ? "t.ex. 4" : "t.ex. 12 eller -1,5"}
                 value={txHours}
@@ -925,7 +997,7 @@ function AtfTab({
             Uttag minskar saldot. Justering kan vara negativ — använd den för ingående saldo eller korrigeringar.
           </FormHint>
           <FormActions>
-            <Button type="submit" variant="secondary">
+            <Button type="submit" variant="secondary" disabled={txPending}>
               + Registrera
             </Button>
           </FormActions>

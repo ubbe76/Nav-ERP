@@ -31,4 +31,17 @@ describe("web error messages", () => {
       .filter((rel) => /\b(\w+) instanceof Error \? \1\.message\b/.test(readFileSync(join(WEB, rel), "utf8")));
     expect(offenders).toEqual([]);
   });
+
+  // The other shape the first test missed (webbgranskningen 2026-11-11:
+  // Behovsberäkning, Beläggning and six report pages): a load's
+  // `.catch((err: Error) => setLoadError(err.message))` — a 400 or 403
+  // showed the API's English text.
+  it("never puts a caught error's raw message straight into state", () => {
+    const offenders = ["app", "components", "lib"]
+      .flatMap((d) => walk(join(WEB, d)))
+      .map((path) => relative(WEB, path))
+      .filter((rel) => !ALLOWED.has(rel))
+      .filter((rel) => /\bset\w*\(\s*(?:err|error|e)\.message\s*\)/.test(readFileSync(join(WEB, rel), "utf8")));
+    expect(offenders).toEqual([]);
+  });
 });

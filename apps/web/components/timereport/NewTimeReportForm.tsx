@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { Button } from "../ui/Button";
 import { Field, Input, Select } from "../ui/Field";
@@ -18,8 +18,8 @@ function today() {
 }
 
 // Only released (or further) orders have snapshotted mo_operations to report
-// time against — "planned" orders don't yet, so the picker excludes them.
-const REPORTABLE_MO_STATUSES = "released,in_progress,done,closed";
+// time against — "planned" orders don't yet, and the API refuses Stängd.
+const REPORTABLE_MO_STATUSES = "released,in_progress,done";
 
 export function NewTimeReportForm({
   employees,
@@ -30,7 +30,7 @@ export function NewTimeReportForm({
   timeKindSplit?: boolean;
   onSuccess: () => void;
 }) {
-  const [employeeId, setEmployeeId] = useState(employees[0]?.id ?? "");
+  const [employeeId, setEmployeeId] = useState("");
   const [order, setOrder] = useState<ManufacturingOrder | null>(null);
   const [operations, setOperations] = useState<MOOperation[]>([]);
   const [operationId, setOperationId] = useState("");
@@ -43,6 +43,8 @@ export function NewTimeReportForm({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const canOpenPersonal = useCanOpenPersonal();
+  const opsSeq = useRef(0);
+  const activeEmployees = employees.filter((emp) => emp.active);
 
   if (employees.length === 0) {
     return (
@@ -67,25 +69,36 @@ export function NewTimeReportForm({
   }
 
   async function handleOrderChange(next: ManufacturingOrder | null) {
+    // A late answer for a previously picked order must not overwrite the list.
+    const seq = ++opsSeq.current;
     setOrder(next);
     setOperationId("");
+    setOperations([]);
     if (!next) {
-      setOperations([]);
+      setOperationsLoading(false);
       return;
     }
     setOperationsLoading(true);
     try {
       const ops = await apiFetch<MOOperation[]>(`/api/v1/manufacturing-orders/${next.id}/operations`);
+      if (seq !== opsSeq.current) return;
       setOperations(ops);
       setOperationId(ops[0]?.id ?? "");
+    } catch (err) {
+      if (seq !== opsSeq.current) return;
+      setError(apiErrorMessage(err, "Kunde inte hämta operationerna"));
     } finally {
-      setOperationsLoading(false);
+      if (seq === opsSeq.current) setOperationsLoading(false);
     }
   }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    if (employeeId === "") {
+      setError("Välj anställd");
+      return;
+    }
     setPending(true);
     try {
       await apiFetch("/api/v1/time-reports", {
@@ -111,8 +124,9 @@ export function NewTimeReportForm({
       <FormError>{error}</FormError>
 
       <Field label="Anställd" htmlFor="employeeId">
-        <Select id="employeeId" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
-          {employees.map((emp) => (
+        <Select id="employeeId" required value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
+          <option value="">Välj anställd…</option>
+          {activeEmployees.map((emp) => (
             <option key={emp.id} value={emp.id}>
               {emp.employeeNumber} — {emp.name}
             </option>
@@ -151,7 +165,7 @@ export function NewTimeReportForm({
           <Input id="date" type="date" required size="sm" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
         <Field label="Timmar" htmlFor="hours">
-          <Input id="hours" type="number" min="0.01" step="0.01" required size="sm" value={hours} onChange={(e) => setHours(e.target.value)} />
+          <Input id="hours" type="number" min="0" step="any" required size="sm" value={hours} onChange={(e) => setHours(e.target.value)} />
         </Field>
       </FormRow>
 

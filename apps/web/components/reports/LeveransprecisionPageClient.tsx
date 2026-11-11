@@ -9,6 +9,7 @@ import { FormError, FormHint } from "../ui/Form";
 import { Table, TableSkeleton } from "../ui/Table";
 import { GatedLink } from "../ui/GatedLink";
 import { apiFetch } from "../../lib/api";
+import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney, formatPercent } from "../../lib/format";
 import type {
   DeliveryPrecisionResponse,
@@ -298,10 +299,10 @@ export function LeveransprecisionPageClient({
       .then((res) => {
         if (!cancelled) setData(res);
       })
-      .catch((err: Error) => {
+      .catch((err: unknown) => {
         if (cancelled) return;
         setData(null);
-        setError(err.message);
+        setError(apiErrorMessage(err, "Kunde inte läsa leveransprecisionen."));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

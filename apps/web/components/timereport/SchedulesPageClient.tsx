@@ -20,6 +20,7 @@ import {
   type WeekSchedule,
 } from "../../lib/types";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { confirmDelete } from "../../lib/confirm";
 import shellStyles from "../../components/AppShell.module.css";
 import formStyles from "./EmployeeTabs.module.css";
 import styles from "../../app/tillverkning/tidrapporter/page.module.css";
@@ -790,6 +791,8 @@ function HolidaysTab({ holidays, daySchedules }: { holidays: Holiday[]; daySched
   const rows = holidays.filter((h) => Number(h.date.slice(0, 4)) === year);
 
   async function deleteHoliday(id: string) {
+    // A holiday changes the schedule of every employee, so ask first.
+    if (!(await confirmDelete("Ta bort helgdagen? Den ändrar schemat för alla anställda."))) return;
     setError(null);
     setSeedResult(null);
     try {

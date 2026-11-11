@@ -10,6 +10,7 @@ import { FormError, FormHint } from "../ui/Form";
 import { SegmentedToggle } from "../ui/SegmentedToggle";
 import { Table, TableSkeleton } from "../ui/Table";
 import { apiFetch } from "../../lib/api";
+import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney } from "../../lib/format";
 import type {
   CalculationAnalysisResponse,
@@ -76,10 +77,10 @@ export function KalkylutfallPageClient({
       .then((res) => {
         if (!cancelled) setData(res);
       })
-      .catch((err: Error) => {
+      .catch((err: unknown) => {
         if (cancelled) return;
         setData(null);
-        setError(err.message);
+        setError(apiErrorMessage(err, "Kunde inte läsa kalkylutfallet."));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

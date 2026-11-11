@@ -27,7 +27,8 @@ import { LegoInquiryModal } from "../articles/LegoInquiryModal";
 import { LegoPurchaseOrderModal } from "./LegoPurchaseOrderModal";
 import { moOperationLabel } from "../../lib/moReportRows";
 import { useCan, useCanOpen } from "../PermissionsProvider";
-import { ACTION_LABELS, actionsForStatus, confirmCancel, runOrderAction, type OrderAction } from "../../lib/manufacturingOrderActions";
+import { ACTION_LABELS, actionsForStatus, confirmOrderAction, runOrderAction, type OrderAction } from "../../lib/manufacturingOrderActions";
+import { moOperationPatch } from "../../lib/moOperationPatch";
 import {
   INQUIRY_STATUS_PILL,
   MANUFACTURING_ORDER_STATUS_PILL,
@@ -53,7 +54,7 @@ import {
 import { Card } from "../ui/Card";
 import { ConfigurationLineList } from "../configurator/ConfigurationLines";
 import { configurationLines } from "../../lib/configurationLines";
-import { formatMoney, formatQuantity } from "../../lib/format";
+import { formatMoney, formatQuantity, formatUnitPrice } from "../../lib/format";
 import { FormError, FormHint, FormNotice, FormStack } from "../ui/Form";
 import { CostCalculationList } from "../costing/CostCalculationList";
 import { CostChain } from "../ui/CostChain";
@@ -158,7 +159,7 @@ export function ManufacturingOrderDetail({
   const [actionPending, setActionPending] = useState<OrderAction | null>(null);
   const statusActions = readOnly ? [] : actionsForStatus(order.status);
   async function runStatusAction(action: OrderAction) {
-    if (action === "cancel" && !(await confirmCancel([order.orderNumber]))) return;
+    if (!(await confirmOrderAction(action, [order.orderNumber]))) return;
     setActionError(null);
     setActionPending(action);
     try {
@@ -183,6 +184,13 @@ export function ManufacturingOrderDetail({
   const canPegging = !readOnly && (order.status === "planned" || order.status === "released" || order.status === "in_progress");
   const canEditLines = !readOnly && (order.status === "released" || order.status === "in_progress");
   const [materialDialog, setMaterialDialog] = useState<{ editing: MOMaterialConsumption | null } | null>(null);
+  // An unsaved Planerat färdigdatum: Flytta halvfabrikaten, Skapa saknade
+  // halvfabrikat and the lego Skapa inköpsorder all count from the SAVED
+  // date on the server, so they wait until it is saved.
+  const [dueDateDirty, setDueDateDirty] = useState(false);
+  // Material rows a report line points at, undone ones included: the server
+  // refuses their Ta bort and component swap (mo-material-consumed).
+  const reportedMaterialIds = new Set(reports.flatMap((r) => r.materials.map((m) => m.materialConsumptionId)));
   const [operationDialog, setOperationDialog] = useState<{ editing: MOOperation | null } | null>(null);
   const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
   const [palletCard, setPalletCard] = useState<PalletCardTarget | null>(null);
@@ -263,11 +271,15 @@ export function ManufacturingOrderDetail({
   }
 
   async function saveOperation(editing: MOOperation | null, payload: OperationPayload) {
+    // Ändra sends only what changed (moOperationPatch): a whole form built on
+    // this card's copy would undo a resource switch made elsewhere since.
+    const body = editing ? moOperationPatch(editing, payload) : payload;
+    if (editing && Object.keys(body).length === 0) return;
     const res = await apiFetch<MOOperationSaveResult>(
       editing
         ? `/api/v1/manufacturing-orders/${order.id}/operations/${editing.id}`
         : `/api/v1/manufacturing-orders/${order.id}/operations`,
-      { method: editing ? "PATCH" : "POST", body: JSON.stringify(payload) }
+      { method: editing ? "PATCH" : "POST", body: JSON.stringify(body) }
     );
     setChangeNotice({ warnings: res?.warnings ?? [] });
   }
@@ -295,12 +307,24 @@ export function ManufacturingOrderDetail({
           </Button>
         )}
         {canPegging && (coverage?.moves.length ?? 0) > 0 && (
-          <Button type="button" variant="ghost" onClick={() => setMoveOpen(true)}>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={dueDateDirty}
+            title={dueDateDirty ? "Spara färdigdatumet först" : undefined}
+            onClick={() => setMoveOpen(true)}
+          >
             Flytta halvfabrikaten…
           </Button>
         )}
         {canPegging && coverage?.materials.some((m) => m.uncovered > 0 && m.articleType === "manufactured") && (
-          <Button type="button" variant="ghost" onClick={() => setMissingOpen(true)}>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={dueDateDirty}
+            title={dueDateDirty ? "Spara färdigdatumet först" : undefined}
+            onClick={() => setMissingOpen(true)}
+          >
             Skapa saknade halvfabrikat…
           </Button>
         )}
@@ -375,7 +399,12 @@ export function ManufacturingOrderDetail({
         {/* E2 Beläggning: editable only while the order is still open — once
             done/closed/cancelled the planned date is moot. */}
         {!readOnly && (order.status === "planned" || order.status === "released" || order.status === "in_progress") && (
-          <DueDateField orderId={order.id} dueDate={order.dueDate} onDone={() => router.refresh()} />
+          <DueDateField
+            orderId={order.id}
+            dueDate={order.dueDate}
+            onDone={() => router.refresh()}
+            onDirtyChange={setDueDateDirty}
+          />
         )}
         {/* Beställningsvara: the förkalkyl's cost per unit is what the finished goods are valued at on
             receipt. Office data — the workshop profile gets null from the server and never sees the row. */}
@@ -468,7 +497,7 @@ export function ManufacturingOrderDetail({
                     <Button type="button" variant="ghost" size="small" style={{ padding: "4px 8px" }} onClick={() => setMaterialDialog({ editing: row })}>
                       Ändra
                     </Button>
-                    {Number(row.quantityConsumed) === 0 && (
+                    {Number(row.quantityConsumed) === 0 && !reportedMaterialIds.has(row.id) && (
                       <Button type="button" variant="ghost" size="small" style={{ padding: "4px 8px" }} onClick={() => removeMaterial(row)}>
                         Ta bort
                       </Button>
@@ -583,7 +612,9 @@ export function ManufacturingOrderDetail({
                           onSelect: () => setLegoPurchaseOp(row),
                           // Supplier and prices come from the operation —
                           // without a supplier there is nobody to buy from.
-                          disabled: row.subcontractSupplierId === null,
+                          // The delivery date counts back from the saved
+                          // färdigdatum, so an unsaved one waits.
+                          disabled: row.subcontractSupplierId === null || dueDateDirty,
                         },
                         legoBuyable(row) && canInkop && { label: "Skapa förfrågan", onSelect: () => setLegoInquiryOp(row) },
                         // Avsändning lego: one entry per open IO that buys the
@@ -697,14 +728,16 @@ export function ManufacturingOrderDetail({
                 // Lego operations carry prices, not times.
                 if (row.workCenterType === "subcontract") {
                   const price = key === "setupTime" ? row.setupPrice : row.unitPrice;
-                  const priceText = price != null ? `${Number(price).toLocaleString("sv-SE")} kr` : "–";
+                  // Styckpris has four decimals (numeric(12,4)), Ställpris öre.
+                  const priceText =
+                    price != null ? `${key === "setupTime" ? formatMoney(price) : formatUnitPrice(price)} kr` : "–";
                   if (key === "setupTime" && row.transportPrice != null) {
                     return (
                       <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
                         <span>{priceText}</span>
                         {/* Wraps in the narrow Ställtid column instead of being clipped. */}
                         <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-                          Transport {Number(row.transportPrice).toLocaleString("sv-SE")} kr
+                          Transport {formatMoney(row.transportPrice)} kr
                         </span>
                       </span>
                     );
@@ -836,6 +869,7 @@ export function ManufacturingOrderDetail({
             orderArticleId={order.articleId}
             operations={operations}
             editing={materialDialog?.editing ?? null}
+            editingHasReports={materialDialog?.editing ? reportedMaterialIds.has(materialDialog.editing.id) : false}
             onSaved={(warnings) => {
               setMaterialDialog(null);
               setLineError(null);
@@ -952,16 +986,22 @@ function DueDateField({
   orderId,
   dueDate,
   onDone,
+  onDirtyChange,
 }: {
   orderId: string;
   dueDate: string | null;
   onDone: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [value, setValue] = useState(dueDate ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   // Osparade ändringar: a typed date not yet saved.
-  useUnsavedGuard(value !== (dueDate ?? ""));
+  const dirty = value !== (dueDate ?? "");
+  useUnsavedGuard(dirty);
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   // Resync when the server value changes underneath us (router.refresh()
   // after any other action on the card) — otherwise a stale unsaved draft
@@ -995,6 +1035,9 @@ function DueDateField({
       <Button type="button" size="small" variant="secondary" disabled={pending} onClick={save}>
         {pending ? "Sparar…" : "Spara"}
       </Button>
+      {dirty && !error && (
+        <span style={{ color: "var(--color-text-secondary)" }}>Inte sparat — åtgärderna som räknar från färdigdatumet väntar.</span>
+      )}
       {error && <span style={{ color: "var(--status-stopped-text)" }}>{error}</span>}
     </span>
   );
