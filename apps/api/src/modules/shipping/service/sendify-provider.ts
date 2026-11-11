@@ -257,13 +257,36 @@ export function createSendifyProvider(config: FreightProviderConfig, deps: Sendi
       }
       throw errorFromBody(text, res.status, requestId);
     }
-    const text = await res.text().catch(() => "");
-    if (res.status === 204 || text === "") return null;
+    // A 2xx on BOOK means Sendify accepted the booking — an answer we cannot
+    // read (the connection dropped or timed out mid-body, an empty or
+    // non-JSON body, not an object) does not mean it failed. It is
+    // booking-unknown like a 5xx, never "oväntat svar" (which reads as
+    // "nothing happened"), and logged with the request id so the transport
+    // can be found at Sendify.
+    const unreadableBooking = (detail: string) => {
+      log({ method, path, status: res.status, requestId, body: detail });
+      return new FreightProviderError(SENDIFY_MESSAGES.bookingUnknown, "booking-unknown", [], requestId);
+    };
+    let text: string;
     try {
-      return JSON.parse(text);
+      text = await res.text();
+    } catch (err) {
+      if (booking) throw unreadableBooking(`unreadable body: ${transportSummary(err)}`);
+      text = "";
+    }
+    if (res.status === 204 || text === "") {
+      if (booking) throw unreadableBooking("empty body");
+      return null;
+    }
+    let data: unknown;
+    try {
+      data = JSON.parse(text);
     } catch {
+      if (booking) throw unreadableBooking(text.slice(0, 2000));
       throw new FreightProviderError(SENDIFY_MESSAGES.unexpected, "unexpected", [], requestId);
     }
+    if (booking && (!data || typeof data !== "object" || Array.isArray(data))) throw unreadableBooking(text.slice(0, 2000));
+    return data;
   }
 
   async function object(method: string, path: string, body?: unknown, booking = false) {

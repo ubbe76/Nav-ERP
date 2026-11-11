@@ -1,5 +1,6 @@
 import PDFDocument from "pdfkit";
 import { code128Width, drawCode128, drawQrCode } from "./pdf-codes.js";
+import { FONT, FONT_BOLD, registerDocumentFonts } from "./pdf-fonts.js";
 
 // Etiketter (#4; spec 2026-10-29-skanning-design.md) — article and lagerplats
 // labels for scanning. Two formats (user decision): an A4 sheet of 24 labels
@@ -48,7 +49,7 @@ function drawLabel(doc: PDFKit.PDFDocument, label: LabelInput, box: Box, large: 
 
   let y = inner.y;
   if (eyebrow) {
-    doc.font("Helvetica-Bold").fontSize(smallSize).fillColor("#555555");
+    doc.font(FONT_BOLD).fontSize(smallSize).fillColor("#555555");
     doc.text(eyebrow, inner.x, y, { width: inner.width, lineBreak: false });
     doc.fillColor("#000000");
     y += smallSize + 2;
@@ -60,10 +61,10 @@ function drawLabel(doc: PDFKit.PDFDocument, label: LabelInput, box: Box, large: 
   const qrSize = barWidth === null ? Math.min(inner.height - (eyebrow ? smallSize + 2 : 0), large ? 96 : 62) : 0;
   const textWidth = barWidth === null ? inner.width - qrSize - 6 : inner.width;
 
-  doc.font("Helvetica-Bold").fontSize(titleSize).fillColor("#000000");
+  doc.font(FONT_BOLD).fontSize(titleSize).fillColor("#000000");
   doc.text(title, inner.x, y, { width: textWidth, height: titleSize * 1.2, ellipsis: true, lineBreak: false });
   y += titleSize * 1.15;
-  doc.font("Helvetica").fontSize(textSize);
+  doc.font(FONT).fontSize(textSize);
   doc.text(caption, inner.x, y, { width: textWidth, height: textSize * 1.2, ellipsis: true, lineBreak: false });
   y += textSize * 1.2;
   if (label.kind === "article" && label.barcode) {
@@ -75,7 +76,7 @@ function drawLabel(doc: PDFKit.PDFDocument, label: LabelInput, box: Box, large: 
   if (barWidth !== null) {
     const codeY = inner.y + inner.height - codeHeight - (smallSize + 2);
     drawCode128(doc, code, inner.x + (inner.width - barWidth) / 2, codeY, inner.width, codeHeight);
-    doc.font("Helvetica").fontSize(smallSize);
+    doc.font(FONT).fontSize(smallSize);
     doc.text(code, inner.x, codeY + codeHeight + 1, { width: inner.width, align: "center", lineBreak: false });
   } else {
     drawQrCode(doc, code, inner.x + inner.width - qrSize, inner.y + inner.height - qrSize, qrSize);
@@ -89,6 +90,7 @@ export async function renderLabelsPdf(labels: LabelInput[], format: LabelFormat,
     format === "a4"
       ? new PDFDocument({ size: "A4", margin: 0, autoFirstPage: false })
       : new PDFDocument({ size: [SINGLE.width, SINGLE.height], margin: 0, autoFirstPage: false });
+  registerDocumentFonts(doc);
   const chunks: Buffer[] = [];
   doc.on("data", (chunk: Buffer) => chunks.push(chunk));
   const finished = new Promise<Buffer>((resolve, reject) => {

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { readUblInvoice } from "../src/modules/einvoice/service/ubl/ubl-reader.js";
 import { EINVOICE_COPY_TITLE, renderEInvoiceCopy, unitLabel } from "../src/modules/mail/service/einvoice-copy-pdf.js";
 import { formatNumber } from "../src/modules/mail/service/document-pdf.js";
-import { pdfPageCount, pdfText } from "./helpers/pdf.js";
+import { pdfPageCount, pdfPagesText, pdfText } from "./helpers/pdf.js";
 
 // sv-SE thousands separator as formatNumber prints it (a non-breaking space).
 const n = (value: number) => formatNumber(value, 2);
@@ -72,7 +72,11 @@ describe("renderEInvoiceCopy", () => {
     expect(pdfPageCount(pdf)).toBeGreaterThan(1);
     const text = pdfText(pdf);
     expect(text).toContain("Rad 80");
-    expect(text.match(/Benämning/g)!.length).toBe(pdfPageCount(pdf));
+    // Every page with rows starts with the row header (the totals may get a
+    // page of their own).
+    const pages = pdfPagesText(pdf);
+    expect(pages).toHaveLength(pdfPageCount(pdf));
+    for (const page of pages.filter((p) => p.includes("Rad "))) expect(page).toContain("ArtikelnrBenämningAntal");
     expect(text).toContain(`sida ${pdfPageCount(pdf)} av ${pdfPageCount(pdf)}`);
   });
 

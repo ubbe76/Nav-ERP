@@ -1,6 +1,7 @@
 import PDFDocument from "pdfkit";
 import type { ReceivedEInvoice, ReceivedEInvoiceParty } from "../../einvoice/service/ubl/received-einvoice.js";
-import { formatNumber } from "./document-pdf.js";
+import { formatNumber, formatQuantity, formatUnitPrice, formatVatRate } from "./document-pdf.js";
+import { FONT, FONT_BOLD, registerDocumentFonts } from "./pdf-fonts.js";
 
 // Visningskopia av e-faktura (spec 2026-11-05-e-faktura-mottagning): a
 // readable PDF drawn from the received UBL when the e-invoice carries no PDF
@@ -78,6 +79,7 @@ export async function renderEInvoiceCopy(doc: ReceivedEInvoice, options: EInvoic
       CreationDate: new Date(`${doc.issueDate}T00:00:00Z`),
     },
   });
+  registerDocumentFonts(pdf);
   const chunks: Buffer[] = [];
   pdf.on("data", (chunk: Buffer) => chunks.push(chunk));
   const finished = new Promise<Buffer>((resolve, reject) => {
@@ -93,7 +95,7 @@ export async function renderEInvoiceCopy(doc: ReceivedEInvoice, options: EInvoic
     }
   };
   const textLine = (text: string, x: number, width: number, opts: { bold?: boolean; size?: number; align?: "left" | "right" } = {}) => {
-    pdf.font(opts.bold ? "Helvetica-Bold" : "Helvetica").fontSize(opts.size ?? 9);
+    pdf.font(opts.bold ? FONT_BOLD : FONT).fontSize(opts.size ?? 9);
     const height = pdf.heightOfString(text, { width });
     ensure(height);
     pdf.text(text, x, y, { width, align: opts.align ?? "left" });
@@ -102,7 +104,7 @@ export async function renderEInvoiceCopy(doc: ReceivedEInvoice, options: EInvoic
 
   // Title band
   pdf.rect(MARGIN, y, CONTENT_WIDTH, 26).fill("#333333");
-  pdf.fillColor("#ffffff").font("Helvetica-Bold").fontSize(12).text(EINVOICE_COPY_TITLE, MARGIN + 8, y + 7, { width: CONTENT_WIDTH - 16 });
+  pdf.fillColor("#ffffff").font(FONT_BOLD).fontSize(12).text(EINVOICE_COPY_TITLE, MARGIN + 8, y + 7, { width: CONTENT_WIDTH - 16 });
   pdf.fillColor("#000000");
   y += 32;
   textLine("Originalet är e-fakturan (XML) som mottogs via Peppol", MARGIN, CONTENT_WIDTH, { size: 8 });
@@ -160,7 +162,7 @@ export async function renderEInvoiceCopy(doc: ReceivedEInvoice, options: EInvoic
     ensure(LINE + 4);
     let x = MARGIN;
     for (const c of columns) {
-      pdf.font("Helvetica-Bold").fontSize(8).text(c.label, x + (c.align === "right" ? 0 : 2), y, { width: c.width - 4, align: c.align });
+      pdf.font(FONT_BOLD).fontSize(8).text(c.label, x + (c.align === "right" ? 0 : 2), y, { width: c.width - 4, align: c.align });
       x += c.width;
     }
     y += LINE;
@@ -172,13 +174,16 @@ export async function renderEInvoiceCopy(doc: ReceivedEInvoice, options: EInvoic
     const cells = [
       line.sellerItemNumber ?? "",
       line.description,
-      formatNumber(line.quantity, Number.isInteger(line.quantity) ? 0 : 2),
+      // Antal and à-pris as sent (up to four decimals), the rate as sent
+      // (25,5 %) — rounded figures that did not multiply out to Belopp made
+      // the copy impossible to check (granskning 2026-11-11).
+      formatQuantity(line.quantity),
       unitLabel(line.unitCode),
-      money(line.unitPrice),
+      line.unitPrice === null ? "" : formatUnitPrice(line.unitPrice),
       money(line.lineAmount),
-      line.vatRate === null ? "" : formatNumber(line.vatRate, 0),
+      line.vatRate === null ? "" : formatVatRate(line.vatRate),
     ];
-    pdf.font("Helvetica").fontSize(8);
+    pdf.font(FONT).fontSize(8);
     const height = Math.max(...cells.map((cell, i) => pdf.heightOfString(cell || " ", { width: columns[i]!.width - 4 })));
     if (y + height > BOTTOM) {
       pdf.addPage();
@@ -191,6 +196,15 @@ export async function renderEInvoiceCopy(doc: ReceivedEInvoice, options: EInvoic
       x += c.width;
     }
     y += height + 2;
+    // The line's own AllowanceCharge: Belopp = antal × à-pris − rabatt +
+    // tillägg, so the reader can follow the arithmetic.
+    const adjustments = [
+      line.allowanceAmount !== 0 ? `Rabatt ${money(-line.allowanceAmount)}` : null,
+      line.chargeAmount !== 0 ? `Tillägg ${money(line.chargeAmount)}` : null,
+    ].filter((part): part is string => part !== null);
+    if (adjustments.length > 0) {
+      y += textLine(adjustments.join(" · "), MARGIN + 62, 300, { size: 7 }) + 2;
+    }
     if (line.note) {
       y += textLine(line.note, MARGIN + 62, 300, { size: 7 }) + 2;
     }
@@ -208,14 +222,24 @@ export async function renderEInvoiceCopy(doc: ReceivedEInvoice, options: EInvoic
     y += LINE;
   };
   for (const v of doc.vat) {
-    const rate = v.percent === null ? v.category : `${formatNumber(v.percent, 0)} %`;
+    const rate = v.percent === null ? v.category : `${formatVatRate(v.percent)} %`;
     totalLine(`Moms ${rate} på ${money(v.taxableAmount)}`, money(v.taxAmount));
+  }
+  // The column adds up to Att betala (granskning 2026-11-11): the
+  // document-level rabatt/tillägg between the rows' sum and Netto (BT-106 −
+  // BT-107 + BT-108 = BT-109), the förskott (BT-113) after Moms — signed as
+  // the deductions they are.
+  const nonZero = (value: number | null): value is number => value !== null && value !== 0;
+  const { allowanceTotalAmount, chargeTotalAmount, prepaidAmount, payableRoundingAmount } = doc.totals;
+  if (nonZero(allowanceTotalAmount) || nonZero(chargeTotalAmount)) {
+    totalLine("Summa rader", money(doc.totals.lineExtensionAmount));
+    if (nonZero(allowanceTotalAmount)) totalLine("Rabatt", money(-allowanceTotalAmount));
+    if (nonZero(chargeTotalAmount)) totalLine("Tillägg", money(chargeTotalAmount));
   }
   totalLine("Netto", money(doc.totals.taxExclusiveAmount ?? doc.totals.lineExtensionAmount));
   totalLine("Moms", money(doc.totals.taxAmount ?? (doc.vat.length > 0 ? doc.vat.reduce((s, v) => s + v.taxAmount, 0) : null)));
-  if (doc.totals.payableRoundingAmount !== null && doc.totals.payableRoundingAmount !== 0) {
-    totalLine("Öresavrundning", money(doc.totals.payableRoundingAmount));
-  }
+  if (nonZero(prepaidAmount)) totalLine("Förskott", money(-prepaidAmount));
+  if (nonZero(payableRoundingAmount)) totalLine("Öresavrundning", money(payableRoundingAmount));
   totalLine(`${credit ? "Att kreditera" : "Att betala"} ${doc.currency}`, money(doc.totals.payableAmount), true);
   y += 10;
 
@@ -240,7 +264,7 @@ export async function renderEInvoiceCopy(doc: ReceivedEInvoice, options: EInvoic
     pdf.switchToPage(i);
     const previousBottom = pdf.page.margins.bottom;
     pdf.page.margins.bottom = 0;
-    pdf.font("Helvetica").fontSize(7).fillColor("#444444");
+    pdf.font(FONT).fontSize(7).fillColor("#444444");
     pdf.text(`Visningskopia av e-faktura ${doc.number} · sida ${i - range.start + 1} av ${range.count}`, MARGIN, PAGE_HEIGHT - 30, {
       width: CONTENT_WIDTH,
       align: "center",

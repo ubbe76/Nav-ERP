@@ -526,17 +526,38 @@ export function createShippingRepository(db: Db) {
     // The broker's id is a technical field, not a draft edit: it deliberately
     // leaves updated_at alone so storeRates' guard still sees any edit made
     // while the broker copy was being created.
-    async saveProviderShipmentId(id: string, providerShipmentId: string) {
-      await db.update(shipments).set({ providerShipmentId }).where(eq(shipments.id, id));
+    // The broker's copy is created once per shipment: the id is only written
+    // onto a row that has none, so of two price fetches racing to create it
+    // the first one's copy wins and the other is told which id is stored
+    // (it then drops its own copy). Returns the id the row carries after the
+    // call — ours, the one that got there first, or null when the row is
+    // gone. Never touches updated_at (storeRates' optimistic check).
+    async saveProviderShipmentId(id: string, providerShipmentId: string): Promise<string | null> {
+      const [saved] = await db
+        .update(shipments)
+        .set({ providerShipmentId })
+        .where(and(eq(shipments.id, id), isNull(shipments.providerShipmentId)))
+        .returning({ providerShipmentId: shipments.providerShipmentId });
+      if (saved) return saved.providerShipmentId;
+      const [row] = await db.select({ providerShipmentId: shipments.providerShipmentId }).from(shipments).where(eq(shipments.id, id));
+      return row?.providerShipmentId ?? null;
     },
 
     // Optimistic write of a price answer: only onto the draft exactly as it
     // was read before the broker calls (updated_at unchanged — every draft
-    // edit bumps it and clears last_rates). False = someone edited meanwhile;
-    // the quote describes the old shipment and must not be stored. Compared
-    // at millisecond precision: a row never written from JS still carries
-    // Postgres' microsecond default, which a Date cannot hold.
-    async storeRates(tx: Tx, id: string, asReadUpdatedAt: Date, patch: Partial<NewShipment>): Promise<boolean> {
+    // edit bumps it and clears last_rates) AND still pointing at the broker
+    // shipment the rates were fetched for (their booking tokens book THAT
+    // copy). False = someone edited meanwhile, or the row points elsewhere;
+    // the quote must not be stored. Compared at millisecond precision: a row
+    // never written from JS still carries Postgres' microsecond default,
+    // which a Date cannot hold.
+    async storeRates(
+      tx: Tx,
+      id: string,
+      asReadUpdatedAt: Date,
+      providerShipmentId: string,
+      patch: Omit<Partial<NewShipment>, "providerShipmentId">
+    ): Promise<boolean> {
       const rows = await tx
         .update(shipments)
         .set({ ...patch, updatedAt: new Date() })
@@ -544,6 +565,7 @@ export function createShippingRepository(db: Db) {
           and(
             eq(shipments.id, id),
             eq(shipments.status, "draft"),
+            eq(shipments.providerShipmentId, providerShipmentId),
             sql`date_trunc('milliseconds', ${shipments.updatedAt}) = ${asReadUpdatedAt.toISOString()}::timestamptz`
           )
         )

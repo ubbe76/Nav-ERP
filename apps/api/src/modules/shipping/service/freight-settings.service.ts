@@ -3,10 +3,10 @@ import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import type { ShippingRepository } from "../repository/shipping.repository.js";
 import { sendifyProviderFactory } from "./sendify-provider.js";
 import type { FreightProvider, FreightProviderFactory, ProviderParty } from "./freight-provider.js";
-import { addDays, nextPickup, pickupFor, PICKUP_SEARCH_DAYS, stockholmNow, type PickupSlot } from "./pickup.js";
+import { addDays, nextPickup, pickupFor, PICKUP_SEARCH_DAYS, requestedPickupTime, stockholmNow, type PickupSlot } from "./pickup.js";
 import { splitAddress } from "./recipient.js";
 import { missingForBooking } from "./shipment-validation.js";
-import { FreightNotConfiguredError, FreightValidationError, InvalidFreightArticleError } from "./shipping.errors.js";
+import { FreightNotConfiguredError, FreightPickupDayError, FreightValidationError, InvalidFreightArticleError } from "./shipping.errors.js";
 
 // Fraktinställningar live as freight_* keys in system_settings (key–value, no
 // migration per setting). The API key is write-only: never returned, never
@@ -134,8 +134,10 @@ export function createFreightSettingsService(deps: {
     return repo.fullDayHolidays(date, addDays(date, PICKUP_SEARCH_DAYS));
   }
 
-  async function nextPickupSlot(): Promise<PickupSlot | null> {
-    const current = today();
+  // `current` = the wall clock the caller also asks requestedPickupTime
+  // with (fetchProducts), so today's slot and its time are decided at one
+  // instant.
+  async function nextPickupSlot(current: { date: string; time: string } = today()): Promise<PickupSlot | null> {
     return nextPickup(current, await repo.listPickupTimes(), await offDaysFrom(current.date));
   }
 
@@ -243,6 +245,16 @@ export function createFreightSettingsService(deps: {
       ).filter((m) => m.startsWith("Avsändare"));
       if (missing.length > 0) throw new FreightValidationError(missing);
 
+      // The time asked of the broker is requestedPickupTime, as for every
+      // other price fetch: today's window from now (rounded up to the
+      // quarter), never a Från that has already passed. nextPickup only
+      // offers today while such a time exists, so with the same clock the
+      // time is never null; the guard is for the type (and a future rule).
+      const current = today();
+      const slot = (await nextPickupSlot(current)) ?? { date: addDays(current.date, 1), timeFrom: "09:00", timeTo: "16:00" };
+      const time = requestedPickupTime(slot, current);
+      if (time === null) throw new FreightPickupDayError("Dagens upphämtningstid har passerat — försök igen");
+
       const id = await p.createShipment({
         sender: party,
         recipient: party,
@@ -264,8 +276,7 @@ export function createFreightSettingsService(deps: {
         receiverReference: null,
       });
       try {
-        const slot = (await nextPickupSlot()) ?? { date: addDays(today().date, 1), timeFrom: "09:00", timeTo: "16:00" };
-        const { rates } = await p.getRates(id, { date: slot.date, time: slot.timeFrom });
+        const { rates } = await p.getRates(id, { date: slot.date, time });
         const { created } = await repo.upsertFreightProducts(p.name, rates);
         await audit.log({ entityType: "freight_settings", entityId: null, action: "products_fetched", detail: { created }, userId });
         return { created, total: (await repo.listFreightProducts()).length };

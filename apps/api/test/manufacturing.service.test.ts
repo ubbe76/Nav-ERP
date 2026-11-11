@@ -1149,7 +1149,10 @@ describe("manufacturing service — TO printout", () => {
       ),
     });
     const withDrawing = await mfgService.getManufacturingOrderPdf(order.id);
-    expect(withDrawing.content.length).toBeGreaterThan(plain.content.length);
+    // One more page — not "more bytes": pdf-lib's re-save compresses the
+    // object streams and can come out smaller than pdfkit's original.
+    const pages = async (buffer: Buffer) => (await PDFDocument.load(buffer)).getPageCount();
+    expect(await pages(withDrawing.content)).toBe((await pages(plain.content)) + 1);
   });
 
   // A long "artikelnummer — benämning" wraps; everything below it must start

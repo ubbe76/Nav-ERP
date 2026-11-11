@@ -42,6 +42,9 @@ COPY packages/shared/package.json ./packages/shared/package.json
 RUN npm ci --omit=dev
 
 COPY --from=build /app/apps/api/dist ./apps/api/dist
+# The PDF documents' embedded typeface (Liberation Sans). pdf-fonts.ts finds
+# it relative to the bundle: dist/server.js → ../assets/fonts.
+COPY apps/api/assets ./apps/api/assets
 COPY --from=build /app/packages/db/dist ./packages/db/dist
 COPY --from=build /app/packages/db/drizzle ./packages/db/drizzle
 

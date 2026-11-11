@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { evaluateConfigurationSchema, listPublicTemplatesQuerySchema } from "@navet/shared";
 import type { ConfiguratorService } from "../service/configurator.service.js";
+import { toPublicEvaluation } from "../service/public-template.js";
 import { run } from "./configurator.routes.js";
 import { errorBody } from "../../system/service/error-body.js";
 import {
@@ -44,6 +45,10 @@ export async function publicConfiguratorRoutes(app: FastifyInstance, opts: { ser
     if (bound && input.currency !== undefined && !clientCurrencyAllowed(req, input.currency, await service.customerCurrency(bound))) {
       return reply.code(403).send(errorBody(new ClientPriceNotAllowedError()));
     }
-    return run(reply, () => service.evaluatePublic(req.params.articleId, input, { client: Boolean(req.apiClient) }));
+    // A client gets the answer through the whitelist (toPublicEvaluation).
+    return run(reply, async () => {
+      const evaluation = await service.evaluatePublic(req.params.articleId, input, { client: Boolean(req.apiClient) });
+      return req.apiClient ? toPublicEvaluation(evaluation) : evaluation;
+    });
   });
 }

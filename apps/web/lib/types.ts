@@ -5474,6 +5474,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   uploaded: "Uppladdad",
   entry_booked: "Post bokförd",
   booking_taken_over: "Bokning övertagen — transporten hör inte till försändelsen",
+  booking_unknown: "Bokningen kan ha genomförts hos Sendify — kontrollera där",
   entry_ignored: "Post markerad som hanterad utanför Nav",
   entry_restored: "Post återställd",
   einvoice_sent: "E-faktura skickad",
