@@ -200,6 +200,7 @@ import { createAlertDigestService } from "./modules/alerts/service/alert-digest.
 import { alertsRoutes } from "./modules/alerts/routes/alerts.routes.js";
 import { isBookkeepingLockViolation, isClosedFiscalYearViolation, isEmployeeAnonymizedViolation } from "./modules/system/service/db-errors.js";
 import { StockLocationNotFoundError } from "./modules/stock/service/stock.errors.js";
+import { documentNumberTakenError } from "./modules/system/service/number-series.js";
 import { errorBody } from "./modules/system/service/error-body.js";
 import { createQualityRepository } from "./modules/quality/repository/quality.repository.js";
 import { createQualityService } from "./modules/quality/service/quality.service.js";
@@ -282,6 +283,15 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     // (resolveStockLocation) — inleverans, utleverans, Förbruka, justering:
     // the client's mistake, mapped once here rather than in every route.
     if (err instanceof StockLocationNotFoundError) return reply.code(404).send(errorBody(err));
+    // A document series whose next number is already taken (Nummerserier
+    // refuses that; an import or a hand edit can still get there): the
+    // create rolled back with its number, from any module — 409 with a
+    // named code, mapped once here rather than in every create route.
+    const numberTaken = documentNumberTakenError(err);
+    if (numberTaken) {
+      app.log.error(err);
+      return reply.code(409).send(errorBody(numberTaken));
+    }
     // GDPR (#2): the anonymized-employee guard (migration 0170).
     if (isEmployeeAnonymizedViolation(err)) {
       return reply.code(409).send({

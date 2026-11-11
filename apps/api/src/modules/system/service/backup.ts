@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createGzip } from "node:zlib";
-import type { Readable } from "node:stream";
+import { pipeline, type Readable } from "node:stream";
 
 // Timestamped, sortable name, e.g. erp-2026-07-24_0905.sql.gz. UTC-based so it
 // is deterministic (and matches the nightly cron script's naming style).
@@ -16,13 +16,20 @@ export interface DatabaseBackup {
   stream: Readable;
 }
 
+// pg_dump as a child process with stdout and stderr piped. Injectable so the
+// teardown below can be tested without pg_dump in the test environment.
+export type DumpProcess = ChildProcessByStdio<null, Readable, Readable>;
+export type SpawnDump = (databaseUrl: string) => DumpProcess;
+
+const spawnPgDump: SpawnDump = (databaseUrl) => spawn("pg_dump", [databaseUrl], { stdio: ["ignore", "pipe", "pipe"] });
+
 // A complete logical backup of the whole database (schema + rows, including the
 // bytea drawings and company logo) as a gzipped plain-SQL dump — the same
 // format as scripts/backup-db.sh, restorable with psql. Requires pg_dump in the
 // image (see apps/api/Dockerfile) and connects via the DATABASE_URL connection
 // string.
-export function createDatabaseBackup(databaseUrl: string, now: Date): DatabaseBackup {
-  const dump = spawn("pg_dump", [databaseUrl], { stdio: ["ignore", "pipe", "pipe"] });
+export function createDatabaseBackup(databaseUrl: string, now: Date, spawnDump: SpawnDump = spawnPgDump): DatabaseBackup {
+  const dump = spawnDump(databaseUrl);
   const gzip = createGzip();
 
   let stderr = "";
@@ -36,6 +43,18 @@ export function createDatabaseBackup(databaseUrl: string, now: Date): DatabaseBa
     if (code !== 0) gzip.destroy(new Error(`pg_dump exited with code ${code}: ${stderr.trim()}`));
   });
 
-  dump.stdout.pipe(gzip);
+  // An aborted download: Fastify destroys gzip when the client goes away.
+  // pipe() only unpiped pg_dump's stdout then, and pg_dump stayed blocked on
+  // write() — with its transaction, its locks and a connection — until the
+  // api restarted. pipeline destroys stdout (the pipe's read end) with gzip,
+  // and a pg_dump still running when the stream closed before the whole dump
+  // was read is ended explicitly (SIGPIPE would need one more write).
+  pipeline(dump.stdout, gzip, () => {
+    // The error (an abort, pg_dump's exit) reaches the response through gzip.
+  });
+  gzip.on("close", () => {
+    if (!gzip.readableEnded && dump.exitCode === null && dump.signalCode === null) dump.kill("SIGTERM");
+  });
+
   return { filename: backupFilename(now), stream: gzip };
 }

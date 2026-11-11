@@ -21,6 +21,8 @@ import {
   DuplicateNumberSeriesNameError,
   DuplicateCompanyCarrierError,
   NumberSeriesNotFoundError,
+  NumberSeriesNumberTakenError,
+  NumberSeriesTooLongError,
   SetupChargeArticleNotFoundError,
 } from "../service/system.service.js";
 
@@ -187,6 +189,9 @@ export async function systemRoutes(app: FastifyInstance, opts: { service: System
         if (err instanceof NumberSeriesNotFoundError) return reply.code(404).send(errorBody(err));
         if (err instanceof BuiltInNumberSeriesError) return reply.code(400).send(errorBody(err));
         if (err instanceof DuplicateNumberSeriesNameError) return reply.code(409).send(errorBody(err));
+        if (err instanceof NumberSeriesTooLongError || err instanceof NumberSeriesNumberTakenError) {
+          return reply.code(409).send({ ...errorBody(err), number: err.number });
+        }
         throw err;
       }
     }

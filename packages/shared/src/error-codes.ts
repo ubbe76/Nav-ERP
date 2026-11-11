@@ -344,6 +344,11 @@ export const ERROR_CODES = {
   SERIES_EXHAUSTED: "series-exhausted",
   DUPLICATE_NUMBER_SERIES_NAME: "duplicate-number-series-name",
   BUILT_IN_NUMBER_SERIES: "built-in-number-series",
+  // Nummerserier: the first number after the change would not fit the
+  // document column / is already taken; a create that hit a taken number.
+  NUMBER_SERIES_TOO_LONG: "number-series-too-long",
+  NUMBER_SERIES_NUMBER_TAKEN: "number-series-number-taken",
+  DOCUMENT_NUMBER_TAKEN: "document-number-taken",
   ORDER_REGISTER_TOO_LARGE: "order-register-too-large",
   QUOTE_FOLLOWUP_TOO_LARGE: "quote-followup-too-large",
   QUOTE_LOSS_REASON_INVALID: "quote-loss-reason-invalid",

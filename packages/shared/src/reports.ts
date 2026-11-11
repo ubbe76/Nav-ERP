@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { businessDateSchema } from "./business-date.js";
 import { purchaseOrderStatusSchema } from "./purchase.js";
 import { salesOrderStatusSchema } from "./sales.js";
 
@@ -102,8 +103,11 @@ export type DeliveryPrecisionCsvQuery = z.infer<typeof deliveryPrecisionCsvQuery
 // selection works on ORDER ROWS: a date range on the order date or the row's
 // effective delivery date, article/varugrupp/artikelkod and "rest kvar" pick rows,
 // and an order is listed with the rows that matched (its values sum only
-// those). Status and partner filter the order. Dates are YYYY-MM-DD.
-const dayParam = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ange datum som ÅÅÅÅ-MM-DD");
+// those). Status and partner filter the order. Dates are YYYY-MM-DD and a
+// real calendar day in the business range (businessDateSchema) — the regex
+// alone let 2026-02-30 through to Postgres, a 500 in the orderförteckning,
+// the offertuppföljning and the projektrapport.
+const dayParam = businessDateSchema;
 const flagParam = z
   .enum(["true", "false"])
   .transform((value) => value === "true")

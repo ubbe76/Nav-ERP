@@ -90,7 +90,7 @@ Spec `private/superpowers/specs/2026-10-29-lagersaldoimport-design.md`.
 ## Kundens leveransadresser
 
 - **Tom Land = kundens eget land** (inte alltid SE): annars matchade en utländsk kunds egen adress aldrig "Samma som kundens adress" och e-fakturans `Delivery` fick SE.
-- **Betalningsvillkor som importen skapar** (`generatePaymentTermCode` i `customers.ts`, kund- och leverantörsimporten): bara ett namn som börjar med ett dagantal och inte har fler tal ("30 dagar netto", "30 dagar efter fakturadatum") får talet som kod; en slug som skulle börja med en siffra får prefixet `V_` — `dueDateFromTerm` läser ledande siffror, så "1 månad netto" blev 1 dag och "10 dagar 2%, 30 dagar netto" 10.
+- **Betalningsvillkor som importen skapar** (`generatePaymentTermCode` i `customers.ts`, kund- och leverantörsimporten): bara ett namn som börjar med ett dagantal och inte har fler tal ("30 dagar netto", "30 dagar efter fakturadatum") får talet som kod; en slug som skulle börja med en siffra får prefixet `V_`. `dueDateFromTerm` (`system/service/due-date.ts`) läser bara en kod som **är** ett dagantal, `/^(\d{1,4})(?:_\d+)?$/` — "30" och krocksuffixets "30_2" ⇒ 30 dagar, allt annat ("2/10", "-30", "1_MANAD_NETTO", fler än fyra siffror) ⇒ ingen förfallodag (systemgranskningen 2026-11-11; förut lästes ledande siffror, så "1 månad netto" blev 1 dag och "99999999" gav 500 vid Utfärda). Test: `due-date.test.ts`.
 
 - Läser både Leveransadress-filen och **Alternativa leveransadresser** (där två kolumner heter "Namn": den första är kundens och lämnas, upprepningen mappas till `label` via sekundäraliaset). Kolumnen **Förvald** (`isDefault`) avgör per rad när den är mappad, annars gäller `setAsDefault`; en kund med förvald adress får aldrig en till (varning).
 

@@ -777,10 +777,12 @@ export async function planCustomerImport(
 // Betalningsvillkor that start with a day count and carry no other number
 // ("30 dagar netto", "30 dagar efter fakturadatum") get that number as the
 // code — it is what dueDateFromTerm (system/service/due-date.ts) reads back as
-// the förfallodag's days. Anything else gets the generic slug, and a slug that
-// would start with a digit is prefixed: dueDateFromTerm reads LEADING digits,
-// so "1 månad netto" became 1_MANAD_NETTO = 1 day and "10 dagar 2%, 30 dagar
-// netto" became 10 (the discount days, not the 30).
+// the förfallodag's days, also with the collision suffix assignRegisterCodes
+// adds below ("30_2"). Anything else gets the generic slug, and a slug that
+// would start with a digit is prefixed: a slug of digits and underscores
+// ("10/30" → 10_30) has the day-count shape, and before dueDateFromTerm was
+// strict it read any LEADING digits ("1 månad netto" became 1_MANAD_NETTO =
+// 1 day, "10 dagar 2%, 30 dagar netto" 10).
 export function generatePaymentTermCode(name: string): string {
   const match = /^(\d+)\s*(?:dagar|dgr|d)\b(.*)$/i.exec(name.trim());
   if (match && !/\d/.test(match[2]!)) return String(Number(match[1]!));

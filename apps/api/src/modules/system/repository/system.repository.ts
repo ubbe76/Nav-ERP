@@ -1,5 +1,5 @@
 import { asc, eq, getTableColumns, sql } from "drizzle-orm";
-import { articles, carriers, companyCarriers, companyInfo, numberSeries, systemSettings, type Db } from "@navet/db";
+import { articles, carriers, companyCarriers, companyInfo, numberSeries, systemSettings, type Db, type Tx } from "@navet/db";
 import type {
   CreateArticleNumberSeriesInput,
   CreateCompanyCarrierInput,
@@ -7,6 +7,7 @@ import type {
   UpdateNumberSeriesInput,
 } from "@navet/shared";
 import { DEFAULT_THEME_KEY } from "../service/theme-settings.js";
+import { documentNumberTaken } from "../service/number-series.js";
 import { lockThemeForSetting } from "./themes.repository.js";
 import { readStorageUsage } from "./storage.js";
 import { exportStoredFiles } from "./file-export.js";
@@ -39,6 +40,39 @@ const companyInfoPublicColumns = {
   hasLogo: sql<boolean>`${companyInfo.logo} is not null`,
   updatedAt: companyInfo.updatedAt,
 };
+
+// The writes PATCH /settings makes, on its transaction.
+function settingsWriter(tx: Tx) {
+  return {
+    // Ställkostnadsartikel: the setting must name an article that exists,
+    // held FOR KEY SHARE until the setting is committed.
+    async lockArticle(id: string): Promise<boolean> {
+      const rows = await tx.select({ id: articles.id }).from(articles).where(eq(articles.id, id)).for("key share");
+      return rows.length > 0;
+    },
+
+    // Egna teman: Förvalt tema för företaget, written only while the theme
+    // exists — false (nothing written) for an unknown id. The theme row is
+    // locked against a concurrent delete (lockThemeForSetting).
+    async setDefaultTheme(id: string): Promise<boolean> {
+      if (!(await lockThemeForSetting(tx, id))) return false;
+      await upsertSetting(tx, DEFAULT_THEME_KEY, id);
+      return true;
+    },
+
+    setSetting(key: string, value: string) {
+      return upsertSetting(tx, key, value);
+    },
+  };
+}
+export type SettingsWriter = ReturnType<typeof settingsWriter>;
+
+async function upsertSetting(executor: Db | Tx, key: string, value: string) {
+  await executor
+    .insert(systemSettings)
+    .values({ key, value })
+    .onConflictDoUpdate({ target: systemSettings.key, set: { value } });
+}
 
 export function createSystemRepository(db: Db) {
   return {
@@ -87,8 +121,26 @@ export function createSystemRepository(db: Db) {
       return row ?? null;
     },
 
-    async updateNumberSeries(key: string, input: UpdateNumberSeriesInput) {
-      const [row] = await db.update(numberSeries).set(input).where(eq(numberSeries.key, key)).returning();
+    // Nummerserier's PATCH runs in one transaction: the series row locked
+    // FOR UPDATE, the guard, the write.
+    transaction<T>(fn: (tx: Tx) => Promise<T>) {
+      return db.transaction(fn);
+    },
+
+    // The same row lock getNextOrderNumber's UPDATE takes: a document
+    // allocating from the series waits for the PATCH, and one that allocated
+    // before it has committed by the time the guard reads its table.
+    async lockNumberSeries(tx: Tx, key: string) {
+      const [row] = await tx.select().from(numberSeries).where(eq(numberSeries.key, key)).for("update");
+      return row ?? null;
+    },
+
+    documentNumberTaken(tx: Tx, key: string, number: string) {
+      return documentNumberTaken(tx, key, number);
+    },
+
+    async updateNumberSeries(key: string, input: UpdateNumberSeriesInput, executor: Db | Tx = db) {
+      const [row] = await executor.update(numberSeries).set(input).where(eq(numberSeries.key, key)).returning();
       return row ?? null;
     },
 
@@ -121,30 +173,11 @@ export function createSystemRepository(db: Db) {
       return db.select({ key: systemSettings.key, value: systemSettings.value }).from(systemSettings);
     },
 
-    // Ställkostnadsartikel: the setting must name an article that exists.
-    async articleExists(id: string) {
-      const [row] = await db.select({ id: articles.id }).from(articles).where(eq(articles.id, id));
-      return row !== undefined;
-    },
-
-    async setSetting(key: string, value: string) {
-      await db
-        .insert(systemSettings)
-        .values({ key, value })
-        .onConflictDoUpdate({ target: systemSettings.key, set: { value } });
-    },
-
-    // Egna teman: Förvalt tema för företaget, written only while the theme
-    // exists — false (nothing written) for an unknown id.
-    async setDefaultTheme(id: string): Promise<boolean> {
-      return db.transaction(async (tx) => {
-        if (!(await lockThemeForSetting(tx, id))) return false;
-        await tx
-          .insert(systemSettings)
-          .values({ key: DEFAULT_THEME_KEY, value: id })
-          .onConflictDoUpdate({ target: systemSettings.key, set: { value: id } });
-        return true;
-      });
+    // PATCH /settings: every write in ONE transaction — a refused reference
+    // (Förvalt tema, Ställkostnadsartikel) or a failing write leaves nothing
+    // half saved, and the händelselogg (written after commit) always matches.
+    writeSettings<T>(fn: (writer: SettingsWriter) => Promise<T>): Promise<T> {
+      return db.transaction((tx) => fn(settingsWriter(tx)));
     },
 
     // --- Company carrier accounts (Företagsinformation → Speditörer) ---
