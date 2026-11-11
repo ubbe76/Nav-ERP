@@ -96,8 +96,15 @@ const STOCK_QUANTITY_HEADINGS = ["antal", "saldo", "lagersaldo"];
 // both, are matched by the article signatures above.
 const CUSTOMER_KEY_HEADINGS = ["kund", "kundnummer", "kundnr"];
 // Referenser ("Referens – Namn") and the contact template (Mobiltelefon,
-// Faxnummer — the customer template has neither).
-const CUSTOMER_CONTACT_HEADINGS = ["referensnamn", "mobiltelefon", "faxnummer"];
+// Faxnummer, Anmärkning — the customer template has none of them). The
+// template's Förvald counts too when there is no address line (the
+// Alternativa leveransadresser file has Förvald + Adressrad 1): the manual
+// says to drop unused columns, and a template without Mobiltelefon and
+// Faxnummer was read as a customer file — its Kontaktperson/Telefon/E-post
+// written over the customer's own.
+const CUSTOMER_CONTACT_HEADINGS = ["referensnamn", "mobiltelefon", "faxnummer", "anmarkning"];
+const isContactFile = (present: Set<string>, headings: string[]) =>
+  headings.some((heading) => present.has(heading)) || (present.has("forvald") && !present.has("adressrad1"));
 // Leveransadress ("Leveransadress – Namn") and the template (Adressnamn).
 // Alternativa leveransadresser has neither; it is the only customer file
 // with both Förvald and a bare Adressrad 1.
@@ -105,7 +112,7 @@ const CUSTOMER_DELIVERY_ADDRESS_HEADINGS = ["leveransadressnamn", "adressnamn"];
 
 function detectCustomerFile(present: Set<string>, headers: string[]): ImportEntity | null {
   if (!CUSTOMER_KEY_HEADINGS.some((heading) => present.has(heading)) || present.has("artikelnummer")) return null;
-  if (CUSTOMER_CONTACT_HEADINGS.some((heading) => present.has(heading))) return "customerContacts";
+  if (isContactFile(present, CUSTOMER_CONTACT_HEADINGS)) return "customerContacts";
   if (
     CUSTOMER_DELIVERY_ADDRESS_HEADINGS.some((heading) => present.has(heading)) ||
     (present.has("forvald") && present.has("adressrad1"))
@@ -136,15 +143,15 @@ const NOT_SUPPLIER_HEADINGS = [
     .map(([heading]) => heading),
 ];
 // Referenser ("Referens – Namn") and the contact template (Mobiltelefon,
-// Faxnummer — the supplier template has neither).
-const SUPPLIER_CONTACT_HEADINGS = ["referensnamn", "mobiltelefon", "faxnummer"];
+// Faxnummer, Anmärkning, Förvald without an address line — as the customers').
+const SUPPLIER_CONTACT_HEADINGS = ["referensnamn", "mobiltelefon", "faxnummer", "anmarkning"];
 // Leveransadress ("Leveransadress – Namn") and the template (Adressnamn).
 const SUPPLIER_DELIVERY_ADDRESS_HEADINGS = ["leveransadressnamn", "adressnamn"];
 
 function detectSupplierFile(present: Set<string>, headers: string[]): ImportEntity | null {
   if (!SUPPLIER_KEY_HEADINGS.some((heading) => present.has(heading))) return null;
   if (NOT_SUPPLIER_HEADINGS.some((heading) => present.has(heading))) return null;
-  if (SUPPLIER_CONTACT_HEADINGS.some((heading) => present.has(heading))) return "supplierContacts";
+  if (isContactFile(present, SUPPLIER_CONTACT_HEADINGS)) return "supplierContacts";
   if (SUPPLIER_DELIVERY_ADDRESS_HEADINGS.some((heading) => present.has(heading))) return "supplierDeliveryAddresses";
   // Same rule as the customers: Besöksadress maps nothing but the number and
   // stays unrecognised.

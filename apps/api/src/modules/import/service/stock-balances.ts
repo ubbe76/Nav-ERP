@@ -16,6 +16,7 @@
 import type { ImportCommitInput } from "@navet/shared";
 import { normalizeDecimal } from "./csv.js";
 import type { ExistingArticle } from "./articles.js";
+import { FALLBACK_LOCATION_NAME } from "../../stock/service/outflow-allocation.js";
 import {
   resolveColumns,
   suggestMapping,
@@ -87,10 +88,12 @@ export interface StockBalanceImportDeps {
 
 // Where the row's balance lives, resolved inside the commit transaction:
 // an existing location, one the import creates, or the article's own
-// location / "***" (resolveStockLocation with no location).
+// location / "***" (resolveStockLocation with no location), or the
+// reservplats "***" itself (getOrCreateFallbackLocation).
 export type StockBalanceTarget =
   | { kind: "location"; locationId: string }
   | { kind: "new"; warehouseName: string; locationName: string }
+  | { kind: "fallback" }
   | { kind: "default" };
 
 export interface StockBalanceRowPlan {
@@ -166,6 +169,9 @@ export async function planStockBalanceImport(
 
   const rows: ImportRowResult[] = [];
   const planned: StockBalanceRowPlan[] = [];
+  // First-seen spelling of a warehouse / place the file names that does not
+  // exist — so every row of one new place carries the same names. What is
+  // actually created is collected from the BOOKED rows (willCreate below).
   const newWarehouses = new Map<string, string>();
   const newLocations = new Map<string, { warehouseName: string; locationName: string }>();
   // "<articleId>|<location key>" — the same article and place twice is an error.
@@ -212,7 +218,16 @@ export async function planStockBalanceImport(
     const locationName = record["locationName"] ?? "";
     let target: StockBalanceTarget | null = null;
     let locationKey = "";
-    if (warehouseName !== "" && locationName === "") {
+    if (locationName === FALLBACK_LOCATION_NAME) {
+      // "***" is the ONE reservplats, whatever Lager the row names (the name
+      // is reserved, stock.md) — the commit books it on
+      // getOrCreateFallbackLocation. Planned as that place, never as a new
+      // place in the named warehouse: today's balance, skipExisting, the
+      // duplicate check and the frysvakt all read the real place, and
+      // neither a warehouse nor a place is created for it.
+      target = { kind: "fallback" };
+      locationKey = fallbackId ?? "new:***";
+    } else if (warehouseName !== "" && locationName === "") {
       errors.push("Lagerplats saknas — ange lagerplatsen i lagret, eller lämna båda tomma för artikelns lagerplats");
     } else if (warehouseName !== "") {
       if (warehouseName.length > 100 || locationName.length > 100) errors.push("Lager och lagerplats får vara högst 100 tecken");
@@ -296,14 +311,31 @@ export async function planStockBalanceImport(
     planned.push({ rowNumber, articleId: article.id, target, quantity, unitCost: cost });
   });
 
+  // Only what a booked row needs is created: a row that is skipped (antal 0
+  // on a new place, skipExisting) or fails never gets a transaction, and the
+  // commit creates places per booked row — a warehouse or place queued for
+  // such a row would be promised in the preview and (the warehouse) created
+  // empty.
+  const createWarehouses = new Map<string, string>();
+  const createLocations = new Map<string, string>();
+  for (const row of planned) {
+    if (row.target.kind !== "new") continue;
+    const warehouseKey = row.target.warehouseName.toLowerCase();
+    if (newWarehouses.has(warehouseKey)) createWarehouses.set(warehouseKey, row.target.warehouseName);
+    createLocations.set(
+      `${warehouseKey}/${row.target.locationName.toLowerCase()}`,
+      `${row.target.warehouseName} / ${row.target.locationName}`
+    );
+  }
+
   return {
     rows,
     summary: summarize(rows),
     willCreate: {
       units: [],
       articleGroups: [],
-      warehouses: [...newWarehouses.values()],
-      stockLocations: [...newLocations.values()].map((l) => `${l.warehouseName} / ${l.locationName}`),
+      warehouses: [...createWarehouses.values()],
+      stockLocations: [...createLocations.values()],
     },
     balances: planned,
     hasErrors: rows.some((row) => row.errors.length > 0),

@@ -1,8 +1,19 @@
 import { createHash } from "node:crypto";
 import { round2, type BankCsvMappingInput } from "@navet/shared";
-import { decodeBuffer, detectDelimiter, parseRecords } from "../../import/service/csv.js";
+import { decodeBuffer, detectDelimiter, ImportFileError, parseRecords } from "../../import/service/csv.js";
 import { BankStatementCsvMappingError } from "./banking.errors.js";
 import { STATEMENT_DEDUPE_KEY_MAX, type ParsedStatement, type ParsedStatementEntry } from "./iso20022/camt053-parser.js";
+
+// The import's decoder, with its file-level refusals (a UTF-16 file) as this
+// reader's own 400 instead of an unmapped error.
+function decodeBankCsv(buf: Buffer): string {
+  try {
+    return decodeBuffer(buf).text;
+  } catch (err) {
+    if (err instanceof ImportFileError) throw new BankStatementCsvMappingError(err.message);
+    throw err;
+  }
+}
 
 // Bankavstämning: the CSV alternative to camt.053 — an export from the
 // internet bank with a column mapping (header names) saved per bank account.
@@ -79,7 +90,7 @@ export function parseBankCsvAmount(raw: string, decimalComma?: boolean): number 
 
 // The headers of the file as the mapping step needs them (after skipRows).
 export function readBankCsvHeaders(buf: Buffer, opts: { delimiter?: ";" | "," | "\t"; skipRows?: number } = {}): string[] {
-  const { text } = decodeBuffer(buf);
+  const text = decodeBankCsv(buf);
   const lines = text.split(/\r\n|\r|\n/);
   const skipped = lines.slice(opts.skipRows ?? 0).join("\n");
   const firstLineEnd = skipped.search(/[\r\n]/);
@@ -125,7 +136,7 @@ function columnIndex(headers: string[], name: string, what: string): number {
 // (default the same) is what the dedupe key is hashed on — the service passes
 // the bank account's id, which outlives a corrected or learned identifier.
 export function parseBankStatementCsv(buf: Buffer, mapping: BankCsvMappingInput, account: string, currency: string, dedupeScope = account): ParsedBankCsv {
-  const { text } = decodeBuffer(buf);
+  const text = decodeBankCsv(buf);
   const lines = text.split(/\r\n|\r|\n/);
   const body = lines.slice(mapping.skipRows ?? 0).join("\n");
   const firstLineEnd = body.search(/[\r\n]/);

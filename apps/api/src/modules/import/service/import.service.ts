@@ -246,14 +246,51 @@ export function suggestMapping(
   return mapping;
 }
 
+// A header JavaScript would not keep in insertion order as an object key: a
+// canonical array index ("2025", "0") is enumerated FIRST, in numeric order,
+// whatever its column — the mapping's key order IS the column order, so such
+// a header shifted every column after it ("Kundnummer;Namn;2025" read the
+// name as the customer number). "__proto__" is no own key at all.
+export function isUnorderedHeaderKey(header: string): boolean {
+  return (/^(0|[1-9]\d*)$/.test(header) && Number(header) < 4294967295) || header === "__proto__";
+}
+
+// The headers the mapping is keyed by: a repeated header gets " (2)", " (3)"
+// … — never one the file already has ("Namn", "Namn (2)", "Namn" gives
+// "Namn (3)" for the last, not a second "Namn (2)" that would swallow a
+// column) — and a header that would not keep its place as an object key
+// (isUnorderedHeaderKey) is named after its column instead.
+export function uniqueHeaders(raw: string[]): string[] {
+  const used = new Set<string>();
+  return raw.map((header, index) => {
+    let name = isUnorderedHeaderKey(header) ? `${header} (kolumn ${index + 1})` : header;
+    if (used.has(name)) {
+      let n = 2;
+      while (used.has(`${name} (${n})`) || raw.includes(`${name} (${n})`)) n++;
+      name = `${name} (${n})`;
+    }
+    used.add(name);
+    return name;
+  });
+}
+
 // Column i of every row belongs to key i of the mapping (JSON objects
 // preserve key order — the wizard builds the mapping from the parse
-// response's headers in order). Returns the target field per column.
+// response's headers in order, and parse renames the headers that would not
+// keep it, see uniqueHeaders). Returns the target field per column.
 export function resolveColumns(
   mapping: Record<string, string | null>,
   allowedFields: string[],
   requiredFields: string[]
 ): (string | null)[] {
+  // A caller that built the mapping from its own headers: refuse rather than
+  // read the wrong columns.
+  const unordered = Object.keys(mapping).find(isUnorderedHeaderKey);
+  if (unordered !== undefined) {
+    throw new ImportMappingError(
+      `Kolumnrubriken "${unordered}" är ett heltal och kan inte användas som nyckel i mappningen — byt rubrik eller använd rubrikerna som filtolkningen returnerar`
+    );
+  }
   const columns = Object.values(mapping);
   const seen = new Set<string>();
   for (const field of columns) {
@@ -486,14 +523,8 @@ export function createImportService(repo: ImportRepository, options: ImportServi
   // address every column unambiguously. Shared by parse() and detect().
   async function parseWithUniqueHeaders(file: Buffer) {
     const parsed = await parseImportFile(file);
-    const seen = new Map<string, number>();
-    const headers = parsed.headers.map((header) => {
-      const n = (seen.get(header) ?? 0) + 1;
-      seen.set(header, n);
-      return n === 1 ? header : `${header} (${n})`;
-    });
     return {
-      headers,
+      headers: uniqueHeaders(parsed.headers),
       rows: parsed.rows,
       meta: {
         format: parsed.format,

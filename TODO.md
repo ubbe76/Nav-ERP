@@ -30,6 +30,8 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — otydliga fel, texter och småbeteenden
 
+- [ ] **Importens igenkänning:** kundens/leverantörens adressmall utan Adressnamn och Förvald (bara nummer + Adressrad 1/Postnummer/Stad) känns igen som kund-/leverantörsfil och skriver adressen över motpartens egen — tvetydig mot kundmallen, så den rättades inte i importgranskningen (guiden visar typen före commit).
+
 - [ ] **Á-pris-etiketten säger kr på en förfrågan i annan valuta** (planeringsgranskningens webbkontroll 2026-11-10): dialogen **Lägg till rad** på en förfrågan till en EUR-leverantör visar "Á-pris (kr/st)" (`InquiryDetail.tsx`; förfrågan har ingen egen valuta, `GET /inquiries/:id` bär sedan dess `supplierCurrency`). Kolla samma etikett på IO-kortet (manualen: "à-pris-etiketten visar `kr/{enhet}`").
 
 ### Låga — layout

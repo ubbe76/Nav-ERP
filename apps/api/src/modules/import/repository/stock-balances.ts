@@ -87,9 +87,6 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
         }
         const newLocationIds = new Map<string, string>();
         async function locationFor(warehouseName: string, locationName: string) {
-          // "***" is the one reservplats, whatever Lager the file names —
-          // never a second place by that name (StockLocationNameReservedError).
-          if (locationName.trim() === FALLBACK_LOCATION_NAME) return getOrCreateFallbackLocation(tx);
           const key = `${warehouseName.toLowerCase()}/${locationName.toLowerCase()}`;
           const known = newLocationIds.get(key);
           if (known) return known;
@@ -114,7 +111,12 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
               ? row.target.locationId
               : row.target.kind === "new"
                 ? await locationFor(row.target.warehouseName, row.target.locationName)
-                : null;
+                : row.target.kind === "fallback"
+                  ? // Lagerplats "***": the one reservplats, whatever Lager
+                    // the file names — never a second place by that name
+                    // (StockLocationNameReservedError).
+                    await getOrCreateFallbackLocation(tx)
+                  : null;
           const locationId = await resolveStockLocation(tx, row.articleId, explicit);
           await assertLocationNotUnderCount(tx, locationId);
           const [balance] = await tx

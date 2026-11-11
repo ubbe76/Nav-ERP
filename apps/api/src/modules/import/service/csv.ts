@@ -39,6 +39,33 @@ export class UnreadableImportFileError extends ImportFileError {
   }
 }
 
+export class Utf16ImportFileError extends ImportFileError {
+  constructor() {
+    super("Filen är sparad som UTF-16 (Unicode-text) — spara om den som CSV UTF-8 eller .xlsx");
+    this.name = "Utf16ImportFileError";
+  }
+}
+
+// An .xlsx whose parts unpack to more than this (a "zip bomb", or a workbook
+// far beyond the 10 000-row limit) is refused before it is unpacked — the
+// 20 MB upload limit only bounds the compressed file.
+export const MAX_XLSX_UNPACKED_BYTES = 200 * 1024 * 1024;
+export class XlsxTooLargeError extends ImportFileError {
+  constructor() {
+    super("Excel-filen är för stor uppackad — dela upp den eller exportera som CSV");
+    this.name = "XlsxTooLargeError";
+  }
+}
+
+// Control characters a cell must not carry: Postgres refuses NUL in text
+// (the commit failed with a 500 and took the whole batch preview with it),
+// and the rest are invisible noise. Tab, LF and CR are text.
+export function stripControlCharacters(value: string): string {
+  return /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(value)
+    ? value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "")
+    : value;
+}
+
 export class LegacyExcelFileError extends ImportFileError {
   constructor() {
     super("Gamla Excel-filer (.xls) stöds inte — spara om filen som .xlsx eller CSV");
@@ -47,6 +74,11 @@ export class LegacyExcelFileError extends ImportFileError {
 }
 
 export function decodeBuffer(buf: Buffer): { text: string; encoding: "utf-8" | "windows-1252" } {
+  // Excel's "Unicode-text" is UTF-16 with a BOM: read as windows-1252 it put a
+  // NUL between every character.
+  if (buf.length >= 2 && ((buf[0] === 0xff && buf[1] === 0xfe) || (buf[0] === 0xfe && buf[1] === 0xff))) {
+    throw new Utf16ImportFileError();
+  }
   // A UTF-8 BOM (EF BB BF) is authoritative: strip it and trust the encoding.
   if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
     return { text: buf.subarray(3).toString("utf-8"), encoding: "utf-8" };
@@ -100,7 +132,11 @@ export function parseRecords(text: string, delimiter: string): string[][] {
       i++;
       continue;
     }
-    if (ch === '"') {
+    // A quote opens a quoted field only at the field's start (RFC 4180): a
+    // quote inside an unquoted field ('Rör 2" AB') is an ordinary character —
+    // it used to open quote mode and swallow the delimiters and line breaks
+    // up to the next quote, shifting every row after it.
+    if (ch === '"' && field === "") {
       inQuotes = true;
       i++;
       continue;
@@ -129,8 +165,12 @@ export function parseRecords(text: string, delimiter: string): string[][] {
     records.push(row);
   }
   // Blank lines (including the common trailing one) parse as a single empty
-  // field — drop them, they carry no data.
-  return records.filter((record) => !(record.length === 1 && record[0] === ""));
+  // field — drop them, they carry no data. A row of nothing but delimiters is
+  // kept here (the bank statement reader numbers its rows by it) and dropped
+  // by the import's parseCsvBuffer.
+  return records
+    .filter((record) => !(record.length === 1 && record[0] === ""))
+    .map((record) => record.map(stripControlCharacters));
 }
 
 export function parseCsvBuffer(buf: Buffer): ParsedCsv {
@@ -138,7 +178,10 @@ export function parseCsvBuffer(buf: Buffer): ParsedCsv {
   const firstLineEnd = text.search(/[\r\n]/);
   const firstLine = firstLineEnd === -1 ? text : text.slice(0, firstLineEnd);
   const delimiter = detectDelimiter(firstLine);
-  const records = parseRecords(text, delimiter);
+  // The ";;;;" rows Excel's "Spara som CSV" writes for formatted but empty
+  // rows carry no data — they failed as "Kundnummer saknas" and blocked the
+  // import (the xlsx path drops fully empty rows the same way).
+  const records = parseRecords(text, delimiter).filter((record) => record.some((cell) => cell.trim() !== ""));
   if (records.length === 0) throw new EmptyCsvError();
   const [headers, ...rows] = records;
   if (rows.length > MAX_IMPORT_ROWS) throw new CsvRowLimitError();

@@ -774,15 +774,18 @@ export async function planCustomerImport(
 // --- Register code generation (payment/delivery terms, carriers, price
 // lists created by the import) ---
 
-// Betalningsvillkor whose name starts with a day count ("30 dagar netto")
-// get that number AS the code — it is what dueDateFromTerm
-// (purchase/service/supplier-invoice.service.ts) parses back out to compute
-// a due date. Anything else (including day-less terms like "Förskott") falls
-// through to the generic slug.
+// Betalningsvillkor that start with a day count and carry no other number
+// ("30 dagar netto", "30 dagar efter fakturadatum") get that number as the
+// code — it is what dueDateFromTerm (system/service/due-date.ts) reads back as
+// the förfallodag's days. Anything else gets the generic slug, and a slug that
+// would start with a digit is prefixed: dueDateFromTerm reads LEADING digits,
+// so "1 månad netto" became 1_MANAD_NETTO = 1 day and "10 dagar 2%, 30 dagar
+// netto" became 10 (the discount days, not the 30).
 export function generatePaymentTermCode(name: string): string {
-  const match = /^(\d+)\s*dagar/i.exec(name.trim());
-  if (match) return match[1]!;
-  return slugifyRegisterCode(name);
+  const match = /^(\d+)\s*(?:dagar|dgr|d)\b(.*)$/i.exec(name.trim());
+  if (match && !/\d/.test(match[2]!)) return String(Number(match[1]!));
+  const slug = slugifyRegisterCode(name);
+  return /^\d/.test(slug) ? slugifyRegisterCode(`V ${slug}`) : slug;
 }
 
 // Generic register code: uppercased, Swedish å/ä->A ö->O (codes are

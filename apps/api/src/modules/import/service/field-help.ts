@@ -1163,7 +1163,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       label: "Land",
       required: false,
       header: "Land",
-      description: "Landskod med två bokstäver (t.ex. SE); små bokstäver godtas. Tom cell ger SE.",
+      description: "Landskod med två bokstäver (t.ex. SE); små bokstäver godtas. Tom cell ger kundens eget land.",
       example: "SE",
     },
     {
@@ -1726,7 +1726,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       header: "Lagerplats",
       text: true,
       description:
-        "Lagerplatsens namn i lagret, max 100 tecken. En plats som saknas skapas i lagret. Utan Lager måste platsnamnet finnas och vara unikt. Tom (och Lager tomt) betyder artikelns huvudplats (en spärrad hoppas över), annars första alternativa platsen, annars reservplatsen ***.",
+        "Lagerplatsens namn i lagret, max 100 tecken. En plats som saknas skapas i lagret. Utan Lager måste platsnamnet finnas och vara unikt. Tom (och Lager tomt) betyder artikelns huvudplats (en spärrad hoppas över), annars första alternativa platsen, annars reservplatsen ***. Lagerplatsen *** är alltid reservplatsen, oavsett Lager.",
       example: "A1-03",
     },
     {
