@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
@@ -148,6 +148,7 @@ function GroupForm({
   const [selectedWorkCenters, setSelectedWorkCenters] = useState<Set<string>>(
     () => new Set(group?.workCenters.map((w) => w.id) ?? [])
   );
+  const createdId = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -175,15 +176,19 @@ function GroupForm({
     try {
       const payload = { code, name, description: description.trim() === "" ? null : description, active };
       let groupId: string;
-      if (group) {
-        await apiFetch(`/api/v1/production-groups/${group.id}`, { method: "PATCH", body: JSON.stringify(payload) });
-        groupId = group.id;
+      // A group created by an earlier attempt whose resource step failed is
+      // updated, not POSTed again (409 on the code).
+      const existingId = group?.id ?? createdId.current;
+      if (existingId) {
+        await apiFetch(`/api/v1/production-groups/${existingId}`, { method: "PATCH", body: JSON.stringify(payload) });
+        groupId = existingId;
       } else {
         const created = await apiFetch<{ id: string }>("/api/v1/production-groups", {
           method: "POST",
           body: JSON.stringify({ ...payload, description: payload.description ?? undefined }),
         });
         groupId = created.id;
+        createdId.current = created.id;
       }
       await apiFetch(`/api/v1/production-groups/${groupId}/work-centers`, {
         method: "PUT",

@@ -2239,6 +2239,9 @@ export function createManufacturingRepository(db: Db) {
         ? await db
             .select({
               moReportId: moReportMaterials.moReportId,
+              // The TO card hides Ta bort and the component swap on a row any
+              // report line points at — undone ones too (materialHasConsumption).
+              materialConsumptionId: moReportMaterials.materialConsumptionId,
               articleNumber: articles.articleNumber,
               quantity: moReportMaterials.quantity,
               // Uttag där saldot finns: one line per location the draw
@@ -2262,7 +2265,8 @@ export function createManufacturingRepository(db: Db) {
         ...r,
         materials: materials
           .filter((m) => m.moReportId === r.id)
-          .map(({ articleNumber, quantity, locationName }) => ({
+          .map(({ materialConsumptionId, articleNumber, quantity, locationName }) => ({
+            materialConsumptionId,
             articleNumber,
             quantity,
             locationName,

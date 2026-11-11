@@ -15,6 +15,7 @@ import { apiFetch } from "../../lib/api";
 import { WORK_CENTER_TYPE_LABELS, type ProductionGroup, type WeekSchedule, type WorkCenter } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
+import { useCan } from "../PermissionsProvider";
 import { apiErrorMessage } from "../../lib/errorMessages";
 
 // The row-edit draft (NOTES.md #5): the fields a planner tunes often —
@@ -73,6 +74,7 @@ export function WorkCentersPageClient({
   weekSchedules: WeekSchedule[];
 }) {
   const router = useRouter();
+  const canImport = useCan()(["admin"]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<WorkCenter | null>(null);
   // Row being edited inline, and its draft.
@@ -146,9 +148,12 @@ export function WorkCentersPageClient({
           <Link href="/tillverkning/ordrar" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
             Tillverkningsordrar
           </Link>
-          <Link href="/tillverkning/resurser/import" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
-            Importera
-          </Link>
+          {/* The import page is admin-only (it says so to anyone else). */}
+          {canImport && (
+            <Link href="/tillverkning/resurser/import" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
+              Importera
+            </Link>
+          )}
           <Button type="button" variant="primary" onClick={() => setModalOpen(true)}>
             + Ny resurs
           </Button>

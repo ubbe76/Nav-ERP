@@ -86,7 +86,7 @@ Personalkortets flik **Frånvaro** (se [Anställda](#anstallda)) registrerar fr�
 
 Kortet **Registrera frånvaro** har fälten **Frånvarokod** (en av frånvarokoderna ovan), **Datum**, **Timmar** och en valfri **Anteckning**. Knappen **Hämta ur schema** fyller i Timmar med den schemalagda nettotiden för valt datum — en hel dag frånvaro motsvarar alltså schemats nettotid, inte alltid 8 timmar. På veckans sista arbetsdag i ett veckoschema med utjämning är det den uträknade tiden. Saknas ett schema för dagen visas ett felmeddelande i stället.
 
-Kortet **Registrerad frånvaro** listar registrerade poster med datum, namn och antal timmar; en **Ta bort**-knapp tar bort en post.
+Kortet **Registrerad frånvaro** listar registrerade poster med datum, namn och antal timmar för perioden från tre månader bakåt till tolv månader framåt (så syns även planerad frånvaro, t.ex. semester); en **Ta bort**-knapp tar bort en post.
 
 Har den anställde öppna arbeten visas det överst på fliken, med en länk till **Pågående arbete**.
 

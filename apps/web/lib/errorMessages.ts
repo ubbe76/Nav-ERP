@@ -294,6 +294,9 @@ const MESSAGES: Record<string, MessageEntry> = {
   "deviation-file-too-large": "Filen är för stor — max 20 MB.",
   "scrap-reason-required": serverMessage("Välj en kassationsorsak."),
   "scrap-reason-invalid": "Kassationsorsaken finns inte, är inaktiv eller gäller inte kassation — välj en annan.",
+  // Förbruka: manual consumption has a ceiling at the row's planned quantity.
+  "over-consumption":
+    "Det är mer än vad som är planerat för materialraden — höj planerat antal med Ändra på materialraden först.",
   // Spärrade lagerplatser
   "stock-location-already-blocked": "Lagerplatsen är redan spärrad — ladda om sidan.",
   "stock-location-not-blocked": "Lagerplatsen är inte spärrad — ladda om sidan.",
@@ -925,6 +928,14 @@ const MESSAGES: Record<string, MessageEntry> = {
   "duplicate-production-group-code": "Produktionsgruppens kod används redan.",
   "duplicate-register-entry": "Det finns redan en post med den koden eller det namnet.",
   "duplicate-schedule-code": "Det finns redan ett schema med den koden.",
+  // Scheman: the plain InvalidScheduleError carries an English message; the balancing variant a Swedish one.
+  "invalid-schedule": "Schemat går inte ihop — kontrollera klockslagen (sluttiden måste vara efter starten och rasterna ligga inom dagen utan att överlappa).",
+  "schedule-balancing-invalid": serverMessage("Veckoschemat med utjämning går inte ihop."),
+  "employee-not-found": "Den anställde finns inte längre — ladda om sidan.",
+  "day-schedule-not-found": "Dagsschemat finns inte längre — ladda om sidan.",
+  "week-schedule-not-found": "Veckoschemat finns inte längre — ladda om sidan.",
+  "holiday-not-found": "Helgdagen finns inte längre — ladda om sidan.",
+  "schedule-override-not-found": "Avvikelsen finns inte längre — ladda om sidan.",
   "duplicate-verification-series": "Det finns redan en verifikationsserie med den koden.",
   "base-unit-conflict": "Standardenheten kan inte läggas till som alternativ enhet.",
   "article-unit-in-use": "Enheten är artikelns inköps- eller försäljningsenhet och kan inte tas bort.",

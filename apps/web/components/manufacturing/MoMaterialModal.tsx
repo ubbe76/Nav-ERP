@@ -21,6 +21,9 @@ interface MoMaterialModalProps {
   operations: MOOperation[];
   // null = add a row; a row = edit it.
   editing: MOMaterialConsumption | null;
+  // A report line points at the row (also an undone one): the server keeps
+  // the component and refuses Ta bort, as it does for drawn material.
+  editingHasReports?: boolean;
   onSaved: (warnings: string[]) => void;
 }
 
@@ -43,19 +46,25 @@ function MaterialForm({
   orderArticleId,
   operations,
   editing,
+  editingHasReports = false,
   onSaved,
 }: Omit<MoMaterialModalProps, "open" | "onClose">) {
   const [component, setComponent] = useState<Article | null>(null);
-  const [quantity, setQuantity] = useState(
-    editing ? String(toUnitQuantity(Number(editing.quantityPlanned), editing.unitFactor)) : "1"
-  );
-  const [unitId, setUnitId] = useState(editing?.unitId ?? ""); // "" = the component's base unit
-  const [operationId, setOperationId] = useState(editing?.moOperationId ?? "");
+  // Ändra starts from the row as saved: its quantity in its own unit, read
+  // with the factor the row was saved with (the article's factor may have
+  // changed since).
+  const initialQuantity = editing ? String(toUnitQuantity(Number(editing.quantityPlanned), editing.unitFactor)) : "1";
+  const initialUnitId = editing?.unitId ?? ""; // "" = the component's base unit
+  const initialOperationId = editing?.moOperationId ?? "";
+  const [quantity, setQuantity] = useState(initialQuantity);
+  const [unitId, setUnitId] = useState(initialUnitId);
+  const [operationId, setOperationId] = useState(initialOperationId);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  // The article can only be swapped while nothing has been drawn from the row.
-  const articleLocked = editing !== null && Number(editing.quantityConsumed) > 0;
+  // The article can only be swapped while nothing has been drawn or reported
+  // from the row (materialHasConsumption on the server).
+  const articleLocked = editing !== null && (Number(editing.quantityConsumed) > 0 || editingHasReports);
   const changedArticle = editing !== null && component !== null && component.id !== editing.componentArticleId;
 
   // Edit mode fetches the current component so the unit select knows its units.
@@ -73,7 +82,15 @@ function MaterialForm({
   }, [editing]);
 
   const unitOptions = useUnitOptions(component);
-  const currentFactor = unitOptions.find((o) => o.value === unitId)?.factor ?? 1;
+  // The row's own unit converts with the row's saved factor, any other unit
+  // with the article's current one.
+  const factorOf = (id: string) =>
+    editing && !changedArticle && id === initialUnitId
+      ? editing.unitFactor == null
+        ? 1
+        : Number(editing.unitFactor)
+      : (unitOptions.find((o) => o.value === id)?.factor ?? 1);
+  const currentFactor = factorOf(unitId);
 
   // Only pending operations can still draw material; a done operation is offered
   // only when the row already points at it.
@@ -95,12 +112,23 @@ function MaterialForm({
       };
       let result: MOMaterialSaveResult;
       if (editing) {
+        // Only what changed. The server reads a quantity without unitId in
+        // the row's own saved factor; sending the unit as well re-resolved it
+        // with the article's CURRENT factor (1 st = 5 kg saved, 4 kg now:
+        // 50 kg became 40 kg on a change of Operation only), and a factor
+        // under 1 drifted on every save (2 st → 0,6667 förp → 2,0001 st).
+        const patch: Record<string, unknown> = {};
+        if (quantity !== initialQuantity) patch.quantity = Number(quantity);
+        if (unitId !== initialUnitId) patch.unitId = unitId === "" ? null : unitId;
+        if (operationId !== initialOperationId) patch.moOperationId = operationId || null;
+        if (changedArticle) patch.componentArticleId = component!.id;
+        if (Object.keys(patch).length === 0) {
+          onSaved([]);
+          return;
+        }
         result = await apiFetch<MOMaterialSaveResult>(
           `/api/v1/manufacturing-orders/${orderId}/materials/${editing.id}`,
-          {
-            method: "PATCH",
-            body: JSON.stringify(changedArticle ? { ...common, componentArticleId: component!.id } : common),
-          }
+          { method: "PATCH", body: JSON.stringify(patch) }
         );
       } else {
         result = await apiFetch<MOMaterialSaveResult>(`/api/v1/manufacturing-orders/${orderId}/materials`, {
@@ -150,7 +178,7 @@ function MaterialForm({
         )}
       </Field>
       {articleLocked && (
-        <FormHint attached>Material har redan förbrukats från raden — artikeln kan inte bytas.</FormHint>
+        <FormHint attached>Material har redan förbrukats eller rapporterats från raden — artikeln kan inte bytas.</FormHint>
       )}
 
       <FormRow>

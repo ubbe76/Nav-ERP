@@ -195,7 +195,7 @@ export function FranvaroTab({ employeeId, employeeName, absenceTypes, initialAbs
       <Card>
         <strong>Registrerad frånvaro</strong>
         {absences.length === 0 ? (
-          <FormHint>Ingen frånvaro registrerad de senaste tre månaderna.</FormHint>
+          <FormHint>Ingen frånvaro registrerad från tre månader bakåt till tolv månader framåt.</FormHint>
         ) : (
           <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
             {absences.map((a) => (

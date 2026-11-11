@@ -22,6 +22,8 @@ import type { DocumentLanguage } from "../../lib/documentLanguage";
 import { createLegoInquiries } from "../../lib/legoInquiries";
 import { copiedNotice, copyArticles } from "../../lib/copiedArticles";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { stashReleaseWarnings } from "../../lib/releaseWarnings";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { SendEmailModal } from "../mail/MailSection";
 import { useCan } from "../PermissionsProvider";
 import { PdfActions } from "../documents/PdfActions";
@@ -232,6 +234,15 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
   // Only a successful order creation clears it, since the proposals
   // themselves changed at that point.
   const [rowStates, setRowStates] = useState<Record<string, RowState>>({});
+  // Hand-made choices (an edited quantity, a picked row — often across
+  // several pages) are lost on a click away, e.g. the article link: ask
+  // first. A deselected row is nothing to lose.
+  // Paging and filtering keep them (this component stays mounted), so only
+  // leaving the page asks.
+  useUnsavedGuard(
+    Object.values(rowStates).some((state) => state.touched && state.selected),
+    { survivesListNavigation: true }
+  );
   const [reloadKey, setReloadKey] = useState(0);
   // The server caches the computed behovsberäkning for a minute (paging,
   // search and filters read the cache). A reload we trigger ourselves —
@@ -368,10 +379,10 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
       });
     };
     load()
-      .catch((err: Error) => {
+      .catch((err: unknown) => {
         if (cancelled) return;
         setData(null);
-        setLoadError(err.message);
+        setLoadError(apiErrorMessage(err, "Kunde inte läsa behovsberäkningen."));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -501,6 +512,9 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
         method: "POST",
         body: JSON.stringify({ proposals }),
       });
+      // Each new TO is released at creation: its shortage warnings show on
+      // its card (as after Ny tillverkningsorder) and in the result below.
+      for (const mo of res.manufacturingOrders) stashReleaseWarnings(mo.id, mo.releaseWarnings);
       setResult(res);
       setModalOpen(false);
       // The created orders are new supply — clear rowStates and refetch so
@@ -723,6 +737,20 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
               </li>
             ))}
           </ul>
+          {result.manufacturingOrders.some((mo) => (mo.releaseWarnings?.length ?? 0) > 0) && (
+            <FormNotice style={{ marginTop: "var(--space-4)" }}>
+              Varning vid frisläpp:
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {result.manufacturingOrders.flatMap((mo) =>
+                  (mo.releaseWarnings ?? []).map((w, i) => (
+                    <li key={`${mo.id}-${i}`}>
+                      {mo.orderNumber}: {w}
+                    </li>
+                  ))
+                )}
+              </ul>
+            </FormNotice>
+          )}
           {/* Everything at once (NOTES.md #9): one PDF per kind, orders in
               list order. With a single order the row's own buttons already
               do the job, so the batch rows appear from two. */}

@@ -19,7 +19,7 @@ import { MANUFACTURING_ORDER_STATUS_PILL, type ManufacturingOrder, type Paged } 
 import {
   ACTION_LABELS,
   actionsForStatus,
-  confirmCancel,
+  confirmOrderAction,
   runOrderAction,
   type OrderAction,
 } from "../../lib/manufacturingOrderActions";
@@ -85,7 +85,7 @@ export function ManufacturingOrdersPageClient({
   }
 
   async function runOne(order: ManufacturingOrder, action: OrderAction) {
-    if (action === "cancel" && !(await confirmCancel([order.orderNumber]))) return;
+    if (!(await confirmOrderAction(action, [order.orderNumber]))) return;
     setFailures([]);
     setWarnings([]);
     setPendingId(order.id);
@@ -103,7 +103,7 @@ export function ManufacturingOrdersPageClient({
   async function runBulk(action: OrderAction) {
     const targets = targetsFor(action);
     if (targets.length === 0) return;
-    if (action === "cancel" && !(await confirmCancel(targets.map((order) => order.orderNumber)))) return;
+    if (!(await confirmOrderAction(action, targets.map((order) => order.orderNumber)))) return;
     setFailures([]);
     setWarnings([]);
     setBulkPending(action);

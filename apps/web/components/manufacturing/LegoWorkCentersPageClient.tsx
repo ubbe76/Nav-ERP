@@ -12,6 +12,7 @@ import { NewLegoWorkCenterForm } from "./NewLegoWorkCenterForm";
 import type { Supplier, WorkCenter } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
+import { useCan } from "../PermissionsProvider";
 
 // Legoresurser — subcontract resources: external suppliers performing an
 // operation. Same register pattern as /tillverkning/resurser but without
@@ -28,6 +29,7 @@ export function LegoWorkCentersPageClient({
   suppliers: Supplier[];
 }) {
   const router = useRouter();
+  const canImport = useCan()(["admin"]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<WorkCenter | null>(null);
 
@@ -42,9 +44,12 @@ export function LegoWorkCentersPageClient({
           <Link href="/tillverkning/resurser" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
             Resurser
           </Link>
-          <Link href="/tillverkning/resurser/import" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
-            Importera
-          </Link>
+          {/* The import page is admin-only (it says so to anyone else). */}
+          {canImport && (
+            <Link href="/tillverkning/resurser/import" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
+              Importera
+            </Link>
+          )}
           <Button type="button" variant="primary" onClick={() => setModalOpen(true)}>
             + Ny legoresurs
           </Button>

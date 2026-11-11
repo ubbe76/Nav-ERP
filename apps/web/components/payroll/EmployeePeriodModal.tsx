@@ -1,7 +1,7 @@
 "use client";
 
-import { confirmDelete } from "../../lib/confirm";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { confirmDelete, confirmDialog } from "../../lib/confirm";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
@@ -89,10 +89,20 @@ export function EmployeePeriodModal({
   onClose: () => void;
 }) {
   const monthName = MONTH_NAMES_SV[month - 1]!;
+  // PeriodDetail keeps this true while an open correction differs from what
+  // it was opened with, so every way of closing the modal can ask first.
+  const dirtyRef = useRef(false);
+  async function requestClose() {
+    if (dirtyRef.current && !(await confirmDialog("Ändringen på närvaron är inte sparad. Stäng ändå?", { confirmLabel: "Stäng" }))) {
+      return;
+    }
+    dirtyRef.current = false;
+    onClose();
+  }
   return (
     <Modal
       open={employee !== null}
-      onClose={onClose}
+      onClose={() => void requestClose()}
       title={employee ? `${employee.name} · ${monthName} ${year}` : ""}
     >
       {employee && (
@@ -102,7 +112,8 @@ export function EmployeePeriodModal({
           year={year}
           month={month}
           periodLocked={periodLocked}
-          onClose={onClose}
+          onClose={() => void requestClose()}
+          dirtyRef={dirtyRef}
         />
       )}
     </Modal>
@@ -149,12 +160,14 @@ function PeriodDetail({
   month,
   periodLocked,
   onClose,
+  dirtyRef,
 }: {
   employeeId: string;
   year: number;
   month: number;
   periodLocked: boolean;
   onClose: () => void;
+  dirtyRef: { current: boolean };
 }) {
   const router = useRouter();
   const [data, setData] = useState<EmployeePeriodDays | null>(null);
@@ -182,6 +195,17 @@ function PeriodDetail({
     initialStopNote: string;
   } | null>(null);
   const [reasons, setReasons] = useState<AttendanceDeviationReason[]>([]);
+  // While a correction is open every other action is off: a reload after
+  // one of them used to throw the half-edited row away.
+  const busy = pending || editing !== null;
+  dirtyRef.current =
+    editing !== null &&
+    (editing.startedAt !== editing.initialStartedAt ||
+      editing.stoppedAt !== editing.initialStoppedAt ||
+      editing.startReasonId !== editing.initialStartReasonId ||
+      editing.startNote !== editing.initialStartNote ||
+      editing.stopReasonId !== editing.initialStopReasonId ||
+      editing.stopNote !== editing.initialStopNote);
 
   // Quick-add frånvaro (open period only) — prefilled from the first day with
   // unaccounted time on every (re)load.
@@ -189,6 +213,9 @@ function PeriodDetail({
   const [absenceDate, setAbsenceDate] = useState("");
   const [absenceHours, setAbsenceHours] = useState("");
   const [absenceNote, setAbsenceNote] = useState("");
+  // Manual wins: once the user has touched Datum/Timmar the reload keeps them
+  // (read when the answer lands, hence a ref).
+  const absenceTouched = useRef(false);
 
   const load = useCallback(async () => {
     const [detail, types, reasonList] = await Promise.all([
@@ -201,11 +228,11 @@ function PeriodDetail({
     setData(detail);
     setAbsenceTypes(types);
     setReasons(reasonList);
-    setEditing(null);
-    const firstUnaccounted = detail.days.find((day) => day.unaccountedMinutes > 0);
-    setAbsenceDate(firstUnaccounted?.date ?? detail.days[0]?.date ?? "");
-    setAbsenceHours(firstUnaccounted ? minutesToHoursInput(firstUnaccounted.unaccountedMinutes) : "");
-    setAbsenceNote("");
+    if (!absenceTouched.current) {
+      const firstUnaccounted = detail.days.find((day) => day.unaccountedMinutes > 0);
+      setAbsenceDate(firstUnaccounted?.date ?? detail.days[0]?.date ?? "");
+      setAbsenceHours(firstUnaccounted ? minutesToHoursInput(firstUnaccounted.unaccountedMinutes) : "");
+    }
   }, [employeeId, year, month, periodLocked]);
 
   useEffect(() => {
@@ -300,6 +327,7 @@ function PeriodDetail({
         `/api/v1/attendance-sessions/${editing.id}`,
         { method: "PATCH", body: JSON.stringify(body) }
       );
+      setEditing(null);
       await afterMutation();
       const stop = body.stoppedAt ? toClock(body.stoppedAt) : "";
       if ((result.pausedWorkSessions ?? 0) > 0) {
@@ -401,6 +429,8 @@ function PeriodDetail({
         }),
       });
       setAbsenceTypeId("");
+      setAbsenceNote("");
+      absenceTouched.current = false;
       await afterMutation();
     } catch (err) {
       setError(correctionErrorMessage(err, "Kunde inte registrera frånvaron"));
@@ -474,7 +504,7 @@ function PeriodDetail({
                     aria-label="Övertid ersätts som"
                     value={day.overtimeDisposition ?? "payout"}
                     onChange={(e) => setDisposition(day.date, e.target.value as OvertimeCompensation)}
-                    disabled={pending}
+                    disabled={busy}
                   >
                     {(Object.keys(OVERTIME_COMPENSATION_LABELS) as OvertimeCompensation[]).map((value) => (
                       <option key={value} value={value}>
@@ -487,7 +517,7 @@ function PeriodDetail({
                       type="button"
                       variant="ghost"
                       size="small"
-                      disabled={pending}
+                      disabled={busy}
                       onClick={() => clearDisposition(day.date)}
                     >
                       Återställ till standard
@@ -574,6 +604,9 @@ function PeriodDetail({
                       <Button type="button" variant="secondary" size="small" disabled={pending} onClick={saveSession}>
                         Spara
                       </Button>
+                      <Button type="button" variant="ghost" size="small" disabled={pending} onClick={() => setEditing(null)}>
+                        Avbryt
+                      </Button>
                     </>
                   ) : (
                     <>
@@ -591,6 +624,7 @@ function PeriodDetail({
                           type="button"
                           variant="ghost"
                           size="small"
+                          disabled={busy}
                           onClick={() => {
                             const startedAt = toDateTimeLocalValue(session.startedAt);
                             const stoppedAt = session.stoppedAt ? toDateTimeLocalValue(session.stoppedAt) : "";
@@ -621,7 +655,7 @@ function PeriodDetail({
                       type="button"
                       variant="ghost"
                       size="small"
-                      disabled={pending}
+                      disabled={busy}
                       onClick={() => deleteSession(session.id)}
                     >
                       Ta bort
@@ -651,7 +685,7 @@ function PeriodDetail({
                       type="button"
                       variant="ghost"
                       size="small"
-                      disabled={pending}
+                      disabled={busy}
                       onClick={() => deleteAbsence(absence.id)}
                     >
                       Ta bort
@@ -693,7 +727,10 @@ function PeriodDetail({
                   required
                   size="sm"
                   value={absenceDate}
-                  onChange={(e) => setAbsenceDate(e.target.value)}
+                  onChange={(e) => {
+                    absenceTouched.current = true;
+                    setAbsenceDate(e.target.value);
+                  }}
                 />
               </Field>
             </FormRow>
@@ -705,7 +742,10 @@ function PeriodDetail({
                   placeholder="t.ex. 8 eller 4,5"
                   size="sm"
                   value={absenceHours}
-                  onChange={(e) => setAbsenceHours(e.target.value)}
+                  onChange={(e) => {
+                    absenceTouched.current = true;
+                    setAbsenceHours(e.target.value);
+                  }}
                 />
               </Field>
               <Field label="Anteckning" htmlFor="detailAbsenceNote">
@@ -717,7 +757,7 @@ function PeriodDetail({
               </Field>
             </FormRow>
             <FormActions>
-              <Button type="submit" variant="secondary" disabled={pending}>
+              <Button type="submit" variant="secondary" disabled={busy}>
                 {pending ? "Registrerar…" : "Registrera"}
               </Button>
             </FormActions>

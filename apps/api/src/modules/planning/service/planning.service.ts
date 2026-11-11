@@ -566,10 +566,12 @@ export interface PurchaseOrderCreator {
 }
 
 export interface ManufacturingOrderCreator {
+  // releaseWarnings: the new TO's release shortage warnings (it is released
+  // at creation), passed on in Skapa ordrar's result.
   createManufacturingOrder(
     input: { articleId: string; quantity: number; note?: string; dueDate?: string },
     createdBy: string | null
-  ): Promise<{ id: string; orderNumber: string }>;
+  ): Promise<{ id: string; orderNumber: string; releaseWarnings?: string[] }>;
   // Konfigurator 4c: a configured proposal's TO is made FROM its KO row — the
   // row owns the choices (and the manufacturing service derives the
   // structure, re-checking the row's key under the row lock).
@@ -577,7 +579,7 @@ export interface ManufacturingOrderCreator {
     rowId: string,
     input: { quantity?: number; dueDate?: string | null; onlyUncovered?: boolean },
     createdBy: string | null
-  ): Promise<{ id: string; orderNumber: string }>;
+  ): Promise<{ id: string; orderNumber: string; releaseWarnings?: string[] }>;
   // Reservationen: the same create inside the caller's transaction (the
   // whole tree of TOs, all or nothing), with the weeks the check booked
   // written as the plan (by sequence number and resource — an alternative
@@ -676,7 +678,10 @@ export interface CreatedOrdersResult {
   // supplierId travels with the order so the caller can look the supplier's
   // email up — the behovsberäkning offers to mail the draft straight away.
   purchaseOrders: { id: string; orderNumber: string; supplierId: string; supplierName: string; rowCount: number }[];
-  manufacturingOrders: { id: string; orderNumber: string; articleNumber: string }[];
+  // releaseWarnings: the new TO is released at creation, and these are the
+  // shortage warnings its release gave (as on Ny tillverkningsorder) — the
+  // web shows them in the result and hands them to the TO card.
+  manufacturingOrders: { id: string; orderNumber: string; articleNumber: string; releaseWarnings: string[] }[];
   errors: { articleId: string; articleNumber: string; message: string }[];
   // Fasta leveransdagar: an IO row whose earliest possible arrival (lead
   // time, the supplier's days, transit) comes after the demand — and, since
@@ -3054,6 +3059,7 @@ export function createPlanningService(
               id: mo.id,
               orderNumber: mo.orderNumber,
               articleNumber: numberFor(proposal.articleId),
+              releaseWarnings: mo.releaseWarnings ?? [],
             });
             pushLateManufacturing(mo.orderNumber, proposal.articleId, suggestion, proposal.reason);
           } catch (err) {
@@ -3090,6 +3096,7 @@ export function createPlanningService(
               id: mo.id,
               orderNumber: mo.orderNumber,
               articleNumber: numberFor(proposal.articleId),
+              releaseWarnings: mo.releaseWarnings ?? [],
             });
             pushLateManufacturing(mo.orderNumber, proposal.articleId, suggestion, proposal.reason);
           } catch (err) {

@@ -9,6 +9,7 @@ import { apiFetch } from "../../lib/api";
 import type { SystemSettings } from "../../lib/types";
 import cardStyles from "../system/SettingsForm.module.css";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 
 // PAXml löneart codes for the payroll export (löneunderlag) and the daily
 // overtime grace period. The codes themselves mean nothing to NAV — they are
@@ -34,6 +35,8 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  useUnsavedGuard(dirty);
 
   async function save(body: Partial<SystemSettings>) {
     setError(null);
@@ -100,13 +103,14 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
       setReasonRequired(updated.attendanceReasonRequired);
       setToleranceMinutes(String(updated.attendanceReasonToleranceMinutes));
       setOvertimeChoice(updated.terminalOvertimeChoice);
+      setDirty(false);
       setSaved(true);
     }
   }
 
   return (
     <div className={cardStyles.card}>
-      <Form onSubmit={handleSave}>
+      <Form onSubmit={handleSave} onChange={() => setDirty(true)}>
         <div>
           <div className={cardStyles.label}>Lön, PAXml &amp; schema</div>
           <div className={cardStyles.description}>

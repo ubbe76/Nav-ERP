@@ -13,7 +13,7 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import { confirmDialog } from "../../lib/confirm";
 import { notify } from "../../lib/notice";
-import { formatQuantity } from "../../lib/format";
+import { formatQuantity, round4 } from "../../lib/format";
 import { defaultReportKind, suggestedConsumeQuantity, suggestedReportHours } from "../../lib/moSuggestions";
 import { groupReportRows, moOperationLabel } from "../../lib/moReportRows";
 import { stockholmToday } from "../../lib/date";
@@ -99,6 +99,11 @@ export function ReportPanel({
 }: ReportPanelProps) {
   const orderDone = orderStatus === "done";
   const [locationId, setLocationId] = useState(""); // "" = Automatiskt (own location, then other locations with stock)
+  // Förbruka refuses a spärrad lagerplats (409 stock-location-blocked); the
+  // reports take the material with Automatiskt then. Förbruka does the same
+  // here, so the one field means one thing for every row on the card.
+  const chosenLocation = locations.find((l) => l.id === locationId);
+  const consumeLocationId = chosenLocation?.blocked ? "" : locationId;
   const scrapReasonOptions = useScrapReasons();
   const { groups, unlinked } = groupReportRows(operations, materials);
 
@@ -155,7 +160,7 @@ export function ReportPanel({
               onDone={onDone}
             />
             {linked.map((m) => (
-              <MaterialRow key={m.id} orderId={orderId} material={m} locationId={locationId} canUndo={canUndoReports} onDone={onDone} />
+              <MaterialRow key={m.id} orderId={orderId} material={m} locationId={consumeLocationId} canUndo={canUndoReports} onDone={onDone} />
             ))}
           </div>
         ))}
@@ -164,7 +169,7 @@ export function ReportPanel({
           <div className={styles.section}>
             <div className={styles.groupTitle}>Vid slutrapportering</div>
             {unlinked.map((m) => (
-              <MaterialRow key={m.id} orderId={orderId} material={m} locationId={locationId} canUndo={canUndoReports} onDone={onDone} />
+              <MaterialRow key={m.id} orderId={orderId} material={m} locationId={consumeLocationId} canUndo={canUndoReports} onDone={onDone} />
             ))}
           </div>
         )}
@@ -433,7 +438,13 @@ function MaterialRow({
           method: "POST",
           body: JSON.stringify({
             locationId: locationId || undefined,
-            quantity: toBaseQuantity(Number(quantity), m.unitFactor ?? null),
+            // Untouched: the exact rest in the base unit. The prefill is
+            // rounded in the row's unit, and turning it back (2 st shown as
+            // 0,6667 förp of 3 st) gave 2,0001 st — refused as over-consumption.
+            quantity:
+              typedQuantity === null
+                ? round4(Number(m.quantityPlanned) - Number(m.quantityConsumed))
+                : toBaseQuantity(Number(quantity), m.unitFactor ?? null),
             allowMaterialShortage,
           }),
         })
@@ -514,7 +525,11 @@ function ReportTimeRow({
   onDone: () => void;
 }) {
   const [employeeId, setEmployeeId] = useState(employees[0]?.id ?? "");
-  const [operationId, setOperationId] = useState(operations[0]?.id ?? "");
+  const [chosenOperationId, setOperationId] = useState(operations[0]?.id ?? "");
+  // The list changes under the form (+ Lägg till operation on an order that
+  // had none, Ta bort of the chosen one): fall back to the first, as the
+  // select shows, instead of sending "" or a removed id.
+  const operationId = operations.some((op) => op.id === chosenOperationId) ? chosenOperationId : (operations[0]?.id ?? "");
   const [date, setDate] = useState(stockholmToday());
   // Timmar is prefilled with the operation's theoretical time less what is
   // already reported on it; a typed value wins until another operation is
@@ -657,7 +672,14 @@ function CompleteOrderRow({
   const [locationId, setLocationId] = useState(""); // "" = artikelns lagerplats
   // Antal = what goes into stock NOW, on top of any delinleverans — so it
   // defaults to what remains; 0 closes a short order without receiving more.
-  const [quantity, setQuantity] = useState(String(Math.max(Number(orderQuantity) - received, 0)));
+  // The default follows the order as it is now (a Slutför on the last
+  // operation receives 4 of 10 while the row stays on screen), and an
+  // untouched field sends no quantity: the server takes the rest under the
+  // order's lock, also after a receipt from the terminal meanwhile. A
+  // remembered 10 here received 10 more on top of the 4 (14 of 10).
+  const remaining = Math.max(Number(orderQuantity) - received, 0);
+  const [typedQuantity, setTypedQuantity] = useState<string | null>(null);
+  const quantity = typedQuantity ?? String(remaining);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -680,10 +702,15 @@ function CompleteOrderRow({
       const closed = await runWithShortageConfirm((allowMaterialShortage) =>
         apiFetch(`/api/v1/manufacturing-orders/${orderId}/complete`, {
           method: "POST",
-          body: JSON.stringify({ locationId: locationId || undefined, quantity: Number(quantity), allowMaterialShortage }),
+          body: JSON.stringify({
+            locationId: locationId || undefined,
+            ...(typedQuantity !== null ? { quantity: Number(typedQuantity) } : {}),
+            allowMaterialShortage,
+          }),
         })
       );
       if (closed === null) return;
+      setTypedQuantity(null);
       // Återkoppling: the order is done; Ångra opens it again and takes back
       // what this Slutför order received and drew.
       const reportId = (closed as { reportId?: string }).reportId ?? null;
@@ -713,7 +740,7 @@ function CompleteOrderRow({
             required
             size="sm"
             value={quantity}
-            onChange={(e) => setQuantity(e.target.value)}
+            onChange={(e) => setTypedQuantity(e.target.value)}
           />
         </Cell>
         {/* Stock locations are optional — the select only appears when some exist. */}

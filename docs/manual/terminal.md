@@ -81,5 +81,5 @@ ATF-saldot och reglerna hanteras på personalkortet — se [Personal & tid](/hja
 
 ## Bra att veta
 
-- Terminalen återgår själv till sifferknappsatsen efter en stunds inaktivitet.
+- Terminalen återgår själv till sifferknappsatsen efter en stunds inaktivitet — aldrig mitt i en stämpling som sparas, och en obesvarad fråga om **Rapportera ändå** försvinner då utan att något sparas. Det du skrivit på utstämplingen (antal, kassation, **Operationen är klar**) töms varje gång utstämplingen öppnas, så nästa person aldrig ärver ett halvifyllt formulär.
 - Hemvyn visar vilka som är närvarostämplade just nu.

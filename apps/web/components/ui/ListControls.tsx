@@ -39,7 +39,7 @@ export function useListNavigation() {
   // Resolves false when the unsaved-changes prompt was declined (nothing
   // navigated). skipGuard: the caller has already asked.
   async function apply(updates: Record<string, string | null>, resetPage: boolean, skipGuard = false): Promise<boolean> {
-    if (!skipGuard && !(await confirmLeave())) return false;
+    if (!skipGuard && !(await confirmLeave({ listNavigation: true }))) return false;
     const next = new URLSearchParams(searchParams.toString());
     for (const [key, value] of Object.entries(updates)) {
       if (value === null || value === "") next.delete(key);
@@ -218,7 +218,7 @@ export function Pagination({ total, pageSize = LIST_PAGE_SIZE }: { total: number
   // then drops the now-stale "page" param and re-runs the server component
   // so listApiQuery()/<Pagination> pick up the new size on the next render.
   async function onPageSizeChange(next: number) {
-    if (!(await confirmLeave())) return;
+    if (!(await confirmLeave({ listNavigation: true }))) return;
     try {
       await apiFetch("/api/v1/me/settings", { method: "PATCH", body: JSON.stringify({ listPageSize: next }) });
     } catch {

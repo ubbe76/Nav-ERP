@@ -2877,7 +2877,8 @@ export interface MOReport {
   undoneAt: string | null;
   undoneByName: string | null;
   // locationName null = a service component (tjänst): consumed, never drawn from stock.
-  materials: { articleNumber: string; quantity: string; locationName: string | null }[];
+  // materialConsumptionId: the TO's material row the line drew for.
+  materials: { materialConsumptionId: string; articleNumber: string; quantity: string; locationName: string | null }[];
 }
 
 export type EmploymentType = "hourly" | "monthly";
@@ -5061,7 +5062,9 @@ export interface PlanningOrdersResult {
   // supplierId is what the "Maila"-button on the result card resolves the
   // recipient from (see fetchDefaultRecipient in lib/mail.ts).
   purchaseOrders: { id: string; orderNumber: string; supplierId: string; supplierName: string; rowCount: number }[];
-  manufacturingOrders: { id: string; orderNumber: string; articleNumber: string }[];
+  // releaseWarnings: the new TO's release shortage warnings (absent from an
+  // older API) — shown in the result and handed to the TO card.
+  manufacturingOrders: { id: string; orderNumber: string; articleNumber: string; releaseWarnings?: string[] }[];
   errors: { articleId: string; articleNumber: string; message: string }[];
   // Fasta leveransdagar: IO rows whose earliest arrival comes after the demand,
   // and TOs whose färdigdatum cannot make the demand (#13).

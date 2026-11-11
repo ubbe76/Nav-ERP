@@ -47,12 +47,28 @@ export async function runOrderAction(orderId: string, action: OrderAction): Prom
   return [];
 }
 
-// Makulera is the one irreversible action here — a cancelled TO cannot be
-// reopened — so both surfaces ask first, with the same wording.
+// Makulera and Stäng order cannot be undone — a cancelled TO cannot be
+// reopened, and a closed one takes no Ångra and no efterrapportering — so
+// both surfaces ask first, with the same wording.
 export function confirmCancel(orderNumbers: string[]): Promise<boolean> {
   const what = orderNumbers.length === 1 ? orderNumbers[0] : `${orderNumbers.length} tillverkningsordrar`;
   return confirmDialog(`Makulera ${what}? En makulerad order kan inte återöppnas.`, {
     confirmLabel: "Makulera",
     danger: true,
   });
+}
+
+export function confirmClose(orderNumbers: string[]): Promise<boolean> {
+  const what = orderNumbers.length === 1 ? orderNumbers[0] : `${orderNumbers.length} tillverkningsordrar`;
+  return confirmDialog(
+    `Stäng ${what}? En stängd order går inte att ångra eller efterrapportera på.`,
+    { confirmLabel: "Stäng order" }
+  );
+}
+
+// The question an action asks before it runs, if any: true = go ahead.
+export async function confirmOrderAction(action: OrderAction, orderNumbers: string[]): Promise<boolean> {
+  if (action === "cancel") return confirmCancel(orderNumbers);
+  if (action === "close") return confirmClose(orderNumbers);
+  return true;
 }

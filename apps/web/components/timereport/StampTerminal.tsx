@@ -7,8 +7,7 @@ import { Wordmark } from "../ui/Wordmark";
 import { FileText } from "lucide-react";
 import { API_URL, ApiError, apiFetch } from "../../lib/api";
 import { formatStockholmDate, stockholmToday, toDateTimeLocalValue } from "../../lib/date";
-import { apiErrorMessage } from "../../lib/errorMessages";
-import { runWithShortageConfirm } from "../../lib/materialShortage";
+import { apiErrorMessage, shortageList } from "../../lib/errorMessages";
 import type {
   AtfStatus,
   AttendanceInputRequiredBody,
@@ -112,7 +111,7 @@ function stockholmDay(iso: string | number) {
 }
 
 export function StampTerminal({
-  employees,
+  employees: initialEmployees,
   initialOpenSessions,
   initialOpenAttendance,
   stations,
@@ -128,6 +127,10 @@ export function StampTerminal({
   timeKindSplit?: boolean;
 }) {
   const [step, setStep] = useState<Step>({ name: "keypad" });
+  // The terminal stays open for days: a number not in the list loaded with
+  // the page is looked up once more before it is refused (someone hired
+  // since, or made active again).
+  const [employees, setEmployees] = useState(initialEmployees);
   const [entry, setEntry] = useState("");
   const [openSessions, setOpenSessions] = useState(initialOpenSessions);
   const [openAttendance, setOpenAttendance] = useState(initialOpenAttendance);
@@ -145,6 +148,10 @@ export function StampTerminal({
   const [scrapReason, setScrapReason] = useState("");
   // Kassationsorsaker from Kvalitetsorsaker: Orsak is chosen, scrapReason holds the Kommentar.
   const [scrapReasonId, setScrapReasonId] = useState("");
+  // Materialbrist i läget warn: the "Rapportera ändå?" question, asked on
+  // the stamp-out step itself (not the app dialog) so a return to the keypad
+  // takes it away — the next person must never answer it for someone else.
+  const [shortageQuestion, setShortageQuestion] = useState<string | null>(null);
   const scrapReasonOptions = useScrapReasons(step.name === "stampOut");
   const scrapReasonRegister = scrapReasonOptions !== null && scrapReasonOptions.length > 0;
   const [atfHours, setAtfHours] = useState("");
@@ -178,12 +185,23 @@ export function StampTerminal({
   // Shared terminal: any pause mid-flow returns to the keypad so the next
   // person never acts as someone else.
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The stamp-out form: emptied whenever it opens and on every return to the
+  // keypad, so one person's Antal OK, Kasserat or "Operationen är klar" is
+  // never reported on the next stamp-out — someone else's or their own.
+  const clearStampOutFields = useCallback(() => {
+    setNote("");
+    setMarkDone(false);
+    setQuantityOk("");
+    setQuantityScrapped("");
+    setScrapReason("");
+    setScrapReasonId("");
+    setShortageQuestion(null);
+  }, []);
   const resetToKeypad = useCallback(() => {
     setStep({ name: "keypad" });
     setEntry("");
     setError(null);
-    setNote("");
-    setMarkDone(false);
+    clearStampOutFields();
     setAtfHours("");
     setForgottenStop("");
     setDevReasonId("");
@@ -198,7 +216,7 @@ export function StampTerminal({
     setRows([]);
     setMaterials([]);
     setListError(null);
-  }, []);
+  }, [clearStampOutFields]);
   // What the idle timeout does — normally back to the keypad, but after Ta
   // ut ATF the withdrawal is already registered, so the deviation step
   // finishes the stop with the defaults first (set further down, where the
@@ -206,8 +224,12 @@ export function StampTerminal({
   // latest state).
   const onIdleRef = useRef<() => void>(resetToKeypad);
   const onIdle = useCallback(() => onIdleRef.current(), []);
+  // Paused while a request is on its way (and Tillbaka/Klar are disabled):
+  // a return to the keypad mid-request would let the answer land on the
+  // next person's screen — someone else's home view, acting as them. The
+  // full timeout starts again when the request is done.
   useEffect(() => {
-    if (step.name === "keypad") return;
+    if (step.name === "keypad" || busy) return;
     if (idleTimer.current) clearTimeout(idleTimer.current);
     idleTimer.current = setTimeout(onIdle, IDLE_RESET_MS);
     return () => {
@@ -215,9 +237,17 @@ export function StampTerminal({
     };
   }, [
     step,
+    busy,
     entry,
     note,
     markDone,
+    quantityOk,
+    quantityScrapped,
+    scrapReason,
+    scrapReasonId,
+    shortageQuestion,
+    atfHours,
+    forgottenStop,
     search,
     stationIds,
     materialId,
@@ -232,7 +262,7 @@ export function StampTerminal({
 
   // Browsing a long operation list (scroll/touch) counts as activity, so the
   // operator isn't sent back to the keypad mid-scroll.
-  const listActive = step.name === "pickOperations";
+  const listActive = step.name === "pickOperations" && !busy;
   useEffect(() => {
     if (!listActive) return;
     const bump = () => {
@@ -253,6 +283,16 @@ export function StampTerminal({
     setOpenAttendance(attendance);
     return { sessions, attendance };
   }, []);
+  // After a write that went through: a failed reload must not look like the
+  // write failed — the step would stay put and a second tap would stamp,
+  // report or withdraw ATF again. The cached lists stay until the next one.
+  const refreshQuietly = useCallback(async () => {
+    try {
+      await refresh();
+    } catch {
+      // keep the cached lists
+    }
+  }, [refresh]);
 
   // Load the operation list when the view opens and when station/material
   // change. A sequence number makes a late response harmless.
@@ -306,25 +346,40 @@ export function StampTerminal({
 
   async function confirmEntry() {
     if (busy) return;
-    const employee = employees.find(
-      (e) => e.employeeNumber === entry || e.employeeNumber.replace(/\D/g, "") === entry
-    );
-    if (!employee) {
-      setError(entry ? `Inget anställningsnummer matchar ${entry}.` : "Knappa in ditt anställningsnummer.");
-      setEntry("");
+    if (!entry) {
+      setError("Knappa in ditt anställningsnummer.");
       return;
     }
+    const typed = entry;
+    const matches = (e: EmployeeDirectoryEntry) =>
+      e.employeeNumber === typed || e.employeeNumber.replace(/\D/g, "") === typed;
     setError(null);
     setEntry("");
+    setBusy(true);
+    let employee = employees.find(matches);
     // Fresh lists before deciding: stamps closed elsewhere (an operation
     // turning done stamps everyone out, regel 10) or attendance fixed in
     // Attestering must not show up stale. On failure the cached lists do.
     let attendance = openAttendance;
-    setBusy(true);
     try {
-      attendance = (await refresh()).attendance;
-    } catch {
-      // keep the cached lists
+      if (!employee) {
+        try {
+          const fresh = (await apiFetch<EmployeeDirectoryEntry[]>("/api/v1/employees/directory")).filter((e) => e.active);
+          setEmployees(fresh);
+          employee = fresh.find(matches);
+        } catch {
+          // keep the list loaded with the page
+        }
+        if (!employee) {
+          setError(`Inget anställningsnummer matchar ${typed}.`);
+          return;
+        }
+      }
+      try {
+        attendance = (await refresh()).attendance;
+      } catch {
+        // keep the cached lists
+      }
     } finally {
       setBusy(false);
     }
@@ -497,7 +552,7 @@ export function StampTerminal({
           // answer first: ask, then send this and the remaining ones again.
           const required = inputRequiredBody(err);
           if (required) {
-            await refresh();
+            await refreshQuietly();
             return void (await openDeviation(
               employee,
               required,
@@ -521,7 +576,7 @@ export function StampTerminal({
           failed.push(operation);
         }
       }
-      await refresh();
+      await refreshQuietly();
       if (failed.length === 0) {
         // Only what was started: a row hidden by Sök/Bara redo was not.
         const started = new Set(operations.map((op) => op.operationId));
@@ -563,7 +618,7 @@ export function StampTerminal({
           ...(forgottenStoppedAt ? { forgottenStoppedAt } : {}),
         }),
       });
-      await refresh();
+      await refreshQuietly();
       setError(null);
       if (forgottenStoppedAt) {
         setNotice(`Närvaron är rättad och du är instämplad igen, ${employee.name.split(" ")[0]}.`);
@@ -605,7 +660,7 @@ export function StampTerminal({
         `/api/v1/attendance-sessions/${attendanceId}/stop`,
         { method: "POST", ...(answers ? { body: JSON.stringify(answers) } : {}) }
       );
-      await refresh();
+      await refreshQuietly();
       setError(null);
       setNotice(
         result.pausedWorkSessions === 0
@@ -667,12 +722,14 @@ export function StampTerminal({
         }),
       });
       if (!attendance) {
-        await refresh();
+        await refreshQuietly();
         setNotice(`${formatHours(Math.round(hours * 60))} ATF uttaget för ${employee.name.split(" ")[0]}.`);
         resetToKeypad();
         return;
       }
-      await finishAtf(employee, { kind: "atf", attendanceId: attendance.id, atfTransactionId: transaction.id, hours });
+      await finishAtf(employee, { kind: "atf", attendanceId: attendance.id, atfTransactionId: transaction.id, hours }, undefined, {
+        fromAtfStep: true,
+      });
     } catch (err) {
       setError(apiErrorMessage(err, "ATF-uttaget misslyckades."));
     } finally {
@@ -686,23 +743,41 @@ export function StampTerminal({
   async function finishAtf(
     employee: EmployeeDirectoryEntry,
     pending: Extract<PendingAttendanceAction, { kind: "atf" }>,
-    answers?: DeviationAnswers
+    answers?: DeviationAnswers,
+    { fromAtfStep = false }: { fromAtfStep?: boolean } = {}
   ) {
+    const first = employee.name.split(" ")[0];
+    const hoursText = formatHours(Math.round(pending.hours * 60));
     setBusy(true);
     try {
       await apiFetch(`/api/v1/attendance-sessions/${pending.attendanceId}/stop`, {
         method: "POST",
         body: JSON.stringify({ ...answers, atfTransactionId: pending.atfTransactionId }),
       });
-      await refresh();
-      setNotice(
-        `${formatHours(Math.round(pending.hours * 60))} ATF uttaget för ${employee.name.split(" ")[0]} — närvaron är utstämplad.`
-      );
+      await refreshQuietly();
+      setNotice(`${hoursText} ATF uttaget för ${first} — närvaron är utstämplad.`);
       resetToKeypad();
     } catch (err) {
       const required = inputRequiredBody(err);
       if (required) return void (await openDeviation(employee, required, pending, answers ?? {}));
       if (answers?.reason && isReasonInvalid(err)) return void (await reasonInvalid(err));
+      if (err instanceof ApiError && err.code === "attendance-session-already-stopped") {
+        // Stamped out elsewhere (Attestering, another terminal) meanwhile:
+        // the withdrawal stands and there is nothing left to stop.
+        await refreshQuietly();
+        resetToKeypad();
+        setNotice(`${hoursText} ATF uttaget för ${first} — närvaron var redan utstämplad.`);
+        return;
+      }
+      if (fromAtfStep) {
+        // The withdrawal is already registered: leave the ATF step, or the
+        // next tap on Ta ut ATF would withdraw the hours a second time.
+        resetToKeypad();
+        setNotice(
+          `ATF-uttaget är registrerat, men närvaron kunde inte stämplas ut (${apiErrorMessage(err, "okänt fel")}). Tryck Gå hem.`
+        );
+        return;
+      }
       setError(apiErrorMessage(err, "ATF-uttaget misslyckades."));
     } finally {
       setBusy(false);
@@ -735,11 +810,7 @@ export function StampTerminal({
           atfTransactionId: pending.atfTransactionId,
         }),
       });
-      try {
-        await refresh();
-      } catch {
-        // keep the cached lists
-      }
+      await refreshQuietly();
       resetToKeypad();
       setNotice(`${formatHours(Math.round(pending.hours * 60))} ATF uttaget för ${first} — närvaron är utstämplad.`);
     } catch (err) {
@@ -775,11 +846,7 @@ export function StampTerminal({
           body: JSON.stringify({ quantityOk: 0, quantityScrapped: 0 }),
         });
       } catch (err) {
-        try {
-          await refresh();
-        } catch {
-          // keep the cached lists
-        }
+        await refreshQuietly();
         setStep({ name: "home", employee });
         setError(apiErrorMessage(err, "Ställ klart misslyckades."));
         return;
@@ -801,18 +868,18 @@ export function StampTerminal({
       } catch (err) {
         setError(apiErrorMessage(err, "Ställtiden sparades men instämplingen på produktion misslyckades."));
       }
-      try {
-        await refresh();
-      } catch {
-        // keep the cached lists
-      }
+      await refreshQuietly();
       setStep({ name: "home", employee });
     } finally {
       setBusy(false);
     }
   }
 
-  async function stampOut(employee: EmployeeDirectoryEntry, session: StampSession) {
+  // Stämpla ut — and Rapportera ändå (allowMaterialShortage) after the
+  // shortage question, asked on this step: the first answer is a 409
+  // material-shortage with overridable: true (Materialbrist vid rapportering
+  // = warn); block mode is an ordinary error.
+  async function stampOut(employee: EmployeeDirectoryEntry, session: StampSession, allowMaterialShortage = false) {
     if (Number(quantityScrapped) > 0 && scrapReasonRegister && scrapReasonId === "") {
       setError("Välj en orsak när kasserat antal är större än 0.");
       return;
@@ -821,24 +888,21 @@ export function StampTerminal({
       setError("Ange en kassationsorsak när kasserat antal är större än 0.");
       return;
     }
+    setShortageQuestion(null);
     setBusy(true);
     try {
-      const stopped = await runWithShortageConfirm((allowMaterialShortage) =>
-        apiFetch(`/api/v1/stamp-sessions/${session.id}/stop`, {
-          method: "POST",
-          body: JSON.stringify({
-            note: note.trim() || undefined,
-            quantityOk: Number(quantityOk) || 0,
-            quantityScrapped: Number(quantityScrapped) || 0,
-            ...(Number(quantityScrapped) > 0 && scrapReasonRegister ? { scrapReasonId } : {}),
-            scrapReason: scrapReason.trim() || undefined,
-            markOperationDone: markDone,
-            allowMaterialShortage,
-          }),
-        })
-      );
-      // Declined "Rapportera ändå?": stay on the stamp-out step, nothing sent.
-      if (stopped === null) return;
+      const stopped = await apiFetch(`/api/v1/stamp-sessions/${session.id}/stop`, {
+        method: "POST",
+        body: JSON.stringify({
+          note: note.trim() || undefined,
+          quantityOk: Number(quantityOk) || 0,
+          quantityScrapped: Number(quantityScrapped) || 0,
+          ...(Number(quantityScrapped) > 0 && scrapReasonRegister ? { scrapReasonId } : {}),
+          scrapReason: scrapReason.trim() || undefined,
+          markOperationDone: markDone,
+          allowMaterialShortage,
+        }),
+      });
       // Pallkort: a stamp-out that reported a quantity auto-opens the pallet
       // card for exactly that quantity (best effort — a popup blocker may
       // stop it). A stamp-out without a quantity opens nothing.
@@ -853,30 +917,27 @@ export function StampTerminal({
           "noopener"
         );
       }
-      await refresh();
-      setNote("");
-      setMarkDone(false);
-      setQuantityOk("");
-      setQuantityScrapped("");
-      setScrapReason("");
-      setScrapReasonId("");
+      await refreshQuietly();
+      clearStampOutFields();
       setError(null);
       setStep({ name: "home", employee });
     } catch (err) {
+      if (
+        err instanceof ApiError &&
+        err.code === "material-shortage" &&
+        (err.body as { overridable?: unknown } | undefined)?.overridable === true
+      ) {
+        // Nothing is sent until Rapportera ändå; Avbryt (or the return to
+        // the keypad) leaves the person stamped in, as the manual says.
+        setError(null);
+        setShortageQuestion(`Det saknas ingående delar: ${shortageList(err)}. Rapportera ändå?`);
+        return;
+      }
       if (err instanceof ApiError && err.code === "stamp-session-already-stopped") {
         // Stamped out elsewhere (regel 10) while this view was open: show
         // the current stamps instead of the stale one.
-        try {
-          await refresh();
-        } catch {
-          // keep the cached lists
-        }
-        setNote("");
-        setMarkDone(false);
-        setQuantityOk("");
-        setQuantityScrapped("");
-        setScrapReason("");
-        setScrapReasonId("");
+        await refreshQuietly();
+        clearStampOutFields();
         setStep({ name: "home", employee });
       }
       setError(apiErrorMessage(err, "Utstämplingen misslyckades."));
@@ -957,7 +1018,10 @@ export function StampTerminal({
             busy={busy}
             timeKindSplit={timeKindSplit}
             onSetupDone={(session) => setupDone(step.employee, session)}
-            onStampOut={(session) => setStep({ name: "stampOut", employee: step.employee, session })}
+            onStampOut={(session) => {
+              clearStampOutFields();
+              setStep({ name: "stampOut", employee: step.employee, session });
+            }}
             onNewStamp={() => openOperationList(step.employee)}
             onAttendanceIn={() => attendanceIn(step.employee)}
             onGoHome={(attendance) => goHome(step.employee, attendance.id)}
@@ -1005,7 +1069,7 @@ export function StampTerminal({
             >
               Ta ut ATF
             </button>
-            <BackRow onBack={() => setStep({ name: "home", employee: step.employee })} />
+            <BackRow disabled={busy} onBack={() => setStep({ name: "home", employee: step.employee })} />
           </section>
         )}
 
@@ -1043,7 +1107,7 @@ export function StampTerminal({
                 Gå hem nu
               </button>
             )}
-            <BackRow label="Avbryt" onBack={resetToKeypad} />
+            <BackRow label="Avbryt" disabled={busy} onBack={resetToKeypad} />
           </section>
         )}
 
@@ -1136,7 +1200,10 @@ export function StampTerminal({
                   step="any"
                   inputMode="decimal"
                   value={quantityOk}
-                  onChange={(e) => setQuantityOk(e.target.value)}
+                  onChange={(e) => {
+                    setQuantityOk(e.target.value);
+                    setShortageQuestion(null);
+                  }}
                   placeholder="0"
                 />
               </label>
@@ -1148,7 +1215,10 @@ export function StampTerminal({
                   step="any"
                   inputMode="decimal"
                   value={quantityScrapped}
-                  onChange={(e) => setQuantityScrapped(e.target.value)}
+                  onChange={(e) => {
+                    setQuantityScrapped(e.target.value);
+                    setShortageQuestion(null);
+                  }}
                   placeholder="0"
                 />
               </label>
@@ -1197,7 +1267,10 @@ export function StampTerminal({
               type="button"
               className={styles.toggle}
               data-on={markDone}
-              onClick={() => setMarkDone((v) => !v)}
+              onClick={() => {
+                setMarkDone((v) => !v);
+                setShortageQuestion(null);
+              }}
               aria-pressed={markDone}
             >
               <span className={styles.toggleBox} aria-hidden="true" />
@@ -1213,15 +1286,37 @@ export function StampTerminal({
                 Ställ klart
               </button>
             )}
-            <button
-              type="button"
-              className={styles.bigAction}
-              disabled={busy}
-              onClick={() => stampOut(step.employee, step.session)}
-            >
-              Stämpla ut
-            </button>
-            <BackRow onBack={() => setStep({ name: "home", employee: step.employee })} />
+            {shortageQuestion ? (
+              <div className={styles.shortageQuestion} role="alertdialog" aria-label="Materialbrist">
+                <p>{shortageQuestion}</p>
+                <button
+                  type="button"
+                  className={styles.bigAction}
+                  disabled={busy}
+                  onClick={() => stampOut(step.employee, step.session, true)}
+                >
+                  Rapportera ändå
+                </button>
+                <button
+                  type="button"
+                  className={styles.backButton}
+                  disabled={busy}
+                  onClick={() => setShortageQuestion(null)}
+                >
+                  Avbryt
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className={styles.bigAction}
+                disabled={busy}
+                onClick={() => stampOut(step.employee, step.session)}
+              >
+                Stämpla ut
+              </button>
+            )}
+            <BackRow disabled={busy} onBack={() => setStep({ name: "home", employee: step.employee })} />
           </section>
         )}
       </main>
@@ -1419,7 +1514,7 @@ function HomeStep({
         </span>
       </button>
 
-      <BackRow label="Klar" onBack={onDone} />
+      <BackRow label="Klar" disabled={busy} onBack={onDone} />
     </section>
   );
 }
@@ -1522,14 +1617,16 @@ function DeviationStep({
       >
         {isStop ? "Spara och gå hem" : "Spara och stämpla in"}
       </button>
-      <BackRow label="Avbryt" onBack={onCancel} />
+      <BackRow label="Avbryt" disabled={busy} onBack={onCancel} />
     </section>
   );
 }
 
-function BackRow({ label = "Tillbaka", onBack }: { label?: string; onBack: () => void }) {
+// Disabled while a request is on its way: leaving mid-request would let the
+// answer land on a later screen — possibly the next person's.
+function BackRow({ label = "Tillbaka", disabled = false, onBack }: { label?: string; disabled?: boolean; onBack: () => void }) {
   return (
-    <button type="button" className={styles.backButton} onClick={onBack}>
+    <button type="button" className={styles.backButton} disabled={disabled} onClick={onBack}>
       {label}
     </button>
   );
@@ -1918,7 +2015,7 @@ function OperationListView({
             Starta valda{startCount > 0 ? ` (${startCount})` : ""}
           </button>
         )}
-        <BackRow onBack={onBack} />
+        <BackRow disabled={busy} onBack={onBack} />
       </div>
     </section>
   );

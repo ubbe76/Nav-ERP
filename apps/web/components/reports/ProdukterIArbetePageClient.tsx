@@ -9,6 +9,7 @@ import { FormError, FormHint, FormNotice, FormRow, FormStack } from "../ui/Form"
 import { GatedLink } from "../ui/GatedLink";
 import { Table } from "../ui/Table";
 import { API_URL, apiFetch } from "../../lib/api";
+import { apiErrorMessage } from "../../lib/errorMessages";
 import { stockholmToday } from "../../lib/date";
 import { formatMoney, formatQuantity } from "../../lib/format";
 import { WIP_BASIS_LABELS, type WipBasis, type WorkInProgressReport, type WorkInProgressRow } from "../../lib/types";
@@ -54,10 +55,10 @@ export function ProdukterIArbetePageClient({ defaultAsOf, defaultBasis, defaultD
       .then((data) => {
         if (!cancelled) setReport(data);
       })
-      .catch((err: Error) => {
+      .catch((err: unknown) => {
         if (cancelled) return;
         setReport(null);
-        setError(err.message);
+        setError(apiErrorMessage(err, "Kunde inte läsa produkter i arbete."));
       })
       .finally(() => {
         if (!cancelled) setPending(false);
