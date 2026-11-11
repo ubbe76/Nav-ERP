@@ -217,7 +217,7 @@ export function InvoiceCard({
       setEditingRowId(null);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara raden");
+      setError(apiErrorMessage(err, "Kunde inte spara raden"));
     } finally {
       setPending(false);
     }
@@ -231,7 +231,7 @@ export function InvoiceCard({
       await apiFetch(`/api/v1/invoices/${invoice.id}/rows/${row.id}`, { method: "DELETE" });
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ta bort raden");
+      setError(apiErrorMessage(err, "Kunde inte ta bort raden"));
     } finally {
       setPending(false);
     }

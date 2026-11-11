@@ -15,6 +15,7 @@ import { SectionHeading } from "../ui/SectionHeading";
 import { computeLineMargin } from "../../lib/margin";
 import styles from "./KalkylTab.module.css";
 import { formatStockholmDate } from "../../lib/date";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // The markups Pröva påslag sends; absent key = the ones that apply.
 type TryMarkups = { generalMarkupPercent?: number; materialMarkupPercent?: number };
@@ -137,7 +138,7 @@ export function KalkylTab({
       );
       setPreview({ ...result, quantity: requestedQuantity, multiLevel: requestedMultiLevel, markups: requestedMarkups });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte beräkna kalkylen");
+      setError(apiErrorMessage(err, "Kunde inte beräkna kalkylen"));
     } finally {
       setPending(false);
     }
@@ -166,7 +167,7 @@ export function KalkylTab({
       setOpenId(result.calculation.id);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara kalkylen");
+      setError(apiErrorMessage(err, "Kunde inte spara kalkylen"));
     } finally {
       setSaving(false);
     }

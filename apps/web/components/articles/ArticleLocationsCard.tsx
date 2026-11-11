@@ -12,6 +12,7 @@ import { formatQuantity } from "../../lib/format";
 import { locationOptionLabel, moveInList, ownPrimaryLocationId } from "../../lib/stockLocations";
 import type { ArticleLocationPlace, ArticleLocations, StockLocation } from "../../lib/types";
 import styles from "./ArticleLocationsCard.module.css";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 const MAX_ALTERNATIVES = 20;
 
@@ -108,7 +109,7 @@ export function ArticleLocationsCard({
       setAltIds(next.alternatives.map((p) => p.locationId));
       setSaved(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara");
+      setError(apiErrorMessage(err, "Kunde inte spara"));
     } finally {
       setPending(false);
     }

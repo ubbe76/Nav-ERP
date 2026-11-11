@@ -8,6 +8,7 @@ import { FormError, FormHint } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import { formatStockholmDateTime } from "../../lib/date";
 import type { ArticlePriceHistory, ArticlePriceHistoryRow } from "../../lib/types";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 const TITLES: Record<keyof ArticlePriceHistory, string> = {
   standardCost: "Historik för standardkostnad",
@@ -29,7 +30,7 @@ export function PriceHistoryButton({ articleId, kind }: { articleId: string; kin
       const history = await apiFetch<ArticlePriceHistory>(`/api/v1/articles/${articleId}/price-history`);
       setRows(history[kind]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte hämta historiken");
+      setError(apiErrorMessage(err, "Kunde inte hämta historiken"));
     }
   }
 

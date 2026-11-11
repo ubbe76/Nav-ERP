@@ -25,6 +25,7 @@ import {
   type SupplierInvoice,
 } from "../../lib/types";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // Inköp-fliken (Monitor G5 "Inköp"-flik): one tab, five stacked sections —
 // the editable leverantörskatalog on top, then the read-only katalogpris-
@@ -57,7 +58,7 @@ export function InkopTab({ articleId }: { articleId: string }) {
       setPrices(price.rows);
       setInvoices(inv.rows);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte hämta inköpsdata");
+      setError(apiErrorMessage(err, "Kunde inte hämta inköpsdata"));
     }
   }
 
@@ -73,7 +74,7 @@ export function InkopTab({ articleId }: { articleId: string }) {
       await apiFetch(`/api/v1/articles/${articleId}/suppliers/${row.id}`, { method: "DELETE" });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ta bort leverantören");
+      setError(apiErrorMessage(err, "Kunde inte ta bort leverantören"));
     }
   }
 
@@ -405,7 +406,7 @@ function ArticleSupplierForm({
       }
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara leverantören");
+      setError(apiErrorMessage(err, "Kunde inte spara leverantören"));
       setPending(false);
     }
   }

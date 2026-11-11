@@ -11,6 +11,7 @@ import { UnitSelect, convertPriceInput, convertQuantityInput, useUnitOptions, ty
 import { apiFetch } from "../../lib/api";
 import type { Article, Inquiry, Supplier } from "../../lib/types";
 import { Form, FormActions, FormError, FormLineRow, FormLineRowTop, FormNotice, FormRow } from "../ui/Form";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 interface InquiryFormRow {
   article: Article | null;
@@ -79,7 +80,7 @@ export function NewInquiryForm({
       });
       router.push(`/inkop/forfragningar/${result.inquiry.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte skapa förfrågan");
+      setError(apiErrorMessage(err, "Kunde inte skapa förfrågan"));
       setPending(false);
     }
   }

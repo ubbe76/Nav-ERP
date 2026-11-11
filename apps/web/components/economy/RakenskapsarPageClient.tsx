@@ -167,7 +167,7 @@ function FiscalYearCard({ year }: { year: FiscalYear }) {
     try {
       setDetail(await apiFetch<FiscalYearDetail>(`/api/v1/fiscal-years/${year.id}`));
     } catch (err) {
-      setFetchError(err instanceof Error ? err.message : "Kunde inte hämta perioder");
+      setFetchError(apiErrorMessage(err, "Kunde inte hämta perioder"));
     } finally {
       setLoading(false);
     }
@@ -190,7 +190,7 @@ function FiscalYearCard({ year }: { year: FiscalYear }) {
       await apiFetch(`/api/v1/accounting-periods/${period.id}/lock`, { method: "POST" });
       await loadDetail();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Kunde inte låsa perioden");
+      setActionError(apiErrorMessage(err, "Kunde inte låsa perioden"));
     } finally {
       setPendingPeriodId(null);
     }

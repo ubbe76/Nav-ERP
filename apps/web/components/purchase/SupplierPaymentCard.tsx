@@ -16,6 +16,7 @@ import { apiFetch } from "../../lib/api";
 import { currencyLabel, exchangeDifferenceText, formatRate, SEK } from "../../lib/currency";
 import { formatMoney } from "../../lib/format";
 import type { SupplierPaymentDetail, SupplierPaymentRow } from "../../lib/types";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 export function SupplierPaymentCard({
   payment,
@@ -51,7 +52,7 @@ export function SupplierPaymentCard({
       await apiFetch(`/api/v1/supplier-payments/${payment.id}/cancel`, { method: "POST" });
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte makulera betalningen");
+      setError(apiErrorMessage(err, "Kunde inte makulera betalningen"));
     } finally {
       setPending(false);
     }

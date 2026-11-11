@@ -7,6 +7,7 @@ import { auditActionLabel, type AuditLogEntry, type Paged } from "../../lib/type
 import { AuditDetail } from "./AuditDetail";
 import { useCan } from "../PermissionsProvider";
 import { formatStockholmDateTime } from "../../lib/date";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // Shared "Historik"-section for the document cards (kundorder, inköpsorder,
 // tillverkningsorder, faktura, leverantörsfaktura) — G1's read side. Mounted
@@ -49,7 +50,7 @@ export function AuditTrailSection({
         if (!cancelled) setEntries(res.rows);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Kunde inte hämta historik");
+        if (!cancelled) setError(apiErrorMessage(err, "Kunde inte hämta historik"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

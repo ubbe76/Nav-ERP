@@ -16,6 +16,7 @@ import { articleLocationRole, ownPrimaryLocationId } from "../../lib/stockLocati
 import { ArticleLocationsCard } from "./ArticleLocationsCard";
 import { ForecastCard } from "./ForecastCard";
 import { formatQuantity } from "../../lib/format";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 interface RowWithId extends StockBalance {
   id: string;
@@ -69,7 +70,7 @@ export function LagerTab({
       setSaved(true);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara");
+      setError(apiErrorMessage(err, "Kunde inte spara"));
     } finally {
       setPending(false);
     }

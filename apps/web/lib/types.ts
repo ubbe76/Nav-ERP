@@ -196,8 +196,9 @@ export interface ArticleNumberSeriesOption {
   name: string | null;
   prefix: string;
   isDefault: boolean;
-  // The number a new article would get right now (a preview).
-  nextArticleNumber: string;
+  // The number a new article would get right now (a preview); null = the
+  // series is full (10 000 taken numbers in a row).
+  nextArticleNumber: string | null;
 }
 
 // One alternative unit on an article: "1 base unit = quantityPerBase of this

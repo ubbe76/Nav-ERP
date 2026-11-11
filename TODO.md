@@ -26,6 +26,9 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — races med litet fönster
 
+- [ ] **Reservplatsen `***`:** `getOrCreateFallbackLocation` läser först och skapar sedan utan konfliktskydd — två samtidiga första användningar ger 500 (`copied-articles.test.ts` föll en gång på det). `lagergranskning.test.ts` ("an inflow onto a temporary place being retired…") läser `pg_locks` utan databasfilter och kan falla med parallella arbetare. Två samtidiga Aktivera på olika revisioner ger 409 med den missvisande texten "Revision … already exists" (artikelgranskningen 2026-11-11).
+- [ ] **Konfigurerade rader i behovsberäkningen och Leveranstidskontrollen** (`planning.service.ts` ~1166–1186, ~2002, ~3045) utvärderar sparade val utan att jämföra nyckeln — ett förval tillagt i mallen efteråt ger materialbehov för det nya förvalet tills Ändra konfiguration körs (TO-skapandet vägrar redan; `variantPrice` rättat i artikelgranskningen).
+
 - [ ] **Löneperiodens Lås mot odaterade ändringar:** personalkortet (standardschema, övertidsförval, Anställd från/till), dags- och veckoscheman, OB-regler, frånvarokoder och inställningarna kan ändras medan Lås räknar underlaget (tidgranskningen serialiserade bara de daterade skrivarna, `payroll-period-guard.ts`); `attest` läser öppen närvaro utanför transaktionen. OB-regelns namn har inget unikt index (förkontrollen ensam).
 
 ### Låga — otydliga fel, texter och småbeteenden

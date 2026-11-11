@@ -328,7 +328,7 @@ export function NewSupplierInvoiceForm({
       // VAT and gross follow from it (see the prefill effect above).
       if (isEmptyAmount(netAmount)) setNetAmount(String(basisRowsSum(built)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte hämta orderraderna");
+      setError(apiErrorMessage(err, "Kunde inte hämta orderraderna"));
     }
   }
 

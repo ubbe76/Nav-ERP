@@ -315,7 +315,7 @@ describe("filer per operation", () => {
     expect(listed!.files).toEqual([]);
   });
 
-  it("copies the operation's files by name with Kopiera från", async () => {
+  it("copies the operation's files with Kopiera från (the copy of the chosen file)", async () => {
     const f = await makeDrawingArticle();
     const wc = await mfg.createWorkCenter(parsed(createWorkCenterSchema, { code: "200", name: "Montering", active: true }));
     await mfg.createRoutingOperation(

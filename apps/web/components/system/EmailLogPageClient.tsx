@@ -20,6 +20,7 @@ import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { FormError } from "../ui/Form";
 import { formatStockholmDateTime } from "../../lib/date";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // Where each document type's card lives — for the Dokument column link.
 // "invoice" rows are ambiguous (old pre-C1 rows point at a sales order id
@@ -61,7 +62,7 @@ export function EmailLogPageClient({ log, pageSize }: { log: Paged<EmailLogEntry
       await apiFetch(`/api/v1/email-log/${entry.id}/resend`, { method: "POST" });
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Omskicket misslyckades");
+      setError(apiErrorMessage(err, "Omskicket misslyckades"));
     } finally {
       setPendingId(null);
     }

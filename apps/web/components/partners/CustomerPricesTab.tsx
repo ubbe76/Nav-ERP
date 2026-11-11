@@ -12,6 +12,7 @@ import { apiFetch } from "../../lib/api";
 import { currencyLabel, SEK } from "../../lib/currency";
 import type { Article, ArticleGroup, CustomerPrice } from "../../lib/types";
 import { Form, FormActions, FormError } from "../ui/Form";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // C3 Kundpriser — fliken Priser: kundens egna pris-/rabattregler
 // (customer_prices). Server-fetched like KontakterTab (prices/articleGroups
@@ -47,7 +48,7 @@ export function CustomerPricesTab({
       await apiFetch(`${pricesBase}/${price.id}`, { method: "DELETE" });
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ta bort prisregeln");
+      setError(apiErrorMessage(err, "Kunde inte ta bort prisregeln"));
     }
   }
 
@@ -231,7 +232,7 @@ function CustomerPriceForm({
       }
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara prisregeln");
+      setError(apiErrorMessage(err, "Kunde inte spara prisregeln"));
       setPending(false);
     }
   }

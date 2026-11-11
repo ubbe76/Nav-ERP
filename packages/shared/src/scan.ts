@@ -28,6 +28,26 @@ export function isValidGtin(code: string): boolean {
   return gtinCheckDigit(code.slice(0, -1)) === Number(code.at(-1));
 }
 
+// THE identity of a GTIN (användarens val 2026-11-11): the same number may be
+// written as UPC-A (12 digits) or as EAN-13 with a leading 0 — a scanner
+// reads a UPC-A package as either — and GS1 compares every GTIN
+// right-justified in 14 digits. So the key is the code zero-padded to 14
+// (the check digit is unchanged by leading zeros); null when the code is no
+// valid GTIN. The stored articles.barcode is never rewritten — the scan
+// lookup and the duplicate check compare keys.
+export function gtinKey(code: string): string | null {
+  return isValidGtin(code) ? code.padStart(14, "0") : null;
+}
+
+// Every form the same GTIN can be stored in (8, 12, 13 or 14 digits — the
+// lengths articles.barcode takes), for an indexed `barcode IN (…)` lookup.
+// [] when the code is no valid GTIN.
+export function gtinForms(code: string): string[] {
+  const key = gtinKey(code);
+  if (key === null) return [];
+  return [14, 13, 12, 8].filter((length) => /^0*$/.test(key.slice(0, 14 - length))).map((length) => key.slice(14 - length));
+}
+
 // Streckkod (EAN) on the article: empty clears it.
 export const articleBarcodeSchema = z
   .string()

@@ -11,6 +11,7 @@ import type {
 // throws it); re-exported so the routes import every article error from here.
 import { CopiedArticlesTooManyError, type CopiedArticleRow } from "../repository/copied-articles.js";
 export { CopiedArticlesTooManyError };
+import { DuplicateArticleBarcodeError } from "../repository/article-barcode.js";
 import {
   articleCopyPartAllowed,
   deriveLoadingMeters,
@@ -43,6 +44,7 @@ import { DEFAULT_ARTICLE_SERIES_KEY, SeriesExhaustedError } from "../../system/s
 import { COPIED_ARTICLES_MAX, ERROR_CODES } from "@navet/shared";
 import { codeFromName, errorBody } from "../../system/service/error-body.js";
 import { assertModeAllowed } from "../../configurator/service/configurator-rules.js";
+import { StockLocationNotFoundError } from "../../stock/service/stock.errors.js";
 
 // Only domain errors the web has a translation for are reported by code; any
 // other error (a raw database error, a bug) must not leak its message.
@@ -105,13 +107,11 @@ export class ArticleCopyPartNotAllowedError extends Error {
   }
 }
 
-// Streckkod (EAN, #4) is unique when set: 409 duplicate-article-barcode.
-export class DuplicateArticleBarcodeError extends Error {
-  constructor(barcode: string) {
-    super(`Another article already has the barcode "${barcode}"`);
-    this.name = "DuplicateArticleBarcodeError";
-  }
-}
+// Streckkod (EAN, #4) is unique when set — as a GTIN, in any of its forms
+// (gtinKey): 409 duplicate-article-barcode. The class lives in the write
+// path's leaf (article-barcode.ts); re-exported so the routes import every
+// article error from here. The exact-string index is the backstop.
+export { DuplicateArticleBarcodeError };
 const ARTICLE_BARCODE_UNIQUE = "articles_barcode_unique";
 function throwIfBarcodeTaken(err: unknown, barcode: string | null | undefined) {
   if (isUniqueViolation(err, ARTICLE_BARCODE_UNIQUE)) throw new DuplicateArticleBarcodeError(barcode ?? "");
@@ -141,6 +141,17 @@ export class DefaultLocationBlockedError extends Error {
   constructor() {
     super("Lagerplatsen är spärrad och kan inte väljas som artikelns lagerplats");
     this.name = "DefaultLocationBlockedError";
+  }
+}
+
+// Tjänster lagerförs inte (stock.md): an article becomes a Tjänst only
+// without stock — on no place, blocked ones included. Otherwise its balance
+// would stand in the log forever, invisible to every routine that skips
+// services (the user's choice 2026-11-11: refuse, adjust to 0 first). 409.
+export class ArticleHasStockError extends Error {
+  constructor() {
+    super("Artikeln har lagersaldo — justera saldot till 0 innan den görs till tjänst");
+    this.name = "ArticleHasStockError";
   }
 }
 
@@ -408,6 +419,15 @@ export function createArticleService(
     if (operation.costingOnly && !rowCostingOnly) throw new CostingOnlyOperationLinkError();
   }
 
+  // A chosen Lagerplats must exist (404 StockLocationNotFoundError, mapped
+  // once in app.ts — the FK violation was a 500) and may not be a Spärrad
+  // lagerplats (0185, DefaultLocationBlockedError).
+  async function assertChoosableLocation(locationId: string) {
+    const place = await repo.findLocationFlags(locationId);
+    if (!place) throw new StockLocationNotFoundError(locationId);
+    if (place.blocked) throw new DefaultLocationBlockedError();
+  }
+
   // A default purchase/sales unit must be the base unit or one of the
   // article's alternative units — anything else would have no factor.
   async function assertUsableDefaultUnit(articleId: string, baseUnitId: string, unitId: string) {
@@ -473,7 +493,7 @@ export function createArticleService(
       // "Lagerplats sätts *** automatiskt" — an article always carries a
       // default location from birth; *** is created on first use. The base
       // unit falls back the same way, to the register's "st" unit.
-      if (input.defaultLocationId && (await repo.isLocationBlocked(input.defaultLocationId))) throw new DefaultLocationBlockedError();
+      if (input.defaultLocationId) await assertChoosableLocation(input.defaultLocationId);
       const defaultLocationId = input.defaultLocationId ?? (await repo.getOrCreateFallbackLocationId());
       let unitId = input.unitId;
       if (unitId) {
@@ -651,12 +671,14 @@ export function createArticleService(
       if (input.articleCodeId && !(await repo.articleCodeExists(input.articleCodeId))) {
         throw new InvalidReferenceError("Unknown article code");
       }
-      if (
-        input.defaultLocationId &&
-        input.defaultLocationId !== article.defaultLocationId &&
-        (await repo.isLocationBlocked(input.defaultLocationId))
-      ) {
-        throw new DefaultLocationBlockedError();
+      // Same 400 as createArticle — the FK violation was a 500.
+      if (input.packageTypeId && input.packageTypeId !== article.packageTypeId && !(await repo.packageTypeExists(input.packageTypeId))) {
+        throw new InvalidReferenceError("Unknown package type");
+      }
+      // Only a changed Lagerplats is tried: the kept one exists (FK), and a
+      // place blocked after it was chosen may stay.
+      if (input.defaultLocationId && input.defaultLocationId !== article.defaultLocationId) {
+        await assertChoosableLocation(input.defaultLocationId);
       }
 
       if (input.unitId !== undefined && input.unitId !== article.unitId) {
@@ -701,6 +723,14 @@ export function createArticleService(
           if (typeChanges || phantomChanges) {
             const mode = await repo.configuratorModeFor(id, tx);
             if (mode) assertModeAllowed({ type: input.type ?? locked.type, isPhantom: input.isPhantom ?? locked.isPhantom }, mode);
+          }
+          // Tjänst only without stock — read under the row lock taken above,
+          // which waits for a stock writer that already wrote a row (its FK
+          // holds the article until commit); a writer that has not yet asked
+          // for the type waits for this transaction (stockedArticleIds) and
+          // sees Tjänst. stocked-article.ts has the rule.
+          if (typeChanges && input.type === "service" && (await repo.articleHoldsStock(tx, id))) {
+            throw new ArticleHasStockError();
           }
           await write(tx);
         });
@@ -1108,9 +1138,12 @@ export function createArticleService(
       return repo.activeRevisionInfo(articleIds);
     },
 
-    // Direct self-reference is already rejected by the `no_self_reference` DB check.
-    // This walks the component's existing subtree to reject indirect cycles
-    // (e.g. A contains B, B contains C, then adding C -> A would loop back).
+    // A cycle — the component itself, or one whose structure already
+    // contains the parent (A contains B, B contains C, then C → A) — is
+    // refused by the repository, which checks and inserts in ONE transaction
+    // under the structure lock (bom-write.ts). The check used to run here,
+    // unlocked and before the INSERT's transaction, so two concurrent adds
+    // A → B and B → A both passed.
     async addBomComponent(parentArticleId: string, input: CreateBomComponentInput) {
       const parent = await repo.findById(parentArticleId);
       if (!parent) throw new ArticleNotFoundError(parentArticleId);
@@ -1118,9 +1151,6 @@ export function createArticleService(
       const component = await repo.findById(input.componentArticleId);
       if (!component) throw new ArticleNotFoundError(input.componentArticleId);
 
-      if (await this.isDescendant(input.componentArticleId, parentArticleId)) {
-        throw new BomCycleError();
-      }
       if (input.routingOperationId) {
         await assertOperationBelongsToArticle(input.routingOperationId, parentArticleId, input.costingOnly ?? false);
       }
@@ -1132,27 +1162,22 @@ export function createArticleService(
       // The same component may already sit on another row (migration 0176
       // dropped the unique (parent, component)) — allowed; the card warns
       // about it from the row list, nothing is refused here.
-      return repo.addBomComponent(parentArticleId, {
+      const row = await repo.addBomComponent(parentArticleId, {
         ...input,
         quantity: toBaseQuantity(input.quantity, selection.unitFactor),
         unitId: selection.unitId,
         unitFactor: selection.unitFactor,
       });
+      if (!row) throw new BomCycleError();
+      return row;
     },
 
-    // Is `candidateAncestorId` reachable by walking down from `articleId`'s BOM tree?
-    async isDescendant(articleId: string, candidateAncestorId: string, visited = new Set<string>()): Promise<boolean> {
-      if (articleId === candidateAncestorId) return true;
-      if (visited.has(articleId)) return false;
-      visited.add(articleId);
-
-      const children = await repo.getBomComponents(articleId);
-      for (const child of children) {
-        if (await this.isDescendant(child.componentArticleId, candidateAncestorId, visited)) {
-          return true;
-        }
-      }
-      return false;
+    // Is `candidateAncestorId` reachable by walking down from `articleId`'s BOM
+    // tree (itself included)? One recursive query (bom-write.ts) — the
+    // configurator's guard on a configurator row; addBomComponent checks the
+    // same thing under the structure lock.
+    async isDescendant(articleId: string, candidateAncestorId: string): Promise<boolean> {
+      return repo.bomReaches(articleId, candidateAncestorId);
     },
   };
 }

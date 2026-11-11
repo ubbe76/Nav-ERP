@@ -2,8 +2,9 @@
 // Produktkonfigurator — the derived structure's material one level down, as the costing preview costs it.
 // Pure (no DB imports; explodeBom is injected): a phantom (fantomartikel) is never costed itself but dissolved
 // into its own components, and rows are merged per (article, operation) exactly like bom-explosion.ts — sum the
-// quantities, base unit when the units differ. A phantom's parts inherit the phantom row's operation unless
-// they carry their own. The derivation itself never merges (rule 7); only the costing view does.
+// quantities, base unit when the units differ. A phantom's parts always inherit the phantom row's operation:
+// explodeBom ignores a phantom's own links (they point at the phantom's own route, which no order has — the
+// länkregel in bom-explosion.ts). The derivation itself never merges (rule 7); only the costing view does.
 
 export type ExplodeBomRow = {
   componentArticleId: string; componentName: string; totalQuantity: number; unitId: string | null; unitFactor: string | null;

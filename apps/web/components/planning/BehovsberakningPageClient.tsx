@@ -511,7 +511,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
       setRowStates({});
       reload();
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Kunde inte skapa ordrar");
+      setSubmitError(apiErrorMessage(err, "Kunde inte skapa ordrar"));
     } finally {
       setSubmitting(false);
     }
@@ -553,7 +553,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
       // picks up the fresh openInquiries links.
       reload();
     } catch (err) {
-      setLegoSubmitError(err instanceof Error ? err.message : "Kunde inte skapa förfrågan");
+      setLegoSubmitError(apiErrorMessage(err, "Kunde inte skapa förfrågan"));
     } finally {
       setLegoSubmitting(false);
     }

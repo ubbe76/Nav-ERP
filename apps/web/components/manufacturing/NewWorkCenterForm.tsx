@@ -7,6 +7,7 @@ import { apiFetch } from "../../lib/api";
 import type { ProductionGroup, WeekSchedule, WorkCenter } from "../../lib/types";
 import { Form, FormHint, FormActions, FormError, FormRow } from "../ui/Form";
 import { findCodeClash, WorkCenterCodeField, WorkCenterCodeHint } from "./WorkCenterCodeField";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // Creates a work center (resurs), or edits one when `workCenter` is passed.
 export function NewWorkCenterForm({
@@ -94,7 +95,7 @@ export function NewWorkCenterForm({
       }
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara resursen");
+      setError(apiErrorMessage(err, "Kunde inte spara resursen"));
       setPending(false);
     }
   }

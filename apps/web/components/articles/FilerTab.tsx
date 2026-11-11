@@ -9,6 +9,7 @@ import { ARTICLE_FILE_ACCEPT, articleFileHref, formatFileSize, uploadArticleFile
 import type { ArticleFile } from "../../lib/types";
 import { FormError } from "../ui/Form";
 import { formatStockholmDate } from "../../lib/date";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 
 // Ritningar och andra filer kopplade till artikeln (PDF/JPEG/PNG). Files are
@@ -23,7 +24,7 @@ export function FilerTab({ articleId }: { articleId: string }) {
     try {
       setFiles(await apiFetch<ArticleFile[]>(`/api/v1/articles/${articleId}/files`));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte hämta filerna");
+      setError(apiErrorMessage(err, "Kunde inte hämta filerna"));
     }
   }
 
@@ -39,7 +40,7 @@ export function FilerTab({ articleId }: { articleId: string }) {
       await uploadArticleFile(articleId, file);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Uppladdningen misslyckades");
+      setError(apiErrorMessage(err, "Uppladdningen misslyckades"));
     } finally {
       setPending(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -54,7 +55,7 @@ export function FilerTab({ articleId }: { articleId: string }) {
       await apiFetch(`/api/v1/articles/${articleId}/files/${file.id}`, { method: "DELETE" });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ta bort filen");
+      setError(apiErrorMessage(err, "Kunde inte ta bort filen"));
     } finally {
       setPending(false);
     }

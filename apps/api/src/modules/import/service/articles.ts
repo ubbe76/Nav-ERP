@@ -1,4 +1,4 @@
-import { isValidGtin, normalizeScanCode } from "@navet/shared";
+import { gtinKey, normalizeScanCode } from "@navet/shared";
 // Article import (Monitor G5 CSV): builds an execution plan from mapped
 // rows. The SAME builder runs for preview and commit — commit never trusts
 // the preview round-trip and re-plans from scratch. The customer/supplier
@@ -186,8 +186,8 @@ export interface ExistingArticle {
 // createImportRepository, stubbed with Maps in tests.
 export interface ArticleImportDeps {
   articlesByNumber(numbers: string[]): Promise<Map<string, ExistingArticle>>;
-  // Streckkod (#4): barcode -> the article number that already has it. Only
-  // asked when the file carries barcodes.
+  // Streckkod (#4): the GTIN key (gtinKey) -> the article number that
+  // already has it in any form. Only asked when the file carries barcodes.
   articlesByBarcode(codes: string[]): Promise<Map<string, string>>;
   // Keyed by LOWERCASED code so "ST" in the CSV finds the "st" unit instead
   // of creating a case-variant duplicate.
@@ -371,7 +371,7 @@ export async function planArticleImport(
   const existingByNumber = await deps.articlesByNumber(numbers);
   const barcodeCells = records.map((r) => normalizeScanCode(r["barcode"] ?? "")).filter((c) => c !== "");
   const takenBarcodes = barcodeCells.length > 0 ? await deps.articlesByBarcode(barcodeCells) : new Map<string, string>();
-  // Barcode -> the article number that claimed it first in this file.
+  // GTIN (gtinKey) -> the article number that claimed it first in this file.
   const barcodesInFile = new Map<string, string>();
   const supplierNumbers = records.map((r) => r["primarySupplierNumber"] ?? "").filter((n) => n !== "");
   const suppliersByNumber = supplierNumbers.length > 0 ? await deps.suppliersByNumber(supplierNumbers) : new Map();
@@ -579,9 +579,12 @@ export async function planArticleImport(
     let barcode: string | null = null;
     if (barcodeCell !== "") {
       const rowNumberOf = record["articleNumber"] ?? "";
-      const holder = takenBarcodes.get(barcodeCell);
-      const fileHolder = barcodesInFile.get(barcodeCell);
-      if (!isValidGtin(barcodeCell)) {
+      // Compared as GTINs: a UPC-A and the EAN-13 with a leading 0 are one
+      // code (gtinKey), in the register and within the file.
+      const key = gtinKey(barcodeCell);
+      const holder = key === null ? undefined : takenBarcodes.get(key);
+      const fileHolder = key === null ? undefined : barcodesInFile.get(key);
+      if (key === null) {
         errors.push(`Ogiltig streckkod "${barcodeCell}" — 8, 12, 13 eller 14 siffror med rätt kontrollsiffra`);
       } else if (holder !== undefined && holder !== rowNumberOf) {
         errors.push(`Streckkoden ${barcodeCell} finns redan på artikel ${holder}`);
@@ -590,7 +593,7 @@ export async function planArticleImport(
       } else {
         barcode = barcodeCell;
         values["barcode"] = barcodeCell;
-        barcodesInFile.set(barcodeCell, rowNumberOf);
+        barcodesInFile.set(key, rowNumberOf);
       }
     }
 

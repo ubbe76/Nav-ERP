@@ -166,7 +166,7 @@ export function ManufacturingOrderDetail({
       if (action === "release") setReleaseWarnings(warnings);
       router.refresh();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Åtgärden misslyckades");
+      setActionError(apiErrorMessage(err, "Åtgärden misslyckades"));
     } finally {
       // One state for all the buttons: a pending flag left over from Frisläpp
       // would keep Makulera order disabled on the released order.
@@ -980,7 +980,7 @@ function DueDateField({
       });
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara datumet");
+      setError(apiErrorMessage(err, "Kunde inte spara datumet"));
     } finally {
       setPending(false);
     }
@@ -1030,7 +1030,7 @@ function usePostCalculate(orderId: string, onSaved: (calculationId: string) => v
         })
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte efterkalkylera");
+      setError(apiErrorMessage(err, "Kunde inte efterkalkylera"));
     } finally {
       setPending(false);
     }
@@ -1051,7 +1051,7 @@ function usePostCalculate(orderId: string, onSaved: (calculationId: string) => v
       // instead of making the user hunt for it in the history.
       onSaved(result.calculation.id);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Kunde inte spara kalkylen");
+      setSaveError(apiErrorMessage(err, "Kunde inte spara kalkylen"));
     } finally {
       setSaving(false);
     }

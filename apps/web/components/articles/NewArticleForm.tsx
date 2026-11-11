@@ -171,7 +171,7 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
         });
       } catch (err) {
         setError(
-          `Artikeln skapades men kunde inte kopplas in i strukturen: ${err instanceof Error ? err.message : "okänt fel"}`
+          `Artikeln skapades men kunde inte kopplas in i strukturen: ${apiErrorMessage(err, "okänt fel")}`
         );
         setPending(false);
         return;
@@ -211,7 +211,9 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
     articleNumber.trim() !== ""
       ? "Eget nummer — serien används inte."
       : chosenSeries
-        ? `Tomt = nästa nummer i serien ${chosenSeries.name ?? "Artikelnummer"}: ${chosenSeries.nextArticleNumber}`
+        ? chosenSeries.nextArticleNumber === null
+          ? `Serien ${chosenSeries.name ?? "Artikelnummer"} är full — skriv ett eget nummer.`
+          : `Tomt = nästa nummer i serien ${chosenSeries.name ?? "Artikelnummer"}: ${chosenSeries.nextArticleNumber}`
         : "Tomt = nästa nummer i serien Artikelnummer.";
 
   return (

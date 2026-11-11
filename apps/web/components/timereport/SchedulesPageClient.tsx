@@ -286,7 +286,7 @@ function DayScheduleForm({ schedule, onDone }: { schedule?: DaySchedule; onDone:
       }
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara dagsschemat");
+      setError(apiErrorMessage(err, "Kunde inte spara dagsschemat"));
       setPending(false);
     }
   }
@@ -795,7 +795,7 @@ function HolidaysTab({ holidays, daySchedules }: { holidays: Holiday[]; daySched
       await apiFetch(`/api/v1/holidays/${id}`, { method: "DELETE" });
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ta bort helgdagen");
+      setError(apiErrorMessage(err, "Kunde inte ta bort helgdagen"));
     }
   }
 
@@ -817,7 +817,7 @@ function HolidaysTab({ holidays, daySchedules }: { holidays: Holiday[]; daySched
       );
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte förifylla helgdagarna");
+      setError(apiErrorMessage(err, "Kunde inte förifylla helgdagarna"));
     } finally {
       setSeeding(false);
     }
@@ -906,7 +906,7 @@ function HolidayForm({ daySchedules, onDone }: { daySchedules: DaySchedule[]; on
       });
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara helgdagen");
+      setError(apiErrorMessage(err, "Kunde inte spara helgdagen"));
       setPending(false);
     }
   }

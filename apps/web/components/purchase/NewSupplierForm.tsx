@@ -7,6 +7,7 @@ import { apiFetch } from "../../lib/api";
 import { DOCUMENT_LANGUAGES, DOCUMENT_LANGUAGE_LABELS, type DocumentLanguage } from "../../lib/documentLanguage";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 import type { SupplierPrefill } from "../../lib/invoiceScan";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 type NewSupplierPayment = "" | "bankgiro" | "plusgiro" | "iban";
 
@@ -72,7 +73,7 @@ export function NewSupplierForm({
       });
       onSuccess(created.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte skapa leverantören");
+      setError(apiErrorMessage(err, "Kunde inte skapa leverantören"));
       setPending(false);
     }
   }

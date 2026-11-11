@@ -77,6 +77,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "manufacturing-order-file-not-found": "Filen finns inte längre.",
   // The server names the template ("63000 är en mall — välj en variant").
   "article-is-template": serverMessage("Artikeln är en mall — välj en variant."),
+  // Typbyte till Tjänst (tjänster lagerförs inte).
+  "article-has-stock": "Artikeln har lagersaldo — justera saldot till 0 innan den görs till tjänst.",
   "payroll-period-locked": "Perioden är låst.",
   "period-not-ended": "Perioden kan låsas först när månaden är slut.",
   "unattested-employees": (err) => {

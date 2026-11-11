@@ -231,11 +231,17 @@ function BomLineForm({
         <Field label="Operation" htmlFor="cfg-line-op">
           <Select id="cfg-line-op" value={link} onChange={(e) => setLink(e.target.value)}>
             <option value="">— Ingen —</option>
-            {routing.map((op) => (
-              <option key={op.id} value={`r:${op.id}`}>
-                {op.sequenceNo} {op.description ?? op.workCenterName}
-              </option>
-            ))}
+            {/* A Kalkyl operation never reaches a TO, so a line cannot draw there (the server
+                refuses it); a line linked before the operation became Kalkyl still shows its
+                link, marked, so it can be changed. */}
+            {routing
+              .filter((op) => !op.costingOnly || line?.routingOperationId === op.id)
+              .map((op) => (
+                <option key={op.id} value={`r:${op.id}`}>
+                  {op.sequenceNo} {op.description ?? op.workCenterName}
+                  {op.costingOnly ? " (kalkyl)" : ""}
+                </option>
+              ))}
             {operations.map((op) => (
               <option key={op.id} value={`c:${op.id}`}>
                 {op.sequenceNo} {op.description ?? op.workCenterName} (villkorad)

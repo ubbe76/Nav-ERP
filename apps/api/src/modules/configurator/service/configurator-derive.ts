@@ -151,8 +151,17 @@ export function deriveStructure(input: {
     }
 
     let operation: DerivedOperationRef | null = null;
-    if (l.routingOperationId) operation = baseRef(l.routingOperationId);
-    else if (l.configuratorOperationId) {
+    if (l.routingOperationId) {
+      // A line is an ordinary row, and a "Kalkyl" operation never reaches a TO
+      // (Länkregeln). The save refuses the link (validateLineInput), but the
+      // route operation may be marked Kalkyl afterwards — the manufacturing
+      // guard counts only bom_components — so such a link is read as unlinked
+      // here, for the TO and the variant's BOM alike.
+      const base = baseOpsById.get(l.routingOperationId);
+      if (base?.costingOnly) {
+        warnings.push(`${l.label} kopplad till operation ${base.sequenceNo} som är en kalkyloperation — dras vid slutrapporteringen`);
+      } else operation = baseRef(l.routingOperationId);
+    } else if (l.configuratorOperationId) {
       const o = conditionalOpsById.get(l.configuratorOperationId);
       if (o && includedOpIds.has(o.id)) operation = { kind: "configurator", id: o.id, sequenceNo: o.sequenceNo };
       // Not included ⇒ unlinked, drawn at final reporting like any unlinked material. An applicable operation

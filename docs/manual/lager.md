@@ -30,7 +30,7 @@ Koden kan läsas på två sätt:
 Det här känns igen:
 
 - **Artikelnummer** — det som står på pallkortens och artikeletiketternas kod.
-- **Streckkod (EAN)** — tillverkarens kod på förpackningen, när den är ifylld på artikelkortet (se [Artiklar](/hjalp/artiklar#allmant)).
+- **Streckkod (EAN)** — tillverkarens kod på förpackningen, när den är ifylld på artikelkortet (se [Artiklar](/hjalp/artiklar#allmant)). En UPC-A-kod (12 siffror) och samma kod som EAN-13 med en inledande nolla är samma kod: artikeln hittas oavsett i vilken form den sparats eller läses.
 - **Lagerplatsens etikettkod** — **LP** följt av ett nummer (till exempel **LP0042**), se [Etiketter](#etiketter).
 - **Ordernummer** — inköpsorder, kundorder (även offertnumret) och tillverkningsorder, som på pallkorten.
 

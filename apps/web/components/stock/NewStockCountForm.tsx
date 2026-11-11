@@ -9,6 +9,7 @@ import { locationOptionLabel } from "../../lib/stockLocations";
 import type { StockLocation } from "../../lib/types";
 import { Card } from "../ui/Card";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 export function NewStockCountForm({ locations, initialLocationId }: { locations: StockLocation[]; initialLocationId?: string }) {
   const router = useRouter();
@@ -46,7 +47,7 @@ export function NewStockCountForm({ locations, initialLocationId }: { locations:
       router.push(`/lager/inventering/${session.id}`);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte skapa inventeringen");
+      setError(apiErrorMessage(err, "Kunde inte skapa inventeringen"));
       setPending(false);
     }
   }

@@ -8,6 +8,7 @@ import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import type { SystemSettings } from "../../lib/types";
 import cardStyles from "../system/SettingsForm.module.css";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // PAXml löneart codes for the payroll export (löneunderlag) and the daily
 // overtime grace period. The codes themselves mean nothing to NAV — they are
@@ -43,7 +44,7 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
         body: JSON.stringify(body),
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara inställningarna");
+      setError(apiErrorMessage(err, "Kunde inte spara inställningarna"));
       return null;
     } finally {
       setPending(false);

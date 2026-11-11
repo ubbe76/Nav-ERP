@@ -1,4 +1,4 @@
-import { eq, or } from "drizzle-orm";
+import { eq, inArray, or } from "drizzle-orm";
 import {
   articles,
   customers,
@@ -35,7 +35,9 @@ export function createScanRepository(db: Db) {
     },
 
     // EAN and article number in one query; the service says which matched.
-    async articlesByCode(code: string) {
+    // `barcodeForms`: every stored form of the scanned GTIN (gtinForms — a
+    // UPC-A scan finds the EAN-13 with a leading 0 and back), indexed.
+    async articlesByCode(code: string, barcodeForms: string[]) {
       return db
         .select({
           id: articles.id,
@@ -48,7 +50,11 @@ export function createScanRepository(db: Db) {
         })
         .from(articles)
         .innerJoin(units, eq(units.id, articles.unitId))
-        .where(or(eq(articles.articleNumber, code), eq(articles.barcode, code)));
+        .where(
+          barcodeForms.length > 0
+            ? or(eq(articles.articleNumber, code), inArray(articles.barcode, barcodeForms))
+            : eq(articles.articleNumber, code)
+        );
     },
 
     async purchaseOrderByNumber(orderNumber: string) {

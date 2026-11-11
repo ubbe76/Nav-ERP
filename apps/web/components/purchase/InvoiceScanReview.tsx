@@ -575,7 +575,7 @@ function ReviewForm({
         deriveAmounts({ net: sum, rate: vatRate });
       }
     } catch (err) {
-      if (!auto && seq === basisSeq.current) setError(err instanceof Error ? err.message : "Kunde inte hämta orderraderna");
+      if (!auto && seq === basisSeq.current) setError(apiErrorMessage(err, "Kunde inte hämta orderraderna"));
     }
   }
 

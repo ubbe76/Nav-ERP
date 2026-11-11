@@ -30,8 +30,9 @@ function SeriesRow({
   onDeleted,
 }: {
   series: NumberSeries;
-  // An article series' next FREE number (taken numbers are skipped), when known.
-  preview?: string;
+  // An article series' next FREE number (taken numbers are skipped), when
+  // known; null = the series is full.
+  preview?: string | null;
   onUpdated: (updated: NumberSeries) => void;
   onDeleted: (key: string) => void;
 }) {
@@ -98,7 +99,9 @@ function SeriesRow({
       <div className={styles.row}>
         <div className={styles.info}>
           <div className={styles.label}>{seriesLabel(series)}</div>
-          <div className={`${styles.preview} num`}>Nästa: {preview ?? formatPreview(series)}</div>
+          <div className={`${styles.preview} num`}>
+            {preview === null ? "Serien är full" : `Nästa: ${preview ?? formatPreview(series)}`}
+          </div>
           {error && <div className={styles.error}>{error}</div>}
         </div>
         <div className={styles.actions}>
@@ -235,7 +238,7 @@ export function NumberSeriesList({ series: initial }: { series: NumberSeries[] }
   const [creating, setCreating] = useState(false);
   // Article series skip numbers that are already taken, so their "Nästa" is
   // the server's preview rather than the counter — refreshed after changes.
-  const [articlePreviews, setArticlePreviews] = useState<Record<string, string>>({});
+  const [articlePreviews, setArticlePreviews] = useState<Record<string, string | null>>({});
   const loadPreviews = useCallback(() => {
     apiFetch<ArticleNumberSeriesOption[]>("/api/v1/article-number-series")
       .then((rows) => setArticlePreviews(Object.fromEntries(rows.map((r) => [r.key, r.nextArticleNumber]))))

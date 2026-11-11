@@ -94,7 +94,7 @@ export function SupplierInvoiceCard({
       await apiFetch(`/api/v1/supplier-invoices/${invoice.id}/${action}`, { method: "POST" });
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Åtgärden misslyckades");
+      setError(apiErrorMessage(err, "Åtgärden misslyckades"));
     } finally {
       setPending(false);
     }
@@ -108,7 +108,7 @@ export function SupplierInvoiceCard({
       await apiFetch(`/api/v1/supplier-invoices/${invoice.id}/rows/${row.id}`, { method: "DELETE" });
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ta bort raden");
+      setError(apiErrorMessage(err, "Kunde inte ta bort raden"));
     } finally {
       setPending(false);
     }

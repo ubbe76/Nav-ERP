@@ -7,6 +7,7 @@ import { Modal } from "../ui/Modal";
 import { Field, Select } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // Manual status override (any status → any status), shared by the purchase
 // and sales order cards. Bypasses the state machine on purpose
@@ -81,7 +82,7 @@ function StatusForm({
       await apiFetch(`${endpoint}/set-status`, { method: "POST", body: JSON.stringify({ status }) });
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte byta status");
+      setError(apiErrorMessage(err, "Kunde inte byta status"));
     } finally {
       setPending(false);
     }

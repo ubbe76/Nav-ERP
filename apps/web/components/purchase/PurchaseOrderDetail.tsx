@@ -242,7 +242,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
       setEditingRowId(null);
       router.refresh();
     } catch (err) {
-      setRowError(err instanceof Error ? err.message : "Kunde inte spara raden");
+      setRowError(apiErrorMessage(err, "Kunde inte spara raden"));
     } finally {
       setRowPending(false);
     }
@@ -272,7 +272,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
       await apiFetch(`/api/v1/purchase-orders/${order.id}/${ACTION_ENDPOINTS[action]}`, { method: "POST" });
       router.refresh();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Åtgärden misslyckades");
+      setActionError(apiErrorMessage(err, "Åtgärden misslyckades"));
     } finally {
       setActionPending(null);
     }
@@ -709,7 +709,7 @@ function EditHeaderForm({
       });
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara");
+      setError(apiErrorMessage(err, "Kunde inte spara"));
     } finally {
       setPending(false);
     }
@@ -930,7 +930,7 @@ function AddRowForm({
       });
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte lägga till raden");
+      setError(apiErrorMessage(err, "Kunde inte lägga till raden"));
     } finally {
       setPending(false);
     }

@@ -202,7 +202,7 @@ Alla fyra bankprofilerna är jämförda med bankernas egna specifikationer (MIG)
 
 Serien **Offert** numrerar nya offerter; när en offert bekräftas får den nästa nummer ur **Kundorder** och offertnumret följer med som referens (se [Offerter](/hjalp/forsaljning#offerter)). Prefix, **nästa nummer** och antal siffror (nollutfyllnad) kan ändras per serie. Nästa nummer delas ut när posten skapas — utom fakturanumret, som delas ut när fakturan **utfärdas** (se [Fakturor](/hjalp/forsaljning#fakturor)), inte när den skapas som utkast.
 
-**Artikelnummer** är standardserien för nya artiklar som saknar artikelnummer (se [Artikelnummer ur en nummerserie](/hjalp/artiklar#artikelnummer-ur-en-nummerserie)). Till skillnad från orderserierna hoppar artikelserierna över nummer som redan finns, så du kan låta serien börja mitt bland importerade artikelnummer.
+**Artikelnummer** är standardserien för nya artiklar som saknar artikelnummer (se [Artikelnummer ur en nummerserie](/hjalp/artiklar#artikelnummer-ur-en-nummerserie)). Till skillnad från orderserierna hoppar artikelserierna över nummer som redan finns, så du kan låta serien börja mitt bland importerade artikelnummer. Raden visar därför nästa **lediga** nummer; är 10 000 nummer i rad upptagna står det **Serien är full** — flytta fram nästa nummer med **Redigera**.
 
 Under **Egna artikelserier** skapar du fler artikelserier med **+ Ny artikelserie**: **Namn** (unikt, det som visas i Ny artikel och på varugruppen), **Prefix**, **Nästa nummer** och **Antal siffror**, och **Skapa artikelserie**. En egen serie kopplas till en eller flera [varugrupper](/hjalp/artiklar#varugrupper) med gruppens fält **Nummerserie**, och kan väljas direkt i Ny artikel. **Redigera** ändrar även namnet, och **Ta bort** tar bort serien — varugrupper som använde den får standardserien, och artiklarna behåller sina nummer. Standardserien och orderserierna kan inte tas bort eller byta namn.
 
@@ -300,7 +300,7 @@ Ett ogiltigt val ger `valid: false` med meddelanden i `errors` och per grupp —
 
 `source` i `GET /price-quote` kan vara `calculated` (**Kalkylpris**): kunden har ett eget påslag och artikeln saknar kundpris och prislistepris, se [Kalkylpris och kundens påslag](/hjalp/forsaljning#kalkylpris-och-kundens-paslag). Priset kommer då utan rabatt; underlaget (kalkylen och procentsatserna) visas bara för inloggade användare, inte för API-klienter.
 
-**Förval, tomma val och `null`.** I `selection` gäller: en **saknad nyckel** betyder att gruppens förval används (finns inget förval är gruppen tom). `null` betyder att gruppen medvetet lämnas **tom** — förvalet används inte. För en obligatorisk grupp ger det felet att gruppen måste fyllas i; för en ja/nej-grupp betyder `null` Nej. Det är samma sak som att välja **— Välj —** i dialogen **Konfigurera**.
+**Förval, tomma val och `null`.** I `selection` gäller: en **saknad nyckel** betyder att gruppens förval används (finns inget förval är gruppen tom). `null` betyder att gruppen medvetet lämnas **tom** — förvalet används inte. För en obligatorisk grupp ger det felet att gruppen måste fyllas i; för en ja/nej-grupp betyder `null` Nej. Det är samma sak som att välja **— Välj —** i dialogen **Konfigurera**. En gruppkod som mallen inte har ger `configurator-invalid-configuration` — utom när värdet är tomt (`null` eller `false`), som ignoreras eftersom en tom grupp ändå inte ingår i konfigurationen.
 
 **4. Lägg en offert** — `POST /api/v1/quotes` är det vanliga offertanropet, men en rad kan ha `configuration` i stället för (eller utöver) ett eget à-pris:
 

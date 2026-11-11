@@ -1,5 +1,6 @@
 import { apiFetch } from "./api";
 import type { CreatedInquiry, Inquiry, InquiryRow, LegoInquiryRowInput } from "./types";
+import { apiErrorMessage } from "./errorMessages";
 
 // Creates one förfrågan per selected supplier, each carrying every selected
 // lego row — a legoförfrågan is a request for competing quotes on the same
@@ -52,7 +53,7 @@ export async function createLegoInquiries({
       errors.push({
         supplierName: supplier.name,
         articleNumbers: rows.map((r) => r.articleNumber),
-        message: err instanceof Error ? err.message : "Förfrågan kunde inte skapas",
+        message: apiErrorMessage(err, "Förfrågan kunde inte skapas"),
       });
     }
   }

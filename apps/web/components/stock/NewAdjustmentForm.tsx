@@ -12,6 +12,7 @@ import { apiFetch } from "../../lib/api";
 import type { Article, StockLocation } from "../../lib/types";
 import { Card } from "../ui/Card";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 export function NewAdjustmentForm({ locations }: { locations: StockLocation[] }) {
   const router = useRouter();
@@ -60,7 +61,7 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
       router.push("/lager/transaktioner");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte registrera justeringen");
+      setError(apiErrorMessage(err, "Kunde inte registrera justeringen"));
       setPending(false);
     }
   }

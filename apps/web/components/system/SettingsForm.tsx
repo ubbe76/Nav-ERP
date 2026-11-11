@@ -13,6 +13,7 @@ import {
   type SystemSettings,
 } from "../../lib/types";
 import styles from "./SettingsForm.module.css";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 export function SettingsForm({
   settings,
@@ -92,7 +93,7 @@ export function SettingsForm({
         body: JSON.stringify(body),
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara inställningen");
+      setError(apiErrorMessage(err, "Kunde inte spara inställningen"));
       return null;
     } finally {
       setPending(false);

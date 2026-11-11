@@ -415,6 +415,7 @@ import {
   ArticleNotFoundError,
   ArticleCopyPartNotAllowedError,
   ArticleIsTemplateError,
+  ArticleHasStockError,
   DefaultLocationBlockedError,
   CopiedArticlesTooManyError,
 } from "../src/modules/article/service/article.service.js";
@@ -799,6 +800,7 @@ const cases: Array<[Error, string]> = [
   [new DuplicateArticleBarcodeError("7350000000017"), ERROR_CODES.DUPLICATE_ARTICLE_BARCODE],
   [new ArticleCopyPartNotAllowedError("beredning", "purchased"), ERROR_CODES.ARTICLE_COPY_PART_NOT_ALLOWED],
   [new ArticleIsTemplateError("63000"), ERROR_CODES.ARTICLE_IS_TEMPLATE],
+  [new ArticleHasStockError(), ERROR_CODES.ARTICLE_HAS_STOCK],
   [new InvalidConfiguratorFormulaError("Antal", "Okänd kod LANGD (tecken 1)"), ERROR_CODES.INVALID_CONFIGURATOR_FORMULA],
   [new InvalidConfiguratorLineError("x"), ERROR_CODES.INVALID_CONFIGURATOR_LINE],
   [new InvalidConfiguratorOperationError("x"), ERROR_CODES.INVALID_CONFIGURATOR_OPERATION],

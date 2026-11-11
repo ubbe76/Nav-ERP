@@ -1,5 +1,5 @@
 import { sql, type SQL } from "drizzle-orm";
-import { bomComponents, type Tx } from "@navet/db";
+import { bomComponents, type Db, type Tx } from "@navet/db";
 
 // Tx-only BOM writer — the article module owns bom_components, so callers
 // that write a structure inside a larger transaction (Kopiera från's
@@ -62,4 +62,32 @@ export async function insertBomRows(
       costingOnly: row.costingOnly ?? false,
     }))
   );
+}
+
+// --- The structure's cycle guard ---
+//
+// An edge parent → component closes a cycle when the parent is reachable
+// walking down from the component. Checked and inserted under ONE advisory
+// lock (addBomComponent): the check read without a lock outside the
+// INSERT's transaction, so two concurrent adds A → B and B → A both passed
+// and the structure looped — explodeBom and getBomTree then throw on every
+// read. Rows written for a NEW article (Kopiera från's Beredning, the
+// configurator's variants, the demo data) cannot close a cycle — nothing
+// contains the new article yet — and take no lock. The structure import
+// checks its plan against a snapshot before its transaction (import.md).
+export const BOM_STRUCTURE_LOCK_SQL = sql`SELECT pg_advisory_xact_lock(hashtext('bom_structure'))`;
+
+// Is `targetArticleId` reachable walking down from `fromArticleId` (itself
+// included)? ONE recursive query; UNION (not ALL) visits each article once,
+// so it ends even on a structure that already loops.
+export async function bomReaches(db: Db | Tx, fromArticleId: string, targetArticleId: string): Promise<boolean> {
+  const result = await db.execute(sql`
+    WITH RECURSIVE reach(id) AS (
+      SELECT ${fromArticleId}::uuid
+      UNION
+      SELECT b.component_article_id FROM bom_components b JOIN reach r ON b.parent_article_id = r.id
+    )
+    SELECT EXISTS (SELECT 1 FROM reach WHERE id = ${targetArticleId}::uuid) AS found`);
+  const [row] = [...result] as { found: boolean }[];
+  return row?.found === true;
 }

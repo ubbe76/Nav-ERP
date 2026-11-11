@@ -12,6 +12,7 @@ import type { StockBalance, StockLocation, StockTransferResult } from "../../lib
 import shellStyles from "../AppShell.module.css";
 import { FormError } from "../ui/Form";
 import { formatQuantity } from "../../lib/format";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 interface RowWithId extends StockBalance {
   id: string;
@@ -113,7 +114,7 @@ export function StockTransferPageClient({
       if (result.deactivatedSourceLocation) router.replace("/lager/flytta");
       else router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte genomföra flytten");
+      setError(apiErrorMessage(err, "Kunde inte genomföra flytten"));
     } finally {
       setPending(false);
     }

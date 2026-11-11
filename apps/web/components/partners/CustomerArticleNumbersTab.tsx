@@ -11,6 +11,7 @@ import { ArticlePicker } from "../ui/ArticlePicker";
 import { apiFetch } from "../../lib/api";
 import type { Article, CustomerArticleNumber } from "../../lib/types";
 import { Form, FormActions, FormError } from "../ui/Form";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // Kundens artikelnummer — what this customer calls one of our articles
 // (customer_article_numbers, one per customer and article). Same shape as
@@ -42,7 +43,7 @@ export function CustomerArticleNumbersTab({
       await apiFetch(`${numbersBase}/${row.id}`, { method: "DELETE" });
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte ta bort kundens artikelnummer");
+      setError(apiErrorMessage(err, "Kunde inte ta bort kundens artikelnummer"));
     }
   }
 
@@ -163,7 +164,7 @@ function CustomerArticleNumberForm({
       }
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara kundens artikelnummer");
+      setError(apiErrorMessage(err, "Kunde inte spara kundens artikelnummer"));
       setPending(false);
     }
   }

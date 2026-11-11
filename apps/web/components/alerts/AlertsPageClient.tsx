@@ -13,6 +13,7 @@ import {
   type AlertsResponse,
 } from "../../lib/alerts";
 import styles from "./AlertsPageClient.module.css";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 interface Props {
   initial: AlertsResponse;
@@ -40,7 +41,7 @@ export function AlertsPageClient({ initial, digest, email, digestTime, smtpMissi
     try {
       setAlerts(await apiFetch<AlertsResponse>("/api/v1/alerts"));
     } catch (err) {
-      setRefreshError(err instanceof Error ? err.message : "Kunde inte uppdatera aviseringarna");
+      setRefreshError(apiErrorMessage(err, "Kunde inte uppdatera aviseringarna"));
     } finally {
       setRefreshing(false);
     }
@@ -57,7 +58,7 @@ export function AlertsPageClient({ initial, digest, email, digestTime, smtpMissi
       setEnabled(updated.alertDigest);
       setKinds(updated.alertDigestKinds);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Kunde inte spara inställningen");
+      setSaveError(apiErrorMessage(err, "Kunde inte spara inställningen"));
     } finally {
       setSaving(false);
     }

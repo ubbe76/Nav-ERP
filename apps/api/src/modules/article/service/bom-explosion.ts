@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { articles, bomComponents, type Db, type Tx } from "@navet/db";
 
 export interface ExplodedComponent {
@@ -6,8 +7,9 @@ export interface ExplodedComponent {
   componentName: string;
   standardCost: string | null;
   totalQuantity: number;
-  // The routing operation that consumes this component, if the BOM row (or
-  // the phantom row it came through) links to one.
+  // The routing operation that consumes this component: the link of the
+  // exploded article's own row it came through (a direct row, or the phantom
+  // row a phantom's part came in by). See the link rule on explodeBom.
   routingOperationId: string | null;
   // Display unit from the BOM row (null = the component's base unit).
   // totalQuantity is always in the base unit; merged branches that disagree
@@ -39,9 +41,23 @@ export type CostingOnlyMode = "include" | "exclude";
 // twice in a structure) are merged by summing totalQuantity. `path` tracks
 // only the current branch (not everything ever visited), so legitimate
 // diamond-shaped reuse isn't mistaken for a cycle. True cycles can't exist
-// today — article.service.ts's isDescendant check runs on every
-// addBomComponent call, phantom or not — but this throws rather than
-// recursing forever if that invariant is ever violated.
+// today — article.service.ts's cycle check runs on every addBomComponent
+// call (under the structure lock), phantom or not — but this throws rather
+// than recursing forever if that invariant is ever violated.
+//
+// The link rule (ONE rule for release, the förkalkyl, the configured TO and
+// the configurator's/costing preview's phantom explosion): a row's
+// routing_operation_id points at its PARENT's routing, so it only means
+// something on the article whose TO (or calculation) this is. A phantom never
+// gets a TO of its own, so a link on a phantom's rows — to the phantom's own
+// operations, which never exist on the exploded article's TO — is ignored:
+// the phantom's parts take the link of the phantom row they came in by. A
+// phantom exploded as the root (the configurator and the costing preview
+// dissolve a phantom material this way) therefore yields unlinked parts and
+// the caller applies its phantom row's link. Without the rule the phantom's
+// own link became an unknown operation at release, the line went unlinked,
+// and the same component on an unlinked row hit mo_material_unique_per_operation
+// (500).
 export async function explodeBom(
   db: Db | Tx,
   parentArticleId: string,
@@ -49,6 +65,7 @@ export async function explodeBom(
   costingOnlyRows: CostingOnlyMode
 ): Promise<ExplodedComponent[]> {
   const merged = new Map<string, ExplodedComponent>();
+  const parentArticles = alias(articles, "bom_parent");
 
   async function walk(
     articleId: string,
@@ -73,9 +90,11 @@ export async function explodeBom(
         name: articles.name,
         standardCost: articles.standardCost,
         isPhantom: articles.isPhantom,
+        parentIsPhantom: parentArticles.isPhantom,
       })
       .from(bomComponents)
       .innerJoin(articles, eq(articles.id, bomComponents.componentArticleId))
+      .innerJoin(parentArticles, eq(parentArticles.id, bomComponents.parentArticleId))
       .where(eq(bomComponents.parentArticleId, articleId));
 
     for (const row of rows) {
@@ -85,9 +104,12 @@ export async function explodeBom(
       if (costingOnly && costingOnlyRows === "exclude") continue;
 
       const rowMultiplier = multiplier * Number(row.quantity);
-      // A component's own link wins; otherwise it inherits the phantom row's
-      // link, since a phantom's parts are consumed where the phantom was.
-      const operationId = row.routingOperationId ?? inheritedOperationId;
+      // The link rule (see above): a row's own link counts only when its
+      // parent is not a phantom — i.e. on the exploded article's own rows.
+      // Below a phantom (every level after the first, since only phantoms
+      // are descended into) the phantom row's link is inherited, since a
+      // phantom's parts are consumed where the phantom was.
+      const operationId = row.parentIsPhantom ? inheritedOperationId : row.routingOperationId;
 
       if (row.isPhantom) {
         await walk(row.componentArticleId, rowMultiplier, nextPath, operationId, costingOnly);

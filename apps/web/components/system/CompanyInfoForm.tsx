@@ -6,6 +6,7 @@ import { Field, Input, Toggle } from "../ui/Field";
 import { API_URL, apiFetch } from "../../lib/api";
 import type { CompanyInfo } from "../../lib/types";
 import styles from "./CompanyInfoForm.module.css";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 export function CompanyInfoForm({ initial }: { initial: CompanyInfo }) {
   const [name, setName] = useState(initial.name);
@@ -69,7 +70,7 @@ export function CompanyInfoForm({ initial }: { initial: CompanyInfo }) {
       });
       setSaved(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara företagsinformationen");
+      setError(apiErrorMessage(err, "Kunde inte spara företagsinformationen"));
     } finally {
       setPending(false);
     }
@@ -100,7 +101,7 @@ export function CompanyInfoForm({ initial }: { initial: CompanyInfo }) {
       setLogoVersion((v) => v + 1);
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (err) {
-      setLogoError(err instanceof Error ? err.message : "Kunde inte ladda upp logotypen");
+      setLogoError(apiErrorMessage(err, "Kunde inte ladda upp logotypen"));
     } finally {
       setUploading(false);
     }

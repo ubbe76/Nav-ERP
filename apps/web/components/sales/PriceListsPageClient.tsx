@@ -16,6 +16,7 @@ import { HelpLink } from "../ui/HelpLink";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 import { CurrencyInput } from "../ui/CurrencyInput";
 import { useCan } from "../PermissionsProvider";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 // Prislistor — registerlistan (kopierad från kundlistans form, se
 // CustomersPageClient.tsx): URL-driven sök/sida via ListToolbar/Pagination,
@@ -128,7 +129,7 @@ function NewPriceListForm({ onSuccess }: { onSuccess: () => void }) {
       });
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte skapa prislistan");
+      setError(apiErrorMessage(err, "Kunde inte skapa prislistan"));
       setPending(false);
     }
   }

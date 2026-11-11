@@ -6,6 +6,7 @@ import { Field } from "../ui/Field";
 import fieldStyles from "../ui/Field.module.css";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
+import { apiErrorMessage } from "../../lib/errorMessages";
 
 export function UnlockPeriodForm({ periodId, onDone }: { periodId: string; onDone: () => void }) {
   const [reason, setReason] = useState("");
@@ -23,7 +24,7 @@ export function UnlockPeriodForm({ periodId, onDone }: { periodId: string; onDon
       });
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte låsa upp perioden");
+      setError(apiErrorMessage(err, "Kunde inte låsa upp perioden"));
       setPending(false);
     }
   }

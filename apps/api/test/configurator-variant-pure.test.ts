@@ -84,6 +84,16 @@ describe("expandCombinations", () => {
     expect(() => expandCombinations(template, { XYZ: ["A"] })).toThrow("Valgruppen XYZ finns inte");
   });
 
+  // Konfiguratorgranskningen 2026-11-11: the engine's step-1 rule — only
+  // empty values in an unknown group are ignored.
+  it("ignores an unknown group whose set is only empty values; anything else in it is still unknown", () => {
+    expect(expandCombinations(template, { XYZ: [null], ABC: [false] })).toEqual([{}]);
+    expect(expandCombinations(template, { LOCK: ["A"], XYZ: [null, false] })).toEqual([{ LOCK: "A" }]);
+    for (const set of [[null, "A"], [true], []] as (string | boolean | null)[][]) {
+      expect(() => expandCombinations(template, { XYZ: set } as never)).toThrow("Valgruppen XYZ finns inte");
+    }
+  });
+
   it("rejects an alternative that is not in the group, naming the group", () => {
     expect(() => expandCombinations(template, { LOCK: ["A", "Q"] })).toThrow(VariantSetError);
     expect(() => expandCombinations(template, { LOCK: ["A", "Q"] })).toThrow("Alternativet Q finns inte i Lås");
