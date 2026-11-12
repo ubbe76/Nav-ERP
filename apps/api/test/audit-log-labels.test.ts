@@ -19,6 +19,8 @@ describe("händelseloggens etiketter", () => {
     ["action", "einvoice_failed"],
     ["action", "lost"],
     ["action", "reopened"],
+    ["action", "order_created"],
+    ["action", "created_from_quote"],
     ["entity", "theme"],
     ["action", "theme_created"],
     ["action", "theme_updated"],

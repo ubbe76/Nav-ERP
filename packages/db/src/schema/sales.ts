@@ -69,6 +69,9 @@ export const salesOrderStatusEnum = pgEnum("sales_order_status", [
   "invoiced",
   "cancelled",
   "lost",
+  // Skapa kundorder från offert (migration 0211): a quote that has given at
+  // least one order. Still a quote (salesDocumentKind) and a final status.
+  "ordered",
 ]);
 
 export const customers = pgTable("customers", {
@@ -442,6 +445,12 @@ export const salesOrders = pgTable("sales_orders", {
   // Legacy pre-C1 stamp: orders invoiced before the invoice module got an
   // FA- number written straight onto the order. Never written since C1 —
   // invoicing (partial and collective) lives in invoices/invoice_rows.
+  // Skapa kundorder från offert (migration 0212): the quote this order was
+  // created from — a COPY of it, the quote stays (status ordered) and may
+  // give more orders. Only orders made that way carry it; a quote confirmed
+  // the old way is the same row and has none. restrict: the quote cannot be
+  // deleted from under its orders.
+  sourceQuoteId: uuid("source_quote_id").references((): AnyPgColumn => salesOrders.id, { onDelete: "restrict" }),
   invoiceNumber: varchar("invoice_number", { length: 20 }).unique(),
   invoicedAt: timestamp("invoiced_at", { withTimezone: true }),
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
@@ -455,6 +464,9 @@ export const salesOrders = pgTable("sales_orders", {
     "sales_orders_markups_range",
     sql`(${table.generalMarkupPercent} is null or ${table.generalMarkupPercent} between 0 and 1000) and (${table.materialMarkupPercent} is null or ${table.materialMarkupPercent} between 0 and 1000)`
   ),
+  check("sales_orders_source_quote_not_self", sql`${table.sourceQuoteId} <> ${table.id}`),
+  // The quote card's "Ordrar från offerten" and the restrict FK's lookup.
+  index("idx_sales_orders_source_quote").on(table.sourceQuoteId).where(sql`source_quote_id IS NOT NULL`),
 ]);
 
 // The same article may appear on several rows (0177) — split deliveries with

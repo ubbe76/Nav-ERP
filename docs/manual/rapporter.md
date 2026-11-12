@@ -28,7 +28,7 @@ Värdena räknas per rad: antal × à-pris med radens rabatt (kundorder) och st�
 
 Definitionerna:
 
-- **Vunnen** är en offert som blivit bekräftad, under tillverkning, levererad eller fakturerad. **Förlorad** är en offert med status Förlorad. **Öppen** är en offert som fortfarande är offert, varav **Utgången** när **Giltig t.o.m.** har passerat. **Makulerad** är en avbruten offert.
+- **Vunnen** är en offert som blivit bekräftad, under tillverkning, levererad eller fakturerad, eller som har status **Order** (den har gett en kundorder). **Förlorad** är en offert med status Förlorad. **Öppen** är en offert som fortfarande är offert, varav **Utgången** när **Giltig t.o.m.** har passerat. **Makulerad** är en avbruten offert.
 - **Hit rate (antal)** = vunna / (vunna + förlorade). **Hit rate (värde)** räknas på samma sätt med vunnet och förlorat värde. Öppna och makulerade offerter räknas inte; finns varken vunna eller förlorade visas **–**.
 - **Värde** är radernas nuvarande värde (antal × à-pris minus rabatt) exklusive moms, i SEK. En offert vars rader har ändrats efter att den vanns visar alltså det nya värdet.
 - En order skapad med **+ Ny kundorder** är ingen offert och ingår inte. Statistiken gäller offerter som var öppna när funktionen infördes och offerter som skapats efter det; äldre ordrar går inte att avgöra och räknas inte.

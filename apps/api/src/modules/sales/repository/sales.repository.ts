@@ -40,6 +40,8 @@ import {
 } from "@navet/db";
 import {
   ilikePattern,
+  isLiveQuoteStatus,
+  isSalesOrderEditableStatus,
   salesDocumentKind,
   type ArticleCustomerPricesInput,
   type ArticlePriceListRowsInput,
@@ -102,6 +104,8 @@ const lostByUser = alias(users, "lost_by_user");
 // Kostnadsställen och projekt: the order header's objects as { id, code, name }.
 const orderCostCenters = alias(costCenters, "order_cost_centers");
 const orderProjects = alias(projects, "order_projects");
+// Skapa kundorder från offert: the quote an order was created from.
+const sourceQuotes = alias(salesOrders, "source_quotes");
 
 // A plain sales_orders row (from insert/update … returning) with its derived
 // document kind, so every write path answers in the same shape as the reads.
@@ -548,7 +552,7 @@ async function rowConfigurationGuards(
     .where(and(eq(salesOrderRows.id, rowId), eq(salesOrderRows.salesOrderId, orderId)));
   const [found] = lock ? await query.for("update", { of: salesOrderRows }) : await query;
   if (!found) return { ok: false, reason: "row_not_found" };
-  if (found.orderStatus !== "quote" && found.orderStatus !== "confirmed" && found.orderStatus !== "in_production") {
+  if (!isSalesOrderEditableStatus(found.orderStatus)) {
     return { ok: false, reason: "order_status", orderStatus: found.orderStatus };
   }
   if (Number(found.row.quantityDelivered) > 0) return { ok: false, reason: "delivered" };
@@ -929,11 +933,11 @@ export function createSalesRepository(db: Db) {
           .where(eq(salesOrders.id, orderId))
           .for("update");
         if (!order) return { ok: false as const, reason: "not_found" as const };
-        if (order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
+        if (!isSalesOrderEditableStatus(order.status)) {
           return { ok: false as const, reason: "status" as const, status: order.status };
         }
         // Giltig t.o.m. is a quote's field — once confirmed the date is history.
-        if (input.quoteValidUntil !== undefined && order.status !== "quote") {
+        if (input.quoteValidUntil !== undefined && !isLiveQuoteStatus(order.status)) {
           return { ok: false as const, reason: "status" as const, status: order.status };
         }
         // Valuta: currency and rate as a quote or a confirmed order only, and
@@ -942,7 +946,7 @@ export function createSalesRepository(db: Db) {
         // insert, so a concurrent first row either commits first (and is
         // seen here: currency_locked) or waits for this and is refused when
         // the currency it was priced in is gone (sales-order-currency-changed).
-        if ((input.currency !== undefined || input.exchangeRate !== undefined) && order.status !== "quote" && order.status !== "confirmed") {
+        if ((input.currency !== undefined || input.exchangeRate !== undefined) && !isLiveQuoteStatus(order.status) && order.status !== "confirmed") {
           return { ok: false as const, reason: "status" as const, status: order.status };
         }
         if (input.currency !== undefined && input.currency !== order.currency) {
@@ -1192,9 +1196,15 @@ export function createSalesRepository(db: Db) {
           // Kostnadsställen och projekt: the header's objects for the card.
           costCenter: { id: orderCostCenters.id, code: orderCostCenters.code, name: orderCostCenters.name },
           project: { id: orderProjects.id, code: orderProjects.code, name: orderProjects.name },
+          // Skapa kundorder från offert: the source quote's number (its OF-
+          // number; a quote from before 0138 has only its order number) —
+          // the card's Offertnummer and the confirmation's "Vår offert:".
+          // null = the order was not created from a quote.
+          sourceQuoteNumber: sql<string | null>`coalesce(${sourceQuotes.quoteNumber}, ${sourceQuotes.orderNumber})`,
         })
         .from(salesOrders)
         .innerJoin(customers, eq(customers.id, salesOrders.customerId))
+        .leftJoin(sourceQuotes, eq(sourceQuotes.id, salesOrders.sourceQuoteId))
         .leftJoin(customerDeliveryAddresses, eq(customerDeliveryAddresses.id, salesOrders.deliveryAddressId))
         .leftJoin(deliveryTerms, eq(deliveryTerms.id, salesOrders.deliveryTermId))
         .leftJoin(paymentTerms, eq(paymentTerms.id, salesOrders.paymentTermId))
@@ -1312,6 +1322,10 @@ export function createSalesRepository(db: Db) {
           .where(eq(salesOrders.id, id))
           .for("update");
         if (!current || (fromStatus && current.status !== fromStatus)) return null;
+        // Skapa kundorder från offert: Order (ordered) is final and only
+        // createOrderFromQuote writes it — never left and never entered
+        // through here, whatever the caller checked before the lock.
+        if (current.status === "ordered" || status === "ordered") return null;
         const numberedAsQuote = current.quoteNumber !== null && current.orderNumber === current.quoteNumber;
         // A quote that ends as Förlorad/Makulerad goes back to its OF- number
         // — it may hold a KO- number reserved by a confirmation send that
@@ -1416,6 +1430,165 @@ export function createSalesRepository(db: Db) {
       return row ? withDocumentKind(row) : null;
     },
 
+    // Skapa kundorder från offert: a NEW order as a copy of the quote, which
+    // stays and becomes Order (ordered) — one transaction.
+    //
+    // Lock: the quote's header FOR UPDATE first and nothing else. Its rows
+    // are read in ONE statement without locks — every row writer ends on the
+    // header (rad → huvud: updateRow/deleteRow bump the revision, addRow
+    // takes KEY SHARE on it first), so a row change in flight either
+    // committed before the header lock was granted or is not in the copy at
+    // all; and since no row lock is taken here the rad → huvud order of
+    // those writers is never crossed. Two concurrent calls queue on the
+    // header: the second sees `ordered` and makes a second order. A
+    // concurrent Förlorad (markLost's UPDATE … WHERE status = 'quote') or
+    // Bekräfta (updateStatus, same lock) waits too, and exactly one wins.
+    //
+    // Number: the next KO- of the sales_order series, drawn inside the
+    // transaction like createQuote's — or the one a failed/in-flight order
+    // confirmation mail reserved on the quote (reserveOrderNumber), which
+    // the quote hands over as it goes back to its OF- number.
+    //
+    // Copied as they are: the header (references, terms, currency AND rate,
+    // markups, dimensions, dates, note, the freight choice) and the rows in
+    // the quote's order (quantity, unit, price, discount, price origin,
+    // configuration and its cost, row date) — no price chain runs. An
+    // engångsadress belongs to the quote, so the order gets its own copy; a
+    // ställkostnadsrad is re-pointed at its article row's copy. Not copied:
+    // quoted (false), quote_number (null), Giltig t.o.m., lost_*, the
+    // revision (a new document starts at 1), deliveries and invoices.
+    // The quote's revision is NOT bumped — a status change never does.
+    async createOrderFromQuote(quoteId: string, createdBy: string | null) {
+      return db.transaction(async (tx) => {
+        const [quote] = await tx.select().from(salesOrders).where(eq(salesOrders.id, quoteId)).for("update");
+        if (!quote) return { ok: false as const, reason: "not_found" as const };
+        if (!isLiveQuoteStatus(quote.status)) {
+          return { ok: false as const, reason: "status" as const, status: quote.status };
+        }
+        const quoteDisplayNumber = quote.quoteNumber ?? quote.orderNumber;
+        const reserved = quote.quoteNumber !== null && quote.orderNumber !== quote.quoteNumber ? quote.orderNumber : null;
+        // The quote first: it must have let go of a reserved KO- number
+        // before the order takes it (order_number is unique).
+        await tx
+          .update(salesOrders)
+          .set({ status: "ordered", orderNumber: quoteDisplayNumber, updatedAt: new Date() })
+          .where(eq(salesOrders.id, quoteId));
+        const orderNumber = reserved ?? (await getNextOrderNumber(tx, "sales_order"));
+
+        let deliveryAddressId = quote.deliveryAddressId;
+        if (deliveryAddressId) {
+          const [address] = await tx
+            .select()
+            .from(customerDeliveryAddresses)
+            .where(eq(customerDeliveryAddresses.id, deliveryAddressId));
+          if (address?.oneOff) {
+            const [copy] = await tx
+              .insert(customerDeliveryAddresses)
+              .values({
+                customerId: address.customerId,
+                label: address.label,
+                address: address.address,
+                postalCode: address.postalCode,
+                city: address.city,
+                country: address.country,
+                isDefault: false,
+                oneOff: true,
+              })
+              .returning({ id: customerDeliveryAddresses.id });
+            deliveryAddressId = copy!.id;
+          }
+        }
+
+        const [order] = await tx
+          .insert(salesOrders)
+          .values({
+            orderNumber,
+            quoteNumber: null,
+            sourceQuoteId: quote.id,
+            status: "confirmed",
+            quoted: false,
+            quoteValidUntil: null,
+            customerId: quote.customerId,
+            customerOrderNumber: quote.customerOrderNumber,
+            customerInquiryNumber: quote.customerInquiryNumber,
+            customerReference: quote.customerReference,
+            deliveryAddressId,
+            deliveryTermId: quote.deliveryTermId,
+            paymentTermId: quote.paymentTermId,
+            carrierId: quote.carrierId,
+            freightProductId: quote.freightProductId,
+            freightCarrierPrice: quote.freightCarrierPrice,
+            freightQuote: quote.freightQuote,
+            costCenterId: quote.costCenterId,
+            projectId: quote.projectId,
+            expectedDeliveryDate: quote.expectedDeliveryDate,
+            note: quote.note,
+            currency: quote.currency,
+            exchangeRate: quote.exchangeRate,
+            generalMarkupPercent: quote.generalMarkupPercent,
+            materialMarkupPercent: quote.materialMarkupPercent,
+            createdBy,
+          })
+          .returning();
+
+        // The quote's rows in the card's order (listRowsByOrder's), copied
+        // in one statement and stamped a millisecond apart like createQuote's
+        // — the order's rows sort on created_at too. New ids up front, so a
+        // ställkostnadsrad can point at its article row's copy.
+        const quoteRows = await tx
+          .select()
+          .from(salesOrderRows)
+          .where(eq(salesOrderRows.salesOrderId, quoteId))
+          .orderBy(asc(salesOrderRows.createdAt), asc(salesOrderRows.id));
+        const newIds = new Map(quoteRows.map((r) => [r.id, randomUUID()]));
+        const now = Date.now();
+        const rows =
+          quoteRows.length === 0
+            ? []
+            : await tx
+                .insert(salesOrderRows)
+                .values(
+                  quoteRows.map((r, i) => ({
+                    id: newIds.get(r.id)!,
+                    salesOrderId: order!.id,
+                    articleId: r.articleId,
+                    quantityOrdered: r.quantityOrdered,
+                    unitPrice: r.unitPrice,
+                    discountPercent: r.discountPercent,
+                    unitId: r.unitId,
+                    unitFactor: r.unitFactor,
+                    expectedDeliveryDate: r.expectedDeliveryDate,
+                    configuration: r.configuration,
+                    configurationCost: r.configurationCost,
+                    setupForRowId: r.setupForRowId ? (newIds.get(r.setupForRowId) ?? null) : null,
+                    priceOrigin: r.priceOrigin,
+                    createdAt: new Date(now + i),
+                  }))
+                )
+                .returning();
+
+        // Tillägg: a new order exists — the same event Ny kundorder and
+        // Bekräfta send (updateStatus).
+        await pluginEvents.emit(tx, { type: "sales_order.confirmed", entityId: order!.id, entityNumber: order!.orderNumber });
+
+        return {
+          ok: true as const,
+          order: withDocumentKind(order!),
+          rows,
+          quote: { id: quote.id, number: quoteDisplayNumber, statusBefore: quote.status },
+        };
+      });
+    },
+
+    // The orders Skapa kundorder made from this quote, oldest first.
+    async listOrdersFromQuote(quoteId: string) {
+      return db
+        .select({ id: salesOrders.id, orderNumber: salesOrders.orderNumber, status: salesOrders.status, createdAt: salesOrders.createdAt })
+        .from(salesOrders)
+        .where(eq(salesOrders.sourceQuoteId, quoteId))
+        .orderBy(asc(salesOrders.createdAt), asc(salesOrders.orderNumber));
+    },
+
     // invoiceOrder was removed in C1 — the invoice module (invoice.repository.ts)
     // now assigns the FA number, on the invoices table rather than the order.
 
@@ -1451,7 +1624,7 @@ export function createSalesRepository(db: Db) {
         // The status again under the key lock — it waits for a delivery's
         // header lock, so a row never lands on an order that just became
         // Levererad (or was cancelled) after the service's unlocked check.
-        if (order && order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
+        if (order && !isSalesOrderEditableStatus(order.status)) {
           throw new SalesOrderRowsLockedError(order.status);
         }
         if (pricedIn !== undefined) {

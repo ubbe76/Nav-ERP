@@ -1478,6 +1478,20 @@
       "when": 1794472620868,
       "tag": "0210_artikel_forsaljning_index",
       "breakpoints": true
+    },
+    {
+      "idx": 211,
+      "version": "7",
+      "when": 1794482853222,
+      "tag": "0211_kundorder_fran_offert_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 212,
+      "version": "7",
+      "when": 1794482867874,
+      "tag": "0212_kundorder_fran_offert",
+      "breakpoints": true
     }
   ]
 }

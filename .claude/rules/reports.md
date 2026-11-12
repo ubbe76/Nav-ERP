@@ -32,7 +32,7 @@ Rapporter-modulen och dess `rapporter`-rättighet; alla filter i URL:en.
 
 ## Offertuppföljning
 
-- `GET /reports/quote-followup` + `/csv` (rena `quote-followup.ts`), sidan `/rapporter/offertuppfoljning`. Utfall vunnen = confirmed/in_production/delivered/invoiced; hit rate = vunna/(vunna+förlorade) i antal och värde; makulerade utanför; värde = radernas nuvarande värde exkl. moms; Stockholmsmånad på skapandet; tak 10 000 ⇒ 400 `quote-followup-too-large`. Bara poster med `quoted = true` räknas (äldre ordrar inte, eftersom Ny kundorder också loggar `confirmed`). Statusarna och förlustorsakerna: `sales.md`.
+- `GET /reports/quote-followup` + `/csv` (rena `quote-followup.ts`), sidan `/rapporter/offertuppfoljning`. Utfall vunnen = confirmed/in_production/delivered/invoiced eller `ordered` (Skapa kundorder gav en order — ordrarna därifrån har `quoted = false` och räknas inte själva; aldrig Utgången); hit rate = vunna/(vunna+förlorade) i antal och värde; makulerade utanför; värde = radernas nuvarande värde exkl. moms; Stockholmsmånad på skapandet; tak 10 000 ⇒ 400 `quote-followup-too-large`. Bara poster med `quoted = true` räknas (äldre ordrar inte, eftersom Ny kundorder också loggar `confirmed`). Statusarna och förlustorsakerna: `sales.md`.
 
 ## Leveransprecision per motpart (Kvalitet, 0153)
 

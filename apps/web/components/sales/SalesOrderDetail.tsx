@@ -16,6 +16,7 @@ import { RowMenu } from "../ui/RowMenu";
 import { ArticleOverviewButton } from "../articles/ArticleOverviewButton";
 import { GatedLink } from "../ui/GatedLink";
 import { StatusPill } from "../ui/StatusPill";
+import { SectionHeading } from "../ui/SectionHeading";
 import { useCan } from "../PermissionsProvider";
 import { useRouter } from "next/navigation";
 import { Table, shareTrack } from "../ui/Table";
@@ -85,6 +86,12 @@ import { alreadyOnDocumentText } from "../../lib/orderRowDuplicates";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow } from "../ui/Form";
 import { SuggestedDueDateField } from "../manufacturing/SuggestedDueDateField";
 
+// Order is reached only through Skapa kundorder (the API refuses set-status
+// to it), so the manual status change never offers it.
+const MANUAL_SALES_ORDER_STATUSES = Object.fromEntries(
+  Object.entries(SALES_ORDER_STATUS_PILL).filter(([status]) => status !== "ordered")
+);
+
 interface SalesOrderDetailProps {
   order: SalesOrder;
   rows: SalesOrderRow[];
@@ -96,7 +103,7 @@ interface SalesOrderDetailProps {
 
 // Confirm / cancel / start-production — no body, just an action call.
 // Fakturera is now a Link into the invoice module (Task 9), not an action call.
-type SalesAction = "confirm" | "cancel" | "start-production" | "reopen";
+type SalesAction = "confirm" | "cancel" | "start-production" | "reopen" | "create-order";
 
 export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, registers, freightEnabled }: SalesOrderDetailProps) {
   const router = useRouter();
@@ -126,7 +133,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   // Rows stay editable until the order is delivered/invoiced/cancelled;
   // per-row guards (quantity ≥ delivered, no delete with deliveries) are
   // enforced by the API and mirrored in the UI below.
-  const rowsEditable = order.status === "quote" || order.status === "confirmed" || order.status === "in_production";
+  const rowsEditable = order.status === "quote" || order.status === "ordered" || order.status === "confirmed" || order.status === "in_production";
 
   const [modal, setModal] = useState<"header" | "addRow" | "deliver" | "createMo" | "lose" | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
@@ -527,6 +534,21 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     }
   }
 
+  // Skapa kundorder: copies the quote's rows and prices to a new order; the
+  // quote stays (status Order) and can give more orders.
+  async function createOrderFromQuote() {
+    if (!(await confirmDialog(`Skapa en kundorder av offert ${order.quoteNumber ?? order.orderNumber}? Raderna och priserna kopieras.`, { confirmLabel: "Skapa kundorder" }))) return;
+    setActionError(null);
+    setActionPending("create-order");
+    try {
+      const created = await apiFetch<{ id: string; orderNumber: string }>(`/api/v1/sales-orders/${order.id}/create-order`, { method: "POST" });
+      router.push(`/forsaljning/ordrar/${created.id}`);
+    } catch (err) {
+      setActionError(apiErrorMessage(err, "Kunde inte skapa kundordern"));
+      setActionPending(null);
+    }
+  }
+
   async function runAction(action: SalesAction) {
     if (action === "cancel") {
       const what = order.status === "quote" ? "offerten" : "ordern";
@@ -553,12 +575,14 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         pill={pill}
         error={actionError}
         trailing={
-          <ManualStatusChange
-            endpoint={`/api/v1/sales-orders/${order.id}`}
-            statuses={SALES_ORDER_STATUS_PILL}
-            current={order.status}
-            onDone={() => router.refresh()}
-          />
+          order.status === "ordered" ? undefined : (
+            <ManualStatusChange
+              endpoint={`/api/v1/sales-orders/${order.id}`}
+              statuses={MANUAL_SALES_ORDER_STATUSES}
+              current={order.status}
+              onDone={() => router.refresh()}
+            />
+          )
         }
       >
         {rowsEditable && (
@@ -588,9 +612,9 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           </Button>
         )}
 
-        {order.status === "quote" && (
-          <Button type="button" variant="primary" disabled={actionPending !== null || rowEditOpen} title={rowEditTitle} onClick={() => runAction("confirm")}>
-            {actionPending === "confirm" ? "Arbetar…" : "Bekräfta"}
+        {(order.status === "quote" || order.status === "ordered") && canSell && (
+          <Button type="button" variant="primary" disabled={actionPending !== null || rowEditOpen} title={rowEditTitle} onClick={createOrderFromQuote}>
+            {actionPending === "create-order" ? "Arbetar…" : "Skapa kundorder"}
           </Button>
         )}
 
@@ -665,6 +689,14 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         }
         fields={[
           { label: "Kund", value: order.customerName, href: `/kunder/${order.customerId}` },
+          ...(order.sourceQuote
+            ? [
+                {
+                  label: "Offertnummer",
+                  value: <GatedLink href={`/forsaljning/offerter/${order.sourceQuote.id}`}>{order.sourceQuote.quoteNumber}</GatedLink>,
+                },
+              ]
+            : []),
           ...customerNumberFields(order),
           { label: "Referens", value: order.customerReference },
           ...headerDimensionFields(order, dims),
@@ -678,7 +710,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           ...(order.materialMarkupPercent != null
             ? [{ label: "Materialpåslag", value: `${Number(order.materialMarkupPercent).toLocaleString("sv-SE")} %` }]
             : []),
-          ...(order.status === "quote"
+          ...((order.status === "quote" || order.status === "ordered")
             ? [
                 {
                   label: "Giltig t.o.m.",
@@ -716,6 +748,28 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         note={order.note}
         onEdit={rowsEditable ? () => setModal("header") : undefined}
       />
+
+      {order.ordersFromQuote && order.ordersFromQuote.length > 0 && (
+        <section>
+          <SectionHeading spaced>Ordrar från offerten</SectionHeading>
+          <Table<NonNullable<SalesOrder["ordersFromQuote"]>[number]>
+            columns={[
+              { key: "orderNumber", label: "Kundorder", width: "1fr" },
+              { key: "status", label: "Status", width: "1fr" },
+              { key: "createdAt", label: "Skapad", width: "1fr" },
+            ]}
+            rows={order.ordersFromQuote}
+            renderCell={(o, key) => {
+              if (key === "orderNumber") return <GatedLink href={`/forsaljning/ordrar/${o.id}`}>{o.orderNumber}</GatedLink>;
+              if (key === "status") {
+                const pill = SALES_ORDER_STATUS_PILL[o.status];
+                return <StatusPill status={pill.status} label={pill.label} compact />;
+              }
+              return formatStockholmDate(o.createdAt);
+            }}
+          />
+        </section>
+      )}
 
       {editingRowId !== null && !editPriceTouched && editQuote && calculatedPriceText(editQuote, formatStockholmDate) && (
         <FormHint>{calculatedPriceText(editQuote, formatStockholmDate)}</FormHint>
@@ -1260,7 +1314,7 @@ function EditHeaderForm({
   // Valuta and Kurs: changeable as a quote or a confirmed order (the API
   // refuses it under tillverkning); another currency only while the order has
   // no rows (their prices would stand in the wrong currency).
-  const canChangeCurrency = order.status === "quote" || order.status === "confirmed";
+  const canChangeCurrency = order.status === "quote" || order.status === "ordered" || order.status === "confirmed";
   const [currency, setCurrency] = useState(order.currency);
   const headerCurrency = currency.trim().toUpperCase();
   const headerForeign = /^[A-Z]{3}$/.test(headerCurrency) && headerCurrency !== SEK;
@@ -1346,7 +1400,7 @@ function EditHeaderForm({
           ...deliveryAddressPayload(deliveryAddressId, newDeliveryAddress, null),
           ...termsPayload(terms),
           // Giltig t.o.m. only exists on a quote (the API refuses it otherwise).
-          ...(order.status === "quote" ? { quoteValidUntil: quoteValidUntil || null } : {}),
+          ...(order.status === "quote" || order.status === "ordered" ? { quoteValidUntil: quoteValidUntil || null } : {}),
           ...markups,
           ...(withConfirm ? { confirmRepricing: true } : {}),
           bumpRevision,
@@ -1447,7 +1501,7 @@ function EditHeaderForm({
                 id="headerExchangeRate"
                 currency={headerCurrency}
                 orderRate={headerRate}
-                quote={order.status === "quote"}
+                quote={(order.status === "quote" || order.status === "ordered")}
               />
             )}
           </FormRow>
@@ -1498,7 +1552,7 @@ function EditHeaderForm({
         </>
       )}
 
-      {order.status === "quote" && (
+      {(order.status === "quote" || order.status === "ordered") && (
         <Field label="Giltig t.o.m." htmlFor="headerQuoteValidUntil">
           <Input
             id="headerQuoteValidUntil"

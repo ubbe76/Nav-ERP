@@ -82,6 +82,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   cancelled: "Avbruten",
   lost: "Förlorad",
   reopened: "Öppnad igen",
+  // Skapa kundorder från offert: on the quote and on the new order.
+  order_created: "Kundorder skapad",
+  created_from_quote: "Skapad från offert",
   issued: "Utfärdad",
   released: "Frisläppt",
   // Skapa saknade halvfabrikat (pegging #9) on the parent TO.

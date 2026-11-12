@@ -39,7 +39,9 @@ export type SalesOrderStatus =
   | "delivered"
   | "invoiced"
   | "cancelled"
-  | "lost";
+  | "lost"
+  // A quote that gave an order (Skapa kundorder) — a quote, never demand.
+  | "ordered";
 export type PurchaseOrderStatus =
   | "draft"
   | "confirmed"

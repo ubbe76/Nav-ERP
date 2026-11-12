@@ -1,0 +1,1 @@
+ALTER TYPE "public"."sales_order_status" ADD VALUE 'ordered';

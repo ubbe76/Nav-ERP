@@ -19,7 +19,7 @@ import { HelpLink } from "../ui/HelpLink";
 
 // One list component for both routines: kind "quote" = /forsaljning/offerter,
 // "order" = /forsaljning/ordrar (the page passes kind to the API as ?kind=).
-const QUOTE_STATUSES: SalesOrderStatus[] = ["quote", "lost", "cancelled"];
+const QUOTE_STATUSES: SalesOrderStatus[] = ["quote", "ordered", "lost", "cancelled"];
 const ORDER_STATUSES: SalesOrderStatus[] = ["confirmed", "in_production", "delivered", "invoiced", "cancelled"];
 
 export function SalesOrdersPageClient({
