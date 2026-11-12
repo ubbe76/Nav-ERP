@@ -183,6 +183,18 @@ export async function stockRoutes(
     }
   });
 
+  // Batch (#8): saldo per batch on the article card's Lager tab — Okänd
+  // first, then the oldest batch, each with its places. The module's read
+  // rule (office); no prices.
+  app.get<{ Params: { id: string } }>("/articles/:id/batch-balances", async (req, reply) => {
+    try {
+      return await service.getArticleBatchBalances(req.params.id);
+    } catch (err) {
+      if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
   app.put<{ Params: { id: string } }>(
     "/articles/:id/locations",
     { config: { access: articleCardWrite(["lager"]) } },

@@ -442,11 +442,15 @@ export interface StockBalanceExportRecord {
   warehouseName: string;
   locationName: string;
   quantity: number;
+  // Batch (#8): "" for an article that is not batchstyrd (one row per
+  // place); a batchstyrd article has one row per cell — the batch number,
+  // or "Okänd" for the stock without a batch.
+  batchNumber: string;
 }
 
-// Antal is the balance after the import, per article and place — today's
-// balance, so the import finds nothing to book. À-pris stays empty: it only
-// values an increase, and there is none.
+// Antal is the balance after the import, per article and place (and, for a
+// batchstyrd article, batch) — today's balance, so the import finds nothing
+// to book. À-pris stays empty: it only values an increase, and there is none.
 export function stockBalanceExportBlocks(records: StockBalanceExportRecord[]): ImportExportBlock[] {
   return blocksBy(records, (r) => r.articleNumber).map((rows) =>
     rows.map((r) => ({
@@ -454,6 +458,7 @@ export function stockBalanceExportBlocks(records: StockBalanceExportRecord[]): I
       warehouseName: r.warehouseName,
       locationName: r.locationName,
       quantity: r.quantity,
+      batchNumber: r.batchNumber,
     }))
   );
 }

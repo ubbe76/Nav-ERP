@@ -29,7 +29,7 @@ import { users } from "./auth";
 import { purchaseOrders, suppliers } from "./purchase";
 import { deviationReasons, units } from "./register";
 import { salesOrderRows } from "./sales";
-import { stockLocations } from "./stock";
+import { stockBatches, stockLocations } from "./stock";
 
 export const manufacturingOrderStatusEnum = pgEnum("manufacturing_order_status", [
   "planned",
@@ -600,6 +600,10 @@ export const moReports = pgTable(
     // Finished goods this report received into stock, and where.
     quantityReceived: numeric("quantity_received", { precision: 14, scale: 4 }).notNull().default("0"),
     receiptLocationId: uuid("receipt_location_id").references(() => stockLocations.id, { onDelete: "restrict" }),
+    // Batch (#8): the batch the goods were booked in — the TO number when
+    // the article was batchstyrd at the time, else null. Ångra takes them
+    // back out of exactly this batch.
+    receiptBatchId: uuid("receipt_batch_id").references(() => stockBatches.id, { onDelete: "restrict" }),
     // This report flipped the order to done.
     completedOrder: boolean("completed_order").notNull().default(false),
     // The stamp-out's time report — undone together with the quantities.
@@ -635,6 +639,9 @@ export const moReportMaterials = pgTable("mo_report_materials", {
   // The place the part was drawn from; null for a service component (tjänst,
   // never stocked — the line records the consumption, no stock movement).
   locationId: uuid("location_id").references(() => stockLocations.id, { onDelete: "restrict" }),
+  // Batch (#8): the batch the part was drawn from (null = Okänd) — Ångra
+  // returns it to the same batch.
+  batchId: uuid("batch_id").references(() => stockBatches.id, { onDelete: "restrict" }),
 });
 
 // Snapshot of BOM quantity x MO quantity, taken at release.

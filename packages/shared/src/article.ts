@@ -169,6 +169,9 @@ export const createArticleSchema = z.object({
   stockControlled: z.boolean().optional(),
   // Prognosstyrd (#10): the behovsberäkning adds a forecast demand.
   forecastControlled: z.boolean().optional(),
+  // Batchstyrd (#8): only while the system setting batchTrackingEnabled is
+  // on, never a Tjänst or a phantom.
+  batchTracked: z.boolean().optional(),
   // Ledtid (dagar) — tillverkningsledtid in whole working days (#13); omitted
   // = the routing's time decides.
   manufacturingLeadTimeDays: blankSafe(z.coerce.number().int().min(0)).optional(),
@@ -251,6 +254,8 @@ export const updateArticleSchema = z
     stockControlled: z.boolean().optional(),
     // Prognosstyrd (#10).
     forecastControlled: z.boolean().optional(),
+    // Batchstyrd (#8) — may always be switched off; the batches stay in the log.
+    batchTracked: z.boolean().optional(),
     // Ledtid (dagar); null clears (the routing's time decides again).
     manufacturingLeadTimeDays: blankSafe(z.coerce.number().int().min(0)).nullable().optional(),
     // "Ytbehandling" / "Färg" — free text printed on documents; "" clears.

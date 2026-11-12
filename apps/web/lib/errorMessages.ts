@@ -308,6 +308,14 @@ const MESSAGES: Record<string, MessageEntry> = {
   "service-article-not-stocked": "Artikeln är en tjänst — tjänster lagerförs inte",
   // The server names the place (Swedish).
   "stock-location-blocked": serverMessage("Lagerplatsen är spärrad — välj en annan plats eller Automatiskt."),
+  // Batch (#8): the server names the batch, the article or the count (Swedish).
+  "batch-insufficient": serverMessage("Batchen räcker inte — välj en annan batch eller Automatiskt."),
+  "stock-batch-not-found": "Batchen finns inte på artikeln — ladda om sidan.",
+  "batch-not-tracked": serverMessage("Artikeln är inte batchstyrd."),
+  "batch-number-reserved": serverMessage("Batchnumret är reserverat — välj ett annat."),
+  "batch-tracking-disabled": "Batch- och serienummer används inte — slå på inställningen under System först.",
+  "batch-tracking-in-use": serverMessage("Det finns batchstyrda artiklar — stäng av Batchstyrd på dem innan inställningen stängs av."),
+  "article-not-batch-trackable": "Tjänster och fantomartiklar kan inte vara batchstyrda.",
   "forecast-month-outside-horizon": "Månaden ligger utanför prognoshorisonten — bara månader i horisonten kan få ett eget antal.",
   "default-location-blocked": "Lagerplatsen är spärrad och kan inte väljas som artikelns lagerplats — välj en annan.",
   // Lager-flikens Lagerplatser: the server names the place and the rule (Swedish).

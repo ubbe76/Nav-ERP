@@ -1492,6 +1492,13 @@
       "when": 1794482867874,
       "tag": "0212_kundorder_fran_offert",
       "breakpoints": true
+    },
+    {
+      "idx": 213,
+      "version": "7",
+      "when": 1794505857108,
+      "tag": "0213_batchnummer",
+      "breakpoints": true
     }
   ]
 }

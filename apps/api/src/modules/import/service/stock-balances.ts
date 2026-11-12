@@ -13,7 +13,16 @@
 // Lagerplats alone must be unambiguous, and neither means the article's
 // huvudplats, else its first usable alternative place, else "***" — what
 // resolveStockLocation does for every writer.
-import type { ImportCommitInput } from "@navet/shared";
+//
+// Batch (#8): for a batchstyrd article the row may name a CELL — Batch is
+// the batch number (created when missing), or "Okänd" for the stock without
+// a batch — and Antal is then that cell's balance after the import. Without
+// Batch the row is the whole place as before (an increase lands in Okänd).
+// One (article, place) is written either per cell or as a whole, never both
+// in one file. Batch on an article that is not batchstyrd is a row error
+// (beslut 15). The batches one import creates all get the same age, so the
+// batch number decides which is drawn first (compareBatches, beslut 16).
+import { UNKNOWN_BATCH_LABEL, type ImportCommitInput } from "@navet/shared";
 import { normalizeDecimal } from "./csv.js";
 import type { ExistingArticle } from "./articles.js";
 import { FALLBACK_LOCATION_NAME } from "../../stock/service/outflow-allocation.js";
@@ -28,7 +37,7 @@ import {
 import { round4 } from "@navet/shared";
 
 // Mappable target fields, in the order the wizard lists them.
-export const STOCK_BALANCE_IMPORT_FIELDS = ["articleNumber", "warehouseName", "locationName", "quantity", "unitCost"] as const;
+export const STOCK_BALANCE_IMPORT_FIELDS = ["articleNumber", "warehouseName", "locationName", "quantity", "unitCost", "batchNumber"] as const;
 export type StockBalanceImportField = (typeof STOCK_BALANCE_IMPORT_FIELDS)[number];
 
 const REQUIRED_FIELDS: StockBalanceImportField[] = ["articleNumber", "quantity"];
@@ -54,6 +63,10 @@ export const STOCK_BALANCE_HEADER_ALIASES: Record<string, string> = {
   inpris: "unitCost",
   styckpris: "unitCost",
   lagerpris: "unitCost",
+  // Deliberately narrow: only the template's own heading and its long forms.
+  batch: "batchNumber",
+  batchnummer: "batchNumber",
+  batchnr: "batchNumber",
 };
 
 export function suggestStockBalanceMapping(headers: string[]): Record<string, string | null> {
@@ -85,6 +98,19 @@ export interface StockBalanceImportDeps {
   stockBalances(articleIds: string[]): Promise<Map<string, number>>;
   /** Locations under an open stock count that blocks transactions (frysvakten). */
   locationsUnderCount(): Promise<Set<string>>;
+  /** stockBatchCellKey(articleId, locationId, batch) -> today's balance of the cell. */
+  stockBatchBalances(articleIds: string[]): Promise<Map<string, number>>;
+}
+
+// The row's batch: a named one, or the Okänd cell ("Okänd" in the file).
+export type StockBalanceBatch = { kind: "named"; batchNumber: string } | { kind: "unknown" };
+
+const UNKNOWN_BATCH_KEY = UNKNOWN_BATCH_LABEL.toLocaleLowerCase("sv");
+
+// One spelling of a cell for the planner's maps (the commit matches batches
+// in SQL, getOrCreateBatch). `batchNumber` null = the Okänd cell.
+export function stockBatchCellKey(articleId: string, locationId: string, batchNumber: string | null): string {
+  return `${articleId}|${locationId}|${batchNumber === null ? "" : `#${batchNumber.toLocaleLowerCase("sv")}`}`;
 }
 
 // Where the row's balance lives, resolved inside the commit transaction:
@@ -104,6 +130,8 @@ export interface StockBalanceRowPlan {
   quantity: number;
   /** The row's À-pris, else the article's standard cost; null = unknown. */
   unitCost: number | null;
+  /** Batch (#8): null = the whole place (as always); else the cell Antal is the balance of. */
+  batch: StockBalanceBatch | null;
 }
 
 export interface StockBalanceImportPlan {
@@ -146,12 +174,22 @@ export async function planStockBalanceImport(
   const numbers = records.map((r) => r["articleNumber"] ?? "").filter((n) => n !== "");
   const articlesByNumber = await deps.articlesByNumber(numbers);
   const articleIds = [...articlesByNumber.values()].map((a) => a.id);
-  const [places, defaults, fallbackId, balances, underCount] = await Promise.all([
+  // Only the batchstyrda articles the file names a batch for have cells to read.
+  const cellArticleIds = [
+    ...new Set(
+      records.flatMap((r) => {
+        const article = articlesByNumber.get(r["articleNumber"] ?? "");
+        return article?.batchTracked && (r["batchNumber"] ?? "") !== "" ? [article.id] : [];
+      })
+    ),
+  ];
+  const [places, defaults, fallbackId, balances, underCount, cellBalances] = await Promise.all([
     deps.stockPlaces(),
     deps.usableArticleLocations(articleIds),
     deps.fallbackLocationId(),
     deps.stockBalances(articleIds),
     deps.locationsUnderCount(),
+    cellArticleIds.length > 0 ? deps.stockBatchBalances(cellArticleIds) : Promise.resolve(new Map<string, number>()),
   ]);
 
   const warehousesByName = new Map<string, ImportWarehouse[]>();
@@ -173,8 +211,12 @@ export async function planStockBalanceImport(
   // actually created is collected from the BOOKED rows (willCreate below).
   const newWarehouses = new Map<string, string>();
   const newLocations = new Map<string, { warehouseName: string; locationName: string }>();
-  // "<articleId>|<location key>" — the same article and place twice is an error.
+  // "<articleId>|<location key>|<batch>" — the same article and place (and
+  // batch) twice is an error.
   const seen = new Set<string>();
+  // "<articleId>|<location key>" -> written per cell (Batch filled) or as a
+  // whole place (Batch empty); both in one file is ambiguous.
+  const placeModes = new Map<string, "cell" | "place">();
 
   records.forEach((record, index) => {
     const rowNumber = index + 2;
@@ -210,6 +252,21 @@ export async function planStockBalanceImport(
         errors.push("À-priset kan inte vara negativt");
         unitCost = null;
       } else unitCost = round4(unitCost);
+    }
+
+    // The batch (#8).
+    const rawBatch = record["batchNumber"] ?? "";
+    let batch: StockBalanceBatch | null = null;
+    if (rawBatch !== "") {
+      if (article && !article.batchTracked) {
+        errors.push(`Artikeln ${articleNumber} är inte batchstyrd — ta bort Batch eller gör artikeln batchstyrd först`);
+      } else if (rawBatch.toLocaleLowerCase("sv") === UNKNOWN_BATCH_KEY) {
+        batch = { kind: "unknown" };
+      } else if (rawBatch.length > 50) {
+        errors.push("Batch får vara högst 50 tecken");
+      } else {
+        batch = { kind: "named", batchNumber: rawBatch };
+      }
     }
 
     // The place.
@@ -270,9 +327,26 @@ export async function planStockBalanceImport(
     }
 
     if (article && locationKey !== "") {
-      const key = `${article.id}|${locationKey}`;
-      if (seen.has(key)) errors.push(`Artikel ${articleNumber} förekommer flera gånger på samma lagerplats i filen`);
+      const placeKey = `${article.id}|${locationKey}`;
+      const key = batch === null ? placeKey : stockBatchCellKey(article.id, locationKey, batch.kind === "named" ? batch.batchNumber : null);
+      if (seen.has(key)) {
+        errors.push(
+          batch === null
+            ? `Artikel ${articleNumber} förekommer flera gånger på samma lagerplats i filen`
+            : `Artikel ${articleNumber} förekommer flera gånger med samma batch på samma lagerplats i filen`
+        );
+      }
       seen.add(key);
+      // Only a row whose Batch was understood takes a side.
+      if (rawBatch === "" || batch !== null) {
+        const mode = batch === null ? "place" : "cell";
+        const earlier = placeModes.get(placeKey);
+        if (earlier !== undefined && earlier !== mode) {
+          errors.push(
+            `Artikel ${articleNumber} har rader både med och utan Batch på samma lagerplats i filen — ange Batch på alla (Okänd för saldot utan batch) eller på ingen`
+          );
+        } else placeModes.set(placeKey, mode);
+      }
       if (!locationKey.startsWith("new:") && underCount.has(locationKey)) {
         errors.push("Lagerplatsen inventeras just nu och är spärrad för lagerhändelser");
       }
@@ -283,13 +357,18 @@ export async function planStockBalanceImport(
       return;
     }
 
-    const current = locationKey.startsWith("new:") ? 0 : (balances.get(`${article.id}|${locationKey}`) ?? 0);
+    // Today's balance: the place's, or — with Batch — the cell's.
+    const current = locationKey.startsWith("new:")
+      ? 0
+      : batch === null
+        ? (balances.get(`${article.id}|${locationKey}`) ?? 0)
+        : (cellBalances.get(stockBatchCellKey(article.id, locationKey, batch.kind === "named" ? batch.batchNumber : null)) ?? 0);
     const delta = round4(quantity - current);
     values["currentQuantity"] = current;
     values["change"] = delta;
 
     if (input.skipExisting && current !== 0) {
-      rows.push(skippedRow(rowNumber, `Platsen har redan saldo ${formatQuantity(current)}`, values));
+      rows.push(skippedRow(rowNumber, `${batch === null ? "Platsen" : "Batchen"} har redan saldo ${formatQuantity(current)}`, values));
       return;
     }
     if (delta === 0) {
@@ -307,7 +386,7 @@ export async function planStockBalanceImport(
     }
 
     rows.push({ rowNumber, action: current === 0 ? "create" : "update", errors, warnings, values });
-    planned.push({ rowNumber, articleId: article.id, target, quantity, unitCost: cost });
+    planned.push({ rowNumber, articleId: article.id, target, quantity, unitCost: cost, batch });
   });
 
   // Only what a booked row needs is created: a row that is skipped (antal 0

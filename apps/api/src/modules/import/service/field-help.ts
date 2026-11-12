@@ -1745,6 +1745,16 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       description: `Värdet per grundenhet i kronor för det som läggs till, ${DECIMAL}. Tom cell betyder artikelns standardkostnad. Används bara när saldot ökar.`,
       example: "24,50",
     },
+    {
+      field: "batchNumber",
+      label: "Batch",
+      required: false,
+      header: "Batch",
+      text: true,
+      description:
+        "Bara för batchstyrda artiklar: batchnumret, max 50 tecken — en batch som saknas skapas — eller Okänd för saldot utan batch. Antal är då batchens saldo på lagerplatsen efter importen, och samma artikel får stå på flera rader per lagerplats, en per batch. Tom cell betyder som förut hela lagerplatsens saldo, och en ökning hamnar i Okänd. Ange Batch på alla rader för en artikel och lagerplats, eller på ingen. Batcher som skapas i samma import tas ut i batchnummerordning. Batch på en artikel som inte är batchstyrd ger fel på raden.",
+      example: "L-2291",
+    },
   ],
 };
 

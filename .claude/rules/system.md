@@ -119,3 +119,7 @@ TODO-posten "Nav som program (UI/UX)"; skisserna är privata.
 - **Webben:** `ExportMenu` (`components/ui/ExportMenu.tsx`, knappen **Exportera** med **CSV**/**Excel**, byggd på `RowMenu` med `button`) är den enda exportkontrollen; `ListExportLink` och `ReportCsvLink` är tunna omslag. Excel-länken härleds ur CSV-länken (`xlsxHrefOf`: sista segmentet `/csv` → `/xlsx`).
 - `buildStoredZip` (xlsx-writer) är zip-byggaren för en export i flera filer (etapp 2).
 - Tester: `table-export.test.ts` (skrivarens tal-/datumceller lästa med `read-excel-file`, kolumnmodellen, tvillingrutterna, taket, filnamnet), `test/helpers/read-xlsx.ts` (`expectXlsxMatchesCsv` — samma rader och värden som CSV:n) i list-/rapporttesterna, `import-templates-generated.test.ts` (mallarna oförändrade).
+
+## Använd batch- och serienummer (#8)
+
+- `batchTrackingEnabled` i `GET/PATCH /settings` (KV `batch_tracking_enabled`, av som förval; nyckeln och låsordningen ägs av lövet `stock/service/batch-tracking.ts`). Av ⇒ ingen artikel kan göras Batchstyrd; kan bara stängas av när ingen artikel är batchstyrd (409 `batch-tracking-in-use`) — raden skrivs före räkningen, se `stock.md` (Batch). Webben ska dölja kryssrutan Batchstyrd och sidan Spårbarhet när den är av (steg 3). Test: `stock-batches.test.ts`.

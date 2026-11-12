@@ -466,6 +466,7 @@ export function createImportRepository(db: Db | Tx) {
             groupCode: articleGroups.code,
             articleCode: articleCodes.code,
             standardCost: articles.standardCost,
+            batchTracked: articles.batchTracked,
             barcode: articles.barcode,
             weight: articles.weight,
             surfaceTreatment: articles.surfaceTreatment,

@@ -12,6 +12,7 @@ import {
   moOperationScrap,
   moOperations,
   moReportMaterials,
+  stockBatches,
   moReports,
   productionGroups,
   purchaseOrders,
@@ -63,6 +64,9 @@ import { uncoveredConfiguredQuantity } from "../../planning/service/configured-c
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { allocateOutflowLocations, lockArticlesForOutflow, type BlockedChoice } from "../../stock/service/outflow-locations.js";
 import { isStockedArticle } from "../../stock/service/stocked-article.js";
+import { getOrCreateBatch } from "../../stock/service/batches.js";
+import { isBatchTrackedArticle } from "../../stock/service/batch-tracking.js";
+import { batchCellQuantity } from "../../stock/repository/batch-balances.js";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
 import { listLegoPurchases } from "./lego-purchases.js";
 import { legoOneOffSql } from "./lego-one-off.js";
@@ -120,6 +124,9 @@ export interface ConsumedMaterialLine {
   materialConsumptionId: string;
   // null = a service component: consumed, never drawn from stock.
   locationId: string | null;
+  // Batch (#8): the batch the part was drawn from — null/left out = Okänd.
+  // Kept on the report log so Ångra returns it to the same batch.
+  batchId?: string | null;
 }
 
 // Where a reporting event came from (mo_reports.source).
@@ -306,6 +313,7 @@ async function drawMaterial(
       transactionType: "mo_consumption",
       referenceId: moId,
       createdBy,
+      batchId: part.batchId ?? null,
     });
     // The draw may have emptied a temporary location.
     await deactivateEmptyLocation(tx, part.locationId);
@@ -314,6 +322,7 @@ async function drawMaterial(
       quantity: part.quantity,
       materialConsumptionId: row.id,
       locationId: part.locationId,
+      batchId: part.batchId ?? null,
     });
   }
   return lines;
@@ -333,6 +342,7 @@ async function insertReport(
         materialConsumptionId: m.materialConsumptionId,
         quantity: String(m.quantity),
         locationId: m.locationId,
+        batchId: m.batchId ?? null,
       }))
     );
   }
@@ -487,10 +497,10 @@ async function receiveFinishedGoods(
   tx: Tx,
   order: typeof manufacturingOrders.$inferSelect,
   opts: { targetReceived: number; locationId?: string; createdBy: string | null }
-): Promise<{ received: number; delta: number; locationId: string | null; consumed: ConsumedMaterialLine[] }> {
+): Promise<{ received: number; delta: number; locationId: string | null; batchId: string | null; consumed: ConsumedMaterialLine[] }> {
   const already = Number(order.quantityReceived);
   const delta = Number((opts.targetReceived - already).toFixed(4));
-  if (delta <= 0) return { received: already, delta: 0, locationId: null, consumed: [] };
+  if (delta <= 0) return { received: already, delta: 0, locationId: null, batchId: null, consumed: [] };
 
   // unit_cost is the produced article's current standard cost, stamped at
   // receipt time — null (not 0) when no standard cost is set, since 0 would
@@ -506,6 +516,20 @@ async function receiveFinishedGoods(
   await lockOrderComponents(tx, order.id);
   const receiptLocationId = await resolveStockLocation(tx, order.articleId, opts.locationId);
   await assertLocationNotUnderCount(tx, receiptLocationId);
+  // Batch (#8, beslut 2): the finished goods of a batchstyrd article are
+  // booked in the batch named after the TO — every delinleverans of one TO
+  // is the same batch, and nobody types anything. The flag as it is NOW
+  // (read FOR KEY SHARE, batch-tracking.ts); the report log keeps the batch
+  // (mo_reports.receipt_batch_id) so Ångra takes exactly it back.
+  const receiptBatch = (await isBatchTrackedArticle(tx, order.articleId))
+    ? await getOrCreateBatch(tx, {
+        articleId: order.articleId,
+        batchNumber: order.orderNumber,
+        origin: "manufacturing_order",
+        manufacturingOrderId: order.id,
+        createdBy: opts.createdBy,
+      })
+    : null;
 
   await tx.insert(stockTransactions).values({
     articleId: order.articleId,
@@ -514,6 +538,7 @@ async function receiveFinishedGoods(
     transactionType: "mo_receipt",
     referenceId: order.id,
     createdBy: opts.createdBy,
+    batchId: receiptBatch?.id ?? null,
     // Konfigurator 4c: a beställningsvara is valued at its own förkalkyl
     // (TVK/st at the TO quantity, stored at creation) — never the
     // template's standard cost, which describes no real configuration.
@@ -545,7 +570,7 @@ async function receiveFinishedGoods(
     .set({ quantityReceived: String(received), updatedAt: new Date() })
     .where(eq(manufacturingOrders.id, order.id));
 
-  return { received, delta, locationId: receiptLocationId, consumed };
+  return { received, delta, locationId: receiptLocationId, batchId: receiptBatch?.id ?? null, consumed };
 }
 
 // One incremental quantity report on an operation, inside a given
@@ -671,6 +696,7 @@ async function reportOperationQuantitiesInTx(
       markedDone,
       quantityReceived: String(goods?.delta ?? 0),
       receiptLocationId: goods?.locationId ?? null,
+      receiptBatchId: goods?.batchId ?? null,
       completedOrder: completed,
       timeReportId: input.timeReportId ?? null,
       employeeId: input.employeeId ?? null,
@@ -898,7 +924,15 @@ async function undoReportInTx(
       .select({ quantity: sql<string>`coalesce(sum(${stockTransactions.quantityDelta}), 0)` })
       .from(stockTransactions)
       .where(and(eq(stockTransactions.articleId, order.articleId), eq(stockTransactions.locationId, report.receiptLocationId)));
-    const available = Number(balance?.quantity ?? 0);
+    // Batch (#8): out of the SAME batch the report booked them in
+    // (receipt_batch_id, null = Okänd), whatever the article's flag says
+    // now. With a batch on the report, or on an article that is batchstyrd
+    // now, the goods must still be in that CELL too — the place may hold
+    // enough in total while this batch is gone.
+    let available = Number(balance?.quantity ?? 0);
+    if (report.receiptBatchId !== null || (await isBatchTrackedArticle(tx, order.articleId))) {
+      available = Math.min(available, await batchCellQuantity(tx, order.articleId, report.receiptLocationId, report.receiptBatchId));
+    }
     if (available < received) return { ok: false, reason: "insufficient_stock", available, required: received };
     await assertLocationNotUnderCount(tx, report.receiptLocationId);
     await tx.insert(stockTransactions).values({
@@ -908,6 +942,7 @@ async function undoReportInTx(
       transactionType: "mo_receipt",
       referenceId: order.id,
       createdBy: input.undoneBy,
+      batchId: report.receiptBatchId,
     });
     await deactivateEmptyLocation(tx, report.receiptLocationId);
   }
@@ -938,6 +973,8 @@ async function undoReportInTx(
       transactionType: "mo_consumption",
       referenceId: order.id,
       createdBy: input.undoneBy,
+      // Batch (#8): back into the batch the part was drawn from.
+      batchId: line.batchId,
     });
   }
 
@@ -2231,8 +2268,11 @@ export function createManufacturingRepository(db: Db) {
           createdAt: moReports.createdAt,
           undoneAt: moReports.undoneAt,
           undoneByName: undoneByUser.name,
+          // Batch (#8): the batch the finished goods were booked in.
+          receiptBatchNumber: stockBatches.batchNumber,
         })
         .from(moReports)
+        .leftJoin(stockBatches, eq(stockBatches.id, moReports.receiptBatchId))
         .leftJoin(moOperations, eq(moOperations.id, moReports.moOperationId))
         .leftJoin(workCenters, eq(workCenters.id, moOperations.workCenterId))
         .leftJoin(timeReports, eq(timeReports.id, moReports.timeReportId))
@@ -2254,8 +2294,11 @@ export function createManufacturingRepository(db: Db) {
               // Uttag där saldot finns: one line per location the draw
               // took from.
               locationName: stockLocations.name,
+              // Batch (#8): the batch the part was drawn from (null = Okänd).
+              batchNumber: stockBatches.batchNumber,
             })
             .from(moReportMaterials)
+            .leftJoin(stockBatches, eq(stockBatches.id, moReportMaterials.batchId))
             .innerJoin(moMaterialConsumptions, eq(moMaterialConsumptions.id, moReportMaterials.materialConsumptionId))
             .innerJoin(articles, eq(articles.id, moMaterialConsumptions.componentArticleId))
             // Left: a service line has no place (locationName null).
@@ -2272,11 +2315,15 @@ export function createManufacturingRepository(db: Db) {
         ...r,
         materials: materials
           .filter((m) => m.moReportId === r.id)
-          .map(({ materialConsumptionId, articleNumber, quantity, locationName }) => ({
+          .map(({ materialConsumptionId, articleNumber, quantity, locationName, batchNumber }) => ({
             materialConsumptionId,
             articleNumber,
             quantity,
             locationName,
+            // Batch (#8): only on a line drawn from a named batch — a line
+            // without the key is Okänd (and every line of an article that
+            // is not batchstyrd, whose shape is unchanged).
+            ...(batchNumber !== null ? { batchNumber } : {}),
           })),
       }));
     },
@@ -2466,6 +2513,7 @@ export function createManufacturingRepository(db: Db) {
             source: "card",
             quantityReceived: String(goods.delta),
             receiptLocationId: goods.locationId,
+            receiptBatchId: goods.batchId,
             completedOrder: true,
             createdBy: input.createdBy,
           },

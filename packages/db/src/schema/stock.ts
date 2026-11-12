@@ -113,6 +113,49 @@ export const articleAlternativeLocations = pgTable(
   ]
 );
 
+// Batch (#8, migration 0213): a named lot of ONE article — the supplier's
+// batch number on an inleverans (empty = the IO number), the TO number for
+// manufactured goods, a number typed on a justering or read by the
+// saldoimport. A dimension on the stock log (stock_transactions.batch_id);
+// a row WITHOUT a batch is "Okänd" — there is no Okänd row here, since the
+// log is append-only and everything booked before the article became
+// batchstyrd has none. Unique per article, case-insensitively (the IO number
+// as the default makes a global number impossible). Never deleted (the log
+// references it, restrict). created_at is the batch's AGE: Automatiskt draws
+// Okänd first, then the oldest batch (compareBatches, outflow-allocation.ts).
+// `origin` and the two order references say how the batch was CREATED —
+// information; the trace reads the log.
+export const stockBatchOriginEnum = pgEnum("stock_batch_origin", ["purchase_receipt", "manufacturing_order", "manual", "import"]);
+
+export const stockBatches = pgTable(
+  "stock_batches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    articleId: uuid("article_id")
+      .notNull()
+      .references(() => articles.id, { onDelete: "restrict" }),
+    batchNumber: varchar("batch_number", { length: 50 }).notNull(),
+    origin: stockBatchOriginEnum("origin").notNull(),
+    // FKs (set null) declared by hand in the migration — purchase.ts and
+    // manufacturing.ts import this file.
+    purchaseOrderId: uuid("purchase_order_id"),
+    manufacturingOrderId: uuid("manufacturing_order_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (table) => [
+    uniqueIndex("stock_batches_article_number_unique").on(table.articleId, sql`lower(${table.batchNumber})`),
+    index("idx_stock_batches_manufacturing_order")
+      .on(table.manufacturingOrderId)
+      .where(sql`${table.manufacturingOrderId} IS NOT NULL`),
+    // Spårbarhetssidans sökning: lower(batch_number) LIKE 'x%'.
+    index("idx_stock_batches_number_search").on(sql`lower(${table.batchNumber}) text_pattern_ops`),
+    check("stock_batches_number_trimmed", sql`${table.batchNumber} = btrim(${table.batchNumber}) AND ${table.batchNumber} <> ''`),
+    // "Okänd" is what a row without a batch is called everywhere.
+    check("stock_batches_number_not_reserved", sql`lower(${table.batchNumber}) <> 'okänd'`),
+  ]
+);
+
 // Append-only händelselogg. Aktuellt saldo ska ALDRIG skrivas via UPDATE —
 // bara härledas ur SUM(quantity_delta) via stock_balances-vyn.
 export const stockTransactions = pgTable(
@@ -149,9 +192,20 @@ export const stockTransactions = pgTable(
     // Every reader goes through stockValuedAt (stock/repository/valued-at.ts).
     valuedAt: timestamp("valued_at", { withTimezone: true }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    // Batch (#8, migration 0213). NULL = Okänd: every row of an article that
+    // is not batchstyrd, everything booked before it became one, and the
+    // remainder of an Automatiskt draw. Every writer sets it explicitly; a
+    // row that reverses another (Ångra) carries the SAME batch_id as the row
+    // it reverses, whatever the article's flag says now. The append-only
+    // trigger compares the whole row, so it can never be changed afterwards.
+    batchId: uuid("batch_id").references(() => stockBatches.id, { onDelete: "restrict" }),
   },
   (table) => [
     index("idx_stock_transactions_article_location").on(table.articleId, table.locationId),
+    // Spårningen per batch; partial, so rows without a batch cost nothing.
+    index("idx_stock_transactions_batch")
+      .on(table.batchId)
+      .where(sql`${table.batchId} IS NOT NULL`),
     // Per place (0185): the lagerplatsregister's sums, locationHoldsStock,
     // the stock count's freeze and the block response's counts.
     index("idx_stock_transactions_location_article").on(table.locationId, table.articleId),
@@ -223,6 +277,11 @@ export const stockCountRows = pgTable(
     snapshotQuantity: numeric("snapshot_quantity", { precision: 14, scale: 4 }).notNull(),
     countedQuantity: numeric("counted_quantity", { precision: 14, scale: 4 }),
     note: text("note"),
+    // Batch (#8, migration 0213): a batchstyrd article is counted per batch
+    // — one row per (article, batch), NULL = Okänd. Every other article has
+    // its one row without a batch, as before.
+    batchId: uuid("batch_id").references(() => stockBatches.id, { onDelete: "restrict" }),
   },
-  (table) => [unique().on(table.sessionId, table.articleId)]
+  // NULLS NOT DISTINCT (PG15+): still one Okänd row per article.
+  (table) => [unique("stock_count_rows_session_article_batch_unique").on(table.sessionId, table.articleId, table.batchId).nullsNotDistinct()]
 );

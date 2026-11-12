@@ -175,6 +175,13 @@ export function createStockService(repo: StockRepository, audit: AuditWriter = {
       return repo.listTransactions(query);
     },
 
+    // Batch (#8): the article card's Saldo per batch.
+    async getArticleBatchBalances(articleId: string) {
+      const view = await repo.articleBatchBalances(articleId);
+      if (!view) throw new ArticleNotFoundError(articleId);
+      return view;
+    },
+
     // Flera lagerplatser per artikel (0186) — GET/PUT /articles/:id/locations.
     async getArticleLocations(articleId: string) {
       const view = await repo.articleLocations(articleId);

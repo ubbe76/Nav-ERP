@@ -46,6 +46,10 @@ import {
   formatLocationLabelCode,
   parseLocationLabelCode,
 } from "@navet/shared";
+import { BatchNotTrackedError } from "../service/batch.errors.js";
+import { getOrCreateBatch } from "../service/batches.js";
+import { isBatchTrackedArticle } from "../service/batch-tracking.js";
+import { articleBatchBalances } from "./batch-balances.js";
 import {
   ArticleNotFoundError,
   FallbackLocationNotBlockableError,
@@ -362,9 +366,24 @@ export function createStockRepository(db: Db) {
           .where(eq(articles.id, input.articleId));
         if (!subject) throw new ArticleNotFoundError(input.articleId);
         if (!isStockedArticleType(subject.type)) throw new ServiceArticleNotStockedError(subject.articleNumber);
+        // Batch (#8). The flag is read FOR KEY SHARE (batch-tracking.ts), so
+        // a flag change in progress is waited out.
+        const batchTracked = await isBatchTrackedArticle(tx, input.articleId);
+        if (input.batchNumber !== undefined && !batchTracked) throw new BatchNotTrackedError(subject.articleNumber);
+        // A decrease of a batchstyrd article is an outflow like any other:
+        // the article lock every draw takes, BEFORE the place is resolved
+        // (article → place) — the cells it is taken from must not be
+        // allocated twice.
+        if (batchTracked && input.quantityDelta < 0) await lockArticlesForOutflow(tx, [input.articleId]);
         // Location is mandatory — resolve article default / "***" when absent.
         const locationId = await resolveStockLocation(tx, input.articleId, input.locationId);
         await assertLocationNotUnderCount(tx, locationId);
+        // An inflow names its batch (created on first use); without one the
+        // goods are Okänd. A decrease is booked on Okänd.
+        const batch =
+          input.batchNumber !== undefined && input.quantityDelta > 0
+            ? await getOrCreateBatch(tx, { articleId: input.articleId, batchNumber: input.batchNumber, origin: "manual", createdBy })
+            : null;
 
         // Only inflows are a valuation event — an outflow doesn't get a cost.
         // unit_cost is the article's current standard cost; null (not 0) when
@@ -389,6 +408,7 @@ export function createStockRepository(db: Db) {
             note: input.note,
             unitCost,
             createdBy,
+            batchId: batch?.id ?? null,
           })
           .returning();
         // A negative adjustment may have emptied the location.
@@ -636,6 +656,15 @@ export function createStockRepository(db: Db) {
     // Flera lagerplatser per artikel (0186): the Lager tab's card. The
     // replace runs in its own transaction (article-locations.ts takes the
     // locks); the answer is read after the commit.
+    // Batch (#8): GET /articles/:id/batch-balances — null = no such article.
+    // An article that is not batchstyrd shows no batches: the ones it had
+    // stay in the log and come back when the flag is switched on again.
+    async articleBatchBalances(articleId: string) {
+      const [article] = await db.select({ batchTracked: articles.batchTracked }).from(articles).where(eq(articles.id, articleId));
+      if (!article) return null;
+      return { batchTracked: article.batchTracked, batches: article.batchTracked ? await articleBatchBalances(db, articleId) : [] };
+    },
+
     async articleLocations(articleId: string) {
       return readArticleLocations(db, articleId);
     },

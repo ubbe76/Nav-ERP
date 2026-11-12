@@ -167,6 +167,8 @@ export interface ExistingArticle {
   // Optional: only the article import reads it.
   articleCode?: string | null;
   standardCost: string | null;
+  // Optional: only the saldoimport reads it (Batchstyrd, #8).
+  batchTracked?: boolean;
   // Optional: only the article import reads it (Streckkod, #4).
   barcode?: string | null;
   weight: string | null;

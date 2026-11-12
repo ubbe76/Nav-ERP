@@ -1,9 +1,14 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { stockCountSessions, stockLocations, stockTransactions, warehouses, type Db, type Tx } from "@navet/db";
+import { articles, stockCountSessions, stockLocations, stockTransactions, warehouses, type Db, type Tx } from "@navet/db";
 import { FALLBACK_LOCATION_NAME, getOrCreateFallbackLocation, resolveStockLocation, usableArticleLocations } from "../../stock/service/location-resolver.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
-import { STOCK_IMPORT_NOTE, type StockBalanceImportPlan } from "../service/stock-balances.js";
+import { lockArticlesForOutflow } from "../../stock/service/outflow-locations.js";
+import { batchTrackedArticleIds } from "../../stock/service/batch-tracking.js";
+import { getOrCreateBatch } from "../../stock/service/batches.js";
+import { BatchNotTrackedError } from "../../stock/service/batch.errors.js";
+import { batchCellQuantity, batchCellsForArticles } from "../../stock/repository/batch-balances.js";
+import { STOCK_IMPORT_NOTE, stockBatchCellKey, type StockBalanceImportPlan } from "../service/stock-balances.js";
 import { round4 } from "@navet/shared";
 
 // Lagersaldon (#3) — the import repository's stock half: the planner's
@@ -61,6 +66,16 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
       return map;
     },
 
+    // Batch (#8): today's balance per cell for the batchstyrda articles the
+    // file names a batch for (the planner's key, stockBatchCellKey).
+    async stockBatchBalances(articleIds: string[]) {
+      const map = new Map<string, number>();
+      for (const cell of await batchCellsForArticles(db, articleIds)) {
+        map.set(stockBatchCellKey(cell.articleId, cell.locationId, cell.batchId === null ? null : cell.batchNumber), cell.quantity);
+      }
+      return map;
+    },
+
     async locationsUnderCount() {
       const rows = await db
         .select({ locationId: stockCountSessions.locationId })
@@ -104,6 +119,35 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
           return id;
         }
 
+        // Batch (#8). The flag is read FOR KEY SHARE (a flag change in
+        // progress is waited out), and every batchstyrd article of the plan
+        // takes the article lock the draws take — sorted, in one go, BEFORE
+        // any place is resolved (article → place): a decrease is an outflow
+        // from the article's cells. Then the batches the plan names are
+        // created in (article, number) order, so two imports never wait on
+        // each other crosswise in the unique index (the sort is stable and
+        // ignores case, so the file's first spelling is the one kept); they all get this
+        // transaction's time, and the number decides their order (beslut 16).
+        const trackedIds = await batchTrackedArticleIds(tx, plan.balances.map((row) => row.articleId));
+        await lockArticlesForOutflow(tx, [...trackedIds]);
+        const batchIds = new Map<string, string>();
+        const named = plan.balances.flatMap((row) =>
+          row.batch?.kind === "named" ? [{ articleId: row.articleId, batchNumber: row.batch.batchNumber }] : []
+        );
+        named.sort((a, b) => (a.articleId < b.articleId ? -1 : a.articleId > b.articleId ? 1 : a.batchNumber.toLocaleLowerCase("sv").localeCompare(b.batchNumber.toLocaleLowerCase("sv"), "sv", { numeric: true })));
+        for (const row of plan.balances) {
+          // The article stopped being batchstyrd between the plan and here.
+          if (row.batch !== null && !trackedIds.has(row.articleId)) {
+            const [article] = await tx.select({ articleNumber: articles.articleNumber }).from(articles).where(eq(articles.id, row.articleId));
+            throw new BatchNotTrackedError(article?.articleNumber ?? row.articleId);
+          }
+        }
+        for (const item of named) {
+          const key = `${item.articleId}|${item.batchNumber.toLocaleLowerCase("sv")}`;
+          if (batchIds.has(key)) continue;
+          batchIds.set(key, (await getOrCreateBatch(tx, { articleId: item.articleId, batchNumber: item.batchNumber, origin: "import" })).id);
+        }
+
         let created = 0;
         let updated = 0;
         for (const row of plan.balances) {
@@ -120,11 +164,20 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
                   : null;
           const locationId = await resolveStockLocation(tx, row.articleId, explicit);
           await assertLocationNotUnderCount(tx, locationId);
-          const [balance] = await tx
-            .select({ quantity: sql<string>`coalesce(sum(${stockTransactions.quantityDelta}), 0)` })
-            .from(stockTransactions)
-            .where(and(eq(stockTransactions.articleId, row.articleId), eq(stockTransactions.locationId, locationId)));
-          const current = Number(balance!.quantity);
+          // Antal is the balance of the whole place — or, with Batch, of
+          // that cell (null = the Okänd cell); the difference is booked there.
+          const batchId =
+            row.batch?.kind === "named" ? batchIds.get(`${row.articleId}|${row.batch.batchNumber.toLocaleLowerCase("sv")}`)! : null;
+          let current: number;
+          if (row.batch === null) {
+            const [balance] = await tx
+              .select({ quantity: sql<string>`coalesce(sum(${stockTransactions.quantityDelta}), 0)` })
+              .from(stockTransactions)
+              .where(and(eq(stockTransactions.articleId, row.articleId), eq(stockTransactions.locationId, locationId)));
+            current = Number(balance!.quantity);
+          } else {
+            current = await batchCellQuantity(tx, row.articleId, locationId, batchId);
+          }
           const delta = round4(row.quantity - current);
           if (delta === 0) continue;
           await tx.insert(stockTransactions).values({
@@ -135,6 +188,8 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
             // Inflows only carry a cost (D0); an outflow is worth what the stock was.
             unitCost: delta > 0 && row.unitCost !== null ? String(row.unitCost) : null,
             note: STOCK_IMPORT_NOTE,
+            // Without Batch an increase is Okänd (and so, for now, is a decrease).
+            batchId,
           });
           if (delta < 0) await deactivateEmptyLocation(tx, locationId);
           if (current === 0) created++;

@@ -64,6 +64,7 @@ export const STOCK_BALANCE_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "locationName", label: "Lagerplats" },
   { field: "quantity", label: "Antal (saldo efter importen)", required: true },
   { field: "unitCost", label: "À-pris" },
+  { field: "batchNumber", label: "Batch" },
 ];
 
 // Mirrors SUPPLIER_PRICE_IMPORT_FIELDS in

@@ -158,6 +158,7 @@ Bredvid **Ladda ned mall** har varje importflik knappen **Exportera**. Den hämt
 | **Lagerplats** | Nej | Lagerplatsens namn i lagret, max 100 tecken. En plats som saknas skapas i lagret. Utan Lager måste platsnamnet finnas och vara unikt. Tom (och Lager tomt) betyder artikelns huvudplats (en spärrad hoppas över), annars första alternativa platsen, annars reservplatsen ***. Lagerplatsen *** är alltid reservplatsen, oavsett Lager. | A1-03 |
 | **Antal** | Ja | Saldot på lagerplatsen efter importen, i artikelns grundenhet, 0 eller mer, decimalkomma eller punkt. Skillnaden mot dagens saldo bokas som en lagerjustering — samma fil två gånger ändrar inget, och 0 tömmer platsen. | 120 |
 | **À-pris** | Nej | Värdet per grundenhet i kronor för det som läggs till, decimalkomma eller punkt. Tom cell betyder artikelns standardkostnad. Används bara när saldot ökar. | 24,50 |
+| **Batch** | Nej | Bara för batchstyrda artiklar: batchnumret, max 50 tecken — en batch som saknas skapas — eller Okänd för saldot utan batch. Antal är då batchens saldo på lagerplatsen efter importen, och samma artikel får stå på flera rader per lagerplats, en per batch. Tom cell betyder som förut hela lagerplatsens saldo, och en ökning hamnar i Okänd. Ange Batch på alla rader för en artikel och lagerplats, eller på ingen. Batcher som skapas i samma import tas ut i batchnummerordning. Batch på en artikel som inte är batchstyrd ger fel på raden. | L-2291 |
 
 ## Kunder
 

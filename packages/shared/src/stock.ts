@@ -59,6 +59,20 @@ export type StockTransactionReference =
   | { kind: "manual" }
   | { kind: "transfer"; counterpartLocation: string };
 
+// Batch (#8). An INFLOW names its batch by number (the supplier's batch on
+// an inleverans, a number typed on a justering): trimmed, at most 50
+// characters, "" = left out — an empty field means the routine's default
+// (the IO number, or Okänd). Compared case-insensitively per article.
+export const batchNumberSchema = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().trim().min(1).max(50).optional()
+);
+// An OUTFLOW chooses among the article's batches by id: left out =
+// Automatiskt (oldest first), null = Okänd.
+export const batchChoiceSchema = z.string().uuid().nullable().optional();
+// What a row without a batch is called everywhere — reserved as a number.
+export const UNKNOWN_BATCH_LABEL = "Okänd";
+
 export const createStockTransactionSchema = z.object({
   articleId: z.string().uuid(),
   locationId: z.string().uuid().optional(),
@@ -68,6 +82,9 @@ export const createStockTransactionSchema = z.object({
   transactionType: stockTransactionTypeSchema.exclude(["stock_transfer"]),
   referenceId: z.string().uuid().optional(),
   note: z.string().max(2000).optional(),
+  // Batch (#8): only on an inflow (positive delta) of a batchstyrd article
+  // — left out, the goods are Okänd.
+  batchNumber: batchNumberSchema,
 });
 export type CreateStockTransactionInput = z.infer<typeof createStockTransactionSchema>;
 
@@ -77,9 +94,14 @@ export type CreateStockTransactionInput = z.infer<typeof createStockTransactionS
 // price it; a free row typed as one of them would count as that document's
 // in FIFO, the latest purchase price and the stock log (granskningen
 // 2026-11-10). Omitted = inventory_adjustment; anything else is 400.
-export const createStockAdjustmentSchema = createStockTransactionSchema.extend({
-  transactionType: z.literal("inventory_adjustment").default("inventory_adjustment"),
-});
+export const createStockAdjustmentSchema = createStockTransactionSchema
+  .extend({
+    transactionType: z.literal("inventory_adjustment").default("inventory_adjustment"),
+  })
+  .refine((input) => input.batchNumber === undefined || input.quantityDelta > 0, {
+    message: "batchNumber names the batch of an inflow — only with a positive quantityDelta",
+    path: ["batchNumber"],
+  });
 
 // Lagerflytt — move balances from one stock location to another. Both legs of
 // every row are written in one transaction; see stock.repository.transferStock.

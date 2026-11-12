@@ -1793,6 +1793,7 @@ export function createPurchaseService(
         quantity: input.quantity,
         createdBy,
         overReceiptPercent: purchaseOverReceiptPercent,
+        batchNumber: input.batchNumber,
       });
       if (result.ok) {
         const [order, article] = await Promise.all([
@@ -1803,7 +1804,11 @@ export function createPurchaseService(
           entityType: "purchase_order_row",
           entityId: order?.orderNumber ?? orderId,
           action: "goods_received",
-          detail: { articleNumber: article?.articleNumber ?? null, quantity: input.quantity },
+          detail: {
+            articleNumber: article?.articleNumber ?? null,
+            quantity: input.quantity,
+            ...(result.batchNumber !== null ? { batchNumber: result.batchNumber } : {}),
+          },
           userId: createdBy,
         });
         // Lego row: the receipt is what "the operation happened" means, so
@@ -1852,7 +1857,8 @@ export function createPurchaseService(
           }
         }
         // receiptId: the webb's notice offers Ångra on exactly this receipt.
-        return { row: result.row, orderStatus: result.orderStatus, operationReport, receiptId: result.receiptId };
+        // batchNumber (#8): the batch the goods were booked in, null without one.
+        return { row: result.row, orderStatus: result.orderStatus, operationReport, receiptId: result.receiptId, batchNumber: result.batchNumber };
       }
 
       switch (result.reason) {

@@ -30,6 +30,7 @@ import {
   priceLists,
   productionGroups,
   routingOperations,
+  stockBatches,
   stockLocations,
   stockTransactions,
   supplierContacts,
@@ -41,6 +42,7 @@ import {
   type Db,
   type Tx,
 } from "@navet/db";
+import { UNKNOWN_BATCH_LABEL } from "@navet/shared";
 import {
   registerCellTexts,
   type ArticleExportRecord,
@@ -404,22 +406,42 @@ export function createImportExportRepository(db: Db | Tx) {
             warehouseName: warehouses.name,
             locationName: stockLocations.name,
             quantity: sql<string>`sum(${stockTransactions.quantityDelta})`,
+            // Batch (#8): a batchstyrd article is grouped per cell — the
+            // batch number, or "Okänd" for the rows without a batch — so the
+            // file reads back as the saldoimport's cell rows. Every other
+            // article sums over whatever batches its log holds, as before.
+            batchTracked: articles.batchTracked,
+            batchNumber: stockBatches.batchNumber,
           })
           .from(stockTransactions)
           .innerJoin(articles, eq(articles.id, stockTransactions.articleId))
           .innerJoin(stockLocations, eq(stockLocations.id, stockTransactions.locationId))
           .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
+          .leftJoin(stockBatches, and(eq(stockBatches.id, stockTransactions.batchId), eq(articles.batchTracked, true)))
           .where(condition)
-          .groupBy(articles.articleNumber, warehouses.name, stockLocations.name, stockLocations.id)
+          .groupBy(
+            articles.articleNumber,
+            articles.batchTracked,
+            warehouses.name,
+            stockLocations.name,
+            stockLocations.id,
+            stockBatches.id,
+            stockBatches.batchNumber
+          )
           .having(sql`sum(${stockTransactions.quantityDelta}) <> 0`)
       );
       return rows
-        .map((row) => ({ ...row, quantity: Number(row.quantity) }))
+        .map(({ batchTracked, batchNumber, ...row }) => ({
+          ...row,
+          quantity: Number(row.quantity),
+          batchNumber: batchTracked ? (batchNumber ?? UNKNOWN_BATCH_LABEL) : "",
+        }))
         .sort(
           (a, b) =>
             byText(a.articleNumber, b.articleNumber) ||
             byText(a.warehouseName, b.warehouseName) ||
-            byText(a.locationName, b.locationName)
+            byText(a.locationName, b.locationName) ||
+            byText(a.batchNumber, b.batchNumber)
         );
     },
 
