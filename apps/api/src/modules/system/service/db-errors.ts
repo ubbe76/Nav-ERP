@@ -115,6 +115,18 @@ export function isEmployeeAnonymizedViolation(err: unknown): boolean {
   );
 }
 
+// Postgres numeric_value_out_of_range (22003) — a number larger than its
+// column holds (numeric(p,s) overflow, integer out of range), also a product
+// computed from two valid inputs (quantity × price). The shared schemas
+// bound the fields they know (numericMax/INT4_MAX in coerce.ts); the global
+// error handler maps whatever is left to 400 number-out-of-range rather than
+// 500. Same two-level code/cause check as above.
+export function isNumberOutOfRange(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const { code, cause } = err as { code?: string; cause?: unknown };
+  return code === "22003" || (typeof cause === "object" && cause !== null && (cause as { code?: string }).code === "22003");
+}
+
 // Postgres serialization failure (40001) — a repeatable-read transaction
 // locking or changing a row another transaction changed or deleted after
 // its snapshot. Same two-level code/cause check as above.

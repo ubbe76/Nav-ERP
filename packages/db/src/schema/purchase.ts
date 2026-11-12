@@ -727,8 +727,8 @@ export const supplierPayments = pgTable(
     amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
     // Valuta (migration 0143): the invoices' currency — one payment never
     // mixes currencies. amount_sek is the SEK amount that actually left the
-    // bank account (= amount for SEK) and bank_fee_sek the bank's fee in SEK
-    // (0 for SEK); the difference to the SEK the rows release is booked as
+    // bank account (= amount + fee for SEK) and bank_fee_sek the bank's fee in
+    // SEK; the difference to the SEK the rows release is booked as
     // kursvinst/kursförlust.
     currency: varchar("currency", { length: 3 }).notNull().default("SEK"),
     amountSek: numeric("amount_sek", { precision: 14, scale: 2 }).notNull(),
@@ -767,10 +767,12 @@ export const supplierPayments = pgTable(
     uniqueIndex("supplier_payments_entry_live")
       .on(table.bankFileEntryId)
       .where(sql`${table.cancelledAt} is null and ${table.bankFileEntryId} is not null`),
-    // A SEK payment moves exactly its amount and has no fee of its own.
+    // A SEK payment moves exactly its amount — plus, since 0209, the fee the
+    // bank took with it (a SEK payment abroad whose camt.054 amount includes
+    // the charges); 0 for every other SEK payment.
     check(
       "supplier_payments_sek_amounts",
-      sql`${table.currency} <> 'SEK' OR (${table.amountSek} = ${table.amount} AND ${table.bankFeeSek} = 0)`
+      sql`${table.currency} <> 'SEK' OR ${table.amountSek} = ${table.amount} + ${table.bankFeeSek}`
     ),
     check("supplier_payments_bank_fee_non_negative", sql`${table.bankFeeSek} >= 0`),
   ]

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { listQuerySchema } from "./list.js";
 import { currencyCodeSchema, exchangeRateValueSchema } from "./currency.js";
 import type { PriceSource } from "./sales.js";
+import { blankSafe } from "./coerce.js";
 
 export const configuratorCodeSchema = z
   .string()
@@ -26,16 +27,20 @@ export type ConfiguratorRuleEffect = z.infer<
   typeof configuratorRuleEffectSchema
 >;
 
-const amount = z.coerce.number().finite();
-const number2 = z.coerce
-  .number()
-  .finite()
-  .refine((v) => Number(v.toFixed(2)) === v, "Högst 2 decimaler");
-const number4 = z.coerce
-  .number()
-  .finite()
-  // Exact: an absolute tolerance on v×10⁴ misjudges large numbers.
-  .refine((v) => Number(v.toFixed(4)) === v, "Högst 4 decimaler");
+const amount = blankSafe(z.coerce.number().finite());
+const number2 = blankSafe(
+  z.coerce
+    .number()
+    .finite()
+    .refine((v) => Number(v.toFixed(2)) === v, "Högst 2 decimaler")
+);
+const number4 = blankSafe(
+  z.coerce
+    .number()
+    .finite()
+    // Exact: an absolute tolerance on v×10⁴ misjudges large numbers.
+    .refine((v) => Number(v.toFixed(4)) === v, "Högst 4 decimaler")
+);
 
 /**
  * Whether a number-group value lies on the step grid counted from min — the
@@ -267,7 +272,7 @@ export const updateConfiguratorBomLineSchema = z
 
 // Conditional operation (villkorad operation).
 const operationFields = {
-  sequenceNo: z.coerce.number().int().min(1).max(9999),
+  sequenceNo: blankSafe(z.coerce.number().int().min(1).max(9999)),
   workCenterId: z.string().uuid(),
   description: z.string().trim().max(255).nullable().optional(),
   setupTime: number2.refine((v) => v >= 0, "Får inte vara negativt").nullable().optional(),
@@ -309,7 +314,7 @@ export type ConfiguratorSelection = z.infer<typeof configuratorSelectionSchema>;
 export const evaluateConfigurationSchema = z.object({
   selection: configuratorSelectionSchema.default({}),
   customerId: z.string().uuid().optional(),
-  quantity: z.coerce.number().positive().default(1),
+  quantity: blankSafe(z.coerce.number().positive()).default(1),
   currency: currencyCodeSchema.optional(),
   exchangeRate: exchangeRateValueSchema.optional(),
 });

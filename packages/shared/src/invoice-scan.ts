@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { listQuerySchema } from "./list.js";
+import { blankSafe } from "./coerce.js";
 
 // Fakturaskanning (Fakturainkorgen) — the shared contract. Spec
 // private/superpowers/specs/2026-10-26-fakturaskanning-design.md §3.1/§5.
@@ -266,13 +267,13 @@ export const updateInvoiceScanSettingsSchema = z
     poMatching: z.boolean().optional(),
     mailEnabled: z.boolean().optional(),
     mailHost: z.string().trim().max(255).nullable().optional(),
-    mailPort: z.coerce.number().int().min(1).max(65535).optional(),
+    mailPort: blankSafe(z.coerce.number().int().min(1).max(65535)).optional(),
     mailTls: z.boolean().optional(),
     mailUser: z.string().trim().max(320).nullable().optional(),
     mailPassword: secretSchema(500, "Lösenordet får bara innehålla vanliga tecken"),
     mailFolder: z.string().trim().min(1).max(200).optional(),
     mailProcessedFolder: z.string().trim().min(1).max(200).optional(),
-    mailIntervalMinutes: z.coerce.number().int().min(1).max(60).optional(),
+    mailIntervalMinutes: blankSafe(z.coerce.number().int().min(1).max(60)).optional(),
   })
   .strict()
   .refine(foldersDiffer, foldersDifferIssue);
@@ -293,7 +294,7 @@ export type TestInvoiceScanAiInput = z.infer<typeof testInvoiceScanAiSchema>;
 export const testInvoiceScanMailSchema = z
   .object({
     mailHost: z.string().trim().max(255).nullable().optional(),
-    mailPort: z.coerce.number().int().min(1).max(65535).optional(),
+    mailPort: blankSafe(z.coerce.number().int().min(1).max(65535)).optional(),
     mailTls: z.boolean().optional(),
     mailUser: z.string().trim().max(320).nullable().optional(),
     mailPassword: z.string().max(500).regex(/^[\x20-\x7E]*$/, "Lösenordet får bara innehålla vanliga tecken").optional(),

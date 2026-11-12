@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, asc, eq } from "drizzle-orm";
-import { accounts, auditLog, bankFiles, companyInfo, db, paymentBatchItems, supplierPayments, verificationRows } from "@navet/db";
+import { accounts, auditLog, bankFiles, companyInfo, db, paymentBatchItems, supplierInvoices, supplierPayments, verificationRows } from "@navet/db";
 import { PaymentFileInvalidError } from "../src/modules/banking/service/banking.errors.js";
 import { camtFile } from "./helpers/camt.js";
 import { failure } from "./helpers/year-end.js";
@@ -370,5 +370,123 @@ describe("camt.054: utlandsbetalningar bekräftas på det instruerade beloppet",
     expect(booked.results[0]).toMatchObject({ ok: true, paymentNumber: endToEndId });
     const [returned] = await db.select().from(paymentBatchItems);
     expect(returned!.status).toBe("returned");
+  });
+});
+
+// A SEK payment abroad: SEB's camt.054 gives TxAmt as the amount "including
+// charges", so the entry is the row's amount plus the fee the bank reports in
+// Chrgs. Built on that documented behaviour — not yet tried on a real file.
+describe("camt.054: SEK-betalning till utlandet där avgiften ingår i postens belopp", () => {
+  const upload = (xml: string, filename = "camt054.xml") => files.upload({ filename, contentType: "application/xml", data: Buffer.from(xml) }, userId);
+
+  async function exportedSek(domestic = false) {
+    const supplier = domestic
+      ? await makeSupplier({ name: "Inrikes Stål AB", postalCode: "12345", city: "Stad", paymentMethod: "bankgiro", bankgiro: "50501055" })
+      : (await suppliers()).dk;
+    const invoice = await makeApprovedSupplierInvoice(supplier.id, { registrationNumber: "LF-9", gross: 10000, dueDate: "2024-10-15", invoiceNumber: "9001" });
+    const draft = await batches.create({ invoiceIds: [invoice.id] }, userId);
+    const batch = await batches.export(draft.id, userId);
+    return { batch, invoice, endToEndId: batch.items[0]!.endToEndId };
+  }
+  const debit = (endToEndId: string, amount: number, charges: { amount: number; code?: string; bearer?: "DEBT" | "CRED" | "SHAR" }[], ref = "1") =>
+    camtFile({
+      messageId: `SEKFEE-${ref}`,
+      account: "SE4550000000058398257466",
+      entries: [{ direction: "debit", amount, bookingDate: TODAY, txs: [{ acctSvcrRef: `SF-${ref}`, endToEndId, amount, charges }] }],
+    });
+
+  it("matches the row's amount plus the included charges and books the fee on the payment's own verification", async () => {
+    const { batch, invoice, endToEndId } = await exportedSek();
+    expect(batch.items[0]).toMatchObject({ currency: "SEK", amount: 10000, paymentKind: "international" });
+    const { file } = await upload(debit(endToEndId, 10050, [{ amount: 50, code: "COMM" }]));
+    const [entry] = await files.outgoingView(file.id);
+    expect(entry).toMatchObject({ state: "matched", amount: 10050, chargesAmount: 50, instructedAmount: null, item: { amount: 10000, currency: "SEK" } });
+    const { results } = await files.bookOutgoing(file.id, { entryIds: [entry!.id] }, userId);
+    expect(results[0]).toMatchObject({ ok: true });
+    const [payment] = await db.select().from(supplierPayments);
+    expect(payment).toMatchObject({ currency: "SEK", amount: "10000.00", amountSek: "10050.00", bankFeeSek: "50.00", bankFileEntryId: entry!.id });
+    expect(await verificationRowsOf(payment!.verificationId!)).toEqual({
+      "1930": { debit: 0, credit: 10050 },
+      "2440": { debit: 10000, credit: 0 },
+      "6570": { debit: 50, credit: 0 },
+    });
+    expect((await testSupplierPaymentService.getPayment(payment!.id))!.exchangeRateDifferenceSek).toBe(0);
+    // The ledger is closed with the invoice's own amount — the fee is no part of it.
+    const [paid] = await db.select().from(supplierInvoices).where(eq(supplierInvoices.id, invoice.id));
+    expect(paid!.status).toBe("paid");
+    const [item] = await db.select().from(paymentBatchItems);
+    expect(item!.status).toBe("confirmed");
+    expect((await files.outgoingView(file.id))[0]!.state).toBe("booked");
+    // Booking it again changes nothing.
+    const again = await files.bookOutgoing(file.id, { entryIds: [entry!.id] }, userId);
+    expect(again.results[0]).toMatchObject({ ok: false, error: { code: "bank-entry-already-booked" } });
+    expect(await db.select().from(supplierPayments)).toHaveLength(1);
+  });
+
+  it("a domestic SEK row with the same difference is still 'amount differs'", async () => {
+    const { batch, endToEndId } = await exportedSek(true);
+    expect(batch.items[0]!.paymentKind).toBe("domestic");
+    const { file } = await upload(debit(endToEndId, 10050, [{ amount: 50, code: "COMM" }]));
+    const [entry] = await files.outgoingView(file.id);
+    expect(entry!.state).toBe("amount_mismatch");
+    const { results } = await files.bookOutgoing(file.id, { entryIds: [entry!.id] }, userId);
+    expect(results[0]).toEqual({
+      entryId: entry!.id,
+      ok: false,
+      error: { error: `Payment ${endToEndId} was 10000.00 but the bank debited 10050.00`, code: "bank-entry-amount-differs" },
+    });
+    expect(await db.select().from(supplierPayments)).toEqual([]);
+  });
+
+  it("a difference that is not exactly our included charges is still 'amount differs'", async () => {
+    const { endToEndId } = await exportedSek();
+    const cases: [number, { amount: number; code?: string; bearer?: "DEBT" | "CRED" | "SHAR" }[]][] = [
+      // No charges reported at all.
+      [10050, []],
+      // Charges that do not explain the difference.
+      [10050, [{ amount: 30, code: "COMM" }]],
+      // The payee's charges (CRED) are not ours.
+      [10050, [{ amount: 50, code: "COMM", bearer: "CRED" }]],
+      // Less than the row, whatever the charges.
+      [9950, [{ amount: 50, code: "COMM" }]],
+    ];
+    for (const [index, [amount, charges]] of cases.entries()) {
+      const { file } = await upload(debit(endToEndId, amount, charges, `m${index}`), `m${index}.xml`);
+      const [entry] = await files.outgoingView(file.id);
+      expect([index, entry!.state]).toEqual([index, "amount_mismatch"]);
+      const { results } = await files.bookOutgoing(file.id, { entryIds: [entry!.id] }, userId);
+      expect(results[0]).toMatchObject({ ok: false, error: { code: "bank-entry-amount-differs" } });
+    }
+    expect(await db.select().from(supplierPayments)).toEqual([]);
+    // The exact amount is booked as a plain SEK payment, without a fee, even
+    // when the bank lists charges.
+    const { file } = await upload(debit(endToEndId, 10000, [{ amount: 50, code: "COMM" }], "exact"), "exact.xml");
+    const [entry] = await files.outgoingView(file.id);
+    expect(entry!.state).toBe("matched");
+    await files.bookOutgoing(file.id, { entryIds: [entry!.id] }, userId);
+    const [payment] = await db.select().from(supplierPayments);
+    expect(payment).toMatchObject({ amount: "10000.00", amountSek: "10000.00", bankFeeSek: "0.00" });
+  });
+
+  it("a return never takes the charges into account, and one of another SEK amount than the payment drew is refused", async () => {
+    const { endToEndId } = await exportedSek();
+    const returnOf = (amount: number, ref: string, charges: { amount: number; code?: string }[] = []) =>
+      camtFile({
+        messageId: `SEKRET-${ref}`,
+        account: "SE4550000000058398257466",
+        entries: [{ direction: "credit", reversal: true, amount, bookingDate: "2024-10-17", txs: [{ acctSvcrRef: `SR-${ref}`, endToEndId, amount, returnReason: "AC01", charges }] }],
+      });
+    const early = await upload(returnOf(10050, "0", [{ amount: 50, code: "COMM" }]), "r0.xml");
+    expect((await files.outgoingView(early.file.id))[0]!.state).toBe("amount_mismatch");
+
+    const confirmed = await upload(debit(endToEndId, 10050, [{ amount: 50, code: "COMM" }]));
+    await files.bookOutgoing(confirmed.file.id, { entryIds: (await files.outgoingView(confirmed.file.id)).map((e) => e.id) }, userId);
+    const back = await upload(returnOf(10000, "1"), "r1.xml");
+    const [ret] = await files.outgoingView(back.file.id);
+    expect(ret!.state).toBe("return");
+    const refused = await files.bookOutgoing(back.file.id, { entryIds: [ret!.id] }, userId);
+    expect(refused.results[0]).toMatchObject({ ok: false, error: { code: "bank-return-sek-differs" } });
+    const [still] = await db.select().from(paymentBatchItems);
+    expect(still!.status).toBe("confirmed");
   });
 });

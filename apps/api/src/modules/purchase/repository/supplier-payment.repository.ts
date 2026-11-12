@@ -469,11 +469,17 @@ export function createSupplierPaymentRepository(db: Db) {
       let amountSek: number;
       let bankFeeSek: number;
       if (currency === SEK) {
-        // A SEK payment moves exactly its amount and has no fee of its own.
-        if (header.amountSek !== null && round2(header.amountSek) !== amount) throw sekGuard("sek");
-        if (header.bankFeeSek !== null && round2(header.bankFeeSek) !== 0) throw sekGuard("sek");
-        amountSek = amount;
-        bankFeeSek = 0;
+        // A SEK payment moves exactly its amount — and, for a payment abroad
+        // whose bank took its fee with the payment (camt.054: TxAmt
+        // including the charges), that fee on top. A fee is only taken as
+        // one when the caller also states the SEK that left the account and
+        // the two add up; a fee alone, a sum that does not, or a fee on a
+        // kvittning/refund is refused as before.
+        bankFeeSek = round2(header.bankFeeSek ?? 0);
+        if (bankFeeSek < 0) throw sekGuard("sek");
+        if (bankFeeSek !== 0 && (header.amountSek === null || amount <= 0)) throw sekGuard("sek");
+        amountSek = round2(amount + bankFeeSek);
+        if (header.amountSek !== null && round2(header.amountSek) !== amountSek) throw sekGuard("sek");
       } else if (amount === 0) {
         // A kvittning moves no money: nothing left the bank, no fee.
         if ((header.amountSek !== null && round2(header.amountSek) !== 0) || (header.bankFeeSek !== null && round2(header.bankFeeSek) !== 0)) {

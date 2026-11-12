@@ -18,6 +18,14 @@ export const blankSafe = <T extends z.ZodTypeAny>(inner: T) =>
     inner
   );
 
+// Upper bounds after the column's type, so an oversized number is a 400 on
+// the field instead of Postgres 22003 (the global error handler's
+// number-out-of-range is only the net for the schemas without one).
+// numericMax(10, 2) = 99999999.99 — the largest value a numeric(10,2) holds.
+export const INT4_MAX = 2_147_483_647;
+export const numericMax = (precision: number, scale: number): number =>
+  Number(`${"9".repeat(precision - scale)}${scale > 0 ? `.${"9".repeat(scale)}` : ""}`);
+
 // Optional free text. A blanked input arrives as "" and is normalized to
 // null here rather than in each writer, so "not filled in" has exactly one
 // representation. First used for routing-operation texts (manufacturing.ts),

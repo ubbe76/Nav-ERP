@@ -585,7 +585,8 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
     // (amountSek, from camt.054's TxAmt or typed in Bekräfta utförd) and the
     // bank's fee in SEK (bankFeeSek); the registration refuses it without
     // (400 supplier-payment-amount-sek, reason required). A SEK row passes
-    // neither, exactly as before.
+    // neither — except one sent abroad whose camt.054 amount includes the
+    // bank's charges: the entry's amount and those charges.
     async confirmItemInTx(
       tx: Tx,
       itemId: string,
@@ -625,7 +626,7 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
           bankAccountNumber: batch.bankAccountNumber,
           paymentBatch: batch.batchNumber,
           endToEndId: item.endToEndId,
-          ...(item.currency !== SEK ? { currency: item.currency, amountSek: opts.amountSek ?? null, bankFeeSek: opts.bankFeeSek ?? 0 } : {}),
+          ...(item.currency !== SEK || (opts.bankFeeSek ?? 0) !== 0 ? { currency: item.currency, amountSek: opts.amountSek ?? null, bankFeeSek: opts.bankFeeSek ?? 0 } : {}),
         },
         userId,
       });
@@ -638,7 +639,7 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
           payment: result.paymentNumber,
           via: opts.bankFileEntryId ? "bank_file" : "manual",
           date: opts.paymentDate,
-          ...(item.currency !== SEK ? { currency: item.currency, amount, amountSek: opts.amountSek ?? null, bankFeeSek: opts.bankFeeSek ?? 0 } : {}),
+          ...(item.currency !== SEK || (opts.bankFeeSek ?? 0) !== 0 ? { currency: item.currency, amount, amountSek: opts.amountSek ?? null, bankFeeSek: opts.bankFeeSek ?? 0 } : {}),
         },
         userId
       );
@@ -714,9 +715,11 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
         if (!payment) throw new Error(`Payment batch row ${item.endToEndId} is confirmed but has no live payment`);
         // An omföring dated before the payment it reverses is never right.
         if (entry.bookingDate < payment.paymentDate) throw new BankReturnBeforePaymentError(item.endToEndId, payment.paymentDate, entry.bookingDate);
-        // A payment in another currency: the omföring reverses the SEK the
-        // payment took — only right when the bank returned exactly that.
-        if (payment.currency !== SEK && entry.amountSek !== undefined && round2(entry.amountSek) !== round2(Number(payment.amountSek))) {
+        // The omföring reverses the SEK the payment took — only right when
+        // the bank returned exactly that (a payment in another currency, or
+        // a SEK payment abroad booked with the bank's fee; any other SEK
+        // payment drew its own amount, which the entry already matched).
+        if (entry.amountSek !== undefined && round2(entry.amountSek) !== round2(Number(payment.amountSek))) {
           throw new BankReturnSekDiffersError(item.endToEndId, Number(payment.amountSek), entry.amountSek);
         }
         await deps.supplierPayments.cancelInTx(tx, payment.id, userId, { date: entry.bookingDate });

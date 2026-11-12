@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { blankSafe } from "./coerce.js";
 
 // E-faktura via Peppol (B2Brouter) — shared zod and vocabularies. Spec:
 // private/superpowers/specs/2026-10-21-e-faktura-peppol-design.md.
@@ -86,10 +87,10 @@ export const updateEinvoiceSettingsSchema = z
     // accountId without a name, or null, clears the stored name.
     accountId: z.string().trim().max(100).nullable().optional(),
     accountName: z.string().trim().max(200).nullable().optional(),
-    statusIntervalMinutes: z.coerce.number().int().min(5).max(1440).optional(),
+    statusIntervalMinutes: blankSafe(z.coerce.number().int().min(5).max(1440)).optional(),
     // Skicka e-faktura automatiskt vid Utfärda (saknas = på).
     autoSend: z.boolean().optional(),
-    receiveIntervalMinutes: z.coerce.number().int().min(5).max(1440).optional(),
+    receiveIntervalMinutes: blankSafe(z.coerce.number().int().min(5).max(1440)).optional(),
   })
   .strict();
 export type UpdateEinvoiceSettingsInput = z.infer<typeof updateEinvoiceSettingsSchema>;

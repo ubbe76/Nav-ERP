@@ -198,7 +198,7 @@ import { createAlertsService } from "./modules/alerts/service/alerts.service.js"
 import { createAlertDigestRepository } from "./modules/alerts/repository/alert-digest.repository.js";
 import { createAlertDigestService } from "./modules/alerts/service/alert-digest.service.js";
 import { alertsRoutes } from "./modules/alerts/routes/alerts.routes.js";
-import { isBookkeepingLockViolation, isClosedFiscalYearViolation, isEmployeeAnonymizedViolation } from "./modules/system/service/db-errors.js";
+import { isBookkeepingLockViolation, isClosedFiscalYearViolation, isEmployeeAnonymizedViolation, isNumberOutOfRange } from "./modules/system/service/db-errors.js";
 import { StockLocationNotFoundError } from "./modules/stock/service/stock.errors.js";
 import { documentNumberTakenError } from "./modules/system/service/number-series.js";
 import { errorBody } from "./modules/system/service/error-body.js";
@@ -298,6 +298,13 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
         error: "The employee is anonymized and cannot change",
         code: "employee-anonymized",
       });
+    }
+    // A number too large for its column (Postgres 22003) from any write the
+    // schemas' own .max() did not stop — the client's value, not a server
+    // fault. Logged: a hit means a schema is missing its bound.
+    if (isNumberOutOfRange(err)) {
+      app.log.error(err);
+      return reply.code(400).send({ error: "A number is too large for its field", code: "number-out-of-range" });
     }
     app.log.error(err);
     return reply.code(500).send({ error: "Internal server error", code: "internal-server-error" });

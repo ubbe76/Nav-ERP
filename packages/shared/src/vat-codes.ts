@@ -2,6 +2,7 @@ import { z } from "zod";
 import { round2 } from "./money.js";
 import type { VatBoxSetting } from "./economy.js";
 import { isVatRate, type VatRate } from "./vat.js";
+import { blankSafe } from "./coerce.js";
 
 // Momskoder (bokföringsgranskningen etapp 1). A VAT code says how a document
 // row is taxed: its rate, which accounts it posts to — and therefore which
@@ -841,7 +842,7 @@ export const importVatSchema = z.object({
     .array(
       z.object({
         vatCodeId: z.string().uuid(),
-        taxBase: z.coerce.number().positive().max(999_999_999_999),
+        taxBase: blankSafe(z.coerce.number().positive().max(999_999_999_999)),
       })
     )
     .min(1)

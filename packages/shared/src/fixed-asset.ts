@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { listQuerySchema } from "./list.js";
+import { blankSafe } from "./coerce.js";
 
 // Anläggningsregister (ekonomi etapp 2, delprojekt 2). Months travel as
 // "YYYY-MM"; the API stores them as the month's first day.
@@ -21,7 +22,7 @@ export const FIXED_ASSET_DISPOSAL_TYPE_LABELS: Record<FixedAssetDisposalType, st
 };
 
 // 1200 months = 100 years; nothing in K2 depreciates slower.
-const usefulLifeSchema = z.coerce.number().int().positive().max(1200);
+const usefulLifeSchema = blankSafe(z.coerce.number().int().positive().max(1200));
 
 // --- Tillgångsgrupper ---
 export const createFixedAssetCategorySchema = z.object({
@@ -55,7 +56,7 @@ const acquisitionMonth = (date: string) => date.slice(0, 7);
 // month it is valid through. Both or neither: the amount is meaningless
 // without knowing which months it covers, and a month without an amount is
 // a typo.
-const openingDepreciationSchema = z.coerce.number().min(0).multipleOf(0.01, "openingDepreciation must have at most 2 decimals");
+const openingDepreciationSchema = blankSafe(z.coerce.number().min(0).multipleOf(0.01, "openingDepreciation must have at most 2 decimals"));
 const OPENING_PAIR_MESSAGE = "openingDepreciation and openingDepreciationThroughMonth must be set together";
 const openingPairConsistent = (data: { openingDepreciation?: number; openingDepreciationThroughMonth?: string | null }) =>
   ((data.openingDepreciation ?? 0) > 0) === (data.openingDepreciationThroughMonth != null);
@@ -66,8 +67,8 @@ export const createFixedAssetSchema = z
     note: z.string().trim().max(2000).nullable().optional(),
     categoryId: z.string().uuid(),
     acquisitionDate: z.string().date(),
-    acquisitionCost: z.coerce.number().positive(),
-    residualValue: z.coerce.number().min(0).default(0),
+    acquisitionCost: blankSafe(z.coerce.number().positive()),
+    residualValue: blankSafe(z.coerce.number().min(0)).default(0),
     // Omitted = the category's default useful life.
     usefulLifeMonths: usefulLifeSchema.optional(),
     // Omitted = the acquisition month (spec decision b).
@@ -97,8 +98,8 @@ export const updateFixedAssetSchema = z
     note: z.string().trim().max(2000).nullable().optional(),
     categoryId: z.string().uuid().optional(),
     acquisitionDate: z.string().date().optional(),
-    acquisitionCost: z.coerce.number().positive().optional(),
-    residualValue: z.coerce.number().min(0).optional(),
+    acquisitionCost: blankSafe(z.coerce.number().positive()).optional(),
+    residualValue: blankSafe(z.coerce.number().min(0)).optional(),
     usefulLifeMonths: usefulLifeSchema.optional(),
     depreciationStartMonth: monthKeySchema.optional(),
     openingDepreciation: openingDepreciationSchema.optional(),
@@ -131,7 +132,7 @@ export const disposeFixedAssetSchema = z.discriminatedUnion("disposalType", [
   z.object({
     disposalType: z.literal("sale"),
     disposalDate: z.string().date(),
-    disposalPrice: z.coerce.number().min(0),
+    disposalPrice: blankSafe(z.coerce.number().min(0)),
     intermediateAccountId: z.string().uuid(),
   }),
   // strict: a scrap must not smuggle in a price or a mellankonto.
