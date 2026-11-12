@@ -600,6 +600,8 @@ Samma sak går att göra på [sidan Kopierat](#sidan-kopierat). Raderas en artik
 
 **Artiklar → Förkalkylera flera** (`/artiklar/forkalkylera`) förkalkylerar många artiklar i ett svep: du väljer ett urval, tittar på siffrorna och sparar de rader du vill behålla. Sidan kräver behörigheten **Artiklar** eller **Tillverkning**. Varje artikel räknas exakt som med **Förkalkylera** på artikelns flik [Kalkyl](#kalkyl).
 
+Vill du i stället jämföra hur färdiga tillverkningsordrar faktiskt kostade mot kalkylerat, se [Efterkalkylera flera](/hjalp/tillverkning#efterkalkylera-flera).
+
 ### Urval
 
 Välj mellan två urval:

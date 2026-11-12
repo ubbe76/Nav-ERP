@@ -27,7 +27,7 @@ import { createTimeReportRepository } from "../src/modules/timereport/repository
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
 import { ExchangeRateUnavailableError } from "../src/modules/system/service/exchange-rates.js";
 import { parsed } from "./helpers/parsed.js";
-import { unwiredPreCalculationBatch, unwiredSalesOrderLinks } from "./helpers/unwired";
+import { unwiredPostCalculationBatch, unwiredPreCalculationBatch, unwiredSalesOrderLinks } from "./helpers/unwired";
 import { editStockLog } from "./helpers/stock-log.js";
 
 // Produkter i arbete (#25) against Postgres: every source bounded to D, the
@@ -466,6 +466,7 @@ describe("Produkter i arbete — the routes", () => {
       service: createCostingService(createCostingRepository(db), { getSettings: async () => costingSettings }),
       workInProgress: wipService,
       batch: unwiredPreCalculationBatch,
+      postBatch: unwiredPostCalculationBatch,
     });
     return app;
   }

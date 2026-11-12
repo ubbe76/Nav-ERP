@@ -134,6 +134,7 @@ export const HUB_ICONS: Record<string, LucideIcon> = {
   "/forsaljning/bankfiler": Landmark,
   "/kunder": Users,
   "/tillverkning/ordrar": ClipboardList,
+  "/tillverkning/efterkalkylera": Calculator,
   "/tillverkning/terminal": Tablet,
   "/tillverkning/pagaende": Activity,
   "/tillverkning/tidrapporter": Clock,

@@ -220,6 +220,8 @@ describe("Endast läsning — writes are refused", () => {
         url: "/api/v1/costing/pre-calculations/batch/save",
         payload: { items: [{ articleId: f.product.id, quantity: 1 }], setStandardCost: true, setSalesPrice: true },
       },
+      // Efterkalkylera flera (#34): the save writes efterkalkyler
+      { method: "POST", url: "/api/v1/costing/post-calculations/batch/save", payload: { manufacturingOrderIds: [f.order.id] } },
       // Reservationen after the delivery-time check
       { method: "POST", url: "/api/v1/delivery-time-check/apply", payload: { salesOrderId: crypto.randomUUID(), deliveryDate: "2030-01-01" } },
     ] as const;
@@ -317,6 +319,9 @@ describe("Endast läsning — reads and side-effect-free POSTs work", () => {
       { url: "/api/v1/costing/pre-calculations/batch", payload: { selection: { activeOnly: true }, fallbackQuantity: 1 } },
       { url: "/api/v1/costing/pre-calculations/batch", payload: { selection: { copied: true }, fallbackQuantity: 2, multiLevel: true } },
       { url: "/api/v1/costing/pre-calculations/batch/selection", payload: { selection: { activeOnly: true } } },
+      // Efterkalkylera flera (#34): the preview and Visa urval write nothing.
+      { url: "/api/v1/costing/post-calculations/batch", payload: { selection: { statuses: ["planned", "released", "in_progress", "done"] } } },
+      { url: "/api/v1/costing/post-calculations/batch/selection", payload: { selection: { statuses: ["planned", "released", "in_progress", "done"] } } },
       { url: `/api/v1/manufacturing-orders/${f.order.id}/cost-calculations/post-calculate`, payload: undefined },
       { url: `/api/v1/manufacturing-orders/${f.order.id}/cost-calculations/post-calculate`, payload: { save: false } },
       { url: `/api/v1/articles/${f.template.id}/configurator/variants/preview`, payload: { sets: { LOCK: ["A"] }, calcQuantity: 1 } },
@@ -453,6 +458,11 @@ describe("Endast läsning — the allowlist", () => {
         "POST /api/v1/costing/pre-calculations/batch",
         // Visa urval: the same selection listed, nothing calculated.
         "POST /api/v1/costing/pre-calculations/batch/selection",
+        // Efterkalkylera flera (#34): the TO card's efterkalkyl without save
+        // over a selection of orders, and the selection listed. The save is
+        // its own route and is refused.
+        "POST /api/v1/costing/post-calculations/batch",
+        "POST /api/v1/costing/post-calculations/batch/selection",
         // The one route that writes: the account's own preferences.
         "PATCH /api/v1/me/settings",
         // Kopierat (#28): the three writes to the user's own working list of

@@ -22,6 +22,7 @@
 // only counted.
 import type { CalculationOutcomeGrouping, CostVarianceAnalysis, CostVarianceParts } from "@navet/shared";
 import { manufacturingCost, type ManufacturingCostBuckets as Buckets } from "../../costing/service/cost-figures.js";
+import { calculatedPerUnit } from "../../costing/service/cost-variance.js";
 import { roundToDecimals } from "@navet/shared";
 
 // One TO's latest efterkalkyl in the period.
@@ -175,7 +176,8 @@ export function preCalculationOutcome(
       perUnitBasis,
       preSource: pre.source,
       preTvkPerUnit: pre.perUnit,
-      calculatedTvkPerUnit: final ? final.base / final.outputQuantity : null,
+      // Null unless the analysis is final; the divisor is > 0 here (above).
+      calculatedTvkPerUnit: calculatedPerUnit(post.analysis),
       postTvkPerUnit,
       deltaPerUnit,
       deltaPct: pre.perUnit !== 0 ? roundToDecimals((deltaPerUnit / pre.perUnit) * 100, 1) : null,

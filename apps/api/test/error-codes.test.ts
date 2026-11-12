@@ -60,6 +60,7 @@ import {
 } from "../src/modules/system/service/themes.errors.js";
 import { errorBody } from "../src/modules/system/service/error-body.js";
 import { PreCalculationBatchTooLargeError } from "../src/modules/costing/service/pre-calculation-batch.service.js";
+import { PostCalculationBatchTooLargeError } from "../src/modules/costing/service/post-calculation-batch.service.js";
 import { SetupChargeArticleNotFoundError } from "../src/modules/system/service/system.service.js";
 import {
   CustomerArticleNumberNotFoundError,
@@ -999,6 +1000,8 @@ const cases: Array<[Error, string]> = [
   [new CopiedArticlesTooManyError(5001), ERROR_CODES.COPIED_ARTICLES_TOO_MANY],
   // Förkalkylera flera (#27)
   [new PreCalculationBatchTooLargeError(501), ERROR_CODES.PRE_CALCULATION_BATCH_TOO_LARGE],
+  // Efterkalkylera flera (#34)
+  [new PostCalculationBatchTooLargeError(501), ERROR_CODES.POST_CALCULATION_BATCH_TOO_LARGE],
 ];
 
 describe("error class name -> ERROR_CODES derivation", () => {
