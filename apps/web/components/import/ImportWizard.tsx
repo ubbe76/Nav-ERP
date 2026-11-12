@@ -1,10 +1,11 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import Link from "next/link";
 import { Button } from "../ui/Button";
 import { FormActions, FormError } from "../ui/Form";
-import { API_URL, ApiError, apiFetch } from "../../lib/api";
+import { API_URL, ApiError, apiFetch, apiErrorFromBody } from "../../lib/api";
 import type { ImportFieldConfig } from "../../lib/importFields";
 import buttonStyles from "../ui/Button.module.css";
 import styles from "./ImportWizard.module.css";
@@ -76,6 +77,8 @@ export function ImportWizard({
   }));
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [result, setResult] = useState<CommitResponse | null>(null);
+  // A file is read and the import has not finished: leaving loses the mapping.
+  useUnsavedGuard(parsed !== null && step !== "Resultat");
   const inputRef = useRef<HTMLInputElement>(null);
 
   // The wizard's identity field: shown per preview row (Artikelnummer for
@@ -97,7 +100,7 @@ export function ImportWizard({
       });
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
-        throw new Error(payload.error ?? "Filen kunde inte läsas");
+        throw apiErrorFromBody(res.status, payload, "Filen kunde inte läsas");
       }
       const data: ParseResponse = await res.json();
       setParsed(data);

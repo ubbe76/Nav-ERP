@@ -106,7 +106,7 @@ type Shortcut = "salesOrder" | "purchaseOrder" | "manufacturingOrder";
 
 // Kopplade dokument: what the case led to, the shortcuts that create it, and
 // Koppla dokument for follow-ups made some other way.
-export function DeviationLinksSection({ deviation, canEdit }: { deviation: Deviation; canEdit: boolean }) {
+export function DeviationLinksSection({ deviation, canEdit, dirty = false }: { deviation: Deviation; canEdit: boolean; dirty?: boolean }) {
   const router = useRouter();
   const can = useCan();
   const [error, setError] = useState<string | null>(null);
@@ -207,7 +207,7 @@ export function DeviationLinksSection({ deviation, canEdit }: { deviation: Devia
                 return formatStockholmDateTime(link.createdAt);
               case "id":
                 return (
-                  <Button type="button" size="small" variant="ghost" disabled={pending} onClick={() => unlink(link)}>
+                  <Button type="button" size="small" variant="ghost" disabled={pending || dirty} onClick={() => unlink(link)}>
                     Ta bort koppling
                   </Button>
                 );
@@ -220,29 +220,30 @@ export function DeviationLinksSection({ deviation, canEdit }: { deviation: Devia
         <p>Inga dokument kopplade.</p>
       )}
 
+      {canEdit && dirty && <div className={styles.notice}>Spara ändringarna innan du skapar eller kopplar dokument.</div>}
       {canEdit && (
         <div className={styles.buttonRow}>
           {canCredit && (
-            <Button type="button" variant="secondary" disabled={pending} onClick={createCredit}>
+            <Button type="button" variant="secondary" disabled={pending || dirty} onClick={createCredit}>
               Skapa kreditfaktura
             </Button>
           )}
           {canReplacementOrder && (
-            <Button type="button" variant="secondary" disabled={pending} onClick={() => setModal("salesOrder")}>
+            <Button type="button" variant="secondary" disabled={pending || dirty} onClick={() => setModal("salesOrder")}>
               Skapa ersättningsorder
             </Button>
           )}
           {canPurchaseOrder && (
-            <Button type="button" variant="secondary" disabled={pending} onClick={() => setModal("purchaseOrder")}>
+            <Button type="button" variant="secondary" disabled={pending || dirty} onClick={() => setModal("purchaseOrder")}>
               Skapa inköpsorder
             </Button>
           )}
           {canManufacturingOrder && (
-            <Button type="button" variant="secondary" disabled={pending} onClick={() => setModal("manufacturingOrder")}>
+            <Button type="button" variant="secondary" disabled={pending || dirty} onClick={() => setModal("manufacturingOrder")}>
               Skapa tillverkningsorder
             </Button>
           )}
-          <Button type="button" variant="ghost" disabled={pending} onClick={() => setModal("link")}>
+          <Button type="button" variant="ghost" disabled={pending || dirty} onClick={() => setModal("link")}>
             Koppla dokument
           </Button>
         </div>

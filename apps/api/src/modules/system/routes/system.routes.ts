@@ -45,9 +45,9 @@ export async function systemRoutes(app: FastifyInstance, opts: { service: System
 
   app.post("/company-info/logo", { preHandler: requireRole("admin") }, async (req, reply) => {
     const file = await req.file({ limits: { fileSize: MAX_LOGO_BYTES } });
-    if (!file) return reply.code(400).send({ error: "No file provided" });
+    if (!file) return reply.code(400).send({ error: "No file provided", code: "logo-file-missing" });
     if (!file.mimetype.startsWith("image/")) {
-      return reply.code(400).send({ error: "Only image files are allowed" });
+      return reply.code(400).send({ error: "Only image files are allowed", code: "invalid-logo-file-type" });
     }
     const buffer = await file.toBuffer();
     await service.updateLogo(buffer, file.mimetype, req.user!.id);

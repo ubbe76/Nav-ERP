@@ -34,6 +34,20 @@ export class ApiError extends Error {
   }
 }
 
+// A raw fetch that failed (multipart uploads go around apiFetch, which sets a
+// JSON content type): the same ApiError apiFetch throws, so apiErrorMessage
+// finds the code. A plain Error made from the body's error text lost it and
+// showed the API's English text ("File too large", 403 read-only-account …).
+export function apiErrorFromBody(status: number, body: unknown, fallback: string): ApiError {
+  const b = (body ?? {}) as { error?: unknown; code?: unknown };
+  return new ApiError(
+    typeof b.error === "string" ? b.error : fallback,
+    status,
+    typeof b.code === "string" ? b.code : undefined,
+    body
+  );
+}
+
 export interface SessionUser {
   id: string;
   email: string;
@@ -55,6 +69,27 @@ export async function getCurrentUser(cookieHeader: string | undefined): Promise<
   });
   if (!res.ok) return null;
   return res.json();
+}
+
+// The proxy's view of the session cookie. "invalid" only when the API
+// answered 401 — the cookie no longer holds a session (account deactivated
+// or removed, password changed, JWT_SECRET replaced, expired). A 5xx, a 429
+// or an unreachable API is "unavailable": it never logs anyone out.
+export type SessionCheck = { kind: "user"; user: SessionUser } | { kind: "invalid" } | { kind: "unavailable" };
+
+export async function checkSession(cookieHeader: string | undefined): Promise<SessionCheck> {
+  if (!cookieHeader) return { kind: "invalid" };
+  try {
+    const res = await fetch(`${SERVER_API_URL}/api/v1/auth/me`, {
+      headers: { cookie: cookieHeader },
+      cache: "no-store",
+    });
+    if (res.status === 401) return { kind: "invalid" };
+    if (!res.ok) return { kind: "unavailable" };
+    return { kind: "user", user: (await res.json()) as SessionUser };
+  } catch {
+    return { kind: "unavailable" };
+  }
 }
 
 export async function login(email: string, password: string): Promise<SessionUser> {
@@ -129,5 +164,12 @@ export async function apiGet<T>(path: string, cookieHeader: string | undefined):
     headers: cookieHeader ? { cookie: cookieHeader } : {},
     cache: "no-store",
   });
+  // The session ended between the proxy's check and this fetch: to the login
+  // page rather than the error page. Imported here, not at the top — the proxy
+  // bundles this module too and never calls apiGet.
+  if (res.status === 401) {
+    const { redirect } = await import("next/navigation");
+    redirect("/login");
+  }
   return parseOrThrow<T>(res);
 }

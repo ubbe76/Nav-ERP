@@ -45,18 +45,19 @@ export function UserForm({
     const readOnlyValue = role !== "admin" && readOnly;
     try {
       if (user) {
-        await apiFetch(`/api/v1/auth/users/${user.id}`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            name,
-            email,
-            role,
-            active,
-            permissionGroupId: permissionGroupId || null,
-            readOnly: readOnlyValue,
-            ...(password ? { password } : {}),
-          }),
-        });
+        // Only fields changed in this form: sending the whole object from a
+        // stale list would revert another admin's change to the same user.
+        const changes: Record<string, unknown> = {};
+        if (name !== user.name) changes.name = name;
+        if (email !== user.email) changes.email = email;
+        if (role !== user.role) changes.role = role;
+        if (active !== user.active) changes.active = active;
+        if ((permissionGroupId || null) !== (user.permissionGroupId ?? null)) changes.permissionGroupId = permissionGroupId || null;
+        if (readOnlyValue !== user.readOnly) changes.readOnly = readOnlyValue;
+        if (password) changes.password = password;
+        if (Object.keys(changes).length > 0) {
+          await apiFetch(`/api/v1/auth/users/${user.id}`, { method: "PATCH", body: JSON.stringify(changes) });
+        }
       } else {
         await apiFetch("/api/v1/auth/users", {
           method: "POST",

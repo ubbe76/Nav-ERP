@@ -20,7 +20,7 @@ import {
 import { registerTabOpener } from "../../lib/tabNavigation";
 import { confirmDialog } from "../../lib/confirm";
 import { notify } from "../../lib/notice";
-import { UNSAVED_MESSAGE } from "../../lib/unsavedGuard";
+import { UNSAVED_MESSAGE, confirmLeave } from "../../lib/unsavedGuard";
 import shellStyles from "../AppShell.module.css";
 import styles from "./DocumentTabs.module.css";
 
@@ -128,7 +128,12 @@ export function DocumentTabsProvider({ children }: { children: ReactNode }) {
     update();
     query.addEventListener("change", update);
     const restoredTabs = restoreTabs(readSession(STORAGE_KEY), window.location.origin);
-    nextId.current = restoredTabs.tabs.length;
+    // Above every restored id ("tab-N"): length alone could reuse one after
+    // a tab in the middle was closed.
+    nextId.current = restoredTabs.tabs.reduce((max, t) => {
+      const n = Number(/(\d+)$/.exec(t.id)?.[1]);
+      return Number.isFinite(n) ? Math.max(max, n) : max;
+    }, restoredTabs.tabs.length);
     setTabs(restoredTabs.tabs);
     setActiveId(restoredTabs.activeId);
     try {
@@ -270,8 +275,13 @@ export function DocumentTabsProvider({ children }: { children: ReactNode }) {
       } else if (message.type === "nav-tab-open") {
         open(message.href, provisionalTitle(message.title));
       } else if (message.type === "nav-tab-navigate") {
-        setActiveId(null);
-        router.push(message.href);
+        // The frame's page asked; an unsaved form in the page behind the tabs
+        // gets its question before the tabs are left.
+        void confirmLeave().then((ok) => {
+          if (!ok) return;
+          setActiveId(null);
+          router.push(message.href);
+        });
       } else if (message.type === "nav-tab-activate") {
         activateDigit(message.digit);
       }

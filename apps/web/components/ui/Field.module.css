@@ -127,3 +127,12 @@
 .track[data-checked="true"]::after {
   transform: translateX(16px);
 }
+
+/* iOS Safari zooms the page on focus in a field under 16px. */
+@media (pointer: coarse) {
+  .input,
+  .select,
+  .textarea {
+    font-size: 16px;
+  }
+}

@@ -212,6 +212,21 @@ export function searchesFor(user: PaletteUser): PaletteSearch[] {
 export const RECENT_KEY = "nav-erp-recent";
 export const RECENT_MAX = 8;
 
+// Logout: the next user of this browser must not see the previous one's
+// pages (Senast öppnade, the open tabs).
+export function clearBrowserTraces(): void {
+  try {
+    window.localStorage.removeItem(RECENT_KEY);
+  } catch {
+    // Blocked storage: nothing was kept.
+  }
+  try {
+    window.sessionStorage.removeItem("nav-erp-tabs");
+  } catch {
+    // Blocked storage: nothing was kept.
+  }
+}
+
 export interface RecentPage {
   href: string;
   title: string;

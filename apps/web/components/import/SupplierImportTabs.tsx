@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ImportWizard } from "./ImportWizard";
 import { MultiFileImportWizard } from "./MultiFileImportWizard";
+import { confirmLeave } from "../../lib/unsavedGuard";
 import { HelpLink } from "../ui/HelpLink";
 import { FormNotice } from "../ui/Form";
 import {
@@ -42,6 +43,10 @@ const ALL_FILES_INTRO = (
 
 export function SupplierImportTabs() {
   const [activeTab, setActiveTab] = useState(ALL_FILES_TAB.tab);
+  // The wizards remount on a tab change; ask first when one holds a read file.
+  async function selectTab(tab: string) {
+    if (tab !== activeTab && (await confirmLeave())) setActiveTab(tab);
+  }
   const activeEntity = ENTITY_TABS.find((t) => t.label === activeTab) ?? null;
   const active = activeEntity ?? ALL_FILES_TAB;
 
@@ -62,7 +67,7 @@ export function SupplierImportTabs() {
             type="button"
             className={styles.tab}
             data-active={tab === activeTab}
-            onClick={() => setActiveTab(tab)}
+            onClick={() => void selectTab(tab)}
           >
             {tab}
           </button>

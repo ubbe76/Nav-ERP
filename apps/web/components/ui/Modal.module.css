@@ -72,6 +72,9 @@
 .body {
   padding: var(--space-card-padding);
   overflow-y: auto;
+  /* Fill a full-height phone sheet so a tap below a short form hits the body,
+     not the <dialog> backdrop area. */
+  flex: 1;
 }
 
 @media (max-width: 640px) {
@@ -79,7 +82,9 @@
   .dialog.wide[open] {
     width: 100vw;
     height: 100vh;
+    height: 100dvh;
     max-height: 100vh;
+    max-height: 100dvh;
     max-width: 100vw;
     border-radius: 0;
     border: none;

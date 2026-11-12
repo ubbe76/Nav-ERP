@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ImportWizard, type ImportOptionConfig } from "./ImportWizard";
+import { confirmLeave } from "../../lib/unsavedGuard";
 import { HelpLink } from "../ui/HelpLink";
 import { FormNotice } from "../ui/Form";
 import {
@@ -75,6 +76,10 @@ const TABS: TabConfig[] = [
 
 export function ResourceImportTabs() {
   const [activeTab, setActiveTab] = useState(TABS[0]!.tab);
+  // The wizard remounts on a tab change; ask first when it holds a read file.
+  async function selectTab(tab: string) {
+    if (tab !== activeTab && (await confirmLeave())) setActiveTab(tab);
+  }
   const active = TABS.find((t) => t.tab === activeTab) ?? TABS[0]!;
 
   return (
@@ -94,7 +99,7 @@ export function ResourceImportTabs() {
             type="button"
             className={styles.tab}
             data-active={tab.tab === activeTab}
-            onClick={() => setActiveTab(tab.tab)}
+            onClick={() => void selectTab(tab.tab)}
           >
             {tab.tab}
           </button>

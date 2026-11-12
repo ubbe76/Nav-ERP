@@ -25,7 +25,7 @@ export function OrdersCard({ orders }: { orders: ManufacturingOrder[] }) {
                 <span className={styles.texts}>
                   <span className={styles.orderNumber}>{order.orderNumber}</span>
                   <span className={styles.product}>
-                    {order.articleName} · <span className="num">{Number(order.quantity).toLocaleString("sv-SE")}</span> st
+                    {order.articleName} · <span className="num">{Number(order.quantity).toLocaleString("sv-SE")}</span> {order.articleUnitCode ?? "st"}
                   </span>
                 </span>
                 <StatusDot status={pill.status} label={pill.label} />

@@ -8,6 +8,7 @@ import type { SystemSettings } from "../../lib/types";
 import cardStyles from "./SettingsForm.module.css";
 import { Form, FormActions, FormError, FormRow } from "../ui/Form";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 
 // SMTP settings for outgoing document email (förfrågan/inköpsorder/offert/
 // orderbekräftelse). The stored password is never shown — leaving the field
@@ -30,6 +31,32 @@ export function SmtpSettingsForm({ settings }: { settings: SystemSettings }) {
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [testPending, setTestPending] = useState(false);
 
+  // Last saved values: a save sends only what differs, and the test mail
+  // (which uses the SAVED settings) waits while the form is changed.
+  const [base, setBase] = useState({
+    smtpHost: settings.smtpHost,
+    smtpPort: settings.smtpPort,
+    smtpSecure: settings.smtpSecure,
+    smtpUser: settings.smtpUser,
+    smtpFromName: settings.smtpFromName,
+    smtpFromEmail: settings.smtpFromEmail,
+  });
+  const typed = {
+    smtpHost: host,
+    smtpPort: Number(port),
+    smtpSecure: secure,
+    smtpUser: user,
+    smtpFromName: fromName,
+    smtpFromEmail: fromEmail,
+  };
+  const changes: Record<string, unknown> = Object.fromEntries(
+    (Object.keys(typed) as (keyof typeof typed)[]).filter((key) => typed[key] !== base[key]).map((key) => [key, typed[key]])
+  );
+  // Blank keeps the stored password, so only a typed one counts as a change.
+  if (password !== "") changes.smtpPassword = password;
+  const dirty = Object.keys(changes).length > 0;
+  useUnsavedGuard(dirty);
+
   async function handleSave(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -39,21 +66,17 @@ export function SmtpSettingsForm({ settings }: { settings: SystemSettings }) {
       setError("Porten måste vara ett heltal 1–65535");
       return;
     }
+    if (!dirty) {
+      setSaved(true);
+      return;
+    }
     setPending(true);
     try {
       const updated = await apiFetch<SystemSettings>("/api/v1/settings", {
         method: "PATCH",
-        body: JSON.stringify({
-          smtpHost: host,
-          smtpPort: portNumber,
-          smtpSecure: secure,
-          smtpUser: user,
-          // Blank keeps the stored password.
-          smtpPassword: password,
-          smtpFromName: fromName,
-          smtpFromEmail: fromEmail,
-        }),
+        body: JSON.stringify(changes),
       });
+      setBase(typed);
       setPasswordSet(updated.smtpPasswordSet);
       setPassword("");
       setSaved(true);
@@ -156,9 +179,10 @@ export function SmtpSettingsForm({ settings }: { settings: SystemSettings }) {
             placeholder="din@adress.se"
             style={{ maxWidth: 280 }}
           />
-          <Button type="button" variant="secondary" disabled={testPending || testTo.trim() === ""} onClick={sendTest}>
+          <Button type="button" variant="secondary" disabled={testPending || testTo.trim() === "" || dirty} onClick={sendTest}>
             {testPending ? "Skickar…" : "Skicka testmejl"}
           </Button>
+          {dirty && <span className={cardStyles.description}>Spara ändringarna först</span>}
           {testResult &&
             (testResult.ok ? (
               <span className={cardStyles.saved}>{testResult.text}</span>

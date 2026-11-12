@@ -29,6 +29,7 @@ export function DeviationFilesSection({
   files,
   canEdit,
   editable,
+  dirty = false,
 }: {
   deviationId: string;
   files: DeviationFile[];
@@ -36,6 +37,8 @@ export function DeviationFilesSection({
   canEdit: boolean;
   // The case is open (closed/cancelled cases explain why files are locked).
   editable: boolean;
+  // Unsaved card edits: an upload refreshes the page and restarts the card.
+  dirty?: boolean;
 }) {
   const router = useRouter();
   const filesUrl = `/api/v1/deviations/${deviationId}/files`;
@@ -82,6 +85,7 @@ export function DeviationFilesSection({
           : "Avvikelsen är avslutad eller makulerad — öppna den igen för att lägga till eller ta bort filer."}
       </FormHint>
 
+      {canEdit && dirty && <div className={styles.notice}>Spara ändringarna innan du lägger till eller tar bort filer.</div>}
       {canEdit && (
         <div className={styles.uploadRow}>
           <input
@@ -90,7 +94,7 @@ export function DeviationFilesSection({
             multiple
             accept={UNDERLAG_ACCEPT}
             aria-label="Ladda upp filer"
-            disabled={pending}
+            disabled={pending || dirty}
             onChange={(e) => {
               if (e.target.files && e.target.files.length > 0) void upload(e.target.files);
             }}
@@ -102,12 +106,12 @@ export function DeviationFilesSection({
             capture="environment"
             className={styles.hiddenInput}
             aria-label="Fota"
-            disabled={pending}
+            disabled={pending || dirty}
             onChange={(e) => {
               if (e.target.files && e.target.files.length > 0) void upload(e.target.files);
             }}
           />
-          <Button type="button" variant="secondary" disabled={pending} onClick={() => cameraRef.current?.click()}>
+          <Button type="button" variant="secondary" disabled={pending || dirty} onClick={() => cameraRef.current?.click()}>
             Fota
           </Button>
           {pending && <span>Laddar upp…</span>}
@@ -144,7 +148,7 @@ export function DeviationFilesSection({
                 return formatStockholmDateTime(file.createdAt);
               case "id":
                 return (
-                  <Button type="button" size="small" variant="danger" disabled={pending} onClick={() => remove(file)}>
+                  <Button type="button" size="small" variant="danger" disabled={pending || dirty} onClick={() => remove(file)}>
                     Ta bort
                   </Button>
                 );

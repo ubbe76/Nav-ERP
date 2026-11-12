@@ -133,3 +133,11 @@
   color: var(--color-text-secondary);
   padding: 0 2px;
 }
+
+/* iOS Safari zooms on focus in fields under 16px. */
+@media (pointer: coarse) {
+  .select,
+  .pageSizeSelect {
+    font-size: 16px;
+  }
+}

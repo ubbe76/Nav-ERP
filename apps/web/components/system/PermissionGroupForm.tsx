@@ -54,10 +54,20 @@ export function PermissionGroupForm({
     e.preventDefault();
     setError(null);
     setPending(true);
-    const body = JSON.stringify({ code, name, permissions: [...selected] });
     try {
-      if (group) await apiFetch(`/api/v1/permission-groups/${group.id}`, { method: "PATCH", body });
-      else await apiFetch("/api/v1/permission-groups", { method: "POST", body });
+      if (group) {
+        // Only changed fields, so a stale list cannot revert another admin's edit.
+        const changes: Record<string, unknown> = {};
+        if (code !== group.code) changes.code = code;
+        if (name !== group.name) changes.name = name;
+        const before = new Set<Permission>(group.permissions);
+        if (selected.size !== before.size || [...selected].some((p) => !before.has(p))) changes.permissions = [...selected];
+        if (Object.keys(changes).length > 0) {
+          await apiFetch(`/api/v1/permission-groups/${group.id}`, { method: "PATCH", body: JSON.stringify(changes) });
+        }
+      } else {
+        await apiFetch("/api/v1/permission-groups", { method: "POST", body: JSON.stringify({ code, name, permissions: [...selected] }) });
+      }
       onSuccess();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte spara behörighetsgruppen"));

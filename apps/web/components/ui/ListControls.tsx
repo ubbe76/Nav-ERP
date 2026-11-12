@@ -28,6 +28,12 @@ function usePendingFlag(pending: boolean) {
 // The list pages are URL-driven: search, filters and page live in the query
 // string, the server component refetches on every change. Filter and search
 // changes reset the page.
+// The query most recently requested per path. router.replace lands later and
+// useSearchParams only follows then, so two quick changes (a search followed by
+// a filter) must build on this, not on the stale hook value. Module level since
+// several controls on one page share the URL.
+let requested: { pathname: string; qs: string } | null = null;
+
 export function useListNavigation() {
   const router = useRouter();
   const pathname = usePathname();
@@ -36,17 +42,25 @@ export function useListNavigation() {
   const [pending, startTransition] = useTransition();
   usePendingFlag(pending);
 
+  // Forget the requested query once the URL has caught up (or the page changed).
+  const currentQs = searchParams.toString();
+  useEffect(() => {
+    if (requested && (requested.pathname !== pathname || requested.qs === currentQs)) requested = null;
+  }, [pathname, currentQs]);
+
   // Resolves false when the unsaved-changes prompt was declined (nothing
   // navigated). skipGuard: the caller has already asked.
   async function apply(updates: Record<string, string | null>, resetPage: boolean, skipGuard = false): Promise<boolean> {
     if (!skipGuard && !(await confirmLeave({ listNavigation: true }))) return false;
-    const next = new URLSearchParams(searchParams.toString());
+    const base = requested && requested.pathname === pathname ? requested.qs : searchParams.toString();
+    const next = new URLSearchParams(base);
     for (const [key, value] of Object.entries(updates)) {
       if (value === null || value === "") next.delete(key);
       else next.set(key, value);
     }
     if (resetPage) next.delete("page");
     const qs = next.toString();
+    requested = { pathname, qs };
     startTransition(() => router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false }));
     return true;
   }
@@ -70,6 +84,24 @@ export function ListToolbar({ placeholder = "Sök…", onSearchKeyDown, children
   const { params, setFilter } = useListNavigation();
   const [value, setValue] = useState(params.get("search") ?? "");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const urlSearch = params.get("search") ?? "";
+
+  // A pending debounce must not fire after the page is left: it would
+  // router.replace the list URL and pull the user back.
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    },
+    []
+  );
+
+  // Follow the URL when it changes from outside (favourite, Senast öppnade,
+  // Back) and the user is not mid-typing.
+  useEffect(() => {
+    if (debounceRef.current) return;
+    setValue((cur) => (cur.trim() === urlSearch ? cur : urlSearch));
+  }, [urlSearch]);
 
   function applySearch(next: string) {
     // Declined leave prompt: show the search that is actually applied.
@@ -90,7 +122,14 @@ export function ListToolbar({ placeholder = "Sök…", onSearchKeyDown, children
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     // The page may claim the key first (e.g. Enter on a keyboard-marked row).
     onSearchKeyDown?.(e);
-    if (e.defaultPrevented || e.key !== "Enter") return;
+    if (e.key !== "Enter") return;
+    if (e.defaultPrevented) {
+      // The page took Enter (opens a row): drop the pending search so it does
+      // not navigate back to the list afterwards.
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+      return;
+    }
     // Enter searches at once instead of waiting out the debounce; the hits
     // stay listed below. Only a pending search is applied — a repeated Enter
     // must not re-navigate.
@@ -211,8 +250,16 @@ export function Pagination({ total, pageSize = LIST_PAGE_SIZE }: { total: number
   const rawPage = Number.parseInt(params.get("page") ?? "1", 10);
   const page = Number.isFinite(rawPage) && rawPage >= 1 ? rawPage : 1;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
-  const to = Math.min(total, page * pageSize);
+  const shownPage = Math.min(page, pageCount);
+  const from = total === 0 ? 0 : (shownPage - 1) * pageSize + 1;
+  const to = Math.min(total, shownPage * pageSize);
+
+  // A stale ?page= beyond the last page (rows deleted, link shared) would show
+  // an empty list with no buttons; step back to the last page.
+  useEffect(() => {
+    if (total > 0 && page > pageCount) void setPage(pageCount, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [total, page, pageCount]);
 
   // Persists the choice server-side (PATCH /me/settings, upserted per user),
   // then drops the now-stale "page" param and re-runs the server component

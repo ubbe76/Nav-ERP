@@ -5,7 +5,7 @@ import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { Field, Input, Select } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
-import { API_URL } from "../../lib/api";
+import { API_URL, apiErrorFromBody } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 
 type LabelFormat = "a4" | "single";
@@ -74,7 +74,7 @@ export function LabelPrintDialog({
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw Object.assign(new Error(body.error ?? "Kunde inte skapa etiketterna"), { code: body.code });
+        throw apiErrorFromBody(res.status, body, "Kunde inte skapa etiketterna");
       }
       const url = URL.createObjectURL(await res.blob());
       if (tab) tab.location.href = url;

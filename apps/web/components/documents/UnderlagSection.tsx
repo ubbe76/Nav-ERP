@@ -7,7 +7,7 @@ import { Table } from "../ui/Table";
 import { Button } from "../ui/Button";
 import { SectionHeading } from "../ui/SectionHeading";
 import { FormError, FormHint } from "../ui/Form";
-import { API_URL, apiFetch } from "../../lib/api";
+import { API_URL, apiFetch, apiErrorFromBody } from "../../lib/api";
 import { formatStockholmDateTime } from "../../lib/date";
 import { apiErrorMessage } from "../../lib/errorMessages";
 
@@ -39,7 +39,7 @@ export async function uploadUnderlag(filesUrl: string, file: File): Promise<void
   const res = await fetch(`${API_URL}${filesUrl}`, { method: "POST", credentials: "include", body });
   if (!res.ok) {
     const payload = await res.json().catch(() => ({}));
-    throw new Error(payload.error ?? `Kunde inte ladda upp ${file.name}`);
+    throw apiErrorFromBody(res.status, payload, `Kunde inte ladda upp ${file.name}`);
   }
 }
 

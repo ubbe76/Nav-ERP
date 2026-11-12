@@ -122,7 +122,11 @@ export function Nav({ active, role, permissions }: NavProps) {
   // collapsed sidebar on page load snaps instead of sliding.
   const [animated, setAnimated] = useState(false);
   useEffect(() => {
-    setCollapsed(window.localStorage.getItem(COLLAPSED_STORAGE_KEY) === "true");
+    try {
+      setCollapsed(window.localStorage.getItem(COLLAPSED_STORAGE_KEY) === "true");
+    } catch {
+      // Blocked storage: the sidebar just starts expanded.
+    }
     const raf = requestAnimationFrame(() => setAnimated(true));
     return () => cancelAnimationFrame(raf);
   }, []);
@@ -130,7 +134,11 @@ export function Nav({ active, role, permissions }: NavProps) {
   function toggleCollapsed() {
     const next = !collapsed;
     setCollapsed(next);
-    window.localStorage.setItem(COLLAPSED_STORAGE_KEY, String(next));
+    try {
+      window.localStorage.setItem(COLLAPSED_STORAGE_KEY, String(next));
+    } catch {
+      // Blocked storage: the choice just is not remembered.
+    }
   }
 
   // Behörighetsgrupper: an entry shows when its hub page is openable

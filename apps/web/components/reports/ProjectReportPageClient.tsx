@@ -84,11 +84,13 @@ export function ProjectReportPageClient({ defaults }: { defaults: ProjectReportD
     if (!projectId) {
       setData(null);
       setError(null);
+      setLoading(false);
       return;
     }
     if (from && to && from > to) {
       setData(null);
       setError("Från måste vara före Till");
+      setLoading(false);
       return;
     }
     let cancelled = false;

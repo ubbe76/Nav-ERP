@@ -12,7 +12,7 @@ import { ListFilterSelect, ListToolbar, Pagination, useListNavigation } from "..
 import { useListColumns } from "../ui/ListColumns";
 import { HelpLink } from "../ui/HelpLink";
 import { useCan } from "../PermissionsProvider";
-import { API_URL } from "../../lib/api";
+import { API_URL, apiErrorFromBody } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import { formatStockholmDate } from "../../lib/date";
 import {
@@ -45,7 +45,7 @@ async function uploadScans(files: File[]): Promise<InvoiceScanUploadResult> {
   for (const file of files) body.append("file", file);
   const res = await fetch(`${API_URL}/api/v1/invoice-scans`, { method: "POST", credentials: "include", body });
   const payload = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(payload.error ?? "Uppladdningen misslyckades");
+  if (!res.ok) throw apiErrorFromBody(res.status, payload, "Uppladdningen misslyckades");
   return payload as InvoiceScanUploadResult;
 }
 

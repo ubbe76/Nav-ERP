@@ -140,6 +140,28 @@ export function draftPayload(draft: DeviationDraft, mode: "create" | "edit"): Re
   return body;
 }
 
+// Fields the server validates together: a row follows its order, an operation
+// its manufacturing order. Changing one sends both so the merge with the stored
+// case never pairs a new row with the old order.
+const PAIRED_FIELDS: string[][] = [
+  ["salesOrderId", "salesOrderRowId"],
+  ["purchaseOrderId", "purchaseOrderRowId"],
+  ["manufacturingOrderId", "moOperationId"],
+];
+
+// PATCH body with only the fields that differ from the saved draft (normalised
+// through draftPayload, so "5.0" vs "5" or a trailing space is no change).
+// Empty object = nothing to save.
+export function changedPayload(draft: DeviationDraft, baseline: DeviationDraft): Record<string, unknown> {
+  const next = draftPayload(draft, "edit");
+  const before = draftPayload(baseline, "edit");
+  const keys = new Set(Object.keys(next).filter((k) => JSON.stringify(next[k]) !== JSON.stringify(before[k])));
+  for (const pair of PAIRED_FIELDS) {
+    if (pair.some((k) => keys.has(k))) for (const k of pair) if (k in next) keys.add(k);
+  }
+  return Object.fromEntries([...keys].map((k) => [k, next[k] === undefined ? null : next[k]]));
+}
+
 // Client-side checks that save a round trip; the API validates again.
 export function draftProblem(draft: DeviationDraft): string | null {
   if (draft.title.trim() === "") return "Ange en rubrik.";

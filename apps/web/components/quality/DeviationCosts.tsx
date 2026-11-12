@@ -39,10 +39,13 @@ export function DeviationCostsSection({
   deviationId,
   costs,
   canEdit,
+  dirty = false,
 }: {
   deviationId: string;
   costs: DeviationCosts;
   canEdit: boolean;
+  // Unsaved card edits: a write here refreshes the page and restarts the card.
+  dirty?: boolean;
 }) {
   const router = useRouter();
   const [kind, setKind] = useState<DeviationCostKind>("material");
@@ -78,6 +81,7 @@ export function DeviationCostsSection({
 
   async function add(e: FormEvent) {
     e.preventDefault();
+    if (dirty) return;
     setError(null);
     setPending(true);
     try {
@@ -141,7 +145,7 @@ export function DeviationCostsSection({
               return row.who;
             case "id":
               return row.removeId ? (
-                <Button type="button" size="small" variant="danger" disabled={pending} onClick={() => remove(row)}>
+                <Button type="button" size="small" variant="danger" disabled={pending || dirty} onClick={() => remove(row)}>
                   Ta bort
                 </Button>
               ) : null;
@@ -163,6 +167,7 @@ export function DeviationCostsSection({
         </span>
       </div>
 
+      {canEdit && dirty && <div className={styles.notice}>Spara ändringarna innan du ändrar kostnaderna.</div>}
       {canEdit && (
         <form className={styles.inlineForm} onSubmit={add}>
           <Field label="Typ" htmlFor="costKind">
@@ -188,7 +193,7 @@ export function DeviationCostsSection({
               onChange={(e) => setAmount(e.target.value)}
             />
           </Field>
-          <Button type="submit" variant="secondary" disabled={pending || !(Number(amount) > 0)}>
+          <Button type="submit" variant="secondary" disabled={pending || dirty || !(Number(amount) > 0)}>
             Lägg till
           </Button>
         </form>
