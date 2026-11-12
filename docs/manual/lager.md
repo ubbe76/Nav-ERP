@@ -231,7 +231,7 @@ Har artikeln alternativa enheter visas en **Enhet**-dropdown vid justeringsfält
 
 ## Importera lagersaldon
 
-Vid start med Nav|ERP läses de ingående saldona in från fil i stället för en justering per artikel: **Artiklar → Importera**, fliken **Lagersaldon** (endast administratörer). Guiden är densamma som för artiklarna — **Fil**, **Kolumner**, **Förhandsgranska** och **Resultat** — och tar CSV eller Excel. Mallen laddas ned med **Ladda ned mall**; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#lagersaldon). Importera artiklarna först — raderna måste peka på artiklar som finns.
+Vid start med Nav|ERP läses de ingående saldona in från fil i stället för en justering per artikel: **Artiklar → Importera**, fliken **Lagersaldon** (endast administratörer). Guiden är densamma som för artiklarna — **Fil**, **Kolumner**, **Förhandsgranska** och **Resultat** — och tar CSV eller Excel. Mallen laddas ned med **Ladda ned mall**; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#lagersaldon). **Exportera** bredvid ger det som redan finns i registret i samma kolumner, se [Exportera registren som importfiler](/hjalp/importmallar#exportera-registren-som-importfiler). Importera artiklarna först — raderna måste peka på artiklar som finns.
 
 En rad per artikel och lagerplats med kolumnerna **Artikelnummer**, **Lager**, **Lagerplats**, **Antal** och **À-pris**:
 

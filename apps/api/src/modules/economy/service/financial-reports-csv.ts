@@ -171,7 +171,9 @@ interface LedgerFlatRow {
 const LEDGER_COLUMNS: CsvColumn<LedgerFlatRow>[] = [
   { label: "Konto", value: (r) => r.konto },
   { label: "Kontonamn", value: (r) => r.kontonamn },
-  { label: "Datum", value: (r) => r.datum },
+  // cell, not format: the CSV text is unchanged, the Excel cell is a date
+  // (the saldo rows have no date — an empty cell).
+  { label: "Datum", value: (r) => r.datum, cell: "date" },
   { label: "Verifikat", value: (r) => r.verifikat },
   { label: "Text", value: (r) => r.text },
   { label: "Kostnadsställe", value: (r) => dimensionText(r.kostnadsstalle) },
@@ -240,7 +242,9 @@ interface VerificationFlatRow {
 
 const VERIFICATION_COLUMNS: CsvColumn<VerificationFlatRow>[] = [
   { label: "Verifikat", value: (r) => r.verifikat },
-  { label: "Datum", value: (r) => r.datum },
+  // cell, not format: the CSV text is unchanged, the Excel cell is a date
+  // (the saldo rows have no date — an empty cell).
+  { label: "Datum", value: (r) => r.datum, cell: "date" },
   { label: "Text", value: (r) => r.text },
   { label: "Konto", value: (r) => r.konto },
   { label: "Kontonamn", value: (r) => r.kontonamn },

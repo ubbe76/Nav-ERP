@@ -13,23 +13,30 @@
 //   money    — a real number with two decimals
 //   percent  — a real number, the percentage AS SHOWN (95,5 under a "%"
 //              heading, not the fraction 0,955), rounded like "number"
+//   decimal  — a real number with EVERY decimal the value has (an exchange
+//              rate has six; the import files' quantities, prices and
+//              factors must read back exactly) — never rounded
 //   date     — an Excel date shown as yyyy-mm-dd
 //   datetime — an Excel date-time shown as yyyy-mm-dd hh:mm, Stockholm time
-export type ExportCellType = "text" | "number" | "money" | "percent" | "date" | "datetime";
+export type ExportCellType = "text" | "number" | "money" | "percent" | "decimal" | "date" | "datetime";
 
 export interface CsvColumn<T> {
   label: string; // Swedish header, matching the list page's column header
   value: (row: T) => string | number | null | undefined;
   // The Excel cell type, when it is not the one `format` implies (money →
-  // money, number → number, date → date, datetime → datetime; no format or
-  // "text" → number for a JS number, otherwise text). Set it to "text" for
-  // a numeric identifier that must not become a number, or to "percent".
+  // money, number → number, decimal → decimal, date → date, datetime →
+  // datetime; no format or "text" → number for a JS number, otherwise text).
+  // Set it to "text" for a numeric identifier that must not become a number,
+  // to "percent", or to "decimal"/"date" for a column whose CSV text is
+  // written by the column itself (no format) but is a number or a day.
   cell?: ExportCellType;
   // How the raw value is rendered: money = 2 decimals, number = up to 4
   // decimals with trailing zeros trimmed (both with a decimal COMMA and no
-  // thousands separator — spaces break Excel's number parsing), date =
-  // YYYY-MM-DD passthrough, datetime = YYYY-MM-DD HH:mm in Europe/Stockholm.
-  format?: "text" | "money" | "number" | "date" | "datetime";
+  // thousands separator — spaces break Excel's number parsing), decimal =
+  // the number as it is, unrounded, with a decimal comma (formatCsvDecimal),
+  // date = YYYY-MM-DD passthrough, datetime = YYYY-MM-DD HH:mm in
+  // Europe/Stockholm.
+  format?: "text" | "money" | "number" | "decimal" | "date" | "datetime";
 }
 
 // Exports refuse (400) rather than silently truncate beyond this.
@@ -82,6 +89,27 @@ export function formatCsvNumber(raw: string | number): string {
   return String(Number(Number(raw).toFixed(4))).replace(".", ",");
 }
 
+// The "decimal" rendering: the number with every decimal it has — never
+// rounded, never in exponent form — with a decimal comma. A numeric string
+// (Postgres numeric: "12.500000") loses only its trailing zeros. A text that
+// is no number is returned as it is.
+export function plainDecimal(raw: string | number): string {
+  if (typeof raw === "number") {
+    if (!Number.isFinite(raw)) return "";
+    const text = String(raw);
+    // String() is the shortest text that reads back as the same double;
+    // only very small (< 1e-6) and very large numbers come out as 1e-7.
+    return /e/i.test(text) ? raw.toFixed(15).replace(/\.?0+$/, "") : text;
+  }
+  const text = raw.trim();
+  if (!/^-?\d+(\.\d+)?$/.test(text)) return text;
+  return text.includes(".") ? text.replace(/\.?0+$/, "") : text;
+}
+
+export function formatCsvDecimal(raw: string | number): string {
+  return plainDecimal(raw).replace(".", ",");
+}
+
 function formatValue(raw: string | number | null | undefined, format: CsvColumn<never>["format"]): string {
   if (raw === null || raw === undefined || raw === "") return "";
   switch (format) {
@@ -89,6 +117,8 @@ function formatValue(raw: string | number | null | undefined, format: CsvColumn<
       return Number(raw).toFixed(2).replace(".", ",");
     case "number":
       return formatCsvNumber(raw);
+    case "decimal":
+      return formatCsvDecimal(raw);
     case "datetime":
       // sv-SE formats as "YYYY-MM-DD HH:mm"; the char between date and time
       // is a regular space with this format set.
@@ -154,6 +184,7 @@ export function exportCellType(column: ExportTableColumn, raw: ExportRawValue): 
   switch (column.format) {
     case "money":
     case "number":
+    case "decimal":
     case "date":
     case "datetime":
       return column.format;
@@ -163,7 +194,8 @@ export function exportCellType(column: ExportTableColumn, raw: ExportRawValue): 
 }
 
 // The same values as the CSV: money is the two-decimal number the CSV
-// prints, number/percent the four-decimal one, a date the same YYYY-MM-DD
+// prints, number/percent the four-decimal one, decimal the number unrounded
+// (also from a text with a decimal comma), a date the same YYYY-MM-DD
 // day, a date-time the same Stockholm reading. A value that does not fit its
 // type (a non-numeric text in a number column, a date that is not a day) is
 // written as the text it is, never as a wrong number or date.
@@ -180,6 +212,11 @@ export function exportCell(column: ExportTableColumn, raw: ExportRawValue): Expo
       const n = typeof raw === "string" ? Number(raw.trim().replace(",", ".")) : Number(raw);
       if (!Number.isFinite(n) || (typeof raw === "string" && raw.trim() === "")) return asText();
       return { type: "number", number: Number(n.toFixed(4)), money: false };
+    }
+    case "decimal": {
+      const n = typeof raw === "string" ? Number(raw.trim().replace(",", ".")) : Number(raw);
+      if (!Number.isFinite(n) || (typeof raw === "string" && raw.trim() === "")) return asText();
+      return { type: "number", number: n, money: false };
     }
     case "date": {
       const text = String(raw);

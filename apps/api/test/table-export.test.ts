@@ -185,6 +185,48 @@ describe("one column model, two renderings", () => {
     expect(rows[2]!.slice(0, 5)).toEqual(["-7", "=SUM(A1)", 0, null, -0.5]);
   });
 
+  it("a decimal cell keeps every decimal — an exchange rate is not cut at four", async () => {
+    type Rate = { stored: string; shown: string; exact: number | string | null };
+    const columns: CsvColumn<Rate>[] = [
+      // No format: the CSV is the column's own text; the cell is the number.
+      { label: "Kurs", value: (r) => r.stored, cell: "decimal" },
+      { label: "Kurs (visad)", value: (r) => r.shown, cell: "decimal" },
+      // format "decimal": unrounded, decimal comma, no formula guard.
+      { label: "Faktor", value: (r) => r.exact, format: "decimal" },
+    ];
+    const table = exportTable(columns, [
+      { stored: "11.234567", shown: "11,234567", exact: 0.083333 },
+      { stored: "1.000000", shown: "1", exact: "-12.500000" },
+      { stored: "", shown: "", exact: 1e-7 },
+    ]);
+    expect(tableCsv(table)).toBe(
+      "\uFEFFKurs;Kurs (visad);Faktor\r\n" + "11.234567;11,234567;0,083333\r\n" + "1.000000;1;-12,5\r\n" + ";;0,0000001\r\n"
+    );
+    expect(exportCell(table.columns[0]!, "11.234567")).toEqual({ type: "number", number: 11.234567, money: false });
+    expect(exportCell(table.columns[1]!, "11,234567")).toEqual({ type: "number", number: 11.234567, money: false });
+    expect(exportCell(table.columns[0]!, "okänd")).toEqual({ type: "text", text: "okänd" });
+    const rows = await readXlsxRows(tableXlsx(table));
+    expect(rows.slice(1)).toEqual([
+      [11.234567, 11.234567, 0.083333],
+      [1, 1, -12.5],
+      [null, null, 1e-7],
+    ]);
+  });
+
+  it("a text column's cells carry the Text format", () => {
+    const table = exportTable<{ code: string; n: number }>(
+      [
+        { label: "Kod", value: (r) => r.code },
+        { label: "Antal", value: (r) => r.n },
+      ],
+      [{ code: "007", n: 2 }]
+    );
+    const sheet = readStoredZipEntries(tableXlsx(table, "Import", [0])).get("xl/worksheets/sheet1.xml")!.toString("utf8");
+    expect(sheet).toContain(`<c r="A2" s="4" t="inlineStr">`);
+    expect(sheet).toContain(`<c r="B2"><v>2</v></c>`);
+    expect(sheet).toMatch(/<col min="1" max="1"[^>]* style="4"\/>/);
+  });
+
   it("gives the sheet a bold frozen header and bounded column widths", () => {
     const wide = exportTable<{ text: string }>([{ label: "Text", value: (r) => r.text }], [{ text: "x".repeat(500) }]);
     const sheet = readStoredZipEntries(tableXlsx(wide)).get("xl/worksheets/sheet1.xml")!.toString("utf8");

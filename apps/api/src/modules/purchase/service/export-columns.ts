@@ -184,7 +184,7 @@ export const SUPPLIER_INVOICE_CSV_COLUMNS: CsvColumn<SupplierInvoiceRow>[] = [
   { label: "Varav moms", value: (r) => r.vatAmount, format: "money" },
   { label: "Valuta", value: (r) => r.currency },
   // Six decimals at most — "number" would cut it at four.
-  { label: "Kurs", value: (r) => String(Number(r.exchangeRate)).replace(".", ",") },
+  { label: "Kurs", value: (r) => String(Number(r.exchangeRate)).replace(".", ","), cell: "decimal" },
   { label: "Belopp SEK", value: (r) => r.grossSekValue, format: "money" },
   { label: "Verifikat", value: (r) => r.verificationDisplayNumber },
   { label: "Notering", value: (r) => r.note },

@@ -53,7 +53,10 @@ function toXlsxCell(cell: ExportCell | null): XlsxAnyCell | null {
   }
 }
 
-export function tableXlsx(table: ExportTable, sheetName = "Export"): Buffer {
+// `textColumns`: column indexes formatted as Text, so what the user types
+// there in Excel (007, 10 %) stays as written — the import exports' number
+// and code columns, like the templates'.
+export function tableXlsx(table: ExportTable, sheetName = "Export", textColumns?: number[]): Buffer {
   const cells = table.rows.map((row) => table.columns.map((column, i) => exportCell(column, row[i])));
   const columnWidths = table.columns.map((column, i) => {
     // The header is bold — a little wider than its character count.
@@ -67,6 +70,7 @@ export function tableXlsx(table: ExportTable, sheetName = "Export"): Buffer {
         name: sheetName,
         freezeHeader: true,
         columnWidths,
+        ...(textColumns && textColumns.length > 0 ? { textColumns } : {}),
         rows: [table.columns.map((column) => ({ value: column.label, bold: true })), ...cells.map((row) => row.map(toXlsxCell))],
       },
     ],

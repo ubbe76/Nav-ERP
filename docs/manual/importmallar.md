@@ -18,6 +18,18 @@ Att känna till:
 
 Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det fält kolumnen är kopplad till, när **Visa förklaringar** är ikryssad (av på smala skärmar). Reglerna för själva importen — vad som skapas, uppdateras eller hoppas över — står i respektive kapitel, länkat från varje avsnitt.
 
+## Exportera registren som importfiler
+
+Bredvid **Ladda ned mall** har varje importflik knappen **Exportera**. Den hämtar det som redan finns i registret som en fil med **mallens kolumner**, ifylld så att importen läser tillbaka samma värden: exportera, ändra i Excel och läs in filen igen på samma flik. En export som läses in oförändrad ändrar ingenting.
+
+- **Format** — **Excel (.xlsx)** eller **CSV**. I Excel-filen är tal riktiga tal, och nummer- och kodkolumnerna är textformaterade som i mallen.
+- **Urval** (flikarna på **Artiklar → Importera**) — **Alla artiklar**, **Kopierat** (din egen lista från artikelregistret) eller **Urval** med **Artikelnummer från**/**till**, **Varugrupp** och **Typ**. Strukturen följer den överordnade artikeln. **Bara aktiva** finns på alla flikar; kontakter och leveransadresser följer då sin kund eller leverantör.
+- **Fler än 10 000 rader** delas upp i flera filer (…-del-1, …-del-2) i en zip-fil, eftersom en importfil rymmer högst 10 000 rader. Packa upp zip-filen och läs in filerna en i taget, eller alla på en gång på fliken **Alla filer**. En artikels operationer, strukturrader och priser hamnar alltid i samma fil.
+- **Operationer** och **Struktur** lägger normalt bara till: kryssa i **Uppdatera befintliga operationer** respektive **Uppdatera befintliga strukturrader** när en ändrad export läses in, annars är varje rad som redan finns ett fel. **Kontakter** och **leveransadresser** som redan finns hoppas alltid över — bara nya rader i filen läggs till.
+- **Så är filerna uppställda:** enhetsfilen har grundenhetens rad (omräkningsfaktor 1) först för varje artikel; operationernas tider står i operationens egen tidsenhet; strukturens **Antal** står i radens enhet; inköps- och kundprisernas staffelsteg står på egna rader under parets första rad; lagersaldots **Antal** är dagens saldo per lagerplats och **À-pris** lämnas tomt.
+- **Följer inte med:** det som importen inte har någon kolumn för — till exempel fler än ett ritningsnummer per artikel (det första exporteras), operationernas alternativa resurser, kundprisregler som bara är en rabatt, kundens engångsadresser och rabatter per varugrupp. Ett negativt lagersaldo exporteras som det är, men kan inte läsas in.
+- Exporten kräver, som importen, en administratör.
+
 ## Artiklar
 
 [Ladda ned mallen](/importmallar/importmall-artiklar.xlsx) — importeras på **Artiklar → Importera**, fliken **Artiklar**. Reglerna beskrivs i [Artiklar](/hjalp/artiklar#importera-artiklar).
@@ -78,7 +90,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det 
 | **Stycktid** | Nej | Tid per styck i den enhet Tidsenhet anger — minuter per styck när den kolumnen saknas; vid antal/timme är värdet i stället antal styck per timme (360 blir 0,1667 min/st). Decimalkomma eller punkt, aldrig negativ. Skriv 0 när momentet saknar stycktid — en rad på en vanlig resurs utan stycktid blir ett radfel. På en legoresurs sparas alltid 0, och kolumnen behövs inte. | 2,5 |
 | **Tidsenhet** | Nej | Enheten för Ställtid och Stycktid på raden: minuter/enhet (även min), antal/timme (även st/h — ställtiden då i timmar), timmar/enhet (även tim eller h) eller sekunder/enhet (även sek eller s). Tom cell betyder minuter — även med Uppdatera befintliga operationer, där en befintlig operation då får tidsenheten minuter. Ett okänt ord ger ett fel. Lagringen är alltid minuter; antal/timme sparas med visningsenheten st/h och sekunder/enhet med sek/st. | minuter/enhet |
 | **Kalkyl** | Nej | Ja/Nej, 1/0, X eller true/false; tom cell betyder Nej — även med Uppdatera befintliga operationer, där en befintlig kalkyloperation då blir en vanlig operation. Ja gör operationen till en kalkyloperation som bara räknas i förkalkylen och aldrig frisläpps eller rapporteras. | Nej |
-| **Kommentar** | Nej | Operationens instruktionstext, max 1 000 tecken. Kryssrutan Skriv ut kommentaren på arbetskortet i guiden avgör om den skrivs ut på TO-utskriften. Tom cell lämnar en befintlig kommentar orörd vid uppdatering. | Kontrollera måtten mot ritningen före kantpressning |
+| **Kommentar** | Nej | Operationens instruktionstext, max 1 000 tecken. Kryssrutan Skriv ut kommentaren på arbetskortet i guiden avgör om den skrivs ut på TO-utskriften. Tom cell lämnar en befintlig kommentar orörd vid uppdatering, och en kommentar som är densamma som den sparade behåller sin utskriftsinställning. | Kontrollera måtten mot ritningen före kantpressning |
 | **Beskrivning** | Nej | Operationens namn, max 255 tecken (t.ex. Kantpressning). Tom cell lämnar ett befintligt namn orört vid uppdatering. | Laserskärning |
 | **Packinstruktion** | Nej | Packinstruktion för operationen, max 1 000 tecken. Tom cell lämnar en befintlig orörd vid uppdatering. | Mellanlägg av papp mellan varje enhet |
 | **Leverantör** | Nej | Bara för operationer på en legoresurs: leverantören som utför arbetet. Måste finnas i leverantörsregistret. Tom cell ger legoresursens egen leverantör på en ny operation och lämnar en befintlig orörd. På en vanlig resurs ignoreras kolumnen med en varning. | 20015 |

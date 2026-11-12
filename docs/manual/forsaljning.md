@@ -110,7 +110,7 @@ Fliken **Alla filer** på **Försäljning → Kunder → Importera** (den först
 
 **Försäljning → Kunder → Importera** öppnar en guide med fyra flikar. **Alla filer** tar emot alla kundfiler på en gång (se [Importera alla kundfiler](#importera-alla-kundfiler)); **Kunder**, **Kontakter** och **Leveransadresser** tar en fil i taget och tar tillsammans in en fullständig kundexport. Endast administratörer har åtkomst. Filer läses som CSV (semikolon, komma och tabb känns alla igen — även teckenkodningen identifieras automatiskt) eller Excel (.xlsx, bara det första bladet läses). Varje flik kör sin egen guide i fyra steg: **Fil**, **Kolumner**, **Förhandsgranska** och **Resultat**.
 
-Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#kunder) (kontakter: [Kundkontakter](/hjalp/importmallar#kundkontakter), leveransadresser: [Kundernas leveransadresser](/hjalp/importmallar#kundernas-leveransadresser)).
+Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#kunder) (kontakter: [Kundkontakter](/hjalp/importmallar#kundkontakter), leveransadresser: [Kundernas leveransadresser](/hjalp/importmallar#kundernas-leveransadresser)). **Exportera** bredvid ger det som redan finns i registret i samma kolumner, se [Exportera registren som importfiler](/hjalp/importmallar#exportera-registren-som-importfiler).
 
 Kundexporten består av flera separata filer. **Fliken Kunder** körs en gång per fil, alltid i den här ordningen:
 
@@ -277,7 +277,7 @@ Kolumner: **Artikelnummer** och **Kundnummer** är obligatoriska; **Pris**, **Ra
 
 Från **Artikellista, Kundkopplingar** importeras **Artikelnummer**, **Kundnummer** (från kolumnen Kund), **Pris**, **Rabatt**, **Ställpris** och **Kundens art.nr**. Kundnamn, Valuta, Enh. och Ledtid importeras inte.
 
-Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#kundpriser).
+Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#kundpriser). **Exportera** bredvid ger det som redan finns i registret i samma kolumner, se [Exportera registren som importfiler](/hjalp/importmallar#exportera-registren-som-importfiler).
 
 - Kunden (matchad på **kundnummer**) och artikeln måste redan finnas.
 - Rader utan kund (i exporten står **Kundkoppling saknas**) och rader med varken pris eller kundens artikelnummer hoppas över och listas som överhoppade.

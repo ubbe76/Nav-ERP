@@ -84,7 +84,9 @@ export const SALES_ORDER_CSV_COLUMNS: CsvColumn<SalesOrderRow>[] = [
   { label: "Kundens förfrågan", value: (r) => r.customerInquiryNumber },
   { label: "Kundens referens", value: (r) => r.customerReference },
   { label: "Valuta", value: (r) => r.currency },
-  { label: "Kurs", value: (r) => r.exchangeRate },
+  // Six decimals: "number" would cut the rate at four. The CSV text is the
+  // stored rate as it is; the Excel cell is the same number, unrounded.
+  { label: "Kurs", value: (r) => r.exchangeRate, cell: "decimal" },
   { label: "Notering", value: (r) => r.note },
   { label: "Skapad", value: (r) => r.createdAt.toISOString(), format: "datetime" },
 ];

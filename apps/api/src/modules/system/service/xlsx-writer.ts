@@ -297,7 +297,10 @@ function sheetXml(sheet: XlsxSheet, hasComments: boolean): string {
           if (raw !== null && typeof raw !== "string" && !isTextCell(raw)) return typedCellXml(raw, ref);
           const cell = toCell(raw);
           if (cell === null) return "";
-          const style = styleIndex(cell);
+          // A plain cell in a text column carries the column's Text format,
+          // so editing it in Excel keeps 007 as written (the templates have
+          // only their bold headings there — their bytes are unchanged).
+          const style = styleIndex(cell) || (textColumns.has(columnIndex) ? TEXT_STYLE : 0);
           const styleAttr = style === 0 ? "" : ` s="${style}"`;
           return `<c r="${ref}"${styleAttr} t="inlineStr"><is><t xml:space="preserve">${xmlText(cell.value)}</t></is></c>`;
         })

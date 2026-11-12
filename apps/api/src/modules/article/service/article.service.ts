@@ -41,7 +41,7 @@ import type { DrawingFileRef, DrawingFileWithData } from "../repository/drawing-
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { DEFAULT_ARTICLE_SERIES_KEY, SeriesExhaustedError } from "../../system/service/number-series.js";
-import { COPIED_ARTICLES_MAX, ERROR_CODES } from "@navet/shared";
+import { COPIED_ARTICLES_MAX, ERROR_CODES, type ImportExportArticleSelection } from "@navet/shared";
 import { codeFromName, errorBody } from "../../system/service/error-body.js";
 import { assertModeAllowed } from "../../configurator/service/configurator-rules.js";
 import { StockLocationNotFoundError } from "../../stock/service/stock.errors.js";
@@ -649,6 +649,31 @@ export function createArticleService(
         }
       }
       return repo.setCopiedArticles(userId, articleIds, input.mode);
+    },
+
+    // The import exports' article selection (#35): Kopierat, article number
+    // from/to (byte order), varugrupp, type and active only — resolved by the
+    // register's own where (restrictingIds + repo.listIds, as Kopiera alla
+    // träffar), never a copy of the conditions. null = no selection, the
+    // whole register; the ids come in article number order otherwise.
+    async selectArticleIds(selection: ImportExportArticleSelection, userId: string | undefined): Promise<string[] | null> {
+      const range =
+        selection.articleNumberFrom !== undefined || selection.articleNumberTo !== undefined
+          ? [{ from: selection.articleNumberFrom, to: selection.articleNumberTo }]
+          : undefined;
+      const restricted =
+        selection.copied === true ||
+        range !== undefined ||
+        selection.groupId !== undefined ||
+        selection.type !== undefined ||
+        selection.activeOnly === true;
+      if (!restricted) return null;
+      const { onlyIds } = await restrictingIds({ copied: selection.copied === true }, userId);
+      if (onlyIds?.length === 0) return [];
+      return repo.listIds(
+        { type: selection.type, groupId: selection.groupId, articleNumberRanges: range, activeOnly: selection.activeOnly === true },
+        { onlyIds }
+      );
     },
 
     async removeCopiedArticles(userId: string, input: CopiedArticlesRemoveInput): Promise<{ count: number }> {

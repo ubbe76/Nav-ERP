@@ -53,6 +53,8 @@ import { getOrCreateDefaultUnitId } from "./default-unit.js";
 import { assertBarcodeFree } from "./article-barcode.js";
 import { BOM_STRUCTURE_LOCK_SQL, bomReaches } from "./bom-write.js";
 import { clearCopiedArticles, listCopiedArticleIds, listCopiedArticleRows, removeCopiedArticles, setCopiedArticles } from "./copied-articles.js";
+import { articleNumberRangesCondition } from "../../costing/repository/pre-calculation-batch.repository.js";
+import type { ArticleNumberRange } from "@navet/shared";
 
 // Append-only write for article_standard_cost_history (D1) — called by the
 // three standard-cost writers (create, updateStandardCost, CSV import) in
@@ -220,7 +222,13 @@ function markupColumn(value: number | null | undefined): string | null | undefin
 
 // The register's filters without paging — what the where is built from.
 // GET /articles passes its full query; Kopierat's `query` has no limit/offset.
-type ArticleListFilter = Omit<ListArticlesQuery, "limit" | "offset">;
+type ArticleListFilter = Omit<ListArticlesQuery, "limit" | "offset"> & {
+  // The import exports' selection (#35, listIds only) — not part of the
+  // list page's query: article number from/to in byte order (Förkalkylera
+  // flera's condition, the ONE implementation) and active articles only.
+  articleNumberRanges?: readonly ArticleNumberRange[];
+  activeOnly?: boolean;
+};
 
 export function createArticleRepository(db: Db) {
   // The register's where — the ONE implementation behind list (page +
@@ -236,6 +244,9 @@ export function createArticleRepository(db: Db) {
     if (query.type) conditions.push(eq(articles.type, query.type));
     if (query.groupId) conditions.push(eq(articles.groupId, query.groupId));
     if (query.articleCodeId) conditions.push(eq(articles.articleCodeId, query.articleCodeId));
+    const numberRanges = articleNumberRangesCondition(query.articleNumberRanges);
+    if (numberRanges) conditions.push(numberRanges);
+    if (query.activeOnly) conditions.push(eq(articles.active, true));
     // ?orderable=true: the pickers on order forms — a template in EITHER mode
     // is excluded (variants: its variants are what gets ordered; to_order: it
     // needs a configuration, and purchase can never buy it) unless the form

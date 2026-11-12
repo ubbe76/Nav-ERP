@@ -66,6 +66,10 @@ const ALLOWED: Record<string, { reads: number; why: string }> = {
     why: "log reader: net material drawn per TO, not a stock balance",
   },
   "modules/import/repository/stock-balances.ts": { reads: 2, why: "physical per place: the saldoimport's 'saldot efter'" },
+  "modules/import/repository/import-export.repository.ts": {
+    reads: 2,
+    why: "physical per place: the Lagersaldon export (#35) must read back as the saldoimport's own per-place figures, blocked places included",
+  },
   "modules/manufacturing/repository/manufacturing.repository.ts": {
     reads: 1,
     why: "physical per place: Ångra rapportering takes the goods back from where they were put",

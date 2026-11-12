@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { articleTypeSchema } from "./article.js";
 
 // CSV/xlsx import (Monitor G5): the file is uploaded ONCE to
 // POST /imports/:entity/parse; preview and commit then re-send the parsed
@@ -149,4 +150,40 @@ export interface ImportFieldHelp {
   header: string;
   description: string;
   example: string;
+}
+
+// GET /imports/:entity/export (#35) — the register as an import file: the
+// template's columns, written so that the import reads back the same values.
+// The seven article-bound entities (IMPORT_ENTITY_ORDER) follow a selection
+// of articles — the article register's own filters (Kopierat, article number
+// from/to in byte order, varugrupp, type, active only); without any of them
+// the whole register. The partner and resource entities take `activeOnly`
+// only. More than IMPORT_EXPORT_MAX_ROWS rows come as a .zip of files of at
+// most that many rows each, which the import's Alla filer takes one by one.
+export const IMPORT_EXPORT_MAX_ROWS = 10_000;
+export const importExportFormatSchema = z.enum(["csv", "xlsx"]);
+export type ImportExportFormat = z.infer<typeof importExportFormatSchema>;
+const queryFlag = z.enum(["true", "false"]).transform((v) => v === "true");
+const articleNumberBound = z.string().trim().min(1).max(50);
+export const importExportQuerySchema = z
+  .object({
+    format: importExportFormatSchema.default("xlsx"),
+    copied: queryFlag.optional(),
+    articleNumberFrom: articleNumberBound.optional(),
+    articleNumberTo: articleNumberBound.optional(),
+    groupId: z.string().uuid().optional(),
+    type: articleTypeSchema.optional(),
+    activeOnly: queryFlag.optional(),
+  })
+  .strict();
+export type ImportExportQuery = z.infer<typeof importExportQuerySchema>;
+
+// The article selection of an export, as the article register resolves it.
+export interface ImportExportArticleSelection {
+  copied?: boolean;
+  articleNumberFrom?: string;
+  articleNumberTo?: string;
+  groupId?: string;
+  type?: z.infer<typeof articleTypeSchema>;
+  activeOnly?: boolean;
 }

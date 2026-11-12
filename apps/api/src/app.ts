@@ -35,6 +35,9 @@ import { createPostCalculationBatchService } from "./modules/costing/service/pos
 import { createImportRepository, runImportDryRun } from "./modules/import/repository/import.repository.js";
 import { createImportService } from "./modules/import/service/import.service.js";
 import { importRoutes } from "./modules/import/routes/import.routes.js";
+import { importExportRoutes } from "./modules/import/routes/import-export.routes.js";
+import { createImportExportRepository } from "./modules/import/repository/import-export.repository.js";
+import { createImportExportService } from "./modules/import/service/import-export.service.js";
 import { createEconomyRepository } from "./modules/economy/repository/economy.repository.js";
 import { createEconomyService } from "./modules/economy/service/economy.service.js";
 import { createVerificationPoster, postingPeriodLockOn } from "./modules/economy/service/verification-poster.js";
@@ -224,6 +227,9 @@ export interface BuildAppOptions {
   invoiceInterpreters?: InvoiceInterpreterFactory;
   // The Fakturainkorg's e-mail box (imapflow by default).
   invoiceMailboxes?: InvoiceMailboxFactory;
+  // Rows per file in the import exports (#35) before they are split into a
+  // .zip — the import's 10 000 by default; the tests lower it.
+  importExportMaxRows?: number;
 }
 
 export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
@@ -336,6 +342,11 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   // same module later. Admin-only routes.
   const importService = createImportService(createImportRepository(database), {
     dryRun: (fn) => runImportDryRun(database, fn),
+  });
+  // The registers as import files (#35) — the article selection is the
+  // article register's own (selectArticleIds).
+  const importExportService = createImportExportService(createImportExportRepository(database), articleService, {
+    maxRows: options.importExportMaxRows,
   });
   // audit: Spärra/Släpp spärr on a stock location.
   const stockService = createStockService(createStockRepository(database), auditRepository);
@@ -1044,6 +1055,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
         await registerModule(protectedRoutes, articleRoutes, { service: articleService }, { read: office, write: ["artiklar"] });
         await registerModule(protectedRoutes, templateConfiguratorRoutes, { service: configuratorService }, { read: office, write: ["artiklar"] });
         await registerModule(protectedRoutes, importRoutes, { service: importService }, adminOnly);
+        await registerModule(protectedRoutes, importExportRoutes, { service: importExportService }, adminOnly);
         await registerModule(
           protectedRoutes,
           stockRoutes,

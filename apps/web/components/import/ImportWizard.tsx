@@ -29,6 +29,8 @@ import {
   type PreviewResponse,
 } from "./importTypes";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { ImportExportDialog } from "./ImportExportDialog";
+import exportStyles from "./ImportExportDialog.module.css";
 
 export type { ImportOptionConfig } from "./ImportOptionsPanel";
 
@@ -77,6 +79,7 @@ export function ImportWizard({
   }));
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [result, setResult] = useState<CommitResponse | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
   // A file is read and the import has not finished: leaving loses the mapping.
   useUnsavedGuard(parsed !== null && step !== "Resultat");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -205,7 +208,7 @@ export function ImportWizard({
           />
           {pending && <span>Läser in…</span>}
           {IMPORT_TEMPLATE_FILES[entity] && (
-            <p>
+            <div className={exportStyles.templateRow}>
               <a
                 href={`/importmallar/${IMPORT_TEMPLATE_FILES[entity]}`}
                 download
@@ -213,7 +216,12 @@ export function ImportWizard({
               >
                 Ladda ned mall
               </a>
-            </p>
+              {/* The register as this tab's import file (#35). */}
+              <Button type="button" variant="secondary" onClick={() => setExportOpen(true)}>
+                Exportera
+              </Button>
+              <ImportExportDialog entity={entity} title={title} open={exportOpen} onClose={() => setExportOpen(false)} />
+            </div>
           )}
         </div>
       )}
