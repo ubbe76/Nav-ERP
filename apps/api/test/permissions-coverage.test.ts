@@ -99,18 +99,36 @@ describe("every API route has an access rule", () => {
     expect(missing).toEqual([]);
   });
 
+  // Artikelkortets flik Försäljning edits SALES data from the article card:
+  // the customer's prices and kundens artikelnummer are written with
+  // Försäljning and the price list rows by admin, exactly like the customer
+  // card's and the price list register's own routes for the same rows
+  // (spec 2026-11-12, article-sales-prices.test.ts asserts both). They are
+  // the only /articles writes an Artiklar-only user may not make.
+  const SALES_DATA_ON_THE_ARTICLE = new Set([
+    "PUT /api/v1/articles/:id/customer-prices/:customerId",
+    "PUT /api/v1/articles/:id/price-lists/:priceListId",
+  ]);
+
   it("lets an Artiklar-only user write every /articles route, whichever module serves it", () => {
     const articlesOnly = { role: "user" as const, permissions: effectivePermissions("user", ["artiklar"]) };
     const blocked: string[] = [];
+    const exempt: string[] = [];
     for (const route of routes) {
       if (!route.url.startsWith("/api/v1/articles")) continue;
       for (const method of methods(route)) {
         if (method === "GET") continue;
+        if (SALES_DATA_ON_THE_ARTICLE.has(`${method} ${route.url}`)) {
+          exempt.push(`${method} ${route.url}`);
+          continue;
+        }
         const rule = resolveRule(route.config as never, method);
         if (rule !== "public" && (rule === null || !satisfiesRule(articlesOnly, rule))) blocked.push(`${method} ${route.url}`);
       }
     }
     expect(blocked).toEqual([]);
+    // A stale exemption (the route renamed or removed) fails here.
+    expect(exempt.sort()).toEqual([...SALES_DATA_ON_THE_ARTICLE].sort());
   });
 
   it("lets an Artiklar-only user run the article card's actions served outside /articles", () => {

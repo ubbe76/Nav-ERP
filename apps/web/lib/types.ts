@@ -6962,3 +6962,42 @@ export interface CopyArticlesResult {
   count: number;
   added: number;
 }
+
+// GET /articles/:id/sales-prices — fliken Försäljning på artikelkortet. Numeric
+// values are strings. A price rule has either unitPrice or discountPercent.
+export interface ArticleSalesPriceStep {
+  id: string;
+  fromQuantity: string;
+  unitPrice: string | null;
+  discountPercent: string | null;
+  setupPrice: string | null;
+}
+export interface ArticleSalesCustomer {
+  customerId: string;
+  customerNumber: string;
+  customerName: string;
+  currency: string;
+  customerArticleNumber: string | null;
+  prices: ArticleSalesPriceStep[];
+}
+export interface ArticleSalesPriceList {
+  priceListId: string;
+  code: string;
+  name: string;
+  currency: string;
+  rows: { id: string; fromQuantity: string; unitPrice: string }[];
+}
+export interface ArticleSalesGroupRule {
+  customerId: string;
+  customerNumber: string;
+  customerName: string;
+  currency: string;
+  hasArticlePrices: boolean;
+  rules: ArticleSalesPriceStep[];
+}
+export interface ArticleSalesPrices {
+  customers: ArticleSalesCustomer[];
+  priceLists: ArticleSalesPriceList[];
+  articleGroup: { id: string; code: string; name: string } | null;
+  groupRules: ArticleSalesGroupRule[];
+}
