@@ -78,7 +78,7 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
   const sendButtons: SendButtonConfig[] = [];
   // Dokument på engelska (#7): the mail defaults follow the customer's language.
   const documentLanguage = documentLanguageOf(order.customerLanguage);
-  if (order.status === "quote") {
+  if (order.status === "quote" || order.status === "ordered") {
     const quoteMail = documentMailTexts({ kind: "quote", number: quoteNumber ?? order.orderNumber }, documentLanguage);
     sendButtons.push({
       label: "Skicka offert",

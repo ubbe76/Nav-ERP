@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { StoredRates } from "@navet/db";
-import type { ParcelInput } from "@navet/shared";
+import { SALES_ORDER_EDITABLE_STATUSES, type ParcelInput } from "@navet/shared";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import { productKey, type ShippingRepository } from "../repository/shipping.repository.js";
 import type { FreightSettingsService } from "./freight-settings.service.js";
@@ -31,7 +31,9 @@ export interface SalesFreightWriter {
   listRows(orderId: string): Promise<unknown>;
 }
 
-const EDITABLE = new Set(["quote", "confirmed", "in_production"]);
+// The sales module's edit whitelist — a quote that has given an order
+// (ordered) is still a quote and gets its freight like one.
+const EDITABLE: ReadonlySet<string> = new Set(SALES_ORDER_EDITABLE_STATUSES);
 
 export function createFreightQuoteService<S extends SalesFreightWriter>(deps: {
   repo: ShippingRepository;

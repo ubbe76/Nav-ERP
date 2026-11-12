@@ -82,7 +82,17 @@ describe("bankSettingsProblems — Nordea", () => {
   });
 
   it("needs the company's town for payments abroad only", async () => {
-    await db.update(companyInfo).set({ plusgiro: "1-8", iban: "SE45 5000 0000 0583 9825 7466", city: null });
+    // The company's own name and number too: the erp_test template has an
+    // empty name, and this test passed only when an earlier file in the same
+    // worker had left one behind.
+    await db.update(companyInfo).set({
+      name: COMPANY.name,
+      orgNumber: COMPANY.orgNumber,
+      postalCode: COMPANY.postalCode,
+      plusgiro: "1-8",
+      iban: "SE45 5000 0000 0583 9825 7466",
+      city: null,
+    });
     const view = await service.update({ profile: "nordea", initiatingPartyId: "nb4321", debtorAgreementId: "nb 123456", debitAccountKind: "plusgiro" }, userId);
     expect(view.initiatingPartyId).toBe("NB4321");
     expect(view.debtorAgreementId).toBe("NB123456");

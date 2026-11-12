@@ -59,6 +59,8 @@ export const SALES_ORDER_STATUS_LABELS: Record<(typeof salesOrderStatusEnum.enum
   invoiced: "Fakturerad",
   cancelled: "Avbruten",
   lost: "Förlorad",
+  // A quote that Skapa kundorder made an order from.
+  ordered: "Order",
 };
 
 // The list omits the detail-only freight_quote jsonb (listSalesOrders).

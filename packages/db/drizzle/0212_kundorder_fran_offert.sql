@@ -1,0 +1,4 @@
+ALTER TABLE "sales_orders" ADD COLUMN "source_quote_id" uuid;--> statement-breakpoint
+ALTER TABLE "sales_orders" ADD CONSTRAINT "sales_orders_source_quote_id_sales_orders_id_fk" FOREIGN KEY ("source_quote_id") REFERENCES "public"."sales_orders"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "idx_sales_orders_source_quote" ON "sales_orders" USING btree ("source_quote_id") WHERE source_quote_id IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "sales_orders" ADD CONSTRAINT "sales_orders_source_quote_not_self" CHECK ("sales_orders"."source_quote_id" <> "sales_orders"."id");

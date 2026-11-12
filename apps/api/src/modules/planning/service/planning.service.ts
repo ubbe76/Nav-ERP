@@ -13,7 +13,7 @@ import type {
   Paged,
 } from "@navet/shared";
 import type { Tx } from "@navet/db";
-import { round4, roundToDecimals, roundUpToMultiple } from "@navet/shared";
+import { round4, roundToDecimals, roundUpToMultiple, SALES_ORDER_EDITABLE_STATUSES } from "@navet/shared";
 import type { CoverageParentsLoad, PlanningRepository } from "../repository/planning.repository.js";
 import { pegOverview, type PegAllocation, type PegSupplyKind, type Pegging } from "./pegging.js";
 import {
@@ -280,8 +280,9 @@ export class SalesOrderNotOpenError extends Error {
 }
 
 // The statuses Leveranstidskontroll accepts — the same set the order card's
-// header edits allow (quote/confirmed/in_production).
-const OPEN_SALES_ORDER_STATUSES: ReadonlySet<string> = new Set(["quote", "confirmed", "in_production"]);
+// header edits allow (quote/ordered/confirmed/in_production): a quote that
+// has given an order (ordered) is checked like any quote — it can give more.
+const OPEN_SALES_ORDER_STATUSES: ReadonlySet<string> = new Set(SALES_ORDER_EDITABLE_STATUSES);
 // The statuses the reservation accepts — a linked TO needs a confirmed order
 // (prepareCreate's LinkedOrderStatusError), so the guard sits up front.
 const RESERVABLE_SALES_ORDER_STATUSES: ReadonlySet<string> = new Set(["confirmed", "in_production"]);

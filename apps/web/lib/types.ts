@@ -1678,7 +1678,8 @@ export type SalesOrderStatus =
   | "delivered"
   | "invoiced"
   | "cancelled"
-  | "lost";
+  | "lost"
+  | "ordered";
 
 export const SALES_ORDER_STATUS_PILL: Record<SalesOrderStatus, { status: "running" | "delayed" | "stopped" | "done" | "draft"; label: string }> = {
   quote: { status: "draft", label: "Offert" },
@@ -1688,6 +1689,7 @@ export const SALES_ORDER_STATUS_PILL: Record<SalesOrderStatus, { status: "runnin
   invoiced: { status: "draft", label: "Fakturerad" },
   cancelled: { status: "stopped", label: "Avbruten" },
   lost: { status: "stopped", label: "Förlorad" },
+  ordered: { status: "done", label: "Order" },
 };
 
 export interface SalesOrder extends DocumentTermsFields {
@@ -1699,6 +1701,11 @@ export interface SalesOrder extends DocumentTermsFields {
   // direct orders and older quotes); documentKind is derived by the API.
   quoteNumber?: string | null;
   documentKind?: "quote" | "order";
+  // Skapa kundorder från offert (GET :id): the quote an order was made from,
+  // and on a quote the orders it gave (oldest first).
+  sourceQuoteId?: string | null;
+  sourceQuote?: { id: string; quoteNumber: string } | null;
+  ordersFromQuote?: { id: string; orderNumber: string; status: SalesOrderStatus; createdAt: string }[];
   customerId: string;
   customerName: string;
   status: SalesOrderStatus;
@@ -5435,6 +5442,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   confirmed: "Bekräftad",
   cancelled: "Avbruten",
   lost: "Förlorad",
+  order_created: "Kundorder skapad",
+  created_from_quote: "Skapad från offert",
   reopened: "Öppnad igen",
   issued: "Utfärdad",
   released: "Frisläppt",

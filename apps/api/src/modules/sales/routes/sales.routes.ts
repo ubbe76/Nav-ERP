@@ -693,6 +693,19 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
     }
   });
 
+  // Skapa kundorder: a new order as a copy of the quote, which becomes Order
+  // (ordered) and can give more. No body. 409 unless the quote is quote/ordered.
+  app.post<{ Params: { id: string } }>("/sales-orders/:id/create-order", async (req, reply) => {
+    try {
+      const created = await service.createOrderFromQuote(req.params.id, req.user!.id);
+      return reply.code(201).send(created);
+    } catch (err) {
+      if (err instanceof SalesOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
+      throw err;
+    }
+  });
+
   // Förlorad: quote → lost with a förlustorsak (400 when unknown/inactive).
   app.post<{ Params: { id: string } }>("/sales-orders/:id/lose", async (req, reply) => {
     const input = loseQuoteSchema.parse(req.body);
@@ -729,6 +742,8 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       return await service.setStatus(req.params.id, input.status, req.user!.id);
     } catch (err) {
       if (err instanceof SalesOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      // Order (ordered) is neither left nor entered by hand.
+      if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });

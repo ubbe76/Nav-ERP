@@ -2,7 +2,10 @@
 // outcome per quote, the totals, the per-customer / per-month / per-loss-
 // reason breakdowns and the quote list. No DB imports.
 //
-//   won        = confirmed, in production, delivered or invoiced
+//   won        = confirmed, in production, delivered or invoiced (the quote
+//                itself became the order), or ordered (Skapa kundorder made
+//                an order from it — the orders made that way have quoted =
+//                false and are not rows here)
 //   lost       = status lost
 //   open       = status quote; `expired` when Giltig t.o.m. < today
 //   cancelled  = status cancelled — listed, never in the hit rate
@@ -24,7 +27,7 @@ import type { QuoteFollowupSourceRow } from "../repository/quote-followup.reposi
 
 export const NO_LOSS_REASON_LABEL = "Ingen orsak angiven";
 
-const WON_STATUSES: ReadonlySet<string> = new Set(["confirmed", "in_production", "delivered", "invoiced"]);
+const WON_STATUSES: ReadonlySet<string> = new Set(["confirmed", "in_production", "delivered", "invoiced", "ordered"]);
 
 export function quoteOutcome(status: string): QuoteOutcome {
   if (WON_STATUSES.has(status)) return "won";

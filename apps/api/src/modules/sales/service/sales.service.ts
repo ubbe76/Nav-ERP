@@ -74,6 +74,8 @@ import {
   type VatCode,
   fromSek,
   SEK,
+  isLiveQuoteStatus,
+  isSalesOrderEditableStatus,
 } from "@navet/shared";
 import type { CustomerDeliveryDateQuery, CustomerDeliveryDateSuggestion } from "@navet/shared";
 import {
@@ -292,6 +294,18 @@ export class InvalidStatusTransitionError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "InvalidStatusTransitionError";
+  }
+}
+
+// Skapa kundorder från offert: Order (`ordered`) is a quote's final status —
+// Förlorad, Makulera, Öppna igen, Bekräfta, the order confirmation mail and
+// the manual status all refuse it (the quote can only give more orders). A
+// subclass, so every route that answers 409 for a refused transition does so
+// for this one too; the code is its own (quote-already-ordered).
+export class QuoteAlreadyOrderedError extends InvalidStatusTransitionError {
+  constructor(public quoteNumber: string) {
+    super(`Quote ${quoteNumber} has already given an order — its status cannot change`);
+    this.name = "QuoteAlreadyOrderedError";
   }
 }
 
@@ -960,8 +974,10 @@ export function createSalesService(
     // took a KO- one; the confirmation prints the order's number and, when
     // it came from an OF- numbered quote, "Vår offert:" as the reference.
     const documentNumber = variant === "quote" ? (order.quoteNumber ?? order.orderNumber) : order.orderNumber;
-    const quoteReference =
-      variant === "confirmation" && order.quoteNumber && order.quoteNumber !== order.orderNumber ? order.quoteNumber : null;
+    // An order made with Skapa kundorder has no quote number of its own —
+    // its reference is the quote it was copied from.
+    const ownQuoteNumber = order.quoteNumber && order.quoteNumber !== order.orderNumber ? order.quoteNumber : null;
+    const quoteReference = variant === "confirmation" ? (order.sourceQuoteNumber ?? ownQuoteNumber) : null;
     const content = await pdf.render({
       language,
       title: variant === "quote" ? texts.titles.quote : texts.titles.orderConfirmation,
@@ -1305,12 +1321,12 @@ export function createSalesService(
     async updateSalesOrderHeader(orderId: string, input: UpdateSalesOrderHeaderInput, userId?: string | null) {
       const order = await repo.findSalesOrderById(orderId);
       if (!order) throw new SalesOrderNotFoundError(orderId);
-      if (order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
+      if (!isSalesOrderEditableStatus(order.status)) {
         throw new InvalidStatusTransitionError(`Cannot change the header of an order in status "${order.status}"`);
       }
       // Giltig t.o.m. only while the order is a quote (re-checked under the
       // row lock in the repository).
-      if (input.quoteValidUntil !== undefined && order.status !== "quote") {
+      if (input.quoteValidUntil !== undefined && !isLiveQuoteStatus(order.status)) {
         throw new InvalidStatusTransitionError(`Cannot change the validity date of an order in status "${order.status}"`);
       }
       // Valuta: currency and rate only as a quote or a confirmed order (the
@@ -1319,7 +1335,7 @@ export function createSalesService(
       // unless one is sent — looked up here, outside the transaction.
       const currencyFields: { currency?: string; exchangeRate?: number } = {};
       if (input.currency !== undefined || input.exchangeRate !== undefined) {
-        if (order.status !== "quote" && order.status !== "confirmed") {
+        if (!isLiveQuoteStatus(order.status) && order.status !== "confirmed") {
           throw new InvalidStatusTransitionError(`Cannot change the currency or rate of an order in status "${order.status}"`);
         }
         const currency = input.currency ?? order.currency;
@@ -1459,11 +1475,11 @@ export function createSalesService(
     async previewOrderMarkups(orderId: string, input: SalesOrderMarkupsPreviewInput): Promise<MarkupRepricing> {
       const order = await repo.findSalesOrderById(orderId);
       if (!order) throw new SalesOrderNotFoundError(orderId);
-      if (order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
+      if (!isSalesOrderEditableStatus(order.status)) {
         throw new InvalidStatusTransitionError(`Cannot change the header of an order in status "${order.status}"`);
       }
       const { exchangeRate: sentRate, ...markups } = input;
-      if (sentRate !== undefined && order.status !== "quote" && order.status !== "confirmed") {
+      if (sentRate !== undefined && !isLiveQuoteStatus(order.status) && order.status !== "confirmed") {
         throw new InvalidStatusTransitionError(`Cannot change the currency or rate of an order in status "${order.status}"`);
       }
       const rate = sentRate === undefined ? Number(order.exchangeRate) : await documentRate(order.currency, sentRate);
@@ -1481,7 +1497,7 @@ export function createSalesService(
     async setExpectedDeliveryDateInTx(tx: Tx, orderId: string, date: string): Promise<{ orderNumber: string; previous: string | null }> {
       const order = await repo.lockSalesOrderForHeader(tx, orderId);
       if (!order) throw new SalesOrderNotFoundError(orderId);
-      if (order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
+      if (!isSalesOrderEditableStatus(order.status)) {
         throw new InvalidStatusTransitionError(`Cannot change the header of an order in status "${order.status}"`);
       }
       await repo.updateSalesOrderHeader(orderId, { expectedDeliveryDate: date, bumpRevision: false }, tx);
@@ -1556,14 +1572,22 @@ export function createSalesService(
     // markup a row gets and from where: the order's field, else the
     // customer's, else the article's varugrupp or the company's.
     async getSalesOrder(id: string) {
-      const order = await repo.findSalesOrderById(id);
-      if (!order) return order;
-      const [overDeliveryPercent, customer] = await Promise.all([
+      const found = await repo.findSalesOrderById(id);
+      if (!found) return found;
+      const { sourceQuoteNumber, ...order } = found;
+      const [overDeliveryPercent, customer, ordersFromQuote] = await Promise.all([
         overDeliveryPercentFor(order.customerId),
         repo.findCustomerById(order.customerId),
+        // Only a quote can have given orders (source_quote_id points at one).
+        order.documentKind === "quote" ? repo.listOrdersFromQuote(order.id) : [],
       ]);
       return {
         ...order,
+        // Skapa kundorder från offert: the quote this order was created from
+        // (the card's Offertnummer) and, on the quote, the orders made from
+        // it, oldest first.
+        sourceQuote: order.sourceQuoteId && sourceQuoteNumber ? { id: order.sourceQuoteId, quoteNumber: sourceQuoteNumber } : null,
+        ordersFromQuote,
         overDeliveryPercent,
         customerMarkups: {
           generalMarkupPercent: customer?.generalMarkupPercent ?? null,
@@ -1623,7 +1647,7 @@ export function createSalesService(
     async addRow(salesOrderId: string, input: CreateSalesOrderRowInput, userId?: string | null) {
       const order = await repo.findSalesOrderById(salesOrderId);
       if (!order) throw new SalesOrderNotFoundError(salesOrderId);
-      if (order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
+      if (!isSalesOrderEditableStatus(order.status)) {
         throw new InvalidStatusTransitionError(`Cannot add rows to an order in status "${order.status}"`);
       }
       const pricing = orderPricing(order);
@@ -1648,7 +1672,7 @@ export function createSalesService(
     async updateRow(salesOrderId: string, rowId: string, input: UpdateSalesOrderRowInput, userId?: string | null) {
       const order = await repo.findSalesOrderById(salesOrderId);
       if (!order) throw new SalesOrderNotFoundError(salesOrderId);
-      if (order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
+      if (!isSalesOrderEditableStatus(order.status)) {
         throw new InvalidStatusTransitionError(`Cannot change rows on an order in status "${order.status}"`);
       }
 
@@ -1946,7 +1970,7 @@ export function createSalesService(
     async setFreightRow(salesOrderId: string, input: { articleId: string; unitPrice: number }, userId?: string | null) {
       const order = await repo.findSalesOrderById(salesOrderId);
       if (!order) throw new SalesOrderNotFoundError(salesOrderId);
-      if (order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
+      if (!isSalesOrderEditableStatus(order.status)) {
         throw new InvalidStatusTransitionError(`Cannot add rows to an order in status "${order.status}"`);
       }
       const unitPrice = order.currency === SEK ? input.unitPrice : fromSek(input.unitPrice, Number(order.exchangeRate));
@@ -1970,7 +1994,7 @@ export function createSalesService(
     async deleteRow(salesOrderId: string, rowId: string, bumpRevision = true, userId?: string | null) {
       const order = await repo.findSalesOrderById(salesOrderId);
       if (!order) throw new SalesOrderNotFoundError(salesOrderId);
-      if (order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
+      if (!isSalesOrderEditableStatus(order.status)) {
         throw new InvalidStatusTransitionError(`Cannot change rows on an order in status "${order.status}"`);
       }
       const existing = await repo.findRowById(rowId);
@@ -2008,6 +2032,7 @@ export function createSalesService(
     async confirm(orderId: string, userId?: string | null) {
       const order = await repo.findSalesOrderById(orderId);
       if (!order) throw new SalesOrderNotFoundError(orderId);
+      if (order.status === "ordered") throw new QuoteAlreadyOrderedError(order.orderNumber);
       if (order.status !== "quote") {
         throw new InvalidStatusTransitionError(`Cannot confirm an order in status "${order.status}"`);
       }
@@ -2103,6 +2128,12 @@ export function createSalesService(
       if (order.status === "cancelled" || order.status === "lost") {
         throw new InvalidStatusTransitionError(`Cannot email an order in status "${order.status}"`);
       }
+      // The order confirmation of a quote is what confirms it — a quote that
+      // has given an order (Order) is never confirmed itself; the
+      // confirmation is sent from the order. Nothing is sent.
+      if (input.variant === "confirmation" && order.status === "ordered") {
+        throw new QuoteAlreadyOrderedError(order.orderNumber);
+      }
       // Visa tilläggspriser: the dialog's choice, else the customer's setting
       // — logged on the email so Skicka om renders the same attachment even
       // after the customer's setting changes.
@@ -2143,6 +2174,35 @@ export function createSalesService(
       return order;
     },
 
+    // Skapa kundorder från offert: the quote stays and a new order is made
+    // as a copy of it (repo.createOrderFromQuote — one transaction, the
+    // quote locked first). From quote or ordered only: a lost or cancelled
+    // quote is reopened first, and an order is not a quote. The quote may
+    // have passed its Giltig t.o.m. — that is the user's call.
+    async createOrderFromQuote(quoteId: string, userId?: string | null) {
+      const result = await repo.createOrderFromQuote(quoteId, userId ?? null);
+      if (!result.ok) {
+        if (result.reason === "not_found") throw new SalesOrderNotFoundError(quoteId);
+        throw new InvalidStatusTransitionError(`Cannot create an order from a quote or order in status "${result.status}"`);
+      }
+      const { order, quote } = result;
+      await audit.log({
+        entityType: "sales_order",
+        entityId: quote.number,
+        action: "order_created",
+        detail: { orderNumber: order.orderNumber, orderId: order.id },
+        userId: userId ?? null,
+      });
+      await audit.log({
+        entityType: "sales_order",
+        entityId: order.orderNumber,
+        action: "created_from_quote",
+        detail: { quoteNumber: quote.number, quoteId: quote.id },
+        userId: userId ?? null,
+      });
+      return { id: order.id, orderNumber: order.orderNumber };
+    },
+
     // Manual placeholder until Fas 3's ManufacturingOrder can drive this transition.
     async startProduction(orderId: string, userId?: string | null) {
       const order = await repo.findSalesOrderById(orderId);
@@ -2166,6 +2226,7 @@ export function createSalesService(
     async cancel(orderId: string, userId?: string | null) {
       const order = await repo.findSalesOrderById(orderId);
       if (!order) throw new SalesOrderNotFoundError(orderId);
+      if (order.status === "ordered") throw new QuoteAlreadyOrderedError(order.orderNumber);
       if (order.status !== "quote" && order.status !== "confirmed") {
         throw new InvalidStatusTransitionError(
           `Cannot cancel an order in status "${order.status}" — production has already started`
@@ -2201,7 +2262,16 @@ export function createSalesService(
     async setStatus(orderId: string, status: SalesOrderStatus, userId?: string | null) {
       const order = await repo.findSalesOrderById(orderId);
       if (!order) throw new SalesOrderNotFoundError(orderId);
-      await repo.updateStatus(orderId, status, userId ?? null);
+      // Order (ordered) is neither left nor entered by hand: only Skapa
+      // kundorder sets it, and it is final. The repository refuses both
+      // again under the row lock (null) — a Skapa kundorder committing
+      // between the read above and the write is not overwritten.
+      if (order.status === "ordered") throw new QuoteAlreadyOrderedError(order.orderNumber);
+      if (status === "ordered") {
+        throw new InvalidStatusTransitionError(`Status "ordered" is only set by creating an order from the quote`);
+      }
+      const updated = await repo.updateStatus(orderId, status, userId ?? null);
+      if (!updated) throw new QuoteAlreadyOrderedError(order.orderNumber);
       await audit.log({
         entityType: "sales_order",
         entityId: order.orderNumber,
@@ -2218,6 +2288,7 @@ export function createSalesService(
     async lose(orderId: string, input: LoseQuoteInput, userId?: string | null) {
       const order = await repo.findSalesOrderById(orderId);
       if (!order) throw new SalesOrderNotFoundError(orderId);
+      if (order.status === "ordered") throw new QuoteAlreadyOrderedError(order.orderNumber);
       if (order.status !== "quote") {
         throw new InvalidStatusTransitionError(`Cannot mark an order in status "${order.status}" as lost`);
       }
@@ -2241,6 +2312,7 @@ export function createSalesService(
     async reopen(orderId: string, userId?: string | null) {
       const order = await repo.findSalesOrderById(orderId);
       if (!order) throw new SalesOrderNotFoundError(orderId);
+      if (order.status === "ordered") throw new QuoteAlreadyOrderedError(order.orderNumber);
       if (order.status !== "lost") {
         throw new InvalidStatusTransitionError(`Cannot reopen an order in status "${order.status}"`);
       }

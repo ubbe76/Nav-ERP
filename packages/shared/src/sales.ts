@@ -16,6 +16,10 @@ import { markupPercentSchema, type CalculatedPriceUnavailable } from "./costing.
 
 // "lost" (Förlorad): a quote the customer did not take — closed like
 // cancelled (no edits, no documents), reopenable to quote.
+// "ordered" (Order, migration 0211): a quote that Skapa kundorder has made
+// at least one order from. The quote itself stays — still a quote, still
+// editable, and it can give more orders — but the status is final: no
+// Förlorad, Makulera, Öppna igen, Bekräfta or manual status from it.
 export const salesOrderStatusSchema = z.enum([
   "quote",
   "confirmed",
@@ -24,11 +28,35 @@ export const salesOrderStatusSchema = z.enum([
   "invoiced",
   "cancelled",
   "lost",
+  "ordered",
 ]);
 export type SalesOrderStatus = z.infer<typeof salesOrderStatusSchema>;
 
+// The statuses of a LIVE quote: editable like a quote, printable and
+// mailable as one, and the ones Skapa kundorder accepts. Everything that
+// asks "is this an open quote" EXCEPT the follow-up (Utgången, Offerter att
+// följa upp), which is status quote only — an ordered quote never expires.
+export const LIVE_QUOTE_STATUSES = ["quote", "ordered"] as const satisfies readonly SalesOrderStatus[];
+export function isLiveQuoteStatus(status: string): boolean {
+  return (LIVE_QUOTE_STATUSES as readonly string[]).includes(status);
+}
+
+// The statuses in which a sales_orders row can be changed (header and rows):
+// a live quote, or an order not yet fully delivered. A whitelist — the one
+// list behind every edit guard in the sales module and the freight on a quote.
+export const SALES_ORDER_EDITABLE_STATUSES = [
+  "quote",
+  "ordered",
+  "confirmed",
+  "in_production",
+] as const satisfies readonly SalesOrderStatus[];
+export function isSalesOrderEditableStatus(status: string): boolean {
+  return (SALES_ORDER_EDITABLE_STATUSES as readonly string[]).includes(status);
+}
+
 // Offerter (migration 0138): quotes and orders share sales_orders, and which
-// one a row is gets DERIVED, never stored. A quote is status quote/lost, or a
+// one a row is gets DERIVED, never stored. A quote is status quote/lost/
+// ordered (a quote that gave an order is still the quote), or a
 // cancelled row that still carries its own OF- number (cancelled as a quote).
 // Everything else is an order — including older quotes cancelled with a KO-
 // number (accepted). Mirrored by apps/web/lib and by the sales repository's
@@ -41,7 +69,7 @@ export function salesDocumentKind(order: {
   orderNumber: string;
   quoteNumber: string | null;
 }): SalesDocumentKind {
-  if (order.status === "quote" || order.status === "lost") return "quote";
+  if (order.status === "quote" || order.status === "lost" || order.status === "ordered") return "quote";
   if (order.status === "cancelled" && order.quoteNumber !== null && order.orderNumber === order.quoteNumber) {
     return "quote";
   }
