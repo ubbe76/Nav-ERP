@@ -2373,7 +2373,7 @@ export function createSalesService(
       const overDeliveryPercent = await overDeliveryPercentForOrder(orderId);
       const result = await repo.deliverBatch(orderId, {
         locationId: input.locationId,
-        rows: [{ rowId, quantity: input.quantity }],
+        rows: [{ rowId, quantity: input.quantity, batchId: input.batchId }],
         createdBy,
         overDeliveryPercent,
       });

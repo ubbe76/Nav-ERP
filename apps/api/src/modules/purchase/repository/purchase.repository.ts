@@ -1192,6 +1192,8 @@ export function createPurchaseRepository(db: Db) {
           // A tjänst has nothing to scan — Inleverans leaves it out of the
           // counting (skanning, #4).
           articleType: articles.type,
+          // Batch (#8): Inleverans shows the Batch field for a batchstyrd article.
+          articleBatchTracked: articles.batchTracked,
           // Skickat (avsändning lego): derived, base unit like quantityReceived.
           quantityDispatched: dispatchedQuantitySql(),
           // The unit the row displays in: the entered unit, falling back to

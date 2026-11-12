@@ -1996,6 +1996,7 @@ export function createManufacturingService(
     async consumeMaterial(moId: string, rowId: string, input: ConsumeMaterialInput, createdBy: string) {
       const result = await repo.consumeMaterial(moId, rowId, {
         locationId: input.locationId,
+        batchId: input.batchId,
         quantity: input.quantity,
         createdBy,
         materialShortage: await materialShortageCheck(input.allowMaterialShortage),

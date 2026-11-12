@@ -31,6 +31,7 @@ import {
   salesOrders,
   shipmentDeliveries,
   shipments,
+  stockBatches,
   stockLocations,
   stockTransactions,
   units,
@@ -82,6 +83,7 @@ import { resolveStockLocation } from "../../stock/service/location-resolver.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { allocateOutflowLocations, lockArticlesForOutflow } from "../../stock/service/outflow-locations.js";
+import { compareBatches } from "../../stock/service/outflow-allocation.js";
 import { isStockedArticle, stockedArticleIds } from "../../stock/service/stocked-article.js";
 import {
   PriceListInUseError,
@@ -180,7 +182,8 @@ export type UndoDeliveryRowResult =
       orderNumber: string;
       articleId: string;
       // Where the goods went back, one entry per part the delivery drew.
-      locations: { locationId: string; quantity: number }[];
+      // batchNumber (#8): the batch the part went back into, null = Okänd.
+      locations: { locationId: string; quantity: number; batchNumber: string | null }[];
       statusBefore: SalesOrderStatus;
       orderStatus: SalesOrderStatus;
     }
@@ -1986,6 +1989,8 @@ export function createSalesRepository(db: Db) {
           // for manufactured articles — the web card needs the type to
           // decide that without a second round-trip.
           articleType: articles.type,
+          // Batch (#8): Utleverans offers a batch choice for a batchstyrd article.
+          articleBatchTracked: articles.batchTracked,
           // Printed as the articleInfo line on the quote/confirmation PDF
           // (renderSalesOrderPdf) via formatArticleAttributes — NOT on the
           // invoice PDF, which shares this same row query.
@@ -2048,7 +2053,7 @@ export function createSalesRepository(db: Db) {
       orderId: string,
       input: {
         locationId?: string;
-        rows: { rowId: string; quantity: number; locationId?: string }[];
+        rows: { rowId: string; quantity: number; locationId?: string; batchId?: string | null }[];
         createdBy: string | null;
         overDeliveryPercent?: number | null;
       }
@@ -2129,7 +2134,10 @@ export function createSalesRepository(db: Db) {
               .returning();
 
             const parts = stocked.has(row.articleId)
-              ? await allocateOutflowLocations(tx, row.articleId, r.quantity, r.locationId ?? input.locationId)
+              ? // Batch (#8): a batchstyrd article is split per (place, batch) —
+                // one movement and one delivery_row_locations part each; the
+                // part's batch is read through its stock row, never copied.
+                await allocateOutflowLocations(tx, row.articleId, r.quantity, r.locationId ?? input.locationId, { batchId: r.batchId })
               : [];
             const rowLinks: { locationId: string; quantity: number; stockTransactionId: string }[] = [];
             for (const part of parts) {
@@ -2143,6 +2151,7 @@ export function createSalesRepository(db: Db) {
                   transactionType: "sales_delivery",
                   referenceId: orderId,
                   createdBy: input.createdBy,
+                  batchId: part.batchId ?? null,
                 })
                 .returning({ id: stockTransactions.id });
               rowLinks.push({ locationId: part.locationId, quantity: part.quantity, stockTransactionId: movement!.id });
@@ -2251,13 +2260,29 @@ export function createSalesRepository(db: Db) {
         if (deliveryRow.undoneAt) return { ok: false, reason: "already_undone" };
         // The parts the delivery drew — none on a row the 0132 backfill
         // could not pair.
+        // Batch (#8): each part's batch is its own stock row's — the goods go
+        // back into the SAME batch, whatever the article's flag says now.
         const parts = await tx
-          .select({ locationId: deliveryRowLocations.locationId, quantity: deliveryRowLocations.quantity })
+          .select({
+            locationId: deliveryRowLocations.locationId,
+            quantity: deliveryRowLocations.quantity,
+            batchId: stockTransactions.batchId,
+            batchNumber: stockBatches.batchNumber,
+          })
           .from(deliveryRowLocations)
+          .innerJoin(stockTransactions, eq(stockTransactions.id, deliveryRowLocations.stockTransactionId))
+          .leftJoin(stockBatches, eq(stockBatches.id, stockTransactions.batchId))
           .innerJoin(stockLocations, eq(stockLocations.id, deliveryRowLocations.locationId))
           .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
           .where(eq(deliveryRowLocations.deliveryRowId, deliveryRow.id))
-          .orderBy(asc(warehouses.name), asc(stockLocations.name));
+          // Per place in the batches' own order (Okänd first, then the oldest).
+          .orderBy(
+            asc(warehouses.name),
+            asc(stockLocations.name),
+            sql`${stockBatches.createdAt} asc nulls first`,
+            asc(stockBatches.batchNumber),
+            asc(deliveryRowLocations.id)
+          );
         // No parts: a service row (never stocked — undone without a stock
         // movement) or a row the 0132 backfill could not pair (not undoable).
         if (parts.length === 0) {
@@ -2293,7 +2318,7 @@ export function createSalesRepository(db: Db) {
 
         // Every part back where it was taken from; a temporary location the
         // delivery emptied is reactivated by the explicit resolve.
-        const locations: { locationId: string; quantity: number }[] = [];
+        const locations: { locationId: string; quantity: number; batchNumber: string | null }[] = [];
         for (const part of parts) {
           const locationId = await resolveStockLocation(tx, orderRow.articleId, part.locationId);
           await assertLocationNotUnderCount(tx, locationId);
@@ -2304,8 +2329,9 @@ export function createSalesRepository(db: Db) {
             transactionType: "sales_delivery",
             referenceId: orderId,
             createdBy: input.undoneBy,
+            batchId: part.batchId,
           });
-          locations.push({ locationId, quantity: Number(part.quantity) });
+          locations.push({ locationId, quantity: Number(part.quantity), batchNumber: part.batchNumber });
         }
 
         await tx
@@ -2459,18 +2485,42 @@ export function createSalesRepository(db: Db) {
           quantity: deliveryRowLocations.quantity,
           locationName: stockLocations.name,
           warehouseName: warehouses.name,
+          // Batch (#8): read through the part's own stock row (null = Okänd).
+          batchId: stockTransactions.batchId,
+          batchNumber: stockBatches.batchNumber,
+          batchCreatedAt: stockBatches.createdAt,
         })
         .from(deliveryRowLocations)
+        .innerJoin(stockTransactions, eq(stockTransactions.id, deliveryRowLocations.stockTransactionId))
+        .leftJoin(stockBatches, eq(stockBatches.id, stockTransactions.batchId))
         .innerJoin(deliveryRows, eq(deliveryRows.id, deliveryRowLocations.deliveryRowId))
         .innerJoin(stockLocations, eq(stockLocations.id, deliveryRowLocations.locationId))
         .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
         .where(eq(deliveryRows.deliveryId, deliveryId))
-        // Ids are random uuids, so the parts come in location order.
+        // Ids are random uuids, so the parts come in location order — and
+        // within a place in the batches' own order (Okänd first, then oldest).
         .orderBy(asc(warehouses.name), asc(stockLocations.name));
-      const partsByRow = new Map<string, { locationId: string; warehouseName: string; locationName: string; quantity: number }[]>();
-      for (const p of partRows) {
+      const partsByRow = new Map<
+        string,
+        { locationId: string; warehouseName: string; locationName: string; quantity: number; batchId: string | null; batchNumber: string | null }[]
+      >();
+      const placeOrder = new Map<string, number>();
+      partRows.forEach((part, index) => {
+        if (!placeOrder.has(part.locationId)) placeOrder.set(part.locationId, index);
+      });
+      const ordered = [...partRows].sort(
+        (a, b) => placeOrder.get(a.locationId)! - placeOrder.get(b.locationId)! || compareBatches(a, b)
+      );
+      for (const p of ordered) {
         const list = partsByRow.get(p.deliveryRowId) ?? [];
-        list.push({ locationId: p.locationId, warehouseName: p.warehouseName, locationName: p.locationName, quantity: Number(p.quantity) });
+        list.push({
+          locationId: p.locationId,
+          warehouseName: p.warehouseName,
+          locationName: p.locationName,
+          quantity: Number(p.quantity),
+          batchId: p.batchId,
+          batchNumber: p.batchNumber,
+        });
         partsByRow.set(p.deliveryRowId, list);
       }
 

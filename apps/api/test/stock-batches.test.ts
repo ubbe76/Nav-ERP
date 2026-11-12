@@ -78,6 +78,11 @@ async function makeLocation(name = "A1") {
 const adjust = (articleId: string, locationId: string, quantityDelta: number, batchNumber?: string) =>
   stockService.recordTransaction({ articleId, locationId, quantityDelta, transactionType: "inventory_adjustment", batchNumber });
 
+// A decrease booked on Okänd whatever batches the place holds (a decrease
+// without a chosen batch takes the place's batches oldest first).
+const takeUnknown = (articleId: string, locationId: string, quantity: number) =>
+  stockService.recordTransaction({ articleId, locationId, quantityDelta: -quantity, transactionType: "inventory_adjustment", batchId: null });
+
 // A transaction held open until `release` — and what a contender did while
 // it was (see artikelgranskning.test.ts): the contender must end up WAITING
 // on a lock, or waitForLockWaiter throws.
@@ -384,10 +389,10 @@ describe("the log and the readers", () => {
     const b = await makeArticle({ batchTracked: true });
     const [a1, b2] = [await makeLocation("A1"), await makeLocation("B2")];
     await adjust(a.id, a1.id, 10, "L-1");
-    await adjust(a.id, a1.id, -3); // Okänd −3 next to the named batch
+    await takeUnknown(a.id, a1.id, 3); // Okänd −3 next to the named batch
     await adjust(a.id, b2.id, 4, "L-1");
     await adjust(a.id, b2.id, 2, "L-2");
-    await adjust(a.id, b2.id, -2, undefined); // nets Okänd on B2 to −2…
+    await takeUnknown(a.id, b2.id, 2); // nets Okänd on B2 to −2…
     await adjust(a.id, b2.id, 2, undefined); // …and back to 0: no cell
     await adjust(b.id, a1.id, 1);
 

@@ -7,6 +7,7 @@ import {
   createStockCountSchema,
   createStockLocationSchema,
   createStockAdjustmentSchema,
+  listStockBatchBalancesQuerySchema,
   createStockTransferSchema,
   createWarehouseSchema,
   listStockTransactionsQuerySchema,
@@ -248,6 +249,16 @@ export async function stockRoutes(
   app.get("/stock/summary", async () => service.getStockSummary());
 
   app.get("/stock/balances", async (req) => service.getBalances(listStockBalancesQuerySchema.parse(req.query)));
+
+  // Batch (#8): saldo per cell (place, batch) for the BATCHSTYRDA among the
+  // listed articles (at most 200), optionally on one place — the batch
+  // choices of Utleverans, Förbruka, flytt and justering. Per article in the
+  // order Automatiskt draws: Okänd first, then the oldest batch, within a
+  // batch the places in pick-list order. Physical, with `blocked` as a flag.
+  app.get("/stock/batch-balances", async (req) => {
+    const query = listStockBatchBalancesQuerySchema.parse(req.query);
+    return { rows: await service.pickBatchCellsForArticles(query.articleIds, { locationId: query.locationId }) };
+  });
 
   registerListCsvRoute(app, {
     path: "/stock/balances/csv",

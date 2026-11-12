@@ -56,6 +56,8 @@ export function selectMaterialRows(dbc: Db | Tx) {
     .select({
       ...getTableColumns(moMaterialConsumptions),
       componentArticleNumber: articles.articleNumber,
+      // Batch (#8): Förbruka offers a batch choice for a batchstyrd component.
+      componentBatchTracked: articles.batchTracked,
       componentName: articles.name,
       // The unit the row displays in: the unit snapshotted on the row,
       // falling back to the component's base unit.

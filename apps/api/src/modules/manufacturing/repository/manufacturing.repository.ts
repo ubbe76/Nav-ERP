@@ -294,7 +294,10 @@ async function drawMaterial(
   locationId: string | undefined,
   moId: string,
   createdBy: string | null,
-  blockedChoice: BlockedChoice
+  blockedChoice: BlockedChoice,
+  // Batch (#8): only Förbruka chooses one (left out = Automatiskt per batch
+  // for a batchstyrd component, null = Okänd).
+  batchId?: string | null
 ): Promise<ConsumedMaterialLine[]> {
   // A service component (tjänst) is work, not goods: the consumption is
   // recorded (one line without a place, for the report log and Ångra), but
@@ -302,7 +305,7 @@ async function drawMaterial(
   if (!(await isStockedArticle(tx, row.componentArticleId))) {
     return [{ componentArticleId: row.componentArticleId, quantity, materialConsumptionId: row.id, locationId: null }];
   }
-  const parts = await allocateOutflowLocations(tx, row.componentArticleId, quantity, locationId, { blockedChoice });
+  const parts = await allocateOutflowLocations(tx, row.componentArticleId, quantity, locationId, { blockedChoice, batchId });
   const lines: ConsumedMaterialLine[] = [];
   for (const part of parts) {
     await assertLocationNotUnderCount(tx, part.locationId);
@@ -2129,7 +2132,7 @@ export function createManufacturingRepository(db: Db) {
     async consumeMaterial(
       moId: string,
       rowId: string,
-      input: { locationId?: string; quantity: number; createdBy: string; materialShortage?: MaterialShortageCheck }
+      input: { locationId?: string; batchId?: string | null; quantity: number; createdBy: string; materialShortage?: MaterialShortageCheck }
     ): Promise<ConsumeMaterialResult> {
       return db.transaction(async (tx) => {
         // The order FOR UPDATE, before the row (the reports' order → rows):
@@ -2163,7 +2166,7 @@ export function createManufacturingRepository(db: Db) {
 
         // Förbruka: drawn where the stock is unless a location was chosen —
         // never from a chosen Spärrad lagerplats (409).
-        const lines = await drawMaterial(tx, row, input.quantity, input.locationId, moId, input.createdBy, "refuse");
+        const lines = await drawMaterial(tx, row, input.quantity, input.locationId, moId, input.createdBy, "refuse", input.batchId);
         // Materialbrist: a throw here rolls the draw back.
         await assertMaterialAvailable(tx, lines, input.materialShortage ?? NO_MATERIAL_SHORTAGE_CHECK);
 
@@ -2320,10 +2323,9 @@ export function createManufacturingRepository(db: Db) {
             articleNumber,
             quantity,
             locationName,
-            // Batch (#8): only on a line drawn from a named batch — a line
-            // without the key is Okänd (and every line of an article that
-            // is not batchstyrd, whose shape is unchanged).
-            ...(batchNumber !== null ? { batchNumber } : {}),
+            // Batch (#8): the batch the part was drawn from, null = Okänd
+            // (and every line of a component that is not batchstyrd).
+            batchNumber,
           })),
       }));
     },

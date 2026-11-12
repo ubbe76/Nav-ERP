@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
-import { stockBatches, stockLocations, stockTransactions, warehouses, type Db, type Tx } from "@navet/db";
-import { compareBatches, type BatchCell } from "../service/outflow-allocation.js";
+import { articleAlternativeLocations, articles, stockBatches, stockLocations, stockTransactions, warehouses, type Db, type Tx } from "@navet/db";
+import { articlePlacePreference, compareBatchCells, compareBatches, type BatchCell } from "../service/outflow-allocation.js";
 
 // Batch (#8) — saldo per CELL (article, place, batch), read straight from
 // the log. A leaf (Db | Tx), ALWAYS with an article filter so the query rides
@@ -138,4 +138,91 @@ export async function articleBatchBalances(db: Db | Tx, articleId: string): Prom
           quantity: Number(p.quantity).toFixed(4),
         })),
     }));
+}
+
+export interface PickBatchCell {
+  articleId: string;
+  locationId: string;
+  warehouseName: string;
+  locationName: string;
+  // A Spärrad lagerplats — physical stock the pick list leaves out.
+  blocked: boolean;
+  preference: number | null;
+  batchId: string | null;
+  batchNumber: string | null;
+  quantity: string;
+}
+
+// The pick list's cells (#8): for the BATCHSTYRDA among these articles, every
+// cell with a balance, per article in the order Automatiskt draws them —
+// compareBatchCells: Okänd first, then the oldest batch, within a batch the
+// places in pick-list order — so the paper and the booking say the same
+// thing. An article that is not batchstyrd is absent (its places come from
+// balancesForArticles, as before). Physical, with `blocked` as a flag.
+export async function pickBatchCellsForArticles(
+  db: Db | Tx,
+  articleIds: readonly string[],
+  opts: { locationId?: string } = {}
+): Promise<PickBatchCell[]> {
+  const ids = [...new Set(articleIds)];
+  const cells: (PickBatchCell & { batchCreatedAt: Date | null })[] = [];
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const rows = await db
+      .select({
+        articleId: stockTransactions.articleId,
+        locationId: stockTransactions.locationId,
+        warehouseName: warehouses.name,
+        locationName: stockLocations.name,
+        blocked: stockLocations.blocked,
+        isPrimary: sql<boolean>`coalesce(${articles.defaultLocationId} = ${stockTransactions.locationId}, false)`,
+        sortOrder: articleAlternativeLocations.sortOrder,
+        batchId: stockTransactions.batchId,
+        batchNumber: stockBatches.batchNumber,
+        batchCreatedAt: stockBatches.createdAt,
+        quantity: sql<string>`sum(${stockTransactions.quantityDelta})`,
+      })
+      .from(stockTransactions)
+      .innerJoin(articles, eq(articles.id, stockTransactions.articleId))
+      .innerJoin(stockLocations, eq(stockLocations.id, stockTransactions.locationId))
+      .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
+      .leftJoin(stockBatches, eq(stockBatches.id, stockTransactions.batchId))
+      .leftJoin(
+        articleAlternativeLocations,
+        and(eq(articleAlternativeLocations.articleId, stockTransactions.articleId), eq(articleAlternativeLocations.locationId, stockTransactions.locationId))
+      )
+      .where(
+        and(
+          inArray(stockTransactions.articleId, ids.slice(i, i + CHUNK)),
+          eq(articles.batchTracked, true),
+          opts.locationId ? eq(stockTransactions.locationId, opts.locationId) : undefined
+        )
+      )
+      .groupBy(
+        stockTransactions.articleId,
+        stockTransactions.locationId,
+        warehouses.name,
+        stockLocations.name,
+        stockLocations.blocked,
+        articles.defaultLocationId,
+        articleAlternativeLocations.sortOrder,
+        stockTransactions.batchId,
+        stockBatches.batchNumber,
+        stockBatches.createdAt
+      )
+      .having(sql`sum(${stockTransactions.quantityDelta}) <> 0`);
+    for (const { isPrimary, sortOrder, ...row } of rows) {
+      cells.push({
+        ...row,
+        quantity: Number(row.quantity).toFixed(4),
+        preference: articlePlacePreference({ locationName: row.locationName, isPrimary: isPrimary === true, sortOrder }),
+      });
+    }
+  }
+  return cells
+    .sort(
+      (a, b) =>
+        (a.articleId < b.articleId ? -1 : a.articleId > b.articleId ? 1 : 0) ||
+        compareBatchCells({ batch: a, place: a }, { batch: b, place: b })
+    )
+    .map(({ batchCreatedAt: _created, ...cell }) => cell);
 }

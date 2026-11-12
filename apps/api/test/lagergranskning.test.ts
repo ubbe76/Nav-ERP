@@ -486,7 +486,7 @@ describe("tjänster lagerförs inte", () => {
     const [line] = await db.select().from(moReportMaterials).where(isNull(moReportMaterials.locationId));
     expect(Number(line!.quantity)).toBe(2);
     const reports = await mfgService.listReports(f.order.id);
-    expect(reports[0]!.materials).toEqual([{ materialConsumptionId: expect.any(String), articleNumber: "S-1", quantity: "2.0000", locationName: null }]);
+    expect(reports[0]!.materials).toEqual([{ materialConsumptionId: expect.any(String), articleNumber: "S-1", quantity: "2.0000", locationName: null, batchNumber: null }]);
     const today = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(new Date());
     const net = await createWorkInProgressRepository(db).listMaterialNet(today);
     expect(net.map((r) => [r.manufacturingOrderId, r.articleId, Number(r.quantity)])).toEqual([[f.order.id, s.id, 2]]);

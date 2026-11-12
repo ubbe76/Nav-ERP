@@ -251,8 +251,8 @@ describe("Ångra inleverans and the batch", () => {
   it("…and the place must still hold them: the batch intact but the place drawn below it is refused too", async () => {
     const o = await makeOrder();
     const received = await receive(o, 10, "L-1");
-    // A decrease is Okänd for now: L-1 +10, Okänd −7 — physically 3 there.
-    await adjust(o.article.id, o.location.id, -7);
+    // Taken from Okänd: L-1 +10, Okänd −7 — physically 3 there.
+    await stockService.recordTransaction({ articleId: o.article.id, locationId: o.location.id, quantityDelta: -7, transactionType: "inventory_adjustment", batchId: null });
 
     const err = await purchaseService.undoReceipt(o.order.id, received.receiptId, o.user.id).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PurchaseReceiptStockMissingError);

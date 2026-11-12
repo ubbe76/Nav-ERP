@@ -24,6 +24,16 @@ export const listStockBalancesQuerySchema = listQuerySchema.extend({
 });
 export type ListStockBalancesQuery = z.infer<typeof listStockBalancesQuerySchema>;
 
+// GET /stock/batch-balances (#8): the cells of the batchstyrda among these
+// articles, optionally on one place.
+export const listStockBatchBalancesQuerySchema = z.object({
+  articleIds: z
+    .string()
+    .transform((raw) => raw.split(",").map((p) => p.trim()).filter((p) => p !== ""))
+    .pipe(z.array(z.string().uuid()).min(1).max(200)),
+  locationId: z.string().uuid().optional(),
+});
+
 export const stockTransactionTypeSchema = z.enum([
   "purchase_receipt",
   "sales_delivery",
@@ -50,6 +60,8 @@ export const listStockTransactionsQuerySchema = listQuerySchema.extend({
   direction: z.enum(["in", "out"]).optional(),
   from: isoDate.optional(),
   to: isoDate.optional(),
+  // Batch (#8): only the rows booked in this batch.
+  batchId: z.string().uuid().optional(),
 });
 export type ListStockTransactionsQuery = z.infer<typeof listStockTransactionsQuerySchema>;
 
@@ -85,6 +97,10 @@ export const createStockTransactionSchema = z.object({
   // Batch (#8): only on an inflow (positive delta) of a batchstyrd article
   // — left out, the goods are Okänd.
   batchNumber: batchNumberSchema,
+  // …and on a decrease (negative delta) the batch to take from: left out =
+  // the place's batches oldest first (Okänd first, the rest as Okänd), null
+  // = Okänd, an id = that batch, which must cover the quantity.
+  batchId: batchChoiceSchema,
 });
 export type CreateStockTransactionInput = z.infer<typeof createStockTransactionSchema>;
 
@@ -101,6 +117,10 @@ export const createStockAdjustmentSchema = createStockTransactionSchema
   .refine((input) => input.batchNumber === undefined || input.quantityDelta > 0, {
     message: "batchNumber names the batch of an inflow — only with a positive quantityDelta",
     path: ["batchNumber"],
+  })
+  .refine((input) => input.batchId === undefined || input.quantityDelta < 0, {
+    message: "batchId chooses the batch of a decrease — only with a negative quantityDelta",
+    path: ["batchId"],
   });
 
 // Lagerflytt — move balances from one stock location to another. Both legs of
@@ -115,6 +135,11 @@ export const createStockTransferSchema = z
         z.object({
           articleId: z.string().uuid(),
           quantity: blankSafe(z.coerce.number().positive()),
+          // Batch (#8), a batchstyrd article: the batch follows the goods.
+          // Left out = Automatiskt (the source's batches, oldest first, one
+          // pair of legs each), null = Okänd, an id = that batch for the
+          // row's whole quantity — two chosen batches are two rows.
+          batchId: batchChoiceSchema,
         })
       )
       .min(1),
@@ -311,6 +336,9 @@ export type ListStockCountsQuery = z.infer<typeof listStockCountsQuerySchema>;
 
 export const addStockCountRowSchema = z.object({
   articleId: z.string().uuid(),
+  // Batch (#8), a batchstyrd article: the batch the new row counts (created
+  // when it is new); left out = the article's Okänd row.
+  batchNumber: batchNumberSchema,
 });
 export type AddStockCountRowInput = z.infer<typeof addStockCountRowSchema>;
 

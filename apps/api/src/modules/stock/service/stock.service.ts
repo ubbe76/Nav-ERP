@@ -175,6 +175,13 @@ export function createStockService(repo: StockRepository, audit: AuditWriter = {
       return repo.listTransactions(query);
     },
 
+    // Batch (#8): the pick list's cells (plocklistan per batch).
+    // Also GET /stock/batch-balances — the batch choices of Utleverans,
+    // Förbruka, flytt and justering.
+    async pickBatchCellsForArticles(articleIds: string[], opts: { locationId?: string } = {}) {
+      return repo.pickBatchCellsForArticles(articleIds, opts);
+    },
+
     // Batch (#8): the article card's Saldo per batch.
     async getArticleBatchBalances(articleId: string) {
       const view = await repo.articleBatchBalances(articleId);

@@ -44,8 +44,8 @@ const ALLOWED: Record<string, { reads: number; why: string }> = {
     why: "physical per place: the count freezes and lists what stands on the shelf",
   },
   "modules/stock/repository/batch-balances.ts": {
-    reads: 5,
-    why: "physical per cell (article, place, batch — #8): the cells Automatiskt allocates from, one cell's balance for Ångra and the saldoimport, and the article card's Saldo per batch; a blocked place is included, the callers decide",
+    reads: 7,
+    why: "physical per cell (article, place, batch — #8): the cells Automatiskt allocates from, one cell's balance for Ångra and the saldoimport, the article card's Saldo per batch and the pick list's / batch choices' cells (with blocked as a flag); a blocked place is included, the callers decide",
   },
   "modules/stock/service/location-lifecycle.ts": { reads: 1, why: "physical per place: locationHoldsStock" },
   "modules/stock/service/stocked-article.ts": {

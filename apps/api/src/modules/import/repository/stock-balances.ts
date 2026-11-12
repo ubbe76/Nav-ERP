@@ -4,6 +4,7 @@ import { FALLBACK_LOCATION_NAME, getOrCreateFallbackLocation, resolveStockLocati
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { lockArticlesForOutflow } from "../../stock/service/outflow-locations.js";
+import { allocateBatchOutflow, withBatchRemainder } from "../../stock/service/outflow-allocation.js";
 import { batchTrackedArticleIds } from "../../stock/service/batch-tracking.js";
 import { getOrCreateBatch } from "../../stock/service/batches.js";
 import { BatchNotTrackedError } from "../../stock/service/batch.errors.js";
@@ -20,6 +21,16 @@ import { round4 } from "@navet/shared";
 
 const CHUNK = 500;
 const chunks = <T>(items: T[]) => Array.from({ length: Math.ceil(items.length / CHUNK) }, (_, i) => items.slice(i * CHUNK, (i + 1) * CHUNK));
+
+// A decrease of `quantity` on the place, split over its batches (#8).
+async function decreaseParts(tx: Tx, articleId: string, locationId: string, quantity: number) {
+  const cells = await batchCellsForArticles(tx, [articleId], { locationIds: [locationId] });
+  const allocation = allocateBatchOutflow(quantity, [], cells, { locationId });
+  return withBatchRemainder(allocation.parts, allocation.remainder, locationId).map((part) => ({
+    quantity: -part.quantity,
+    batchId: part.batchId ?? null,
+  }));
+}
 
 export function createStockBalanceImportRepository(db: Db | Tx) {
   return {
@@ -180,17 +191,27 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
           }
           const delta = round4(row.quantity - current);
           if (delta === 0) continue;
-          await tx.insert(stockTransactions).values({
-            articleId: row.articleId,
-            locationId,
-            quantityDelta: String(delta),
-            transactionType: "inventory_adjustment",
-            // Inflows only carry a cost (D0); an outflow is worth what the stock was.
-            unitCost: delta > 0 && row.unitCost !== null ? String(row.unitCost) : null,
-            note: STOCK_IMPORT_NOTE,
-            // Without Batch an increase is Okänd (and so, for now, is a decrease).
-            batchId,
-          });
+          // Without Batch an increase is Okänd. A decrease of a batchstyrd
+          // article's whole place is taken from the place's batches oldest
+          // first (Okänd first, what they do not cover as Okänd) — the pure
+          // rule with the place chosen, as a negative justering; one row per
+          // batch.
+          const parts: { quantity: number; batchId: string | null }[] =
+            row.batch === null && delta < 0 && trackedIds.has(row.articleId)
+              ? await decreaseParts(tx, row.articleId, locationId, -delta)
+              : [{ quantity: delta, batchId }];
+          await tx.insert(stockTransactions).values(
+            parts.map((part) => ({
+              articleId: row.articleId,
+              locationId,
+              quantityDelta: String(part.quantity),
+              transactionType: "inventory_adjustment" as const,
+              // Inflows only carry a cost (D0); an outflow is worth what the stock was.
+              unitCost: delta > 0 && row.unitCost !== null ? String(row.unitCost) : null,
+              note: STOCK_IMPORT_NOTE,
+              batchId: part.batchId,
+            }))
+          );
           if (delta < 0) await deactivateEmptyLocation(tx, locationId);
           if (current === 0) created++;
           else updated++;
