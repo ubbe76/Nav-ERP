@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { listQuerySchema, statusListParam } from "./list.js";
+import { blankSafe } from "./coerce.js";
 
 // Spärrade lagerplatser as a list filter: "true" = only blocked places,
 // "false" = without them, absent = all. NOT z.coerce.boolean() — that turns
@@ -61,7 +62,7 @@ export type StockTransactionReference =
 export const createStockTransactionSchema = z.object({
   articleId: z.string().uuid(),
   locationId: z.string().uuid().optional(),
-  quantityDelta: z.coerce.number().refine((n) => n !== 0, "quantityDelta cannot be zero"),
+  quantityDelta: blankSafe(z.coerce.number().refine((n) => n !== 0, "quantityDelta cannot be zero")),
   // A transfer is always two paired rows, so it can only be booked through
   // POST /stock/transfers — never one leg at a time through this endpoint.
   transactionType: stockTransactionTypeSchema.exclude(["stock_transfer"]),
@@ -91,7 +92,7 @@ export const createStockTransferSchema = z
       .array(
         z.object({
           articleId: z.string().uuid(),
-          quantity: z.coerce.number().positive(),
+          quantity: blankSafe(z.coerce.number().positive()),
         })
       )
       .min(1),

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { articleTypeSchema } from "./article.js";
+import { blankSafe, numericMax } from "./coerce.js";
 
 // Its own file: article.ts imports costing.ts (markupPercentSchema), so the
 // batch schema, which needs the article type enum, cannot live in costing.ts
@@ -49,7 +50,7 @@ export const preCalculationBatchSchema = z.object({
   // The quantity for an article WITHOUT a saved förkalkyl — one with a saved
   // one is calculated with that calculation's quantity (quantitySource
   // "latest"). The card's own quantity rule: positive.
-  fallbackQuantity: z.coerce.number().positive(),
+  fallbackQuantity: blankSafe(z.coerce.number().positive().max(numericMax(14, 4))),
   // Räkna om underliggande nivåer, as on the card (plain z.boolean(), see
   // preCalculateSchema).
   multiLevel: z.boolean().default(false),
@@ -57,7 +58,7 @@ export const preCalculationBatchSchema = z.object({
   // förkalkyl's quantity and the fallback (quantitySource "manual"). An
   // article outside the selection is ignored.
   quantities: z
-    .array(z.object({ articleId: z.string().uuid(), quantity: z.coerce.number().positive() }))
+    .array(z.object({ articleId: z.string().uuid(), quantity: blankSafe(z.coerce.number().positive().max(numericMax(14, 4))) }))
     .max(PRE_CALCULATION_BATCH_MAX)
     .optional(),
   // Recalculate only these articles of the selection — the one row whose
@@ -78,7 +79,7 @@ export type PreCalculationBatchListInput = z.infer<typeof preCalculationBatchLis
 // and/or Sätt försäljningspris with the card's own functions.
 export const preCalculationBatchSaveSchema = z.object({
   items: z
-    .array(z.object({ articleId: z.string().uuid(), quantity: z.coerce.number().positive() }))
+    .array(z.object({ articleId: z.string().uuid(), quantity: blankSafe(z.coerce.number().positive().max(numericMax(14, 4))) }))
     .min(1)
     .max(PRE_CALCULATION_BATCH_MAX),
   multiLevel: z.boolean().default(false),

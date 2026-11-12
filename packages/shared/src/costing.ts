@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { blankSafe, numericMax } from "./coerce.js";
 
 export const costCalculationTypeSchema = z.enum(["pre", "post"]);
 export type CostCalculationType = z.infer<typeof costCalculationTypeSchema>;
@@ -86,7 +87,7 @@ export interface CalculatedPriceDetail {
 // `save` absent or false = preview: the numbers are computed and returned but
 // nothing is written. Only an explicit `true` stores the calculation.
 export const preCalculateSchema = z.object({
-  quantity: z.coerce.number().positive(),
+  quantity: blankSafe(z.coerce.number().positive().max(numericMax(14, 4))),
   save: z.boolean().optional(),
   // Räkna om underliggande nivåer: cost manufactured sub-assemblies from their
   // own structure and routing instead of from their standard cost. Plain

@@ -1,0 +1,2 @@
+ALTER TABLE "supplier_payments" DROP CONSTRAINT "supplier_payments_sek_amounts";--> statement-breakpoint
+ALTER TABLE "supplier_payments" ADD CONSTRAINT "supplier_payments_sek_amounts" CHECK ("supplier_payments"."currency" <> 'SEK' OR "supplier_payments"."amount_sek" = "supplier_payments"."amount" + "supplier_payments"."bank_fee_sek");

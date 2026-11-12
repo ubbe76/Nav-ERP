@@ -69,8 +69,9 @@ export function SupplierPaymentCard({
         <span>
           Belopp: {formatMoney(payment.amount)} {currencyLabel(payment.currency)}
         </span>
-        {foreign && <span>Draget från kontot: {formatMoney(payment.amountSek)} kr</span>}
-        {foreign && Number(payment.bankFeeSek) > 0 && <span>Bankavgift: {formatMoney(payment.bankFeeSek)} kr</span>}
+        {/* A SEK payment abroad can carry the fee the bank took with it. */}
+        {(foreign || Number(payment.bankFeeSek) > 0) && <span>Draget från kontot: {formatMoney(payment.amountSek)} kr</span>}
+        {Number(payment.bankFeeSek) > 0 && <span>Bankavgift: {formatMoney(payment.bankFeeSek)} kr</span>}
         {foreign && <span>{exchangeDifferenceText(payment.exchangeRateDifferenceSek, formatMoney)}</span>}
         <span>Konto: {payment.bankAccountNumber}</span>
         {payment.paymentBatchItem && (

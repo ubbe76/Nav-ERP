@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { OperationTimeUnit } from "./manufacturing.js";
 import { round2, round4 } from "./money.js";
+import { blankSafe } from "./coerce.js";
 
 // Units register (enheter) + per-article alternative units with conversion
 // factors. Factor semantics everywhere: quantity_per_base = how many of the
@@ -11,12 +12,12 @@ import { round2, round4 } from "./money.js";
 
 export const createArticleUnitSchema = z.object({
   unitId: z.string().uuid(),
-  quantityPerBase: z.coerce.number().positive(),
+  quantityPerBase: blankSafe(z.coerce.number().positive()),
 });
 export type CreateArticleUnitInput = z.infer<typeof createArticleUnitSchema>;
 
 export const updateArticleUnitSchema = z.object({
-  quantityPerBase: z.coerce.number().positive(),
+  quantityPerBase: blankSafe(z.coerce.number().positive()),
 });
 export type UpdateArticleUnitInput = z.infer<typeof updateArticleUnitSchema>;
 

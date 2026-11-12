@@ -25,6 +25,8 @@ paths:
   - "apps/api/test/user*"
   - "apps/api/test/backup*"
   - "apps/api/test/systemgranskning*"
+  - "apps/api/test/talfalt*"
+  - "packages/shared/src/coerce.ts"
 ---
 
 # System: exempeldata, Kom igång, favoriter, backup
@@ -96,3 +98,9 @@ TODO-posten "Nav som program (UI/UX)"; skisserna är privata.
 - Alla uppladdade/arkiverade filer ligger i bytea-kolumner. `GET /storage` (admin, sektionen överst på `/system/sakerhetskopiering`) summerar dem per slag via `STORED_FILE_KINDS` i lövet `system/repository/storage.ts` (`octet_length` läser längden ur TOAST-pekaren, filinnehållet hämtas aldrig) plus `pg_database_size`. **En ny bytea-kolumn ska in i listan** — `system-storage.test.ts` jämför den mot `information_schema` och faller annars. Webben påminner när filerna passerar 50 GB (`FILES_GUIDELINE_BYTES` i `StorageSection.tsx`, manualens Lagringsutrymme).
 - **Exportera filer** (`GET /storage/export`, admin): `FILE_EXPORT_KINDS` i `system/repository/file-export.ts` (samma nycklar som `STORED_FILE_KINDS`, testat) listar metadata per slag med mappar (artikelnummer, AV-/LF-nummer, verifikatets serie-år-nummer …) och läser bytes tio rader åt gången; `ZipStreamWriter` i rena `service/zip-stream.ts` skriver STORED-poster direkt i strömmen (CRC och storlek i lokala huvudet, UTF-8-namn, ZIP64-poster bara när > 65 535 poster eller offset ≥ 4 GiB, Stockholmstid), `safeSegment`/`UniquePaths` ger säkra och unika sökvägar. Ingen transaktion hålls över nedladdningen — en fil som raderas under tiden hoppas över.
 
+## Talfält: gränser och tomma värden (2026-11-12)
+
+- **Nätet:** Postgres 22003 (numeric overflow, heltal utanför int4) blir 400 `number-out-of-range` i den globala felhanteraren (`isNumberOutOfRange`, `db-errors.ts`) — även för en **produkt** av två giltiga tal (antal × pris), som inget schema kan se. Felet loggas: en träff betyder oftast att ett schema saknar sin gräns. Fånga inte 22003 i en service för att göra om det till 500/409.
+- **Gränsen på fältet** är `.max(numericMax(p, s))` / `.max(INT4_MAX)` (`coerce.ts`) efter kolumnens precision — ger 400 `validation-failed` med fältnamn. Finns i `manufacturing.ts`, `preCalculateSchema` och Förkalkylera flera; övriga scheman lutar sig mot nätet (TODO).
+- **`blankSafe` runt varje `z.coerce.number()` i ett body-schema:** `""` och `null` är 400, aldrig 0. `.nullable()`/`.optional()`/`.default()` ligger UTANFÖR `blankSafe(...)` — innanför når null aldrig fram, och ett PATCH-fält som ska kunna tömmas slutar fungera. **Query-scheman** (`list.ts`, `*QuerySchema`, pallkortens `quantity`) är medvetet oinslagna: `?offset=` är 0 som förut. Importens fältavkodning har egna regler.
+- Test: `talfalt.test.ts` (route-nivå; overflow-fallet är ett antal × materialkostnad som schemat släpper igenom).

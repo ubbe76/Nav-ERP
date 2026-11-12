@@ -47,6 +47,11 @@ function hintFor(e: OutgoingEntryView): string | undefined {
     }
     if (e.state === "return") return "Returen makulerar utbetalningen — det går bara om banken återförde samma belopp i SEK som den drog.";
   }
+  // A SEK payment abroad whose bank took its fee with the payment: the
+  // entry is the row's amount plus the charges the bank reports as included.
+  if (e.item && e.state === "matched" && e.chargesAmount !== null && e.amount !== e.item.amount) {
+    return `Bokförs med ${formatMoney(e.amount)} kr draget från kontot, varav bankavgift ${formatMoney(e.chargesAmount)} kr.`;
+  }
   return HINT[e.state];
 }
 

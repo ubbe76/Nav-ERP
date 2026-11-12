@@ -569,7 +569,7 @@ export const createAllocationSchema = z.object({
   balanceAccount: allocationAccountSchema,
   resultAccount: allocationAccountSchema,
   firstMonth: yearMonthSchema,
-  months: z.coerce.number().int().min(2).max(120),
+  months: blankSafe(z.coerce.number().int().min(2).max(120)),
   description: z.string().trim().min(1).max(200),
   seriesId: z.string().uuid().optional(),
   sourceVerificationId: z.string().uuid().optional(),

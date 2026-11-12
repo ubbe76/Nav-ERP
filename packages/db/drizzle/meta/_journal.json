@@ -1464,6 +1464,13 @@
       "when": 1794409973585,
       "tag": "0208_delatgranskning",
       "breakpoints": true
+    },
+    {
+      "idx": 209,
+      "version": "7",
+      "when": 1794463311657,
+      "tag": "0209_sek_bankavgift",
+      "breakpoints": true
     }
   ]
 }

@@ -156,15 +156,38 @@ function matchingAmounts(entry: { amount: string | number; currency: string; ins
   };
 }
 
-// Is the bank's amount the batch row's? A SEK row: the entry's own amount
-// (as before). A row in another currency: the instructed amount in that
-// currency (InstdAmt) — the entry's own amount is the SEK it cost.
-function sameAmount(
-  item: { amount: string | number; currency: string },
-  entry: { amount: string | number; instructedAmount: string | number | null; instructedCurrency: string | null }
-): boolean {
-  if (item.currency === "SEK") return round2(Number(item.amount)) === round2(Number(entry.amount));
-  return entry.instructedCurrency === item.currency && entry.instructedAmount !== null && round2(Number(entry.instructedAmount)) === round2(Number(item.amount));
+// Is the bank's amount the batch row's — and which fee did the bank take
+// with it? null = another amount (amount_mismatch).
+//  - A row in another currency: the instructed amount in that currency
+//    (InstdAmt); the entry's own amount is the SEK it cost, the charges the
+//    bank reports as included are the fee.
+//  - A SEK row: the entry's own amount, no fee (as before).
+//  - A SEK row sent abroad (betalningstyp sepa/international in the export's
+//    snapshot): also the entry's amount less the charges the bank reports as
+//    included in it (SEB: TxAmt is the amount "including charges") — those
+//    charges are the fee. Only on the debit itself, never on a return, never
+//    for a domestic row, and only when the difference is exactly the charges.
+export function settledAmount(
+  item: { amount: string | number; currency: string; creditorSnapshot?: { kind?: string } | null },
+  entry: {
+    amount: string | number;
+    instructedAmount: string | number | null;
+    instructedCurrency: string | null;
+    chargesAmount: string | number | null;
+    reversal: boolean;
+  }
+): { bankFeeSek: number } | null {
+  const itemAmount = round2(Number(item.amount));
+  const charges = entry.chargesAmount === null ? 0 : round2(Number(entry.chargesAmount));
+  if (item.currency !== "SEK") {
+    const same = entry.instructedCurrency === item.currency && entry.instructedAmount !== null && round2(Number(entry.instructedAmount)) === itemAmount;
+    return same ? { bankFeeSek: charges } : null;
+  }
+  const entryAmount = round2(Number(entry.amount));
+  if (entryAmount === itemAmount) return { bankFeeSek: 0 };
+  const abroad = item.creditorSnapshot?.kind === "sepa" || item.creditorSnapshot?.kind === "international";
+  if (abroad && !entry.reversal && charges > 0 && round2(entryAmount - charges) === itemAmount) return { bankFeeSek: charges };
+  return null;
 }
 
 export function createBankFileService(deps: BankFileServiceDeps) {
@@ -481,7 +504,7 @@ export function createBankFileService(deps: BankFileServiceDeps) {
             }
           : null;
         let state: OutgoingEntryView["state"];
-        const same = item ? sameAmount(item, e) : false;
+        const same = row.item?.id ? settledAmount(row.item as { amount: string; currency: string; creditorSnapshot: { kind?: string } | null }, e) !== null : false;
         if (row.handled) state = "booked";
         else if (e.ignoredAt) state = "ignored";
         // Our payments are drawn from the SEK account — an entry in another
@@ -530,7 +553,8 @@ export function createBankFileService(deps: BankFileServiceDeps) {
         // Debit or return, the bank's amount must be the row's (spec §6.2) —
         // for a payment in another currency the instructed amount in it.
         const foreign = item.currency !== "SEK";
-        if (!sameAmount(item, entry)) {
+        const settled = settledAmount(item, entry);
+        if (!settled) {
           const actual = foreign ? (entry.instructedCurrency === item.currency && entry.instructedAmount !== null ? Number(entry.instructedAmount) : null) : Number(entry.amount);
           throw new BankEntryAmountDiffersError(item.endToEndId, Number(item.amount), actual, entry.reversal ? "returned" : "debited", item.currency);
         }
@@ -538,7 +562,10 @@ export function createBankFileService(deps: BankFileServiceDeps) {
           await deps.batches.returnItemInTx(
             tx,
             item.id,
-            { id: entry.id, bookingDate: entry.bookingDate, returnReason: entry.returnReason, ...(foreign ? { amountSek: Number(entry.amount) } : {}) },
+            // The SEK that came back — the omföring is only right when it is
+            // what the payment drew (another currency, or a SEK payment
+            // abroad booked with the bank's fee).
+            { id: entry.id, bookingDate: entry.bookingDate, returnReason: entry.returnReason, amountSek: Number(entry.amount) },
             userId
           );
           await audit(tx, file.filename, "entry_booked", { dedupeKey: entry.dedupeKey, returned: item.endToEndId }, userId);
@@ -548,14 +575,16 @@ export function createBankFileService(deps: BankFileServiceDeps) {
         // A payment in another currency books what left the SEK account
         // (the entry's amount, charges included) and the charges the bank
         // reports as included; a bank that reports none (Nordea) leaves the
-        // fee inside the exchange difference.
+        // fee inside the exchange difference. A SEK payment abroad whose
+        // entry includes the bank's charges is booked the same way: the
+        // entry's amount left the account, the charges are the fee.
         const done = await deps.batches.confirmItemInTx(
           tx,
           item.id,
           {
             paymentDate: entry.bookingDate,
             bankFileEntryId: entry.id,
-            ...(foreign ? { amountSek: Number(entry.amount), bankFeeSek: entry.chargesAmount === null ? 0 : Number(entry.chargesAmount) } : {}),
+            ...(foreign || settled.bankFeeSek !== 0 ? { amountSek: Number(entry.amount), bankFeeSek: settled.bankFeeSek } : {}),
           },
           userId
         );

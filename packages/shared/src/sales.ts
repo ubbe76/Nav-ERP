@@ -262,7 +262,7 @@ const quoteRowSchema = z.object({
   articleId: z.string().uuid(),
   // quantity/unitPrice are entered in the chosen unit (the article's base
   // unit when unitId is omitted/null) and stored converted to the base unit.
-  quantity: z.coerce.number().positive(),
+  quantity: blankSafe(z.coerce.number().positive()),
   // C3: omitted ⇒ the server resolves price AND discount via the price
   // chain (customer price → price list → base price). Sent ⇒ used verbatim,
   // including 0 (0 means free, never "look it up").
@@ -492,7 +492,7 @@ export const updateSalesOrderRowSchema = z
   .object({
     // Interpreted in the row's unit (or the newly provided unitId; null
     // switches the row back to the article's base unit).
-    quantity: z.coerce.number().positive().optional(),
+    quantity: blankSafe(z.coerce.number().positive()).optional(),
     unitPrice: blankSafe(z.coerce.number().nonnegative()).optional(),
     discountPercent: blankSafe(z.coerce.number().min(0).max(100)).optional(),
     unitId: z.string().uuid().nullable().optional(),
@@ -516,7 +516,7 @@ export type SetRowConfigurationInput = z.infer<typeof setRowConfigurationSchema>
 
 export const deliverGoodsSchema = z.object({
   locationId: z.string().uuid().optional(),
-  quantity: z.coerce.number().positive(),
+  quantity: blankSafe(z.coerce.number().positive()),
 });
 export type DeliverGoodsInput = z.infer<typeof deliverGoodsSchema>;
 
@@ -533,7 +533,7 @@ export const deliverBatchSchema = z.object({
     .array(
       z.object({
         rowId: z.string().uuid(),
-        quantity: z.coerce.number().positive(),
+        quantity: blankSafe(z.coerce.number().positive()),
         locationId: z.string().uuid().optional(),
       })
     )
@@ -568,7 +568,7 @@ export const invoiceRowInputSchema = z.object({
   salesOrderRowId: z.string().uuid().nullable().optional(),
   shipmentId: z.string().uuid().optional(),
   description: z.string().min(1).max(255),
-  quantity: z.coerce.number().positive(),
+  quantity: blankSafe(z.coerce.number().positive()),
   unitPrice: blankSafe(z.coerce.number()),
   discountPercent: blankSafe(z.coerce.number().min(0).max(100)).optional(),
   vatRate: vatRateSchema.optional(),
@@ -837,7 +837,7 @@ export type UpdateCustomerArticleNumberInput = z.infer<typeof updateCustomerArti
 export const priceQuoteQuerySchema = z.object({
   customerId: z.string().uuid(),
   articleId: z.string().uuid(),
-  quantity: z.coerce.number().positive(),
+  quantity: blankSafe(z.coerce.number().positive()),
   salesOrderId: z.string().uuid().optional(),
   currency: currencyCodeSchema.optional(),
   exchangeRate: exchangeRateValueSchema.optional(),

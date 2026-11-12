@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { optionalText } from "./coerce.js";
+import { blankSafe, INT4_MAX, numericMax, optionalText } from "./coerce.js";
 import { configuratorSelectionSchema } from "./configurator.js";
 import { listQuerySchema, manufacturingOrderStatusListParam, statusListParam } from "./list.js";
 
@@ -56,33 +56,33 @@ export const createWorkCenterSchema = z.object({
   name: z.string().min(1).max(100),
   type: z.enum(workCenterTypes).default("machine"),
   productionGroupId: z.string().uuid().nullable().optional(),
-  hourlyRate: z.coerce.number().nonnegative().default(0),
-  overheadPercent: z.coerce.number().nonnegative().default(0),
+  hourlyRate: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).default(0),
+  overheadPercent: blankSafe(z.coerce.number().nonnegative().max(numericMax(5, 2))).default(0),
   // E2 capacity: available time = the week schedule's resolved net hours for
   // the actual week × capacityFactor (e.g. 2 = two machines/people). No
   // schedule = no capacity shown in beläggningen. Factor 0 is rejected —
   // clear the schedule instead.
   weekScheduleId: z.string().uuid().nullable().optional(),
-  capacityFactor: z.coerce.number().positive().default(1),
+  capacityFactor: blankSafe(z.coerce.number().positive().max(numericMax(6, 2))).default(1),
   // Kapacitet (timmar per dag): Monday–Friday hours used when the resource
   // has no week schedule (the schedule wins when both are set).
-  hoursPerDay: z.coerce.number().positive().max(24).nullable().optional(),
+  hoursPerDay: blankSafe(z.coerce.number().positive().max(24)).nullable().optional(),
   // Legoresurs only: the resource's default supplier, prefilled on new lego
   // operations in the beredning.
   supplierId: z.string().uuid().nullable().optional(),
   active: z.boolean().default(true),
   // Monitor G5 resource defaults (imported, editable, not yet consumed by
   // the beredning). All optional/nullable — see work_centers' comment.
-  defaultSetupTime: z.coerce.number().nonnegative().nullable().optional(),
+  defaultSetupTime: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).nullable().optional(),
   defaultOperationName: z.string().max(100).nullable().optional(),
   rateAppliesToSetup: z.boolean().nullable().optional(),
   rateAppliesToRun: z.boolean().nullable().optional(),
-  calcRate1: z.coerce.number().nonnegative().nullable().optional(),
-  calcRate2: z.coerce.number().nonnegative().nullable().optional(),
+  calcRate1: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).nullable().optional(),
+  calcRate2: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).nullable().optional(),
   // Legoresurs only (days).
-  leadTimeDays: z.coerce.number().nonnegative().nullable().optional(),
-  queueTimeDays: z.coerce.number().nonnegative().nullable().optional(),
-  orderLeadTimeDays: z.coerce.number().nonnegative().nullable().optional(),
+  leadTimeDays: blankSafe(z.coerce.number().nonnegative().max(numericMax(6, 1))).nullable().optional(),
+  queueTimeDays: blankSafe(z.coerce.number().nonnegative().max(numericMax(6, 1))).nullable().optional(),
+  orderLeadTimeDays: blankSafe(z.coerce.number().nonnegative().max(numericMax(6, 1))).nullable().optional(),
 });
 export type CreateWorkCenterInput = z.infer<typeof createWorkCenterSchema>;
 
@@ -92,22 +92,22 @@ export const updateWorkCenterSchema = z
     name: z.string().min(1).max(100).optional(),
     type: z.enum(workCenterTypes).optional(),
     productionGroupId: z.string().uuid().nullable().optional(),
-    hourlyRate: z.coerce.number().nonnegative().optional(),
-    overheadPercent: z.coerce.number().nonnegative().optional(),
+    hourlyRate: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).optional(),
+    overheadPercent: blankSafe(z.coerce.number().nonnegative().max(numericMax(5, 2))).optional(),
     weekScheduleId: z.string().uuid().nullable().optional(),
-    capacityFactor: z.coerce.number().positive().optional(),
-    hoursPerDay: z.coerce.number().positive().max(24).nullable().optional(),
+    capacityFactor: blankSafe(z.coerce.number().positive().max(numericMax(6, 2))).optional(),
+    hoursPerDay: blankSafe(z.coerce.number().positive().max(24)).nullable().optional(),
     supplierId: z.string().uuid().nullable().optional(),
     active: z.boolean().optional(),
-    defaultSetupTime: z.coerce.number().nonnegative().nullable().optional(),
+    defaultSetupTime: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).nullable().optional(),
     defaultOperationName: z.string().max(100).nullable().optional(),
     rateAppliesToSetup: z.boolean().nullable().optional(),
     rateAppliesToRun: z.boolean().nullable().optional(),
-    calcRate1: z.coerce.number().nonnegative().nullable().optional(),
-    calcRate2: z.coerce.number().nonnegative().nullable().optional(),
-    leadTimeDays: z.coerce.number().nonnegative().nullable().optional(),
-    queueTimeDays: z.coerce.number().nonnegative().nullable().optional(),
-    orderLeadTimeDays: z.coerce.number().nonnegative().nullable().optional(),
+    calcRate1: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).nullable().optional(),
+    calcRate2: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).nullable().optional(),
+    leadTimeDays: blankSafe(z.coerce.number().nonnegative().max(numericMax(6, 1))).nullable().optional(),
+    queueTimeDays: blankSafe(z.coerce.number().nonnegative().max(numericMax(6, 1))).nullable().optional(),
+    orderLeadTimeDays: blankSafe(z.coerce.number().nonnegative().max(numericMax(6, 1))).nullable().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateWorkCenterInput = z.infer<typeof updateWorkCenterSchema>;
@@ -174,8 +174,8 @@ export type OperationTimeUnit = (typeof operationTimeUnits)[number];
 // ordinarie (the operation's own time, read at every use).
 export const routingAlternativeSchema = z.object({
   workCenterId: z.string().uuid(),
-  setupTime: z.coerce.number().nonnegative().nullable().optional(),
-  runTimePerUnit: z.coerce.number().nonnegative().nullable().optional(),
+  setupTime: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).nullable().optional(),
+  runTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 4))).nullable().optional(),
 });
 export type RoutingAlternativeInput = z.infer<typeof routingAlternativeSchema>;
 export const MAX_ROUTING_ALTERNATIVES = 5;
@@ -205,15 +205,15 @@ export const routingFileIdsSchema = z
   .refine((ids) => new Set(ids).size === ids.length, "Samma fil kan bara väljas en gång");
 
 export const createRoutingOperationSchema = z.object({
-  sequenceNo: z.coerce.number().int().positive(),
+  sequenceNo: blankSafe(z.coerce.number().int().positive().max(INT4_MAX)),
   // Optional — every surface falls back to the resource name when it is
   // missing, so a routing imported without it reads exactly as before.
   description: routingDescriptionSchema.optional(),
   workCenterId: z.string().uuid(),
-  setupTime: z.coerce.number().nonnegative(),
-  runTimePerUnit: z.coerce.number().nonnegative(),
+  setupTime: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))),
+  runTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 4))),
   // "Cykeltid" — productive time, minutes per unit like runTimePerUnit; null = none.
-  cycleTimePerUnit: z.coerce.number().nonnegative().nullable().optional(),
+  cycleTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 4))).nullable().optional(),
   timeUnit: z.enum(operationTimeUnits).optional(),
   // "Kalkyl" — time counted in the pre-calculation only; the operation is
   // skipped when the routing is snapshotted at release.
@@ -226,10 +226,10 @@ export const createRoutingOperationSchema = z.object({
   // --- Lego (subcontract) fields — meaningful only when the chosen work
   // center is a legoresurs; the service refuses them on other resources. ---
   subcontractSupplierId: z.string().uuid().nullable().optional(),
-  setupPrice: z.coerce.number().nonnegative().nullable().optional(),
+  setupPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 2))).nullable().optional(),
   // Transportkostnad (lego) — added to the ställpris on the lego IO and in the costing.
-  transportPrice: z.coerce.number().nonnegative().nullable().optional(),
-  unitPrice: z.coerce.number().nonnegative().nullable().optional(),
+  transportPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 2))).nullable().optional(),
+  unitPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 4))).nullable().optional(),
   showNetWeight: z.boolean().optional(),
   useArticleDrawing: z.boolean().optional(),
   // Alternativa resurser — see routingAlternativesSchema.
@@ -245,13 +245,13 @@ export type CreateRoutingOperationInput = z.infer<typeof createRoutingOperationS
 
 export const updateRoutingOperationSchema = z
   .object({
-    sequenceNo: z.coerce.number().int().positive().optional(),
+    sequenceNo: blankSafe(z.coerce.number().int().positive().max(INT4_MAX)).optional(),
     description: routingDescriptionSchema.optional(),
     workCenterId: z.string().uuid().optional(),
-    setupTime: z.coerce.number().nonnegative().optional(),
-    runTimePerUnit: z.coerce.number().nonnegative().optional(),
+    setupTime: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).optional(),
+    runTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 4))).optional(),
     // "Cykeltid"; null clears.
-    cycleTimePerUnit: z.coerce.number().nonnegative().nullable().optional(),
+    cycleTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 4))).nullable().optional(),
     timeUnit: z.enum(operationTimeUnits).optional(),
     costingOnly: z.boolean().optional(),
     // Nullable so the comment can be cleared.
@@ -262,9 +262,9 @@ export const updateRoutingOperationSchema = z
     // Lego fields — nullable so switching back to an ordinary resource can
     // clear them.
     subcontractSupplierId: z.string().uuid().nullable().optional(),
-    setupPrice: z.coerce.number().nonnegative().nullable().optional(),
-    transportPrice: z.coerce.number().nonnegative().nullable().optional(),
-    unitPrice: z.coerce.number().nonnegative().nullable().optional(),
+    setupPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 2))).nullable().optional(),
+    transportPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 2))).nullable().optional(),
+    unitPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 4))).nullable().optional(),
     showNetWeight: z.boolean().optional(),
     useArticleDrawing: z.boolean().optional(),
     // Alternativa resurser — sent = the whole new set, omitted = unchanged.
@@ -284,7 +284,7 @@ export type UpdateRoutingOperationInput = z.infer<typeof updateRoutingOperationS
 // moOperationId null/omitted = not tied to an operation (drawn at receipt).
 export const createMoMaterialSchema = z.object({
   componentArticleId: z.string().uuid(),
-  quantity: z.coerce.number().positive(),
+  quantity: blankSafe(z.coerce.number().positive().max(numericMax(14, 4))),
   unitId: z.string().uuid().nullable().optional(),
   moOperationId: z.string().uuid().nullable().optional(),
 });
@@ -295,7 +295,7 @@ export type CreateMoMaterialInput = z.infer<typeof createMoMaterialSchema>;
 // component's base unit unless unitId is given alongside.
 export const updateMoMaterialSchema = z
   .object({
-    quantity: z.coerce.number().positive().optional(),
+    quantity: blankSafe(z.coerce.number().positive().max(numericMax(14, 4))).optional(),
     unitId: z.string().uuid().nullable().optional(),
     moOperationId: z.string().uuid().nullable().optional(),
     componentArticleId: z.string().uuid().optional(),
@@ -307,39 +307,39 @@ export type UpdateMoMaterialInput = z.infer<typeof updateMoMaterialSchema>;
 // minus costingOnly (a Kalkyl operation never exists on a TO) and
 // useArticleDrawing (a TO operation has no routing row to read it from).
 export const createMoOperationSchema = z.object({
-  sequenceNo: z.coerce.number().int().positive(),
+  sequenceNo: blankSafe(z.coerce.number().int().positive().max(INT4_MAX)),
   description: routingDescriptionSchema.optional(),
   workCenterId: z.string().uuid(),
-  setupTime: z.coerce.number().nonnegative(),
-  runTimePerUnit: z.coerce.number().nonnegative(),
+  setupTime: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))),
+  runTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 4))),
   timeUnit: z.enum(operationTimeUnits).optional(),
   comment: routingCommentSchema.optional(),
   printOnWorkCard: z.boolean().optional(),
   packingInstructions: routingPackingInstructionsSchema.optional(),
   subcontractSupplierId: z.string().uuid().nullable().optional(),
-  setupPrice: z.coerce.number().nonnegative().nullable().optional(),
+  setupPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 2))).nullable().optional(),
   // Transportkostnad (lego) — added to the ställpris on the lego IO and in the costing.
-  transportPrice: z.coerce.number().nonnegative().nullable().optional(),
-  unitPrice: z.coerce.number().nonnegative().nullable().optional(),
+  transportPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 2))).nullable().optional(),
+  unitPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 4))).nullable().optional(),
   showNetWeight: z.boolean().optional(),
 });
 export type CreateMoOperationInput = z.infer<typeof createMoOperationSchema>;
 
 export const updateMoOperationSchema = z
   .object({
-    sequenceNo: z.coerce.number().int().positive().optional(),
+    sequenceNo: blankSafe(z.coerce.number().int().positive().max(INT4_MAX)).optional(),
     description: routingDescriptionSchema.optional(),
     workCenterId: z.string().uuid().optional(),
-    setupTime: z.coerce.number().nonnegative().optional(),
-    runTimePerUnit: z.coerce.number().nonnegative().optional(),
+    setupTime: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).optional(),
+    runTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 4))).optional(),
     timeUnit: z.enum(operationTimeUnits).optional(),
     comment: routingCommentSchema.optional(),
     printOnWorkCard: z.boolean().optional(),
     packingInstructions: routingPackingInstructionsSchema.optional(),
     subcontractSupplierId: z.string().uuid().nullable().optional(),
-    setupPrice: z.coerce.number().nonnegative().nullable().optional(),
-    transportPrice: z.coerce.number().nonnegative().nullable().optional(),
-    unitPrice: z.coerce.number().nonnegative().nullable().optional(),
+    setupPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 2))).nullable().optional(),
+    transportPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 2))).nullable().optional(),
+    unitPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 4))).nullable().optional(),
     showNetWeight: z.boolean().optional(),
     // "Vald för hand" (alternativa resurser). A switch to one of the
     // operation's resources sets it unless false is sent; false alone gives
@@ -364,7 +364,7 @@ export type UpdateMoOperationInput = z.infer<typeof updateMoOperationSchema>;
 export const createManufacturingOrderSchema = z
   .object({
     articleId: z.string().uuid().optional(),
-    quantity: z.coerce.number().positive(),
+    quantity: blankSafe(z.coerce.number().positive().max(numericMax(14, 4))),
     note: z.string().optional(),
     salesOrderRowId: z.string().uuid().optional(),
     // Planerat färdigdatum (E2 beläggning) — optional; load lands in this week.
@@ -396,7 +396,7 @@ export type UpdateManufacturingOrderInput = z.infer<typeof updateManufacturingOr
 // service. dueDate is the dialog's Planerat färdigdatum (prefilled from
 // GET /articles/:id/due-date-suggestion?salesOrderRowId=); omitted = none.
 export const createFromSalesOrderRowSchema = z.object({
-  quantity: z.coerce.number().positive().optional(),
+  quantity: blankSafe(z.coerce.number().positive().max(numericMax(14, 4))).optional(),
   dueDate: z.string().date().nullable().optional(),
 });
 export type CreateFromSalesOrderRowInput = z.infer<typeof createFromSalesOrderRowSchema>;
@@ -410,7 +410,7 @@ export const materialShortageOverrideSchema = z.boolean().optional();
 
 export const consumeMaterialSchema = z.object({
   locationId: z.string().uuid().optional(),
-  quantity: z.coerce.number().positive(),
+  quantity: blankSafe(z.coerce.number().positive().max(numericMax(14, 4))),
   allowMaterialShortage: materialShortageOverrideSchema,
 });
 export type ConsumeMaterialInput = z.infer<typeof consumeMaterialSchema>;
@@ -421,9 +421,9 @@ export type ConsumeMaterialInput = z.infer<typeof consumeMaterialSchema>;
 // allowed on purpose — it draws extra material.
 export const completeOperationSchema = z
   .object({
-    actualTime: z.coerce.number().nonnegative().optional(),
-    quantityCompleted: z.coerce.number().nonnegative().optional(),
-    quantityScrapped: z.coerce.number().nonnegative().default(0),
+    actualTime: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).optional(),
+    quantityCompleted: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).optional(),
+    quantityScrapped: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).default(0),
     scrapReason: z.string().trim().max(500).optional(),
     // Kvalitet: the Avvikelseorsak (applies_scrap) — required by the API when
     // the register has an active scrap reason; scrapReason is then the
@@ -443,7 +443,7 @@ export const completeManufacturingOrderSchema = z.object({
   // What to receive NOW, on top of any delinleverans from the last operation.
   // Omitted = what remains of the order quantity; 0 closes a short order
   // (scrap kept it from reaching the quantity) without receiving more.
-  quantity: z.coerce.number().nonnegative().optional(),
+  quantity: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).optional(),
   allowMaterialShortage: materialShortageOverrideSchema,
 });
 export type CompleteManufacturingOrderInput = z.infer<typeof completeManufacturingOrderSchema>;

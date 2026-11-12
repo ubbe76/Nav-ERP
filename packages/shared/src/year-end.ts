@@ -2,6 +2,7 @@ import { z } from "zod";
 import { currencyCodeSchema, exchangeRateValueSchema, SEK } from "./currency.js";
 import { listQuerySchema } from "./list.js";
 import { valuationMethodSchema } from "./stock.js";
+import { blankSafe } from "./coerce.js";
 
 // Årsbokslut (ekonomi etapp 2, delprojekt 3).
 
@@ -64,7 +65,7 @@ export const accrualRowInputSchema = z
     resultAccountId: z.string().uuid(),
     // At most 2 decimals: an amount that rounds to 0,00 (e.g. 0.001) would
     // otherwise reach the poster as a zero row.
-    amount: z.coerce.number().positive().max(100_000_000_000).multipleOf(0.01, "amount must have at most 2 decimals"),
+    amount: blankSafe(z.coerce.number().positive().max(100_000_000_000).multipleOf(0.01, "amount must have at most 2 decimals")),
     description: z.string().trim().min(1).max(255),
   })
   .refine((row) => row.balanceAccountId !== row.resultAccountId, {
@@ -80,7 +81,7 @@ export const reopenYearEndClosingSchema = z.object({ reason: z.string().trim().m
 
 export const profitDispositionSchema = z.object({
   agmDate: z.string().date(),
-  dividendAmount: z.coerce.number().min(0).max(100_000_000_000).default(0),
+  dividendAmount: blankSafe(z.coerce.number().min(0).max(100_000_000_000)).default(0),
 });
 export type ProfitDispositionInput = z.infer<typeof profitDispositionSchema>;
 

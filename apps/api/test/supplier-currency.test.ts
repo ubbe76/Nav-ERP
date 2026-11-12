@@ -443,6 +443,10 @@ describe("leverantörsbetalning i valuta", () => {
     const sekBase = { supplierId: sek.id, paymentDate: TODAY, bankAccountNumber: "1930", amount: 500, rows: [{ supplierInvoiceId: sekInvoice!.id, appliedAmount: 500 }] };
     expect(await reason({ ...sekBase, amountSek: 499 })).toBe("sek");
     expect(await reason({ ...sekBase, bankFeeSek: 10 })).toBe("sek");
+    // A fee the bank took with a SEK payment needs the SEK that left the
+    // account, and the two must add up (amount + fee).
+    expect(await reason({ ...sekBase, amountSek: 500, bankFeeSek: 10 })).toBe("sek");
+    expect(await reason({ ...sekBase, amountSek: 520, bankFeeSek: 10 })).toBe("sek");
 
     const paid = await payments.create({ ...sekBase, amountSek: 500, bankFeeSek: 0 }, user.id);
     expect(paid).toMatchObject({ currency: "SEK", amount: "500.00", amountSek: "500.00", bankFeeSek: "0.00", exchangeRateDifferenceSek: 0 });

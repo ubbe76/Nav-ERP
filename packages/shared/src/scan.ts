@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { blankSafe } from "./coerce.js";
 
 // Skanning (#4; spec 2026-10-29-skanning-design.md) — the pure rules every
 // scan and every barcode field shares: what a scanned string looks like once
@@ -96,8 +97,8 @@ export type LabelFormatInput = z.infer<typeof labelFormatSchema>;
 
 const labelPrintFields = {
   format: labelFormatSchema,
-  copies: z.coerce.number().int().min(1).max(100).default(1),
-  start: z.coerce.number().int().min(1).max(24).default(1),
+  copies: blankSafe(z.coerce.number().int().min(1).max(100)).default(1),
+  start: blankSafe(z.coerce.number().int().min(1).max(24)).default(1),
 };
 const MAX_LABELS = 2000;
 

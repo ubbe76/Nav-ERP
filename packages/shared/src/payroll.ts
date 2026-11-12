@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { clockTimeSchema, overtimeDispositions } from "./timereport.js";
+import { blankSafe } from "./coerce.js";
 
 export const obDayKinds = ["weekday", "saturday", "sunday", "holiday"] as const;
 export type ObDayKind = (typeof obDayKinds)[number];
@@ -50,7 +51,7 @@ export type UpdateObRuleInput = z.infer<typeof updateObRuleSchema>;
 export const createAbsenceSchema = z.object({
   absenceTypeId: z.string().uuid(),
   date: z.string().date(),
-  minutes: z.coerce.number().int().min(1).max(1440),
+  minutes: blankSafe(z.coerce.number().int().min(1).max(1440)),
   note: z.string().max(2000).optional(),
 });
 export type CreateAbsenceInput = z.infer<typeof createAbsenceSchema>;

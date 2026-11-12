@@ -69,9 +69,9 @@ const inquiryRowSchema = z
     articleId: z.string().uuid(),
     // quantity/unitPrice are entered in the chosen unit (the article's base
     // unit when unitId is omitted/null) and stored converted to the base unit.
-    quantity: z.coerce.number().positive(),
+    quantity: blankSafe(z.coerce.number().positive()),
     // Left out until the supplier has answered with a price.
-    unitPrice: z.coerce.number().nonnegative().optional(),
+    unitPrice: blankSafe(z.coerce.number().nonnegative()).optional(),
     unitId: z.string().uuid().nullable().optional(),
     // Lego (subcontract) link — at most one of the two; the service derives
     // the routing operation from the MO operation. A TO operation comes
@@ -106,8 +106,8 @@ export const updateInquiryRowSchema = z
   .object({
     // Interpreted in the row's unit (or the newly provided unitId; null
     // switches the row back to the article's base unit).
-    quantity: z.coerce.number().positive().optional(),
-    unitPrice: z.coerce.number().nonnegative().nullable().optional(),
+    quantity: blankSafe(z.coerce.number().positive()).optional(),
+    unitPrice: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
     unitId: z.string().uuid().nullable().optional(),
     // Lego rows only (the service rejects it elsewhere); null clears. The
     // operation link itself is fixed after creation, like PO rows.
@@ -207,7 +207,7 @@ export const createPurchaseOrderSchema = z.object({
   supplierId: z.string().uuid(),
   expectedDeliveryDate: z.string().date().optional(),
   note: z.string().optional(),
-  exchangeRate: z.coerce.number().positive().optional(),
+  exchangeRate: blankSafe(z.coerce.number().positive()).optional(),
   // Er referens (the supplier's contact) / Vår referens (our buyer) —
   // printed on the PO document when set.
   yourReference: z.string().max(100).optional(),
@@ -227,15 +227,15 @@ export type CreatePurchaseOrderInput = z.infer<typeof createPurchaseOrderSchema>
 // UI asks on every save; omitted means bump (external callers unchanged).
 export const createPurchaseOrderRowSchema = z.object({
   articleId: z.string().uuid(),
-  quantity: z.coerce.number().positive(),
-  unitPrice: z.coerce.number().nonnegative(),
+  quantity: blankSafe(z.coerce.number().positive()),
+  unitPrice: blankSafe(z.coerce.number().nonnegative()),
   unitId: z.string().uuid().nullable().optional(),
   bumpRevision: z.boolean().optional(),
   // Lego (subcontract) row: the MO operation this row buys. Receiving the
   // row auto-reports the operation. setupPrice (ställpris) is added ONCE to
   // the row amount: qty × unitPrice + setupPrice.
   moOperationId: z.string().uuid().nullable().optional(),
-  setupPrice: z.coerce.number().nonnegative().nullable().optional(),
+  setupPrice: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
   // Önskat leveransdatum for this row; omitted/null = the order's date.
   expectedDeliveryDate: z.string().date().nullable().optional(),
   // Bekräftat leveransdatum for this row; omitted/null = the order's.
@@ -249,13 +249,13 @@ export const updatePurchaseOrderRowSchema = z
   .object({
     // Interpreted in the row's unit (or the newly provided unitId; null
     // switches the row back to the article's base unit).
-    quantity: z.coerce.number().positive().optional(),
-    unitPrice: z.coerce.number().nonnegative().optional(),
+    quantity: blankSafe(z.coerce.number().positive()).optional(),
+    unitPrice: blankSafe(z.coerce.number().nonnegative()).optional(),
     unitId: z.string().uuid().nullable().optional(),
     bumpRevision: z.boolean().optional(),
     // Nullable so a lego row's setup price can be cleared. The operation
     // link itself (moOperationId) is set at creation and not editable here.
-    setupPrice: z.coerce.number().nonnegative().nullable().optional(),
+    setupPrice: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
     // null clears the row's own date (the row follows the order again).
     expectedDeliveryDate: z.string().date().nullable().optional(),
     confirmedDeliveryDate: businessDateSchema.nullable().optional(),
@@ -290,7 +290,7 @@ export const updatePurchaseOrderHeaderSchema = z
     confirmedDeliveryDate: businessDateSchema.nullable().optional(),
     note: z.string().nullable().optional(),
     // Not nullable — an order always has an exchange rate.
-    exchangeRate: z.coerce.number().positive().optional(),
+    exchangeRate: blankSafe(z.coerce.number().positive()).optional(),
     yourReference: z.string().max(100).nullable().optional(),
     ourReference: z.string().max(100).nullable().optional(),
     deliveryTermId: z.string().uuid().nullable().optional(),
@@ -324,8 +324,8 @@ export const createPurchaseDispatchSchema = z.object({
         rowId: z.string().uuid(),
         // At least one unit at the column's 4 decimals — a smaller positive
         // number would round to 0 and fall on the CHECK.
-        quantity: z.coerce.number().min(0.0001),
-        parcels: z.coerce.number().int().min(1).default(1),
+        quantity: blankSafe(z.coerce.number().min(0.0001)),
+        parcels: blankSafe(z.coerce.number().int().min(1)).default(1),
       })
     )
     .min(1)
@@ -359,7 +359,7 @@ export type SetPurchaseOrderStatusInput = z.infer<typeof setPurchaseOrderStatusS
 
 export const receiveGoodsSchema = z.object({
   locationId: z.string().uuid().optional(),
-  quantity: z.coerce.number().positive(),
+  quantity: blankSafe(z.coerce.number().positive()),
   // Materialbrist: a lego row's receipt reports the TO operation, which
   // draws its linked material — report anyway after a 409 material-shortage
   // in mode "warn" (see materialShortageOverrideSchema in manufacturing.ts).
@@ -378,8 +378,8 @@ const currencyField = z.string().regex(/^[A-Z]{3}$/, "3 stora bokstäver, t.ex. 
 // REPLACES the stored set (`[]` clears it), so duplicates are caught here
 // rather than by the unique constraint.
 export const supplierPriceBreakSchema = z.object({
-  fromQuantity: z.coerce.number().gt(1, "Från antal måste vara större än 1"),
-  price: z.coerce.number().nonnegative(),
+  fromQuantity: blankSafe(z.coerce.number().gt(1, "Från antal måste vara större än 1")),
+  price: blankSafe(z.coerce.number().nonnegative()),
 });
 export type SupplierPriceBreakInput = z.infer<typeof supplierPriceBreakSchema>;
 
@@ -403,9 +403,9 @@ const priceBreaksField = z
 export const createArticleSupplierSchema = z.object({
   supplierId: z.string().uuid(),
   supplierArticleNumber: z.string().max(100).optional(),
-  price: z.coerce.number().nonnegative().optional(),
+  price: blankSafe(z.coerce.number().nonnegative()).optional(),
   currency: currencyField.default("SEK"),
-  leadTimeDays: z.coerce.number().int().nonnegative().optional(),
+  leadTimeDays: blankSafe(z.coerce.number().int().nonnegative()).optional(),
   isPrimary: z.boolean().default(false),
   priceBreaks: priceBreaksField.optional(),
 });
@@ -416,9 +416,9 @@ export type CreateArticleSupplierInput = z.infer<typeof createArticleSupplierSch
 export const updateArticleSupplierSchema = z
   .object({
     supplierArticleNumber: z.string().max(100).nullable().optional(),
-    price: z.coerce.number().nonnegative().nullable().optional(),
+    price: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
     currency: currencyField.optional(),
-    leadTimeDays: z.coerce.number().int().nonnegative().nullable().optional(),
+    leadTimeDays: blankSafe(z.coerce.number().int().nonnegative()).nullable().optional(),
     isPrimary: z.boolean().optional(),
     priceBreaks: priceBreaksField.optional(),
   })
@@ -431,7 +431,7 @@ export type UpdateArticleSupplierInput = z.infer<typeof updateArticleSupplierSch
 export const supplierPriceQuoteQuerySchema = z.object({
   supplierId: z.string().uuid(),
   articleId: z.string().uuid(),
-  quantity: z.coerce.number().positive(),
+  quantity: blankSafe(z.coerce.number().positive()),
 });
 export type SupplierPriceQuoteQuery = z.infer<typeof supplierPriceQuoteQuerySchema>;
 
@@ -465,9 +465,9 @@ const supplierInvoiceRowInputSchema = z.object({
   // Optional PO row to match this line against (price/quantity deviation).
   purchaseOrderRowId: z.string().uuid().nullable().optional(),
   description: z.string().min(1).max(255),
-  quantity: z.coerce.number().positive().default(1),
+  quantity: blankSafe(z.coerce.number().positive()).default(1),
   // Signed — a credit line can be negative.
-  unitPrice: z.coerce.number(),
+  unitPrice: blankSafe(z.coerce.number()),
   // Enum-locked to the Swedish set since B5 (was free 0-100) — same
   // vatRateSchema as the sales side. Informational only since the momskoder:
   // the row's VAT is never posted (header is authoritative).
@@ -487,8 +487,8 @@ export const updateSupplierInvoiceRowSchema = z
     articleId: z.string().uuid().nullable().optional(),
     purchaseOrderRowId: z.string().uuid().nullable().optional(),
     description: z.string().min(1).max(255).optional(),
-    quantity: z.coerce.number().positive().optional(),
-    unitPrice: z.coerce.number().optional(),
+    quantity: blankSafe(z.coerce.number().positive()).optional(),
+    unitPrice: blankSafe(z.coerce.number()).optional(),
     vatRate: vatRateSchema.nullable().optional(),
     // null = back to following the invoice's code.
     vatCodeId: z.string().uuid().nullable().optional(),

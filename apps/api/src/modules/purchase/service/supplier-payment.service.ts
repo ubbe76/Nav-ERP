@@ -140,7 +140,8 @@ export class PaymentMixedCurrenciesError extends Error {
 //   sign      — the SEK amount is zero or points the other way,
 //   fee       — the fee exceeds the SEK amount,
 //   kvittning — a kvittning (amount 0) moves no SEK and has no fee,
-//   sek       — a SEK payment's SEK amount is the amount itself, without fee.
+//   sek       — a SEK payment's SEK amount is the amount itself, plus the fee
+//               the bank took with it (stated together or not at all).
 export class SupplierPaymentAmountSekError extends Error {
   constructor(
     public reason: SupplierPaymentSekReason,
@@ -151,7 +152,7 @@ export class SupplierPaymentAmountSekError extends Error {
       sign: "The SEK amount must be non-zero and point the same way as the payment amount",
       fee: "The bank fee cannot exceed the SEK amount",
       kvittning: "A kvittning moves no money — it has no SEK amount and no bank fee",
-      sek: "A SEK payment's SEK amount is the amount itself, and it has no separate bank fee",
+      sek: "A SEK payment's SEK amount is the amount itself plus the bank fee taken with it",
     };
     super(text[reason]);
     this.name = "SupplierPaymentAmountSekError";
@@ -301,7 +302,9 @@ export function createSupplierPaymentService(
         detail: {
           amount: payment.amount,
           bankAccountNumber: payment.bankAccountNumber,
-          ...(payment.currency === "SEK" ? {} : { currency: payment.currency, amountSek: payment.amountSek, bankFeeSek: payment.bankFeeSek }),
+          ...(payment.currency === "SEK" && Number(payment.bankFeeSek) === 0
+            ? {}
+            : { currency: payment.currency, amountSek: payment.amountSek, bankFeeSek: payment.bankFeeSek }),
         },
         userId: createdBy,
       });

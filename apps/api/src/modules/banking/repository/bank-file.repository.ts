@@ -181,7 +181,7 @@ export function createBankFileRepository(db: Db) {
         .select({
           entry: bankFileEntries,
           handled: outgoingHandledSql,
-          item: { id: item.id, batchId: item.batchId, endToEndId: item.endToEndId, status: item.status, amount: item.amount, currency: item.currency },
+          item: { id: item.id, batchId: item.batchId, endToEndId: item.endToEndId, status: item.status, amount: item.amount, currency: item.currency, creditorSnapshot: item.creditorSnapshot },
           // The matched row's live UTB, however it was booked (by hand, from
           // another file) — "Redan bekräftad … visas med UTB-länk" (§6.2).
           // Explicitly qualified: see the note on E above.
