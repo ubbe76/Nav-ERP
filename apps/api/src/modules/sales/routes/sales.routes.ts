@@ -31,6 +31,8 @@ import {
   updateSalesOrderHeaderSchema,
   updateSalesOrderRowSchema,
   salesOrderMarkupsPreviewSchema,
+  articleCustomerPricesSchema,
+  articlePriceListRowsSchema,
 } from "@navet/shared";
 import { z } from "zod";
 import { MailSendError, SmtpNotConfiguredError } from "../../mail/service/mail.service.js";
@@ -930,6 +932,55 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
         return reply.code(204).send();
       } catch (err) {
         if (err instanceof PriceListRowNotFoundError) return reply.code(404).send(errorBody(err));
+        throw err;
+      }
+    }
+  );
+
+  // --- Artikelkortets flik Försäljning ---
+  // One read for the whole tab: the customers with an article price or a
+  // kundens artikelnummer, every price list with the article's rows, and the
+  // customers' rules on the article's varugrupp. Read: office (the module's).
+  app.get<{ Params: { id: string } }>("/articles/:id/sales-prices", async (req, reply) => {
+    try {
+      return await service.getArticleSalesPrices(req.params.id);
+    } catch (err) {
+      if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Replaces the customer's article-level staffel and kundens artikelnummer
+  // for the article (diff on fromQuantity, one transaction). Answers the
+  // customer's entry in the GET's customers[] shape, or null when nothing is
+  // left. Write: Försäljning (the module's), like the customer card's routes.
+  app.put<{ Params: { id: string; customerId: string } }>(
+    "/articles/:id/customer-prices/:customerId",
+    async (req, reply) => {
+      const input = articleCustomerPricesSchema.parse(req.body);
+      try {
+        return await service.replaceArticleCustomerPrices(req.params.id, req.params.customerId, input, req.user!.id);
+      } catch (err) {
+        if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof CustomerNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof DuplicateCustomerPriceError) return reply.code(409).send(errorBody(err));
+        throw err;
+      }
+    }
+  );
+
+  // Replaces the article's rows in the price list; admin like the register.
+  app.put<{ Params: { id: string; priceListId: string } }>(
+    "/articles/:id/price-lists/:priceListId",
+    admin,
+    async (req, reply) => {
+      const input = articlePriceListRowsSchema.parse(req.body);
+      try {
+        return await service.replaceArticlePriceListRows(req.params.id, req.params.priceListId, input, req.user!.id);
+      } catch (err) {
+        if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof PriceListNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof DuplicatePriceListRowError) return reply.code(409).send(errorBody(err));
         throw err;
       }
     }

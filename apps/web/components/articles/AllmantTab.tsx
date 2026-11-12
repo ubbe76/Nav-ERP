@@ -41,8 +41,6 @@ export function AllmantTab({
   const [barcode, setBarcode] = useState(article.barcode ?? "");
   const [unitId, setUnitId] = useState(article.unitId);
   const [purchaseUnitId, setPurchaseUnitId] = useState(article.purchaseUnitId ?? "");
-  const [salesUnitId, setSalesUnitId] = useState(article.salesUnitId ?? "");
-  const [salesPrice, setSalesPrice] = useState(article.salesPrice ?? "");
   const [active, setActive] = useState(article.active);
   const [groupId, setGroupId] = useState(article.groupId ?? "");
   const [articleCodeId, setArticleCodeId] = useState(article.articleCodeId ?? "");
@@ -107,9 +105,7 @@ export function AllmantTab({
     barcode: barcode.trim(),
     unitId,
     purchaseUnitId: purchaseUnitId === "" ? null : purchaseUnitId,
-    salesUnitId: salesUnitId === "" ? null : salesUnitId,
     active,
-    salesPrice: salesPrice.trim() === "" ? null : Number(salesPrice),
     groupId: groupId === "" ? null : groupId,
     articleCodeId: articleCodeId === "" ? null : articleCodeId,
     weight: weight.trim() === "" ? null : Number(weight),
@@ -358,39 +354,8 @@ export function AllmantTab({
                 ))}
               </Select>
             </Field>
-            <Field label="Försäljningsenhet" htmlFor="salesUnitId">
-              <Select id="salesUnitId" value={salesUnitId} onChange={(e) => setSalesUnitId(e.target.value)}>
-                <option value="">Grundenheten ({baseUnitCode})</option>
-                {articleUnits.map((u) => (
-                  <option key={u.unitId} value={u.unitId}>
-                    {u.unitCode} · {u.unitName}
-                  </option>
-                ))}
-              </Select>
-            </Field>
           </div>
         </section>
-
-        <section className={styles.section}>
-          <SectionHeading>Försäljning</SectionHeading>
-          <div className={styles.grid}>
-            <Field label="Försäljningspris (kr)" htmlFor="salesPrice">
-              <Input
-                id="salesPrice"
-                type="number"
-                size="sm"
-                min="0"
-                step="any"
-                value={salesPrice}
-                onChange={(e) => setSalesPrice(e.target.value)}
-              />
-            </Field>
-          </div>
-          <div className={styles.historyAction}>
-            <PriceHistoryButton articleId={article.id} kind="salesPrice" />
-          </div>
-        </section>
-
 
         <section className={styles.section}>
           <SectionHeading>Vikt & mått</SectionHeading>

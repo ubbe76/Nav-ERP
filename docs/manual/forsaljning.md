@@ -187,6 +187,7 @@ Vid prissättning väljs den rad vars **Från antal** är det högsta som fortfa
 
 Utöver prislistorna kan varje kund ha egna prisregler, oberoende av vilken prislista (om någon) kunden är kopplad till. De hanteras på **kundkortets flik Priser**:
 
+- Kundens priser för en artikel kan också ändras från artikelkortets flik **Försäljning**, avsnittet **Kundpriser** (dialogen **Kundpris**, se [Fliken Försäljning](/hjalp/artiklar#fliken-forsaljning)) — det är samma uppgifter, så en ändring syns på båda ställena. Där hanteras artikelns alla staffelsteg för kunden på en gång.
 - Tabellen visar kundens registrerade regler: **Artikel/Grupp**, **Från antal**, **Pris**, **Rabatt %**, **Ställpris** (— när regeln saknar ställpris). Har kunden en annan valuta än SEK står den i kolumnrubriken, t.ex. **Pris (EUR)**.
 - **+ Ny prisregel** öppnar en dialog:
   - **Måltyp** — radioknapparna **Artikel** eller **Varugrupp** väljer om regeln gäller en enskild artikel (artikelväljaren) eller en hel varugrupp (dropdown ur varugruppsregistret).
@@ -220,6 +221,8 @@ Många kunder har egna artikelnummer för det de köper av oss. På **kundkortet
 - **Ändra** ändrar bara kundens artikelnummer; artikeln visas skrivskyddad. Är artikeln fel tar du bort raden och lägger till den på nytt.
 - **Ta bort** tar bort numret efter bekräftelse.
 - Fliken kräver samma behörighet som kundens prisregler på fliken **Priser**.
+
+Kundens artikelnummer kan också skrivas in i dialogen **Kundpris** på artikelkortets flik **Försäljning** ([Fliken Försäljning](/hjalp/artiklar#fliken-forsaljning)).
 
 Numret skrivs ut som **Ert art.nr: …** på första raden under artikelns benämning på **offert, orderbekräftelse, plocklista, följesedel och faktura**. Det hämtas alltid från kundkortets aktuella värde när dokumentet skrivs ut — men en redan utfärdad faktura behåller det nummer den hade när den utfärdades, eftersom fakturans PDF arkiveras. Kundens artikelnummer kan också läsas in med [Importera kundpriser](#importera-kundpriser).
 

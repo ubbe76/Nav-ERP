@@ -286,7 +286,12 @@ export const priceListRows = pgTable(
     unitPrice: numeric("unit_price", { precision: 14, scale: 4 }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [unique().on(table.priceListId, table.articleId, table.fromQuantity)]
+  (table) => [
+    unique().on(table.priceListId, table.articleId, table.fromQuantity),
+    // The unique index starts on the list: the article card's Försäljning tab
+    // and the FK check when an article is deleted read per article (0210).
+    index("idx_price_list_rows_article").on(table.articleId),
+  ]
 );
 
 // Customer-specific rules (chain levels 1-2): per article OR article group
@@ -322,6 +327,11 @@ export const customerPrices = pgTable(
     uniqueIndex("uq_customer_prices_group")
       .on(table.customerId, table.articleGroupId, table.fromQuantity)
       .where(sql`article_group_id IS NOT NULL`),
+    // Both unique indexes start on the customer: the article card's
+    // Försäljning tab reads per article and per article group, and so do the
+    // restrict FK checks when an article or a group is deleted (0210).
+    index("idx_customer_prices_article").on(table.articleId).where(sql`article_id IS NOT NULL`),
+    index("idx_customer_prices_article_group").on(table.articleGroupId).where(sql`article_group_id IS NOT NULL`),
   ]
 );
 

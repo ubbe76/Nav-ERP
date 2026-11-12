@@ -17,6 +17,7 @@ import type { ArticleType } from "../../lib/types";
 import { AllmantTab } from "./AllmantTab";
 import { BeredningTab } from "./BeredningTab";
 import { InkopTab } from "./InkopTab";
+import { ForsaljningTab } from "./ForsaljningTab";
 import { LagerTab } from "./LagerTab";
 import { KalkylTab } from "./KalkylTab";
 import { KonfiguratorTab } from "./KonfiguratorTab";
@@ -25,7 +26,7 @@ import { RevisionerTab } from "./RevisionerTab";
 import { PluginTabContent, pluginTabId, usePluginTabs } from "../plugins/PluginTabs";
 import styles from "./ArticleTabs.module.css";
 
-type Tab = "Allmänt" | "Konfigurator" | "Beredning" | "Inköp" | "Lager" | "Kalkyl" | "Revisioner" | "Filer";
+type Tab = "Allmänt" | "Konfigurator" | "Beredning" | "Inköp" | "Försäljning" | "Lager" | "Kalkyl" | "Revisioner" | "Filer";
 
 // Monitor-style: the flikar depend on the article type. Beredning (BOM + rutt)
 // is only relevant for a manufactured article; a purchased article gets an
@@ -34,11 +35,11 @@ type Tab = "Allmänt" | "Konfigurator" | "Beredning" | "Inköp" | "Lager" | "Kal
 function tabsForType(type: ArticleType): Tab[] {
   switch (type) {
     case "manufactured":
-      return ["Allmänt", "Konfigurator", "Beredning", "Lager", "Kalkyl", "Revisioner", "Filer"];
+      return ["Allmänt", "Konfigurator", "Beredning", "Försäljning", "Lager", "Kalkyl", "Revisioner", "Filer"];
     case "purchased":
-      return ["Allmänt", "Inköp", "Lager", "Kalkyl", "Revisioner", "Filer"];
+      return ["Allmänt", "Inköp", "Försäljning", "Lager", "Kalkyl", "Revisioner", "Filer"];
     case "service":
-      return ["Allmänt", "Inköp", "Kalkyl", "Revisioner", "Filer"];
+      return ["Allmänt", "Inköp", "Försäljning", "Kalkyl", "Revisioner", "Filer"];
   }
 }
 
@@ -67,17 +68,18 @@ export function ArticleTabs({
 }: ArticleTabsProps) {
   const tabs = tabsForType(article.type);
   const [activeTab, setActiveTabState] = useState<string>("Allmänt");
-  // Allmänt and Lager stay mounted (hidden) once opened, so a half-typed form
+  // Allmänt, Försäljning and Lager stay mounted (hidden) once opened, so a half-typed form
   // survives a tab switch — before, switching to Lager dropped Allmänt's
   // changes without a word (webbgranskningen 2026-11-11, same as the partner
-  // card). Allmänt reports unsaved changes; leaving the page asks first.
+  // card). Allmänt and Försäljning report unsaved changes; leaving the page asks first.
   const [openedTabs, setOpenedTabs] = useState<Set<string>>(() => new Set(["Allmänt"]));
   const setActiveTab = (tab: string) => {
     setActiveTabState(tab);
     setOpenedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
   };
   const [allmantDirty, setAllmantDirty] = useState(false);
-  useUnsavedGuard(allmantDirty);
+  const [forsaljningDirty, setForsaljningDirty] = useState(false);
+  useUnsavedGuard(allmantDirty || forsaljningDirty);
   // Tillägg add their own tabs last.
   const pluginTabs = usePluginTabs("article");
   const activePluginTab = pluginTabs.find((t) => pluginTabId(t) === activeTab);
@@ -127,6 +129,11 @@ export function ArticleTabs({
         />
       )}
       {activeTab === "Inköp" && tabs.includes("Inköp") && <InkopTab articleId={article.id} />}
+      {openedTabs.has("Försäljning") && (
+        <div hidden={activeTab !== "Försäljning"}>
+          <ForsaljningTab article={article} onDirtyChange={setForsaljningDirty} />
+        </div>
+      )}
       {openedTabs.has("Lager") && tabs.includes("Lager") && (
         <div hidden={activeTab !== "Lager"}>
           <LagerTab article={article} balances={balances} articleLocations={articleLocations} />

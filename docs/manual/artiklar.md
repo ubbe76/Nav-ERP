@@ -79,9 +79,9 @@ Klicka på ett artikelnummer i registret för att öppna artikelkortet, som är 
 
 Vilka flikar som visas beror på artikelns **typ**:
 
-- **Tillverkad**: Allmänt, Konfigurator, Beredning, Lager, Kalkyl, Revisioner och Filer.
-- **Köpt**: Allmänt, Inköp, Lager, Kalkyl, Revisioner och Filer — fliken **Inköp** ersätter Beredning, som bara gäller tillverkade artiklar.
-- **Tjänst**: Allmänt, Inköp, Kalkyl, Revisioner och Filer — tjänster lagerhålls inte och saknar därför både Lager och Beredning.
+- **Tillverkad**: Allmänt, Konfigurator, Beredning, Försäljning, Lager, Kalkyl, Revisioner och Filer.
+- **Köpt**: Allmänt, Inköp, Försäljning, Lager, Kalkyl, Revisioner och Filer — fliken **Inköp** ersätter Beredning, som bara gäller tillverkade artiklar.
+- **Tjänst**: Allmänt, Inköp, Försäljning, Kalkyl, Revisioner och Filer — tjänster lagerhålls inte och saknar därför både Lager och Beredning. Fliken [Försäljning](#fliken-forsaljning) finns på alla tre typerna.
 
 Längst upp på kortet finns ett artikelhuvud som ligger kvar oavsett vilken flik du är på, med fyra fält:
 
@@ -97,17 +97,16 @@ Benämning, artikeltyp och fantom-/aktivflaggan ändras på fliken [Allmänt](#a
 Grunduppgifterna är grupperade i sektioner:
 
 - **Identitet** — artikelnummer, typ, benämning, **Extra benämning** (flerradig fritext, max 2 000 tecken), **Varugrupp**, den skrivskyddade **Momssats** som följer varugruppen, **Artikelkod**, fantomflagga, **Ytbehandling** och **Färg** (fria textfält, max 200 tecken), **Streckkod (EAN)** och aktiv/inaktiv. Streckkoden är tillverkarens kod på förpackningen (EAN/GTIN, 8, 12, 13 eller 14 siffror med rätt kontrollsiffra) och gör att varan hittas när den skannas, se [Skanna](/hjalp/lager#skanna). Samma kod kan bara finnas på en artikel. En kod jämförs som GTIN: en UPC-A-kod med 12 siffror och samma kod som EAN-13 med en inledande nolla (och som GTIN-14 med nollor framför) är samma kod — vid skanning hittas artikeln i vilken form koden än läses, och en annan artikel kan inte få samma kod i en annan form. Koden sparas som du skriver den. Fältet kan också fyllas i med artikelimportens kolumn **EAN**.
-- **Enheter** — grundenhet, inköpsenhet och försäljningsenhet.
-- **Försäljning** — **Försäljningspris (kr)**, artikelns grundpris vid försäljning (kr per grundenhet). Grundpriset är sista steget i kundprisernas priskedjan (kundens egen prisregel → kundens prislista → grundpriset) och förifyller à-priset på offert-/kundorderrader när inget mer specifikt pris finns — se [Kundpriser](/hjalp/forsaljning#kundpriser) i Försäljning.
+- **Enheter** — grundenhet och inköpsenhet. Försäljningsenheten ställs in på fliken [Försäljning](#fliken-forsaljning).
 - **Vikt & mått** — **Vikt (kg)** och måtten **Längd**, **Bredd** och **Höjd** i millimeter (nettovikt och yttermått, för volym och transport).
 - **Förpackning** — **Antal per kolli** (i artikelns grundenhet, t.ex. 48 st per pall) och **Kollityp** som väljs ur kollityp-registret under [Grunddata](/hjalp/grunddata) (t.ex. EUR-pall). Används för kolliförslaget vid transportbokning (se punkten **Frakt** nedan).
 - **Frakt** — styr hur artikeln blir kollin på en [försändelse](/hjalp/forsaljning#frakt). Fraktsättet härleds och visas som text överst i sektionen: **Förpackning** när både kollityp och **Antal per kolli** är ifyllda, annars **Egna mått** när artikelns mått finns, annars **Inget fraktsätt** (vikten hamnar då på en rad av typen Övrigt). Fälten är **Kolliart (egna mått)** (Paket eller Pall), **Pallplatser** (ger **Flakmeter** = pallplatser × 0,4 när Flakmeter är tomt), **Flakmeter** och **Stapelbar**.
 - **Kalkyl** — standardkostnad.
 - **Alternativa enheter** — extra enheter med omräkningsfaktor (se nedan).
 
-**Historik** under **Försäljningspris (kr)** och bredvid **Spara standardkostnad** visar hur priset har ändrats: en rad per ändring med **Från och med** (datum och tid) och värdet, nyast först. Alla ändringar kommer med, oavsett om de gjordes på kortet, med **Sätt standardpris**/**Sätt försäljningspris** från en kalkyl, med massändring eller med import. Ett rensat försäljningspris visas som **inget pris**. Historiken för försäljningspriset börjar när funktionen infördes; standardkostnadens har förts sedan lagervärderingen per datum infördes. Tidigare värden är okända.
+**Historik** under **Försäljningspris (kr)** på fliken [Försäljning](#fliken-forsaljning) och bredvid **Spara standardkostnad** visar hur priset har ändrats: en rad per ändring med **Från och med** (datum och tid) och värdet, nyast först. Alla ändringar kommer med, oavsett om de gjordes på kortet, med **Sätt standardpris**/**Sätt försäljningspris** från en kalkyl, med massändring eller med import. Ett rensat försäljningspris visas som **inget pris**. Historiken för försäljningspriset börjar när funktionen infördes; standardkostnadens har förts sedan lagervärderingen per datum infördes. Tidigare värden är okända.
 
-Identitet, Enheter, Försäljning, Vikt & mått, Förpackning och Frakt sparas tillsammans med knappen **Spara**. Kalkyl och Alternativa enheter är egna block med egna knappar — en linje skiljer blocken åt, och varje knapp sparar blocket ovanför sig. **Spara** skickar bara de fält du har ändrat, så ett försäljningspris som satts från Kalkyl under tiden skrivs inte tillbaka. Osparade ändringar visas med *Osparade ändringar* vid knappen, finns kvar om du byter flik till Lager och tillbaka, och lämnar du kortet — även via artikelväljaren i huvudet — frågar Nav först. Byter du **Grundenhet** utan att spara räknas alternativa enheter fortfarande mot den sparade grundenheten; spara först.
+Identitet, Enheter, Vikt & mått, Förpackning och Frakt sparas tillsammans med knappen **Spara**. Kalkyl och Alternativa enheter är egna block med egna knappar — en linje skiljer blocken åt, och varje knapp sparar blocket ovanför sig. **Spara** skickar bara de fält du har ändrat, så ett värde som ändrats på annat håll under tiden skrivs inte tillbaka. Osparade ändringar visas med *Osparade ändringar* vid knappen, finns kvar om du byter flik till Lager och tillbaka, och lämnar du kortet — även via artikelväljaren i huvudet — frågar Nav först. Byter du **Grundenhet** utan att spara räknas alternativa enheter fortfarande mot den sparade grundenheten; spara först.
 
 **Momssats** (25/12/6/0 %) är artikelns momssats vid försäljning — fakturarader ärver den som förval. Den kan inte ändras på artikeln utan följer **Varugrupp**: gruppens momssats, eller 25 % för en artikel utan varugrupp. Se [Varugrupper](#varugrupper).
 
@@ -127,13 +126,31 @@ En artikel har alltid en **grundenhet** — allt lagersaldo och alla lagrade ant
 2. Ange faktorn i fältet **1 {grundenhet} =** — t.ex. väger en st-artikel 5 kg per styck anges `5` på kg-raden. Den omvända riktningen visas direkt som hjälptext (`1 kg = 0,2 st`).
 3. Klicka **Lägg till**. Faktorn kan ändras i efterhand (**Spara** visas när den ändrats) och raden tas bort med **Ta bort**.
 
-Fälten **Inköpsenhet** och **Försäljningsenhet** väljer vilken enhet som förifylls på inköps- respektive kundorderrader för artikeln — grundenheten eller en av de alternativa enheterna. Enheten går alltid att byta per orderrad, med automatisk omräkning av antal och à-pris (se [Inköp](/hjalp/inkop) och [Försäljning](/hjalp/forsaljning)).
+Fälten **Inköpsenhet** (på fliken Allmänt) och **Försäljningsenhet** (på fliken [Försäljning](#fliken-forsaljning)) väljer vilken enhet som förifylls på inköps- respektive kundorderrader för artikeln — grundenheten eller en av de alternativa enheterna. Enheten går alltid att byta per orderrad, med automatisk omräkning av antal och à-pris (se [Inköp](/hjalp/inkop) och [Försäljning](/hjalp/forsaljning)).
 
 Regler:
 
 - **Grundenheten är låst** så länge artikeln har alternativa enheter — faktorernas betydelse skulle annars ändras i tysthet. Ta bort de alternativa enheterna först om grundenheten måste bytas.
 - En alternativ enhet som är vald som inköps- eller försäljningsenhet kan inte tas bort förrän valet ändrats.
 - Befintliga orderrader påverkas inte av senare faktorändringar — radens faktor låses när raden skrivs.
+
+### Fliken Försäljning
+
+Fliken **Försäljning** samlar allt som styr hur artikeln prissätts vid försäljning. Den finns på alla artikeltyper, står före **Lager** och har fyra avsnitt. Fliken hämtar sina uppgifter när du öppnar den, laddas om efter varje sparning och finns kvar (med eventuella osparade ändringar) när du byter flik; lämnar du kortet med osparade ändringar frågar Nav först.
+
+**Försäljning** — **Försäljningsenhet** (enheten som förifylls på offert- och kundorderrader: grundenheten eller en alternativ enhet, se [Enheter](#enheter)) och **Försäljningspris (kr)**, artikelns grundpris vid försäljning (kr per grundenhet). Grundpriset är sista steget i priskedjan (kundens egen prisregel → kundens gruppregel → kundens prislista → grundpriset) och förifyller à-priset på offert-/kundorderrader när inget mer specifikt pris finns — se [Kundpriser](/hjalp/forsaljning#kundpriser) i Försäljning. **Historik** under priset visar hur det har ändrats. **Spara** skickar bara de fält du har ändrat, så ett pris som satts från Kalkyl med **Sätt försäljningspris** skrivs inte tillbaka med ett gammalt värde; efter en sådan ändring visar fältet det nya priset så länge du inte själv har ändrat det. Fälten och **Spara** kräver behörigheten **Artiklar**.
+
+**Kundpriser** — en rad per kund som har egna priser eller ett eget artikelnummer för artikeln, med kolumnerna **Kund** (länk till kundkortet när du får öppna det), **Kundens art.nr**, **Från antal**, **Pris**, **Rabatt %** och **Ställpris**. Har kunden staffel står varje steg på en egen rad i cellerna; priser i annan valuta än SEK får valutan efter beloppet. **+ Ny kund** och **Ändra** öppnar dialogen **Kundpris**:
+
+- **Kund** — den sökbara väljaren (bara vid ny kund). Väljer du en kund som redan finns i listan laddas dess värden, så du ändrar dem i stället för att skapa dubbletter.
+- **Kundens artikelnummer** — valfritt, det kunden själv kallar artikeln.
+- Staffeltabellen **Från antal | Pris | Rabatt % | Ställpris** med **+ Lägg till staffelsteg** och **✕** per rad. Varje rad ska ha antingen **Pris** eller **Rabatt %** (inte båda), och **Från antal** får inte upprepas.
+
+Priserna gäller per grundenhet i kundens valuta och bara på order i kundens valuta. **Spara** ersätter allt som kunden har för artikeln; **Ta bort** tar bort kundens alla priser och kundens artikelnummer för artikeln efter en bekräftelse. Ändringarna syns direkt på kundkortets flikar **Priser** och **Kundens artikelnummer** — det är samma uppgifter. Knapparna kräver behörigheten **Försäljning**.
+
+**Prislistor** — en rad per prislista som innehåller artikeln: **Prislista** (kod och namn), **Valuta**, **Från antal** och **Pris** (staffeln i cellerna). Avsnittet visas bara när det finns prislistor. Administratörer kan **Ändra** och **Ta bort** raden samt lägga till artikeln i en lista med **+ Lägg till i prislista** (visas när det finns listor som saknar artikeln). Dialogen **Prislistepris** har **Prislista** (låst vid **Ändra**) och staffeltabellen **Från antal | Pris**.
+
+**Kundregler för varugruppen {kod} {namn}** — bara visning: de kunder som har en prisregel på artikelns varugrupp, med samma kolumner som Kundpriser (utan artikelnummer). Har kunden även egna artikelpriser står notisen *Kunden har egna artikelpriser, de går före gruppregeln från sina antal.* Gruppreglerna ändras på kundkortets flik **Priser**. Avsnittet visas inte när artikeln saknar varugrupp eller ingen kund har en regel på den.
 
 ### Konfigurator
 
@@ -144,7 +161,7 @@ Har artikeln ingen mall visas en förklaring och knappen **Gör konfigurerbar**.
 - **Variantartiklar** — varje kombination av val blir en egen, lagerförd artikel (se [Varianter](#varianter)). Kräver en tillverkad artikel (*Variantartiklar kräver en tillverkad artikel*) som inte är fantom.
 - **Beställningsvara** — artikeln ligger kvar som den är och säljs med valen på orderraden: säljaren konfigurerar den i dialogen **Konfigurera** på offert/kundorder, raden får valen, etiketterna och prisuppdelningen sparade, och samma mall kan ligga flera gånger på en order med olika val (se [Försäljning](/hjalp/forsaljning#kundorder)). Raden kan tillverkas: **Skapa TO** på kundorderraden, **+ Ny tillverkningsorder** (med **Konfigurera**) och [behovsberäkningens](/hjalp/tillverkning#konfigurerade-kundorderrader) sektion **Konfigurerade kundorderrader** tar valen med sig och tillverkningsordern visar **Lagervärde vid inleverans** ur förkalkylen — se [Tillverkningsorder för beställningsvara](/hjalp/tillverkning#tillverkningsorder-for-bestallningsvara). Inköp av mallen förblir spärrat: den visas inte i artikelväljaren på inköpsorder och förfrågan. Kräver en tillverkad artikel; fliken Konfigurator finns därför bara på tillverkade artiklar.
 
-En fantomartikel kan aldrig vara mall, och ett typbyte på en mallartikel som skulle bryta läget vägras. Läget ändras med **Ändra** och mallen tas bort med **Ta bort konfigurator** (valgrupper och regler försvinner, artikeln blir en vanlig artikel). **Grundpris** är artikelns försäljningspris i blocket Försäljning på fliken [Allmänt](#allmant); saknas det visas varningen *Grundpris saknas — ange försäljningspris på artikeln*.
+En fantomartikel kan aldrig vara mall, och ett typbyte på en mallartikel som skulle bryta läget vägras. Läget ändras med **Ändra** och mallen tas bort med **Ta bort konfigurator** (valgrupper och regler försvinner, artikeln blir en vanlig artikel). **Grundpris** är artikelns försäljningspris i avsnittet Försäljning på fliken [Försäljning](#fliken-forsaljning); saknas det visas varningen *Grundpris saknas — ange försäljningspris på artikeln*.
 
 Kryssrutan **Visa i API** (hjälptext: *Mallen syns för externa system via API:t (System → Integrationer)*) publicerar mallen för externa system — sparas direkt; mallens rad **Läge** får då etiketten **API**. Bara publicerade mallar på aktiva artiklar syns för API-klienter; se [Konfigurator-API](/hjalp/system#konfigurator-api).
 

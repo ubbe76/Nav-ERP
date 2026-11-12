@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, asc, count, desc, eq, exists, getTableColumns, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { customerArticleNumberMap } from "./customer-article-numbers.js";
+import { readArticleSalesPrices, replaceArticleCustomerPrices, replaceArticlePriceListRows } from "./article-sales-prices.js";
 import {
   articleGroups,
   articles,
@@ -40,6 +41,8 @@ import {
 import {
   ilikePattern,
   salesDocumentKind,
+  type ArticleCustomerPricesInput,
+  type ArticlePriceListRowsInput,
   type CreateContactInput,
   type CreateCustomerInput,
   type CreateDeliveryAddressInput,
@@ -2608,6 +2611,19 @@ export function createSalesRepository(db: Db) {
         .where(and(eq(customerPrices.id, priceId), eq(customerPrices.customerId, customerId)))
         .returning();
       return result.length > 0;
+    },
+
+    // --- Artikelkortets flik Försäljning (article-sales-prices.ts) ---
+    async articleSalesPrices(articleId: string) {
+      return readArticleSalesPrices(db, articleId);
+    },
+
+    async replaceArticleCustomerPrices(articleId: string, customerId: string, input: ArticleCustomerPricesInput) {
+      return replaceArticleCustomerPrices(db, articleId, customerId, input);
+    },
+
+    async replaceArticlePriceListRows(articleId: string, priceListId: string, input: ArticlePriceListRowsInput) {
+      return replaceArticlePriceListRows(db, articleId, priceListId, input);
     },
   };
 }

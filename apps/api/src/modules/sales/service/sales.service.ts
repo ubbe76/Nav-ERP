@@ -1,4 +1,6 @@
 import type {
+  ArticleCustomerPricesInput,
+  ArticlePriceListRowsInput,
   ConfiguratorSelection,
   CreateContactInput,
   CreateCustomerInput,
@@ -92,6 +94,7 @@ import {
   type DocumentSettingsReader,
 } from "../../mail/service/document-pdf.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
+import { StaffelConflict } from "../repository/article-sales-prices.js";
 // Konfigurator 4b: the configurator's pure pieces only — the stored-entries
 // → selection mapper (variant-identity.ts has no DB imports) and the error
 // class the row evaluation shares with Konfigurera (4a). The service itself
@@ -2836,6 +2839,114 @@ export function createSalesService(
         detail: { customerId, articleId: row.articleId, customerArticleNumber: row.customerArticleNumber },
         userId: userId ?? null,
       });
+    },
+
+    // --- Artikelkortets flik Försäljning ---
+    // The same rows as the customer card's Priser/Kundens artikelnummer and
+    // the price list register, read and replaced per article. The diff, the
+    // pair's advisory lock and the transaction live in
+    // repository/article-sales-prices.ts; the audit entries below have the
+    // customer card's and the register's detail shapes, one per changed row.
+
+    async getArticleSalesPrices(articleId: string) {
+      const result = await repo.articleSalesPrices(articleId);
+      if (!result) throw new ArticleNotFoundError(articleId);
+      return result;
+    },
+
+    async replaceArticleCustomerPrices(
+      articleId: string,
+      customerId: string,
+      input: ArticleCustomerPricesInput,
+      userId?: string | null
+    ) {
+      let result;
+      try {
+        result = await repo.replaceArticleCustomerPrices(articleId, customerId, input);
+      } catch (err) {
+        if (err instanceof StaffelConflict) throw new DuplicateCustomerPriceError(err.fromQuantity);
+        throw err;
+      }
+      if (!result.ok) {
+        if (result.reason === "article_not_found") throw new ArticleNotFoundError(articleId);
+        throw new CustomerNotFoundError(customerId);
+      }
+      // setupPrice is in before/after here (the customer card's entry lacks
+      // it): a save that only changes the ställpris would otherwise log two
+      // identical halves.
+      const values = (row: { fromQuantity: string; unitPrice: string | null; discountPercent: string | null }) => ({
+        fromQuantity: row.fromQuantity,
+        unitPrice: row.unitPrice,
+        discountPercent: row.discountPercent,
+      });
+      for (const change of result.priceChanges) {
+        await audit.log({
+          entityType: "customer_price",
+          entityId: change.row.id,
+          action: change.kind,
+          detail:
+            change.kind === "created"
+              ? { customerId, articleId, articleGroupId: null, ...values(change.row) }
+              : change.kind === "updated"
+                ? {
+                    before: { ...values(change.before), setupPrice: change.before.setupPrice },
+                    after: { ...values(change.row), setupPrice: change.row.setupPrice },
+                  }
+                : values(change.row),
+          userId: userId ?? null,
+        });
+      }
+      const number = result.numberChange;
+      if (number) {
+        await audit.log({
+          entityType: "customer_article_number",
+          entityId: number.id,
+          action: number.kind,
+          detail:
+            number.kind === "updated"
+              ? { before: number.before, after: number.after }
+              : { customerId, articleId, customerArticleNumber: number.kind === "created" ? number.after : number.before },
+          userId: userId ?? null,
+        });
+      }
+      return result.entry;
+    },
+
+    async replaceArticlePriceListRows(
+      articleId: string,
+      priceListId: string,
+      input: ArticlePriceListRowsInput,
+      userId?: string | null
+    ) {
+      let result;
+      try {
+        result = await repo.replaceArticlePriceListRows(articleId, priceListId, input);
+      } catch (err) {
+        if (err instanceof StaffelConflict) throw new DuplicatePriceListRowError(err.fromQuantity);
+        throw err;
+      }
+      if (!result.ok) {
+        if (result.reason === "article_not_found") throw new ArticleNotFoundError(articleId);
+        throw new PriceListNotFoundError(priceListId);
+      }
+      const { articleNumber } = result;
+      const values = (row: { fromQuantity: string; unitPrice: string }) => ({
+        fromQuantity: row.fromQuantity,
+        unitPrice: row.unitPrice,
+      });
+      for (const change of result.changes) {
+        await audit.log({
+          entityType: "price_list",
+          entityId: result.entry.code,
+          action: change.kind === "created" ? "row_added" : change.kind === "updated" ? "row_updated" : "row_deleted",
+          detail:
+            change.kind === "updated"
+              ? { articleNumber, before: values(change.before), after: values(change.row) }
+              : { articleNumber, ...values(change.row) },
+          userId: userId ?? null,
+        });
+      }
+      return result.entry;
     },
 
     // Exposes the price chain directly — GET /price-quote, used both for

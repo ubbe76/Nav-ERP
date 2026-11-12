@@ -4,7 +4,8 @@ import { vatRateSchema } from "./vat.js";
 import { listQuerySchema, orderStatusListParam, statusListParam } from "./list.js";
 import { configuratorSelectionSchema, orderRowConfigurationInputSchema } from "./configurator.js";
 
-import { blankSafe } from "./coerce.js";
+import { blankSafe, numericMax } from "./coerce.js";
+import { round4 } from "./money.js";
 import { businessDateSchema } from "./business-date.js";
 import { partnerDeliveryFields } from "./delivery.js";
 import { palletCardCodeSchema } from "./system.js";
@@ -829,6 +830,54 @@ export const updateCustomerArticleNumberSchema = z.object({
   customerArticleNumber: z.string().trim().min(1).max(50),
 });
 export type UpdateCustomerArticleNumberInput = z.infer<typeof updateCustomerArticleNumberSchema>;
+
+// --- Artikelkortets flik Försäljning ---
+// PUT /articles/:id/customer-prices/:customerId and
+// PUT /articles/:id/price-lists/:priceListId replace the whole staffel for
+// one (customer | price list, article) pair; the server diffs on
+// fromQuantity, the unique key. The quantity is compared in the column's
+// four decimals (1 and 1.00001 are the same step), and the smallest step is
+// the smallest the column can hold — 0.00004 would be stored as 0.
+const STAFFEL_MAX_ROWS = 50;
+const staffelQuantitySchema = blankSafe(z.coerce.number().min(0.0001).max(numericMax(14, 4)));
+const staffelPriceSchema = blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4)));
+const uniqueFromQuantities = (rows: { fromQuantity: number }[]) =>
+  new Set(rows.map((row) => round4(row.fromQuantity))).size === rows.length;
+const UNIQUE_FROM_QUANTITY_MESSAGE = "Each fromQuantity may only occur once";
+
+export const articleCustomerPricesSchema = z.object({
+  // Kundens artikelnummer; null or blank = none.
+  customerArticleNumber: z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? null : value),
+    z.string().trim().min(1).max(50).nullable()
+  ),
+  prices: z
+    .array(
+      z
+        .object({
+          fromQuantity: staffelQuantitySchema,
+          unitPrice: staffelPriceSchema.nullable().optional(),
+          discountPercent: blankSafe(z.coerce.number().min(0).max(100)).nullable().optional(),
+          // Ställpris; null/0 = none.
+          setupPrice: staffelPriceSchema.nullable().optional(),
+        })
+        .refine((data) => (data.unitPrice != null) !== (data.discountPercent != null), {
+          message: "Exactly one of unitPrice and discountPercent must be set",
+          path: ["unitPrice"],
+        })
+    )
+    .max(STAFFEL_MAX_ROWS)
+    .refine(uniqueFromQuantities, UNIQUE_FROM_QUANTITY_MESSAGE),
+});
+export type ArticleCustomerPricesInput = z.infer<typeof articleCustomerPricesSchema>;
+
+export const articlePriceListRowsSchema = z.object({
+  rows: z
+    .array(z.object({ fromQuantity: staffelQuantitySchema, unitPrice: staffelPriceSchema }))
+    .max(STAFFEL_MAX_ROWS)
+    .refine(uniqueFromQuantities, UNIQUE_FROM_QUANTITY_MESSAGE),
+});
+export type ArticlePriceListRowsInput = z.infer<typeof articlePriceListRowsSchema>;
 
 // Valuta: the price in a currency — salesOrderId takes the order's currency
 // and rate (and wins); else currency (default the customer's) and

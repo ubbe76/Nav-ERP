@@ -114,6 +114,12 @@ Spec `docs/superpowers/specs/2026-10-24-kostnadsstallen-budget-ranta-design.md` 
 
 - `customer_article_numbers` (unik per kund + artikel, cascade från båda) redigeras på kundkortets flik **Kundens artikelnummer** (`/customers/:id/article-numbers`, samma behörighet som kundpriserna, 409 `duplicate-customer-article-number`). Läses **live** vid utskrift genom EN uppslagning, lövet `sales/repository/customer-article-numbers.ts` (`customerArticleNumberMap`, `Db | Tx`), som både sales- och invoice-repositoryt använder: "Ert art.nr: X" som första infotext på offert, orderbekräftelse, plocklista, följesedel och faktura (fakturan arkiveras vid utfärdandet och behåller det den hade då).
 
+## Kundpriser och prislisterader från artikelkortet (migration 0210)
+
+- Kundens artikelpriser (`/customers/:id/prices`), kundens artikelnummer (`/customers/:id/article-numbers`) och prislisteraderna (`/price-lists/:id/rows`) har en andra skrivväg per **artikel**, för artikelkortets flik Försäljning: `GET /articles/:id/sales-prices`, `PUT /articles/:id/customer-prices/:customerId` (Försäljning) och `PUT /articles/:id/price-lists/:priceListId` (admin). Samma rader, samma audit-former, samma felkoder (`duplicate-customer-price`, `duplicate-price-list-row`, `customer-not-found`, `article-not-found`, `price-list-not-found`). Koden bor i lövet `sales/repository/article-sales-prices.ts`; diffen på `fromQuantity`, parets advisory-lås och undantaget i `permissions-coverage.test.ts` står i `article.md` (*Fliken Försäljning*).
+- **Kundkortets vägar tar inte parets lås.** En ny skrivare av `customer_prices` (artikelnivå), `customer_article_numbers` eller `price_list_rows` som läser-och-skriver flera rader för ett par ska ta `lockArticleSalesPair` först i sin transaktion; enstaka rad-POST/PATCH/DELETE klarar sig på det unika indexet och radlåsen. PUT:en rör aldrig kundens **gruppregler** (`article_group_id`) — de ändras bara på kundkortet.
+- Test: `article-sales-prices.test.ts`.
+
 ## Ställpris som egen orderrad (migration 0161)
 
 - `customer_prices.setup_price` (CHECK ≥ 0) ger via `resolvePrice` `price.setupPrice` från den matchade kundregeln (artikel- eller grupp-regel, samma valuta som priset — kundregler gäller bara i kundens valuta). Inställningen **Ställkostnadsartikel** (`setup_charge_article_id`, okänd artikel ⇒ 400 `setup-charge-article-not-found`; tom = av).
