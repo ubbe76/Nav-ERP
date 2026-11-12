@@ -3,6 +3,7 @@
 import { useScrapReasons } from "../../lib/useScrapReasons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useCanOpen } from "../PermissionsProvider";
 import { Wordmark } from "../ui/Wordmark";
 import { FileText } from "lucide-react";
 import { API_URL, ApiError, apiFetch } from "../../lib/api";
@@ -1852,6 +1853,7 @@ function OperationListView({
   onStart: (timeKind?: TimeKind) => void;
   onBack: () => void;
 }) {
+  const canOpenPage = useCanOpen();
   const today = stockholmToday();
   const readinessStatus: Record<TerminalOperation["readiness"], Status> = {
     ready: "done",
@@ -1872,6 +1874,17 @@ function OperationListView({
           disabled={busy}
           onApply={onStationIds}
         />
+        {/* Körplan of the chosen station (one station only), in a new tab. */}
+        {stationIds.length === 1 && canOpenPage("/tillverkning/korplan") && (
+          <a
+            href={`/tillverkning/korplan?resurs=${encodeURIComponent(stationIds[0]!)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={styles.stationButton}
+          >
+            Körplan
+          </a>
+        )}
         <label className={styles.filterGroup}>
           <span className={styles.filterLabel}>Material</span>
           <select className={styles.select} value={materialId} disabled={busy} onChange={(e) => onMaterialId(e.target.value)}>

@@ -8,7 +8,7 @@ Menyvalet **Tillverkning** öppnar modulens sida, där alla tillverkningsfunktio
 
 - **Ordrar** — **Tillverkningsordrar**.
 - **Verkstad** — **Stämpelterminal**, **Pågående arbete** och **Tidrapporter**.
-- **Planering** — **Behovsberäkning**, **Beläggning** och **Scheman**.
+- **Planering** — **Behovsberäkning**, **Beläggning**, **Körplan** och **Scheman**.
 - **Resurser** — **Resurser** och **Produktionsgrupper**.
 
 Personal och lön har en egen meny, **Personal & lön** (se kapitlet [Personal & lön](/hjalp/lon)). Nyckeltal för pågående tillverkning finns på **Översikt**, startsidan.
@@ -591,6 +591,35 @@ Ovanför matrisen står **Senast planerad** (tidpunkten för senaste **Planera**
 [Leveranstidskontrollen](/hjalp/forsaljning#leveranstidskontroll) i Försäljning använder samma beläggning och samma planeringsregel: den lägger en ny orders operationer på resursernas lediga tid per vecka, det vill säga tillgänglig tid minus lasten som visas här — inklusive de planerade veckorna.
 
 Observera att en grupps **Summa**-procent bara ställs mot de medlemmar som har kapacitet (veckoschema eller timmar per dag) — lasten summeras över alla medlemmar, så procenttalet kan överdrivas när någon resurs i gruppen saknar kapacitet.
+
+## Körplan
+
+**Tillverkning → Körplan** visar de kommande arbetena på en resurs, vecka för vecka — det som körs på maskinen eller arbetsplatsen härnäst. Sidan går att skriva ut som underlag till verkstaden.
+
+Välj **Resurs** (produktionsresurserna; legoresurser finns inte med eftersom de inte körs hos er) och **T.o.m. vecka**. Förvalet för **T.o.m. vecka** är nästa vecka; listan tar med allt som ligger till och med den veckan. Utan vald resurs står *Välj en resurs*, och finns inget att köra står *Inga kommande arbeten på resursen t.o.m. vecka N*.
+
+### Vad som tas med
+
+- Väntande operationer i tillverkningsordrar som är **Frisläppt**, **Pågår** eller **Planerad**. Klara och stängda ordrar, makulerade ordrar, klara operationer och legooperationer tas inte med.
+- Ordningen är den **planerade veckan** först (se [Planerade veckor](#planerade-veckor)) och därefter färdigdatum. En operation som inte är planerad hör till färdigdatumets vecka. Har den varken plan eller färdigdatum hamnar den under **Ej planerad**.
+- Operationer som borde varit klara — veckan har passerat — står överst under **Försenad**. Därefter kommer en grupp per vecka (**Vecka N**) och sist **Ej planerad**. Varje grupp visar sin summa i timmar och längst ner står **Totalt**.
+
+### Kolumnerna
+
+- **Vecka** — operationens planerade vecka (eller färdigdatumets vecka för en operation som inte är planerad).
+- **TO** — tillverkningsordernumret, en länk till TO-kortet.
+- **Artikel** — artikelnummer och namn.
+- **Operation** — operationens nummer och beskrivning.
+- **Antal kvar** — det som återstår att tillverka i operationen.
+- **Tid kvar (h)** — återstående tid i timmar med två decimaler: stycktid × kvarvarande antal plus ställtiden så länge den inte är gjord. Det är samma tal som [Beläggning](#belaggning) räknar med för operationen.
+- **Färdigdatum** — tillverkningsorderns färdigdatum.
+- **Status** — hur långt operationen kan göras just nu: **Redo** (hela det som återstår kan göras), **Väntar på op N** (föregående operation har inte levererat något ännu), delvis redo visas som *N redo · väntar på op M*, och **Planerad TO** för en order som inte är frisläppt än. Beredskapen räknas som i [stämpelterminalen](/hjalp/terminal). Märket **Låst** betyder att veckan är flyttad för hand i Beläggning och ligger kvar när du kör **Planera**.
+
+### Skriv ut
+
+**Skriv ut** öppnar körplanen som PDF i en ny flik, med samma resurs och samma **T.o.m. vecka** som på sidan. Knappen visas när en resurs är vald.
+
+Från [stämpelterminalen](/hjalp/terminal) finns en länk **Körplan** för den valda stationen.
 
 ## Pågående arbete
 

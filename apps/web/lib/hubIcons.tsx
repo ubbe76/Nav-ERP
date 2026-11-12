@@ -140,6 +140,7 @@ export const HUB_ICONS: Record<string, LucideIcon> = {
   "/tillverkning/tidrapporter": Clock,
   "/tillverkning/behovsberakning": ListChecks,
   "/tillverkning/belaggning": Gauge,
+  "/tillverkning/korplan": ListOrdered,
   "/tillverkning/scheman": CalendarDays,
   "/tillverkning/resurser": Cog,
   "/tillverkning/grupper": Group,

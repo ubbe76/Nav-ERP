@@ -63,7 +63,11 @@ describe("sectionsForUser", () => {
     const visible = hrefs(sectionsForUser(TILLVERKNING_SECTIONS, workshop));
     expect(visible.length).toBeGreaterThan(0);
     for (const href of visible) {
-      expect(href.startsWith("/tillverkning/terminal") || href.startsWith("/tillverkning/ordrar")).toBe(true);
+      expect(
+        href.startsWith("/tillverkning/terminal") || href.startsWith("/tillverkning/ordrar") || href.startsWith("/tillverkning/korplan")
+      ).toBe(true);
     }
+    // Körplan (2026-11-12): the workshop sees its own resource's coming work.
+    expect(visible).toContain("/tillverkning/korplan");
   });
 });

@@ -338,6 +338,11 @@ export const TILLVERKNING_SECTIONS: ModuleNavSection[] = [
         description: "Last per resurs och vecka mot schemalagd kapacitet.",
       },
       {
+        href: "/tillverkning/korplan",
+        title: "Körplan",
+        description: "Kommande arbeten på en resurs, vecka för vecka — utskrivbar.",
+      },
+      {
         href: "/tillverkning/scheman",
         title: "Scheman",
         description: "Dagsscheman, veckoscheman och helgdagar — grunden för kalendrar och löneunderlag.",

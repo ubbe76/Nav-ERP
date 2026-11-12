@@ -14,6 +14,9 @@ export const articleCardWrite = (moduleWrite: AccessRule): AccessRule => ["artik
 export const TERMINAL_READ: AccessRule = ["office", "terminal"];
 export const TERMINAL_WRITE: AccessRule = ["terminal"];
 // Tillverkningsorder i läsläge (and what the terminal needs from an order).
+// Also the körplan (GET /planning/run-plan[/pdf], the user's decision
+// 2026-11-12: "verkstaden och kontoret") — read like a TO, so the terminal's
+// Körplan link works for a terminal-only user. No price data in its answer.
 export const MO_READ: AccessRule = ["office", "terminal", "tillverkningsorder_las"];
 // Artikelöversikten with its drawings, plus the article picker's search.
 export const OVERVIEW_READ: AccessRule = ["office", "artikeloversikt"];

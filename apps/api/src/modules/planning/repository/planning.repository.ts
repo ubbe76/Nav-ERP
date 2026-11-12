@@ -63,6 +63,7 @@ import type { ForecastMonth } from "../service/forecast.js";
 import { loadPriceBreaks } from "../../purchase/repository/price-breaks.js";
 import type { CapacityInput, OperationResourceOption, PlannedWeek } from "../service/capacity-calc.js";
 import type { OperationPlan } from "../service/production-plan.js";
+import type { RunPlanPlannedOperation } from "../service/run-plan.js";
 import { roundPlanWeeks } from "../service/capacity-book.js";
 import type { ArticleOverviewLoad } from "../service/article-overview.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
@@ -1181,6 +1182,7 @@ export function createPlanningRepository(db: Db) {
             orderQuantity: manufacturingOrders.quantity,
             dueDate: manufacturingOrders.dueDate,
             sequenceNo: moOperations.sequenceNo,
+            description: moOperations.description,
             setupTime: moOperations.setupTime,
             runTimePerUnit: moOperations.runTimePerUnit,
             operationStatus: moOperations.status,
@@ -1311,6 +1313,100 @@ export function createPlanningRepository(db: Db) {
         })),
         holidays: holidayRows,
       };
+    },
+
+    // --- Körplan (run-plan.ts) ---------------------------------------------
+
+    // Every resource: the körplan's picker (active, not lego — filtered by
+    // the pure file) and the chosen resource itself.
+    async runPlanWorkCenters() {
+      return db
+        .select({ id: workCenters.id, code: workCenters.code, name: workCenters.name, type: workCenters.type, active: workCenters.active })
+        .from(workCenters);
+    },
+
+    // The open orders (released/in progress) with a pending operation on the
+    // resource — loadCapacityInput is then asked for exactly those orders,
+    // with ALL their operations (the readiness needs the siblings).
+    async runPlanOpenOrderIds(workCenterId: string): Promise<string[]> {
+      const rows = await db
+        .selectDistinct({ id: moOperations.manufacturingOrderId })
+        .from(moOperations)
+        .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+        .where(
+          and(
+            inArray(manufacturingOrders.status, ["released", "in_progress"]),
+            eq(moOperations.workCenterId, workCenterId),
+            eq(moOperations.status, "pending")
+          )
+        );
+      return rows.map((r) => r.id);
+    },
+
+    // Planerade TO (not yet released) with work on the resource. A plain
+    // planned TO has no mo_operations — they are snapshotted at release — so
+    // its operations are the article's route as release would take it
+    // (Kalkyl rows never reach a TO); a configured one (beställningsvara)
+    // got its derived operations at creation and is read from them. Shaped
+    // as untouched capacity rows: nothing can have been reported or planned
+    // on an order that is not released.
+    async runPlanPlannedOrderOperations(workCenterId: string): Promise<RunPlanPlannedOperation[]> {
+      const planned = eq(manufacturingOrders.status, "planned");
+      const order = {
+        manufacturingOrderId: manufacturingOrders.id,
+        orderNumber: manufacturingOrders.orderNumber,
+        articleNumber: articles.articleNumber,
+        articleName: articles.name,
+        orderQuantity: manufacturingOrders.quantity,
+        dueDate: manufacturingOrders.dueDate,
+      };
+      const [snapshotted, fromRoute] = await Promise.all([
+        db
+          .select({
+            ...order,
+            moOperationId: moOperations.id,
+            sequenceNo: moOperations.sequenceNo,
+            description: moOperations.description,
+            setupTime: moOperations.setupTime,
+            runTimePerUnit: moOperations.runTimePerUnit,
+          })
+          .from(moOperations)
+          .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+          .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))
+          .where(and(planned, eq(moOperations.workCenterId, workCenterId), eq(moOperations.status, "pending"))),
+        db
+          .select({
+            ...order,
+            sequenceNo: routingOperations.sequenceNo,
+            description: routingOperations.description,
+            setupTime: routingOperations.setupTime,
+            runTimePerUnit: routingOperations.runTimePerUnit,
+          })
+          .from(routingOperations)
+          .innerJoin(manufacturingOrders, eq(manufacturingOrders.articleId, routingOperations.articleId))
+          .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))
+          .where(
+            and(
+              planned,
+              isNull(manufacturingOrders.configuration),
+              eq(routingOperations.workCenterId, workCenterId),
+              eq(routingOperations.costingOnly, false),
+              sql`NOT EXISTS (SELECT 1 FROM mo_operations own_op WHERE own_op.manufacturing_order_id = ${manufacturingOrders.id})`
+            )
+          ),
+      ]);
+      return [...snapshotted, ...fromRoute.map((r) => ({ ...r, moOperationId: null }))].map((r) => ({
+        ...r,
+        workCenterId,
+        orderQuantity: Number(r.orderQuantity),
+        setupTime: Number(r.setupTime),
+        runTimePerUnit: Number(r.runTimePerUnit),
+        operationStatus: "pending" as const,
+        quantityCompleted: null,
+        quantityScrapped: 0,
+        ...NO_TIME,
+        plannedWeeks: null,
+      }));
     },
 
     // --- Produktionsplanering ---------------------------------------------

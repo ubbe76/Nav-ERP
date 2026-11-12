@@ -11,6 +11,8 @@ import type {
   ListRequirementsQuery,
   MoveOperationInput,
   Paged,
+  RunPlanPdfQuery,
+  RunPlanQuery,
 } from "@navet/shared";
 import type { Tx } from "@navet/db";
 import { round4, roundToDecimals, roundUpToMultiple, SALES_ORDER_EDITABLE_STATUSES } from "@navet/shared";
@@ -113,6 +115,8 @@ import {
   type ResourceSuggestion,
 } from "./resource-suggestions.js";
 import { lockProductionPlan } from "../repository/plan-lock.js";
+import { buildRunPlan, defaultRunPlanToWeek, runPlanStations, type RunPlanResult, type RunPlanRow } from "./run-plan.js";
+import type { RunPlanPdfInput } from "../../mail/service/document-pdf.js";
 import type { AuditEntry, AuditWriter } from "../../system/repository/audit.repository.js";
 import {
   deliveryTimeAnswer,
@@ -351,6 +355,34 @@ export class PlanWeekInPastError extends Error {
   constructor(public weekMonday: string, public currentWeekMonday: string) {
     super(`Veckan som börjar ${weekMonday} har passerat — en operation kan inte flyttas till en vecka före innevarande (${currentWeekMonday})`);
     this.name = "PlanWeekInPastError";
+  }
+}
+
+// Körplan for a legoresurs: a supplier's work is bought, never run on our
+// own floor — the körplan lists own resources only. 400.
+export class RunPlanSubcontractResourceError extends Error {
+  constructor(public workCenterCode: string) {
+    super(`${workCenterCode} är en legoresurs — körplanen visar bara egna resurser`);
+    this.name = "RunPlanSubcontractResourceError";
+  }
+}
+
+// The körplan's Swedish texts, shared by every surface the API prints them
+// on (the PDF). The web has its own labels for the same fields.
+const formatRunPlanHours = (hours: number) =>
+  `${hours.toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace("−", "-")} h`;
+const formatRunPlanQuantity = (quantity: number) =>
+  quantity.toLocaleString("sv-SE", { maximumFractionDigits: 4 }).replace("−", "-");
+function runPlanStatusLabel(row: RunPlanRow): string {
+  switch (row.status) {
+    case "planned_order":
+      return "Planerad TO";
+    case "ready":
+      return "Redo";
+    case "partial":
+      return `${formatRunPlanQuantity(row.available ?? 0)} redo · väntar på op ${row.waitingForSequenceNo}`;
+    case "not_ready":
+      return `Väntar på op ${row.waitingForSequenceNo}`;
   }
 }
 
@@ -792,6 +824,9 @@ export function createPlanningService(
     // Produktionsplanering's händelselogg (Planera, Flytta, Lås upp) —
     // optional for the fixtures, app.ts passes the real one.
     audit?: AuditWriter;
+    // Körplanens utskrift (app.ts passes the document PDF service).
+    // Optional so the fixtures that never print need not wire it.
+    runPlanPdf?: { renderRunPlan(input: RunPlanPdfInput): Promise<Buffer> };
     // Reservationen's KO date write (app.ts passes salesService). Optional
     // so the fixtures that never reserve need not wire it.
     salesOrderDates?: SalesOrderDateWriter;
@@ -2602,6 +2637,72 @@ export function createPlanningService(
         result.groups = result.groups.filter((g) => g.productionGroupId === query.productionGroupId);
       }
       return result;
+    },
+
+    // Körplan — a resource's coming work (run-plan.ts owns the list, every
+    // figure is Beläggning's or the terminal's rule). Derived at every read.
+    // null = the resource does not exist (the route answers 404).
+    async getRunPlan(query: RunPlanQuery): Promise<RunPlanResult | null> {
+      const today = todayFn();
+      const toWeek = query.toWeek ?? defaultRunPlanToWeek(today);
+      const workCenters = await repo.runPlanWorkCenters();
+      const stations = runPlanStations(workCenters);
+      if (!query.workCenterId) {
+        return { workCenter: null, today, currentWeek: mondayOf(today), toWeek, rows: [], weeks: [], totalMinutes: 0, totalHours: 0, stations };
+      }
+      const workCenter = workCenters.find((w) => w.id === query.workCenterId);
+      if (!workCenter) return null;
+      if (workCenter.type === "subcontract") throw new RunPlanSubcontractResourceError(workCenter.code);
+      const [orderIds, plannedOrderOperations] = await Promise.all([
+        repo.runPlanOpenOrderIds(workCenter.id),
+        repo.runPlanPlannedOrderOperations(workCenter.id),
+      ]);
+      // Beläggning's own loader, narrowed to the orders with work here: the
+      // same rows (quantities, time flags, planned weeks) the matrix reads.
+      // The calendars are not read by the körplan — no holiday span needed.
+      const operations = orderIds.length === 0 ? [] : (await repo.loadCapacityInput(today, today, undefined, { orderIds })).operations;
+      return buildRunPlan({ today, toWeek, workCenter, stations, operations, plannedOrderOperations });
+    },
+
+    // The körplan as a PDF (A4 landscape), the same selection as the list.
+    async getRunPlanPdf(query: RunPlanPdfQuery): Promise<{ filename: string; content: Buffer } | null> {
+      if (!deps.runPlanPdf) throw new Error("The körplan PDF renderer is not wired");
+      const plan = await this.getRunPlan(query);
+      if (!plan || !plan.workCenter) return null;
+      const weekLabel = (monday: string) => `vecka ${isoWeekOf(monday).isoWeek}`;
+      const rowsOf = (group: RunPlanResult["weeks"][number]) =>
+        plan.rows.filter((row) =>
+          group.kind === "late" ? row.late : group.kind === "unplanned" ? row.week == null : !row.late && row.week === group.week
+        );
+      const content = await deps.runPlanPdf.renderRunPlan({
+        title: `Körplan — ${plan.workCenter.code} ${plan.workCenter.name}`,
+        subtitle: `T.o.m. ${weekLabel(plan.toWeek)} (${plan.toWeek} – ${addDays(plan.toWeek, 6)}) · Utskriven ${plan.today}`,
+        emptyText: "Inga väntande operationer på resursen i perioden.",
+        groups: plan.weeks.map((group) => ({
+          heading:
+            group.kind === "late"
+              ? "Försenad"
+              : group.kind === "unplanned"
+                ? "Ej planerad"
+                : `Vecka ${group.isoWeek} (${group.week} – ${addDays(group.week!, 6)})`,
+          totalLabel: group.kind === "week" ? `Summa vecka ${group.isoWeek}` : group.kind === "late" ? "Summa försenad" : "Summa ej planerad",
+          total: formatRunPlanHours(group.hours),
+          rows: rowsOf(group).map((row) => ({
+            week: row.week == null ? "–" : `v.${isoWeekOf(row.week).isoWeek}`,
+            orderNumber: row.orderNumber,
+            article: `${row.articleNumber} ${row.articleName}`,
+            operation: row.description ? `Op ${row.sequenceNo} ${row.description}` : `Op ${row.sequenceNo}`,
+            remainingQuantity: formatRunPlanQuantity(row.remainingQuantity),
+            remainingTime: formatRunPlanHours(row.remainingHours),
+            dueDate: row.dueDate ?? "–",
+            status: runPlanStatusLabel(row),
+            locked: row.planLocked ? "Låst" : "",
+          })),
+        })),
+        totalLabel: "Summa tid kvar",
+        total: formatRunPlanHours(plan.totalHours),
+      });
+      return { filename: `korplan-${plan.workCenter.code}-${plan.toWeek}.pdf`, content };
     },
 
     // Planera — every open TO's pending operations placed on free capacity

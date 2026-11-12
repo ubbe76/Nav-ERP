@@ -35,6 +35,7 @@ import type {
 // Materialbrist vid rapportering: the check itself is a leaf the repository
 // runs inside the report transactions; the mode is read here, outside them.
 import { MaterialShortageError, type MaterialShortageCheck } from "./material-shortage.js";
+import { compareStationCodes } from "./station-order.js";
 import { computeReadiness, type Readiness, type ReadinessResult } from "./terminal-readiness.js";
 import { MANUFACTURING_ORDER_STATUS_LABELS } from "./export-columns.js";
 import type { GivenOperationPlan, GivenPlanOptions, ManufacturingPlanReader, SetDueDatesOutcome } from "../../planning/service/planning.service.js";
@@ -1335,15 +1336,9 @@ export function createManufacturingService(
       };
     },
 
-    // Stations for the terminal in natural number order: purely numeric codes
-    // numerically ("90" before "100"), other codes after them alphabetically.
+    // Stations for the terminal in natural number order (station-order.ts).
     async listTerminalStations() {
-      const isNumeric = (code: string) => /^\d+$/.test(code);
-      return (await repo.terminalStations()).sort((a, b) => {
-        if (isNumeric(a.code) && isNumeric(b.code)) return Number(a.code) - Number(b.code);
-        if (isNumeric(a.code) !== isNumeric(b.code)) return isNumeric(a.code) ? -1 : 1;
-        return a.code.localeCompare(b.code, "sv");
-      });
+      return (await repo.terminalStations()).sort(compareStationCodes);
     },
 
     async listWorkCenters(query?: ListWorkCentersQuery) {

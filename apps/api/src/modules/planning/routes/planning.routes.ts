@@ -11,6 +11,8 @@ import {
   listRequirementsQuerySchema,
   missingComponentsSchema,
   moveOperationSchema,
+  runPlanPdfQuerySchema,
+  runPlanQuerySchema,
 } from "@navet/shared";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { abcExportColumns, requirementsExportColumns } from "../service/export-columns.js";
@@ -31,6 +33,7 @@ import {
   OperationNotPlannableError,
   PlanWeekInPastError,
   PlanWeekNoCapacityError,
+  RunPlanSubcontractResourceError,
   SalesOrderNotFoundError,
   SalesOrderNotOpenError,
   type AbcList,
@@ -42,7 +45,9 @@ import {
   LinkedRowArticleMismatchError,
   LinkedRowNotFoundError,
   LinkedRowNotManufacturedError,
+  WorkCenterNotFoundError,
 } from "../../manufacturing/service/manufacturing.service.js";
+import { contentDisposition } from "../../system/service/content-disposition.js";
 import { ArticleIsTemplateError } from "../../article/service/article.service.js";
 // The sales module's configuration errors — the manufacturing service throws
 // these (not planning's own classes of the same name) from prepareCreate.
@@ -320,6 +325,37 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
   app.get("/planning/capacity", async (req) => {
     const query = capacityQuerySchema.parse(req.query);
     return service.getCapacity(query);
+  });
+
+  // Körplan — a resource's coming work, derived at read time. Read like a
+  // TO (MO_READ: the office, the terminal and Tillverkningsorder i läsläge);
+  // no price data. Without workCenterId the answer only carries the resource
+  // picker's stations, so the picker needs no other route.
+  app.get("/planning/run-plan", { config: { access: MO_READ } }, async (req, reply) => {
+    const query = runPlanQuerySchema.parse(req.query);
+    try {
+      const plan = await service.getRunPlan(query);
+      if (!plan) return reply.code(404).send(errorBody(new WorkCenterNotFoundError(query.workCenterId!)));
+      return plan;
+    } catch (err) {
+      if (err instanceof RunPlanSubcontractResourceError) return reply.code(400).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // The same selection as a PDF (A4 landscape) — Skriv ut.
+  app.get("/planning/run-plan/pdf", { config: { access: MO_READ } }, async (req, reply) => {
+    const query = runPlanPdfQuerySchema.parse(req.query);
+    try {
+      const pdf = await service.getRunPlanPdf(query);
+      if (!pdf) return reply.code(404).send(errorBody(new WorkCenterNotFoundError(query.workCenterId)));
+      reply.header("Content-Type", "application/pdf");
+      reply.header("Content-Disposition", contentDisposition(pdf.filename, "inline"));
+      return reply.send(pdf.content);
+    } catch (err) {
+      if (err instanceof RunPlanSubcontractResourceError) return reply.code(400).send(errorBody(err));
+      throw err;
+    }
   });
 
   // Produktionsplanering — the three plan writes, each one transaction under
