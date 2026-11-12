@@ -523,7 +523,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.8.8-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.8.8 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -768,7 +768,7 @@ full byggordning och [`TODO.md`](TODO.md) för det som återstår.
 
 ## Återkoppling och bidrag
 
-Nav|ERP är en alfaversion, och återkoppling från dig som provar är det som
+Nav|ERP är en tidig version (0.x), och återkoppling från dig som provar är det som
 hjälper mest:
 
 - **Fel och förslag:** öppna ett [ärende](https://github.com/ubbe76/Nav-ERP/issues/new/choose)

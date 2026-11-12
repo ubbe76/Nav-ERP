@@ -20,11 +20,11 @@ Nav|ERP utvecklas av en person. Du får ett svar så snart som möjligt, och en 
 
 ## Versioner
 
-Nav|ERP är en alfaversion och **inte redo för produktion**. Bara den senaste versionen på `main` får säkerhetsrättningar.
+Nav|ERP är en tidig version (0.x) och **inte redo för produktion**. Bara den senaste versionen på `main` får säkerhetsrättningar.
 
 | Version | Får rättningar |
 |---|---|
-| 0.8.8-alpha (senaste `main`) | Ja |
+| 0.8.8 (senaste `main`) | Ja |
 | Äldre | Nej — uppdatera till senaste |
 
 ## Driftsätt säkert
