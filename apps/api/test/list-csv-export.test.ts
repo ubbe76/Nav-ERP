@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { expectXlsxMatchesCsv } from "./helpers/read-xlsx.js";
 import Fastify from "fastify";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -190,6 +191,30 @@ describe("GET /articles/csv", () => {
     ).toBe(true);
     expect(res.body).toContain("Skruv 8x40");
     expect(res.body).not.toContain("Annan artikel");
+  });
+});
+
+describe("GET /articles/xlsx (#35)", () => {
+  it("is the same list as the CSV — same filter, same rows and values — as a workbook", async () => {
+    await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "0042", name: "Skruv 8x40", type: "purchased", standardCost: 12.5 }));
+    await articleService.createArticle(parsed(createArticleSchema, { articleNumber: "A-XLSX-2", name: "Annan artikel", type: "purchased" }));
+
+    const csv = await app.inject({ url: "/articles/csv?search=Skruv" });
+    const xlsx = await app.inject({ url: "/articles/xlsx?search=Skruv" });
+
+    expect(xlsx.statusCode).toBe(200);
+    expect(xlsx.headers["content-type"]).toBe("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    expect(xlsx.headers["content-disposition"]).toMatch(/filename="artiklar-\d{4}-\d{2}-\d{2}\.xlsx"/);
+    const rows = await expectXlsxMatchesCsv(xlsx.rawPayload, csv.body);
+    expect(rows).toHaveLength(2);
+    const header = rows[0] as string[];
+    // The article number stays text (leading zeros), the cost is a number.
+    expect(rows[1]![header.indexOf("Artikelnummer")]).toBe("0042");
+    expect(rows[1]![header.indexOf("Standardkostnad")]).toBe(12.5);
+  });
+
+  it("carries the CSV route's guard: 403 without the admin role on /accounts/xlsx", async () => {
+    expect((await app.inject({ url: "/accounts/xlsx" })).statusCode).toBe(403);
   });
 });
 

@@ -34,6 +34,7 @@ import {
 } from "../service/payroll.service.js";
 import { PayrollPeriodLockedError } from "../service/period-lock.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
+import { registerTableExportRoutes } from "../../system/routes/csv-export.js";
 import { errorBody } from "../../system/service/error-body.js";
 
 // NOT z.coerce.boolean() — that turns the string "false" into true (same
@@ -282,17 +283,14 @@ export async function payrollRoutes(app: FastifyInstance, opts: { service: Payro
     }
   );
 
-  app.get<{ Params: { year: string; month: string } }>(
+  // The CSV and its Excel twin (…/xlsx) — one table, two renderings.
+  registerTableExportRoutes(
+    app,
     "/periods/:year/:month/csv",
     { preHandler: requireRole("admin", "supervisor") },
     async (req, reply) => {
       const { year, month } = periodParamsSchema.parse(req.params);
-      return handle(reply, async () => {
-        const { filename, content } = await service.getCsvExport(year, month);
-        reply.header("Content-Type", "text/csv; charset=utf-8");
-        reply.header("Content-Disposition", contentDisposition(filename));
-        return reply.send(content);
-      });
+      return handle(reply, () => service.getExportTable(year, month));
     }
   );
 
@@ -308,17 +306,14 @@ export async function payrollRoutes(app: FastifyInstance, opts: { service: Payro
     }
   );
 
-  app.get<{ Params: { year: string; month: string; snapshotId: string } }>(
+  registerTableExportRoutes(
+    app,
     "/periods/:year/:month/snapshots/:snapshotId/csv",
     { preHandler: requireRole("admin", "supervisor") },
     async (req, reply) => {
       const { year, month } = periodParamsSchema.parse(req.params);
-      return handle(reply, async () => {
-        const { filename, content } = await service.getPreviousSnapshotCsv(year, month, req.params.snapshotId);
-        reply.header("Content-Type", "text/csv; charset=utf-8");
-        reply.header("Content-Disposition", contentDisposition(filename));
-        return reply.send(content);
-      });
+      const { snapshotId } = req.params as { snapshotId: string };
+      return handle(reply, () => service.getPreviousSnapshotTable(year, month, snapshotId));
     }
   );
 

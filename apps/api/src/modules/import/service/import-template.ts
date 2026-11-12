@@ -5,7 +5,7 @@
 // import-templates-generated.test.ts checks the checked-in ones are current.
 import type { ImportEntity } from "@navet/shared";
 import { IMPORT_FIELD_HELP } from "./field-help.js";
-import { writeXlsx, type XlsxCell, type XlsxWorkbook } from "./xlsx-writer.js";
+import { writeXlsx, type XlsxCell, type XlsxWorkbook } from "../../system/service/xlsx-writer.js";
 
 export interface ImportTemplateInfo {
   entity: ImportEntity;

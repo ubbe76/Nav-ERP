@@ -42,6 +42,7 @@ import buttonStyles from "../ui/Button.module.css";
 import shellStyles from "../AppShell.module.css";
 import { AccountCell } from "./VerificationRowsEditor";
 import styles from "./Budget.module.css";
+import { ExportMenu } from "../ui/ExportMenu";
 
 // "total" = the read-only sum over every cost centre, "none" = Ej fördelat,
 // anything else is a cost centre id.
@@ -400,9 +401,7 @@ export function BudgetDetailPageClient({
           <Button type="button" variant="secondary" size="small" disabled={readOnly || pending} onClick={() => setActualsOpen(true)}>
             Kopiera utfall från föregående år
           </Button>
-          <a href={csvHref} download className={`${buttonStyles.button} ${buttonStyles.secondary} ${buttonStyles.small}`}>
-            Exportera CSV
-          </a>
+          <ExportMenu csvHref={csvHref} variant="secondary" size="small" />
           <Button type="button" variant="secondary" size="small" disabled={readOnly || pending} onClick={() => fileRef.current?.click()}>
             Importera CSV
           </Button>

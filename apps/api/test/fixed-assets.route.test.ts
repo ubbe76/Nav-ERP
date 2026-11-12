@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { expectXlsxMatchesCsv } from "./helpers/read-xlsx.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import Fastify from "fastify";
 import { ZodError } from "zod";
@@ -342,6 +343,13 @@ describe("fixed-asset-plan routes", () => {
     const csv = await app.inject({ url: `/fixed-asset-plan/csv?fiscalYearId=${planYearId}` });
     expect(csv.statusCode).toBe(200);
     expect(csv.headers["content-type"]).toContain("text/csv");
+    // #35: the Excel twin — same plan, same file name, typed cells.
+    const xlsx = await app.inject({ url: `/fixed-asset-plan/xlsx?fiscalYearId=${planYearId}` });
+    expect(xlsx.statusCode).toBe(200);
+    expect(xlsx.headers["content-type"]).toBe("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    expect(xlsx.headers["content-disposition"]).toBe(String(csv.headers["content-disposition"]).replaceAll(".csv", ".xlsx"));
+    await expectXlsxMatchesCsv(xlsx.rawPayload, csv.body);
+    expect((await app.inject({ url: `/fixed-asset-plan/xlsx?fiscalYearId=${crypto.randomUUID()}` })).statusCode).toBe(404);
     const missing = await app.inject({ url: `/fixed-asset-plan?fiscalYearId=${crypto.randomUUID()}` });
     expect(missing.statusCode).toBe(404);
     expect(missing.json().code).toBe("fixed-asset-plan-year-not-found");

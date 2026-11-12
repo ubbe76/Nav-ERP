@@ -10,6 +10,7 @@ paths:
   - "packages/shared/src/import.ts"
   - "apps/api/test/import*"
   - "apps/api/test/xlsx*"
+  - "apps/api/src/modules/system/service/xlsx-writer.ts"
 ---
 
 # Importerna (Monitor-exporter och mallar)
@@ -22,7 +23,7 @@ Spec `docs/superpowers/specs/2026-10-22-importmallar-design.md`.
 
 - Rena `import/service/field-help.ts` är enda källan för varje importkolumns rubrik, förklaring, exempel och `text`-flagga (alla 16 entiteter; testet kräver täckning åt båda hållen, att varje rubrik kopplas till sitt eget fält av entitetens alias och att `required` stämmer med planern). Serveras till mappningssteget via `GET /imports/:entity/fields` (admin).
 - `npm run generate:import-templates -w apps/api` genererar de **incheckade** mallarna `apps/web/public/importmallar/importmall-<namn>.xlsx` (blad Import med kommentarer och textformaterade nummer-/kodkolumner, blad Instruktioner; proxyn undantar `importmallar/`) och manualkapitlet `docs/manual/importmallar.md` — **redigera aldrig dem för hand**. `import-templates-generated.test.ts` jämför byte för byte och kräver att katalogen och webbens `IMPORT_TEMPLATE_FILES` är exakt `IMPORT_TEMPLATES`. **Ändras en planer eller en förklaring: uppdatera field-help och kör generatorn.**
-- `xlsx-writer.ts` är handskriven och deterministisk (STORED-zip med `zlib.crc32`, OOXML med legacy-kommentarer + VML) — inget produktionsberoende. Hemsidan synkar mallarna (`hemsida/lib/sync.ts`), så Nav-main måste ha dem innan hemsidan byggs.
+- `system/service/xlsx-writer.ts` (flyttad från importmodulen i #35 — tabellexporterna delar den, se `system.md`) är handskriven och deterministisk (STORED-zip med `zlib.crc32`, OOXML med legacy-kommentarer + VML) — inget produktionsberoende. En arbetsbok med **bara textceller** får exakt mallarnas stilmall; talformaten läggs till först när en tal-/datumcell finns, så mallarnas bytes ändras aldrig av exporternas behov. Hemsidan synkar mallarna (`hemsida/lib/sync.ts`), så Nav-main måste ha dem innan hemsidan byggs.
 
 ## Flerfilsimport "Alla filer" (paket D)
 

@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { expectXlsxMatchesCsv } from "./helpers/read-xlsx.js";
 import Fastify from "fastify";
 import fastifyCookie from "@fastify/cookie";
 import { sql } from "drizzle-orm";
@@ -247,6 +248,7 @@ describe("GET /audit-log/csv", () => {
     const app = buildApp();
     const res = await app.inject({ url: "/audit-log/csv" });
     expect(res.statusCode).toBe(401);
+    expect((await app.inject({ url: "/audit-log/xlsx" })).statusCode).toBe(401);
     await app.close();
   });
 
@@ -262,6 +264,11 @@ describe("GET /audit-log/csv", () => {
     expect(body).toContain("KO-2500001");
     expect(body).toContain("Kundorder");
     expect(body).toContain("Bekräftad");
+    // #35: the Excel twin — the timestamp is a date-time cell.
+    const xlsx = await app.inject({ url: "/audit-log/xlsx", headers: { cookie } });
+    expect(xlsx.statusCode).toBe(200);
+    const rows = await expectXlsxMatchesCsv(xlsx.rawPayload, body);
+    expect(rows[1]!.some((cell) => cell instanceof Date)).toBe(true);
     await app.close();
   });
 });

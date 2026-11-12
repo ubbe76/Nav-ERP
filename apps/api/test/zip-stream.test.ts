@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { crc32 } from "node:zlib";
-import { readStoredZipEntries } from "../src/modules/import/service/xlsx-writer.js";
+import { readStoredZipEntries } from "../src/modules/system/service/xlsx-writer.js";
 import { dosDateTime, safeSegment, stockholmDosDateTime, UniquePaths, ZipStreamWriter } from "../src/modules/system/service/zip-stream.js";
 
 // The file export's streaming zip writer: STORED entries, UTF-8 names, and

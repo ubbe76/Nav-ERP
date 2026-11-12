@@ -12,6 +12,7 @@ import { shiftMonth } from "./AttestationPageClient";
 import type { PeriodEmployeeSummary, PeriodSummary, PreviousPayrollSnapshot } from "../../lib/types";
 import { formatStockholmDate, formatStockholmDateTime } from "../../lib/date";
 import { SectionHeading } from "../ui/SectionHeading";
+import { ExportMenu } from "../ui/ExportMenu";
 
 // The Table needs an `id`; the summary rows are keyed by employeeId.
 type EmployeeRow = PeriodEmployeeSummary & { id: string };
@@ -207,13 +208,7 @@ export function PayrollReportPageClient({
 
       <Card maxWidth="none">
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <a
-            className={`${buttonStyles.button} ${buttonStyles.ghost}`}
-            href={`${API_URL}/api/v1/periods/${year}/${month}/csv`}
-            download
-          >
-            Ladda ner CSV
-          </a>
+          <ExportMenu csvHref={`${API_URL}/api/v1/periods/${year}/${month}/csv`} />
           <a
             className={`${buttonStyles.button} ${buttonStyles.ghost}`}
             href={`${API_URL}/api/v1/periods/${year}/${month}/pdf`}
@@ -316,13 +311,7 @@ function PreviousSnapshots({
               return <span className="num">{snapshot.employeeCount}</span>;
             case "csv":
               return (
-                <a
-                  className={`${buttonStyles.button} ${buttonStyles.ghost}`}
-                  href={`${API_URL}/api/v1/periods/${year}/${month}/snapshots/${snapshot.id}/csv`}
-                  download
-                >
-                  Ladda ner CSV
-                </a>
+                <ExportMenu csvHref={`${API_URL}/api/v1/periods/${year}/${month}/snapshots/${snapshot.id}/csv`} />
               );
             default:
               return null;

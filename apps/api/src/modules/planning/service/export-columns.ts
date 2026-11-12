@@ -82,8 +82,8 @@ export function abcExportColumns(seePrices: boolean): CsvColumn<AbcRow>[] {
     columns.push(
       { label: "Standardkostnad", value: (r) => r.standardCost, format: "money" },
       { label: "Förbrukningsvärde", value: (r) => r.value, format: "money" },
-      { label: "Andel (%)", value: (r) => r.share, format: "number" },
-      { label: "Ackumulerad andel (%)", value: (r) => r.cumulativeShare, format: "number" }
+      { label: "Andel (%)", cell: "percent", value: (r) => r.share, format: "number" },
+      { label: "Ackumulerad andel (%)", cell: "percent", value: (r) => r.cumulativeShare, format: "number" }
     );
   }
   columns.push(

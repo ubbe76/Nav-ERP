@@ -15,6 +15,7 @@ import {
 import { requirePermission } from "../../auth/middleware/permission.middleware.js";
 import { canSeePrices } from "../../auth/middleware/access-rules.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
+import { registerTableExportRoutes } from "../../system/routes/csv-export.js";
 import type { ReportsService } from "../service/reports.service.js";
 import { errorBody } from "../../system/service/error-body.js";
 import {
@@ -25,14 +26,14 @@ import {
 import { QuoteFollowupTooLargeError, type QuoteFollowupService } from "../service/quote-followup.service.js";
 import { ProjectNotFoundError, type ProjectReportService } from "../service/project-report.service.js";
 import {
-  buildCalculationOutcomeAnalysisCsv,
-  buildCalculationOutcomeCsv,
-  buildDeliveryPrecisionCsv,
-  buildCounterpartyPrecisionCsv,
-  buildPurchaseStatisticsCsv,
-  buildSalesStatisticsCsv,
-  buildScrapStatisticsCsv,
-  buildOrderMarginCsv,
+  buildCalculationOutcomeAnalysisTable,
+  buildCalculationOutcomeTable,
+  buildDeliveryPrecisionTable,
+  buildCounterpartyPrecisionTable,
+  buildPurchaseStatisticsTable,
+  buildSalesStatisticsTable,
+  buildScrapStatisticsTable,
+  buildOrderMarginTable,
 } from "../service/reports-csv.js";
 
 // F1 Rapporter — the whole section requires the Rapporter permission
@@ -45,12 +46,8 @@ export async function reportsRoutes(
   const { service, orderRegister, quoteFollowup, projectReport } = opts;
   app.addHook("preHandler", requirePermission("rapporter"));
 
-  // F2: CSV download — same content, text/csv instead of JSON.
-  function sendCsv(reply: FastifyReply, filename: string, content: string) {
-    reply.header("Content-Type", "text/csv; charset=utf-8");
-    reply.header("Content-Disposition", contentDisposition(filename));
-    return reply.send(content);
-  }
+  // F2/#35: every report's download is one table served as …/csv and
+  // …/xlsx (registerTableExportRoutes) — same content as the JSON.
 
   // Gruppera: Månad (default) | Motpart — the latter with the quality
   // columns (Kvalitet); Avvikelsekostnad follows canSeePrices.
@@ -59,21 +56,21 @@ export async function reportsRoutes(
     return service.getDeliveryPrecision(query, { seePrices: canSeePrices(req.user!) });
   });
 
-  app.get("/reports/delivery-precision/csv", async (req, reply) => {
+  registerTableExportRoutes(app, "/reports/delivery-precision/csv", {}, async (req) => {
     const query = deliveryPrecisionCsvQuerySchema.parse(req.query);
     const seePrices = canSeePrices(req.user!);
     const result = await service.getDeliveryPrecisionSection(query.kind, query, { seePrices });
     const early = result.section.margins.earlyDays !== null;
     if (query.groupBy === "counterparty") {
-      const filename = `leveransprecision-${query.kind}-motpart-${result.from}-${result.to}.csv`;
-      return sendCsv(
-        reply,
-        filename,
-        buildCounterpartyPrecisionCsv(result.section.counterparties!, { kind: query.kind, seePrices, early })
-      );
+      return {
+        basename: `leveransprecision-${query.kind}-motpart-${result.from}-${result.to}`,
+        table: buildCounterpartyPrecisionTable(result.section.counterparties!, { kind: query.kind, seePrices, early }),
+      };
     }
-    const filename = `leveransprecision-${query.kind}-${result.from}-${result.to}.csv`;
-    return sendCsv(reply, filename, buildDeliveryPrecisionCsv(result.section.months, { early }));
+    return {
+      basename: `leveransprecision-${query.kind}-${result.from}-${result.to}`,
+      table: buildDeliveryPrecisionTable(result.section.months, { early }),
+    };
   });
 
   // Kalkylutfall: ?view=pre (Mot förkalkyl, default) | analysis
@@ -83,15 +80,16 @@ export async function reportsRoutes(
     return service.getCalculationOutcome(query);
   });
 
-  app.get("/reports/calculation-outcome/csv", async (req, reply) => {
+  registerTableExportRoutes(app, "/reports/calculation-outcome/csv", {}, async (req) => {
     const query = calculationOutcomeQuerySchema.parse(req.query);
     const result = await service.getCalculationOutcome(query);
     if (result.view === "analysis") {
-      const filename = `kalkylutfall-avvikelseanalys-${result.groupBy}-${result.from}-${result.to}.csv`;
-      return sendCsv(reply, filename, buildCalculationOutcomeAnalysisCsv(result));
+      return {
+        basename: `kalkylutfall-avvikelseanalys-${result.groupBy}-${result.from}-${result.to}`,
+        table: buildCalculationOutcomeAnalysisTable(result),
+      };
     }
-    const filename = `kalkylutfall-${result.from}-${result.to}.csv`;
-    return sendCsv(reply, filename, buildCalculationOutcomeCsv(result.rows));
+    return { basename: `kalkylutfall-${result.from}-${result.to}`, table: buildCalculationOutcomeTable(result.rows) };
   });
 
   app.get("/reports/sales-statistics", async (req) => {
@@ -99,11 +97,10 @@ export async function reportsRoutes(
     return service.getSalesStatistics(query);
   });
 
-  app.get("/reports/sales-statistics/csv", async (req, reply) => {
+  registerTableExportRoutes(app, "/reports/sales-statistics/csv", {}, async (req) => {
     const query = salesStatisticsQuerySchema.parse(req.query);
     const result = await service.getSalesStatistics(query);
-    const filename = `forsaljningsstatistik-${result.groupBy}-${result.from}-${result.to}.csv`;
-    return sendCsv(reply, filename, buildSalesStatisticsCsv(result));
+    return { basename: `forsaljningsstatistik-${result.groupBy}-${result.from}-${result.to}`, table: buildSalesStatisticsTable(result) };
   });
 
   app.get("/reports/order-margin", async (req) => {
@@ -111,11 +108,10 @@ export async function reportsRoutes(
     return service.getOrderMargin(query);
   });
 
-  app.get("/reports/order-margin/csv", async (req, reply) => {
+  registerTableExportRoutes(app, "/reports/order-margin/csv", {}, async (req) => {
     const query = orderMarginQuerySchema.parse(req.query);
     const result = await service.getOrderMargin(query);
-    const filename = `marginal-${result.groupBy}-${result.from}-${result.to}.csv`;
-    return sendCsv(reply, filename, buildOrderMarginCsv(result));
+    return { basename: `marginal-${result.groupBy}-${result.from}-${result.to}`, table: buildOrderMarginTable(result) };
   });
 
   app.get("/reports/purchase-statistics", async (req) => {
@@ -123,11 +119,10 @@ export async function reportsRoutes(
     return service.getPurchaseStatistics(query);
   });
 
-  app.get("/reports/purchase-statistics/csv", async (req, reply) => {
+  registerTableExportRoutes(app, "/reports/purchase-statistics/csv", {}, async (req) => {
     const query = purchaseStatisticsQuerySchema.parse(req.query);
     const result = await service.getPurchaseStatistics(query);
-    const filename = `inkopsstatistik-${result.groupBy}-${result.from}-${result.to}.csv`;
-    return sendCsv(reply, filename, buildPurchaseStatisticsCsv(result));
+    return { basename: `inkopsstatistik-${result.groupBy}-${result.from}-${result.to}`, table: buildPurchaseStatisticsTable(result) };
   });
 
   app.get("/reports/scrap-statistics", async (req) => {
@@ -135,11 +130,10 @@ export async function reportsRoutes(
     return service.getScrapStatistics(query);
   });
 
-  app.get("/reports/scrap-statistics/csv", async (req, reply) => {
+  registerTableExportRoutes(app, "/reports/scrap-statistics/csv", {}, async (req) => {
     const query = scrapStatisticsQuerySchema.parse(req.query);
     const result = await service.getScrapStatistics(query);
-    const filename = `kassationsstatistik-${result.groupBy}-${result.from}-${result.to}.csv`;
-    return sendCsv(reply, filename, buildScrapStatisticsCsv(result));
+    return { basename: `kassationsstatistik-${result.groupBy}-${result.from}-${result.to}`, table: buildScrapStatisticsTable(result) };
   });
 
   // Offertuppföljning — hit rate per customer/month/loss reason over the
@@ -154,11 +148,10 @@ export async function reportsRoutes(
     }
   });
 
-  app.get("/reports/quote-followup/csv", async (req, reply) => {
+  registerTableExportRoutes(app, "/reports/quote-followup/csv", {}, async (req, reply) => {
     const query = quoteFollowupQuerySchema.parse(req.query);
     try {
-      const { filename, content } = await quoteFollowup.getCsv(query);
-      return sendCsv(reply, filename, content);
+      return await quoteFollowup.getTable(query);
     } catch (err) {
       if (err instanceof QuoteFollowupTooLargeError) return reply.code(400).send(errorBody(err));
       throw err;
@@ -177,11 +170,10 @@ export async function reportsRoutes(
     }
   });
 
-  app.get("/reports/project-report/csv", async (req, reply) => {
+  registerTableExportRoutes(app, "/reports/project-report/csv", {}, async (req, reply) => {
     const query = projectReportQuerySchema.parse(req.query);
     try {
-      const { filename, content } = await projectReport.getCsv(query);
-      return sendCsv(reply, filename, content);
+      return await projectReport.getTable(query);
     } catch (err) {
       if (err instanceof ProjectNotFoundError) return reply.code(404).send(errorBody(err));
       throw err;
@@ -210,12 +202,9 @@ export async function reportsRoutes(
       return run(reply, () => orderRegister.get(register.kind, query));
     });
 
-    app.get(`${register.path}/csv`, async (req, reply) => {
+    registerTableExportRoutes(app, `${register.path}/csv`, {}, async (req, reply) => {
       const query = register.schema.parse(req.query);
-      return run(reply, async () => {
-        const { filename, content } = await orderRegister.getCsv(register.kind, query);
-        return sendCsv(reply, filename, content);
-      });
+      return run(reply, () => orderRegister.getTable(register.kind, query));
     });
 
     app.get(`${register.path}/pdf`, async (req, reply) => {

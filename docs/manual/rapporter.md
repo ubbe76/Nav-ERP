@@ -2,7 +2,7 @@
 
 **Rapporter** i Nav|ERP:s huvudmeny samlar de analyserande rapporterna. Hela avsnittet kräver rättigheten **Rapporter** i användarens behörighetsgrupp (administratörer har den alltid) — menyposten syns inte för andra, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper). Alla rapporter är härledda ur befintliga order-, faktura- och tillverkningsdata i det ögonblick de visas; ingenting lagras separat.
 
-Statistikrapporterna filtreras med ett månadsintervall (**Från månad** / **Till månad**); utan val visas de senaste tolv månaderna inklusive innevarande. Orderförteckningarna har egna urval med datum, se nedan. Varje rapport har **Exportera CSV** — se [Exportera till Excel (CSV)](#exportera-till-excel-csv).
+Statistikrapporterna filtreras med ett månadsintervall (**Från månad** / **Till månad**); utan val visas de senaste tolv månaderna inklusive innevarande. Orderförteckningarna har egna urval med datum, se nedan. Varje rapport har **Exportera** med valet **CSV** eller **Excel** — se [Exportera till Excel (CSV)](#exportera-till-excel-csv).
 
 ## Orderförteckning
 
@@ -18,13 +18,13 @@ Urvalet gäller **orderraderna**: leveransdatum, artikel, varugrupp, artikelkod 
 
 Värdena räknas per rad: antal × à-pris med radens rabatt (kundorder) och ställpriset (inköp; ställpriset räknas som rest tills något på raden är mottaget). Inköpsordrar i annan valuta visas i sin valuta; summorna överst och på utskriften är omräknade till SEK med orderns växelkurs. Antal och à-pris visas i radens enhet.
 
-**Skriv ut** öppnar förteckningen som PDF (liggande A4) med urvalet i rubriken, och **Exportera CSV** ger samma urval som fil — med **Visa rader** en rad per orderrad med orderns uppgifter upprepade, så att den går att filtrera i Excel. Ett urval med fler än 10 000 orderrader avvisas; avgränsa då med datum, status eller kund/leverantör.
+**Skriv ut** öppnar förteckningen som PDF (liggande A4) med urvalet i rubriken, och **Exportera** ger samma urval som fil (**CSV** eller **Excel**) — med **Visa rader** en rad per orderrad med orderns uppgifter upprepade, så att den går att filtrera i Excel. Ett urval med fler än 10 000 orderrader avvisas; avgränsa då med datum, status eller kund/leverantör.
 
 ## Offertuppföljning
 
 **Rapporter → Offertuppföljning** visar hur stor andel av offerterna som blir order. Urvalet är **Från** och **Till** (förval innevarande år) på dagen offerten skapades, och valfritt en **Kund**; alla val ligger i adressen så att urvalet går att spara eller skicka vidare.
 
-Överst står nyckeltalen **Offerter**, **Vunna**, **Förlorade**, **Öppna** (med antalet utgångna), **Makulerade**, **Hit rate (antal)** och **Hit rate (värde)**. Därunder kommer tabellerna **Per kund** (störst offererat värde först), **Per månad**, **Per förlustorsak** (antal, värde och andel av de förlorade; offerter förlorade utan orsak står som *Ingen orsak angiven*) och **Offerter** med varje offert: offertnummer (länkat till offertkortet; vunna offerter visar även det KO-nummer de fick), kund, skapad, giltig t.o.m., utfall, orsak och värde. **Exportera CSV** ger offertlistan.
+Överst står nyckeltalen **Offerter**, **Vunna**, **Förlorade**, **Öppna** (med antalet utgångna), **Makulerade**, **Hit rate (antal)** och **Hit rate (värde)**. Därunder kommer tabellerna **Per kund** (störst offererat värde först), **Per månad**, **Per förlustorsak** (antal, värde och andel av de förlorade; offerter förlorade utan orsak står som *Ingen orsak angiven*) och **Offerter** med varje offert: offertnummer (länkat till offertkortet; vunna offerter visar även det KO-nummer de fick), kund, skapad, giltig t.o.m., utfall, orsak och värde. **Exportera** ger offertlistan.
 
 Definitionerna:
 
@@ -41,7 +41,7 @@ Definitionerna:
 - **Kundordrar**: ordern räknas när den är **Levererad** eller **Fakturerad**. Utlovat datum är orderns **Förväntat leveransdatum** (dagen kunden får varan — även för kunder med [transportdagar](/hjalp/forsaljning#leveransdagar)); faktiskt datum är det **sista leveranstillfällets** datum. Leverans samma dag som utlovat räknas **i tid**.
 - **Inköpsordrar**: ordern räknas när den är **Mottagen** eller **Stängd** och har minst en inleverans. Faktiskt datum är den sista inleveransens datum — även inleveranser av lego- och tjänsterader, som inte ger någon lagerrörelse. Ångrade inleveranser räknas inte.
 - **Marginaler**: utan inställningar är en leverans sen redan dagen efter utlovat datum, och en tidig leverans räknas som i tid. Under [System → Inställningar → Leveransprecision](/hjalp/system#leveransprecision) kan du ge kundordrar och inköpsordrar var sin marginal: **Sen efter** (sen först mer än så många dagar efter datumet) och **För tidig före** (för tidig när leveransen kommer mer än så många dagar före). Raden under varje tabell visar vilka marginaler som gäller.
-- Är marginalen för tidiga leveranser påslagen får tabellen kolumnen **För tidiga** (under **Motpart**: **Tidiga**), och den finns även i CSV-filen.
+- Är marginalen för tidiga leveranser påslagen får tabellen kolumnen **För tidiga** (under **Motpart**: **Tidiga**), och den finns även i exportfilen.
 - **Precision** = andelen ordrar i tid av de mätbara, så en för tidig leverans sänker precisionen precis som en sen. **Snitt försening** räknas enbart över de försenade ordrarna, i dagar efter utlovat datum (inte efter marginalen).
 - **Ej mätbara** redovisas separat: ordrar utan förväntat leveransdatum, och äldre kundordrar som levererades innan leveranstillfällen infördes (de saknar leveransdatum i systemet).
 - Delvis levererade ordrar syns inte förrän de är färdiglevererade — rapporten mäter hela ordern mot dess sista leverans.
@@ -55,7 +55,7 @@ Urvalet **Gruppera** väljer mellan **Månad** (som ovan) och **Motpart**. Med *
 - **Reklamerat antal** — summan av ärendenas antal. Har ärendena olika enheter går de inte att summera: kolumnen visar **—**, och klickar du på den ser du antalet per artikel.
 - **Avvikelsekostnad** — ärendenas nettokostnad (bara för den som får se priser).
 
-**Exportera CSV** följer valet.
+**Exportera** följer valet.
 
 ## Försäljningsstatistik
 
@@ -73,7 +73,7 @@ Orsaken är den som valts ur [Kvalitetsorsaker](/hjalp/kvalitet#kvalitetsorsaker
 
 ## Kalkylutfall
 
-**Rapporter → Kalkylutfall** ställer kalkylen mot utfallet per tillverkningsorder, i två vyer som du väljer med **Vy**: **Mot förkalkyl** (förval) och **Avvikelseanalys**. Valen ligger i adressen (`?view=&groupBy=&from=&to=`), så vyn går att spara som bokmärke. Intervallet filtrerar på efterkalkylens datum. Varje vy har egen **Exportera CSV** med samma val.
+**Rapporter → Kalkylutfall** ställer kalkylen mot utfallet per tillverkningsorder, i två vyer som du väljer med **Vy**: **Mot förkalkyl** (förval) och **Avvikelseanalys**. Valen ligger i adressen (`?view=&groupBy=&from=&to=`), så vyn går att spara som bokmärke. Intervallet filtrerar på efterkalkylens datum. Varje vy har egen **Exportera** med samma val.
 
 ### Mot förkalkyl
 
@@ -104,7 +104,7 @@ Fyra rutor överst gäller alla analyserade ordrar, oavsett gruppering: **Total 
 - **Order** och **Artikel** visar **Inlevererat**, **Kalkylerat**, **Utfall**, **Avvikelse**, **Avvikelse %**, **Pris**, **Mängd** (med *varav kassation* under beloppet), **Ställ**, **Stycke**, **Ej uppdelad** och **Påslag**. Per artikel finns dessutom **Antal TO**, och Inlevererat är summan över ordrarna. **Timpris** visas bara när något skiljer sig: den är skillnaden mellan timkostnaden de dagar tiden arbetades och timkostnaden när ordern skapades. **Ställ** och **Stycke** visas bara när någon rad har tid som registrerats uppdelad; annars visas **Ej uppdelad**, där hela tidsavvikelsen ligger. Raden **Totalt** summerar tabellen.
 - **Resurs** visar bara operationerna, eftersom material och påslag inte hör till någon resurs. Varje resurs får en rad per slag, **Tid** eller **Lego**; en resurs som byter slag mellan två ordrar får alltså två rader. En tidsresurs visar **Planerad ställ (h)**, **Planerad stycke (h)**, **Ej uppdelad (h)**, **Rapporterat (h)** och **Tidsavvikelse (kr)** (verklig ställ- och stycktid visas när tiden är registrerad som **Ställ** och **Produktion**, se [Tidrapporter](/hjalp/tillverkning#tidrapporter); annars står de som **—**). En operation där bara en del av tiden har typ räknas med alla sina timmar under **Ej uppdelad (h)**, eftersom hela dess tidsavvikelse ligger under Ej uppdelad; timmarna och kronorna går då att stämma av mot varandra. **Tidsavvikelse (kr)** är Timpris, Ställ, Stycke och Ej uppdelad tillsammans. En legoresurs visar **Kalkylerat**, **Utfall**, **Pris** och **Mängd**, med kalkylerat och mottaget antal under beloppen. Har en operation bytt resurs efter att tid rapporterats hamnar timmarna och deras kostnad på resursen de gjordes på; den planerade tiden står på den resurs operationen har nu, så den gamla resursens tid syns som avvikelse där (skillnaden i timkostnad som Timpris).
 
-Under tabellen står räknarna **N analyserade ordrar**, **N preliminära (Ej klar)** och **N utan analys**. De två sista ingår inte i summorna: en preliminär order är inte färdig, och en efterkalkyl som sparades före avvikelseanalysen har ingen bas att räknas mot (efterkalkylera ordern och spara igen för att få den). En order räknas i den månad då dess *senaste* efterkalkyl sparades, och aldrig i två perioder. Rapporten har ingen PDF — tabellen är för bred för A4 — men CSV-filen innehåller alla kolumner, med *varav kassation* som egen kolumn.
+Under tabellen står räknarna **N analyserade ordrar**, **N preliminära (Ej klar)** och **N utan analys**. De två sista ingår inte i summorna: en preliminär order är inte färdig, och en efterkalkyl som sparades före avvikelseanalysen har ingen bas att räknas mot (efterkalkylera ordern och spara igen för att få den). En order räknas i den månad då dess *senaste* efterkalkyl sparades, och aldrig i två perioder. Rapporten har ingen PDF — tabellen är för bred för A4 — men exportfilen innehåller alla kolumner, med *varav kassation* som egen kolumn.
 
 ## Marginal
 
@@ -117,7 +117,7 @@ Självkostnaden hämtas från artikelns **senaste sparade förkalkyl**, självko
 
 För en beställningsvara räknas TB mot konfigurationens förkalkyl från kundorderraden, inte mot mallartikelns egen kalkyl; går konfigurationens kostnad inte att räkna fram hamnar raden under **Utan kalkyl**.
 
-Kolumnerna är **Nettoomsättning**, **Självkostnad**, **TB** (täckningsbidrag), **TG** (täckningsgrad i procent, mot den omsättning som har en kalkyl) och **Utan kalkyl**. Negativ täckningsgrad tonas rött. Rapporten kan exporteras som CSV, där totalraden ingår.
+Kolumnerna är **Nettoomsättning**, **Självkostnad**, **TB** (täckningsbidrag), **TG** (täckningsgrad i procent, mot den omsättning som har en kalkyl) och **Utan kalkyl**. Negativ täckningsgrad tonas rött. Rapporten kan exporteras (**Exportera**), och totalraden ingår i filen.
 
 ## Produkter i arbete
 
@@ -140,7 +140,7 @@ Pågående tillverkning bokförs i årsbokslutet av steget [Produkter i arbete](
 
 **Rapporter → Projektrapport** visar **intäkter**, **kostnader** och **resultat** för ett projekt ur bokföringen. Välj **Projekt** (öppna och stängda), och ange vid behov **Från** och **Till** — lämnas de tomma gäller hela projektets bokföring, och texten under nyckeltalen visar då det första och sista bokförda datumet (eller *alla datum* om projektet inte har några bokförda rader än). Filtren ligger i adressen, så vyn går att spara som bokmärke.
 
-Under de tre nyckeltalen visas projektet **per månad** (**Intäkter**, **Kostnader**, **Resultat**), **per konto** och **Kundordrar på projektet** — de kundordrar som har projektet i sitt huvud (offerter, förlorade offerter och makulerade order räknas inte), med status och värde, klickbara till ordern. Siffrorna är de bokförda verifikatrader som bär projektet; hur projekt sätts på rader beskrivs under [Kostnadsställen och projekt](/hjalp/ekonomi#kostnadsstallen-och-projekt). **Exportera CSV** ger samma rapport. Rapporten kräver rättigheten **Rapporter**.
+Under de tre nyckeltalen visas projektet **per månad** (**Intäkter**, **Kostnader**, **Resultat**), **per konto** och **Kundordrar på projektet** — de kundordrar som har projektet i sitt huvud (offerter, förlorade offerter och makulerade order räknas inte), med status och värde, klickbara till ordern. Siffrorna är de bokförda verifikatrader som bär projektet; hur projekt sätts på rader beskrivs under [Kostnadsställen och projekt](/hjalp/ekonomi#kostnadsstallen-och-projekt). **Exportera** ger samma rapport. Rapporten kräver rättigheten **Rapporter**.
 
 ## Lagervärde
 
@@ -148,6 +148,11 @@ Lagervärdesrapporten är [Lagervärdering](/hjalp/lager#lagervardering) under L
 
 ## Exportera till Excel (CSV)
 
-Alla registerlistor (artiklar, ordrar, fakturor, saldon m.fl.) har knappen **Exportera CSV** i verktygsraden — den exporterar **hela** listan med aktuella filter (sök, status osv.), oavsett sidindelning. Även ekonomirapporterna (balans- och resultaträkning, huvudbok, verifikatlista) och rapporterna ovan har **Ladda ner CSV**/**Exportera CSV**.
+Alla registerlistor (artiklar, ordrar, fakturor, saldon m.fl.) har knappen **Exportera** i verktygsraden — den exporterar **hela** listan med aktuella filter (sök, status osv.), oavsett sidindelning. Även ekonomirapporterna (balans- och resultaträkning, huvudbok, verifikatlista), budgeten, avskrivningsplanen, löneunderlaget och rapporterna ovan har **Exportera**.
 
-Filerna är gjorda för svensk Excel: semikolon som avgränsare, decimalkomma och UTF-8 med BOM — dubbelklicka bara på filen så hamnar kolumnerna rätt. En export är begränsad till **10 000 rader**; större uttag avvisas med ett felmeddelande — avgränsa med filter och exportera i delar.
+Knappen öppnar en liten meny med två format, **CSV** och **Excel**. Båda innehåller samma rader och kolumner:
+
+- **Excel** ger en .xlsx-fil med fet, låst rubrikrad och kolumnbredder efter innehållet. Tal och belopp är riktiga tal som går att summera, datum är riktiga datum (visade som åååå-mm-dd) och text — till exempel artikelnummer med inledande nollor — förblir text.
+- **CSV** är gjord för svensk Excel: semikolon som avgränsare, decimalkomma och UTF-8 med BOM — dubbelklicka bara på filen så hamnar kolumnerna rätt. Välj CSV när filen ska läsas av ett annat program, eller läsas in igen med **Importera CSV** på budgeten.
+
+En export är begränsad till **10 000 rader** i båda formaten; större uttag avvisas med ett felmeddelande — avgränsa med filter och exportera i delar.

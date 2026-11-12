@@ -2,7 +2,7 @@
 // pdfkit) — they flatten the hierarchical report bodies to semicolon rows in
 // the same visual order as the web pages and the PDFs, using the shared
 // Excel-friendly CSV conventions from @navet/shared.
-import { buildCsv, type CsvColumn, type DimensionRef } from "@navet/shared";
+import { exportTable, tableCsv, type ExportTable, type CsvColumn, type DimensionRef } from "@navet/shared";
 import { dimensionText } from "./dimension-check.js";
 import type { BudgetedIncomeStatementBody } from "./budget-calc.js";
 import type {
@@ -26,7 +26,7 @@ const FLAT_COLUMNS: CsvColumn<FlatRow>[] = [
   { label: "Belopp", value: (r) => r.amount, format: "money" },
 ];
 
-export function buildBalanceSheetCsv(report: BalanceSheetBody): string {
+export function buildBalanceSheetTable(report: BalanceSheetBody): ExportTable {
   const rows: FlatRow[] = [];
   const section = (label: string, groups: BalanceSheetBody["assets"]["groups"], total: number, sumLabel: string) => {
     rows.push({ konto: "", label, amount: null }); // section heading, like the PDF/web page
@@ -51,10 +51,10 @@ export function buildBalanceSheetCsv(report: BalanceSheetBody): string {
     report.equityAndLiabilities.total,
     "Summa eget kapital och skulder"
   );
-  return buildCsv(FLAT_COLUMNS, rows);
+  return exportTable(FLAT_COLUMNS, rows);
 }
 
-export function buildIncomeStatementCsv(report: IncomeStatementBody): string {
+export function buildIncomeStatementTable(report: IncomeStatementBody): ExportTable {
   const rows: FlatRow[] = [];
   for (const entry of report.entries) {
     if (entry.kind === "line") {
@@ -69,12 +69,12 @@ export function buildIncomeStatementCsv(report: IncomeStatementBody): string {
     }
   }
   rows.push({ konto: "", label: "Periodens resultat", amount: report.result });
-  return buildCsv(FLAT_COLUMNS, rows);
+  return exportTable(FLAT_COLUMNS, rows);
 }
 
 // Resultaträkningen per objekt: Konto, Benämning, one column per objekt
 // (code and name as the heading) and Totalt — the same rows as the flat CSV.
-export function buildGroupedIncomeStatementCsv(report: IncomeStatementBody, columns: IncomeStatementColumn[]): string {
+export function buildGroupedIncomeStatementTable(report: IncomeStatementBody, columns: IncomeStatementColumn[]): ExportTable {
   type GroupedRow = FlatRow & { amounts: (number | null)[] };
   const csvColumns: CsvColumn<GroupedRow>[] = [
     { label: "Konto", value: (r) => r.konto },
@@ -102,12 +102,12 @@ export function buildGroupedIncomeStatementCsv(report: IncomeStatementBody, colu
   }
   const resultEntry = [...report.entries].reverse().find((entry) => entry.kind === "subtotal");
   rows.push({ konto: "", label: "Periodens resultat", amount: report.result, amounts: amountsOf(resultEntry?.amounts) });
-  return buildCsv(csvColumns, rows);
+  return exportTable(csvColumns, rows);
 }
 
 // Resultaträkningen med budget: every budget column, always (the PDF drops
 // the accumulated ones when the period starts on the year's first day).
-export function buildBudgetedIncomeStatementCsv(report: BudgetedIncomeStatementBody): string {
+export function buildBudgetedIncomeStatementTable(report: BudgetedIncomeStatementBody): ExportTable {
   type Figures = {
     amount: number;
     budget: number;
@@ -125,11 +125,11 @@ export function buildBudgetedIncomeStatementCsv(report: BudgetedIncomeStatementB
     { label: "Utfall", value: (r) => r.amount, format: "money" },
     { label: "Budget", value: (r) => r.budget, format: "money" },
     { label: "Avvikelse", value: (r) => r.variance, format: "money" },
-    { label: "Avvikelse %", value: (r) => r.variancePercent, format: "number" },
+    { label: "Avvikelse %", cell: "percent", value: (r) => r.variancePercent, format: "number" },
     { label: "Utfall ack.", value: (r) => r.accumulated, format: "money" },
     { label: "Budget ack.", value: (r) => r.accumulatedBudget, format: "money" },
     { label: "Avvikelse ack.", value: (r) => r.accumulatedVariance, format: "money" },
-    { label: "Avvikelse ack. %", value: (r) => r.accumulatedVariancePercent, format: "number" },
+    { label: "Avvikelse ack. %", cell: "percent", value: (r) => r.accumulatedVariancePercent, format: "number" },
   ];
   const rows: BudgetRow[] = [];
   for (const entry of report.entries) {
@@ -152,7 +152,7 @@ export function buildBudgetedIncomeStatementCsv(report: BudgetedIncomeStatementB
     accumulatedVariance: report.resultAccumulatedVariance,
     accumulatedVariancePercent: report.resultAccumulatedVariancePercent,
   });
-  return buildCsv(columns, rows);
+  return exportTable(columns, rows);
 }
 
 interface LedgerFlatRow {
@@ -181,7 +181,7 @@ const LEDGER_COLUMNS: CsvColumn<LedgerFlatRow>[] = [
   { label: "Saldo", value: (r) => r.saldo, format: "money" },
 ];
 
-export function buildGeneralLedgerCsv(report: GeneralLedgerResponse): string {
+export function buildGeneralLedgerTable(report: GeneralLedgerResponse): ExportTable {
   const rows: LedgerFlatRow[] = [];
   for (const account of report.accounts) {
     rows.push({
@@ -223,7 +223,7 @@ export function buildGeneralLedgerCsv(report: GeneralLedgerResponse): string {
       saldo: account.closingBalance,
     });
   }
-  return buildCsv(LEDGER_COLUMNS, rows);
+  return exportTable(LEDGER_COLUMNS, rows);
 }
 
 interface VerificationFlatRow {
@@ -250,7 +250,7 @@ const VERIFICATION_COLUMNS: CsvColumn<VerificationFlatRow>[] = [
   { label: "Kredit", value: (r) => r.kredit, format: "money" },
 ];
 
-export function buildVerificationListCsv(report: VerificationListResponse): string {
+export function buildVerificationListTable(report: VerificationListResponse): ExportTable {
   const rows: VerificationFlatRow[] = [];
   for (const verification of report.verifications) {
     for (const row of verification.rows) {
@@ -267,5 +267,26 @@ export function buildVerificationListCsv(report: VerificationListResponse): stri
       });
     }
   }
-  return buildCsv(VERIFICATION_COLUMNS, rows);
+  return exportTable(VERIFICATION_COLUMNS, rows);
+}
+
+// The CSV rendering of each table above — the Excel twin renders the same
+// table (system/service/table-export.ts).
+export function buildBalanceSheetCsv(...args: Parameters<typeof buildBalanceSheetTable>): string {
+  return tableCsv(buildBalanceSheetTable(...args));
+}
+export function buildIncomeStatementCsv(...args: Parameters<typeof buildIncomeStatementTable>): string {
+  return tableCsv(buildIncomeStatementTable(...args));
+}
+export function buildGroupedIncomeStatementCsv(...args: Parameters<typeof buildGroupedIncomeStatementTable>): string {
+  return tableCsv(buildGroupedIncomeStatementTable(...args));
+}
+export function buildBudgetedIncomeStatementCsv(...args: Parameters<typeof buildBudgetedIncomeStatementTable>): string {
+  return tableCsv(buildBudgetedIncomeStatementTable(...args));
+}
+export function buildGeneralLedgerCsv(...args: Parameters<typeof buildGeneralLedgerTable>): string {
+  return tableCsv(buildGeneralLedgerTable(...args));
+}
+export function buildVerificationListCsv(...args: Parameters<typeof buildVerificationListTable>): string {
+  return tableCsv(buildVerificationListTable(...args));
 }

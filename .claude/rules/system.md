@@ -20,6 +20,9 @@ paths:
   - "apps/api/test/overview*"
   - "packages/shared/src/user-settings.ts"
   - "scripts/**"
+  - "packages/shared/src/csv.ts"
+  - "apps/web/components/ui/ExportMenu*"
+  - "apps/api/test/table-export*"
   - "apps/api/test/demo*"
   - "apps/api/test/onboarding*"
   - "apps/api/test/user*"
@@ -104,3 +107,14 @@ TODO-posten "Nav som program (UI/UX)"; skisserna är privata.
 - **Gränsen på fältet** är `.max(numericMax(p, s))` / `.max(INT4_MAX)` (`coerce.ts`) efter kolumnens precision — ger 400 `validation-failed` med fältnamn. Finns i `manufacturing.ts`, `preCalculateSchema` och Förkalkylera flera; övriga scheman lutar sig mot nätet (TODO).
 - **`blankSafe` runt varje `z.coerce.number()` i ett body-schema:** `""` och `null` är 400, aldrig 0. `.nullable()`/`.optional()`/`.default()` ligger UTANFÖR `blankSafe(...)` — innanför når null aldrig fram, och ett PATCH-fält som ska kunna tömmas slutar fungera. **Query-scheman** (`list.ts`, `*QuerySchema`, pallkortens `quantity`) är medvetet oinslagna: `?offset=` är 0 som förut. Importens fältavkodning har egna regler.
 - Test: `talfalt.test.ts` (route-nivå; overflow-fallet är ett antal × materialkostnad som schemat släpper igenom).
+
+## Tabellexporter: CSV och Excel (#35)
+
+- **EN kolumnlista, två renderingar.** En export beskrivs en gång som `CsvColumn<T>[]` + rader (shared `csv.ts`) och räknas en gång till en `ExportTable` (`exportTable` — etiketter + varje cells RÅA värde). `tableCsv` ger CSV:n (`buildCsv` = `tableCsv(exportTable(...))`, byte för byte som förut) och `exportCell` den typade cellen som `system/service/table-export.ts` (`tableXlsx`, `renderExport`, `csvFile`/`xlsxFile`, `NamedTable` = tabell + filnamn utan ändelse) skriver med `xlsx-writer.ts`. Skriv aldrig en andra kolumnlista eller en egen avrundning för Excel.
+- **Celltypen** följer `format` (money → belopp med två decimaler, number → tal med högst fyra, date → Excel-datum `yyyy-mm-dd`, datetime → `yyyy-mm-dd hh:mm` i Stockholmstid); utan format blir ett JS-tal en talcell och en sträng text. `cell:` åsidosätter (`"text"` för ett numeriskt id som ska förbli text, `"percent"` = procenttalet som det visas, 95,5 — inte bråket). Ett värde som inte passar typen skrivs som text, aldrig som fel tal. Texten skrivs **utan** CSV:ns formelvakt (en inline-sträng räknas aldrig).
+- **Datum:** skrivaren tittar aldrig på klockan eller processens zon — ett datum är kalenderdagen den får (`excelDateSerial` via `Date.UTC`), en tidpunkt den Stockholms-avläsning shared redan formaterat.
+- **Rutterna:** `registerListCsvRoute` registrerar `…/csv` OCH `…/xlsx` genom samma handler (samma schema, `fetch`, tak 400 vid > 10 000, kolumner, preHandler) — sökvägen måste sluta på `/csv`. En rapports egen export använder `registerTableExportRoutes(app, "/…/csv", options, produce)` där `produce` ger en `NamedTable` (eller det svar felmappningen redan skickat). Tvillingen ärver modulens läsregel/preHandlern — en ny CSV-export för människor ska registreras så, aldrig med ett eget `text/csv`-svar.
+- **Undantag (ingen Excel):** fasta filformat och original — SIE, PAXml, betalfiler (pain.001), momsfil, periodisk sammanställning, e-fakturans original/UBL, lagrade bankfiler och kontoutdrag — samt importguidens lista över överhoppade rader, som byggs i webbläsaren (`apps/web/lib/csv.ts`). Budgetens **Importera CSV** läser bara CSV:n.
+- **Webben:** `ExportMenu` (`components/ui/ExportMenu.tsx`, knappen **Exportera** med **CSV**/**Excel**, byggd på `RowMenu` med `button`) är den enda exportkontrollen; `ListExportLink` och `ReportCsvLink` är tunna omslag. Excel-länken härleds ur CSV-länken (`xlsxHrefOf`: sista segmentet `/csv` → `/xlsx`).
+- `buildStoredZip` (xlsx-writer) är zip-byggaren för en export i flera filer (etapp 2).
+- Tester: `table-export.test.ts` (skrivarens tal-/datumceller lästa med `read-excel-file`, kolumnmodellen, tvillingrutterna, taket, filnamnet), `test/helpers/read-xlsx.ts` (`expectXlsxMatchesCsv` — samma rader och värden som CSV:n) i list-/rapporttesterna, `import-templates-generated.test.ts` (mallarna oförändrade).

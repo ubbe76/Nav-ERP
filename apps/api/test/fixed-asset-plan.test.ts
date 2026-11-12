@@ -1,4 +1,6 @@
 import { createVerificationSchema } from "@navet/shared";
+import { expectXlsxMatchesCsv } from "./helpers/read-xlsx.js";
+import { xlsxFile } from "../src/modules/system/service/table-export.js";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { buildFixedAssetPlan, type PlanAssetInput, type PlanCategoryInput } from "../src/modules/economy/service/fixed-asset-plan.js";
 import { buildFixedAssetPlanCsv } from "../src/modules/economy/service/fixed-asset-plan-csv.js";
@@ -244,5 +246,13 @@ describe("avskrivningsplan (DB, PDF)", () => {
     const csv = await testFixedAssetService.getPlanCsv({ fiscalYearId: planYearId });
     expect(csv.filename).toBe(`avskrivningsplan-${Y}.csv`);
     expect(csv.content).toContain("AN-1;CNC-fräs");
+    // #35: the Excel twin — the dates are date cells, the amounts numbers.
+    const xlsx = xlsxFile(await testFixedAssetService.getPlanTable({ fiscalYearId: planYearId }));
+    expect(xlsx.filename).toBe(`avskrivningsplan-${Y}.xlsx`);
+    const rows = await expectXlsxMatchesCsv(xlsx.content, csv.content);
+    const header = rows[0] as string[];
+    const asset = rows.find((row) => row[header.indexOf("Nr")] === "AN-1")!;
+    expect(asset[header.indexOf("Anskaffad")]).toBeInstanceOf(Date);
+    expect(typeof asset[header.indexOf("Bokfört värde")]).toBe("number");
   });
 });

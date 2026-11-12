@@ -9,6 +9,9 @@ export interface RowMenuItem {
   // A button item runs onSelect; a link item navigates to href.
   onSelect?: () => void;
   href?: string;
+  // With href: a plain <a download> (a file from the API) instead of an
+  // in-app navigation.
+  download?: boolean;
   danger?: boolean;
   disabled?: boolean;
 }
@@ -30,7 +33,18 @@ const VIEWPORT_MARGIN = 8;
 // there is no room below — and closes on scroll and resize, since a fixed
 // box does not follow the page. popoverTarget makes the button the invoker,
 // so a click on it while open closes the menu instead of reopening it.
-export function RowMenu({ items, label = "Fler åtgärder" }: { items: (RowMenuItem | false | null | undefined)[]; label?: string }) {
+//
+// With `button` the trigger is an ordinary text button instead of the ⋯
+// (ExportMenu's "Exportera") — same menu, same keyboard handling.
+export function RowMenu({
+  items,
+  label = "Fler åtgärder",
+  button,
+}: {
+  items: (RowMenuItem | false | null | undefined)[];
+  label?: string;
+  button?: { text: string; className: string };
+}) {
   const visible = items.filter((i): i is RowMenuItem => Boolean(i));
   const id = useId();
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -111,25 +125,39 @@ export function RowMenu({ items, label = "Fler åtgärder" }: { items: (RowMenuI
 
   return (
     <>
-      <button
-        ref={buttonRef}
-        type="button"
-        className={styles.trigger}
-        popoverTarget={id}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={id}
-        aria-label={label}
-        title={label}
-        // Right-click on the row opens this menu (KeyboardShortcuts).
-        data-row-menu=""
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-          <circle cx="3" cy="8" r="1.5" fill="currentColor" />
-          <circle cx="8" cy="8" r="1.5" fill="currentColor" />
-          <circle cx="13" cy="8" r="1.5" fill="currentColor" />
-        </svg>
-      </button>
+      {button ? (
+        <button
+          ref={buttonRef}
+          type="button"
+          className={button.className}
+          popoverTarget={id}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-controls={id}
+        >
+          {button.text}
+        </button>
+      ) : (
+        <button
+          ref={buttonRef}
+          type="button"
+          className={styles.trigger}
+          popoverTarget={id}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-controls={id}
+          aria-label={label}
+          title={label}
+          // Right-click on the row opens this menu (KeyboardShortcuts).
+          data-row-menu=""
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <circle cx="3" cy="8" r="1.5" fill="currentColor" />
+            <circle cx="8" cy="8" r="1.5" fill="currentColor" />
+            <circle cx="13" cy="8" r="1.5" fill="currentColor" />
+          </svg>
+        </button>
+      )}
       <div
         ref={menuRef}
         id={id}
@@ -143,7 +171,11 @@ export function RowMenu({ items, label = "Fler åtgärder" }: { items: (RowMenuI
       >
         {visible.map((item) => {
           const className = `${styles.item}${item.danger ? ` ${styles.danger}` : ""}`;
-          return item.href && !item.disabled ? (
+          return item.href && item.download && !item.disabled ? (
+            <a key={item.label} href={item.href} download role="menuitem" className={className} onClick={() => menuRef.current?.hidePopover()}>
+              {item.label}
+            </a>
+          ) : item.href && !item.disabled ? (
             <Link key={item.label} href={item.href} role="menuitem" className={className} onClick={() => menuRef.current?.hidePopover()}>
               {item.label}
             </Link>

@@ -27,6 +27,7 @@ import {
 } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
 import listStyles from "../../app/ekonomi/page.module.css";
+import { ExportMenu } from "../ui/ExportMenu";
 
 export function VerifikatPageClient({
   verifications,
@@ -76,13 +77,7 @@ export function VerifikatPageClient({
           >
             Skriv ut lista (PDF)
           </a>
-          <a
-            href={`${API_URL}/api/v1/verification-list/csv?${printParams.toString()}`}
-            download
-            className={`${buttonStyles.button} ${buttonStyles.ghost}`}
-          >
-            Ladda ner CSV
-          </a>
+          <ExportMenu csvHref={`${API_URL}/api/v1/verification-list/csv?${printParams.toString()}`} />
           <Button type="button" variant="ghost" onClick={() => setAllocateOpen(true)}>
             Fördela över perioder
           </Button>

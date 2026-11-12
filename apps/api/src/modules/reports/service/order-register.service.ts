@@ -1,4 +1,5 @@
-import { buildCsv, type CsvColumn, type PurchaseOrderRegisterQuery, type SalesOrderRegisterQuery } from "@navet/shared";
+import { exportTable, type CsvColumn, type PurchaseOrderRegisterQuery, type SalesOrderRegisterQuery } from "@navet/shared";
+import { csvFile, type NamedTable } from "../../system/service/table-export.js";
 import { formatNumber, formatUnitPrice, type OrderRegisterPdfInput } from "../../mail/service/document-pdf.js";
 import { PURCHASE_ORDER_STATUS_LABELS } from "../../purchase/service/export-columns.js";
 import { SALES_ORDER_STATUS_LABELS } from "../../sales/service/export-columns.js";
@@ -88,7 +89,7 @@ function csvColumns(kind: OrderRegisterKind, withRows: boolean): CsvColumn<CsvLi
     { label: "Enhet", value: (l) => l.row?.unit },
     { label: "À-pris", value: (l) => l.row?.unitPrice, format: "number" },
     ...(kind === "sales"
-      ? [{ label: "Rabatt %", value: (l: CsvLine) => l.row?.discountPercent, format: "number" as const }]
+      ? [{ label: "Rabatt %", cell: "percent" as const, value: (l: CsvLine) => l.row?.discountPercent, format: "number" as const }]
       : [{ label: "Ställpris", value: (l: CsvLine) => l.row?.setupPrice, format: "money" as const }]),
     { label: "Belopp", value: (l) => l.row?.amount, format: "money" },
     { label: "Restbelopp", value: (l) => l.row?.restAmount, format: "money" },
@@ -109,7 +110,8 @@ export function createOrderRegisterService(repo: OrderRegisterRepository, pdf?: 
       return buildOrderRegister(source, query.withRows ?? false);
     },
 
-    async getCsv(kind: OrderRegisterKind, query: RegisterQuery) {
+    // The export table — the CSV and the Excel twin render the same one.
+    async getTable(kind: OrderRegisterKind, query: RegisterQuery): Promise<NamedTable> {
       const withRows = query.withRows ?? false;
       // The CSV always carries the rows when asked — one line per row with
       // the order columns repeated, so Excel can filter and pivot it.
@@ -118,9 +120,13 @@ export function createOrderRegisterService(repo: OrderRegisterRepository, pdf?: 
         ? result.orders.flatMap((order) => (order.rows ?? []).map((row) => ({ order, row })))
         : result.orders.map((order) => ({ order }));
       return {
-        filename: `${SIDE[kind].filename}-${stockholmToday()}.csv`,
-        content: buildCsv(csvColumns(kind, withRows), lines),
+        basename: `${SIDE[kind].filename}-${stockholmToday()}`,
+        table: exportTable(csvColumns(kind, withRows), lines),
       };
+    },
+
+    async getCsv(kind: OrderRegisterKind, query: RegisterQuery) {
+      return csvFile(await service.getTable(kind, query));
     },
 
     async getPdf(kind: OrderRegisterKind, query: RegisterQuery) {

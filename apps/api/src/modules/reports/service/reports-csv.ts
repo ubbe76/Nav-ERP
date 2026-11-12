@@ -2,7 +2,7 @@
 // the JSON response shapes reports.service.ts already produces into
 // semicolon rows using the shared Excel-friendly CSV conventions
 // (@navet/shared's buildCsv).
-import { buildCsv, type CsvColumn } from "@navet/shared";
+import { exportTable, tableCsv, type ExportTable, type CsvColumn } from "@navet/shared";
 import type { PrecisionMonth } from "./delivery-precision-calc.js";
 import type { CounterpartyPrecisionRow, CounterpartyPrecisionTotals } from "./delivery-quality-calc.js";
 import type {
@@ -24,25 +24,25 @@ import type {
 
 // För tidiga only when the side's early margin is on (#29) — the same rule
 // as the web table; off, every non-late delivery is I tid.
-export function buildDeliveryPrecisionCsv(months: PrecisionMonth[], opts: { early: boolean }): string {
+export function buildDeliveryPrecisionTable(months: PrecisionMonth[], opts: { early: boolean }): ExportTable {
   const columns: CsvColumn<PrecisionMonth>[] = [
     { label: "Månad", value: (r) => r.month },
     { label: "Antal ordrar", value: (r) => r.total },
     ...(opts.early ? [{ label: "För tidiga", value: (r: PrecisionMonth) => r.early }] : []),
     { label: "I tid", value: (r) => r.onTime },
     { label: "Försenade", value: (r) => r.late },
-    { label: "Precision %", value: (r) => r.precisionPct },
+    { label: "Precision %", cell: "percent", value: (r) => r.precisionPct },
     { label: "Snitt försening (dagar)", value: (r) => r.avgDaysLate, format: "number" },
   ];
-  return buildCsv(columns, months);
+  return exportTable(columns, months);
 }
 
 // Gruppera: Motpart — one row per supplier/customer plus a Totalt row.
 // Reklamerat antal is blank where the units are mixed (the web shows "—").
-export function buildCounterpartyPrecisionCsv(
+export function buildCounterpartyPrecisionTable(
   grouped: { rows: CounterpartyPrecisionRow[]; totals: CounterpartyPrecisionTotals },
   opts: { kind: "sales" | "purchase"; seePrices: boolean; early: boolean }
-): string {
+): ExportTable {
   type Row = Omit<CounterpartyPrecisionRow, "counterpartyId">;
   const columns: CsvColumn<Row>[] = [
     { label: opts.kind === "sales" ? "Kund" : "Leverantör", value: (r) => r.counterpartyName },
@@ -50,16 +50,16 @@ export function buildCounterpartyPrecisionCsv(
     ...(opts.early ? [{ label: "För tidiga", value: (r: Row) => r.early }] : []),
     { label: "I tid", value: (r) => r.onTime },
     { label: "Försenade", value: (r) => r.late },
-    { label: "Precision %", value: (r) => r.precisionPct },
+    { label: "Precision %", cell: "percent", value: (r) => r.precisionPct },
     { label: "Snitt försening (dagar)", value: (r) => r.avgDaysLate, format: "number" },
     { label: "Avvikelser", value: (r) => r.deviations },
     { label: "Order med avvikelse", value: (r) => r.ordersWithDeviation },
-    { label: "Andel felfria %", value: (r) => r.defectFreePct },
+    { label: "Andel felfria %", cell: "percent", value: (r) => r.defectFreePct },
     { label: "Reklamerat antal", value: (r) => r.claimedQuantity, format: "number" },
     { label: "Enhet", value: (r) => r.claimedUnit },
     ...(opts.seePrices ? [{ label: "Avvikelsekostnad", value: (r: Row) => r.deviationCost, format: "money" as const }] : []),
   ];
-  return buildCsv(columns, [...grouped.rows, { ...grouped.totals, counterpartyName: "Totalt" }]);
+  return exportTable(columns, [...grouped.rows, { ...grouped.totals, counterpartyName: "Totalt" }]);
 }
 
 const STATISTICS_COLUMNS: CsvColumn<StatisticsRowResponse>[] = [
@@ -69,12 +69,12 @@ const STATISTICS_COLUMNS: CsvColumn<StatisticsRowResponse>[] = [
   { label: "Antal fakturor", value: (r) => r.invoiceCount },
 ];
 
-export function buildSalesStatisticsCsv(response: SalesStatisticsResponse): string {
-  return buildCsv(STATISTICS_COLUMNS, response.rows);
+export function buildSalesStatisticsTable(response: SalesStatisticsResponse): ExportTable {
+  return exportTable(STATISTICS_COLUMNS, response.rows);
 }
 
-export function buildPurchaseStatisticsCsv(response: PurchaseStatisticsResponse): string {
-  return buildCsv(STATISTICS_COLUMNS, response.rows);
+export function buildPurchaseStatisticsTable(response: PurchaseStatisticsResponse): ExportTable {
+  return exportTable(STATISTICS_COLUMNS, response.rows);
 }
 
 const SCRAP_COLUMNS: CsvColumn<ScrapStatisticsRowResponse>[] = [
@@ -83,8 +83,8 @@ const SCRAP_COLUMNS: CsvColumn<ScrapStatisticsRowResponse>[] = [
   { label: "Antal rapporter", value: (r) => r.reportCount },
 ];
 
-export function buildScrapStatisticsCsv(response: ScrapStatisticsResponse): string {
-  return buildCsv(SCRAP_COLUMNS, response.rows);
+export function buildScrapStatisticsTable(response: ScrapStatisticsResponse): ExportTable {
+  return exportTable(SCRAP_COLUMNS, response.rows);
 }
 
 // Mot förkalkyl. Efterkalkyl TVK/st is per Inlevererat on a final analysis,
@@ -99,7 +99,7 @@ const CALC_OUTCOME_COLUMNS: CsvColumn<OutcomeRow>[] = [
   { label: "Kalkylerat TVK/st", value: (r) => r.calculatedTvkPerUnit, format: "money" },
   { label: "Efterkalkyl TVK/st", value: (r) => r.postTvkPerUnit, format: "money" },
   { label: "Avvikelse/st", value: (r) => r.deltaPerUnit, format: "money" },
-  { label: "Avvikelse %", value: (r) => r.deltaPct, format: "number" },
+  { label: "Avvikelse %", cell: "percent", value: (r) => r.deltaPct, format: "number" },
   { label: "Delat med", value: (r) => (r.perUnitBasis === "output" ? "Inlevererat" : "Antal") },
   { label: "Förkalkyl", value: (r) => (r.preSource === "configuration" ? "Konfiguration" : "Artikel") },
   { label: "Flernivå", value: (r) => (r.preMultiLevel ? "Ja" : "") },
@@ -116,7 +116,7 @@ function amountColumns<T extends OutcomeAmounts>(): CsvColumn<T>[] {
     { label: "Kalkylerat", value: (r) => r.base, format: "money" },
     { label: "Utfall", value: (r) => r.actual, format: "money" },
     { label: "Avvikelse", value: (r) => r.deviation, format: "money" },
-    { label: "Avvikelse %", value: (r) => r.deviationPct, format: "number" },
+    { label: "Avvikelse %", cell: "percent", value: (r) => r.deviationPct, format: "number" },
     { label: "Pris", value: (r) => r.parts.price, format: "money" },
     { label: "Mängd", value: (r) => r.parts.quantity, format: "money" },
     { label: "varav kassation", value: (r) => r.parts.scrap, format: "money" },
@@ -166,20 +166,20 @@ const ANALYSIS_WORK_CENTER_COLUMNS: CsvColumn<Total<AnalysisWorkCenterRow>>[] = 
 ];
 
 // One row per group plus a Totalt row, so the file reconciles on its own.
-export function buildCalculationOutcomeAnalysisCsv(result: AnalysisOutcomeResult): string {
+export function buildCalculationOutcomeAnalysisTable(result: AnalysisOutcomeResult): ExportTable {
   switch (result.groupBy) {
     case "order":
-      return buildCsv(ANALYSIS_ORDER_COLUMNS, [
+      return exportTable(ANALYSIS_ORDER_COLUMNS, [
         ...(result.rows as AnalysisOrderRow[]),
         { ...result.totals, orderNumber: "Totalt" },
       ]);
     case "article":
-      return buildCsv(ANALYSIS_ARTICLE_COLUMNS, [
+      return exportTable(ANALYSIS_ARTICLE_COLUMNS, [
         ...(result.rows as AnalysisArticleRow[]),
         { ...result.totals, articleNumber: "Totalt", orderCount: result.counts.analysed },
       ]);
     case "workCenter":
-      return buildCsv(ANALYSIS_WORK_CENTER_COLUMNS, [
+      return exportTable(ANALYSIS_WORK_CENTER_COLUMNS, [
         ...(result.rows as AnalysisWorkCenterRow[]),
         { ...result.totals, workCenterCode: "Totalt" },
       ]);
@@ -192,16 +192,43 @@ const ORDER_MARGIN_COLUMNS: CsvColumn<MarginGroup>[] = [
   { label: "Varav med kalkyl", value: (r) => r.costedNetRevenue, format: "money" },
   { label: "Självkostnad", value: (r) => r.cost, format: "money" },
   { label: "Täckningsbidrag", value: (r) => r.contribution, format: "money" },
-  { label: "Täckningsgrad %", value: (r) => r.marginPercent, format: "number" },
+  { label: "Täckningsgrad %", cell: "percent", value: (r) => r.marginPercent, format: "number" },
   { label: "Rader utan kalkyl", value: (r) => r.rowsWithoutCost, format: "number" },
 ];
 
-export function buildOrderMarginCsv(result: { groups: MarginGroup[]; total: MarginGroup }): string {
+export function buildOrderMarginTable(result: { groups: MarginGroup[]; total: MarginGroup }): ExportTable {
   // The total is appended as an ordinary row so the file reconciles on its own
   // — the same shape the other statistics exports use.
-  return buildCsv(ORDER_MARGIN_COLUMNS, [...result.groups, result.total]);
+  return exportTable(ORDER_MARGIN_COLUMNS, [...result.groups, result.total]);
 }
 
-export function buildCalculationOutcomeCsv(rows: OutcomeRow[]): string {
-  return buildCsv(CALC_OUTCOME_COLUMNS, rows);
+export function buildCalculationOutcomeTable(rows: OutcomeRow[]): ExportTable {
+  return exportTable(CALC_OUTCOME_COLUMNS, rows);
+}
+
+// The CSV rendering of each table above — the Excel twin renders the same
+// table (system/service/table-export.ts).
+export function buildDeliveryPrecisionCsv(...args: Parameters<typeof buildDeliveryPrecisionTable>): string {
+  return tableCsv(buildDeliveryPrecisionTable(...args));
+}
+export function buildCounterpartyPrecisionCsv(...args: Parameters<typeof buildCounterpartyPrecisionTable>): string {
+  return tableCsv(buildCounterpartyPrecisionTable(...args));
+}
+export function buildSalesStatisticsCsv(...args: Parameters<typeof buildSalesStatisticsTable>): string {
+  return tableCsv(buildSalesStatisticsTable(...args));
+}
+export function buildPurchaseStatisticsCsv(...args: Parameters<typeof buildPurchaseStatisticsTable>): string {
+  return tableCsv(buildPurchaseStatisticsTable(...args));
+}
+export function buildScrapStatisticsCsv(...args: Parameters<typeof buildScrapStatisticsTable>): string {
+  return tableCsv(buildScrapStatisticsTable(...args));
+}
+export function buildCalculationOutcomeAnalysisCsv(...args: Parameters<typeof buildCalculationOutcomeAnalysisTable>): string {
+  return tableCsv(buildCalculationOutcomeAnalysisTable(...args));
+}
+export function buildOrderMarginCsv(...args: Parameters<typeof buildOrderMarginTable>): string {
+  return tableCsv(buildOrderMarginTable(...args));
+}
+export function buildCalculationOutcomeCsv(...args: Parameters<typeof buildCalculationOutcomeTable>): string {
+  return tableCsv(buildCalculationOutcomeTable(...args));
 }

@@ -1,4 +1,4 @@
-import { buildCsv, type CsvColumn } from "@navet/shared";
+import { exportTable, tableCsv, type ExportTable, type CsvColumn } from "@navet/shared";
 import type { FixedAssetPlan, PlanAssetRow } from "./fixed-asset-plan.js";
 
 // One row per asset, every plan column flat — the same conventions as the
@@ -20,9 +20,15 @@ const COLUMNS: CsvColumn<PlanAssetRow>[] = [
   { label: "Bokfört värde", value: (row) => row.bookValueClosing, format: "money" },
 ];
 
-export function buildFixedAssetPlanCsv(plan: FixedAssetPlan): string {
-  return buildCsv(
+export function buildFixedAssetPlanTable(plan: FixedAssetPlan): ExportTable {
+  return exportTable(
     COLUMNS,
     plan.categories.flatMap((category) => category.assets)
   );
+}
+
+// The CSV rendering of each table above — the Excel twin renders the same
+// table (system/service/table-export.ts).
+export function buildFixedAssetPlanCsv(...args: Parameters<typeof buildFixedAssetPlanTable>): string {
+  return tableCsv(buildFixedAssetPlanTable(...args));
 }

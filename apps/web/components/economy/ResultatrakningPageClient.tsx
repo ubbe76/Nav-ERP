@@ -23,6 +23,7 @@ import type {
 } from "../../lib/types";
 import { CostCenterSelect, ProjectSelect } from "./DimensionSelect";
 import styles from "./Resultatrakning.module.css";
+import { ExportMenu } from "../ui/ExportMenu";
 
 type GroupBy = "" | "costCenter" | "project";
 
@@ -219,13 +220,7 @@ export function ResultatrakningPageClient({
             </a>
           )}
           {report && (
-            <a
-              href={`${API_URL}/api/v1/income-statement/csv?${queryString}`}
-              download
-              className={`${buttonStyles.button} ${buttonStyles.ghost}`}
-            >
-              Ladda ner CSV
-            </a>
+            <ExportMenu csvHref={`${API_URL}/api/v1/income-statement/csv?${queryString}`} />
           )}
         </FormRow>
         {showDimensionControls && (

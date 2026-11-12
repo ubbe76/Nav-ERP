@@ -7,83 +7,57 @@
 // COMMA on every number, and a UTF-8 BOM so Excel detects the encoding
 // instead of mangling åäö.
 
-import {
-  CSV_BOM as BOM,
-  CSV_NEWLINE as NEWLINE,
-  CSV_SEPARATOR as SEPARATOR,
-  csvCell,
-  guardFormulaInjection,
-} from "@navet/shared";
-import type { PeriodEmployeeSummary, PeriodSummary } from "./payroll.service.js";
+// #35: the file is described once as an export table — the CSV and the Excel
+// twin (…/xlsx) render the same one, the hours as real numbers in Excel.
 
-const FIXED_HEADERS = [
-  "Anställningsnr",
-  "Namn",
-  "Anställningsform",
-  "Schema (h)",
-  "Arbetad tid (h)",
-  "Övertid utbet. (h)",
-  "Övertid komp (h)",
-  "Övertid helg utbet. (h)",
-  "Övertid helg komp (h)",
-  "ATF (h)",
-  "Ofördelat (h)",
-];
+import { exportTable, tableCsv, type CsvColumn, type ExportTable } from "@navet/shared";
+import type { PeriodEmployeeSummary, PeriodSummary } from "./payroll.service.js";
 
 const EMPLOYMENT_LABELS: Record<string, string> = { hourly: "Timlön", monthly: "Månadslön" };
 
-// Minutes as hours with a decimal comma, e.g. 510 -> "8,50".
-function hours(minutes: number): string {
-  return (minutes / 60).toFixed(2).replace(".", ",");
+type Column = CsvColumn<PeriodEmployeeSummary>;
+
+// Minutes as hours with two decimals, e.g. 510 -> "8,50" (the money format
+// is exactly that: two decimals, decimal comma).
+function hoursColumn(label: string, minutes: (employee: PeriodEmployeeSummary) => number): Column {
+  return { label, value: (employee) => minutes(employee) / 60, format: "money" };
 }
 
 function sortedCodes(values: Iterable<string>): string[] {
   return [...new Set(values)].sort((a, b) => a.localeCompare(b, "sv"));
 }
 
-function minutesByCode(entries: { code: string; minutes: number }[]): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const entry of entries) map.set(entry.code, (map.get(entry.code) ?? 0) + entry.minutes);
-  return map;
+function minutesOfCode(entries: { code: string; minutes: number }[], code: string): number {
+  return entries.reduce((sum, entry) => (entry.code === code ? sum + entry.minutes : sum), 0);
 }
 
-export function buildPayrollCsv(summary: PeriodSummary): string {
+export function buildPayrollTable(summary: PeriodSummary): ExportTable {
   // The absence/OB columns are dynamic: only the codes actually used in this
   // period get a column, in a stable (code-sorted) order so two exports of
   // the same period always line up.
   const absenceCodes = sortedCodes(summary.employees.flatMap((e) => e.absence.map((a) => a.code)));
   const obCodes = sortedCodes(summary.employees.flatMap((e) => e.ob.map((o) => o.code)));
 
-  const headers = [
-    ...FIXED_HEADERS,
-    ...absenceCodes.map((code) => `Frånvaro ${code} (h)`),
-    ...obCodes.map((code) => `OB ${code} (h)`),
+  const columns: Column[] = [
+    // Both are free text (the number too: any string up to 50 characters) —
+    // the CSV's formula-injection guard applies, same as the generic export.
+    { label: "Anställningsnr", value: (e) => e.employeeNumber, cell: "text" },
+    { label: "Namn", value: (e) => e.name },
+    { label: "Anställningsform", value: (e) => (e.employmentType === null ? "" : (EMPLOYMENT_LABELS[e.employmentType] ?? "")) },
+    hoursColumn("Schema (h)", (e) => e.scheduledMinutes),
+    hoursColumn("Arbetad tid (h)", (e) => e.workedMinutes),
+    hoursColumn("Övertid utbet. (h)", (e) => e.overtimeMinutes - (e.overtimeCompMinutes ?? 0)),
+    hoursColumn("Övertid komp (h)", (e) => e.overtimeCompMinutes ?? 0),
+    hoursColumn("Övertid helg utbet. (h)", (e) => e.overtimeOffScheduleMinutes - (e.overtimeOffScheduleCompMinutes ?? 0)),
+    hoursColumn("Övertid helg komp (h)", (e) => e.overtimeOffScheduleCompMinutes ?? 0),
+    hoursColumn("ATF (h)", (e) => e.atfMinutes),
+    hoursColumn("Ofördelat (h)", (e) => e.unaccountedMinutes),
+    ...absenceCodes.map((code) => hoursColumn(`Frånvaro ${code} (h)`, (e) => minutesOfCode(e.absence, code))),
+    ...obCodes.map((code) => hoursColumn(`OB ${code} (h)`, (e) => minutesOfCode(e.ob, code))),
   ];
+  return exportTable(columns, summary.employees);
+}
 
-  const row = (employee: PeriodEmployeeSummary): string => {
-    const absence = minutesByCode(employee.absence);
-    const ob = minutesByCode(employee.ob);
-    return [
-      // Both are free text (the number too: any string up to 50 characters)
-      // — formula-injection guard, same as the generic export.
-      guardFormulaInjection(employee.employeeNumber),
-      guardFormulaInjection(employee.name),
-      employee.employmentType === null ? "" : (EMPLOYMENT_LABELS[employee.employmentType] ?? ""),
-      hours(employee.scheduledMinutes),
-      hours(employee.workedMinutes),
-      hours(employee.overtimeMinutes - (employee.overtimeCompMinutes ?? 0)),
-      hours(employee.overtimeCompMinutes ?? 0),
-      hours(employee.overtimeOffScheduleMinutes - (employee.overtimeOffScheduleCompMinutes ?? 0)),
-      hours(employee.overtimeOffScheduleCompMinutes ?? 0),
-      hours(employee.atfMinutes),
-      hours(employee.unaccountedMinutes),
-      ...absenceCodes.map((code) => hours(absence.get(code) ?? 0)),
-      ...obCodes.map((code) => hours(ob.get(code) ?? 0)),
-    ]
-      .map(csvCell)
-      .join(SEPARATOR);
-  };
-
-  const lines = [headers.map(csvCell).join(SEPARATOR), ...summary.employees.map(row)];
-  return BOM + lines.join(NEWLINE) + NEWLINE;
+export function buildPayrollCsv(summary: PeriodSummary): string {
+  return tableCsv(buildPayrollTable(summary));
 }

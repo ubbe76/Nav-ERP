@@ -564,7 +564,7 @@ Filerna behåller sina namn; två filer med samma namn i samma mapp får ` (2)`,
 
 **System → Händelselogg** (endast administratörer) listar statusövergångar och radändringar i hela systemet — vem gjorde vad och när. Varje rad visar tid, användare, typ (t.ex. Kundorder, Inköpsorder, Tillverkningsorder, Faktura, Leverantörsfaktura, Verifikat, Användare, Behörighetsgrupp, API-klient, Inställningar), id (dokumentets nummer, t.ex. KO2500123 eller LF2500045), händelse (t.ex. Bekräftad, Ändrad, Borttagen, Bokförd) och en kort detalj — en radändring visas som **fält: gammalt värde → nytt värde**.
 
-Sök på id eller händelse, och filtrera på typ, användare och tidsperiod (Från/Till). **Exportera CSV** laddar ner den filtrerade listan. En rad utan användare (kolumnen visar **System**) kommer från en systemhändelse utan inloggad användare bakom sig; en användare som senare tagits bort visas fortfarande med sitt namn.
+Sök på id eller händelse, och filtrera på typ, användare och tidsperiod (Från/Till). **Exportera** laddar ner den filtrerade listan som **CSV** eller **Excel**. En rad utan användare (kolumnen visar **System**) kommer från en systemhändelse utan inloggad användare bakom sig; en användare som senare tagits bort visas fortfarande med sitt namn.
 
 Varje kort (kundorder, inköpsorder, tillverkningsorder, faktura, leverantörsfaktura) har också en egen sektion **Historik** längst ner som visar just den ordningens/fakturans egna händelser — samma information, förfiltrerad till kortet. Precis som händelseloggen visas sektionen bara för administratörer.
 

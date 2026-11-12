@@ -28,7 +28,7 @@ import {
   verificationRowInputSchema,
 } from "@navet/shared";
 import { requirePermission } from "../../auth/middleware/permission.middleware.js";
-import { registerListCsvRoute } from "../../system/routes/csv-export.js";
+import { registerListCsvRoute, registerTableExportRoutes } from "../../system/routes/csv-export.js";
 import { accountExportColumns, verificationExportColumns } from "../service/export-columns.js";
 import type { EconomyService } from "../service/economy.service.js";
 import {
@@ -789,24 +789,6 @@ export async function economyRoutes(
     }
   }
 
-  // F2: CSV sibling of sendPdf — same shape, text/csv instead of a PDF buffer.
-  async function sendCsv(
-    reply: Parameters<typeof reportError>[1] & {
-      header: (k: string, v: string) => unknown;
-      send: (b: unknown) => unknown;
-    },
-    produce: () => Promise<{ filename: string; content: string }>
-  ) {
-    try {
-      const { filename, content } = await produce();
-      reply.header("Content-Type", "text/csv; charset=utf-8");
-      reply.header("Content-Disposition", contentDisposition(filename));
-      return reply.send(content);
-    } catch (err) {
-      return reportError(err, reply);
-    }
-  }
-
   app.get("/balance-sheet", { preHandler: requirePermission("ekonomi") }, async (req, reply) => {
     const query = balanceSheetQuerySchema.parse(req.query);
     try {
@@ -821,9 +803,14 @@ export async function economyRoutes(
     return sendPdf(reply, () => reports.getBalanceSheetPdf(query));
   });
 
-  app.get("/balance-sheet/csv", { preHandler: requirePermission("ekonomi") }, async (req, reply) => {
+  // CSV and its Excel twin (…/xlsx) — one table, two renderings.
+  registerTableExportRoutes(app, "/balance-sheet/csv", { preHandler: requirePermission("ekonomi") }, async (req, reply) => {
     const query = balanceSheetQuerySchema.parse(req.query);
-    return sendCsv(reply, () => reports.getBalanceSheetCsv(query));
+    try {
+      return await reports.getBalanceSheetTable(query);
+    } catch (err) {
+      return reportError(err, reply);
+    }
   });
 
   app.get("/income-statement", { preHandler: requirePermission("ekonomi") }, async (req, reply) => {
@@ -840,9 +827,14 @@ export async function economyRoutes(
     return sendPdf(reply, () => reports.getIncomeStatementPdf(query));
   });
 
-  app.get("/income-statement/csv", { preHandler: requirePermission("ekonomi") }, async (req, reply) => {
+  // CSV and its Excel twin (…/xlsx) — one table, two renderings.
+  registerTableExportRoutes(app, "/income-statement/csv", { preHandler: requirePermission("ekonomi") }, async (req, reply) => {
     const query = incomeStatementQuerySchema.parse(req.query);
-    return sendCsv(reply, () => reports.getIncomeStatementCsv(query));
+    try {
+      return await reports.getIncomeStatementTable(query);
+    } catch (err) {
+      return reportError(err, reply);
+    }
   });
 
   app.get("/general-ledger", { preHandler: requirePermission("ekonomi") }, async (req, reply) => {
@@ -859,9 +851,14 @@ export async function economyRoutes(
     return sendPdf(reply, () => reports.getGeneralLedgerPdf(query));
   });
 
-  app.get("/general-ledger/csv", { preHandler: requirePermission("ekonomi") }, async (req, reply) => {
+  // CSV and its Excel twin (…/xlsx) — one table, two renderings.
+  registerTableExportRoutes(app, "/general-ledger/csv", { preHandler: requirePermission("ekonomi") }, async (req, reply) => {
     const query = generalLedgerQuerySchema.parse(req.query);
-    return sendCsv(reply, () => reports.getGeneralLedgerCsv(query));
+    try {
+      return await reports.getGeneralLedgerTable(query);
+    } catch (err) {
+      return reportError(err, reply);
+    }
   });
 
   // Verifikatlista (B6a) — the JSON GET was missing; only the PDF was wired.
@@ -880,9 +877,14 @@ export async function economyRoutes(
     return sendPdf(reply, () => reports.getVerificationListPdf(query));
   });
 
-  app.get("/verification-list/csv", { preHandler: requirePermission("ekonomi") }, async (req, reply) => {
+  // CSV and its Excel twin (…/xlsx) — one table, two renderings.
+  registerTableExportRoutes(app, "/verification-list/csv", { preHandler: requirePermission("ekonomi") }, async (req, reply) => {
     const query = verificationListReportQuerySchema.parse(req.query);
-    return sendCsv(reply, () => reports.getVerificationListCsv(query));
+    try {
+      return await reports.getVerificationListTable(query);
+    } catch (err) {
+      return reportError(err, reply);
+    }
   });
 
   // --- SIE (B6b) ---

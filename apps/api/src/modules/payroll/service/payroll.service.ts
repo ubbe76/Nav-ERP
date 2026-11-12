@@ -35,7 +35,8 @@ import {
   type ObRuleInput,
 } from "./payroll-day.js";
 import { buildPaxmlXml, type PaxmlEmployeeInput, type PaxmlPost } from "./paxml.js";
-import { buildPayrollCsv } from "./payroll-csv.js";
+import { buildPayrollTable } from "./payroll-csv.js";
+import { csvFile, type NamedTable } from "../../system/service/table-export.js";
 import { PayrollPeriodLockedError, type PeriodLockChecker } from "./period-lock.js";
 // The printable löneunderlag PDF — same pattern as the plocklista/TO
 // printout, narrowed to just the one renderer this module needs.
@@ -759,6 +760,18 @@ export function createPayrollService(
     };
   }
 
+  async function periodExportTable(year: number, month: number): Promise<NamedTable> {
+    const summary = await loadPeriodSummary(year, month);
+    return { basename: `loneunderlag-${periodKey(year, month)}`, table: buildPayrollTable(summary) };
+  }
+
+  async function snapshotExportTable(year: number, month: number, snapshotId: string): Promise<NamedTable> {
+    const snapshot = (await repo.findUnlockedSnapshot(periodKey(year, month), snapshotId)) as PeriodSummary | null;
+    if (!snapshot) throw new PayrollSnapshotNotFoundError(snapshotId);
+    const lockedDate = snapshot.lockedAt ? stockholmDateOf(new Date(snapshot.lockedAt)) : "okant";
+    return { basename: `loneunderlag-${periodKey(year, month)}-lasning-${lockedDate}`, table: buildPayrollTable(snapshot) };
+  }
+
   return {
     // --- Frånvarokoder ---
 
@@ -1127,12 +1140,11 @@ export function createPayrollService(
 
     // CSV overview of the same basis. Unlike PAXml this is allowed on an open
     // period — it is a preview the payroll admin checks *before* locking.
+    // The export table is what both the CSV and the Excel twin render (#35).
+    getExportTable: periodExportTable,
+
     async getCsvExport(year: number, month: number) {
-      const summary = await loadPeriodSummary(year, month);
-      return {
-        filename: `loneunderlag-${periodKey(year, month)}.csv`,
-        content: buildPayrollCsv(summary),
-      };
+      return csvFile(await periodExportTable(year, month));
     },
 
     // Printable löneunderlag PDF — same basis as the CSV/summary (the frozen
@@ -1284,14 +1296,10 @@ export function createPayrollService(
 
     // One dropped basis as the same CSV as Löneunderlag (CSV). An old
     // snapshot is read like the period's own (findSnapshot's cast).
+    getPreviousSnapshotTable: snapshotExportTable,
+
     async getPreviousSnapshotCsv(year: number, month: number, snapshotId: string) {
-      const snapshot = (await repo.findUnlockedSnapshot(periodKey(year, month), snapshotId)) as PeriodSummary | null;
-      if (!snapshot) throw new PayrollSnapshotNotFoundError(snapshotId);
-      const lockedDate = snapshot.lockedAt ? stockholmDateOf(new Date(snapshot.lockedAt)) : "okant";
-      return {
-        filename: `loneunderlag-${periodKey(year, month)}-lasning-${lockedDate}.csv`,
-        content: buildPayrollCsv(snapshot),
-      };
+      return csvFile(await snapshotExportTable(year, month, snapshotId));
     },
 
     // Per-employee day detail plus the raw session/absence rows the

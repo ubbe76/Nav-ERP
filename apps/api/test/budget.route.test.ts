@@ -1,4 +1,5 @@
 import type { InjectOptions } from "fastify";
+import { expectXlsxMatchesCsv } from "./helpers/read-xlsx.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { costCenters, db, permissionGroups } from "@navet/db";
@@ -167,6 +168,13 @@ describe("budget routes", () => {
     expect(lines[0]).toBe(`Konto;Kontonamn;Kostnadsställe;${Array.from({ length: 12 }, (_, i) => `${YEAR}-${String(i + 1).padStart(2, "0")}`).join(";")};Summa`);
     expect(lines[1]).toBe(`3001;Försäljning inom Sverige 25 %;;${months(1000).map(() => "1000,00").join(";")};12000,00`);
     expect(lines[2]).toBe(`5010;Lokalhyra;100;${months(0, { 12: 12 }).map((n) => `${n},00`).join(";")};12,00`);
+    // #35: the Excel twin — same lines, the amounts as numbers, Konto as text.
+    const xlsx = await ekonomi.get(`/budgets/${id}/xlsx`);
+    expect(xlsx.statusCode).toBe(200);
+    expect(xlsx.headers["content-disposition"]).toContain("budget-2027-b.xlsx");
+    const sheet = await expectXlsxMatchesCsv(xlsx.rawPayload, all.body);
+    expect(sheet[1]!.slice(0, 4)).toEqual(["3001", "Försäljning inom Sverige 25 %", null, 1000]);
+    expect(sheet[1]![15]).toBe(12000);
     const only = await ekonomi.get(`/budgets/${id}/csv?costCenterId=none`);
     expect(only.body.replace(/^﻿/, "").split("\r\n").filter(Boolean)).toHaveLength(2);
     expect((await ekonomi.get(`/budgets/${id}/csv?costCenterId=${workshop.id}`)).body).toContain("5010;Lokalhyra;100;");

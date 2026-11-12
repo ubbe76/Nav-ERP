@@ -44,7 +44,7 @@ export const CUSTOMER_CSV_COLUMNS: CsvColumn<CustomerRow>[] = [
   { label: "Samlingsfaktura", value: (r) => (r.collectiveInvoicing ? "Ja" : "Nej") },
   { label: "Privatperson", value: (r) => (r.privatePerson ? "Ja" : "Nej") },
   { label: "Webbsida", value: (r) => r.website },
-  { label: "Kundrabatt %", value: (r) => r.discountPercent },
+  { label: "Kundrabatt %", cell: "percent", value: (r) => r.discountPercent },
   { label: "Valuta", value: (r) => r.currency },
   { label: "Skapad", value: (r) => r.createdAt.toISOString(), format: "datetime" },
 ];

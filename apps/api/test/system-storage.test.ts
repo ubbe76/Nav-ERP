@@ -8,7 +8,7 @@ import { readStorageUsage, STORED_FILE_KINDS } from "../src/modules/system/repos
 import { FILE_EXPORT_KINDS } from "../src/modules/system/repository/file-export.js";
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
-import { readStoredZipEntries } from "../src/modules/import/service/xlsx-writer.js";
+import { readStoredZipEntries } from "../src/modules/system/service/xlsx-writer.js";
 import { parsed } from "./helpers/parsed.js";
 
 // Lagringsutrymme: the file sizes per kind, read without fetching the bytes,
