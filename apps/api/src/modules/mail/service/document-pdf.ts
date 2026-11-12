@@ -573,6 +573,32 @@ export interface OrderRegisterPdfInput {
   emptyText: string;
 }
 
+// Körplan (planning module formats every cell). Landscape A4: the resource's
+// pending operations grouped per week, a sum line per group and a total.
+export interface RunPlanPdfInput {
+  title: string;
+  subtitle: string;
+  emptyText: string;
+  groups: {
+    heading: string;
+    totalLabel: string;
+    total: string;
+    rows: {
+      week: string;
+      orderNumber: string;
+      article: string;
+      operation: string;
+      remainingQuantity: string;
+      remainingTime: string;
+      dueDate: string;
+      status: string;
+      locked: string;
+    }[];
+  }[];
+  totalLabel: string;
+  total: string;
+}
+
 // Räknelista (D2) — count sheet for a stock-count session: article rows with
 // an empty "Räknat" column to fill in by hand. Blind by default: the booked
 // balance column only prints when showBalances is set.
@@ -869,6 +895,19 @@ const ORDER_REGISTER_ROW_COLS = {
   amount: { x: 528, w: 72 },
   restAmount: { x: 603, w: 72 },
   deliveryDate: { x: 680, w: 62 },
+} as const;
+
+// Körplan, same landscape width and table foot as the orderförteckning.
+const RUN_PLAN_COLS = {
+  week: { x: 0, w: 34 },
+  orderNumber: { x: 37, w: 72 },
+  article: { x: 112, w: 180 },
+  operation: { x: 295, w: 125 },
+  remainingQuantity: { x: 423, w: 50 },
+  remainingTime: { x: 476, w: 56 },
+  dueDate: { x: 540, w: 58 },
+  status: { x: 601, w: 108 },
+  locked: { x: 712, w: 30 },
 } as const;
 
 const VERIFICATION_LIST_COLS = {
@@ -3208,8 +3247,97 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     return finished;
   }
 
+  async function renderRunPlan(input: RunPlanPdfInput): Promise<Buffer> {
+    const { doc, finished } = await startDocument({ landscape: true });
+    const left = PAGE_MARGIN;
+    const C = RUN_PLAN_COLS;
+    let y = startReport(doc, input.title, input.subtitle);
+    const cell = (text: string, col: { x: number; w: number }, align: "left" | "right" = "left") =>
+      // One line per cell (the height cap cuts a too-long text with an
+      // ellipsis instead of wrapping into the next row).
+      doc.text(text, left + col.x, y, { width: col.w, height: 11, align, ellipsis: true });
+    const rule = (color: string) => {
+      doc
+        .moveTo(left, y)
+        .lineTo(doc.page.width - PAGE_MARGIN, y)
+        .strokeColor(color)
+        .lineWidth(0.5)
+        .stroke();
+    };
+
+    const header = () => {
+      doc.font(FONT_BOLD).fontSize(8.5);
+      cell("Vecka", C.week);
+      cell("TO", C.orderNumber);
+      cell("Artikel", C.article);
+      cell("Operation", C.operation);
+      cell("Antal kvar", C.remainingQuantity, "right");
+      cell("Tid kvar", C.remainingTime, "right");
+      cell("Färdigdatum", C.dueDate);
+      cell("Status", C.status);
+      cell("Låst", C.locked);
+      y += 12;
+      rule("#999999");
+      y += 4;
+    };
+    // A new page repeats the column header so every sheet reads on its own.
+    const ensure = (height: number) => {
+      if (y + height > ORDER_REGISTER_TABLE_BOTTOM) {
+        doc.addPage();
+        y = PAGE_MARGIN;
+        header();
+      }
+    };
+
+    if (input.groups.length === 0) {
+      doc.font(FONT).fontSize(10).text(input.emptyText, left, y);
+      doc.end();
+      return finished;
+    }
+
+    header();
+    for (const group of input.groups) {
+      // A week heading never lands alone at the foot of a page.
+      ensure(26);
+      doc.font(FONT_BOLD).fontSize(9.5).text(group.heading, left, y, { width: 400, height: 12, ellipsis: true });
+      y += 14;
+      doc.font(FONT).fontSize(8.5);
+      for (const row of group.rows) {
+        ensure(12);
+        doc.font(FONT).fontSize(8.5);
+        cell(row.week, C.week);
+        cell(row.orderNumber, C.orderNumber);
+        cell(row.article, C.article);
+        cell(row.operation, C.operation);
+        cell(row.remainingQuantity, C.remainingQuantity, "right");
+        cell(row.remainingTime, C.remainingTime, "right");
+        cell(row.dueDate, C.dueDate);
+        cell(row.status, C.status);
+        cell(row.locked, C.locked);
+        y += 12;
+      }
+      ensure(16);
+      doc.font(FONT_ITALIC).fontSize(8.5);
+      doc.text(group.totalLabel, left + C.article.x, y, { width: C.remainingTime.x - C.article.x - 5, height: 11, align: "right", ellipsis: true });
+      cell(group.total, C.remainingTime, "right");
+      y += 18;
+    }
+
+    ensure(20);
+    rule("#666666");
+    y += 5;
+    doc.font(FONT_BOLD).fontSize(9);
+    doc.text(input.totalLabel, left, y, { width: C.remainingTime.x - 5, height: 12, align: "right", ellipsis: true });
+    cell(input.total, C.remainingTime, "right");
+
+    drawPageNumbers(doc);
+    doc.end();
+    return finished;
+  }
+
   return {
     render,
+    renderRunPlan,
     renderPaymentReminder,
     renderDeviationReport,
     renderPickList,

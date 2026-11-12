@@ -7010,3 +7010,61 @@ export interface ArticleSalesPrices {
   articleGroup: { id: string; code: string; name: string } | null;
   groupRules: ArticleSalesGroupRule[];
 }
+
+// Körplan (GET /planning/run-plan): the coming work on one resource, by week.
+export type RunPlanStatus = "planned_order" | "ready" | "partial" | "not_ready";
+
+export interface RunPlanRow {
+  key: string;
+  moOperationId: string | null;
+  manufacturingOrderId: string;
+  orderNumber: string;
+  articleNumber: string;
+  articleName: string;
+  sequenceNo: number;
+  description: string | null;
+  orderQuantity: number;
+  remainingQuantity: number;
+  remainingMinutes: number;
+  remainingHours: number;
+  setupDone: boolean;
+  dueDate: string | null;
+  week: string | null;
+  late: boolean;
+  planned: boolean;
+  plannedStartWeek: string | null;
+  plannedEndWeek: string | null;
+  planLocked: boolean;
+  status: RunPlanStatus;
+  available: number | null;
+  waitingForSequenceNo: number | null;
+}
+
+export interface RunPlanWeek {
+  kind: "late" | "week" | "unplanned";
+  week: string | null;
+  isoYear: number | null;
+  isoWeek: number | null;
+  late: boolean;
+  rows: number;
+  minutes: number;
+  hours: number;
+}
+
+export interface RunPlanStation {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export interface RunPlanResult {
+  workCenter: RunPlanStation | null;
+  today: string;
+  currentWeek: string;
+  toWeek: string;
+  rows: RunPlanRow[];
+  weeks: RunPlanWeek[];
+  totalMinutes: number;
+  totalHours: number;
+  stations: RunPlanStation[];
+}

@@ -4,6 +4,7 @@ import { getCurrentUser, apiGet } from "../../../lib/api";
 import { canOpen } from "../../../lib/pageAccess";
 import { StampTerminal } from "../../../components/timereport/StampTerminal";
 import { ConfirmDialogHost } from "../../../components/ui/ConfirmDialogHost";
+import { PermissionsProvider } from "../../../components/PermissionsProvider";
 import { ReadOnlyBanner } from "../../../components/ReadOnlyBanner";
 import type {
   AttendanceSession,
@@ -34,8 +35,10 @@ export default async function StampTerminalPage() {
   // itself — otherwise confirmDialog ("Rapportera ändå?" on a material
   // shortage) falls back to window.confirm, which Safari on iPhone can stop
   // showing and then silently answers Avbryt.
+  // No AppShell here either, so the permissions provider (useCanOpen for the
+  // Körplan link) is mounted by the page itself.
   return (
-    <>
+    <PermissionsProvider role={user.role} permissions={user.permissions}>
       <ReadOnlyBanner readOnly={user.readOnly} flush />
       <StampTerminal
         employees={employees.filter((e) => e.active)}
@@ -46,6 +49,6 @@ export default async function StampTerminalPage() {
         timeKindSplit={settings.timeKindSplit === true}
       />
       <ConfirmDialogHost />
-    </>
+    </PermissionsProvider>
   );
 }

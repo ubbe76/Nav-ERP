@@ -797,6 +797,8 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     // late-bound reader the manufacturing service derives TO structure with.
     configuredStructure: configuredStructureReader,
     audit: auditRepository,
+    // Körplanens utskrift.
+    runPlanPdf: documentPdfService,
     // Reservationen: the KO's Förväntat leveransdatum is set by the sales
     // service inside the planning transaction (SalesOrderDateWriter).
     salesOrderDates: salesService,

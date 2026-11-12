@@ -685,6 +685,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "operation-not-found": "Operationen finns inte — ladda om beläggningen.",
   "operation-not-plannable": serverMessage("Operationen kan inte planeras — den är klar, en legooperation, utan tid eller ordern är inte öppen."),
   "plan-week-in-past": "Veckan har passerat — välj innevarande vecka eller en senare.",
+  // Körplan
+  "run-plan-subcontract-resource": "Resursen är en legoresurs — körplanen visar bara egna resurser.",
   "plan-week-no-capacity": serverMessage("Resursen har ingen kapacitet den veckan — välj en annan vecka."),
   // Reservationen från Leveranstidskontrollen (the 409 body carries the new result).
   "delivery-time-changed": "Läget har ändrats sedan kontrollen — se det nya datumet och försök igen.",

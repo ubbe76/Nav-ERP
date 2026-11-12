@@ -151,6 +151,19 @@ export type DeliveryTimeCheckRequest = z.infer<typeof deliveryTimeCheckSchema>;
 export const isMonday = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay() === 1;
 export const planWeekSchema = businessDateSchema.refine(isMonday, { message: "week must be a Monday" });
 
+// GET /planning/run-plan — Körplan: a resource's coming work up to and
+// including the week `toWeek` (a Monday; left out = next week, Stockholm).
+// Without a resource the answer only carries the picker's stations.
+export const runPlanQuerySchema = z.object({
+  workCenterId: z.string().uuid().optional(),
+  toWeek: planWeekSchema.optional(),
+});
+export type RunPlanQuery = z.infer<typeof runPlanQuerySchema>;
+
+// GET /planning/run-plan/pdf — the printout is always of one resource.
+export const runPlanPdfQuerySchema = runPlanQuerySchema.required({ workCenterId: true });
+export type RunPlanPdfQuery = z.infer<typeof runPlanPdfQuerySchema>;
+
 // POST /planning/operations/:opId/move — Flytta: the operation starts in
 // weekMonday (whole-week capacity, overload allowed) and is locked; with
 // moveFollowing the TO's later unlocked operations are replanned after it.

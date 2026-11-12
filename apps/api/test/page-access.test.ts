@@ -49,6 +49,7 @@ describe("page access table", () => {
         "/hjalp/x1",
         "/ingen-behorighet",
         "/tillverkning",
+        "/tillverkning/korplan",
         "/tillverkning/ordrar",
         "/tillverkning/ordrar/x1",
         "/tillverkning/terminal",

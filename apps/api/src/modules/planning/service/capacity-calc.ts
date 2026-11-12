@@ -60,6 +60,9 @@ export interface CapacityOperationRow {
   orderQuantity: number;
   dueDate: string | null; // MO header due date (YYYY-MM-DD)
   sequenceNo: number;
+  // The operation's benämning (mo_operations.description) — only the körplan
+  // prints it; left out by the fixtures.
+  description?: string | null;
   setupTime: number; // minutes
   runTimePerUnit: number; // minutes
   operationStatus: "pending" | "done";
@@ -337,9 +340,8 @@ export function resourceDayMinutes(lookups: ScheduleLookups, calendar: ResourceC
 // "Utan datum" column; Leveranstidskontrollen leaves it out).
 export function loadBucketMonday(dueDate: string | null, firstMonday: string): string | null {
   if (dueDate == null) return null;
-  if (dueDate < firstMonday) return firstMonday;
-  const { isoYear, isoWeek } = isoWeekOf(dueDate);
-  return isoWeekRange(isoYear, isoWeek).monday;
+  const monday = mondayOf(dueDate);
+  return monday < firstMonday ? firstMonday : monday;
 }
 
 // The Monday of the ISO week a date is in.
@@ -376,6 +378,27 @@ export function remainingByPlannedWeeks(remaining: number, plannedWeeks: Planned
     rest -= minutes;
   }
   return out;
+}
+
+// An operation's planned weeks as a range: the first and last Monday of its
+// allocation, null when unplanned. The ONE reading of "planerad vecka" for
+// the matrix's chips and the körplan.
+export function plannedWeekRange(op: Pick<CapacityOperationRow, "plannedWeeks">): { start: string; end: string } | null {
+  if (!op.plannedWeeks || op.plannedWeeks.length === 0) return null;
+  const mondays = op.plannedWeeks.map((w) => w.monday).sort();
+  return { start: mondays[0]!, end: mondays[mondays.length - 1]! };
+}
+
+// The week an operation is due to start in, NOT clamped to the current week
+// (the körplan's veckonyckel — a week before the current one is Försenad):
+// the plan's first week when planned, else the week of the MO's due date —
+// the very week operationLoadWeeks buckets an unplanned operation in before
+// it clamps the past to the current week (loadBucketMonday). null = neither
+// a plan nor a due date.
+export function operationStartWeek(op: Pick<CapacityOperationRow, "plannedWeeks" | "dueDate">): string | null {
+  const planned = plannedWeekRange(op);
+  if (planned) return planned.start;
+  return op.dueDate == null ? null : mondayOf(op.dueDate);
 }
 
 // The weeks an operation's remaining load counts in — the ONE bucketing rule
@@ -600,8 +623,8 @@ export function computeCapacity(
     // Overdue at DAY granularity — a due date earlier this week is already
     // passed even though it buckets into the current week column.
     const overdue = operation.dueDate != null && operation.dueDate < options.today;
-    const planned = !!operation.plannedWeeks && operation.plannedWeeks.length > 0;
-    const plannedMondays = planned ? operation.plannedWeeks!.map((w) => w.monday).sort() : [];
+    const plannedRange = plannedWeekRange(operation);
+    const planned = plannedRange != null;
     const hours = round2(minutes / 60);
 
     // A planned operation is spread over its weeks (its load filled from the
@@ -628,8 +651,8 @@ export function computeCapacity(
         remainingHours: hours,
         hoursInWeek: round2(chunk.minutes / 60),
         planned,
-        plannedStartWeek: planned ? plannedMondays[0]! : null,
-        plannedEndWeek: planned ? plannedMondays[plannedMondays.length - 1]! : null,
+        plannedStartWeek: plannedRange?.start ?? null,
+        plannedEndWeek: plannedRange?.end ?? null,
         planLocked: operation.planLocked ?? false,
         late: statusByOrder.get(operation.manufacturingOrderId)?.late ?? false,
         componentLate: options.componentLateOrders?.has(operation.manufacturingOrderId) ?? false,
