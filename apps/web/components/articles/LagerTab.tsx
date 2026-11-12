@@ -253,10 +253,10 @@ export function LagerTab({
           <Table<{ id: string } & ArticleBatchBalances["batches"][number]>
             columns={[
               { key: "batch", label: "Batch", width: "1fr" },
-              { key: "location", label: "Lagerplats", width: "1fr" },
+              { key: "location", label: "Lagerplatser", width: "2fr" },
               { key: "quantity", label: "Saldo", width: "140px", align: "right" },
             ]}
-            rows={batchBalances.batches.map((b) => ({ ...b, id: `${b.batchId ?? "unknown"}-${b.locationId ?? "none"}` }))}
+            rows={batchBalances.batches.map((b) => ({ ...b, id: b.batchId ?? "unknown" }))}
             renderCell={(row, key) => {
               if (key === "batch") {
                 return row.batchId ? (
@@ -270,16 +270,18 @@ export function LagerTab({
               if (key === "location") {
                 return (
                   <span>
-                    {row.locationName ? `${row.warehouseName ? `${row.warehouseName} · ` : ""}${row.locationName}` : "—"}
-                    {row.blocked && (
-                      <span style={{ marginLeft: 8 }}>
-                        <StatusPill status="stopped" label="Spärrad" compact />
-                      </span>
-                    )}
+                    {row.locations.length === 0
+                      ? "—"
+                      : row.locations
+                          .map(
+                            (l) =>
+                              `${l.locationName ? `${l.warehouseName ? `${l.warehouseName} · ` : ""}${l.locationName}` : "—"} (${formatQuantity(l.quantity)})${l.blocked ? " — spärrad" : ""}`
+                          )
+                          .join(", ")}
                   </span>
                 );
               }
-              return formatQuantity(row.quantity);
+              return formatQuantity(row.total);
             }}
           />
         </Card>

@@ -43,8 +43,9 @@ function BatchHead({ batch, linkBatch }: { batch: TraceBatchRef; linkBatch: bool
 }
 
 function StopNote({ stop }: { stop: TraceStop }) {
-  if (!stop) return null;
-  const text = stop === "unknown" ? "Okänd batch" : stop === "repeated" ? "visas ovan" : "(fortsättningen visas inte)";
+  // "unknown": the batch head above already says Okänd batch.
+  if (!stop || stop === "unknown") return null;
+  const text = stop === "repeated" ? "visas ovan" : "(fortsättningen visas inte)";
   return <div className={styles.muted}>{text}</div>;
 }
 

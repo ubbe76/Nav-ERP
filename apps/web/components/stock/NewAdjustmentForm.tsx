@@ -9,7 +9,7 @@ import { UnitSelect, convertQuantityInput, useUnitOptions } from "../ui/UnitSele
 import { toBaseQuantity } from "../../lib/units";
 import { locationOptionLabel } from "../../lib/stockLocations";
 import { apiFetch } from "../../lib/api";
-import { BatchSelect } from "./BatchSelect";
+import { BatchSelect, useBatchBalances } from "./BatchSelect";
 import { BATCH_AUTO, batchIdField } from "../../lib/batch";
 import type { Article, ArticleBatchBalances, StockLocation } from "../../lib/types";
 import { Card } from "../ui/Card";
@@ -54,6 +54,7 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
     };
   }, [article]);
   const batchTracked = Boolean(batchInfo?.batchTracked);
+  const { rows: batchRows } = useBatchBalances(batchTracked && article ? [article.id] : []);
 
   // A negative adjustment takes goods from a place: with "Artikelns lagerplats"
   // the API resolves the place by the inflow rule, which may not be where the
@@ -176,7 +177,7 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
           <Field label="Batch" htmlFor="adjustmentBatchChoice">
             <BatchSelect
               id="adjustmentBatchChoice"
-              rows={batchInfo.batches}
+              rows={batchRows}
               articleId={article.id}
               locationId={locationId || null}
               value={batchChoice}

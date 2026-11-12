@@ -602,7 +602,7 @@ export function GoodsReceiptPageClient({
               { key: "unitCode", label: "Enhet", width: "70px" },
               { key: "quantityReceived", label: "Mottaget", width: "100px", align: "right" },
               { key: "remaining", label: "Rest", width: "100px", align: "right" },
-              { key: "id", label: "Ta emot nu", width: "260px", align: "right" },
+              { key: "id", label: "Ta emot nu", width: "340px", align: "right" },
             ]}
             rows={openRows}
             highlightedRowId={lastRowId}
@@ -696,7 +696,7 @@ function RowBatchFields({
         onChange={(e) => onChange({ ...value, batchNumber: e.target.value })}
       />
       {value.parts.map((p) => (
-        <span key={p.key} style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+        <span key={p.key} style={{ display: "inline-flex", gap: 4, alignItems: "center", flexWrap: "nowrap", whiteSpace: "nowrap" }}>
           <Input
             type="number"
             min="0"

@@ -280,9 +280,22 @@ export interface BatchBalanceRow {
   quantity: string;
 }
 
+// GET /articles/:id/batch-balances — grouped per batch (Okänd: batchId null,
+// first), with the locations that hold it.
 export interface ArticleBatchBalances {
   batchTracked: boolean;
-  batches: BatchBalanceRow[];
+  batches: {
+    batchId: string | null;
+    batchNumber: string | null;
+    total: string;
+    locations: {
+      locationId: string | null;
+      warehouseName: string | null;
+      locationName: string | null;
+      blocked: boolean;
+      quantity: string;
+    }[];
+  }[];
 }
 
 // Spårbarhet (#8) — GET /stock/batches and /stock/batches/:id/trace; mirrors

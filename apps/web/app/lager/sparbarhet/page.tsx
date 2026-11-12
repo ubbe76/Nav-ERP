@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { AppShell } from "../../../components/AppShell";
 import { BatchesList } from "../../../components/stock/BatchesList";
 import { BatchTraceView } from "../../../components/stock/BatchTraceView";
@@ -29,6 +30,11 @@ export default async function TraceabilityPage(props: { searchParams: Promise<Pa
   const list = batchId
     ? null
     : await apiGet<Paged<StockBatchListRow>>(`/api/v1/stock/batches${listApiQuery(searchParams, [], pageSize)}`, cookieHeader);
+
+  // A search that finds exactly one batch opens its trace (the batch links in
+  // the log and on the receipt are ?search=<number>).
+  const search = typeof searchParams.search === "string" ? searchParams.search.trim() : "";
+  if (list && search !== "" && list.total === 1 && list.rows[0]) redirect(`/lager/sparbarhet?batch=${list.rows[0].id}`);
 
   const title = trace ? `Batch ${trace.batch.batchNumber ?? "Okänd"}` : "Spårbarhet";
   const meta = trace
