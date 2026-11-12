@@ -26,7 +26,7 @@ Typerna visas i fast ordning: röda före gula. Inom en typ står det äldsta el
 | **Försenade kundordrar** | gul | Order med status bekräftad eller under tillverkning där en rad med rest har ett leveransdatum som har passerat. Offerter och levererade ordrar räknas aldrig. **Visa alla** öppnar [Kundorder](/hjalp/forsaljning#kundorder) filtrerad på **Sen**, som använder samma regel. |
 | **Försenade inköpsordrar** | gul | Order med status utkast, bekräftad eller delvis mottagen där en rad med rest har ett ankomstdatum som har passerat. Bekräftat leveransdatum gäller före önskat. **Visa alla** öppnar [Inköpsorder](/hjalp/inkop#inkopsorder) filtrerad på **Sen**. |
 | **Sena tillverkningsordrar** | gul | Tillverkningsordrar som är Frisläppta eller Pågår som är **Sena** enligt produktionsplaneringen, alltså samma **Sen** som tillverkningsorderlistan och tillverkningsordern visar. **Visa alla** öppnar listan filtrerad på **Sen**. |
-| **Behöver beställas** | gul | Behovsberäkningens rader med förslaget att köpa eller lägga ut på legotillverkning: artikeln ligger under beställningspunkten eller räcker inte till behovet. |
+| **Behöver beställas** | gul | Behovsberäkningens rader med förslaget att köpa eller lägga ut på legotillverkning: artikeln ligger under beställningspunkten eller räcker inte till behovet. Raderna grupperas på artikelns **förvalda leverantör**, se [Behöver beställas per leverantör](#behover-bestallas-per-leverantor). |
 | **Behöver tillverkas** | gul | Behovsberäkningens rader med förslaget att tillverka, även konfigurerade artiklar. |
 | **Bokningar utan kostnadsställe** | gul | Bokförda rader på ett konto med **Kräver kostnadsställe** som saknar kostnadsställe — i praktiken rader som automatkonteringen bokat utan, eftersom manuella verifikat inte kan bokföras utan. Raden länkar till [Verifikat](/hjalp/ekonomi#verifikat). Ekonomi-rättigheten krävs. |
 | **Omatchade bankposter** | gul | Poster på ett kontoutdrag som är äldre än 10 dagar och ännu inte är matchade mot bokföringen. Raden visar dag, text, belopp och bankkonto och länkar till [Bankavstämning](/hjalp/ekonomi#bankavstamning) för kontot, där posterna matchas eller bokförs; aviseringen försvinner när posten matchats. |
@@ -55,6 +55,18 @@ Sidan visar en ruta per typ som har något att visa, med rubrik, antal och rader
 - Antalet är alltid det verkliga antalet, men högst 200 rader visas per typ. **Visa alla** under raderna öppnar den vanliga listan för typen.
 - **Beräknad hh:mm** visar när uppgifterna räknades fram (svensk tid). **Uppdatera** räknar om. Behovsberäkningen återanvänds i högst en minut, så **Behöver beställas** och **Behöver tillverkas** kan släpa något efter.
 - Går det inte att läsa en typ visas den med ett felmeddelande, medan de övriga visas som vanligt.
+
+## Behöver beställas per leverantör
+
+Rutan **Behöver beställas** är grupperad på artikelns förvalda leverantör, med leverantörens namn (en länk till leverantörskortet) och antalet som rubrik. Leverantörerna står i namnordning, men gruppen **Utan förvald leverantör** står alltid först — där saknas leverantör på artikelkortet, och raden länkar dit; ange leverantör på artikelkortets flik **Inköp**. Förslagen om legotillverkning ligger i samma grupper som köpförslagen, hos operationens leverantör.
+
+Har du rätt att skapa inköpsorder finns en kryssruta på varje rad (utom i **Utan förvald leverantör**, där det inte finns någon leverantör att beställa från) och **Markera alla** i varje leverantörsgrupp. När du markerat något visas knappen **Skapa inköpsorder (N)** i rutans rubrik. Den frågar "Skapa inköpsorder för N artiklar? En inköpsorder skapas per leverantör, köp och lego var för sig." och skapar sedan inköpsorder som **Utkast** på samma sätt som **Skapa ordrar** i [behovsberäkningen](/hjalp/tillverkning#orderforslag-och-skapa-ordrar): samma leverantörs- och prisregler, samma datumregler och samma varningar. Resultatet visas överst under **Skapade inköpsorder** med ordernumren som länkar till ordrarna, och fel visas per artikel. En leverantör som har både köp- och legoförslag markerade får **två** inköpsordrar, en för köp och en för lego.
+
+Gruppen hör till menyn **Inköp** (se ovan), så det är den som har Inköp som skapar inköpsorder här; i behovsberäkningen får även **Tillverkning** skapa dem med **Skapa ordrar**. Konton med **Endast läsning** kan inte skapa order. Efter skapandet räknas listan om, och förslagen som blev ordrar försvinner.
+
+Visas högst 200 rader per typ står det **+ N till** under en leverantörsgrupp som har fler; länken öppnar behovsberäkningen. Rubrikens antal är alltid gruppens verkliga antal.
+
+På Översikten visar kortet **Att bevaka** raderna för **Behöver beställas** under samma leverantörsrubriker, utan kryssrutor — en rad öppnar sidan Aviseringar.
 
 ## Daglig sammanställning via e-post
 

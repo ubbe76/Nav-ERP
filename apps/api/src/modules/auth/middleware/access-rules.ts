@@ -42,6 +42,13 @@ export const CONFIGURE_ROW_WRITE: AccessRule = ["forsaljning", "tillverkning", "
 // one promising the date, so Försäljning alone must reach it; the KO status
 // guard and the manufacturing service's own rules are the double check.
 export const DELIVERY_CHECK: AccessRule = ["forsaljning", "tillverkning"];
+// Skapa ordrar (POST /planning/orders): Inköp reaches it from Aviseringarnas
+// Behöver beställas (and the TO card's lego operations) — for purchase and
+// lego proposals only. A proposal that makes a TO still needs Tillverkning
+// (MO_PROPOSAL_WRITE, checked in the route against the body), so an Inköp
+// user can never create a TO. Tillverkning keeps creating the draft IOs.
+export const PLANNING_ORDERS: AccessRule = ["inkop", "tillverkning"];
+export const MO_PROPOSAL_WRITE: AccessRule = ["tillverkning"];
 // Etiketter (#4): printing article or lagerplats labels writes nothing, so
 // anyone who may read the registers may print them — not only the menu that
 // edits them (the warehouse staff print article labels).

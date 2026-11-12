@@ -58,6 +58,34 @@ export type AlertSeverity = "red" | "yellow";
 // real number.
 export const ALERT_ITEMS_LIMIT = 200;
 
+// Behöver beställas: one of the row's order proposals, in the form
+// POST /planning/orders takes (createPlanningOrdersSchema) — the web sends
+// the marked rows' proposals as they are, so Skapa inköpsorder is the
+// behovsberäkning's Skapa ordrar. `key` makes the server recompute and
+// refuse a proposal that is already ordered.
+export interface AlertOrderProposal {
+  articleId: string;
+  quantity: number;
+  kind: "purchase" | "subcontract";
+  key: string;
+  reason: "demand" | "reorder_point" | "safety_stock" | "forecast" | "undated";
+  needDate?: string;
+  // Subcontract only: the TO operation the proposal buys.
+  moOperationId?: string;
+}
+
+// Behöver beställas: the rows grouped per supplier. `items` come sorted in
+// the groups' order, so a group is the next `shown` rows; `count` is the
+// group's real number (the response holds at most ALERT_ITEMS_LIMIT rows).
+export interface AlertSupplierGroup {
+  // The supplier id, "none" for Utan förvald leverantör (always first).
+  key: string;
+  supplierId: string | null;
+  supplierName: string | null;
+  count: number;
+  shown: number;
+}
+
 export interface AlertItem {
   // Stable per underlying row (the order/invoice/article id), so the web can
   // key rows and the digest can refer to them.
@@ -70,6 +98,12 @@ export interface AlertItem {
   secondary: string | null;
   // The date the row is sorted/measured on (ISO date), when there is one.
   date: string | null;
+  // purchase_needed only: the proposal's own supplier (the article's förvalda
+  // leverantör, the lego operation's supplier; null = none) and the order
+  // proposals to send to POST /planning/orders.
+  supplierId?: string | null;
+  supplierName?: string | null;
+  proposals?: AlertOrderProposal[];
 }
 
 export interface AlertGroup {
@@ -79,6 +113,9 @@ export interface AlertGroup {
   count: number;
   listHref: string;
   items: AlertItem[];
+  // purchase_needed only: the supplier groups in display order (without a
+  // förvald leverantör first, then by supplier name).
+  supplierGroups?: AlertSupplierGroup[];
   // A reader that failed does not take the others down: the group is shown
   // with error = true and a text, and no rows.
   error: boolean;

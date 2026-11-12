@@ -1,4 +1,14 @@
-import { ALERT_ITEMS_LIMIT, BANK_UNRECONCILED_DAYS, type AlertGroup, type AlertItem, type AlertKind, type AlertSeverity, type AlertsResponse } from "@navet/shared";
+import {
+  ALERT_ITEMS_LIMIT,
+  BANK_UNRECONCILED_DAYS,
+  type AlertGroup,
+  type AlertItem,
+  type AlertKind,
+  type AlertOrderProposal,
+  type AlertSeverity,
+  type AlertSupplierGroup,
+  type AlertsResponse,
+} from "@navet/shared";
 import { addDays, stockholmToday } from "../../system/service/delivery-days.js";
 import { stockholmNow } from "../../shipping/service/pickup.js";
 import { dueDateFromTerm } from "../../system/service/due-date.js";
@@ -21,7 +31,19 @@ export interface AlertRequirementRow {
   proposalQuantity: number;
   proposalKind: "purchase" | "manufacture" | "subcontract" | "configured" | null;
   projected: number;
+  // The row's proposals (one per need week) — Behöver beställas hands them
+  // on so the web can send them to POST /planning/orders unchanged.
+  proposals: {
+    key: string;
+    needDate: string | null;
+    quantity: number;
+    reason: AlertOrderProposal["reason"];
+  }[];
+  // The supplier the proposal would be ordered from: the article's förvalda
+  // leverantör for a purchase row, the operation's supplier for a lego row.
+  primarySupplier: { supplierId: string; supplierName: string } | null;
   // Subcontract rows: the MO operation the proposal buys.
+  moOperationId?: string;
   moOrderNumber?: string;
   moOperationLabel?: string;
   // Configured rows: the KO row the proposal makes a TO for.
@@ -188,12 +210,12 @@ export function createAlertsService(deps: {
 
     async purchase_needed() {
       const rows = await planning.requirementProposals();
-      return proposals(rows, ["purchase", "subcontract"]);
+      return groupBySupplier(proposals(rows, ["purchase", "subcontract"]).map(orderItem)).items;
     },
 
     async manufacture_needed() {
       const rows = await planning.requirementProposals();
-      return proposals(rows, ["manufacture", "configured"]);
+      return proposals(rows, ["manufacture", "configured"]).map(requirementItem);
     },
 
     async customer_invoice_overdue(today) {
@@ -418,11 +440,30 @@ export function createAlertsService(deps: {
 
   // Behovsberäkningen's rows of the given kinds, lowest projected balance
   // first (a copy — the cached rows are never reordered).
-  function proposals(rows: AlertRequirementRow[], kinds: readonly AlertRequirementRow["proposalKind"][]): AlertItem[] {
+  function proposals(rows: AlertRequirementRow[], kinds: readonly AlertRequirementRow["proposalKind"][]): AlertRequirementRow[] {
     return rows
       .filter((r) => kinds.includes(r.proposalKind))
-      .sort((a, b) => a.projected - b.projected || a.articleNumber.localeCompare(b.articleNumber, "sv"))
-      .map(requirementItem);
+      .sort((a, b) => a.projected - b.projected || a.articleNumber.localeCompare(b.articleNumber, "sv"));
+  }
+
+  // Behöver beställas: the row's supplier and its order proposals, both
+  // straight from the behovsberäkning's row — no supplier rule of its own.
+  function orderItem(row: AlertRequirementRow): AlertItem {
+    const kind = row.proposalKind === "subcontract" ? "subcontract" : "purchase";
+    return {
+      ...requirementItem(row),
+      supplierId: row.primarySupplier?.supplierId ?? null,
+      supplierName: row.primarySupplier?.supplierName ?? null,
+      proposals: row.proposals.map((p) => ({
+        articleId: row.articleId,
+        quantity: p.quantity,
+        kind,
+        key: p.key,
+        reason: p.reason,
+        ...(p.needDate ? { needDate: p.needDate } : {}),
+        ...(kind === "subcontract" && row.moOperationId ? { moOperationId: row.moOperationId } : {}),
+      })),
+    };
   }
 
   // A subcontract row names its TO operation and a configured row its KO row.
@@ -462,13 +503,18 @@ export function createAlertsService(deps: {
         try {
           const items = await readers[kind](today);
           items.sort(compareItems);
+          // Behöver beställas: the reader's rows are already in the groups'
+          // order (every row is yellow, the sort above is stable).
+          const shown = items.slice(0, ALERT_ITEMS_LIMIT);
+          const supplierGroups = kind === "purchase_needed" ? groupBySupplier(items, shown.length).groups : undefined;
           return {
             kind,
             label: def.label,
             severity: groupSeverity(kind, items),
             count: items.length,
             listHref: def.listHref,
-            items: items.slice(0, ALERT_ITEMS_LIMIT),
+            items: shown,
+            ...(supplierGroups ? { supplierGroups } : {}),
             error: false,
             message: null,
           };
@@ -499,6 +545,33 @@ export function createAlertsService(deps: {
       return computeAlerts(only ? visible.filter((kind) => only.includes(kind)) : visible);
     },
   };
+}
+
+// Behöver beställas grouped per supplier: the rows without a förvald
+// leverantör first, then one group per supplier in the supplier name's order
+// (lego rows in their supplier's group, next to its purchase rows); inside a
+// group the rows keep the order they came in. `limit` = how many of the
+// rows the response carries — a group's `shown` is its share of them.
+const NO_SUPPLIER_KEY = "none";
+export function groupBySupplier(items: AlertItem[], limit = items.length): { items: AlertItem[]; groups: AlertSupplierGroup[] } {
+  const byKey = new Map<string, { supplierId: string | null; supplierName: string | null; items: AlertItem[] }>();
+  for (const item of items) {
+    const key = item.supplierId ?? NO_SUPPLIER_KEY;
+    const group = byKey.get(key) ?? { supplierId: item.supplierId ?? null, supplierName: item.supplierName ?? null, items: [] };
+    group.items.push(item);
+    byKey.set(key, group);
+  }
+  const ordered = [...byKey.values()].sort((a, b) => {
+    if (a.supplierId === null || b.supplierId === null) return a.supplierId === b.supplierId ? 0 : a.supplierId === null ? -1 : 1;
+    return (a.supplierName ?? "").localeCompare(b.supplierName ?? "", "sv") || (a.supplierId < b.supplierId ? -1 : 1);
+  });
+  let left = limit;
+  const groups = ordered.map((g): AlertSupplierGroup => {
+    const shown = Math.min(g.items.length, left);
+    left -= shown;
+    return { key: g.supplierId ?? NO_SUPPLIER_KEY, supplierId: g.supplierId, supplierName: g.supplierName, count: g.items.length, shown };
+  });
+  return { items: ordered.flatMap((g) => g.items), groups };
 }
 
 // Within a kind: red before yellow (supplier invoices and quotes mix), then the
