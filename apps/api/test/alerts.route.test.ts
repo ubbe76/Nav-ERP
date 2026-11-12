@@ -95,6 +95,8 @@ describe("GET /alerts", () => {
         items: expect.any(Array),
         error: false,
         message: null,
+        // Behöver beställas alone is grouped per supplier.
+        ...(g.kind === "purchase_needed" ? { supplierGroups: expect.any(Array) } : {}),
       });
     }
     const late = body.groups.find((g) => g.kind === "sales_order_late")!;

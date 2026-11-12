@@ -95,3 +95,17 @@ a.all:hover {
 span.all {
   color: var(--color-text-muted);
 }
+
+.heading {
+  padding: 8px 0 2px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.divider {
+  margin: 6px 0;
+  border-top: 1px solid var(--color-border);
+}

@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { GatedLink } from "../ui/GatedLink";
 import cardStyles from "./DashboardCard.module.css";
 import styles from "./AttentionCard.module.css";
@@ -10,6 +11,8 @@ export interface AttentionItem {
   tone: "red" | "yellow";
   primary: string;
   secondary: string;
+  /** Supplier subheading (Behöver beställas): shown above the first row of each run. */
+  heading?: string;
 }
 
 // The action queue: the first rows of Aviseringar (GET /alerts), each a
@@ -33,8 +36,16 @@ export function AttentionCard({
         <p className={styles.empty}>{emptyText}</p>
       ) : (
         <div>
-          {items.map((item) => (
-            <AttentionRow key={item.key} item={item} />
+          {items.map((item, i) => (
+            <Fragment key={item.key}>
+              {item.heading && item.heading !== items[i - 1]?.heading && (
+                <div className={styles.heading}>{item.heading}</div>
+              )}
+              {/* The supplier sections of Behöver beställas end here: a line,
+                  so the next group's rows never read as that supplier's. */}
+              {!item.heading && items[i - 1]?.heading && <div className={styles.divider} />}
+              <AttentionRow item={item} />
+            </Fragment>
           ))}
           <GatedLink href="/aviseringar" className={styles.all}>
             Visa alla ({totalCount})

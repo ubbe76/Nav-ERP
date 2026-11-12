@@ -160,3 +160,38 @@ span.all {
   color: var(--status-stopped-text);
   margin: 4px 0 0;
 }
+
+.supplierSection {
+  margin-top: 12px;
+}
+.supplierHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 4px;
+}
+.supplierName {
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-decoration: none;
+}
+a.supplierName:hover {
+  text-decoration: underline;
+}
+.supplierHeader .hint {
+  margin: 0;
+  font-size: 12.5px;
+}
+.pickRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--color-divider);
+}
+.pickRow .row {
+  border-top: none;
+  flex: 1;
+  min-width: 0;
+}

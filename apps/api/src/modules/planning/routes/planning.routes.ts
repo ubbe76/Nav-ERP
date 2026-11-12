@@ -59,7 +59,17 @@ import {
 import { ConfiguratorInvalidConfigurationError, ConfiguratorModeChangedError, ConfiguratorNotToOrderModeError } from "../../configurator/service/configurator.errors.js";
 import { InvalidStatusTransitionError as SalesStatusError } from "../../sales/service/sales.service.js";
 import { errorBody } from "../../system/service/error-body.js";
-import { articleCardWrite, canSeePrices, DELIVERY_CHECK, MO_READ, OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
+import { satisfiesRule } from "@navet/shared";
+import {
+  articleCardWrite,
+  canSeePrices,
+  DELIVERY_CHECK,
+  MO_PROPOSAL_WRITE,
+  MO_READ,
+  OVERVIEW_READ,
+  PLANNING_ORDERS,
+} from "../../auth/middleware/access-rules.js";
+import { ForbiddenError } from "../../auth/middleware/permission.middleware.js";
 
 export async function planningRoutes(app: FastifyInstance, opts: { service: PlanningService }) {
   const { service } = opts;
@@ -391,8 +401,16 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
   // Order proposals -> real orders: one draft IO per primary supplier plus
   // one planned TO per manufactured article. Partial success is reported
   // per proposal in `errors`, created orders are kept.
-  app.post("/planning/orders", async (req, reply) => {
+  // Access: Inköp or Tillverkning for purchase and lego proposals (Behöver
+  // beställas in Aviseringar sends them); a proposal that makes a TO
+  // (manufacture, configured) needs Tillverkning — the whole call is refused
+  // (403 forbidden, nothing created), so an Inköp user never creates a TO.
+  app.post("/planning/orders", { config: { access: PLANNING_ORDERS } }, async (req, reply) => {
     const input = createPlanningOrdersSchema.parse(req.body);
+    const makesOrders = input.proposals.some((p) => p.kind === "manufacture" || p.kind === "configured");
+    if (makesOrders && !satisfiesRule(req.user!, MO_PROPOSAL_WRITE)) {
+      return reply.code(403).send(errorBody(new ForbiddenError()));
+    }
     const result = await service.createOrdersFromProposals(input, req.user!.id);
     return reply.code(201).send(result);
   });

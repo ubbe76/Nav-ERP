@@ -25,7 +25,7 @@ import { FavoritesProvider } from "../components/FavoritesProvider";
 import { getCurrentUser, apiGet } from "../lib/api";
 import { loadShellSettings } from "../lib/favorites";
 import { UserPrefsProvider } from "../components/UserPrefsProvider";
-import type { AlertKind, AlertsResponse } from "../lib/alerts";
+import { supplierSections, type AlertKind, type AlertsResponse } from "../lib/alerts";
 import {
   OVERVIEW_CARDS,
   OVERVIEW_CARD_ALERT_KIND,
@@ -238,10 +238,23 @@ export default async function OverviewPage() {
 
   // "Att bevaka" is Aviseringar: the first rows over all groups in their
   // fixed order (red before yellow), the rest behind "Visa alla".
+  // Behöver beställas carries a supplier subheading per group.
   const attentionItems: AttentionItem[] = (alerts?.groups ?? [])
-    .flatMap((g) => g.items.map((item) => ({ group: g, item })))
+    .flatMap((g) => {
+      if (g.kind === "purchase_needed" && g.supplierGroups) {
+        return supplierSections(g).flatMap((sec) =>
+          sec.items.map((item) => ({
+            group: g,
+            item,
+            heading: sec.group.supplierId === null ? "Utan förvald leverantör" : (sec.group.supplierName ?? undefined),
+          }))
+        );
+      }
+      return g.items.map((item) => ({ group: g, item, heading: undefined as string | undefined }));
+    })
     .slice(0, MAX_ATTENTION_ROWS)
-    .map(({ group, item }): AttentionItem => ({
+    .map(({ group, item, heading }): AttentionItem => ({
+      ...(heading ? { heading } : {}),
       key: `${group.kind}-${item.key}`,
       href: item.href,
       tone: item.severity,

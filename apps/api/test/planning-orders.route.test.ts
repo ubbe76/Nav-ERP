@@ -21,7 +21,8 @@ function buildApp(create: PlanningService["createOrdersFromProposals"]) {
   // The route reads req.user.id (set by the auth plugin in the real app).
   app.decorateRequest("user", null);
   app.addHook("preHandler", async (req) => {
-    (req as unknown as { user: { id: string } }).user = { id: "user-1" };
+    // Admin: a manufacture proposal needs Tillverkning (checked in the route).
+    (req as unknown as { user: { id: string; role: string } }).user = { id: "user-1", role: "admin" };
   });
   app.register(planningRoutes, { service: { createOrdersFromProposals: create } as unknown as PlanningService });
   return app;
