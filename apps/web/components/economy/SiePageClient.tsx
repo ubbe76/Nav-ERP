@@ -5,7 +5,7 @@ import { Card } from "../ui/Card";
 import { Field, Select } from "../ui/Field";
 import { FormActions, FormError, FormHint, FormStack } from "../ui/Form";
 import { Button } from "../ui/Button";
-import { API_URL } from "../../lib/api";
+import { API_URL, apiErrorFromBody } from "../../lib/api";
 import buttonStyles from "../ui/Button.module.css";
 import type { FiscalYear } from "../../lib/types";
 import { SectionHeading } from "../ui/SectionHeading";
@@ -54,7 +54,7 @@ export function SiePageClient({ fiscalYears }: { fiscalYears: FiscalYear[] }) {
       });
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
-        throw new Error(payload.error ?? "Importen misslyckades");
+        throw apiErrorFromBody(res.status, payload, "Importen misslyckades");
       }
       setResult(await res.json());
     } catch (err) {

@@ -14,6 +14,7 @@ import { useCan } from "../PermissionsProvider";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatStockholmDateTime } from "../../lib/date";
+import { notify } from "../../lib/notice";
 import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import {
   DEVIATION_ACTION_LABELS,
@@ -30,7 +31,7 @@ import {
 } from "../../lib/quality";
 import { DeviationCostsSection } from "./DeviationCosts";
 import { DeviationFields } from "./DeviationFields";
-import { draftFromDeviation, draftPayload, draftProblem, type DeviationDraft } from "./deviationDraft";
+import { changedPayload, draftFromDeviation, draftProblem, type DeviationDraft } from "./deviationDraft";
 import { DeviationFilesSection } from "./DeviationFiles";
 import { DeviationHistory } from "./DeviationHistory";
 import { DeviationLinksSection } from "./DeviationLinks";
@@ -293,9 +294,11 @@ export function DeviationCard({
   const canEdit = canWrite && deviation.editable;
   const pill = DEVIATION_STATUS_PILL[deviation.status];
 
-  const [initialJson] = useState(() => JSON.stringify(draftFromDeviation(deviation)));
+  // The saved state, moved forward after a successful PATCH. Compared through
+  // the payload so "5.0" or a trailing space is not an unsaved change.
+  const [baseline, setBaseline] = useState<DeviationDraft>(() => draftFromDeviation(deviation));
   const [draft, setDraft] = useState<DeviationDraft>(() => draftFromDeviation(deviation));
-  const dirty = canEdit && JSON.stringify(draft) !== initialJson;
+  const dirty = canEdit && Object.keys(changedPayload(draft, baseline)).length > 0;
   useUnsavedGuard(dirty);
 
   const [saving, setSaving] = useState(false);
@@ -317,10 +320,15 @@ export function DeviationCard({
       return;
     }
     setError(null);
+    const body = changedPayload(draft, baseline);
+    if (Object.keys(body).length === 0) return;
     setSaving(true);
     try {
-      await apiFetch(`/api/v1/deviations/${deviation.id}`, { method: "PATCH", body: JSON.stringify(draftPayload(draft, "edit")) });
+      await apiFetch(`/api/v1/deviations/${deviation.id}`, { method: "PATCH", body: JSON.stringify(body) });
+      setBaseline(draft);
       setSaved(true);
+      // The page remounts the card on updatedAt, which drops "Sparat" below.
+      notify(`${deviation.deviationNumber} sparades.`);
       router.refresh();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte spara avvikelsen"));
@@ -413,11 +421,11 @@ export function DeviationCard({
         <DeviationDetails deviation={deviation} />
       )}
 
-      {deviation.costs && <DeviationCostsSection deviationId={deviation.id} costs={deviation.costs} canEdit={canEdit} />}
+      {deviation.costs && <DeviationCostsSection deviationId={deviation.id} costs={deviation.costs} canEdit={canEdit} dirty={dirty} />}
 
-      <DeviationLinksSection deviation={deviation} canEdit={canEdit} />
+      <DeviationLinksSection deviation={deviation} canEdit={canEdit} dirty={dirty} />
 
-      <DeviationFilesSection deviationId={deviation.id} files={deviation.files} canEdit={canEdit} editable={deviation.editable} />
+      <DeviationFilesSection deviationId={deviation.id} files={deviation.files} canEdit={canEdit} editable={deviation.editable} dirty={dirty} />
 
       <DeviationHistory events={deviation.events} />
 

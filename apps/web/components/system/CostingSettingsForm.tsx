@@ -9,6 +9,7 @@ import { CostChain, type CostChainLine } from "../ui/CostChain";
 import { apiFetch } from "../../lib/api";
 import type { CostingMaterialSource, CostingSupplierPriceTier, SystemSettings } from "../../lib/types";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 
 // Fixed example amounts for the live preview, so the numbers below move only
 // with the percentages the user is typing. TO is included because it is part
@@ -40,20 +41,48 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
+  // Last saved values — a save sends only what differs, and the
+  // unsaved-changes guard compares against them.
+  const [base, setBase] = useState({
+    costingMaterialSource: settings.costingMaterialSource,
+    costingPostMaterialSource: settings.costingPostMaterialSource,
+    costingSupplierPriceTier: settings.costingSupplierPriceTier,
+    costingMoPercent: settings.costingMoPercent,
+    costingLoPercent: settings.costingLoPercent,
+    costingAffoPercent: settings.costingAffoPercent,
+    costingGeneralMarkupPercent: settings.costingGeneralMarkupPercent,
+    costingMaterialMarkupPercent: settings.costingMaterialMarkupPercent,
+  });
+  const typed = {
+    costingMaterialSource: materialSource,
+    costingPostMaterialSource: postMaterialSource,
+    costingSupplierPriceTier: supplierPriceTier,
+    costingMoPercent: toPercent(mo),
+    costingLoPercent: toPercent(lo),
+    costingAffoPercent: toPercent(affo),
+    costingGeneralMarkupPercent: toPercent(general),
+    costingMaterialMarkupPercent: toPercent(materialMarkup),
+  };
+  const changes = Object.fromEntries(
+    (Object.keys(typed) as (keyof typeof typed)[]).filter((key) => typed[key] !== base[key]).map((key) => [key, typed[key]])
+  );
+  useUnsavedGuard(Object.keys(changes).length > 0);
+
   async function handleSave(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setSaved(false);
 
-    const percents = {
-      costingMoPercent: toPercent(mo),
-      costingLoPercent: toPercent(lo),
-      costingAffoPercent: toPercent(affo),
-      costingGeneralMarkupPercent: toPercent(general),
-      costingMaterialMarkupPercent: toPercent(materialMarkup),
-    };
-    if (Object.values(percents).some((value) => value === null)) {
+    if (
+      [typed.costingMoPercent, typed.costingLoPercent, typed.costingAffoPercent, typed.costingGeneralMarkupPercent, typed.costingMaterialMarkupPercent].some(
+        (value) => value === null
+      )
+    ) {
       setError("Påslagen måste vara tal mellan 0 och 1000");
+      return;
+    }
+    if (Object.keys(changes).length === 0) {
+      setSaved(true);
       return;
     }
 
@@ -61,13 +90,9 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
     try {
       await apiFetch<SystemSettings>("/api/v1/settings", {
         method: "PATCH",
-        body: JSON.stringify({
-          costingMaterialSource: materialSource,
-          costingPostMaterialSource: postMaterialSource,
-          costingSupplierPriceTier: supplierPriceTier,
-          ...percents,
-        }),
+        body: JSON.stringify(changes),
       });
+      setBase(typed as typeof base);
       setSaved(true);
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte spara kalkylinställningarna"));
@@ -179,7 +204,7 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
               type="number"
               min={0}
               max={1000}
-              step="0.1"
+              step="0.01"
               size="xs"
               value={mo}
               onChange={(e) => setMo(e.target.value)}
@@ -191,7 +216,7 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
               type="number"
               min={0}
               max={1000}
-              step="0.1"
+              step="0.01"
               size="xs"
               value={lo}
               onChange={(e) => setLo(e.target.value)}
@@ -210,7 +235,7 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
               type="number"
               min={0}
               max={1000}
-              step="0.1"
+              step="0.01"
               size="xs"
               value={affo}
               onChange={(e) => setAffo(e.target.value)}
@@ -222,7 +247,7 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
               type="number"
               min={0}
               max={1000}
-              step="0.1"
+              step="0.01"
               size="xs"
               value={general}
               onChange={(e) => setGeneral(e.target.value)}
@@ -240,7 +265,7 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
             type="number"
             min={0}
             max={1000}
-            step="0.1"
+            step="0.01"
             size="xs"
             value={materialMarkup}
             onChange={(e) => setMaterialMarkup(e.target.value)}

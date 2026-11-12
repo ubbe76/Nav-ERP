@@ -93,6 +93,10 @@ export function ArticleNumberInput({ id, value, onChange, placeholder, "aria-lab
         pick(hit);
       }
     } else if (e.key === "Escape") {
+      // Only the list closes: inside a dialog, Esc would otherwise also
+      // cancel the dialog (and Modal unmounts the filled-in form).
+      e.preventDefault();
+      e.stopPropagation();
       setOpen(false);
     }
   }

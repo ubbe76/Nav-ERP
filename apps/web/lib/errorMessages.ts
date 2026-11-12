@@ -8,7 +8,7 @@
 // in sync with ERROR_CODES by hand; apps/api/test/error-codes.test.ts pins
 // the API side (class name -> code derivation) so a class rename fails loudly
 // there rather than silently breaking the mapping this file relies on.
-import type { ApiError } from "./api";
+import { ApiError } from "./api";
 import { formatStockholmDateTime } from "./date";
 
 // Which registers keep System → Exempeldata from running, in prose.
@@ -69,6 +69,9 @@ const MESSAGES: Record<string, MessageEntry> = {
   "article-not-found": "Artikeln hittades inte.",
   "duplicate-article-barcode": "En annan artikel har redan den streckkoden (EAN).",
   "invalid-file-type": "Filen måste vara en PDF, JPEG eller PNG.",
+  // Företagsinfo's logo upload.
+  "logo-file-missing": "Välj en bildfil att ladda upp.",
+  "invalid-logo-file-type": "Logotypen måste vara en bild (PNG, JPEG …).",
   "article-unit-not-found": "Enheten finns inte längre på artikeln — ladda om sidan.",
   "article-file-not-found": "Filen finns inte längre.",
   "article-revision-not-found": "Revisionen finns inte längre — ladda om sidan.",
@@ -915,6 +918,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "duplicate-supplier-number": "Leverantörsnumret används redan av en annan leverantör.",
   "duplicate-supplier-invoice-number": "Leverantören har redan en faktura med det fakturanumret.",
   "duplicate-email": "E-postadressen används redan av en annan användare.",
+  "last-admin": "Den sista aktiva administratören kan inte degraderas, stängas av eller tas bort.",
   "duplicate-work-center-code": "Resurskoden används redan av en annan resurs.",
   "duplicate-sequence-no": "Artikelns beredning har redan en operation med det operationsnumret.",
   "duplicate-price-list": "Det finns redan en prislista med den koden eller det namnet.",
@@ -965,10 +969,10 @@ const MESSAGES: Record<string, MessageEntry> = {
   "bookkeeping-record-locked": "Bokförd räkenskapsinformation kan inte ändras eller raderas — rätta med en omföring.",
 };
 
-// Chain: mapped Swedish text for err.code -> the API's own (English) message
-// -> the caller's fallback. Only ApiError carries a `code`; any other thrown
-// value (a plain Error, a non-Error throw) falls straight through to its
-// message or the fallback.
+// Chain: mapped Swedish text for err.code -> a 401 (session gone) or a fetch
+// that never reached the server in Swedish -> the API's own message -> the
+// caller's fallback. Only ApiError carries a `code`; any other thrown value (a
+// plain Error, a non-Error throw) falls through to its message or the fallback.
 // "Plåt 2 mm (behöver 8 st, tillgängligt 3 st), …" from a material-shortage body.
 export function shortageList(err: ApiError): string {
   const body = err.body as { shortages?: unknown } | undefined;
@@ -992,6 +996,19 @@ export function apiErrorMessage(err: unknown, fallback: string): string {
     const entry = apiErr.code ? MESSAGES[apiErr.code] : undefined;
     if (entry) return typeof entry === "function" ? entry(apiErr) : entry;
   }
+  if (err instanceof ApiError) {
+    // The API answers 401 without a code ("Authentication required").
+    if (err.status === 401) return SESSION_EXPIRED_MESSAGE;
+    // An empty error body: parseOrThrow's own placeholder, never shown.
+    if (/^Request failed \(\d+\)$/.test(err.message)) return fallback;
+  }
+  // fetch itself failed (no network, server down): the browser's own English
+  // text — "Failed to fetch", "NetworkError when attempting to fetch
+  // resource.", Safari's "Load failed".
+  if (err instanceof TypeError && /fetch|network|load failed/i.test(err.message)) return NETWORK_ERROR_MESSAGE;
   if (err instanceof Error && err.message) return err.message;
   return fallback;
 }
+
+export const SESSION_EXPIRED_MESSAGE = "Sessionen har gått ut — logga in igen.";
+export const NETWORK_ERROR_MESSAGE = "Ingen kontakt med servern — kontrollera anslutningen och försök igen.";

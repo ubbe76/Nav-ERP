@@ -44,4 +44,16 @@ describe("web error messages", () => {
       .filter((rel) => /\bset\w*\(\s*(?:err|error|e)\.message\s*\)/.test(readFileSync(join(WEB, rel), "utf8")));
     expect(offenders).toEqual([]);
   });
+
+  // A raw fetch (multipart upload) that failed must throw the ApiError
+  // apiErrorFromBody builds (lib/api.ts): `new Error(body.error ?? …)` lost
+  // the code, and apiErrorMessage then showed the API's English text — the
+  // avvikelse's file upload, the logo, SIE and the import parse did.
+  it("never turns a failed response body into a plain Error", () => {
+    const offenders = ["app", "components", "lib"]
+      .flatMap((d) => walk(join(WEB, d)))
+      .map((path) => relative(WEB, path))
+      .filter((rel) => /new Error\(\s*\w+\??\.error\b/.test(readFileSync(join(WEB, rel), "utf8")));
+    expect(offenders).toEqual([]);
+  });
 });

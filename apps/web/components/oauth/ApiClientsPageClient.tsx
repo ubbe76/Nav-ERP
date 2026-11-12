@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
@@ -10,11 +10,24 @@ import { EditApiClientForm } from "./EditApiClientForm";
 import type { ApiClient } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
+import { confirmDialog } from "../../lib/confirm";
 
 export function ApiClientsPageClient({ clients }: { clients: ApiClient[] }) {
   const router = useRouter();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<ApiClient | null>(null);
+
+  // The secret is shown once: closing the dialog any way but "Klar" asks first.
+  const secretShown = useRef(false);
+  async function requestClose() {
+    if (secretShown.current) {
+      if (!(await confirmDialog("Secreten visas inte igen. Har du sparat den?", { confirmLabel: "Stäng" }))) return;
+      // The client exists now — reload the list however the dialog was closed.
+      secretShown.current = false;
+      router.refresh();
+    }
+    setModalOpen(false);
+  }
 
   return (
     <>
@@ -33,9 +46,14 @@ export function ApiClientsPageClient({ clients }: { clients: ApiClient[] }) {
 
       <ApiClientsTable clients={clients} onEdit={setEditing} />
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Ny API-klient">
+      <Modal open={modalOpen} onClose={() => void requestClose()} title="Ny API-klient">
         <NewApiClientForm
+          onSecretShown={() => {
+            secretShown.current = true;
+            router.refresh();
+          }}
           onSuccess={() => {
+            secretShown.current = false;
             setModalOpen(false);
             router.refresh();
           }}

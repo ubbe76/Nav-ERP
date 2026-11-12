@@ -3,10 +3,11 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Button } from "../ui/Button";
 import { Field, Input, Toggle } from "../ui/Field";
-import { API_URL, apiFetch } from "../../lib/api";
+import { API_URL, apiFetch, apiErrorFromBody } from "../../lib/api";
 import type { CompanyInfo } from "../../lib/types";
 import styles from "./CompanyInfoForm.module.css";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 
 export function CompanyInfoForm({ initial }: { initial: CompanyInfo }) {
   const [name, setName] = useState(initial.name);
@@ -38,36 +39,68 @@ export function CompanyInfoForm({ initial }: { initial: CompanyInfo }) {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // The wire value of every field; the last saved snapshot is what a save is
+  // diffed against (and what the unsaved-changes guard compares with).
+  const current = {
+    name,
+    orgNumber: orgNumber || null,
+    address: address || null,
+    postalCode: postalCode || null,
+    city: city || null,
+    deliveryAddress: deliveryAddress.trim() || null,
+    deliveryPostalCode: deliveryPostalCode.trim() || null,
+    deliveryCity: deliveryCity.trim() || null,
+    phone: phone || null,
+    email: email || null,
+    website: website || null,
+    bankgiro: bankgiro || null,
+    plusgiro: plusgiro || null,
+    bankName: bankName || null,
+    iban: iban || null,
+    bic: bic || null,
+    vatNumber: vatNumber || null,
+    companySeat: companySeat || null,
+    fSkatt,
+  };
+  const [base, setBase] = useState<typeof current>(() => ({
+    name: initial.name,
+    orgNumber: initial.orgNumber || null,
+    address: initial.address || null,
+    postalCode: initial.postalCode || null,
+    city: initial.city || null,
+    deliveryAddress: initial.deliveryAddress?.trim() || null,
+    deliveryPostalCode: initial.deliveryPostalCode?.trim() || null,
+    deliveryCity: initial.deliveryCity?.trim() || null,
+    phone: initial.phone || null,
+    email: initial.email || null,
+    website: initial.website || null,
+    bankgiro: initial.bankgiro || null,
+    plusgiro: initial.plusgiro || null,
+    bankName: initial.bankName || null,
+    iban: initial.iban || null,
+    bic: initial.bic || null,
+    vatNumber: initial.vatNumber || null,
+    companySeat: initial.companySeat || null,
+    fSkatt: initial.fSkatt,
+  }));
+  const changes = Object.fromEntries(
+    (Object.keys(current) as (keyof typeof current)[]).filter((key) => current[key] !== base[key]).map((key) => [key, current[key]])
+  );
+  const dirty = Object.keys(changes).length > 0;
+  useUnsavedGuard(dirty);
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setSaved(false);
+    if (!dirty) {
+      setSaved(true);
+      return;
+    }
     setPending(true);
     try {
-      await apiFetch("/api/v1/company-info", {
-        method: "PATCH",
-        body: JSON.stringify({
-          name,
-          orgNumber: orgNumber || null,
-          address: address || null,
-          postalCode: postalCode || null,
-          city: city || null,
-          deliveryAddress: deliveryAddress.trim() || null,
-          deliveryPostalCode: deliveryPostalCode.trim() || null,
-          deliveryCity: deliveryCity.trim() || null,
-          phone: phone || null,
-          email: email || null,
-          website: website || null,
-          bankgiro: bankgiro || null,
-          plusgiro: plusgiro || null,
-          bankName: bankName || null,
-          iban: iban || null,
-          bic: bic || null,
-          vatNumber: vatNumber || null,
-          companySeat: companySeat || null,
-          fSkatt,
-        }),
-      });
+      await apiFetch("/api/v1/company-info", { method: "PATCH", body: JSON.stringify(changes) });
+      setBase(current);
       setSaved(true);
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte spara företagsinformationen"));
@@ -95,7 +128,7 @@ export function CompanyInfoForm({ initial }: { initial: CompanyInfo }) {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? "Kunde inte ladda upp logotypen");
+        throw apiErrorFromBody(res.status, body, "Kunde inte ladda upp logotypen");
       }
       setHasLogo(true);
       setLogoVersion((v) => v + 1);

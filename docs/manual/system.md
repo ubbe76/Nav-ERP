@@ -131,7 +131,7 @@ Den mottagna XML-filen sparas oförändrad som räkenskapsinformation (sju år),
 Reglerna, som läser PDF:ens textlager helt lokalt, används alltid. **AI-tolkning** är ett tillägg för fakturor som reglerna inte klarar, och för foton och inskannade PDF utan textlager (Nav har ingen lokal teckenigenkänning). Utan API-nyckel lämnar ingen fil Nav.
 
 - **Läge**: **Av** (ingen AI), **Automatiskt när reglerna inte räcker** (AI körs på inkomna fakturor där reglerna inte hittar leverantör, fakturanummer, datum och belopp med säkerhet, eller som saknar textlager; för e-post bara när avsändaren är känd och verifierad, se nedan) eller **Bara med knappen** (AI körs bara när någon trycker **Tolka med AI** på en faktura).
-- **API-nyckel**: företagets egen nyckel hos Anthropic. Nyckeln visas aldrig igen: ett tomt fält behåller den sparade (fältet visar **Nyckel sparad**) och **Ta bort nyckel** raderar den.
+- **API-nyckel**: företagets egen nyckel hos Anthropic. Nyckeln visas aldrig igen: ett tomt fält behåller den sparade (fältet visar **Nyckel sparad**) och **Ta bort nyckel** frågar först och raderar den; osparade ändringar i övriga fält rörs inte.
 - **Modell**: vilken modell som tolkar fakturorna — **Claude Opus 5.5 (noggrannast)**, **Claude Sonnet 5.5** eller **Claude Haiku 5.5 (snabbast, billigast)**.
 - **Testa anslutning** gör ett litet anrop med nyckeln i fältet (är det tomt testas den sparade) och vald modell, och visar om det fungerade. Inget sparas av testet.
 
@@ -225,7 +225,7 @@ Exempeldata kan bara skapas på en tom installation: så fort det finns artiklar
 
 ## Integrationer
 
-**System → Integrationer** hanterar **API-klienter** för externa system, t.ex. en produktkonfigurator som skapar offerter programmatiskt. Skapa en klient så genereras klient-ID och en **hemlighet som bara visas en gång** — kopiera den direkt. Klienten autentiserar med OAuth2 client credentials mot API:t.
+**System → Integrationer** hanterar **API-klienter** för externa system, t.ex. en produktkonfigurator som skapar offerter programmatiskt. Skapa en klient så genereras klient-ID och en **hemlighet som bara visas en gång** — kopiera den direkt. Stänger du rutan innan du valt **Klar** frågar Nav "Secreten visas inte igen. Har du sparat den?". **Återkalla** på en klient frågar först och kan inte ångras — klienten slutar fungera direkt. Klienten autentiserar med OAuth2 client credentials mot API:t.
 
 Program som ska ligga *inne i* Nav — med egna sidor, flikar på korten och händelser — installeras i stället som [tillägg](/hjalp/tillagg).
 
@@ -436,7 +436,7 @@ Klicka på **Ladda upp tema…** och välj en temafil (`.json`, högst 64 kB). N
 
 #### Kontrastkravet och Justera
 
-Varje textfärg måste ha kontrasten 4,5:1 mot de ytor den ligger på (WCAG AA), precis som de inbyggda temana. Nav väljer själv läsbara textfärger, men en kombination kan vara omöjlig, och en färg du ändrar för hand kan bryta kravet. Brister listas under **Kontrast**, till exempel "Dämpad text på Indataytor: 3,9:1, kräver 4,5:1". **Justera** flyttar förgrundens ljushet tills kravet klaras (behåller kulören) och lägger resultatet som en egen ändring. **Spara** är avstängd så länge brister finns, och servern kontrollerar alltid kravet igen.
+Varje textfärg måste ha kontrasten 4,5:1 mot de ytor den ligger på (WCAG AA), precis som de inbyggda temana. Nav väljer själv läsbara textfärger, men en kombination kan vara omöjlig, och en färg du ändrar för hand kan bryta kravet. Brister listas under **Kontrast**, till exempel "Dämpad text på Indataytor: 3,9:1, kräver 4,5:1". **Justera** flyttar förgrundens ljushet tills kravet klaras (behåller kulören) och lägger resultatet som en egen ändring. **Spara** är avstängd så länge brister finns, och servern kontrollerar alltid kravet igen. Ett färgfält med ett ogiltigt värde (inte på formen #rrggbb) markeras med "Ogiltigt värde" och håller också **Spara** avstängd. Lämnar du redigeraren med osparade ändringar, även med **Tillbaka**, frågar Nav först.
 
 #### Avancerat
 
@@ -529,7 +529,7 @@ Fälten är:
 - **Användarnamn** och **Lösenord** — inloggningen hos leverantören. Lösenordet visas aldrig efter att det sparats; lämna fältet tomt för att behålla det sparade. Observera att lösenordet lagras i klartext i databasen.
 - **Avsändarnamn** och **Avsändaradress** — hur avsändaren visas hos mottagaren, t.ex. "Företaget AB" och order@foretaget.se. Lämnas avsändaradressen tom används användarnamnet.
 
-Spara med **Spara** och kontrollera sedan inställningarna med **Skicka testmejl** — ange en mottagaradress och klicka på knappen; resultatet visas direkt.
+Spara med **Spara** och kontrollera sedan inställningarna med **Skicka testmejl** — ange en mottagaradress och klicka på knappen; resultatet visas direkt. Testmejlet använder de sparade uppgifterna, så knappen är avstängd ("Spara ändringarna först") medan formuläret har osparade ändringar.
 
 ## E-postlogg
 

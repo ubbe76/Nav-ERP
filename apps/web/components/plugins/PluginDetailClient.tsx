@@ -6,6 +6,7 @@ import { apiFetch } from "../../lib/api";
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
 import { formatStockholmDateTime } from "../../lib/date";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { PERMISSION_LABELS, type Permission } from "../../lib/permissions";
 import {
   PLUGIN_DELIVERY_STATUS_LABELS,
@@ -86,6 +87,7 @@ export function PluginDetailClient({
     const saved = new Set(normalizePermissions(plugin.permissions));
     return readOnly !== plugin.readOnly || saved.size !== permissions.size || [...permissions].some((p) => !saved.has(p));
   }, [plugin, permissions, readOnly]);
+  useUnsavedGuard(permissionsDirty);
 
   // Requested by the manifest but not granted – shown as a hint, never added silently.
   const notGranted = useMemo(() => {
@@ -466,7 +468,12 @@ function UpdateManifest({
     <div className={styles.body}>
       <FormError>{error}</FormError>
       <Field label="Adress" htmlFor="update-plugin-url">
-        <Input id="update-plugin-url" type="url" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+        <Input id="update-plugin-url" type="url" value={baseUrl} onChange={(e) => {
+            setBaseUrl(e.target.value);
+            // The shown manifest came from the old address — save must not use it.
+            setPreview(null);
+          }}
+        />
       </Field>
       <div className={styles.actions}>
         <Button type="button" variant="secondary" disabled={pending || baseUrl.trim() === ""} onClick={fetchAgain}>

@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, getCurrentUser } from "./lib/api";
+import { SESSION_COOKIE, checkSession } from "./lib/api";
 import { canOpen, landingFor } from "./lib/pageAccess";
 
 const PUBLIC_PATHS = ["/login", "/register"];
@@ -16,38 +16,33 @@ export async function proxy(req: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Only a session the API still accepts leaves /login. A cookie that no
-  // longer holds one — the account was deactivated or removed, its password
-  // changed, JWT_SECRET replaced — used to bounce /login → / → AppShell's
-  // redirect("/login") → … until the browser gave up ("too many
-  // redirects"). Now the page opens and the dead cookie is cleared; an
-  // unreachable API just opens the page.
+  // Only a session the API still accepts leaves /login. A cookie the API
+  // refuses (401 — the account was deactivated or removed, its password
+  // changed, JWT_SECRET replaced) is cleared and the page opens; an API that
+  // is down or busy (5xx, 429, unreachable) just opens the page and keeps the
+  // cookie — a hiccup must not log anyone out.
   if (hasSession && isPublicPath) {
-    let user: Awaited<ReturnType<typeof getCurrentUser>> = null;
-    try {
-      user = await getCurrentUser(req.headers.get("cookie") ?? undefined);
-    } catch {
-      return NextResponse.next();
-    }
-    if (user) return NextResponse.redirect(new URL("/", req.url));
+    const session = await checkSession(req.headers.get("cookie") ?? undefined);
+    if (session.kind === "user") return NextResponse.redirect(new URL("/", req.url));
     const res = NextResponse.next();
-    res.cookies.delete(SESSION_COOKIE);
+    if (session.kind === "invalid") res.cookies.delete(SESSION_COOKIE);
     return res;
   }
 
-  // Behörighetsgrupper: page guard. The API refuses the data anyway; this
-  // turns a refused page into a clear "Ingen behörighet" instead of a crash.
-  // A failed /auth/me (expired session, or the API unreachable) falls
-  // through — AppShell sends the user to /login exactly as before.
+  // A cookie the API refuses goes to /login (and is cleared) here: the pages
+  // fetch their data before AppShell could redirect, so a dead session used
+  // to end on the error page. Behörighetsgrupper: page guard — the API
+  // refuses the data anyway; this turns a refused page into a clear "Ingen
+  // behörighet" instead of a crash. An unavailable API falls through.
   if (hasSession && !isPublicPath) {
-    let user: Awaited<ReturnType<typeof getCurrentUser>> = null;
-    try {
-      user = await getCurrentUser(req.headers.get("cookie") ?? undefined);
-    } catch {
-      return NextResponse.next();
+    const session = await checkSession(req.headers.get("cookie") ?? undefined);
+    if (session.kind === "invalid") {
+      const res = NextResponse.redirect(new URL("/login", req.url));
+      res.cookies.delete(SESSION_COOKIE);
+      return res;
     }
-    if (user && !canOpen(user, req.nextUrl.pathname)) {
-      const target = req.nextUrl.pathname === "/" ? landingFor(user) : "/ingen-behorighet";
+    if (session.kind === "user" && !canOpen(session.user, req.nextUrl.pathname)) {
+      const target = req.nextUrl.pathname === "/" ? landingFor(session.user) : "/ingen-behorighet";
       return NextResponse.redirect(new URL(target, req.url));
     }
   }

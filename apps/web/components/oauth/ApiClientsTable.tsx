@@ -10,6 +10,7 @@ import type { ApiClient } from "../../lib/types";
 import { API_CLIENT_SCOPE_LABELS, API_CLIENT_SCOPES } from "../../lib/apiClientScopes";
 import { formatStockholmDate } from "../../lib/date";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { confirmDialog } from "../../lib/confirm";
 
 // All rights and no customer — what clients created before 4.9 got.
 function hasFullAccess(client: ApiClient) {
@@ -77,6 +78,13 @@ function RevokeButton({ client, onDone }: { client: ApiClient; onDone: () => voi
   const [error, setError] = useState<string | null>(null);
 
   async function revoke() {
+    if (
+      !(await confirmDialog(`Återkalla ${client.name}? Klienten slutar fungera direkt och kan inte aktiveras igen.`, {
+        confirmLabel: "Återkalla",
+        danger: true,
+      }))
+    )
+      return;
     setError(null);
     setPending(true);
     try {

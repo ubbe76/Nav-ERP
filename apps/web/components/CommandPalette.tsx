@@ -17,6 +17,8 @@ import {
   type PaletteRecord,
   type RecentPage,
 } from "../lib/commandPalette";
+import { canOpen } from "../lib/pageAccess";
+import { confirmLeave } from "../lib/unsavedGuard";
 import { useAccessUser } from "./PermissionsProvider";
 import shellStyles from "./AppShell.module.css";
 import styles from "./CommandPalette.module.css";
@@ -100,13 +102,14 @@ export function CommandPalette() {
   // text is cleared when the palette closes.
   useEffect(() => {
     if (open) {
-      setRecent(readRecent());
+      // Only pages this user may open (the list is per browser, not per user).
+      setRecent(readRecent().filter((r) => (user ? canOpen(user, r.href) : false)));
       setActive(0);
     } else {
       setQuery("");
       setRecords(null);
     }
-  }, [open]);
+  }, [open, user]);
 
   // The record searches: debounced, every list in parallel, a late answer
   // for an older query is dropped.
@@ -169,7 +172,13 @@ export function CommandPalette() {
   // the frame around it opens what was chosen (punkt 5, lib/tabNavigation.ts).
   function go(entry: Entry) {
     setOpen(false);
-    navigateTo(entry.href, entry.title, (href) => router.push(href));
+    // push runs only when this page really navigates (a tab opening leaves
+    // it alone), so the unsaved-changes question is asked just then.
+    navigateTo(entry.href, entry.title, (href) => {
+      void confirmLeave().then((ok) => {
+        if (ok) router.push(href);
+      });
+    });
   }
 
   function onKeyDown(e: ReactKeyboardEvent) {
@@ -186,6 +195,23 @@ export function CommandPalette() {
     } else if (e.key === "Escape") {
       e.preventDefault();
       close();
+    }
+  }
+
+  // aria-modal: keep Tab/Shift+Tab inside the palette instead of the page behind.
+  function trapTab(e: ReactKeyboardEvent<HTMLDivElement>) {
+    if (e.key !== "Tab") return;
+    const items = [...e.currentTarget.querySelectorAll<HTMLElement>("input, button:not([disabled]), [tabindex]:not([tabindex='-1'])")];
+    if (items.length === 0) return;
+    const first = items[0]!;
+    const last = items[items.length - 1]!;
+    const current = document.activeElement;
+    if (e.shiftKey && (current === first || !e.currentTarget.contains(current))) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && (current === last || !e.currentTarget.contains(current))) {
+      e.preventDefault();
+      first.focus();
     }
   }
 
@@ -208,7 +234,7 @@ export function CommandPalette() {
       {open &&
         createPortal(
         <div className={styles.overlay} onPointerDown={(e) => e.target === e.currentTarget && close()}>
-          <div className={styles.dialog} role="dialog" aria-modal="true" aria-label="Sök och kommandon">
+          <div className={styles.dialog} role="dialog" aria-modal="true" aria-label="Sök och kommandon" onKeyDown={trapTab}>
             <div className={styles.inputRow}>
               <Search size={18} strokeWidth={1.8} aria-hidden="true" />
               <input

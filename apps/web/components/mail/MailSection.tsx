@@ -15,6 +15,7 @@ import fieldStyles from "../ui/Field.module.css";
 import { Form, FormActions, FormError } from "../ui/Form";
 import { formatStockholmDateTime } from "../../lib/date";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { hasUnsavedDrafts } from "../../lib/unsavedGuard";
 
 export interface SendButtonConfig {
   label: string; // e.g. "Skicka via e-post", "Skicka offert"
@@ -71,6 +72,19 @@ export function MailSection({
   const router = useRouter();
   const [active, setActive] = useState<SendButtonConfig | null>(null);
   const [showPrices, setShowPrices] = useState(configurationPrices?.defaultChecked ?? false);
+  // The mail is rendered from the SAVED document on the server: with unsaved
+  // changes on the card (a new Åtgärd on the avvikelse, an edited row) the
+  // recipient got the old text. Asked when the button is clicked, since the
+  // card's drafts are not this section's state.
+  const [unsavedNotice, setUnsavedNotice] = useState(false);
+  function openSend(btn: SendButtonConfig) {
+    if (hasUnsavedDrafts()) {
+      setUnsavedNotice(true);
+      return;
+    }
+    setUnsavedNotice(false);
+    setActive(btn);
+  }
 
   return (
     <div style={{ marginTop: 28 }}>
@@ -78,7 +92,7 @@ export function MailSection({
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
         {sendButtons.map((btn) => (
           <span key={btn.label} style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <Button type="button" variant="secondary" onClick={() => setActive(btn)}>
+            <Button type="button" variant="secondary" onClick={() => openSend(btn)}>
               {btn.label}
             </Button>
             {btn.hint && <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>{btn.hint}</span>}
@@ -100,6 +114,7 @@ export function MailSection({
           );
         })}
       </div>
+      {unsavedNotice && <FormError>Spara ändringarna innan du skickar — e-posten skapas av det sparade dokumentet.</FormError>}
       {configurationPrices && (
         <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14, marginTop: 10 }}>
           <input type="checkbox" checked={showPrices} onChange={(e) => setShowPrices(e.target.checked)} />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { Checkbox, Select } from "../ui/Field";
 import { Button } from "../ui/Button";
@@ -84,14 +84,20 @@ export function SettingsForm({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
+  // The server's last known settings: a blur on a field whose value is
+  // unchanged saves nothing.
+  const lastSaved = useRef<SystemSettings>(settings);
+
   async function save(body: Partial<SystemSettings>) {
     setError(null);
     setPending(true);
     try {
-      return await apiFetch<SystemSettings>("/api/v1/settings", {
+      const updated = await apiFetch<SystemSettings>("/api/v1/settings", {
         method: "PATCH",
         body: JSON.stringify(body),
       });
+      lastSaved.current = updated;
+      return updated;
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte spara inställningen"));
       return null;
@@ -144,6 +150,7 @@ export function SettingsForm({
       setError("Tillåten överleverans måste vara 0–1000 % eller tomt för ingen gräns");
       return;
     }
+    if (percent === lastSaved.current.purchaseOverReceiptPercent) return;
     const updated = await save({ purchaseOverReceiptPercent: percent });
     if (updated) {
       setOverReceiptPercent(formatPercent(updated.purchaseOverReceiptPercent));
@@ -160,6 +167,7 @@ export function SettingsForm({
       setError("Tillåten överleverans måste vara 0–1000 % eller tomt för ingen gräns");
       return;
     }
+    if (percent === lastSaved.current.salesOverDeliveryPercent) return;
     const updated = await save({ salesOverDeliveryPercent: percent });
     if (updated) {
       setOverDeliveryPercent(formatPercent(updated.salesOverDeliveryPercent));
@@ -190,6 +198,7 @@ export function SettingsForm({
       setError("Orimligt mycket tid måste vara 0–104 veckor (0 = ingen varning)");
       return;
     }
+    if (weeks === lastSaved.current.planningLongOperationWeeks) return;
     const updated = await save({ planningLongOperationWeeks: weeks });
     if (updated) {
       setLongOperationWeeks(String(updated.planningLongOperationWeeks));
@@ -214,6 +223,7 @@ export function SettingsForm({
       setError("Standardledtid måste vara 0–60 dagar med högst en decimal (0 = ingen standardledtid)");
       return;
     }
+    if (days === lastSaved.current.planningDefaultLeadTimeDays) return;
     const updated = await save({ planningDefaultLeadTimeDays: days });
     if (updated) {
       setDefaultLeadTimeDays(String(updated.planningDefaultLeadTimeDays));
@@ -228,6 +238,7 @@ export function SettingsForm({
       setError("Kötid mellan operationer måste vara 0–60 dagar med högst en decimal (0 = ingen kötid)");
       return;
     }
+    if (days === lastSaved.current.planningQueueTimeDays) return;
     const updated = await save({ planningQueueTimeDays: days });
     if (updated) {
       setQueueTimeDays(String(updated.planningQueueTimeDays));
@@ -258,6 +269,7 @@ export function SettingsForm({
       setError(`${spec.label} måste vara ett heltal 1–${spec.max} månader`);
       return;
     }
+    if (value === lastSaved.current[spec.field as keyof SystemSettings]) return;
     const updated = await save({ [spec.field]: value });
     if (updated) {
       spec.set(String(updated[spec.field as keyof SystemSettings]));
@@ -278,6 +290,7 @@ export function SettingsForm({
       setError("ABC — gräns A måste vara lägre än gräns B");
       return;
     }
+    if (a === lastSaved.current.planningAbcClassAPercent && b === lastSaved.current.planningAbcClassBPercent) return;
     const updated = await save({ planningAbcClassAPercent: a, planningAbcClassBPercent: b });
     if (updated) {
       setAbcA(String(updated.planningAbcClassAPercent));
@@ -293,6 +306,7 @@ export function SettingsForm({
       setError("Offertens giltighetstid måste vara ett heltal 0–365 dagar (0 = ingen giltighetstid)");
       return;
     }
+    if (value === lastSaved.current.quoteValidityDays) return;
     const updated = await save({ quoteValidityDays: value });
     if (updated) {
       setQuoteValidityDays(String(updated.quoteValidityDays));

@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
+import { confirmLeave, useUnsavedGuard } from "../../lib/unsavedGuard";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import {
   BUILTIN_THEMES,
@@ -113,6 +114,7 @@ function ColorField({
   fallback,
   optional,
   onChange,
+  onValidity,
 }: {
   label: string;
   id: string;
@@ -120,9 +122,17 @@ function ColorField({
   fallback: string;
   optional?: boolean;
   onChange: (next: string | null) => void;
+  // Reports whether the typed text is a usable colour, so Spara can wait.
+  onValidity: (id: string, valid: boolean) => void;
 }) {
   const [draft, setDraft] = useState(value ?? "");
   useEffect(() => setDraft(value ?? ""), [value]);
+  const trimmed = draft.trim();
+  const invalid = !isHexColor(trimmed) && !(optional && trimmed === "");
+  useEffect(() => {
+    onValidity(id, !invalid);
+    return () => onValidity(id, true);
+  }, [id, invalid, onValidity]);
 
   return (
     <Field label={label} htmlFor={id}>
@@ -140,6 +150,7 @@ function ColorField({
           value={draft}
           spellCheck={false}
           placeholder={optional ? "Som accent" : "#rrggbb"}
+          aria-invalid={invalid || undefined}
           onChange={(e) => {
             const next = e.target.value.trim();
             setDraft(e.target.value);
@@ -148,6 +159,7 @@ function ColorField({
           }}
         />
       </div>
+      {invalid && <span className={styles.invalid}>Ogiltigt värde — använd formatet #rrggbb</span>}
     </Field>
   );
 }
@@ -160,6 +172,7 @@ function TokenRow({
   changed,
   onSet,
   onReset,
+  onValidity,
 }: {
   name: string;
   label: string;
@@ -168,11 +181,16 @@ function TokenRow({
   changed: boolean;
   onSet: (value: string) => void;
   onReset: () => void;
+  onValidity: (id: string, valid: boolean) => void;
 }) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   const check = checkTokenValue(kind, draft);
   const invalid = !check.ok && draft !== value;
+  useEffect(() => {
+    onValidity(`token-${name}`, !invalid);
+    return () => onValidity(`token-${name}`, true);
+  }, [name, invalid, onValidity]);
 
   return (
     <div className={styles.tokenRow}>
@@ -216,10 +234,25 @@ export function ThemeEditor({ theme, copyOf }: { theme: ThemeDetail | null; copy
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [serverIssues, setServerIssues] = useState<string[]>([]);
+  // Fields whose typed text is not a valid value (they keep the last good one
+  // in `source`, so saving would silently drop what the user typed).
+  const [invalidFields, setInvalidFields] = useState<ReadonlySet<string>>(new Set());
+  const setFieldValidity = useCallback((id: string, valid: boolean) => {
+    setInvalidFields((prev) => {
+      if (valid === !prev.has(id)) return prev;
+      const next = new Set(prev);
+      if (valid) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  // Last saved state — the unsaved-changes guard compares against it.
+  const [saved, setSaved] = useState({ name: initial.name.trim(), source: JSON.stringify(initial.source) });
+  useUnsavedGuard(name.trim() !== saved.name || JSON.stringify(source) !== saved.source || invalidFields.size > 0);
 
   const derived = useMemo(() => deriveTheme(source), [source]);
   const hasFailures = derived.unmet.length > 0;
-  const canSave = !pending && name.trim().length > 0 && !hasFailures;
+  const canSave = !pending && name.trim().length > 0 && !hasFailures && invalidFields.size === 0;
 
   const patch = (changes: Partial<ThemeSource>) => setSource((s) => ({ ...s, ...changes }));
 
@@ -256,8 +289,10 @@ export function ThemeEditor({ theme, copyOf }: { theme: ThemeDetail | null; copy
     setPending(true);
     setError(null);
     setServerIssues([]);
+    const prevSaved = saved;
     const body = JSON.stringify({ name: name.trim(), scheme: derived.scheme, tokens: derived.tokens, source });
     try {
+      setSaved({ name: name.trim(), source: JSON.stringify(source) });
       if (theme) {
         await apiFetch<ThemeDetail>(`/api/v1/themes/${theme.id}`, { method: "PATCH", body });
         router.refresh();
@@ -268,6 +303,7 @@ export function ThemeEditor({ theme, copyOf }: { theme: ThemeDetail | null; copy
         router.refresh();
       }
     } catch (err) {
+      setSaved(prevSaved);
       setError(apiErrorMessage(err, "Kunde inte spara temat"));
       const errBody = (err as { body?: { errors?: ThemeIssue[] } }).body;
       setServerIssues((errBody?.errors ?? []).map((e) => e.message));
@@ -325,20 +361,24 @@ export function ThemeEditor({ theme, copyOf }: { theme: ThemeDetail | null; copy
               <SegmentedToggle value={base} options={SCHEME_OPTIONS} onChange={changeBase} ariaLabel="Utgå från" />
             </Field>
             <div className={styles.colorGrid}>
-              <ColorField label="Bakgrund" id="theme-bg" value={source.bg} fallback={source.bg} onChange={(v) => v && patch({ bg: v })} />
+              <ColorField label="Bakgrund" id="theme-bg" value={source.bg} fallback={source.bg} onValidity={setFieldValidity}
+                onChange={(v) => v && patch({ bg: v })} />
               <ColorField
                 label="Ytor"
                 id="theme-surface"
                 value={source.surface}
                 fallback={source.surface}
+                onValidity={setFieldValidity}
                 onChange={(v) => v && patch({ surface: v })}
               />
-              <ColorField label="Text" id="theme-text" value={source.text} fallback={source.text} onChange={(v) => v && patch({ text: v })} />
+              <ColorField label="Text" id="theme-text" value={source.text} fallback={source.text} onValidity={setFieldValidity}
+                onChange={(v) => v && patch({ text: v })} />
               <ColorField
                 label="Accentfärg"
                 id="theme-accent"
                 value={source.accent}
                 fallback={source.accent}
+                onValidity={setFieldValidity}
                 onChange={(v) => v && patch({ accent: v })}
               />
               <ColorField
@@ -347,6 +387,7 @@ export function ThemeEditor({ theme, copyOf }: { theme: ThemeDetail | null; copy
                 value={source.heading}
                 fallback={source.accent}
                 optional
+                onValidity={setFieldValidity}
                 onChange={(v) => patch({ heading: v })}
               />
             </div>
@@ -371,7 +412,8 @@ export function ThemeEditor({ theme, copyOf }: { theme: ThemeDetail | null; copy
                     id={`theme-status-${f.key}`}
                     value={source.status![f.key]}
                     fallback={source.status![f.key]}
-                    onChange={(v) => v && patch({ status: { ...source.status!, [f.key]: v } })}
+                    onValidity={setFieldValidity}
+                onChange={(v) => v && patch({ status: { ...source.status!, [f.key]: v } })}
                   />
                 ))}
               </div>
@@ -419,6 +461,7 @@ export function ThemeEditor({ theme, copyOf }: { theme: ThemeDetail | null; copy
                         changed={token.name in source.overrides}
                         onSet={(v) => setOverride(token.name, v)}
                         onReset={() => resetOverride(token.name)}
+                        onValidity={setFieldValidity}
                       />
                     ))}
                   </div>
@@ -444,11 +487,12 @@ export function ThemeEditor({ theme, copyOf }: { theme: ThemeDetail | null; copy
           <Button type="button" variant="secondary" onClick={exportFile}>
             Exportera
           </Button>
-          <Button type="button" variant="ghost" onClick={() => router.push("/system/teman")}>
+          <Button type="button" variant="ghost" onClick={() => void confirmLeave().then((ok) => ok && router.push("/system/teman"))}>
             Tillbaka
           </Button>
         </FormActions>
         {hasFailures && <FormHint>Spara är avstängd så länge kontrastbrister finns — använd Justera.</FormHint>}
+        {invalidFields.size > 0 && <FormHint>Spara är avstängd så länge en färg har ett ogiltigt värde.</FormHint>}
       </div>
 
       <div className={styles.previewColumn}>

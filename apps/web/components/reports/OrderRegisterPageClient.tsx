@@ -12,7 +12,7 @@ import { Table, TableSkeleton } from "../ui/Table";
 import { StatusPill } from "../ui/StatusPill";
 import { API_URL, apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { formatMoney } from "../../lib/format";
+import { formatMoney, formatUnitPrice } from "../../lib/format";
 import {
   PURCHASE_ORDER_STATUS_PILL,
   SALES_ORDER_STATUS_PILL,
@@ -162,9 +162,18 @@ export function OrderRegisterPageClient({
   // An article chosen in the URL is shown by number once it is looked up.
   useEffect(() => {
     if (!defaults.articleId) return;
+    // A late answer must not overwrite an article the user picked meanwhile.
+    let cancelled = false;
     apiFetch<ArticlePickerValue>(`/api/v1/articles/${defaults.articleId}`)
-      .then((a) => setArticle({ id: a.id, articleNumber: a.articleNumber, name: a.name }))
-      .catch(() => setArticle(null));
+      .then((a) => {
+        if (!cancelled) setArticle({ id: a.id, articleNumber: a.articleNumber, name: a.name });
+      })
+      .catch(() => {
+        if (!cancelled) setArticle(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [defaults.articleId]);
 
   const qs = new URLSearchParams();
@@ -482,7 +491,7 @@ export function OrderRegisterPageClient({
                         case "unitPrice":
                           return (
                             <div>
-                              <div className="num">{formatMoney(row.unitPrice)}</div>
+                              <div className="num">{formatUnitPrice(row.unitPrice)}</div>
                               {row.discountPercent > 0 && (
                                 <div className={styles.muted}>Rabatt {qty(row.discountPercent)} %</div>
                               )}

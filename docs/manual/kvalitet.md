@@ -39,7 +39,7 @@ Välj **Typ** först (hoppas över när du kommer från ett kort) och fyll sedan
 
 Överst på kortet visas **Status**, typen och vem som registrerade ärendet, samt knapparna **Ladda ner PDF**, **Skriv ut** och statusknapparna.
 
-I ett öppet ärende är fälten redigerbara; spara med **Spara**. Osparade ändringar varnar innan du lämnar sidan, och statusknapparna väntar tills du sparat.
+I ett öppet ärende är fälten redigerbara; spara med **Spara**. Osparade ändringar varnar innan du lämnar sidan, och statusknapparna väntar tills du sparat. Samma gäller **Kostnader**, **Kopplade dokument** (inklusive Skapa ersättningsorder, Skapa inköpsorder och Skapa tillverkningsorder) och **Bilder och filer** — de låses med texten *Spara ändringarna innan du …* tills kortet är sparat, eftersom en ändring där läser in ärendet på nytt. **Spara** skickar bara fälten du ändrat, och efter sparning visas en notis.
 
 - **Rubrik**, **Datum** (förval i dag), **Orsak**, **Ansvarig** och **Åtgärd senast**. **Orsak** visar de aktiva [Kvalitetsorsaker](#kvalitetsorsaker) som gäller ärendets typ. Listan **Ansvarig** visar alla aktiva användare.
 - **Kund** eller **Leverantör** och **Kundens referens** respektive **Leverantörens referens** — motpartens eget ärendenummer.

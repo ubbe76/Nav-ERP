@@ -45,27 +45,45 @@ function SeriesRow({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  function startEdit() {
-    setName(series.name ?? "");
-    setPrefix(series.prefix);
-    setNextNumber(String(series.nextNumber));
-    setDigits(String(series.digits));
+  // What the fields were opened with — only differing fields are sent.
+  const [base, setBase] = useState(series);
+
+  async function startEdit() {
+    // Re-read the series so "Nästa nummer" shows the live counter, not the
+    // page's old snapshot (documents may have taken numbers since).
+    let fresh = series;
+    try {
+      const all = await apiFetch<NumberSeries[]>("/api/v1/number-series");
+      fresh = all.find((s) => s.key === series.key) ?? series;
+      if (fresh !== series) onUpdated(fresh);
+    } catch {
+      // keep the snapshot; the server still validates the save
+    }
+    setBase(fresh);
+    setName(fresh.name ?? "");
+    setPrefix(fresh.prefix);
+    setNextNumber(String(fresh.nextNumber));
+    setDigits(String(fresh.digits));
     setError(null);
     setEditing(true);
   }
 
   async function handleSave() {
+    const body: Record<string, unknown> = {};
+    if (own && name !== (base.name ?? "")) body.name = name;
+    if (prefix !== base.prefix) body.prefix = prefix;
+    if (Number(nextNumber) !== base.nextNumber) body.nextNumber = Number(nextNumber);
+    if (Number(digits) !== base.digits) body.digits = Number(digits);
+    if (Object.keys(body).length === 0) {
+      setEditing(false);
+      return;
+    }
     setError(null);
     setPending(true);
     try {
       const updated = await apiFetch<NumberSeries>(`/api/v1/number-series/${series.key}`, {
         method: "PATCH",
-        body: JSON.stringify({
-          ...(own ? { name } : {}),
-          prefix,
-          nextNumber: Number(nextNumber),
-          digits: Number(digits),
-        }),
+        body: JSON.stringify(body),
       });
       onUpdated(updated);
       setEditing(false);
@@ -105,7 +123,7 @@ function SeriesRow({
           {error && <div className={styles.error}>{error}</div>}
         </div>
         <div className={styles.actions}>
-          <Button type="button" variant="secondary" size="small" onClick={startEdit}>
+          <Button type="button" variant="secondary" size="small" onClick={() => void startEdit()}>
             Redigera
           </Button>
           {own && (

@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmLeave } from "../../lib/unsavedGuard";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, ApiError } from "../../lib/api";
@@ -144,7 +145,11 @@ export function PluginFrame({
           }
           break;
         case "nav:navigate":
-          if (isInternalNavigationPath(data.path)) router.push(data.path);
+          if (isInternalNavigationPath(data.path)) {
+            // The page behind the frame may hold unsaved drafts.
+            const path = data.path;
+            void confirmLeave().then((ok) => ok && router.push(path));
+          }
           break;
         case "nav:theme":
           sendTheme();

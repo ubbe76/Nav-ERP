@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Field";
 import { FormActions, FormError, FormHint, FormNotice } from "../ui/Form";
-import { API_URL, ApiError, apiFetch } from "../../lib/api";
+import { API_URL, ApiError, apiFetch, apiErrorFromBody } from "../../lib/api";
 import { type ImportEntityConfig } from "../../lib/importEntities";
 import buttonStyles from "../ui/Button.module.css";
 import wizardStyles from "./ImportWizard.module.css";
@@ -24,6 +24,7 @@ import {
   type PreviewResponse,
 } from "./importTypes";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 
 const STEPS = ["Filer", "Kolumner", "Förhandsgranska", "Resultat"] as const;
 type Step = (typeof STEPS)[number];
@@ -111,6 +112,8 @@ export function MultiFileImportWizard({ title, backHref, entities, order, intro 
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Work in progress = a file is read and the result is not yet shown.
+  useUnsavedGuard(files.length > 0 && step !== "Resultat");
 
   function patchFile(id: string, patch: Partial<FileState> | ((file: FileState) => Partial<FileState>)) {
     setFiles((current) =>
@@ -125,13 +128,21 @@ export function MultiFileImportWizard({ title, backHref, entities, order, intro 
     const problems: string[] = [];
     try {
       for (const file of Array.from(list)) {
-        const res = await uploadFile(`${API_URL}/api/v1/imports/detect`, file);
-        if (!res.ok) {
-          const payload = await res.json().catch(() => ({}));
-          problems.push(`${file.name}: ${payload.error ?? "filen kunde inte läsas"}`);
+        // Per file: a network error on one file must not drop the files
+        // already read, so it is reported like any other unreadable file.
+        let data: DetectResponse;
+        try {
+          const res = await uploadFile(`${API_URL}/api/v1/imports/detect`, file);
+          if (!res.ok) {
+            const payload = await res.json().catch(() => ({}));
+            problems.push(`${file.name}: ${apiErrorMessage(apiErrorFromBody(res.status, payload, "filen kunde inte läsas"), "filen kunde inte läsas")}`);
+            continue;
+          }
+          data = await res.json();
+        } catch (err) {
+          problems.push(`${file.name}: ${apiErrorMessage(err, "filen kunde inte läsas")}`);
           continue;
         }
-        const data: DetectResponse = await res.json();
         const config = configFor(data.detectedEntity);
         added.push({
           id: `${file.name}-${Date.now()}-${added.length}`,
@@ -171,7 +182,7 @@ export function MultiFileImportWizard({ title, backHref, entities, order, intro 
       const res = await uploadFile(`${API_URL}/api/v1/imports/${entity}/parse`, fileState.file);
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
-        throw new Error(payload.error ?? "Filen kunde inte läsas");
+        throw apiErrorFromBody(res.status, payload, "Filen kunde inte läsas");
       }
       const data: ParseResponse = await res.json();
       const config = configFor(entity);
@@ -549,7 +560,7 @@ export function MultiFileImportWizard({ title, backHref, entities, order, intro 
                 {file.status === "blocked" && (
                   <FormHint>
                     Filen importerades inte eftersom en tidigare fil misslyckades. Rätta felet och importera de
-                    återstående filerna på nytt — det som redan importerats hoppas över eller uppdateras.
+                    återstående filerna på nytt. Operationer och struktur ger radfel för det som redan finns om du inte bockar i Hoppa över rader som redan finns eller Uppdatera befintliga operationer/strukturrader i steget Kolumner.
                   </FormHint>
                 )}
               </div>

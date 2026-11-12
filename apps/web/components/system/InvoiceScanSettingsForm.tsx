@@ -10,6 +10,8 @@ import { StatusPill } from "../ui/StatusPill";
 import { Table } from "../ui/Table";
 import { ApiError, apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { confirmDelete } from "../../lib/confirm";
+import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { formatStockholmDateTime } from "../../lib/date";
 import {
   INVOICE_SCAN_AI_MODE_LABELS,
@@ -77,7 +79,26 @@ export function InvoiceScanSettingsForm({ initial }: { initial: InvoiceScanSetti
   const [mailTestNotice, setMailTestNotice] = useState<{ text: string; ok: boolean } | null>(null);
   const [mailTesting, setMailTesting] = useState(false);
 
+  // Last saved settings — the unsaved-changes guard compares against them.
+  const [base, setBase] = useState(initial);
+  const dirty =
+    aiMode !== base.aiMode ||
+    aiApiKey !== "" ||
+    aiModel !== base.aiModel ||
+    poMatching !== base.poMatching ||
+    mailEnabled !== base.mailEnabled ||
+    mailHost !== (base.mailHost ?? "") ||
+    mailPort !== String(base.mailPort) ||
+    mailTls !== base.mailTls ||
+    mailUser !== (base.mailUser ?? "") ||
+    mailPassword !== "" ||
+    mailFolder !== base.mailFolder ||
+    mailProcessedFolder !== base.mailProcessedFolder ||
+    mailInterval !== String(base.mailIntervalMinutes);
+  useUnsavedGuard(dirty);
+
   function apply(updated: InvoiceScanSettings) {
+    setBase(updated);
     setAiMode(updated.aiMode);
     setAiApiKeySet(updated.aiApiKeySet);
     setAiModel(updated.aiModel);
@@ -146,14 +167,19 @@ export function InvoiceScanSettingsForm({ initial }: { initial: InvoiceScanSetti
   }
 
   async function removeSecret(field: "aiApiKey" | "mailPassword") {
+    // Only the flags come from the answer: apply() would overwrite the other,
+    // unsaved fields in the form.
+    if (!(await confirmDelete(field === "aiApiKey" ? "Ta bort den sparade API-nyckeln?" : "Ta bort det sparade lösenordet?"))) return;
     setError(null);
     try {
-      apply(
-        await apiFetch<InvoiceScanSettings>("/api/v1/settings/invoice-scan", {
-          method: "PATCH",
-          body: JSON.stringify({ [field]: null }),
-        })
-      );
+      const updated = await apiFetch<InvoiceScanSettings>("/api/v1/settings/invoice-scan", {
+        method: "PATCH",
+        body: JSON.stringify({ [field]: null }),
+      });
+      setAiApiKeySet(updated.aiApiKeySet);
+      setMailPasswordSet(updated.mailPasswordSet);
+      setLastError(updated.mailLastError);
+      setBase((prev) => ({ ...prev, aiApiKeySet: updated.aiApiKeySet, mailPasswordSet: updated.mailPasswordSet, mailLastError: updated.mailLastError }));
     } catch (err) {
       setError(apiErrorMessage(err, field === "aiApiKey" ? "Kunde inte ta bort nyckeln" : "Kunde inte ta bort lösenordet"));
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { apiFetch } from "../../lib/api";
 import type { Paged } from "../../lib/types";
 import styles from "./SearchPicker.module.css";
@@ -66,11 +66,25 @@ export function SearchPicker<T extends { id: string }>({
   const [open, setOpen] = useState(false);
   const [term, setTerm] = useState("");
   const [results, setResults] = useState<T[]>([]);
+  // The (trimmed) term `results` were fetched for: Enter only picks from a
+  // list that belongs to what the box says.
+  const [resultsFor, setResultsFor] = useState<string | null>(null);
   const [highlighted, setHighlighted] = useState(0);
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const blurRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestSeq = useRef(0);
   const listRef = useRef<HTMLUListElement>(null);
+  // Enter pressed before the list matched the box (typed or scanned "1234" +
+  // Enter within the debounce): the search runs at once and its first hit is
+  // picked when it lands — never a row of the previous list.
+  const enterPending = useRef(false);
+  // Typed or arrowed since the list opened. An untouched list must not turn
+  // an Enter meant for the form into a new pick (the cached list restored on
+  // focus need not contain the current value).
+  const interacted = useRef(false);
+  const listId = useId();
+  const optionId = (index: number) => `${listId}-o${index}`;
 
   // The rendered/keyboard-navigable list: `results` (and the cache) always
   // hold the unfiltered server rows so a cache entry can be shared across
@@ -79,7 +93,9 @@ export function SearchPicker<T extends { id: string }>({
   // empty state alike.
   const visible = excludeId ? results.filter((item) => item.id !== excludeId) : results;
 
-  async function search(query: string) {
+  // keepHighlightId: a background refresh of the restored list keeps the
+  // highlighted row where it is instead of jumping to the top.
+  async function search(query: string, keepHighlightId?: string) {
     const seq = ++requestSeq.current;
     setLoading(true);
     try {
@@ -88,50 +104,149 @@ export function SearchPicker<T extends { id: string }>({
         `${endpoint}${separator}search=${encodeURIComponent(query)}&limit=20`
       );
       if (seq !== requestSeq.current) return; // a newer search superseded this one
-      setResults(page.rows);
-      setHighlighted(0);
-      searchCache.set(endpoint, { term: query, results: page.rows, lastSelectedId: searchCache.get(endpoint)?.lastSelectedId });
+      const rows = page.rows;
+      setResults(rows);
+      setResultsFor(query);
+      const rowsVisible = excludeId ? rows.filter((item) => item.id !== excludeId) : rows;
+      const kept = keepHighlightId ? rowsVisible.findIndex((item) => item.id === keepHighlightId) : -1;
+      setHighlighted(kept >= 0 ? kept : 0);
+      searchCache.set(endpoint, { term: query, results: rows, lastSelectedId: searchCache.get(endpoint)?.lastSelectedId });
+      if (enterPending.current) {
+        enterPending.current = false;
+        const first = rowsVisible[0];
+        if (first) commit(first, query, rows);
+      }
     } catch {
-      if (seq === requestSeq.current) setResults([]);
+      if (seq === requestSeq.current) {
+        setResults([]);
+        setResultsFor(query);
+        enterPending.current = false;
+      }
     } finally {
       if (seq === requestSeq.current) setLoading(false);
     }
   }
 
-  useEffect(() => () => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (blurRef.current) clearTimeout(blurRef.current);
+    },
+    []
+  );
 
   function openAndSearch(query: string) {
     setOpen(true);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => void search(query), query === "" ? 0 : 250);
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null;
+      void search(query);
+    }, query === "" ? 0 : 250);
   }
 
-  function select(item: T) {
-    // `term`/`results` here already match the open list (either just
-    // fetched or restored from cache on open), so re-save them alongside
-    // the newly picked id — reopening later highlights this pick. `results`
-    // is the unfiltered list, matching the cache's contract.
-    searchCache.set(endpoint, { term, results, lastSelectedId: item.id });
+  // Opens the list: the cached search and rows for this endpoint when there
+  // are any (refreshed in the background — a new or changed record shows
+  // without typing), otherwise the first 20.
+  function openList() {
+    interacted.current = false;
+    const cached = searchCache.get(endpoint);
+    if (cached) {
+      // A pending debounced search from before the blur must not be
+      // allowed to fire and clobber the restored view below.
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+      // Continue where the user was: show the last search + results
+      // (unfiltered, matching the cache's contract). Highlight the current
+      // value if it's in the visible list, else the last pick for this
+      // endpoint if it's visible, else — if the remembered pick IS the
+      // currently excluded row (e.g. the article-card switcher landed back
+      // on the article that was just picked) — the visible row adjacent to
+      // where it would have been, else the top row.
+      const rows = cached.results as T[];
+      setTerm(cached.term);
+      setResults(rows);
+      setResultsFor(cached.term);
+      setOpen(true);
+      const rowsVisible = excludeId ? rows.filter((item) => item.id !== excludeId) : rows;
+      let idx = value ? rowsVisible.findIndex((item) => item.id === value.id) : -1;
+      if (idx < 0 && cached.lastSelectedId) {
+        idx = rowsVisible.findIndex((item) => item.id === cached.lastSelectedId);
+      }
+      if (idx < 0 && cached.lastSelectedId) {
+        const fullIdx = rows.findIndex((item) => item.id === cached.lastSelectedId);
+        if (fullIdx >= 0) {
+          const countBefore = rows
+            .slice(0, fullIdx)
+            .filter((item) => !excludeId || item.id !== excludeId).length;
+          idx = Math.min(countBefore, rowsVisible.length - 1);
+        }
+      }
+      const at = idx >= 0 ? idx : 0;
+      setHighlighted(at);
+      void search(cached.term, rowsVisible[at]?.id);
+      return;
+    }
+    setTerm("");
+    openAndSearch("");
+  }
+
+  // Picks `item` and remembers the list it came from — reopening later
+  // continues there and highlights this pick. `rows` is the unfiltered list,
+  // matching the cache's contract.
+  function commit(item: T, query: string, rows: T[]) {
+    searchCache.set(endpoint, { term: query, results: rows, lastSelectedId: item.id });
     onChange(item);
     setTerm("");
     setOpen(false);
   }
 
+  function select(item: T) {
+    commit(item, term.trim(), results);
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (!open) return;
+    if (!open) {
+      // A closed list (after Esc or a pick) opens again with ArrowDown.
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        openList();
+        interacted.current = true;
+      }
+      return;
+    }
     if (e.key === "ArrowDown") {
       e.preventDefault();
+      interacted.current = true;
       setHighlighted((h) => Math.min(h + 1, visible.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
+      interacted.current = true;
       setHighlighted((h) => Math.max(h - 1, 0));
     } else if (e.key === "Enter") {
+      // Untouched list with a value already picked: the Enter belongs to the
+      // form (submit), not to the list.
+      if (!interacted.current && value) {
+        setOpen(false);
+        return;
+      }
       e.preventDefault();
+      const query = term.trim();
+      if (debounceRef.current !== null || resultsFor !== query) {
+        // The list on screen is for an older term: search now, pick the
+        // first hit when it lands.
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+        enterPending.current = true;
+        void search(query);
+        return;
+      }
       const hit = visible[highlighted];
       if (hit) select(hit);
     } else if (e.key === "Escape") {
+      // Only the list closes: inside a dialog, Esc would otherwise also
+      // cancel the dialog (and Modal unmounts the filled-in form).
+      e.preventDefault();
+      e.stopPropagation();
       setOpen(false);
     }
   }
@@ -151,48 +266,20 @@ export function SearchPicker<T extends { id: string }>({
         role="combobox"
         aria-expanded={open}
         aria-autocomplete="list"
+        aria-controls={listId}
+        aria-activedescendant={open && visible[highlighted] ? optionId(highlighted) : undefined}
         value={display}
         placeholder={value && !open ? undefined : placeholder}
         onFocus={() => {
-          const cached = searchCache.get(endpoint);
-          if (cached) {
-            // A pending debounced search from before the blur must not be
-            // allowed to fire and clobber the restored view below.
-            if (debounceRef.current) clearTimeout(debounceRef.current);
-            // Continue where the user was: show the last search + results
-            // (unfiltered, matching the cache's contract) without
-            // refetching. Highlight the current value if it's in the
-            // visible list, else the last pick for this endpoint if it's
-            // visible, else — if the remembered pick IS the currently
-            // excluded row (e.g. the article-card switcher landed back on
-            // the article that was just picked) — the visible row adjacent
-            // to where it would have been, else the top row.
-            const rows = cached.results as T[];
-            setTerm(cached.term);
-            setResults(rows);
-            setOpen(true);
-            const rowsVisible = excludeId ? rows.filter((item) => item.id !== excludeId) : rows;
-            let idx = value ? rowsVisible.findIndex((item) => item.id === value.id) : -1;
-            if (idx < 0 && cached.lastSelectedId) {
-              idx = rowsVisible.findIndex((item) => item.id === cached.lastSelectedId);
-            }
-            if (idx < 0 && cached.lastSelectedId) {
-              const fullIdx = rows.findIndex((item) => item.id === cached.lastSelectedId);
-              if (fullIdx >= 0) {
-                const countBefore = rows
-                  .slice(0, fullIdx)
-                  .filter((item) => !excludeId || item.id !== excludeId).length;
-                idx = Math.min(countBefore, rowsVisible.length - 1);
-              }
-            }
-            setHighlighted(idx >= 0 ? idx : 0);
-            return;
-          }
-          setTerm("");
-          openAndSearch("");
+          // A blur timer from a quick refocus must not close the list again.
+          if (blurRef.current) clearTimeout(blurRef.current);
+          blurRef.current = null;
+          openList();
         }}
         onChange={(e) => {
           const next = e.target.value;
+          interacted.current = true;
+          enterPending.current = false;
           setTerm(next);
           if (value) onChange(null); // typing invalidates the previous pick
           openAndSearch(next.trim());
@@ -200,14 +287,18 @@ export function SearchPicker<T extends { id: string }>({
         onKeyDown={onKeyDown}
         onBlur={() => {
           // Delay so a mousedown on an option can complete its click first.
-          setTimeout(() => setOpen(false), 150);
+          blurRef.current = setTimeout(() => {
+            blurRef.current = null;
+            setOpen(false);
+          }, 150);
         }}
       />
       {open && (
-        <ul className={styles.list} role="listbox" ref={listRef}>
+        <ul className={styles.list} role="listbox" id={listId} ref={listRef}>
           {visible.map((item, index) => (
-            <li key={item.id}>
+            <li key={item.id} role="none">
               <button
+                id={optionId(index)}
                 type="button"
                 role="option"
                 aria-selected={index === highlighted}
@@ -225,7 +316,11 @@ export function SearchPicker<T extends { id: string }>({
               </button>
             </li>
           ))}
-          {visible.length === 0 && <li className={styles.empty}>{loading ? "Söker…" : emptyText}</li>}
+          {visible.length === 0 && (
+            <li className={styles.empty} role="none">
+              {loading ? "Söker…" : emptyText}
+            </li>
+          )}
         </ul>
       )}
     </div>

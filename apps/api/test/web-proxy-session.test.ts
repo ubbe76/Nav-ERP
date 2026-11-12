@@ -48,10 +48,45 @@ describe("proxy: the session cookie on /login", () => {
     expect(res.headers.get("set-cookie")).toBeNull();
   });
 
+  it("keeps the cookie when the API answers 5xx (a hiccup never logs anyone out)", async () => {
+    stubMe(new Response("{}", { status: 503 }));
+    const res = await proxy(request("/login", "session=ok-but-api-busy"));
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
   it("a page without a cookie still goes to /login", async () => {
     const fetchMock = stubMe(new Response("{}", { status: 401 }));
     const res = await proxy(request("/kunder"));
     expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// Webbgranskningen 2026-11-12: a page with a cookie the API refuses rendered
+// Next's error page — the page fetched its data (apiGet → 401) before AppShell
+// could redirect. The proxy sends it to /login and clears the cookie.
+describe("proxy: the session cookie on a page", () => {
+  it("sends a cookie the API refuses to /login and clears it", async () => {
+    stubMe(new Response("{}", { status: 401 }));
+    const res = await proxy(request("/kunder", "session=dead"));
+    expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
+    expect(res.headers.get("set-cookie")).toMatch(/^session=;.*Expires=Thu, 01 Jan 1970/i);
+  });
+
+  it("lets the page render when the API is down or busy", async () => {
+    stubMe(new Response("{}", { status: 503 }));
+    const busy = await proxy(request("/kunder", "session=ok"));
+    expect(busy.headers.get("location")).toBeNull();
+    expect(busy.headers.get("set-cookie")).toBeNull();
+    stubMe(new TypeError("fetch failed"));
+    const down = await proxy(request("/kunder", "session=ok"));
+    expect(down.headers.get("location")).toBeNull();
+  });
+
+  it("lets a valid session through to a page it may open", async () => {
+    stubMe(new Response(JSON.stringify(user), { status: 200, headers: { "content-type": "application/json" } }));
+    const res = await proxy(request("/kunder", "session=ok"));
+    expect(res.headers.get("location")).toBeNull();
   });
 });

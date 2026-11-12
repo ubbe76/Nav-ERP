@@ -2510,7 +2510,7 @@ export interface ManufacturingOrder {
   articleNumber: string;
   articleName: string;
   // The article's base unit (MO quantities are base-unit); only on the
-  // detail GET, not in the list.
+  // detail GET and the list.
   articleUnitCode?: string;
   quantity: string;
   // Inlevererat — received into stock so far (delinleverans from the last

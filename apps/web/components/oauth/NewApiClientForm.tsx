@@ -18,7 +18,7 @@ interface CreateApiClientResponse {
 // Unlike the other "Ny X" forms, onSuccess is NOT called right after the
 // POST resolves — the secret is only shown once, so the modal must stay
 // open until the user explicitly confirms they've copied it via "Klar".
-export function NewApiClientForm({ onSuccess }: { onSuccess: () => void }) {
+export function NewApiClientForm({ onSuccess, onSecretShown }: { onSuccess: () => void; onSecretShown?: () => void }) {
   const [name, setName] = useState("");
   // Starts on Hemsida — the least access a configurator needs.
   const [access, setAccess] = useState<ApiClientAccess>({ scopes: [...API_CLIENT_PRESETS[0]!.scopes], customerId: null });
@@ -44,6 +44,7 @@ export function NewApiClientForm({ onSuccess }: { onSuccess: () => void }) {
         body: JSON.stringify({ name, scopes: access.scopes, customerId: access.customerId }),
       });
       setCreated(result);
+      onSecretShown?.();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte skapa klienten"));
     } finally {

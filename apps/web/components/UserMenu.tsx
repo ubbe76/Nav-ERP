@@ -12,6 +12,7 @@ import { FAVORITES_PLACEMENTS, FAVORITES_PLACEMENT_LABELS, favoritesPlacement, t
 import segmentedStyles from "./ThemeToggle.module.css";
 import { useThemeBoot } from "./ThemeBootProvider";
 import { logout } from "../lib/api";
+import { clearBrowserTraces } from "../lib/commandPalette";
 import { INSTALL_PROMPT_EVENT, installOffer, type InstallOffer } from "../lib/installApp";
 import styles from "./UserMenu.module.css";
 
@@ -97,6 +98,7 @@ export function UserMenu({ userName, userRole }: { userName: string; userRole: s
 
   async function handleLogout() {
     await logout();
+    clearBrowserTraces();
     router.push("/login");
     router.refresh();
   }

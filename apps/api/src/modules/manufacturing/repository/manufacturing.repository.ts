@@ -1963,9 +1963,16 @@ export function createManufacturingRepository(db: Db) {
 
       const [rows, totalRows] = await Promise.all([
         db
-          .select({ ...getTableColumns(manufacturingOrders), articleNumber: articles.articleNumber, articleName: articles.name })
+          .select({
+            ...getTableColumns(manufacturingOrders),
+            articleNumber: articles.articleNumber,
+            articleName: articles.name,
+            // Base unit, so a list card (Översikten) never prints "st" for metres.
+            articleUnitCode: units.code,
+          })
           .from(manufacturingOrders)
           .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))
+          .innerJoin(units, eq(units.id, articles.unitId))
           .where(where)
           .orderBy(query.order === "asc" ? asc(manufacturingOrders.orderNumber) : desc(manufacturingOrders.orderNumber))
           .limit(query.limit)
