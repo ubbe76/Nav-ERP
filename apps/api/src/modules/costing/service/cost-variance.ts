@@ -482,6 +482,17 @@ export function costVarianceAnalysis(
   };
 }
 
+// Kalkylerat per styck: the analysis's Kalkylerat ÷ N — only for a FINAL
+// analysis with N > 0 (a preliminary order's N is still moving, and with
+// nothing received there is no unit to carry it). The one division behind
+// Kalkylutfall's calculatedTvkPerUnit and Efterkalkylera flera's
+// Kalkylerat/st (#34).
+export type FinalAnalysisSource = Pick<CostVarianceAnalysis, "preliminary" | "outputQuantity" | "base">;
+export function calculatedPerUnit(analysis: FinalAnalysisSource | null): number | null {
+  if (analysis === null || analysis.preliminary || !(analysis.outputQuantity > 0)) return null;
+  return analysis.base / analysis.outputQuantity;
+}
+
 // ---------------------------------------------------------------------------
 // A saved calculation, as its columns read back
 // ---------------------------------------------------------------------------

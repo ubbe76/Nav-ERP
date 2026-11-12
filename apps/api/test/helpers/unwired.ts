@@ -1,3 +1,4 @@
+import type { PostCalculationBatchService } from "../../src/modules/costing/service/post-calculation-batch.service";
 import type { PreCalculationBatchService } from "../../src/modules/costing/service/pre-calculation-batch.service";
 import type { EinvoiceReceiveService } from "../../src/modules/einvoice/service/einvoice-receive.service";
 import type { SalesOrderLinkReader } from "../../src/modules/manufacturing/service/manufacturing.service";
@@ -46,4 +47,11 @@ export const unwiredPreCalculationBatch: PreCalculationBatchService = {
   listSelection: () => unwired("PreCalculationBatchService.listSelection"),
   preview: () => unwired("PreCalculationBatchService.preview"),
   save: () => unwired("PreCalculationBatchService.save"),
+};
+
+// Efterkalkylera flera (#34), same use.
+export const unwiredPostCalculationBatch: PostCalculationBatchService = {
+  listSelection: () => unwired("PostCalculationBatchService.listSelection"),
+  preview: () => unwired("PostCalculationBatchService.preview"),
+  save: () => unwired("PostCalculationBatchService.save"),
 };

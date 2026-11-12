@@ -31,6 +31,7 @@ import { createCostingService } from "./modules/costing/service/costing.service.
 import { createWorkInProgressService } from "./modules/costing/service/work-in-progress.service.js";
 import { costingRoutes } from "./modules/costing/routes/costing.routes.js";
 import { createPreCalculationBatchService } from "./modules/costing/service/pre-calculation-batch.service.js";
+import { createPostCalculationBatchService } from "./modules/costing/service/post-calculation-batch.service.js";
 import { createImportRepository, runImportDryRun } from "./modules/import/repository/import.repository.js";
 import { createImportService } from "./modules/import/service/import.service.js";
 import { importRoutes } from "./modules/import/routes/import.routes.js";
@@ -550,6 +551,12 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     db: database,
     costing: costingService,
     copied: { listCopiedArticleIds: async (userId) => (await articleService.listCopiedArticles(userId)).articleIds },
+    log: (msg, extra) => app.log.error(extra ?? {}, msg),
+  });
+  // Efterkalkylera flera (#34): the batch over the TO card's postCalculate.
+  const postCalculationBatchService = createPostCalculationBatchService({
+    db: database,
+    costing: costingService,
     log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });
   // Produkter i arbete (#25): the efterkalkyl per a day for the open TOs —
@@ -1136,7 +1143,12 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
         await registerModule(
           protectedRoutes,
           costingRoutes,
-          { service: costingService, workInProgress: workInProgressService, batch: preCalculationBatchService },
+          {
+            service: costingService,
+            workInProgress: workInProgressService,
+            batch: preCalculationBatchService,
+            postBatch: postCalculationBatchService,
+          },
           { read: office, write: ["tillverkning"] }
         );
         await registerModule(protectedRoutes, apiClientRoutes, { service: oauthService }, adminOnly);

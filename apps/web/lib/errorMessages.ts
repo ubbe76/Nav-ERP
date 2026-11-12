@@ -319,6 +319,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "cost-calculation-not-final": serverMessage("Efterkalkylen ger inget pris per styck — tillverkningsordern är inte klar eller inget är inlevererat."),
   // Förkalkylera flera (#27): the server names the count and the cap (Swedish).
   "pre-calculation-batch-too-large": serverMessage("Urvalet är för stort — högst 500 artiklar kan förkalkyleras åt gången. Snäva in urvalet med ett artikelnummerintervall, en varugrupp eller en artikelkod."),
+  // Efterkalkylera flera (#34): the server names the count and the cap (Swedish).
+  "post-calculation-batch-too-large": serverMessage("Urvalet är för stort — högst 500 tillverkningsordrar kan efterkalkyleras åt gången. Snäva in urvalet med datum, artikel eller varugrupp."),
   // The server names what went wrong with the key / the mailbox.
   "invoice-scan-ai-test-failed": serverMessage("AI-tjänsten svarade inte med den här nyckeln och modellen."),
   "invoice-scan-mail-test-failed": serverMessage("Kunde inte ansluta till e-postlådan."),

@@ -649,6 +649,10 @@ export const ERROR_CODES = {
   // PRE_CALCULATION_BATCH_MAX articles (400, Swedish message; the body also
   // carries `count` and `max`). Nothing is calculated.
   PRE_CALCULATION_BATCH_TOO_LARGE: "pre-calculation-batch-too-large",
+  // Efterkalkylera flera (#34): the selection holds more than
+  // POST_CALCULATION_BATCH_MAX manufacturing orders (400, Swedish message;
+  // the body also carries `count` and `max`). Nothing is calculated.
+  POST_CALCULATION_BATCH_TOO_LARGE: "post-calculation-batch-too-large",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

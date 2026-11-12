@@ -6,6 +6,8 @@ import { ForbiddenError } from "../../auth/middleware/permission.middleware.js";
 import {
   postCalculateSchema,
   preCalculateSchema,
+  postCalculationBatchSaveSchema,
+  postCalculationBatchSchema,
   preCalculationBatchListSchema,
   preCalculationBatchSaveSchema,
   preCalculationBatchSchema,
@@ -14,6 +16,7 @@ import {
 } from "@navet/shared";
 import type { CostingService } from "../service/costing.service.js";
 import { PreCalculationBatchTooLargeError, type PreCalculationBatchService } from "../service/pre-calculation-batch.service.js";
+import { PostCalculationBatchTooLargeError, type PostCalculationBatchService } from "../service/post-calculation-batch.service.js";
 import type { WorkInProgressService } from "../service/work-in-progress.service.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
 import { errorBody } from "../../system/service/error-body.js";
@@ -39,9 +42,14 @@ function isPreview(schema: ZodType<{ save?: boolean }>, body: unknown): boolean 
 // requireAuth has already run and req.user is guaranteed to be set.
 export async function costingRoutes(
   app: FastifyInstance,
-  opts: { service: CostingService; workInProgress: WorkInProgressService; batch: PreCalculationBatchService }
+  opts: {
+    service: CostingService;
+    workInProgress: WorkInProgressService;
+    batch: PreCalculationBatchService;
+    postBatch: PostCalculationBatchService;
+  }
 ) {
-  const { service, workInProgress, batch } = opts;
+  const { service, workInProgress, batch, postBatch } = opts;
 
   // Without `save` this only computes and returns the numbers (200, id null);
   // with it the calculation is written and answered exactly as before (201).
@@ -198,6 +206,37 @@ export async function costingRoutes(
     "/costing/pre-calculations/batch/save",
     { config: { access: articleCardWrite(["tillverkning"]) } },
     async (req) => batch.save(preCalculationBatchSaveSchema.parse(req.body))
+  );
+
+  // Efterkalkylera flera (#34). Access as the card's post-calculate route:
+  // the module's write (Tillverkning) — no override. The preview computes
+  // and answers, nothing is written — readOnlySafe like the card's preview.
+  // The cap is a domain error, 400 with count/max, raised before any
+  // calculation.
+  app.post("/costing/post-calculations/batch", { config: { readOnlySafe: true } }, async (req, reply) => {
+    const input = postCalculationBatchSchema.parse(req.body);
+    try {
+      return await postBatch.preview(input);
+    } catch (err) {
+      if (err instanceof PostCalculationBatchTooLargeError) {
+        return reply.code(400).send({ ...errorBody(err), count: err.count, max: err.max });
+      }
+      throw err;
+    }
+  });
+
+  // Visa urval: the selection's orders before anything is calculated —
+  // read-only like the preview, never refused for size (the answer carries
+  // count and max instead).
+  app.post("/costing/post-calculations/batch/selection", { config: { readOnlySafe: true } }, async (req) =>
+    postBatch.listSelection(postCalculationBatchSchema.parse(req.body))
+  );
+
+  // The save: per ticked order the card's Spara (postCalculate with save).
+  // No price is set from here. Partial success is answered honestly
+  // (saved + errors), never as a 4xx; an unknown order is one of the errors.
+  app.post("/costing/post-calculations/batch/save", async (req) =>
+    postBatch.save(postCalculationBatchSaveSchema.parse(req.body))
   );
 
   // The self cost an order row's margin is measured against. Needed as its own

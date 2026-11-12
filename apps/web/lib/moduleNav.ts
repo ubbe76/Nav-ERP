@@ -297,6 +297,11 @@ export const TILLVERKNING_SECTIONS: ModuleNavSection[] = [
         title: "Tillverkningsordrar",
         description: "Planera, frisläpp och färdigrapportera tillverkningsordrar med material och operationer.",
       },
+      {
+        href: "/tillverkning/efterkalkylera",
+        title: "Efterkalkylera flera",
+        description: "Efterkalkylera ett urval tillverkningsordrar i ett svep, jämför mot kalkylerat och spara de markerade.",
+      },
     ],
   },
   {

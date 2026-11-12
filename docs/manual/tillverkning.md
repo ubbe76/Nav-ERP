@@ -337,6 +337,40 @@ Efterkalkylen räknar aldrig om underliggande nivåer. **Räkna om underliggande
 
 Kalkylen räknas aldrig om i efterhand: ändrar du inställningar gäller det från nästa beräkning, och gamla kalkyler står kvar med de påslag de kördes med. En ändrad timkostnad gäller från den dag den ändrades, så den påverkar bara tid som arbetas från och med den dagen.
 
+### Efterkalkylera flera
+
+**Tillverkning → Efterkalkylera flera** (`/tillverkning/efterkalkylera`) efterkalkylerar många tillverkningsordrar i ett svep: du väljer ett urval, tittar på hur varje order avviker mot kalkylerat och sparar de efterkalkyler du vill behålla. Varje order räknas exakt som med **Efterkalkylera** på TO-kortet (se [Efterkalkyl](#efterkalkyl)). Sidan kräver behörigheten **Tillverkning**; ett läskonto kan titta på urvalet men inte spara.
+
+#### Urval
+
+- **Senaste inleverans från** och **till** — datumen (inklusive) då ordern senast togs in till lager, räknat som svenska dagar. En ångrad inleverans räknas inte. Ordrar som aldrig fått något inlevererat, till exempel en makulerad, faller utanför ett datumurval.
+- **Artikel** — en enskild artikel, eller **Artikelnummer från/till** för ett intervall (båda inklusive, tecken för tecken som i artikelregistret). Välj ett av dem: har du valt en artikel används inte intervallet.
+- **Varugrupp**.
+- **Status** — kryssrutor för **Planerad**, **Frisläppt**, **Pågår**, **Klar**, **Stängd** och **Makulerad**. Förvalt är **Klar** och **Stängd**, och minst en status måste vara vald. En order som inte är klar får en preliminär efterkalkyl: **Kalkylerat/st** och **Efterkalkyl/st** visas som *Ej klar*, men raden kan sparas.
+
+Högst 500 ordrar kan efterkalkyleras åt gången. Blir urvalet större visas ett felmeddelande och ingenting beräknas — snäva in det med datum, artikel eller varugrupp.
+
+**Visa urval** listar ordrarna som urvalet träffar — **TO-nummer** (länk till ordern), **Artikel**, **Status**, **Senaste inleverans** och om ordern redan har en sparad **Efterkalkyl** — utan att räkna något. Överst står hur många ordrar urvalet har (*Urvalet har 12 ordrar*). Ändrar du urvalet försvinner listan; **Dölj** stänger den.
+
+#### Tabellen
+
+Klicka **Efterkalkylera** (knappen visar **Beräknar…** medan det pågår). Inget sparas ännu. Tabellen har en rad per order:
+
+- **TO-nummer** (länk till TO-kortet), **Artikel**, **Status** och **Senaste inleverans**.
+- **Inlevererat** — det antal som per styck-siffrorna delas med.
+- **Kalkylerat/st** — ordens kalkylerade kostnad per styck: samma **Kalkylerat** som [Avvikelseanalys](#avvikelseanalys) på TO-kortet visar, alltså ordens egna rader prissatta den dag ordern skapades. Det är alltså inte artikelns senaste förkalkyl.
+- **Efterkalkyl/st** — vad ordern faktiskt kostade per styck (tillverkningskostnaden).
+- **Avvikelse/st** — Efterkalkyl minus Kalkylerat, i kronor och procent av Kalkylerat. Positivt betyder att ordern blev dyrare än kalkylerat. Saknas någon sida, eller är Kalkylerat 0, står *—* eller bara beloppet.
+- **Senaste efterkalkyl** — datum och tid för orderns senaste sparade efterkalkyl, om det finns någon.
+
+En order som inte går att räkna visar felet på raden och kan inte markeras; varningar från efterkalkylen står under artikeln. Alla ordrar är markerade när tabellen visas, utom de som redan har en sparad efterkalkyl — vill du spara en ny för dem markerar du dem själv. Kryssrutan i rubriken markerar eller avmarkerar alla.
+
+#### Spara markerade
+
+**Spara markerade (N)** sparar en ny efterkalkyl för varje markerad order, precis som **Spara kalkyl** på TO-kortet — den räknas om vid sparandet. Resultatet visar hur många som sparades och, för de ordrar som inte gick, vilket fel det blev; övriga sparas ändå. Därefter räknas tabellen om så att **Senaste efterkalkyl** visar det som just sparades, och inget är markerat, så ett andra klick inte sparar samma kalkyler igen. Sparade efterkalkyler kan inte tas bort, se [Efterkalkyl](#efterkalkyl).
+
+**Inga priser sätts.** Spara markerade sparar bara efterkalkylerna under **Kalkyl** på respektive artikel; standardpris och försäljningspris sätts fortfarande från en enskild kalkyl på artikelkortet.
+
 ### Täcks av och Går till
 
 I tabellen **Material** på TO-kortet visar kolumnen **Täcks av** vad som täcker varje materialrad, en rad per källa: *Lager*, *IO-123 · 2026-11-20* (en inköpsorder i utkast står som *(utkast)*) eller *TO-456 · 2026-11-18*. Ordernumren är länkar till kortet. Det som ingenting täcker står som *Saknas 12 st*. Täcks raden av flera källor, eller delvis, visas antalet på varje rad. Kommer en källa efter att materialet behövs står *N dagar för sent* i varningsfärg, och saknar den datum står *saknar datum*. Lagret är aldrig sent.
