@@ -54,6 +54,9 @@ export interface DocumentPdfRow {
   // Sales documents: Kundens artikelnummer — printed as "Ert art.nr: X", the
   // first info line under the name.
   customerArticleNumber?: string | null;
+  // Batch (#8), invoice only: the order row's delivered named batches,
+  // pre-formatted by formatBatchInfo — printed as "Batch: A123 (10), B456 (5)".
+  batchInfo?: string | null;
   // Ställkostnad: the article number of the row this setup charge belongs to
   // — printed as "Ställkostnad för X" (quote, order confirmation, invoice).
   setupForArticleNumber?: string | null;
@@ -165,6 +168,23 @@ export function formatRevisionInfo(
   if (info.revision) parts.push(t.revision(info.revision));
   for (const d of info.drawings) parts.push(t.drawing(d.drawingNumber, d.revision));
   return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+// Batch (#8): the text after "Batch:" under a row — the parts summed per
+// batch number, in the order given. A customer document passes only its
+// NAMED batches (Okänd is never printed there, decision 14); the internal
+// ones pass Okänd under its label. One batch covering the whole row prints
+// as the number alone, several (or one beside left-out parts) with their
+// quantities: "A123 (10), B456 (5)". Null when there is nothing to print.
+export function formatBatchInfo(
+  parts: readonly { batchNumber: string; quantity: number }[],
+  opts: { language?: DocumentLanguage; whole?: boolean } = {}
+): string | null {
+  const totals = new Map<string, number>();
+  for (const part of parts) totals.set(part.batchNumber, (totals.get(part.batchNumber) ?? 0) + part.quantity);
+  if (totals.size === 0) return null;
+  if (totals.size === 1 && opts.whole !== false) return [...totals.keys()][0]!;
+  return [...totals].map(([number, quantity]) => `${number} (${formatQuantity(String(Number(quantity.toFixed(4))), opts.language)})`).join(", ");
 }
 
 // Vald leveransadress på kundordern — printed as its own block next to the
@@ -381,6 +401,9 @@ export interface DeliveryNoteRow {
   extraDescription?: string | null;
   // Kundens artikelnummer — "Ert art.nr: X".
   customerArticleNumber?: string | null;
+  // Batch (#8): the row's named batches, pre-formatted (formatBatchInfo) —
+  // "Batch: A123 (10), B456 (5)". Okänd is never passed in.
+  batchInfo?: string | null;
   // Ångra utleverans: the row was undone — printed as a line under the name.
   undoneAt?: Date | null;
 }
@@ -607,6 +630,10 @@ export interface StockCountSheetPdfRow {
   articleName: string;
   unit: string | null;
   snapshotQuantity: number | null; // null when hidden (blind count)
+  // Batch (#8): a batchstyrd article has one row per batch — the batch
+  // number (Okänd under its label; internal document), printed under the
+  // name. Null/omitted = the article is not batchstyrd.
+  batch?: string | null;
 }
 
 export interface StockCountSheetPdfInput {
@@ -735,6 +762,10 @@ interface PalletCardCommon {
   // Kolli: this card's number among the cards printed for the same row/
   // operation — "Kolli 2 av 3", always printed; omitted ⇒ "Kolli 1 av 1".
   parcel?: { index: number; count: number };
+  // Batch (#8): a last cell in the bottom row — the delivery row's named
+  // batches on a "final" card (never Okänd), the TO number on the TO cards
+  // of a batchstyrd article. Null/omitted = no cell, the card as before.
+  batch?: string | null;
 }
 
 export type PalletCardPdfInput =
@@ -1483,6 +1514,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         row.extraDescription ?? null,
         ...(row.configurationLines ?? []),
         row.moReference ?? null,
+        row.batchInfo ? meta(t.rowInfo.batch, row.batchInfo) : null,
         // The order reference and the invoice row's Leveransdatum share one
         // sub-line ("Order KO… · Ert ordernr … · Levererad 2026-10-01").
         [row.orderReference ?? null, row.deliveredDate ? t.rowInfo.delivered(row.deliveredDate) : null]
@@ -2012,9 +2044,14 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     drawTableHeader();
 
     for (const row of input.rows) {
+      // Batch (#8): an 8pt line under the name, counted into the row height
+      // (a row without a batch is laid out exactly as before).
+      const nameHeight = doc.heightOfString(row.articleName, { width: COUNT_COLS.articleName.w });
+      const infoLines = row.batch ? [`Batch: ${row.batch}`] : [];
+      const measured = measureInfoLines(doc, infoLines, COUNT_COLS.articleName.w);
       const rowHeight =
         Math.max(
-          doc.heightOfString(row.articleName, { width: COUNT_COLS.articleName.w }),
+          nameHeight + measured.height,
           doc.heightOfString(row.articleNumber, { width: COUNT_COLS.articleNumber.w }),
           11
         ) + 10;
@@ -2034,6 +2071,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       }
       // Empty line for the counter to fill in by hand.
       doc.text("__________", left + COUNT_COLS.counted.x, y, { width: COUNT_COLS.counted.w, align: "right" });
+      drawInfoLines(doc, infoLines, measured, left + COUNT_COLS.articleName.x, y + nameHeight + 1, COUNT_COLS.articleName.w);
       y += rowHeight;
     }
 
@@ -2133,6 +2171,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         ...(row.customerArticleNumber ? [`${t.rowInfo.customerArticleNumber}: ${row.customerArticleNumber}`] : []),
         ...(row.extraDescription ? [row.extraDescription] : []),
         ...(row.configurationLines ?? []),
+        ...(row.batchInfo ? [`${t.rowInfo.batch}: ${row.batchInfo}`] : []),
         ...(row.undoneAt ? [dn.undone(formatStockholmDateTime(row.undoneAt))] : []),
       ];
       const measured = measureInfoLines(doc, infoLines, DELIVERY_NOTE_COLS.articleName.w);
@@ -2697,6 +2736,8 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         [pc.date, formatStockholmDateTime(card.printedAt ?? new Date())],
         ...(card.reportedBy ? [[card.kind === "subcontract" ? pc.dispatchedBy : pc.reportedBy, card.reportedBy] as [string, string]] : []),
         [pc.reference, card.reference || "—"],
+        // Batch (#8): in the bottom row, so the card's height never changes.
+        ...(card.batch ? [[pc.batch, card.batch] as [string, string]] : []),
       ];
       const cellWidth = CONTENT_WIDTH / bottomCells.length;
       bottomCells.forEach(([labelText, text], i) => {

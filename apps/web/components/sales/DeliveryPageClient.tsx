@@ -13,6 +13,8 @@ import { SearchPicker } from "../ui/SearchPicker";
 import { ScanPanel } from "../ui/ScanInput";
 import { useCountState, useScanFeedback, useScanQueue } from "../ui/useOrderScan";
 import { ApiError, apiFetch } from "../../lib/api";
+import { BatchSelect, useBatchBalances } from "../stock/BatchSelect";
+import { BATCH_AUTO, batchIdField } from "../../lib/batch";
 import { outflowLocationChoices } from "../../lib/stockLocations";
 import { confirmDialog } from "../../lib/confirm";
 import { notify } from "../../lib/notice";
@@ -123,6 +125,13 @@ export function DeliveryPageClient({
   // after a delivery changed them).
   const [rowLocations, setRowLocations] = useState<Record<string, string>>({});
   const [balances, setBalances] = useState<Record<string, ArticleLocationBalance[]>>({});
+  // Batch (#8) per row: "" = Automatiskt. Only batch-tracked rows have a choice.
+  const [rowBatches, setRowBatches] = useState<Record<string, string>>({});
+  const trackedArticleIds = useMemo(
+    () => openRows.filter((r) => r.articleBatchTracked).map((r) => r.articleId),
+    [openRows]
+  );
+  const { rows: batchRows, reload: reloadBatches } = useBatchBalances(trackedArticleIds);
   // A scanned lagerplats that GET /stock/locations leaves out (inactive: it
   // holds nothing), added to the select so the choice can be shown.
   const [scannedLocation, setScannedLocation] = useState<LocationOption | null>(null);
@@ -162,6 +171,7 @@ export function DeliveryPageClient({
   );
   useEffect(() => {
     setRowLocations({});
+    setRowBatches({});
   }, [selectedId]);
   useEffect(() => {
     if (!openArticleKey) {
@@ -335,6 +345,7 @@ export function DeliveryPageClient({
               quantity: toBaseQuantity(quantity, row.unitFactor),
               // Only a row that overrides the field above carries its own plats.
               locationId: rowLocations[row.id] || undefined,
+              ...(row.articleBatchTracked ? batchIdField(rowBatches[row.id] ?? BATCH_AUTO) : {}),
             })),
           }),
         }
@@ -358,6 +369,8 @@ export function DeliveryPageClient({
       setCount(NO_COUNT);
       setLastRowId(null);
       setRowLocations({});
+      setRowBatches({});
+      reloadBatches();
       clearFeedback();
       // Pallkort: auto-open the cards for the delivery (one page per row) —
       // best effort (a popup blocker may stop it); the Pallkort (PDF) link
@@ -578,6 +591,7 @@ export function DeliveryPageClient({
                 ? [{ key: "left", label: "Kvar att plocka", width: "110px", align: "right" as const }]
                 : []),
               { key: "location", label: "Lagerplats", width: "190px" },
+              ...(trackedArticleIds.length > 0 ? [{ key: "batch", label: "Batch", width: "170px" }] : []),
               { key: "id", label: "Leverera nu", width: "180px", align: "right" },
             ]}
             rows={openRows}
@@ -616,6 +630,17 @@ export function DeliveryPageClient({
                     </Select>
                   );
                 }
+                case "batch":
+                  return row.articleBatchTracked ? (
+                    <BatchSelect
+                      aria-label={`Batch — ${row.articleNumber}`}
+                      rows={batchRows}
+                      articleId={row.articleId}
+                      locationId={rowLocations[row.id] || locationId || null}
+                      value={rowBatches[row.id] ?? BATCH_AUTO}
+                      onChange={(v) => setRowBatches((prev) => ({ ...prev, [row.id]: v }))}
+                    />
+                  ) : null;
                 case "id":
                   return (
                     <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>

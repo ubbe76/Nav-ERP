@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
 import { Field, Input, Select } from "../ui/Field";
@@ -9,7 +9,9 @@ import { UnitSelect, convertQuantityInput, useUnitOptions } from "../ui/UnitSele
 import { toBaseQuantity } from "../../lib/units";
 import { locationOptionLabel } from "../../lib/stockLocations";
 import { apiFetch } from "../../lib/api";
-import type { Article, StockLocation } from "../../lib/types";
+import { BatchSelect } from "./BatchSelect";
+import { BATCH_AUTO, batchIdField } from "../../lib/batch";
+import type { Article, ArticleBatchBalances, StockLocation } from "../../lib/types";
 import { Card } from "../ui/Card";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 import { apiErrorMessage } from "../../lib/errorMessages";
@@ -21,6 +23,11 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
   const [quantityDelta, setQuantityDelta] = useState("0");
   const [unitId, setUnitId] = useState(""); // "" = artikelns grundenhet
   const [note, setNote] = useState("");
+  // Batch (#8): a positive adjustment names the batch (empty = Okänd), a
+  // negative one picks which batch to take from.
+  const [batchInfo, setBatchInfo] = useState<ArticleBatchBalances | null>(null);
+  const [batchNumber, setBatchNumber] = useState("");
+  const [batchChoice, setBatchChoice] = useState(BATCH_AUTO);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -30,6 +37,23 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
   // Entered in the chosen unit, booked in the base unit — the ledger is
   // always in the article's base unit.
   const baseDelta = toBaseQuantity(Number(quantityDelta) || 0, currentFactor);
+
+  useEffect(() => {
+    setBatchInfo(null);
+    setBatchNumber("");
+    setBatchChoice(BATCH_AUTO);
+    if (!article) return;
+    let cancelled = false;
+    apiFetch<ArticleBatchBalances>(`/api/v1/articles/${article.id}/batch-balances`)
+      .then((r) => {
+        if (!cancelled) setBatchInfo(r);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [article]);
+  const batchTracked = Boolean(batchInfo?.batchTracked);
 
   // A negative adjustment takes goods from a place: with "Artikelns lagerplats"
   // the API resolves the place by the inflow rule, which may not be where the
@@ -63,6 +87,8 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
           articleId: article.id,
           locationId: locationId || undefined,
           quantityDelta: baseDelta,
+          ...(batchTracked && baseDelta > 0 && batchNumber.trim() ? { batchNumber: batchNumber.trim() } : {}),
+          ...(batchTracked && baseDelta < 0 ? batchIdField(batchChoice) : {}),
           transactionType: "inventory_adjustment",
           note: note || undefined,
         }),
@@ -134,6 +160,30 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
           {needsLocation && " Välj vilken lagerplats varorna tas från."}
           {unitId !== "" && ` Bokförs som ${baseDelta} ${baseUnitCode} — saldot räknas alltid i grundenheten.`}
         </FormHint>
+
+        {article && batchTracked && batchInfo && baseDelta > 0 && (
+          <Field label="Batch" htmlFor="adjustmentBatch">
+            <Input
+              id="adjustmentBatch"
+              size="sm"
+              placeholder="Okänd"
+              value={batchNumber}
+              onChange={(e) => setBatchNumber(e.target.value)}
+            />
+          </Field>
+        )}
+        {article && batchTracked && batchInfo && baseDelta < 0 && (
+          <Field label="Batch" htmlFor="adjustmentBatchChoice">
+            <BatchSelect
+              id="adjustmentBatchChoice"
+              rows={batchInfo.batches}
+              articleId={article.id}
+              locationId={locationId || null}
+              value={batchChoice}
+              onChange={setBatchChoice}
+            />
+          </Field>
+        )}
 
         <Field label="Anteckning (valfritt)" htmlFor="note">
           <Input id="note" value={note} onChange={(e) => setNote(e.target.value)} />

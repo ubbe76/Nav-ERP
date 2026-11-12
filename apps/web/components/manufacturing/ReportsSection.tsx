@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Table } from "../ui/Table";
+import { GatedLink } from "../ui/GatedLink";
 import { Button } from "../ui/Button";
 import { FormError } from "../ui/Form";
 import { SectionHeading } from "../ui/SectionHeading";
@@ -112,12 +113,31 @@ export function ReportsSection({
               return (
                 <span style={muted}>
                   {reportLabel(row)}
+                  {row.receiptBatchNumber && Number(row.quantityReceived) > 0 && (
+                    <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
+                      Inlevererad batch:{" "}
+                      <GatedLink href={`/lager/sparbarhet?search=${encodeURIComponent(row.receiptBatchNumber)}`} style={{ color: "var(--accent-fg)" }}>
+                        {row.receiptBatchNumber}
+                      </GatedLink>
+                    </div>
+                  )}
                   {row.materials.length > 0 && (
                     <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
                       Material:{" "}
-                      {row.materials
-                        .map((m) => `${m.articleNumber} ${quantity(m.quantity)}${m.locationName ? ` (${m.locationName})` : ""}`)
-                        .join(", ")}
+                      {row.materials.map((m, i) => (
+                        <span key={`${m.materialConsumptionId}-${i}`}>
+                          {i > 0 ? ", " : ""}
+                          {`${m.articleNumber} ${quantity(m.quantity)}${m.locationName ? ` (${m.locationName})` : ""}`}
+                          {m.batchNumber && (
+                            <>
+                              {" · batch "}
+                              <GatedLink href={`/lager/sparbarhet?search=${encodeURIComponent(m.batchNumber)}`} style={{ color: "var(--accent-fg)" }}>
+                                {m.batchNumber}
+                              </GatedLink>
+                            </>
+                          )}
+                        </span>
+                      ))}
                     </div>
                   )}
                 </span>

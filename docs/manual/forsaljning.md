@@ -864,6 +864,8 @@ Fakturor skapas i **fakturamodulen** (se [Fakturor](#fakturor) ovan) i stället 
 3. Radtabellen visar **Beställt** (totalt antal på raden), Enhet, **Levererat** och **Rest** (beställt minus levererat, det som återstår att leverera) per rad — allt i radens enhet — och fältet **Leverera nu** är förifyllt med restantalet. Justera antalen — rader som sätts till 0 hoppas över. Antalet räknas om till grundenheten när saldot bokförs. Varje rad har också en egen **Lagerplats**: förvalet **Som ovan** följer fältet **Lagerplats** överst, och i listan finns de platser där artikeln har saldo, med saldot i grundenheten, t.ex. *Huvudlager — A1 (12 st)*. Välj en plats på en rad för att ta just den raden därifrån; övriga rader följer fortfarande fältet överst.
 4. Klicka **Rapportera utleverans**. Alla ifyllda rader bokförs tillsammans som **ett leveranstillfälle** — inte en separat bokning per rad — med ett eget **FS-nummer** (en följesedel), och ordern blir **Levererad** när allt är rapporterat. Ett fel visas under knappen **Rapportera utleverans**; gäller det en bestämd rad — en rad som tagits bort, eller en rad där **Leverera nu** överskrider vad ordern tillåter — visas felet i stället under den radens **Leverera nu**. Efter att en försändelse skapats med **Boka transport** ersätts knappen av en länk till försändelsen. Efter en lyckad rapportering visas länkarna **Följesedel FS-N (PDF)** och **Pallkort (PDF)** för att skriva ut leveranstillfällets följesedel respektive pallkort, och **Ångra…** som öppnar dialogen **Ångra utleverans** för följesedeln (se [Ångra utleverans](#angra-utleverans)). En notis nere till höger säger vad som levererades — *Utlevererat 2 rader på KO-5003 — följesedel FS-1012.* — och har samma **Ångra…**.
 
+För en **batchstyrd** artikel finns kolumnen **Batch** per rad: **Automatiskt** (äldsta batch först) eller en vald batch, som gäller hela radens antal — se [Batchnummer och spårbarhet](/hjalp/lager#batchnummer-och-sparbarhet).
+
 Enstaka rader kan fortfarande levereras direkt på kundorderkortet med **Leverera** — även det skapar ett eget leveranstillfälle (en följesedel med en rad).
 
 En rad med en **tjänst** levereras utan att något dras från lagret — [tjänster lagerförs inte](/hjalp/artiklar#artikeltyper) — och **Ångra…** räknar bara ned raden.
@@ -909,6 +911,7 @@ Behöver du skriva ut igen, eller ett annat antal, klickar du **Pallkort (PDF)**
 - Kolumnen **Plockat** och raden "Plockat av / Datum" fylls i för hand av den som plockar.
 - Ordernumret står också som streckkod uppe till höger, så att ordern kan skannas i [Utleverans](#skanna-vid-plock).
 - Konfigurerade rader visar valen (t.ex. *Lock: Lock B*, *Bredd: 1 200 mm*) under benämningen — aldrig priser.
+- Batchstyrda artiklar visar *Batch* med de levererade batchnumren (aldrig Okänd). Fakturan har på samma sätt en rad *Batch: …* under orderraden — se [Batchnummer och spårbarhet](/hjalp/lager#batchnummer-och-sparbarhet).
 
 Plocklistan kan skrivas ut i alla statusar utom Avbruten och ändrar ingenting i systemet.
 

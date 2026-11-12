@@ -7,6 +7,8 @@ import { Button } from "../ui/Button";
 import { Field, Input, Select } from "../ui/Field";
 import { HelpLink } from "../ui/HelpLink";
 import { apiFetch } from "../../lib/api";
+import { BatchSelect, useBatchBalances } from "./BatchSelect";
+import { BATCH_AUTO, batchIdField, batchOptions } from "../../lib/batch";
 import { locationOptionLabel } from "../../lib/stockLocations";
 import type { StockBalance, StockLocation, StockTransferResult } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
@@ -40,6 +42,8 @@ export function StockTransferPageClient({
   const [note, setNote] = useState("");
   // articleId → entered quantity (string). Absent = the prefilled default.
   const [quantities, setQuantities] = useState<Record<string, string>>({});
+  // Batch (#8) per article row: Automatiskt unless chosen.
+  const [batchChoices, setBatchChoices] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState<string | null>(null);
@@ -49,12 +53,21 @@ export function StockTransferPageClient({
     [balances]
   );
 
+  const { rows: batchRows, reload: reloadBatches } = useBatchBalances(balances.map((b) => b.articleId));
+  const batchTrackedIds = useMemo(() => new Set(batchRows.map((r) => r.articleId)), [batchRows]);
+
   const fromLocation = locations.find((l) => l.id === fromLocationId) ?? null;
   const targetOptions = locations.filter((l) => l.id !== fromLocationId);
 
   // Linked from a single balance row: only that article is prefilled.
   function defaultQuantity(row: RowWithId): string {
     if (preselectedArticleId && row.articleId !== preselectedArticleId) return "0";
+    // A chosen batch moves at most its own balance on the location.
+    const choice = batchChoices[row.articleId] ?? BATCH_AUTO;
+    if (choice !== BATCH_AUTO && batchTrackedIds.has(row.articleId)) {
+      const o = batchOptions(batchRows, row.articleId, fromLocationId).find((x) => x.value === choice);
+      if (o) return String(Math.min(Number(row.quantityOnHand), o.quantity));
+    }
     return String(Number(row.quantityOnHand));
   }
 
@@ -64,6 +77,7 @@ export function StockTransferPageClient({
 
   function selectFrom(id: string) {
     setQuantities({});
+    setBatchChoices({});
     setError(null);
     setDone(null);
     setToLocationId("");
@@ -75,7 +89,11 @@ export function StockTransferPageClient({
     setDone(null);
 
     const payloadRows = rows
-      .map((row) => ({ articleId: row.articleId, quantity: Number(enteredQuantity(row)) }))
+      .map((row) => ({
+        articleId: row.articleId,
+        quantity: Number(enteredQuantity(row)),
+        ...(batchTrackedIds.has(row.articleId) ? batchIdField(batchChoices[row.articleId] ?? BATCH_AUTO) : {}),
+      }))
       .filter((row) => row.quantity > 0);
 
     if (payloadRows.length === 0) {
@@ -108,6 +126,8 @@ export function StockTransferPageClient({
           : moved
       );
       setQuantities({});
+      setBatchChoices({});
+      reloadBatches();
       setNote("");
       // A deactivated source is no longer a selectable option, so drop it from
       // the URL and fall back to the neutral state instead of a dangling ?from.
@@ -178,12 +198,25 @@ export function StockTransferPageClient({
             columns={[
               { key: "articleNumber", label: "Artikelnummer", width: "160px" },
               { key: "articleName", label: "Benämning", width: "1fr" },
+              ...(batchTrackedIds.size > 0 ? [{ key: "batch", label: "Batch", width: "200px" }] : []),
               { key: "quantityOnHand", label: "Saldo", width: "110px", align: "right" },
               { key: "id", label: "Flytta", width: "160px", align: "right" },
             ]}
             rows={rows}
             renderCell={(row, key) => {
               switch (key) {
+                case "batch":
+                  return batchTrackedIds.has(row.articleId) ? (
+                    <BatchSelect
+                      size="sm"
+                      aria-label={`Batch — ${row.articleNumber}`}
+                      rows={batchRows}
+                      articleId={row.articleId}
+                      locationId={fromLocationId}
+                      value={batchChoices[row.articleId] ?? BATCH_AUTO}
+                      onChange={(v) => setBatchChoices((c) => ({ ...c, [row.articleId]: v }))}
+                    />
+                  ) : null;
                 case "quantityOnHand":
                   return formatQuantity(row.quantityOnHand);
                 case "id":

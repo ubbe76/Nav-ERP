@@ -41,6 +41,9 @@ const MAPPING = {
   Ritningsrevision: "drawingRevision",
 };
 
+// Batch (#8): the system setting as the fake deps answer it.
+const batchTrackingSetting = { enabled: false };
+
 function fakeDeps(existing: ExistingArticle[] = []): ArticleImportDeps {
   return {
     async articlesByNumber(numbers) {
@@ -63,6 +66,9 @@ function fakeDeps(existing: ExistingArticle[] = []): ArticleImportDeps {
     },
     async resolveDefaults() {
       return { unitId: "unit-st", locationId: "loc-fallback" };
+    },
+    async batchTrackingEnabled() {
+      return batchTrackingSetting.enabled;
     },
   };
 }

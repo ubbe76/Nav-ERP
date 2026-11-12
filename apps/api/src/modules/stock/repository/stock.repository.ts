@@ -36,6 +36,7 @@ import {
   type CreateWarehouseInput,
   type ListQuery,
   type ListStockTransactionsQuery,
+  type ListStockBatchesQuery,
   type StockTransactionReference,
   type ListStockBalancesQuery,
   type ListStockLocationRegisterQuery,
@@ -53,6 +54,8 @@ import { BatchNotTrackedError } from "../service/batch.errors.js";
 import { findArticleBatch, getOrCreateBatch } from "../service/batches.js";
 import { isBatchTrackedArticle } from "../service/batch-tracking.js";
 import { articleBatchBalances, batchCellsForArticles, pickBatchCellsForArticles } from "./batch-balances.js";
+import { createBatchTraceReader, listStockBatches } from "./batch-trace.repository.js";
+import { traceBatch, type BatchTraceLimits } from "../service/batch-trace.js";
 import {
   ArticleNotFoundError,
   FallbackLocationNotBlockableError,
@@ -753,6 +756,20 @@ export function createStockRepository(db: Db) {
       const [article] = await db.select({ batchTracked: articles.batchTracked }).from(articles).where(eq(articles.id, articleId));
       if (!article) return null;
       return { batchTracked: article.batchTracked, batches: article.batchTracked ? await articleBatchBalances(db, articleId) : [] };
+    },
+
+    // Spårbarhet (#8): the batch register and one batch's trace. The whole
+    // trace reads ONE snapshot (repeatable read, read only — PIA's pattern),
+    // so a level never sees a movement the level before it did not.
+    async listBatches(query: ListStockBatchesQuery) {
+      return listStockBatches(db, query);
+    },
+
+    async traceBatch(batchId: string, limits?: BatchTraceLimits) {
+      return db.transaction((tx) => traceBatch(createBatchTraceReader(tx), batchId, limits), {
+        isolationLevel: "repeatable read",
+        accessMode: "read only",
+      });
     },
 
     async articleLocations(articleId: string) {

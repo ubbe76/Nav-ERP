@@ -2065,6 +2065,10 @@ export function createPurchaseService(
             printedAt: dispatch.dispatchedAt,
             reportedBy: dispatch.dispatchedByName,
             reference: dispatch.orderNumber,
+            // Batch (#8, decision 17): the TO number is the batch its
+            // finished goods are received in — when the TO's article is
+            // batchstyrd.
+            batch: pick.row.moArticleBatchTracked === true ? pick.row.moOrderNumber : null,
             supplierName: dispatch.supplierName,
             supplierAddress,
             surfaceTreatment: pick.row.articleSurfaceTreatment,

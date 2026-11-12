@@ -1237,6 +1237,10 @@ export function createManufacturingService(
         printedAt: extras.printedAt,
         reportedBy: extras.reportedBy,
         reference: `${order.orderNumber} · op ${operation.sequenceNo}`,
+        // Batch (#8, decision 17): the finished goods are received in the
+        // batch named after the TO — known before anything is received, and
+        // printed on both variants when the article is batchstyrd.
+        batch: order.articleBatchTracked ? order.orderNumber : null,
       };
       return salesOrderRow
         ? {

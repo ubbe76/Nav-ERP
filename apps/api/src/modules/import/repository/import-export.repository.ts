@@ -116,6 +116,7 @@ export function createImportExportRepository(db: Db | Tx) {
             safetyStock: articles.safetyStock,
             stockControlled: articles.stockControlled,
             forecastControlled: articles.forecastControlled,
+            batchTracked: articles.batchTracked,
             manufacturingLeadTimeDays: articles.manufacturingLeadTimeDays,
             quantityPerPackage: articles.quantityPerPackage,
             primarySupplierNumber: suppliers.supplierNumber,

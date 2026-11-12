@@ -223,6 +223,14 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       example: "Ja",
     },
     {
+      field: "batchTracked",
+      label: "Batchstyrd",
+      required: false,
+      header: "Batchstyrd",
+      description: `Ja eller Nej (även 1/0). Ja gör att artikelns lager förs per batchnummer. Kräver att inställningen Använd batch- och serienummer är på (annars radfel) och går inte att sätta på en tjänst eller fantomartikel; Nej går alltid. En ny artikel utan värde blir Nej. ${UNTOUCHED}`,
+      example: "Nej",
+    },
+    {
       field: "leadTimeDays",
       label: "Ledtid (dagar)",
       required: false,

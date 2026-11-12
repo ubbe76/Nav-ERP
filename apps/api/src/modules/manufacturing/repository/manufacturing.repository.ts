@@ -1912,6 +1912,8 @@ export function createManufacturingRepository(db: Db) {
           // Dokument på engelska (#7): for the customer's pallet card.
           articleNameEn: articles.nameEn,
           articleUnitCodeEn: units.codeEn,
+          // Batch (#8): the pallet cards print the TO number as the batch.
+          articleBatchTracked: articles.batchTracked,
         })
         .from(manufacturingOrders)
         .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))

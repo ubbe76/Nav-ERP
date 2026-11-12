@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
+import { GatedLink } from "../ui/GatedLink";
 import { Button } from "../ui/Button";
 import { FormError } from "../ui/Form";
 import { SectionHeading } from "../ui/SectionHeading";
@@ -33,7 +34,7 @@ function undoQuestion(receipt: PurchaseReceipt, row: PurchaseOrderRow | undefine
   const what = `${rowQuantity(receipt, row)} ${row?.unitCode ?? ""} ${row?.articleNumber ?? ""}`.replace(/\s+/g, " ").trim();
   const effect = row?.moOperationId
     ? `Rapporteringen på ${row.moOrderNumber ?? "tillverkningsordern"} ångras också.`
-    : `Varorna tas ut ur lager${receipt.locationName ? ` från ${receipt.locationName}` : ""} igen.`;
+    : `Varorna tas ut ur lager${receipt.locationName ? ` från ${receipt.locationName}` : ""}${receipt.batchNumber ? ` (batch ${receipt.batchNumber})` : ""} igen.`;
   return `Ångra inleveransen ${when(receipt.createdAt)} av ${what}? ${effect}`;
 }
 
@@ -98,6 +99,14 @@ export function ReceiptsSection({
               return (
                 <span style={muted}>
                   {row ? `${row.articleNumber} — ${row.articleName}` : receipt.purchaseOrderRowId === null ? "Borttagen rad" : "–"}
+                  {receipt.batchNumber && (
+                    <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
+                      Batch{" "}
+                      <GatedLink href={`/lager/sparbarhet?search=${encodeURIComponent(receipt.batchNumber)}`} style={{ color: "var(--accent-fg)" }}>
+                        {receipt.batchNumber}
+                      </GatedLink>
+                    </div>
+                  )}
                   {row?.moOperationId && (
                     <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
                       Lego för {row.moOrderNumber ?? "TO"}

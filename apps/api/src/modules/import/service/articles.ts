@@ -9,6 +9,7 @@ import { gtinKey, normalizeScanCode, round4, roundToDecimals } from "@navet/shar
 // execute<Entity>Plan consumes in one transaction.
 import type { ArticleType, ImportCommitInput } from "@navet/shared";
 import { normalizeDecimal } from "./csv.js";
+import { batchTrackableArticle } from "../../stock/service/batch-tracking.js";
 import {
   resolveColumns,
   suggestMapping,
@@ -50,6 +51,8 @@ export const ARTICLE_IMPORT_FIELDS = [
   "stockControlled",
   // Prognosstyrd (#10): Ja/Nej — no Monitor export has it.
   "forecastControlled",
+  // Batchstyrd (#8): Ja/Nej — only while the system setting is on.
+  "batchTracked",
   // Ledtid (dagar), 0 = none: a manufactured article's own lead time, a
   // purchased article's primary supplier's (see planArticleImport).
   "leadTimeDays",
@@ -87,6 +90,8 @@ export const ARTICLE_HEADER_ALIASES: Record<string, string> = {
   styrning: "stockControlled",
   prognosstyrd: "forecastControlled",
   prognosstyrning: "forecastControlled",
+  batchstyrd: "batchTracked",
+  batchstyrning: "batchTracked",
   ledtid: "leadTimeDays",
   // The template's heading "Ledtid (dagar)".
   ledtiddagar: "leadTimeDays",
@@ -202,6 +207,9 @@ export interface ArticleImportDeps {
   // The same fallbacks createArticle uses ("st" + the "***" location),
   // resolved ONCE before rows are built.
   resolveDefaults(): Promise<{ unitId: string; locationId: string }>;
+  // Batch (#8): the system setting "Använd batch- och serienummer". Only
+  // asked when the file has a Batchstyrd cell that says Ja.
+  batchTrackingEnabled(): Promise<boolean>;
 }
 
 // The Revisioner tab's registers, set by one row: the article's active
@@ -244,6 +252,7 @@ export interface ArticleCreatePlan {
   safetyStock?: number | null;
   stockControlled?: boolean;
   forecastControlled?: boolean;
+  batchTracked?: boolean;
   quantityPerPackage?: number | null;
   primarySupplierId?: string | null;
   // Ledtid: a manufactured article's manufacturing_lead_time_days; for a
@@ -278,6 +287,9 @@ export interface ArticleUpdatePlan {
     safetyStock?: number | null;
     stockControlled?: boolean;
     forecastControlled?: boolean;
+    // Batchstyrd (#8): present only when the flag really changes — the
+    // commit takes the article FOR UPDATE for it (the flag's lock).
+    batchTracked?: boolean;
     manufacturingLeadTimeDays?: number | null;
   };
   revisions?: ArticleRevisionPlan;
@@ -377,6 +389,9 @@ export async function planArticleImport(
   const barcodesInFile = new Map<string, string>();
   const supplierNumbers = records.map((r) => r["primarySupplierNumber"] ?? "").filter((n) => n !== "");
   const suppliersByNumber = supplierNumbers.length > 0 ? await deps.suppliersByNumber(supplierNumbers) : new Map();
+  // Batchstyrd (#8): the setting is only read when some row asks for Ja.
+  const wantsBatchTracking = records.some((r) => parseActive(r["batchTracked"] ?? "") === true);
+  const batchTrackingEnabled = wantsBatchTracking ? await deps.batchTrackingEnabled() : false;
 
   const rows: ImportRowResult[] = [];
   const creates: ArticleCreatePlan[] = [];
@@ -698,6 +713,30 @@ export async function planArticleImport(
         values["forecastControlled"] = forecastControlled;
       }
     }
+    // Batchstyrd (#8): Ja/Nej like Prognosstyrd; an empty cell leaves it as
+    // it is (a new article: Nej). The card's rules (batch-tracking.ts): Ja
+    // only while "Använd batch- och serienummer" is on and never on a tjänst
+    // or a fantomartikel; Nej is always allowed (decision 10).
+    const batchTrackedCell = record["batchTracked"] ?? "";
+    let batchTracked: boolean | undefined;
+    if (batchTrackedCell !== "") {
+      const parsedFlag = parseActive(batchTrackedCell);
+      if (parsedFlag === null) {
+        errors.push(`Ogiltigt värde för Batchstyrd: "${batchTrackedCell}" (Ja/Nej/1/0/true/false)`);
+      } else {
+        const target = existing
+          ? { type: existing.type, isPhantom: existing.isPhantom }
+          : { type: parsedType?.type ?? input.defaults?.articleType ?? "purchased", isPhantom: parsedType?.isPhantom ?? false };
+        if (parsedFlag && !batchTrackingEnabled) {
+          errors.push('Batchstyrd kan inte sättas — slå först på "Använd batch- och serienummer" under System → Inställningar');
+        } else if (parsedFlag && !batchTrackableArticle(target)) {
+          errors.push("En tjänst eller fantomartikel kan inte vara batchstyrd");
+        } else {
+          batchTracked = parsedFlag;
+          values["batchTracked"] = batchTracked;
+        }
+      }
+    }
 
     // Ledtid (dagar) — whole days, 0 is "none" like the other planning
     // fields. Where it lands depends on the article type (the stored one on
@@ -838,6 +877,7 @@ export async function planArticleImport(
         ...(safetyStock != null ? { safetyStock } : {}),
         ...(stockControlled !== undefined ? { stockControlled } : {}),
         ...(forecastControlled !== undefined ? { forecastControlled } : {}),
+        ...(batchTracked !== undefined ? { batchTracked } : {}),
         ...(primarySupplierId !== null ? { primarySupplierId } : {}),
         ...(manufacturingLeadTimeDays != null ? { manufacturingLeadTimeDays } : {}),
         ...(primarySupplierLeadTimeDays != null ? { primarySupplierLeadTimeDays } : {}),
@@ -880,6 +920,7 @@ export async function planArticleImport(
       if (safetyStock !== undefined) patch.safetyStock = safetyStock;
       if (stockControlled !== undefined) patch.stockControlled = stockControlled;
       if (forecastControlled !== undefined) patch.forecastControlled = forecastControlled;
+      if (batchTracked !== undefined && batchTracked !== existing.batchTracked) patch.batchTracked = batchTracked;
       if (manufacturingLeadTimeDays !== undefined) patch.manufacturingLeadTimeDays = manufacturingLeadTimeDays;
       updates.push({
         id: existing.id,

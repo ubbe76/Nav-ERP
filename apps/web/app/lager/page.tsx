@@ -4,7 +4,7 @@ import { HelpLink } from "../../components/ui/HelpLink";
 import { withPluginPages } from "../../lib/pluginHub";
 import { HubSections } from "../../components/ui/HubSections";
 import { LAGER_SECTIONS, sectionsForUser } from "../../lib/moduleNav";
-import { getCurrentUser } from "../../lib/api";
+import { apiGet, getCurrentUser } from "../../lib/api";
 import shellStyles from "../../components/AppShell.module.css";
 
 // Module menu (TODO2 #14). The balance list that used to live here moved to
@@ -17,7 +17,16 @@ export default async function StockPage() {
   // to a page that just answers "Endast administratörer …".
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const user = await getCurrentUser(cookieHeader);
-  const sections = await withPluginPages(sectionsForUser(LAGER_SECTIONS, user ?? { role: "user", permissions: [] }), "lager", cookieHeader);
+  // Spårbarhet is hidden until the company uses batch numbers (Använd batch-
+  // och serienummer in Systeminställningar); the page itself stays reachable.
+  const settings = await apiGet<{ batchTrackingEnabled?: boolean }>("/api/v1/settings", cookieHeader).catch(() => null);
+  const visible = sectionsForUser(LAGER_SECTIONS, user ?? { role: "user", permissions: [] })
+    .map((section) => ({
+      ...section,
+      items: settings?.batchTrackingEnabled ? section.items : section.items.filter((item) => item.href !== "/lager/sparbarhet"),
+    }))
+    .filter((section) => section.items.length > 0);
+  const sections = await withPluginPages(visible, "lager", cookieHeader);
 
   return (
     <AppShell active="Lager">

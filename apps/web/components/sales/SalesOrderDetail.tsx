@@ -54,6 +54,8 @@ import { useOrderRate } from "../../lib/useOrderRate";
 import { CurrencyInput } from "../ui/CurrencyInput";
 import { OrderRateField } from "./OrderRateField";
 import { apiFetch } from "../../lib/api";
+import { BatchSelect, useBatchBalances } from "../stock/BatchSelect";
+import { BATCH_AUTO, batchIdField } from "../../lib/batch";
 import { stashReleaseWarnings } from "../../lib/releaseWarnings";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { askBumpRevision } from "../../lib/revision";
@@ -2084,8 +2086,11 @@ function DeliverGoodsForm({
   const [rowId, setRowId] = useState(rows[0]?.id ?? "");
   const [locationId, setLocationId] = useState(""); // "" = artikelns lagerplats
   const [quantity, setQuantity] = useState("1");
+  // Batch (#8): Automatiskt unless a batch is chosen on a batch-tracked row.
+  const [batch, setBatch] = useState(BATCH_AUTO);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const { rows: batchRows } = useBatchBalances(rows.filter((r) => r.articleBatchTracked).map((r) => r.articleId));
   // Quantities are entered in the row's unit and converted to the base unit
   // before hitting the deliver endpoint (stock is always base).
   const selectedRow = rows.find((r) => r.id === rowId) ?? rows[0];
@@ -2106,7 +2111,13 @@ function DeliverGoodsForm({
         method: "POST",
         body: JSON.stringify({
           locationId: locationId || undefined,
-          rows: [{ rowId, quantity: toBaseQuantity(Number(quantity), selectedRow?.unitFactor ?? null) }],
+          rows: [
+            {
+              rowId,
+              quantity: toBaseQuantity(Number(quantity), selectedRow?.unitFactor ?? null),
+              ...(selectedRow?.articleBatchTracked ? batchIdField(batch) : {}),
+            },
+          ],
         }),
       });
       onDone();
@@ -2122,7 +2133,14 @@ function DeliverGoodsForm({
       <FormError>{error}</FormError>
 
       <Field label="Rad" htmlFor="rowId">
-        <Select id="rowId" value={rowId} onChange={(e) => setRowId(e.target.value)}>
+        <Select
+          id="rowId"
+          value={rowId}
+          onChange={(e) => {
+            setRowId(e.target.value);
+            setBatch(BATCH_AUTO);
+          }}
+        >
           {rows.map((r) => (
             <option key={r.id} value={r.id}>
               {r.articleNumber} — {r.articleName} ({toUnitQuantity(Number(r.quantityDelivered), r.unitFactor)}/
@@ -2159,6 +2177,18 @@ function DeliverGoodsForm({
           />
         </Field>
       </FormRow>
+      {selectedRow?.articleBatchTracked && (
+        <Field label="Batch" htmlFor="deliverBatch">
+          <BatchSelect
+            id="deliverBatch"
+            rows={batchRows}
+            articleId={selectedRow.articleId}
+            locationId={locationId || null}
+            value={batch}
+            onChange={setBatch}
+          />
+        </Field>
+      )}
       {locations.length > 0 && <FormHint>Tas från artikelns lagerplats och sedan från andra platser med saldo.</FormHint>}
 
       {selectedRow && deliveryWarning && <FormNotice>{deliveryWarning}</FormNotice>}

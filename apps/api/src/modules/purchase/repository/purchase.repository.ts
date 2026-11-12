@@ -248,6 +248,7 @@ export function createPurchaseRepository(db: Db) {
   // and lego reference — listDispatches and the pallet card share it.
   async function dispatchRowsByOrder(orderId: string) {
     const rowUnits = alias(units, "row_units");
+    const moArticles = alias(articles, "mo_articles");
     return db
       .select({
         id: purchaseOrderDispatchRows.id,
@@ -267,6 +268,9 @@ export function createPurchaseRepository(db: Db) {
         moOrderNumber: manufacturingOrders.orderNumber,
         moOperationSequenceNo: moOperations.sequenceNo,
         moOperationDescription: moOperations.description,
+        // Batch (#8): the TO's own article — its finished goods get the TO
+        // number as their batch, printed on the lego pallet card.
+        moArticleBatchTracked: moArticles.batchTracked,
         rowCreatedAt: purchaseOrderRows.createdAt,
       })
       .from(purchaseOrderDispatchRows)
@@ -277,6 +281,7 @@ export function createPurchaseRepository(db: Db) {
       .leftJoin(rowUnits, eq(rowUnits.id, purchaseOrderRows.unitId))
       .leftJoin(moOperations, eq(moOperations.id, purchaseOrderRows.moOperationId))
       .leftJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+      .leftJoin(moArticles, eq(moArticles.id, manufacturingOrders.articleId))
       .where(eq(purchaseOrderDispatches.purchaseOrderId, orderId))
       // The IO's row order (entry order), as the card lists the rows.
       .orderBy(asc(purchaseOrderRows.createdAt), asc(purchaseOrderRows.id), asc(purchaseOrderDispatchRows.id));

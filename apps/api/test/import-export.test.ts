@@ -26,6 +26,7 @@ import {
   routingOperations,
   stockLocations,
   stockTransactions,
+  systemSettings,
   supplierContacts,
   supplierDeliveryAddresses,
   suppliers,
@@ -51,6 +52,7 @@ import { createImportRepository, runImportDryRun } from "../src/modules/import/r
 import { createImportService } from "../src/modules/import/service/import.service.js";
 import { createImportExportRepository } from "../src/modules/import/repository/import-export.repository.js";
 import { createImportExportService } from "../src/modules/import/service/import-export.service.js";
+import { BATCH_TRACKING_ENABLED_KEY } from "../src/modules/stock/service/batch-tracking.js";
 import {
   NUMERIC_FIELDS,
   addressCells,
@@ -102,6 +104,7 @@ async function cleanRegisters() {
   await db.delete(carriers).where(like(carriers.code, "ZX%"));
   await db.delete(priceLists).where(like(priceLists.code, "ZX%"));
   await db.delete(permissionGroups).where(like(permissionGroups.code, "ZXEXP%"));
+  await db.delete(systemSettings).where(eq(systemSettings.key, BATCH_TRACKING_ENABLED_KEY));
 }
 
 beforeEach(async () => {
@@ -228,6 +231,7 @@ async function seed() {
     { supplierId: s2!.id, label: "Werk 2", address: "Industriestraße 5", postalCode: "20095", city: "Hamburg" },
   ]);
 
+  await db.insert(systemSettings).values({ key: BATCH_TRACKING_ENABLED_KEY, value: "true" }).onConflictDoUpdate({ target: systemSettings.key, set: { value: "true" } });
   const inserted = await db
     .insert(articles)
     .values([
@@ -258,7 +262,8 @@ async function seed() {
       { articleNumber: "EX-200", name: "Plåt 1,5 mm", type: "purchased", unitId: st, purchaseUnitId: kartong, standardCost: "10.3333" },
       { articleNumber: "EX-300", name: "Montering på plats", type: "service", unitId: st, active: false },
       { articleNumber: "EX-400", name: "Fantomsats", type: "manufactured", isPhantom: true, unitId: st },
-      { articleNumber: "-EX-500", name: "=Formel + text", type: "purchased", unitId: st },
+      // Batchstyrd (#8) — exported as Ja; the import accepts it because the setting is on (below).
+      { articleNumber: "-EX-500", name: "=Formel + text", type: "purchased", unitId: st, batchTracked: true },
       { articleNumber: "007", name: "Skruv M6", type: "purchased", unitId: st, standardCost: "0.2500" },
     ])
     .returning({ id: articles.id, articleNumber: articles.articleNumber });
@@ -581,6 +586,7 @@ describe("import exports — the round trip", () => {
       Partiformningsregel: "Fast orderstorlek",
       Styrning: "Lagerstyrd",
       Prognosstyrd: "Ja",
+      Batchstyrd: "Nej",
       "Ledtid (dagar)": "7",
       Artikelrevision: "B",
       Ritningsnummer: "R-100",
@@ -596,6 +602,7 @@ describe("import exports — the round trip", () => {
     });
     expect(articleRows.find((r) => r["Artikelnummer"] === "EX-300")).toMatchObject({ Artikeltyp: "Tjänst", Aktiv: "Nej" });
     expect(articleRows.find((r) => r["Artikelnummer"] === "EX-400")).toMatchObject({ Artikeltyp: "Fiktiv" });
+    expect(articleRows.find((r) => r["Artikelnummer"] === "-EX-500")).toMatchObject({ Batchstyrd: "Ja" });
 
     // Omräkningsfaktor is base units per alternative unit.
     expect(await table("articleUnits")).toEqual([

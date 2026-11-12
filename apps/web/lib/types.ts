@@ -48,6 +48,8 @@ export interface Article {
   // Streckkod (EAN/GTIN) — 8, 12, 13 or 14 digits; unique when set.
   barcode: string | null;
   isPhantom: boolean;
+  // Batchstyrd (#8): stock is kept per batch; null/undefined = not tracked.
+  batchTracked?: boolean;
   // Set when the article is a configurator template (left join on the server).
   configuratorMode?: "variants" | "to_order" | null;
   // Base unit (grundenhet): code + register id. Default purchase/sales units
@@ -264,6 +266,127 @@ export interface StockBalance {
   locationBlocked: boolean;
 }
 
+// Saldo per batch (#8) — GET /stock/batch-balances, in draw order.
+// batchId null = Okänd (stock from before the article became batch tracked).
+export interface BatchBalanceRow {
+  articleId: string;
+  locationId: string | null;
+  warehouseName: string | null;
+  locationName: string | null;
+  blocked: boolean;
+  preference: number | null;
+  batchId: string | null;
+  batchNumber: string | null;
+  quantity: string;
+}
+
+export interface ArticleBatchBalances {
+  batchTracked: boolean;
+  batches: BatchBalanceRow[];
+}
+
+// Spårbarhet (#8) — GET /stock/batches and /stock/batches/:id/trace; mirrors
+// packages/shared/src/stock.ts (the web app cannot import @navet/shared).
+export type StockBatchOrigin = "purchase_receipt" | "manufacturing_order" | "manual" | "import";
+export const STOCK_BATCH_ORIGIN_LABELS: Record<StockBatchOrigin, string> = {
+  purchase_receipt: "Inleverans",
+  manufacturing_order: "Tillverkning",
+  manual: "Manuell",
+  import: "Import",
+};
+export interface StockBatchListRow {
+  id: string;
+  batchNumber: string;
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  unitCode: string;
+  origin: StockBatchOrigin;
+  createdAt: string;
+  quantity: number;
+}
+export interface TraceBatchRef {
+  batchId: string | null;
+  batchNumber: string | null;
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  unitCode: string;
+  batchTracked: boolean;
+  origin: StockBatchOrigin | null;
+  createdAt: string | null;
+}
+export type TraceStop = null | "unknown" | "repeated" | "limit";
+export interface TraceEvent {
+  kind: "adjustment" | "stock_count";
+  stockCountId: string | null;
+  stockCountNumber: string | null;
+  at: string;
+  quantity: number;
+  note: string | null;
+}
+export interface TraceReceipt {
+  purchaseOrderId: string;
+  orderNumber: string;
+  supplierId: string;
+  supplierName: string;
+  receivedAt: string;
+  quantity: number;
+}
+export interface TraceDelivery {
+  deliveryId: string;
+  deliveryNumber: string;
+  salesOrderId: string;
+  orderNumber: string;
+  customerId: string;
+  customerName: string;
+  deliveredAt: string;
+  quantity: number;
+}
+export interface TraceOnHand {
+  locationId: string;
+  warehouseName: string;
+  locationName: string;
+  blocked: boolean;
+  quantity: number;
+}
+export interface BackwardTraceNode {
+  batch: TraceBatchRef;
+  stop: TraceStop;
+  quantity: number | null;
+  receipts: TraceReceipt[];
+  manufacturingOrders: {
+    manufacturingOrderId: string;
+    orderNumber: string;
+    quantity: number;
+    materials: BackwardTraceNode[];
+  }[];
+  events: TraceEvent[];
+}
+export interface ForwardTraceNode {
+  batch: TraceBatchRef;
+  stop: TraceStop;
+  quantity: number | null;
+  consumedBy: {
+    manufacturingOrderId: string;
+    orderNumber: string;
+    articleId: string;
+    articleNumber: string;
+    articleName: string;
+    quantity: number;
+    produced: ForwardTraceNode[];
+  }[];
+  deliveries: TraceDelivery[];
+  events: TraceEvent[];
+  onHand: TraceOnHand[];
+}
+export interface BatchTrace {
+  batch: TraceBatchRef;
+  backward: BackwardTraceNode;
+  forward: ForwardTraceNode;
+  truncated: boolean;
+}
+
 export type StockTransactionType =
   | "purchase_receipt"
   | "sales_delivery"
@@ -299,6 +422,8 @@ export interface StockTransaction {
   locationName: string | null;
   warehouseName: string | null;
   quantityDelta: string;
+  // Batch (#8): null = Okänd or the article is not batch tracked.
+  batchNumber?: string | null;
   transactionType: StockTransactionType;
   referenceId: string | null;
   note: string | null;
@@ -1000,6 +1125,8 @@ export interface PurchaseOrderRow {
   articleNumber: string;
   articleName: string;
   articleType: ArticleType;
+  // Batchstyrd (#8): the receipt asks for a Batch per row.
+  articleBatchTracked?: boolean;
   confirmedDeliveryDate: string | null;
   // Always stored in the article's base unit; unitCode/unitFactor say which
   // unit the row was entered in (factor null = base unit).
@@ -1044,6 +1171,8 @@ export interface PurchaseReceipt {
   purchaseOrderRowId: string | null;
   quantity: string;
   locationName: string | null;
+  // Batch (#8) the goods went into (null = article not batch tracked).
+  batchNumber?: string | null;
   moReportId: string | null;
   createdAt: string;
   createdByName: string | null;
@@ -1120,6 +1249,8 @@ export interface GoodsReceiptLogEntry {
   unitPrice: string;
   currency: string;
   locationName: string | null;
+  // Batch (#8): null on a row of an article that is not batch tracked.
+  batchNumber?: string | null;
 }
 
 // Prishistorik on the article card (GET /articles/:id/price-history),
@@ -1859,6 +1990,8 @@ export interface SalesOrderRow {
   articleId: string;
   articleNumber: string;
   articleName: string;
+  // Batchstyrd (#8): Leverera offers a Batch choice on the row.
+  articleBatchTracked?: boolean;
   expectedDeliveryDate: string | null;
   // E3: only manufactured articles offer "Skapa tillverkningsorder".
   articleType: ArticleType;
@@ -1965,7 +2098,7 @@ export interface DeliveryRowsResponse {
     undoable: boolean;
     // Where the goods go back, one part per location the row was taken from
     // (quantity in the article's base unit); empty = not undoable.
-    locations: { locationId: string; warehouseName: string; locationName: string; quantity: number }[];
+    locations: { locationId: string; warehouseName: string; locationName: string; quantity: number; batchNumber?: string | null }[];
     // The article's base unit — the unit of the parts above.
     baseUnit: string;
   }[];
@@ -2729,6 +2862,8 @@ export interface MOMaterialConsumption {
   componentArticleId: string;
   componentArticleNumber: string;
   componentName: string;
+  // Batchstyrd (#8): Förbruka offers a Batch choice.
+  componentBatchTracked?: boolean;
   // Always stored in the component's base unit; unitCode/unitFactor say
   // which unit the BOM row was entered in (factor null = base unit).
   quantityPlanned: string;
@@ -2880,12 +3015,14 @@ export interface MOReport {
   employeeName: string | null;
   userName: string | null;
   purchaseOrderNumber: string | null;
+  // Batch (#8) of the finished goods this report received (null = none).
+  receiptBatchNumber?: string | null;
   createdAt: string;
   undoneAt: string | null;
   undoneByName: string | null;
   // locationName null = a service component (tjänst): consumed, never drawn from stock.
   // materialConsumptionId: the TO's material row the line drew for.
-  materials: { materialConsumptionId: string; articleNumber: string; quantity: string; locationName: string | null }[];
+  materials: { materialConsumptionId: string; articleNumber: string; quantity: string; locationName: string | null; batchNumber?: string | null }[];
 }
 
 export type EmploymentType = "hourly" | "monthly";
@@ -3258,6 +3395,9 @@ export const EXTRA_DESCRIPTION_DOCUMENTS = Object.keys(
 ) as ExtraDescriptionDocument[];
 
 export interface SystemSettings {
+  // Använd batch- och serienummer: off hides Batchstyrd on the article card
+  // (409 batch-tracking-in-use while an article is batch tracked).
+  batchTrackingEnabled: boolean;
   // Egna teman: the company's default theme (a built-in id or a custom
   // theme's key) and whether users may pick their own.
   defaultTheme: string;
@@ -4870,6 +5010,11 @@ export interface StockCountRow {
   countedQuantity: string | null;
   note: string | null;
   disturbed: boolean;
+  // Batch (#8): batchTracked rows are counted per batch; batchId null +
+  // batchNumber null = the Okänd row.
+  batchTracked?: boolean;
+  batchId?: string | null;
+  batchNumber?: string | null;
 }
 
 // #26 — may an open count be booked per the day its underlag was created?

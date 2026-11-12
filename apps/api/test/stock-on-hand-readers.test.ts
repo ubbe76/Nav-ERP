@@ -35,6 +35,10 @@ const ALLOWED: Record<string, { reads: number; why: string }> = {
     reads: 8,
     why: "physical: countArticlesInStock (Översiktens artiklar i lager, over every place incl. blocked), getBalances (rows + count, with locationBlocked), balancesForArticles (with blocked), the transfer's overdraw check on one place, the log's running balance, the block response's articles with stock on the place, the lagerplatsregister's sums per place and unit",
   },
+  "modules/stock/repository/batch-trace.repository.ts": {
+    reads: 5,
+    why: "physical per batch (#8, Spårbarhet): what a TO received into / drew from a batch (net of undone rows), what a batch has left per place (blocked places flagged) and the batch register's balance — a trace follows the goods wherever they stand",
+  },
   "modules/stock/repository/article-locations.ts": {
     reads: 1,
     why: "physical per place: the Lager tab's Lagerplatser card shows the article's balance on each of its places",

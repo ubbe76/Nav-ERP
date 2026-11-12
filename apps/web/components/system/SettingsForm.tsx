@@ -40,6 +40,7 @@ export function SettingsForm({
   const [overReceiptSaved, setOverReceiptSaved] = useState(false);
   const [materialShortage, setMaterialShortage] = useState(settings.manufacturingMaterialShortage);
   const [palletMismatch, setPalletMismatch] = useState(settings.palletCardAllowQuantityMismatch);
+  const [batchTracking, setBatchTracking] = useState(settings.batchTrackingEnabled);
   const [palletCardCode, setPalletCardCode] = useState(settings.palletCardCode);
   const [longOperationWeeks, setLongOperationWeeks] = useState(String(settings.planningLongOperationWeeks));
   const [longOperationSaved, setLongOperationSaved] = useState(false);
@@ -183,6 +184,11 @@ export function SettingsForm({
   async function togglePalletMismatch() {
     const updated = await save({ palletCardAllowQuantityMismatch: !palletMismatch });
     if (updated) setPalletMismatch(updated.palletCardAllowQuantityMismatch);
+  }
+
+  async function toggleBatchTracking() {
+    const updated = await save({ batchTrackingEnabled: !batchTracking });
+    if (updated) setBatchTracking(updated.batchTrackingEnabled);
   }
 
   async function changePalletCardCode(next: SystemSettings["palletCardCode"]) {
@@ -647,6 +653,27 @@ export function SettingsForm({
           data-on={palletMismatch}
           disabled={pending}
           onClick={togglePalletMismatch}
+        >
+          <span className={styles.knob} aria-hidden="true" />
+        </button>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Använd batch- och serienummer</div>
+          <div className={styles.description}>
+            På: artikelkortet får kryssrutan Batchstyrd, och lagerrutinerna håller reda på vilken batch saldot
+            tillhör. Av: allt fungerar som förut. Kan bara stängas av när ingen artikel är batchstyrd.
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={batchTracking}
+          aria-label="Använd batch- och serienummer"
+          className={styles.switch}
+          data-on={batchTracking}
+          disabled={pending}
+          onClick={toggleBatchTracking}
         >
           <span className={styles.knob} aria-hidden="true" />
         </button>

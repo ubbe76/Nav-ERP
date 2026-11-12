@@ -2453,6 +2453,9 @@ export function createSalesRepository(db: Db) {
             unitFactor: salesOrderRows.unitFactor,
             // The parts below are in the article's base unit.
             baseUnitCode: units.code,
+            // Batch (#8): the documents print the parts' batches only while
+            // the article is batchstyrd (decision 10).
+            batchTracked: articles.batchTracked,
             quantityDelivered: salesOrderRows.quantityDelivered,
             // Konfigurator 4b: the configured row's choices print on the note.
             configuration: salesOrderRows.configuration,
@@ -2559,6 +2562,7 @@ export function createSalesRepository(db: Db) {
           unitCodeEn: r.unitCodeEn,
           unitFactor: r.unitFactor,
           baseUnitCode: r.baseUnitCode,
+          batchTracked: r.batchTracked,
           priorDelivered: Math.max(0, Number(r.quantityDelivered) - (laterMap.get(r.salesOrderRowId) ?? 0)),
           configuration: r.configuration,
           undoneAt: r.undoneAt,

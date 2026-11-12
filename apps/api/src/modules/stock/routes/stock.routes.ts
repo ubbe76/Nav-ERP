@@ -8,6 +8,7 @@ import {
   createStockLocationSchema,
   createStockAdjustmentSchema,
   listStockBatchBalancesQuerySchema,
+  listStockBatchesQuerySchema,
   createStockTransferSchema,
   createWarehouseSchema,
   listStockTransactionsQuerySchema,
@@ -259,6 +260,14 @@ export async function stockRoutes(
     const query = listStockBatchBalancesQuerySchema.parse(req.query);
     return { rows: await service.pickBatchCellsForArticles(query.articleIds, { locationId: query.locationId }) };
   });
+
+  // Spårbarhet (#8): the batch register (list pattern; search on the batch
+  // number or the article) and one batch's trace backward and forward. The
+  // module's read rule (office); no prices. An unknown batch is 404
+  // stock-batch-not-found (batchErrorStatus in app.ts).
+  app.get("/stock/batches", async (req) => service.listBatches(listStockBatchesQuerySchema.parse(req.query)));
+
+  app.get<{ Params: { id: string } }>("/stock/batches/:id/trace", async (req) => service.traceBatch(req.params.id));
 
   registerListCsvRoute(app, {
     path: "/stock/balances/csv",

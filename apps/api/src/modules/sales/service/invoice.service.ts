@@ -40,7 +40,7 @@ import { rowConfigurationLines } from "../../configurator/service/configuration-
 import { documentTexts } from "../../mail/service/document-texts.js";
 import type { InvoiceableShipment, InvoiceRepository, InvoiceRowWrite, IssueStamp } from "../repository/invoice.repository.js";
 import type { DocumentPdfInput, DocumentSettingsReader, PaymentReminderPdfInput } from "../../mail/service/document-pdf.js";
-import { extraDescriptionFor } from "../../mail/service/document-pdf.js";
+import { extraDescriptionFor, formatBatchInfo } from "../../mail/service/document-pdf.js";
 import { ZeroAmountPostingError, type PostingVatCode } from "../../economy/service/verification-poster.js";
 import {
   documentVatCode,
@@ -584,6 +584,27 @@ export function createInvoiceService(
     );
     const customerArticleNumbers = await repo.customerArticleNumberMap(invoice.customerId, rows.map((r) => r.articleId));
     const isCredit = invoice.type === "credit";
+    // Batch (#8, decision 13): the order row's delivered, not undone, NAMED
+    // batches as they are when the PDF is built — at Utfärda, since the PDF
+    // is archived right then and every later print serves those bytes, so an
+    // Ångra utleverans afterwards never changes an issued invoice (the same
+    // freeze as Leveransdatum and the configuration lines below). The row is
+    // never split per batch. A credit note prints none: the text is frozen
+    // in the source invoice's archived PDF only, and the row's live
+    // deliveries at credit time (often already undone — a return) would say
+    // something else than the invoice it credits.
+    const deliveredBatches = isCredit
+      ? new Map<string, never>()
+      : await repo.deliveredBatchesForOrderRows(rows.flatMap((r) => (r.salesOrderRowId ? [r.salesOrderRowId] : [])));
+    // (Called from the row mapping below, once `language` is resolved.)
+    const batchInfoFor = (r: { salesOrderRowId: string | null; unitFactor: string | null }): string | null => {
+      const delivered = r.salesOrderRowId ? deliveredBatches.get(r.salesOrderRowId) : undefined;
+      if (!delivered) return null;
+      return formatBatchInfo(
+        delivered.batches.map((b) => ({ batchNumber: b.batchNumber, quantity: toUnitQuantity(b.quantity, r.unitFactor) })),
+        { language, whole: delivered.complete }
+      );
+    };
     // Credits: quantities stay positive, unit prices (and thus every
     // downstream line amount / total / Att betala) are negated — the
     // renderer itself never restructures its arithmetic for this, it just
@@ -693,6 +714,7 @@ export function createInvoiceService(
         ),
         customerArticleNumber: r.articleId ? (customerArticleNumbers.get(r.articleId) ?? null) : null,
         setupForArticleNumber: r.setupForArticleNumber,
+        batchInfo: batchInfoFor(r),
       })),
       showTotal: true,
       vat: { perRow: true },

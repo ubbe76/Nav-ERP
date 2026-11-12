@@ -34,6 +34,7 @@ export const ARTICLE_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "safetyStock", label: "Säkerhetslager" },
   { field: "stockControlled", label: "Styrning" },
   { field: "forecastControlled", label: "Prognosstyrd" },
+  { field: "batchTracked", label: "Batchstyrd" },
   { field: "leadTimeDays", label: "Ledtid (dagar)" },
   // Revisioner: the article's active revision and a drawing number with its
   // active revision.

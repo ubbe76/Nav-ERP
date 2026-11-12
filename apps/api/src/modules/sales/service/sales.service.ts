@@ -54,8 +54,8 @@ import type { PriceChainQuery, PriceMarkups, PriceResolution } from "./price-res
 import type { RegisterReferenceReader } from "../../register/service/register.service.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import type { MailService } from "../../mail/service/mail.service.js";
-import { formatQuantity, type DocumentPdfService, type PalletCardPdfInput } from "../../mail/service/document-pdf.js";
-import { documentLanguageOf, localized, type DocumentLanguage } from "@navet/shared";
+import { formatBatchInfo, formatQuantity, type DocumentPdfService, type PalletCardPdfInput } from "../../mail/service/document-pdf.js";
+import { documentLanguageOf, localized, UNKNOWN_BATCH_LABEL, type DocumentLanguage } from "@navet/shared";
 import { documentTexts } from "../../mail/service/document-texts.js";
 import {
   customerVatNumberWarning,
@@ -150,6 +150,30 @@ export interface StockBalanceReader {
   balancesForArticles(
     articleIds: string[]
   ): Promise<{ articleId: string; quantityOnHand: string; locationName: string | null; warehouseName: string | null; blocked: boolean }[]>;
+  // Batch (#8): the cells (place, batch) of the BATCHSTYRDA among the
+  // articles, per article in the order Automatiskt draws them — the pick
+  // list prints these instead of the per-place balances.
+  pickBatchCellsForArticles(
+    articleIds: string[]
+  ): Promise<
+    { articleId: string; warehouseName: string; locationName: string; blocked: boolean; batchNumber: string | null; quantity: string }[]
+  >;
+}
+
+// Batch (#8) on the customer documents (följesedel, pallkort till kund): the
+// delivery row's NAMED batches, summed per batch in the row's unit — Okänd
+// is never printed there (decision 14), and nothing at all once the article
+// is no longer batchstyrd (decision 10). The quantities print as soon as the
+// batches do not cover the whole row on their own.
+function deliveryRowBatchInfo(
+  row: { batchTracked: boolean; unitFactor: string | null; locations: { quantity: number; batchNumber: string | null }[] },
+  language: DocumentLanguage
+): string | null {
+  if (!row.batchTracked) return null;
+  const named = row.locations.flatMap((part) =>
+    part.batchNumber === null ? [] : [{ batchNumber: part.batchNumber, quantity: toUnitQuantity(part.quantity, row.unitFactor) }]
+  );
+  return formatBatchInfo(named, { language, whole: named.length === row.locations.length });
 }
 
 // E3 (KO→TO-koppling): the narrow slice of the manufacturing service sales
@@ -2072,6 +2096,10 @@ export function createSalesService(
       const rows = await repo.listRowsByOrder(orderId);
       const openRows = rows.filter((r) => Number(r.quantityDelivered) < Number(r.quantityOrdered));
       const balances = await stock.balancesForArticles(openRows.map((r) => r.articleId));
+      // Batch (#8): a batchstyrd article prints its cells (place · batch) in
+      // the order Automatiskt draws them, Okänd included — internal document.
+      const batchCells = await stock.pickBatchCellsForArticles(openRows.map((r) => r.articleId));
+      const batchTrackedIds = new Set(openRows.filter((r) => r.articleBatchTracked).map((r) => r.articleId));
       const extraDescription = extraDescriptionFor(await settings.getSettings(), "pickList");
       const customerArticleNumbers = await repo.customerArticleNumberMap(order.customerId, openRows.map((r) => r.articleId));
 
@@ -2106,13 +2134,20 @@ export function createSalesService(
           deliveryDate: ownDeliveryDate(r.expectedDeliveryDate, order.expectedDeliveryDate),
           // Spärrade lagerplatser are left out — Automatiskt never draws
           // there, so the paper says the same as the booking.
-          locations: balances
-            .filter((b) => b.articleId === r.articleId && !b.blocked)
-            .map((b) =>
-              b.locationName
-                ? `${b.warehouseName} — ${b.locationName}: ${formatQuantity(b.quantityOnHand)}`
-                : `Utan lagerplats: ${formatQuantity(b.quantityOnHand)}`
-            ),
+          locations: batchTrackedIds.has(r.articleId)
+            ? batchCells
+                .filter((c) => c.articleId === r.articleId && !c.blocked)
+                .map(
+                  (c) =>
+                    `${c.warehouseName} — ${c.locationName} · Batch ${c.batchNumber ?? UNKNOWN_BATCH_LABEL}: ${formatQuantity(c.quantity)}`
+                )
+            : balances
+                .filter((b) => b.articleId === r.articleId && !b.blocked)
+                .map((b) =>
+                  b.locationName
+                    ? `${b.warehouseName} — ${b.locationName}: ${formatQuantity(b.quantityOnHand)}`
+                    : `Utan lagerplats: ${formatQuantity(b.quantityOnHand)}`
+                ),
         })),
       });
       return { filename: `Plocklista-${order.orderNumber}.pdf`, content };
@@ -2539,6 +2574,7 @@ export function createSalesService(
             r.articleExtraDescription ? localized(r.articleExtraDescription, r.articleExtraDescriptionEn, language) : null
           ),
           customerArticleNumber: customerArticleNumbers.get(r.articleId) ?? null,
+          batchInfo: deliveryRowBatchInfo(r, language),
         })),
       });
       return {
@@ -2599,6 +2635,9 @@ export function createSalesService(
             // The delivery card deliberately names no reporter (user's
             // decision) — only the TO cards carry Rapporterad av.
             reference: delivery.deliveryNumber,
+            // Batch (#8): the kolli does not know its own batch — every
+            // card of the row carries the row's named batches.
+            batch: deliveryRowBatchInfo(pick.row, language),
             deliveryAddress: delivery.deliveryAddress
               ? {
                   address: delivery.deliveryAddress,

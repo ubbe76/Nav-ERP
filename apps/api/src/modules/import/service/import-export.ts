@@ -88,6 +88,7 @@ export interface ArticleExportRecord {
   safetyStock: number | null;
   stockControlled: boolean;
   forecastControlled: boolean;
+  batchTracked: boolean;
   manufacturingLeadTimeDays: number | null;
   quantityPerPackage: number | null;
   /** The primary supplier (Inköp tab) and its catalogue lead time. */
@@ -137,6 +138,7 @@ export function articleExportBlocks(records: ArticleExportRecord[]): ImportExpor
       safetyStock: r.safetyStock,
       stockControlled: r.stockControlled ? "Lagerstyrd" : "Orderstyrd",
       forecastControlled: yesNo(r.forecastControlled),
+      batchTracked: yesNo(r.batchTracked),
       // Where the planner puts Ledtid: the article's own for a manufactured
       // one, the primary supplier's for a purchased one, nowhere for a service.
       leadTimeDays:

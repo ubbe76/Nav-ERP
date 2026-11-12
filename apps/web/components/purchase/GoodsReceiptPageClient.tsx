@@ -50,6 +50,19 @@ const NO_COUNT: OrderCountState = { counting: false, quantities: {} };
 type ArticleMatch = Extract<ScanMatch, { kind: "article" }>;
 type LocationOption = Pick<StockLocation, "id" | "name" | "warehouseName">;
 
+// Batch (#8): one batch number per batch-tracked row (empty = the order's
+// number) plus extra parts when the row is split over several batches.
+interface BatchPart {
+  key: number;
+  quantity: string;
+  batchNumber: string;
+}
+interface RowBatches {
+  batchNumber: string;
+  parts: BatchPart[];
+}
+const NO_BATCHES: RowBatches = { batchNumber: "", parts: [] };
+
 const articleLabel = (a: { articleNumber: string; name: string }) => `${a.articleNumber} · ${a.name}`;
 
 // Inleverans routine — report a whole goods receipt in one go. Quantities are
@@ -106,6 +119,8 @@ export function GoodsReceiptPageClient({
   useUnsavedGuard(hasCounted(count));
   const { feedback, ok, warn, clear: clearFeedback } = useScanFeedback();
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  const [batches, setBatches] = useState<Record<string, RowBatches>>({});
+  const nextPartKey = useRef(1);
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [lastRowId, setLastRowId] = useState<string | null>(null);
@@ -150,6 +165,7 @@ export function GoodsReceiptPageClient({
 
   function goToOrder(id: string) {
     setCount(NO_COUNT);
+    setBatches({});
     setRowErrors({});
     setDone(null);
     setLastRowId(null);
@@ -319,46 +335,78 @@ export function GoodsReceiptPageClient({
     const receiptIds: string[] = [];
     const orderId = selectedId;
     const orderNumber = order?.orderNumber ?? "";
+    // Extra batch parts a run booked, removed from the form afterwards so a
+    // second Rapportera never receives them again.
+    const bookedParts: Record<string, number> = {};
     for (const row of openRows) {
       const scanRow = scanRows.find((r) => r.id === row.id)!;
       const quantity = Number(enteredQuantity(scanRow, count));
-      if (!quantity) continue;
-      try {
-        const result = await runWithShortageConfirm((allowMaterialShortage) =>
-          apiFetch<{ operationReport?: { ok: boolean; message?: string }; receiptId?: string }>(
-            `/api/v1/purchase-orders/${selectedId}/rows/${row.id}/receive`,
-            {
-              method: "POST",
-              body: JSON.stringify({
-                locationId: locationId || undefined,
-                quantity: toBaseQuantity(quantity, row.unitFactor),
-                allowMaterialShortage,
-              }),
-            }
-          )
-        );
-        // Declined "Rapportera ändå?": this row is left unreceived — say so on
-        // the row, or it would look like it was simply forgotten.
-        if (result === null) {
-          errors[row.id] = "Inte inlevererad — avbröts på grund av materialbrist.";
-          continue;
-        }
-        booked += 1;
-        bookedRowIds.push(row.id);
-        if (result.receiptId) receiptIds.push(result.receiptId);
-        // Lego row: the receipt auto-reports the linked TO operation. The
-        // receipt itself stands even when the report fails (e.g. the TO is
-        // already done) — surface that as a row warning, not a failure.
-        if (result.operationReport) {
-          if (result.operationReport.ok) reportedOperations += 1;
-          else {
-            errors[row.id] =
-              `Inlevererad, men operationen kunde inte avrapporteras: ${result.operationReport.message ?? "okänt fel"}`;
+      const rowBatches = row.articleBatchTracked ? (batches[row.id] ?? NO_BATCHES) : NO_BATCHES;
+      // One call per batch part (the main part first); a failed part stops
+      // the row so the booked ones are always a prefix.
+      const parts: { quantity: number; batchNumber: string; extraIndex: number | null }[] = [];
+      if (quantity) parts.push({ quantity, batchNumber: rowBatches.batchNumber.trim(), extraIndex: null });
+      rowBatches.parts.forEach((p, i) => {
+        const q = Number(p.quantity);
+        if (q > 0) parts.push({ quantity: q, batchNumber: p.batchNumber.trim(), extraIndex: i });
+      });
+      if (parts.length === 0) continue;
+      let rowBooked = false;
+      for (const part of parts) {
+        try {
+          const result = await runWithShortageConfirm((allowMaterialShortage) =>
+            apiFetch<{ operationReport?: { ok: boolean; message?: string }; receiptId?: string }>(
+              `/api/v1/purchase-orders/${selectedId}/rows/${row.id}/receive`,
+              {
+                method: "POST",
+                body: JSON.stringify({
+                  locationId: locationId || undefined,
+                  quantity: toBaseQuantity(part.quantity, row.unitFactor),
+                  ...(row.articleBatchTracked && part.batchNumber ? { batchNumber: part.batchNumber } : {}),
+                  allowMaterialShortage,
+                }),
+              }
+            )
+          );
+          // Declined "Rapportera ändå?": this row is left unreceived — say so on
+          // the row, or it would look like it was simply forgotten.
+          if (result === null) {
+            errors[row.id] = "Inte inlevererad — avbröts på grund av materialbrist.";
+            break;
           }
+          if (!rowBooked) {
+            booked += 1;
+            rowBooked = true;
+          }
+          if (part.extraIndex === null) bookedRowIds.push(row.id);
+          else bookedParts[row.id] = (bookedParts[row.id] ?? 0) + 1;
+          if (result.receiptId) receiptIds.push(result.receiptId);
+          // Lego row: the receipt auto-reports the linked TO operation. The
+          // receipt itself stands even when the report fails (e.g. the TO is
+          // already done) — surface that as a row warning, not a failure.
+          if (result.operationReport) {
+            if (result.operationReport.ok) reportedOperations += 1;
+            else {
+              errors[row.id] =
+                `Inlevererad, men operationen kunde inte avrapporteras: ${result.operationReport.message ?? "okänt fel"}`;
+            }
+          }
+        } catch (err) {
+          errors[row.id] = apiErrorMessage(err, "Kunde inte ta emot raden");
+          break;
         }
-      } catch (err) {
-        errors[row.id] = apiErrorMessage(err, "Kunde inte ta emot raden");
       }
+    }
+    // Drop the booked extra parts (the form keeps the failed ones).
+    if (Object.keys(bookedParts).length > 0) {
+      setBatches((prev) => {
+        const next = { ...prev };
+        for (const [rowId, n] of Object.entries(bookedParts)) {
+          const cur = next[rowId];
+          if (cur) next[rowId] = { ...cur, parts: cur.parts.filter((p) => Number(p.quantity) > 0).slice(n) };
+        }
+        return next;
+      });
     }
     setRowErrors(errors);
     if (booked > 0 && Object.keys(errors).length === 0) {
@@ -369,6 +417,7 @@ export function GoodsReceiptPageClient({
             : "")
       );
       setCount(NO_COUNT);
+      setBatches({});
       setLastRowId(null);
       clearFeedback();
     } else if (bookedRowIds.length > 0) {
@@ -553,7 +602,7 @@ export function GoodsReceiptPageClient({
               { key: "unitCode", label: "Enhet", width: "70px" },
               { key: "quantityReceived", label: "Mottaget", width: "100px", align: "right" },
               { key: "remaining", label: "Rest", width: "100px", align: "right" },
-              { key: "id", label: "Ta emot nu", width: "220px", align: "right" },
+              { key: "id", label: "Ta emot nu", width: "260px", align: "right" },
             ]}
             rows={openRows}
             highlightedRowId={lastRowId}
@@ -588,6 +637,15 @@ export function GoodsReceiptPageClient({
                           scanField.current?.focus();
                         }}
                       />
+                      {row.articleBatchTracked && (
+                        <RowBatchFields
+                          row={row}
+                          orderNumber={order.orderNumber}
+                          value={batches[row.id] ?? NO_BATCHES}
+                          onChange={(v) => setBatches((prev) => ({ ...prev, [row.id]: v }))}
+                          newKey={() => nextPartKey.current++}
+                        />
+                      )}
                       {rowErrors[row.id] && (
                         <FormError inline>{rowErrors[row.id]}</FormError>
                       )}
@@ -607,5 +665,75 @@ export function GoodsReceiptPageClient({
         </>
       )}
     </>
+  );
+}
+
+// Batch fields under "Ta emot nu" on a batch-tracked row: the main part's
+// batch and, via "Dela på flera batcher", extra parts with their own amount.
+function RowBatchFields({
+  row,
+  orderNumber,
+  value,
+  onChange,
+  newKey,
+}: {
+  row: PurchaseOrderRow;
+  orderNumber: string;
+  value: RowBatches;
+  onChange: (v: RowBatches) => void;
+  newKey: () => number;
+}) {
+  const setPart = (key: number, patch: Partial<BatchPart>) =>
+    onChange({ ...value, parts: value.parts.map((p) => (p.key === key ? { ...p, ...patch } : p)) });
+  return (
+    <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+      <Input
+        type="text"
+        size="sm"
+        aria-label={`Batch — ${row.articleNumber}`}
+        placeholder={orderNumber}
+        value={value.batchNumber}
+        onChange={(e) => onChange({ ...value, batchNumber: e.target.value })}
+      />
+      {value.parts.map((p) => (
+        <span key={p.key} style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+          <Input
+            type="number"
+            min="0"
+            step="any"
+            size="sm"
+            aria-label={`Antal i delbatch — ${row.articleNumber}`}
+            placeholder="Antal"
+            value={p.quantity}
+            onChange={(e) => setPart(p.key, { quantity: e.target.value })}
+          />
+          <Input
+            type="text"
+            size="sm"
+            aria-label={`Batch för delen — ${row.articleNumber}`}
+            placeholder={orderNumber}
+            value={p.batchNumber}
+            onChange={(e) => setPart(p.key, { batchNumber: e.target.value })}
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            size="small"
+            aria-label="Ta bort batchdelen"
+            onClick={() => onChange({ ...value, parts: value.parts.filter((x) => x.key !== p.key) })}
+          >
+            Ta bort
+          </Button>
+        </span>
+      ))}
+      <Button
+        type="button"
+        variant="secondary"
+        size="small"
+        onClick={() => onChange({ ...value, parts: [...value.parts, { key: newKey(), quantity: "", batchNumber: "" }] })}
+      >
+        Dela på flera batcher
+      </Button>
+    </span>
   );
 }
