@@ -35,7 +35,8 @@ import {
 import { formatNumber, type DocumentPdfService, type FixedAssetPlanPdfInput } from "../../mail/service/document-pdf.js";
 import { readAccountBalances } from "./account-balances.js";
 import { buildFixedAssetPlan, type FixedAssetPlan, type PlanAssetInput } from "./fixed-asset-plan.js";
-import { buildFixedAssetPlanCsv } from "./fixed-asset-plan-csv.js";
+import { buildFixedAssetPlanTable } from "./fixed-asset-plan-csv.js";
+import { csvFile, type NamedTable } from "../../system/service/table-export.js";
 import { assertPostablePeriod, type VerificationPoster } from "./verification-poster.js";
 
 // Anläggningsregister (ekonomi etapp 2, delprojekt 2). Owns every status
@@ -1371,9 +1372,14 @@ export function createFixedAssetService(deps: FixedAssetServiceDeps) {
       return { filename: `avskrivningsplan-${plan.fiscalYear.label}.pdf`, content: await deps.pdf.renderFixedAssetPlan(input) };
     },
 
-    async getPlanCsv(query: { fiscalYearId: string }) {
+    // The export table — the CSV and the Excel twin render the same one.
+    async getPlanTable(query: { fiscalYearId: string }): Promise<NamedTable> {
       const plan = await service.getPlan(query);
-      return { filename: `avskrivningsplan-${plan.fiscalYear.label}.csv`, content: buildFixedAssetPlanCsv(plan) };
+      return { basename: `avskrivningsplan-${plan.fiscalYear.label}`, table: buildFixedAssetPlanTable(plan) };
+    },
+
+    async getPlanCsv(query: { fiscalYearId: string }) {
+      return csvFile(await service.getPlanTable(query));
     },
   };
 

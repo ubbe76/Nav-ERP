@@ -8,7 +8,7 @@ Menyn kräver rättigheten **Kvalitet** (se [Behörighet](#behorighet)).
 
 ## Avvikelser
 
-**Kvalitet → Avvikelser** är listan över alla ärenden. Den visar som förval de öppna (**Registrerad** och **Utreds**). Sök på nummer, rubrik, kund, leverantör, artikel eller referens, och filtrera på **Typ**, **Status** (**Öppna**, en enskild status eller **Alla statusar**), **Orsak** och **Ansvarig**. Rutan **Försenade** visar ärenden där **Åtgärd senast** har passerat. **Exportera CSV** hämtar samma urval som en fil.
+**Kvalitet → Avvikelser** är listan över alla ärenden. Den visar som förval de öppna (**Registrerad** och **Utreds**). Sök på nummer, rubrik, kund, leverantör, artikel eller referens, och filtrera på **Typ**, **Status** (**Öppna**, en enskild status eller **Alla statusar**), **Orsak** och **Ansvarig**. Rutan **Försenade** visar ärenden där **Åtgärd senast** har passerat. **Exportera** hämtar samma urval som en fil (**CSV** eller **Excel**).
 
 Kolumnerna är **Nr**, **Datum**, **Typ**, **Rubrik**, **Motpart**, **Artikel**, **Orsak**, **Ansvarig**, **Åtgärd senast** (röd när datumet har passerat och ärendet är öppet), **Status** och **Nettokostnad**. Klicka på numret eller rubriken för att öppna kortet.
 

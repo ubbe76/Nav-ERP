@@ -420,6 +420,8 @@ export interface ExistingRoutingOperation {
   alternativeWorkCenterIds: string[];
   /** Ordinary (not Kalkyl) structure rows linked to the operation. */
   linkedMaterialCount: number;
+  /** The stored Kommentar — the routing import leaves an unchanged one alone. */
+  comment: string | null;
 }
 
 export function createImportRepository(db: Db | Tx) {
@@ -1109,6 +1111,7 @@ export function createImportRepository(db: Db | Tx) {
             articleId: routingOperations.articleId,
             sequenceNo: routingOperations.sequenceNo,
             costingOnly: routingOperations.costingOnly,
+            comment: routingOperations.comment,
             hasLegoFields: sql<boolean>`(${routingOperations.subcontractSupplierId} is not null or ${routingOperations.setupPrice} is not null or ${routingOperations.unitPrice} is not null or ${routingOperations.transportPrice} is not null or ${routingOperations.showNetWeight})`,
             // The outer column spelled out: drizzle leaves a column of a
             // join-less select unqualified, and inside the subquery "id"
@@ -1126,6 +1129,7 @@ export function createImportRepository(db: Db | Tx) {
             hasLegoFields: row.hasLegoFields,
             alternativeWorkCenterIds: row.alternativeWorkCenterIds,
             linkedMaterialCount: row.linkedMaterialCount,
+            comment: row.comment,
           });
           map.set(row.articleId, perArticle);
         }

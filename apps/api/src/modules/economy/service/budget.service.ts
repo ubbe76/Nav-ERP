@@ -13,8 +13,9 @@ import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { parseCsvBuffer } from "../../import/service/csv.js";
 import type { ActualsCostCenterFilter, BudgetFiscalYear, BudgetHeaderRow, BudgetLineRow, BudgetRepository } from "../repository/budget.repository.js";
 import { budgetSign, calendarMonthMap, compareGridLines, isBudgetableAccount, type BudgetGridLine } from "./budget-calc.js";
-import { buildBudgetCsv, parseBudgetCsv, type BudgetCsvParseResult } from "./budget-csv.js";
+import { buildBudgetTable, parseBudgetCsv, type BudgetCsvParseResult } from "./budget-csv.js";
 import { CostCenterNotFoundError } from "./dimension-check.js";
+import { csvFile, type NamedTable } from "../../system/service/table-export.js";
 import { FiscalYearNotFoundError } from "./economy.service.js";
 
 // Budget (bokföringsgranskningen etapp 5 del B): a budget per räkenskapsår
@@ -312,7 +313,9 @@ export function createBudgetService(deps: { repo: BudgetRepository; audit: Audit
 
     // Exportera CSV: omitted = every line, "none" = Ej fördelat, id = that
     // cost center.
-    async csv(id: string, query: BudgetCsvQuery): Promise<{ filename: string; content: string }> {
+    // The export table — the CSV (which Importera CSV reads back) and the
+    // Excel twin render the same one.
+    async exportTable(id: string, query: BudgetCsvQuery): Promise<NamedTable> {
       const head = await requireHeader(id);
       const year = await requireFiscalYear(head.fiscalYearId);
       const filter = costCenterFilterOf(query.costCenterId);
@@ -324,7 +327,11 @@ export function createBudgetService(deps: { repo: BudgetRepository; audit: Audit
         return line.costCenterId === filter.id;
       });
       const safeName = head.name.replace(/[^\p{L}\p{N}_-]+/gu, "-").toLowerCase();
-      return { filename: `budget-${year.label}-${safeName}.csv`, content: buildBudgetCsv(months.map((month) => month.label), lines) };
+      return { basename: `budget-${year.label}-${safeName}`, table: buildBudgetTable(months.map((month) => month.label), lines) };
+    },
+
+    async csv(id: string, query: BudgetCsvQuery): Promise<{ filename: string; content: string }> {
+      return csvFile(await service.exportTable(id, query));
     },
 
     // Importera CSV: parses into grid lines for the web to fill the grid

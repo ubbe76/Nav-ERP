@@ -1,17 +1,26 @@
-// Minimal, deterministic .xlsx WRITER for the import templates — the
-// production twin of test/helpers/xlsx-fixture.ts, and like the SIE and bank
-// files it adds no dependency: a workbook is a zip of a handful of OOXML
-// parts, and the template needs only what is hand-written here.
+// Minimal, deterministic .xlsx WRITER for the import templates and the table
+// exports (#35) — the production twin of test/helpers/xlsx-fixture.ts, and
+// like the SIE and bank files it adds no dependency: a workbook is a zip of
+// a handful of OOXML parts, and only what is needed is hand-written here.
 //
 // What it does: one or more sheets with text cells (inline strings — no
-// shared string table), bold and wrapped cell styles, column widths, a
+// shared string table), NUMBER cells (real numbers, General or two-decimal
+// money) and DATE / DATE-TIME cells (Excel serials shown as yyyy-mm-dd and
+// yyyy-mm-dd hh:mm), bold and wrapped cell styles, column widths, a
 // frozen header row, and classic cell comments (comments<n>.xml PLUS the
 // legacy VML drawing Excel insists on before it shows a comment; LibreOffice
 // reads the same pair). Everything is XML-escaped and characters XML 1.0
 // forbids are dropped. The zip is STORED (no deflate) with a FIXED
 // timestamp, so the same workbook description always yields the same bytes
 // — import-templates-generated.test.ts compares the checked-in files byte
-// for byte.
+// for byte. A workbook with text cells only gets exactly the style sheet the
+// templates always had; the number formats are added only when a typed cell
+// asks for them.
+//
+// The writer never looks at a clock or a time zone: a date is the calendar
+// day it is handed ("2026-11-12"), a date-time the wall-clock reading it is
+// handed ("2026-11-12 14:05") — the caller decides whose day that is
+// (Stockholm's, see shared csv.ts).
 import { Buffer } from "node:buffer";
 import { crc32 } from "node:zlib";
 
@@ -22,6 +31,57 @@ export interface XlsxCell {
   wrap?: boolean;
   /** A classic cell comment (shown on hover in Excel/LibreOffice). */
   comment?: string;
+}
+
+/** A numeric cell — Excel can sum it. Non-finite numbers are not written. */
+export interface XlsxNumberCell {
+  number: number;
+  /** general = as many decimals as the number has; money = two decimals with thousands grouping. */
+  format?: "general" | "money";
+}
+
+/** A calendar day, "YYYY-MM-DD", shown as yyyy-mm-dd. */
+export interface XlsxDateCell {
+  date: string;
+}
+
+/** A wall-clock reading, "YYYY-MM-DD HH:mm", shown as yyyy-mm-dd hh:mm. */
+export interface XlsxDateTimeCell {
+  dateTime: string;
+}
+
+export type XlsxAnyCell = XlsxCell | XlsxNumberCell | XlsxDateCell | XlsxDateTimeCell;
+
+const MS_PER_DAY = 86_400_000;
+// Excel's day 0 is 1899-12-30 (the 1900 date system, with its phantom leap
+// day behind it for every date from March 1900 on).
+const EXCEL_EPOCH = Date.UTC(1899, 11, 30);
+
+/**
+ * The Excel serial of a calendar day — pure calendar arithmetic through
+ * Date.UTC, so the process time zone never enters. null when the text is not
+ * a real YYYY-MM-DD day.
+ */
+export function excelDateSerial(date: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!m) return null;
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const ms = Date.UTC(year, month - 1, day);
+  const back = new Date(ms);
+  if (back.getUTCFullYear() !== year || back.getUTCMonth() !== month - 1 || back.getUTCDate() !== day) return null;
+  const serial = (ms - EXCEL_EPOCH) / MS_PER_DAY;
+  // Before 1900-03-01 the serials are off by Excel's phantom 1900-02-29.
+  return serial >= 61 ? serial : null;
+}
+
+/** The serial of "YYYY-MM-DD HH:mm" (seconds optional), null when unreadable. */
+export function excelDateTimeSerial(dateTime: string): number | null {
+  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(dateTime);
+  if (!m) return null;
+  const day = excelDateSerial(m[1]!);
+  const [hours, minutes, seconds] = [Number(m[2]), Number(m[3]), Number(m[4] ?? 0)];
+  if (day === null || hours > 23 || minutes > 59 || seconds > 59) return null;
+  return day + (hours * 3600 + minutes * 60 + seconds) / 86_400;
 }
 
 export interface XlsxSheet {
@@ -41,7 +101,7 @@ export interface XlsxSheet {
   /** Row heights in points, by row index; missing = default. */
   rowHeights?: number[];
   /** null = no cell written at that position. */
-  rows: (XlsxCell | string | null)[][];
+  rows: (XlsxAnyCell | string | null)[][];
 }
 
 export interface XlsxWorkbook {
@@ -52,7 +112,7 @@ export interface XlsxWorkbook {
 
 // --- zip (STORED) ------------------------------------------------------------
 
-interface ZipEntry {
+export interface ZipEntry {
   name: string;
   data: Buffer;
 }
@@ -62,7 +122,12 @@ interface ZipEntry {
 const ZIP_DOS_TIME = 0;
 const ZIP_DOS_DATE = ((2026 - 1980) << 9) | (1 << 5) | 1;
 
-function zipStored(entries: ZipEntry[]): Buffer {
+/**
+ * A STORED (uncompressed) zip of the entries, in the order given and with a
+ * fixed timestamp — the same input always gives the same bytes. Also the
+ * container for an export in several files.
+ */
+export function buildStoredZip(entries: ZipEntry[]): Buffer {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
   let offset = 0;
@@ -164,9 +229,42 @@ function styleIndex(cell: XlsxCell): number {
 }
 const TEXT_STYLE = 4;
 
-function toCell(raw: XlsxCell | string | null): XlsxCell | null {
+// The typed cells' styles — only in the extended style sheet (stylesXml).
+const MONEY_STYLE = 5;
+const DATE_STYLE = 6;
+const DATE_TIME_STYLE = 7;
+
+function isTextCell(cell: XlsxAnyCell): cell is XlsxCell {
+  return "value" in cell;
+}
+
+function toCell(raw: XlsxAnyCell | string | null): XlsxCell | null {
   if (raw === null) return null;
-  return typeof raw === "string" ? { value: raw } : raw;
+  if (typeof raw === "string") return { value: raw };
+  return isTextCell(raw) ? raw : null;
+}
+
+// A typed cell as its <c> element; "" when there is nothing to write (a
+// non-finite number, an unreadable date) — an empty cell rather than a file
+// Excel refuses to open.
+function typedCellXml(cell: XlsxNumberCell | XlsxDateCell | XlsxDateTimeCell, ref: string): string {
+  if ("number" in cell) {
+    if (!Number.isFinite(cell.number)) return "";
+    const styleAttr = cell.format === "money" ? ` s="${MONEY_STYLE}"` : "";
+    return `<c r="${ref}"${styleAttr}><v>${cell.number}</v></c>`;
+  }
+  if ("date" in cell) {
+    const serial = excelDateSerial(cell.date);
+    return serial === null ? "" : `<c r="${ref}" s="${DATE_STYLE}"><v>${serial}</v></c>`;
+  }
+  const serial = excelDateTimeSerial(cell.dateTime);
+  return serial === null ? "" : `<c r="${ref}" s="${DATE_TIME_STYLE}"><v>${serial}</v></c>`;
+}
+
+function usesTypedCells(workbook: XlsxWorkbook): boolean {
+  return workbook.sheets.some((sheet) =>
+    sheet.rows.some((cells) => cells.some((raw) => raw !== null && typeof raw !== "string" && !isTextCell(raw)))
+  );
 }
 
 function sheetXml(sheet: XlsxSheet, hasComments: boolean): string {
@@ -195,10 +293,14 @@ function sheetXml(sheet: XlsxSheet, hasComments: boolean): string {
       const heightAttr = height !== undefined ? ` ht="${height}" customHeight="1"` : "";
       const rendered = cells
         .map((raw, columnIndex) => {
+          const ref = `${columnName(columnIndex)}${r}`;
+          if (raw !== null && typeof raw !== "string" && !isTextCell(raw)) return typedCellXml(raw, ref);
           const cell = toCell(raw);
           if (cell === null) return "";
-          const ref = `${columnName(columnIndex)}${r}`;
-          const style = styleIndex(cell);
+          // A plain cell in a text column carries the column's Text format,
+          // so editing it in Excel keeps 007 as written (the templates have
+          // only their bold headings there — their bytes are unchanged).
+          const style = styleIndex(cell) || (textColumns.has(columnIndex) ? TEXT_STYLE : 0);
           const styleAttr = style === 0 ? "" : ` s="${style}"`;
           return `<c r="${ref}"${styleAttr} t="inlineStr"><is><t xml:space="preserve">${xmlText(cell.value)}</t></is></c>`;
         })
@@ -278,23 +380,38 @@ function vmlDrawing(comments: CommentRef[], shapeBase: number): string {
   );
 }
 
-const STYLES_XML =
+// `typed` adds the date formats and the three typed-cell styles. Without it
+// the sheet is exactly what the import templates have always carried (their
+// bytes are checked in), so a text-only workbook never changes.
+function stylesXml(typed: boolean): string {
+  return (
   `${XML_HEADER}<styleSheet xmlns="${NS_MAIN}">` +
+  (typed
+    ? `<numFmts count="2"><numFmt numFmtId="164" formatCode="yyyy\\-mm\\-dd"/><numFmt numFmtId="165" formatCode="yyyy\\-mm\\-dd\\ hh:mm"/></numFmts>`
+    : "") +
   `<fonts count="2"><font><sz val="11"/><name val="Calibri"/><family val="2"/></font><font><b/><sz val="11"/><name val="Calibri"/><family val="2"/></font></fonts>` +
   `<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>` +
   `<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>` +
   `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>` +
   // 0 plain, 1 bold, 2 wrap, 3 bold + wrap (see styleIndex), 4 Text
-  // (numFmtId 49 = "@", TEXT_STYLE — the text columns' style).
-  `<cellXfs count="5">` +
+  // (numFmtId 49 = "@", TEXT_STYLE — the text columns' style); typed only:
+  // 5 money (numFmtId 4 = "#,##0.00"), 6 date, 7 date-time.
+  `<cellXfs count="${typed ? 8 : 5}">` +
   `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>` +
   `<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>` +
   `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>` +
   `<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>` +
   `<xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>` +
+  (typed
+    ? `<xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>` +
+      `<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>` +
+      `<xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>`
+    : "") +
   `</cellXfs>` +
   `<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>` +
-  `</styleSheet>`;
+  `</styleSheet>`
+  );
+}
 
 export function writeXlsx(workbook: XlsxWorkbook): Buffer {
   const author = workbook.commentAuthor ?? "Nav";
@@ -359,12 +476,12 @@ export function writeXlsx(workbook: XlsxWorkbook): Buffer {
     `<Relationship Id="rId${workbook.sheets.length + 1}" Type="${REL_TYPE}/styles" Target="styles.xml"/>` +
     `</Relationships>`;
 
-  return zipStored([
+  return buildStoredZip([
     { name: "[Content_Types].xml", data: Buffer.from(contentTypes, "utf8") },
     { name: "_rels/.rels", data: Buffer.from(rootRels, "utf8") },
     { name: "xl/workbook.xml", data: Buffer.from(workbookXml, "utf8") },
     { name: "xl/_rels/workbook.xml.rels", data: Buffer.from(workbookRels, "utf8") },
-    { name: "xl/styles.xml", data: Buffer.from(STYLES_XML, "utf8") },
+    { name: "xl/styles.xml", data: Buffer.from(stylesXml(usesTypedCells(workbook)), "utf8") },
     ...entries,
   ]);
 }

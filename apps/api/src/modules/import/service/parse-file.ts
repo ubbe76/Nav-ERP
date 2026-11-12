@@ -9,6 +9,7 @@ import {
   parseCsvBuffer,
 } from "./csv.js";
 import { parseXlsxBuffer } from "./xlsx.js";
+import { unguardFormulaInjection } from "@navet/shared";
 
 export type ImportFileFormat = "csv" | "xlsx";
 
@@ -39,6 +40,17 @@ const OLE2_MAGIC = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
 // failure that reads as "your Excel file is broken".
 const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46];
 
+// Nav's own CSV exports guard a text that starts with a formula character
+// (= + - @) with an apostrophe, so Excel shows it instead of running it
+// (shared csv.ts). An import file may be such an export — the registers'
+// import files (#35), edited and read back — so the apostrophe is dropped
+// again here, in both formats (a CSV saved from Excel as .xlsx keeps it):
+// "'+46 70 …" is the phone number +46 70 …. Only in front of a formula
+// character; any other apostrophe is the cell's own.
+function unguardRows(rows: string[][]): string[][] {
+  return rows.map((row) => row.map(unguardFormulaInjection));
+}
+
 export async function parseImportFile(buf: Buffer): Promise<ParsedImportFile> {
   if (startsWith(buf, OLE2_MAGIC)) throw new LegacyExcelFileError();
   if (startsWith(buf, PDF_MAGIC)) throw new UnreadableImportFileError();
@@ -52,7 +64,7 @@ export async function parseImportFile(buf: Buffer): Promise<ParsedImportFile> {
       sheetName: parsed.sheetName,
       sheetCount: parsed.sheetCount,
       headers: parsed.headers,
-      rows: parsed.rows,
+      rows: unguardRows(parsed.rows),
     };
   }
 
@@ -64,6 +76,6 @@ export async function parseImportFile(buf: Buffer): Promise<ParsedImportFile> {
     sheetName: null,
     sheetCount: null,
     headers: parsed.headers,
-    rows: parsed.rows,
+    rows: unguardRows(parsed.rows),
   };
 }

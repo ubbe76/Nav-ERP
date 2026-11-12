@@ -10,7 +10,7 @@ import {
 } from "@navet/shared";
 import { requirePermission } from "../../auth/middleware/permission.middleware.js";
 import { ImportFileError } from "../../import/service/csv.js";
-import { contentDisposition } from "../../system/service/content-disposition.js";
+import { registerTableExportRoutes } from "../../system/routes/csv-export.js";
 import { errorBody } from "../../system/service/error-body.js";
 import { CostCenterNotFoundError } from "../service/dimension-check.js";
 import { FiscalYearNotFoundError } from "../service/economy.service.js";
@@ -121,13 +121,12 @@ export async function budgetRoutes(app: FastifyInstance, opts: { service: Budget
     }
   });
 
-  app.get<{ Params: { id: string } }>("/budgets/:id/csv", ekonomi, async (req, reply) => {
+  // CSV and its Excel twin (/budgets/:id/xlsx) — one table. Importera CSV
+  // reads the CSV back; the Excel file is for reading.
+  registerTableExportRoutes(app, "/budgets/:id/csv", ekonomi, async (req, reply) => {
     const query = budgetCsvQuerySchema.parse(req.query);
     try {
-      const { filename, content } = await service.csv(req.params.id, query);
-      reply.header("Content-Type", "text/csv; charset=utf-8");
-      reply.header("Content-Disposition", contentDisposition(filename));
-      return reply.send(content);
+      return await service.exportTable((req.params as { id: string }).id, query);
     } catch (err) {
       return budgetError(err, reply);
     }

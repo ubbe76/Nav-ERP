@@ -14,13 +14,14 @@ import { dimensionText, loadDimensionRefs } from "./dimension-check.js";
 import { displayNumber } from "./economy.service.js";
 import { formatNumber } from "../../mail/service/document-pdf.js";
 import {
-  buildBalanceSheetCsv,
-  buildBudgetedIncomeStatementCsv,
-  buildGeneralLedgerCsv,
-  buildGroupedIncomeStatementCsv,
-  buildIncomeStatementCsv,
-  buildVerificationListCsv,
+  buildBalanceSheetTable,
+  buildBudgetedIncomeStatementTable,
+  buildGeneralLedgerTable,
+  buildGroupedIncomeStatementTable,
+  buildIncomeStatementTable,
+  buildVerificationListTable,
 } from "./financial-reports-csv.js";
+import { csvFile, type NamedTable } from "../../system/service/table-export.js";
 import { budgetedAmounts, buildBudgetedIncomeStatement, type BudgetedIncomeStatementBody } from "./budget-calc.js";
 import { BudgetNotFoundError } from "./budget.service.js";
 import type { BudgetReportSource } from "../repository/budget.repository.js";
@@ -841,9 +842,15 @@ export function createFinancialReportsService(deps: {
     // Same numbers as the JSON/PDF variants, flattened by the pure builders
     // in financial-reports-csv.ts — no separate query path.
 
-    async getBalanceSheetCsv(query: { asOf: string }) {
+    // Each report's export table (get…Table) is what both the CSV and the
+    // Excel twin render (#35); get…Csv is the CSV of it.
+    async getBalanceSheetTable(query: { asOf: string }): Promise<NamedTable> {
       const sheet = await service.getBalanceSheet(query);
-      return { filename: `balansrakning-${sheet.asOf}.csv`, content: buildBalanceSheetCsv(sheet) };
+      return { basename: `balansrakning-${sheet.asOf}`, table: buildBalanceSheetTable(sheet) };
+    },
+
+    async getBalanceSheetCsv(query: { asOf: string }) {
+      return csvFile(await service.getBalanceSheetTable(query));
     },
 
     // Per objekt the A4 template has one amount column, so the PDF prints
@@ -928,17 +935,21 @@ export function createFinancialReportsService(deps: {
       return { filename: `resultatrakning-${statement.from}--${statement.to}.pdf`, content };
     },
 
-    async getIncomeStatementCsv(query: IncomeStatementQueryInput) {
+    async getIncomeStatementTable(query: IncomeStatementQueryInput): Promise<NamedTable> {
       if (query.budgetId) {
         const statement = await service.getBudgetedIncomeStatement({ ...query, budgetId: query.budgetId });
-        return { filename: `resultatrakning-${statement.from}--${statement.to}.csv`, content: buildBudgetedIncomeStatementCsv(statement) };
+        return { basename: `resultatrakning-${statement.from}--${statement.to}`, table: buildBudgetedIncomeStatementTable(statement) };
       }
       const statement = await service.getIncomeStatement(query);
       if ("budget" in statement) throw new Error("unreachable: budgeted statement without budgetId");
       return {
-        filename: `resultatrakning-${statement.from}--${statement.to}.csv`,
-        content: statement.columns ? buildGroupedIncomeStatementCsv(statement, statement.columns) : buildIncomeStatementCsv(statement),
+        basename: `resultatrakning-${statement.from}--${statement.to}`,
+        table: statement.columns ? buildGroupedIncomeStatementTable(statement, statement.columns) : buildIncomeStatementTable(statement),
       };
+    },
+
+    async getIncomeStatementCsv(query: IncomeStatementQueryInput) {
+      return csvFile(await service.getIncomeStatementTable(query));
     },
 
     async getGeneralLedgerPdf(query: GeneralLedgerQueryInput) {
@@ -964,9 +975,13 @@ export function createFinancialReportsService(deps: {
       return { filename: `huvudbok-${ledger.from}--${ledger.to}.pdf`, content };
     },
 
-    async getGeneralLedgerCsv(query: GeneralLedgerQueryInput) {
+    async getGeneralLedgerTable(query: GeneralLedgerQueryInput): Promise<NamedTable> {
       const ledger = await service.getGeneralLedger(query);
-      return { filename: `huvudbok-${ledger.from}--${ledger.to}.csv`, content: buildGeneralLedgerCsv(ledger) };
+      return { basename: `huvudbok-${ledger.from}--${ledger.to}`, table: buildGeneralLedgerTable(ledger) };
+    },
+
+    async getGeneralLedgerCsv(query: GeneralLedgerQueryInput) {
+      return csvFile(await service.getGeneralLedgerTable(query));
     },
 
     async getVerificationListPdf(filters: VerificationListFilters) {
@@ -1001,10 +1016,14 @@ export function createFinancialReportsService(deps: {
       return { filename: `verifikatlista${suffix}.pdf`, content };
     },
 
-    async getVerificationListCsv(filters: VerificationListFilters) {
+    async getVerificationListTable(filters: VerificationListFilters): Promise<NamedTable> {
       const list = await service.getVerificationList(filters);
       const suffix = filters.from && filters.to ? `-${filters.from}--${filters.to}` : "";
-      return { filename: `verifikatlista${suffix}.csv`, content: buildVerificationListCsv(list) };
+      return { basename: `verifikatlista${suffix}`, table: buildVerificationListTable(list) };
+    },
+
+    async getVerificationListCsv(filters: VerificationListFilters) {
+      return csvFile(await service.getVerificationListTable(filters));
     },
   };
 

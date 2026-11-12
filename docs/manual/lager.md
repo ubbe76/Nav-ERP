@@ -10,7 +10,7 @@ Lagret är **append-only**: saldot ändras aldrig direkt, utan varje förändrin
 
 **Lager → Saldon** (`/lager/saldon`) listar saldo per artikel och lagerplats med sök på artikelnummer/benämning. Menyvalet **Lager** öppnar modulens sida med alla lagerfunktioner i ett rutnät — saldolistan är den första av dem. Ett saldo uppstår första gången en transaktion bokförs på artikeln/platsen, och försvinner ur listan när artikeln nettar till 0 på platsen — historiken finns kvar i transaktionsloggen. Negativa saldon tillåts och lyfts fram på Översiktens bevakningslista.
 
-Filtret **Alla lagerplatser** / **Bara spärrade** / **Utan spärrade** begränsar listan, och saldot på en [spärrad lagerplats](#sparrade-lagerplatser) märks med **Spärrad**. Kolumnen **Spärrad** finns också i CSV-exporten.
+Filtret **Alla lagerplatser** / **Bara spärrade** / **Utan spärrade** begränsar listan, och saldot på en [spärrad lagerplats](#sparrade-lagerplatser) märks med **Spärrad**. Kolumnen **Spärrad** finns också i exporten.
 
 En lagerplats kan visas ensam: **Visa saldon** i [Lagerplatser](#lagerplatser) öppnar listan för just den platsen.
 
@@ -53,18 +53,18 @@ Välj format i dialogen:
 
 **Lager → Transaktioner** (`/lager/transaktioner`) är hela loggen, nyast först. Kolumnerna är **Datum**, **Artikel**, **Lagerplats**, **Typ**, **Mängd** (+/−), **Saldo**, **Källa**, **Vem**, **À-pris**, **Värde** och **Anteckning**. Från artikelkortets Lager-flik öppnar länken **Visa lagerlogg** loggen med artikeln förvald.
 
-**Datum** är dagen raden räknas på i lagervärderingen. Det är samma tidpunkt som raden registrerades, utom för en inventering som registrerats per underlagets datum (se [Räkna och registrera](#rakna-och-registrera)). Då står raden på tidpunkten då underlaget skapades, och registrerades den en annan dag står **Registrerad** med den dagen under datumet. Ordningen, datumfiltret och **Saldo** följer **Datum**. CSV-exporten har båda tidpunkterna, i kolumnerna **Datum** och **Registrerad**.
+**Datum** är dagen raden räknas på i lagervärderingen. Det är samma tidpunkt som raden registrerades, utom för en inventering som registrerats per underlagets datum (se [Räkna och registrera](#rakna-och-registrera)). Då står raden på tidpunkten då underlaget skapades, och registrerades den en annan dag står **Registrerad** med den dagen under datumet. Ordningen, datumfiltret och **Saldo** följer **Datum**. Exporten har båda tidpunkterna, i kolumnerna **Datum** och **Registrerad**.
 
 ### Filter
 
-Sök på artikelnummer eller benämning, eller använd filtren: artikel (artikelväljaren), **Alla lagerplatser**, **Alla typer**, **In och ut** (Inflöden/Utflöden) samt datumfälten **Från** och **Till**. Datumen är kalenderdagar i svensk tid och gäller inklusive båda dagarna. Filtren ligger i sidans URL (går att bokmärka), följer med när du bläddrar mellan sidor och gäller även **Exportera CSV** (där kolumnen Saldo bara tas med när en artikel är vald).
+Sök på artikelnummer eller benämning, eller använd filtren: artikel (artikelväljaren), **Alla lagerplatser**, **Alla typer**, **In och ut** (Inflöden/Utflöden) samt datumfälten **Från** och **Till**. Datumen är kalenderdagar i svensk tid och gäller inklusive båda dagarna. Filtren ligger i sidans URL (går att bokmärka), följer med när du bläddrar mellan sidor och gäller även **Exportera** (där kolumnen Saldo bara tas med när en artikel är vald).
 
 ### Kolumnerna
 
 - **Källa** visar dokumentet som gav upphov till raden, och länkar till det när du har behörighet till dokumentets sida: inköpsordern (IO-nummer) vid inleverans, kundordern (KO-nummer) vid utleverans, tillverkningsordern (TO-nummer) vid materialuttag och inleverans TO, och inventeringen (INV-nummer) vid en inventeringsjustering. En justering som gjorts för hand visar **Manuell**, och en lagerflytt visar **Flytt till** (minusraden) eller **Flytt från** (plusraden) och den andra lagerplatsen i flytten ("Flytt till Huvudlager — B2"). Kan källan inte avgöras visas ett streck.
 - **Saldo** är artikelns verkliga saldo direkt efter raden, räknat över hela artikelns historik — inte bara över de rader som filtret visar. Kolumnen visas bara när en artikel är vald; är även en lagerplats vald gäller saldot just den platsen, annars artikelns totalsaldo. Utan andra filter än artikel (och plats) stämmer översta raden med saldot i [Saldon](#saldon) (summan av artikelns platser när ingen plats är vald).
 - **Vem** är användaren som bokförde raden (ett streck när den saknas).
-- **À-pris** och **Värde** (mängd gånger à-pris) visas bara för administratörer och användare med behörigheten Ekonomi — övriga ser varken kolumnerna eller beloppen, och de saknas även i CSV-exporten. À-pris sätts bara på inflöden (se [Lagervärdering](#lagervardering)), så utflöden och lagerflytt har ett streck.
+- **À-pris** och **Värde** (mängd gånger à-pris) visas bara för administratörer och användare med behörigheten Ekonomi — övriga ser varken kolumnerna eller beloppen, och de saknas även i exporten. À-pris sätts bara på inflöden (se [Lagervärdering](#lagervardering)), så utflöden och lagerflytt har ett streck.
 
 Transaktionstyperna:
 
@@ -87,7 +87,7 @@ Listan över lagerplatser är sidindelad och har sökfältet **Sök lagerplats, 
 - Status: **Aktiva** (förval), **Inaktiva** eller **Alla**. En plats som tömts och städats bort är inaktiv och syns bara under **Inaktiva** eller **Alla**.
 - **Alla lagerplatser** / **Bara spärrade** / **Utan spärrade**, som i [Saldon](#saldon).
 
-Kolumnen **Artiklar** visar hur många artiklar som har saldo på platsen (artiklar som nettar till 0 räknas inte). Kolumnen **Saldo** visar saldot per enhet, till exempel *120 st · 35,5 kg*, eftersom en summa över olika enheter inte betyder något. Länken **Visa saldon** på raden öppnar [Saldon](#saldon) bara för den platsen, och **Visa alla lagerplatser** där tar bort begränsningen. **Exportera CSV** hämtar hela urvalet, utan sidindelning, med samma sök och filter som listan: Lager, Lagerplats, Etikettkod, Fast, Spärrad, Spärrad sedan, Anteckning, Artiklar, Saldo och Status.
+Kolumnen **Artiklar** visar hur många artiklar som har saldo på platsen (artiklar som nettar till 0 räknas inte). Kolumnen **Saldo** visar saldot per enhet, till exempel *120 st · 35,5 kg*, eftersom en summa över olika enheter inte betyder något. Länken **Visa saldon** på raden öppnar [Saldon](#saldon) bara för den platsen, och **Visa alla lagerplatser** där tar bort begränsningen. **Exportera** (**CSV** eller **Excel**) hämtar hela urvalet, utan sidindelning, med samma sök och filter som listan: Lager, Lagerplats, Etikettkod, Fast, Spärrad, Spärrad sedan, Anteckning, Artiklar, Saldo och Status.
 
 Markera platser i listan och klicka **Skriv ut etiketter** för att skriva ut etiketterna för dem. Det gäller de markerade raderna på sidan.
 
@@ -231,7 +231,7 @@ Har artikeln alternativa enheter visas en **Enhet**-dropdown vid justeringsfält
 
 ## Importera lagersaldon
 
-Vid start med Nav|ERP läses de ingående saldona in från fil i stället för en justering per artikel: **Artiklar → Importera**, fliken **Lagersaldon** (endast administratörer). Guiden är densamma som för artiklarna — **Fil**, **Kolumner**, **Förhandsgranska** och **Resultat** — och tar CSV eller Excel. Mallen laddas ned med **Ladda ned mall**; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#lagersaldon). Importera artiklarna först — raderna måste peka på artiklar som finns.
+Vid start med Nav|ERP läses de ingående saldona in från fil i stället för en justering per artikel: **Artiklar → Importera**, fliken **Lagersaldon** (endast administratörer). Guiden är densamma som för artiklarna — **Fil**, **Kolumner**, **Förhandsgranska** och **Resultat** — och tar CSV eller Excel. Mallen laddas ned med **Ladda ned mall**; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#lagersaldon). **Exportera** bredvid ger det som redan finns i registret i samma kolumner, se [Exportera registren som importfiler](/hjalp/importmallar#exportera-registren-som-importfiler). Importera artiklarna först — raderna måste peka på artiklar som finns.
 
 En rad per artikel och lagerplats med kolumnerna **Artikelnummer**, **Lager**, **Lagerplats**, **Antal** och **À-pris**:
 
@@ -263,7 +263,7 @@ En **prognosstyrd** artikel planeras mot ett förväntat månadsbehov, inte bara
 - Raden **A**, **B**, **C** överst visar antalet artiklar per klass — och, med behörighet att se priser, värde och andel. Tabellen har kolumnerna **Artikelnummer** (länk till artikelkortet), **Benämning**, **Typ** (**Köpt** eller **Tillverkad**), **ABC**, **Förbrukat**, **Förbrukningsvärde**, **Andel**, **Ackumulerat**, **Beställningspunkt**, **Säkerhetslager** och **Prognosstyrd** (**Ja** eller **–**). Filtren **Alla klasser** och **Alla typer** och sökfältet begränsar listan; summeringen överst gäller alltid hela klassningen.
 - En artikel med förbrukning men utan standardpris får värde 0 och märket *saknar standardpris* — sätt priset på artikelkortet så hamnar den rätt. Standardpris 0 räknas som ett pris.
 - **Priser är kontorsdata.** Utan behörighet att se priser saknas kolumnerna **Förbrukningsvärde**, **Andel** och **Ackumulerat** (och värdet i summeringen); klassen, antalen och planeringsfälten syns som vanligt.
-- **Exportera CSV** hämtar hela listan med samma sökning och filter. Klassen visas också på artikelkortet (**ABC-klass** i Planering), i kolumnen **ABC** i [artikelregistret](/hjalp/artiklar#artikelregistret) och i artikelexporten.
+- **Exportera** (**CSV** eller **Excel**) hämtar hela listan med samma sökning och filter. Klassen visas också på artikelkortet (**ABC-klass** i Planering), i kolumnen **ABC** i [artikelregistret](/hjalp/artiklar#artikelregistret) och i artikelexporten.
 
 ## Lagervärdering
 

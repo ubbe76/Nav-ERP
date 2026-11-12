@@ -1,4 +1,5 @@
 import type { InjectOptions } from "fastify";
+import { expectXlsxMatchesCsv } from "./helpers/read-xlsx.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { inArray, sql } from "drizzle-orm";
 import { db, systemSettings } from "@navet/db";
@@ -103,6 +104,16 @@ describe("leveransprecision per motpart", () => {
     expect(csv.body).toContain("Avvikelsekostnad");
     expect(csv.body).toContain("Exempel Stål AB");
     expect(csv.body).toContain("Totalt");
+    // #35: the Excel twin of the same report — same rows, numbers as numbers.
+    const xlsx = await get("/reports/delivery-precision/xlsx?kind=purchase&groupBy=counterparty");
+    expect(xlsx.statusCode).toBe(200);
+    expect(xlsx.headers["content-disposition"]).toBe(String(csv.headers["content-disposition"]).replaceAll(".csv", ".xlsx"));
+    const sheet = await expectXlsxMatchesCsv(xlsx.rawPayload, csv.body);
+    const header = sheet[0] as string[];
+    const steelRow = sheet.find((row) => row[0] === "Exempel Stål AB")!;
+    expect(steelRow[header.indexOf("Precision %")]).toBe(50);
+    expect(steelRow[header.indexOf("Avvikelsekostnad")]).toBe(400);
+    expect(sheet[sheet.length - 1]![0]).toBe("Totalt");
     expect((await get("/reports/delivery-precision?groupBy=bogus")).statusCode).toBe(400);
   });
 

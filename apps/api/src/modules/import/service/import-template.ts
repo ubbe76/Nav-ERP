@@ -5,7 +5,7 @@
 // import-templates-generated.test.ts checks the checked-in ones are current.
 import type { ImportEntity } from "@navet/shared";
 import { IMPORT_FIELD_HELP } from "./field-help.js";
-import { writeXlsx, type XlsxCell, type XlsxWorkbook } from "./xlsx-writer.js";
+import { writeXlsx, type XlsxCell, type XlsxWorkbook } from "../../system/service/xlsx-writer.js";
 
 export interface ImportTemplateInfo {
   entity: ImportEntity;
@@ -258,6 +258,33 @@ export function buildImportTemplateManual(): string {
   lines.push(
     "Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det fält kolumnen är kopplad till, när **Visa förklaringar** är ikryssad (av på smala skärmar). Reglerna för själva importen — vad som skapas, uppdateras eller hoppas över — står i respektive kapitel, länkat från varje avsnitt."
   );
+
+  lines.push("");
+  lines.push("## Exportera registren som importfiler");
+  lines.push("");
+  lines.push(
+    "Bredvid **Ladda ned mall** har varje importflik knappen **Exportera**. Den hämtar det som redan finns i registret som en fil med **mallens kolumner**, ifylld så att importen läser tillbaka samma värden: exportera, ändra i Excel och läs in filen igen på samma flik. En export som läses in oförändrad ändrar ingenting."
+  );
+  lines.push("");
+  lines.push(
+    "- **Format** — **Excel (.xlsx)** eller **CSV**. I Excel-filen är tal riktiga tal, och nummer- och kodkolumnerna är textformaterade som i mallen."
+  );
+  lines.push(
+    "- **Urval** (flikarna på **Artiklar → Importera**) — **Alla artiklar**, **Kopierat** (din egen lista från artikelregistret) eller **Urval** med **Artikelnummer från**/**till**, **Varugrupp** och **Typ**. Strukturen följer den överordnade artikeln. **Bara aktiva** finns på alla flikar; kontakter och leveransadresser följer då sin kund eller leverantör."
+  );
+  lines.push(
+    "- **Fler än 10 000 rader** delas upp i flera filer (…-del-1, …-del-2) i en zip-fil, eftersom en importfil rymmer högst 10 000 rader. Packa upp zip-filen och läs in filerna en i taget, eller alla på en gång på fliken **Alla filer**. En artikels operationer, strukturrader och priser hamnar alltid i samma fil."
+  );
+  lines.push(
+    "- **Operationer** och **Struktur** lägger normalt bara till: kryssa i **Uppdatera befintliga operationer** respektive **Uppdatera befintliga strukturrader** när en ändrad export läses in, annars är varje rad som redan finns ett fel. **Kontakter** och **leveransadresser** som redan finns hoppas alltid över — bara nya rader i filen läggs till."
+  );
+  lines.push(
+    "- **Så är filerna uppställda:** enhetsfilen har grundenhetens rad (omräkningsfaktor 1) först för varje artikel; operationernas tider står i operationens egen tidsenhet; strukturens **Antal** står i radens enhet; inköps- och kundprisernas staffelsteg står på egna rader under parets första rad; lagersaldots **Antal** är dagens saldo per lagerplats och **À-pris** lämnas tomt."
+  );
+  lines.push(
+    "- **Följer inte med:** det som importen inte har någon kolumn för — till exempel fler än ett ritningsnummer per artikel (det första exporteras), operationernas alternativa resurser, kundprisregler som bara är en rabatt, kundens engångsadresser och rabatter per varugrupp. Ett negativt lagersaldo exporteras som det är, men kan inte läsas in."
+  );
+  lines.push("- Exporten kräver, som importen, en administratör.");
 
   for (const info of IMPORT_TEMPLATES) {
     const fields = IMPORT_FIELD_HELP[info.entity];

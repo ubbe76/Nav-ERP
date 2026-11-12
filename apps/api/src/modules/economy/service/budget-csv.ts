@@ -4,7 +4,7 @@
 // straight into another. Pure: the export is buildCsv over grid lines, the
 // parser turns parsed records into grid lines + per-row errors and saves
 // nothing (the web fills the grid, the user presses Spara).
-import { buildCsv, round2, unguardFormulaInjection, type CsvColumn } from "@navet/shared";
+import { exportTable, tableCsv, type ExportTable, round2, unguardFormulaInjection, type CsvColumn } from "@navet/shared";
 import { normalizeDecimal } from "../../import/service/csv.js";
 import { compareGridLines, isBudgetableAccount, type BudgetGridLine } from "./budget-calc.js";
 
@@ -15,7 +15,7 @@ export interface BudgetCsvLine extends BudgetGridLine {
 // The three leading columns before the months.
 export const BUDGET_CSV_FIXED_COLUMNS = 3;
 
-export function buildBudgetCsv(monthLabels: string[], lines: BudgetCsvLine[]): string {
+export function buildBudgetTable(monthLabels: string[], lines: BudgetCsvLine[]): ExportTable {
   const columns: CsvColumn<BudgetCsvLine>[] = [
     { label: "Konto", value: (line) => line.accountNumber },
     { label: "Kontonamn", value: (line) => line.accountName ?? "" },
@@ -23,7 +23,7 @@ export function buildBudgetCsv(monthLabels: string[], lines: BudgetCsvLine[]): s
     ...monthLabels.map((label, index): CsvColumn<BudgetCsvLine> => ({ label, value: (line) => line.amounts[index] ?? 0, format: "money" })),
     { label: "Summa", value: (line) => line.amounts.reduce((sum, amount) => round2(sum + amount), 0), format: "money" },
   ];
-  return buildCsv(columns, lines);
+  return exportTable(columns, lines);
 }
 
 export interface BudgetCsvParseResult {
@@ -100,4 +100,10 @@ export function parseBudgetCsv(records: string[][], monthCount: number, resolve:
 
   lines.sort(compareGridLines);
   return { lines: lines.map(({ costCenterCode: _code, ...line }) => line), errors };
+}
+
+// The CSV rendering of each table above — the Excel twin renders the same
+// table (system/service/table-export.ts).
+export function buildBudgetCsv(...args: Parameters<typeof buildBudgetTable>): string {
+  return tableCsv(buildBudgetTable(...args));
 }

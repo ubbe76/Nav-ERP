@@ -1,4 +1,6 @@
 import { createWeekScheduleSchema, createWorkCenterSchema } from "@navet/shared";
+import { expectXlsxMatchesCsv } from "./helpers/read-xlsx.js";
+import { xlsxFile } from "../src/modules/system/service/table-export.js";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { stockholmInstant } from "../src/modules/system/service/delivery-days.js";
 import { and, eq, sql } from "drizzle-orm";
@@ -765,6 +767,19 @@ describe("getCsvExport", () => {
     expect(content).toContain("Månadslön");
     // The absence is 120 minutes for both employees.
     expect(content).toContain("2,00");
+  });
+
+  it("the Excel twin is the same table with the hours as numbers (#35)", async () => {
+    const seeded = await seedPeriod();
+    const { content } = await service.getCsvExport(YEAR, MONTH);
+    const file = xlsxFile(await service.getExportTable(YEAR, MONTH));
+    expect(file.filename).toBe("loneunderlag-2026-05.xlsx");
+    const rows = await expectXlsxMatchesCsv(file.content, content);
+    const header = rows[0] as string[];
+    const hourly = rows.find((row) => row[0] === seeded.hourly.employeeNumber)!;
+    expect(typeof hourly[0]).toBe("string"); // the employee number is text
+    expect(hourly[header.indexOf("Frånvaro SJUK (h)")]).toBe(2);
+    expect(typeof hourly[header.indexOf("Schema (h)")]).toBe("number");
   });
 
   it("serves the frozen snapshot once the period is locked", async () => {

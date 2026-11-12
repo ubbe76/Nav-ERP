@@ -829,9 +829,11 @@ describe("profiles against the real app", () => {
     expect(await status(c, "GET", "/periods/2026/1")).toBe(200);
     expect(await status(c, "GET", `/periods/2026/1/employees/${NO_ID}/days`)).toBe(404);
     expect(await status(c, "GET", "/periods/2026/1/csv")).toBe(200);
+    expect(await status(c, "GET", "/periods/2026/1/xlsx")).toBe(200);
     // Tidigare låsta underlag — same audience as the CSV.
     expect(await status(c, "GET", "/periods/2026/1/snapshots")).toBe(200);
     expect(await status(c, "GET", `/periods/2026/1/snapshots/${NO_ID}/csv`)).toBe(404);
+    expect(await status(c, "GET", `/periods/2026/1/snapshots/${NO_ID}/xlsx`)).toBe(404);
     expect(await status(c, "GET", "/periods/2026/1/snapshots/not-a-uuid/csv")).toBe(400);
     expect(await status(c, "POST", "/periods/2026/1/attest", {})).toBe(400);
     expect(await status(c, "POST", "/periods/2026/1/attest", { employeeId: NO_ID })).not.toBe(403);
@@ -869,6 +871,8 @@ describe("profiles against the real app", () => {
     expect(await status(c, "GET", "/periods/2026/1/paxml")).toBe(403);
     expect(await status(c, "GET", "/periods/2026/1/snapshots")).toBe(403);
     expect(await status(c, "GET", `/periods/2026/1/snapshots/${NO_ID}/csv`)).toBe(403);
+    expect(await status(c, "GET", `/periods/2026/1/snapshots/${NO_ID}/xlsx`)).toBe(403);
+    expect(await status(c, "GET", "/periods/2026/1/xlsx")).toBe(403);
     expect(await status(c, "POST", "/periods/2026/1/attest", { employeeId: NO_ID })).toBe(403);
     expect(await status(c, "PATCH", `/attendance-sessions/${NO_ID}`, {})).toBe(403);
     expect(await status(c, "DELETE", `/attendance-sessions/${NO_ID}`)).toBe(403);

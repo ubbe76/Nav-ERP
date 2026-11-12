@@ -675,7 +675,7 @@ Artikelöversikten finns också som en **flyttbar panel** som öppnas ovanpå de
 
 Fliken **Alla filer** på **Artiklar → Importera** tar emot **alla exportfiler på en gång** i stället för en fil per flik. Guiden har fyra steg: **Filer**, **Kolumner**, **Förhandsgranska** och **Resultat**.
 
-Mallar för varje fil laddas ned med **Ladda ned mall** i respektive flik; kolumnerna förklaras i [Importmallar](/hjalp/importmallar).
+Mallar för varje fil laddas ned med **Ladda ned mall** i respektive flik; kolumnerna förklaras i [Importmallar](/hjalp/importmallar). Varje flik har också **Exportera**, som ger registret som en importfil — en export på fler än 10 000 rader kommer som flera filer i en zip-fil, som packas upp och läses in här; se [Exportera registren som importfiler](/hjalp/importmallar#exportera-registren-som-importfiler).
 
 Importguiderna varnar innan du byter flik eller lämnar sidan medan en fil är inläst och importen inte är klar — ett flikbyte börjar annars om från början.
 
@@ -690,7 +690,7 @@ Raderna med omräkningsfaktor 1 i Enheter-filen räknas som överhoppade — se 
 
 **Artiklar → Importera** läser in artiklar från fil, till exempel exporterade från ett tidigare affärssystem. Både **CSV** (semikolon, komma och tabb känns alla igen — även teckenkodningen identifieras automatiskt) och **Excel (.xlsx)** fungerar; av en arbetsbok läses bara det **första bladet**. Endast administratörer har åtkomst. Guiden har fyra steg: **Fil**, **Kolumner**, **Förhandsgranska** och **Resultat**.
 
-Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#artiklar).
+Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#artiklar). **Exportera** bredvid ger det som redan finns i registret i samma kolumner, se [Exportera registren som importfiler](/hjalp/importmallar#exportera-registren-som-importfiler).
 
 Sidan har åtta flikar — **Alla filer** (se [ovan](#importera-alla-filer)), **Artiklar**, **Enheter**, **Operationer**, **Struktur**, **Inköpspriser**, **Kundpriser** och **Lagersaldon**. Byter du flik börjar guiden om från steget **Fil**. Vid en migrering från ett annat system är ordningen **artiklar → enheter → operationer → struktur → inköpspriser → kundpriser → lagersaldon**: strukturens kolumn **Operation** slår upp en operation som redan måste finnas (saknas den importeras raden ändå, men utan koppling), och prisfilerna kräver att artiklar, leverantörer respektive kunder redan finns. Strukturimporten kan dessutom lägga upp de komponenter som inte kom med i artikelfilen — se [Importera artikelstruktur](#importera-artikelstruktur). Enheter beskrivs i [Importera alternativa enheter](#importera-alternativa-enheter), inköpspriser i [Inköp](/hjalp/inkop#importera-inkopspriser), kundpriser i [Försäljning](/hjalp/forsaljning#importera-kundpriser) och lagersaldon i [Lager](/hjalp/lager#importera-lagersaldon).
 
@@ -719,7 +719,7 @@ Regler att känna till:
 
 Fliken **Enheter** läser exporten **Artikellista, Enheter** — en rad per artikel och enhet, med rubrikerna **Enh.**, **Omr.faktor**, **Inköpsorder** och **Kundorder** (de känns igen automatiskt; Förvald, Materialuttag, Rapportera inleverans, Packa för leverans, Rapportera utleverans, Lagerrapportering och Statistik importeras inte). Kolumner: **Artikelnummer**, **Enhet** och **Omräkningsfaktor** är obligatoriska; **Inköpsenhet (Inköpsorder)** och **Försäljningsenhet (Kundorder)** är valfria.
 
-Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#alternativa-enheter).
+Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#alternativa-enheter). **Exportera** bredvid ger det som redan finns i registret i samma kolumner, se [Exportera registren som importfiler](/hjalp/importmallar#exportera-registren-som-importfiler).
 
 - **Raden med omräkningsfaktor 1 är artikelns grundenhet** och hoppas över — bara alternativa enheter importeras (de ligger på artikelkortets Allmänt-flik under **Enheter**). Avviker den radens enhet från artikelns grundenhet visas en varning; grundenheten ändras aldrig av importen. Står **Inköpsorder** eller **Kundorder** = Ja på grundenhetens rad blir grundenheten artikelns inköps- respektive försäljningsenhet igen — en alternativ enhet som en tidigare import valde tas alltså bort som förval.
 - **Faktorn inverteras.** Filens Omr.faktor är antal *grundenheter per en alternativ enhet* (rundstål Ø12 med grundenhet kg: raden `m` säger 0,89 = 0,89 kg per meter). Nav lagrar det omvända — *alternativa enheter per grundenhet* — så 0,89 blir 1 kg = 1,123596 m (sex decimaler). Samma enhet som grundenheten med en annan faktor än 1 är ett fel.
@@ -749,7 +749,7 @@ Krysset gäller bara poster som redan finns i databasen. **Samma rad två gånge
 
 Fliken **Struktur** på **Artiklar → Importera** läser in strukturrader (BOM) — en rad per komponent. Guiden har samma fyra steg som artikelimporten.
 
-Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#artikelstruktur).
+Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#artikelstruktur). **Exportera** bredvid ger det som redan finns i registret i samma kolumner, se [Exportera registren som importfiler](/hjalp/importmallar#exportera-registren-som-importfiler).
 
 Kolumner: **Artikelnummer** (den tillverkade artikeln), **Komponentnummer** och **Antal** är obligatoriska; **Enhet**, **Operation**, **Pos.**, **Artikelbenämning (komponenten)**, **Komponentens artikeltyp** och **Komponentens standardpris** är valfria. De tre sista används bara tillsammans med **Skapa saknade artiklar**.
 
@@ -777,7 +777,7 @@ Materiallistan bär allt som behövs för de komponenter som inte kom med i arti
 
 Fliken **Operationer** på **Artiklar → Importera** läser in rutter — en rad per operation.
 
-Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#operationer).
+Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#operationer). **Exportera** bredvid ger det som redan finns i registret i samma kolumner, se [Exportera registren som importfiler](/hjalp/importmallar#exportera-registren-som-importfiler).
 
 Kolumner: **Artikelnummer**, **Sekvensnr** och **Resurs** är obligatoriska; **Ställtid** och **Stycktid / Tid per enhet** krävs på varje rad med en vanlig resurs (se nedan); **Tidsenhet**, **Cykeltid**, **Beskrivning**, **Kalkyl**, **Kommentar**, **Packinstruktion**, **Legoleverantör**, **Ställpris**, **Styckpris** och **Transportkostnad** är valfria.
 
@@ -793,7 +793,7 @@ Kolumner: **Artikelnummer**, **Sekvensnr** och **Resurs** är obligatoriska; **S
 - **Kommentar** är operationens fritext (operationslistans **Instruktion**), max 1000 tecken — en längre text blir ett radfel. Kryssrutan **Skriv ut kommentaren på arbetskortet** i steget **Kolumner** avgör om texterna skrivs ut på utskriften **Skriv ut TO (PDF)**: filen bär ingen egen kolumn för valet, så det gäller alla rader som har en kommentar. Utan kryss sparas kommentaren men skrivs inte ut — krysset kan sättas per operation efteråt på artikelkortet, se [Kommentar på operationen](#kommentar-pa-operationen).
 - **Packinstruktion**, max 1000 tecken — en längre text blir ett radfel, aldrig en tyst avkortning. Se [Packinstruktion på operationen](#packinstruktion-pa-operationen).
 - **Nya rader som standard.** Finns sekvensnumret redan på artikeln blir raden ett fel — ta bort den ur filen, eller kryssa i **Hoppa över rader som redan finns** (se [Hoppa över befintliga rader](#hoppa-over-befintliga-rader)). Operationer kan alltså läggas till på en artikel som redan har en rutt, så länge sekvensnumren är nya.
-- **Uppdatera befintliga operationer** är kryssrutan i steget **Kolumner** som i stället skriver över en operation som redan finns (samma artikel och sekvensnummer) med filens **resurs, ställtid, stycktid, tidsenhet och Kalkyl**, samt **beskrivning, kommentar och packinstruktion** för de celler som är ifyllda — en tom textcell lämnar det sparade värdet orört, och utskriftsvalet för kommentaren följer kryssrutan **Skriv ut kommentaren på arbetskortet** bara på rader som har en kommentar. Det är så en rutt som importerats med fel tidsenhet rättas: kör om Operationslistan med kryssrutan i, så räknas tiderna om enligt **Enhet**-kolumnen. En operation som har material kopplat till sig kan inte märkas Kalkyl — raden blir ett fel tills operationskopplingen tagits bort på strukturraden, precis som på artikelkortet. Förhandsgranskningen visar raderna som **Uppdateras**. Frisläppta tillverkningsordrar påverkas inte — de behåller sin kopia av operationerna från frisläppet. Kryssrutan kan inte kombineras med **Hoppa över rader som redan finns**; kryssar du i den ena släcks den andra.
+- **Uppdatera befintliga operationer** är kryssrutan i steget **Kolumner** som i stället skriver över en operation som redan finns (samma artikel och sekvensnummer) med filens **resurs, ställtid, stycktid, tidsenhet och Kalkyl**, samt **beskrivning, kommentar och packinstruktion** för de celler som är ifyllda — en tom textcell lämnar det sparade värdet orört, och utskriftsvalet för kommentaren följer kryssrutan **Skriv ut kommentaren på arbetskortet** bara på rader som har en kommentar som skiljer sig från den sparade (en oförändrad kommentar, som i en export som läses in igen, behåller sitt utskriftsval). Det är så en rutt som importerats med fel tidsenhet rättas: kör om Operationslistan med kryssrutan i, så räknas tiderna om enligt **Enhet**-kolumnen. En operation som har material kopplat till sig kan inte märkas Kalkyl — raden blir ett fel tills operationskopplingen tagits bort på strukturraden, precis som på artikelkortet. Förhandsgranskningen visar raderna som **Uppdateras**. Frisläppta tillverkningsordrar påverkas inte — de behåller sin kopia av operationerna från frisläppet. Kryssrutan kan inte kombineras med **Hoppa över rader som redan finns**; kryssar du i den ena släcks den andra.
 
 ## Varugrupper
 

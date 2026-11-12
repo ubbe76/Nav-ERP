@@ -15,6 +15,7 @@ import { dimensionText, useDimensions } from "../../lib/dimensions";
 import type { Account, DimensionRef, GeneralLedgerResponse, LedgerResponse } from "../../lib/types";
 import { CostCenterSelect, ProjectSelect } from "./DimensionSelect";
 import { SectionHeading } from "../ui/SectionHeading";
+import { ExportMenu } from "../ui/ExportMenu";
 
 // "1930 · Företagskonto" — same accountLabel idiom as VerificationCard.tsx's
 // account picker. Inactive accounts stay selectable (they can carry booked
@@ -276,15 +277,9 @@ export function HuvudbokPageClient({
               </a>
             )}
             {accountId && (
-              <a
-                href={`${API_URL}/api/v1/general-ledger/csv?from=${from}&to=${to}&onlyWithMovement=false&accountFrom=${
+              <ExportMenu csvHref={`${API_URL}/api/v1/general-ledger/csv?from=${from}&to=${to}&onlyWithMovement=false&accountFrom=${
                   accounts.find((a) => a.id === accountId)?.number ?? "0000"
-                }&accountTo=${accounts.find((a) => a.id === accountId)?.number ?? "9999"}${dimensionParams()}`}
-                download
-                className={`${buttonStyles.button} ${buttonStyles.ghost}`}
-              >
-                Ladda ner CSV
-              </a>
+                }&accountTo=${accounts.find((a) => a.id === accountId)?.number ?? "9999"}${dimensionParams()}`} />
             )}
           </FormRow>
         ) : (
@@ -328,13 +323,7 @@ export function HuvudbokPageClient({
           </a>
         )}
         {mode === "range" && (
-          <a
-            href={`${API_URL}/api/v1/general-ledger/csv?${rangeParams()}`}
-            download
-            className={`${buttonStyles.button} ${buttonStyles.ghost}`}
-          >
-            Ladda ner CSV
-          </a>
+          <ExportMenu csvHref={`${API_URL}/api/v1/general-ledger/csv?${rangeParams()}`} />
         )}
       </Card>
 

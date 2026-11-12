@@ -1,0 +1,49 @@
+.selection {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control-sm);
+  margin: 0;
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.legend {
+  padding: 0 6px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+}
+
+.choice[data-disabled="true"] {
+  color: var(--color-text-muted);
+}
+
+/* Two columns that fold to one in the narrow modal body on phones. */
+.filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 12px;
+}
+
+.templateRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

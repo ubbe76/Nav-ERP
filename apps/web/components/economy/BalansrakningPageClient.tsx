@@ -14,6 +14,7 @@ import type { BalanceSheetResponse, FiscalYear } from "../../lib/types";
 import { stockholmToday } from "../../lib/date";
 import { currentFiscalYear } from "../../lib/fiscalYear";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { ExportMenu } from "../ui/ExportMenu";
 
 // One flat row per printed line — the same discriminated-row technique the
 // momsrapport uses, except the labels come from the API because the lines are
@@ -135,13 +136,7 @@ export function BalansrakningPageClient({
             </a>
           )}
           {report && (
-            <a
-              href={`${API_URL}/api/v1/balance-sheet/csv?asOf=${asOf}`}
-              download
-              className={`${buttonStyles.button} ${buttonStyles.ghost}`}
-            >
-              Ladda ner CSV
-            </a>
+            <ExportMenu csvHref={`${API_URL}/api/v1/balance-sheet/csv?asOf=${asOf}`} />
           )}
         </FormRow>
         {report && (

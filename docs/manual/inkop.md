@@ -92,7 +92,7 @@ Fliken **Alla filer** på **Inköp → Leverantörer → Importera** (den först
 
 **Inköp → Leverantörer → Importera** öppnar en guide med fyra flikar. **Alla filer** tar emot alla leverantörsfiler på en gång (se [Importera alla leverantörsfiler](#importera-alla-leverantorsfiler)); **Leverantörer**, **Kontakter** och **Leveransadresser** tar en fil i taget och tar tillsammans in en fullständig leverantörsexport. Endast administratörer har åtkomst. Filer läses som CSV (semikolon, komma och tabb känns alla igen — även teckenkodningen identifieras automatiskt) eller Excel (.xlsx, bara det första bladet läses). Varje flik kör sin egen guide i fyra steg: **Fil**, **Kolumner**, **Förhandsgranska** och **Resultat**.
 
-Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#leverantorer) (kontakter: [Leverantörskontakter](/hjalp/importmallar#leverantorskontakter), leveransadresser: [Leverantörernas leveransadresser](/hjalp/importmallar#leverantorernas-leveransadresser)).
+Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#leverantorer) (kontakter: [Leverantörskontakter](/hjalp/importmallar#leverantorskontakter), leveransadresser: [Leverantörernas leveransadresser](/hjalp/importmallar#leverantorernas-leveransadresser)). **Exportera** bredvid ger det som redan finns i registret i samma kolumner, se [Exportera registren som importfiler](/hjalp/importmallar#exportera-registren-som-importfiler).
 
 Leverantörsexporten består av flera separata filer. **Fliken Leverantörer** körs en gång per fil, alltid i den här ordningen:
 
@@ -150,7 +150,7 @@ Läser exportens **Leveransadress**-fil. Mappningsbara fält (filens rubriker "L
 
 ## Importera inköpspriser
 
-Fliken **Inköpspriser** på **Artiklar → Importera** läser in artiklarnas leverantörskatalog (fliken **Inköp** på artikelkortet, se [Artiklar](/hjalp/artiklar#inkop)) från exporten **Prislista Inköp**. Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#inkopspriser).
+Fliken **Inköpspriser** på **Artiklar → Importera** läser in artiklarnas leverantörskatalog (fliken **Inköp** på artikelkortet, se [Artiklar](/hjalp/artiklar#inkop)) från exporten **Prislista Inköp**. Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#inkopspriser). **Exportera** bredvid ger det som redan finns i registret i samma kolumner, se [Exportera registren som importfiler](/hjalp/importmallar#exportera-registren-som-importfiler).
 
 Två exportfiler läses med samma flik:
 

@@ -395,7 +395,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       required: false,
       header: "Kommentar",
       description:
-        "Operationens instruktionstext, max 1 000 tecken. Kryssrutan Skriv ut kommentaren på arbetskortet i guiden avgör om den skrivs ut på TO-utskriften. Tom cell lämnar en befintlig kommentar orörd vid uppdatering.",
+        "Operationens instruktionstext, max 1 000 tecken. Kryssrutan Skriv ut kommentaren på arbetskortet i guiden avgör om den skrivs ut på TO-utskriften. Tom cell lämnar en befintlig kommentar orörd vid uppdatering, och en kommentar som är densamma som den sparade behåller sin utskriftsinställning.",
       example: "Kontrollera måtten mot ritningen före kantpressning",
     },
     {

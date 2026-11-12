@@ -7,7 +7,7 @@ import { LIST_PAGE_SIZE, LIST_PAGE_SIZE_OPTIONS } from "../../lib/listQuery";
 import { API_URL, apiFetch } from "../../lib/api";
 import { confirmLeave } from "../../lib/unsavedGuard";
 import styles from "./ListControls.module.css";
-import buttonStyles from "./Button.module.css";
+import { ExportMenu } from "./ExportMenu";
 
 // Återkoppling (Nav som program, punkt 7): while a list's new search, filter
 // or page is on its way, <html data-list-pending> fades the table
@@ -208,11 +208,11 @@ export function ListToggleFilter({ param, label }: { param: string; label: strin
   );
 }
 
-// F2: same-filters CSV download for a list page — the API's /csv sibling
-// accepts the same search/filter query params as the JSON list (see
-// registerListCsvRoute), just never paginated, so `page` is dropped before
-// building the query string. Same <a download> idiom as the report pages'
-// "Ladda ner PDF" links (e.g. BalansrakningPageClient).
+// F2: same-filters export for a list page — the API's /csv sibling (and its
+// /xlsx twin) accepts the same search/filter query params as the JSON list
+// (see registerListCsvRoute), just never paginated, so `page` is dropped
+// before building the query string. `endpoint` is the CSV route; ExportMenu
+// offers CSV and Excel.
 export function ListExportLink({ endpoint, renameParams }: { endpoint: string; renameParams?: Record<string, string> }) {
   const searchParams = useSearchParams();
   const params = new URLSearchParams(searchParams.toString());
@@ -224,11 +224,7 @@ export function ListExportLink({ endpoint, renameParams }: { endpoint: string; r
     if (value !== null) params.set(to, value);
   }
   const qs = params.toString();
-  return (
-    <a href={`${API_URL}${endpoint}${qs ? `${endpoint.includes("?") ? "&" : "?"}${qs}` : ""}`} download className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
-      Exportera CSV
-    </a>
-  );
+  return <ExportMenu csvHref={`${API_URL}${endpoint}${qs ? `${endpoint.includes("?") ? "&" : "?"}${qs}` : ""}`} />;
 }
 
 // Page-number strip: all pages when few, otherwise first/last plus the

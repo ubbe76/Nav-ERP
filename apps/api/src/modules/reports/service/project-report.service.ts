@@ -1,4 +1,5 @@
-import { buildCsv, type CsvColumn, type ProjectReport, type ProjectReportQuery } from "@navet/shared";
+import { exportTable, type CsvColumn, type ProjectReport, type ProjectReportQuery } from "@navet/shared";
+import { csvFile, type NamedTable } from "../../system/service/table-export.js";
 import { ProjectNotFoundError } from "../../economy/service/dimension-check.js";
 import { SALES_ORDER_STATUS_LABELS } from "../../sales/service/export-columns.js";
 import type { ProjectReportRepository } from "../repository/project-report.repository.js";
@@ -47,7 +48,8 @@ export function createProjectReportService(repo: ProjectReportRepository) {
       };
     },
 
-    async getCsv(query: ProjectReportQuery) {
+    // The export table — the CSV and the Excel twin render the same one.
+    async getTable(query: ProjectReportQuery): Promise<NamedTable> {
       const report = await service.get(query);
       const rows: CsvRow[] = [
         ...report.months.map((m) => ({ typ: "Månad", nyckel: m.month, namn: "", intakter: m.revenue, kostnader: m.costs, resultat: m.result, status: null, varde: null })),
@@ -65,7 +67,11 @@ export function createProjectReportService(repo: ProjectReportRepository) {
         { typ: "Totalt", nyckel: "", namn: report.project.name, intakter: report.revenue, kostnader: report.costs, resultat: report.result, status: null, varde: null },
       ];
       const suffix = report.from && report.to ? `-${report.from}--${report.to}` : "";
-      return { filename: `projektrapport-${report.project.code}${suffix}.csv`, content: buildCsv(CSV_COLUMNS, rows) };
+      return { basename: `projektrapport-${report.project.code}${suffix}`, table: exportTable(CSV_COLUMNS, rows) };
+    },
+
+    async getCsv(query: ProjectReportQuery) {
+      return csvFile(await service.getTable(query));
     },
   };
   return service;

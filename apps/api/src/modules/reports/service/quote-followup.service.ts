@@ -1,4 +1,5 @@
-import { buildCsv, type CsvColumn, type QuoteFollowupQuery, type QuoteFollowupQuote, type QuoteFollowupReport } from "@navet/shared";
+import { exportTable, type CsvColumn, type QuoteFollowupQuery, type QuoteFollowupQuote, type QuoteFollowupReport } from "@navet/shared";
+import { csvFile, type NamedTable } from "../../system/service/table-export.js";
 import { stockholmToday } from "../../system/service/delivery-days.js";
 import { SALES_ORDER_STATUS_LABELS } from "../../sales/service/export-columns.js";
 import { QUOTE_FOLLOWUP_MAX_ROWS, type QuoteFollowupRepository } from "../repository/quote-followup.repository.js";
@@ -49,12 +50,17 @@ export function createQuoteFollowupService(repo: QuoteFollowupRepository, deps: 
       };
     },
 
-    async getCsv(query: QuoteFollowupQuery) {
+    // The export table — the CSV and the Excel twin render the same one.
+    async getTable(query: QuoteFollowupQuery): Promise<NamedTable> {
       const result = await service.get(query);
       return {
-        filename: `offertuppfoljning-${result.from}-${result.to}.csv`,
-        content: buildCsv(CSV_COLUMNS, result.quotes),
+        basename: `offertuppfoljning-${result.from}-${result.to}`,
+        table: exportTable(CSV_COLUMNS, result.quotes),
       };
+    },
+
+    async getCsv(query: QuoteFollowupQuery) {
+      return csvFile(await service.getTable(query));
     },
   };
   return service;

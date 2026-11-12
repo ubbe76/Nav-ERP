@@ -4,7 +4,7 @@ import { validateXML } from "xmllint-wasm";
 import { db, suppliers } from "@navet/db";
 import type { ImportEntity } from "@navet/shared";
 import { parseXlsxBuffer } from "../src/modules/import/service/xlsx.js";
-import { noteRows, readStoredZipEntries, writeXlsx, xmlText } from "../src/modules/import/service/xlsx-writer.js";
+import { noteRows, readStoredZipEntries, writeXlsx, xmlText } from "../src/modules/system/service/xlsx-writer.js";
 import {
   buildImportTemplate,
   buildImportTemplateWorkbook,
@@ -194,14 +194,14 @@ describe("writeXlsx", () => {
     const sheet = workbook.sheets[1]!;
     expect(sheet.name).toBe("Instruktioner");
     const first = sheet.rows[0]![0];
-    expect(typeof first === "object" && first !== null ? first.value : first).toBe("Importmall: Operationer");
-    const header = sheet.rows.findIndex((row) => typeof row[0] === "object" && row[0] !== null && row[0].value === "Kolumn");
+    expect(typeof first === "object" && first !== null && "value" in first ? first.value : first).toBe("Importmall: Operationer");
+    const header = sheet.rows.findIndex((row) => typeof row[0] === "object" && row[0] !== null && "value" in row[0] && row[0].value === "Kolumn");
     expect(header).toBeGreaterThan(0);
     const dataRows = sheet.rows.slice(header + 1);
     expect(dataRows).toHaveLength(IMPORT_FIELD_HELP.routing.length);
     const cell = (row: (typeof dataRows)[number], i: number) => {
       const c = row[i];
-      return typeof c === "object" && c !== null ? c.value : c;
+      return typeof c === "object" && c !== null && "value" in c ? c.value : c;
     };
     expect(cell(dataRows[0]!, 0)).toBe("Artikelnummer");
     expect(cell(dataRows[0]!, 1)).toBe("Ja");

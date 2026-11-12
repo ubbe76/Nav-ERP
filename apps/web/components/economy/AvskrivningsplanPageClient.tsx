@@ -9,6 +9,7 @@ import { API_URL } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import type { FiscalYear, FixedAssetPlan, FixedAssetPlanRow, FixedAssetPlanTotals } from "../../lib/types";
 import buttonStyles from "../ui/Button.module.css";
+import { ExportMenu } from "../ui/ExportMenu";
 
 // Nr and Anskaffad ride in the Benämning cell (number first, date on a second
 // line) and the two disposal columns only show when the year has a disposal:
@@ -105,9 +106,7 @@ export function AvskrivningsplanPageClient({
             <a href={`${API_URL}/api/v1/fixed-asset-plan/pdf?fiscalYearId=${selectedId}`} download className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
               Ladda ner PDF
             </a>
-            <a href={`${API_URL}/api/v1/fixed-asset-plan/csv?fiscalYearId=${selectedId}`} download className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
-              Exportera CSV
-            </a>
+            <ExportMenu csvHref={`${API_URL}/api/v1/fixed-asset-plan/csv?fiscalYearId=${selectedId}`} />
           </>
         )}
       </div>

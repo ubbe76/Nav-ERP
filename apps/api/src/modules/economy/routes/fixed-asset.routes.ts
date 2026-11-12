@@ -13,6 +13,7 @@ import {
 import { requirePermission } from "../../auth/middleware/permission.middleware.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
 import { errorBody } from "../../system/service/error-body.js";
+import { registerTableExportRoutes } from "../../system/routes/csv-export.js";
 import { AccountingPeriodLockedError } from "../service/accounting-period-lock.js";
 import { AccountNotFoundError, AlreadyReversedError, InactiveAccountError } from "../service/economy.service.js";
 import { CostCenterInactiveError, CostCenterNotFoundError } from "../service/dimension-check.js";
@@ -291,13 +292,11 @@ export async function fixedAssetRoutes(app: FastifyInstance, opts: { service: Fi
     }
   });
 
-  app.get("/fixed-asset-plan/csv", ekonomi, async (req, reply) => {
+  // CSV and its Excel twin (/fixed-asset-plan/xlsx) — one table.
+  registerTableExportRoutes(app, "/fixed-asset-plan/csv", ekonomi, async (req, reply) => {
     const query = fixedAssetPlanQuerySchema.parse(req.query);
     try {
-      const { filename, content } = await service.getPlanCsv(query);
-      reply.header("Content-Type", "text/csv; charset=utf-8");
-      reply.header("Content-Disposition", contentDisposition(filename));
-      return reply.send(content);
+      return await service.getPlanTable(query);
     } catch (err) {
       return planError(err, reply);
     }

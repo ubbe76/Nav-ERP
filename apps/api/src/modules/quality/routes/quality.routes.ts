@@ -45,7 +45,7 @@ type DeviationListRow = Awaited<ReturnType<QualityService["list"]>>["rows"][numb
 
 const CSV_COLUMNS = (seePrices: boolean): CsvColumn<DeviationListRow>[] => [
   { label: "Nr", value: (r) => r.deviationNumber },
-  { label: "Datum", value: (r) => r.reportedDate },
+  { label: "Datum", value: (r) => r.reportedDate, cell: "date" },
   { label: "Typ", value: (r) => DEVIATION_TYPE_LABELS[r.type] },
   { label: "Rubrik", value: (r) => r.title },
   { label: "Motpart", value: (r) => r.counterpartyName },
@@ -54,7 +54,7 @@ const CSV_COLUMNS = (seePrices: boolean): CsvColumn<DeviationListRow>[] => [
   { label: "Enhet", value: (r) => r.unitCode },
   { label: "Orsak", value: (r) => r.reasonName },
   { label: "Ansvarig", value: (r) => r.responsibleUserName },
-  { label: "Åtgärd senast", value: (r) => r.dueDate },
+  { label: "Åtgärd senast", value: (r) => r.dueDate, cell: "date" },
   { label: "Status", value: (r) => DEVIATION_STATUS_LABELS[r.status] },
   ...(seePrices ? [{ label: "Nettokostnad", value: (r: DeviationListRow) => r.netCost, format: "money" as const }] : []),
   { label: "Er referens", value: (r) => r.counterpartyReference },

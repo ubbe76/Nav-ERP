@@ -301,6 +301,8 @@ export interface RoutingImportDeps {
           alternativeWorkCenterIds?: string[];
           /** Ordinary (not Kalkyl) structure rows linked to the operation. */
           linkedMaterialCount?: number;
+          /** The stored Kommentar — an unchanged one is not rewritten. */
+          comment?: string | null;
         }
       >
     >
@@ -454,6 +456,7 @@ export async function planRoutingImport(
     let existingHasLegoFields = false;
     let existingAlternativeIds: string[] = [];
     let existingLinkedMaterialCount = 0;
+    let existingComment: string | null | undefined;
     if (article && sequenceNo !== null) {
       const key = `${article.id}#${sequenceNo}`;
       const existingOperation = existingOperations.get(article.id)?.get(sequenceNo);
@@ -478,6 +481,7 @@ export async function planRoutingImport(
           existingHasLegoFields = existingOperation.hasLegoFields === true;
           existingAlternativeIds = existingOperation.alternativeWorkCenterIds ?? [];
           existingLinkedMaterialCount = existingOperation.linkedMaterialCount ?? 0;
+          existingComment = existingOperation.comment;
         } else {
           errors.push(`Operation ${sequenceNo} finns redan på artikel ${articleNumber} — ta bort raden ur filen`);
         }
@@ -713,7 +717,11 @@ export async function planRoutingImport(
           costingOnly,
         };
         if (cycleTimePerUnit !== undefined) patch.cycleTimePerUnit = cycleTimePerUnit;
-        if (comment !== null) {
+        // A comment the file leaves as it is stored keeps its print setting:
+        // the wizard's checkbox decides for the comments the file brings,
+        // and an exported file read back (#35) brings none — it used to
+        // switch the printing off on every operation with a comment.
+        if (comment !== null && comment !== (existingComment ?? "").trim()) {
           patch.comment = comment;
           patch.printOnWorkCard = input.printCommentOnWorkCard === true;
         }
