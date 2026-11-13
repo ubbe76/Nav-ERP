@@ -136,7 +136,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
-- [ ] **Skapa kundorder från offert** — en kundorder ska kunna skapas ur en offert (användarens önskemål 2026-11-11). **Beslut 2026-11-12:** offerten står kvar som offert och en *ny* kundorder skapas som kopia — samma offert kan ge flera ordrar (avrop), och ordern pekar tillbaka på offerten (inte dagens Bekräfta, som gör om samma post till order). Offerten får statusen **Order** när en order skapats ur den, och raderna följer med till ordern med offertens priser — de räknas inte om (användaren 2026-11-12). Fler ordrar kan skapas ur samma offert även när den har status Order. Huvudfälten följer med och är redigerbara på ordern. Varje ny order får sitt KO-nummer ur nummerserien (offerten behåller sitt OF-nummer). Orderhuvudet får fältet **Offertnummer**, ifyllt med OF-numret på offerten man kopierade från (obs: `sales_orders.quote_number` är unik och bär postens eget OF-nummer — kopplingen behöver en egen kolumn, t.ex. källofferten som FK; orderbekräftelsens **Vår offert:** bör läsa den). En offert med status Order räknas aldrig som Utgången och visas inte under Offerter att följa upp; fler ordrar kan ändå skapas ur den, även efter Giltig t.o.m. (användaren 2026-11-12).
 - [ ] **Fler val av frakttjänster** — fler frakttjänster att välja mellan än dagens Sendify-koppling (användarens önskemål 2026-11-11). Omfattningen är inte specad än.
 
 ### Låg

@@ -523,7 +523,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.8.9 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.8.10 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -705,8 +705,13 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   aldrig automatiskt, men värderas som vanligt), ett lagerplatsregister med
   sök och saldo per plats, transaktionslogg (inflödesrader
   bär inköpskostnaden `unit_cost` i SEK), inventering (som kan bokföras per
-  dagen då underlaget skapades), **skanning** med
-  handskanner eller mobilens kamera (Lager → Skanna, och räkning av
+  dagen då underlaget skapades), **spårbarhet** med batch- eller
+  serienummer per artikel (utgångsdatum och FEFO, serienummer ur egna
+  serier vid inleverans eller utleverans, batch och nummer på följesedel,
+  pallkort och faktura, och sidan Spårbarhet bakåt till leverantören och
+  framåt till kunden), **skanning** med
+  handskanner eller mobilens kamera (Lager → Skanna, även GS1-koder med
+  batch, serienummer och utgångsdatum, och räkning av
   artiklarna i inleverans, plock/utleverans och inventering), **import av
   lagersaldon**, **ABC-analys** på förbrukningsvärde samt
   **lagervärdering** (`/lager/vardering`, administratörer): lagrets värde
