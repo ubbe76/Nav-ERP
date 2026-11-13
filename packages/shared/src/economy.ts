@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { listQuerySchema, statusListParam } from "./list.js";
-import { blankSafe } from "./coerce.js";
+import { blankSafe, numericMax, numericStep } from "./coerce.js";
 import { round2 } from "./money.js";
 import { dimensionFields, dimensionFilterQuery, incomeStatementGroupBySchema } from "./dimensions.js";
 
@@ -176,8 +176,8 @@ export type ListVerificationsQuery = z.infer<typeof listVerificationsQuerySchema
 export const verificationRowInputSchema = z
   .object({
     accountId: z.string().uuid(),
-    debit: blankSafe(z.coerce.number().nonnegative()),
-    credit: blankSafe(z.coerce.number().nonnegative()),
+    debit: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 2))),
+    credit: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 2))),
     description: z.string().max(255).optional(),
     // Kostnadsställen och projekt: the row's SIE objects.
     ...dimensionFields,
@@ -480,7 +480,7 @@ export type SaveVerificationTemplateInput = z.infer<typeof saveVerificationTempl
 // Verifikatmallar. Rows carry account NUMBERS (the template outlives chart
 // edits) and optional amounts — null/omitted/0 all mean "fill in on the
 // verification"; a row may not carry both sides.
-const templateAmountSchema = blankSafe(z.coerce.number().nonnegative()).nullable().optional();
+const templateAmountSchema = blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 2))).nullable().optional();
 export const verificationTemplateRowInputSchema = z
   .object({
     accountNumber: z.string().regex(/^[0-9]{4}$/, "Account number must be exactly 4 digits"),
@@ -564,7 +564,7 @@ export const ALLOCATION_KINDS = ["cost", "revenue"] as const;
 export type AllocationKind = (typeof ALLOCATION_KINDS)[number];
 const allocationAccountSchema = z.string().regex(/^[0-9]{4}$/, "Account number must be exactly 4 digits");
 export const createAllocationSchema = z.object({
-  amount: blankSafe(z.coerce.number().positive()),
+  amount: blankSafe(z.coerce.number().min(numericStep(2)).max(numericMax(14, 2))),
   kind: z.enum(ALLOCATION_KINDS),
   balanceAccount: allocationAccountSchema,
   resultAccount: allocationAccountSchema,

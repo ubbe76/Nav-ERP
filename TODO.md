@@ -24,8 +24,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 - [ ] **Stycktiden tappar precision under ~0,5 s/st** (delatgranskningen 2026-11-11, användarens val: lämna): `run_time_per_unit` är `numeric(10,4)` i minuter (rutt, TO-operationer, resurser, alternativ, konfigurator) — 0,05 s/st sparas som 0,0008 min (0,048 s, kalkyl och kapacitet 4 % för låga), 36 000 st/h visas som 35 294 st/h. Från ~1 s/st under 0,3 %. Rättelse vid behov: `numeric(12,6)` i en migration, zod-gränser och visning.
 
-- [ ] **Talfält: gränser per fält utanför tillverkning och kalkyl** (rest av talfältsbuggen, rättad 2026-11-12: 22003 → 400 `number-out-of-range` i den globala felhanteraren, `blankSafe` på alla body-scheman, `.max()` efter kolumnen i `manufacturing.ts`, `preCalculateSchema` och Förkalkylera flera): övriga scheman (artikel, inköp, försäljning, tid m.fl.) saknar fortfarande `.max(numericMax(p, s))` — ett för stort tal ger 400 från nätet men utan fältnamn. Kalkylantal under 0,00005 sparas fortfarande som 0 (ingen `.min(0.0001)`).
-
 ### Låga — races med litet fönster
 
 - [ ] **Bekräftelsedialogen saknar dialogroll** (webbgranskningen 2026-11-11): `ConfirmDialogHost` (`lib/confirm.ts`) renderas utan `role="dialog"`/`aria-modal` och etikett, så skärmläsare och Playwright hittar den inte som dialog. Kontrollera även fokusfällan.

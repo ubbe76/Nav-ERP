@@ -12,7 +12,7 @@ const budgetAccountNumberSchema = z.string().regex(/^[0-9]{4}$/, "Account number
 // |amount| < 1e12 keeps numeric(14,2) safe; zero is allowed on input (the grid
 // sends every month) but never stored.
 export const BUDGET_AMOUNT_LIMIT = 1e12;
-const budgetAmountSchema = z.number().finite().refine((value) => Math.abs(value) < BUDGET_AMOUNT_LIMIT, "Amount out of range");
+const budgetAmountSchema = z.number().finite().gt(-BUDGET_AMOUNT_LIMIT, "Amount out of range").lt(BUDGET_AMOUNT_LIMIT, "Amount out of range");
 
 export const listBudgetsQuerySchema = z.object({ fiscalYearId: z.string().uuid().optional() });
 export type ListBudgetsQuery = z.infer<typeof listBudgetsQuerySchema>;

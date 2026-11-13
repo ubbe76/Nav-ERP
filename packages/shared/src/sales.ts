@@ -4,7 +4,7 @@ import { vatRateSchema } from "./vat.js";
 import { listQuerySchema, orderStatusListParam, statusListParam } from "./list.js";
 import { configuratorSelectionSchema, orderRowConfigurationInputSchema } from "./configurator.js";
 
-import { blankSafe, numericMax } from "./coerce.js";
+import { blankSafe, numericMax, numericStep } from "./coerce.js";
 import { batchChoiceSchema, serialChoiceSchema, serialNumbersSchema, SERIAL_NUMBERS_MAX } from "./stock.js";
 import { round4 } from "./money.js";
 import { businessDateSchema } from "./business-date.js";
@@ -292,11 +292,11 @@ const quoteRowSchema = z.object({
   articleId: z.string().uuid(),
   // quantity/unitPrice are entered in the chosen unit (the article's base
   // unit when unitId is omitted/null) and stored converted to the base unit.
-  quantity: blankSafe(z.coerce.number().positive()),
+  quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))),
   // C3: omitted ⇒ the server resolves price AND discount via the price
   // chain (customer price → price list → base price). Sent ⇒ used verbatim,
   // including 0 (0 means free, never "look it up").
-  unitPrice: blankSafe(z.coerce.number().nonnegative()).optional(),
+  unitPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).optional(),
   discountPercent: blankSafe(z.coerce.number().min(0).max(100)).optional(),
   unitId: z.string().uuid().nullable().optional(),
   // Konfigurator 4b: the choices for a beställningsvara row (the article is
@@ -522,8 +522,8 @@ export const updateSalesOrderRowSchema = z
   .object({
     // Interpreted in the row's unit (or the newly provided unitId; null
     // switches the row back to the article's base unit).
-    quantity: blankSafe(z.coerce.number().positive()).optional(),
-    unitPrice: blankSafe(z.coerce.number().nonnegative()).optional(),
+    quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))).optional(),
+    unitPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).optional(),
     discountPercent: blankSafe(z.coerce.number().min(0).max(100)).optional(),
     unitId: z.string().uuid().nullable().optional(),
     // null clears the row's own date (the row follows the order again).
@@ -557,7 +557,7 @@ export const deliverGoodsSchema = z.object({
   // Serienummer (steg 4): as on a deliverBatch row.
   serialIds: serialChoiceSchema,
   serialNumbers: serialNumbersSchema.optional(),
-  quantity: blankSafe(z.coerce.number().positive()),
+  quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))),
 });
 export type DeliverGoodsInput = z.infer<typeof deliverGoodsSchema>;
 
@@ -574,7 +574,7 @@ export const deliverBatchSchema = z.object({
     .array(
       z.object({
         rowId: z.string().uuid(),
-        quantity: blankSafe(z.coerce.number().positive()),
+        quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))),
         locationId: z.string().uuid().optional(),
         // Batch (#8), a batchstyrd article's row: left out = Automatiskt
         // (oldest batch first, split over batches and places), null = Okänd,
@@ -626,8 +626,8 @@ export const invoiceRowInputSchema = z.object({
   salesOrderRowId: z.string().uuid().nullable().optional(),
   shipmentId: z.string().uuid().optional(),
   description: z.string().min(1).max(255),
-  quantity: blankSafe(z.coerce.number().positive()),
-  unitPrice: blankSafe(z.coerce.number()),
+  quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))),
+  unitPrice: blankSafe(z.coerce.number().min(-numericMax(14, 4)).max(numericMax(14, 4))),
   discountPercent: blankSafe(z.coerce.number().min(0).max(100)).optional(),
   vatRate: vatRateSchema.optional(),
   vatCodeId: z.string().uuid().optional(),
@@ -731,7 +731,7 @@ export type ListPaymentsQuery = z.infer<typeof listPaymentsQuerySchema>;
 // open amount and the tolerance setting.
 const paymentRowInputSchema = z.object({
   invoiceId: z.string().uuid(),
-  appliedAmount: blankSafe(z.coerce.number()),
+  appliedAmount: blankSafe(z.coerce.number().min(-numericMax(14, 2)).max(numericMax(14, 2))),
 });
 
 // amount is the BANK part (0 = pure kvittning) and must equal Σ appliedAmount —
@@ -751,10 +751,10 @@ export const createPaymentSchema = z.object({
   // The betalkonto, chosen per payment from the ACTIVE chart of accounts
   // (/account-options); the posting validates that it exists and is active.
   bankAccountNumber: z.string().regex(/^[0-9]{4}$/),
-  amount: blankSafe(z.coerce.number()),
+  amount: blankSafe(z.coerce.number().min(-numericMax(14, 2)).max(numericMax(14, 2))),
   currency: currencyCodeSchema.optional(),
-  amountSek: blankSafe(z.coerce.number()).optional(),
-  bankFeeSek: blankSafe(z.coerce.number().min(0)).optional(),
+  amountSek: blankSafe(z.coerce.number().min(-numericMax(14, 2)).max(numericMax(14, 2))).optional(),
+  bankFeeSek: blankSafe(z.coerce.number().min(0).max(numericMax(14, 2))).optional(),
   note: z.string().nullable().optional(),
   rows: z.array(paymentRowInputSchema).min(1),
 });
@@ -819,15 +819,15 @@ export type ListPriceListsQuery = z.infer<typeof listPriceListsQuerySchema>;
 // Row prices are entered and stored in the article's BASE unit.
 export const priceListRowInputSchema = z.object({
   articleId: z.string().uuid(),
-  fromQuantity: blankSafe(z.coerce.number().positive()).default(1),
-  unitPrice: blankSafe(z.coerce.number().nonnegative()),
+  fromQuantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))).default(1),
+  unitPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))),
 });
 export type PriceListRowInput = z.infer<typeof priceListRowInputSchema>;
 
 export const updatePriceListRowSchema = z
   .object({
-    fromQuantity: blankSafe(z.coerce.number().positive()).optional(),
-    unitPrice: blankSafe(z.coerce.number().nonnegative()).optional(),
+    fromQuantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))).optional(),
+    unitPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdatePriceListRowInput = z.infer<typeof updatePriceListRowSchema>;
@@ -838,11 +838,11 @@ export const customerPriceInputSchema = z
   .object({
     articleId: z.string().uuid().nullable().optional(),
     articleGroupId: z.string().uuid().nullable().optional(),
-    fromQuantity: blankSafe(z.coerce.number().positive()).default(1),
-    unitPrice: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
+    fromQuantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))).default(1),
+    unitPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).nullable().optional(),
     discountPercent: blankSafe(z.coerce.number().min(0).max(100)).nullable().optional(),
     // Ställpris — charged as its own Ställkostnad row on new order rows; null/0 = none.
-    setupPrice: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
+    setupPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).nullable().optional(),
   })
   .refine((data) => (data.articleId != null) !== (data.articleGroupId != null), {
     message: "Exactly one of articleId and articleGroupId must be set",
@@ -862,11 +862,11 @@ export type CustomerPriceInput = z.infer<typeof customerPriceInputSchema>;
 // the repository never has to guess which one wins.
 export const updateCustomerPriceSchema = z
   .object({
-    fromQuantity: blankSafe(z.coerce.number().positive()).optional(),
-    unitPrice: blankSafe(z.coerce.number().nonnegative()).optional(),
+    fromQuantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))).optional(),
+    unitPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).optional(),
     discountPercent: blankSafe(z.coerce.number().min(0).max(100)).optional(),
     // Ställpris; null clears.
-    setupPrice: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
+    setupPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).nullable().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided")
   .refine((data) => !(data.unitPrice !== undefined && data.discountPercent !== undefined), {
@@ -896,7 +896,7 @@ export type UpdateCustomerArticleNumberInput = z.infer<typeof updateCustomerArti
 // four decimals (1 and 1.00001 are the same step), and the smallest step is
 // the smallest the column can hold — 0.00004 would be stored as 0.
 const STAFFEL_MAX_ROWS = 50;
-const staffelQuantitySchema = blankSafe(z.coerce.number().min(0.0001).max(numericMax(14, 4)));
+const staffelQuantitySchema = blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4)));
 const staffelPriceSchema = blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4)));
 const uniqueFromQuantities = (rows: { fromQuantity: number }[]) =>
   new Set(rows.map((row) => round4(row.fromQuantity))).size === rows.length;
@@ -943,7 +943,7 @@ export type ArticlePriceListRowsInput = z.infer<typeof articlePriceListRowsSchem
 export const priceQuoteQuerySchema = z.object({
   customerId: z.string().uuid(),
   articleId: z.string().uuid(),
-  quantity: blankSafe(z.coerce.number().positive()),
+  quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))),
   salesOrderId: z.string().uuid().optional(),
   currency: currencyCodeSchema.optional(),
   exchangeRate: exchangeRateValueSchema.optional(),
@@ -962,7 +962,7 @@ export type PriceQuoteQuery = z.infer<typeof priceQuoteQuerySchema>;
 // empty PDF. The kolli are never checked against the delivered total.
 export const deliveryPalletCardRowSchema = z.object({
   deliveryRowId: z.string().uuid(),
-  quantities: z.array(z.coerce.number().positive()).max(50),
+  quantities: z.array(z.coerce.number().positive().max(numericMax(14, 4))).max(50),
 });
 export type DeliveryPalletCardRow = z.infer<typeof deliveryPalletCardRowSchema>;
 

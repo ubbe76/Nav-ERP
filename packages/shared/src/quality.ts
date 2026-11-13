@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { blankSafe, optionalText } from "./coerce.js";
+import { blankSafe, numericStep, optionalText } from "./coerce.js";
 import { listQuerySchema } from "./list.js";
 import { sendDocumentEmailSchema } from "./mail.js";
 
@@ -137,7 +137,7 @@ const deviationFields = {
   moOperationId: uuidRef,
   articleId: uuidRef,
   // In the article's base (stock) unit.
-  quantity: blankSafe(z.coerce.number().positive().max(1e9)).nullable().optional(),
+  quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(1e9)).nullable().optional(),
   causeAnalysis: longText,
   correctiveAction: longText,
   preventiveAction: longText,

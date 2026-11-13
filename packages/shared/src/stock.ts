@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { listQuerySchema, statusListParam } from "./list.js";
-import { blankSafe } from "./coerce.js";
+import { blankSafe, numericMax, numericStep } from "./coerce.js";
 import { businessDateSchema } from "./business-date.js";
 
 // Spärrade lagerplatser as a list filter: "true" = only blocked places,
@@ -326,7 +326,7 @@ export const UNKNOWN_BATCH_LABEL = "Okänd";
 export const createStockTransactionSchema = z.object({
   articleId: z.string().uuid(),
   locationId: z.string().uuid().optional(),
-  quantityDelta: blankSafe(z.coerce.number().refine((n) => n !== 0, "quantityDelta cannot be zero")),
+  quantityDelta: blankSafe(z.coerce.number().min(-numericMax(14, 4)).max(numericMax(14, 4)).refine((n) => n !== 0, "quantityDelta cannot be zero")),
   // A transfer is always two paired rows, so it can only be booked through
   // POST /stock/transfers — never one leg at a time through this endpoint.
   transactionType: stockTransactionTypeSchema.exclude(["stock_transfer"]),
@@ -387,7 +387,7 @@ export const createStockTransferSchema = z
       .array(
         z.object({
           articleId: z.string().uuid(),
-          quantity: blankSafe(z.coerce.number().positive()),
+          quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))),
           // Batch (#8), a batchstyrd article: the batch follows the goods.
           // Left out = Automatiskt (the source's batches, oldest first, one
           // pair of legs each), null = Okänd, an id = that batch for the
@@ -610,7 +610,7 @@ export const updateStockCountRowSchema = z
         z.null(),
         z.preprocess(
           (value) => (typeof value === "string" && value.trim() === "" ? Number.NaN : value),
-          z.coerce.number().min(0)
+          z.coerce.number().min(0).max(numericMax(14, 4))
         ),
       ])
       .optional(),

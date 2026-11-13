@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { blankSafe } from "./coerce.js";
+import { blankSafe, numericMax, numericStep } from "./coerce.js";
 import { listQuerySchema } from "./list.js";
 import { EU_COUNTRY_CODES } from "./vat-codes.js";
 
@@ -405,7 +405,7 @@ export type AddPaymentBatchItemsInput = z.infer<typeof addPaymentBatchItemsSchem
 
 export const updatePaymentBatchItemSchema = z
   .object({
-    amount: blankSafe(z.coerce.number().positive()).optional(),
+    amount: blankSafe(z.coerce.number().min(numericStep(2)).max(numericMax(14, 2))).optional(),
     executionDate: z.string().date().optional(),
   })
   .refine((v) => v.amount !== undefined || v.executionDate !== undefined, "At least one field must be provided");
@@ -418,8 +418,8 @@ export type UpdatePaymentBatchItemInput = z.infer<typeof updatePaymentBatchItemS
 // SEK row takes no entry (its SEK amount is the amount itself).
 export const confirmPaymentBatchItemAmountSchema = z.object({
   itemId: z.string().uuid(),
-  amountSek: blankSafe(z.coerce.number().positive()),
-  bankFeeSek: blankSafe(z.coerce.number().min(0)).optional(),
+  amountSek: blankSafe(z.coerce.number().min(numericStep(2)).max(numericMax(14, 2))),
+  bankFeeSek: blankSafe(z.coerce.number().min(0).max(numericMax(14, 2))).optional(),
 });
 export type ConfirmPaymentBatchItemAmount = z.infer<typeof confirmPaymentBatchItemAmountSchema>;
 
@@ -458,7 +458,7 @@ export const bookIncomingEntriesSchema = z.object({
       z.object({
         entryId: z.string().uuid(),
         customerId: z.string().uuid(),
-        rows: z.array(z.object({ invoiceId: z.string().uuid(), appliedAmount: blankSafe(z.coerce.number()) })).min(1).max(50),
+        rows: z.array(z.object({ invoiceId: z.string().uuid(), appliedAmount: blankSafe(z.coerce.number().min(-numericMax(14, 2)).max(numericMax(14, 2))) })).min(1).max(50),
       })
     )
     .min(1)

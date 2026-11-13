@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { INT4_MAX } from "./coerce.js";
 
 // Shared shape for paginated register listings: every unbounded list endpoint
 // takes search/limit/offset and answers with { rows, total }. The max limit is
@@ -7,7 +8,7 @@ import { z } from "zod";
 export const listQuerySchema = z.object({
   search: z.string().trim().max(100).optional(),
   limit: z.coerce.number().int().min(1).max(1000).default(50),
-  offset: z.coerce.number().int().min(0).default(0),
+  offset: z.coerce.number().int().min(0).max(INT4_MAX).default(0),
 });
 export type ListQuery = z.infer<typeof listQuerySchema>;
 

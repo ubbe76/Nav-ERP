@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { blankSafe, INT4_MAX, numericMax, optionalText } from "./coerce.js";
+import { blankSafe, INT4_MAX, numericMax, numericStep, optionalText } from "./coerce.js";
 import { batchChoiceSchema, serialChoiceSchema } from "./stock.js";
 import { configuratorSelectionSchema } from "./configurator.js";
 import { listQuerySchema, manufacturingOrderStatusListParam, statusListParam } from "./list.js";
@@ -64,10 +64,10 @@ export const createWorkCenterSchema = z.object({
   // schedule = no capacity shown in beläggningen. Factor 0 is rejected —
   // clear the schedule instead.
   weekScheduleId: z.string().uuid().nullable().optional(),
-  capacityFactor: blankSafe(z.coerce.number().positive().max(numericMax(6, 2))).default(1),
+  capacityFactor: blankSafe(z.coerce.number().min(numericStep(2)).max(numericMax(6, 2))).default(1),
   // Kapacitet (timmar per dag): Monday–Friday hours used when the resource
   // has no week schedule (the schedule wins when both are set).
-  hoursPerDay: blankSafe(z.coerce.number().positive().max(24)).nullable().optional(),
+  hoursPerDay: blankSafe(z.coerce.number().min(numericStep(2)).max(24)).nullable().optional(),
   // Legoresurs only: the resource's default supplier, prefilled on new lego
   // operations in the beredning.
   supplierId: z.string().uuid().nullable().optional(),
@@ -96,8 +96,8 @@ export const updateWorkCenterSchema = z
     hourlyRate: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).optional(),
     overheadPercent: blankSafe(z.coerce.number().nonnegative().max(numericMax(5, 2))).optional(),
     weekScheduleId: z.string().uuid().nullable().optional(),
-    capacityFactor: blankSafe(z.coerce.number().positive().max(numericMax(6, 2))).optional(),
-    hoursPerDay: blankSafe(z.coerce.number().positive().max(24)).nullable().optional(),
+    capacityFactor: blankSafe(z.coerce.number().min(numericStep(2)).max(numericMax(6, 2))).optional(),
+    hoursPerDay: blankSafe(z.coerce.number().min(numericStep(2)).max(24)).nullable().optional(),
     supplierId: z.string().uuid().nullable().optional(),
     active: z.boolean().optional(),
     defaultSetupTime: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).nullable().optional(),
@@ -285,7 +285,7 @@ export type UpdateRoutingOperationInput = z.infer<typeof updateRoutingOperationS
 // moOperationId null/omitted = not tied to an operation (drawn at receipt).
 export const createMoMaterialSchema = z.object({
   componentArticleId: z.string().uuid(),
-  quantity: blankSafe(z.coerce.number().positive().max(numericMax(14, 4))),
+  quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))),
   unitId: z.string().uuid().nullable().optional(),
   moOperationId: z.string().uuid().nullable().optional(),
 });
@@ -296,7 +296,7 @@ export type CreateMoMaterialInput = z.infer<typeof createMoMaterialSchema>;
 // component's base unit unless unitId is given alongside.
 export const updateMoMaterialSchema = z
   .object({
-    quantity: blankSafe(z.coerce.number().positive().max(numericMax(14, 4))).optional(),
+    quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))).optional(),
     unitId: z.string().uuid().nullable().optional(),
     moOperationId: z.string().uuid().nullable().optional(),
     componentArticleId: z.string().uuid().optional(),
@@ -365,7 +365,7 @@ export type UpdateMoOperationInput = z.infer<typeof updateMoOperationSchema>;
 export const createManufacturingOrderSchema = z
   .object({
     articleId: z.string().uuid().optional(),
-    quantity: blankSafe(z.coerce.number().positive().max(numericMax(14, 4))),
+    quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))),
     note: z.string().optional(),
     salesOrderRowId: z.string().uuid().optional(),
     // Planerat färdigdatum (E2 beläggning) — optional; load lands in this week.
@@ -397,7 +397,7 @@ export type UpdateManufacturingOrderInput = z.infer<typeof updateManufacturingOr
 // service. dueDate is the dialog's Planerat färdigdatum (prefilled from
 // GET /articles/:id/due-date-suggestion?salesOrderRowId=); omitted = none.
 export const createFromSalesOrderRowSchema = z.object({
-  quantity: blankSafe(z.coerce.number().positive().max(numericMax(14, 4))).optional(),
+  quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))).optional(),
   dueDate: z.string().date().nullable().optional(),
 });
 export type CreateFromSalesOrderRowInput = z.infer<typeof createFromSalesOrderRowSchema>;
@@ -418,7 +418,7 @@ export const consumeMaterialSchema = z.object({
   // the chosen or scanned numbers' ids — as many as the styck — or left out
   // = Automatiskt, the oldest numbers. Not together with batchId.
   serialIds: serialChoiceSchema,
-  quantity: blankSafe(z.coerce.number().positive().max(numericMax(14, 4))),
+  quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))),
   allowMaterialShortage: materialShortageOverrideSchema,
 });
 export type ConsumeMaterialInput = z.infer<typeof consumeMaterialSchema>;
@@ -465,7 +465,7 @@ export type CompleteManufacturingOrderInput = z.infer<typeof completeManufacturi
 // never checks that the kolli add up to the total — the dialog warns.
 export const palletCardQuantitiesSchema = z.preprocess(
   (value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value]),
-  z.array(z.coerce.number().positive()).min(1).max(50).optional()
+  z.array(z.coerce.number().positive().max(numericMax(14, 4))).min(1).max(50).optional()
 );
 export const palletCardQuerySchema = z.object({
   quantity: palletCardQuantitiesSchema,

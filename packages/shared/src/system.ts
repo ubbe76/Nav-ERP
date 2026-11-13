@@ -2,7 +2,7 @@ import { z } from "zod";
 import { costingMaterialSourceSchema, costingPreMaterialSourceSchema, costingSupplierPriceTierSchema } from "./costing.js";
 import { deliveryDayModeSchema, transitDaysSchema } from "./delivery.js";
 import { themeIdSchema } from "./themes.js";
-import { blankSafe } from "./coerce.js";
+import { blankSafe, INT4_MAX } from "./coerce.js";
 
 // Materialbrist vid rapportering — see updateSystemSettingsSchema below.
 export const manufacturingMaterialShortageSchema = z.enum(["none", "warn", "block"]);
@@ -383,7 +383,7 @@ export const updateNumberSeriesSchema = z
     // Empty prefix is legal — the customer series prints bare numbers
     // ("1001"), and the series page always submits the field.
     prefix: z.string().max(20).optional(),
-    nextNumber: blankSafe(z.coerce.number().int().positive()).optional(),
+    nextNumber: blankSafe(z.coerce.number().int().positive().max(INT4_MAX)).optional(),
     digits: blankSafe(z.coerce.number().int().min(0).max(10)).optional(),
     // Only the user's own article series have a name (the built-in ones are
     // labelled by the web).
@@ -397,7 +397,7 @@ export type UpdateNumberSeriesInput = z.infer<typeof updateNumberSeriesSchema>;
 export const createArticleNumberSeriesSchema = z.object({
   name: z.string().trim().min(1).max(100),
   prefix: z.string().max(20).default(""),
-  nextNumber: blankSafe(z.coerce.number().int().positive()).default(1),
+  nextNumber: blankSafe(z.coerce.number().int().positive().max(INT4_MAX)).default(1),
   digits: blankSafe(z.coerce.number().int().min(0).max(10)).default(0),
   // Serienummerserier (#8 etapp 2, 0215): true makes it a serial number
   // series (chosen on a serienummerstyrd article) instead of an article

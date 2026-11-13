@@ -3,7 +3,7 @@ import { orderRowConfigurationInputSchema } from "./configurator.js";
 import { listQuerySchema } from "./list.js";
 import { abcClassListParam } from "./abc.js";
 import { businessDateSchema } from "./business-date.js";
-import { blankSafe } from "./coerce.js";
+import { blankSafe, INT4_MAX, numericMax, numericStep } from "./coerce.js";
 
 // Behovsberäkning (MRP light) — query and order-creation schemas. The
 // requirements list itself is fully derived (never stored), so there is no
@@ -66,7 +66,7 @@ export const createPlanningOrdersSchema = z.object({
         .object({
           articleId: z.string().uuid(),
           // User-editable before creation — Monitor lets the planner override.
-          quantity: blankSafe(z.coerce.number().positive()),
+          quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))),
           // "subcontract" = a lego operation needs buying: the proposal is
           // keyed by moOperationId (an operation, not an article-level need).
           // "configured" = a configured (beställningsvara) sales order row
@@ -114,7 +114,7 @@ export type CreatePlanningOrdersInput = z.infer<typeof createPlanningOrdersSchem
 // omitted ⇒ 1.
 export const dueDateSuggestionQuerySchema = z.object({
   salesOrderRowId: z.string().uuid().optional(),
-  quantity: z.coerce.number().positive().optional(),
+  quantity: z.coerce.number().min(numericStep(4)).max(numericMax(14, 4)).optional(),
 });
 export type DueDateSuggestionQuery = z.infer<typeof dueDateSuggestionQuerySchema>;
 
@@ -131,7 +131,7 @@ export const deliveryTimeCheckSchema = z
       .array(
         z.object({
           articleId: z.string().uuid(),
-          quantity: blankSafe(z.coerce.number().positive()),
+          quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))),
           configuration: orderRowConfigurationInputSchema.optional(),
         })
       )
@@ -190,7 +190,7 @@ export type MoveOperationInput = z.infer<typeof moveOperationSchema>;
 export const applyDeliveryTimeSchema = z.object({
   salesOrderId: z.string().uuid(),
   deliveryDate: businessDateSchema,
-  expectedOrders: z.number().int().min(0).optional(),
+  expectedOrders: z.number().int().min(0).max(INT4_MAX).optional(),
   useAlternatives: z.boolean().optional(),
 });
 export type ApplyDeliveryTimeInput = z.infer<typeof applyDeliveryTimeSchema>;
@@ -226,8 +226,8 @@ export const missingComponentsSchema = z.object({
     .array(
       z.object({
         articleId: z.string().uuid(),
-        quantity: blankSafe(z.coerce.number().positive()),
-        level: z.number().int().min(1),
+        quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))),
+        level: z.number().int().min(1).max(INT4_MAX),
       })
     )
     .min(1),
@@ -241,7 +241,7 @@ export type MissingComponentsInput = z.infer<typeof missingComponentsSchema>;
 export const forecastMonthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "month must be YYYY-MM");
 export const articleForecastUpdateSchema = z.object({
   months: z
-    .array(z.object({ month: forecastMonthSchema, quantity: blankSafe(z.coerce.number().nonnegative()).nullable() }))
+    .array(z.object({ month: forecastMonthSchema, quantity: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).nullable() }))
     .min(1)
     .refine((months) => new Set(months.map((m) => m.month)).size === months.length, { message: "each month at most once" }),
 });
