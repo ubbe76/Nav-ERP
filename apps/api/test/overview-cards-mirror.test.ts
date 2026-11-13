@@ -159,6 +159,7 @@ describe("Översiktens kort", () => {
       alertRows({
         kind: "quote_followup",
         label: "Offerter att följa upp",
+        area: "forsaljning",
         severity: "yellow",
         count: 1,
         listHref: "/forsaljning/offerter?status=quote",

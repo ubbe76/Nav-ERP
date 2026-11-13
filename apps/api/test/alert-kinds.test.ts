@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ALERT_KINDS, effectivePermissions, type AlertKind } from "@navet/shared";
+import { ALERT_AREAS, ALERT_AREA_LABELS, ALERT_KINDS, effectivePermissions, type AlertKind } from "@navet/shared";
 import {
   ALERT_KIND_CATALOG,
   alertKindDef,
@@ -51,6 +51,18 @@ describe("the catalog", () => {
       expect(def.listHref.startsWith("/")).toBe(true);
       expect(alertKindDef(def.kind)).toBe(def);
     }
+  });
+
+  // Aviseringar per område: a kind sits under the menu its permission comes
+  // from, and the admin-only kinds under System — so whoever sees a heading
+  // also has that menu. A new kind that breaks this needs a reason here.
+  it("puts every kind under the area of its menu, the admin-only kinds under System", () => {
+    for (const def of ALERT_KIND_CATALOG) {
+      expect(ALERT_AREAS).toContain(def.area);
+      expect(def.rule).toHaveLength(1);
+      expect(def.area).toBe(def.rule[0] === "admin" ? "system" : def.rule[0]);
+    }
+    expect(Object.keys(ALERT_AREA_LABELS)).toEqual([...ALERT_AREAS]);
   });
 });
 

@@ -8,7 +8,7 @@ import { createAuthRepository } from "../src/modules/auth/repository/auth.reposi
 import { createAuthService } from "../src/modules/auth/service/auth.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { testArticleService } from "./helpers/services.js";
-import { ALERT_KIND_CATALOG } from "../src/modules/alerts/service/alert-kinds.js";
+import { ALERT_KIND_CATALOG, alertKindDef } from "../src/modules/alerts/service/alert-kinds.js";
 import { parsed } from "./helpers/parsed.js";
 
 // GET /alerts through the real app: the response shape, the kinds filtered
@@ -89,6 +89,7 @@ describe("GET /alerts", () => {
       expect(g).toEqual({
         kind: expect.any(String),
         label: expect.any(String),
+        area: alertKindDef(g.kind).area,
         severity: expect.stringMatching(/^(red|yellow)$/),
         count: expect.any(Number),
         listHref: expect.any(String),

@@ -51,6 +51,21 @@ export const alertsQuerySchema = z.object({
 });
 export type AlertsQuery = z.infer<typeof alertsQuerySchema>;
 
+// The menu area a kind belongs to — Aviseringar and Översiktens Att bevaka
+// group the kinds under these headings, in the side menu's order. Each
+// kind's area is in the catalog (alert-kinds.ts).
+export const ALERT_AREAS = ["inkop", "forsaljning", "tillverkning", "lager", "kvalitet", "ekonomi", "system"] as const;
+export type AlertArea = (typeof ALERT_AREAS)[number];
+export const ALERT_AREA_LABELS: Record<AlertArea, string> = {
+  inkop: "Inköp",
+  forsaljning: "Försäljning",
+  tillverkning: "Tillverkning",
+  lager: "Lager",
+  kvalitet: "Kvalitet",
+  ekonomi: "Ekonomi",
+  system: "System",
+};
+
 // Red before yellow in the fixed order; a supplier invoice is red once it is
 // overdue and yellow while it is only due soon.
 export type AlertSeverity = "red" | "yellow";
@@ -110,6 +125,7 @@ export interface AlertItem {
 export interface AlertGroup {
   kind: AlertKind;
   label: string;
+  area: AlertArea;
   severity: AlertSeverity;
   count: number;
   listHref: string;

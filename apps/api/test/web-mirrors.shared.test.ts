@@ -93,8 +93,10 @@ describe("favorites mirror", () => {
 });
 
 describe("alerts mirror", () => {
-  it("has the same alert kinds in the same order", () => {
+  it("has the same alert kinds and areas in the same order", () => {
     expect([...webAlerts.ALERT_KINDS]).toEqual([...shared.ALERT_KINDS]);
+    expect([...webAlerts.ALERT_AREAS]).toEqual([...shared.ALERT_AREAS]);
+    expect(webAlerts.ALERT_AREA_LABELS).toEqual(shared.ALERT_AREA_LABELS);
   });
 });
 

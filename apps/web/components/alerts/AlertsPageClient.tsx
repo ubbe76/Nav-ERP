@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useCan } from "../PermissionsProvider";
 import { confirmDialog } from "../../lib/confirm";
 import type { PlanningOrdersResult } from "../../lib/types";
@@ -10,8 +10,18 @@ import { Checkbox } from "../ui/Field";
 import { GatedLink } from "../ui/GatedLink";
 import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
 import {
+  ALERT_AREAS,
+  ALERT_AREA_LABELS,
+  ALERT_PREVIEW_ROWS,
   ALERTS_EMPTY_TEXT,
+  alertAreaAnchor,
+  alertAreaSections,
+  alertGroupTone,
+  alertKindAnchor,
+  alertKindFromHash,
   formatAlertTime,
+  previewSupplierSections,
+  type AlertAreaSection,
   type AlertGroup,
   type AlertKind,
   type AlertsResponse,
@@ -124,7 +134,30 @@ export function AlertsPageClient({ initial, digest, email, digestTime, smtpMissi
     }
   }
 
-  const everythingEmpty = alerts.groups.every((g) => g.count === 0 && !g.error);
+  // Fem + Visa fler: the kinds unfolded on the page. A kind named in the
+  // address (#typ-<kind>, Översiktens Att bevaka) opens unfolded.
+  const [expanded, setExpanded] = useState<Set<AlertKind>>(new Set());
+  function setKindExpanded(kind: AlertKind, on: boolean) {
+    setExpanded((prev) => {
+      if (prev.has(kind) === on) return prev;
+      const next = new Set(prev);
+      if (on) next.add(kind);
+      else next.delete(kind);
+      return next;
+    });
+  }
+  useEffect(() => {
+    function fromHash() {
+      const kind = alertKindFromHash(window.location.hash);
+      if (kind) setKindExpanded(kind, true);
+    }
+    fromHash();
+    window.addEventListener("hashchange", fromHash);
+    return () => window.removeEventListener("hashchange", fromHash);
+  }, []);
+
+  const areas = alertAreaSections(alerts.groups);
+  const everythingEmpty = areas.length === 0;
 
   return (
     <>
@@ -163,24 +196,46 @@ export function AlertsPageClient({ initial, digest, email, digestTime, smtpMissi
       {everythingEmpty ? (
         <p className={styles.empty}>{ALERTS_EMPTY_TEXT}</p>
       ) : (
-        alerts.groups
-          .filter((g) => g.count > 0 || g.error)
-          .map((group) =>
-            group.kind === "purchase_needed" && group.supplierGroups ? (
-              <PurchaseNeededCard
-                key={group.kind}
-                group={group}
-                canOrder={canOrder}
-                picked={picked}
-                onToggle={togglePicked}
-                creating={creating}
-                error={createError}
-                onCreate={() => void createOrders()}
-              />
-            ) : (
-              <GroupCard key={group.kind} group={group} />
-            )
-          )
+        <>
+          {areas.length > 1 && <AreaNav areas={areas} />}
+          {areas.map((section) => (
+            <section
+              key={section.area}
+              id={alertAreaAnchor(section.area)}
+              className={styles.area}
+              aria-labelledby={`${alertAreaAnchor(section.area)}-rubrik`}
+            >
+              <h2 id={`${alertAreaAnchor(section.area)}-rubrik`} className={styles.areaTitle}>
+                <span className={styles.marker} data-tone={section.tone} aria-hidden="true" />
+                {section.label}
+                <span className={styles.areaCount}>{section.count}</span>
+              </h2>
+              {section.groups.map((group) =>
+                group.kind === "purchase_needed" && group.supplierGroups ? (
+                  <PurchaseNeededCard
+                    key={group.kind}
+                    group={group}
+                    expanded={expanded.has(group.kind)}
+                    onExpand={(on) => setKindExpanded(group.kind, on)}
+                    canOrder={canOrder}
+                    picked={picked}
+                    onToggle={togglePicked}
+                    creating={creating}
+                    error={createError}
+                    onCreate={() => void createOrders()}
+                  />
+                ) : (
+                  <GroupCard
+                    key={group.kind}
+                    group={group}
+                    expanded={expanded.has(group.kind)}
+                    onExpand={(on) => setKindExpanded(group.kind, on)}
+                  />
+                )
+              )}
+            </section>
+          ))}
+        </>
       )}
 
       <section className={styles.digest} aria-labelledby="digest-heading">
@@ -210,16 +265,40 @@ export function AlertsPageClient({ initial, digest, email, digestTime, smtpMissi
         )}
         <fieldset className={styles.kinds} disabled={saving || !enabled}>
           <legend className={styles.legend}>Ta med</legend>
-          {alerts.groups.map((g) => (
-            <label key={g.kind} className={styles.check}>
-              <Checkbox checked={isChecked(g.kind)} onChange={() => toggleKind(g.kind)} />
-              <span>{g.label}</span>
-            </label>
-          ))}
+          {ALERT_AREAS.map((area) => {
+            const inArea = alerts.groups.filter((g) => g.area === area);
+            if (inArea.length === 0) return null;
+            return (
+              <div key={area} className={styles.kindArea}>
+                <div className={styles.kindAreaTitle}>{ALERT_AREA_LABELS[area]}</div>
+                {inArea.map((g) => (
+                  <label key={g.kind} className={styles.check}>
+                    <Checkbox checked={isChecked(g.kind)} onChange={() => toggleKind(g.kind)} />
+                    <span>{g.label}</span>
+                  </label>
+                ))}
+              </div>
+            );
+          })}
         </fieldset>
         {saveError && <p className={styles.error}>{saveError}</p>}
       </section>
     </>
+  );
+}
+
+// Hoppa till område: one link per area with something to show.
+function AreaNav({ areas }: { areas: AlertAreaSection[] }) {
+  return (
+    <nav className={styles.areaNav} aria-label="Områden">
+      {areas.map((section) => (
+        <a key={section.area} href={`#${alertAreaAnchor(section.area)}`} className={styles.areaLink}>
+          <span className={styles.marker} data-tone={section.tone} aria-hidden="true" />
+          {section.label}
+          <span className={styles.areaLinkCount}>{section.count}</span>
+        </a>
+      ))}
+    </nav>
   );
 }
 
@@ -250,8 +329,56 @@ function AlertRow({ item, checkbox }: { item: AlertItem; checkbox?: React.ReactN
   );
 }
 
+// The kind's heading: marker, label and count. The id is the anchor
+// Översiktens Att bevaka links to.
+function KindHeader({ group, children }: { group: AlertGroup; children?: React.ReactNode }) {
+  return (
+    <header className={styles.groupHeader}>
+      <span className={styles.marker} data-tone={alertGroupTone(group)} aria-hidden="true" />
+      <h3 className={styles.groupTitle}>{group.label}</h3>
+      <span className={styles.count}>{group.error ? "–" : group.count}</span>
+      {children}
+    </header>
+  );
+}
+
+// Visa fler (N) / Visa färre, then Öppna listan (the kind's own list page).
+function KindFooter({
+  group,
+  hidden,
+  expanded,
+  onExpand,
+}: {
+  group: AlertGroup;
+  hidden: number;
+  expanded: boolean;
+  onExpand: (on: boolean) => void;
+}) {
+  const foldable = group.items.length > ALERT_PREVIEW_ROWS;
+  return (
+    <div className={styles.footer}>
+      {foldable && (
+        <button
+          type="button"
+          className={styles.more}
+          aria-expanded={expanded}
+          aria-controls={`${alertKindAnchor(group.kind)}-rader`}
+          onClick={() => onExpand(!expanded)}
+        >
+          {expanded ? "Visa färre" : `Visa fler (${hidden})`}
+        </button>
+      )}
+      <GatedLink href={group.listHref} className={styles.all}>
+        Öppna listan
+      </GatedLink>
+    </div>
+  );
+}
+
 function PurchaseNeededCard({
   group,
+  expanded,
+  onExpand,
   canOrder,
   picked,
   onToggle,
@@ -260,6 +387,8 @@ function PurchaseNeededCard({
   onCreate,
 }: {
   group: AlertGroup;
+  expanded: boolean;
+  onExpand: (on: boolean) => void;
   canOrder: boolean;
   picked: Set<string>;
   onToggle: (keys: string[], on: boolean) => void;
@@ -268,54 +397,66 @@ function PurchaseNeededCard({
   onCreate: () => void;
 }) {
   const sections = supplierSections(group);
+  const visible = expanded ? sections : previewSupplierSections(sections, ALERT_PREVIEW_ROWS);
+  const visibleCount = visible.reduce((sum, s) => sum + s.items.length, 0);
   const pickedCount = group.items.filter((i) => picked.has(i.key)).length;
   return (
-    <section className={styles.group}>
-      <header className={styles.groupHeader}>
-        <span className={styles.marker} data-tone={group.severity} aria-hidden="true" />
-        <h2 className={styles.groupTitle}>{group.label}</h2>
-        <span className={styles.count}>{group.count}</span>
+    <section id={alertKindAnchor(group.kind)} className={styles.group}>
+      <KindHeader group={group}>
         {canOrder && pickedCount > 0 && (
           <Button type="button" size="small" disabled={creating} onClick={onCreate}>
             {creating ? "Skapar…" : `Skapa inköpsorder (${pickedCount})`}
           </Button>
         )}
-      </header>
+      </KindHeader>
       {error && <p className={styles.error}>{error}</p>}
-      {sections.map((section) => (
-        <SupplierSection
-          key={section.group.key}
-          section={section}
-          canOrder={canOrder}
-          picked={picked}
-          onToggle={onToggle}
-          listHref={group.listHref}
-        />
-      ))}
-      <GatedLink href={group.listHref} className={styles.all}>
-        Visa alla
-      </GatedLink>
+      <div id={`${alertKindAnchor(group.kind)}-rader`}>
+        {visible.map((section) => (
+          <SupplierSection
+            key={section.group.key}
+            section={section}
+            // Markera alla picks the supplier's every row, also the folded
+            // ones — so it unfolds the card: nothing is picked out of sight.
+            allItems={sections.find((s) => s.group.key === section.group.key)?.items ?? section.items}
+            complete={expanded}
+            canOrder={canOrder}
+            picked={picked}
+            onToggle={onToggle}
+            onPickAll={() => onExpand(true)}
+            listHref={group.listHref}
+          />
+        ))}
+      </div>
+      <KindFooter group={group} hidden={group.items.length - visibleCount} expanded={expanded} onExpand={onExpand} />
     </section>
   );
 }
 
 function SupplierSection({
   section,
+  allItems,
+  complete,
   canOrder,
   picked,
   onToggle,
+  onPickAll,
   listHref,
 }: {
   section: AlertSupplierSection;
+  /** The supplier's every row in the response (section.items may be folded). */
+  allItems: AlertItem[];
+  /** The card is unfolded — "+ N till" only then. */
+  complete: boolean;
   canOrder: boolean;
   picked: Set<string>;
   onToggle: (keys: string[], on: boolean) => void;
+  onPickAll: () => void;
   listHref: string;
 }) {
   const { group: sg, items } = section;
   const none = sg.supplierId === null;
   const selectable = canOrder && !none;
-  const keys = items.map((i) => i.key);
+  const keys = allItems.map((i) => i.key);
   const allPicked = keys.length > 0 && keys.every((k) => picked.has(k));
   const title = none ? "Utan förvald leverantör" : (sg.supplierName ?? "Leverantör");
   return (
@@ -326,7 +467,10 @@ function SupplierSection({
             checked={allPicked}
             indeterminate={!allPicked && keys.some((k) => picked.has(k))}
             ariaLabel={`Markera alla för ${title}`}
-            onChange={(on) => onToggle(keys, on)}
+            onChange={(on) => {
+              if (on) onPickAll();
+              onToggle(keys, on);
+            }}
           />
         )}
         {none ? (
@@ -355,7 +499,7 @@ function SupplierSection({
           }
         />
       ))}
-      {sg.count > sg.shown && (
+      {complete && sg.count > sg.shown && (
         <GatedLink href={listHref} className={styles.all}>
           + {sg.count - sg.shown} till
         </GatedLink>
@@ -364,41 +508,29 @@ function SupplierSection({
   );
 }
 
-function GroupCard({ group }: { group: AlertGroup }) {
+function GroupCard({
+  group,
+  expanded,
+  onExpand,
+}: {
+  group: AlertGroup;
+  expanded: boolean;
+  onExpand: (on: boolean) => void;
+}) {
+  const visible = expanded ? group.items : group.items.slice(0, ALERT_PREVIEW_ROWS);
   return (
-    <section className={styles.group}>
-      <header className={styles.groupHeader}>
-        <span className={styles.marker} data-tone={group.severity} aria-hidden="true" />
-        <h2 className={styles.groupTitle}>{group.label}</h2>
-        <span className={styles.count}>{group.error ? "–" : group.count}</span>
-      </header>
+    <section id={alertKindAnchor(group.kind)} className={styles.group}>
+      <KindHeader group={group} />
       {group.error ? (
         <p className={styles.error}>{group.message ?? "Kunde inte läsa den här typen av aviseringar."}</p>
       ) : (
         <>
-          {group.items.map((item) => {
-            const content = (
-              <>
-                <span className={styles.marker} data-tone={item.severity} aria-hidden="true" />
-                <span className={styles.texts}>
-                  <span className={styles.primary}>{item.primary}</span>
-                  {item.secondary && <span className={styles.secondary}>{item.secondary}</span>}
-                </span>
-              </>
-            );
-            return item.href === null ? (
-              <span key={item.key} className={styles.row}>
-                {content}
-              </span>
-            ) : (
-              <GatedLink key={item.key} href={item.href} className={styles.row}>
-                {content}
-              </GatedLink>
-            );
-          })}
-          <GatedLink href={group.listHref} className={styles.all}>
-            Visa alla
-          </GatedLink>
+          <div id={`${alertKindAnchor(group.kind)}-rader`}>
+            {visible.map((item) => (
+              <AlertRow key={item.key} item={item} />
+            ))}
+          </div>
+          <KindFooter group={group} hidden={group.items.length - visible.length} expanded={expanded} onExpand={onExpand} />
         </>
       )}
     </section>

@@ -1,4 +1,4 @@
-import { satisfiesRule, type AccessRule, type AlertKind, type AlertSeverity, type Permission, type UserRole } from "@navet/shared";
+import { satisfiesRule, type AccessRule, type AlertArea, type AlertKind, type AlertSeverity, type Permission, type UserRole } from "@navet/shared";
 
 // Aviseringar — the catalog. Pure (no DB imports): every kind's label,
 // severity, permission and list page, in DISPLAY ORDER (red before yellow,
@@ -15,22 +15,33 @@ export interface AlertKindDef {
   // among the reds. batch_expiry is the third such kind.
   severity: AlertSeverity;
   rule: AccessRule;
-  // The web page that lists every row of the kind ("Visa alla").
+  // The web page that lists every row of the kind ("Öppna listan").
   listHref: string;
+  // The heading the kind is grouped under on Aviseringar and in Att bevaka
+  // (the menu where the matter is fixed — the admin-only kinds are System).
+  area: AlertArea;
 }
 
 export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
-  { kind: "stock_negative", label: "Negativt saldo", severity: "red", rule: ["lager"], listHref: "/lager/saldon" },
+  { kind: "stock_negative", label: "Negativt saldo", severity: "red", rule: ["lager"], listHref: "/lager/saldon", area: "lager" },
   // Utgångna batcher (#8 etapp 2): batches with stock on places that are
   // not blocked whose utgångsdatum has passed (red) or is within N days
-  // (yellow). "Visa alla" is the batch register filtered on the same rows.
-  { kind: "batch_expiry", label: "Utgångna batcher", severity: "red", rule: ["lager"], listHref: "/lager/sparbarhet?expiry=due" },
+  // (yellow). "Öppna listan" is the batch register filtered on the same rows.
+  {
+    kind: "batch_expiry",
+    label: "Utgångna batcher",
+    severity: "red",
+    rule: ["lager"],
+    listHref: "/lager/sparbarhet?expiry=due",
+    area: "lager",
+  },
   {
     kind: "customer_invoice_overdue",
     label: "Förfallna kundfakturor",
     severity: "red",
     rule: ["forsaljning"],
     listHref: "/forsaljning/reskontra",
+    area: "forsaljning",
   },
   {
     kind: "supplier_invoice_due",
@@ -38,6 +49,7 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     severity: "red",
     rule: ["inkop"],
     listHref: "/inkop/reskontra",
+    area: "inkop",
   },
   // Offerter att följa upp: expired (red) and expiring within N days (yellow).
   {
@@ -47,6 +59,7 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     rule: ["forsaljning"],
     // Offerter (0138): quotes have their own list and card.
     listHref: "/forsaljning/offerter?status=quote",
+    area: "forsaljning",
   },
   {
     kind: "einvoice_failed",
@@ -54,6 +67,7 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     severity: "red",
     rule: ["forsaljning"],
     listHref: "/forsaljning/fakturor",
+    area: "forsaljning",
   },
   // Mottagning: the reception job could not fetch received e-invoices at
   // the last run — System → E-faktura is an admin page.
@@ -63,9 +77,17 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     severity: "red",
     rule: ["admin"],
     listHref: "/system/e-faktura",
+    area: "system",
   },
   // The e-mail log is an admin page, so only administrators see this kind.
-  { kind: "email_failed", label: "Utskick som misslyckades", severity: "red", rule: ["admin"], listHref: "/system/e-postlogg" },
+  {
+    kind: "email_failed",
+    label: "Utskick som misslyckades",
+    severity: "red",
+    rule: ["admin"],
+    listHref: "/system/e-postlogg",
+    area: "system",
+  },
   // Tillägg: System → Tillägg is an admin page.
   {
     kind: "plugin_delivery_failed",
@@ -73,6 +95,7 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     severity: "red",
     rule: ["admin"],
     listHref: "/system/tillagg",
+    area: "system",
   },
   // Fakturaskanning: the e-mail box could not be read at the last run —
   // System → Fakturaskanning is an admin page.
@@ -82,6 +105,7 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     severity: "red",
     rule: ["admin"],
     listHref: "/system/fakturaskanning",
+    area: "system",
   },
   // Återkommande verifikat: a month the job could not create (locked
   // period, inactive account …) — fixed and retried with Kör nu.
@@ -91,6 +115,7 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     severity: "red",
     rule: ["ekonomi"],
     listHref: "/ekonomi/aterkommande-verifikat",
+    area: "ekonomi",
   },
   {
     kind: "sales_order_late",
@@ -99,6 +124,7 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     rule: ["forsaljning"],
     // Straight to the list filtered on Sen — the same rule (late-orders.ts).
     listHref: "/forsaljning/ordrar?status=late",
+    area: "forsaljning",
   },
   {
     kind: "purchase_order_late",
@@ -106,6 +132,7 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     severity: "yellow",
     rule: ["inkop"],
     listHref: "/inkop/ordrar?status=late",
+    area: "inkop",
   },
   {
     kind: "manufacturing_order_late",
@@ -113,6 +140,7 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     severity: "yellow",
     rule: ["tillverkning"],
     listHref: "/tillverkning/ordrar?status=late",
+    area: "tillverkning",
   },
   {
     kind: "purchase_needed",
@@ -120,6 +148,7 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     severity: "yellow",
     rule: ["inkop"],
     listHref: "/tillverkning/behovsberakning",
+    area: "inkop",
   },
   // Fakturaskanning: files in the Fakturainkorg still to review (new +
   // interpreted) — Att granska.
@@ -129,6 +158,7 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     severity: "yellow",
     rule: ["inkop"],
     listHref: "/inkop/fakturainkorg",
+    area: "inkop",
   },
   {
     kind: "manufacture_needed",
@@ -136,6 +166,7 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     severity: "yellow",
     rule: ["tillverkning"],
     listHref: "/tillverkning/behovsberakning",
+    area: "tillverkning",
   },
   // Bankavstämning: statement entries older than BANK_UNRECONCILED_DAYS
   // without a matching — a bookkeeping to-do, not an error.
@@ -145,6 +176,7 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     severity: "yellow",
     rule: ["ekonomi"],
     listHref: "/ekonomi/bankavstamning",
+    area: "ekonomi",
   },
   // Kostnadsställen och projekt: a booked row on an account with Kräver
   // kostnadsställe but without one — the automatkontering books anyway and
@@ -155,6 +187,7 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     severity: "yellow",
     rule: ["ekonomi"],
     listHref: "/ekonomi/verifikat",
+    area: "ekonomi",
   },
   // Kvalitet: open avvikelser whose Åtgärd senast has passed.
   {
@@ -163,6 +196,7 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     severity: "yellow",
     rule: ["kvalitet"],
     listHref: "/kvalitet/avvikelser?overdue=1",
+    area: "kvalitet",
   },
 ];
 

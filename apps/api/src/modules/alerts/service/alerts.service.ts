@@ -535,6 +535,7 @@ export function createAlertsService(deps: {
           return {
             kind,
             label: def.label,
+            area: def.area,
             severity: groupSeverity(kind, items),
             count: items.length,
             listHref: def.listHref,
@@ -548,6 +549,7 @@ export function createAlertsService(deps: {
           return {
             kind,
             label: def.label,
+            area: def.area,
             severity: def.severity,
             count: 0,
             listHref: def.listHref,

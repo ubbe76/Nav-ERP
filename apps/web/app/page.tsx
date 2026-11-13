@@ -11,7 +11,7 @@ import { Nav } from "../components/ui/Nav";
 import { PermissionsProvider } from "../components/PermissionsProvider";
 import { Button } from "../components/ui/Button";
 import { FlowStrip, type FlowStation } from "../components/dashboard/FlowStrip";
-import { AttentionCard, type AttentionItem } from "../components/dashboard/AttentionCard";
+import { AttentionCard } from "../components/dashboard/AttentionCard";
 import { OrdersCard } from "../components/dashboard/OrdersCard";
 import { StockActivityCard } from "../components/dashboard/StockActivityCard";
 import { CustomizeOverview } from "../components/dashboard/CustomizeOverview";
@@ -25,7 +25,7 @@ import { FavoritesProvider } from "../components/FavoritesProvider";
 import { getCurrentUser, apiGet } from "../lib/api";
 import { loadShellSettings } from "../lib/favorites";
 import { UserPrefsProvider } from "../components/UserPrefsProvider";
-import { supplierSections, type AlertKind, type AlertsResponse } from "../lib/alerts";
+import { attentionSections, type AlertKind, type AlertsResponse } from "../lib/alerts";
 import {
   OVERVIEW_CARDS,
   OVERVIEW_CARD_ALERT_KIND,
@@ -58,8 +58,6 @@ import type {
 } from "../lib/types";
 
 const ROLE_LABELS: Record<string, string> = { admin: "Administratör", supervisor: "Arbetsledare", user: "Användare" };
-
-const MAX_ATTENTION_ROWS = 7;
 
 export default async function OverviewPage() {
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
@@ -236,31 +234,9 @@ export default async function OverviewPage() {
     },
   ];
 
-  // "Att bevaka" is Aviseringar: the first rows over all groups in their
-  // fixed order (red before yellow), the rest behind "Visa alla".
-  // Behöver beställas carries a supplier subheading per group.
-  const attentionItems: AttentionItem[] = (alerts?.groups ?? [])
-    .flatMap((g) => {
-      if (g.kind === "purchase_needed" && g.supplierGroups) {
-        return supplierSections(g).flatMap((sec) =>
-          sec.items.map((item) => ({
-            group: g,
-            item,
-            heading: sec.group.supplierId === null ? "Utan förvald leverantör" : (sec.group.supplierName ?? undefined),
-          }))
-        );
-      }
-      return g.items.map((item) => ({ group: g, item, heading: undefined as string | undefined }));
-    })
-    .slice(0, MAX_ATTENTION_ROWS)
-    .map(({ group, item, heading }): AttentionItem => ({
-      ...(heading ? { heading } : {}),
-      key: `${group.kind}-${item.key}`,
-      href: item.href,
-      tone: item.severity,
-      primary: item.primary,
-      secondary: item.secondary ? `${group.label} · ${item.secondary}` : group.label,
-    }));
+  // "Att bevaka" is Aviseringar in short: one row per kind with its count,
+  // under the page's area headings.
+  const attention = attentionSections(alerts?.groups ?? []);
   const attentionTotal = (alerts?.groups ?? []).reduce((sum, g) => sum + g.count, 0);
 
   // The transactions endpoint is sorted newest-first, so the six rows are
@@ -291,7 +267,7 @@ export default async function OverviewPage() {
     attention: (
       <AttentionCard
         key="attention"
-        items={attentionItems}
+        sections={attention}
         totalCount={attentionTotal}
         emptyText={alerts === null ? "Kunde inte läsa aviseringarna just nu." : undefined}
       />

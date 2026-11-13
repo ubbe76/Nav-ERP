@@ -76,7 +76,7 @@ Installationen kräver att Nav nås över **https** — en installation som öpp
 
 Startsidan visar materialflödet i fyra stationer — Inköp, Lager, Tillverkning, Försäljning — med antal öppna ordrar och varningar (försenade ordrar, negativa saldon). Varje station är klickbar: Inköp, Tillverkning och Försäljning öppnar modulens sida, och Lager landar direkt på saldolistan som stationens siffror beskriver. Under den finns:
 
-- **Att bevaka** — de sju första raderna ur [Aviseringar](/hjalp/aviseringar): negativa saldon, försenade ordrar, förfallna fakturor och annat som behöver åtgärdas, röda före gula. **Visa alla (N)** öppnar sidan Aviseringar, och finns inget att bevaka står det "Inget att bevaka just nu." Raderna du ser beror på din behörighetsgrupp. Raderna för **Behöver beställas** står under leverantörsrubriker, **Utan förvald leverantör** först. Signalerna under stationerna ("2 försenade", "3 med negativt saldo") räknas ur samma aviseringar, så kortet och stationerna visar alltid samma sak. Saknar du behörighet till en typ står det "Se Aviseringar" i stället för en siffra. En order räknas som försenad när någon av raderna som inte är fullt mottagen/levererad har passerat sitt leveransdatum; offerter och levererade ordrar räknas aldrig.
+- **Att bevaka** — en sammanfattning av [Aviseringar](/hjalp/aviseringar#att-bevaka-pa-oversikten): en rad per typ med antalet (negativa saldon, försenade ordrar, förfallna fakturor och annat som behöver åtgärdas) under områdesrubriker som **Inköp** och **Försäljning**, röda före gula inom området. En rad öppnar sidan Aviseringar vid den typen. **Visa alla (N)** öppnar sidan, och finns inget att bevaka står det "Inget att bevaka just nu." Typerna du ser beror på din behörighetsgrupp. Signalerna under stationerna ("2 försenade", "3 med negativt saldo") räknas ur samma aviseringar, så kortet och stationerna visar alltid samma sak. Saknar du behörighet till en typ står det "Se Aviseringar" i stället för en siffra. En order räknas som försenad när någon av raderna som inte är fullt mottagen/levererad har passerat sitt leveransdatum; offerter och levererade ordrar räknas aldrig.
 - **Pågående tillverkning** och **Senaste lagerhändelser**.
 
 Stationerna, raderna och knappen **+ Ny order** följer din behörighetsgrupp: det du inte får öppna visas som vanlig text i stället för som länk, och **+ Ny order** visas bara för den som kan öppna tillverkningsorderlistan.
@@ -90,7 +90,7 @@ Standardvyn har fyra kort:
 | Kort | Innehåll |
 |---|---|
 | **Materialflöde** | De fyra stationerna Inköp, Lager, Tillverkning och Försäljning |
-| **Att bevaka** | De första raderna ur [Aviseringar](/hjalp/aviseringar) |
+| **Att bevaka** | Antalet per typ ur [Aviseringar](/hjalp/aviseringar), per område |
 | **Pågående tillverkning** | De första pågående och frisläppta tillverkningsordrarna |
 | **Senaste lagerhändelser** | De sex senaste lagerrörelserna |
 
