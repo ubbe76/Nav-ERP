@@ -31,7 +31,7 @@ import { createPaymentRepository } from "../src/modules/sales/repository/payment
 import { createPaymentService } from "../src/modules/sales/service/payment.service.js";
 import { AccountingPeriodLockedError } from "../src/modules/economy/service/accounting-period-lock.js";
 import { MissingPostingAccountError } from "../src/modules/economy/service/verification-poster.js";
-import { pdfText } from "./helpers/pdf.js";
+import { fact, pdfText } from "./helpers/pdf.js";
 import {
   DEFAULT_POSTING_SETTINGS,
   setupPostingBaseline,
@@ -565,7 +565,7 @@ describe("kundreskontra — betalningspåminnelser", () => {
 
     const text = pdfText(sentMails[0]!.attachments![0]!.content);
     expect(text).toContain("Betalningspåminnelse 1");
-    expect(text).toContain(`Faktura ${invoice.invoiceNumber}`);
+    expect(text).toContain(fact("Faktura", `${invoice.invoiceNumber}`));
     expect(text).toContain("Kund AB");
     expect(text).toContain("Fakturabelopp inkl. moms");
     expect(text).toContain("Betalt/krediterat");

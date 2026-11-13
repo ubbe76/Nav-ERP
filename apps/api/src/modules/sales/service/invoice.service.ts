@@ -622,7 +622,7 @@ export function createInvoiceService(
     const sign = isCredit ? -1 : 1;
 
     // Credit notes reference their source invoice's OWN FA number in the
-    // header (the dictionary's meta.creditsInvoice line).
+    // header (the fact meta.creditedInvoice, "Krediterar faktura").
     let creditedInvoiceNumber: string | null = null;
     if (isCredit && invoice.creditedInvoiceId) {
       const source = await repo.findRawById(invoice.creditedInvoiceId);

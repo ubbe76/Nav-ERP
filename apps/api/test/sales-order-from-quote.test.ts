@@ -19,7 +19,7 @@ import { documentKindSql } from "../src/modules/sales/repository/document-kind.j
 import { quoteOutcome } from "../src/modules/reports/service/quote-followup.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { addDays, stockholmToday } from "../src/modules/system/service/delivery-days.js";
-import { pdfText } from "./helpers/pdf.js";
+import { fact, pdfText } from "./helpers/pdf.js";
 import { testArticleService } from "./helpers/services.js";
 import { parsed } from "./helpers/parsed.js";
 
@@ -589,14 +589,14 @@ describe("the documents and the audit trail", () => {
     expect(confirmation.statusCode).toBe(200);
     const text = pdfText(confirmation.rawPayload);
     expect(text).toContain(created.orderNumber);
-    expect(text).toContain(`Vår offert: ${quote.orderNumber}`);
+    expect(text).toContain(fact("Vår offert", quote.orderNumber));
 
     // A quote confirmed the old way prints its own number, as before.
     const old = await makeQuote();
     const confirmed = await call(admin, "POST", `/sales-orders/${old.order.id}/confirm`);
     expect(confirmed.statusCode).toBe(200);
     const oldText = pdfText((await call(admin, "GET", `/sales-orders/${old.order.id}/pdf?variant=confirmation`)).rawPayload);
-    expect(oldText).toContain(`Vår offert: ${old.order.orderNumber}`);
+    expect(oldText).toContain(fact("Vår offert", old.order.orderNumber));
     // Ny kundorder has none.
     const direct = await makeQuote({ confirm: true });
     const directText = pdfText((await call(admin, "GET", `/sales-orders/${direct.order.id}/pdf?variant=confirmation`)).rawPayload);

@@ -13,7 +13,7 @@ import {
   SalesOrderRowNotFoundError,
 } from "../src/modules/sales/service/sales.service.js";
 import { resolvePrice } from "../src/modules/sales/service/price-resolver.js";
-import { pdfText } from "./helpers/pdf.js";
+import { fact, pdfText } from "./helpers/pdf.js";
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockCountRepository } from "../src/modules/stock/repository/stock-count.repository.js";
 import { createStockService, LocationUnderStockCountError } from "../src/modules/stock/service/stock.service.js";
@@ -390,7 +390,7 @@ describe("delivery note (följesedel) PDF", () => {
 
     const text = pdfText(pdf);
     expect(text).toContain(`Följesedel ${second.deliveryNumber}`);
-    expect(text).toContain(`Ordernummer: ${order.orderNumber}`);
+    expect(text).toContain(fact("Ordernummer", order.orderNumber));
     // rowA: 6 delivered THIS occasion, 4 delivered before it (the first
     // occasion's booking) — adjacent doc.text() calls concatenate with no
     // separator, same convention document-pdf-amounts.test.ts relies on.

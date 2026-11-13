@@ -19,7 +19,7 @@ import { createDocumentPdfService } from "../src/modules/mail/service/document-p
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
-import { pdfText } from "./helpers/pdf.js";
+import { fact, pdfText } from "./helpers/pdf.js";
 import { parsed } from "./helpers/parsed.js";
 
 // Kundens förfrågan (migration 0139): the customer's inquiry/RFQ reference on
@@ -128,14 +128,14 @@ describe("documents", () => {
   it("the quote prints Er förfrågan and no Ert ordernummer when it has none", async () => {
     const order = await makeOrder({ customerInquiryNumber: "RFQ-2026-17" });
     const text = pdfText((await salesService.getSalesOrderPdf(order.id, "quote")).content);
-    expect(text).toContain("Er förfrågan: RFQ-2026-17");
+    expect(text).toContain(fact("Er förfrågan", "RFQ-2026-17"));
     expect(text).not.toContain("Ert ordernummer");
   });
 
   it("an older quote with a customer order number still prints it", async () => {
     const order = await makeOrder({ customerOrderNumber: "PO-4711" });
     const text = pdfText((await salesService.getSalesOrderPdf(order.id, "quote")).content);
-    expect(text).toContain("Ert ordernummer: PO-4711");
+    expect(text).toContain(fact("Ert ordernummer", "PO-4711"));
     expect(text).not.toContain("Er förfrågan");
   });
 
@@ -144,14 +144,14 @@ describe("documents", () => {
     await salesService.confirm(order.id);
     await salesService.updateSalesOrderHeader(order.id, { customerOrderNumber: "PO-4711" });
     const text = pdfText((await salesService.getSalesOrderPdf(order.id, "confirmation")).content);
-    expect(text).toContain("Ert ordernummer: PO-4711");
-    expect(text).toContain("Er förfrågan: RFQ-2026-17");
+    expect(text).toContain(fact("Ert ordernummer", "PO-4711"));
+    expect(text).toContain(fact("Er förfrågan", "RFQ-2026-17"));
   });
 
   it("no Er förfrågan line on a confirmation without one", async () => {
     const order = await makeOrder({ customerOrderNumber: "PO-4711", confirm: true });
     const text = pdfText((await salesService.getSalesOrderPdf(order.id, "confirmation")).content);
-    expect(text).toContain("Ert ordernummer: PO-4711");
+    expect(text).toContain(fact("Ert ordernummer", "PO-4711"));
     expect(text).not.toContain("Er förfrågan");
   });
 });

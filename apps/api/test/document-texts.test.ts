@@ -103,9 +103,9 @@ describe("DOCUMENT_TEXTS — completeness", () => {
     expect(en.filenames.deviation("Complaint notice", "AV-1")).toBe("Complaint-notice-AV-1.pdf");
   });
 
-  it("the Swedish credit-note line keeps the historical 'Ordernummer:' wording; the English one reads on its own", () => {
-    expect(DOCUMENT_TEXTS.sv.meta.creditsInvoice("FA-7")).toBe("Ordernummer: Krediterar faktura FA-7");
-    expect(DOCUMENT_TEXTS.en.meta.creditsInvoice("FA-7")).toBe("Credit note for invoice FA-7");
+  it("the credit note names the invoice it credits as a fact in the header box", () => {
+    expect(DOCUMENT_TEXTS.sv.meta.creditedInvoice).toBe("Krediterar faktura");
+    expect(DOCUMENT_TEXTS.en.meta.creditedInvoice).toBe("Credit note for invoice");
   });
 
   it("country names: Swedish list as before, English list covers the same codes", () => {

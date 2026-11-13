@@ -24,7 +24,7 @@ import { createSystemRepository } from "../src/modules/system/repository/system.
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { createVerificationPoster } from "../src/modules/economy/service/verification-poster.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
-import { pdfText } from "./helpers/pdf.js";
+import { fact, pdfText } from "./helpers/pdf.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/services.js";
 import { vatRateGroupId } from "./helpers/vat-group.js";
 import { parsed } from "./helpers/parsed.js";
@@ -330,7 +330,7 @@ describe("samlingsfakturering — invoice PDF prints the order per row", () => {
     expect(text).toContain(`Order ${a.order.orderNumber}`);
     expect(text).toContain("Ert ordernr PO-999");
     expect(text).toContain(`Order ${b.order.orderNumber}`);
-    expect(text).toContain("Vårt leverantörsnr hos er: LEV-4711");
+    expect(text).toContain(fact("Vårt leverantörsnr hos er", "LEV-4711"));
   });
 });
 

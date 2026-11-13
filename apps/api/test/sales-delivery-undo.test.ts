@@ -466,12 +466,14 @@ describe("Ångra utleverans — följesedel, pallkort and listings", () => {
     const secondText = pdfText((await salesService.deliveryNotePdf(second.deliveryId)).pdf);
     expect(secondText).toMatch(/Ångrad \d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
     expect(secondText).toContain(`${articleB.articleNumber}Testartikel5st0`);
-    // Only a row is undone — the header carries no Ångrad line.
-    expect(secondText).not.toMatch(/Leveransdatum: \d{4}-\d{2}-\d{2}Ångrad/);
+    // Only a row is undone — the header (everything before the column
+    // headings) carries no Ångrad line.
+    const header = (text: string) => text.slice(0, text.indexOf("ArtikelBenämning"));
+    expect(header(secondText)).not.toMatch(/Ångrad/);
 
     await salesService.undoDeliveryRow(order.id, first.deliveryId, first.byOrderRow(rowA.id).id, user.id);
     const firstText = pdfText((await salesService.deliveryNotePdf(first.deliveryId)).pdf);
-    expect(firstText).toMatch(/Leveransdatum: \d{4}-\d{2}-\d{2}Ångrad \d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
+    expect(header(firstText)).toMatch(/Ångrad \d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
 
     const list = await salesService.listDeliveries(order.id);
     expect(list.find((x) => x.id === first.deliveryId)).toMatchObject({ rowCount: 1, undoneRowCount: 1 });

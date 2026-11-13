@@ -33,7 +33,7 @@ import { createSystemRepository } from "../src/modules/system/repository/system.
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { createVerificationPoster } from "../src/modules/economy/service/verification-poster.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
-import { pdfText } from "./helpers/pdf.js";
+import { fact, pdfText } from "./helpers/pdf.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/services.js";
 import { vatRateGroupId } from "./helpers/vat-group.js";
 import { parsed } from "./helpers/parsed.js";
@@ -1573,7 +1573,7 @@ describe("customer invoice — PDF and email", () => {
     const text = pdfText(content);
 
     expect(text).toContain("Kreditfaktura FA-");
-    expect(text).toContain(`Krediterar faktura ${issued!.invoiceNumber}`);
+    expect(text).toContain(fact("Krediterar faktura", `${issued!.invoiceNumber}`));
     expect(text).toContain("Att betala");
     expect(text).toContain(sv(-125)); // negated total, quantities stay positive
     expect(text).toContain("2"); // the row's quantity is still printed positive
@@ -1725,8 +1725,8 @@ describe("customer invoice — customer number snapshot", () => {
     // Renumber the customer — the issued invoice keeps the frozen snapshot.
     await salesService.updateCustomer(customer.id, { customerNumber: "NYTT-99" });
     const { content } = await invoiceService.renderPdf(issued!.id);
-    expect(pdfText(content)).toContain(`Kundnr: ${raw!.customerNumber}`);
-    expect(pdfText(content)).not.toContain("Kundnr: NYTT-99");
+    expect(pdfText(content)).toContain(fact("Kundnr", `${raw!.customerNumber}`));
+    expect(pdfText(content)).not.toContain(fact("Kundnr", "NYTT-99"));
   });
 });
 

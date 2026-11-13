@@ -214,6 +214,13 @@ function textOperations(stream: string): { font: string | null; y: number | null
   return ops;
 }
 
+// A fact in the outgoing documents' header box (drawAddressesAndFacts): the
+// label and the value are two text runs, which pdfText joins without a
+// separator — "Er referens" + "Anna" reads as "Er referensAnna".
+export function fact(label: string, value: string): string {
+  return `${label}${value}`;
+}
+
 // Extracts the rendered text from a PDF buffer, page after page, so tests
 // can assert on printed strings. Lines are concatenated without separators.
 // Every character comes back as printed — a sv-SE number keeps its
