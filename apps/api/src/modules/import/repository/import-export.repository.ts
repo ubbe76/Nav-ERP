@@ -1,3 +1,4 @@
+import { trackedSql } from "../../stock/service/batch-tracking.js";
 // The reads behind the import exports (#35, service/import-export.ts): each
 // register as the records its row builder takes — codes and numbers instead
 // of ids, numbers as numbers. Read-only.
@@ -116,7 +117,8 @@ export function createImportExportRepository(db: Db | Tx) {
             safetyStock: articles.safetyStock,
             stockControlled: articles.stockControlled,
             forecastControlled: articles.forecastControlled,
-            batchTracked: articles.batchTracked,
+            tracking: articles.tracking,
+            shelfLifeDays: articles.shelfLifeDays,
             manufacturingLeadTimeDays: articles.manufacturingLeadTimeDays,
             quantityPerPackage: articles.quantityPerPackage,
             primarySupplierNumber: suppliers.supplierNumber,
@@ -411,38 +413,51 @@ export function createImportExportRepository(db: Db | Tx) {
             // batch number, or "Okänd" for the rows without a batch — so the
             // file reads back as the saldoimport's cell rows. Every other
             // article sums over whatever batches its log holds, as before.
-            batchTracked: articles.batchTracked,
+            stockTracked: trackedSql(),
             batchNumber: stockBatches.batchNumber,
+            batchKind: stockBatches.kind,
+            batchDate: stockBatches.batchDate,
+            expiresOn: stockBatches.expiresOn,
           })
           .from(stockTransactions)
           .innerJoin(articles, eq(articles.id, stockTransactions.articleId))
           .innerJoin(stockLocations, eq(stockLocations.id, stockTransactions.locationId))
           .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
-          .leftJoin(stockBatches, and(eq(stockBatches.id, stockTransactions.batchId), eq(articles.batchTracked, true)))
+          .leftJoin(stockBatches, and(eq(stockBatches.id, stockTransactions.batchId), trackedSql()))
           .where(condition)
           .groupBy(
             articles.articleNumber,
-            articles.batchTracked,
+            articles.tracking,
+            articles.serialAssignedAt,
             warehouses.name,
             stockLocations.name,
             stockLocations.id,
             stockBatches.id,
-            stockBatches.batchNumber
+            stockBatches.batchNumber,
+            stockBatches.kind,
+            stockBatches.batchDate,
+            stockBatches.expiresOn
           )
           .having(sql`sum(${stockTransactions.quantityDelta}) <> 0`)
       );
       return rows
-        .map(({ batchTracked, batchNumber, ...row }) => ({
+        .map(({ stockTracked, batchNumber, batchKind, batchDate, expiresOn, ...row }) => ({
           ...row,
           quantity: Number(row.quantity),
-          batchNumber: batchTracked ? (batchNumber ?? UNKNOWN_BATCH_LABEL) : "",
+          // A serial number goes in its own column (the import's cell key
+          // there); Okänd and batches in Batch.
+          batchNumber: !stockTracked || batchKind === "serial" ? "" : (batchNumber ?? UNKNOWN_BATCH_LABEL),
+          serialNumber: stockTracked && batchKind === "serial" ? (batchNumber ?? "") : "",
+          batchDate: batchDate ?? "",
+          expiresOn: expiresOn ?? "",
         }))
         .sort(
           (a, b) =>
             byText(a.articleNumber, b.articleNumber) ||
             byText(a.warehouseName, b.warehouseName) ||
             byText(a.locationName, b.locationName) ||
-            byText(a.batchNumber, b.batchNumber)
+            // Okänd and the batches, then the serial numbers.
+            byText(a.batchNumber || `\uffff${a.serialNumber}`, b.batchNumber || `\uffff${b.serialNumber}`)
         );
     },
 

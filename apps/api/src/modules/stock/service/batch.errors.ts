@@ -10,9 +10,16 @@ export class BatchInsufficientError extends Error {
   constructor(
     readonly batchNumber: string,
     readonly available: number,
-    readonly requested: number
+    readonly requested: number,
+    // Chosen serial numbers (steg 4): the ones named are not in stock on a
+    // place the draw may take from.
+    readonly serial = false
   ) {
-    super(`Batch ${batchNumber} räcker inte: ${available} tillgängligt, ${requested} begärt`);
+    super(
+      serial
+        ? `Serienummer ${batchNumber} finns inte i lager på en valbar plats`
+        : `Batch ${batchNumber} räcker inte: ${available} tillgängligt, ${requested} begärt`
+    );
     this.name = "BatchInsufficientError";
   }
 }
@@ -67,10 +74,193 @@ export class ArticleNotBatchTrackableError extends Error {
   }
 }
 
+// --- Serienummer (etapp 2, migration 0215) ---
+
+// The number exists on the article as the OTHER sort: one number is either a
+// batch or a serial number (the unique index covers both).
+export class BatchKindMismatchError extends Error {
+  constructor(
+    readonly batchNumber: string,
+    readonly existingKind: "batch" | "serial"
+  ) {
+    super(
+      existingKind === "batch"
+        ? `${batchNumber} finns redan som batch på artikeln och kan inte användas som serienummer`
+        : `${batchNumber} finns redan som serienummer på artikeln och kan inte användas som batch`
+    );
+    this.name = "BatchKindMismatchError";
+  }
+}
+
+// A serienummerstyrd article moves in whole styck.
+export class SerialQuantityNotIntegerError extends Error {
+  constructor(
+    readonly articleNumber: string,
+    readonly quantity: number
+  ) {
+    super(`Artikeln ${articleNumber} är serienummerstyrd — antalet måste vara ett helt antal styck i grundenheten (${quantity})`);
+    this.name = "SerialQuantityNotIntegerError";
+  }
+}
+
+// An inflow of a serienummerstyrd article (numbers created vid inleverans)
+// without its numbers (beslut 5).
+export class SerialNumbersRequiredError extends Error {
+  constructor(readonly articleNumber: string) {
+    super(`Artikeln ${articleNumber} är serienummerstyrd — ange ett serienummer per styck`);
+    this.name = "SerialNumbersRequiredError";
+  }
+}
+
+// Serial numbers sent for an article that takes none (not serienummerstyrd,
+// or its numbers are created vid utleverans) — refused, never dropped.
+export class ArticleNotSerialTrackedError extends Error {
+  constructor(readonly articleNumber: string) {
+    super(`Artikeln ${articleNumber} tar inga serienummer här`);
+    this.name = "ArticleNotSerialTrackedError";
+  }
+}
+
+// The numbers are not as many as the styck, or one number is given twice.
+export class SerialCountMismatchError extends Error {
+  constructor(
+    readonly expected: number,
+    readonly given: number,
+    readonly duplicate: string | null = null
+  ) {
+    super(
+      duplicate !== null
+        ? `Serienummer ${duplicate} förekommer flera gånger`
+        : `Antalet serienummer (${given}) stämmer inte med antalet styck (${expected})`
+    );
+    this.name = "SerialCountMismatchError";
+  }
+}
+
+// More numbers in one movement than the system takes at a time.
+export class SerialNumbersTooManyError extends Error {
+  constructor(
+    readonly count: number,
+    readonly max: number
+  ) {
+    super(`Högst ${max} serienummer kan bokas åt gången (${count}) — dela upp rörelsen`);
+    this.name = "SerialNumbersTooManyError";
+  }
+}
+
+// An inflow of a number that already stands in stock.
+export class SerialAlreadyInStockError extends Error {
+  constructor(
+    readonly serialNumber: string,
+    readonly locationName: string | null
+  ) {
+    super(`Serienummer ${serialNumber} finns redan i lager${locationName ? ` (${locationName})` : ""}`);
+    this.name = "SerialAlreadyInStockError";
+  }
+}
+
+// A series whose next number no longer fits the column (varchar 50).
+export class SerialNumberTooLongError extends Error {
+  constructor(
+    readonly seriesKey: string,
+    readonly number: string,
+    readonly width: number
+  ) {
+    super(`Serienummerserien ger ${number}, som är längre än ${width} tecken — ändra serien under System → Nummerserier`);
+    this.name = "SerialNumberTooLongError";
+  }
+}
+
+// Inventering (steg 4): a serial number's row is counted 0 or 1.
+export class SerialCountNotUnitError extends Error {
+  constructor(readonly serialNumber: string) {
+    super(`Serienummer ${serialNumber} räknas som 0 (saknas) eller 1 (finns)`);
+    this.name = "SerialCountNotUnitError";
+  }
+}
+
+// Inventering (steg 4): the number stands on ANOTHER place — move it first.
+export class SerialOnOtherLocationError extends Error {
+  constructor(
+    readonly serialNumber: string,
+    readonly locationName: string
+  ) {
+    super(`Serienummer ${serialNumber} står på ${locationName} — flytta det hit först`);
+    this.name = "SerialOnOtherLocationError";
+  }
+}
+
+// Serienummer skapas vid utleverans (beslut 16–18): a number typed or
+// scanned at the delivery already exists on the article — delivered before,
+// burnt by an undone delivery, or a batch. A number is given once.
+export class SerialNumberTakenError extends Error {
+  constructor(readonly serialNumber: string) {
+    super(`Serienummer ${serialNumber} är redan använt på artikeln — välj ett annat`);
+    this.name = "SerialNumberTakenError";
+  }
+}
+
+// The article's Serienummerserie is not a serial number series.
+export class SerialSeriesInvalidError extends Error {
+  constructor(readonly seriesKey: string) {
+    super(`Nummerserien ${seriesKey} är ingen serienummerserie`);
+    this.name = "SerialSeriesInvalidError";
+  }
+}
+
+// The database guard (trigger stock_transactions_serial_unit, SQLSTATE
+// NV003 — NV002 is the anonymized employee's, 0170): a serial number's balance would be something else than 0 or 1.
+// Never reached when the writers follow the rule — the application answers
+// first with one of the errors above.
+export const SERIAL_BALANCE_VIOLATED = {
+  code: "serial-balance-violated",
+  message: "Ett serienummer kan bara finnas i ett exemplar i lager — rörelsen bokades inte",
+} as const;
+export function isSerialBalanceViolation(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const { code, cause } = err as { code?: string; cause?: unknown };
+  return code === "NV003" || (typeof cause === "object" && cause !== null && (cause as { code?: string }).code === "NV003");
+}
+
+// An inflow names an existing batch with ANOTHER utgångsdatum than the batch
+// has — never silently overwritten; corrected with PATCH /stock/batches/:id.
+export class BatchExpiryMismatchError extends Error {
+  constructor(
+    readonly batchNumber: string,
+    readonly expiresOn: string,
+    readonly requested: string
+  ) {
+    super(`Batch ${batchNumber} har redan utgångsdatum ${expiresOn} — ${requested} skiljer sig. Rätta batchens datum under Lager → Spårbarhet eller ange samma datum`);
+    this.name = "BatchExpiryMismatchError";
+  }
+}
+
+// PATCH /stock/batches/:id: the new number is another batch of the article.
+export class DuplicateBatchNumberError extends Error {
+  constructor(readonly batchNumber: string) {
+    super(`Batchnumret ${batchNumber} finns redan på artikeln`);
+    this.name = "DuplicateBatchNumberError";
+  }
+}
+
 // The HTTP status of a batch error, null for anything else.
 export function batchErrorStatus(err: unknown): 400 | 404 | 409 | null {
   if (err instanceof StockBatchNotFoundError) return 404;
   if (err instanceof BatchInsufficientError || err instanceof BatchTrackingDisabledError || err instanceof BatchTrackingInUseError) return 409;
+  if (err instanceof BatchExpiryMismatchError || err instanceof DuplicateBatchNumberError) return 409;
+  if (err instanceof BatchKindMismatchError || err instanceof SerialAlreadyInStockError || err instanceof SerialNumberTooLongError) return 409;
+  if (err instanceof SerialOnOtherLocationError || err instanceof SerialNumberTakenError) return 409;
+  if (err instanceof SerialCountNotUnitError) return 400;
+  if (
+    err instanceof SerialQuantityNotIntegerError ||
+    err instanceof SerialNumbersRequiredError ||
+    err instanceof ArticleNotSerialTrackedError ||
+    err instanceof SerialCountMismatchError ||
+    err instanceof SerialNumbersTooManyError ||
+    err instanceof SerialSeriesInvalidError
+  ) {
+    return 400;
+  }
   if (err instanceof BatchNotTrackedError || err instanceof BatchNumberReservedError || err instanceof ArticleNotBatchTrackableError) return 400;
   return null;
 }

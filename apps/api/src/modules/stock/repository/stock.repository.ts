@@ -21,10 +21,10 @@ import {
 import { resolveStockLocation } from "../service/location-resolver.js";
 import { deactivateEmptyLocation, locationHoldsStock } from "../service/location-lifecycle.js";
 import { assertLocationNotUnderCount } from "../service/count-guard.js";
-import { lockArticlesForOutflow } from "../service/outflow-locations.js";
+import { lockArticlesForOutflow, chosenSerials } from "../service/outflow-locations.js";
 import { isStockedArticleType } from "../service/stocked-article.js";
 import { allocateBatchOutflow, articlePlacePreference, compareOutflowLocations, FALLBACK_LOCATION_NAME, withBatchRemainder } from "../service/outflow-allocation.js";
-import { isCheckViolation } from "../../system/service/db-errors.js";
+import { isCheckViolation, isUniqueViolation } from "../../system/service/db-errors.js";
 import { stockValuedAt } from "./valued-at.js";
 import { readArticleLocations, replaceArticleLocations } from "./article-locations.js";
 import {
@@ -37,6 +37,7 @@ import {
   type ListQuery,
   type ListStockTransactionsQuery,
   type ListStockBatchesQuery,
+  type UpdateStockBatchInput,
   type StockTransactionReference,
   type ListStockBalancesQuery,
   type ListStockLocationRegisterQuery,
@@ -50,9 +51,12 @@ import {
   round4,
   UNKNOWN_BATCH_LABEL,
 } from "@navet/shared";
-import { BatchNotTrackedError } from "../service/batch.errors.js";
-import { findArticleBatch, getOrCreateBatch } from "../service/batches.js";
-import { isBatchTrackedArticle } from "../service/batch-tracking.js";
+import { ArticleNotSerialTrackedError, BatchNotTrackedError, DuplicateBatchNumberError, SerialCountMismatchError } from "../service/batch.errors.js";
+import { stockTrackingOf } from "../service/article-tracking.js";
+import { findArticleBatch, getOrCreateBatch, normalizeBatchNumber } from "../service/batches.js";
+import { stockholmToday } from "../../system/service/delivery-days.js";
+import { isTrackedArticle, trackedSql, trackingOf } from "../service/batch-tracking.js";
+import { assertSerialsOutOfStock, getOrCreateSerials, lockSerials } from "../service/serial-numbers.js";
 import { articleBatchBalances, batchCellsForArticles, pickBatchCellsForArticles } from "./batch-balances.js";
 import { createBatchTraceReader, listStockBatches } from "./batch-trace.repository.js";
 import { traceBatch, type BatchTraceLimits } from "../service/batch-trace.js";
@@ -274,6 +278,29 @@ export function createStockRepository(db: Db) {
       return ids.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
     },
 
+    // Etiketter (#8 etapp 2): what a batch or serienummer label prints, in
+    // the order asked for. The sort is the row's own.
+    async labelBatches(ids: string[]) {
+      const found: { id: string; batchNumber: string; kind: "batch" | "serial"; articleNumber: string; articleName: string }[] = [];
+      for (let i = 0; i < ids.length; i += 1000) {
+        found.push(
+          ...(await db
+            .select({
+              id: stockBatches.id,
+              batchNumber: stockBatches.batchNumber,
+              kind: stockBatches.kind,
+              articleNumber: articles.articleNumber,
+              articleName: articles.name,
+            })
+            .from(stockBatches)
+            .innerJoin(articles, eq(articles.id, stockBatches.articleId))
+            .where(inArray(stockBatches.id, ids.slice(i, i + 1000))))
+        );
+      }
+      const byId = new Map(found.map((row) => [row.id, row]));
+      return ids.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
+    },
+
     async listLocations(query: ListStockLocationsQuery = { includeInactive: false }) {
       const rows = await db
         .select(locationColumns)
@@ -374,10 +401,12 @@ export function createStockRepository(db: Db) {
         if (!isStockedArticleType(subject.type)) throw new ServiceArticleNotStockedError(subject.articleNumber);
         // Batch (#8). The flag is read FOR KEY SHARE (batch-tracking.ts), so
         // a flag change in progress is waited out.
-        const batchTracked = await isBatchTrackedArticle(tx, input.articleId);
+        const sort = await trackingOf(tx, input.articleId);
+        const batchTracked = sort !== null;
         if ((input.batchNumber !== undefined || typeof input.batchId === "string") && !batchTracked) {
           throw new BatchNotTrackedError(subject.articleNumber);
         }
+        if (input.serialIds !== undefined && sort !== "serial") throw new ArticleNotSerialTrackedError(subject.articleNumber);
         // A decrease of a batchstyrd article is an outflow like any other:
         // the article lock every draw takes, BEFORE the place is resolved
         // (article → place) — the cells it is taken from must not be
@@ -400,9 +429,20 @@ export function createStockRepository(db: Db) {
               : input.batchId === null
                 ? { batchId: null, batchNumber: null }
                 : await findArticleBatch(tx, input.articleId, input.batchId).then((b) => ({ batchId: b.id, batchNumber: b.batchNumber }));
+          // Serienummer (steg 4): whole styck — a chosen number (batchId, one
+          // styck), several (serialIds) or the place's numbers oldest first;
+          // only the Okänd cell (batchId null) may be corrected by a fraction.
+          const serials =
+            sort === "serial" && input.batchId !== null
+              ? await chosenSerials(tx, input.articleId, subject.articleNumber, -input.quantityDelta, input)
+              : undefined;
+          if (sort === "serial" && input.batchId === null && input.serialIds !== undefined) {
+            throw new SerialCountMismatchError(-input.quantityDelta, input.serialIds.length);
+          }
           const cells = await batchCellsForArticles(tx, [input.articleId], { locationIds: [locationId] });
-          const allocation = allocateBatchOutflow(-input.quantityDelta, [], cells, { locationId, batch: chosen });
+          const allocation = allocateBatchOutflow(-input.quantityDelta, [], cells, { locationId, batch: chosen, batches: serials });
           const parts = withBatchRemainder(allocation.parts, allocation.remainder, locationId);
+          if (sort === "serial") await lockSerials(tx, parts.flatMap((part) => (part.batchId ? [part.batchId] : [])));
           const rows = await tx
             .insert(stockTransactions)
             .values(
@@ -432,9 +472,38 @@ export function createStockRepository(db: Db) {
         }
         // An inflow names its batch (created on first use); without one the
         // goods are Okänd.
+        //
+        // Serienummer (0215): on a serienummerstyrd article the number IS a
+        // serial number — one styck (the delta must be 1), which must not
+        // stand in stock already; its row is locked after the place. Without
+        // a number the goods are Okänd, in any quantity (old stock must be
+        // correctable).
+        let serial: { id: string } | null = null;
+        if (sort === "serial" && input.batchNumber !== undefined && input.quantityDelta > 0) {
+          if (input.quantityDelta !== 1) throw new SerialCountMismatchError(input.quantityDelta, 1);
+          [serial = null] = await getOrCreateSerials(tx, {
+            articleId: input.articleId,
+            serialNumbers: [input.batchNumber],
+            origin: "manual",
+            createdBy,
+            expiresOn: input.expiresOn,
+          });
+          await lockSerials(tx, [serial!.id]);
+          await assertSerialsOutOfStock(tx, [serial!.id]);
+        }
         const batch =
-          input.batchNumber !== undefined && input.quantityDelta > 0
-            ? await getOrCreateBatch(tx, { articleId: input.articleId, batchNumber: input.batchNumber, origin: "manual", createdBy })
+          serial !== null
+            ? serial
+            : input.batchNumber !== undefined && input.quantityDelta > 0
+            ? await getOrCreateBatch(tx, {
+                articleId: input.articleId,
+                batchNumber: input.batchNumber,
+                origin: "manual",
+                createdBy,
+                // Etapp 2: the new batch's utgångsdatum; another date than an
+                // existing batch has is refused (409 batch-expiry-mismatch).
+                expiresOn: input.expiresOn,
+              })
             : null;
 
         // Only inflows are a valuation event — an outflow doesn't get a cost.
@@ -519,13 +588,25 @@ export function createStockRepository(db: Db) {
         const transferId = randomUUID();
         for (const row of input.rows) {
           const [article] = await tx
-            .select({ articleNumber: articles.articleNumber, type: articles.type, batchTracked: articles.batchTracked })
+            .select({
+              articleNumber: articles.articleNumber,
+              type: articles.type,
+              batchTracked: trackedSql(),
+              tracking: articles.tracking,
+              serialAssignedAt: articles.serialAssignedAt,
+            })
             .from(articles)
             .where(eq(articles.id, row.articleId));
           if (!article) throw new ArticleNotFoundError(row.articleId);
           if (!isStockedArticleType(article.type)) throw new ServiceArticleNotStockedError(article.articleNumber);
           // The row is locked above, so the flag cannot change under the move.
           if (!article.batchTracked && typeof row.batchId === "string") throw new BatchNotTrackedError(article.articleNumber);
+          const sort = stockTrackingOf(article);
+          if (row.serialIds !== undefined && sort !== "serial") throw new ArticleNotSerialTrackedError(article.articleNumber);
+          // Serienummer (steg 4): whole styck — except Okänd, old stock that
+          // may be any quantity — and the chosen numbers validated.
+          const serials = sort === "serial" && row.batchId !== null ? await chosenSerials(tx, row.articleId, article.articleNumber, row.quantity, row) : undefined;
+          if (sort === "serial" && row.batchId === null && row.serialIds !== undefined) throw new SerialCountMismatchError(row.quantity, row.serialIds.length);
 
           const [balance] = await tx
             .select({ quantityOnHand: sql<string>`coalesce(sum(${stockTransactions.quantityDelta}), 0)` })
@@ -559,7 +640,7 @@ export function createStockRepository(db: Db) {
                   ? { batchId: null }
                   : await findArticleBatch(tx, row.articleId, row.batchId).then((b) => ({ batchId: b.id, batchNumber: b.batchNumber }));
             const cells = await batchCellsForArticles(tx, [row.articleId], { locationIds: [from.id] });
-            const { parts, remainder } = allocateBatchOutflow(row.quantity, [], cells, { locationId: from.id, batch });
+            const { parts, remainder } = allocateBatchOutflow(row.quantity, [], cells, { locationId: from.id, batch, batches: serials });
             if (remainder > 0) {
               throw new InsufficientStockError(
                 `${article.articleNumber} (${UNKNOWN_BATCH_LABEL})`,
@@ -568,6 +649,10 @@ export function createStockRepository(db: Db) {
               );
             }
             moved = parts.map((part) => ({ quantity: part.quantity, batchId: part.batchId ?? null }));
+            // The numbers that move: their rows locked, sorted, after the
+            // places (both legs are written in one INSERT — the −1 first —
+            // so the guard sees the move as a whole).
+            if (sort === "serial") await lockSerials(tx, moved.flatMap((part) => (part.batchId ? [part.batchId] : [])));
           }
 
           await tx.insert(stockTransactions).values(
@@ -746,23 +831,63 @@ export function createStockRepository(db: Db) {
     // Batch (#8): the pick list's cells for the batchstyrda among these
     // articles, in the order Automatiskt draws (batch-balances.ts).
     async pickBatchCellsForArticles(articleIds: string[], opts: { locationId?: string } = {}) {
-      return pickBatchCellsForArticles(db, articleIds, opts);
+      return pickBatchCellsForArticles(db, articleIds, { ...opts, today: stockholmToday() });
     },
 
     // Batch (#8): GET /articles/:id/batch-balances — null = no such article.
     // An article that is not batchstyrd shows no batches: the ones it had
     // stay in the log and come back when the flag is switched on again.
     async articleBatchBalances(articleId: string) {
-      const [article] = await db.select({ batchTracked: articles.batchTracked }).from(articles).where(eq(articles.id, articleId));
+      const [article] = await db.select({ tracking: articles.tracking, stockTracked: trackedSql() }).from(articles).where(eq(articles.id, articleId));
       if (!article) return null;
-      return { batchTracked: article.batchTracked, batches: article.batchTracked ? await articleBatchBalances(db, articleId) : [] };
+      return {
+        batchTracked: article.tracking === "batch",
+        batches: article.stockTracked ? await articleBatchBalances(db, articleId, stockholmToday()) : [],
+      };
     },
 
     // Spårbarhet (#8): the batch register and one batch's trace. The whole
     // trace reads ONE snapshot (repeatable read, read only — PIA's pattern),
     // so a level never sees a movement the level before it did not.
     async listBatches(query: ListStockBatchesQuery) {
-      return listStockBatches(db, query);
+      return listStockBatches(db, query, stockholmToday());
+    },
+
+    // PATCH /stock/batches/:id (etapp 2): the batch's dates and number. The
+    // batch row is not part of the append-only log. The row is locked FOR
+    // UPDATE and compared, so the caller can log what actually changed; a
+    // number another batch of the article has (case-insensitively, the
+    // unique index) is DuplicateBatchNumberError, the reserved name
+    // BatchNumberReservedError. null = no such batch.
+    async updateBatch(batchId: string, input: UpdateStockBatchInput) {
+      return db.transaction(async (tx) => {
+        const columns = {
+          id: stockBatches.id,
+          articleId: stockBatches.articleId,
+          batchNumber: stockBatches.batchNumber,
+          expiresOn: stockBatches.expiresOn,
+          batchDate: stockBatches.batchDate,
+        };
+        const [before] = await tx.select(columns).from(stockBatches).where(eq(stockBatches.id, batchId)).for("update");
+        if (!before) return null;
+        const patch: { expiresOn?: string | null; batchDate?: string | null; batchNumber?: string } = {};
+        if (input.expiresOn !== undefined && input.expiresOn !== before.expiresOn) patch.expiresOn = input.expiresOn;
+        if (input.batchDate !== undefined && input.batchDate !== before.batchDate) patch.batchDate = input.batchDate;
+        if (input.batchNumber !== undefined) {
+          const batchNumber = normalizeBatchNumber(input.batchNumber);
+          if (batchNumber !== before.batchNumber) patch.batchNumber = batchNumber;
+        }
+        if (Object.keys(patch).length === 0) return { before, after: before, changed: false };
+        try {
+          // A savepoint, so the unique violation does not abort the caller's
+          // view of the transaction before it is mapped.
+          const [after] = await tx.transaction((sp) => sp.update(stockBatches).set(patch).where(eq(stockBatches.id, batchId)).returning(columns));
+          return { before, after: after!, changed: true };
+        } catch (err) {
+          if (isUniqueViolation(err) && patch.batchNumber !== undefined) throw new DuplicateBatchNumberError(patch.batchNumber);
+          throw err;
+        }
+      });
     },
 
     async traceBatch(batchId: string, limits?: BatchTraceLimits) {

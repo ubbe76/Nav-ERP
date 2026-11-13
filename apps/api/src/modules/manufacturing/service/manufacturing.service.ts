@@ -50,7 +50,7 @@ import {
 import type { DocumentPdfService, PalletCardPdfInput } from "../../mail/service/document-pdf.js";
 import { documentLanguageOf, localized } from "@navet/shared";
 import { documentTexts } from "../../mail/service/document-texts.js";
-import { extraDescriptionFor } from "../../mail/service/document-pdf.js";
+import { extraDescriptionFor, formatBatchLabel, formatSerialInfo } from "../../mail/service/document-pdf.js";
 import { appendFilesToPdf, mergePdfs } from "../../mail/service/pdf-merge.js";
 import { ArticleNotFoundError, assertOrderableArticle, type ArticleFileReader, type ArticleUnitReader } from "../../article/service/article.service.js";
 import type { MaterialRow, OperationRowView } from "../repository/order-edit.js";
@@ -382,10 +382,15 @@ export class MoReportFromPurchaseReceiptError extends Error {
 export class MoReportStockMissingError extends Error {
   constructor(
     readonly available: number,
-    readonly required: number
+    readonly required: number,
+    // Serienummer (0215): the report's numbers that no longer stand on the
+    // place they were received to (the first 20 are named in the text).
+    readonly serialNumbers: string[] = []
   ) {
     super(
-      `Rapporteringen lade ${required.toLocaleString("sv-SE")} st i lager men bara ${available.toLocaleString("sv-SE")} st finns kvar på lagerplatsen`
+      serialNumbers.length > 0
+        ? `Serienummer ${serialNumbers.slice(0, 20).join(", ")}${serialNumbers.length > 20 ? ` och ${serialNumbers.length - 20} till` : ""} finns inte kvar på lagerplatsen rapporteringen lade ${serialNumbers.length === 1 ? "det" : "dem"} på — flytta tillbaka eller ångra rörelsen först`
+        : `Rapporteringen lade ${required.toLocaleString("sv-SE")} st i lager men bara ${available.toLocaleString("sv-SE")} st finns kvar på lagerplatsen`
     );
     this.name = "MoReportStockMissingError";
   }
@@ -781,7 +786,7 @@ export function createManufacturingService(
       case "invalid_status":
         throw new InvalidStatusTransitionError("Reports can only be undone while the order is open or done");
       case "insufficient_stock":
-        throw new MoReportStockMissingError(result.available, result.required);
+        throw new MoReportStockMissingError(result.available, result.required, result.serialNumbers ?? []);
     }
   }
 
@@ -1189,7 +1194,7 @@ export function createManufacturingService(
   async function buildOperationPalletCards(
     moId: string,
     operationId: string,
-    extras: { quantities?: number[]; printedAt: Date; reportedBy: string | null }
+    extras: { quantities?: number[]; printedAt: Date; reportedBy: string | null; reportId?: string }
   ) {
     const order = await repo.findManufacturingOrderById(moId);
     if (!order) throw new ManufacturingOrderNotFoundError(moId);
@@ -1225,6 +1230,18 @@ export function createManufacturingService(
     // Dokument på engelska (#7): the final card follows the customer's
     // language (it travels with the goods); the internal card is Swedish.
     const language = salesOrderRow ? documentLanguageOf(salesOrderRow.customerLanguage) : "sv";
+    // Serienummer (etapp 2): the numbers the TO has received so far (its
+    // live reports' receiptSerialNumbers) on the LAST operation's card —
+    // empty before the first inleverans, since a tillverkat styck gets its
+    // number when it is received (decision 9). The kolli does not know its
+    // own numbers; every card carries the order's — or, on a report's card
+    // (reportId), the numbers that report received.
+    const receivedSerials = isLast
+      ? (await repo.listReports(moId)).flatMap((report) =>
+          report.undoneAt === null && (extras.reportId === undefined || report.id === extras.reportId) ? report.receiptSerialNumbers : []
+        )
+      : [];
+    const serialText = formatSerialInfo(receivedSerials);
     // One card per kolli, numbered Kolli n av m.
     const cards: PalletCardPdfInput[] = quantities.map((quantity, i) => {
       const common = {
@@ -1240,7 +1257,9 @@ export function createManufacturingService(
         // Batch (#8, decision 17): the finished goods are received in the
         // batch named after the TO — known before anything is received, and
         // printed on both variants when the article is batchstyrd.
-        batch: order.articleBatchTracked ? order.orderNumber : null,
+        // Etapp 2: with the batch's utgångsdatum once it has one.
+        batch: order.articleBatchTracked ? formatBatchLabel(order.orderNumber, order.receiptBatchExpiresOn, language) : null,
+        serial: serialText === null ? null : { text: serialText, count: new Set(receivedSerials).size },
       };
       return salesOrderRow
         ? {
@@ -2001,6 +2020,7 @@ export function createManufacturingService(
       const result = await repo.consumeMaterial(moId, rowId, {
         locationId: input.locationId,
         batchId: input.batchId,
+        serialIds: input.serialIds,
         quantity: input.quantity,
         createdBy,
         materialShortage: await materialShortageCheck(input.allowMaterialShortage),
@@ -2095,6 +2115,9 @@ export function createManufacturingService(
           // was not the last operation) and whether the order is now done.
           received: result.receipt?.received ?? 0,
           orderCompleted: result.receipt?.completed ?? false,
+          // Serienummer (0215): the numbers this report gave the styck it
+          // received ([] otherwise) — shown and labelled by the card/terminal.
+          receivedSerialNumbers: result.receivedSerialNumbers ?? [],
           // The report log row — a lego receipt links its IO receipt to it.
           reportId: result.reportId,
         };
@@ -2371,7 +2394,7 @@ export function createManufacturingService(
           userId: createdBy,
         });
         // The order as before, plus the Slutför order report (Ångra in the notice).
-        return { ...result.order, reportId: result.reportId };
+        return { ...result.order, reportId: result.reportId, receivedSerialNumbers: result.receivedSerialNumbers };
       }
 
       switch (result.reason) {
@@ -2553,6 +2576,7 @@ export function createManufacturingService(
         quantities: quantities ?? (Number(report.quantityOk) > 0 ? [Number(report.quantityOk)] : undefined),
         printedAt: report.createdAt,
         reportedBy: report.employeeName ?? report.userName ?? null,
+        reportId,
       });
       const content = await pdf.renderPalletCard(cards);
       return { filename: documentTexts(language).filenames.palletCard(`${order.orderNumber}-op${operation.sequenceNo}`), content };

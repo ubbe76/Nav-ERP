@@ -223,12 +223,20 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       example: "Ja",
     },
     {
-      field: "batchTracked",
-      label: "Batchstyrd",
+      field: "tracking",
+      label: "Spårning",
       required: false,
-      header: "Batchstyrd",
-      description: `Ja eller Nej (även 1/0). Ja gör att artikelns lager förs per batchnummer. Kräver att inställningen Använd batch- och serienummer är på (annars radfel) och går inte att sätta på en tjänst eller fantomartikel; Nej går alltid. En ny artikel utan värde blir Nej. ${UNTOUCHED}`,
-      example: "Nej",
+      header: "Spårning",
+      description: `Ingen, Batch eller Serienummer. Batch gör att artikelns lager förs per batchnummer, Serienummer att varje styck får ett eget nummer. Kräver att inställningen Använd batch- och serienummer är på (annars radfel) och går inte att sätta på en tjänst eller fantomartikel; Ingen går alltid. En äldre fil med kolumnen Batchstyrd (Ja/Nej) läses också: Ja är Batch, Nej är Ingen. En ny artikel utan värde blir Ingen. ${UNTOUCHED}`,
+      example: "Ingen",
+    },
+    {
+      field: "shelfLifeDays",
+      label: "Hållbarhet (dagar)",
+      required: false,
+      header: "Hållbarhet (dagar)",
+      description: `Hela dagar, 1–36500. En tillverkad batch får utgångsdatum = inleveransdagen + hållbarheten. 0 tömmer fältet. ${UNTOUCHED}`,
+      example: "365",
     },
     {
       field: "leadTimeDays",
@@ -1762,6 +1770,36 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       description:
         "Bara för batchstyrda artiklar: batchnumret, max 50 tecken — en batch som saknas skapas — eller Okänd för saldot utan batch. Antal är då batchens saldo på lagerplatsen efter importen, och samma artikel får stå på flera rader per lagerplats, en per batch. Tom cell betyder som förut hela lagerplatsens saldo, och en ökning hamnar i Okänd. Ange Batch på alla rader för en artikel och lagerplats, eller på ingen. Batcher som skapas i samma import tas ut i batchnummerordning. Batch på en artikel som inte är batchstyrd ger fel på raden.",
       example: "L-2291",
+    },
+    {
+      field: "serialNumber",
+      label: "Serienummer",
+      required: false,
+      header: "Serienummer",
+      text: true,
+      description:
+        "Bara för serienummerstyrda artiklar vars nummer skapas vid inleverans: ett serienummer, max 50 tecken — ett nummer som saknas skapas. Antal är då 1 (numret står på lagerplatsen efter importen) eller 0 (det tas bort därifrån). Ett nummer får stå en gång i filen och aldrig på två lagerplatser; står det redan på en annan plats blir det fel på raden. Ange aldrig både Batch och Serienummer på samma rad. Tom cell betyder som förut hela lagerplatsens saldo, och en ökning hamnar i Okänd.",
+      example: "SN-000123",
+    },
+    {
+      field: "batchDate",
+      label: "Batchdatum",
+      required: false,
+      header: "Batchdatum",
+      text: true,
+      description:
+        "Bara på en rad med ett batchnummer i Batch: batchens ålder som datum (ÅÅÅÅ-MM-DD) — den äldsta batchen tas ut först. Sätts när importen skapar batchen eller batchen saknar datum; har batchen redan ett annat datum står det kvar och raden får en varning. Samma batch på flera rader ska ha samma datum. Tom cell: batchens ålder är dagen den skapades.",
+      example: "2026-03-01",
+    },
+    {
+      field: "expiresOn",
+      label: "Utgångsdatum",
+      required: false,
+      header: "Utgångsdatum",
+      text: true,
+      description:
+        "Bara på en rad med ett batchnummer i Batch: batchens sista användbara dag (ÅÅÅÅ-MM-DD). Batcher med kortast utgångsdatum tas ut först, och en utgången batch tas inte av Automatiskt. Sätts när importen skapar batchen eller batchen saknar datum; har batchen redan ett annat datum står det kvar och raden får en varning. Tom cell: inget utgångsdatum.",
+      example: "2027-03-01",
     },
   ],
 };

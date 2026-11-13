@@ -9,6 +9,7 @@ import { SectionHeading } from "../ui/SectionHeading";
 import { apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import type { MOReport } from "../../lib/types";
+import { compressSerialNumbers } from "../../lib/serials";
 import { formatStockholmDateTime } from "../../lib/date";
 import { apiErrorMessage } from "../../lib/errorMessages";
 
@@ -45,7 +46,12 @@ function undoQuestion(r: MOReport): string {
   if (Number(r.quantityOk) > 0) effects.push(`${quantity(r.quantityOk)} st OK dras av`);
   if (Number(r.quantityScrapped) > 0) effects.push(`${quantity(r.quantityScrapped)} st kasserat dras av`);
   if (r.materials.length > 0) effects.push("materialet läggs tillbaka i lager");
-  if (Number(r.quantityReceived) > 0) effects.push(`${quantity(r.quantityReceived)} st tas ut ur lager igen`);
+  if (Number(r.quantityReceived) > 0) {
+    const numbers = r.receiptSerialNumbers ?? [];
+    effects.push(
+      `${quantity(r.quantityReceived)} st tas ut ur lager igen${numbers.length > 0 ? ` (serienummer ${compressSerialNumbers(numbers)} — de är förbrukade och ges inte igen)` : ""}`
+    );
+  }
   if (r.hours !== null) effects.push(`${quantity(r.hours)} h tid tas bort`);
   if (r.completedOrder) effects.push("ordern öppnas igen");
   const what = `${reportLabel(r).toLowerCase()} ${when(r.createdAt)}`;
@@ -121,6 +127,17 @@ export function ReportsSection({
                       </GatedLink>
                     </div>
                   )}
+                  {(row.receiptSerialNumbers ?? []).length > 0 && Number(row.quantityReceived) > 0 && (
+                    <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
+                      Mottagna serienummer:{" "}
+                      <GatedLink
+                        href={`/lager/sparbarhet?search=${encodeURIComponent(row.receiptSerialNumbers![0]!)}`}
+                        style={{ color: "var(--accent-fg)" }}
+                      >
+                        {compressSerialNumbers(row.receiptSerialNumbers!)}
+                      </GatedLink>
+                    </div>
+                  )}
                   {row.materials.length > 0 && (
                     <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
                       Material:{" "}
@@ -130,7 +147,7 @@ export function ReportsSection({
                           {`${m.articleNumber} ${quantity(m.quantity)}${m.locationName ? ` (${m.locationName})` : ""}`}
                           {m.batchNumber && (
                             <>
-                              {" · batch "}
+                              {m.batchKind === "serial" ? " · serienummer " : " · batch "}
                               <GatedLink href={`/lager/sparbarhet?search=${encodeURIComponent(m.batchNumber)}`} style={{ color: "var(--accent-fg)" }}>
                                 {m.batchNumber}
                               </GatedLink>

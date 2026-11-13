@@ -644,6 +644,23 @@ export const moReportMaterials = pgTable("mo_report_materials", {
   batchId: uuid("batch_id").references(() => stockBatches.id, { onDelete: "restrict" }),
 });
 
+// Serienummer (#8 etapp 2, migration 0215): the serial numbers a report
+// received as finished goods — one stock row +1 each. The report is the
+// Ångra unit and takes back EXACTLY these numbers (mo_reports.receipt_batch_id
+// is one id and stays null for them).
+export const moReportSerials = pgTable(
+  "mo_report_serials",
+  {
+    moReportId: uuid("mo_report_id")
+      .notNull()
+      .references(() => moReports.id, { onDelete: "cascade" }),
+    batchId: uuid("batch_id")
+      .notNull()
+      .references(() => stockBatches.id, { onDelete: "restrict" }),
+  },
+  (table) => [primaryKey({ columns: [table.moReportId, table.batchId] }), index("idx_mo_report_serials_batch").on(table.batchId)]
+);
+
 // Snapshot of BOM quantity x MO quantity, taken at release.
 export const moMaterialConsumptions = pgTable(
   "mo_material_consumptions",

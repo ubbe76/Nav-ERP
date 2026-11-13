@@ -12,7 +12,7 @@ import {
   listStockTransactionsQuerySchema,
   updateSystemSettingsSchema,
 } from "@navet/shared";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { articles, auditLog, db, deliveryRowLocations, deliveryRows, stockBatches, stockLocations, stockTransactions, systemSettings, type Tx } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
@@ -39,6 +39,7 @@ import { allocateOutflowLocations, lockArticlesForOutflow } from "../src/modules
 import { DuplicateStockCountRowError, InsufficientStockError, StockLocationBlockedError } from "../src/modules/stock/service/stock.errors.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
+import { addDays, stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { parsed } from "./helpers/parsed.js";
 import { testArticleService, testDocumentPdfService, testSystemService } from "./helpers/services.js";
 import { waitForLockWaiter } from "./helpers/year-end.js";
@@ -675,3 +676,138 @@ describe("Lagerloggen", () => {
 // Kept for the type import above (articles is only used through the services).
 void articles;
 void lockArticlesForOutflow;
+
+// --- Etapp 2: FEFO and the utgångna batches ---------------------------------------
+
+describe("Utgångna batcher — Automatiskt hoppar över dem i förbrukning och utleverans", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const expires = (batchNumber: string, expiresOn: string | null) => db.update(stockBatches).set({ expiresOn }).where(eq(stockBatches.batchNumber, batchNumber));
+  const yesterday = () => addDays(stockholmToday(), -1);
+
+  // A1: UTGÅNGEN 5 (expired yesterday), KORT 4 (expires in 10 days), LÅNG 6
+  // (in 100 days, the OLDEST row), ODATERAD 3.
+  async function dated() {
+    const article = await makeArticle();
+    const a1 = await makeLocation("A1");
+    await articleService.updateArticle(article.id, { defaultLocationId: a1.id });
+    await adjust(article.id, a1.id, 5, "UTGÅNGEN");
+    await adjust(article.id, a1.id, 4, "KORT");
+    await adjust(article.id, a1.id, 6, "LÅNG");
+    await adjust(article.id, a1.id, 3, "ODATERAD");
+    await age("LÅNG", 50);
+    await age("ODATERAD", 40);
+    await expires("UTGÅNGEN", yesterday());
+    await expires("KORT", addDays(stockholmToday(), 10));
+    await expires("LÅNG", addDays(stockholmToday(), 100));
+    return { article, a1 };
+  }
+
+  it("the loader: FEFO — the dated by date, then the undated — and the expired batch is left alone", async () => {
+    const { article } = await dated();
+    expect(await allocate(article.id, 12)).toEqual(["A1/KORT:4", "A1/LÅNG:6", "A1/ODATERAD:2"]);
+    // "include" (not used by any writer yet) takes it first.
+    expect(await allocate(article.id, 6, undefined, { expired: "include" })).toEqual(["A1/UTGÅNGEN:5", "A1/KORT:1"]);
+  });
+
+  it("only expired stock left: the whole draw is Okänd minus on the article's place; chosen by hand it is taken", async () => {
+    const article = await makeArticle();
+    const a1 = await makeLocation("A1");
+    await articleService.updateArticle(article.id, { defaultLocationId: a1.id });
+    await adjust(article.id, a1.id, 5, "UTGÅNGEN");
+    await expires("UTGÅNGEN", yesterday());
+    expect(await allocate(article.id, 3)).toEqual(["A1/Okänd:3"]);
+    expect(await allocate(article.id, 3, a1.id)).toEqual(["A1/Okänd:3"]);
+    expect(await allocate(article.id, 3, undefined, { batchId: await batchId(article.id, "UTGÅNGEN") })).toEqual(["A1/UTGÅNGEN:3"]);
+  });
+
+  it("the limit is the Stockholm day: usable on its last day, expired from Stockholm midnight — in a suite that runs in UTC", async () => {
+    const article = await makeArticle();
+    const a1 = await makeLocation("A1");
+    await articleService.updateArticle(article.id, { defaultLocationId: a1.id });
+    await adjust(article.id, a1.id, 5, "L-1");
+    await expires("L-1", "2026-06-10");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    // 21:30 UTC = 23:30 in Stockholm on the last day.
+    vi.setSystemTime(new Date("2026-06-10T21:30:00Z"));
+    expect(await allocate(article.id, 1)).toEqual(["A1/L-1:1"]);
+    // 22:30 UTC is still 10 June in UTC — but 00:30 on 11 June in Stockholm.
+    vi.setSystemTime(new Date("2026-06-10T22:30:00Z"));
+    expect(await allocate(article.id, 1)).toEqual(["A1/Okänd:1"]);
+  });
+
+  it("utleverans: Automatiskt skips the expired batch (the shortage is Okänd minus); a chosen expired batch is delivered", async () => {
+    const { article, a1 } = await dated();
+    const { order, row } = await makeOrder(article.id, 20);
+    await deliver(order.id, [{ rowId: row.id, quantity: 15 }]);
+    expect(await moves(article.id, "sales_delivery")).toEqual(["A1/KORT:-4", "A1/LÅNG:-6", "A1/ODATERAD:-3", "A1/Okänd:-2"]);
+    expect(await cells(article.id)).toEqual(["A1/Okänd=-2", "A1/UTGÅNGEN=5"]);
+    // Chosen by hand it is delivered. The place ceiling of etapp 1 still
+    // holds without a chosen place: A1 nets to 3 (UTGÅNGEN 5, Okänd −2), so
+    // 5 of it is refused there — with the place chosen the cell decides.
+    const expired = await batchId(article.id, "UTGÅNGEN");
+    await expect(deliver(order.id, [{ rowId: row.id, quantity: 5, batchId: expired }])).rejects.toThrow(BatchInsufficientError);
+    await deliver(order.id, [{ rowId: row.id, quantity: 3, batchId: expired }]);
+    await deliver(order.id, [{ rowId: row.id, quantity: 2, batchId: expired, locationId: a1.id }]);
+    expect(await cells(article.id)).toEqual(["A1/Okänd=-2"]);
+  });
+
+  it("TO-uttag: the report and Förbruka (Automatiskt) skip the expired batch; Förbruka with the batch chosen takes it", async () => {
+    const mo = await makeManufacturingOrder();
+    // The fixture: A1 Okänd 2, GAMMAL 5 (+4 on B2), NY 6. GAMMAL expires.
+    await expires("GAMMAL", yesterday());
+    await mfgService.completeOperation(mo.first.id, parsed(completeOperationSchema, { quantityCompleted: 4 }), user.id);
+    expect(await moves(mo.component.id, "mo_consumption")).toEqual(["A1/NY:-6", "A1/Okänd:-2"]);
+    const consume = (quantity: number, extra: Record<string, unknown> = {}) =>
+      mfgService.consumeMaterial(mo.order.id, mo.material.id, parsed(consumeMaterialSchema, { quantity, ...extra }), user.id);
+    // Nothing usable left: Okänd minus on the article's place.
+    await consume(1);
+    expect(await cells(mo.component.id)).toEqual(["A1/GAMMAL=5", "A1/Okänd=-1", "B2/GAMMAL=4"]);
+    await consume(1, { batchId: await batchId(mo.component.id, "GAMMAL") });
+    expect(await cells(mo.component.id)).toEqual(["A1/GAMMAL=4", "A1/Okänd=-1", "B2/GAMMAL=4"]);
+  });
+
+  it("flytt and negativ justering do NOT skip it: expired stock can be moved to a spärrad plats or scrapped — FEFO, so it goes first", async () => {
+    const { article, a1 } = await dated();
+    const karantan = await makeLocation("KARANTÄN");
+    await stockService.transferStock(
+      parsed(createStockTransferSchema, { fromLocationId: a1.id, toLocationId: karantan.id, rows: [{ articleId: article.id, quantity: 6 }] }),
+      user.id
+    );
+    expect(await cells(article.id)).toEqual(["A1/KORT=3", "A1/LÅNG=6", "A1/ODATERAD=3", "KARANTÄN/KORT=1", "KARANTÄN/UTGÅNGEN=5"]);
+    await stockService.recordTransaction(parsed(createStockAdjustmentSchema, { articleId: article.id, locationId: karantan.id, quantityDelta: -5 }), user.id);
+    expect(await cells(article.id)).toEqual(["A1/KORT=3", "A1/LÅNG=6", "A1/ODATERAD=3", "KARANTÄN/KORT=1"]);
+  });
+
+  it("the batch choices and the pick list: FEFO with the dates, the expired cells last and flagged; the card's saldo per batch too", async () => {
+    const { article } = await dated();
+    const list = await stockService.pickBatchCellsForArticles([article.id]);
+    expect(list.map((c) => [c.batchNumber, c.expiresOn, c.expired])).toEqual([
+      ["KORT", addDays(stockholmToday(), 10), false],
+      ["LÅNG", addDays(stockholmToday(), 100), false],
+      ["ODATERAD", null, false],
+      ["UTGÅNGEN", yesterday(), true],
+    ]);
+    const card = await stockService.getArticleBatchBalances(article.id);
+    expect(card.batches.map((b) => [b.batchNumber, b.expiresOn, b.batchDate, b.expired])).toEqual([
+      ["UTGÅNGEN", yesterday(), null, true],
+      ["KORT", addDays(stockholmToday(), 10), null, false],
+      ["LÅNG", addDays(stockholmToday(), 100), null, false],
+      ["ODATERAD", null, null, false],
+    ]);
+  });
+
+  it("a positive justering names the new batch's utgångsdatum — refused when the batch has another; only with a batch", async () => {
+    const article = await makeArticle();
+    const a1 = await makeLocation("A1");
+    const increase = (extra: Record<string, unknown>) =>
+      stockService.recordTransaction(parsed(createStockAdjustmentSchema, { articleId: article.id, locationId: a1.id, quantityDelta: 2, ...extra }), user.id);
+    await increase({ batchNumber: "J-1", expiresOn: "2027-01-01" });
+    await increase({ batchNumber: "J-1", expiresOn: "2027-01-01" });
+    await expect(increase({ batchNumber: "J-1", expiresOn: "2027-02-02" })).rejects.toMatchObject({ name: "BatchExpiryMismatchError" });
+    expect(await cells(article.id)).toEqual(["A1/J-1=4"]);
+    expect(createStockAdjustmentSchema.safeParse({ articleId: article.id, quantityDelta: 2, expiresOn: "2027-01-01" }).success).toBe(false);
+    expect(createStockAdjustmentSchema.safeParse({ articleId: article.id, quantityDelta: 2, batchNumber: "X", expiresOn: "" }).success).toBe(true);
+  });
+});

@@ -390,6 +390,14 @@ export function deliveryHolidayWindow(dates: string[], extraWorkingDays: number)
 // out of src).
 
 // Today as a Stockholm day — the "from today" of every suggestion.
+// Hållbarhet (#8 etapp 2): a manufactured batch's utgångsdatum = the
+// Stockholm day it is received + the article's Hållbarhet (dagar), in
+// calendar days. The utgångsdatum is the LAST usable day. null without a
+// hållbarhet.
+export function expiryFromShelfLife(day: string, shelfLifeDays: number | null | undefined): string | null {
+  return shelfLifeDays == null || shelfLifeDays <= 0 ? null : addDays(day, shelfLifeDays);
+}
+
 export function stockholmToday(): string {
   return stockholmDateOf(new Date());
 }

@@ -5,7 +5,7 @@ import { once } from "node:events";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { gunzipSync } from "node:zlib";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   auditLog,
   customers,
@@ -189,10 +189,14 @@ describe("Nummerserier: a series that cannot issue its next number is refused", 
   });
 
   it("knows the column of every document series in number_series, and the columns match the database", async () => {
-    const seeded = await db.select({ key: numberSeries.key }).from(numberSeries).where(eq(numberSeries.forArticles, false));
+    // The article and the serial number series (0215) step over taken numbers themselves.
+    const seeded = await db
+      .select({ key: numberSeries.key })
+      .from(numberSeries)
+      .where(and(eq(numberSeries.forArticles, false), eq(numberSeries.forSerials, false)));
     const registerSeries = ["customer", "supplier"];
     expect(seeded.map((r) => r.key).filter((key) => !registerSeries.includes(key)).sort()).toEqual([...documentSeriesKeys()].sort());
-    for (const key of [...registerSeries, "article"]) expect(documentSeriesTarget(key)).toBeNull();
+    for (const key of [...registerSeries, "article", "serial"]) expect(documentSeriesTarget(key)).toBeNull();
 
     for (const key of documentSeriesKeys()) {
       const target = documentSeriesTarget(key)!;

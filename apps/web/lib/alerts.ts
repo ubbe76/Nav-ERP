@@ -2,6 +2,7 @@
 // @navet/shared) — keep the keys and the GET /alerts shape in step.
 export const ALERT_KINDS = [
   "stock_negative",
+  "batch_expiry",
   "sales_order_late",
   "purchase_order_late",
   "manufacturing_order_late",

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Select } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
-import { BATCH_AUTO, BATCH_UNKNOWN, batchOptions } from "../../lib/batch";
+import { BATCH_AUTO, BATCH_UNKNOWN, batchOptions, expiryText } from "../../lib/batch";
 import { formatQuantity } from "../../lib/format";
 import type { BatchBalanceRow } from "../../lib/types";
 
@@ -36,8 +36,10 @@ export function useBatchBalances(articleIds: string[]): {
   return { rows, reload: () => setTick((t) => t + 1) };
 }
 
-// Batch choice: Automatiskt (default) / Okänd / the batches with stock,
-// narrowed to the picked location when there is one.
+// Batch choice: Automatiskt (default; skips utgångna batcher) / Okänd / the
+// batches with stock in FEFO order, each with its utgångsdatum, narrowed to
+// the picked location when there is one. An utgången batch can be picked by
+// hand — the caller then sends the place (expiredBatchLocationId).
 export function BatchSelect({
   rows,
   articleId,
@@ -80,7 +82,8 @@ export function BatchSelect({
       {!options.some((o) => o.value === BATCH_UNKNOWN) && <option value={BATCH_UNKNOWN}>Okänd</option>}
       {options.map((o) => (
         <option key={o.value} value={o.value}>
-          {o.label} ({formatQuantity(String(o.quantity))})
+          {o.label}
+          {o.expiresOn ? ` · ${expiryText(o.expiresOn, o.expired)}` : ""} ({formatQuantity(String(o.quantity))})
         </option>
       ))}
     </Select>

@@ -98,7 +98,7 @@ const alertsAt = (today: string) =>
   createAlertsService({
     repo: createAlertsRepository(db),
     planning: { requirementProposals: async () => [], orderPlanSummaries: async () => new Map() },
-    settings: { supplierInvoiceDays: async () => 7, quoteFollowupDays: async () => 7 },
+    settings: { supplierInvoiceDays: async () => 7, quoteFollowupDays: async () => 7, batchExpiryDays: async () => 30 },
     today: () => today,
   });
 const unreconciledCount = async (today: string) => (await alertsAt(today).computeAlerts(["bank_unreconciled"])).groups[0]!.count;

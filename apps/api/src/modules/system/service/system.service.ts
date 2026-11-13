@@ -16,6 +16,7 @@ import type {
 import { EXTRA_DESCRIPTION_DOCUMENTS, round2 } from "@navet/shared";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_ARTICLE_SERIES_KEY, documentSeriesTarget, formatSeriesNumber } from "./number-series.js";
+import { DEFAULT_SERIAL_SERIES_KEY } from "../../stock/service/serial-numbers.js";
 import type { SystemRepository } from "../repository/system.repository.js";
 import { createDatabaseBackup } from "./backup.js";
 import { decodeDeliveryDefaults, DELIVERY_SETTING_KEYS, type DeliveryDefaults } from "./delivery-days.js";
@@ -66,6 +67,8 @@ import {
   ALERT_SUPPLIER_INVOICE_DAYS_KEY,
   decodeAlertDigestTime,
   decodeAlertQuoteFollowupDays,
+  decodeAlertBatchExpiryDays,
+  ALERT_BATCH_EXPIRY_DAYS_KEY,
   decodeAlertSupplierInvoiceDays,
   decodePublicBaseUrl,
   PUBLIC_BASE_URL_KEY,
@@ -256,8 +259,11 @@ export class NumberSeriesNumberTakenError extends Error {
   }
 }
 
-const isOwnArticleSeries = (row: { key: string; forArticles: boolean }) =>
-  row.forArticles && row.key !== DEFAULT_ARTICLE_SERIES_KEY;
+// The user's own series: article number series and (0215) serial number
+// series. The built-in ones — "article", "serial" and the document series —
+// can be reconfigured but neither renamed nor deleted.
+const isOwnArticleSeries = (row: { key: string; forArticles: boolean; forSerials: boolean }) =>
+  (row.forArticles && row.key !== DEFAULT_ARTICLE_SERIES_KEY) || (row.forSerials && row.key !== DEFAULT_SERIAL_SERIES_KEY);
 
 export class SetupChargeArticleNotFoundError extends Error {
   constructor(id: string) {
@@ -414,6 +420,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       alertDigestTime: decodeAlertDigestTime(get(ALERT_DIGEST_TIME_KEY)),
       alertSupplierInvoiceDays: decodeAlertSupplierInvoiceDays(get(ALERT_SUPPLIER_INVOICE_DAYS_KEY)),
       alertQuoteFollowupDays: decodeAlertQuoteFollowupDays(get(ALERT_QUOTE_FOLLOWUP_DAYS_KEY)),
+      alertBatchExpiryDays: decodeAlertBatchExpiryDays(get(ALERT_BATCH_EXPIRY_DAYS_KEY)),
       publicBaseUrl: decodePublicBaseUrl(get(PUBLIC_BASE_URL_KEY)),
       // Uppföljning av offerter — quote-settings.ts owns the key and default.
       quoteValidityDays: decodeQuoteValidityDays(get(QUOTE_VALIDITY_DAYS_KEY)),
@@ -520,7 +527,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
     async createArticleNumberSeries(input: CreateArticleNumberSeriesInput, userId: string | null = null) {
       // Keys are internal (they address the series in the API); the name is
       // what the user sees and picks.
-      const key = `article_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+      const key = `${input.forSerials ? "serial" : "article"}_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
       let row;
       try {
         row = await repo.createArticleNumberSeries(key, input);
@@ -532,7 +539,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
         entityType: "number_series",
         entityId: key,
         action: "created",
-        detail: { name: row.name, prefix: row.prefix, nextNumber: row.nextNumber, digits: row.digits },
+        detail: { name: row.name, prefix: row.prefix, nextNumber: row.nextNumber, digits: row.digits, ...(row.forSerials ? { forSerials: true } : {}) },
         userId,
       });
       return row;
@@ -700,7 +707,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
         if (input.batchTrackingEnabled !== undefined) {
           await set(BATCH_TRACKING_ENABLED_KEY, String(input.batchTrackingEnabled));
           if (!input.batchTrackingEnabled) {
-            const tracked = await writer.countBatchTrackedArticles();
+            const tracked = await writer.countTrackedArticles();
             if (tracked > 0) throw new BatchTrackingInUseError(tracked);
           }
         }
@@ -846,6 +853,9 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
         }
         if (input.alertQuoteFollowupDays !== undefined) {
           await set(ALERT_QUOTE_FOLLOWUP_DAYS_KEY, String(input.alertQuoteFollowupDays));
+        }
+        if (input.alertBatchExpiryDays !== undefined) {
+          await set(ALERT_BATCH_EXPIRY_DAYS_KEY, String(input.alertBatchExpiryDays));
         }
         if (input.quoteValidityDays !== undefined) await set(QUOTE_VALIDITY_DAYS_KEY, String(input.quoteValidityDays));
         if (input.precisionSalesLateMarginDays !== undefined) {

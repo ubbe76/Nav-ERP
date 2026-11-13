@@ -12,6 +12,7 @@ import {
   moOperationScrap,
   moOperations,
   moReportMaterials,
+  moReportSerials,
   stockBatches,
   moReports,
   productionGroups,
@@ -65,7 +66,10 @@ import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js"
 import { allocateOutflowLocations, lockArticlesForOutflow, type BlockedChoice } from "../../stock/service/outflow-locations.js";
 import { isStockedArticle } from "../../stock/service/stocked-article.js";
 import { getOrCreateBatch } from "../../stock/service/batches.js";
-import { isBatchTrackedArticle } from "../../stock/service/batch-tracking.js";
+import { isTrackedArticle, batchTrackedSql, trackingOf } from "../../stock/service/batch-tracking.js";
+import { assertSerialsOutOfStock, claimSerialNumbers, lockSerialSeriesForReceipt, lockSerials } from "../../stock/service/serial-numbers.js";
+import { SerialQuantityNotIntegerError } from "../../stock/service/batch.errors.js";
+import { expiryFromShelfLife, stockholmToday } from "../../system/service/delivery-days.js";
 import { batchCellQuantity } from "../../stock/repository/batch-balances.js";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
 import { listLegoPurchases } from "./lego-purchases.js";
@@ -111,7 +115,15 @@ export type ConsumeMaterialResult =
   | { ok: false; reason: "order_not_found" | "row_not_found" | "invalid_status" | "over_consumption" };
 
 export type CompleteResult =
-  | { ok: true; order: typeof manufacturingOrders.$inferSelect; consumed: ConsumedMaterialLine[]; received: number; reportId: string }
+  | {
+      ok: true;
+      order: typeof manufacturingOrders.$inferSelect;
+      consumed: ConsumedMaterialLine[];
+      received: number;
+      reportId: string;
+      // Serienummer (0215): the numbers the receipt gave the styck ([] otherwise).
+      receivedSerialNumbers: string[];
+    }
   | { ok: false; reason: "order_not_found" | "invalid_status" };
 
 // What an automatic draw actually booked, per material row AND location —
@@ -141,7 +153,9 @@ export type UndoReportResult =
       timeReport: typeof timeReports.$inferSelect | null;
     }
   | { ok: false; reason: "report_not_found" | "already_undone" | "from_purchase_receipt" | "invalid_status" }
-  | { ok: false; reason: "insufficient_stock"; available: number; required: number };
+  // serialNumbers: the report's serial numbers that no longer stand on the
+  // place it received them to (moved, delivered, drawn).
+  | { ok: false; reason: "insufficient_stock"; available: number; required: number; serialNumbers?: string[] };
 
 export type CancelResult =
   | { ok: true; order: typeof manufacturingOrders.$inferSelect }
@@ -157,6 +171,8 @@ export type CompleteOperationResult =
       // Set when the report was on the order's last operation and received
       // finished goods; `completed` = the order reached its quantity and is done.
       receipt?: { order: typeof manufacturingOrders.$inferSelect; received: number; completed: boolean };
+      // Serienummer (0215): the numbers this report gave the received styck.
+      receivedSerialNumbers?: string[];
     }
   | { ok: false; reason: "operation_not_found" | "order_not_found" | "invalid_status" };
 
@@ -297,7 +313,10 @@ async function drawMaterial(
   blockedChoice: BlockedChoice,
   // Batch (#8): only Förbruka chooses one (left out = Automatiskt per batch
   // for a batchstyrd component, null = Okänd).
-  batchId?: string | null
+  batchId?: string | null,
+  // Serienummer (steg 4): only Förbruka chooses numbers — as many as the
+  // styck; left out = the oldest numbers (every report, the terminal).
+  serialIds?: string[]
 ): Promise<ConsumedMaterialLine[]> {
   // A service component (tjänst) is work, not goods: the consumption is
   // recorded (one line without a place, for the report log and Ångra), but
@@ -305,21 +324,27 @@ async function drawMaterial(
   if (!(await isStockedArticle(tx, row.componentArticleId))) {
     return [{ componentArticleId: row.componentArticleId, quantity, materialConsumptionId: row.id, locationId: null }];
   }
-  const parts = await allocateOutflowLocations(tx, row.componentArticleId, quantity, locationId, { blockedChoice, batchId });
+  const parts = await allocateOutflowLocations(tx, row.componentArticleId, quantity, locationId, { blockedChoice, batchId, serialIds });
   const lines: ConsumedMaterialLine[] = [];
-  for (const part of parts) {
-    await assertLocationNotUnderCount(tx, part.locationId);
-    await tx.insert(stockTransactions).values({
+  if (parts.length === 0) return lines;
+  // Per PLACE, not per part: a serienummerstyrd component gives one part per
+  // number, often hundreds on one place. All the rows in one INSERT.
+  const places = [...new Set(parts.map((part) => part.locationId))];
+  for (const place of places) await assertLocationNotUnderCount(tx, place);
+  await tx.insert(stockTransactions).values(
+    parts.map((part) => ({
       articleId: row.componentArticleId,
       locationId: part.locationId,
       quantityDelta: String(-part.quantity),
-      transactionType: "mo_consumption",
+      transactionType: "mo_consumption" as const,
       referenceId: moId,
       createdBy,
       batchId: part.batchId ?? null,
-    });
-    // The draw may have emptied a temporary location.
-    await deactivateEmptyLocation(tx, part.locationId);
+    }))
+  );
+  // The draw may have emptied a temporary location.
+  for (const place of places) await deactivateEmptyLocation(tx, place);
+  for (const part of parts) {
     lines.push({
       componentArticleId: row.componentArticleId,
       quantity: part.quantity,
@@ -335,9 +360,15 @@ async function drawMaterial(
 async function insertReport(
   tx: Tx,
   values: typeof moReports.$inferInsert,
-  materials: ConsumedMaterialLine[]
+  materials: ConsumedMaterialLine[],
+  // Serienummer (0215): the serial numbers the report received — what Ångra
+  // takes back, exactly.
+  serialIds: readonly string[] = []
 ): Promise<typeof moReports.$inferSelect> {
   const [report] = await tx.insert(moReports).values(values).returning();
+  for (let i = 0; i < serialIds.length; i += 1000) {
+    await tx.insert(moReportSerials).values(serialIds.slice(i, i + 1000).map((batchId) => ({ moReportId: report!.id, batchId })));
+  }
   if (materials.length > 0) {
     await tx.insert(moReportMaterials).values(
       materials.map((m) => ({
@@ -500,16 +531,24 @@ async function receiveFinishedGoods(
   tx: Tx,
   order: typeof manufacturingOrders.$inferSelect,
   opts: { targetReceived: number; locationId?: string; createdBy: string | null }
-): Promise<{ received: number; delta: number; locationId: string | null; batchId: string | null; consumed: ConsumedMaterialLine[] }> {
+): Promise<{
+  received: number;
+  delta: number;
+  locationId: string | null;
+  batchId: string | null;
+  // Serienummer (0215): the numbers claimed for the received styck.
+  serials: { id: string; batchNumber: string }[];
+  consumed: ConsumedMaterialLine[];
+}> {
   const already = Number(order.quantityReceived);
   const delta = Number((opts.targetReceived - already).toFixed(4));
-  if (delta <= 0) return { received: already, delta: 0, locationId: null, batchId: null, consumed: [] };
+  if (delta <= 0) return { received: already, delta: 0, locationId: null, batchId: null, serials: [], consumed: [] };
 
   // unit_cost is the produced article's current standard cost, stamped at
   // receipt time — null (not 0) when no standard cost is set, since 0 would
   // be a false claim of zero value.
   const [producedArticle] = await tx
-    .select({ standardCost: articles.standardCost })
+    .select({ standardCost: articles.standardCost, shelfLifeDays: articles.shelfLifeDays, articleNumber: articles.articleNumber })
     .from(articles)
     .where(eq(articles.id, order.articleId));
 
@@ -524,36 +563,72 @@ async function receiveFinishedGoods(
   // is the same batch, and nobody types anything. The flag as it is NOW
   // (read FOR KEY SHARE, batch-tracking.ts); the report log keeps the batch
   // (mo_reports.receipt_batch_id) so Ångra takes exactly it back.
-  const receiptBatch = (await isBatchTrackedArticle(tx, order.articleId))
+  //
+  // Serienummer (etapp 2, beslut 3, 4 and 9): a serienummerstyrd article
+  // (numbers created vid inleverans) gets ONE number per styck out of its
+  // series, here and nowhere earlier — nothing is typed, also in the
+  // terminal, and no numbers are burnt on orders that never finish. The
+  // series' row was locked right after the order row
+  // (lockSerialSeriesForReceipt, on both paths); the numbers are created in
+  // this transaction, so a dry run and a failed report roll them back. One
+  // stock row +1 per number, in ONE insert; the report keeps the numbers
+  // (mo_report_serials). Created vid utleverans: not lagerspårad, received
+  // as an article without batches.
+  const sort = await trackingOf(tx, order.articleId);
+  const expiresOn = expiryFromShelfLife(stockholmToday(), producedArticle?.shelfLifeDays);
+  let serials: { id: string; batchNumber: string }[] = [];
+  if (sort === "serial") {
+    if (!Number.isInteger(delta)) throw new SerialQuantityNotIntegerError(producedArticle?.articleNumber ?? order.articleId, delta);
+    serials = await claimSerialNumbers(tx, {
+      articleId: order.articleId,
+      count: delta,
+      manufacturingOrderId: order.id,
+      createdBy: opts.createdBy,
+      expiresOn,
+    });
+  }
+  const receiptBatch = sort === "batch"
     ? await getOrCreateBatch(tx, {
         articleId: order.articleId,
         batchNumber: order.orderNumber,
         origin: "manufacturing_order",
         manufacturingOrderId: order.id,
         createdBy: opts.createdBy,
+        // Etapp 2 (beslut 7): utgångsdatum = the Stockholm day of THIS
+        // receipt + the article's Hållbarhet (dagar); nothing without one.
+        // The TO's batch is created at the first delinleverans and keeps
+        // that day's date — a later one computes a later date, which is not
+        // a conflict ("keep"); a batch still without a date gets it.
+        expiresOn,
+        onExpiryMismatch: "keep",
       })
     : null;
 
-  await tx.insert(stockTransactions).values({
-    articleId: order.articleId,
-    locationId: receiptLocationId,
-    quantityDelta: String(delta),
-    transactionType: "mo_receipt",
-    referenceId: order.id,
-    createdBy: opts.createdBy,
-    batchId: receiptBatch?.id ?? null,
-    // Konfigurator 4c: a beställningsvara is valued at its own förkalkyl
-    // (TVK/st at the TO quantity, stored at creation) — never the
-    // template's standard cost, which describes no real configuration.
-    unitCost: order.configuration
-      ? (() => {
-          // == null: a missing cost (older/partial jsonb) must never
-          // become the string "undefined".
-          const c = (order.configuration as ManufacturingOrderConfiguration).cost?.manufacturingCostPerUnit;
-          return c == null ? null : String(c);
-        })()
-      : producedArticle?.standardCost ?? null,
-  });
+  // Konfigurator 4c: a beställningsvara is valued at its own förkalkyl
+  // (TVK/st at the TO quantity, stored at creation) — never the
+  // template's standard cost, which describes no real configuration.
+  const unitCost = order.configuration
+    ? (() => {
+        // == null: a missing cost (older/partial jsonb) must never
+        // become the string "undefined".
+        const c = (order.configuration as ManufacturingOrderConfiguration).cost?.manufacturingCostPerUnit;
+        return c == null ? null : String(c);
+      })()
+    : producedArticle?.standardCost ?? null;
+  const receiptParts: { quantity: number; batchId: string | null }[] =
+    sort === "serial" ? serials.map((serial) => ({ quantity: 1, batchId: serial.id })) : [{ quantity: delta, batchId: receiptBatch?.id ?? null }];
+  await tx.insert(stockTransactions).values(
+    receiptParts.map((part) => ({
+      articleId: order.articleId,
+      locationId: receiptLocationId,
+      quantityDelta: String(part.quantity),
+      transactionType: "mo_receipt" as const,
+      referenceId: order.id,
+      createdBy: opts.createdBy,
+      batchId: part.batchId,
+      unitCost,
+    }))
+  );
 
   // round4: 0.7 + 0.1 is 0.7999999999999999, which never reached an order
   // quantity of 0.8 — the order stayed in progress with everything received.
@@ -573,7 +648,7 @@ async function receiveFinishedGoods(
     .set({ quantityReceived: String(received), updatedAt: new Date() })
     .where(eq(manufacturingOrders.id, order.id));
 
-  return { received, delta, locationId: receiptLocationId, batchId: receiptBatch?.id ?? null, consumed };
+  return { received, delta, locationId: receiptLocationId, batchId: receiptBatch?.id ?? null, serials, consumed };
 }
 
 // One incremental quantity report on an operation, inside a given
@@ -616,6 +691,21 @@ async function reportOperationQuantitiesInTx(
   if (order.status !== "released" && order.status !== "in_progress" && !lateReport) {
     return { ok: false, reason: "invalid_status" };
   }
+
+  // Delinleverans: OK on the order's LAST operation is finished goods (see
+  // below). Known here already, because a report that may receive goods of
+  // a serienummerstyrd article takes the serial number series' row NOW —
+  // right after the order row and before the components' article locks
+  // (consumeLinkedMaterial). Slutför order takes it at the same point; the
+  // one fixed place is what keeps the two from waiting crosswise.
+  const [last] = await tx
+    .select({ sequenceNo: moOperations.sequenceNo })
+    .from(moOperations)
+    .where(eq(moOperations.manufacturingOrderId, operation.manufacturingOrderId))
+    .orderBy(desc(moOperations.sequenceNo))
+    .limit(1);
+  const receivesGoods = !lateReport && last?.sequenceNo === operation.sequenceNo;
+  if (receivesGoods) await lockSerialSeriesForReceipt(tx, order.articleId);
 
   // At the column's 4 decimals (round4): the sums are compared with the
   // order quantity below (done, the receipt) and float noise must not
@@ -664,17 +754,11 @@ async function reportOperationQuantitiesInTx(
   // received at once (scrapped units never are), and the order is done
   // once the received quantity reaches the order quantity. Never on a done
   // order: its goods are already in (more takes undoing what closed it).
-  const [last] = await tx
-    .select({ sequenceNo: moOperations.sequenceNo })
-    .from(moOperations)
-    .where(eq(moOperations.manufacturingOrderId, operation.manufacturingOrderId))
-    .orderBy(desc(moOperations.sequenceNo))
-    .limit(1);
   // A location chosen on the TO card (Lagerplats för materialuttag) also
   // receives the finished goods — and the unlinked material is drawn from it,
   // as with Slutför order. Terminal and lego reports choose none.
   const goods =
-    !lateReport && last?.sequenceNo === operation.sequenceNo
+    receivesGoods
       ? await receiveFinishedGoods(tx, order, { targetReceived: totalOk, locationId: input.locationId, createdBy: input.createdBy })
       : null;
   const completed = goods !== null && goods.delta > 0 && goods.received >= Number(order.quantity);
@@ -706,7 +790,8 @@ async function reportOperationQuantitiesInTx(
       purchaseOrderId: input.purchaseOrderId ?? null,
       createdBy: input.createdBy,
     },
-    [...consumed, ...(goods?.consumed ?? [])]
+    [...consumed, ...(goods?.consumed ?? [])],
+    goods?.serials.map((serial) => serial.id)
   );
   if (scrapId) {
     await tx.update(moOperationScrap).set({ moReportId: reportId }).where(eq(moOperationScrap.id, scrapId));
@@ -741,6 +826,7 @@ async function reportOperationQuantitiesInTx(
     reportId,
     consumed: [...consumed, ...goods.consumed],
     receipt: { order: receivedOrder!, received: goods.delta, completed },
+    receivedSerialNumbers: goods.serials.map((serial) => serial.batchNumber),
   };
 }
 
@@ -933,25 +1019,67 @@ async function undoReportInTx(
     // now, the goods must still be in that CELL too — the place may hold
     // enough in total while this batch is gone.
     let available = Number(balance?.quantity ?? 0);
-    if (report.receiptBatchId !== null || (await isBatchTrackedArticle(tx, order.articleId))) {
+    // Serienummer (0215): the report's OWN numbers (mo_report_serials) —
+    // exactly those, never "the N oldest". Each must still stand on the
+    // place the report received it to (its cell is 1): one that was moved,
+    // delivered or drawn stops the undo, named in the answer. Their rows are
+    // locked (sorted) after the article, last in the lock order.
+    const reportSerials = await tx
+      .select({ batchId: moReportSerials.batchId, batchNumber: stockBatches.batchNumber })
+      .from(moReportSerials)
+      .innerJoin(stockBatches, eq(stockBatches.id, moReportSerials.batchId))
+      .where(eq(moReportSerials.moReportId, report.id))
+      .orderBy(asc(stockBatches.batchNumber));
+    let parts: { quantity: number; batchId: string | null }[] = [{ quantity: received, batchId: report.receiptBatchId }];
+    if (reportSerials.length > 0) {
+      const serialIds = reportSerials.map((serial) => serial.batchId);
+      await lockSerials(tx, serialIds);
+      const onPlace = new Map<string, number>();
+      for (let i = 0; i < serialIds.length; i += 500) {
+        const cells = await tx
+          .select({ batchId: stockTransactions.batchId, quantity: sql<string>`sum(${stockTransactions.quantityDelta})` })
+          .from(stockTransactions)
+          .where(and(inArray(stockTransactions.batchId, serialIds.slice(i, i + 500)), eq(stockTransactions.locationId, report.receiptLocationId)))
+          .groupBy(stockTransactions.batchId);
+        for (const cell of cells) onPlace.set(cell.batchId!, Number(cell.quantity));
+      }
+      const missing = reportSerials.filter((serial) => onPlace.get(serial.batchId) !== 1);
+      available = Math.min(available, reportSerials.length - missing.length);
+      if (missing.length > 0 || available < received) {
+        return { ok: false, reason: "insufficient_stock", available, required: received, serialNumbers: missing.map((serial) => serial.batchNumber) };
+      }
+      parts = serialIds.map((batchId) => ({ quantity: 1, batchId }));
+    } else if (report.receiptBatchId !== null || (await isTrackedArticle(tx, order.articleId))) {
       available = Math.min(available, await batchCellQuantity(tx, order.articleId, report.receiptLocationId, report.receiptBatchId));
     }
     if (available < received) return { ok: false, reason: "insufficient_stock", available, required: received };
+    // Per place, not per number.
     await assertLocationNotUnderCount(tx, report.receiptLocationId);
-    await tx.insert(stockTransactions).values({
-      articleId: order.articleId,
-      locationId: report.receiptLocationId,
-      quantityDelta: String(-received),
-      transactionType: "mo_receipt",
-      referenceId: order.id,
-      createdBy: input.undoneBy,
-      batchId: report.receiptBatchId,
-    });
+    await tx.insert(stockTransactions).values(
+      parts.map((part) => ({
+        articleId: order.articleId,
+        locationId: report.receiptLocationId!,
+        quantityDelta: String(-part.quantity),
+        transactionType: "mo_receipt" as const,
+        referenceId: order.id,
+        createdBy: input.undoneBy,
+        batchId: part.batchId,
+      }))
+    );
     await deactivateEmptyLocation(tx, report.receiptLocationId);
   }
 
   // Drawn material back to where it was drawn from.
+  //
+  // Serienummer (steg 4): the lines that are serial numbers come back as an
+  // INFLOW of those numbers — a number that has come back into stock some
+  // other way cannot come back twice (409 serial-already-in-stock, naming it
+  // and where it stands). The material rows and the places first (one count
+  // check per place), then the numbers' rows locked sorted — last in the
+  // lock order — and only then the stock rows, in one INSERT.
   const lines = await tx.select().from(moReportMaterials).where(eq(moReportMaterials.moReportId, report.id));
+  const returns: { articleId: string; locationId: string; quantity: number; batchId: string | null }[] = [];
+  const checkedPlaces = new Set<string>();
   for (const line of lines) {
     const [row] = await tx
       .select()
@@ -968,17 +1096,34 @@ async function undoReportInTx(
     // A service line (no place) was never drawn from stock: nothing to return.
     if (line.locationId === null) continue;
     const locationId = await resolveStockLocation(tx, row.componentArticleId, line.locationId);
-    await assertLocationNotUnderCount(tx, locationId);
-    await tx.insert(stockTransactions).values({
-      articleId: row.componentArticleId,
-      locationId,
-      quantityDelta: String(quantity),
-      transactionType: "mo_consumption",
-      referenceId: order.id,
-      createdBy: input.undoneBy,
-      // Batch (#8): back into the batch the part was drawn from.
-      batchId: line.batchId,
-    });
+    if (!checkedPlaces.has(locationId)) await assertLocationNotUnderCount(tx, locationId);
+    checkedPlaces.add(locationId);
+    // Batch (#8): back into the batch the part was drawn from.
+    returns.push({ articleId: row.componentArticleId, locationId, quantity, batchId: line.batchId });
+  }
+  const returnedBatchIds = returns.flatMap((r) => (r.batchId ? [r.batchId] : []));
+  const returnedSerials: string[] = [];
+  for (let i = 0; i < returnedBatchIds.length; i += 500) {
+    const kinds = await tx
+      .select({ id: stockBatches.id })
+      .from(stockBatches)
+      .where(and(inArray(stockBatches.id, returnedBatchIds.slice(i, i + 500)), eq(stockBatches.kind, "serial")));
+    returnedSerials.push(...kinds.map((k) => k.id));
+  }
+  await lockSerials(tx, returnedSerials);
+  await assertSerialsOutOfStock(tx, returnedSerials);
+  for (let i = 0; i < returns.length; i += 1000) {
+    await tx.insert(stockTransactions).values(
+      returns.slice(i, i + 1000).map((r) => ({
+        articleId: r.articleId,
+        locationId: r.locationId,
+        quantityDelta: String(r.quantity),
+        transactionType: "mo_consumption" as const,
+        referenceId: order.id,
+        createdBy: input.undoneBy,
+        batchId: r.batchId,
+      }))
+    );
   }
 
   // The operation's quantities, scrap rows and done flag.
@@ -1913,7 +2058,13 @@ export function createManufacturingRepository(db: Db) {
           articleNameEn: articles.nameEn,
           articleUnitCodeEn: units.codeEn,
           // Batch (#8): the pallet cards print the TO number as the batch.
-          articleBatchTracked: articles.batchTracked,
+          articleBatchTracked: batchTrackedSql(),
+          // Etapp 2: the utgångsdatum of the TO's own batch, once the first
+          // delinleverans has created it (null before, or without hållbarhet).
+          receiptBatchExpiresOn: sql<string | null>`(
+            select sb.expires_on::text from stock_batches sb
+            where sb.article_id = ${manufacturingOrders.articleId} and lower(sb.batch_number) = lower(${manufacturingOrders.orderNumber})
+          )`,
         })
         .from(manufacturingOrders)
         .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))
@@ -2134,7 +2285,14 @@ export function createManufacturingRepository(db: Db) {
     async consumeMaterial(
       moId: string,
       rowId: string,
-      input: { locationId?: string; batchId?: string | null; quantity: number; createdBy: string; materialShortage?: MaterialShortageCheck }
+      input: {
+        locationId?: string;
+        batchId?: string | null;
+        serialIds?: string[];
+        quantity: number;
+        createdBy: string;
+        materialShortage?: MaterialShortageCheck;
+      }
     ): Promise<ConsumeMaterialResult> {
       return db.transaction(async (tx) => {
         // The order FOR UPDATE, before the row (the reports' order → rows):
@@ -2168,7 +2326,7 @@ export function createManufacturingRepository(db: Db) {
 
         // Förbruka: drawn where the stock is unless a location was chosen —
         // never from a chosen Spärrad lagerplats (409).
-        const lines = await drawMaterial(tx, row, input.quantity, input.locationId, moId, input.createdBy, "refuse", input.batchId);
+        const lines = await drawMaterial(tx, row, input.quantity, input.locationId, moId, input.createdBy, "refuse", input.batchId, input.serialIds);
         // Materialbrist: a throw here rolls the draw back.
         await assertMaterialAvailable(tx, lines, input.materialShortage ?? NO_MATERIAL_SHORTAGE_CHECK);
 
@@ -2301,6 +2459,8 @@ export function createManufacturingRepository(db: Db) {
               locationName: stockLocations.name,
               // Batch (#8): the batch the part was drawn from (null = Okänd).
               batchNumber: stockBatches.batchNumber,
+              // batch | serial (0215), null for Okänd.
+              batchKind: stockBatches.kind,
             })
             .from(moReportMaterials)
             .leftJoin(stockBatches, eq(stockBatches.id, moReportMaterials.batchId))
@@ -2316,11 +2476,27 @@ export function createManufacturingRepository(db: Db) {
             )
             .orderBy(asc(articles.articleNumber), asc(stockLocations.name))
         : [];
+      // Serienummer (0215): the numbers each report received, in number order.
+      const serials = rows.length
+        ? await db
+            .select({ moReportId: moReportSerials.moReportId, batchNumber: stockBatches.batchNumber })
+            .from(moReportSerials)
+            .innerJoin(stockBatches, eq(stockBatches.id, moReportSerials.batchId))
+            .where(
+              inArray(
+                moReportSerials.moReportId,
+                rows.map((r) => r.id)
+              )
+            )
+        : [];
+      const serialsByReport = new Map<string, string[]>();
+      for (const serial of serials) serialsByReport.set(serial.moReportId, [...(serialsByReport.get(serial.moReportId) ?? []), serial.batchNumber]);
       return rows.map((r) => ({
         ...r,
+        receiptSerialNumbers: (serialsByReport.get(r.id) ?? []).sort((a, b) => a.localeCompare(b, "sv", { numeric: true })),
         materials: materials
           .filter((m) => m.moReportId === r.id)
-          .map(({ materialConsumptionId, articleNumber, quantity, locationName, batchNumber }) => ({
+          .map(({ materialConsumptionId, articleNumber, quantity, locationName, batchNumber, batchKind }) => ({
             materialConsumptionId,
             articleNumber,
             quantity,
@@ -2328,6 +2504,7 @@ export function createManufacturingRepository(db: Db) {
             // Batch (#8): the batch the part was drawn from, null = Okänd
             // (and every line of a component that is not batchstyrd).
             batchNumber,
+            batchKind,
           })),
       }));
     },
@@ -2490,6 +2667,11 @@ export function createManufacturingRepository(db: Db) {
         if (!order) return { ok: false, reason: "order_not_found" };
         if (order.status !== "released" && order.status !== "in_progress") return { ok: false, reason: "invalid_status" };
 
+        // Serienummer: the series' row right after the order row and before
+        // the components' article locks — the same point as the report on
+        // the last operation (reportOperationQuantitiesInTx).
+        await lockSerialSeriesForReceipt(tx, order.articleId);
+
         const already = Number(order.quantityReceived);
         const quantity = input.quantity ?? Math.max(Number(order.quantity) - already, 0);
         const goods = await receiveFinishedGoods(tx, order, {
@@ -2521,10 +2703,18 @@ export function createManufacturingRepository(db: Db) {
             completedOrder: true,
             createdBy: input.createdBy,
           },
-          goods.consumed
+          goods.consumed,
+          goods.serials.map((serial) => serial.id)
         );
 
-        return { ok: true, order: updatedOrder!, consumed: goods.consumed, received: goods.delta, reportId: report.id };
+        return {
+          ok: true,
+          order: updatedOrder!,
+          consumed: goods.consumed,
+          received: goods.delta,
+          reportId: report.id,
+          receivedSerialNumbers: goods.serials.map((serial) => serial.batchNumber),
+        };
       });
     },
   };

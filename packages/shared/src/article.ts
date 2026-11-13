@@ -18,6 +18,12 @@ const roundingSchema = z.coerce
   .refine((v) => Math.abs(v * 1000 - Math.round(v * 1000)) < 1e-6, "Avrundning får ha högst 3 decimaler");
 
 export const articleTypeSchema = z.enum(["manufactured", "purchased", "service"]);
+// Spårning (#8, etapp 2): antingen eller.
+export const articleTrackingSchema = z.enum(["none", "batch", "serial"]);
+export type ArticleTracking = z.infer<typeof articleTrackingSchema>;
+export const articleSerialAssignedAtSchema = z.enum(["receipt", "delivery"]);
+export type ArticleSerialAssignedAt = z.infer<typeof articleSerialAssignedAtSchema>;
+export const SHELF_LIFE_DAYS_MAX = 36500;
 export type ArticleType = z.infer<typeof articleTypeSchema>;
 
 export const listArticlesQuerySchema = listQuerySchema.extend({
@@ -169,9 +175,22 @@ export const createArticleSchema = z.object({
   stockControlled: z.boolean().optional(),
   // Prognosstyrd (#10): the behovsberäkning adds a forecast demand.
   forecastControlled: z.boolean().optional(),
-  // Batchstyrd (#8): only while the system setting batchTrackingEnabled is
-  // on, never a Tjänst or a phantom.
+  // Spårning (#8, etapp 2): none | batch | serial — only while the system
+  // setting batchTrackingEnabled is on, never a Tjänst or a phantom.
+  // `batchTracked` is the older alias (true = batch); `tracking` wins when
+  // both are sent.
+  tracking: articleTrackingSchema.optional(),
   batchTracked: z.boolean().optional(),
+  // Hållbarhet (dagar): a manufactured batch's utgångsdatum = the day it is
+  // received + this.
+  shelfLifeDays: blankSafe(z.coerce.number().int().min(1).max(SHELF_LIFE_DAYS_MAX)).optional(),
+  // Serienummer skapas (beslut 16): vid inleverans (förval) or vid
+  // utleverans — then the stock is untracked and the number is given at the
+  // delivery. Only read while tracking = serial.
+  serialAssignedAt: articleSerialAssignedAtSchema.optional(),
+  // Serienummerserie (0215): one of the serial number series; left out or
+  // null = the common one.
+  serialSeriesKey: z.string().min(1).max(50).nullable().optional(),
   // Ledtid (dagar) — tillverkningsledtid in whole working days (#13); omitted
   // = the routing's time decides.
   manufacturingLeadTimeDays: blankSafe(z.coerce.number().int().min(0)).optional(),
@@ -254,8 +273,15 @@ export const updateArticleSchema = z
     stockControlled: z.boolean().optional(),
     // Prognosstyrd (#10).
     forecastControlled: z.boolean().optional(),
-    // Batchstyrd (#8) — may always be switched off; the batches stay in the log.
+    // Spårning (#8) — may always be switched off; the batches stay in the
+    // log. `batchTracked: false` only switches BATCH off (resolveTracking).
+    tracking: articleTrackingSchema.optional(),
     batchTracked: z.boolean().optional(),
+    // Hållbarhet (dagar); null clears.
+    shelfLifeDays: blankSafe(z.coerce.number().int().min(1).max(SHELF_LIFE_DAYS_MAX)).nullable().optional(),
+    serialAssignedAt: articleSerialAssignedAtSchema.optional(),
+    // null = the common serial number series.
+    serialSeriesKey: z.string().min(1).max(50).nullable().optional(),
     // Ledtid (dagar); null clears (the routing's time decides again).
     manufacturingLeadTimeDays: blankSafe(z.coerce.number().int().min(0)).nullable().optional(),
     // "Ytbehandling" / "Färg" — free text printed on documents; "" clears.

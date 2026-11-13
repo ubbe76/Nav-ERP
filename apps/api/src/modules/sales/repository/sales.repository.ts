@@ -1,3 +1,4 @@
+import { batchTrackedSql, trackedSql } from "../../stock/service/batch-tracking.js";
 import { randomUUID } from "node:crypto";
 import { and, asc, count, desc, eq, exists, getTableColumns, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -17,6 +18,7 @@ import {
   customers,
   deliveries,
   deliveryRowLocations,
+  deliveryRowSerials,
   deliveryRows,
   deliveryTerms,
   freightProducts,
@@ -84,6 +86,17 @@ import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { allocateOutflowLocations, lockArticlesForOutflow } from "../../stock/service/outflow-locations.js";
 import { compareBatches } from "../../stock/service/outflow-allocation.js";
+import { ArticleNotSerialTrackedError } from "../../stock/service/batch.errors.js";
+import { deliveryRowSerialNumbers } from "./delivered-batches.js";
+import {
+  assertSerialsOutOfStock,
+  assignDeliverySerials,
+  deliverySerialArticles,
+  lockSerialSeries,
+  lockSerials,
+  previewSerialNumbers,
+} from "../../stock/service/serial-numbers.js";
+import { batchAgeDateSql } from "../../stock/repository/batch-balances.js";
 import { isStockedArticle, stockedArticleIds } from "../../stock/service/stocked-article.js";
 import {
   PriceListInUseError,
@@ -165,6 +178,8 @@ export type DeliverBatchResult =
       deliveryNumber: string;
       orderStatus: SalesOrderStatus;
       rows: (typeof salesOrderRows.$inferSelect)[];
+      // Serienummer skapas vid utleverans: the numbers each such row gave.
+      assignedSerials: { rowId: string; serialNumbers: string[] }[];
     }
   | { ok: false; reason: "order_not_found" | "invalid_status" }
   | { ok: false; reason: "row_not_found"; rowId: string }
@@ -1990,7 +2005,11 @@ export function createSalesRepository(db: Db) {
           // decide that without a second round-trip.
           articleType: articles.type,
           // Batch (#8): Utleverans offers a batch choice for a batchstyrd article.
-          articleBatchTracked: articles.batchTracked,
+          articleBatchTracked: batchTrackedSql(),
+          // Spårning (etapp 2): the sort; batchTracked above is its alias.
+          articleTracking: articles.tracking,
+          // Lagerspårad: the pick list prints the article's cells.
+          articleStockTracked: trackedSql(),
           // Printed as the articleInfo line on the quote/confirmation PDF
           // (renderSalesOrderPdf) via formatArticleAttributes — NOT on the
           // invoice PDF, which shares this same row query.
@@ -2053,7 +2072,14 @@ export function createSalesRepository(db: Db) {
       orderId: string,
       input: {
         locationId?: string;
-        rows: { rowId: string; quantity: number; locationId?: string; batchId?: string | null }[];
+        rows: {
+          rowId: string;
+          quantity: number;
+          locationId?: string;
+          batchId?: string | null;
+          serialIds?: string[];
+          serialNumbers?: string[];
+        }[];
         createdBy: string | null;
         overDeliveryPercent?: number | null;
       }
@@ -2077,6 +2103,13 @@ export function createSalesRepository(db: Db) {
               .from(salesOrderRows)
               .where(and(inArray(salesOrderRows.id, rowIds), eq(salesOrderRows.salesOrderId, orderId)))
           ).map((r) => r.articleId);
+          // Serienummer skapas vid utleverans (beslut 16–18): the rows of such
+          // articles give their styck a number each. The series rows are
+          // locked FIRST — series → articles → rows → places, the series'
+          // position relative to the articles in every writer (serial-
+          // numbers.ts) — sorted on the key.
+          const atDelivery = await deliverySerialArticles(tx, articleIds);
+          await lockSerialSeries(tx, [...atDelivery.values()].map((article) => article.seriesKey));
           await lockArticlesForOutflow(tx, articleIds);
           // A service row (tjänst) is delivered without a stock movement and
           // without parts (stocked-article.ts).
@@ -2113,6 +2146,9 @@ export function createSalesRepository(db: Db) {
           // movements that took them — one part per location, written to
           // delivery_row_locations below.
           const links: { locationId: string; quantity: number; stockTransactionId: string }[][] = [];
+          // The serial numbers each row GAVE (created vid utleverans), linked
+          // to its delivery row below.
+          const assigned: { id: string; batchNumber: string }[][] = [];
           for (const r of input.rows) {
             const [row] = await tx
               .select()
@@ -2137,27 +2173,62 @@ export function createSalesRepository(db: Db) {
               ? // Batch (#8): a batchstyrd article is split per (place, batch) —
                 // one movement and one delivery_row_locations part each; the
                 // part's batch is read through its stock row, never copied.
-                await allocateOutflowLocations(tx, row.articleId, r.quantity, r.locationId ?? input.locationId, { batchId: r.batchId })
-              : [];
-            const rowLinks: { locationId: string; quantity: number; stockTransactionId: string }[] = [];
-            for (const part of parts) {
-              await assertLocationNotUnderCount(tx, part.locationId);
-              const [movement] = await tx
-                .insert(stockTransactions)
-                .values({
-                  articleId: row.articleId,
-                  locationId: part.locationId,
-                  quantityDelta: String(-part.quantity),
-                  transactionType: "sales_delivery",
-                  referenceId: orderId,
-                  createdBy: input.createdBy,
-                  batchId: part.batchId ?? null,
+                // Serienummer in stock (created vid inleverans): the chosen
+                // numbers or the oldest, one part per number.
+                await allocateOutflowLocations(tx, row.articleId, r.quantity, r.locationId ?? input.locationId, {
+                  batchId: r.batchId,
+                  serialIds: r.serialIds,
                 })
-                .returning({ id: stockTransactions.id });
-              rowLinks.push({ locationId: part.locationId, quantity: part.quantity, stockTransactionId: movement!.id });
-              // The delivery may have emptied a temporary location.
-              await deactivateEmptyLocation(tx, part.locationId);
+              : [];
+            // Created vid utleverans: the sent numbers win, else the next of
+            // the article's series — drawn HERE, in the delivery's
+            // transaction (a failed delivery burns none). Any other article
+            // takes no numbers this way.
+            const numbered = atDelivery.get(row.articleId);
+            if (r.serialNumbers !== undefined && !numbered) {
+              const [article] = await tx.select({ articleNumber: articles.articleNumber }).from(articles).where(eq(articles.id, row.articleId));
+              throw new ArticleNotSerialTrackedError(article?.articleNumber ?? row.articleId);
             }
+            assigned.push(
+              numbered
+                ? await assignDeliverySerials(tx, {
+                    articleId: row.articleId,
+                    articleNumber: numbered.articleNumber,
+                    count: r.quantity,
+                    serialNumbers: r.serialNumbers,
+                    createdBy: input.createdBy,
+                  })
+                : []
+            );
+            // Per PLACE, not per part (a serial number is a part each), and
+            // the stock rows in one INSERT — matched back on (place, batch).
+            const places = [...new Set(parts.map((part) => part.locationId))];
+            for (const place of places) await assertLocationNotUnderCount(tx, place);
+            const movements =
+              parts.length === 0
+                ? []
+                : await tx
+                    .insert(stockTransactions)
+                    .values(
+                      parts.map((part) => ({
+                        articleId: row.articleId,
+                        locationId: part.locationId,
+                        quantityDelta: String(-part.quantity),
+                        transactionType: "sales_delivery" as const,
+                        referenceId: orderId,
+                        createdBy: input.createdBy,
+                        batchId: part.batchId ?? null,
+                      }))
+                    )
+                    .returning({ id: stockTransactions.id, locationId: stockTransactions.locationId, batchId: stockTransactions.batchId });
+            const movementOf = new Map(movements.map((m) => [`${m.locationId}|${m.batchId ?? ""}`, m.id]));
+            const rowLinks = parts.map((part) => ({
+              locationId: part.locationId,
+              quantity: part.quantity,
+              stockTransactionId: movementOf.get(`${part.locationId}|${part.batchId ?? ""}`)!,
+            }));
+            // The delivery may have emptied a temporary location.
+            for (const place of places) await deactivateEmptyLocation(tx, place);
             links.push(rowLinks);
 
             updatedRows.push(updatedRow!);
@@ -2191,6 +2262,8 @@ export function createSalesRepository(db: Db) {
           );
           // Only service rows ⇒ no parts at all.
           if (partRows.length > 0) await tx.insert(deliveryRowLocations).values(partRows);
+          const serialLinks = insertedRows.flatMap((inserted, i) => assigned[i]!.map((serial) => ({ deliveryRowId: inserted.id, batchId: serial.id })));
+          for (let i = 0; i < serialLinks.length; i += 1000) await tx.insert(deliveryRowSerials).values(serialLinks.slice(i, i + 1000));
 
           const allRows = await tx.select().from(salesOrderRows).where(eq(salesOrderRows.salesOrderId, orderId));
           const allDelivered = allRows.every((r) => Number(r.quantityDelivered) >= Number(r.quantityOrdered));
@@ -2211,7 +2284,14 @@ export function createSalesRepository(db: Db) {
             data: { deliveryId: delivery!.id, deliveryNumber },
           });
 
-          return { ok: true, deliveryId: delivery!.id, deliveryNumber, orderStatus, rows: updatedRows };
+          return {
+            ok: true,
+            deliveryId: delivery!.id,
+            deliveryNumber,
+            orderStatus,
+            rows: updatedRows,
+            assignedSerials: input.rows.flatMap((r, i) => (assigned[i]!.length > 0 ? [{ rowId: r.rowId, serialNumbers: assigned[i]!.map((serial) => serial.batchNumber) }] : [])),
+          };
         });
       } catch (err) {
         if (err instanceof BatchOrderNotFoundError) return { ok: false, reason: "order_not_found" };
@@ -2268,6 +2348,7 @@ export function createSalesRepository(db: Db) {
             quantity: deliveryRowLocations.quantity,
             batchId: stockTransactions.batchId,
             batchNumber: stockBatches.batchNumber,
+            batchKind: stockBatches.kind,
           })
           .from(deliveryRowLocations)
           .innerJoin(stockTransactions, eq(stockTransactions.id, deliveryRowLocations.stockTransactionId))
@@ -2318,10 +2399,30 @@ export function createSalesRepository(db: Db) {
 
         // Every part back where it was taken from; a temporary location the
         // delivery emptied is reactivated by the explicit resolve.
+        //
+        // Serienummer (steg 4): an Ångra is an INFLOW of the delivered
+        // numbers — the first undo that has to prove something. A number
+        // that has come back into stock some other way (received again,
+        // counted in) cannot come back twice: 409 serial-already-in-stock,
+        // naming it and where it stands. The places first (one check per
+        // place), then the numbers' rows locked sorted — last in the lock
+        // order. The numbers a delivery GAVE (created vid utleverans) need
+        // nothing here: their link stays on the undone row and they are
+        // burnt (beslut 18).
         const locations: { locationId: string; quantity: number; batchNumber: string | null }[] = [];
+        const resolved: string[] = [];
+        const checked = new Set<string>();
         for (const part of parts) {
           const locationId = await resolveStockLocation(tx, orderRow.articleId, part.locationId);
-          await assertLocationNotUnderCount(tx, locationId);
+          if (!checked.has(locationId)) await assertLocationNotUnderCount(tx, locationId);
+          checked.add(locationId);
+          resolved.push(locationId);
+        }
+        const serialIds = parts.flatMap((part) => (part.batchKind === "serial" && part.batchId ? [part.batchId] : []));
+        await lockSerials(tx, serialIds);
+        await assertSerialsOutOfStock(tx, serialIds);
+        for (const [index, part] of parts.entries()) {
+          const locationId = resolved[index]!;
           await tx.insert(stockTransactions).values({
             articleId: orderRow.articleId,
             locationId,
@@ -2455,7 +2556,7 @@ export function createSalesRepository(db: Db) {
             baseUnitCode: units.code,
             // Batch (#8): the documents print the parts' batches only while
             // the article is batchstyrd (decision 10).
-            batchTracked: articles.batchTracked,
+            batchTracked: trackedSql(),
             quantityDelivered: salesOrderRows.quantityDelivered,
             // Konfigurator 4b: the configured row's choices print on the note.
             configuration: salesOrderRows.configuration,
@@ -2492,6 +2593,12 @@ export function createSalesRepository(db: Db) {
           batchId: stockTransactions.batchId,
           batchNumber: stockBatches.batchNumber,
           batchCreatedAt: stockBatches.createdAt,
+          // batch | serial (0215), null for Okänd.
+          batchKind: stockBatches.kind,
+          // Etapp 2: the batch's utgångsdatum (printed on the följesedel
+          // and the pallet card) and its age day (the FEFO order).
+          expiresOn: stockBatches.expiresOn,
+          batchAgeDate: batchAgeDateSql,
         })
         .from(deliveryRowLocations)
         .innerJoin(stockTransactions, eq(stockTransactions.id, deliveryRowLocations.stockTransactionId))
@@ -2505,7 +2612,16 @@ export function createSalesRepository(db: Db) {
         .orderBy(asc(warehouses.name), asc(stockLocations.name));
       const partsByRow = new Map<
         string,
-        { locationId: string; warehouseName: string; locationName: string; quantity: number; batchId: string | null; batchNumber: string | null }[]
+        {
+          locationId: string;
+          warehouseName: string;
+          locationName: string;
+          quantity: number;
+          batchId: string | null;
+          batchNumber: string | null;
+          batchKind: "batch" | "serial" | null;
+          expiresOn: string | null;
+        }[]
       >();
       const placeOrder = new Map<string, number>();
       partRows.forEach((part, index) => {
@@ -2523,9 +2639,23 @@ export function createSalesRepository(db: Db) {
           quantity: Number(p.quantity),
           batchId: p.batchId,
           batchNumber: p.batchNumber,
+          batchKind: p.batchKind,
+          expiresOn: p.expiresOn,
         });
         partsByRow.set(p.deliveryRowId, list);
       }
+      // Serienummer per delivery row — ONE list whatever way the numbers
+      // came: the row's parts that are serial numbers (created vid
+      // inleverans, drawn from stock) and the numbers the row GAVE (created
+      // vid utleverans, delivery_row_serials). For the följesedel, the
+      // pallet card and the dialogs; the numbers of an undone row are burnt
+      // (the row's undoneAt says so).
+      const givenByRow = await deliveryRowSerialNumbers(db, { deliveryId });
+      const serialsOf = (deliveryRowId: string) =>
+        [
+          ...(partsByRow.get(deliveryRowId) ?? []).flatMap((part) => (part.batchKind === "serial" && part.batchNumber ? [part.batchNumber] : [])),
+          ...(givenByRow.get(deliveryRowId) ?? []),
+        ].sort((a, b) => a.localeCompare(b, "sv", { numeric: true }));
 
       const currentIndex = occasions.findIndex((o) => o.id === deliveryId);
       const laterDeliveryIds = occasions.slice(currentIndex).map((o) => o.id);
@@ -2568,9 +2698,15 @@ export function createSalesRepository(db: Db) {
           undoneAt: r.undoneAt,
           undoneByName: r.undoneByName,
           locations: partsByRow.get(r.deliveryRowId) ?? [],
+          serialNumbers: serialsOf(r.deliveryRowId),
           undoable: r.undoneAt === null && partsByRow.has(r.deliveryRowId),
         })),
       };
+    },
+
+    // Serienummer skapas vid utleverans: a preview of the series (nothing drawn).
+    async previewSerialNumbers(articleId: string, count: number) {
+      return previewSerialNumbers(db, articleId, count);
     },
 
     // --- C3 Kundpriser: prislistor ---

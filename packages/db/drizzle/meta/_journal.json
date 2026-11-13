@@ -1499,6 +1499,27 @@
       "when": 1794505857108,
       "tag": "0213_batchnummer",
       "breakpoints": true
+    },
+    {
+      "idx": 214,
+      "version": "7",
+      "when": 1794540514045,
+      "tag": "0214_sparning_utgangsdatum",
+      "breakpoints": true
+    },
+    {
+      "idx": 215,
+      "version": "7",
+      "when": 1794542895547,
+      "tag": "0215_serienummer",
+      "breakpoints": true
+    },
+    {
+      "idx": 216,
+      "version": "7",
+      "when": 1794545129762,
+      "tag": "0216_serienummer_vid_utleverans",
+      "breakpoints": true
     }
   ]
 }

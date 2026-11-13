@@ -474,7 +474,9 @@ export function createImportRepository(db: Db | Tx) {
             groupCode: articleGroups.code,
             articleCode: articleCodes.code,
             standardCost: articles.standardCost,
-            batchTracked: articles.batchTracked,
+            tracking: articles.tracking,
+            serialAssignedAt: articles.serialAssignedAt,
+            shelfLifeDays: articles.shelfLifeDays,
             barcode: articles.barcode,
             weight: articles.weight,
             surfaceTreatment: articles.surfaceTreatment,
@@ -549,8 +551,9 @@ export function createImportRepository(db: Db | Tx) {
         // flag ON then holds the setting's row FOR SHARE to the commit —
         // article first, then the setting, as updateArticle. Both rules are
         // re-checked here: the preview read them without locks.
-        const flagChanges = plan.updates.filter((u) => u.patch.batchTracked !== undefined);
-        const switchedOn = new Set(flagChanges.filter((u) => u.patch.batchTracked === true).map((u) => u.id));
+        const flagChanges = plan.updates.filter((u) => u.patch.tracking !== undefined);
+        const switchedOn = new Set(flagChanges.filter((u) => u.patch.tracking !== "none").map((u) => u.id));
+
         const flagIds = flagChanges.map((u) => u.id).sort();
         for (const part of chunk(flagIds)) {
           if (part.length === 0) continue;
@@ -564,7 +567,7 @@ export function createImportRepository(db: Db | Tx) {
             if (switchedOn.has(row.id) && !batchTrackableArticle(row)) throw new ArticleNotBatchTrackableError();
           }
         }
-        if (switchedOn.size > 0 || plan.creates.some((c) => c.batchTracked === true)) {
+        if (switchedOn.size > 0 || plan.creates.some((c) => c.tracking !== undefined && c.tracking !== "none")) {
           if (!(await batchTrackingEnabledForShare(tx))) throw new BatchTrackingDisabledError();
         }
 
@@ -666,7 +669,8 @@ export function createImportRepository(db: Db | Tx) {
                 safetyStock: create.safetyStock != null ? String(create.safetyStock) : undefined,
                 stockControlled: create.stockControlled ?? false,
                 forecastControlled: create.forecastControlled ?? false,
-                batchTracked: create.batchTracked ?? false,
+                tracking: create.tracking ?? "none",
+                shelfLifeDays: create.shelfLifeDays ?? null,
                 manufacturingLeadTimeDays: create.manufacturingLeadTimeDays ?? null,
               }))
             )
@@ -745,7 +749,8 @@ export function createImportRepository(db: Db | Tx) {
               ...(update.patch.forecastControlled !== undefined
                 ? { forecastControlled: update.patch.forecastControlled }
                 : {}),
-              ...(update.patch.batchTracked !== undefined ? { batchTracked: update.patch.batchTracked } : {}),
+              ...(update.patch.tracking !== undefined ? { tracking: update.patch.tracking } : {}),
+              ...(update.patch.shelfLifeDays !== undefined ? { shelfLifeDays: update.patch.shelfLifeDays } : {}),
               ...(update.patch.manufacturingLeadTimeDays !== undefined
                 ? { manufacturingLeadTimeDays: update.patch.manufacturingLeadTimeDays }
                 : {}),

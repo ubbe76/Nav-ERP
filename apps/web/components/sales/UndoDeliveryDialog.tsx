@@ -11,6 +11,7 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import { confirmDialog } from "../../lib/confirm";
 import { useCan } from "../PermissionsProvider";
 import type { DeliveryRowsResponse, SalesOrderStatus } from "../../lib/types";
+import { compressSerialNumbers } from "../../lib/serials";
 import { formatStockholmDateTime } from "../../lib/date";
 
 // Ångra utleverans: lists a följesedel's rows; Ångra on a row puts exactly
@@ -28,10 +29,19 @@ const fmtQty = (n: number) => n.toLocaleString("sv-SE");
 function putBackText(row: DeliveryRowsResponse["rows"][number]): string | null {
   if (row.locations.length === 0) return null;
   const parts = row.locations.map(
-    (l) => `${l.warehouseName} — ${l.locationName}${l.batchNumber ? `, batch ${l.batchNumber}` : ""} (${fmtQty(l.quantity)} ${row.baseUnit})`
+    (l) =>
+      `${l.warehouseName} — ${l.locationName}${l.batchNumber ? `, ${l.batchKind === "serial" ? "serienummer" : "batch"} ${l.batchNumber}` : ""} (${fmtQty(l.quantity)} ${row.baseUnit})`
   );
   const joined = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} och ${parts[parts.length - 1]}` : parts[0];
   return `Varorna läggs tillbaka på ${joined}.`;
+}
+
+// Serienummer (#8 etapp 2): numbers the row GAVE at the delivery (Vid
+// utleverans — not part of its stock rows) are burnt by Ångra; the ones drawn
+// from stock go back with the goods. Beslut 18.
+function burntSerials(row: DeliveryRowsResponse["rows"][number]): string[] {
+  const back = new Set(row.locations.filter((l) => l.batchKind === "serial" && l.batchNumber).map((l) => l.batchNumber!));
+  return (row.serialNumbers ?? []).filter((n) => !back.has(n));
 }
 
 const mutedText = { color: "var(--color-text-muted)" } as const;
@@ -70,7 +80,12 @@ export function UndoDeliveryDialog({
 
   async function undo(row: DeliveryRowsResponse["rows"][number]) {
     const what = `${row.quantity.toLocaleString("sv-SE")} ${row.unit} ${row.articleNumber}`.replace(/\s+/g, " ").trim();
-    const question = `Ångra leveransen av ${what} på följesedel ${data?.deliveryNumber ?? ""}? ${putBackText(row) ?? "Varorna läggs tillbaka i lager."} Orderns levererade antal minskas.`;
+    const burnt = burntSerials(row);
+    const burntText =
+      burnt.length > 0
+        ? ` Serienummer ${compressSerialNumbers(burnt)} gavs vid utleveransen och bränns — de ges aldrig igen och kan inte skrivas in på nytt.`
+        : "";
+    const question = `Ångra leveransen av ${what} på följesedel ${data?.deliveryNumber ?? ""}? ${putBackText(row) ?? "Varorna läggs tillbaka i lager."}${burntText} Orderns levererade antal minskas.`;
     if (!(await confirmDialog(question, { confirmLabel: "Ångra", danger: true }))) return;
     setError(null);
     setPendingId(row.id);
@@ -103,6 +118,17 @@ export function UndoDeliveryDialog({
                   <div style={{ fontSize: 12, ...mutedText }}>
                     {row.quantity.toLocaleString("sv-SE")} {row.unit}
                   </div>
+                  {(row.serialNumbers ?? []).length > 0 && (
+                    <div style={{ fontSize: 12, ...mutedText }}>Serienummer: {compressSerialNumbers(row.serialNumbers!)}</div>
+                  )}
+                  {!undone && row.undoable && burntSerials(row).length > 0 && (
+                    <div style={{ fontSize: 12, ...mutedText }}>
+                      Nummer som gavs vid utleveransen ({compressSerialNumbers(burntSerials(row))}) bränns om du ångrar.
+                    </div>
+                  )}
+                  {undone && burntSerials(row).length > 0 && (
+                    <div style={{ fontSize: 12, ...mutedText }}>Bränt: {compressSerialNumbers(burntSerials(row))}</div>
+                  )}
                   {!undone && row.undoable && putBackText(row) && (
                     <div style={{ fontSize: 12, ...mutedText }}>{putBackText(row)}</div>
                   )}

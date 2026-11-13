@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Table } from "../ui/Table";
 import { Button } from "../ui/Button";
-import { Field, Input } from "../ui/Field";
+import { Checkbox, Field, Input } from "../ui/Field";
 import { ArticlePicker } from "../ui/ArticlePicker";
 import { StatusPill } from "../ui/StatusPill";
 import { HelpLink } from "../ui/HelpLink";
@@ -14,6 +14,7 @@ import { ScanPanel } from "../ui/ScanInput";
 import { useScanFeedback, useScanQueue } from "../ui/useOrderScan";
 import { locationCountHref, ORDER_KIND_LABEL } from "./StockCountScanPanel";
 import { API_URL, apiFetch } from "../../lib/api";
+import { stockholmToday } from "../../lib/date";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { resolveCountScan } from "../../lib/countScan";
 import buttonStyles from "../ui/Button.module.css";
@@ -24,6 +25,7 @@ import {
   type Article,
   type StockCountBookOn,
   type StockCountDetail,
+  type ScanGs1,
   type ScanMatch,
   type StockCountPostResult,
   type StockCountRow,
@@ -45,21 +47,33 @@ const articleLabel = (a: { articleNumber: string; name: string }) => `${a.articl
 // field. An article the sheet lacks is added first, as Lägg till artikel
 // does. No +1 per scan here: a handheld scanner types into the focused field,
 // so counting by scans and typing the count cannot be mixed.
+//
+// GS1 (#8 etapp 2 steg 6): a serienummer (a GS1 code's AI 21, or the number
+// itself) is the exception — its row is counted 1 at once (saved), one styck
+// is one styck; a number the sheet lacks is added first. A batch (AI 10, or
+// the batch number) marks THAT batch's row, added when it is missing. An
+// article scanned alone that has several rows (batches, serienummer) only
+// narrows the sheet to them — the user picks the row, or scans the number.
 export function StockCountDetailClient({ session }: { session: StockCountDetail }) {
   const router = useRouter();
   const [counted, setCounted] = useState<Record<string, string>>({});
   const [addArticle, setAddArticle] = useState<Article | null>(null);
   // Batch (#8): a batch-tracked article is added with a batch (empty = Okänd).
+  // A serienummerstyrd article (numbers created at the receipt) is added with a number.
   const [addBatchTracked, setAddBatchTracked] = useState(false);
+  const [addSerialTracked, setAddSerialTracked] = useState(false);
   const [addBatchNumber, setAddBatchNumber] = useState("");
   useEffect(() => {
     setAddBatchTracked(false);
+    setAddSerialTracked(false);
     setAddBatchNumber("");
     if (!addArticle) return;
     let cancelled = false;
-    apiFetch<{ batchTracked: boolean }>(`/api/v1/articles/${addArticle.id}/batch-balances`)
+    apiFetch<Pick<Article, "tracking" | "batchTracked" | "serialAssignedAt">>(`/api/v1/articles/${addArticle.id}`)
       .then((r) => {
-        if (!cancelled) setAddBatchTracked(r.batchTracked);
+        if (cancelled) return;
+        setAddBatchTracked((r.tracking ?? (r.batchTracked ? "batch" : "none")) === "batch");
+        setAddSerialTracked(r.tracking === "serial" && (r.serialAssignedAt ?? "receipt") === "receipt");
       })
       .catch(() => {});
     return () => {
@@ -80,6 +94,9 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
   const bookOn: StockCountBookOn = !backdating?.allowed ? "today" : (bookOnChoice ?? "count_date");
   const { feedback, ok, warn } = useScanFeedback();
   const [markedRowId, setMarkedRowId] = useState<string | null>(null);
+  // An article scanned without a number that names the row: the sheet shows
+  // only that article's rows until Visa alla.
+  const [filterArticle, setFilterArticle] = useState<{ id: string; label: string } | null>(null);
   const scanField = useRef<HTMLInputElement>(null);
   const countFields = useRef(new Map<string, HTMLInputElement>());
   // A row added by a scan arrives with the refresh; its field takes the
@@ -137,6 +154,9 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
   function serverValue(row: StockCountRow): string {
     return row.countedQuantity === null ? "" : String(Number(row.countedQuantity));
   }
+  // A serial number is counted 0 (not found) or 1 (found), by a checkbox.
+  const isSerialRow = (row: StockCountRow) => row.batchKind === "serial";
+  const hasSerialRows = session.rows.some(isSerialRow);
   function enteredCount(row: StockCountRow): string {
     return counted[row.id] ?? serverValue(row);
   }
@@ -205,13 +225,42 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
     }
   }
 
-  const onScan = useScanQueue(async (code: string, matches: ScanMatch[]) => {
-    const current = latest.current;
-    const intent = resolveCountScan(matches, {
-      locationId: current.locationId,
-      open: current.status === "open",
-      rows: current.rows,
+  // The article of a scanned number, for the messages: from the sheet, else
+  // from what the scan answered.
+  function articleText(articleId: string, matches: ScanMatch[]): string {
+    const row = latest.current.rows.find((r) => r.articleId === articleId);
+    if (row) return articleLabel({ articleNumber: row.articleNumber, name: row.articleName });
+    for (const m of matches) {
+      if (m.kind === "article" && m.id === articleId) return articleLabel(m);
+      if (m.kind === "batch" && m.articleId === articleId) return articleLabel({ articleNumber: m.articleNumber, name: m.articleName });
+    }
+    return "";
+  }
+
+  // A scanned serienummer is there: Räknat = 1, saved at once.
+  async function countSerialRow(rowId: string, text: string) {
+    await apiFetch(`/api/v1/stock-counts/${latest.current.id}/rows/${rowId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ countedQuantity: 1 }),
     });
+    setCounted((c) => ({ ...c, [rowId]: "1" }));
+    setMarkedRowId(rowId);
+    ok(`${text} — finns, sparat`);
+    router.refresh();
+  }
+
+  const onScan = useScanQueue(async (code: string, matches: ScanMatch[], gs1: ScanGs1 | null) => {
+    const current = latest.current;
+    const intent = resolveCountScan(
+      matches,
+      {
+        locationId: current.locationId,
+        open: current.status === "open",
+        rows: current.rows,
+      },
+      gs1
+    );
+    if (intent.kind !== "chooseRow") setFilterArticle(null);
     switch (intent.kind) {
       case "thisLocation":
         ok(`${current.warehouseName} — ${current.locationName} är den här inventeringens plats`);
@@ -263,7 +312,68 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
         }
         return;
       }
+      case "chooseRow": {
+        const article = intent.match;
+        if (intent.rowIds.length > 0) setFilterArticle({ id: article.id, label: articleLabel(article) });
+        setMarkedRowId(null);
+        if (intent.serial) {
+          warn(`${articleLabel(article)} har serienummer — skanna serienumret`);
+        } else {
+          warn(`${articleLabel(article)} har ${intent.rowIds.length} rader — välj batchens rad och skriv räknat antal, eller skanna batchen`);
+        }
+        return;
+      }
+      case "serialRow": {
+        const text = `${articleText(intent.articleId, matches)}: serienummer ${intent.serialNumber}`;
+        try {
+          await countSerialRow(intent.rowId, text);
+        } catch (err) {
+          warn(apiErrorMessage(err, "Kunde inte spara raden"));
+        }
+        return;
+      }
+      case "addSerial": {
+        const text = `${articleText(intent.articleId, matches)}: serienummer ${intent.serialNumber}`;
+        try {
+          const row = await apiFetch<{ id: string }>(`/api/v1/stock-counts/${current.id}/rows`, {
+            method: "POST",
+            body: JSON.stringify({ articleId: intent.articleId, batchNumber: intent.serialNumber }),
+          });
+          const loaded = waitForLoad((s) => s.rows.some((r) => r.id === row.id));
+          await countSerialRow(row.id, `${text} fanns inte på underlaget och lades till`);
+          await loaded;
+        } catch (err) {
+          // 409 serial-on-other-location names the place the number stands on.
+          warn(apiErrorMessage(err, "Kunde inte lägga till serienumret"));
+        }
+        return;
+      }
+      case "batchRow":
+        ok(`${articleText(intent.articleId, matches)}: batch ${intent.batchNumber} — skriv räknat antal och tryck Enter`);
+        focusCount(intent.rowId);
+        return;
+      case "addBatch": {
+        const text = `${articleText(intent.articleId, matches)}: batch ${intent.batchNumber}`;
+        try {
+          const row = await apiFetch<{ id: string }>(`/api/v1/stock-counts/${current.id}/rows`, {
+            method: "POST",
+            body: JSON.stringify({ articleId: intent.articleId, batchNumber: intent.batchNumber }),
+          });
+          warn(`${text} fanns inte på underlaget och lades till — skriv räknat antal`);
+          focusCount(row.id);
+          const loaded = waitForLoad((s) => s.rows.some((r) => r.id === row.id));
+          router.refresh();
+          await loaded;
+        } catch (err) {
+          warn(apiErrorMessage(err, "Kunde inte lägga till batchen"));
+        }
+        return;
+      }
+      case "ambiguousNumber":
+        warn(`${intent.batchNumber} finns på flera artiklar — skanna artikeln eller lägg till raden för hand`);
+        return;
       case "articleNotCounting":
+      case "numberNotCounting":
         warn(`Inventeringen är ${STOCK_COUNT_STATUS_LABELS[current.status].toLowerCase()} — räknade antal kan inte ändras`);
         return;
       case "order":
@@ -330,7 +440,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
         method: "POST",
         body: JSON.stringify({
           articleId: addArticle.id,
-          ...(addBatchTracked && addBatchNumber.trim() ? { batchNumber: addBatchNumber.trim() } : {}),
+          ...((addBatchTracked || addSerialTracked) && addBatchNumber.trim() ? { batchNumber: addBatchNumber.trim() } : {}),
         }),
       });
       setAddArticle(null);
@@ -409,11 +519,21 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
 
       <FormError>{error}</FormError>
       {message && <p>{message}</p>}
+      {filterArticle && (
+        <p style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <span>Visar bara raderna för {filterArticle.label}.</span>
+          <Button type="button" variant="secondary" size="small" onClick={() => setFilterArticle(null)}>
+            Visa alla
+          </Button>
+        </p>
+      )}
 
       <Table<StockCountRow>
         columns={[
           { key: "articleNumber", label: "Artikel", width: "1fr" },
-          ...(session.rows.some((r) => r.batchTracked) ? [{ key: "batch", label: "Batch", width: "130px" }] : []),
+          ...(session.rows.some((r) => r.batchTracked || isSerialRow(r))
+            ? [{ key: "batch", label: hasSerialRows ? "Batch / serienummer" : "Batch", width: "160px" }]
+            : []),
           { key: "unit", label: "Enhet", width: "70px" },
           { key: "snapshotQuantity", label: "Bokfört", width: "100px", align: "right" },
           { key: "countedQuantity", label: "Räknat", width: "120px", align: "right" },
@@ -421,7 +541,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
           { key: "warning", label: "", width: "170px" },
           { key: "actions", label: "", width: "80px", align: "right" },
         ]}
-        rows={session.rows}
+        rows={filterArticle ? session.rows.filter((r) => r.articleId === filterArticle.id) : session.rows}
         highlightedRowId={markedRowId}
         emptyText="Inga rader — lagerplatsen har inget bokfört saldo. Lägg till artiklar som hittas fysiskt."
         renderCell={(row, key) => {
@@ -429,12 +549,38 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
             case "articleNumber":
               return `${row.articleNumber} — ${row.articleName}`;
             case "batch":
-              return row.batchTracked ? (row.batchNumber ?? "Okänd") : "";
+              return row.batchTracked || isSerialRow(row) ? (
+                <>
+                  {row.batchNumber ?? "Okänd"}
+                  {row.expiresOn && (
+                    <span style={{ display: "block", fontSize: "0.85em", color: row.expiresOn < stockholmToday() ? "var(--status-stopped-text)" : undefined }}>
+                      {row.expiresOn < stockholmToday() ? "utgången" : "utgår"} {row.expiresOn}
+                    </span>
+                  )}
+                </>
+              ) : (
+                ""
+              );
             case "unit":
               return row.unit ?? "—";
             case "snapshotQuantity":
               return formatQuantity(row.snapshotQuantity);
             case "countedQuantity":
+              if (open && isSerialRow(row)) {
+                const entered = enteredCount(row);
+                return (
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <Checkbox
+                      aria-label={`Hittad — ${row.articleNumber} ${row.batchNumber ?? ""}`.trim()}
+                      checked={entered === "1"}
+                      onChange={(e) => setCounted((c) => ({ ...c, [row.id]: e.target.checked ? "1" : "0" }))}
+                    />
+                    <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                      {entered === "" ? "ej räknad" : entered === "1" ? "finns" : "saknas"}
+                    </span>
+                  </label>
+                );
+              }
               return open ? (
                 <Input
                   aria-label={`Räknat antal för ${row.articleNumber}`}
@@ -518,9 +664,9 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
               <ArticlePicker id="countAddArticle" value={addArticle} onChange={setAddArticle} />
             </Field>
           </div>
-          {addArticle && addBatchTracked && (
+          {addArticle && (addBatchTracked || addSerialTracked) && (
             <div style={{ minWidth: 160 }}>
-              <Field label="Batch" htmlFor="countAddBatch">
+              <Field label={addSerialTracked ? "Serienummer" : "Batch"} htmlFor="countAddBatch">
                 <Input
                   id="countAddBatch"
                   size="sm"
@@ -535,6 +681,22 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
             Lägg till
           </Button>
           <div style={{ flex: 1 }} />
+          {hasSerialRows && (
+            <Button
+              variant="secondary"
+              disabled={pending}
+              onClick={() =>
+                setCounted((c) => {
+                  // Every serial number not yet counted is not there: 0.
+                  const next = { ...c };
+                  for (const r of session.rows) if (isSerialRow(r) && (next[r.id] ?? serverValue(r)) === "") next[r.id] = "0";
+                  return next;
+                })
+              }
+            >
+              Sätt oskannade till 0
+            </Button>
+          )}
           <Button variant="secondary" onClick={saveCounts} disabled={pending || dirtyRows.length === 0}>
             {pending ? "Sparar…" : `Spara räknade antal${dirtyRows.length > 0 ? ` (${dirtyRows.length})` : ""}`}
           </Button>

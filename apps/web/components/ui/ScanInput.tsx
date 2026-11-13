@@ -14,6 +14,17 @@ interface NativeDetector {
 }
 type NativeDetectorCtor = new (opts: { formats: string[] }) => NativeDetector;
 
+// FNC1 / the GS1 group separator, as it stands inside a scanned code.
+const GROUP_SEPARATOR = "\x1d";
+
+// Ctrl+] — or the raw control character, as some scanners and browsers
+// report it (key "\x1d", or the deprecated keyCode 29).
+export function isGroupSeparatorKey(e: { key: string; code?: string; keyCode?: number; ctrlKey: boolean; altKey: boolean; metaKey: boolean }): boolean {
+  if (e.key === GROUP_SEPARATOR) return true;
+  if (!e.ctrlKey || e.altKey || e.metaKey) return false;
+  return e.key === "]" || e.code === "BracketRight" || e.keyCode === 29;
+}
+
 const CAMERA_ERROR = "Kameran kunde inte startas — kontrollera att sidan får använda kameran";
 
 // Skanningsfält: a text field that takes what a handheld scanner types (the
@@ -46,6 +57,20 @@ export function ScanInput({
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    // GS1 (#8 etapp 2): a handheld scanner in keyboard mode sends the group
+    // separator between a code's fields as Ctrl+] (ASCII 29), which the
+    // browser does not type into the field. It is put into the code where
+    // the cursor stands — the server needs it to tell where a batch or a
+    // serienummer ends. Ctrl only (AltGr is Ctrl+Alt on Windows and types ]
+    // on a Swedish keyboard).
+    if (isGroupSeparatorKey(e)) {
+      e.preventDefault();
+      const field = e.currentTarget;
+      const start = field.selectionStart ?? value.length;
+      const end = field.selectionEnd ?? start;
+      setValue(value.slice(0, start) + GROUP_SEPARATOR + value.slice(end));
+      return;
+    }
     if (e.key !== "Enter") return;
     e.preventDefault();
     submit(value);
@@ -157,7 +182,14 @@ function CameraScanner({ onDecoded }: { onDecoded: (code: string) => void }) {
 
         const Native = (window as unknown as { BarcodeDetector?: NativeDetectorCtor }).BarcodeDetector;
         if (Native) {
-          const detector = new Native({ formats: FORMATS });
+          // GS1 DataMatrix carries batch and serienummer; a browser that
+          // does not know the format gets the list without it.
+          let detector: NativeDetector;
+          try {
+            detector = new Native({ formats: [...FORMATS, "data_matrix"] });
+          } catch {
+            detector = new Native({ formats: FORMATS });
+          }
           const tick = async () => {
             if (cancelled) return;
             try {

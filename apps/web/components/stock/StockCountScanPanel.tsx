@@ -58,7 +58,16 @@ export function StockCountScanPanel() {
       case "articleNotCounting":
       case "row":
       case "addArticle":
+      case "chooseRow":
         warn(`Skanna lagerplatsens etikett först — ${code} är en artikel`);
+        return;
+      case "numberNotCounting":
+      case "serialRow":
+      case "addSerial":
+      case "batchRow":
+      case "addBatch":
+      case "ambiguousNumber":
+        warn(`Skanna lagerplatsens etikett först — ${code} är ett batch- eller serienummer`);
         return;
       case "order":
         warn(`${code} är ${ORDER_KIND_LABEL[intent.match.kind]} — skanna lagerplatsens etikett`);

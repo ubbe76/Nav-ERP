@@ -40,12 +40,13 @@ import type { ArticleRepository } from "../repository/article.repository.js";
 import type { DrawingFileRef, DrawingFileWithData } from "../repository/drawing-files.js";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
-import { DEFAULT_ARTICLE_SERIES_KEY, SeriesExhaustedError } from "../../system/service/number-series.js";
+import { DEFAULT_ARTICLE_SERIES_KEY, SeriesExhaustedError, formatSeriesNumber } from "../../system/service/number-series.js";
+import { DEFAULT_SERIAL_SERIES_KEY } from "../../stock/service/serial-numbers.js";
 import { COPIED_ARTICLES_MAX, ERROR_CODES, type ImportExportArticleSelection } from "@navet/shared";
 import { codeFromName, errorBody } from "../../system/service/error-body.js";
 import { assertModeAllowed } from "../../configurator/service/configurator-rules.js";
 import { StockLocationNotFoundError } from "../../stock/service/stock.errors.js";
-import { batchTrackableArticle } from "../../stock/service/batch-tracking.js";
+import { batchTrackableArticle, mentionsTracking, resolveTracking, type ArticleTracking } from "../../stock/service/batch-tracking.js";
 import { ArticleNotBatchTrackableError, BatchTrackingDisabledError } from "../../stock/service/batch.errors.js";
 
 // Only domain errors the web has a translation for are reported by code; any
@@ -571,6 +572,21 @@ export function createArticleService(
       );
     },
 
+    // Artikelkortets Serienummerserie (0215): the serial number series with
+    // the number each would issue next — a preview: nothing is reserved, and
+    // a number already on the article is stepped over when it is claimed.
+    async listSerialNumberSeries() {
+      const rows = await repo.listSerialNumberSeries();
+      return rows.map((row) => ({
+        key: row.key,
+        name: row.name,
+        prefix: row.prefix,
+        digits: row.digits,
+        isDefault: row.key === DEFAULT_SERIAL_SERIES_KEY,
+        nextSerialNumber: formatSeriesNumber(row.prefix, row.nextNumber, row.digits),
+      }));
+    },
+
     // Etiketter (#4): the labels as a PDF, each article `copies` times in a
     // row. Unknown ids are left out; none known is a 404.
     async renderArticleLabels(input: ArticleLabelsInput) {
@@ -745,10 +761,20 @@ export function createArticleService(
       // Batchstyrd (#8) is decided under the same lock, whenever the patch
       // mentions it (or the type/phantom, which may make the article one that
       // cannot be batchstyrd): the stock writers read the flag FOR KEY SHARE
-      // (batchTrackedArticleIds) and the draws hold the article FOR NO KEY
+      // (trackedArticleIds) and the draws hold the article FOR NO KEY
       // UPDATE, so the change waits for them and they for it.
-      let batchTrackedChange: { before: boolean; after: boolean } | null = null;
-      if (input.type !== undefined || input.isPhantom !== undefined || input.batchTracked !== undefined) {
+      let trackingChange: { before: ArticleTracking; after: ArticleTracking } | null = null;
+      // Serienummer skapas decides whether the stock is lagerspårat and the
+      // Serienummerserie where the numbers come from — both are changed under
+      // the same lock as Spårning.
+      let assignedAtChange: { before: "receipt" | "delivery"; after: "receipt" | "delivery" } | null = null;
+      if (
+        input.type !== undefined ||
+        input.isPhantom !== undefined ||
+        mentionsTracking(input) ||
+        input.serialAssignedAt !== undefined ||
+        input.serialSeriesKey !== undefined
+      ) {
         await repo.transaction(async (tx) => {
           const locked = await repo.lockArticle(tx, id);
           if (!locked) throw new ArticleNotFoundError(id);
@@ -759,14 +785,27 @@ export function createArticleService(
           // the setting cannot be switched off past this article). Off: always
           // allowed (beslut 10) — the batches stay in the log, are no longer
           // asked for or shown, and are there again if the flag comes back.
-          // An article that becomes a Tjänst or a phantom loses the flag.
+          // An article that becomes a Tjänst or a phantom loses the tracking.
+          // The request's `tracking`/`batchTracked` are resolved against the
+          // LOCKED row by the one rule (resolveTracking).
           const trackable = batchTrackableArticle({ type: input.type ?? locked.type, isPhantom: input.isPhantom ?? locked.isPhantom });
-          if (input.batchTracked === true && !trackable) throw new ArticleNotBatchTrackableError();
-          const batchTracked = trackable && (input.batchTracked ?? locked.batchTracked);
-          if (batchTracked && !locked.batchTracked && !(await repo.batchTrackingEnabled(tx))) throw new BatchTrackingDisabledError();
-          if (batchTracked !== locked.batchTracked) {
-            batchTrackedChange = { before: locked.batchTracked, after: batchTracked };
-            effective = { ...effective, batchTracked };
+          const wanted = resolveTracking(locked.tracking, input);
+          if (input.serialSeriesKey !== undefined) await repo.assertSerialSeries(tx, input.serialSeriesKey);
+          if (input.serialAssignedAt !== undefined && input.serialAssignedAt !== locked.serialAssignedAt) {
+            assignedAtChange = { before: locked.serialAssignedAt, after: input.serialAssignedAt };
+          }
+          const asksOn = input.tracking !== undefined ? input.tracking !== "none" : input.batchTracked === true;
+          if (asksOn && !trackable) throw new ArticleNotBatchTrackableError();
+          const tracking: ArticleTracking = trackable ? wanted : "none";
+          if (tracking !== "none" && locked.tracking === "none" && !(await repo.batchTrackingEnabled(tx))) throw new BatchTrackingDisabledError();
+          // The alias never reaches the UPDATE; the resolved sort does.
+          const { batchTracked: _alias, tracking: _sent, ...withoutTracking } = effective;
+          void _alias;
+          void _sent;
+          effective = withoutTracking;
+          if (tracking !== locked.tracking) {
+            trackingChange = { before: locked.tracking, after: tracking };
+            effective = { ...effective, tracking };
           }
           if (typeChanges || phantomChanges) {
             const mode = await repo.configuratorModeFor(id, tx);
@@ -791,7 +830,22 @@ export function createArticleService(
       // before) — only this flag turns a whole demand source on or off.
       // Batchstyrd (#8) is logged the same way: it changes how every stock
       // movement of the article is booked from here on.
-      const batchChange = batchTrackedChange as { before: boolean; after: boolean } | null;
+      const batchChange = trackingChange as { before: ArticleTracking; after: ArticleTracking } | null;
+      const assignedChange = assignedAtChange as { before: "receipt" | "delivery"; after: "receipt" | "delivery" } | null;
+      // Serienummer skapas is logged for the same reason, on its own row.
+      if (assignedChange) {
+        await audit.log({
+          entityType: "article",
+          entityId: id,
+          action: "updated",
+          detail: {
+            articleNumber: article.articleNumber,
+            before: { serialAssignedAt: assignedChange.before },
+            after: { serialAssignedAt: assignedChange.after },
+          },
+          userId,
+        });
+      }
       if (batchChange) {
         await audit.log({
           entityType: "article",
@@ -799,8 +853,11 @@ export function createArticleService(
           action: "updated",
           detail: {
             articleNumber: article.articleNumber,
-            before: { batchTracked: batchChange.before },
-            after: { batchTracked: batchChange.after },
+            // Between Ingen and Batch the entry is the one it always was
+            // (batchTracked); a change that involves Serienummer names the sort.
+            ...(batchChange.before !== "serial" && batchChange.after !== "serial"
+              ? { before: { batchTracked: batchChange.before === "batch" }, after: { batchTracked: batchChange.after === "batch" } }
+              : { before: { tracking: batchChange.before }, after: { tracking: batchChange.after } }),
           },
           userId,
         });

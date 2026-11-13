@@ -728,12 +728,12 @@ describe("system service — settings", () => {
 });
 
 describe("system service — number series admin API", () => {
-  it("lists the nineteen configured series", async () => {
+  it("lists the twenty configured series", async () => {
     const rows = await systemService.listNumberSeries();
     // The migration-seeded series only — own article series (generated keys)
     // come and go with the users of the table.
     const keys = rows
-      .filter((r) => !(r.forArticles && r.key !== "article"))
+      .filter((r) => !(r.forArticles && r.key !== "article") && !(r.forSerials && r.key !== "serial"))
       .map((r) => r.key)
       .sort();
     expect(keys).toEqual([
@@ -751,6 +751,7 @@ describe("system service — number series admin API", () => {
       "purchase_order",
       "quote",
       "sales_order",
+      "serial",
       "shipment",
       "stock_count",
       "supplier",

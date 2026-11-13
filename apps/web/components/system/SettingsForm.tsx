@@ -661,8 +661,9 @@ export function SettingsForm({
         <div className={styles.texts}>
           <div className={styles.label}>Använd batch- och serienummer</div>
           <div className={styles.description}>
-            På: artikelkortet får kryssrutan Batchstyrd, och lagerrutinerna håller reda på vilken batch saldot
-            tillhör. Av: allt fungerar som förut. Kan bara stängas av när ingen artikel är batchstyrd.
+            På: artikelkortet får väljaren Spårning (Ingen, Batch eller Serienummer), och lagerrutinerna håller reda på
+            vilken batch eller vilket serienummer saldot tillhör. Av: allt fungerar som förut. Kan bara stängas av när ingen
+            artikel är spårad.
           </div>
         </div>
         <button

@@ -8,7 +8,7 @@ import {
   receiveGoodsSchema,
   updateSystemSettingsSchema,
 } from "@navet/shared";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db, moReportMaterials, moReports, purchaseOrderRows, stockBatches, stockTransactions, systemSettings } from "@navet/db";
 import { testArticleService, testDocumentPdfService, testSystemService } from "./helpers/services.js";
@@ -27,9 +27,9 @@ import { createSalesRepository } from "../src/modules/sales/repository/sales.rep
 import { markSalesOrderInProduction } from "../src/modules/sales/service/production-transition.js";
 import { batchCellQuantity } from "../src/modules/stock/repository/batch-balances.js";
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
-import { BatchNotTrackedError, BatchNumberReservedError } from "../src/modules/stock/service/batch.errors.js";
+import { BatchExpiryMismatchError, BatchNotTrackedError, BatchNumberReservedError } from "../src/modules/stock/service/batch.errors.js";
 import { BATCH_TRACKING_ENABLED_KEY } from "../src/modules/stock/service/batch-tracking.js";
-import { getOrCreateBatch } from "../src/modules/stock/service/batches.js";
+import { getOrCreateBatch, getOrCreateDatedBatch } from "../src/modules/stock/service/batches.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { parsed } from "./helpers/parsed.js";
@@ -451,5 +451,108 @@ describe("Ångra rapportering and the batch", () => {
 
     await mfgService.undoReport(mo.order.id, report!.id, mo.user.id);
     expect((await movements(mo.component.id)).at(-1)).toEqual(["mo_consumption", 4, "L-7"]);
+  });
+});
+
+// --- Etapp 2: utgångsdatum and hållbarhet --------------------------------------
+
+describe("Utgångsdatum vid inleverans", () => {
+  const receiveDated = (o: Order, quantity: number, batchNumber: string | undefined, expiresOn: string | undefined) =>
+    purchaseService.receiveGoods(o.order.id, o.row.id, parsed(receiveGoodsSchema, { locationId: o.location.id, quantity, batchNumber, expiresOn }), o.user.id);
+
+  it("the supplier's date is set on the new batch, answered and listed with the receipt; no date = none", async () => {
+    const o = await makeOrder();
+    const dated = await receiveDated(o, 4, "L-1", "2027-03-01");
+    expect(dated).toMatchObject({ batchNumber: "L-1", expiresOn: "2027-03-01" });
+    // "" is left out; the server never computes a date for bought goods.
+    const undated = await receiveDated(o, 2, "L-2", "");
+    expect(undated.expiresOn).toBeNull();
+    expect((await batchesOf(o.article.id)).map((b) => [b.batchNumber, b.expiresOn, b.batchDate])).toEqual([
+      ["L-1", "2027-03-01", null],
+      ["L-2", null, null],
+    ]);
+    expect((await purchaseService.listReceipts(o.order.id)).map((r) => [r.batchNumber, r.expiresOn]).sort()).toEqual([
+      ["L-1", "2027-03-01"],
+      ["L-2", null],
+    ]);
+  });
+
+  it("a batch without a date gets it from a later receipt; the same date again is fine; the IO number's batch takes one too", async () => {
+    const o = await makeOrder();
+    await receiveDated(o, 2, "L-1", undefined);
+    expect((await receiveDated(o, 2, "L-1", "2027-03-01")).expiresOn).toBe("2027-03-01");
+    expect((await receiveDated(o, 2, "l-1", "2027-03-01")).expiresOn).toBe("2027-03-01");
+    // A receipt without a date leaves the batch's date alone and answers it.
+    expect((await receiveDated(o, 1, "L-1", undefined)).expiresOn).toBe("2027-03-01");
+    expect((await receiveDated(o, 1, undefined, "2027-05-05")).batchNumber).toBe(o.order.orderNumber);
+    expect((await batchesOf(o.article.id)).map((b) => b.expiresOn).sort()).toEqual(["2027-03-01", "2027-05-05"]);
+  });
+
+  it("another date than the batch has is refused — 409 batch-expiry-mismatch — and nothing is booked", async () => {
+    const o = await makeOrder();
+    await receiveDated(o, 2, "L-1", "2027-03-01");
+    const err = await receiveDated(o, 3, "L-1", "2027-04-01").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BatchExpiryMismatchError);
+    expect(err).toMatchObject({ batchNumber: "L-1", expiresOn: "2027-03-01", requested: "2027-04-01" });
+    expect(await movements(o.article.id)).toEqual([["purchase_receipt", 2, "L-1"]]);
+    expect((await purchaseService.listRows(o.order.id))[0]!.quantityReceived).toBe("2.0000");
+    expect((await batchesOf(o.article.id))[0]!.expiresOn).toBe("2027-03-01");
+  });
+
+  it("a date on an article that is not spårad is refused like a batch", async () => {
+    const plain = await makeOrder({ batchTracked: false });
+    await expect(receiveDated(plain, 5, undefined, "2027-03-01")).rejects.toThrow(BatchNotTrackedError);
+    expect(await db.select().from(stockTransactions)).toEqual([]);
+  });
+
+  it("getOrCreateDatedBatch: fills in Batchdatum, keeps another one, and \"keep\" never throws on the utgångsdatum", async () => {
+    const o = await makeOrder();
+    const base = { articleId: o.article.id, batchNumber: "X-1", origin: "manual" as const };
+    expect(await getOrCreateDatedBatch(db, { ...base, batchDate: "2026-01-01" })).toMatchObject({ batchDate: "2026-01-01", expiresOn: null });
+    expect(await getOrCreateDatedBatch(db, { ...base, batchDate: "2025-01-01", expiresOn: "2027-01-01" })).toMatchObject({
+      batchDate: "2026-01-01",
+      expiresOn: "2027-01-01",
+    });
+    expect(await getOrCreateDatedBatch(db, { ...base, expiresOn: "2028-01-01", onExpiryMismatch: "keep" })).toMatchObject({ expiresOn: "2027-01-01" });
+    await expect(getOrCreateDatedBatch(db, { ...base, expiresOn: "2028-01-01" })).rejects.toThrow(BatchExpiryMismatchError);
+    // The plain ref is unchanged.
+    expect(Object.keys(await getOrCreateBatch(db, base)).sort()).toEqual(["batchNumber", "id"]);
+  });
+});
+
+describe("Hållbarhet — the TO's batch", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  // Only Date is faked: the Stockholm day the service computes.
+  const at = (instant: string) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(instant));
+  };
+
+  it("utgångsdatum = the Stockholm day of the first inleverans + Hållbarhet (dagar); a later delinleverans does not change it", async () => {
+    const mo = await makeManufacturingOrder();
+    await articleService.updateArticle(mo.parent.id, { shelfLifeDays: 30 });
+    // 22:30 UTC on 10 June is 00:30 on 11 June in Stockholm (the suite runs in UTC).
+    at("2026-06-10T22:30:00Z");
+    await reportLast(mo, 2);
+    expect((await batchesOf(mo.parent.id)).map((b) => [b.batchNumber, b.expiresOn])).toEqual([[mo.order.orderNumber, "2026-07-11"]]);
+
+    at("2026-06-20T10:00:00Z");
+    await reportLast(mo, 1);
+    await mfgService.complete(mo.order.id, { quantity: 2 }, mo.user.id);
+    expect(await batchesOf(mo.parent.id)).toHaveLength(1);
+    expect((await batchesOf(mo.parent.id))[0]!.expiresOn).toBe("2026-07-11");
+    expect(await movements(mo.parent.id)).toHaveLength(3);
+  });
+
+  it("without a hållbarhet the batch has no date — and gets one from the first inleverans after it is set", async () => {
+    const mo = await makeManufacturingOrder();
+    await reportLast(mo, 2);
+    expect((await batchesOf(mo.parent.id))[0]!.expiresOn).toBeNull();
+    await articleService.updateArticle(mo.parent.id, { shelfLifeDays: 10 });
+    at("2026-06-20T10:00:00Z");
+    await reportLast(mo, 1);
+    expect((await batchesOf(mo.parent.id))[0]!.expiresOn).toBe("2026-06-30");
   });
 });

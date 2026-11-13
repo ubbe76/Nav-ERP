@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  date,
   check,
   index,
   integer,
@@ -125,7 +126,17 @@ export const articleAlternativeLocations = pgTable(
 // Okänd first, then the oldest batch (compareBatches, outflow-allocation.ts).
 // `origin` and the two order references say how the batch was CREATED —
 // information; the trace reads the log.
-export const stockBatchOriginEnum = pgEnum("stock_batch_origin", ["purchase_receipt", "manufacturing_order", "manual", "import"]);
+// "delivery" (0216): a serial number created VID UTLEVERANS — it never stands
+// in stock; delivery_row_serials says which delivery row it was given to.
+export const stockBatchOriginEnum = pgEnum("stock_batch_origin", ["purchase_receipt", "manufacturing_order", "manual", "import", "delivery"]);
+
+// Sort (#8 etapp 2, migration 0215): a row here is a batch or ONE serial
+// number — a serial number is a batch row whose balance is 0 or 1 (the
+// trigger stock_transactions_serial_unit holds that). The names batch_id /
+// stock_batches / batchNumber carry both; the sort is always read from the
+// ROW, never from the article (an article that changed Spårning keeps its
+// old rows as they were).
+export const stockBatchKindEnum = pgEnum("stock_batch_kind", ["batch", "serial"]);
 
 export const stockBatches = pgTable(
   "stock_batches",
@@ -135,15 +146,27 @@ export const stockBatches = pgTable(
       .notNull()
       .references(() => articles.id, { onDelete: "restrict" }),
     batchNumber: varchar("batch_number", { length: 50 }).notNull(),
+    kind: stockBatchKindEnum("kind").notNull().default("batch"),
     origin: stockBatchOriginEnum("origin").notNull(),
     // FKs (set null) declared by hand in the migration — purchase.ts and
     // manufacturing.ts import this file.
     purchaseOrderId: uuid("purchase_order_id"),
     manufacturingOrderId: uuid("manufacturing_order_id"),
+    // Utgångsdatum (0214): the LAST usable day — the batch is utgången when
+    // expires_on < the Stockholm day. Null = no date. Set at the batch's
+    // first inflow (getOrCreateBatch), corrected with PATCH /stock/batches/:id
+    // — this table is not part of the append-only log.
+    expiresOn: date("expires_on"),
+    // Batchdatum (0214): the batch's AGE when it is not the day the row was
+    // created (saldoimporten). Null = created_at's Stockholm day.
+    batchDate: date("batch_date"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   },
   (table) => [
+    index("idx_stock_batches_expires_on")
+      .on(table.expiresOn)
+      .where(sql`${table.expiresOn} IS NOT NULL`),
     uniqueIndex("stock_batches_article_number_unique").on(table.articleId, sql`lower(${table.batchNumber})`),
     index("idx_stock_batches_manufacturing_order")
       .on(table.manufacturingOrderId)

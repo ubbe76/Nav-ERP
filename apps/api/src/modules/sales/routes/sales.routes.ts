@@ -9,6 +9,7 @@ import {
   customerArticleNumberInputSchema,
   customerPriceInputSchema,
   deliverBatchSchema,
+  serialSuggestionsQuerySchema,
   deliveryPalletCardQuerySchema,
   deliverGoodsSchema,
   listPriceListsQuerySchema,
@@ -853,6 +854,16 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       if (err instanceof DeliveryNotFoundError) return reply.code(404).send(errorBody(err));
       throw err;
     }
+  });
+
+  // Serienummer skapas vid utleverans (#8 etapp 2, beslut 17): the numbers
+  // Utleverans proposes for a row — the next `count` of the article's series,
+  // stepping over the numbers the article already has. A read: nothing is
+  // drawn or reserved, so two open forms are shown the same numbers and the
+  // delivery itself decides (POST …/deliver draws, a sent number wins).
+  app.get("/serial-suggestions", async (req) => {
+    const query = serialSuggestionsQuerySchema.parse(req.query);
+    return service.serialSuggestions(query.articleId, query.count);
   });
 
   // --- C3 Kundpriser: prislistor ---

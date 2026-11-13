@@ -22,8 +22,24 @@
 // in one file. Batch on an article that is not batchstyrd is a row error
 // (beslut 15). The batches one import creates all get the same age, so the
 // batch number decides which is drawn first (compareBatches, beslut 16).
+//
+// Etapp 2: Batchdatum (the batch's age, so an older batch is drawn first)
+// and Utgångsdatum, only on a row with a named Batch. They are set when the
+// import creates the batch or the batch lacks the date; a batch that already
+// has ANOTHER date keeps it and the row gets a warning — the import is not
+// the way to correct a date (PATCH /stock/batches/:id is). A row whose
+// balance is unchanged but whose dates fill in a batch is not skipped.
+//
+// Serienummer (0215): for a serienummerstyrd article (numbers created vid
+// inleverans) the row may name ONE serial number in the column Serienummer —
+// the cell key, as Batch is for a batch — and Antal is then 0 or 1: 1 puts
+// the number on the place (it must not stand anywhere else), 0 takes it away
+// from there. A number once per file, never Batch and Serienummer on one
+// row, and the column on any other article is a row error. Without it the
+// row is the whole place as before (an increase lands in Okänd).
 import { UNKNOWN_BATCH_LABEL, type ImportCommitInput } from "@navet/shared";
-import { normalizeDecimal } from "./csv.js";
+import { normalizeDay, normalizeDecimal } from "./csv.js";
+import { stockTrackingOf } from "../../stock/service/article-tracking.js";
 import type { ExistingArticle } from "./articles.js";
 import { FALLBACK_LOCATION_NAME } from "../../stock/service/outflow-allocation.js";
 import {
@@ -37,7 +53,7 @@ import {
 import { round4 } from "@navet/shared";
 
 // Mappable target fields, in the order the wizard lists them.
-export const STOCK_BALANCE_IMPORT_FIELDS = ["articleNumber", "warehouseName", "locationName", "quantity", "unitCost", "batchNumber"] as const;
+export const STOCK_BALANCE_IMPORT_FIELDS = ["articleNumber", "warehouseName", "locationName", "quantity", "unitCost", "batchNumber", "serialNumber", "batchDate", "expiresOn"] as const;
 export type StockBalanceImportField = (typeof STOCK_BALANCE_IMPORT_FIELDS)[number];
 
 const REQUIRED_FIELDS: StockBalanceImportField[] = ["articleNumber", "quantity"];
@@ -67,6 +83,13 @@ export const STOCK_BALANCE_HEADER_ALIASES: Record<string, string> = {
   batch: "batchNumber",
   batchnummer: "batchNumber",
   batchnr: "batchNumber",
+  serienummer: "serialNumber",
+  serienr: "serialNumber",
+  // Etapp 2 — as narrow: the template's headings and their plain variants.
+  batchdatum: "batchDate",
+  utgangsdatum: "expiresOn",
+  bastfore: "expiresOn",
+  bastforedatum: "expiresOn",
 };
 
 export function suggestStockBalanceMapping(headers: string[]): Record<string, string | null> {
@@ -100,6 +123,13 @@ export interface StockBalanceImportDeps {
   locationsUnderCount(): Promise<Set<string>>;
   /** stockBatchCellKey(articleId, locationId, batch) -> today's balance of the cell. */
   stockBatchBalances(articleIds: string[]): Promise<Map<string, number>>;
+  /** stockBatchKey(articleId, batchNumber) -> the dates the batch has today (only existing batches). */
+  stockBatchDates(articleIds: string[]): Promise<Map<string, { expiresOn: string | null; batchDate: string | null; kind?: "batch" | "serial" }>>;
+}
+
+// One spelling of a batch (article, number) for the planner's maps.
+export function stockBatchKey(articleId: string, batchNumber: string): string {
+  return `${articleId}|${batchNumber.toLocaleLowerCase("sv")}`;
 }
 
 // The row's batch: a named one, or the Okänd cell ("Okänd" in the file).
@@ -132,6 +162,13 @@ export interface StockBalanceRowPlan {
   unitCost: number | null;
   /** Batch (#8): null = the whole place (as always); else the cell Antal is the balance of. */
   batch: StockBalanceBatch | null;
+  /** Etapp 2, a named batch only: the dates to set when the batch is created or lacks them. */
+  batchDate?: string | null;
+  expiresOn?: string | null;
+  /** The balance is unchanged — the row is only there to fill in the batch's dates. */
+  datesOnly?: boolean;
+  /** Serienummer (0215): the row's batch is ONE serial number (Antal 0 or 1). */
+  serial?: boolean;
 }
 
 export interface StockBalanceImportPlan {
@@ -145,6 +182,12 @@ export interface StockBalanceImportPlan {
 }
 
 export const STOCK_IMPORT_NOTE = "Import av lagersaldo";
+
+// Lagerspårad (batch-tracking.ts' stockTrackingOf) for the planner's article:
+// the fields are optional on ExistingArticle (older fakes carry none).
+function stockSort(article: ExistingArticle): "batch" | "serial" | null {
+  return stockTrackingOf({ tracking: article.tracking ?? "none", serialAssignedAt: article.serialAssignedAt ?? "receipt" });
+}
 
 function formatQuantity(value: number): string {
   return value.toLocaleString("sv-SE", { maximumFractionDigits: 4 });
@@ -179,18 +222,33 @@ export async function planStockBalanceImport(
     ...new Set(
       records.flatMap((r) => {
         const article = articlesByNumber.get(r["articleNumber"] ?? "");
-        return article?.batchTracked && (r["batchNumber"] ?? "") !== "" ? [article.id] : [];
+        return article && stockSort(article) !== null && ((r["batchNumber"] ?? "") !== "" || (r["serialNumber"] ?? "") !== "") ? [article.id] : [];
       })
     ),
   ];
-  const [places, defaults, fallbackId, balances, underCount, cellBalances] = await Promise.all([
+  const [places, defaults, fallbackId, balances, underCount, cellBalances, batchDates] = await Promise.all([
     deps.stockPlaces(),
     deps.usableArticleLocations(articleIds),
     deps.fallbackLocationId(),
     deps.stockBalances(articleIds),
     deps.locationsUnderCount(),
     cellArticleIds.length > 0 ? deps.stockBatchBalances(cellArticleIds) : Promise.resolve(new Map<string, number>()),
+    cellArticleIds.length > 0
+      ? deps.stockBatchDates(cellArticleIds)
+      : Promise.resolve(new Map<string, { expiresOn: string | null; batchDate: string | null; kind?: "batch" | "serial" }>()),
   ]);
+  // The dates the file gives a batch — the same batch on several places must
+  // say the same thing.
+  const fileBatchDates = new Map<string, { batchDate: string | null; expiresOn: string | null }>();
+  // Serienummer: a number once per file, and (row number → place id) where a
+  // number with Antal 1 already stands — compared with the row's own place
+  // once that is known.
+  const serialsInFile = new Set<string>();
+  const serialElsewhere = new Map<number, string>();
+  const locationLabel = (locationId: string) => {
+    const location = places.locations.find((l) => l.id === locationId);
+    return location ? `${warehouseNameById.get(location.warehouseId) ?? "?"} — ${location.name}` : "en annan lagerplats";
+  };
 
   const warehousesByName = new Map<string, ImportWarehouse[]>();
   for (const w of places.warehouses) {
@@ -255,11 +313,49 @@ export async function planStockBalanceImport(
     }
 
     // The batch (#8).
-    const rawBatch = record["batchNumber"] ?? "";
+    // Serienummer (0215) is the cell key of a serienummerstyrd article, as
+    // Batch is of a batchstyrd one — from here on the row's "batch".
+    const rawSerial = record["serialNumber"] ?? "";
+    const sort = article ? stockSort(article) : null;
+    let serial = false;
+    if (rawSerial !== "") {
+      if ((record["batchNumber"] ?? "") !== "") errors.push("Ange antingen Batch eller Serienummer på raden, inte båda");
+      else if (article && sort !== "serial") {
+        errors.push(`Artikeln ${articleNumber} får inga serienummer vid inleverans — ta bort Serienummer, eller gör artikeln serienummerstyrd (Serienummer skapas: Vid inleverans) först`);
+      } else if (rawSerial.toLocaleLowerCase("sv") === UNKNOWN_BATCH_KEY) errors.push(`${UNKNOWN_BATCH_LABEL} är inget serienummer`);
+      else if (rawSerial.length > 50) errors.push("Serienummer får vara högst 50 tecken");
+      else {
+        serial = true;
+        if (quantity !== null && quantity !== 0 && quantity !== 1) errors.push("Antal ska vara 0 eller 1 på en rad med Serienummer");
+        const serialKey = article ? stockBatchKey(article.id, rawSerial) : "";
+        if (article && serialsInFile.has(serialKey)) errors.push(`Serienummer ${rawSerial} förekommer flera gånger i filen`);
+        serialsInFile.add(serialKey);
+      }
+    }
+    // Both columns filled is already an error above — the Batch is not read then.
+    const rawBatch = serial ? rawSerial : rawSerial !== "" ? "" : (record["batchNumber"] ?? "");
     let batch: StockBalanceBatch | null = null;
-    if (rawBatch !== "") {
-      if (article && !article.batchTracked) {
+    if (serial) {
+      batch = { kind: "named", batchNumber: rawSerial };
+      const existing = article ? batchDates.get(stockBatchKey(article.id, rawSerial)) : undefined;
+      if (existing?.kind === "batch") errors.push(`${rawSerial} finns redan som batch på artikeln och kan inte användas som serienummer`);
+      // Antal 1: the number must not stand on another place.
+      if (article && quantity === 1) {
+        const suffix = `|#${rawSerial.toLocaleLowerCase("sv")}`;
+        for (const [key, balance] of cellBalances) {
+          if (balance === 0 || !key.startsWith(`${article.id}|`) || !key.endsWith(suffix)) continue;
+          serialElsewhere.set(rowNumber, key.slice(article.id.length + 1, key.length - suffix.length));
+        }
+      }
+    } else if (rawBatch !== "") {
+      // On a serienummerstyrd article the column Batch only names the Okänd
+      // cell (old stock without numbers, any quantity).
+      if (article && sort === "serial" && rawBatch.toLocaleLowerCase("sv") !== UNKNOWN_BATCH_KEY) {
+        errors.push(`Artikeln ${articleNumber} är serienummerstyrd — ange numret i kolumnen Serienummer, inte Batch`);
+      } else if (article && sort === null) {
         errors.push(`Artikeln ${articleNumber} är inte batchstyrd — ta bort Batch eller gör artikeln batchstyrd först`);
+      } else if (article && batchDates.get(stockBatchKey(article.id, rawBatch))?.kind === "serial") {
+        errors.push(`${rawBatch} finns redan som serienummer på artikeln och kan inte användas som batch`);
       } else if (rawBatch.toLocaleLowerCase("sv") === UNKNOWN_BATCH_KEY) {
         batch = { kind: "unknown" };
       } else if (rawBatch.length > 50) {
@@ -267,6 +363,38 @@ export async function planStockBalanceImport(
       } else {
         batch = { kind: "named", batchNumber: rawBatch };
       }
+    }
+
+    // Batchdatum and Utgångsdatum (etapp 2) — a named batch's.
+    const rowDates: { batchDate: string | null; expiresOn: string | null } = { batchDate: null, expiresOn: null };
+    for (const [field, label] of [
+      ["batchDate", "Batchdatum"],
+      ["expiresOn", "Utgångsdatum"],
+    ] as const) {
+      const raw = record[field] ?? "";
+      if (raw === "") continue;
+      const day = normalizeDay(raw);
+      if (day === null) errors.push(`Ogiltigt ${label.toLowerCase()}: "${raw}" (ÅÅÅÅ-MM-DD)`);
+      else if (rawBatch === "" || batch?.kind === "unknown") errors.push(`${label} kräver ett batchnummer i kolumnen Batch`);
+      else {
+        rowDates[field] = day;
+        values[field] = day;
+      }
+    }
+    if (article && batch?.kind === "named") {
+      const batchKey = stockBatchKey(article.id, batch.batchNumber);
+      const inFile = fileBatchDates.get(batchKey) ?? { batchDate: null, expiresOn: null };
+      for (const [field, label] of [
+        ["batchDate", "Batchdatum"],
+        ["expiresOn", "Utgångsdatum"],
+      ] as const) {
+        const day = rowDates[field];
+        if (day === null) continue;
+        if (inFile[field] !== null && inFile[field] !== day) {
+          errors.push(`Batch ${batch.batchNumber} har olika ${label.toLowerCase()} i filen (${inFile[field]} och ${day})`);
+        } else inFile[field] = day;
+      }
+      fileBatchDates.set(batchKey, inFile);
     }
 
     // The place.
@@ -329,16 +457,21 @@ export async function planStockBalanceImport(
     if (article && locationKey !== "") {
       const placeKey = `${article.id}|${locationKey}`;
       const key = batch === null ? placeKey : stockBatchCellKey(article.id, locationKey, batch.kind === "named" ? batch.batchNumber : null);
-      if (seen.has(key)) {
+      // Only a row whose Batch / Serienummer was understood is a row of its
+      // cell (or, with neither, of the whole place) and takes a side.
+      const cellUnderstood = batch !== null || ((record["batchNumber"] ?? "") === "" && rawSerial === "");
+      // (A row whose Batch was not understood is still compared as the
+      // place's row, as before; one with a Serienummer that was not is left out.)
+      const compared = batch !== null || rawSerial === "";
+      if (compared && seen.has(key)) {
         errors.push(
           batch === null
             ? `Artikel ${articleNumber} förekommer flera gånger på samma lagerplats i filen`
             : `Artikel ${articleNumber} förekommer flera gånger med samma batch på samma lagerplats i filen`
         );
       }
-      seen.add(key);
-      // Only a row whose Batch was understood takes a side.
-      if (rawBatch === "" || batch !== null) {
+      if (compared) seen.add(key);
+      if (cellUnderstood) {
         const mode = batch === null ? "place" : "cell";
         const earlier = placeModes.get(placeKey);
         if (earlier !== undefined && earlier !== mode) {
@@ -346,6 +479,10 @@ export async function planStockBalanceImport(
             `Artikel ${articleNumber} har rader både med och utan Batch på samma lagerplats i filen — ange Batch på alla (Okänd för saldot utan batch) eller på ingen`
           );
         } else placeModes.set(placeKey, mode);
+      }
+      const elsewhere = serialElsewhere.get(rowNumber);
+      if (elsewhere !== undefined && elsewhere !== locationKey) {
+        errors.push(`Serienummer ${rawSerial} finns på ${locationLabel(elsewhere)} — flytta det dit det ska stå, eller sätt Antal 0 där först`);
       }
       if (!locationKey.startsWith("new:") && underCount.has(locationKey)) {
         errors.push("Lagerplatsen inventeras just nu och är spärrad för lagerhändelser");
@@ -367,11 +504,45 @@ export async function planStockBalanceImport(
     values["currentQuantity"] = current;
     values["change"] = delta;
 
+    // The dates against the batch as it is: missing ⇒ filled in, another
+    // date ⇒ kept, with a warning. A batch the import creates gets both.
+    const existingDates = batch?.kind === "named" ? batchDates.get(stockBatchKey(article.id, batch.batchNumber)) : undefined;
+    let fillsDates = false;
+    for (const [field, label] of [
+      ["batchDate", "Batchdatum"],
+      ["expiresOn", "Utgångsdatum"],
+    ] as const) {
+      const day = rowDates[field];
+      if (day === null || batch?.kind !== "named") continue;
+      const has = existingDates?.[field] ?? null;
+      if (has !== null && has !== day) {
+        warnings.push(`Batch ${batch.batchNumber} har redan ${label.toLowerCase()} ${has} — det står kvar (ändra det under Lager → Spårbarhet)`);
+      } else if (has === null && existingDates !== undefined) fillsDates = true;
+    }
+    const dateFields = { ...(rowDates.batchDate !== null ? { batchDate: rowDates.batchDate } : {}), ...(rowDates.expiresOn !== null ? { expiresOn: rowDates.expiresOn } : {}) };
+
+    // Serienummer (steg 4): a decrease of a serienummerstyrd article's whole
+    // place takes its numbers oldest first — whole styck. A fraction can only
+    // be the Okänd cell's (Batch = Okänd).
+    if (sort === "serial" && batch === null && delta < 0 && !Number.isInteger(delta)) {
+      errors.push(
+        `Artikeln ${articleNumber} är serienummerstyrd — saldot kan bara minska med hela styck (${formatQuantity(-delta)}). Ange Serienummer per rad, eller Batch ${UNKNOWN_BATCH_LABEL} för saldot utan nummer`
+      );
+      rows.push({ rowNumber, action: "update", errors, warnings, values });
+      return;
+    }
+
     if (input.skipExisting && current !== 0) {
       rows.push(skippedRow(rowNumber, `${batch === null ? "Platsen" : "Batchen"} har redan saldo ${formatQuantity(current)}`, values));
       return;
     }
     if (delta === 0) {
+      if (fillsDates) {
+        // Only the batch's missing dates are set — nothing is booked.
+        rows.push({ rowNumber, action: "update", errors, warnings, values });
+        planned.push({ rowNumber, articleId: article.id, target, quantity, unitCost: null, batch, ...dateFields, datesOnly: true, ...(serial ? { serial } : {}) });
+        return;
+      }
       rows.push(skippedRow(rowNumber, `Saldot är redan ${formatQuantity(current)}`, values));
       return;
     }
@@ -386,7 +557,7 @@ export async function planStockBalanceImport(
     }
 
     rows.push({ rowNumber, action: current === 0 ? "create" : "update", errors, warnings, values });
-    planned.push({ rowNumber, articleId: article.id, target, quantity, unitCost: cost, batch });
+    planned.push({ rowNumber, articleId: article.id, target, quantity, unitCost: cost, batch, ...dateFields, ...(serial ? { serial } : {}) });
   });
 
   // Only what a booked row needs is created: a row that is skipped (antal 0

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AppShell } from "../../../components/AppShell";
 import { BatchesList } from "../../../components/stock/BatchesList";
+import { BatchDates } from "../../../components/stock/BatchDates";
 import { BatchTraceView } from "../../../components/stock/BatchTraceView";
 import { Pagination } from "../../../components/ui/ListControls";
 import buttonStyles from "../../../components/ui/Button.module.css";
@@ -29,17 +30,18 @@ export default async function TraceabilityPage(props: { searchParams: Promise<Pa
     : null;
   const list = batchId
     ? null
-    : await apiGet<Paged<StockBatchListRow>>(`/api/v1/stock/batches${listApiQuery(searchParams, [], pageSize)}`, cookieHeader);
+    : await apiGet<Paged<StockBatchListRow>>(`/api/v1/stock/batches${listApiQuery(searchParams, ["expiry", "kind"], pageSize)}`, cookieHeader);
 
   // A search that finds exactly one batch opens its trace (the batch links in
   // the log and on the receipt are ?search=<number>).
   const search = typeof searchParams.search === "string" ? searchParams.search.trim() : "";
   if (list && search !== "" && list.total === 1 && list.rows[0]) redirect(`/lager/sparbarhet?batch=${list.rows[0].id}`);
 
-  const title = trace ? `Batch ${trace.batch.batchNumber ?? "Okänd"}` : "Spårbarhet";
+  const serialRoot = trace?.batch.kind === "serial";
+  const title = trace ? `${serialRoot ? "Serienummer" : "Batch"} ${trace.batch.batchNumber ?? "Okänd"}` : "Spårbarhet";
   const meta = trace
-    ? `${trace.batch.articleNumber} ${trace.batch.articleName}`
-    : `${(list?.total ?? 0).toLocaleString("sv-SE")} batcher`;
+    ? `${trace.batch.articleNumber} ${trace.batch.articleName}${trace.batch.burnt ? " — Bränt (utleveransen ångrad)" : ""}`
+    : `${(list?.total ?? 0).toLocaleString("sv-SE")} träffar`;
 
   return (
     <AppShell active="Lager">
@@ -52,7 +54,7 @@ export default async function TraceabilityPage(props: { searchParams: Promise<Pa
           {batchId && (
             <>
               <Link href="/lager/sparbarhet" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
-                Alla batcher
+                Alla batcher och serienummer
               </Link>
               <Link href={`/lager/transaktioner?batch=${batchId}`} className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
                 Lagerlogg
@@ -63,8 +65,13 @@ export default async function TraceabilityPage(props: { searchParams: Promise<Pa
         </div>
       </div>
 
-      {batchId && !trace && <p>Batchen hittades inte.</p>}
-      {trace && <BatchTraceView trace={trace} />}
+      {batchId && !trace && <p>Batchen eller serienumret hittades inte.</p>}
+      {trace && (
+        <>
+          <BatchDates batch={trace.batch} />
+          <BatchTraceView trace={trace} />
+        </>
+      )}
       {list && (
         <>
           <BatchesList rows={list.rows} />

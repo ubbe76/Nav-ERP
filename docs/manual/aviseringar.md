@@ -12,6 +12,7 @@ Typerna visas i fast ordning: röda före gula. Inom en typ står det äldsta el
 
 | Typ | Färg | Urval |
 |---|---|---|
+| **Utgångna batcher** | röd om utgången, annars gul | Batcher med saldo på ospärrade lagerplatser vars utgångsdatum har passerat eller infaller inom så många dagar som inställningen **Batcher som går ut inom (dagar)** (förval 30). Raden länkar till [Spårbarhet](/hjalp/lager#utgangsdatum-och-fefo). |
 | **Negativt saldo** | röd | Artikelns totala saldo över alla lagerplatser är mindre än 0. Raden visar artikelnummer, benämning och saldo. |
 | **Förfallna kundfakturor** | röd | Utfärdad kundfaktura med belopp kvar att betala och ett förfallodatum som har passerat. |
 | **Leverantörsfakturor att betala** | röd om förfallen, annars gul | Attesterad leverantörsfaktura med belopp kvar att betala och förfallodatum senast om så många dagar som inställningen **Leverantörsfakturor att betala inom (dagar)** anger (förval 7). Fakturor som ligger i en pågående betalningsomgång tas inte med, eftersom de redan är på väg att betalas. |
@@ -38,6 +39,7 @@ Datumen för order räknas som på [Översikten och i planeringen](/hjalp/komma-
 Du ser bara de typer som din behörighetsgrupp ger:
 
 - **Negativt saldo**: menyn **Lager**.
+- **Utgångna batcher**: menyn **Lager**.
 - **Förfallna kundfakturor**, **E-fakturor som inte gick fram**, **Offerter att följa upp** och **Försenade kundordrar**: menyn **Försäljning**.
 - **Leverantörsfakturor att betala**, **Försenade inköpsordrar**, **Behöver beställas** och **Fakturor i inkorgen att granska**: menyn **Inköp**.
 - **Sena tillverkningsordrar** och **Behöver tillverkas**: menyn **Tillverkning**.

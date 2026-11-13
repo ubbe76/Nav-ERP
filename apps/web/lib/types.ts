@@ -49,7 +49,17 @@ export interface Article {
   barcode: string | null;
   isPhantom: boolean;
   // Batchstyrd (#8): stock is kept per batch; null/undefined = not tracked.
+  // Etapp 2: the alias of `tracking === "batch"`.
   batchTracked?: boolean;
+  // Spårning (#8 etapp 2): Ingen / Batch / Serienummer.
+  tracking?: ArticleTracking;
+  // Hållbarhet (dagar): a manufactured batch's utgångsdatum = the day it is
+  // received + this; null = none.
+  shelfLifeDays?: number | null;
+  // Serienummer skapas: Vid inleverans / Vid utleverans.
+  serialAssignedAt?: "receipt" | "delivery";
+  // Serienummerserie: a serial number series key; null = the common one.
+  serialSeriesKey?: string | null;
   // Set when the article is a configurator template (left join on the server).
   configuratorMode?: "variants" | "to_order" | null;
   // Base unit (grundenhet): code + register id. Default purchase/sales units
@@ -193,6 +203,17 @@ export interface ArticleGroup {
 }
 
 // An article number series as offered when creating articles / groups.
+// GET /serial-number-series — the serial number series an article can use.
+export interface SerialNumberSeriesOption {
+  key: string;
+  name: string | null;
+  prefix: string;
+  digits: number;
+  isDefault: boolean;
+  // The next number the series would give; null = the series is full.
+  nextSerialNumber: string | null;
+}
+
 export interface ArticleNumberSeriesOption {
   key: string;
   name: string | null;
@@ -267,7 +288,10 @@ export interface StockBalance {
 }
 
 // Saldo per batch (#8) — GET /stock/batch-balances, in draw order.
+export type ArticleTracking = "none" | "batch" | "serial";
+
 // batchId null = Okänd (stock from before the article became batch tracked).
+// Etapp 2: per article in FEFO order, the cells of an utgången batch last.
 export interface BatchBalanceRow {
   articleId: string;
   locationId: string | null;
@@ -277,6 +301,12 @@ export interface BatchBalanceRow {
   preference: number | null;
   batchId: string | null;
   batchNumber: string | null;
+  // The cell's own sort: a batch or one serial number (null = Okänd).
+  batchKind?: "batch" | "serial" | null;
+  // Utgångsdatum (the last usable day) and whether it has passed —
+  // Automatiskt leaves an utgången cell alone; it can be chosen by hand.
+  expiresOn?: string | null;
+  expired?: boolean;
   quantity: string;
 }
 
@@ -287,6 +317,9 @@ export interface ArticleBatchBalances {
   batches: {
     batchId: string | null;
     batchNumber: string | null;
+    expiresOn?: string | null;
+    batchDate?: string | null;
+    expired?: boolean;
     total: string;
     locations: {
       locationId: string | null;
@@ -300,12 +333,14 @@ export interface ArticleBatchBalances {
 
 // Spårbarhet (#8) — GET /stock/batches and /stock/batches/:id/trace; mirrors
 // packages/shared/src/stock.ts (the web app cannot import @navet/shared).
-export type StockBatchOrigin = "purchase_receipt" | "manufacturing_order" | "manual" | "import";
+export type StockBatchOrigin = "purchase_receipt" | "manufacturing_order" | "manual" | "import" | "delivery";
 export const STOCK_BATCH_ORIGIN_LABELS: Record<StockBatchOrigin, string> = {
   purchase_receipt: "Inleverans",
   manufacturing_order: "Tillverkning",
   manual: "Manuell",
   import: "Import",
+  // A serial number created vid utleverans (it never stands in stock).
+  delivery: "Utleverans",
 };
 export interface StockBatchListRow {
   id: string;
@@ -316,6 +351,13 @@ export interface StockBatchListRow {
   unitCode: string;
   origin: StockBatchOrigin;
   createdAt: string;
+  // Etapp 2: Utgångsdatum, Batchdatum (null = the day of createdAt), utgången.
+  expiresOn?: string | null;
+  batchDate?: string | null;
+  expired?: boolean;
+  // Sort: batch or serial number; burnt = a serial number whose delivery was undone.
+  kind?: "batch" | "serial";
+  burnt?: boolean;
   quantity: number;
 }
 export interface TraceBatchRef {
@@ -326,8 +368,31 @@ export interface TraceBatchRef {
   articleName: string;
   unitCode: string;
   batchTracked: boolean;
+  tracking?: ArticleTracking;
+  expiresOn?: string | null;
   origin: StockBatchOrigin | null;
   createdAt: string | null;
+  // null = Okänd; burnt = serial number burnt by an undone delivery.
+  kind?: "batch" | "serial" | null;
+  burnt?: boolean;
+}
+export interface TraceSerialGroup {
+  count: number;
+  numbers: string;
+  batchIds: string[];
+}
+export interface TraceSerialOrigin {
+  deliveryId: string;
+  deliveryNumber: string;
+  deliveryRowId: string;
+  salesOrderId: string;
+  orderNumber: string;
+  salesOrderRowId: string;
+  customerId: string;
+  customerName: string;
+  deliveredAt: string;
+  rowQuantity: number;
+  undoneAt: string | null;
 }
 export type TraceStop = null | "unknown" | "repeated" | "limit";
 export interface TraceEvent {
@@ -355,6 +420,8 @@ export interface TraceDelivery {
   customerName: string;
   deliveredAt: string;
   quantity: number;
+  undoneAt?: string | null;
+  serialNumbers?: string;
 }
 export interface TraceOnHand {
   locationId: string;
@@ -375,6 +442,8 @@ export interface BackwardTraceNode {
     materials: BackwardTraceNode[];
   }[];
   events: TraceEvent[];
+  serials?: TraceSerialGroup;
+  deliveryOrigin?: TraceSerialOrigin | null;
 }
 export interface ForwardTraceNode {
   batch: TraceBatchRef;
@@ -392,6 +461,7 @@ export interface ForwardTraceNode {
   deliveries: TraceDelivery[];
   events: TraceEvent[];
   onHand: TraceOnHand[];
+  serials?: TraceSerialGroup;
 }
 export interface BatchTrace {
   batch: TraceBatchRef;
@@ -828,6 +898,10 @@ export type ScanMatch =
       unitCode: string;
       active: boolean;
       matchedBy: "barcode" | "articleNumber";
+      // How the article's stock is tracked ("serial" only when the numbers
+      // are created at the receipt) — which of a GS1 code's batch and
+      // serienummer the article asks for.
+      stockTracking: "batch" | "serial" | null;
     }
   | { kind: "purchaseOrder"; id: string; orderNumber: string; status: string; partyName: string }
   | { kind: "salesOrder"; id: string; orderNumber: string; status: string; partyName: string }
@@ -838,11 +912,36 @@ export type ScanMatch =
       status: string;
       articleNumber: string;
       articleName: string;
+    }
+  // A batch or a serienummer that exists under the scanned number (GS1 AI
+  // 21, else AI 10, else the whole code), with where it stands.
+  | {
+      kind: "batch";
+      id: string;
+      batchNumber: string;
+      batchKind: "batch" | "serial";
+      articleId: string;
+      articleNumber: string;
+      articleName: string;
+      expiresOn: string | null;
+      quantityOnHand: number;
+      locations: { locationId: string; locationName: string; warehouseName: string; blocked: boolean; quantity: number }[];
     };
+
+// What a GS1 code (GS1-128, DataMatrix) said next to its GTIN — read by the
+// server (parseGs1); null = the code is no GS1 string.
+export interface ScanGs1 {
+  gtin: string | null;
+  batch: string | null;
+  serial: string | null;
+  expiresOn: string | null;
+  quantity: number | null;
+}
 
 export interface ScanResult {
   code: string;
   matches: ScanMatch[];
+  gs1: ScanGs1 | null;
 }
 
 // Base-data register entry (leveransvillkor / betalningsvillkor / speditörer).
@@ -1140,6 +1239,7 @@ export interface PurchaseOrderRow {
   articleType: ArticleType;
   // Batchstyrd (#8): the receipt asks for a Batch per row.
   articleBatchTracked?: boolean;
+  articleTracking?: ArticleTracking;
   confirmedDeliveryDate: string | null;
   // Always stored in the article's base unit; unitCode/unitFactor say which
   // unit the row was entered in (factor null = base unit).
@@ -1186,6 +1286,10 @@ export interface PurchaseReceipt {
   locationName: string | null;
   // Batch (#8) the goods went into (null = article not batch tracked).
   batchNumber?: string | null;
+  // Etapp 2: the batch's utgångsdatum.
+  expiresOn?: string | null;
+  // Serienummer: a "serial" receipt is one styck, batchNumber is its number.
+  batchKind?: "batch" | "serial" | null;
   moReportId: string | null;
   createdAt: string;
   createdByName: string | null;
@@ -2005,6 +2109,7 @@ export interface SalesOrderRow {
   articleName: string;
   // Batchstyrd (#8): Leverera offers a Batch choice on the row.
   articleBatchTracked?: boolean;
+  articleTracking?: ArticleTracking;
   expectedDeliveryDate: string | null;
   // E3: only manufactured articles offer "Skapa tillverkningsorder".
   articleType: ArticleType;
@@ -2111,9 +2216,20 @@ export interface DeliveryRowsResponse {
     undoable: boolean;
     // Where the goods go back, one part per location the row was taken from
     // (quantity in the article's base unit); empty = not undoable.
-    locations: { locationId: string; warehouseName: string; locationName: string; quantity: number; batchNumber?: string | null }[];
+    locations: {
+      locationId: string;
+      warehouseName: string;
+      locationName: string;
+      quantity: number;
+      batchNumber?: string | null;
+      expiresOn?: string | null;
+      batchKind?: "batch" | "serial" | null;
+    }[];
     // The article's base unit — the unit of the parts above.
     baseUnit: string;
+    // Serienummer: the row's numbers — drawn from stock or given at the
+    // delivery (those of an undone row are burnt).
+    serialNumbers?: string[];
   }[];
 }
 
@@ -2877,6 +2993,7 @@ export interface MOMaterialConsumption {
   componentName: string;
   // Batchstyrd (#8): Förbruka offers a Batch choice.
   componentBatchTracked?: boolean;
+  componentTracking?: ArticleTracking;
   // Always stored in the component's base unit; unitCode/unitFactor say
   // which unit the BOM row was entered in (factor null = base unit).
   quantityPlanned: string;
@@ -3030,12 +3147,21 @@ export interface MOReport {
   purchaseOrderNumber: string | null;
   // Batch (#8) of the finished goods this report received (null = none).
   receiptBatchNumber?: string | null;
+  // Serienummer the report received (the finished goods of a serienummerstyrd article).
+  receiptSerialNumbers?: string[];
   createdAt: string;
   undoneAt: string | null;
   undoneByName: string | null;
   // locationName null = a service component (tjänst): consumed, never drawn from stock.
   // materialConsumptionId: the TO's material row the line drew for.
-  materials: { materialConsumptionId: string; articleNumber: string; quantity: string; locationName: string | null; batchNumber?: string | null }[];
+  materials: {
+    materialConsumptionId: string;
+    articleNumber: string;
+    quantity: string;
+    locationName: string | null;
+    batchNumber?: string | null;
+    batchKind?: "batch" | "serial" | null;
+  }[];
 }
 
 export type EmploymentType = "hourly" | "monthly";
@@ -3549,6 +3675,8 @@ export interface SystemSettings {
   alertSupplierInvoiceDays: number;
   // Offerter att följa upp inom (dagar), 0–60.
   alertQuoteFollowupDays: number;
+  // Batcher som går ut inom (dagar) — the avisering Utgångna batcher (0–365, förval 30).
+  alertBatchExpiryDays?: number;
   // Offertens giltighetstid (dagar), 0–365; 0 = ingen giltighetstid.
   quoteValidityDays: number;
   // Marginal i leveransprecisionen (#29), whole days 0–365 per side: Sen
@@ -3871,10 +3999,13 @@ export type NumberSeriesKey =
   | "stock_count"
   | "quote"
   | "invoice_scan"
-  | "deviation";
+  | "deviation"
+  | "serial";
 
 export const NUMBER_SERIES_LABELS: Record<NumberSeriesKey, string> = {
   article: "Artikelnummer",
+  // Serienummer (#8 etapp 2): the common serial number series.
+  serial: "Serienummer",
   purchase_order: "Inköpsorder",
   quote: "Offert",
   sales_order: "Kundorder",
@@ -3901,6 +4032,8 @@ export interface NumberSeries {
   // Only the user's own article series carry a name.
   name: string | null;
   forArticles: boolean;
+  // Serienummerserie (#8 etapp 2): true on the common "serial" and the user's own.
+  forSerials?: boolean;
   prefix: string;
   nextNumber: number;
   digits: number;
@@ -5026,8 +5159,12 @@ export interface StockCountRow {
   // Batch (#8): batchTracked rows are counted per batch; batchId null +
   // batchNumber null = the Okänd row.
   batchTracked?: boolean;
+  tracking?: ArticleTracking;
   batchId?: string | null;
   batchNumber?: string | null;
+  // The row's own sort: "serial" = one serial number, counted 0 or 1.
+  batchKind?: "batch" | "serial" | null;
+  expiresOn?: string | null;
 }
 
 // #26 — may an open count be booked per the day its underlag was created?
@@ -5601,6 +5738,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   cancelled: "Avbruten",
   lost: "Förlorad",
   order_created: "Kundorder skapad",
+  production_started: "Tillverkning startad",
   created_from_quote: "Skapad från offert",
   reopened: "Öppnad igen",
   issued: "Utfärdad",

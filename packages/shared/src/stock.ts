@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { listQuerySchema, statusListParam } from "./list.js";
 import { blankSafe } from "./coerce.js";
+import { businessDateSchema } from "./business-date.js";
 
 // Spärrade lagerplatser as a list filter: "true" = only blocked places,
 // "false" = without them, absent = all. NOT z.coerce.boolean() — that turns
@@ -79,14 +80,56 @@ export const batchNumberSchema = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
   z.string().trim().min(1).max(50).optional()
 );
+// Serienummer (etapp 2, 0215): at most this many numbers in one movement.
+export const SERIAL_NUMBERS_MAX = 1000;
+// An INFLOW of a serienummerstyrd article names one number per styck
+// (trimmed, at most 50 characters each; compared case-insensitively).
+export const serialNumbersSchema = z.array(z.string().trim().min(1).max(50)).min(1).max(SERIAL_NUMBERS_MAX);
+
+// An OUTFLOW of a serienummerstyrd article (numbers created vid inleverans)
+// chooses its numbers by id — as many as the styck — or leaves them out:
+// Automatiskt, the oldest numbers.
+export const serialChoiceSchema = z.array(z.string().uuid()).min(1).max(SERIAL_NUMBERS_MAX).optional();
+
+// Utgångsdatum / Batchdatum on a write (etapp 2): an ISO day, "" = left out.
+export const batchDayInputSchema = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  businessDateSchema.optional()
+);
 // GET /stock/batches (#8, Spårbarhet): the batch register — search on the
 // batch number or the article's number/name, optionally one article.
+// `expiry` (etapp 2) is the avisering Utgångna batcher's "Visa alla" — the
+// SAME rows: `due` = batches of spårade articles with stock on a place that
+// is not blocked and an utgångsdatum within the setting's window (expired
+// ones included), `expired` = only those already past it. Sorted on the date.
+export const STOCK_BATCH_EXPIRY_FILTERS = ["due", "expired"] as const;
+// `kind` (etapp 2 steg 5): only batches or only serial numbers.
+export const STOCK_BATCH_KINDS = ["batch", "serial"] as const;
+export type StockBatchKind = (typeof STOCK_BATCH_KINDS)[number];
 export const listStockBatchesQuerySchema = listQuerySchema.extend({
   articleId: z.string().uuid().optional(),
+  expiry: z.enum(STOCK_BATCH_EXPIRY_FILTERS).optional(),
+  kind: z.enum(STOCK_BATCH_KINDS).optional(),
 });
+
+
+// PATCH /stock/batches/:id (etapp 2): correct a batch's utgångsdatum,
+// Batchdatum (null clears either) or a mistyped number. The batch row is not
+// part of the append-only log; archived documents are not changed.
+export const updateStockBatchSchema = z
+  .object({
+    expiresOn: businessDateSchema.nullable().optional(),
+    batchDate: businessDateSchema.nullable().optional(),
+    batchNumber: z.string().trim().min(1).max(50).optional(),
+  })
+  .strict()
+  .refine((input) => input.expiresOn !== undefined || input.batchDate !== undefined || input.batchNumber !== undefined, {
+    message: "Nothing to change",
+  });
+export type UpdateStockBatchInput = z.infer<typeof updateStockBatchSchema>;
 export type ListStockBatchesQuery = z.infer<typeof listStockBatchesQuerySchema>;
 
-export const STOCK_BATCH_ORIGINS = ["purchase_receipt", "manufacturing_order", "manual", "import"] as const;
+export const STOCK_BATCH_ORIGINS = ["purchase_receipt", "manufacturing_order", "manual", "import", "delivery"] as const;
 export type StockBatchOrigin = (typeof STOCK_BATCH_ORIGINS)[number];
 
 export interface StockBatchListRow {
@@ -97,7 +140,17 @@ export interface StockBatchListRow {
   articleName: string;
   unitCode: string;
   origin: StockBatchOrigin;
+  // batch | serial (0215) — a serial number is a row of its own, saldo 0/1.
+  kind: StockBatchKind;
+  // A serial number given at a delivery (origin "delivery") whose delivery
+  // row was undone since: burnt — never used again (decision 18).
+  burnt: boolean;
   createdAt: string;
+  // Etapp 2: Utgångsdatum (the last usable day), Batchdatum (null = the day
+  // of createdAt) and whether the batch is utgången today (Stockholm day).
+  expiresOn: string | null;
+  batchDate: string | null;
+  expired: boolean;
   // Physical balance over every place (blocked ones included), base unit.
   quantity: number;
 }
@@ -116,8 +169,50 @@ export interface TraceBatchRef {
   // The article's flag NOW — a leaf without a batch is "Okänd" on a
   // batchstyrd article and "ej batchstyrd" otherwise.
   batchTracked: boolean;
+  // Etapp 2: the article's Spårning now (batchTracked = it is "batch"), and
+  // the batch's utgångsdatum (null = none, or Okänd).
+  tracking: "none" | "batch" | "serial";
+  expiresOn: string | null;
   origin: StockBatchOrigin | null;
   createdAt: string | null;
+  // Steg 5: the row's OWN sort — batch | serial, null for Okänd. Read this,
+  // never the article's Spårning (an article that changed keeps its old rows).
+  kind: StockBatchKind | null;
+  // A serial number given at a delivery whose row was undone since (burnt,
+  // decision 18): it never went anywhere and is never used again.
+  burnt: boolean;
+}
+// Steg 5 — the group node: the serial numbers of ONE article that one TO
+// produced (forward) or drew (backward) are one node instead of one per
+// number. `numbers` is every number, compressed (compressSerialNumbers);
+// `batchIds` the first 200 of them, for links. On such a node `batch` is the
+// group's FIRST number (so a reader that does not know groups still shows
+// something true), `quantity` the group's sum, and the children are the
+// whole group's, merged: one entry per TO, per följesedel (with the group's
+// numbers on it, `serialNumbers`), per inköpsorder, per place, and one event
+// per sort (kind, inventering, note).
+export interface TraceSerialGroup {
+  count: number;
+  numbers: string;
+  batchIds: string[];
+}
+// Backward from a serial number that was CREATED at a delivery (Serienummer
+// skapas: Vid utleverans — the stock is untracked, so the trace starts
+// here): the delivery row that gave it. undoneAt set = the row was undone
+// and the number is burnt.
+export interface TraceSerialOrigin {
+  deliveryId: string;
+  deliveryNumber: string;
+  deliveryRowId: string;
+  salesOrderId: string;
+  orderNumber: string;
+  salesOrderRowId: string;
+  customerId: string;
+  customerName: string;
+  deliveredAt: string;
+  // The delivery row's whole quantity (base unit) — the number is one of them.
+  rowQuantity: number;
+  undoneAt: string | null;
 }
 // Why a node has no children of its own: null = it is expanded here;
 // "unknown" = Okänd (never followed); "repeated" = the same batch is already
@@ -151,6 +246,12 @@ export interface TraceDelivery {
   customerName: string;
   deliveredAt: string;
   quantity: number;
+  // Steg 5. Set (a moment) only for a serial number GIVEN at the delivery
+  // whose row was undone since — the number is burnt and shown as ångrad.
+  // Goods drawn from stock net themselves away when undone and never show.
+  undoneAt?: string | null;
+  // On a group node: the group's numbers on this följesedel, compressed.
+  serialNumbers?: string;
 }
 export interface TraceOnHand {
   locationId: string;
@@ -176,6 +277,11 @@ export interface BackwardTraceNode {
   }[];
   // Positive adjustments / stock-count differences into the batch.
   events: TraceEvent[];
+  // Steg 5: set on a group node (see TraceSerialGroup).
+  serials?: TraceSerialGroup;
+  // Steg 5: the delivery row that created the number (root only; null/
+  // omitted for everything that came in through stock).
+  deliveryOrigin?: TraceSerialOrigin | null;
 }
 export interface ForwardTraceNode {
   batch: TraceBatchRef;
@@ -200,6 +306,8 @@ export interface ForwardTraceNode {
   events: TraceEvent[];
   // What is still in stock, per place.
   onHand: TraceOnHand[];
+  // Steg 5: set on a group node (see TraceSerialGroup).
+  serials?: TraceSerialGroup;
 }
 export interface BatchTrace {
   batch: TraceBatchRef;
@@ -227,10 +335,17 @@ export const createStockTransactionSchema = z.object({
   // Batch (#8): only on an inflow (positive delta) of a batchstyrd article
   // — left out, the goods are Okänd.
   batchNumber: batchNumberSchema,
+  // Etapp 2: the new batch's Utgångsdatum — only with batchNumber (an
+  // existing batch with another date is refused, 409 batch-expiry-mismatch).
+  expiresOn: batchDayInputSchema,
   // …and on a decrease (negative delta) the batch to take from: left out =
   // the place's batches oldest first (Okänd first, the rest as Okänd), null
   // = Okänd, an id = that batch, which must cover the quantity.
   batchId: batchChoiceSchema,
+  // Serienummer (steg 4): on a decrease of a serienummerstyrd article, the
+  // numbers taken — as many as the styck; left out = the place's numbers
+  // oldest first. Not together with batchId.
+  serialIds: serialChoiceSchema,
 });
 export type CreateStockTransactionInput = z.infer<typeof createStockTransactionSchema>;
 
@@ -251,6 +366,14 @@ export const createStockAdjustmentSchema = createStockTransactionSchema
   .refine((input) => input.batchId === undefined || input.quantityDelta < 0, {
     message: "batchId chooses the batch of a decrease — only with a negative quantityDelta",
     path: ["batchId"],
+  })
+  .refine((input) => input.serialIds === undefined || input.quantityDelta < 0, {
+    message: "serialIds chooses the serial numbers of a decrease — only with a negative quantityDelta",
+    path: ["serialIds"],
+  })
+  .refine((input) => input.expiresOn === undefined || input.batchNumber !== undefined, {
+    message: "expiresOn is the utgångsdatum of the batch named by batchNumber",
+    path: ["expiresOn"],
   });
 
 // Lagerflytt — move balances from one stock location to another. Both legs of
@@ -270,6 +393,9 @@ export const createStockTransferSchema = z
           // pair of legs each), null = Okänd, an id = that batch for the
           // row's whole quantity — two chosen batches are two rows.
           batchId: batchChoiceSchema,
+          // Serienummer (steg 4): the numbers that move — as many as the
+          // styck; left out = the source's numbers, oldest first.
+          serialIds: serialChoiceSchema,
         })
       )
       .min(1),

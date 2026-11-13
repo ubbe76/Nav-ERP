@@ -4,6 +4,7 @@ import {
   allocateBatchOutflow,
   compareBatchCells,
   compareBatches,
+  isBatchExpired,
   withBatchRemainder,
   type BatchCell,
   type OutflowCandidate,
@@ -264,5 +265,197 @@ describe("withBatchRemainder", () => {
   it("no remainder leaves the parts as they are", () => {
     const parts = [{ locationId: "A1", quantity: 2, batchId: "x" }];
     expect(withBatchRemainder(parts, 0, "A1")).toBe(parts);
+  });
+});
+
+// Etapp 2 — FEFO (beslut 10) and the expired batches (beslut 8 and 12).
+describe("FEFO — compareBatches with utgångsdatum and Batchdatum", () => {
+  const key = (batch: string, over: Partial<BatchCell> = {}, age = 0) => ({
+    batchId: `id-${batch}`,
+    batchNumber: batch,
+    batchCreatedAt: new Date(T0 + age * DAY),
+    ...over,
+  });
+  const order = (batches: Parameters<typeof compareBatches>[0][]) => [...batches].sort(compareBatches).map((b) => b.batchNumber);
+
+  it("Okänd → the dated ones (shortest date first) → the undated ones, oldest first", () => {
+    expect(
+      order([
+        key("ODATERAD-NY", {}, 9),
+        key("LÅNG", { expiresOn: "2027-06-01" }, 1),
+        key("ODATERAD-GAMMAL", {}, 0),
+        { batchId: null, batchNumber: null, batchCreatedAt: null },
+        key("KORT", { expiresOn: "2027-01-31" }, 5),
+      ])
+    ).toEqual([null, "KORT", "LÅNG", "ODATERAD-GAMMAL", "ODATERAD-NY"]);
+  });
+
+  it("the same utgångsdatum: the age decides, then the number", () => {
+    expect(
+      order([
+        key("B", { expiresOn: "2027-01-31" }, 3),
+        key("A", { expiresOn: "2027-01-31" }, 3),
+        key("ÄLDRE", { expiresOn: "2027-01-31" }, 1),
+      ])
+    ).toEqual(["ÄLDRE", "A", "B"]);
+  });
+
+  it("Batchdatum goes before created_at: the age day first, the moment only within one day", () => {
+    expect(
+      order([
+        // Created first, but its Batchdatum says it is the younger one.
+        key("SKAPAD-FÖRST", { batchAgeDate: "2026-03-01" }, 0),
+        key("SKAPAD-SIST", { batchAgeDate: "2025-11-15" }, 20),
+      ])
+    ).toEqual(["SKAPAD-SIST", "SKAPAD-FÖRST"]);
+    expect(
+      order([key("SEN", { batchAgeDate: "2026-01-01" }, 0.5), key("TIDIG", { batchAgeDate: "2026-01-01" }, 0.1)])
+    ).toEqual(["TIDIG", "SEN"]);
+  });
+
+  it("the order is unchanged when no batch has a date — with or without the age day", () => {
+    const plain = [key("L-10", {}, 1), key("L-2", {}, 1), key("Z", {}, 0), { batchId: null, batchNumber: null, batchCreatedAt: null }];
+    expect(order(plain)).toEqual([null, "Z", "L-2", "L-10"]);
+    const withAge = plain.map((b) => (b.batchId === null ? b : { ...b, expiresOn: null, batchAgeDate: b.batchCreatedAt!.toISOString().slice(0, 10) }));
+    expect(order(withAge)).toEqual([null, "Z", "L-2", "L-10"]);
+  });
+
+  it("isBatchExpired: the utgångsdatum is the LAST usable day", () => {
+    expect(isBatchExpired("2026-06-10", "2026-06-10")).toBe(false);
+    expect(isBatchExpired("2026-06-10", "2026-06-11")).toBe(true);
+    expect(isBatchExpired(null, "2026-06-11")).toBe(false);
+    expect(isBatchExpired(undefined, "2026-06-11")).toBe(false);
+  });
+});
+
+describe("allocateBatchOutflow — utgångna batcher", () => {
+  const TODAY = "2026-06-11";
+  const dated = (locationId: string, batch: string, quantity: number, expiresOn: string | null, age = 0): BatchCell => ({
+    ...cell(locationId, batch, quantity, age),
+    expiresOn,
+  });
+
+  it("Automatiskt takes the shortest date first and skips the expired one — its last day is still usable", () => {
+    const places = [place({ locationId: "A1", quantityOnHand: 30 })];
+    const cells = [
+      dated("A1", "UTGÅNGEN", 10, "2026-06-10"),
+      dated("A1", "SISTA-DAGEN", 10, "2026-06-11", 3),
+      dated("A1", "LÅNG", 10, "2027-01-01", 1),
+    ];
+    expect(allocateBatchOutflow(15, places, cells, { expiredBefore: TODAY })).toEqual({
+      parts: [
+        { locationId: "A1", quantity: 10, batchId: "id-SISTA-DAGEN" },
+        { locationId: "A1", quantity: 5, batchId: "id-LÅNG" },
+      ],
+      remainder: 0,
+    });
+    // Without the day (flytt, justering) the expired one is simply first.
+    expect(allocateBatchOutflow(15, places, cells).parts[0]).toEqual({ locationId: "A1", quantity: 10, batchId: "id-UTGÅNGEN" });
+  });
+
+  it("an expired batch is taken when it is CHOSEN", () => {
+    const { parts, remainder } = allocateBatchOutflow(
+      4,
+      [place({ locationId: "A1", quantityOnHand: 10 })],
+      [dated("A1", "UTGÅNGEN", 10, "2026-01-01")],
+      { batch: { batchId: "id-UTGÅNGEN" }, expiredBefore: TODAY }
+    );
+    expect(parts).toEqual([{ locationId: "A1", quantity: 4, batchId: "id-UTGÅNGEN" }]);
+    expect(remainder).toBe(0);
+  });
+
+  it("only expired stock left: nothing is taken and the whole quantity is the remainder (Okänd minus)", () => {
+    const { parts, remainder } = allocateBatchOutflow(
+      6,
+      [place({ locationId: "A1", quantityOnHand: 10 })],
+      [dated("A1", "UTGÅNGEN", 10, "2026-01-01")],
+      { expiredBefore: TODAY }
+    );
+    expect(parts).toEqual([]);
+    expect(remainder).toBe(6);
+    expect(withBatchRemainder(parts, remainder, "A1")).toEqual([{ locationId: "A1", quantity: 6, batchId: null }]);
+  });
+
+  it("the place ceiling counts the expired cell's stock, but only the usable cells are taken", () => {
+    // Net 12 on the place: expired +10, fresh +5, Okänd −3. The fresh cell
+    // gives its 5 (the ceiling 12 is more generous), the rest is remainder.
+    const { parts, remainder } = allocateBatchOutflow(
+      8,
+      [place({ locationId: "A1", quantityOnHand: 12 })],
+      [dated("A1", "UTGÅNGEN", 10, "2026-01-01"), dated("A1", "FÄRSK", 5, "2027-01-01"), cell("A1", null, -3)],
+      { expiredBefore: TODAY }
+    );
+    expect(parts).toEqual([{ locationId: "A1", quantity: 5, batchId: "id-FÄRSK" }]);
+    expect(remainder).toBe(3);
+  });
+
+  it("a chosen place: the expired cell is skipped there too, the rest becomes Okänd on the place", () => {
+    const { parts, remainder } = allocateBatchOutflow(
+      7,
+      [],
+      [dated("A1", "UTGÅNGEN", 10, "2026-01-01"), dated("A1", "FÄRSK", 5, null)],
+      { locationId: "A1", expiredBefore: TODAY }
+    );
+    expect(parts).toEqual([{ locationId: "A1", quantity: 5, batchId: "id-FÄRSK" }]);
+    expect(remainder).toBe(2);
+  });
+});
+
+// Etapp 2, steg 4 — several chosen batch rows (serial numbers).
+describe("allocateBatchOutflow — flera valda (serienummer)", () => {
+  const serial = (locationId: string, number: string, age = 0): BatchCell => cell(locationId, number, 1, age);
+  const chosen = (...numbers: string[]) => numbers.map((n) => ({ batchId: `id-${n}`, batchNumber: n }));
+
+  it("takes exactly the chosen ones — whatever their age, wherever they stand", () => {
+    const { parts, remainder } = allocateBatchOutflow(
+      2,
+      [place({ locationId: "A1", quantityOnHand: 3 }), place({ locationId: "B2", quantityOnHand: 1 })],
+      [serial("A1", "S-1", 1), serial("A1", "S-2", 2), serial("A1", "S-3", 3), serial("B2", "S-4", 4)],
+      { batches: chosen("S-4", "S-2") }
+    );
+    expect(parts.map((p) => `${p.locationId}/${p.batchId}`).sort()).toEqual(["A1/id-S-2", "B2/id-S-4"]);
+    expect(remainder).toBe(0);
+  });
+
+  it("a chosen number that is not in stock on a usable place is refused, naming it — never a remainder", () => {
+    const places = [place({ locationId: "A1", quantityOnHand: 2 }), place({ locationId: "K1", quantityOnHand: 1, blocked: true })];
+    const cells = [serial("A1", "S-1"), serial("A1", "S-2"), serial("K1", "S-9")];
+    const refused = (numbers: string[]) => {
+      try {
+        allocateBatchOutflow(numbers.length, places, cells, { batches: chosen(...numbers) });
+      } catch (err) {
+        return err;
+      }
+      return null;
+    };
+    const missing = refused(["S-1", "S-7"]);
+    expect(missing).toBeInstanceOf(BatchInsufficientError);
+    expect((missing as Error).message).toBe("Serienummer S-7 finns inte i lager på en valbar plats");
+    // On a blocked place it is not usable either.
+    expect((refused(["S-9"]) as Error).message).toBe("Serienummer S-9 finns inte i lager på en valbar plats");
+  });
+
+  it("a chosen place: only the chosen numbers on it; an expired one is taken (chosen by hand)", () => {
+    const cells: BatchCell[] = [{ ...serial("A1", "S-1"), expiresOn: "2020-01-01" }, serial("A1", "S-2"), serial("B2", "S-3")];
+    expect(allocateBatchOutflow(1, [], cells, { locationId: "A1", batches: chosen("S-1"), expiredBefore: "2026-06-11" }).parts).toEqual([
+      { locationId: "A1", quantity: 1, batchId: "id-S-1" },
+    ]);
+    expect(() => allocateBatchOutflow(1, [], cells, { locationId: "A1", batches: chosen("S-3") })).toThrow(BatchInsufficientError);
+  });
+
+  it("Automatiskt on serial cells: Okänd first, then the oldest numbers, whole styck; what is missing is Okänd", () => {
+    const { parts, remainder } = allocateBatchOutflow(
+      4,
+      [place({ locationId: "A1", quantityOnHand: 4 })],
+      [serial("A1", "S-NY", 9), serial("A1", "S-GAMMAL", 1), serial("A1", "S-MELLAN", 5), cell("A1", null, 1)]
+    );
+    expect(parts.map((p) => [p.batchId, p.quantity])).toEqual([
+      [null, 1],
+      ["id-S-GAMMAL", 1],
+      ["id-S-MELLAN", 1],
+      ["id-S-NY", 1],
+    ]);
+    expect(remainder).toBe(0);
+    expect(allocateBatchOutflow(3, [place({ locationId: "A1", quantityOnHand: 1 })], [serial("A1", "S-1")]).remainder).toBe(2);
   });
 });

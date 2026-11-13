@@ -13,12 +13,14 @@ export function AlertSettingsForm({ settings }: { settings: SystemSettings }) {
   const [time, setTime] = useState(settings.alertDigestTime);
   const [days, setDays] = useState(String(settings.alertSupplierInvoiceDays));
   const [quoteDays, setQuoteDays] = useState(String(settings.alertQuoteFollowupDays));
+  const [batchDays, setBatchDays] = useState(String(settings.alertBatchExpiryDays ?? 30));
   // The last values the server holds; a blur that changes nothing sends no PATCH.
   const [last, setLast] = useState({
     url: settings.publicBaseUrl,
     time: settings.alertDigestTime,
     days: settings.alertSupplierInvoiceDays,
     quoteDays: settings.alertQuoteFollowupDays,
+    batchDays: settings.alertBatchExpiryDays ?? 30,
   });
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -34,11 +36,13 @@ export function AlertSettingsForm({ settings }: { settings: SystemSettings }) {
       setTime(updated.alertDigestTime);
       setDays(String(updated.alertSupplierInvoiceDays));
       setQuoteDays(String(updated.alertQuoteFollowupDays));
+      setBatchDays(String(updated.alertBatchExpiryDays ?? 30));
       setLast({
         url: updated.publicBaseUrl,
         time: updated.alertDigestTime,
         days: updated.alertSupplierInvoiceDays,
         quoteDays: updated.alertQuoteFollowupDays,
+        batchDays: updated.alertBatchExpiryDays ?? 30,
       });
       setSaved(field);
     } catch (err) {
@@ -81,6 +85,16 @@ export function AlertSettingsForm({ settings }: { settings: SystemSettings }) {
     }
     if (value === last.quoteDays) return;
     void save("quoteDays", { alertQuoteFollowupDays: value });
+  }
+
+  function saveBatchDays(badInput: boolean) {
+    const value = batchDays.trim() === "" ? NaN : Number(batchDays);
+    if (badInput || !Number.isInteger(value) || value < 0 || value > 365) {
+      setError("Antal dagar måste vara ett heltal 0–365");
+      return;
+    }
+    if (value === last.batchDays) return;
+    void save("batchDays", { alertBatchExpiryDays: value });
   }
 
   return (
@@ -192,6 +206,35 @@ export function AlertSettingsForm({ settings }: { settings: SystemSettings }) {
           {saved === "quoteDays" && <span className={styles.saved}>Sparat</span>}
         </div>
       </div>
+      {settings.batchTrackingEnabled && (
+        <div className={styles.row}>
+          <div className={styles.texts}>
+            <div className={styles.label}>Batcher som går ut inom (dagar)</div>
+            <div className={styles.description}>
+              Hur långt framåt aviseringen Utgångna batcher tittar. 0 = batcher som redan har gått ut och de som går
+              ut i dag.
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="number"
+              min="0"
+              max={365}
+              step="1"
+              aria-label="Batcher som går ut inom (dagar)"
+              className={styles.numberInput}
+              value={batchDays}
+              disabled={pending}
+              onChange={(e) => {
+                setSaved(null);
+                setBatchDays(e.target.value);
+              }}
+              onBlur={(e) => saveBatchDays(e.currentTarget.validity.badInput)}
+            />
+            {saved === "batchDays" && <span className={styles.saved}>Sparat</span>}
+          </div>
+        </div>
+      )}
       {error && <p className={styles.error}>{error}</p>}
     </div>
   );

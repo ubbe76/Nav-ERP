@@ -742,7 +742,7 @@ describe("Ta emot e-faktura and the web hook", () => {
     const alerts = createAlertsService({
       repo: createAlertsRepository(db),
       planning: {} as never,
-      settings: { supplierInvoiceDays: async () => 7, quoteFollowupDays: async () => 7 },
+      settings: { supplierInvoiceDays: async () => 7, quoteFollowupDays: async () => 7, batchExpiryDays: async () => 30 },
       today: () => "2026-11-05",
     });
     const a = fake.receive(Buffer.from("<nope/>"));

@@ -1,5 +1,5 @@
 import { renderLabelsPdf, type LabelInput } from "../../mail/service/label-pdf.js";
-import { formatLocationLabelCode, type LocationLabelsInput } from "@navet/shared";
+import { formatLocationLabelCode, type BatchLabelsInput, type LocationLabelsInput } from "@navet/shared";
 import type {
   ArticleLocationsInput,
   CreateStockLocationInput,
@@ -9,6 +9,7 @@ import type {
   ListQuery,
   ListStockTransactionsQuery,
   ListStockBatchesQuery,
+  UpdateStockBatchInput,
   ListStockBalancesQuery,
   ListStockLocationRegisterQuery,
   ListStockLocationsQuery,
@@ -141,6 +142,26 @@ export function createStockService(repo: StockRepository, audit: AuditWriter = {
       return renderLabelsPdf(labels, input.format, input.start);
     },
 
+    // Etiketter (#8 etapp 2): batch- and serienummeretiketter — one label
+    // per stock_batches row and copy, in the order asked for (the web sends
+    // a report's or an inleverans's numbers). Unknown ids are left out; none
+    // known is a 404. Readable whatever the setting or the article's
+    // Spårning says now — a label writes nothing.
+    async renderBatchLabels(input: BatchLabelsInput) {
+      const found = await repo.labelBatches([...new Set(input.batchIds)]);
+      if (found.length === 0) throw new StockBatchNotFoundError(input.batchIds[0]!);
+      const labels: LabelInput[] = found.flatMap((b) =>
+        Array.from({ length: input.copies }, () => ({
+          kind: "batch" as const,
+          sort: b.kind,
+          number: b.batchNumber,
+          articleNumber: b.articleNumber,
+          name: b.articleName,
+        }))
+      );
+      return renderLabelsPdf(labels, input.format, input.start);
+    },
+
     async listLocations(query?: ListStockLocationsQuery) {
       return repo.listLocations(query);
     },
@@ -190,6 +211,25 @@ export function createStockService(repo: StockRepository, audit: AuditWriter = {
     // that is no longer batchstyrd are still in the log.
     async listBatches(query: ListStockBatchesQuery) {
       return repo.listBatches(query);
+    },
+
+    // PATCH /stock/batches/:id (etapp 2): correct a batch's utgångsdatum,
+    // Batchdatum or number. Logged (stock_batch / updated, before and after)
+    // after the commit, only when something changed.
+    async updateBatch(batchId: string, input: UpdateStockBatchInput, userId: string | null) {
+      const result = await repo.updateBatch(batchId, input);
+      if (!result) throw new StockBatchNotFoundError(batchId);
+      if (result.changed) {
+        const pick = (b: typeof result.before) => ({ batchNumber: b.batchNumber, expiresOn: b.expiresOn, batchDate: b.batchDate });
+        await audit.log({
+          entityType: "stock_batch",
+          entityId: batchId,
+          action: "updated",
+          detail: { articleId: result.after.articleId, before: pick(result.before), after: pick(result.after) },
+          userId,
+        });
+      }
+      return result.after;
     },
 
     async traceBatch(batchId: string, limits?: BatchTraceLimits) {

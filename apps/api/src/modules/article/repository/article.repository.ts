@@ -20,6 +20,7 @@ import {
   articleStandardCostHistory,
   articles,
   articleUnits,
+  numberSeries,
   bomComponents,
   configuratorTemplates,
   packageTypes,
@@ -47,8 +48,16 @@ import {
 } from "@navet/shared";
 import { getOrCreateFallbackLocation } from "../../stock/service/location-resolver.js";
 import { articleHoldsStock } from "../../stock/service/stocked-article.js";
-import { batchTrackableArticle, batchTrackingEnabledForShare } from "../../stock/service/batch-tracking.js";
+import {
+  batchTrackableArticle,
+  batchTrackedSql,
+  batchTrackingEnabledForShare,
+  mentionsTracking,
+  resolveTracking,
+  type ArticleTracking,
+} from "../../stock/service/batch-tracking.js";
 import { ArticleNotBatchTrackableError, BatchTrackingDisabledError } from "../../stock/service/batch.errors.js";
+import { assertSerialSeries, DEFAULT_SERIAL_SERIES_KEY } from "../../stock/service/serial-numbers.js";
 import { applyInformation, copyArticleParts, readCopySource } from "./article-copy.js";
 import { articleVatRateSql } from "./article-vat-rate.js";
 import { getOrCreateDefaultUnitId } from "./default-unit.js";
@@ -133,7 +142,10 @@ export async function insertArticle(tx: Tx, input: InsertArticleInput): Promise<
     safetyStock: input.safetyStock ? String(input.safetyStock) : undefined,
     stockControlled: input.stockControlled ?? false,
     forecastControlled: input.forecastControlled ?? false,
-    batchTracked: input.batchTracked ?? false,
+    tracking: mentionsTracking(input) ? resolveTracking("none", input) : undefined,
+    shelfLifeDays: input.shelfLifeDays,
+    serialAssignedAt: input.serialAssignedAt,
+    serialSeriesKey: input.serialSeriesKey,
     manufacturingLeadTimeDays: input.manufacturingLeadTimeDays ?? null,
     packageTypeId: input.packageTypeId,
     parcelKind: input.parcelKind ?? null,
@@ -155,17 +167,23 @@ export async function insertArticle(tx: Tx, input: InsertArticleInput): Promise<
   if (copy && source && copy.parts.includes("information")) {
     applyInformation(values as Record<string, unknown>, input, source, copyUnits);
   }
-  // Batchstyrd (#8): never a Tjänst or a phantom, and only while the system
+  // Spårning (#8): never a Tjänst or a phantom, and only while the system
   // setting is on — read FOR SHARE and held until this transaction commits
   // (batch-tracking.ts), so the setting cannot be switched off past a new
-  // batchstyrd article. Asked for in the request it is refused; brought
-  // along by Kopiera från (or a variant's template) it is just dropped.
-  if (values.batchTracked) {
+  // spårad article. Asked for in the request it is refused; brought along
+  // by Kopiera från (or a variant's template) it is just dropped. The
+  // request wins over the copy (resolveTracking against "none": an explicit
+  // batchTracked: false is "none" here — there is nothing to protect yet).
+  const asked = mentionsTracking(input);
+  if (asked) values.tracking = input.tracking ?? (input.batchTracked ? "batch" : "none");
+  // Serienummerserie: must be a serial number series (400).
+  await assertSerialSeries(tx, input.serialSeriesKey);
+  if (values.tracking !== undefined && values.tracking !== "none") {
     const trackable = batchTrackableArticle({ type: input.type, isPhantom: input.isPhantom === true });
-    if (!trackable && input.batchTracked) throw new ArticleNotBatchTrackableError();
+    if (!trackable && asked) throw new ArticleNotBatchTrackableError();
     const enabled = trackable && (await batchTrackingEnabledForShare(tx));
-    if (trackable && !enabled && input.batchTracked) throw new BatchTrackingDisabledError();
-    if (!enabled) values.batchTracked = false;
+    if (trackable && !enabled && asked) throw new BatchTrackingDisabledError();
+    if (!enabled) values.tracking = "none";
   }
   // Streckkod: the same GTIN in another form (UPC-A/EAN-13) is a duplicate too.
   if (input.barcode) await assertBarcodeFree(tx, input.barcode, null);
@@ -199,8 +217,11 @@ async function updateArticleRow(dbc: Db | Tx, id: string, input: UpdateArticleIn
     safetyStock,
     palletSpaces,
     loadingMeters,
+    // The alias is never a column: updateArticle resolves it into `tracking`.
+    batchTracked: _batchTracked,
     ...rest
   } = input;
+  void _batchTracked;
   const numeric = (v: number | null | undefined) => (v === undefined ? undefined : v === null ? null : String(v));
   // Streckkod: the same GTIN in another form on ANOTHER article is a duplicate.
   if (input.barcode) await assertBarcodeFree(dbc, input.barcode, id);
@@ -303,6 +324,11 @@ export function createArticleRepository(db: Db) {
 
     // Batch (#8): the system setting "Använd batch- och serienummer", read
     // FOR SHARE in the transaction that switches an article's flag on.
+    // Serienummerserie: 400 serial-series-invalid unless it is one.
+    async assertSerialSeries(tx: Tx, key: string | null | undefined): Promise<void> {
+      return assertSerialSeries(tx, key);
+    },
+
     async batchTrackingEnabled(tx: Tx): Promise<boolean> {
       return batchTrackingEnabledForShare(tx);
     },
@@ -339,10 +365,16 @@ export function createArticleRepository(db: Db) {
     // row from here, so the lock order (template → article) cannot invert.
     // Batch (#8): a change of Batchstyrd holds it too — it waits for a draw
     // in progress (FOR NO KEY UPDATE) and for an inflow that has already
-    // read the flag (FOR KEY SHARE, batchTrackedArticleIds).
-    async lockArticle(tx: Tx, id: string): Promise<{ id: string; type: ArticleType; isPhantom: boolean; batchTracked: boolean } | null> {
+    // read the flag (FOR KEY SHARE, trackedArticleIds).
+    async lockArticle(tx: Tx, id: string): Promise<{ id: string; type: ArticleType; isPhantom: boolean; tracking: ArticleTracking; serialAssignedAt: "receipt" | "delivery" } | null> {
       const [row] = await tx
-        .select({ id: articles.id, type: articles.type, isPhantom: articles.isPhantom, batchTracked: articles.batchTracked })
+        .select({
+          id: articles.id,
+          type: articles.type,
+          isPhantom: articles.isPhantom,
+          tracking: articles.tracking,
+          serialAssignedAt: articles.serialAssignedAt,
+        })
         .from(articles)
         .where(eq(articles.id, id))
         .for("update");
@@ -420,6 +452,8 @@ export function createArticleRepository(db: Db) {
       const [row] = await db
         .select({
           ...getTableColumns(articles),
+          // Spårning: the backwards compatible alias (true = batch).
+          batchTracked: batchTrackedSql(),
           // Base unit code keeps the pre-register field name `unit` so
           // existing consumers (web, PDFs) stay unchanged.
           unit: units.code,
@@ -471,6 +505,7 @@ export function createArticleRepository(db: Db) {
         db
           .select({
             ...getTableColumns(articles),
+            batchTracked: batchTrackedSql(),
             unit: units.code,
             groupName: articleGroups.name,
             vatRate: articleVatRateSql,
@@ -662,6 +697,14 @@ export function createArticleRepository(db: Db) {
     },
 
     // Artikelnummerserier (article-number.ts).
+    // Serienummerserier (0215): the rows with for_serials — the common one
+    // first, then the user's own by name.
+    async listSerialNumberSeries() {
+      const rows = await db.select().from(numberSeries).where(eq(numberSeries.forSerials, true));
+      return rows.sort((a, b) =>
+        a.key === DEFAULT_SERIAL_SERIES_KEY ? -1 : b.key === DEFAULT_SERIAL_SERIES_KEY ? 1 : (a.name ?? "").localeCompare(b.name ?? "", "sv", { numeric: true })
+      );
+    },
     listArticleNumberSeries: () => listArticleNumberSeries(db),
     findArticleNumberSeries: (key: string) => findArticleNumberSeries(db, key),
     previewArticleNumber: (series: Awaited<ReturnType<typeof listArticleNumberSeries>>[number]) =>

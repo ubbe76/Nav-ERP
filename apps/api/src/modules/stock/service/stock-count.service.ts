@@ -105,7 +105,11 @@ export function createStockCountService(deps: {
           snapshotQuantity: showBalances ? Number(r.snapshotQuantity) : null,
           // Batch (#8): one row per batch for a batchstyrd article — Okänd
           // under its label (internal document).
-          batch: r.batchTracked ? (r.batchNumber ?? UNKNOWN_BATCH_LABEL) : null,
+          batch: r.stockTracked && r.batchKind !== "serial" ? (r.batchNumber ?? UNKNOWN_BATCH_LABEL) : null,
+          // Serienummer: a number has a row of its own (0 or 1) — the sort
+          // is the row's (batchKind), so an article that changed Spårning
+          // prints its old batches as batches and its numbers as numbers.
+          serial: r.batchKind === "serial" ? r.batchNumber : null,
         })),
       });
       return { filename: `raknelista-${session.countNumber}.pdf`, content };

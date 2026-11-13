@@ -11,6 +11,7 @@ import type {
   ForwardTraceNode,
   TraceBatchRef,
   TraceEvent,
+  TraceSerialGroup,
   TraceStop,
 } from "../../lib/types";
 import styles from "./BatchTraceView.module.css";
@@ -20,19 +21,41 @@ const qty = (value: number, unit: string) => `${formatQuantity(value)} ${unit}`;
 // A batch's name: the number, "Okänd" for stock without a batch on a batchstyrd
 // article, "ej batchstyrd" for one that has none at all.
 function batchLabel(batch: TraceBatchRef): string {
-  return batch.batchNumber ?? (batch.batchTracked ? "Okänd batch" : "Ej batchstyrd");
+  const unknown = batch.tracking === "serial" ? "Okänt serienummer" : "Okänd batch";
+  return batch.batchNumber ?? (batch.batchTracked ? unknown : "Ej batchstyrd");
 }
 
-function BatchHead({ batch, linkBatch }: { batch: TraceBatchRef; linkBatch: boolean }) {
+// A group of serial numbers merged into one node: "12 serienummer: SN-1001–SN-1012".
+function groupLabel(group: TraceSerialGroup): string {
+  return `${group.count} serienummer: ${group.numbers}`;
+}
+
+function Burnt({ batch }: { batch: TraceBatchRef }) {
+  return batch.burnt ? <span className={styles.muted}> — Bränt (utleveransen ångrad)</span> : null;
+}
+
+function BatchHead({
+  batch,
+  linkBatch,
+  serials,
+}: {
+  batch: TraceBatchRef;
+  linkBatch: boolean;
+  serials?: TraceSerialGroup;
+}) {
+  const link = serials && serials.batchIds.length === 1 ? serials.batchIds[0] : batch.batchId;
   return (
     <>
-      {linkBatch && batch.batchId ? (
-        <GatedLink href={`/lager/sparbarhet?batch=${batch.batchId}`} style={{ color: "var(--accent-fg)" }}>
+      {serials ? (
+        groupLabel(serials)
+      ) : linkBatch && link ? (
+        <GatedLink href={`/lager/sparbarhet?batch=${link}`} style={{ color: "var(--accent-fg)" }}>
           {batchLabel(batch)}
         </GatedLink>
       ) : (
         batchLabel(batch)
       )}
+      <Burnt batch={batch} />
       {" — "}
       <GatedLink href={`/artiklar/${batch.articleId}`} style={{ color: "var(--accent-fg)" }}>
         {batch.articleNumber}
@@ -76,18 +99,33 @@ function Event({ event, unit }: { event: TraceEvent; unit: string }) {
 
 function BackwardNode({ node, root }: { node: BackwardTraceNode; root: boolean }) {
   const unit = node.batch.unitCode;
-  const empty = node.receipts.length === 0 && node.manufacturingOrders.length === 0 && node.events.length === 0;
+  const origin = node.deliveryOrigin ?? null;
+  const empty = !origin && node.receipts.length === 0 && node.manufacturingOrders.length === 0 && node.events.length === 0;
   return (
     <div className={styles.node}>
       {!root && (
         <div className={styles.line}>
           <span className={styles.nodeHead}>
-            <BatchHead batch={node.batch} linkBatch />
+            <BatchHead batch={node.batch} linkBatch serials={node.serials} />
           </span>
           {node.quantity != null && <span className={styles.qty}>{qty(node.quantity, unit)}</span>}
         </div>
       )}
       <StopNote stop={node.stop} />
+      {origin && (
+        <Line kind="Skapat vid utleverans" amount={qty(1, unit)}>
+          {origin.rowQuantity !== 1 ? `(rad om ${qty(origin.rowQuantity, unit)}) ` : ""}följesedel {origin.deliveryNumber},{" "}
+          <GatedLink href={`/forsaljning/ordrar/${origin.salesOrderId}`} style={{ color: "var(--accent-fg)" }}>
+            {origin.orderNumber}
+          </GatedLink>{" "}
+          till{" "}
+          <GatedLink href={`/kunder/${origin.customerId}`} style={{ color: "var(--accent-fg)" }}>
+            {origin.customerName}
+          </GatedLink>
+          , {formatStockholmDate(origin.deliveredAt)}
+          {origin.undoneAt ? ` — ångrad ${formatStockholmDate(origin.undoneAt)}` : ""}
+        </Line>
+      )}
       {node.receipts.map((r, i) => (
         <Line key={`r${i}`} kind="Inleverans" amount={qty(r.quantity, unit)}>
           <GatedLink href={`/inkop/ordrar/${r.purchaseOrderId}`} style={{ color: "var(--accent-fg)" }}>
@@ -133,7 +171,7 @@ function ForwardNode({ node, root }: { node: ForwardTraceNode; root: boolean }) 
       {!root && (
         <div className={styles.line}>
           <span className={styles.nodeHead}>
-            <BatchHead batch={node.batch} linkBatch />
+            <BatchHead batch={node.batch} linkBatch serials={node.serials} />
           </span>
           {node.quantity != null && <span className={styles.qty}>{qty(node.quantity, unit)}</span>}
         </div>
@@ -160,7 +198,7 @@ function ForwardNode({ node, root }: { node: ForwardTraceNode; root: boolean }) 
         </div>
       ))}
       {node.deliveries.map((d, i) => (
-        <Line key={`d${i}`} kind="Utleverans" amount={qty(d.quantity, unit)}>
+        <Line key={`d${i}`} kind={d.undoneAt ? "Utleverans (ångrad)" : "Utleverans"} amount={qty(d.quantity, unit)}>
           <GatedLink href={`/forsaljning/ordrar/${d.salesOrderId}`} style={{ color: "var(--accent-fg)" }}>
             {d.orderNumber}
           </GatedLink>{" "}
@@ -169,6 +207,8 @@ function ForwardNode({ node, root }: { node: ForwardTraceNode; root: boolean }) 
             {d.customerName}
           </GatedLink>
           , följesedel {d.deliveryNumber}, {formatStockholmDate(d.deliveredAt)}
+          {d.undoneAt ? ` — ångrad ${formatStockholmDate(d.undoneAt)}` : ""}
+          {d.serialNumbers ? ` — serienummer ${d.serialNumbers}` : ""}
         </Line>
       ))}
       {node.events.map((e, i) => (

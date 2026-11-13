@@ -1,11 +1,13 @@
-import { eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import {
   articles,
   customers,
   manufacturingOrders,
   purchaseOrders,
   salesOrders,
+  stockBatches,
   stockLocations,
+  stockTransactions,
   suppliers,
   units,
   warehouses,
@@ -47,6 +49,8 @@ export function createScanRepository(db: Db) {
           barcode: articles.barcode,
           unitCode: units.code,
           active: articles.active,
+          tracking: articles.tracking,
+          serialAssignedAt: articles.serialAssignedAt,
         })
         .from(articles)
         .innerJoin(units, eq(units.id, articles.unitId))
@@ -55,6 +59,57 @@ export function createScanRepository(db: Db) {
             ? or(eq(articles.articleNumber, code), inArray(articles.barcode, barcodeForms))
             : eq(articles.articleNumber, code)
         );
+    },
+
+    // Batches and serienummer named `numbers` (compared with lower(), as the
+    // unique index does), on `articleIds` only when given — a GS1 code names
+    // its article. At most 20, oldest first.
+    async batchesByNumber(numbers: string[], articleIds: string[] | null) {
+      const wanted = [...new Set(numbers.map((n) => n.toLowerCase()))];
+      if (wanted.length === 0 || (articleIds !== null && articleIds.length === 0)) return [];
+      return db
+        .select({
+          id: stockBatches.id,
+          batchNumber: stockBatches.batchNumber,
+          batchKind: stockBatches.kind,
+          articleId: stockBatches.articleId,
+          articleNumber: articles.articleNumber,
+          articleName: articles.name,
+          expiresOn: stockBatches.expiresOn,
+        })
+        .from(stockBatches)
+        .innerJoin(articles, eq(articles.id, stockBatches.articleId))
+        .where(
+          and(
+            inArray(sql`lower(${stockBatches.batchNumber})`, wanted),
+            articleIds === null ? undefined : inArray(stockBatches.articleId, articleIds)
+          )
+        )
+        .orderBy(stockBatches.createdAt, stockBatches.id)
+        .limit(20);
+    },
+
+    // Where the batches stand: the physical balance per place (spärrade
+    // platser included, flagged), places with nothing left out.
+    async batchBalances(batchIds: string[]) {
+      if (batchIds.length === 0) return [];
+      const quantity = sql<string>`sum(${stockTransactions.quantityDelta})`;
+      return db
+        .select({
+          batchId: sql<string>`${stockTransactions.batchId}`,
+          locationId: stockTransactions.locationId,
+          locationName: stockLocations.name,
+          warehouseName: warehouses.name,
+          blocked: stockLocations.blocked,
+          quantity,
+        })
+        .from(stockTransactions)
+        .innerJoin(stockLocations, eq(stockLocations.id, stockTransactions.locationId))
+        .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
+        .where(inArray(stockTransactions.batchId, batchIds))
+        .groupBy(stockTransactions.batchId, stockTransactions.locationId, stockLocations.name, warehouses.name, stockLocations.blocked)
+        .having(sql`${quantity} <> 0`)
+        .orderBy(warehouses.name, stockLocations.name);
     },
 
     async purchaseOrderByNumber(orderNumber: string) {

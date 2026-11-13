@@ -8,6 +8,7 @@ import { z } from "zod";
 // the catalog's, not this list's.
 export const ALERT_KINDS = [
   "stock_negative",
+  "batch_expiry",
   "sales_order_late",
   "purchase_order_late",
   "manufacturing_order_late",

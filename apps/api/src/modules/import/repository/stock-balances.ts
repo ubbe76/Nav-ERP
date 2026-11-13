@@ -1,15 +1,16 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { articles, stockCountSessions, stockLocations, stockTransactions, warehouses, type Db, type Tx } from "@navet/db";
+import { articles, stockBatches, stockCountSessions, stockLocations, stockTransactions, warehouses, type Db, type Tx } from "@navet/db";
 import { FALLBACK_LOCATION_NAME, getOrCreateFallbackLocation, resolveStockLocation, usableArticleLocations } from "../../stock/service/location-resolver.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { lockArticlesForOutflow } from "../../stock/service/outflow-locations.js";
 import { allocateBatchOutflow, withBatchRemainder } from "../../stock/service/outflow-allocation.js";
-import { batchTrackedArticleIds } from "../../stock/service/batch-tracking.js";
+import { articleTrackingByIds } from "../../stock/service/batch-tracking.js";
 import { getOrCreateBatch } from "../../stock/service/batches.js";
-import { BatchNotTrackedError } from "../../stock/service/batch.errors.js";
+import { assertSerialsOutOfStock, lockSerials } from "../../stock/service/serial-numbers.js";
+import { BatchNotTrackedError, SerialQuantityNotIntegerError } from "../../stock/service/batch.errors.js";
 import { batchCellQuantity, batchCellsForArticles } from "../../stock/repository/batch-balances.js";
-import { STOCK_IMPORT_NOTE, stockBatchCellKey, type StockBalanceImportPlan } from "../service/stock-balances.js";
+import { STOCK_IMPORT_NOTE, stockBatchCellKey, stockBatchKey, type StockBalanceImportPlan } from "../service/stock-balances.js";
 import { round4 } from "@navet/shared";
 
 // Lagersaldon (#3) — the import repository's stock half: the planner's
@@ -23,9 +24,16 @@ const CHUNK = 500;
 const chunks = <T>(items: T[]) => Array.from({ length: Math.ceil(items.length / CHUNK) }, (_, i) => items.slice(i * CHUNK, (i + 1) * CHUNK));
 
 // A decrease of `quantity` on the place, split over its batches (#8).
-async function decreaseParts(tx: Tx, articleId: string, locationId: string, quantity: number) {
+// Serienummer (steg 4): whole styck, the place's numbers oldest first, their
+// rows locked (the article lock is held; the place is resolved).
+async function decreaseParts(tx: Tx, articleId: string, locationId: string, quantity: number, serial: boolean) {
+  if (serial && !Number.isInteger(quantity)) {
+    const [article] = await tx.select({ articleNumber: articles.articleNumber }).from(articles).where(eq(articles.id, articleId));
+    throw new SerialQuantityNotIntegerError(article?.articleNumber ?? articleId, quantity);
+  }
   const cells = await batchCellsForArticles(tx, [articleId], { locationIds: [locationId] });
   const allocation = allocateBatchOutflow(quantity, [], cells, { locationId });
+  if (serial) await lockSerials(tx, allocation.parts.flatMap((part) => (part.batchId ? [part.batchId] : [])));
   return withBatchRemainder(allocation.parts, allocation.remainder, locationId).map((part) => ({
     quantity: -part.quantity,
     batchId: part.batchId ?? null,
@@ -87,6 +95,28 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
       return map;
     },
 
+    // Etapp 2: the dates of the batches those articles have today.
+    async stockBatchDates(articleIds: string[]) {
+      const map = new Map<string, { expiresOn: string | null; batchDate: string | null; kind?: "batch" | "serial" }>();
+      for (const part of chunks([...new Set(articleIds)])) {
+        if (part.length === 0) continue;
+        const rows = await db
+          .select({
+            articleId: stockBatches.articleId,
+            batchNumber: stockBatches.batchNumber,
+            expiresOn: stockBatches.expiresOn,
+            batchDate: stockBatches.batchDate,
+            kind: stockBatches.kind,
+          })
+          .from(stockBatches)
+          .where(inArray(stockBatches.articleId, part));
+        for (const row of rows) {
+          map.set(stockBatchKey(row.articleId, row.batchNumber), { expiresOn: row.expiresOn, batchDate: row.batchDate, kind: row.kind });
+        }
+      }
+      return map;
+    },
+
     async locationsUnderCount() {
       const rows = await db
         .select({ locationId: stockCountSessions.locationId })
@@ -139,12 +169,32 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
         // each other crosswise in the unique index (the sort is stable and
         // ignores case, so the file's first spelling is the one kept); they all get this
         // transaction's time, and the number decides their order (beslut 16).
-        const trackedIds = await batchTrackedArticleIds(tx, plan.balances.map((row) => row.articleId));
+        const sorts = await articleTrackingByIds(tx, plan.balances.map((row) => row.articleId));
+        const trackedIds = new Set(sorts.keys());
         await lockArticlesForOutflow(tx, [...trackedIds]);
         const batchIds = new Map<string, string>();
         const named = plan.balances.flatMap((row) =>
-          row.batch?.kind === "named" ? [{ articleId: row.articleId, batchNumber: row.batch.batchNumber }] : []
+          row.batch?.kind === "named"
+            ? [
+                {
+                  articleId: row.articleId,
+                  batchNumber: row.batch.batchNumber,
+                  batchDate: row.batchDate ?? null,
+                  expiresOn: row.expiresOn ?? null,
+                  kind: row.serial ? ("serial" as const) : ("batch" as const),
+                },
+              ]
+            : []
         );
+        // Etapp 2: the dates the file gives each batch (the plan refuses two
+        // different ones) — set when the batch is created or lacks them; a
+        // batch with another date keeps it ("keep": the plan warned).
+        const datesByBatch = new Map<string, { batchDate: string | null; expiresOn: string | null }>();
+        for (const item of named) {
+          const key = `${item.articleId}|${item.batchNumber.toLocaleLowerCase("sv")}`;
+          const dates = datesByBatch.get(key) ?? { batchDate: null, expiresOn: null };
+          datesByBatch.set(key, { batchDate: dates.batchDate ?? item.batchDate, expiresOn: dates.expiresOn ?? item.expiresOn });
+        }
         named.sort((a, b) => (a.articleId < b.articleId ? -1 : a.articleId > b.articleId ? 1 : a.batchNumber.toLocaleLowerCase("sv").localeCompare(b.batchNumber.toLocaleLowerCase("sv"), "sv", { numeric: true })));
         for (const row of plan.balances) {
           // The article stopped being batchstyrd between the plan and here.
@@ -156,11 +206,29 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
         for (const item of named) {
           const key = `${item.articleId}|${item.batchNumber.toLocaleLowerCase("sv")}`;
           if (batchIds.has(key)) continue;
-          batchIds.set(key, (await getOrCreateBatch(tx, { articleId: item.articleId, batchNumber: item.batchNumber, origin: "import" })).id);
+          const dates = datesByBatch.get(key)!;
+          batchIds.set(
+            key,
+            (
+              await getOrCreateBatch(tx, {
+                articleId: item.articleId,
+                batchNumber: item.batchNumber,
+                origin: "import",
+                batchDate: dates.batchDate,
+                expiresOn: dates.expiresOn,
+                onExpiryMismatch: "keep",
+                // 0215: the row's sort — a number that exists as the other
+                // one is refused (409 batch-kind-mismatch; the plan says so).
+                kind: item.kind,
+              })
+            ).id
+          );
         }
 
-        let created = 0;
-        let updated = 0;
+        // The place of every row first (article → place), then the serial
+        // number rows the plan books, locked sorted on id — last in the lock
+        // order (serial-numbers.ts) — before anything is booked.
+        const rowLocations: string[] = [];
         for (const row of plan.balances) {
           const explicit =
             row.target.kind === "location"
@@ -175,6 +243,16 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
                   : null;
           const locationId = await resolveStockLocation(tx, row.articleId, explicit);
           await assertLocationNotUnderCount(tx, locationId);
+          rowLocations.push(locationId);
+        }
+        const serialKey = (row: (typeof plan.balances)[number]) =>
+          row.serial && row.batch?.kind === "named" ? batchIds.get(`${row.articleId}|${row.batch.batchNumber.toLocaleLowerCase("sv")}`)! : null;
+        await lockSerials(tx, plan.balances.flatMap((row) => serialKey(row) ?? []));
+
+        let created = 0;
+        let updated = 0;
+        for (const [index, row] of plan.balances.entries()) {
+          const locationId = rowLocations[index]!;
           // Antal is the balance of the whole place — or, with Batch, of
           // that cell (null = the Okänd cell); the difference is booked there.
           const batchId =
@@ -190,7 +268,14 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
             current = await batchCellQuantity(tx, row.articleId, locationId, batchId);
           }
           const delta = round4(row.quantity - current);
-          if (delta === 0) continue;
+          // Serienummer: a number put in stock must not stand anywhere
+          // (here it stands nowhere on this place — the delta is +1).
+          if (row.serial && delta > 0) await assertSerialsOutOfStock(tx, [batchId!]);
+          if (delta === 0) {
+            // A row that only filled in its batch's dates (above).
+            if (row.datesOnly) updated++;
+            continue;
+          }
           // Without Batch an increase is Okänd. A decrease of a batchstyrd
           // article's whole place is taken from the place's batches oldest
           // first (Okänd first, what they do not cover as Okänd) — the pure
@@ -198,7 +283,7 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
           // batch.
           const parts: { quantity: number; batchId: string | null }[] =
             row.batch === null && delta < 0 && trackedIds.has(row.articleId)
-              ? await decreaseParts(tx, row.articleId, locationId, -delta)
+              ? await decreaseParts(tx, row.articleId, locationId, -delta, sorts.get(row.articleId) === "serial")
               : [{ quantity: delta, batchId }];
           await tx.insert(stockTransactions).values(
             parts.map((part) => ({

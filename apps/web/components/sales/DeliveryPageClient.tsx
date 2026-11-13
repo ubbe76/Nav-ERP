@@ -11,10 +11,13 @@ import { SectionHeading } from "../ui/SectionHeading";
 import { Field, Input, Select } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
 import { ScanPanel } from "../ui/ScanInput";
-import { useCountState, useScanFeedback, useScanQueue } from "../ui/useOrderScan";
+import { useCountState, useScanFeedback, useScanQueue, useScanState } from "../ui/useOrderScan";
 import { ApiError, apiFetch } from "../../lib/api";
 import { BatchSelect, useBatchBalances } from "../stock/BatchSelect";
-import { BATCH_AUTO, batchIdField } from "../../lib/batch";
+import { BATCH_AUTO, batchIdField, expiredBatchLocationId } from "../../lib/batch";
+import { compressSerialNumbers } from "../../lib/serials";
+import { serialCountOf } from "../../lib/serialInput";
+import { DeliverySerialsField, SerialCellPicker, isDeliverySerial, isStockSerial, useSerialModes } from "../stock/SerialNumbers";
 import { outflowLocationChoices } from "../../lib/stockLocations";
 import { confirmDialog } from "../../lib/confirm";
 import { notify } from "../../lib/notice";
@@ -27,6 +30,8 @@ import {
   hasCounted,
   isScannableRow,
   leftToCount,
+  matchBatchScan,
+  matchSerialScan,
   resolveOrderScan,
   salesScanDate,
   type OrderCountState,
@@ -38,6 +43,7 @@ import {
   type SalesOrderRow,
   type SalesOrderStatus,
   type ArticleLocationBalance,
+  type ScanGs1,
   type ScanMatch,
   type StockLocation,
 } from "../../lib/types";
@@ -72,6 +78,12 @@ const articleLabel = (a: { articleNumber: string; name: string }) => `${a.articl
 // default none) is refused, as the server refuses it. Tjänster and ställkostnadsrader keep
 // their remaining amount. The rules are lib/orderScan.ts, shared with
 // Inleverans.
+//
+// GS1 (#8 etapp 2 steg 6): a scanned serienummer (a GS1 code's AI 21, or
+// the number itself) picks that number on its article's row — the article
+// need not be scanned first — and a scanned batch (AI 10, or the batch
+// number) chooses the batch on the row: one chosen batch per row. Both land
+// in the row's own fields (Serienummer, Batch), to be seen before Rapportera.
 export function DeliveryPageClient({
   locations,
   selected,
@@ -123,15 +135,27 @@ export function DeliveryPageClient({
   // Lagerplats per rad: "" = Som ovan (follows the field above). Balances of
   // the open rows' articles per location, fetched once per order (and again
   // after a delivery changed them).
-  const [rowLocations, setRowLocations] = useState<Record<string, string>>({});
+  const [rowLocations, rowLocationsRef, setRowLocations] = useScanState<Record<string, string>>({});
   const [balances, setBalances] = useState<Record<string, ArticleLocationBalance[]>>({});
   // Batch (#8) per row: "" = Automatiskt. Only batch-tracked rows have a choice.
-  const [rowBatches, setRowBatches] = useState<Record<string, string>>({});
+  const [rowBatches, rowBatchesRef, setRowBatches] = useScanState<Record<string, string>>({});
+  // Serienummer (#8 etapp 2): numbers picked in stock (serialIds, stock per
+  // number) or given at the delivery (serialNumbers, Vid utleverans).
+  const serialModes = useSerialModes(openRows.map((r) => ({ articleId: r.articleId, tracking: r.articleTracking })));
+  const [rowSerialIds, rowSerialIdsRef, setRowSerialIds] = useScanState<Record<string, string[]>>({});
+  const [rowGivenSerials, setRowGivenSerials] = useState<Record<string, string[]>>({});
+  const stockSerial = (r: SalesOrderRow) => isStockSerial(r.articleTracking, serialModes, r.articleId);
+  const deliverySerial = (r: SalesOrderRow) => isDeliverySerial(r.articleTracking, serialModes, r.articleId);
   const trackedArticleIds = useMemo(
     () => openRows.filter((r) => r.articleBatchTracked).map((r) => r.articleId),
     [openRows]
   );
-  const { rows: batchRows, reload: reloadBatches } = useBatchBalances(trackedArticleIds);
+  const serialStockArticleIds = useMemo(
+    () => openRows.filter((r) => isStockSerial(r.articleTracking, serialModes, r.articleId)).map((r) => r.articleId),
+    [openRows, serialModes]
+  );
+  const hasSerialRows = serialStockArticleIds.length > 0 || openRows.some((r) => isDeliverySerial(r.articleTracking, serialModes, r.articleId));
+  const { rows: batchRows, reload: reloadBatches } = useBatchBalances([...trackedArticleIds, ...serialStockArticleIds]);
   // A scanned lagerplats that GET /stock/locations leaves out (inactive: it
   // holds nothing), added to the select so the choice can be shown.
   const [scannedLocation, setScannedLocation] = useState<LocationOption | null>(null);
@@ -151,9 +175,9 @@ export function DeliveryPageClient({
   const scanField = useRef<HTMLInputElement>(null);
   // The props the queued scan handlers read — a handler may run after a
   // navigation it did not see.
-  const latest = useRef({ order, openRows, scanRows, rows, overDeliveryPercent });
+  const latest = useRef({ order, openRows, scanRows, rows, overDeliveryPercent, batchRows, serialModes, locationId });
   useEffect(() => {
-    latest.current = { order, openRows, scanRows, rows, overDeliveryPercent };
+    latest.current = { order, openRows, scanRows, rows, overDeliveryPercent, batchRows, serialModes, locationId };
   });
 
   // Frakt: "Boka transport" on the result block only when freight is
@@ -172,6 +196,8 @@ export function DeliveryPageClient({
   useEffect(() => {
     setRowLocations({});
     setRowBatches({});
+    setRowSerialIds({});
+    setRowGivenSerials({});
   }, [selectedId]);
   useEffect(() => {
     if (!openArticleKey) {
@@ -222,12 +248,108 @@ export function DeliveryPageClient({
     goToOrder(next.id);
   }
 
-  function applyCount(article: ArticleMatch) {
-    const outcome = countScan(latest.current.scanRows, countRef.current, article.id);
+  const numberText = (cell: { batchNumber: string | null }, rowId?: string) => {
+    const row = latest.current.openRows.find((r) => r.id === rowId) ?? null;
+    return `${cell.batchNumber ?? ""}${row ? ` — ${articleLabel({ articleNumber: row.articleNumber, name: row.articleName })}` : ""}`;
+  };
+  const placeText = (cell: { warehouseName: string | null; locationName: string | null }) =>
+    cell.locationName ? `${cell.warehouseName ? `${cell.warehouseName} — ` : ""}${cell.locationName}` : "en annan lagerplats";
+
+  // A scanned serienummer: picks the number on its row (Serienummer), and
+  // Leverera nu follows the picked numbers. true = the scan was a
+  // serienummer of this order (handled, whatever came of it).
+  function applySerialScan(serialNumber: string, articleIds: string[] | null): boolean {
+    const { openRows: currentOpen, batchRows: cells, serialModes: modes, locationId: place, overDeliveryPercent: allowed } = latest.current;
+    const serialRows = currentOpen
+      .filter((r) => isStockSerial(r.articleTracking, modes, r.articleId))
+      .map((r) => {
+        const left = Number(r.quantityOrdered) - Number(r.quantityDelivered);
+        return {
+          id: r.id,
+          articleId: r.articleId,
+          remainingStyck: left,
+          // One styck per number: the allowed överleverans in whole styck.
+          maxStyck: allowed === null ? null : Math.floor(Number(r.quantityOrdered) * (1 + allowed / 100) - Number(r.quantityDelivered) + 1e-9),
+          date: salesScanDate(r, latest.current.order),
+          locationId: rowLocationsRef.current[r.id] || place || null,
+        };
+      });
+    const outcome = matchSerialScan(serialNumber, cells, serialRows, rowSerialIdsRef.current, articleIds);
+    if (!outcome) return false;
+    switch (outcome.kind) {
+      case "picked": {
+        const row = currentOpen.find((r) => r.id === outcome.rowId)!;
+        setRowSerialIds((prev) => ({ ...prev, [row.id]: [...(prev[row.id] ?? []), outcome.serialId] }));
+        setCount({
+          counting: true,
+          quantities: { ...countRef.current.quantities, [row.id]: String(toUnitQuantity(outcome.count, row.unitFactor)) },
+        });
+        setLastRowId(row.id);
+        setDone(null);
+        const text = `Serienummer ${numberText(outcome.cell, row.id)}: ${outcome.count} av ${serialRows.find((r) => r.id === row.id)!.remainingStyck}`;
+        if (outcome.over) warn(`${text} — överleverans`);
+        else ok(text);
+        return true;
+      }
+      case "already":
+        setLastRowId(outcome.rowId);
+        warn(`Serienummer ${numberText(outcome.cell, outcome.rowId)} är redan plockat`);
+        return true;
+      case "blocked":
+        warn(`Serienummer ${outcome.cell.batchNumber} står på en spärrad lagerplats (${placeText(outcome.cell)}) — uttag görs inte därifrån`);
+        return true;
+      case "otherLocation":
+        setLastRowId(outcome.rowId);
+        warn(`Serienummer ${numberText(outcome.cell, outcome.rowId)} står på ${placeText(outcome.cell)}, inte på radens valda lagerplats`);
+        return true;
+      case "full":
+        warn(`Överplock — serienummer ${outcome.cell.batchNumber}: raden är redan plockad`);
+        return true;
+    }
+  }
+
+  // A scanned batch: chooses the batch on its row (Batch). Returns the row
+  // the batch is chosen on (null = not chosen, already explained), or
+  // undefined when the scan was no batch of this order.
+  function applyBatchScan(batchNumber: string, articleIds: string[] | null): string | null | undefined {
+    const { openRows: currentOpen, batchRows: cells, locationId: place } = latest.current;
+    const batchScanRows = currentOpen
+      .filter((r) => r.articleBatchTracked)
+      .map((r) => ({
+        id: r.id,
+        articleId: r.articleId,
+        chosen: rowBatchesRef.current[r.id] ?? BATCH_AUTO,
+        date: salesScanDate(r, latest.current.order),
+        locationId: rowLocationsRef.current[r.id] || place || null,
+      }));
+    const outcome = matchBatchScan(batchNumber, cells, batchScanRows, articleIds);
+    if (!outcome) return undefined;
+    switch (outcome.kind) {
+      case "chosen":
+        setRowBatches((prev) => ({ ...prev, [outcome.rowId]: outcome.batchId }));
+        setLastRowId(outcome.rowId);
+        ok(`Batch ${numberText(outcome.cell, outcome.rowId)} vald`);
+        return outcome.rowId;
+      case "otherBatch":
+        setLastRowId(outcome.rowId);
+        warn(`Batch ${numberText(outcome.cell, outcome.rowId)}: raden har redan en annan batch vald — en batch per rad, dela leveransen eller byt batch på raden`);
+        return null;
+      case "blocked":
+        warn(`Batch ${outcome.cell.batchNumber} står på en spärrad lagerplats (${placeText(outcome.cell)}) — uttag görs inte därifrån`);
+        return null;
+      case "otherLocation":
+        setLastRowId(outcome.rowId);
+        warn(`Batch ${numberText(outcome.cell, outcome.rowId)} finns inte på radens valda lagerplats — den står på ${placeText(outcome.cell)}`);
+        return null;
+    }
+  }
+
+  function applyCount(article: ArticleMatch, onlyRowId?: string, note?: string) {
+    const outcome = countScan(latest.current.scanRows, countRef.current, article.id, onlyRowId);
     if (!outcome.counted && !outcome.full) return;
     setLastRowId(outcome.rowId);
     const row = latest.current.openRows.find((r) => r.id === outcome.rowId);
-    const amount = `${outcome.quantity} av ${outcome.remaining} ${row?.unitCode ?? ""}`.trim();
+    const amount = `${outcome.quantity} av ${outcome.remaining} ${row?.unitCode ?? ""}`.trim() + (note ? ` — ${note}` : "");
     const allowed = latest.current.overDeliveryPercent;
     const allowance = allowed ? `tillåten överleverans ${allowed.toLocaleString("sv-SE")} %` : null;
     if (!outcome.counted) {
@@ -245,7 +367,7 @@ export function DeliveryPageClient({
 
   const onScan = useScanQueue(handleScan, warn);
 
-  async function handleScan(code: string, matches: ScanMatch[]) {
+  async function handleScan(code: string, matches: ScanMatch[], gs1: ScanGs1 | null) {
     const { order: current, scanRows: currentRows, rows: allRows } = latest.current;
     const intent = resolveOrderScan(
       matches,
@@ -269,9 +391,26 @@ export function DeliveryPageClient({
         else warn(`${text} — inaktiv, det finns inget saldo på den`);
         return;
       }
-      case "count":
-        applyCount(intent.match);
+      case "count": {
+        const article = intent.match;
+        // A GS1 code named the article and, next to it, a serienummer or a
+        // batch: the number is picked / the batch chosen on the row.
+        const row = latest.current.openRows.find((r) => r.articleId === article.id && isScannableRow(r));
+        if (gs1?.serial && row && isStockSerial(row.articleTracking, latest.current.serialModes, row.articleId)) {
+          if (!applySerialScan(gs1.serial, [article.id])) {
+            warn(`Serienummer ${gs1.serial} finns inte i lager — ${articleLabel(article)}`);
+          }
+          return;
+        }
+        if (gs1?.batch && row?.articleBatchTracked) {
+          const rowId = applyBatchScan(gs1.batch, [article.id]);
+          if (rowId === undefined) warn(`Batch ${gs1.batch} finns inte i lager — ${articleLabel(article)}`);
+          else if (rowId !== null) applyCount(article, rowId, `batch ${gs1.batch}`);
+          return;
+        }
+        applyCount(article);
         return;
+      }
       case "order": {
         const m = intent.match;
         if (m.id === current?.id) {
@@ -306,9 +445,17 @@ export function DeliveryPageClient({
           `${code} är en ${intent.match.kind === "purchaseOrder" ? "inköpsorder" : "tillverkningsorder"} — skanna en kundorder, en artikel eller en lagerplats`
         );
         return;
-      case "unknown":
+      case "unknown": {
+        // No article, order or place: the number itself — a serienummer
+        // that stands in stock for a row here, or a batch (which is chosen,
+        // not counted: the code named no article to count).
+        const serialNumber = gs1 ? gs1.serial : code;
+        const batchNumber = gs1 ? gs1.batch : code;
+        if (current && serialNumber && applySerialScan(serialNumber, null)) return;
+        if (current && batchNumber && applyBatchScan(batchNumber, null) !== undefined) return;
         warn(`Ingen träff för ${code}`);
         return;
+      }
     }
   }
 
@@ -332,9 +479,24 @@ export function DeliveryPageClient({
     if (toDeliver.length === 0 || !selectedId) return;
     const deliveredOrderId = selectedId;
 
+    // Vid utleverans: the numbers shown must be one per styck.
+    const serialErrors: Record<string, string> = {};
+    for (const { row, quantity } of toDeliver) {
+      if (!deliverySerial(row)) continue;
+      const given = rowGivenSerials[row.id] ?? [];
+      const styck = toBaseQuantity(quantity, row.unitFactor);
+      if (given.length > 0 && given.length !== styck) {
+        serialErrors[row.id] = `Ange ett serienummer per styck — ${given.length} av ${styck} angivna.`;
+      }
+    }
+    if (Object.keys(serialErrors).length > 0) {
+      setRowErrors(serialErrors);
+      return;
+    }
+
     setPending(true);
     try {
-      const result = await apiFetch<{ deliveryId: string; deliveryNumber: string; orderStatus: string }>(
+      const result = await apiFetch<{ deliveryId: string; deliveryNumber: string; orderStatus: string; assignedSerials?: { rowId: string; serialNumbers: string[] }[] }>(
         `/api/v1/sales-orders/${selectedId}/deliver`,
         {
           method: "POST",
@@ -344,20 +506,31 @@ export function DeliveryPageClient({
               rowId: row.id,
               quantity: toBaseQuantity(quantity, row.unitFactor),
               // Only a row that overrides the field above carries its own plats.
-              locationId: rowLocations[row.id] || undefined,
+              locationId:
+                rowLocations[row.id] ||
+                (row.articleBatchTracked
+                  ? expiredBatchLocationId(batchRows, row.articleId, rowBatches[row.id] ?? BATCH_AUTO, locationId)
+                  : undefined) ||
+                undefined,
               ...(row.articleBatchTracked ? batchIdField(rowBatches[row.id] ?? BATCH_AUTO) : {}),
+              ...(stockSerial(row) && (rowSerialIds[row.id] ?? []).length > 0 ? { serialIds: rowSerialIds[row.id] } : {}),
+              ...(deliverySerial(row) && (rowGivenSerials[row.id] ?? []).length > 0 ? { serialNumbers: rowGivenSerials[row.id] } : {}),
             })),
           }),
         }
       );
+      // Serienummer given at the delivery, per row.
+      const assignedText = (result.assignedSerials ?? [])
+        .map((a) => `${openRows.find((r) => r.id === a.rowId)?.articleNumber ?? ""} ${compressSerialNumbers(a.serialNumbers)}`.trim())
+        .join("; ");
       setDone({
-        message: `${toDeliver.length} rad${toDeliver.length === 1 ? "" : "er"} utlevererade`,
+        message: `${toDeliver.length} rad${toDeliver.length === 1 ? "" : "er"} utlevererade${assignedText ? ` — serienummer: ${assignedText}` : ""}`,
         orderId: deliveredOrderId,
         deliveryId: result.deliveryId,
         deliveryNumber: result.deliveryNumber,
       });
       notify({
-        message: `Utlevererat ${toDeliver.length} rad${toDeliver.length === 1 ? "" : "er"} på ${order?.orderNumber ?? ""} — följesedel ${result.deliveryNumber}.`,
+        message: `Utlevererat ${toDeliver.length} rad${toDeliver.length === 1 ? "" : "er"} på ${order?.orderNumber ?? ""} — följesedel ${result.deliveryNumber}.${assignedText ? ` Serienummer: ${assignedText}.` : ""}`,
         action: {
           label: "Ångra…",
           run: async () => {
@@ -370,6 +543,8 @@ export function DeliveryPageClient({
       setLastRowId(null);
       setRowLocations({});
       setRowBatches({});
+      setRowSerialIds({});
+      setRowGivenSerials({});
       reloadBatches();
       clearFeedback();
       // Pallkort: auto-open the cards for the delivery (one page per row) —
@@ -405,6 +580,42 @@ export function DeliveryPageClient({
     setPending(false);
     router.refresh();
   }
+
+  // Serienummer under "Leverera nu": picked in stock, or given at the delivery.
+  function serialControl(row: SalesOrderRow) {
+    if (stockSerial(row)) {
+      return (
+        <SerialCellPicker
+          ariaLabel={`Serienummer — ${row.articleNumber}`}
+          rows={batchRows}
+          articleId={row.articleId}
+          locationId={rowLocations[row.id] || locationId || null}
+          value={rowSerialIds[row.id] ?? []}
+          onChange={(next) => {
+            setRowSerialIds((prev) => ({ ...prev, [row.id]: next }));
+            // One styck per number: Leverera nu follows the picked numbers.
+            const quantities = { ...countRef.current.quantities };
+            if (next.length > 0) quantities[row.id] = String(toUnitQuantity(next.length, row.unitFactor));
+            else delete quantities[row.id];
+            setCount({ ...countRef.current, quantities });
+          }}
+        />
+      );
+    }
+    if (deliverySerial(row)) {
+      return (
+        <DeliverySerialsField
+          ariaLabel={`Serienummer — ${row.articleNumber}`}
+          articleId={row.articleId}
+          count={serialCountOf(toBaseQuantity(Number(enteredQuantity(scanRowOf(row), count)), row.unitFactor))}
+          value={rowGivenSerials[row.id] ?? []}
+          onChange={(next) => setRowGivenSerials((prev) => ({ ...prev, [row.id]: next }))}
+        />
+      );
+    }
+    return null;
+  }
+
 
   const pill = order ? SALES_ORDER_STATUS_PILL[order.status] : null;
   // Kvar att plocka, shown once counting has started.
@@ -592,7 +803,9 @@ export function DeliveryPageClient({
                 : []),
               { key: "location", label: "Lagerplats", width: "190px" },
               ...(trackedArticleIds.length > 0 ? [{ key: "batch", label: "Batch", width: "170px" }] : []),
-              { key: "id", label: "Leverera nu", width: "180px", align: "right" },
+              // Serienummer sit under the amount (no column of their own: the
+              // table would overflow beside the menu).
+              { key: "id", label: "Leverera nu", width: hasSerialRows ? "240px" : "180px", align: "right" },
             ]}
             rows={openRows}
             highlightedRowId={lastRowId}
@@ -661,6 +874,7 @@ export function DeliveryPageClient({
                           scanField.current?.focus();
                         }}
                       />
+                      {serialControl(row)}
                       {(() => {
                         const warning = configuredDeliveryWarning(
                           row,

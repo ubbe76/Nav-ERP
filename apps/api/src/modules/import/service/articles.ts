@@ -1,4 +1,4 @@
-import { gtinKey, normalizeScanCode, round4, roundToDecimals } from "@navet/shared";
+import { gtinKey, normalizeScanCode, round4, roundToDecimals, SHELF_LIFE_DAYS_MAX } from "@navet/shared";
 // Article import (Monitor G5 CSV): builds an execution plan from mapped
 // rows. The SAME builder runs for preview and commit — commit never trusts
 // the preview round-trip and re-plans from scratch. The customer/supplier
@@ -7,9 +7,10 @@ import { gtinKey, normalizeScanCode, round4, roundToDecimals } from "@navet/shar
 // plan<Entity>Import(input, deps) returning rows/summary/willCreate plus the
 // entity-specific create/update lists that the repository's
 // execute<Entity>Plan consumes in one transaction.
-import type { ArticleType, ImportCommitInput } from "@navet/shared";
+import type { ArticleTracking, ArticleType, ImportCommitInput } from "@navet/shared";
 import { normalizeDecimal } from "./csv.js";
 import { batchTrackableArticle } from "../../stock/service/batch-tracking.js";
+import { resolveTracking } from "../../stock/service/article-tracking.js";
 import {
   resolveColumns,
   suggestMapping,
@@ -51,8 +52,11 @@ export const ARTICLE_IMPORT_FIELDS = [
   "stockControlled",
   // Prognosstyrd (#10): Ja/Nej — no Monitor export has it.
   "forecastControlled",
-  // Batchstyrd (#8): Ja/Nej — only while the system setting is on.
-  "batchTracked",
+  // Spårning (#8): Ingen/Batch (Serienummer later) — only while the system
+  // setting is on. The older heading Batchstyrd (Ja/Nej) maps here too.
+  "tracking",
+  // Hållbarhet (dagar), 0 = none: a manufactured batch's utgångsdatum.
+  "shelfLifeDays",
   // Ledtid (dagar), 0 = none: a manufactured article's own lead time, a
   // purchased article's primary supplier's (see planArticleImport).
   "leadTimeDays",
@@ -90,8 +94,11 @@ export const ARTICLE_HEADER_ALIASES: Record<string, string> = {
   styrning: "stockControlled",
   prognosstyrd: "forecastControlled",
   prognosstyrning: "forecastControlled",
-  batchstyrd: "batchTracked",
-  batchstyrning: "batchTracked",
+  sparning: "tracking",
+  batchstyrd: "tracking",
+  batchstyrning: "tracking",
+  hallbarhet: "shelfLifeDays",
+  hallbarhetdagar: "shelfLifeDays",
   ledtid: "leadTimeDays",
   // The template's heading "Ledtid (dagar)".
   ledtiddagar: "leadTimeDays",
@@ -172,8 +179,12 @@ export interface ExistingArticle {
   // Optional: only the article import reads it.
   articleCode?: string | null;
   standardCost: string | null;
-  // Optional: only the saldoimport reads it (Batchstyrd, #8).
-  batchTracked?: boolean;
+  // Optional: the saldoimport and the article import read it (Spårning, #8).
+  tracking?: ArticleTracking;
+  // Optional: only the saldoimport reads it (Serienummer skapas).
+  serialAssignedAt?: "receipt" | "delivery";
+  // Optional: only the article import reads it.
+  shelfLifeDays?: number | null;
   // Optional: only the article import reads it (Streckkod, #4).
   barcode?: string | null;
   weight: string | null;
@@ -252,7 +263,8 @@ export interface ArticleCreatePlan {
   safetyStock?: number | null;
   stockControlled?: boolean;
   forecastControlled?: boolean;
-  batchTracked?: boolean;
+  tracking?: ArticleTracking;
+  shelfLifeDays?: number | null;
   quantityPerPackage?: number | null;
   primarySupplierId?: string | null;
   // Ledtid: a manufactured article's manufacturing_lead_time_days; for a
@@ -287,9 +299,10 @@ export interface ArticleUpdatePlan {
     safetyStock?: number | null;
     stockControlled?: boolean;
     forecastControlled?: boolean;
-    // Batchstyrd (#8): present only when the flag really changes — the
-    // commit takes the article FOR UPDATE for it (the flag's lock).
-    batchTracked?: boolean;
+    // Spårning (#8): present only when it really changes — the commit
+    // takes the article FOR UPDATE for it (the flag's lock).
+    tracking?: ArticleTracking;
+    shelfLifeDays?: number | null;
     manufacturingLeadTimeDays?: number | null;
   };
   revisions?: ArticleRevisionPlan;
@@ -362,6 +375,19 @@ function parseActive(cell: string): boolean | null {
   return null;
 }
 
+// The cell of the column Spårning — its own words, or the older Batchstyrd's
+// Ja/Nej (as the API's batchTracked alias). undefined = empty, null = junk.
+export const TRACKING_WORDS: Record<ArticleTracking, string> = { none: "Ingen", batch: "Batch", serial: "Serienummer" };
+export function parseTrackingCell(cell: string): { tracking?: ArticleTracking; batchTracked?: boolean } | null | undefined {
+  const text = cell.trim().toLowerCase();
+  if (text === "") return undefined;
+  if (text === "ingen") return { tracking: "none" };
+  if (text === "batch" || text === "batchnummer") return { tracking: "batch" };
+  if (text === "serienummer" || text === "serienr") return { tracking: "serial" };
+  const flag = parseActive(cell);
+  return flag === null ? null : { batchTracked: flag };
+}
+
 export async function planArticleImport(
   input: ImportCommitInput,
   deps: ArticleImportDeps
@@ -390,7 +416,10 @@ export async function planArticleImport(
   const supplierNumbers = records.map((r) => r["primarySupplierNumber"] ?? "").filter((n) => n !== "");
   const suppliersByNumber = supplierNumbers.length > 0 ? await deps.suppliersByNumber(supplierNumbers) : new Map();
   // Batchstyrd (#8): the setting is only read when some row asks for Ja.
-  const wantsBatchTracking = records.some((r) => parseActive(r["batchTracked"] ?? "") === true);
+  const wantsBatchTracking = records.some((r) => {
+    const parsed = parseTrackingCell(r["tracking"] ?? "");
+    return parsed !== null && parsed !== undefined && (parsed.tracking ?? (parsed.batchTracked ? "batch" : "none")) !== "none";
+  });
   const batchTrackingEnabled = wantsBatchTracking ? await deps.batchTrackingEnabled() : false;
 
   const rows: ImportRowResult[] = [];
@@ -713,28 +742,47 @@ export async function planArticleImport(
         values["forecastControlled"] = forecastControlled;
       }
     }
-    // Batchstyrd (#8): Ja/Nej like Prognosstyrd; an empty cell leaves it as
-    // it is (a new article: Nej). The card's rules (batch-tracking.ts): Ja
-    // only while "Använd batch- och serienummer" is on and never on a tjänst
-    // or a fantomartikel; Nej is always allowed (decision 10).
-    const batchTrackedCell = record["batchTracked"] ?? "";
-    let batchTracked: boolean | undefined;
-    if (batchTrackedCell !== "") {
-      const parsedFlag = parseActive(batchTrackedCell);
-      if (parsedFlag === null) {
-        errors.push(`Ogiltigt värde för Batchstyrd: "${batchTrackedCell}" (Ja/Nej/1/0/true/false)`);
+    // Spårning (#8): Ingen/Batch/Serienummer; an empty cell leaves it as it
+    // is (a new article: Ingen). The older column Batchstyrd (Ja/Nej) is read
+    // through the same rule as the API's batchTracked alias (resolveTracking:
+    // Nej only switches BATCH off). The card's rules (batch-tracking.ts):
+    // on only while "Använd batch- och serienummer" is on and never on a
+    // tjänst or a fantomartikel; Ingen is always allowed (decision 10).
+    // Serienummer cannot be chosen yet.
+    const trackingCell = record["tracking"] ?? "";
+    let tracking: ArticleTracking | undefined;
+    if (trackingCell !== "") {
+      const parsedCell = parseTrackingCell(trackingCell);
+      if (parsedCell === null || parsedCell === undefined) {
+        errors.push(`Ogiltigt värde för Spårning: "${trackingCell}" (Ingen/Batch/Serienummer, eller Ja/Nej för Batchstyrd)`);
       } else {
+        const wanted = resolveTracking(existing?.tracking ?? "none", parsedCell);
         const target = existing
           ? { type: existing.type, isPhantom: existing.isPhantom }
           : { type: parsedType?.type ?? input.defaults?.articleType ?? "purchased", isPhantom: parsedType?.isPhantom ?? false };
-        if (parsedFlag && !batchTrackingEnabled) {
-          errors.push('Batchstyrd kan inte sättas — slå först på "Använd batch- och serienummer" under System → Inställningar');
-        } else if (parsedFlag && !batchTrackableArticle(target)) {
+        const asksOn = parsedCell.tracking !== undefined ? parsedCell.tracking !== "none" : parsedCell.batchTracked === true;
+        if (asksOn && !batchTrackingEnabled) {
+          errors.push('Spårning kan inte sättas — slå först på "Använd batch- och serienummer" under System → Inställningar');
+        } else if (asksOn && !batchTrackableArticle(target)) {
           errors.push("En tjänst eller fantomartikel kan inte vara batchstyrd");
         } else {
-          batchTracked = parsedFlag;
-          values["batchTracked"] = batchTracked;
+          tracking = wanted;
+          values["tracking"] = TRACKING_WORDS[tracking];
         }
+      }
+    }
+    // Hållbarhet (dagar): whole days 1–36500, 0 clears, empty leaves it.
+    const shelfLifeCell = record["shelfLifeDays"] ?? "";
+    let shelfLifeDays: number | null | undefined;
+    if (shelfLifeCell !== "") {
+      const parsed = normalizeDecimal(shelfLifeCell);
+      if (parsed === null) errors.push(`Ogiltig hållbarhet: "${shelfLifeCell}"`);
+      else if (parsed < 0) errors.push("Hållbarheten kan inte vara negativ");
+      else if (!Number.isInteger(parsed)) errors.push(`Hållbarheten ska vara ett helt antal dagar: "${shelfLifeCell}"`);
+      else if (parsed > SHELF_LIFE_DAYS_MAX) errors.push(`Hållbarheten är för lång (max ${SHELF_LIFE_DAYS_MAX} dagar)`);
+      else {
+        shelfLifeDays = parsed === 0 ? null : parsed;
+        values["shelfLifeDays"] = shelfLifeDays;
       }
     }
 
@@ -877,7 +925,8 @@ export async function planArticleImport(
         ...(safetyStock != null ? { safetyStock } : {}),
         ...(stockControlled !== undefined ? { stockControlled } : {}),
         ...(forecastControlled !== undefined ? { forecastControlled } : {}),
-        ...(batchTracked !== undefined ? { batchTracked } : {}),
+        ...(tracking !== undefined ? { tracking } : {}),
+        ...(shelfLifeDays != null ? { shelfLifeDays } : {}),
         ...(primarySupplierId !== null ? { primarySupplierId } : {}),
         ...(manufacturingLeadTimeDays != null ? { manufacturingLeadTimeDays } : {}),
         ...(primarySupplierLeadTimeDays != null ? { primarySupplierLeadTimeDays } : {}),
@@ -920,7 +969,8 @@ export async function planArticleImport(
       if (safetyStock !== undefined) patch.safetyStock = safetyStock;
       if (stockControlled !== undefined) patch.stockControlled = stockControlled;
       if (forecastControlled !== undefined) patch.forecastControlled = forecastControlled;
-      if (batchTracked !== undefined && batchTracked !== existing.batchTracked) patch.batchTracked = batchTracked;
+      if (tracking !== undefined && tracking !== (existing.tracking ?? "none")) patch.tracking = tracking;
+      if (shelfLifeDays !== undefined && shelfLifeDays !== (existing.shelfLifeDays ?? null)) patch.shelfLifeDays = shelfLifeDays;
       if (manufacturingLeadTimeDays !== undefined) patch.manufacturingLeadTimeDays = manufacturingLeadTimeDays;
       updates.push({
         id: existing.id,

@@ -1,5 +1,6 @@
 import PDFDocument from "pdfkit";
 import {
+  compressSerialNumbers,
   documentLanguageOf,
   minutesPerUnitToSecondsPerUnit,
   minutesPerUnitToUnitsPerHour,
@@ -57,6 +58,9 @@ export interface DocumentPdfRow {
   // Batch (#8), invoice only: the order row's delivered named batches,
   // pre-formatted by formatBatchInfo — printed as "Batch: A123 (10), B456 (5)".
   batchInfo?: string | null;
+  // Serienummer, invoice only: the order row's delivered serial numbers,
+  // pre-formatted by formatSerialInfo — "Serienummer: SN-001001–SN-001010".
+  serialInfo?: string | null;
   // Ställkostnad: the article number of the row this setup charge belongs to
   // — printed as "Ställkostnad för X" (quote, order confirmation, invoice).
   setupForArticleNumber?: string | null;
@@ -176,15 +180,35 @@ export function formatRevisionInfo(
 // ones pass Okänd under its label. One batch covering the whole row prints
 // as the number alone, several (or one beside left-out parts) with their
 // quantities: "A123 (10), B456 (5)". Null when there is nothing to print.
+// Etapp 2: a part that carries its batch's utgångsdatum prints it after the
+// number — "L-778 utg. 2027-03-01 (6)" ("exp." in English); the callers
+// that must not print dates (the invoice) simply do not pass them.
+export function formatBatchLabel(batchNumber: string, expiresOn: string | null | undefined, language?: DocumentLanguage): string {
+  return expiresOn ? `${batchNumber} ${documentTexts(language ?? "sv").rowInfo.expires} ${expiresOn}` : batchNumber;
+}
+
 export function formatBatchInfo(
-  parts: readonly { batchNumber: string; quantity: number }[],
+  parts: readonly { batchNumber: string; quantity: number; expiresOn?: string | null }[],
   opts: { language?: DocumentLanguage; whole?: boolean } = {}
 ): string | null {
   const totals = new Map<string, number>();
-  for (const part of parts) totals.set(part.batchNumber, (totals.get(part.batchNumber) ?? 0) + part.quantity);
+  for (const part of parts) {
+    const label = formatBatchLabel(part.batchNumber, part.expiresOn, opts.language);
+    totals.set(label, (totals.get(label) ?? 0) + part.quantity);
+  }
   if (totals.size === 0) return null;
   if (totals.size === 1 && opts.whole !== false) return [...totals.keys()][0]!;
   return [...totals].map(([number, quantity]) => `${number} (${formatQuantity(String(Number(quantity.toFixed(4))), opts.language)})`).join(", ");
+}
+
+// Serienummer (#8 etapp 2): the text after "Serienummer:" under a row — the
+// numbers compressed by the ONE shared rule (compressSerialNumbers: natural
+// order, runs of three or more as "SN-001001–SN-001010", every number
+// printed). Null when there are none. The caller decides WHICH numbers (a
+// delivery row's own, burnt ones never); the sort is the number's own
+// (`kind` on its row), never the article's Spårning.
+export function formatSerialInfo(serialNumbers: readonly string[]): string | null {
+  return serialNumbers.length > 0 ? compressSerialNumbers(serialNumbers) : null;
 }
 
 // Vald leveransadress på kundordern — printed as its own block next to the
@@ -404,6 +428,9 @@ export interface DeliveryNoteRow {
   // Batch (#8): the row's named batches, pre-formatted (formatBatchInfo) —
   // "Batch: A123 (10), B456 (5)". Okänd is never passed in.
   batchInfo?: string | null;
+  // Serienummer: the row's numbers, pre-formatted (formatSerialInfo) —
+  // "Serienummer: SN-001001–SN-001010". Its own line after the batch.
+  serialInfo?: string | null;
   // Ångra utleverans: the row was undone — printed as a line under the name.
   undoneAt?: Date | null;
 }
@@ -634,6 +661,9 @@ export interface StockCountSheetPdfRow {
   // number (Okänd under its label; internal document), printed under the
   // name. Null/omitted = the article is not batchstyrd.
   batch?: string | null;
+  // Serienummer: a serial number has a row of its own (saldo 0 or 1) — the
+  // number, printed as "Serienummer: SN-000123" under the name.
+  serial?: string | null;
 }
 
 export interface StockCountSheetPdfInput {
@@ -766,6 +796,12 @@ interface PalletCardCommon {
   // batches on a "final" card (never Okänd), the TO number on the TO cards
   // of a batchstyrd article. Null/omitted = no cell, the card as before.
   batch?: string | null;
+  // Serienummer: one more cell in the bottom row — the numbers compressed
+  // (`text`, formatSerialInfo). The cell is one line of fixed width, so when
+  // the text does not fit, the count is printed instead: "12 st — se
+  // följesedel" on a delivery card (the följesedel lists them all), "12 st"
+  // on a TO card. Null/omitted = no cell.
+  serial?: { text: string; count: number } | null;
 }
 
 export type PalletCardPdfInput =
@@ -1515,6 +1551,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         ...(row.configurationLines ?? []),
         row.moReference ?? null,
         row.batchInfo ? meta(t.rowInfo.batch, row.batchInfo) : null,
+        row.serialInfo ? meta(t.rowInfo.serial, row.serialInfo) : null,
         // The order reference and the invoice row's Leveransdatum share one
         // sub-line ("Order KO… · Ert ordernr … · Levererad 2026-10-01").
         [row.orderReference ?? null, row.deliveredDate ? t.rowInfo.delivered(row.deliveredDate) : null]
@@ -2047,7 +2084,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       // Batch (#8): an 8pt line under the name, counted into the row height
       // (a row without a batch is laid out exactly as before).
       const nameHeight = doc.heightOfString(row.articleName, { width: COUNT_COLS.articleName.w });
-      const infoLines = row.batch ? [`Batch: ${row.batch}`] : [];
+      const infoLines = row.serial ? [`Serienummer: ${row.serial}`] : row.batch ? [`Batch: ${row.batch}`] : [];
       const measured = measureInfoLines(doc, infoLines, COUNT_COLS.articleName.w);
       const rowHeight =
         Math.max(
@@ -2172,6 +2209,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         ...(row.extraDescription ? [row.extraDescription] : []),
         ...(row.configurationLines ?? []),
         ...(row.batchInfo ? [`${t.rowInfo.batch}: ${row.batchInfo}`] : []),
+        ...(row.serialInfo ? [`${t.rowInfo.serial}: ${row.serialInfo}`] : []),
         ...(row.undoneAt ? [dn.undone(formatStockholmDateTime(row.undoneAt))] : []),
       ];
       const measured = measureInfoLines(doc, infoLines, DELIVERY_NOTE_COLS.articleName.w);
@@ -2738,13 +2776,30 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         [pc.reference, card.reference || "—"],
         // Batch (#8): in the bottom row, so the card's height never changes.
         ...(card.batch ? [[pc.batch, card.batch] as [string, string]] : []),
+        ...(card.serial ? [[pc.serial, card.serial.text] as [string, string]] : []),
       ];
       const cellWidth = CONTENT_WIDTH / bottomCells.length;
+      // Serienummer: the cell is one line — the numbers shrink from 12 to
+      // 8 pt to fit, and numbers that still do not fit are never cut off
+      // with an ellipsis (half a list is worse than none): the count is
+      // printed instead.
+      let serialSize = 12;
+      if (card.serial) {
+        const text = card.serial.text;
+        doc.font(FONT_BOLD);
+        const fits = [12, 10, 9, 8].find((size) => doc.fontSize(size).widthOfString(text) <= cellWidth - 2 * pad);
+        if (fits) serialSize = fits;
+        else {
+          bottomCells[bottomCells.length - 1]![1] =
+            card.kind === "final" ? pc.serialOverflow(card.serial.count) : pc.serialCount(card.serial.count);
+        }
+      }
       bottomCells.forEach(([labelText, text], i) => {
         const x = left + i * cellWidth;
         if (i > 0) thinLine(x, y, x, y + 32);
         label(labelText, x + pad, y + 5);
-        value(text, x + pad, y + 14, 12, cellWidth - 2 * pad);
+        const size = card.serial && i === bottomCells.length - 1 ? serialSize : 12;
+        value(text, x + pad, y + 14 + (12 - size), size, cellWidth - 2 * pad);
       });
       y += 32;
 

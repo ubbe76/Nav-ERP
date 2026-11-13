@@ -6,7 +6,7 @@ import { Field, Input } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
 import { confirmDelete } from "../../lib/confirm";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { NUMBER_SERIES_LABELS, type ArticleNumberSeriesOption, type NumberSeries, type NumberSeriesKey } from "../../lib/types";
+import { NUMBER_SERIES_LABELS, type ArticleNumberSeriesOption, type NumberSeries, type SerialNumberSeriesOption, type NumberSeriesKey } from "../../lib/types";
 import styles from "./NumberSeriesList.module.css";
 
 function formatPreview(series: NumberSeries) {
@@ -18,6 +18,13 @@ function formatPreview(series: NumberSeries) {
 function isOwnArticleSeries(series: NumberSeries) {
   return series.forArticles && series.key !== "article";
 }
+
+// The user's own serial number series (the built-in common "serial" is not one).
+function isOwnSerialSeries(series: NumberSeries) {
+  return series.forSerials === true && series.key !== "serial";
+}
+
+const isOwnSeries = (series: NumberSeries) => isOwnArticleSeries(series) || isOwnSerialSeries(series);
 
 function seriesLabel(series: NumberSeries) {
   return series.name ?? NUMBER_SERIES_LABELS[series.key as NumberSeriesKey] ?? series.key;
@@ -36,7 +43,7 @@ function SeriesRow({
   onUpdated: (updated: NumberSeries) => void;
   onDeleted: (key: string) => void;
 }) {
-  const own = isOwnArticleSeries(series);
+  const own = isOwnSeries(series);
   const [name, setName] = useState(series.name ?? "");
   const [editing, setEditing] = useState(false);
   const [prefix, setPrefix] = useState(series.prefix);
@@ -97,7 +104,9 @@ function SeriesRow({
   async function handleDelete() {
     if (
       !(await confirmDelete(
-        `Ta bort nummerserien ${seriesLabel(series)}? Varugrupper som använder den får standardserien Artikelnummer.`
+        isOwnSerialSeries(series)
+          ? `Ta bort nummerserien ${seriesLabel(series)}? Artiklar som använder den får den gemensamma serien Serienummer.`
+          : `Ta bort nummerserien ${seriesLabel(series)}? Varugrupper som använder den får standardserien Artikelnummer.`
       ))
     )
       return;
@@ -183,7 +192,15 @@ function SeriesRow({
   );
 }
 
-function NewSeriesForm({ onCreated, onCancel }: { onCreated: (created: NumberSeries) => void; onCancel: () => void }) {
+function NewSeriesForm({
+  onCreated,
+  onCancel,
+  forSerials = false,
+}: {
+  onCreated: (created: NumberSeries) => void;
+  onCancel: () => void;
+  forSerials?: boolean;
+}) {
   const [name, setName] = useState("");
   const [prefix, setPrefix] = useState("");
   const [nextNumber, setNextNumber] = useState("1");
@@ -197,7 +214,13 @@ function NewSeriesForm({ onCreated, onCancel }: { onCreated: (created: NumberSer
     try {
       const created = await apiFetch<NumberSeries>("/api/v1/number-series", {
         method: "POST",
-        body: JSON.stringify({ name, prefix, nextNumber: Number(nextNumber), digits: Number(digits) }),
+        body: JSON.stringify({
+          name,
+          prefix,
+          nextNumber: Number(nextNumber),
+          digits: Number(digits),
+          ...(forSerials ? { forSerials: true } : {}),
+        }),
       });
       onCreated(created);
     } catch (err) {
@@ -209,16 +232,16 @@ function NewSeriesForm({ onCreated, onCancel }: { onCreated: (created: NumberSer
   return (
     <div className={styles.editRow}>
       {error && <div className={styles.error}>{error}</div>}
-      <Field label="Namn" htmlFor="new-series-name">
-        <Input id="new-series-name" value={name} onChange={(e) => setName(e.target.value)} />
+      <Field label="Namn" htmlFor={forSerials ? "new-serial-series-name" : "new-series-name"}>
+        <Input id={forSerials ? "new-serial-series-name" : "new-series-name"} value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
       <div className={styles.editFields}>
-        <Field label="Prefix" htmlFor="new-series-prefix">
-          <Input id="new-series-prefix" size="xs" value={prefix} onChange={(e) => setPrefix(e.target.value)} />
+        <Field label="Prefix" htmlFor={forSerials ? "new-serial-series-prefix" : "new-series-prefix"}>
+          <Input id={forSerials ? "new-serial-series-prefix" : "new-series-prefix"} size="xs" value={prefix} onChange={(e) => setPrefix(e.target.value)} />
         </Field>
-        <Field label="Nästa nummer" htmlFor="new-series-next">
+        <Field label="Nästa nummer" htmlFor={forSerials ? "new-serial-series-next" : "new-series-next"}>
           <Input
-            id="new-series-next"
+            id={forSerials ? "new-serial-series-next" : "new-series-next"}
             type="number"
             min={1}
             step={1}
@@ -227,9 +250,9 @@ function NewSeriesForm({ onCreated, onCancel }: { onCreated: (created: NumberSer
             onChange={(e) => setNextNumber(e.target.value)}
           />
         </Field>
-        <Field label="Antal siffror" htmlFor="new-series-digits">
+        <Field label="Antal siffror" htmlFor={forSerials ? "new-serial-series-digits" : "new-series-digits"}>
           <Input
-            id="new-series-digits"
+            id={forSerials ? "new-serial-series-digits" : "new-series-digits"}
             type="number"
             min={0}
             max={10}
@@ -241,7 +264,7 @@ function NewSeriesForm({ onCreated, onCancel }: { onCreated: (created: NumberSer
       </div>
       <div className={styles.actions}>
         <Button type="button" variant="primary" size="small" onClick={handleCreate} disabled={pending || name.trim() === ""}>
-          {pending ? "Skapar…" : "Skapa artikelserie"}
+          {pending ? "Skapar…" : forSerials ? "Skapa serienummerserie" : "Skapa artikelserie"}
         </Button>
         <Button type="button" variant="ghost" size="small" onClick={onCancel} disabled={pending}>
           Avbryt
@@ -254,6 +277,7 @@ function NewSeriesForm({ onCreated, onCancel }: { onCreated: (created: NumberSer
 export function NumberSeriesList({ series: initial }: { series: NumberSeries[] }) {
   const [series, setSeries] = useState(initial);
   const [creating, setCreating] = useState(false);
+  const [creatingSerial, setCreatingSerial] = useState(false);
   // Article series skip numbers that are already taken, so their "Nästa" is
   // the server's preview rather than the counter — refreshed after changes.
   const [articlePreviews, setArticlePreviews] = useState<Record<string, string | null>>({});
@@ -263,31 +287,43 @@ export function NumberSeriesList({ series: initial }: { series: NumberSeries[] }
       .catch(() => setArticlePreviews({}));
   }, []);
   useEffect(loadPreviews, [loadPreviews]);
+  // Serial number series: the next number the series would give (taken
+  // numbers are skipped), same idea as the article previews.
+  const [serialPreviews, setSerialPreviews] = useState<Record<string, string | null>>({});
+  const loadSerialPreviews = useCallback(() => {
+    apiFetch<SerialNumberSeriesOption[]>("/api/v1/serial-number-series")
+      .then((rows) => setSerialPreviews(Object.fromEntries(rows.map((r) => [r.key, r.nextSerialNumber]))))
+      .catch(() => setSerialPreviews({}));
+  }, []);
+  useEffect(loadSerialPreviews, [loadSerialPreviews]);
 
   function handleUpdated(updated: NumberSeries) {
     setSeries((prev) => prev.map((s) => (s.key === updated.key ? updated : s)));
     if (updated.forArticles) loadPreviews();
+    if (updated.forSerials) loadSerialPreviews();
   }
 
   function handleDeleted(key: string) {
     setSeries((prev) => prev.filter((s) => s.key !== key));
   }
 
-  const builtIn = series.filter((s) => !isOwnArticleSeries(s));
+  const builtIn = series.filter((s) => !isOwnSeries(s));
   const own = series.filter(isOwnArticleSeries);
+  const ownSerial = series.filter(isOwnSerialSeries);
+  const previewOf = (s: NumberSeries) => (s.forSerials ? serialPreviews[s.key] : articlePreviews[s.key]);
 
   return (
     <>
       <div className={styles.card}>
         {builtIn.map((s) => (
-          <SeriesRow key={s.key} series={s} preview={articlePreviews[s.key]} onUpdated={handleUpdated} onDeleted={handleDeleted} />
+          <SeriesRow key={s.key} series={s} preview={previewOf(s)} onUpdated={handleUpdated} onDeleted={handleDeleted} />
         ))}
       </div>
 
       <h2 className={styles.sectionTitle}>Egna artikelserier</h2>
       <div className={styles.card}>
         {own.map((s) => (
-          <SeriesRow key={s.key} series={s} preview={articlePreviews[s.key]} onUpdated={handleUpdated} onDeleted={handleDeleted} />
+          <SeriesRow key={s.key} series={s} preview={previewOf(s)} onUpdated={handleUpdated} onDeleted={handleDeleted} />
         ))}
         {creating ? (
           <NewSeriesForm
@@ -302,6 +338,30 @@ export function NumberSeriesList({ series: initial }: { series: NumberSeries[] }
           <div className={styles.row}>
             <Button type="button" variant="secondary" size="small" onClick={() => setCreating(true)}>
               + Ny artikelserie
+            </Button>
+          </div>
+        )}
+      </div>
+
+      <h2 className={styles.sectionTitle}>Egna serienummerserier</h2>
+      <div className={styles.card}>
+        {ownSerial.map((s) => (
+          <SeriesRow key={s.key} series={s} preview={previewOf(s)} onUpdated={handleUpdated} onDeleted={handleDeleted} />
+        ))}
+        {creatingSerial ? (
+          <NewSeriesForm
+            forSerials
+            onCreated={(created) => {
+              setSeries((prev) => [...prev, created]);
+              setCreatingSerial(false);
+              loadSerialPreviews();
+            }}
+            onCancel={() => setCreatingSerial(false)}
+          />
+        ) : (
+          <div className={styles.row}>
+            <Button type="button" variant="secondary" size="small" onClick={() => setCreatingSerial(true)}>
+              + Ny serienummerserie
             </Button>
           </div>
         )}

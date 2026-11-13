@@ -13,7 +13,7 @@ import { addDays, stockholmToday } from "../../system/service/delivery-days.js";
 import { stockholmNow } from "../../shipping/service/pickup.js";
 import { dueDateFromTerm } from "../../system/service/due-date.js";
 import type { AlertsRepository } from "../repository/alerts.repository.js";
-import { alertKindDef, quoteFollowupSeverity, sortKinds, supplierInvoiceSeverity, visibleKinds, type AlertUser } from "./alert-kinds.js";
+import { alertKindDef, batchExpirySeverity, quoteFollowupSeverity, sortKinds, supplierInvoiceSeverity, visibleKinds, type AlertUser } from "./alert-kinds.js";
 
 // Aviseringar — computeAlerts runs the readers of the requested kinds in
 // parallel and builds one group per kind in catalog order. A reader that
@@ -65,6 +65,8 @@ export interface AlertSettingsReader {
   supplierInvoiceDays(): Promise<number>;
   // Offerter att följa upp inom (dagar).
   quoteFollowupDays(): Promise<number>;
+  // Batcher som går ut inom (dagar).
+  batchExpiryDays(): Promise<number>;
 }
 
 // Utskick som misslyckades looks this far back.
@@ -164,6 +166,29 @@ export function createAlertsService(deps: {
         secondary: `Saldo ${formatQuantity(r.balance)}`,
         date: null,
       }));
+    },
+
+    // Utgångna batcher (#8 etapp 2): batches with stock on places that are
+    // not blocked and an utgångsdatum within N days (the system setting) —
+    // red once the last usable day has passed, yellow while it is today or
+    // ahead. Gone when the batch is used up, scrapped or moved to a Spärrad
+    // lagerplats.
+    async batch_expiry(today) {
+      const days = await deps.settings.batchExpiryDays();
+      const rows = await repo.expiringBatches(addDays(today, days));
+      return rows.map((r) => {
+        const severity = batchExpirySeverity(r.expiresOn, today);
+        return {
+          key: r.batchId,
+          severity,
+          href: `/lager/sparbarhet?batch=${r.batchId}`,
+          primary: `${r.articleNumber} ${r.articleName} — batch ${r.batchNumber}`,
+          secondary:
+            `${severity === "red" ? `Gick ut ${r.expiresOn}` : `Går ut ${r.expiresOn} (${daysAheadText(r.expiresOn, today)})`}` +
+            ` · ${formatQuantity(r.quantity)} ${r.unitCode}`,
+          date: r.expiresOn,
+        };
+      });
     },
 
     async sales_order_late(today) {

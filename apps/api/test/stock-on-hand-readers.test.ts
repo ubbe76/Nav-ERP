@@ -44,12 +44,20 @@ const ALLOWED: Record<string, { reads: number; why: string }> = {
     why: "physical per place: the Lager tab's Lagerplatser card shows the article's balance on each of its places",
   },
   "modules/stock/repository/stock-count.repository.ts": {
-    reads: 3,
-    why: "physical per place: the count freezes and lists what stands on the shelf",
+    reads: 4,
+    why: "physical per place: the count freezes and lists what stands on the shelf — and where a serial number stands now (steg 4: counted in it must stand nowhere, counted out it must still stand here)",
   },
   "modules/stock/repository/batch-balances.ts": {
     reads: 7,
     why: "physical per cell (article, place, batch — #8): the cells Automatiskt allocates from, one cell's balance for Ångra and the saldoimport, the article card's Saldo per batch and the pick list's / batch choices' cells (with blocked as a flag); a blocked place is included, the callers decide",
+  },
+  "modules/stock/repository/batch-expiry.ts": {
+    reads: 1,
+    why: "per batch on the places that are NOT blocked (#8 etapp 2, Utgångna batcher): the avisering and the batch register's filter — a batch moved to a Spärrad lagerplats is put aside and no longer counts; a named batch's cell never goes negative, so no debt hides in the sum",
+  },
+  "modules/stock/service/serial-numbers.ts": {
+    reads: 2,
+    why: "physical per serial number (0215): assertSerialsOutOfStock — an inflow proves the number stands NOWHERE, a blocked place included",
   },
   "modules/stock/service/location-lifecycle.ts": { reads: 1, why: "physical per place: locationHoldsStock" },
   "modules/stock/service/stocked-article.ts": {
@@ -74,13 +82,17 @@ const ALLOWED: Record<string, { reads: number; why: string }> = {
     why: "log reader: net material drawn per TO, not a stock balance",
   },
   "modules/import/repository/stock-balances.ts": { reads: 2, why: "physical per place: the saldoimport's 'saldot efter'" },
+  "modules/scan/repository/scan.repository.ts": {
+    reads: 1,
+    why: "physical per place: Skanna's batch/serial hit shows the batch's balance on every place, blocked ones flagged",
+  },
   "modules/import/repository/import-export.repository.ts": {
     reads: 2,
     why: "physical per place: the Lagersaldon export (#35) must read back as the saldoimport's own per-place figures, blocked places included",
   },
   "modules/manufacturing/repository/manufacturing.repository.ts": {
-    reads: 1,
-    why: "physical per place: Ångra rapportering takes the goods back from where they were put",
+    reads: 2,
+    why: "physical per place: Ångra rapportering takes the goods back from where they were put — and, for serial numbers (0215), each of the report's numbers must still stand on that place (its cell is 1)",
   },
   "modules/purchase/repository/purchase.repository.ts": {
     reads: 1,

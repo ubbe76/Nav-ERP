@@ -1,6 +1,9 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
+  articles,
+  stockBatches,
+  systemSettings,
   customers,
   db,
   einvoiceTransmissions,
@@ -42,6 +45,9 @@ import { createAlertsRepository } from "../src/modules/alerts/repository/alerts.
 import { createPurchaseRepository } from "../src/modules/purchase/repository/purchase.repository.js";
 import { createSalesRepository } from "../src/modules/sales/repository/sales.repository.js";
 import { createAlertsService, EMAIL_FAILED_DAYS } from "../src/modules/alerts/service/alerts.service.js";
+import { listStockBatches } from "../src/modules/stock/repository/batch-trace.repository.js";
+import { ALERT_BATCH_EXPIRY_DAYS_KEY } from "../src/modules/system/service/alert-settings.js";
+import { listStockBatchesQuerySchema, createStockLocationSchema } from "@navet/shared";
 import { vatCodeId } from "./helpers/vat-codes.js";
 import { parsed } from "./helpers/parsed.js";
 import { unwiredSalesOrderLinks } from "./helpers/unwired";
@@ -74,10 +80,15 @@ const planningService = createPlanningService(createPlanningRepository(db), {
 });
 let supplierInvoiceDays = 7;
 let quoteFollowupDays = 7;
+let batchExpiryDays = 30;
 const alerts = createAlertsService({
   repo: createAlertsRepository(db),
   planning: planningService,
-  settings: { supplierInvoiceDays: async () => supplierInvoiceDays, quoteFollowupDays: async () => quoteFollowupDays },
+  settings: {
+    supplierInvoiceDays: async () => supplierInvoiceDays,
+    quoteFollowupDays: async () => quoteFollowupDays,
+    batchExpiryDays: async () => batchExpiryDays,
+  },
   today: () => TODAY,
 });
 
@@ -92,6 +103,7 @@ beforeEach(async () => {
   await db.execute(TRUNCATE);
   supplierInvoiceDays = 7;
   quoteFollowupDays = 7;
+  batchExpiryDays = 30;
 });
 afterAll(async () => {
   await db.execute(TRUNCATE);
@@ -764,7 +776,7 @@ describe("computeAlerts", () => {
         },
         orderPlanSummaries: async () => new Map(),
       },
-      settings: { supplierInvoiceDays: async () => 7, quoteFollowupDays: async () => 7 },
+      settings: { supplierInvoiceDays: async () => 7, quoteFollowupDays: async () => 7, batchExpiryDays: async () => 30 },
       today: () => TODAY,
       log: () => {},
     });
@@ -784,5 +796,111 @@ describe("computeAlerts", () => {
     const g = await group("stock_negative");
     expect(g.count).toBe(205);
     expect(g.items).toHaveLength(200);
+  });
+});
+
+// Utgångna batcher (#8 etapp 2): batches with stock on places that are not
+// blocked whose utgångsdatum has passed (red) or is within the window (yellow).
+describe("batch_expiry — Utgångna batcher", () => {
+  async function place(name: string) {
+    const warehouse = await stockService.createWarehouse({ name: `Lager ${suffix()}`, active: true });
+    return stockService.createLocation(parsed(createStockLocationSchema, { warehouseId: warehouse!.id, name, active: true }));
+  }
+  // A spårad article with one batch of `quantity` on the place.
+  async function batch(batchNumber: string, expiresOn: string | null, quantity: number, locationId: string, articleId?: string) {
+    const id = articleId ?? (await makeArticle("purchased")).id;
+    await db.update(articles).set({ tracking: "batch" }).where(eq(articles.id, id));
+    await stockService.recordTransaction({ articleId: id, locationId, quantityDelta: quantity, transactionType: "inventory_adjustment", batchNumber });
+    const [row] = await db.update(stockBatches).set({ expiresOn }).where(eq(stockBatches.batchNumber, batchNumber)).returning();
+    return { articleId: id, batchId: row!.id };
+  }
+
+  it("red once the last usable day has passed, yellow within the window; the last day itself is yellow; sorted on the date", async () => {
+    const a1 = await place("A1");
+    const expired = await batch("UTGÅNGEN", YESTERDAY, 5, a1.id);
+    const lastDay = await batch("SISTA-DAGEN", TODAY, 2.5, a1.id);
+    const soon = await batch("SNART", "2030-04-03", 1, a1.id); // today + 30
+    await batch("SENARE", "2030-04-04", 1, a1.id); // today + 31: outside
+    await batch("ODATERAD", null, 1, a1.id);
+
+    const g = await group("batch_expiry");
+    expect(g).toMatchObject({ kind: "batch_expiry", label: "Utgångna batcher", severity: "red", count: 3, error: false, listHref: "/lager/sparbarhet?expiry=due" });
+    expect(g.items.map((i) => [i.key, i.severity, i.date, i.href])).toEqual([
+      [expired.batchId, "red", YESTERDAY, `/lager/sparbarhet?batch=${expired.batchId}`],
+      [lastDay.batchId, "yellow", TODAY, `/lager/sparbarhet?batch=${lastDay.batchId}`],
+      [soon.batchId, "yellow", "2030-04-03", `/lager/sparbarhet?batch=${soon.batchId}`],
+    ]);
+    expect(g.items[0]!.primary).toMatch(/ — batch UTGÅNGEN$/);
+    expect(g.items.map((i) => i.secondary)).toEqual([
+      `Gick ut ${YESTERDAY} · 5 st`,
+      `Går ut ${TODAY} (i dag) · 2,5 st`,
+      "Går ut 2030-04-03 (om 30 dagar) · 1 st",
+    ]);
+  });
+
+  it("the window is the setting: 0 days leaves the expired and today's, a longer one takes more", async () => {
+    const a1 = await place("A1");
+    await batch("UTGÅNGEN", YESTERDAY, 1, a1.id);
+    await batch("I-DAG", TODAY, 1, a1.id);
+    await batch("I-MORGON", TOMORROW, 1, a1.id);
+    await batch("LÅNGT-FRAM", "2030-09-01", 1, a1.id);
+    batchExpiryDays = 0;
+    expect((await group("batch_expiry")).items.map((i) => i.date)).toEqual([YESTERDAY, TODAY]);
+    batchExpiryDays = 365;
+    expect((await group("batch_expiry")).count).toBe(4);
+  });
+
+  it("only stock on places that are not blocked counts: used up, moved to a spärrad plats or an article no longer spårad — the row is gone", async () => {
+    const a1 = await place("A1");
+    const karantan = await place("KARANTÄN");
+    const user = await makeUser();
+    const usedUp = await batch("SLUT", YESTERDAY, 3, a1.id);
+    const moved = await batch("FLYTTAD", YESTERDAY, 4, a1.id);
+    const split = await batch("DELAD", YESTERDAY, 6, a1.id);
+    const switchedOff = await batch("AVSTÄNGD", YESTERDAY, 2, a1.id);
+    expect((await group("batch_expiry")).count).toBe(4);
+
+    await stockService.recordTransaction({ articleId: usedUp.articleId, locationId: a1.id, quantityDelta: -3, transactionType: "inventory_adjustment", batchId: usedUp.batchId });
+    await stockService.blockLocation(karantan.id, "Utgånget", user.id);
+    const transfer = (articleId: string, quantity: number) =>
+      stockService.transferStock({ fromLocationId: a1.id, toLocationId: karantan.id, rows: [{ articleId, quantity }] }, user.id);
+    await transfer(moved.articleId, 4);
+    await transfer(split.articleId, 2);
+    await db.update(articles).set({ tracking: "none" }).where(eq(articles.id, switchedOff.articleId));
+
+    const g = await group("batch_expiry");
+    // Only what still stands on an open place, with that quantity.
+    expect(g.items.map((i) => [i.key, i.secondary])).toEqual([[split.batchId, `Gick ut ${YESTERDAY} · 4 st`]]);
+
+    // Släpp spärr: the stock counts again.
+    await stockService.unblockLocation(karantan.id, user.id);
+    expect((await group("batch_expiry")).items.map((i) => i.key).sort()).toEqual([moved.batchId, split.batchId].sort());
+  });
+
+  it("the batch register's filter lists the group's rows — expiry=due the window, expiry=expired only the passed ones", async () => {
+    const a1 = await place("A1");
+    const expired = await batch("UTGÅNGEN", YESTERDAY, 5, a1.id);
+    const soon = await batch("SNART", "2030-03-20", 1, a1.id);
+    await batch("SENARE", "2030-05-01", 1, a1.id);
+    await batch("ODATERAD", null, 1, a1.id);
+    // The register reads the stored setting (the alert gets it handed in).
+    await db.insert(systemSettings).values({ key: ALERT_BATCH_EXPIRY_DAYS_KEY, value: "20" }).onConflictDoUpdate({ target: systemSettings.key, set: { value: "20" } });
+    batchExpiryDays = 20;
+    try {
+      const g = await group("batch_expiry");
+      const due = await listStockBatches(db, listStockBatchesQuerySchema.parse({ expiry: "due" }), TODAY);
+      expect(due.rows.map((r) => r.id)).toEqual(g.items.map((i) => i.key));
+      expect(due.rows.map((r) => [r.id, r.expiresOn, r.expired])).toEqual([
+        [expired.batchId, YESTERDAY, true],
+        [soon.batchId, "2030-03-20", false],
+      ]);
+      expect(due.total).toBe(2);
+      const passed = await listStockBatches(db, listStockBatchesQuerySchema.parse({ expiry: "expired" }), TODAY);
+      expect(passed.rows.map((r) => r.id)).toEqual([expired.batchId]);
+      // Without the filter: every batch, newest first, with its dates.
+      expect((await listStockBatches(db, listStockBatchesQuerySchema.parse({}), TODAY)).total).toBe(4);
+    } finally {
+      await db.delete(systemSettings).where(eq(systemSettings.key, ALERT_BATCH_EXPIRY_DAYS_KEY));
+    }
   });
 });

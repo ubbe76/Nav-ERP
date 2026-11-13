@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import {
   articleAlternativeLocations,
   articles,
+  stockBatches,
   stockCountSessions,
   stockLocations,
   stockTransactions,
@@ -19,10 +20,19 @@ import {
   type OutflowCandidate,
   type OutflowPart,
 } from "./outflow-allocation.js";
-import { BatchNotTrackedError } from "./batch.errors.js";
+import {
+  ArticleNotSerialTrackedError,
+  BatchNotTrackedError,
+  SerialCountMismatchError,
+  SerialQuantityNotIntegerError,
+  StockBatchNotFoundError,
+} from "./batch.errors.js";
+import { stockTrackingOf } from "./article-tracking.js";
+import { assertSerialCountAllowed, lockSerials } from "./serial-numbers.js";
 import { findArticleBatch } from "./batches.js";
 import { batchCellsForArticles } from "../repository/batch-balances.js";
 import { StockLocationBlockedError } from "./stock.errors.js";
+import { stockholmToday } from "../../system/service/delivery-days.js";
 
 // What a CHOSEN place that is blocked (Spärrad lagerplats, 0185) means for
 // the draw:
@@ -70,12 +80,30 @@ export type BlockedChoice = "refuse" | "automatic";
 //
 // Each part is one stock_transactions row; the caller still runs
 // assertLocationNotUnderCount and deactivateEmptyLocation per part.
+// `expired` (etapp 2): what Automatiskt does with the cells of an utgången
+// batch — "skip" (the default: förbrukning and utleverans never take
+// expired stock by themselves; a batch chosen by hand is never tried) or
+// "include". The day is the Stockholm day of the draw.
+export interface OutflowOptions {
+  blockedChoice?: BlockedChoice;
+  batchId?: string | null;
+  expired?: "skip" | "include";
+  // Serienummer (steg 4): the CHOSEN or scanned numbers of a
+  // serienummerstyrd article (numbers created vid inleverans) — all of the
+  // quantity or none ("three chosen and two automatic" does not exist): as
+  // many as the styck (400 serial-count-mismatch), distinct, the article's
+  // and serial numbers (404 stock-batch-not-found), each in stock on a place
+  // the draw may take from (409 batch-insufficient naming the missing ones).
+  // Left out = Automatiskt: the oldest numbers. On any other article 400.
+  serialIds?: readonly string[] | undefined;
+}
+
 export async function allocateOutflowLocations(
   db: Db | Tx,
   articleId: string,
   quantity: number,
   locationId?: string | null,
-  opts: { blockedChoice?: BlockedChoice; batchId?: string | null } = {}
+  opts: OutflowOptions = {}
 ): Promise<OutflowPart[]> {
   await lockArticlesForOutflow(db, [articleId]);
   // Batch (#8). The flag on the row just locked: a flag change takes the
@@ -83,13 +111,24 @@ export async function allocateOutflowLocations(
   // for this draw. An article that is not batchstyrd takes the path below
   // exactly as before — its parts carry no batchId.
   const [subject] = await db
-    .select({ batchTracked: articles.batchTracked, articleNumber: articles.articleNumber })
+    .select({ tracking: articles.tracking, serialAssignedAt: articles.serialAssignedAt, articleNumber: articles.articleNumber })
     .from(articles)
     .where(eq(articles.id, articleId));
-  if (subject?.batchTracked) return allocateBatchTracked(db, articleId, quantity, locationId, opts);
+  const sort = subject ? stockTrackingOf(subject) : null;
+  if (sort !== null) {
+    // Serienummer (steg 4): whole styck, and the chosen numbers validated;
+    // every named serial number of the result is locked — after the places,
+    // last in the lock order (serial-numbers.ts).
+    const chosen = sort === "serial" ? await chosenSerials(db, articleId, subject!.articleNumber, quantity, opts) : undefined;
+    if (sort === "batch" && opts.serialIds !== undefined) throw new ArticleNotSerialTrackedError(subject!.articleNumber);
+    const parts = await allocateBatchTracked(db, articleId, quantity, locationId, opts, chosen);
+    if (sort === "serial") await lockSerials(db, parts.flatMap((part) => (part.batchId ? [part.batchId] : [])));
+    return parts;
+  }
   // A chosen named batch is never dropped silently (null = Okänd is what
   // every row of such an article is anyway).
   if (typeof opts.batchId === "string") throw new BatchNotTrackedError(subject?.articleNumber ?? articleId);
+  if (opts.serialIds !== undefined) throw new ArticleNotSerialTrackedError(subject?.articleNumber ?? articleId);
   if (locationId) {
     // Revive first (resolveStockLocation's UPDATE of an inactive place takes
     // the row lock itself), then FOR SHARE: taking the share lock first and
@@ -137,6 +176,10 @@ export async function allocateOutflowLocations(
 //                          on resolveStockLocation's place (a chosen NAMED
 //                          batch that does not cover it is refused)
 //
+// Etapp 2: with the batch on automatic, the cells of an utgången batch are
+// skipped on every row of the table (opts.expired, default "skip") — only
+// expired stock left ⇒ the whole quantity is the remainder, Okänd minus.
+//
 // `opts.batchId`: left out = automatic, null = Okänd, an id = that batch
 // (it must be the article's — 404 stock-batch-not-found). A blocked chosen
 // place is tried exactly as on the other path, and with "automatic" the
@@ -148,8 +191,11 @@ async function allocateBatchTracked(
   articleId: string,
   quantity: number,
   locationId: string | null | undefined,
-  opts: { blockedChoice?: BlockedChoice; batchId?: string | null }
+  opts: OutflowOptions,
+  // Several chosen batch rows (serial numbers) — the rule's `batches`.
+  batches?: { batchId: string; batchNumber: string }[]
 ): Promise<OutflowPart[]> {
+  const expiredBefore = (opts.expired ?? "skip") === "skip" ? stockholmToday() : undefined;
   const batch =
     opts.batchId === undefined
       ? undefined
@@ -165,7 +211,7 @@ async function allocateBatchTracked(
       .for("share");
     if (!place?.blocked) {
       const cells = await batchCellsForArticles(db, [articleId], { locationIds: [chosen] });
-      const { parts, remainder } = allocateBatchOutflow(quantity, [], cells, { locationId: chosen, batch });
+      const { parts, remainder } = allocateBatchOutflow(quantity, [], cells, { locationId: chosen, batch, batches, expiredBefore });
       return withBatchRemainder(parts, remainder, chosen);
     }
     if ((opts.blockedChoice ?? "refuse") === "refuse") {
@@ -184,9 +230,42 @@ async function allocateBatchTracked(
     candidateIds.length > 0
       ? await Promise.all([readCandidates(db, articleId, candidateIds), batchCellsForArticles(db, [articleId], { locationIds: candidateIds })])
       : [[], []];
-  const { parts, remainder } = allocateBatchOutflow(quantity, candidates, cells, { batch });
+  const { parts, remainder } = allocateBatchOutflow(quantity, candidates, cells, { batch, batches, expiredBefore });
   if (remainder <= 0) return parts;
   return withBatchRemainder(parts, remainder, await resolveStockLocation(db, articleId));
+}
+
+// A serienummerstyrd article's draw (numbers created vid inleverans): the
+// quantity is whole styck in the base unit, and the chosen numbers — when
+// there are any — are exactly as many, distinct, the article's own and
+// serial numbers. Also used by flytt and justering (stock.repository.ts).
+export async function chosenSerials(
+  db: Db | Tx,
+  articleId: string,
+  articleNumber: string,
+  quantity: number,
+  opts: { serialIds?: readonly string[] | undefined; batchId?: string | null | undefined }
+): Promise<{ batchId: string; batchNumber: string }[] | undefined> {
+  if (!Number.isInteger(quantity)) throw new SerialQuantityNotIntegerError(articleNumber, quantity);
+  if (opts.serialIds === undefined) return undefined;
+  if (opts.batchId !== undefined) throw new SerialCountMismatchError(quantity, opts.serialIds.length);
+  assertSerialCountAllowed(opts.serialIds.length);
+  const distinct = new Set(opts.serialIds);
+  if (distinct.size !== opts.serialIds.length || opts.serialIds.length !== quantity) throw new SerialCountMismatchError(quantity, opts.serialIds.length);
+  const found = new Map<string, { batchId: string; batchNumber: string; kind: "batch" | "serial" }>();
+  const ids = [...distinct];
+  for (let i = 0; i < ids.length; i += 500) {
+    const rows = await db
+      .select({ batchId: stockBatches.id, batchNumber: stockBatches.batchNumber, kind: stockBatches.kind })
+      .from(stockBatches)
+      .where(and(eq(stockBatches.articleId, articleId), inArray(stockBatches.id, ids.slice(i, i + 500))));
+    for (const row of rows) found.set(row.batchId, row);
+  }
+  return opts.serialIds.map((id) => {
+    const row = found.get(id);
+    if (!row || row.kind !== "serial") throw new StockBatchNotFoundError(id);
+    return { batchId: row.batchId, batchNumber: row.batchNumber };
+  });
 }
 
 // Balances and flags of the locked places, as the pure rule wants them.

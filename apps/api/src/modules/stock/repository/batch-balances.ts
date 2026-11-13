@@ -1,6 +1,13 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { trackedSql } from "../service/batch-tracking.js";
 import { articleAlternativeLocations, articles, stockBatches, stockLocations, stockTransactions, warehouses, type Db, type Tx } from "@navet/db";
-import { articlePlacePreference, compareBatchCells, compareBatches, type BatchCell } from "../service/outflow-allocation.js";
+import { articlePlacePreference, compareBatchCells, compareBatches, isBatchExpired, type BatchCell } from "../service/outflow-allocation.js";
+
+// The batch's AGE as a Stockholm day (etapp 2): its Batchdatum, else the day
+// the row was created — what compareBatches sorts the undated batches on.
+// Null for Okänd (the left join). created_at is a timestamptz: never ::date
+// without the zone.
+export const batchAgeDateSql = sql<string | null>`coalesce(${stockBatches.batchDate}, (${stockBatches.createdAt} AT TIME ZONE 'Europe/Stockholm')::date)::text`;
 
 // Batch (#8) — saldo per CELL (article, place, batch), read straight from
 // the log. A leaf (Db | Tx), ALWAYS with an article filter so the query rides
@@ -34,6 +41,8 @@ export async function batchCellsForArticles(
         batchId: stockTransactions.batchId,
         batchNumber: stockBatches.batchNumber,
         batchCreatedAt: stockBatches.createdAt,
+        expiresOn: stockBatches.expiresOn,
+        batchAgeDate: batchAgeDateSql,
         quantity: sql<string>`sum(${stockTransactions.quantityDelta})`,
       })
       .from(stockTransactions)
@@ -44,7 +53,15 @@ export async function batchCellsForArticles(
           opts.locationIds ? inArray(stockTransactions.locationId, [...opts.locationIds]) : undefined
         )
       )
-      .groupBy(stockTransactions.articleId, stockTransactions.locationId, stockTransactions.batchId, stockBatches.batchNumber, stockBatches.createdAt)
+      .groupBy(
+        stockTransactions.articleId,
+        stockTransactions.locationId,
+        stockTransactions.batchId,
+        stockBatches.batchNumber,
+        stockBatches.createdAt,
+        stockBatches.expiresOn,
+        stockBatches.batchDate
+      )
       .having(sql`sum(${stockTransactions.quantityDelta}) <> 0`);
     for (const row of rows) cells.push({ ...row, quantity: Number(row.quantity) });
   }
@@ -73,13 +90,20 @@ export interface ArticleBatchBalance {
   batchNumber: string | null;
   origin: (typeof stockBatches.origin.enumValues)[number] | null;
   createdAt: string | null;
+  // Etapp 2: Utgångsdatum (last usable day), Batchdatum (null = the day of
+  // createdAt) and whether the batch is utgången today (Stockholm day).
+  expiresOn: string | null;
+  batchDate: string | null;
+  expired: boolean;
   total: string;
   locations: { locationId: string; warehouseName: string; locationName: string; blocked: boolean; quantity: string }[];
 }
 
-// The article card's Saldo per batch: Okänd first, then the oldest batch
-// (compareBatches — the order Automatiskt draws in), each with its places.
-export async function articleBatchBalances(db: Db | Tx, articleId: string): Promise<ArticleBatchBalance[]> {
+// The article card's Saldo per batch, in compareBatches order (FEFO: Okänd
+// first, the dated by utgångsdatum, the undated oldest first) — the order
+// Automatiskt draws in, except that it skips the expired — each with its
+// places. `today` = the Stockholm day `expired` is judged against.
+export async function articleBatchBalances(db: Db | Tx, articleId: string, today: string): Promise<ArticleBatchBalance[]> {
   const rows = await db
     .select({
       locationId: stockTransactions.locationId,
@@ -90,6 +114,9 @@ export async function articleBatchBalances(db: Db | Tx, articleId: string): Prom
       batchNumber: stockBatches.batchNumber,
       origin: stockBatches.origin,
       batchCreatedAt: stockBatches.createdAt,
+      expiresOn: stockBatches.expiresOn,
+      batchDate: stockBatches.batchDate,
+      batchAgeDate: batchAgeDateSql,
       quantity: sql<string>`sum(${stockTransactions.quantityDelta})`,
     })
     .from(stockTransactions)
@@ -105,7 +132,9 @@ export async function articleBatchBalances(db: Db | Tx, articleId: string): Prom
       stockTransactions.batchId,
       stockBatches.batchNumber,
       stockBatches.origin,
-      stockBatches.createdAt
+      stockBatches.createdAt,
+      stockBatches.expiresOn,
+      stockBatches.batchDate
     )
     .having(sql`sum(${stockTransactions.quantityDelta}) <> 0`);
 
@@ -123,6 +152,9 @@ export async function articleBatchBalances(db: Db | Tx, articleId: string): Prom
       batchNumber: head.batchNumber,
       origin: head.origin,
       createdAt: head.batchCreatedAt ? head.batchCreatedAt.toISOString() : null,
+      expiresOn: head.expiresOn,
+      batchDate: head.batchDate,
+      expired: isBatchExpired(head.expiresOn, today),
       total: places.reduce((sum, p) => sum + Number(p.quantity), 0).toFixed(4),
       locations: places
         .sort(
@@ -150,6 +182,12 @@ export interface PickBatchCell {
   preference: number | null;
   batchId: string | null;
   batchNumber: string | null;
+  // batch | serial (0215) — the cell's own sort, null for Okänd.
+  batchKind: "batch" | "serial" | null;
+  // Etapp 2: the batch's utgångsdatum and whether it is utgången today —
+  // Automatiskt leaves such a cell alone (it can be chosen by hand).
+  expiresOn: string | null;
+  expired: boolean;
   quantity: string;
 }
 
@@ -159,13 +197,15 @@ export interface PickBatchCell {
 // places in pick-list order — so the paper and the booking say the same
 // thing. An article that is not batchstyrd is absent (its places come from
 // balancesForArticles, as before). Physical, with `blocked` as a flag.
+// Etapp 2: FEFO, and the cells of an utgången batch LAST per article
+// (Automatiskt skips them) — `today` is the Stockholm day.
 export async function pickBatchCellsForArticles(
   db: Db | Tx,
   articleIds: readonly string[],
-  opts: { locationId?: string } = {}
+  opts: { locationId?: string; today: string }
 ): Promise<PickBatchCell[]> {
   const ids = [...new Set(articleIds)];
-  const cells: (PickBatchCell & { batchCreatedAt: Date | null })[] = [];
+  const cells: (PickBatchCell & { batchCreatedAt: Date | null; batchAgeDate: string | null })[] = [];
   for (let i = 0; i < ids.length; i += CHUNK) {
     const rows = await db
       .select({
@@ -178,7 +218,10 @@ export async function pickBatchCellsForArticles(
         sortOrder: articleAlternativeLocations.sortOrder,
         batchId: stockTransactions.batchId,
         batchNumber: stockBatches.batchNumber,
+        batchKind: stockBatches.kind,
         batchCreatedAt: stockBatches.createdAt,
+        expiresOn: stockBatches.expiresOn,
+        batchAgeDate: batchAgeDateSql,
         quantity: sql<string>`sum(${stockTransactions.quantityDelta})`,
       })
       .from(stockTransactions)
@@ -193,7 +236,7 @@ export async function pickBatchCellsForArticles(
       .where(
         and(
           inArray(stockTransactions.articleId, ids.slice(i, i + CHUNK)),
-          eq(articles.batchTracked, true),
+          trackedSql(),
           opts.locationId ? eq(stockTransactions.locationId, opts.locationId) : undefined
         )
       )
@@ -207,12 +250,16 @@ export async function pickBatchCellsForArticles(
         articleAlternativeLocations.sortOrder,
         stockTransactions.batchId,
         stockBatches.batchNumber,
-        stockBatches.createdAt
+        stockBatches.kind,
+        stockBatches.createdAt,
+        stockBatches.expiresOn,
+        stockBatches.batchDate
       )
       .having(sql`sum(${stockTransactions.quantityDelta}) <> 0`);
     for (const { isPrimary, sortOrder, ...row } of rows) {
       cells.push({
         ...row,
+        expired: isBatchExpired(row.expiresOn, opts.today),
         quantity: Number(row.quantity).toFixed(4),
         preference: articlePlacePreference({ locationName: row.locationName, isPrimary: isPrimary === true, sortOrder }),
       });
@@ -222,7 +269,8 @@ export async function pickBatchCellsForArticles(
     .sort(
       (a, b) =>
         (a.articleId < b.articleId ? -1 : a.articleId > b.articleId ? 1 : 0) ||
+        Number(a.expired) - Number(b.expired) ||
         compareBatchCells({ batch: a, place: a }, { batch: b, place: b })
     )
-    .map(({ batchCreatedAt: _created, ...cell }) => cell);
+    .map(({ batchCreatedAt: _created, batchAgeDate: _age, ...cell }) => cell);
 }

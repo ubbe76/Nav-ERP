@@ -132,9 +132,12 @@ export function withRemainder(parts: OutflowPart[], remainder: number, fallbackL
 //      net balance: a place holding batch X +10 and Okänd −3 physically has 7,
 //      and never gives more than 7 — as it never gave more than its positive
 //      balance before batches.
-//   2. The batches in compareBatches order: Okänd (no batch) FIRST, then the
-//      oldest (created_at), then the batch number (the saldoimport creates
-//      all its batches in one instant — the number then decides, beslut 16).
+//   2. The batches in compareBatches order (FEFO): Okänd (no batch) FIRST,
+//      then the dated ones (shortest utgångsdatum first), then the undated,
+//      oldest first (Batchdatum, else created_at), then the batch number
+//      (the saldoimport creates all its batches in one instant — the number
+//      then decides, beslut 16). With `expiredBefore`, expired batches are
+//      skipped.
 //      Within a batch its cells with a balance > 0 on usable places, in
 //      pick-list order (compareOutflowLocations).
 //   3. From each cell min(what is left, the cell, the place's remaining
@@ -160,17 +163,46 @@ export interface BatchCell {
   batchId: string | null;
   batchNumber: string | null;
   batchCreatedAt: Date | null;
+  // Utgångsdatum (etapp 2): the batch's LAST usable day, YYYY-MM-DD; null or
+  // left out = no date.
+  expiresOn?: string | null;
+  // The batch's age as a Stockholm day: its Batchdatum, else the day the row
+  // was created (the readers compute it in SQL). Left out = created_at alone.
+  batchAgeDate?: string | null;
   // sum(quantity_delta) of the cell; may be negative for Okänd.
   quantity: number;
 }
 
-type BatchKey = Pick<BatchCell, "batchId" | "batchNumber" | "batchCreatedAt">;
+type BatchKey = Pick<BatchCell, "batchId" | "batchNumber" | "batchCreatedAt" | "expiresOn" | "batchAgeDate">;
 
-// The order batches are drawn (and listed) in: Okänd first, then the oldest.
+// Utgången = the Stockholm day is past the batch's last usable day. The ONE
+// comparison; `today` is always passed in (stockholmToday), never read here.
+export function isBatchExpired(expiresOn: string | null | undefined, today: string): boolean {
+  return expiresOn != null && expiresOn < today;
+}
+
+// The order batches are drawn (and listed) in — FEFO (etapp 2, beslut 10):
+//   1. Okänd first (undated, unknown — it should go first);
+//   2. the batches WITH an utgångsdatum, the shortest date first;
+//   3. the batches WITHOUT one, oldest first.
+// Ties (and all of 3): the age day (Batchdatum, else the day of creation),
+// then created_at, then the number (sv, numeric), then the id. For an
+// article none of whose batches has a date this is exactly the order before
+// FEFO — oldest first.
 export function compareBatches(a: BatchKey, b: BatchKey): number {
   if (a.batchId === b.batchId) return 0;
   if (a.batchId === null) return -1;
   if (b.batchId === null) return 1;
+  const aExpires = a.expiresOn ?? null;
+  const bExpires = b.expiresOn ?? null;
+  if (aExpires !== bExpires) {
+    if (aExpires === null) return 1;
+    if (bExpires === null) return -1;
+    return aExpires < bExpires ? -1 : 1;
+  }
+  const aAge = a.batchAgeDate ?? null;
+  const bAge = b.batchAgeDate ?? null;
+  if (aAge !== null && bAge !== null && aAge !== bAge) return aAge < bAge ? -1 : 1;
   const aTime = a.batchCreatedAt?.getTime() ?? 0;
   const bTime = b.batchCreatedAt?.getTime() ?? 0;
   if (aTime !== bTime) return aTime - bTime;
@@ -192,8 +224,22 @@ export interface BatchOutflowChoice {
   // Left out = every batch, oldest first; batchId null = Okänd. The number
   // is only for the error text (the cells carry it when the batch has stock).
   batch?: { batchId: string | null; batchNumber?: string | null };
+  // SEVERAL chosen batch rows (etapp 2, steg 4 — serial numbers chosen or
+  // scanned): only their cells, and together they must cover the quantity —
+  // else BatchInsufficientError naming the ones that are missing. Never
+  // tried against the utgångsdatum (chosen by hand). The rule does not know
+  // the sort; the loader only sends serial numbers this way.
+  batches?: readonly { batchId: string; batchNumber: string }[];
   // A chosen place: only its cells, no ceiling (see above).
   locationId?: string;
+  // Utgångna (etapp 2, beslut 8 and 12): a Stockholm day. With NO chosen
+  // batch, the cells of a batch whose utgångsdatum is before it are left
+  // alone — what they would have covered becomes the remainder (Okänd
+  // minus, like any shortage). A CHOSEN batch is never tried against the
+  // date: expired stock can be taken by hand. Left out = nothing is skipped
+  // (flytt, negativ justering, saldoimporten: moving or scrapping expired
+  // stock is exactly what must work).
+  expiredBefore?: string | undefined;
 }
 
 export function allocateBatchOutflow(
@@ -215,10 +261,17 @@ export function allocateBatchOutflow(
     }
   }
   const chosenBatch = choice.batch;
+  const chosenMany = choice.batches === undefined ? undefined : new Set(choice.batches.map((b) => b.batchId));
   const candidates = cells
     .filter((c) => c.quantity > 0)
     .filter((c) => (choice.locationId === undefined ? ceiling.has(c.locationId) : c.locationId === choice.locationId))
     .filter((c) => chosenBatch === undefined || c.batchId === chosenBatch.batchId)
+    .filter((c) => chosenMany === undefined || (c.batchId !== null && chosenMany.has(c.batchId)))
+    // An expired cell stays in its place's net balance (the ceiling) but is
+    // not taken — the ceiling can only be more generous than the cells left.
+    .filter(
+      (c) => chosenBatch !== undefined || chosenMany !== undefined || choice.expiredBefore === undefined || !isBatchExpired(c.expiresOn, choice.expiredBefore)
+    )
     .sort((a, b) => {
       const byBatch = compareBatches(a, b);
       if (byBatch !== 0) return byBatch;
@@ -238,6 +291,20 @@ export function allocateBatchOutflow(
   }
 
   const remainder = Math.max(left, 0);
+  if (choice.batches !== undefined) {
+    // Every chosen one must have given its whole cell… and they must cover it.
+    const taken = new Set(parts.map((p) => p.batchId));
+    const missing = choice.batches.filter((b) => !taken.has(b.batchId));
+    if (remainder > 0 || missing.length > 0) {
+      const names = (missing.length > 0 ? missing : choice.batches).map((b) => b.batchNumber);
+      throw new BatchInsufficientError(
+        names.slice(0, 20).join(", ") + (names.length > 20 ? ` och ${names.length - 20} till` : ""),
+        round4(round4(quantity) - remainder),
+        round4(quantity),
+        true
+      );
+    }
+  }
   if (remainder > 0 && chosenBatch && chosenBatch.batchId !== null) {
     const batchNumber = chosenBatch.batchNumber ?? cells.find((c) => c.batchId === chosenBatch.batchId)?.batchNumber ?? chosenBatch.batchId;
     throw new BatchInsufficientError(batchNumber, round4(round4(quantity) - remainder), round4(quantity));

@@ -262,8 +262,8 @@ async function seed() {
       { articleNumber: "EX-200", name: "Plåt 1,5 mm", type: "purchased", unitId: st, purchaseUnitId: kartong, standardCost: "10.3333" },
       { articleNumber: "EX-300", name: "Montering på plats", type: "service", unitId: st, active: false },
       { articleNumber: "EX-400", name: "Fantomsats", type: "manufactured", isPhantom: true, unitId: st },
-      // Batchstyrd (#8) — exported as Ja; the import accepts it because the setting is on (below).
-      { articleNumber: "-EX-500", name: "=Formel + text", type: "purchased", unitId: st, batchTracked: true },
+      // Spårning (#8) — exported as Batch; the import accepts it because the setting is on (below).
+      { articleNumber: "-EX-500", name: "=Formel + text", type: "purchased", unitId: st, tracking: "batch" },
       { articleNumber: "007", name: "Skruv M6", type: "purchased", unitId: st, standardCost: "0.2500" },
     ])
     .returning({ id: articles.id, articleNumber: articles.articleNumber });
@@ -586,7 +586,7 @@ describe("import exports — the round trip", () => {
       Partiformningsregel: "Fast orderstorlek",
       Styrning: "Lagerstyrd",
       Prognosstyrd: "Ja",
-      Batchstyrd: "Nej",
+      Spårning: "Ingen",
       "Ledtid (dagar)": "7",
       Artikelrevision: "B",
       Ritningsnummer: "R-100",
@@ -602,7 +602,7 @@ describe("import exports — the round trip", () => {
     });
     expect(articleRows.find((r) => r["Artikelnummer"] === "EX-300")).toMatchObject({ Artikeltyp: "Tjänst", Aktiv: "Nej" });
     expect(articleRows.find((r) => r["Artikelnummer"] === "EX-400")).toMatchObject({ Artikeltyp: "Fiktiv" });
-    expect(articleRows.find((r) => r["Artikelnummer"] === "-EX-500")).toMatchObject({ Batchstyrd: "Ja" });
+    expect(articleRows.find((r) => r["Artikelnummer"] === "-EX-500")).toMatchObject({ Spårning: "Batch" });
 
     // Omräkningsfaktor is base units per alternative unit.
     expect(await table("articleUnits")).toEqual([
@@ -657,8 +657,8 @@ describe("import exports — the round trip", () => {
     ]);
 
     expect(await table("stockBalances")).toEqual([
-      { Artikelnummer: "007", Lager: "ZX Lager", Lagerplats: "A2", Antal: "100", "À-pris": "", Batch: "" },
-      { Artikelnummer: "EX-200", Lager: "ZX Lager", Lagerplats: "A1", Antal: "7,5", "À-pris": "", Batch: "" },
+      { Artikelnummer: "007", Lager: "ZX Lager", Lagerplats: "A2", Antal: "100", "À-pris": "", Batch: "", Serienummer: "", Batchdatum: "", Utgångsdatum: "" },
+      { Artikelnummer: "EX-200", Lager: "ZX Lager", Lagerplats: "A1", Antal: "7,5", "À-pris": "", Batch: "", Serienummer: "", Batchdatum: "", Utgångsdatum: "" },
     ]);
 
     const customerRows = await table("customers");

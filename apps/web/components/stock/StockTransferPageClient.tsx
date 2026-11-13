@@ -9,6 +9,8 @@ import { HelpLink } from "../ui/HelpLink";
 import { apiFetch } from "../../lib/api";
 import { BatchSelect, useBatchBalances } from "./BatchSelect";
 import { BATCH_AUTO, batchIdField, batchOptions } from "../../lib/batch";
+import { serialArticleIds } from "../../lib/serialInput";
+import { SerialCellPicker } from "./SerialNumbers";
 import { locationOptionLabel } from "../../lib/stockLocations";
 import type { StockBalance, StockLocation, StockTransferResult } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
@@ -44,6 +46,8 @@ export function StockTransferPageClient({
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   // Batch (#8) per article row: Automatiskt unless chosen.
   const [batchChoices, setBatchChoices] = useState<Record<string, string>>({});
+  // Serienummer (#8 etapp 2) per article row: the numbers picked (none = the oldest).
+  const [serialChoices, setSerialChoices] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState<string | null>(null);
@@ -54,7 +58,11 @@ export function StockTransferPageClient({
   );
 
   const { rows: batchRows, reload: reloadBatches } = useBatchBalances(balances.map((b) => b.articleId));
-  const batchTrackedIds = useMemo(() => new Set(batchRows.map((r) => r.articleId)), [batchRows]);
+  const serialIds = useMemo(() => serialArticleIds(batchRows), [batchRows]);
+  const batchTrackedIds = useMemo(
+    () => new Set(batchRows.filter((r) => !serialIds.has(r.articleId)).map((r) => r.articleId)),
+    [batchRows, serialIds]
+  );
 
   const fromLocation = locations.find((l) => l.id === fromLocationId) ?? null;
   const targetOptions = locations.filter((l) => l.id !== fromLocationId);
@@ -62,6 +70,9 @@ export function StockTransferPageClient({
   // Linked from a single balance row: only that article is prefilled.
   function defaultQuantity(row: RowWithId): string {
     if (preselectedArticleId && row.articleId !== preselectedArticleId) return "0";
+    // Picked serial numbers: one styck each.
+    const pickedSerials = serialChoices[row.articleId] ?? [];
+    if (serialIds.has(row.articleId) && pickedSerials.length > 0) return String(pickedSerials.length);
     // A chosen batch moves at most its own balance on the location.
     const choice = batchChoices[row.articleId] ?? BATCH_AUTO;
     if (choice !== BATCH_AUTO && batchTrackedIds.has(row.articleId)) {
@@ -78,6 +89,7 @@ export function StockTransferPageClient({
   function selectFrom(id: string) {
     setQuantities({});
     setBatchChoices({});
+    setSerialChoices({});
     setError(null);
     setDone(null);
     setToLocationId("");
@@ -93,6 +105,9 @@ export function StockTransferPageClient({
         articleId: row.articleId,
         quantity: Number(enteredQuantity(row)),
         ...(batchTrackedIds.has(row.articleId) ? batchIdField(batchChoices[row.articleId] ?? BATCH_AUTO) : {}),
+        ...(serialIds.has(row.articleId) && (serialChoices[row.articleId] ?? []).length > 0
+          ? { serialIds: serialChoices[row.articleId] }
+          : {}),
       }))
       .filter((row) => row.quantity > 0);
 
@@ -127,6 +142,7 @@ export function StockTransferPageClient({
       );
       setQuantities({});
       setBatchChoices({});
+      setSerialChoices({});
       reloadBatches();
       setNote("");
       // A deactivated source is no longer a selectable option, so drop it from
@@ -198,7 +214,9 @@ export function StockTransferPageClient({
             columns={[
               { key: "articleNumber", label: "Artikelnummer", width: "160px" },
               { key: "articleName", label: "Benämning", width: "1fr" },
-              ...(batchTrackedIds.size > 0 ? [{ key: "batch", label: "Batch", width: "200px" }] : []),
+              ...(batchTrackedIds.size > 0 || serialIds.size > 0
+                ? [{ key: "batch", label: serialIds.size > 0 && batchTrackedIds.size === 0 ? "Serienummer" : "Batch / serienummer", width: "240px" }]
+                : []),
               { key: "quantityOnHand", label: "Saldo", width: "110px", align: "right" },
               { key: "id", label: "Flytta", width: "160px", align: "right" },
             ]}
@@ -206,6 +224,25 @@ export function StockTransferPageClient({
             renderCell={(row, key) => {
               switch (key) {
                 case "batch":
+                  if (serialIds.has(row.articleId)) {
+                    return (
+                      <SerialCellPicker
+                        ariaLabel={`Serienummer — ${row.articleNumber}`}
+                        rows={batchRows}
+                        articleId={row.articleId}
+                        locationId={fromLocationId}
+                        value={serialChoices[row.articleId] ?? []}
+                        onChange={(next) => {
+                          setSerialChoices((c) => ({ ...c, [row.articleId]: next }));
+                          // The amount follows the picked numbers again.
+                          setQuantities((q) => {
+                            const { [row.articleId]: _gone, ...rest } = q;
+                            return rest;
+                          });
+                        }}
+                      />
+                    );
+                  }
                   return batchTrackedIds.has(row.articleId) ? (
                     <BatchSelect
                       size="sm"

@@ -26,6 +26,23 @@ import styles from "./ScanPageClient.module.css";
 
 type Balance = StockBalance & { id: string };
 
+// A quantity with the article's base unit (the scan answer carries none).
+function QuantityWithUnit({ articleId, quantity }: { articleId: string; quantity: number }) {
+  const [unit, setUnit] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ unit: string }>(`/api/v1/articles/${articleId}`)
+      .then((a) => {
+        if (!cancelled) setUnit(a.unit);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [articleId]);
+  return <>{`${formatQuantity(quantity)} ${unit}`.trim()}</>;
+}
+
 // Lager → Skanna: scan anything and see what it is. The last result stays
 // until the next scan replaces it.
 export function ScanPageClient() {
@@ -54,11 +71,21 @@ export function ScanPageClient() {
       <ScanInput autoFocus onScan={(code) => void onScan(code)} />
       {error && <p className={styles.error}>{error}</p>}
       {loading && <p className={styles.muted}>Söker…</p>}
+      {result?.gs1 && (
+        <p className={styles.muted}>
+          GS1-kod
+          {result.gs1.gtin ? ` · GTIN ${result.gs1.gtin}` : ""}
+          {result.gs1.batch ? ` · batch ${result.gs1.batch}` : ""}
+          {result.gs1.serial ? ` · serienummer ${result.gs1.serial}` : ""}
+          {result.gs1.expiresOn ? ` · utgångsdatum ${result.gs1.expiresOn}` : ""}
+          {result.gs1.quantity !== null ? ` · antal ${result.gs1.quantity}` : ""}
+        </p>
+      )}
       {result && (
         <div className={styles.cards}>
           {result.matches.length === 0 ? (
             <Card maxWidth="none">
-              <p className={styles.title}>Ingen träff för {result.code}</p>
+              <p className={styles.title}>Ingen träff för {result.gs1 ? "koden" : result.code}</p>
             </Card>
           ) : (
             result.matches.map((m) => <MatchCard key={`${m.kind}-${m.id}`} match={m} />)
@@ -108,6 +135,55 @@ function MatchCard({ match }: { match: ScanMatch }) {
           </div>
           <SectionHeading>Innehåll</SectionHeading>
           <Balances query={`locationId=${match.id}&limit=200`} mode="location" />
+        </Card>
+      );
+    case "batch":
+      return (
+        <Card maxWidth="none">
+          <div className={styles.cardHead}>
+            <div>
+              <div className={styles.kind}>{match.batchKind === "serial" ? "Serienummer" : "Batch"}</div>
+              <div className={styles.title}>{match.batchNumber}</div>
+              <div className={styles.sub}>
+                {match.articleNumber} · {match.articleName}
+                {match.expiresOn ? ` · utgångsdatum ${match.expiresOn}` : ""}
+              </div>
+            </div>
+            <GatedLink href={`/lager/sparbarhet?batch=${match.id}`} className={styles.link}>
+              Öppna spårningen
+            </GatedLink>
+          </div>
+          <SectionHeading>Saldo per lagerplats</SectionHeading>
+          {match.locations.length === 0 ? (
+            <p className={styles.muted}>Inget i lager</p>
+          ) : (
+            <Table<{ id: string; place: string; blocked: boolean; quantity: number }>
+              columns={[
+                { key: "place", label: "Lagerplats", width: "1fr" },
+                { key: "quantity", label: "Saldo", width: "110px", align: "right" },
+              ]}
+              rows={match.locations.map((l) => ({
+                id: l.locationId,
+                place: `${l.warehouseName} / ${l.locationName}`,
+                blocked: l.blocked,
+                quantity: l.quantity,
+              }))}
+              renderCell={(row, key) =>
+                key === "place" ? (
+                  <>
+                    {row.place}
+                    {row.blocked && (
+                      <span style={{ marginLeft: 8 }}>
+                        <StatusPill status="stopped" label="Spärrad" compact />
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <QuantityWithUnit articleId={match.articleId} quantity={row.quantity} />
+                )
+              }
+            />
+          )}
         </Card>
       );
     case "purchaseOrder":
