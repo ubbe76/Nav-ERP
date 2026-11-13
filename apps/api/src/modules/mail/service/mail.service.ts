@@ -28,10 +28,28 @@ export class EmailLogEntryNotFoundError extends Error {
   }
 }
 
+// The copy as sent: trimmed, without duplicates (case-insensitive) and
+// without the recipient itself.
+export function normalizeCc(cc: string[] | undefined, to: string): string[] {
+  const seen = new Set([to.trim().toLowerCase()]);
+  const result: string[] = [];
+  for (const raw of cc ?? []) {
+    const address = raw.trim();
+    const key = address.toLowerCase();
+    if (!address || seen.has(key)) continue;
+    seen.add(key);
+    result.push(address);
+  }
+  return result;
+}
+
 export interface OutgoingMail {
   documentType: EmailDocumentType;
   documentId: string | null;
   to: string;
+  // Kopia (inquiry / purchase order): sent as Cc and logged so Skicka om
+  // sends the same copy. Omitted/empty = none.
+  cc?: string[];
   subject: string;
   // The plain-text body — what email_log keeps and what Skicka om replays.
   message: string;
@@ -56,6 +74,7 @@ export interface MailTransport {
   sendMail(opts: {
     from: string;
     to: string;
+    cc?: string[];
     subject: string;
     text: string;
     html?: string;
@@ -90,11 +109,13 @@ export function createMailService(
       const fromEmail = config.fromEmail || config.user;
       const from = config.fromName ? `"${config.fromName.replace(/"/g, "")}" <${fromEmail}>` : fromEmail;
       const transport = transportFactory(config);
+      const cc = normalizeCc(mail.cc, mail.to);
 
       try {
         await transport.sendMail({
           from,
           to: mail.to,
+          cc: cc.length > 0 ? cc : undefined,
           subject: mail.subject,
           text: mail.message,
           html: mail.html,
@@ -106,6 +127,7 @@ export function createMailService(
           documentType: mail.documentType,
           documentId: mail.documentId,
           recipient: mail.to,
+          cc,
           subject: mail.subject,
           message: mail.message,
           attachDrawings: mail.attachDrawings ?? false,
@@ -121,6 +143,7 @@ export function createMailService(
         documentType: mail.documentType,
         documentId: mail.documentId,
         recipient: mail.to,
+        cc,
         subject: mail.subject,
         message: mail.message,
         attachDrawings: mail.attachDrawings ?? false,

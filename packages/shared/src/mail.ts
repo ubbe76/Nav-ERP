@@ -41,6 +41,22 @@ export const sendDocumentEmailSchema = z.object({
 });
 export type SendDocumentEmailInput = z.infer<typeof sendDocumentEmailSchema>;
 
+// Kopia (inquiry / purchase order): extra recipients on the supplier's
+// documents — the supplier's contacts or typed addresses. Sent as Cc and
+// logged so Skicka om sends the same copy.
+export const MAX_EMAIL_CC = 10;
+export const emailCcSchema = z.array(z.string().trim().email().max(255)).max(MAX_EMAIL_CC).default([]);
+export const sendSupplierDocumentEmailSchema = sendDocumentEmailSchema.extend({ cc: emailCcSchema });
+export type SendSupplierDocumentEmailInput = z.infer<typeof sendSupplierDocumentEmailSchema>;
+
+// The purchase order's send: Mottagare omitted = the supplier's E-post för
+// inköpsorder, else its huvudkontakt's address, else the supplier's E-post
+// (400 purchase-order-recipient-missing when there is none).
+export const sendPurchaseOrderEmailSchema = sendSupplierDocumentEmailSchema.extend({
+  to: z.string().trim().email().max(255).optional(),
+});
+export type SendPurchaseOrderEmailInput = z.infer<typeof sendPurchaseOrderEmailSchema>;
+
 // Sales orders carry two printable documents: the quote and the order
 // confirmation. Sending the confirmation is what confirms the quote.
 export const salesEmailVariants = ["quote", "confirmation"] as const;

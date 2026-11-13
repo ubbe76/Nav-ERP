@@ -613,6 +613,7 @@ export interface SupplierExportRecord {
   vatNumber: string | null;
   contactName: string | null;
   email: string | null;
+  purchaseOrderEmail: string | null;
   phone: string | null;
   address: string | null;
   postalCode: string | null;
@@ -625,6 +626,7 @@ export interface SupplierExportRecord {
   deliveryTerm: string | null;
   carrier: string | null;
   carrierCustomerNumber: string | null;
+  freightPaidByUsDefault: boolean;
 }
 
 export function supplierExportBlocks(records: SupplierExportRecord[]): ImportExportBlock[] {
@@ -638,6 +640,7 @@ export function supplierExportBlocks(records: SupplierExportRecord[]): ImportExp
         vatNumber: r.vatNumber,
         contactName: r.contactName,
         email: r.email,
+        purchaseOrderEmail: r.purchaseOrderEmail,
         phone: r.phone,
         address,
         address2,
@@ -652,6 +655,7 @@ export function supplierExportBlocks(records: SupplierExportRecord[]): ImportExp
         deliveryTerm: r.deliveryTerm,
         carrier: r.carrier,
         carrierCustomerNumber: r.carrierCustomerNumber,
+        freightPaidByUsDefault: yesNo(r.freightPaidByUsDefault),
       },
     ];
   });

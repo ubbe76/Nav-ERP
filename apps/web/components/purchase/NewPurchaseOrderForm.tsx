@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
-import { Field, Input } from "../ui/Field";
+import { Field, Input, Toggle } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
@@ -12,7 +12,7 @@ import { useExchangeRateLookup } from "../../lib/useExchangeRate";
 import { formatRate } from "../../lib/currency";
 import { stockholmToday } from "../../lib/date";
 import { DeliveryDateHint } from "../ui/DeliveryDateHint";
-import type { Article, PurchaseOrder, Supplier, SupplierPriceQuote } from "../../lib/types";
+import type { Article, PartnerContact, PurchaseOrder, Supplier, SupplierPriceQuote } from "../../lib/types";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 
 // Skapa inköpsorder (Kvalitet): the avvikelse the order is created for. The
@@ -65,6 +65,34 @@ export function NewPurchaseOrderForm({
   const rateLookup = useExchangeRateLookup(foreign ? supplierCurrency : null, stockholmToday());
   const [yourReference, setYourReference] = useState("");
   const [ourReference, setOurReference] = useState("");
+  // Leverantörens förval: Er referens = the huvudkontakt's name, Frakt på
+  // vårt konto = the supplier card's förval. "Manuellt vinner" — a touched
+  // field is left alone and sent as typed; an untouched one is not sent, so
+  // the server applies the same förval. The reference flag is read when the
+  // contact lookup LANDS (the ref), not from the effect's closure.
+  const [referenceTouched, setReferenceTouched] = useState(false);
+  const referenceTouchedNow = useRef(false);
+  const [freightPaidByUs, setFreightPaidByUs] = useState(lockedSupplier?.freightPaidByUsDefault ?? false);
+  const [freightTouched, setFreightTouched] = useState(false);
+  const contactRequest = useRef(0);
+  const supplierId = supplier?.id ?? null;
+  const supplierFreightDefault = supplier?.freightPaidByUsDefault ?? false;
+  useEffect(() => {
+    if (!freightTouched) setFreightPaidByUs(supplierFreightDefault);
+  }, [supplierId, supplierFreightDefault, freightTouched]);
+  useEffect(() => {
+    const request = ++contactRequest.current;
+    if (!supplierId) {
+      if (!referenceTouchedNow.current) setYourReference("");
+      return;
+    }
+    apiFetch<PartnerContact[]>(`/api/v1/suppliers/${supplierId}/contacts`)
+      .catch(() => [] as PartnerContact[])
+      .then((contacts) => {
+        if (request !== contactRequest.current || referenceTouchedNow.current) return;
+        setYourReference((contacts.find((c) => c.isPrimary)?.name ?? "").slice(0, 100));
+      });
+  }, [supplierId]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -84,7 +112,9 @@ export function NewPurchaseOrderForm({
           expectedDeliveryDate: expectedDeliveryDate || undefined,
           note: note || undefined,
           ...(foreign && exchangeRate.trim() ? { exchangeRate: Number(exchangeRate) } : {}),
-          yourReference: yourReference.trim() || undefined,
+          // Untouched = omitted: the server fills in the supplier's förval.
+          ...(referenceTouched ? { yourReference: yourReference.trim() } : {}),
+          ...(freightTouched ? { freightPaidByUs } : {}),
           ourReference: ourReference.trim() || undefined,
           ...(deviation ? { deviationId: deviation.id } : {}),
         }),
@@ -181,7 +211,11 @@ export function NewPurchaseOrderForm({
             id="yourReference"
             maxLength={100}
             value={yourReference}
-            onChange={(e) => setYourReference(e.target.value)}
+            onChange={(e) => {
+              referenceTouchedNow.current = true;
+              setReferenceTouched(true);
+              setYourReference(e.target.value);
+            }}
           />
         </Field>
         <Field label="Vår referens (valfritt)" htmlFor="ourReference">
@@ -193,6 +227,19 @@ export function NewPurchaseOrderForm({
           />
         </Field>
       </FormRow>
+
+      <FormHint attached>Er referens förifylls med leverantörens huvudkontakt.</FormHint>
+
+      <Field label="Frakt på vårt konto" htmlFor="freightPaidByUs">
+        <Toggle
+          id="freightPaidByUs"
+          checked={freightPaidByUs}
+          onChange={(e) => {
+            setFreightTouched(true);
+            setFreightPaidByUs(e.target.checked);
+          }}
+        />
+      </Field>
 
       <Field label="Anteckning (valfritt)" htmlFor="note">
         <Input id="note" value={note} onChange={(e) => setNote(e.target.value)} />

@@ -27,6 +27,7 @@ export interface EmailLogExportRow {
   createdAt: string | Date;
   documentType: EmailDocumentType;
   recipient: string;
+  cc?: string[] | null;
   subject: string;
   status: EmailStatus;
 }
@@ -35,6 +36,8 @@ export const emailLogExportColumns: CsvColumn<EmailLogExportRow>[] = [
   { label: "Tid", value: (r) => (r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt), format: "datetime" },
   { label: "Dokument", value: (r) => EMAIL_DOCUMENT_TYPE_LABELS[r.documentType] },
   { label: "Mottagare", value: (r) => r.recipient },
+  // Kopia (inquiry / purchase order) — its own column in the export.
+  { label: "Kopia", value: (r) => (r.cc ?? []).join(", ") },
   { label: "Ämne", value: (r) => r.subject },
   { label: "Status", value: (r) => EMAIL_STATUS_LABELS[r.status] },
 ];

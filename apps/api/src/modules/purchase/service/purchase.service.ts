@@ -197,6 +197,14 @@ export class PurchaseOrderExchangeRateError extends Error {
   }
 }
 
+// Skicka inköpsorder without Mottagare, and the supplier has no address.
+export class PurchaseOrderRecipientMissingError extends Error {
+  constructor() {
+    super("The supplier has no email address — give a recipient");
+    this.name = "PurchaseOrderRecipientMissingError";
+  }
+}
+
 export class InquiryNotFoundError extends Error {
   constructor(id: string) {
     super(`Inquiry ${id} not found`);
@@ -1283,7 +1291,8 @@ export function createPurchaseService(
     // Emails the inquiry as a PDF attachment. Sending is what "skickad"
     // means, so a draft transitions to sent — but only when SMTP succeeded
     // (sendMail throws otherwise). Later statuses are plain resends.
-    async sendInquiryEmail(id: string, input: SendDocumentEmailInput) {
+    // Kopia (input.cc): sent as Cc and logged, so Skicka om sends the same.
+    async sendInquiryEmail(id: string, input: SendDocumentEmailInput & { cc?: string[] }) {
       const inquiry = await repo.findInquiryById(id);
       if (!inquiry) throw new InquiryNotFoundError(id);
       if (inquiry.status === "ordered" || inquiry.status === "cancelled") {
@@ -1300,6 +1309,7 @@ export function createPurchaseService(
         documentType: "inquiry",
         documentId: id,
         to: input.to,
+        cc: input.cc,
         subject: input.subject,
         message: input.message,
         attachments: dedupeAttachmentFilenames([attachment, ...extra]),
@@ -1448,13 +1458,17 @@ export function createPurchaseService(
     async getPurchaseOrder(id: string) {
       const order = await repo.findPurchaseOrderById(id);
       if (!order) return null;
-      const [supplier, book, linkedSalesOrders] = await Promise.all([
+      const [supplier, book, linkedSalesOrders, defaults] = await Promise.all([
         repo.findSupplierById(order.supplierId),
         repo.vatCodeBook(),
         repo.linkedSalesOrders(id),
+        repo.supplierOrderDefaults(order.supplierId),
       ]);
       return {
         ...order,
+        // Who a sent order goes to (E-post för inköpsorder → huvudkontakt →
+        // the supplier's E-post) — the send dialog's Mottagare; null = none.
+        defaultRecipient: defaults.purchaseOrderRecipient,
         vat: supplier ? purchaseOrderVat(book, supplier) : null,
         // Leveransadress (null = the company's address) and the sales orders
         // the lego rows belong to — the card's "Hämta från kundorder".
@@ -1672,12 +1686,21 @@ export function createPurchaseService(
     // without them): the article's own drawings when the operation says
     // "use article drawings", otherwise the file uploaded on the operation.
     // The attachDrawings checkbox keeps governing the other rows only.
-    async sendPurchaseOrderEmail(orderId: string, input: SendDocumentEmailInput) {
+    // Mottagare (input.to) omitted = the supplier's E-post för inköpsorder,
+    // else its huvudkontakt's address, else the supplier's E-post — the same
+    // address GET /purchase-orders/:id gives the dialog (defaultRecipient).
+    // Kopia (input.cc) is sent as Cc and logged, so Skicka om sends the same.
+    async sendPurchaseOrderEmail(
+      orderId: string,
+      input: Omit<SendDocumentEmailInput, "to"> & { to?: string; cc?: string[] }
+    ) {
       const order = await repo.findPurchaseOrderById(orderId);
       if (!order) throw new PurchaseOrderNotFoundError(orderId);
       if (order.status === "cancelled" || order.status === "closed") {
         throw new InvalidStatusTransitionError(`Cannot email an order in status "${order.status}"`);
       }
+      const to = input.to ?? (await repo.supplierOrderDefaults(order.supplierId)).purchaseOrderRecipient;
+      if (!to) throw new PurchaseOrderRecipientMissingError();
       const attachment = await renderPurchaseOrderPdf(order);
 
       const extra = await legoAwareAttachments(
@@ -1689,7 +1712,8 @@ export function createPurchaseService(
       await mail.sendMail({
         documentType: "purchase_order",
         documentId: orderId,
-        to: input.to,
+        to,
+        cc: input.cc,
         subject: input.subject,
         message: input.message,
         attachments: dedupeAttachmentFilenames([attachment, ...extra]),

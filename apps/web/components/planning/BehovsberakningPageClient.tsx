@@ -16,7 +16,7 @@ import { ListExportLink, ListFilterSelect, ListToggleFilter, ListToolbar, Pagina
 import { useListColumns } from "../ui/ListColumns";
 import { FormActions, FormError, FormHint, FormNotice } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
-import { fetchDefaultRecipientAndLanguage } from "../../lib/mail";
+import { fetchPurchaseOrderRecipientAndLanguage } from "../../lib/mail";
 import { documentMailTexts } from "../../lib/documentMailTexts";
 import type { DocumentLanguage } from "../../lib/documentLanguage";
 import { createLegoInquiries } from "../../lib/legoInquiries";
@@ -295,7 +295,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
     if (!mailTarget) return;
     let cancelled = false;
     setMailTo(null);
-    fetchDefaultRecipientAndLanguage("suppliers", mailTarget.supplierId).then(({ to, language }) => {
+    fetchPurchaseOrderRecipientAndLanguage(mailTarget.id).then(({ to, language }) => {
       if (!cancelled) {
         setMailTo(to);
         setMailLanguage(language);
@@ -1156,6 +1156,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
             label: "Maila",
             modalTitle: `Skicka ${mailTarget.orderNumber} via e-post`,
             endpoint: `/api/v1/purchase-orders/${mailTarget.id}/send-email`,
+            ccSupplierId: mailTarget.supplierId,
             subject: documentMailTexts({ kind: "purchaseOrder", number: mailTarget.orderNumber }, mailLanguage).subject,
             message: documentMailTexts({ kind: "purchaseOrder", number: mailTarget.orderNumber }, mailLanguage).body,
           }}

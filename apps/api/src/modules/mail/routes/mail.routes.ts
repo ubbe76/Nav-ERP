@@ -101,10 +101,11 @@ export async function mailRoutes(
         attachDrawings: entry.attachDrawings,
       };
       switch (entry.documentType) {
+        // Kopia is replayed as logged (inquiry / purchase order).
         case "inquiry":
-          return await purchaseService.sendInquiryEmail(entry.documentId!, input);
+          return await purchaseService.sendInquiryEmail(entry.documentId!, { ...input, cc: entry.cc });
         case "purchase_order":
-          return await purchaseService.sendPurchaseOrderEmail(entry.documentId!, input);
+          return await purchaseService.sendPurchaseOrderEmail(entry.documentId!, { ...input, cc: entry.cc });
         // Visa tilläggspriser is replayed as logged (undefined on old rows ⇒
         // the customer's current setting, as a fresh send would).
         case "quote":

@@ -280,6 +280,7 @@ const SUPPLIER_PASSTHROUGH_FIELDS = [
   "vatNumber",
   "contactName",
   "email",
+  "purchaseOrderEmail",
   "phone",
   "address",
   "postalCode",
@@ -289,6 +290,7 @@ const SUPPLIER_PASSTHROUGH_FIELDS = [
   "language",
   "ourCustomerNumber",
   "carrierCustomerNumber",
+  "freightPaidByUsDefault",
 ] as const satisfies readonly (keyof SupplierCreatePlan)[];
 
 // Suppliers have no price list — three registers, not four.

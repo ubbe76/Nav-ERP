@@ -57,6 +57,7 @@ export default async function InquiryDetailPage(props: { params: Promise<{ id: s
                   label: "Skicka via e-post",
                   modalTitle: `Skicka ${inquiry.inquiryNumber} via e-post`,
                   endpoint: `/api/v1/inquiries/${inquiry.id}/send-email`,
+                  ccSupplierId: inquiry.supplierId,
                   subject: inquiryMail.subject,
                   message: inquiryMail.body,
                 },

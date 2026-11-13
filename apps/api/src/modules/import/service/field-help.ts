@@ -1249,6 +1249,15 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       example: "order@example.com",
     },
     {
+      field: "purchaseOrderEmail",
+      label: "E-post för inköpsorder",
+      required: false,
+      header: "E-post för inköpsorder",
+      description:
+        "Adressen som inköpsorder skickas till, max 255 tecken — utan den går ordern till huvudkontakten eller leverantörens E-post. En ogiltig adress stoppar inte raden — fältet lämnas tomt på en ny post och orört på en befintlig, med en varning.",
+      example: "inkopsorder@example.com",
+    },
+    {
       field: "phone",
       label: "Telefon",
       required: false,
@@ -1373,6 +1382,14 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       text: true,
       description: `Vårt kundnummer hos leverantörens speditör, max 50 tecken. ${UNTOUCHED}`,
       example: "F-98765",
+    },
+    {
+      field: "freightPaidByUsDefault",
+      label: "Frakt på vårt konto",
+      required: false,
+      header: "Frakt på vårt konto",
+      description: `Ja eller Nej (även 1/0). Ja gör att nya förfrågningar och inköpsordrar till leverantören får Frakt på vårt konto ifyllt. En ny leverantör utan värde blir Nej. ${UNTOUCHED}`,
+      example: "Ja",
     },
   ],
 

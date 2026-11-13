@@ -1,4 +1,5 @@
 import { boolean, pgEnum, pgTable, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 // Which business document an email carried. "test" rows come from the
 // "Skicka testmejl" button on /system/installningar and have no documentId.
@@ -41,6 +42,12 @@ export const emailLog = pgTable("email_log", {
   // Avvikelser (migration 0153): the reklamationsrapport was sent with
   // Orsaksanalys/Åtgärd/Beslut — reused on resend. Null = not applicable.
   includeDetails: boolean("include_details"),
+  // Kopia (migration 0217): the cc addresses as sent (inquiry / purchase
+  // order) — reused on resend. Empty = no copy.
+  cc: text("cc")
+    .array()
+    .notNull()
+    .default(sql`'{}'::text[]`),
   status: emailStatusEnum("status").notNull(),
   error: text("error"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

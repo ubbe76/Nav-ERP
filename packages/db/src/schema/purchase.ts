@@ -55,6 +55,9 @@ export const suppliers = pgTable("suppliers", {
   name: varchar("name", { length: 255 }).notNull(),
   contactName: varchar("contact_name", { length: 255 }),
   email: varchar("email", { length: 255 }),
+  // E-post för inköpsorder (migration 0217): the recipient a purchase order
+  // is sent to — null = the supplier's own email above.
+  purchaseOrderEmail: varchar("purchase_order_email", { length: 255 }),
   phone: varchar("phone", { length: 50 }),
   // Street address; postal code and city are separate fields.
   address: text("address"),
@@ -67,6 +70,10 @@ export const suppliers = pgTable("suppliers", {
   carrierId: uuid("carrier_id").references(() => carriers.id, { onDelete: "restrict" }),
   // Our account number with the carrier (kundnummer hos speditör).
   carrierCustomerNumber: varchar("carrier_customer_number", { length: 50 }),
+  // Frakt på vårt konto (förval, migration 0217): what freight_paid_by_us
+  // starts as on a new inquiry / purchase order to this supplier
+  // (supplier-order-defaults.ts — an explicit value always wins).
+  freightPaidByUsDefault: boolean("freight_paid_by_us_default").notNull().default(false),
   // Our customer number at this supplier (vårt kundnummer hos leverantören)
   // — printed on inquiry/PO so the supplier can find us in their system.
   // Free text, NOT unique, no snapshot: documents always print the current

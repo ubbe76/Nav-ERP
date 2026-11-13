@@ -218,6 +218,9 @@ async function seed() {
         deliveryTermId: deliveryTerm!.id,
         carrierId: carrier!.id,
         carrierCustomerNumber: "123456",
+        // Leverantörens förval (0217) round-trip too.
+        purchaseOrderEmail: "inkopsorder@stal.example.com",
+        freightPaidByUsDefault: true,
       },
       { supplierNumber: "9002", name: "Lego & Yta GmbH", country: "DE", currency: "EUR", language: "en", active: false },
     ])

@@ -195,6 +195,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   // Valuta
   // The server names the currency and day ("Ingen kurs för EUR 2026-10-24 —
   // ange kursen själv").
+  "purchase-order-recipient-missing": "Leverantören har ingen e-postadress — ange en mottagare.",
   "exchange-rate-unavailable": serverMessage("Ingen kurs hittades — ange kursen själv."),
   "riksbank-unavailable": (err) => {
     const reason = (err.body as { reason?: string } | undefined)?.reason;

@@ -30,6 +30,7 @@ export const SUPPLIER_IMPORT_FIELDS = [
   "vatNumber",
   "contactName",
   "email",
+  "purchaseOrderEmail",
   "phone",
   "address",
   "address2",
@@ -44,6 +45,7 @@ export const SUPPLIER_IMPORT_FIELDS = [
   "deliveryTerm",
   "carrier",
   "carrierCustomerNumber",
+  "freightPaidByUsDefault",
 ] as const;
 export type SupplierImportField = (typeof SUPPLIER_IMPORT_FIELDS)[number];
 
@@ -59,6 +61,7 @@ const MAX_LENGTHS: Partial<Record<SupplierImportField, number>> = {
   vatNumber: 30,
   contactName: 255,
   email: 255,
+  purchaseOrderEmail: 255,
   phone: 50,
   postalCode: 20,
   city: 100,
@@ -78,6 +81,7 @@ const FIELD_LABELS: Record<SupplierImportField, string> = {
   vatNumber: "VAT-nummer",
   contactName: "Kontaktperson",
   email: "E-post",
+  purchaseOrderEmail: "E-post för inköpsorder",
   phone: "Telefon",
   address: "Adress",
   address2: "Adressrad 2",
@@ -92,12 +96,21 @@ const FIELD_LABELS: Record<SupplierImportField, string> = {
   deliveryTerm: "Leveransvillkor",
   carrier: "Leveranssätt/speditör",
   carrierCustomerNumber: "Kundnummer hos speditör",
+  freightPaidByUsDefault: "Frakt på vårt konto",
 };
 
 // E-mail policy: an invalid address never blocks the row — the value is
 // dropped (the cell is then treated as empty: NULL on create, untouched on
 // update) with a row warning.
 const emailSchema = z.string().email();
+
+// Ja/Nej in the style of articles.ts's parseActive. null = junk.
+function parseYesNoCell(cell: string): boolean | null {
+  const value = cell.trim().toLowerCase();
+  if (value === "ja" || value === "1" || value === "true") return true;
+  if (value === "nej" || value === "0" || value === "false") return false;
+  return null;
+}
 // Mirrors createSupplierSchema's currency regex (packages/shared/src/purchase.ts).
 const CURRENCY_PATTERN = /^[A-Z]{3}$/;
 
@@ -113,6 +126,7 @@ const SPECIAL_FIELDS: ReadonlySet<SupplierImportField> = new Set<SupplierImportF
   "paymentTerm",
   "deliveryTerm",
   "carrier",
+  "freightPaidByUsDefault",
 ]);
 
 // Normalized header -> target field (see import.service.ts's
@@ -138,6 +152,8 @@ export const SUPPLIER_HEADER_ALIASES: Record<string, string> = {
   referens: "contactName",
   epost: "email",
   mail: "email",
+  epostforinkopsorder: "purchaseOrderEmail",
+  epostinkopsorder: "purchaseOrderEmail",
   telefon: "phone",
   adress: "address",
   besoksadress: "address",
@@ -172,6 +188,7 @@ export const SUPPLIER_HEADER_ALIASES: Record<string, string> = {
   leveranssattspeditor: "carrier",
   speditor: "carrier",
   kundnummerhosspeditor: "carrierCustomerNumber",
+  fraktpavartkonto: "freightPaidByUsDefault",
 };
 
 // Applied in a first pass, before the general alias contest — a specific
@@ -246,6 +263,8 @@ export interface SupplierCreatePlan {
   vatNumber?: string;
   contactName?: string;
   email?: string;
+  // E-post för inköpsorder — the recipient of a sent purchase order.
+  purchaseOrderEmail?: string;
   phone?: string;
   address?: string;
   postalCode?: string;
@@ -268,6 +287,8 @@ export interface SupplierCreatePlan {
   carrierId?: string;
   carrierName?: string;
   carrierCustomerNumber?: string;
+  // Frakt på vårt konto (förval); omitted = the column's DB default false.
+  freightPaidByUsDefault?: boolean;
 }
 
 export interface SupplierUpdatePlan {
@@ -425,7 +446,7 @@ export async function planSupplierImport(
       const raw = record[field] ?? "";
       if (raw === "") continue;
       values[field] = raw;
-      if (field === "email" && !emailSchema.safeParse(raw).success) {
+      if ((field === "email" || field === "purchaseOrderEmail") && !emailSchema.safeParse(raw).success) {
         warnings.push(`Ogiltig e-postadress '${raw}' — fältet lämnades tomt`);
         continue;
       }
@@ -479,6 +500,17 @@ export async function planSupplierImport(
       const parsed = parseDocumentLanguageCell(languageCell);
       if (parsed === null) errors.push(`Ogiltigt språk '${languageCell}' — ange Svenska eller Engelska`);
       else patch.language = parsed;
+    }
+
+    // Frakt på vårt konto (förval) — Ja/Nej (1/0), anything else is a row
+    // ERROR. Empty cell: Nej on create (the column default), untouched on
+    // update.
+    const freightCell = record["freightPaidByUsDefault"] ?? "";
+    if (freightCell !== "") {
+      values["freightPaidByUsDefault"] = freightCell;
+      const flag = parseYesNoCell(freightCell);
+      if (flag === null) errors.push(`Ogiltigt värde '${freightCell}' för Frakt på vårt konto — ange Ja eller Nej`);
+      else patch.freightPaidByUsDefault = flag;
     }
 
     // The three register lookups: id on a hit, name (queued for creation)
