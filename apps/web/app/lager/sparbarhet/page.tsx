@@ -37,10 +37,11 @@ export default async function TraceabilityPage(props: { searchParams: Promise<Pa
   const search = typeof searchParams.search === "string" ? searchParams.search.trim() : "";
   if (list && search !== "" && list.total === 1 && list.rows[0]) redirect(`/lager/sparbarhet?batch=${list.rows[0].id}`);
 
-  const title = trace ? `Batch ${trace.batch.batchNumber ?? "Okänd"}` : "Spårbarhet";
+  const serialRoot = trace?.batch.kind === "serial";
+  const title = trace ? `${serialRoot ? "Serienummer" : "Batch"} ${trace.batch.batchNumber ?? "Okänd"}` : "Spårbarhet";
   const meta = trace
-    ? `${trace.batch.articleNumber} ${trace.batch.articleName}`
-    : `${(list?.total ?? 0).toLocaleString("sv-SE")} batcher`;
+    ? `${trace.batch.articleNumber} ${trace.batch.articleName}${trace.batch.burnt ? " — Bränt (utleveransen ångrad)" : ""}`
+    : `${(list?.total ?? 0).toLocaleString("sv-SE")} träffar`;
 
   return (
     <AppShell active="Lager">
@@ -53,7 +54,7 @@ export default async function TraceabilityPage(props: { searchParams: Promise<Pa
           {batchId && (
             <>
               <Link href="/lager/sparbarhet" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
-                Alla batcher
+                Alla batcher och serienummer
               </Link>
               <Link href={`/lager/transaktioner?batch=${batchId}`} className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
                 Lagerlogg
@@ -64,7 +65,7 @@ export default async function TraceabilityPage(props: { searchParams: Promise<Pa
         </div>
       </div>
 
-      {batchId && !trace && <p>Batchen hittades inte.</p>}
+      {batchId && !trace && <p>Batchen eller serienumret hittades inte.</p>}
       {trace && (
         <>
           <BatchDates batch={trace.batch} />

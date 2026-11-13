@@ -26,6 +26,23 @@ import styles from "./ScanPageClient.module.css";
 
 type Balance = StockBalance & { id: string };
 
+// A quantity with the article's base unit (the scan answer carries none).
+function QuantityWithUnit({ articleId, quantity }: { articleId: string; quantity: number }) {
+  const [unit, setUnit] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ unit: string }>(`/api/v1/articles/${articleId}`)
+      .then((a) => {
+        if (!cancelled) setUnit(a.unit);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [articleId]);
+  return <>{`${formatQuantity(quantity)} ${unit}`.trim()}</>;
+}
+
 // Lager → Skanna: scan anything and see what it is. The last result stays
 // until the next scan replaces it.
 export function ScanPageClient() {
@@ -162,7 +179,7 @@ function MatchCard({ match }: { match: ScanMatch }) {
                     )}
                   </>
                 ) : (
-                  formatQuantity(row.quantity)
+                  <QuantityWithUnit articleId={match.articleId} quantity={row.quantity} />
                 )
               }
             />

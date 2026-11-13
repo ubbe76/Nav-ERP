@@ -20,6 +20,7 @@ describe("händelseloggens etiketter", () => {
     ["action", "lost"],
     ["action", "reopened"],
     ["action", "order_created"],
+    ["action", "production_started"],
     ["action", "created_from_quote"],
     ["entity", "theme"],
     ["action", "theme_created"],

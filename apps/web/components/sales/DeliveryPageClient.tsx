@@ -581,6 +581,42 @@ export function DeliveryPageClient({
     router.refresh();
   }
 
+  // Serienummer under "Leverera nu": picked in stock, or given at the delivery.
+  function serialControl(row: SalesOrderRow) {
+    if (stockSerial(row)) {
+      return (
+        <SerialCellPicker
+          ariaLabel={`Serienummer — ${row.articleNumber}`}
+          rows={batchRows}
+          articleId={row.articleId}
+          locationId={rowLocations[row.id] || locationId || null}
+          value={rowSerialIds[row.id] ?? []}
+          onChange={(next) => {
+            setRowSerialIds((prev) => ({ ...prev, [row.id]: next }));
+            // One styck per number: Leverera nu follows the picked numbers.
+            const quantities = { ...countRef.current.quantities };
+            if (next.length > 0) quantities[row.id] = String(toUnitQuantity(next.length, row.unitFactor));
+            else delete quantities[row.id];
+            setCount({ ...countRef.current, quantities });
+          }}
+        />
+      );
+    }
+    if (deliverySerial(row)) {
+      return (
+        <DeliverySerialsField
+          ariaLabel={`Serienummer — ${row.articleNumber}`}
+          articleId={row.articleId}
+          count={serialCountOf(toBaseQuantity(Number(enteredQuantity(scanRowOf(row), count)), row.unitFactor))}
+          value={rowGivenSerials[row.id] ?? []}
+          onChange={(next) => setRowGivenSerials((prev) => ({ ...prev, [row.id]: next }))}
+        />
+      );
+    }
+    return null;
+  }
+
+
   const pill = order ? SALES_ORDER_STATUS_PILL[order.status] : null;
   // Kvar att plocka, shown once counting has started.
   const rowsLeft = count.counting ? scanRows.filter((r) => (leftToCount(r, count) ?? 0) > 0).length : 0;
@@ -767,8 +803,9 @@ export function DeliveryPageClient({
                 : []),
               { key: "location", label: "Lagerplats", width: "190px" },
               ...(trackedArticleIds.length > 0 ? [{ key: "batch", label: "Batch", width: "170px" }] : []),
-              ...(hasSerialRows ? [{ key: "serial", label: "Serienummer", width: "240px" }] : []),
-              { key: "id", label: "Leverera nu", width: "180px", align: "right" },
+              // Serienummer sit under the amount (no column of their own: the
+              // table would overflow beside the menu).
+              { key: "id", label: "Leverera nu", width: hasSerialRows ? "240px" : "180px", align: "right" },
             ]}
             rows={openRows}
             highlightedRowId={lastRowId}
@@ -817,38 +854,6 @@ export function DeliveryPageClient({
                       onChange={(v) => setRowBatches((prev) => ({ ...prev, [row.id]: v }))}
                     />
                   ) : null;
-                case "serial":
-                  if (stockSerial(row)) {
-                    return (
-                      <SerialCellPicker
-                        ariaLabel={`Serienummer — ${row.articleNumber}`}
-                        rows={batchRows}
-                        articleId={row.articleId}
-                        locationId={rowLocations[row.id] || locationId || null}
-                        value={rowSerialIds[row.id] ?? []}
-                        onChange={(next) => {
-                          setRowSerialIds((prev) => ({ ...prev, [row.id]: next }));
-                          // One styck per number: Leverera nu follows the picked numbers.
-                          const quantities = { ...countRef.current.quantities };
-                          if (next.length > 0) quantities[row.id] = String(toUnitQuantity(next.length, row.unitFactor));
-                          else delete quantities[row.id];
-                          setCount({ ...countRef.current, quantities });
-                        }}
-                      />
-                    );
-                  }
-                  if (deliverySerial(row)) {
-                    return (
-                      <DeliverySerialsField
-                        ariaLabel={`Serienummer — ${row.articleNumber}`}
-                        articleId={row.articleId}
-                        count={serialCountOf(toBaseQuantity(Number(enteredQuantity(scanRowOf(row), count)), row.unitFactor))}
-                        value={rowGivenSerials[row.id] ?? []}
-                        onChange={(next) => setRowGivenSerials((prev) => ({ ...prev, [row.id]: next }))}
-                      />
-                    );
-                  }
-                  return null;
                 case "id":
                   return (
                     <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
@@ -869,6 +874,7 @@ export function DeliveryPageClient({
                           scanField.current?.focus();
                         }}
                       />
+                      {serialControl(row)}
                       {(() => {
                         const warning = configuredDeliveryWarning(
                           row,

@@ -72,7 +72,7 @@ export function SerialNumbersInput({
   onChange,
   count,
   ariaLabel,
-  placeholder = "Skriv eller skanna serienummer",
+  placeholder = "Skanna nummer",
   inputRef,
   disabled,
 }: {
@@ -271,7 +271,7 @@ export function DeliverySerialsField({
 
   return (
     <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "stretch", gap: 4, minWidth: 0, maxWidth: "100%" }}>
-      <SerialNumbersInput value={value} onChange={change} count={count} ariaLabel={ariaLabel} placeholder="Serienummer ur serien" />
+      <SerialNumbersInput value={value} onChange={change} count={count} ariaLabel={ariaLabel} placeholder="Nummer" />
       <span style={muted}>
         {loading ? "Hämtar förslag…" : "Förslag ur artikelns serie — ändra vid behov. "}
         {touched.current && (
@@ -357,7 +357,7 @@ export function SerialCellPicker({
         type="text"
         size="md"
         aria-label={ariaLabel}
-        placeholder="Skanna eller sök serienummer"
+        placeholder="Sök nummer"
         value={text}
         onChange={(e) => {
           setText(e.target.value);

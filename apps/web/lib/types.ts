@@ -5738,6 +5738,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   cancelled: "Avbruten",
   lost: "Förlorad",
   order_created: "Kundorder skapad",
+  production_started: "Tillverkning startad",
   created_from_quote: "Skapad från offert",
   reopened: "Öppnad igen",
   issued: "Utfärdad",

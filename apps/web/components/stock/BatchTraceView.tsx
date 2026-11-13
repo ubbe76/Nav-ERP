@@ -113,8 +113,8 @@ function BackwardNode({ node, root }: { node: BackwardTraceNode; root: boolean }
       )}
       <StopNote stop={node.stop} />
       {origin && (
-        <Line kind="Skapat vid utleverans" amount={qty(origin.rowQuantity, unit)}>
-          följesedel {origin.deliveryNumber},{" "}
+        <Line kind="Skapat vid utleverans" amount={qty(1, unit)}>
+          {origin.rowQuantity !== 1 ? `(rad om ${qty(origin.rowQuantity, unit)}) ` : ""}följesedel {origin.deliveryNumber},{" "}
           <GatedLink href={`/forsaljning/ordrar/${origin.salesOrderId}`} style={{ color: "var(--accent-fg)" }}>
             {origin.orderNumber}
           </GatedLink>{" "}

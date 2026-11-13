@@ -280,7 +280,6 @@ export function LagerTab({
                     <Field label="Serienummer skapas" htmlFor="serialAssignedAt">
                       <Select
                         id="serialAssignedAt"
-                        size="sm"
                         value={serialAssignedAt}
                         onChange={(e) => setSerialAssignedAt(e.target.value as "receipt" | "delivery")}
                       >
@@ -291,7 +290,6 @@ export function LagerTab({
                     <Field label="Serienummerserie" htmlFor="serialSeriesKey">
                       <Select
                         id="serialSeriesKey"
-                        size="sm"
                         value={newSeriesOpen ? "__new" : serialSeriesKey}
                         onChange={(e) => {
                           if (e.target.value === "__new") {
@@ -423,10 +421,10 @@ export function LagerTab({
           <SectionHeading>Saldo per batch</SectionHeading>
           <Table<{ id: string } & ArticleBatchBalances["batches"][number]>
             columns={[
-              { key: "batch", label: "Batch", width: "1fr" },
-              { key: "expiresOn", label: "Utgångsdatum", width: "150px" },
-              { key: "location", label: "Lagerplatser", width: "2fr" },
-              { key: "quantity", label: "Saldo", width: "140px", align: "right" },
+              { key: "batch", label: "Batch", width: "minmax(0, 1fr)" },
+              { key: "expiresOn", label: "Utgångsdatum", width: "minmax(0, 150px)" },
+              { key: "location", label: "Lagerplatser", width: "minmax(0, 2fr)" },
+              { key: "quantity", label: "Saldo", width: "minmax(80px, 120px)", align: "right" },
             ]}
             rows={batchBalances.batches.map((b) => ({ ...b, id: b.batchId ?? "unknown" }))}
             renderCell={(row, key) => {
@@ -543,9 +541,9 @@ function SerialBalances({ batches }: { batches: ArticleBatchBalances["batches"] 
       <SectionHeading>Saldo per serienummer</SectionHeading>
       <Table<PlaceRow>
         columns={[
-          { key: "place", label: "Lagerplats", width: "1fr" },
-          { key: "count", label: "Antal", width: "100px", align: "right" },
-          { key: "numbers", label: "Serienummer", width: "3fr" },
+          { key: "place", label: "Lagerplats", width: "minmax(0, 1fr)" },
+          { key: "count", label: "Antal", width: "minmax(70px, 100px)", align: "right" },
+          { key: "numbers", label: "Serienummer", width: "minmax(0, 3fr)" },
         ]}
         rows={rows}
         renderCell={(row, key) => {

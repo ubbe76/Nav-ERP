@@ -880,13 +880,14 @@ function RowBatchFields({
         onChange={(e) => onChange({ ...value, expiresOn: e.target.value })}
       />
       {value.parts.map((p) => (
-        <span key={p.key} style={{ display: "inline-flex", gap: 4, alignItems: "center", flexWrap: "nowrap", whiteSpace: "nowrap" }}>
+        <span key={p.key} style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
           <Input
             type="number"
             min="0"
             step="any"
             size="sm"
             aria-label={`Antal i delbatch — ${row.articleNumber}`}
+            style={{ width: 96 }}
             placeholder="Antal"
             value={p.quantity}
             onChange={(e) => setPart(p.key, { quantity: e.target.value })}
@@ -895,6 +896,7 @@ function RowBatchFields({
             type="text"
             size="sm"
             aria-label={`Batch för delen — ${row.articleNumber}`}
+            style={{ width: 140 }}
             placeholder={orderNumber}
             value={p.batchNumber}
             onChange={(e) => setPart(p.key, { batchNumber: e.target.value })}
