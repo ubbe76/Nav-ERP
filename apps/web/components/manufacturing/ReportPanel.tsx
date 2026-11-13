@@ -5,7 +5,7 @@ import { Card } from "../ui/Card";
 import { Input, Label, Select } from "../ui/Field";
 import { FormError, FormHint } from "../ui/Form";
 import { BatchSelect, useBatchBalances } from "../stock/BatchSelect";
-import { BATCH_AUTO, batchIdField } from "../../lib/batch";
+import { BATCH_AUTO, batchIdField, expiredBatchLocationId } from "../../lib/batch";
 import { ScrapReasonFields } from "../quality/ScrapReasonFields";
 import { useScrapReasons } from "../../lib/useScrapReasons";
 import { locationOptionLabel } from "../../lib/stockLocations";
@@ -443,7 +443,10 @@ function MaterialRow({
         apiFetch(`/api/v1/manufacturing-orders/${orderId}/materials/${m.id}/consume`, {
           method: "POST",
           body: JSON.stringify({
-            locationId: locationId || undefined,
+            locationId:
+              locationId ||
+              (batchTracked ? expiredBatchLocationId(batchRows, m.componentArticleId, batch) : undefined) ||
+              undefined,
             ...(batchTracked ? batchIdField(batch) : {}),
             // Untouched: the exact rest in the base unit. The prefill is
             // rounded in the row's unit, and turning it back (2 st shown as

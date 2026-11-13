@@ -14,7 +14,7 @@ import { ScanPanel } from "../ui/ScanInput";
 import { useCountState, useScanFeedback, useScanQueue } from "../ui/useOrderScan";
 import { ApiError, apiFetch } from "../../lib/api";
 import { BatchSelect, useBatchBalances } from "../stock/BatchSelect";
-import { BATCH_AUTO, batchIdField } from "../../lib/batch";
+import { BATCH_AUTO, batchIdField, expiredBatchLocationId } from "../../lib/batch";
 import { outflowLocationChoices } from "../../lib/stockLocations";
 import { confirmDialog } from "../../lib/confirm";
 import { notify } from "../../lib/notice";
@@ -344,7 +344,12 @@ export function DeliveryPageClient({
               rowId: row.id,
               quantity: toBaseQuantity(quantity, row.unitFactor),
               // Only a row that overrides the field above carries its own plats.
-              locationId: rowLocations[row.id] || undefined,
+              locationId:
+                rowLocations[row.id] ||
+                (row.articleBatchTracked
+                  ? expiredBatchLocationId(batchRows, row.articleId, rowBatches[row.id] ?? BATCH_AUTO, locationId)
+                  : undefined) ||
+                undefined,
               ...(row.articleBatchTracked ? batchIdField(rowBatches[row.id] ?? BATCH_AUTO) : {}),
             })),
           }),

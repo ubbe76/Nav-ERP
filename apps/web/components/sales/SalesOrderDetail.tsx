@@ -55,7 +55,7 @@ import { CurrencyInput } from "../ui/CurrencyInput";
 import { OrderRateField } from "./OrderRateField";
 import { apiFetch } from "../../lib/api";
 import { BatchSelect, useBatchBalances } from "../stock/BatchSelect";
-import { BATCH_AUTO, batchIdField } from "../../lib/batch";
+import { BATCH_AUTO, batchIdField, expiredBatchLocationId } from "../../lib/batch";
 import { stashReleaseWarnings } from "../../lib/releaseWarnings";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { askBumpRevision } from "../../lib/revision";
@@ -2110,7 +2110,10 @@ function DeliverGoodsForm({
       await apiFetch(`/api/v1/sales-orders/${orderId}/deliver`, {
         method: "POST",
         body: JSON.stringify({
-          locationId: locationId || undefined,
+          locationId:
+            locationId ||
+            (selectedRow?.articleBatchTracked ? expiredBatchLocationId(batchRows, selectedRow.articleId, batch) : undefined) ||
+            undefined,
           rows: [
             {
               rowId,

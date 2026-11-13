@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AppShell } from "../../../components/AppShell";
 import { BatchesList } from "../../../components/stock/BatchesList";
+import { BatchDates } from "../../../components/stock/BatchDates";
 import { BatchTraceView } from "../../../components/stock/BatchTraceView";
 import { Pagination } from "../../../components/ui/ListControls";
 import buttonStyles from "../../../components/ui/Button.module.css";
@@ -29,7 +30,7 @@ export default async function TraceabilityPage(props: { searchParams: Promise<Pa
     : null;
   const list = batchId
     ? null
-    : await apiGet<Paged<StockBatchListRow>>(`/api/v1/stock/batches${listApiQuery(searchParams, [], pageSize)}`, cookieHeader);
+    : await apiGet<Paged<StockBatchListRow>>(`/api/v1/stock/batches${listApiQuery(searchParams, ["expiry"], pageSize)}`, cookieHeader);
 
   // A search that finds exactly one batch opens its trace (the batch links in
   // the log and on the receipt are ?search=<number>).
@@ -64,7 +65,12 @@ export default async function TraceabilityPage(props: { searchParams: Promise<Pa
       </div>
 
       {batchId && !trace && <p>Batchen hittades inte.</p>}
-      {trace && <BatchTraceView trace={trace} />}
+      {trace && (
+        <>
+          <BatchDates batch={trace.batch} />
+          <BatchTraceView trace={trace} />
+        </>
+      )}
       {list && (
         <>
           <BatchesList rows={list.rows} />

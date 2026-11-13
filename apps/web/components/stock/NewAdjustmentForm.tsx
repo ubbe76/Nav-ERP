@@ -27,6 +27,7 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
   // negative one picks which batch to take from.
   const [batchInfo, setBatchInfo] = useState<ArticleBatchBalances | null>(null);
   const [batchNumber, setBatchNumber] = useState("");
+  const [expiresOn, setExpiresOn] = useState("");
   const [batchChoice, setBatchChoice] = useState(BATCH_AUTO);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -41,6 +42,7 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
   useEffect(() => {
     setBatchInfo(null);
     setBatchNumber("");
+    setExpiresOn("");
     setBatchChoice(BATCH_AUTO);
     if (!article) return;
     let cancelled = false;
@@ -88,7 +90,9 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
           articleId: article.id,
           locationId: locationId || undefined,
           quantityDelta: baseDelta,
-          ...(batchTracked && baseDelta > 0 && batchNumber.trim() ? { batchNumber: batchNumber.trim() } : {}),
+          ...(batchTracked && baseDelta > 0 && batchNumber.trim()
+            ? { batchNumber: batchNumber.trim(), ...(expiresOn ? { expiresOn } : {}) }
+            : {}),
           ...(batchTracked && baseDelta < 0 ? batchIdField(batchChoice) : {}),
           transactionType: "inventory_adjustment",
           note: note || undefined,
@@ -170,6 +174,18 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
               placeholder="Okänd"
               value={batchNumber}
               onChange={(e) => setBatchNumber(e.target.value)}
+            />
+          </Field>
+        )}
+        {article && batchTracked && batchInfo && baseDelta > 0 && (
+          <Field label="Utgångsdatum (valfritt)" htmlFor="adjustmentExpiresOn">
+            <Input
+              id="adjustmentExpiresOn"
+              type="date"
+              size="sm"
+              value={expiresOn}
+              disabled={batchNumber.trim() === ""}
+              onChange={(e) => setExpiresOn(e.target.value)}
             />
           </Field>
         )}

@@ -11,7 +11,7 @@ import { SectionHeading } from "../ui/SectionHeading";
 import { Field, Input, Select } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
-import type { Article, ArticleBatchBalances, ArticleLocations, StockBalance } from "../../lib/types";
+import type { Article, ArticleBatchBalances, ArticleTracking, ArticleLocations, StockBalance } from "../../lib/types";
 import { articleLocationRole, ownPrimaryLocationId } from "../../lib/stockLocations";
 import { ArticleLocationsCard } from "./ArticleLocationsCard";
 import { ForecastCard } from "./ForecastCard";
@@ -42,7 +42,9 @@ export function LagerTab({
   const [rounding, setRounding] = useState(article.rounding ?? "");
   const [leadTime, setLeadTime] = useState(article.manufacturingLeadTimeDays != null ? String(article.manufacturingLeadTimeDays) : "");
   const [forecastControlled, setForecastControlled] = useState(article.forecastControlled ?? false);
-  const [batchTracked, setBatchTracked] = useState(article.batchTracked ?? false);
+  const currentTracking: ArticleTracking = article.tracking ?? (article.batchTracked ? "batch" : "none");
+  const [tracking, setTracking] = useState<ArticleTracking>(currentTracking);
+  const [shelfLife, setShelfLife] = useState(article.shelfLifeDays != null ? String(article.shelfLifeDays) : "");
   const [batchSetting, setBatchSetting] = useState(false);
   const [batchBalances, setBatchBalances] = useState<ArticleBatchBalances | null>(null);
   const [pending, setPending] = useState(false);
@@ -83,7 +85,11 @@ export function LagerTab({
           orderQuantity: orderQuantity.trim() === "" ? null : Number(orderQuantity),
           rounding: rounding.trim() === "" ? null : Number(rounding),
           forecastControlled,
-          ...(showBatchToggle && batchTracked !== Boolean(article.batchTracked) ? { batchTracked } : {}),
+          // Serienummer cannot be chosen yet (the API refuses it); only Ingen/Batch are sent.
+          ...(showBatchToggle && tracking !== currentTracking ? { tracking } : {}),
+          ...(showBatchToggle && tracking === "batch" && shelfLife.trim() !== String(article.shelfLifeDays ?? "")
+            ? { shelfLifeDays: shelfLife.trim() === "" ? null : Number(shelfLife) }
+            : {}),
           // Only manufactured articles carry a lead time; others leave it untouched.
           ...(article.type === "manufactured"
             ? { manufacturingLeadTimeDays: leadTime.trim() === "" ? null : Number(leadTime) }
@@ -205,15 +211,35 @@ export function LagerTab({
           </FormHint>
           {showBatchToggle && (
             <>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, margin: "12px 0 4px" }}>
-                <input type="checkbox" checked={batchTracked} onChange={(e) => setBatchTracked(e.target.checked)} />
-                Batchstyrd
-              </label>
+              <Field label="Spårning" htmlFor="tracking">
+                <Select id="tracking" size="sm" value={tracking} onChange={(e) => setTracking(e.target.value as ArticleTracking)}>
+                  <option value="none">Ingen</option>
+                  <option value="batch">Batch</option>
+                </Select>
+              </Field>
               <FormHint attached>
-                Batchstyrd: saldot hålls per batch. Befintligt saldo hamnar i batchen Okänd, som dras först; därefter
-                dras äldsta batch först. Batchnummer anges vid inleverans — tomt blir inköpsorderns nummer —
-                och tillverkade varor får tillverkningsordernumret som batch.
+                Batch: saldot hålls per batch. Befintligt saldo hamnar i batchen Okänd, som dras först; därefter
+                dras batchen med kortast utgångsdatum först (utan datum: äldsta först). Batchnummer anges vid
+                inleverans — tomt blir inköpsorderns nummer — och tillverkade varor får tillverkningsordernumret som batch.
               </FormHint>
+              {tracking === "batch" && (
+                <>
+                  <Field label="Hållbarhet (dagar)" htmlFor="shelfLifeDays">
+                    <Input
+                      id="shelfLifeDays"
+                      type="number"
+                      min="1"
+                      step="1"
+                      size="sm"
+                      value={shelfLife}
+                      onChange={(e) => setShelfLife(e.target.value)}
+                    />
+                  </Field>
+                  <FormHint attached>
+                    En tillverkad batch får inleveransdagen plus Hållbarhet som utgångsdatum. Tomt: inget datum.
+                  </FormHint>
+                </>
+              )}
             </>
           )}
           <p style={{ margin: "12px 0 4px" }}>
@@ -253,6 +279,7 @@ export function LagerTab({
           <Table<{ id: string } & ArticleBatchBalances["batches"][number]>
             columns={[
               { key: "batch", label: "Batch", width: "1fr" },
+              { key: "expiresOn", label: "Utgångsdatum", width: "150px" },
               { key: "location", label: "Lagerplatser", width: "2fr" },
               { key: "quantity", label: "Saldo", width: "140px", align: "right" },
             ]}
@@ -265,6 +292,14 @@ export function LagerTab({
                   </GatedLink>
                 ) : (
                   "Okänd"
+                );
+              }
+              if (key === "expiresOn") {
+                if (!row.expiresOn) return "—";
+                return row.expired ? (
+                  <span style={{ color: "var(--status-stopped-text)", fontWeight: 600 }}>{row.expiresOn} — utgången</span>
+                ) : (
+                  row.expiresOn
                 );
               }
               if (key === "location") {

@@ -14,6 +14,7 @@ import { ScanPanel } from "../ui/ScanInput";
 import { useScanFeedback, useScanQueue } from "../ui/useOrderScan";
 import { locationCountHref, ORDER_KIND_LABEL } from "./StockCountScanPanel";
 import { API_URL, apiFetch } from "../../lib/api";
+import { stockholmToday } from "../../lib/date";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { resolveCountScan } from "../../lib/countScan";
 import buttonStyles from "../ui/Button.module.css";
@@ -413,7 +414,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
       <Table<StockCountRow>
         columns={[
           { key: "articleNumber", label: "Artikel", width: "1fr" },
-          ...(session.rows.some((r) => r.batchTracked) ? [{ key: "batch", label: "Batch", width: "130px" }] : []),
+          ...(session.rows.some((r) => r.batchTracked) ? [{ key: "batch", label: "Batch", width: "160px" }] : []),
           { key: "unit", label: "Enhet", width: "70px" },
           { key: "snapshotQuantity", label: "Bokfört", width: "100px", align: "right" },
           { key: "countedQuantity", label: "Räknat", width: "120px", align: "right" },
@@ -429,7 +430,18 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
             case "articleNumber":
               return `${row.articleNumber} — ${row.articleName}`;
             case "batch":
-              return row.batchTracked ? (row.batchNumber ?? "Okänd") : "";
+              return row.batchTracked ? (
+                <>
+                  {row.batchNumber ?? "Okänd"}
+                  {row.expiresOn && (
+                    <span style={{ display: "block", fontSize: "0.85em", color: row.expiresOn < stockholmToday() ? "var(--status-stopped-text)" : undefined }}>
+                      {row.expiresOn < stockholmToday() ? "utgången" : "utgår"} {row.expiresOn}
+                    </span>
+                  )}
+                </>
+              ) : (
+                ""
+              );
             case "unit":
               return row.unit ?? "—";
             case "snapshotQuantity":

@@ -56,12 +56,14 @@ interface BatchPart {
   key: number;
   quantity: string;
   batchNumber: string;
+  expiresOn: string;
 }
 interface RowBatches {
   batchNumber: string;
+  expiresOn: string;
   parts: BatchPart[];
 }
-const NO_BATCHES: RowBatches = { batchNumber: "", parts: [] };
+const NO_BATCHES: RowBatches = { batchNumber: "", expiresOn: "", parts: [] };
 
 const articleLabel = (a: { articleNumber: string; name: string }) => `${a.articleNumber} · ${a.name}`;
 
@@ -344,11 +346,11 @@ export function GoodsReceiptPageClient({
       const rowBatches = row.articleBatchTracked ? (batches[row.id] ?? NO_BATCHES) : NO_BATCHES;
       // One call per batch part (the main part first); a failed part stops
       // the row so the booked ones are always a prefix.
-      const parts: { quantity: number; batchNumber: string; extraIndex: number | null }[] = [];
-      if (quantity) parts.push({ quantity, batchNumber: rowBatches.batchNumber.trim(), extraIndex: null });
+      const parts: { quantity: number; batchNumber: string; expiresOn: string; extraIndex: number | null }[] = [];
+      if (quantity) parts.push({ quantity, batchNumber: rowBatches.batchNumber.trim(), expiresOn: rowBatches.expiresOn, extraIndex: null });
       rowBatches.parts.forEach((p, i) => {
         const q = Number(p.quantity);
-        if (q > 0) parts.push({ quantity: q, batchNumber: p.batchNumber.trim(), extraIndex: i });
+        if (q > 0) parts.push({ quantity: q, batchNumber: p.batchNumber.trim(), expiresOn: p.expiresOn, extraIndex: i });
       });
       if (parts.length === 0) continue;
       let rowBooked = false;
@@ -363,6 +365,8 @@ export function GoodsReceiptPageClient({
                   locationId: locationId || undefined,
                   quantity: toBaseQuantity(part.quantity, row.unitFactor),
                   ...(row.articleBatchTracked && part.batchNumber ? { batchNumber: part.batchNumber } : {}),
+                  // "" = no date (the API keeps the batch's own, or none).
+                  ...(row.articleBatchTracked && part.expiresOn ? { expiresOn: part.expiresOn } : {}),
                   allowMaterialShortage,
                 }),
               }
@@ -695,6 +699,14 @@ function RowBatchFields({
         value={value.batchNumber}
         onChange={(e) => onChange({ ...value, batchNumber: e.target.value })}
       />
+      <Input
+        type="date"
+        size="sm"
+        aria-label={`Utgångsdatum — ${row.articleNumber}`}
+        title="Utgångsdatum (valfritt)"
+        value={value.expiresOn}
+        onChange={(e) => onChange({ ...value, expiresOn: e.target.value })}
+      />
       {value.parts.map((p) => (
         <span key={p.key} style={{ display: "inline-flex", gap: 4, alignItems: "center", flexWrap: "nowrap", whiteSpace: "nowrap" }}>
           <Input
@@ -715,6 +727,14 @@ function RowBatchFields({
             value={p.batchNumber}
             onChange={(e) => setPart(p.key, { batchNumber: e.target.value })}
           />
+          <Input
+            type="date"
+            size="sm"
+            aria-label={`Utgångsdatum för delen — ${row.articleNumber}`}
+            title="Utgångsdatum (valfritt)"
+            value={p.expiresOn}
+            onChange={(e) => setPart(p.key, { expiresOn: e.target.value })}
+          />
           <Button
             type="button"
             variant="secondary"
@@ -730,7 +750,7 @@ function RowBatchFields({
         type="button"
         variant="secondary"
         size="small"
-        onClick={() => onChange({ ...value, parts: [...value.parts, { key: newKey(), quantity: "", batchNumber: "" }] })}
+        onClick={() => onChange({ ...value, parts: [...value.parts, { key: newKey(), quantity: "", batchNumber: "", expiresOn: "" }] })}
       >
         Dela på flera batcher
       </Button>

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Table } from "../ui/Table";
-import { ListToolbar } from "../ui/ListControls";
+import { ListFilterSelect, ListToolbar } from "../ui/ListControls";
 import { useListColumns } from "../ui/ListColumns";
 import { GatedLink } from "../ui/GatedLink";
 import { formatQuantity } from "../../lib/format";
@@ -13,6 +13,7 @@ const COLUMNS = [
   { key: "batchNumber", label: "Batch", width: "180px" },
   { key: "article", label: "Artikel", width: "1fr" },
   { key: "origin", label: "Ursprung", width: "130px" },
+  { key: "expiresOn", label: "Utgångsdatum", width: "150px" },
   { key: "createdAt", label: "Skapad", width: "110px" },
   { key: "quantity", label: "Saldo", width: "120px", align: "right" as const },
 ];
@@ -22,7 +23,18 @@ export function BatchesList({ rows }: { rows: StockBatchListRow[] }) {
   const view = useListColumns(COLUMNS);
   return (
     <>
-      <ListToolbar placeholder="Sök batch, artikelnummer eller benämning…">{view.chooser}</ListToolbar>
+      <ListToolbar placeholder="Sök batch, artikelnummer eller benämning…">
+        <ListFilterSelect
+          param="expiry"
+          allLabel="Alla utgångsdatum"
+          ariaLabel="Filtrera på utgångsdatum"
+          options={[
+            { value: "due", label: "Utgår" },
+            { value: "expired", label: "Utgångna" },
+          ]}
+        />
+        {view.chooser}
+      </ListToolbar>
       <Table<StockBatchListRow>
         columns={view.columns}
         onColumnResize={view.onColumnResize}
@@ -48,6 +60,13 @@ export function BatchesList({ rows }: { rows: StockBatchListRow[] }) {
               );
             case "origin":
               return STOCK_BATCH_ORIGIN_LABELS[row.origin] ?? row.origin;
+            case "expiresOn":
+              if (!row.expiresOn) return "—";
+              return row.expired ? (
+                <span style={{ color: "var(--status-stopped-text)", fontWeight: 600 }}>{row.expiresOn} — utgången</span>
+              ) : (
+                row.expiresOn
+              );
             case "createdAt":
               return formatStockholmDate(row.createdAt);
             case "quantity":
