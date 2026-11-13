@@ -421,9 +421,11 @@ export function LagerTab({
           <SectionHeading>Saldo per batch</SectionHeading>
           <Table<{ id: string } & ArticleBatchBalances["batches"][number]>
             columns={[
-              { key: "batch", label: "Batch", width: "minmax(0, 1fr)" },
-              { key: "expiresOn", label: "Utgångsdatum", width: "minmax(0, 150px)" },
-              { key: "location", label: "Lagerplatser", width: "minmax(0, 2fr)" },
+              // Minimum widths: with minmax(0, …) the columns shrank to nothing
+              // on the narrow card and the headers ran together (BATCHUTGÅNGSDATUM).
+              { key: "batch", label: "Batch", width: "minmax(100px, 1fr)" },
+              { key: "expiresOn", label: "Utgångsdatum", width: "minmax(120px, 150px)" },
+              { key: "location", label: "Lagerplatser", width: "minmax(120px, 2fr)" },
               { key: "quantity", label: "Saldo", width: "minmax(80px, 120px)", align: "right" },
             ]}
             rows={batchBalances.batches.map((b) => ({ ...b, id: b.batchId ?? "unknown" }))}
