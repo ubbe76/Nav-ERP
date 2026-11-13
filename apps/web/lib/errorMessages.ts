@@ -44,6 +44,27 @@ const serverMessage =
   (err) =>
     err.message || fallback;
 
+// validation-failed: when the refusal is a number outside its field's range
+// (Talfält — the bound is the column's, 2026-11-13) say so with the limit;
+// the field name in `issues` is the API's, not the form's label, so it is
+// not shown. Any other validation error keeps the general text.
+const VALIDATION_FAILED_MESSAGE = "Ogiltiga uppgifter — kontrollera fälten.";
+const limitText = (value: number): string => value.toLocaleString("sv-SE", { maximumFractionDigits: 6 });
+function validationFailedMessage(err: ApiError): string {
+  const issues = (err.body as { issues?: unknown } | undefined)?.issues;
+  if (!Array.isArray(issues)) return VALIDATION_FAILED_MESSAGE;
+  for (const issue of issues as { code?: unknown; type?: unknown; maximum?: unknown; minimum?: unknown; inclusive?: unknown }[]) {
+    if (issue?.type !== "number") continue;
+    if (issue.code === "too_big" && typeof issue.maximum === "number") {
+      return `Ett tal är för stort — ${issue.inclusive === false ? "under" : "högst"} ${limitText(issue.maximum)}.`;
+    }
+    if (issue.code === "too_small" && typeof issue.minimum === "number") {
+      return `Ett tal är för litet — ${issue.inclusive === false ? "större än" : "minst"} ${limitText(issue.minimum)}.`;
+    }
+  }
+  return VALIDATION_FAILED_MESSAGE;
+}
+
 // "1 234,56" for a number (or numeric string) in an error body, else null.
 const moneyOrNull = (value: unknown): string | null =>
   typeof value === "number" || (typeof value === "string" && value !== "" && Number.isFinite(Number(value)))
@@ -1002,7 +1023,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "stamp-session-not-found": "Stämplingen finns inte längre — ladda om listan.",
   "inactive-absence-type": "Frånvarotypen är inaktiv — välj en annan.",
   // generic (thrown by the zod/body-parsing layer, not a named domain error)
-  "validation-failed": "Ogiltiga uppgifter — kontrollera fälten.",
+  "validation-failed": validationFailedMessage,
   "invalid-request-body": "Ogiltig förfrågan.",
   "internal-server-error": "Ett oväntat fel inträffade.",
   "work-in-progress-account-conflict":

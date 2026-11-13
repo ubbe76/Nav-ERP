@@ -26,6 +26,17 @@ export const INT4_MAX = 2_147_483_647;
 export const numericMax = (precision: number, scale: number): number =>
   Number(`${"9".repeat(precision - scale)}${scale > 0 ? `.${"9".repeat(scale)}` : ""}`);
 
+// The smallest positive value a numeric(…, scale) column keeps: anything
+// below half of it rounds to 0 on insert, so a "positive" quantity of
+// 0.00001 was stored as a zero row (numericStep(4) = 0.0001). A positive
+// number field is .min(numericStep(scale)), not .positive().
+export const numericStep = (scale: number): number => Number(`1e-${scale}`);
+
+// Whole-day lead times in int4 columns: the routing's lead time is
+// numeric(6,1), so 99 999 days is the reach of every lead time — a larger
+// int4 would push the date arithmetic past the year 9999.
+export const LEAD_TIME_DAYS_MAX = numericMax(5, 0);
+
 // Optional free text. A blanked input arrives as "" and is normalized to
 // null here rather than in each writer, so "not filled in" has exactly one
 // representation. First used for routing-operation texts (manufacturing.ts),

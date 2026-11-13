@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { listQuerySchema } from "./list.js";
 import { materialShortageOverrideSchema } from "./manufacturing.js";
-import { blankSafe } from "./coerce.js";
+import { blankSafe, numericMax, numericStep } from "./coerce.js";
 
 // The stamp and attendance history (GET /stamp-sessions and
 // GET /attendance-sessions without ?open=true): the list pattern, search on
@@ -52,7 +52,7 @@ export const updateEmployeeSchema = z
     // Löneuppgifter — wage is timlön or månadslön depending on employmentType.
     employmentType: z.enum(employmentTypes).nullable().optional(),
     overtimeCompensation: z.enum(overtimeDispositions).optional(),
-    wage: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
+    wage: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).nullable().optional(),
     weeklyHours: blankSafe(z.coerce.number().nonnegative().max(168)).nullable().optional(),
     // Standardveckoschema — null clears it.
     defaultWeekScheduleId: z.string().uuid().nullable().optional(),
@@ -271,7 +271,7 @@ export const createTimeReportSchema = z.object({
   employeeId: z.string().uuid(),
   moOperationId: z.string().uuid(),
   date: z.string().date(),
-  hours: blankSafe(z.coerce.number().positive()),
+  hours: blankSafe(z.coerce.number().min(numericStep(2)).max(numericMax(10, 2))),
   note: z.string().max(2000).optional(),
   // Ställ/Produktion; null or absent = ej uppdelad.
   kind: timeKindSchema.nullable().optional(),
@@ -298,7 +298,7 @@ export type UpdateAttendanceSessionInput = z.infer<typeof updateAttendanceSessio
 export const updateTimeReportSchema = z
   .object({
     date: z.string().date().optional(),
-    hours: blankSafe(z.coerce.number().positive()).optional(),
+    hours: blankSafe(z.coerce.number().min(numericStep(2)).max(numericMax(10, 2))).optional(),
     note: z.string().max(2000).nullable().optional(),
     // Rättning av typen: null = ej uppdelad, undefined keeps it.
     kind: timeKindSchema.nullable().optional(),
@@ -331,8 +331,8 @@ export type StampInInput = z.infer<typeof stampInSchema>;
 export const stampOutSchema = z
   .object({
     note: z.string().max(2000).optional(),
-    quantityOk: blankSafe(z.coerce.number().nonnegative()).default(0),
-    quantityScrapped: blankSafe(z.coerce.number().nonnegative()).default(0),
+    quantityOk: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).default(0),
+    quantityScrapped: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).default(0),
     scrapReason: z.string().trim().max(500).optional(),
     // Kvalitet: the Avvikelseorsak (applies_scrap) — required by the API when
     // the register has an active scrap reason; scrapReason is then the

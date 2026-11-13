@@ -3,7 +3,7 @@ import { z } from "zod";
 import { listQuerySchema } from "./list.js";
 import { currencyCodeSchema, exchangeRateValueSchema } from "./currency.js";
 import type { PriceSource } from "./sales.js";
-import { blankSafe } from "./coerce.js";
+import { blankSafe, numericMax, numericStep } from "./coerce.js";
 
 export const configuratorCodeSchema = z
   .string()
@@ -27,20 +27,22 @@ export type ConfiguratorRuleEffect = z.infer<
   typeof configuratorRuleEffectSchema
 >;
 
-const amount = blankSafe(z.coerce.number().finite());
-const number2 = blankSafe(
-  z.coerce
-    .number()
-    .finite()
-    .refine((v) => Number(v.toFixed(2)) === v, "Högst 2 decimaler")
-);
-const number4 = blankSafe(
-  z.coerce
-    .number()
-    .finite()
-    // Exact: an absolute tolerance on v×10⁴ misjudges large numbers.
-    .refine((v) => Number(v.toFixed(4)) === v, "Högst 4 decimaler")
-);
+// Within the column numeric(precision, scale), either sign — a larger
+// number is a 400 on the field, not Postgres 22003. `amount` (priceAdd,
+// numeric(14,2)) is rounded by the column; the others refuse more decimals.
+const amount = blankSafe(z.coerce.number().finite().min(-numericMax(14, 2)).max(numericMax(14, 2)));
+const decimals = (precision: number, scale: number) =>
+  blankSafe(
+    z.coerce
+      .number()
+      .finite()
+      .min(-numericMax(precision, scale))
+      .max(numericMax(precision, scale))
+      // Exact: an absolute tolerance on v×10⁴ misjudges large numbers.
+      .refine((v) => Number(v.toFixed(scale)) === v, `Högst ${scale} decimaler`)
+  );
+const number2 = decimals(14, 2);
+const number4 = decimals(14, 4);
 
 /**
  * Whether a number-group value lies on the step grid counted from min — the
@@ -275,9 +277,9 @@ const operationFields = {
   sequenceNo: blankSafe(z.coerce.number().int().min(1).max(9999)),
   workCenterId: z.string().uuid(),
   description: z.string().trim().max(255).nullable().optional(),
-  setupTime: number2.refine((v) => v >= 0, "Får inte vara negativt").nullable().optional(),
+  setupTime: decimals(10, 2).refine((v) => v >= 0, "Får inte vara negativt").nullable().optional(),
   setupFormula: formulaText.nullable().optional(),
-  runTimePerUnit: number4.refine((v) => v >= 0, "Får inte vara negativt").nullable().optional(),
+  runTimePerUnit: decimals(10, 4).refine((v) => v >= 0, "Får inte vara negativt").nullable().optional(),
   runFormula: formulaText.nullable().optional(),
   // Lego pricing (subcontract resources), like routing_operations.setup_price/unit_price; null clears.
   setupPrice: number2.refine((v) => v >= 0, "Får inte vara negativt").nullable().optional(),
@@ -304,7 +306,7 @@ export const configuratorReorderSchema = z.object({
 // 5: the external API and — Välj — clear a default with it).
 export const configuratorSelectionSchema = z.record(
   z.string().max(20),
-  z.union([z.string().max(20), z.boolean(), z.number().finite(), z.null()]),
+  z.union([z.string().max(20), z.boolean(), z.number().finite().min(-numericMax(14, 4)).max(numericMax(14, 4)), z.null()]),
 );
 export type ConfiguratorSelection = z.infer<typeof configuratorSelectionSchema>;
 // Valuta: the price in a currency — currency omitted = the customer's (with a
@@ -314,7 +316,7 @@ export type ConfiguratorSelection = z.infer<typeof configuratorSelectionSchema>;
 export const evaluateConfigurationSchema = z.object({
   selection: configuratorSelectionSchema.default({}),
   customerId: z.string().uuid().optional(),
-  quantity: blankSafe(z.coerce.number().positive()).default(1),
+  quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))).default(1),
   currency: currencyCodeSchema.optional(),
   exchangeRate: exchangeRateValueSchema.optional(),
 });
@@ -554,14 +556,15 @@ export const variantSetsSchema = z.record(
   z.union([
     z.array(z.string().max(20).nullable()).min(1).max(200),
     z.array(z.boolean()).min(1).max(2),
-    z.array(z.number().finite().nullable()).min(1).max(200),
+    z.array(z.number().finite().min(-numericMax(14, 4)).max(numericMax(14, 4)).nullable()).min(1).max(200),
   ])
 );
 export const variantRequestSchema = z.object({
   sets: variantSetsSchema.default({}),
   calcQuantity: z.coerce
     .number()
-    .positive()
+    .min(numericStep(4))
+    .max(numericMax(14, 4))
     .refine((n) => Number(n.toFixed(4)) === n, "Högst 4 decimaler"),
 });
 export type VariantRequest = z.infer<typeof variantRequestSchema>;

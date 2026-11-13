@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { round2 } from "./money.js";
-import { blankSafe } from "./coerce.js";
+import { blankSafe, numericMax } from "./coerce.js";
 import { businessDateSchema } from "./business-date.js";
 import { listQuerySchema } from "./list.js";
 
@@ -12,19 +12,20 @@ export type ParcelKind = z.infer<typeof parcelKindSchema>;
 export const shipmentStatusSchema = z.enum(["draft", "booked", "delivered", "cancelled"]);
 export type ShipmentStatus = z.infer<typeof shipmentStatusSchema>;
 
-const nonNegative = blankSafe(z.coerce.number().nonnegative());
-const optionalNonNegative = nonNegative.nullable();
+// A non-negative number within its column numeric(precision, scale); null clears.
+const optionalNonNegative = (precision: number, scale: number) =>
+  blankSafe(z.coerce.number().nonnegative().max(numericMax(precision, scale))).nullable();
 
 // Kollitypens fraktfält (PATCH /package-types/:id/freight) — the whole set.
 // Only Paket/Pall are offered for a package type; "other" is internal.
 export const packageTypeFreightSchema = z.object({
   parcelKind: z.enum(["package", "pallet"]),
-  lengthMm: optionalNonNegative,
-  widthMm: optionalNonNegative,
-  heightMm: optionalNonNegative,
-  tareWeight: optionalNonNegative,
+  lengthMm: optionalNonNegative(10, 2),
+  widthMm: optionalNonNegative(10, 2),
+  heightMm: optionalNonNegative(10, 2),
+  tareWeight: optionalNonNegative(12, 3),
   stackable: z.boolean(),
-  loadingMeters: optionalNonNegative,
+  loadingMeters: optionalNonNegative(8, 2),
 });
 export type PackageTypeFreightInput = z.infer<typeof packageTypeFreightSchema>;
 
@@ -88,7 +89,7 @@ export const updateShipmentSchema = z
     pickupDate: businessDateSchema.optional(),
     pickupFrom: hhmm.optional(),
     pickupTo: hhmm.optional(),
-    customerPrice: optionalNonNegative.optional(),
+    customerPrice: optionalNonNegative(14, 2).optional(),
   })
   .refine((d) => Object.keys(d).length > 0, "At least one field must be provided");
 export type UpdateShipmentInput = z.infer<typeof updateShipmentSchema>;
@@ -101,7 +102,7 @@ export const parcelInputSchema = z.object({
   weightKg: blankSafe(z.coerce.number().nonnegative().max(100000)),
   quantity: blankSafe(z.coerce.number().int().positive().max(999)),
   stackable: z.boolean(),
-  loadingMeters: optionalNonNegative,
+  loadingMeters: optionalNonNegative(8, 2),
   description: optionalLine(100),
 });
 export type ParcelInput = z.infer<typeof parcelInputSchema>;

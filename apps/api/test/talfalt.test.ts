@@ -8,6 +8,8 @@ import { createAuthService } from "../src/modules/auth/service/auth.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { testArticleService } from "./helpers/services.js";
 import { parsed } from "./helpers/parsed.js";
+import { ApiError } from "../../web/lib/api.js";
+import { apiErrorMessage } from "../../web/lib/errorMessages.js";
 
 // Talfält (medelbugg 2026-11-10) through the real app: a number larger than
 // its column is a 400 — on the field where the schema knows the bound
@@ -124,6 +126,60 @@ describe("number fields — bounds and blanks", () => {
     expect(res.json().code).toBe("number-out-of-range");
     const rows = await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM cost_calculations`);
     expect(rows[0]!.n).toBe(0);
+  });
+
+  // Gränser per fält i övriga register (2026-11-13): every shared schema's
+  // number is bounded by its column (number-field-bounds.test.ts walks them
+  // all); a few through the routes, with the web's text for them.
+  const issuesOf = (res: Awaited<ReturnType<typeof post>>) =>
+    (res.json().issues as { path: (string | number)[]; code: string }[]).map((i) => `${i.path.join(".")}:${i.code}`);
+
+  it("refuses an article weight, a supplier invoice amount and a unit factor outside their columns on the field", async () => {
+    const weight = await post("/articles", { articleNumber: "TF-2", name: "Vikt", type: "purchased", weight: 1e10 });
+    expect(weight.statusCode).toBe(400);
+    expect(weight.json().code).toBe("validation-failed");
+    expect(issuesOf(weight)).toEqual(["weight:too_big"]);
+    // numeric(12,3) holds 999 999 999,999 — the largest still passes.
+    const largest = await post("/articles", { articleNumber: "TF-2", name: "Vikt", type: "purchased", weight: 999_999_999.999 });
+    expect(largest.statusCode).toBe(201);
+
+    // A signed amount (a credit is negative): both ends of numeric(14,2).
+    const invoice = { supplierId: crypto.randomUUID(), invoiceNumber: "F-1", invoiceDate: "2026-11-13" };
+    for (const netAmount of [-1e13, 1e13]) {
+      const res = await post("/supplier-invoices", { ...invoice, netAmount });
+      expect(res.statusCode, String(netAmount)).toBe(400);
+      expect(issuesOf(res)).toEqual([`netAmount:${netAmount < 0 ? "too_small" : "too_big"}`]);
+    }
+
+    // A positive factor below the column's sixth decimal would be stored as 0.
+    const unit = await post(`/articles/${largest.json().id}/units`, { unitId: crypto.randomUUID(), quantityPerBase: 0.0000001 });
+    expect(unit.statusCode).toBe(400);
+    expect(issuesOf(unit)).toEqual(["quantityPerBase:too_small"]);
+  });
+
+  it("refuses a calculation quantity that the column would round to 0", async () => {
+    const { parent } = await makeProduct();
+    const res = await post(`/articles/${parent.id}/cost-calculations/pre-calculate`, { quantity: 0.00004, save: true });
+    expect(res.statusCode).toBe(400);
+    expect(issuesOf(res)).toEqual(["quantity:too_small"]);
+    const rows = await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM cost_calculations`);
+    expect(rows[0]!.n).toBe(0);
+    const smallest = await post(`/articles/${parent.id}/cost-calculations/pre-calculate`, { quantity: 0.0001, save: false });
+    expect(smallest.statusCode).toBe(200);
+  });
+
+  it("the web names the limit when a number is out of range, and keeps the general text otherwise", async () => {
+    const asWeb = (res: Awaited<ReturnType<typeof post>>) =>
+      apiErrorMessage(new ApiError(res.json().error, res.statusCode, res.json().code, res.json()), "reserv").replace(/\s/g, " ");
+    const big = await post("/articles", { articleNumber: "TF-3", name: "Vikt", type: "purchased", weight: 1e10 });
+    expect(asWeb(big)).toBe("Ett tal är för stort — högst 999 999 999,999.");
+    const negative = await post("/articles", { articleNumber: "TF-3", name: "Vikt", type: "purchased", weight: -1 });
+    expect(asWeb(negative)).toBe("Ett tal är för litet — minst 0.");
+    const { parent } = await makeProduct();
+    const tiny = await post(`/articles/${parent.id}/cost-calculations/pre-calculate`, { quantity: 0.00004 });
+    expect(asWeb(tiny)).toBe("Ett tal är för litet — minst 0,0001.");
+    const text = await post("/articles", { articleNumber: "TF-3", name: "", type: "purchased" });
+    expect(asWeb(text)).toBe("Ogiltiga uppgifter — kontrollera fälten.");
   });
 
   it("leaves the query schemas' coercion alone: an empty ?offset= is 0 and an empty ?limit= is refused as before", async () => {

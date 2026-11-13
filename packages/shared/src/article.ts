@@ -6,7 +6,7 @@ import { parcelKindSchema } from "./shipping.js";
 // vatRates/vatRateSchema moved to vat.ts in B5 — imported here for the
 // varugrupp schemas below, re-exported to consumers via index.ts.
 import { vatRateSchema } from "./vat.js";
-import { blankSafe, optionalText } from "./coerce.js";
+import { blankSafe, LEAD_TIME_DAYS_MAX, numericMax, numericStep, optionalText } from "./coerce.js";
 import { markupPercentSchema } from "./costing.js";
 
 // Avrundning — a positive step with at most 3 decimals (numeric(14,3) in the
@@ -15,6 +15,7 @@ import { markupPercentSchema } from "./costing.js";
 const roundingSchema = z.coerce
   .number()
   .positive()
+  .max(numericMax(14, 3))
   .refine((v) => Math.abs(v * 1000 - Math.round(v * 1000)) < 1e-6, "Avrundning får ha högst 3 decimaler");
 
 export const articleTypeSchema = z.enum(["manufactured", "purchased", "service"]);
@@ -147,31 +148,31 @@ export const createArticleSchema = z.object({
   unitId: z.string().uuid().optional(),
   purchaseUnitId: z.string().uuid().nullable().optional(),
   salesUnitId: z.string().uuid().nullable().optional(),
-  standardCost: blankSafe(z.coerce.number().nonnegative()).optional(),
-  salesPrice: blankSafe(z.coerce.number().nonnegative()).optional(),
+  standardCost: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).optional(),
+  salesPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).optional(),
   // No VAT rate of its own since 0155: the varugrupp's (groupId) applies.
   // Nettovikt (kg) and dimensions (mm) — used later for volume/transport.
-  weight: blankSafe(z.coerce.number().nonnegative()).optional(),
-  length: blankSafe(z.coerce.number().nonnegative()).optional(),
-  width: blankSafe(z.coerce.number().nonnegative()).optional(),
-  height: blankSafe(z.coerce.number().nonnegative()).optional(),
+  weight: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 3))).optional(),
+  length: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).optional(),
+  width: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).optional(),
+  height: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).optional(),
   // Standard packaging: base units per kolli + the kolli type (register).
-  quantityPerPackage: blankSafe(z.coerce.number().nonnegative()).optional(),
+  quantityPerPackage: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).optional(),
   packageTypeId: z.string().uuid().optional(),
   // Frakt, egna mått: kolliart (omitted = Paket), stapelbar, pallplatser and
   // flakmeter (derived from pallplatser when omitted — deriveLoadingMeters).
   parcelKind: parcelKindSchema.optional(),
   stackable: z.boolean().optional(),
-  palletSpaces: blankSafe(z.coerce.number().nonnegative()).optional(),
-  loadingMeters: blankSafe(z.coerce.number().nonnegative()).optional(),
+  palletSpaces: blankSafe(z.coerce.number().nonnegative().max(numericMax(8, 2))).optional(),
+  loadingMeters: blankSafe(z.coerce.number().nonnegative().max(numericMax(8, 2))).optional(),
   // Planning (E1 behovsberäkning): beställningspunkt + orderkvantitet, plus
   // Avrundning — the step proposals AND order-row quantities are rounded up
   // to (roundUpToMultiple in units.ts). Positive, at most 3 decimals.
-  reorderPoint: blankSafe(z.coerce.number().nonnegative()).optional(),
-  orderQuantity: blankSafe(z.coerce.number().positive()).optional(),
+  reorderPoint: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).optional(),
+  orderQuantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))).optional(),
   rounding: roundingSchema.optional(),
   // Säkerhetslager (base unit) and Styrning Lagerstyrd (true) / Orderstyrd.
-  safetyStock: blankSafe(z.coerce.number().nonnegative()).optional(),
+  safetyStock: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).optional(),
   stockControlled: z.boolean().optional(),
   // Prognosstyrd (#10): the behovsberäkning adds a forecast demand.
   forecastControlled: z.boolean().optional(),
@@ -193,7 +194,7 @@ export const createArticleSchema = z.object({
   serialSeriesKey: z.string().min(1).max(50).nullable().optional(),
   // Ledtid (dagar) — tillverkningsledtid in whole working days (#13); omitted
   // = the routing's time decides.
-  manufacturingLeadTimeDays: blankSafe(z.coerce.number().int().min(0)).optional(),
+  manufacturingLeadTimeDays: blankSafe(z.coerce.number().int().min(0).max(LEAD_TIME_DAYS_MAX)).optional(),
   // "Ytbehandling" / "Färg" — free text printed on documents (see the
   // articles schema); blank = not filled in.
   surfaceTreatment: optionalText(200).optional(),
@@ -226,7 +227,7 @@ export const createArticleSchema = z.object({
 export type CreateArticleInput = z.infer<typeof createArticleSchema>;
 
 export const updateStandardCostSchema = z.object({
-  standardCost: blankSafe(z.coerce.number().nonnegative()),
+  standardCost: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))),
 });
 export type UpdateStandardCostInput = z.infer<typeof updateStandardCostSchema>;
 
@@ -245,31 +246,31 @@ export const updateArticleSchema = z
     purchaseUnitId: z.string().uuid().nullable().optional(),
     salesUnitId: z.string().uuid().nullable().optional(),
     active: z.boolean().optional(),
-    salesPrice: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
+    salesPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).nullable().optional(),
     // The varugrupp also sets the article's VAT rate (no rate of its own).
     groupId: z.string().uuid().nullable().optional(),
     articleCodeId: z.string().uuid().nullable().optional(),
     // Null resets to the "***" fallback behavior.
     defaultLocationId: z.string().uuid().nullable().optional(),
     // Nettovikt (kg) and dimensions (mm); null clears the value.
-    weight: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
-    length: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
-    width: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
-    height: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
+    weight: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 3))).nullable().optional(),
+    length: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).nullable().optional(),
+    width: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).nullable().optional(),
+    height: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).nullable().optional(),
     // Standard packaging (null clears).
-    quantityPerPackage: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
+    quantityPerPackage: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).nullable().optional(),
     packageTypeId: z.string().uuid().nullable().optional(),
     // Frakt, egna mått (null clears).
     parcelKind: parcelKindSchema.nullable().optional(),
     stackable: z.boolean().optional(),
-    palletSpaces: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
-    loadingMeters: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
+    palletSpaces: blankSafe(z.coerce.number().nonnegative().max(numericMax(8, 2))).nullable().optional(),
+    loadingMeters: blankSafe(z.coerce.number().nonnegative().max(numericMax(8, 2))).nullable().optional(),
     // Planning (E1 behovsberäkning); null clears.
-    reorderPoint: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
-    orderQuantity: blankSafe(z.coerce.number().positive()).nullable().optional(),
+    reorderPoint: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).nullable().optional(),
+    orderQuantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))).nullable().optional(),
     rounding: roundingSchema.nullable().optional(),
     // Säkerhetslager; null clears. Styrning: true = Lagerstyrd.
-    safetyStock: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
+    safetyStock: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).nullable().optional(),
     stockControlled: z.boolean().optional(),
     // Prognosstyrd (#10).
     forecastControlled: z.boolean().optional(),
@@ -283,7 +284,7 @@ export const updateArticleSchema = z
     // null = the common serial number series.
     serialSeriesKey: z.string().min(1).max(50).nullable().optional(),
     // Ledtid (dagar); null clears (the routing's time decides again).
-    manufacturingLeadTimeDays: blankSafe(z.coerce.number().int().min(0)).nullable().optional(),
+    manufacturingLeadTimeDays: blankSafe(z.coerce.number().int().min(0).max(LEAD_TIME_DAYS_MAX)).nullable().optional(),
     // "Ytbehandling" / "Färg" — free text printed on documents; "" clears.
     surfaceTreatment: optionalText(200).optional(),
     colour: optionalText(200).optional(),
@@ -319,7 +320,7 @@ export type BatchUpdateArticlesInput = z.infer<typeof batchUpdateArticlesSchema>
 // BOM = Bill of Materials / struktur — komponentrad kopplad till en parent-artikel
 export const createBomComponentSchema = z.object({
   componentArticleId: z.string().uuid(),
-  quantity: blankSafe(z.coerce.number().positive()),
+  quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))),
   // Unit the quantity is entered in — the component's base unit (null/omitted)
   // or one of its alternative units. Stored quantity is always in the base
   // unit; the factor is snapshotted on the row for display.
@@ -341,7 +342,7 @@ export type CreateBomComponentInput = z.infer<typeof createBomComponentSchema>;
 export const updateBomComponentSchema = z
   .object({
     // Interpreted in the row's unit (or the newly provided unitId).
-    quantity: blankSafe(z.coerce.number().positive()).optional(),
+    quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))).optional(),
     // Null switches the row back to the component's base unit.
     unitId: z.string().uuid().nullable().optional(),
     routingOperationId: z.string().uuid().nullable().optional(),

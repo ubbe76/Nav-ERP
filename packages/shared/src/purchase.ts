@@ -3,7 +3,7 @@ import { dimensionFields } from "./dimensions.js";
 import { businessDateSchema } from "./business-date.js";
 import { materialShortageOverrideSchema } from "./manufacturing.js";
 import { listQuerySchema, orderStatusListParam, statusListParam } from "./list.js";
-import { blankSafe } from "./coerce.js";
+import { blankSafe, INT4_MAX, LEAD_TIME_DAYS_MAX, numericMax, numericStep } from "./coerce.js";
 import { batchDayInputSchema, batchNumberSchema, serialNumbersSchema } from "./stock.js";
 import { vatRateSchema } from "./vat.js";
 import { paymentReferenceSchema, supplierPaymentDetailsFields } from "./banking.js";
@@ -70,9 +70,9 @@ const inquiryRowSchema = z
     articleId: z.string().uuid(),
     // quantity/unitPrice are entered in the chosen unit (the article's base
     // unit when unitId is omitted/null) and stored converted to the base unit.
-    quantity: blankSafe(z.coerce.number().positive()),
+    quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))),
     // Left out until the supplier has answered with a price.
-    unitPrice: blankSafe(z.coerce.number().nonnegative()).optional(),
+    unitPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).optional(),
     unitId: z.string().uuid().nullable().optional(),
     // Lego (subcontract) link — at most one of the two; the service derives
     // the routing operation from the MO operation. A TO operation comes
@@ -81,7 +81,7 @@ const inquiryRowSchema = z
     moOperationId: z.string().uuid().optional(),
     routingOperationId: z.string().uuid().optional(),
     // Ställpris — omitted = defaulted from the operation by the service.
-    setupPrice: blankSafe(z.coerce.number().nonnegative()).optional(),
+    setupPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 2))).optional(),
   })
   .refine((r) => !(r.moOperationId && r.routingOperationId), {
     message: "Ange antingen moOperationId eller routingOperationId",
@@ -109,12 +109,12 @@ export const updateInquiryRowSchema = z
   .object({
     // Interpreted in the row's unit (or the newly provided unitId; null
     // switches the row back to the article's base unit).
-    quantity: blankSafe(z.coerce.number().positive()).optional(),
-    unitPrice: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
+    quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))).optional(),
+    unitPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).nullable().optional(),
     unitId: z.string().uuid().nullable().optional(),
     // Lego rows only (the service rejects it elsewhere); null clears. The
     // operation link itself is fixed after creation, like PO rows.
-    setupPrice: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
+    setupPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 2))).nullable().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateInquiryRowInput = z.infer<typeof updateInquiryRowSchema>;
@@ -217,7 +217,7 @@ export const createPurchaseOrderSchema = z.object({
   supplierId: z.string().uuid(),
   expectedDeliveryDate: z.string().date().optional(),
   note: z.string().optional(),
-  exchangeRate: blankSafe(z.coerce.number().positive()).optional(),
+  exchangeRate: blankSafe(z.coerce.number().min(numericStep(6)).max(numericMax(12, 6))).optional(),
   // Er referens (the supplier's contact) / Vår referens (our buyer) —
   // printed on the PO document when set. Er referens omitted = the name of
   // the supplier's huvudkontakt; "" is an explicit "none".
@@ -240,15 +240,15 @@ export type CreatePurchaseOrderInput = z.infer<typeof createPurchaseOrderSchema>
 // UI asks on every save; omitted means bump (external callers unchanged).
 export const createPurchaseOrderRowSchema = z.object({
   articleId: z.string().uuid(),
-  quantity: blankSafe(z.coerce.number().positive()),
-  unitPrice: blankSafe(z.coerce.number().nonnegative()),
+  quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))),
+  unitPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))),
   unitId: z.string().uuid().nullable().optional(),
   bumpRevision: z.boolean().optional(),
   // Lego (subcontract) row: the MO operation this row buys. Receiving the
   // row auto-reports the operation. setupPrice (ställpris) is added ONCE to
   // the row amount: qty × unitPrice + setupPrice.
   moOperationId: z.string().uuid().nullable().optional(),
-  setupPrice: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
+  setupPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 2))).nullable().optional(),
   // Önskat leveransdatum for this row; omitted/null = the order's date.
   expectedDeliveryDate: z.string().date().nullable().optional(),
   // Bekräftat leveransdatum for this row; omitted/null = the order's.
@@ -262,13 +262,13 @@ export const updatePurchaseOrderRowSchema = z
   .object({
     // Interpreted in the row's unit (or the newly provided unitId; null
     // switches the row back to the article's base unit).
-    quantity: blankSafe(z.coerce.number().positive()).optional(),
-    unitPrice: blankSafe(z.coerce.number().nonnegative()).optional(),
+    quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))).optional(),
+    unitPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).optional(),
     unitId: z.string().uuid().nullable().optional(),
     bumpRevision: z.boolean().optional(),
     // Nullable so a lego row's setup price can be cleared. The operation
     // link itself (moOperationId) is set at creation and not editable here.
-    setupPrice: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
+    setupPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 2))).nullable().optional(),
     // null clears the row's own date (the row follows the order again).
     expectedDeliveryDate: z.string().date().nullable().optional(),
     confirmedDeliveryDate: businessDateSchema.nullable().optional(),
@@ -303,7 +303,7 @@ export const updatePurchaseOrderHeaderSchema = z
     confirmedDeliveryDate: businessDateSchema.nullable().optional(),
     note: z.string().nullable().optional(),
     // Not nullable — an order always has an exchange rate.
-    exchangeRate: blankSafe(z.coerce.number().positive()).optional(),
+    exchangeRate: blankSafe(z.coerce.number().min(numericStep(6)).max(numericMax(12, 6))).optional(),
     yourReference: z.string().max(100).nullable().optional(),
     ourReference: z.string().max(100).nullable().optional(),
     deliveryTermId: z.string().uuid().nullable().optional(),
@@ -337,8 +337,8 @@ export const createPurchaseDispatchSchema = z.object({
         rowId: z.string().uuid(),
         // At least one unit at the column's 4 decimals — a smaller positive
         // number would round to 0 and fall on the CHECK.
-        quantity: blankSafe(z.coerce.number().min(0.0001)),
-        parcels: blankSafe(z.coerce.number().int().min(1)).default(1),
+        quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))),
+        parcels: blankSafe(z.coerce.number().int().min(1).max(INT4_MAX)).default(1),
       })
     )
     .min(1)
@@ -354,7 +354,7 @@ export type CreatePurchaseDispatchInput = z.infer<typeof createPurchaseDispatchS
 // with the dispatched quantity as one card per parcel.
 export const dispatchPalletCardRowSchema = z.object({
   dispatchRowId: z.string().uuid(),
-  quantities: z.array(z.coerce.number().positive()).max(50),
+  quantities: z.array(z.coerce.number().positive().max(numericMax(14, 4))).max(50),
 });
 export type DispatchPalletCardRow = z.infer<typeof dispatchPalletCardRowSchema>;
 
@@ -372,7 +372,7 @@ export type SetPurchaseOrderStatusInput = z.infer<typeof setPurchaseOrderStatusS
 
 export const receiveGoodsSchema = z.object({
   locationId: z.string().uuid().optional(),
-  quantity: blankSafe(z.coerce.number().positive()),
+  quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))),
   // Batch (#8): the supplier's batch number on a batchstyrd article's row;
   // left out or "" = the IO number. A row split over several batches is
   // one receipt per batch (each its own kvitto, undone on its own).
@@ -408,8 +408,8 @@ const currencyField = z.string().regex(/^[A-Z]{3}$/, "3 stora bokstäver, t.ex. 
 // REPLACES the stored set (`[]` clears it), so duplicates are caught here
 // rather than by the unique constraint.
 export const supplierPriceBreakSchema = z.object({
-  fromQuantity: blankSafe(z.coerce.number().gt(1, "Från antal måste vara större än 1")),
-  price: blankSafe(z.coerce.number().nonnegative()),
+  fromQuantity: blankSafe(z.coerce.number().gt(1, "Från antal måste vara större än 1").max(numericMax(14, 4))),
+  price: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))),
 });
 export type SupplierPriceBreakInput = z.infer<typeof supplierPriceBreakSchema>;
 
@@ -433,9 +433,9 @@ const priceBreaksField = z
 export const createArticleSupplierSchema = z.object({
   supplierId: z.string().uuid(),
   supplierArticleNumber: z.string().max(100).optional(),
-  price: blankSafe(z.coerce.number().nonnegative()).optional(),
+  price: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).optional(),
   currency: currencyField.default("SEK"),
-  leadTimeDays: blankSafe(z.coerce.number().int().nonnegative()).optional(),
+  leadTimeDays: blankSafe(z.coerce.number().int().nonnegative().max(LEAD_TIME_DAYS_MAX)).optional(),
   isPrimary: z.boolean().default(false),
   priceBreaks: priceBreaksField.optional(),
 });
@@ -446,9 +446,9 @@ export type CreateArticleSupplierInput = z.infer<typeof createArticleSupplierSch
 export const updateArticleSupplierSchema = z
   .object({
     supplierArticleNumber: z.string().max(100).nullable().optional(),
-    price: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
+    price: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).nullable().optional(),
     currency: currencyField.optional(),
-    leadTimeDays: blankSafe(z.coerce.number().int().nonnegative()).nullable().optional(),
+    leadTimeDays: blankSafe(z.coerce.number().int().nonnegative().max(LEAD_TIME_DAYS_MAX)).nullable().optional(),
     isPrimary: z.boolean().optional(),
     priceBreaks: priceBreaksField.optional(),
   })
@@ -461,7 +461,7 @@ export type UpdateArticleSupplierInput = z.infer<typeof updateArticleSupplierSch
 export const supplierPriceQuoteQuerySchema = z.object({
   supplierId: z.string().uuid(),
   articleId: z.string().uuid(),
-  quantity: blankSafe(z.coerce.number().positive()),
+  quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))),
 });
 export type SupplierPriceQuoteQuery = z.infer<typeof supplierPriceQuoteQuerySchema>;
 
@@ -495,9 +495,9 @@ const supplierInvoiceRowInputSchema = z.object({
   // Optional PO row to match this line against (price/quantity deviation).
   purchaseOrderRowId: z.string().uuid().nullable().optional(),
   description: z.string().min(1).max(255),
-  quantity: blankSafe(z.coerce.number().positive()).default(1),
+  quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))).default(1),
   // Signed — a credit line can be negative.
-  unitPrice: blankSafe(z.coerce.number()),
+  unitPrice: blankSafe(z.coerce.number().min(-numericMax(14, 4)).max(numericMax(14, 4))),
   // Enum-locked to the Swedish set since B5 (was free 0-100) — same
   // vatRateSchema as the sales side. Informational only since the momskoder:
   // the row's VAT is never posted (header is authoritative).
@@ -517,8 +517,8 @@ export const updateSupplierInvoiceRowSchema = z
     articleId: z.string().uuid().nullable().optional(),
     purchaseOrderRowId: z.string().uuid().nullable().optional(),
     description: z.string().min(1).max(255).optional(),
-    quantity: blankSafe(z.coerce.number().positive()).optional(),
-    unitPrice: blankSafe(z.coerce.number()).optional(),
+    quantity: blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4))).optional(),
+    unitPrice: blankSafe(z.coerce.number().min(-numericMax(14, 4)).max(numericMax(14, 4))).optional(),
     vatRate: vatRateSchema.nullable().optional(),
     // null = back to following the invoice's code.
     vatCodeId: z.string().uuid().nullable().optional(),
@@ -533,9 +533,9 @@ export const createSupplierInvoiceSchema = z.object({
   purchaseOrderId: z.string().uuid().nullable().optional(),
   invoiceDate: z.string().date(),
   dueDate: z.string().date().nullable().optional(),
-  netAmount: blankSafe(z.coerce.number()).default(0),
-  vatAmount: blankSafe(z.coerce.number()).default(0),
-  grossAmount: blankSafe(z.coerce.number()).default(0),
+  netAmount: blankSafe(z.coerce.number().min(-numericMax(14, 2)).max(numericMax(14, 2))).default(0),
+  vatAmount: blankSafe(z.coerce.number().min(-numericMax(14, 2)).max(numericMax(14, 2))).default(0),
+  grossAmount: blankSafe(z.coerce.number().min(-numericMax(14, 2)).max(numericMax(14, 2))).default(0),
   note: z.string().nullable().optional(),
   paymentReference: paymentReferenceSchema.nullable().optional(),
   // Momskod (direction both/purchase) for every row without a code of its
@@ -566,9 +566,9 @@ export const updateSupplierInvoiceHeaderSchema = z
     purchaseOrderId: z.string().uuid().nullable().optional(),
     invoiceDate: z.string().date().optional(),
     dueDate: z.string().date().nullable().optional(),
-    netAmount: blankSafe(z.coerce.number()).optional(),
-    vatAmount: blankSafe(z.coerce.number()).optional(),
-    grossAmount: blankSafe(z.coerce.number()).optional(),
+    netAmount: blankSafe(z.coerce.number().min(-numericMax(14, 2)).max(numericMax(14, 2))).optional(),
+    vatAmount: blankSafe(z.coerce.number().min(-numericMax(14, 2)).max(numericMax(14, 2))).optional(),
+    grossAmount: blankSafe(z.coerce.number().min(-numericMax(14, 2)).max(numericMax(14, 2))).optional(),
     note: z.string().nullable().optional(),
     paymentReference: paymentReferenceSchema.nullable().optional(),
     vatCodeId: z.string().uuid().optional(),
@@ -611,7 +611,7 @@ export type ListSupplierPaymentsQuery = z.infer<typeof listSupplierPaymentsQuery
 // derives it from the invoice's open amount and the tolerance setting.
 const supplierPaymentRowInputSchema = z.object({
   supplierInvoiceId: z.string().uuid(),
-  appliedAmount: blankSafe(z.coerce.number()),
+  appliedAmount: blankSafe(z.coerce.number().min(-numericMax(14, 2)).max(numericMax(14, 2))),
 });
 
 // amount is the BANK part (0 = pure kvittning) and must equal Σ appliedAmount —
@@ -632,9 +632,9 @@ export const createSupplierPaymentSchema = z.object({
   // The betalkonto, chosen per payment from the ACTIVE chart of accounts
   // (/account-options); the posting validates that it exists and is active.
   bankAccountNumber: z.string().regex(/^[0-9]{4}$/),
-  amount: blankSafe(z.coerce.number()),
-  amountSek: blankSafe(z.coerce.number()).optional(),
-  bankFeeSek: blankSafe(z.coerce.number().min(0)).optional(),
+  amount: blankSafe(z.coerce.number().min(-numericMax(14, 2)).max(numericMax(14, 2))),
+  amountSek: blankSafe(z.coerce.number().min(-numericMax(14, 2)).max(numericMax(14, 2))).optional(),
+  bankFeeSek: blankSafe(z.coerce.number().min(0).max(numericMax(14, 2))).optional(),
   note: z.string().nullable().optional(),
   rows: z.array(supplierPaymentRowInputSchema).min(1),
 });
