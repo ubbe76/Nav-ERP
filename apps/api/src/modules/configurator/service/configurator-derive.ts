@@ -3,6 +3,7 @@ import type {
   ConfiguratorCondition, ConfiguratorEvaluation, DerivedMaterial, DerivedOperation, DerivedOperationRef,
 } from "@navet/shared";
 import { conditionHolds, type EffectiveValue, type EngineGroup, type EngineTemplate } from "./configurator-engine.js";
+import { RUN_TIME_DECIMALS } from "@navet/shared";
 import { evaluateFormula, type FormulaValues } from "./configurator-formula.js";
 import { findCoverageGaps, selectionCoverageWarnings } from "./structure-coverage.js";
 
@@ -95,7 +96,9 @@ export function deriveStructure(input: {
     const time = (fixed: number | null, formula: string | null, what: "ställtiden" | "stycktiden"): number | null => {
       let value = fixed ?? 0;
       if (formula !== null) {
-        const r = evaluateFormula(formula, formulaValues);
+        // Stycktiden keeps the column's 8 decimals (0218): a formula like
+        // BREDD / 60000 is a fraction of a second per unit.
+        const r = evaluateFormula(formula, formulaValues, what === "stycktiden" ? RUN_TIME_DECIMALS : 4);
         if (!r.ok) { errors.push(`${label}: ${r.message}`); return null; }
         value = r.value;
       }

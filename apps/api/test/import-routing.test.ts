@@ -536,7 +536,7 @@ describe("planRoutingImport", () => {
       );
       expect(plan.rows[0]!.errors).toEqual([]);
       expect(plan.rows[0]!.warnings).toEqual([]);
-      expect(plan.creates[0]).toMatchObject({ setupTime: 12, runTimePerUnit: 0.1667, timeUnit: "units_per_hour" });
+      expect(plan.creates[0]).toMatchObject({ setupTime: 12, runTimePerUnit: 0.16666667, timeUnit: "units_per_hour" });
     });
 
     it("treats an unmapped or empty unit as minutes — today's behaviour", async () => {
@@ -644,7 +644,7 @@ describe("planRoutingImport", () => {
           patch: {
             workCenterId: "wc-110",
             setupTime: 12,
-            runTimePerUnit: 0.1667,
+            runTimePerUnit: 0.16666667,
             timeUnit: "units_per_hour",
             costingOnly: true,
             description: "Bockning",
@@ -1026,8 +1026,8 @@ describe("routing import — repository", () => {
     expect(result).toEqual({ created: 2, updated: 0, registersCreated: { units: [], articleGroups: [] } });
     const stored = await db.select().from(routingOperations).orderBy(routingOperations.sequenceNo);
     expect(stored.map((row) => [row.sequenceNo, row.setupTime, row.runTimePerUnit, row.timeUnit, row.costingOnly])).toEqual([
-      [10, "15.00", "2.0000", "minutes_per_unit", false],
-      [20, "0.50", "1.2500", "units_per_hour", true],
+      [10, "15.00", "2.00000000", "minutes_per_unit", false],
+      [20, "0.50", "1.25000000", "units_per_hour", true],
     ]);
   });
 
@@ -1046,7 +1046,7 @@ describe("routing import — repository", () => {
       hasErrors: false,
       creates: [],
       updates: [
-        { id: existing!.id, patch: { workCenterId, setupTime: 12, runTimePerUnit: 0.1667, timeUnit: "units_per_hour", costingOnly: false, description: "Bockning" } },
+        { id: existing!.id, patch: { workCenterId, setupTime: 12, runTimePerUnit: 0.16666667, timeUnit: "units_per_hour", costingOnly: false, description: "Bockning" } },
       ],
     });
 
@@ -1054,7 +1054,7 @@ describe("routing import — repository", () => {
     const [stored] = await db.select().from(routingOperations);
     expect(stored).toMatchObject({
       setupTime: "12.00",
-      runTimePerUnit: "0.1667",
+      runTimePerUnit: "0.16666667",
       timeUnit: "units_per_hour",
       description: "Bockning",
       // Not in the patch — untouched.
@@ -1179,9 +1179,9 @@ describe("import service — routing entity", () => {
     expect(result.updated).toBe(1);
 
     const [routing] = await db.select().from(routingOperations);
-    expect(routing).toMatchObject({ setupTime: "12.00", runTimePerUnit: "0.1667", timeUnit: "units_per_hour" });
+    expect(routing).toMatchObject({ setupTime: "12.00", runTimePerUnit: "0.16666667", timeUnit: "units_per_hour" });
     const [snapshot] = await db.select().from(moOperations);
-    expect(snapshot).toMatchObject({ setupTime: "0.20", runTimePerUnit: "360.0000" });
+    expect(snapshot).toMatchObject({ setupTime: "0.20", runTimePerUnit: "360.00000000" });
   });
 
   it("refuses skipExisting together with updateExisting", async () => {
@@ -1243,7 +1243,7 @@ describe("import service — routing entity", () => {
     expect(rows[0]).toMatchObject({
       sequenceNo: 20,
       setupTime: "0.00",
-      runTimePerUnit: "0.0000",
+      runTimePerUnit: "0.00000000",
       subcontractSupplierId: fileSupplier!.id,
       setupPrice: "150.00",
       unitPrice: "4.5000",

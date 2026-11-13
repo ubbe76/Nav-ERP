@@ -22,8 +22,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel — fel resultat i ovanliga lägen och 500-fel
 
-- [ ] **Stycktiden tappar precision under ~0,5 s/st** (delatgranskningen 2026-11-11, användarens val: lämna): `run_time_per_unit` är `numeric(10,4)` i minuter (rutt, TO-operationer, resurser, alternativ, konfigurator) — 0,05 s/st sparas som 0,0008 min (0,048 s, kalkyl och kapacitet 4 % för låga), 36 000 st/h visas som 35 294 st/h. Från ~1 s/st under 0,3 %. Rättelse vid behov: `numeric(12,6)` i en migration, zod-gränser och visning.
-
 ### Låga — races med litet fönster
 
 - [ ] **Bekräftelsedialogen saknar dialogroll** (webbgranskningen 2026-11-11): `ConfirmDialogHost` (`lib/confirm.ts`) renderas utan `role="dialog"`/`aria-modal` och etikett, så skärmläsare och Playwright hittar den inte som dialog. Kontrollera även fokusfällan.

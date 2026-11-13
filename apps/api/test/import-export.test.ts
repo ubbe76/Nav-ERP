@@ -350,9 +350,9 @@ async function seed() {
         packingInstructions: "Mellanlägg",
       },
       // 7 st/h = 8,5714 min/st; ställtid 0,2 h.
-      { articleId: id("EX-100"), sequenceNo: 20, workCenterId: wc120!.id, setupTime: "12.00", runTimePerUnit: "8.5714", cycleTimePerUnit: "4.0000", timeUnit: "units_per_hour" },
+      { articleId: id("EX-100"), sequenceNo: 20, workCenterId: wc120!.id, setupTime: "12.00", runTimePerUnit: "8.57142857", cycleTimePerUnit: "4.0000", timeUnit: "units_per_hour" },
       // 7 s = 0,1167 min/st.
-      { articleId: id("EX-100"), sequenceNo: 30, workCenterId: wc110!.id, setupTime: "0.50", runTimePerUnit: "0.1167", cycleTimePerUnit: "0.0500", timeUnit: "seconds_per_unit" },
+      { articleId: id("EX-100"), sequenceNo: 30, workCenterId: wc110!.id, setupTime: "0.50", runTimePerUnit: "0.11666667", cycleTimePerUnit: "0.0500", timeUnit: "seconds_per_unit" },
       {
         articleId: id("EX-100"),
         sequenceNo: 40,
@@ -759,7 +759,7 @@ describe("import exports — the row rules", () => {
     expect(bomQuantityCell(24.0001, 0.083333)).toBe(2);
     expect(bomQuantityCell(1, 3)).toBe(3);
     expect(bomQuantityCell(7.5, null)).toBe(7.5);
-    expect(routingTimeCells({ setupTime: 12, runTimePerUnit: 8.5714, cycleTimePerUnit: null, timeUnit: "units_per_hour" })).toEqual({
+    expect(routingTimeCells({ setupTime: 12, runTimePerUnit: 8.57142857, cycleTimePerUnit: null, timeUnit: "units_per_hour" })).toEqual({
       setupTime: 0.2,
       runTimePerUnit: 7,
       cycleTimePerUnit: null,
@@ -767,7 +767,7 @@ describe("import exports — the row rules", () => {
     });
     // No st/h value for 0 — minutes.
     expect(routingTimeCells({ setupTime: 12, runTimePerUnit: 0, cycleTimePerUnit: null, timeUnit: "units_per_hour" }).timeUnit).toBe("minuter/enhet");
-    expect(routingTimeCells({ setupTime: 0.5, runTimePerUnit: 0.1167, cycleTimePerUnit: 0.05, timeUnit: "seconds_per_unit" })).toEqual({
+    expect(routingTimeCells({ setupTime: 0.5, runTimePerUnit: 0.11666667, cycleTimePerUnit: 0.05, timeUnit: "seconds_per_unit" })).toEqual({
       setupTime: 30,
       runTimePerUnit: 7,
       cycleTimePerUnit: 3,

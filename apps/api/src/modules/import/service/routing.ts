@@ -15,7 +15,7 @@
 // orders are unaffected either way: their mo_operations snapshot is never
 // touched, same rule as PATCH on the article card.
 import type { ImportCommitInput, OperationTimeUnit } from "@navet/shared";
-import { unitsPerHourToMinutesPerUnit, round2, round4, roundToDecimals } from "@navet/shared";
+import { unitsPerHourToMinutesPerUnit, round2, roundRunTime, roundToDecimals, secondsPerUnitToMinutesPerUnit } from "@navet/shared";
 import { normalizeDecimal } from "./csv.js";
 import type { ExistingArticle } from "./articles.js";
 import { padWorkCenterCode } from "./work-centers.js";
@@ -228,8 +228,8 @@ export function parseRoutingTimeUnit(raw: string): RoutingFileTimeUnit | null {
 }
 
 // Ställtid/Stycktid from the file → the stored minutes plus the display unit
-// the operation is saved with. Setup time keeps 2 decimals, run time 4 (the
-// column scales). "antal/timme" with Stycktid 0 cannot be expressed as st/h
+// the operation is saved with. Setup time keeps 2 decimals, run time 8 (the
+// column scales; roundRunTime, 0218). "antal/timme" with Stycktid 0 cannot be expressed as st/h
 // (0 units per hour has no meaning — the same rule the operation dialog
 // enforces), so it lands as 0 min/st with a warning instead of an error: the
 // row is still a valid operation, it just has no run time.
@@ -240,12 +240,12 @@ export function convertRoutingTimes(
 ): { setupTime: number; runTimePerUnit: number; timeUnit: OperationTimeUnit; warning?: string } {
   switch (unit) {
     case "minutes_per_unit":
-      return { setupTime: round2(setup), runTimePerUnit: round4(run), timeUnit: "minutes_per_unit" };
+      return { setupTime: round2(setup), runTimePerUnit: roundRunTime(run), timeUnit: "minutes_per_unit" };
     case "hours_per_unit":
-      return { setupTime: round2(setup * 60), runTimePerUnit: round4(run * 60), timeUnit: "minutes_per_unit" };
+      return { setupTime: round2(setup * 60), runTimePerUnit: roundRunTime(run * 60), timeUnit: "minutes_per_unit" };
     case "seconds_per_unit":
       // Saved with the display unit sek/st (0167), like antal/timme keeps st/h.
-      return { setupTime: round2(setup / 60), runTimePerUnit: round4(run / 60), timeUnit: "seconds_per_unit" };
+      return { setupTime: round2(setup / 60), runTimePerUnit: secondsPerUnitToMinutesPerUnit(run), timeUnit: "seconds_per_unit" };
     case "units_per_hour":
       if (run > 0) {
         return { setupTime: round2(setup * 60), runTimePerUnit: unitsPerHourToMinutesPerUnit(run), timeUnit: "units_per_hour" };
@@ -265,11 +265,11 @@ export function convertCycleTime(unit: RoutingFileTimeUnit, value: number): numb
   if (value === 0) return null;
   switch (unit) {
     case "minutes_per_unit":
-      return round4(value);
+      return roundRunTime(value);
     case "hours_per_unit":
-      return round4(value * 60);
+      return roundRunTime(value * 60);
     case "seconds_per_unit":
-      return round4(value / 60);
+      return secondsPerUnitToMinutesPerUnit(value);
     case "units_per_hour":
       return unitsPerHourToMinutesPerUnit(value);
   }

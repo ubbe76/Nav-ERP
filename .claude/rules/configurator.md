@@ -14,6 +14,8 @@ paths:
 
 En mall har läget `variants` (materialiseras till vanliga artiklar) eller `to_order` (beställningsvara — mallen ligger kvar som radens artikel).
 
+- **Formlernas decimaler:** `evaluateFormula(källa, värden, decimaler = 4)` avrundar resultatet; härledningen (`configurator-derive.ts`) ger **stycktidens** formel `RUN_TIME_DECIMALS` (8, kolumnen numeric(14,8) sedan 0218, `article.md`) — med 4 blev `BREDD / 60000` 0. Övriga formler (antal, ställtid) har 4.
+
 ## Varianter (delprojekt 3, migration 0112)
 
 - `POST /articles/:id/configurator/variants` (förhandsgranskning `…/variants/preview`). `configurator_variants` länkar variant → mall och bär `selection` + `calc_quantity`; den **unika spärren (mall, nyckel)** gör att samma kombination aldrig blir två artiklar.

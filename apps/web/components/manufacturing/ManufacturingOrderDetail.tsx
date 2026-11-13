@@ -54,7 +54,7 @@ import {
 import { Card } from "../ui/Card";
 import { ConfigurationLineList } from "../configurator/ConfigurationLines";
 import { configurationLines } from "../../lib/configurationLines";
-import { formatMoney, formatQuantity, formatUnitPrice } from "../../lib/format";
+import { formatMoney, formatQuantity, formatRunMinutes, formatUnitPrice } from "../../lib/format";
 import { FormError, FormHint, FormNotice, FormStack } from "../ui/Form";
 import { CostCalculationList } from "../costing/CostCalculationList";
 import { CostChain } from "../ui/CostChain";
@@ -755,7 +755,7 @@ export function ManufacturingOrderDetail({
                 if (row.timeUnit === "seconds_per_unit") {
                   return `${formatQuantity(minutesPerUnitToSecondsPerUnit(runTimePerUnit))} sek`;
                 }
-                return formatQuantity(runTimePerUnit);
+                return formatRunMinutes(runTimePerUnit);
               }
               case "status":
                 return row.status === "done" ? (

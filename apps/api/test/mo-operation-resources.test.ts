@@ -211,20 +211,20 @@ describe("the snapshot at release", () => {
   it("gives an operation with alternatives rank 0 = the ordinarie and the alternatives with resolved times; one without gets none", async () => {
     const w = await seedWorld({ inactiveAlternative: true });
     expect(await resourceRows(w.op10.id)).toEqual([
-      { workCenterId: w.r110.id, rank: 0, setupTime: "10.00", runTimePerUnit: "60.0000" },
+      { workCenterId: w.r110.id, rank: 0, setupTime: "10.00", runTimePerUnit: "60.00000000" },
       // 120: setup som ordinarie (10), its own 30 min/st.
-      { workCenterId: w.r120.id, rank: 1, setupTime: "10.00", runTimePerUnit: "30.0000" },
+      { workCenterId: w.r120.id, rank: 1, setupTime: "10.00", runTimePerUnit: "30.00000000" },
       // 130: its own setup 5, stycktid som ordinarie (60). The inactive 150 is left out.
-      { workCenterId: w.r130.id, rank: 2, setupTime: "5.00", runTimePerUnit: "60.0000" },
+      { workCenterId: w.r130.id, rank: 2, setupTime: "5.00", runTimePerUnit: "60.00000000" },
     ]);
     expect(await resourceRows(w.op20.id)).toEqual([]);
     // The list's shape: resources with code/name by rank, resourceLocked, on ordinarie.
     const view = await operationView(w.order.id, w.op10.id);
     expect(view).toMatchObject({ workCenterId: w.r110.id, resourceLocked: false });
     expect(view.resources).toEqual([
-      { workCenterId: w.r110.id, code: "110", name: "Kantpress", rank: 0, setupTime: "10.00", runTimePerUnit: "60.0000" },
-      { workCenterId: w.r120.id, code: "120", name: "Kantpress 2", rank: 1, setupTime: "10.00", runTimePerUnit: "30.0000" },
-      { workCenterId: w.r130.id, code: "130", name: "Kantpress 3", rank: 2, setupTime: "5.00", runTimePerUnit: "60.0000" },
+      { workCenterId: w.r110.id, code: "110", name: "Kantpress", rank: 0, setupTime: "10.00", runTimePerUnit: "60.00000000" },
+      { workCenterId: w.r120.id, code: "120", name: "Kantpress 2", rank: 1, setupTime: "10.00", runTimePerUnit: "30.00000000" },
+      { workCenterId: w.r130.id, code: "130", name: "Kantpress 3", rank: 2, setupTime: "5.00", runTimePerUnit: "60.00000000" },
     ]);
     expect((await operationView(w.order.id, w.op20.id)).resources).toEqual([]);
   });
@@ -236,9 +236,9 @@ describe("the snapshot at release", () => {
     const later = await mfgService.createManufacturingOrder({ articleId: w.parent.id, quantity: 1 }, w.user.id);
     const [op] = await mfgService.listOperations(later.id);
     expect(await resourceRows(op!.id)).toEqual([
-      { workCenterId: w.r110.id, rank: 0, setupTime: "20.00", runTimePerUnit: "60.0000" },
+      { workCenterId: w.r110.id, rank: 0, setupTime: "20.00", runTimePerUnit: "60.00000000" },
       // Som ordinarie follows the changed ordinary setup time.
-      { workCenterId: w.r130.id, rank: 1, setupTime: "20.00", runTimePerUnit: "60.0000" },
+      { workCenterId: w.r130.id, rank: 1, setupTime: "20.00", runTimePerUnit: "60.00000000" },
     ]);
   });
 
@@ -267,7 +267,7 @@ describe("Byt resurs — Ändra operationer", () => {
       workCenterId: w.r120.id,
       workCenterCode: "120",
       setupTime: "10.00",
-      runTimePerUnit: "30.0000",
+      runTimePerUnit: "30.00000000",
       resourceLocked: true,
       planLocked: false,
       // Replanned on 120's free capacity: this week (10 + 30 × 10 = 310 min).
@@ -295,9 +295,9 @@ describe("Byt resurs — Ändra operationer", () => {
   it("switches back to the ordinarie with its times, and resourceLocked: false leaves it unchosen", async () => {
     const w = await seedWorld();
     await mfgService.updateOperation(w.order.id, w.op10.id, { workCenterId: w.r130.id }, w.user.id);
-    expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r130.id, setupTime: "5.00", runTimePerUnit: "60.0000", resourceLocked: true });
+    expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r130.id, setupTime: "5.00", runTimePerUnit: "60.00000000", resourceLocked: true });
     const back = await mfgService.updateOperation(w.order.id, w.op10.id, { workCenterId: w.r110.id, resourceLocked: false }, w.user.id);
-    expect(back.operation).toMatchObject({ workCenterId: w.r110.id, setupTime: "10.00", runTimePerUnit: "60.0000", resourceLocked: false });
+    expect(back.operation).toMatchObject({ workCenterId: w.r110.id, setupTime: "10.00", runTimePerUnit: "60.00000000", resourceLocked: false });
     // The flag alone: set and cleared without a switch (Ändra's checkbox).
     expect((await mfgService.updateOperation(w.order.id, w.op10.id, { resourceLocked: true }, w.user.id)).operation.resourceLocked).toBe(true);
     expect((await mfgService.updateOperation(w.order.id, w.op10.id, { resourceLocked: false }, w.user.id)).operation.resourceLocked).toBe(false);
@@ -306,17 +306,17 @@ describe("Byt resurs — Ändra operationer", () => {
   it("keeps the invariant: given times win over the row's and land on the row; a time change alone writes the current row", async () => {
     const w = await seedWorld();
     await mfgService.updateOperation(w.order.id, w.op10.id, { workCenterId: w.r120.id, runTimePerUnit: 25 }, w.user.id);
-    expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r120.id, setupTime: "10.00", runTimePerUnit: "25.0000" });
+    expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r120.id, setupTime: "10.00", runTimePerUnit: "25.00000000" });
     await mfgService.updateOperation(w.order.id, w.op10.id, { setupTime: 7 }, w.user.id);
     expect(await resourceRows(w.op10.id)).toEqual([
-      { workCenterId: w.r110.id, rank: 0, setupTime: "10.00", runTimePerUnit: "60.0000" },
-      { workCenterId: w.r120.id, rank: 1, setupTime: "7.00", runTimePerUnit: "25.0000" },
-      { workCenterId: w.r130.id, rank: 2, setupTime: "5.00", runTimePerUnit: "60.0000" },
+      { workCenterId: w.r110.id, rank: 0, setupTime: "10.00", runTimePerUnit: "60.00000000" },
+      { workCenterId: w.r120.id, rank: 1, setupTime: "7.00", runTimePerUnit: "25.00000000" },
+      { workCenterId: w.r130.id, rank: 2, setupTime: "5.00", runTimePerUnit: "60.00000000" },
     ]);
     // Away and back again: the corrected times come back with the resource.
     await mfgService.updateOperation(w.order.id, w.op10.id, { workCenterId: w.r110.id }, w.user.id);
     await mfgService.updateOperation(w.order.id, w.op10.id, { workCenterId: w.r120.id }, w.user.id);
-    expect(await opRow(w.op10.id)).toMatchObject({ setupTime: "7.00", runTimePerUnit: "25.0000" });
+    expect(await opRow(w.op10.id)).toMatchObject({ setupTime: "7.00", runTimePerUnit: "25.00000000" });
   });
 
   it("a switch outside the rows removes them, and Vald för hand with them", async () => {
@@ -324,7 +324,7 @@ describe("Byt resurs — Ändra operationer", () => {
     await mfgService.updateOperation(w.order.id, w.op10.id, { workCenterId: w.r120.id }, w.user.id);
     const out = await mfgService.updateOperation(w.order.id, w.op10.id, { workCenterId: w.r140.id }, w.user.id);
     // Outside the rows the times stay the operation's (as before #15).
-    expect(out.operation).toMatchObject({ workCenterId: w.r140.id, runTimePerUnit: "30.0000", resourceLocked: false, resources: [] });
+    expect(out.operation).toMatchObject({ workCenterId: w.r140.id, runTimePerUnit: "30.00000000", resourceLocked: false, resources: [] });
     expect(await resourceRows(w.op10.id)).toEqual([]);
     // The flag cannot be set on an operation without alternatives.
     expect((await mfgService.updateOperation(w.order.id, w.op10.id, { resourceLocked: true }, w.user.id)).operation.resourceLocked).toBe(false);
@@ -581,7 +581,7 @@ describe("förslag på resurs (etapp 2)", () => {
     expect(operation).toMatchObject({
       workCenterId: w.r120.id,
       setupTime: "10.00",
-      runTimePerUnit: "30.0000",
+      runTimePerUnit: "30.00000000",
       resourceLocked: true,
       plannedEndWeek: suggestion.toWeek,
     });
@@ -717,7 +717,7 @@ describe("förslag på resurs (etapp 2)", () => {
     expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r130.id, resourceLocked: true });
     // On the resource it expects, unlocked: the switch goes through.
     const { operation } = await byt(w.r130.id);
-    expect(operation).toMatchObject({ workCenterId: w.r120.id, setupTime: "10.00", runTimePerUnit: "30.0000", resourceLocked: true });
+    expect(operation).toMatchObject({ workCenterId: w.r120.id, setupTime: "10.00", runTimePerUnit: "30.00000000", resourceLocked: true });
   });
 
   it("the TO card reads no load for an order without an operation that could get one", async () => {

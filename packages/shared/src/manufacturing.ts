@@ -176,7 +176,7 @@ export type OperationTimeUnit = (typeof operationTimeUnits)[number];
 export const routingAlternativeSchema = z.object({
   workCenterId: z.string().uuid(),
   setupTime: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).nullable().optional(),
-  runTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 4))).nullable().optional(),
+  runTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 8))).nullable().optional(),
 });
 export type RoutingAlternativeInput = z.infer<typeof routingAlternativeSchema>;
 export const MAX_ROUTING_ALTERNATIVES = 5;
@@ -212,9 +212,9 @@ export const createRoutingOperationSchema = z.object({
   description: routingDescriptionSchema.optional(),
   workCenterId: z.string().uuid(),
   setupTime: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))),
-  runTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 4))),
+  runTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 8))),
   // "Cykeltid" — productive time, minutes per unit like runTimePerUnit; null = none.
-  cycleTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 4))).nullable().optional(),
+  cycleTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 8))).nullable().optional(),
   timeUnit: z.enum(operationTimeUnits).optional(),
   // "Kalkyl" — time counted in the pre-calculation only; the operation is
   // skipped when the routing is snapshotted at release.
@@ -250,9 +250,9 @@ export const updateRoutingOperationSchema = z
     description: routingDescriptionSchema.optional(),
     workCenterId: z.string().uuid().optional(),
     setupTime: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).optional(),
-    runTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 4))).optional(),
+    runTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 8))).optional(),
     // "Cykeltid"; null clears.
-    cycleTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 4))).nullable().optional(),
+    cycleTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 8))).nullable().optional(),
     timeUnit: z.enum(operationTimeUnits).optional(),
     costingOnly: z.boolean().optional(),
     // Nullable so the comment can be cleared.
@@ -312,7 +312,7 @@ export const createMoOperationSchema = z.object({
   description: routingDescriptionSchema.optional(),
   workCenterId: z.string().uuid(),
   setupTime: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))),
-  runTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 4))),
+  runTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 8))),
   timeUnit: z.enum(operationTimeUnits).optional(),
   comment: routingCommentSchema.optional(),
   printOnWorkCard: z.boolean().optional(),
@@ -332,7 +332,7 @@ export const updateMoOperationSchema = z
     description: routingDescriptionSchema.optional(),
     workCenterId: z.string().uuid().optional(),
     setupTime: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 2))).optional(),
-    runTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(10, 4))).optional(),
+    runTimePerUnit: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 8))).optional(),
     timeUnit: z.enum(operationTimeUnits).optional(),
     comment: routingCommentSchema.optional(),
     printOnWorkCard: z.boolean().optional(),

@@ -134,7 +134,7 @@ describe("the beredning", () => {
     });
     const expected = [
       { workCenterId: r.r130.id, code: "130", name: "Kantpress 3", rank: 1, setupTime: "5.00", runTimePerUnit: null, active: true, hasCapacity: false },
-      { workCenterId: r.r120.id, code: "120", name: "Kantpress 2", rank: 2, setupTime: null, runTimePerUnit: "1.5000", active: true, hasCapacity: true },
+      { workCenterId: r.r120.id, code: "120", name: "Kantpress 2", rank: 2, setupTime: null, runTimePerUnit: "1.50000000", active: true, hasCapacity: true },
     ];
     expect(created.alternatives).toEqual(expected);
     const [listed] = await mfgService.listRoutingOperations(parent.id);
@@ -162,7 +162,7 @@ describe("the beredning", () => {
     });
     expect(updated.description).toBe("Bockning");
     expect(await storedAlternatives(op.id)).toEqual([
-      { workCenterId: r.r130.id, rank: 1, setupTime: null, runTimePerUnit: "3.0000" },
+      { workCenterId: r.r130.id, rank: 1, setupTime: null, runTimePerUnit: "3.00000000" },
       { workCenterId: r.r120.id, rank: 2, setupTime: null, runTimePerUnit: null },
     ]);
     // Omitted: untouched, also when the ordinarie's times change.
@@ -263,8 +263,8 @@ describe("the beredning", () => {
       runTimePerUnit: 1,
       alternatives: [{ workCenterId: r.r110.id, setupTime: 10, runTimePerUnit: 2 }],
     });
-    expect(swapped).toMatchObject({ workCenterId: r.r120.id, runTimePerUnit: "1.0000" });
-    expect(swapped.alternatives.map((a) => [a.code, a.setupTime, a.runTimePerUnit])).toEqual([["110", "10.00", "2.0000"]]);
+    expect(swapped).toMatchObject({ workCenterId: r.r120.id, runTimePerUnit: "1.00000000" });
+    expect(swapped.alternatives.map((a) => [a.code, a.setupTime, a.runTimePerUnit])).toEqual([["110", "10.00", "2.00000000"]]);
     // Without alternatives the operation may become lego or Kalkyl as before.
     const plain = await mfgService.updateRoutingOperation(parent.id, op.id, { alternatives: [], costingOnly: true });
     expect(plain.costingOnly).toBe(true);
@@ -303,7 +303,7 @@ describe("Kopiera beredning", () => {
     const op10 = operations.find((op) => op.sequenceNo === 10)!;
     expect(op10.alternatives.map((a) => [a.code, a.rank, a.setupTime, a.runTimePerUnit])).toEqual([
       ["130", 1, "5.00", null],
-      ["120", 2, null, "1.5000"],
+      ["120", 2, null, "1.50000000"],
     ]);
     expect(operations.find((op) => op.sequenceNo === 20)!.alternatives).toEqual([]);
     // The source keeps its own rows.

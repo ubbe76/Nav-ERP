@@ -29,6 +29,16 @@ export function formatQuantity(value: string | number): string {
   return Number(value).toLocaleString("sv-SE", { maximumFractionDigits: 4 });
 }
 
+// Tid/enhet in minutes (numeric(14,8), migration 0218): at most four
+// decimals like a quantity, but a run time under a minute keeps six
+// significant digits — 0,05 s/st is 0,00083333 min and showed as "0,0008".
+export function formatRunMinutes(value: string | number): string {
+  const n = Number(value);
+  return n !== 0 && Math.abs(n) < 1
+    ? n.toLocaleString("sv-SE", { maximumSignificantDigits: 6 })
+    : n.toLocaleString("sv-SE", { maximumFractionDigits: 4 });
+}
+
 // Percentages as they're written in Swedish: comma decimal, a space before
 // the sign. Used by the Rapporter section (precision, statistics, outcome).
 export function formatPercent(value: number, decimals = 1): string {

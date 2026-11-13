@@ -412,7 +412,7 @@ describe("operations", () => {
       workCenterName: "Kap",
       workCenterType: "machine",
       setupTime: "30.00",
-      runTimePerUnit: "60.0000",
+      runTimePerUnit: "60.00000000",
       description: "Efterkontroll",
       printOnWorkCard: true,
       comment: "Kolla",
@@ -456,7 +456,7 @@ describe("operations", () => {
     expect((await opRow(w.op10.id))!.plannedAt?.getTime()).toBe(before!.plannedAt?.getTime());
     // 60 → 300 min/st: 8 st remain ⇒ 40 h, started ⇒ from this week; R1 has 40 h in W1 minus nothing else.
     const times = await mfgService.updateOperation(w.order.id, w.op10.id, { runTimePerUnit: 300 }, w.user.id);
-    expect(times.operation.runTimePerUnit).toBe("300.0000");
+    expect(times.operation.runTimePerUnit).toBe("300.00000000");
     expect(await planRows(w.op10.id)).toEqual([{ monday: W1, minutes: 2400 }]);
     // Op 20 follows into W2 (R1 full in W1 ⇒ op 10 ends W1; op 20 needs 10 h on R2, W1 has room — it ends the same week).
     expect((await opRow(w.op20.id))!.plannedStartWeek).toBe(W1);
@@ -635,7 +635,7 @@ describe("concurrency", () => {
       ]);
     }
     expect((await opRow(w.op10.id))!.quantityCompleted).toBe("6.0000");
-    expect((await opRow(w.op20.id))!.runTimePerUnit).toBe("65.0000");
+    expect((await opRow(w.op20.id))!.runTimePerUnit).toBe("65.00000000");
     expect((await mfgService.listMaterialConsumptions(w.order.id))[0]!.quantityConsumed).toBe("12.0000");
   });
 });

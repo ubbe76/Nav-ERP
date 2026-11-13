@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { OperationTimeUnit } from "./manufacturing.js";
-import { round2, round4 } from "./money.js";
+import { round2, round4, roundToDecimals } from "./money.js";
 import { blankSafe, numericMax, numericStep } from "./coerce.js";
 
 // Units register (enheter) + per-article alternative units with conversion
@@ -54,26 +54,43 @@ export function toUnitPrice(basePrice: number, factor: UnitFactor): number {
 // Routing/MO operation time — "Tid/enhet" is always stored/returned in
 // minutes per unit (canonical, used unchanged by costing, capacity planning,
 // import and the external configurator API). The per-operation time_unit is
-// a pure display preference: st/h (units per hour) is converted at the edges
-// only. The round-trip is not exact — round4(60/round2(60/x)) can drift from
-// x in the last digit(s) — so a value re-entered as e.g. 7 st/h is stored as
-// 8.5714 min/st, which displays back as 7 st/h again, but a value that started
-// life in minutes and gets toggled to st/h and back may show a tiny drift.
-// This is accepted: the drift is presentational only, never re-persisted
-// silently (a save always writes exactly what the active unit's field shows).
+// a pure display preference: st/h (units per hour) and sek/st are converted
+// at the edges only.
+//
+// The stored minutes keep RUN_TIME_DECIMALS (numeric(14,8), migration 0218 —
+// 4 decimals made 0,05 s/st 0,048 s and 36 000 st/h 35 294 st/h). Every
+// conversion INTO minutes rounds with roundRunTime, never round4.
+export const RUN_TIME_DECIMALS = 8;
+export function roundRunTime(minutesPerUnit: number): number {
+  return roundToDecimals(minutesPerUnit, RUN_TIME_DECIMALS);
+}
+
 export function unitsPerHourToMinutesPerUnit(unitsPerHour: number): number {
-  return round4(60 / unitsPerHour);
+  return roundRunTime(60 / unitsPerHour);
 }
 
+// The st/h shown for stored minutes: the SHORTEST number (at most 2 decimals)
+// that converts back to exactly those minutes — 36 000 st/h is stored as
+// 0.00166667 min, which is 35 999,99 st/h rounded but 36 000 shortest. A
+// typed st/h therefore reads back unchanged (up to ~77 000 st/h every whole
+// number does); minutes typed as minutes (13 min/st = 4,615… st/h) have no
+// short st/h and show rounded to 2 decimals as before. A save never converts
+// the shown st/h back (the dialog keeps the stored minutes until typed over).
 export function minutesPerUnitToUnitsPerHour(minutesPerUnit: number): number {
-  return round2(60 / minutesPerUnit);
+  const exact = 60 / minutesPerUnit;
+  for (let digits = 1; digits <= 15; digits++) {
+    const candidate = Number(exact.toPrecision(digits));
+    if (candidate !== round2(candidate)) break;
+    if (unitsPerHourToMinutesPerUnit(candidate) === minutesPerUnit) return candidate;
+  }
+  return round2(exact);
 }
 
-// Sekunder (sek/st, migration 0167): the stored minutes keep 4 decimals and
-// the shown seconds 2, so a value typed in seconds reads back unchanged —
-// 7 s → 0.1167 min → 7 s. Unlike st/h, 0 converts fine both ways.
+// Sekunder (sek/st, migration 0167): the shown seconds keep 2 decimals, so a
+// value typed in seconds reads back unchanged — 7 s → 0.11666667 min → 7 s,
+// 0,05 s → 0.00083333 min → 0,05 s. Unlike st/h, 0 converts fine both ways.
 export function secondsPerUnitToMinutesPerUnit(secondsPerUnit: number): number {
-  return round4(secondsPerUnit / 60);
+  return roundRunTime(secondsPerUnit / 60);
 }
 
 export function minutesPerUnitToSecondsPerUnit(minutesPerUnit: number): number {
