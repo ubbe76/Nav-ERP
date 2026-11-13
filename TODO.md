@@ -143,7 +143,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Bakdaterade lagerrörelser** → [#19](https://github.com/ubbe76/Nav-ERP/issues/19) *(hemsidan)*. FIFO-värderingen och inventering per underlagets datum (#26) är klara sedan 2026-11-04. Kvar är att registrera andra lagerrörelser med ett tidigare värderingsdatum, eftersom kolumnen `valued_at` redan finns. Hemsidans text ("Det finns ingen FIFO-värdering …" och metodlistorna i `areas.ts`) ändras vid nästa version.
 - [ ] **Färdiga kollektivavtal att välja** → [#30](https://github.com/ubbe76/Nav-ERP/issues/30) *(hemsidan)*
 - [ ] **Mobilapp** → [#31](https://github.com/ubbe76/Nav-ERP/issues/31) *(hemsidan)*
-- [ ] **Aktivitetsbaserad kalkyl** → [#32](https://github.com/ubbe76/Nav-ERP/issues/32) *(hemsidan)*
 
 ### Medvetet utanför
 
