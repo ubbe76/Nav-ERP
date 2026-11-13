@@ -1,6 +1,6 @@
 # Aviseringar
 
-Aviseringar samlar det som behöver åtgärdas just nu: försenade ordrar, negativa saldon, förfallna fakturor och utskick som misslyckats. Sidan finns under menyvalet **Aviseringar** direkt under **Översikt**, och de första raderna visas på Översikten i kortet **Att bevaka**.
+Aviseringar samlar det som behöver åtgärdas just nu: försenade ordrar, negativa saldon, förfallna fakturor och utskick som misslyckats. Sidan finns under menyvalet **Aviseringar** direkt under **Översikt**, och en sammanfattning med antalet per typ visas på Översikten i kortet **Att bevaka**.
 
 ## Aviseringarna försvinner av sig själva
 
@@ -8,7 +8,7 @@ En avisering lagras aldrig. Den är en fråga mot nuläget som ställs varje gå
 
 ## Typerna
 
-Typerna visas i fast ordning: röda före gula. Inom en typ står det äldsta eller mest akuta först.
+Typerna grupperas per område (se [Sidan Aviseringar](#sidan-aviseringar)) och står i fast ordning inom området: röda före gula. Inom en typ står det äldsta eller mest akuta först.
 
 | Typ | Färg | Urval |
 |---|---|---|
@@ -24,9 +24,9 @@ Typerna visas i fast ordning: röda före gula. Inom en typ står det äldsta el
 | **E-postlådan för fakturor kunde inte läsas** | röd | E-postlådan som läses av [Fakturaskanning](/hjalp/system#fakturaskanning) har inte gått att läsa vid senaste körningen. Raden visar orsaken och länkar till inställningssidan, där **Testa anslutning** kan hjälpa. Aviseringen försvinner när en körning lyckas. Bara administratörer ser typen. |
 | **Fakturor i inkorgen att granska** | gul | Fakturor i [Fakturainkorgen](/hjalp/inkop#fakturainkorg) som är **Ny**, **Tolkad** eller **Osäker**, alltså de som visas under **Att granska**. Raden länkar till inkorgen. Menyn **Inköp** krävs. |
 | **Avvikelser som passerat Åtgärd senast** | gul | Öppna [avvikelser](/hjalp/kvalitet) (**Registrerad** eller **Utreds**) där **Åtgärd senast** har passerat, äldsta först. Raden visar numret, rubriken, datumet och motparten och länkar till avvikelsen; listan är avvikelserna med rutan **Försenade** ibockad. |
-| **Försenade kundordrar** | gul | Order med status bekräftad eller under tillverkning där en rad med rest har ett leveransdatum som har passerat. Offerter och levererade ordrar räknas aldrig. **Visa alla** öppnar [Kundorder](/hjalp/forsaljning#kundorder) filtrerad på **Sen**, som använder samma regel. |
-| **Försenade inköpsordrar** | gul | Order med status utkast, bekräftad eller delvis mottagen där en rad med rest har ett ankomstdatum som har passerat. Bekräftat leveransdatum gäller före önskat. **Visa alla** öppnar [Inköpsorder](/hjalp/inkop#inkopsorder) filtrerad på **Sen**. |
-| **Sena tillverkningsordrar** | gul | Tillverkningsordrar som är Frisläppta eller Pågår som är **Sena** enligt produktionsplaneringen, alltså samma **Sen** som tillverkningsorderlistan och tillverkningsordern visar. **Visa alla** öppnar listan filtrerad på **Sen**. |
+| **Försenade kundordrar** | gul | Order med status bekräftad eller under tillverkning där en rad med rest har ett leveransdatum som har passerat. Offerter och levererade ordrar räknas aldrig. **Öppna listan** öppnar [Kundorder](/hjalp/forsaljning#kundorder) filtrerad på **Sen**, som använder samma regel. |
+| **Försenade inköpsordrar** | gul | Order med status utkast, bekräftad eller delvis mottagen där en rad med rest har ett ankomstdatum som har passerat. Bekräftat leveransdatum gäller före önskat. **Öppna listan** öppnar [Inköpsorder](/hjalp/inkop#inkopsorder) filtrerad på **Sen**. |
+| **Sena tillverkningsordrar** | gul | Tillverkningsordrar som är Frisläppta eller Pågår som är **Sena** enligt produktionsplaneringen, alltså samma **Sen** som tillverkningsorderlistan och tillverkningsordern visar. **Öppna listan** öppnar listan filtrerad på **Sen**. |
 | **Behöver beställas** | gul | Behovsberäkningens rader med förslaget att köpa eller lägga ut på legotillverkning: artikeln ligger under beställningspunkten eller räcker inte till behovet. Raderna grupperas på artikelns **förvalda leverantör**, se [Behöver beställas per leverantör](#behover-bestallas-per-leverantor). |
 | **Behöver tillverkas** | gul | Behovsberäkningens rader med förslaget att tillverka, även konfigurerade artiklar. |
 | **Bokningar utan kostnadsställe** | gul | Bokförda rader på ett konto med **Kräver kostnadsställe** som saknar kostnadsställe — i praktiken rader som automatkonteringen bokat utan, eftersom manuella verifikat inte kan bokföras utan. Raden länkar till [Verifikat](/hjalp/ekonomi#verifikat). Ekonomi-rättigheten krävs. |
@@ -51,10 +51,13 @@ Administratörer ser allt. Sidan kräver minst en meny. Även ett konto med **En
 
 ## Sidan Aviseringar
 
-Sidan visar en ruta per typ som har något att visa, med rubrik, antal och raderna. Typer utan aviseringar visas inte, och finns ingenting alls står det "Inget att bevaka just nu."
+Sidan är grupperad per område, i samma ordning som sidomenyn: **Inköp**, **Försäljning**, **Tillverkning**, **Lager**, **Kvalitet**, **Ekonomi** och **System**. Varje område har en rubrik med det sammanlagda antalet och en röd prick om någon av dess typer har en röd rad, annars en gul. Under rubriken står en ruta per typ som har något att visa, med rubrik, antal och raderna. Typer och områden utan aviseringar visas inte, och finns ingenting alls står det "Inget att bevaka just nu." Har mer än ett område något att visa finns en rad med områdena överst, och ett klick på ett område hoppar till dess rubrik.
 
+Typerna hör till området där saken åtgärdas, alltså menyn som ger rätt att se dem (se [Vem ser vad](#vem-ser-vad)). Typerna som bara administratörer ser står under **System**.
+
+- Varje ruta visar de fem första raderna. **Visa fler (N)** under raderna fäller ut resten på sidan, och **Visa färre** fäller ihop dem igen. **Öppna listan** öppnar den vanliga listan för typen.
 - Varje rad länkar till kortet där saken åtgärdas: kundorder, inköpsorder, tillverkningsorder, faktura eller leverantörsfaktura. Negativt saldo och behovsraderna länkar till artikelöversikten. En rad utan kort, t.ex. ett misslyckat testmejl, är vanlig text. Länkar till sidor du inte får öppna visas också som vanlig text.
-- Antalet är alltid det verkliga antalet, men högst 200 rader visas per typ. **Visa alla** under raderna öppnar den vanliga listan för typen.
+- Antalet är alltid det verkliga antalet, men högst 200 rader visas per typ, även utfällt.
 - **Beräknad hh:mm** visar när uppgifterna räknades fram (svensk tid). **Uppdatera** räknar om. Behovsberäkningen återanvänds i högst en minut, så **Behöver beställas** och **Behöver tillverkas** kan släpa något efter.
 - Går det inte att läsa en typ visas den med ett felmeddelande, medan de övriga visas som vanligt.
 
@@ -62,13 +65,17 @@ Sidan visar en ruta per typ som har något att visa, med rubrik, antal och rader
 
 Rutan **Behöver beställas** är grupperad på artikelns förvalda leverantör, med leverantörens namn (en länk till leverantörskortet) och antalet som rubrik. Leverantörerna står i namnordning, men gruppen **Utan förvald leverantör** står alltid först — där saknas leverantör på artikelkortet, och raden länkar dit; ange leverantör på artikelkortets flik **Inköp**. Förslagen om legotillverkning ligger i samma grupper som köpförslagen, hos operationens leverantör.
 
-Har du rätt att skapa inköpsorder finns en kryssruta på varje rad (utom i **Utan förvald leverantör**, där det inte finns någon leverantör att beställa från) och **Markera alla** i varje leverantörsgrupp. När du markerat något visas knappen **Skapa inköpsorder (N)** i rutans rubrik. Den frågar "Skapa inköpsorder för N artiklar? En inköpsorder skapas per leverantör, köp och lego var för sig." och skapar sedan inköpsorder som **Utkast** på samma sätt som **Skapa ordrar** i [behovsberäkningen](/hjalp/tillverkning#orderforslag-och-skapa-ordrar): samma leverantörs- och prisregler, samma datumregler och samma varningar. Resultatet visas överst under **Skapade inköpsorder** med ordernumren som länkar till ordrarna, och fel visas per artikel. En leverantör som har både köp- och legoförslag markerade får **två** inköpsordrar, en för köp och en för lego.
+Även här visas de fem första raderna, under sina leverantörsrubriker, tills du väljer **Visa fler (N)**. Har du rätt att skapa inköpsorder finns en kryssruta på varje rad (utom i **Utan förvald leverantör**, där det inte finns någon leverantör att beställa från) och **Markera alla** i varje leverantörsgrupp. **Markera alla** markerar leverantörens alla rader och fäller därför ut rutan, så att du ser allt som markeras. När du markerat något visas knappen **Skapa inköpsorder (N)** i rutans rubrik. Den frågar "Skapa inköpsorder för N artiklar? En inköpsorder skapas per leverantör, köp och lego var för sig." och skapar sedan inköpsorder som **Utkast** på samma sätt som **Skapa ordrar** i [behovsberäkningen](/hjalp/tillverkning#orderforslag-och-skapa-ordrar): samma leverantörs- och prisregler, samma datumregler och samma varningar. Resultatet visas överst under **Skapade inköpsorder** med ordernumren som länkar till ordrarna, och fel visas per artikel. En leverantör som har både köp- och legoförslag markerade får **två** inköpsordrar, en för köp och en för lego.
 
 Gruppen hör till menyn **Inköp** (se ovan), så det är den som har Inköp som skapar inköpsorder här; i behovsberäkningen får även **Tillverkning** skapa dem med **Skapa ordrar**. Konton med **Endast läsning** kan inte skapa order. Efter skapandet räknas listan om, och förslagen som blev ordrar försvinner.
 
-Visas högst 200 rader per typ står det **+ N till** under en leverantörsgrupp som har fler; länken öppnar behovsberäkningen. Rubrikens antal är alltid gruppens verkliga antal.
+Visas högst 200 rader per typ står det **+ N till** under en leverantörsgrupp som har fler när rutan är utfälld; länken öppnar behovsberäkningen. Rubrikens antal är alltid gruppens verkliga antal.
 
-På Översikten visar kortet **Att bevaka** raderna för **Behöver beställas** under samma leverantörsrubriker, utan kryssrutor — en rad öppnar sidan Aviseringar.
+På Översikten visar kortet **Att bevaka** bara typen **Behöver beställas** med antalet, se nedan.
+
+## Att bevaka på Översikten
+
+Kortet **Att bevaka** på Översikten är en sammanfattning av sidan: en rad per typ som har något att visa, med typens namn, en röd eller gul prick och antalet, under samma områdesrubriker som sidan. Ett klick på en rad öppnar sidan Aviseringar vid den typen, med raderna utfällda. **Visa alla (N)** öppnar sidan, där N är det sammanlagda antalet. En typ som inte gick att läsa visas med ett streck i stället för antal.
 
 ## Daglig sammanställning via e-post
 

@@ -21,6 +21,7 @@ function group(kind: AlertGroup["kind"], items: AlertItem[], overrides: Partial<
   return {
     kind,
     label: "Försenade kundordrar",
+    area: "forsaljning",
     severity: "yellow",
     count: items.length,
     listHref: "/forsaljning/ordrar",

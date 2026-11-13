@@ -51,7 +51,7 @@ async function fakeComputeAlerts(kinds: readonly AlertKind[]): Promise<AlertsRes
       secondary: null,
       date: null,
     }));
-    return { kind, label: def.label, severity: def.severity, count: items.length, listHref: def.listHref, items, error: false, message: null };
+    return { kind, label: def.label, area: def.area, severity: def.severity, count: items.length, listHref: def.listHref, items, error: false, message: null };
   });
   return { computedAt: new Date().toISOString(), groups };
 }
