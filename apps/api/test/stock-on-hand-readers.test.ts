@@ -44,8 +44,8 @@ const ALLOWED: Record<string, { reads: number; why: string }> = {
     why: "physical per place: the Lager tab's Lagerplatser card shows the article's balance on each of its places",
   },
   "modules/stock/repository/stock-count.repository.ts": {
-    reads: 3,
-    why: "physical per place: the count freezes and lists what stands on the shelf",
+    reads: 4,
+    why: "physical per place: the count freezes and lists what stands on the shelf — and where a serial number stands now (steg 4: counted in it must stand nowhere, counted out it must still stand here)",
   },
   "modules/stock/repository/batch-balances.ts": {
     reads: 7,

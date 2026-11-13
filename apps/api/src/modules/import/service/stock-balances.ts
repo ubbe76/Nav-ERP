@@ -348,7 +348,9 @@ export async function planStockBalanceImport(
         }
       }
     } else if (rawBatch !== "") {
-      if (article && sort === "serial") {
+      // On a serienummerstyrd article the column Batch only names the Okänd
+      // cell (old stock without numbers, any quantity).
+      if (article && sort === "serial" && rawBatch.toLocaleLowerCase("sv") !== UNKNOWN_BATCH_KEY) {
         errors.push(`Artikeln ${articleNumber} är serienummerstyrd — ange numret i kolumnen Serienummer, inte Batch`);
       } else if (article && sort === null) {
         errors.push(`Artikeln ${articleNumber} är inte batchstyrd — ta bort Batch eller gör artikeln batchstyrd först`);
@@ -518,6 +520,17 @@ export async function planStockBalanceImport(
       } else if (has === null && existingDates !== undefined) fillsDates = true;
     }
     const dateFields = { ...(rowDates.batchDate !== null ? { batchDate: rowDates.batchDate } : {}), ...(rowDates.expiresOn !== null ? { expiresOn: rowDates.expiresOn } : {}) };
+
+    // Serienummer (steg 4): a decrease of a serienummerstyrd article's whole
+    // place takes its numbers oldest first — whole styck. A fraction can only
+    // be the Okänd cell's (Batch = Okänd).
+    if (sort === "serial" && batch === null && delta < 0 && !Number.isInteger(delta)) {
+      errors.push(
+        `Artikeln ${articleNumber} är serienummerstyrd — saldot kan bara minska med hela styck (${formatQuantity(-delta)}). Ange Serienummer per rad, eller Batch ${UNKNOWN_BATCH_LABEL} för saldot utan nummer`
+      );
+      rows.push({ rowNumber, action: "update", errors, warnings, values });
+      return;
+    }
 
     if (input.skipExisting && current !== 0) {
       rows.push(skippedRow(rowNumber, `${batch === null ? "Platsen" : "Batchen"} har redan saldo ${formatQuantity(current)}`, values));

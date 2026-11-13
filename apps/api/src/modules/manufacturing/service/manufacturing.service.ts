@@ -2007,6 +2007,7 @@ export function createManufacturingService(
       const result = await repo.consumeMaterial(moId, rowId, {
         locationId: input.locationId,
         batchId: input.batchId,
+        serialIds: input.serialIds,
         quantity: input.quantity,
         createdBy,
         materialShortage: await materialShortageCheck(input.allowMaterialShortage),

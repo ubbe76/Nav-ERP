@@ -224,6 +224,12 @@ export interface BatchOutflowChoice {
   // Left out = every batch, oldest first; batchId null = Okänd. The number
   // is only for the error text (the cells carry it when the batch has stock).
   batch?: { batchId: string | null; batchNumber?: string | null };
+  // SEVERAL chosen batch rows (etapp 2, steg 4 — serial numbers chosen or
+  // scanned): only their cells, and together they must cover the quantity —
+  // else BatchInsufficientError naming the ones that are missing. Never
+  // tried against the utgångsdatum (chosen by hand). The rule does not know
+  // the sort; the loader only sends serial numbers this way.
+  batches?: readonly { batchId: string; batchNumber: string }[];
   // A chosen place: only its cells, no ceiling (see above).
   locationId?: string;
   // Utgångna (etapp 2, beslut 8 and 12): a Stockholm day. With NO chosen
@@ -255,13 +261,17 @@ export function allocateBatchOutflow(
     }
   }
   const chosenBatch = choice.batch;
+  const chosenMany = choice.batches === undefined ? undefined : new Set(choice.batches.map((b) => b.batchId));
   const candidates = cells
     .filter((c) => c.quantity > 0)
     .filter((c) => (choice.locationId === undefined ? ceiling.has(c.locationId) : c.locationId === choice.locationId))
     .filter((c) => chosenBatch === undefined || c.batchId === chosenBatch.batchId)
+    .filter((c) => chosenMany === undefined || (c.batchId !== null && chosenMany.has(c.batchId)))
     // An expired cell stays in its place's net balance (the ceiling) but is
     // not taken — the ceiling can only be more generous than the cells left.
-    .filter((c) => chosenBatch !== undefined || choice.expiredBefore === undefined || !isBatchExpired(c.expiresOn, choice.expiredBefore))
+    .filter(
+      (c) => chosenBatch !== undefined || chosenMany !== undefined || choice.expiredBefore === undefined || !isBatchExpired(c.expiresOn, choice.expiredBefore)
+    )
     .sort((a, b) => {
       const byBatch = compareBatches(a, b);
       if (byBatch !== 0) return byBatch;
@@ -281,6 +291,20 @@ export function allocateBatchOutflow(
   }
 
   const remainder = Math.max(left, 0);
+  if (choice.batches !== undefined) {
+    // Every chosen one must have given its whole cell… and they must cover it.
+    const taken = new Set(parts.map((p) => p.batchId));
+    const missing = choice.batches.filter((b) => !taken.has(b.batchId));
+    if (remainder > 0 || missing.length > 0) {
+      const names = (missing.length > 0 ? missing : choice.batches).map((b) => b.batchNumber);
+      throw new BatchInsufficientError(
+        names.slice(0, 20).join(", ") + (names.length > 20 ? ` och ${names.length - 20} till` : ""),
+        round4(round4(quantity) - remainder),
+        round4(quantity),
+        true
+      );
+    }
+  }
   if (remainder > 0 && chosenBatch && chosenBatch.batchId !== null) {
     const batchNumber = chosenBatch.batchNumber ?? cells.find((c) => c.batchId === chosenBatch.batchId)?.batchNumber ?? chosenBatch.batchId;
     throw new BatchInsufficientError(batchNumber, round4(round4(quantity) - remainder), round4(quantity));

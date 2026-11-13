@@ -6,8 +6,10 @@ import {
   BatchKindMismatchError,
   SerialAlreadyInStockError,
   SerialCountMismatchError,
+  SerialNumberTakenError,
   SerialNumberTooLongError,
   SerialNumbersTooManyError,
+  SerialQuantityNotIntegerError,
   SerialSeriesInvalidError,
 } from "./batch.errors.js";
 import { normalizeBatchNumber, type StockBatchOrigin, type StockBatchRef } from "./batches.js";
@@ -21,7 +23,7 @@ import { trackingOf } from "./batch-tracking.js";
 // The writer's rule (stock.md): a NAMED serial number is always booked as
 // its own row ±1, after lockSerials; an INFLOW first proves the number is out
 // of stock in total (assertSerialsOutOfStock) — also an Ångra that puts a
-// number back. The trigger stock_transactions_serial_unit (NV002) is the
+// number back. The trigger stock_transactions_serial_unit (NV003) is the
 // guard behind the rule, never the rule.
 //
 // Lock order, for every writer: order → serierad → artiklar → platser →
@@ -201,6 +203,8 @@ export async function claimSerialNumbers(
     manufacturingOrderId?: string | null;
     createdBy?: string | null;
     expiresOn?: string | null | undefined;
+    // How the numbers are created: a TO's receipt (the default) or a delivery.
+    origin?: "manufacturing_order" | "delivery";
   }
 ): Promise<StockBatchRef[]> {
   assertSerialCountAllowed(input.count);
@@ -228,7 +232,7 @@ export async function claimSerialNumbers(
           // exist ("Okänd" has no digits), so the numbers are stored as issued.
           batchNumber: batchNumber.trim(),
           kind: "serial" as const,
-          origin: "manufacturing_order" as const,
+          origin: input.origin ?? ("manufacturing_order" as const),
           manufacturingOrderId: input.manufacturingOrderId ?? null,
           createdBy: input.createdBy ?? null,
           expiresOn: input.expiresOn ?? null,
@@ -240,4 +244,116 @@ export async function claimSerialNumbers(
     claimed.push(...created.sort((a, b) => position.get(a.batchNumber)! - position.get(b.batchNumber)!));
   }
   return claimed;
+}
+
+// --- Serienummer skapas vid utleverans (beslut 16–18, migration 0216) ---
+//
+// The stock of such an article is untracked; the number is given to the
+// styck when it is delivered and linked to the delivery row
+// (delivery_row_serials). A number is given ONCE: the series steps over
+// every number the article already has, a typed or scanned one must be new
+// to the article, and the numbers of an undone delivery row are burnt — the
+// rows stay, so nothing can issue them again.
+
+// The serienummerstyrda articles among these whose numbers are created vid
+// utleverans, with the series each is numbered from. Read FOR KEY SHARE like
+// every reader of the article's Spårning that then writes.
+export async function deliverySerialArticles(
+  tx: Db | Tx,
+  articleIds: readonly string[]
+): Promise<Map<string, { articleNumber: string; seriesKey: string }>> {
+  const ids = [...new Set(articleIds)];
+  const found = new Map<string, { articleNumber: string; seriesKey: string }>();
+  for (let i = 0; i < ids.length; i += 500) {
+    const rows = await tx
+      .select({ id: articles.id, articleNumber: articles.articleNumber, seriesKey: articles.serialSeriesKey })
+      .from(articles)
+      .where(and(inArray(articles.id, ids.slice(i, i + 500)), eq(articles.tracking, "serial"), eq(articles.serialAssignedAt, "delivery")))
+      .for("key share");
+    for (const row of rows) found.set(row.id, { articleNumber: row.articleNumber, seriesKey: row.seriesKey ?? DEFAULT_SERIAL_SERIES_KEY });
+  }
+  return found;
+}
+
+// The series rows FOR UPDATE, sorted on the key — the FIRST lock of a
+// delivery that gives serial numbers (series → articles → rows → places),
+// the same position the TO report gives it relative to the articles.
+export async function lockSerialSeries(tx: Tx, keys: readonly string[]): Promise<void> {
+  const sorted = [...new Set(keys)].sort();
+  if (sorted.length === 0) return;
+  await tx.select({ key: numberSeries.key }).from(numberSeries).where(inArray(numberSeries.key, sorted)).orderBy(asc(numberSeries.key)).for("update");
+}
+
+// The next `count` numbers the article's series WOULD give — a suggestion
+// for the delivery form. Nothing is drawn or reserved (the draw happens in
+// the delivery's transaction), numbers the article already has are stepped
+// over, and two forms open at once are shown the same numbers.
+export async function previewSerialNumbers(db: Db | Tx, articleId: string, count: number): Promise<string[]> {
+  assertSerialCountAllowed(count);
+  const key = await serialSeriesKeyOf(db, articleId);
+  const [series] = await db.select().from(numberSeries).where(and(eq(numberSeries.key, key), eq(numberSeries.forSerials, true)));
+  if (!series) throw new NumberSeriesNotConfiguredError(key);
+  const suggestions: string[] = [];
+  let next = series.nextNumber;
+  for (let round = 0; suggestions.length < count && round < CLAIM_ROUNDS; round++) {
+    const candidates = Array.from({ length: count - suggestions.length }, (_, i) => formatSeriesNumber(series.prefix, next + i, series.digits));
+    next += candidates.length;
+    // The free ones, in the series' order — compared with Postgres' lower().
+    const free = (await db.execute(sql`
+      select u.number
+      from unnest(${sql.param(candidates)}::text[]) with ordinality as u(number, position)
+      where not exists (
+        select 1 from stock_batches sb where sb.article_id = ${articleId} and lower(sb.batch_number) = lower(u.number)
+      )
+      order by u.position`)) as unknown as { number: string }[];
+    for (const row of [...free]) suggestions.push(row.number);
+  }
+  return suggestions.slice(0, count);
+}
+
+// The numbers a delivery row gives its `count` styck: the ones sent (typed
+// or scanned — they win; exactly as many as the styck, distinct, and NEW to
+// the article: 409 serial-number-taken otherwise) or the next ones of the
+// article's series (whose row the caller has locked). Created as serial
+// numbers with origin delivery; the caller links them to the delivery row.
+export async function assignDeliverySerials(
+  tx: Tx,
+  input: { articleId: string; articleNumber: string; count: number; serialNumbers?: readonly string[] | undefined; createdBy?: string | null }
+): Promise<StockBatchRef[]> {
+  if (!Number.isInteger(input.count)) throw new SerialQuantityNotIntegerError(input.articleNumber, input.count);
+  if (input.serialNumbers === undefined) {
+    return claimSerialNumbers(tx, { articleId: input.articleId, count: input.count, createdBy: input.createdBy, origin: "delivery" });
+  }
+  if (input.serialNumbers.length !== input.count) throw new SerialCountMismatchError(input.count, input.serialNumbers.length);
+  const numbers = input.serialNumbers.map((raw) => normalizeBatchNumber(raw));
+  assertSerialCountAllowed(numbers.length);
+  const keyed = (await tx.execute(
+    sql`select u.number, lower(u.number) as key from unnest(${sql.param(numbers)}::text[]) with ordinality as u(number, position) order by u.position`
+  )) as unknown as { number: string; key: string }[];
+  const keys = [...keyed].map((row) => row.key);
+  const seen = new Set<string>();
+  keys.forEach((key, index) => {
+    if (seen.has(key)) throw new SerialCountMismatchError(numbers.length, numbers.length, numbers[index]!);
+    seen.add(key);
+  });
+  const order = numbers.map((number, index) => ({ number, key: keys[index]! })).sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  const created = await tx
+    .insert(stockBatches)
+    .values(
+      order.map(({ number }) => ({
+        articleId: input.articleId,
+        batchNumber: number,
+        kind: "serial" as const,
+        origin: "delivery" as const,
+        createdBy: input.createdBy ?? null,
+      }))
+    )
+    .onConflictDoNothing()
+    .returning({ id: stockBatches.id, batchNumber: stockBatches.batchNumber });
+  if (created.length < numbers.length) {
+    const made = new Set(created.map((row) => row.batchNumber));
+    throw new SerialNumberTakenError(numbers.find((number) => !made.has(number))!);
+  }
+  const byNumber = new Map(created.map((row) => [row.batchNumber, row]));
+  return numbers.map((number) => byNumber.get(number)!);
 }

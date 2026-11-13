@@ -319,12 +319,14 @@ export interface ArticleBatchBalances {
 
 // Spårbarhet (#8) — GET /stock/batches and /stock/batches/:id/trace; mirrors
 // packages/shared/src/stock.ts (the web app cannot import @navet/shared).
-export type StockBatchOrigin = "purchase_receipt" | "manufacturing_order" | "manual" | "import";
+export type StockBatchOrigin = "purchase_receipt" | "manufacturing_order" | "manual" | "import" | "delivery";
 export const STOCK_BATCH_ORIGIN_LABELS: Record<StockBatchOrigin, string> = {
   purchase_receipt: "Inleverans",
   manufacturing_order: "Tillverkning",
   manual: "Manuell",
   import: "Import",
+  // A serial number created vid utleverans (it never stands in stock).
+  delivery: "Utleverans",
 };
 export interface StockBatchListRow {
   id: string;

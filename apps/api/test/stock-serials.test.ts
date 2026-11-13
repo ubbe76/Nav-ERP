@@ -30,7 +30,7 @@ import { testSystemService } from "./helpers/services.js";
 // Serienummer (#8 etapp 2, steg 3 — migration 0215): a serial number is a
 // stock_batches row with kind = 'serial' whose balance is 0 or 1. This file:
 // the leaf (get-or-create, the sort, the locks' helpers), the database guard
-// (NV002), the series and claimSerialNumbers, and the positive justering.
+// (NV003), the series and claimSerialNumbers, and the positive justering.
 // Inleverans and the TO's finished goods are in stock-serial-inflows.test.ts.
 
 const articleService = createArticleService(createArticleRepository(db));
@@ -140,7 +140,7 @@ describe("getOrCreateSerials", () => {
   });
 });
 
-describe("the database guard (trigger stock_transactions_serial_unit, NV002)", () => {
+describe("the database guard (trigger stock_transactions_serial_unit, NV003)", () => {
   it("a serial number's balance is 0 or 1 — in total and on the row's place — and it moves one at a time", async () => {
     const a = await makeArticle();
     const [here, there] = [await makeLocation("A1"), await makeLocation("B2")];

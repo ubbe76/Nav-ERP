@@ -67,7 +67,7 @@ import { allocateOutflowLocations, lockArticlesForOutflow, type BlockedChoice } 
 import { isStockedArticle } from "../../stock/service/stocked-article.js";
 import { getOrCreateBatch } from "../../stock/service/batches.js";
 import { isTrackedArticle, batchTrackedSql, trackingOf } from "../../stock/service/batch-tracking.js";
-import { claimSerialNumbers, lockSerialSeriesForReceipt, lockSerials } from "../../stock/service/serial-numbers.js";
+import { assertSerialsOutOfStock, claimSerialNumbers, lockSerialSeriesForReceipt, lockSerials } from "../../stock/service/serial-numbers.js";
 import { SerialQuantityNotIntegerError } from "../../stock/service/batch.errors.js";
 import { expiryFromShelfLife, stockholmToday } from "../../system/service/delivery-days.js";
 import { batchCellQuantity } from "../../stock/repository/batch-balances.js";
@@ -313,7 +313,10 @@ async function drawMaterial(
   blockedChoice: BlockedChoice,
   // Batch (#8): only Förbruka chooses one (left out = Automatiskt per batch
   // for a batchstyrd component, null = Okänd).
-  batchId?: string | null
+  batchId?: string | null,
+  // Serienummer (steg 4): only Förbruka chooses numbers — as many as the
+  // styck; left out = the oldest numbers (every report, the terminal).
+  serialIds?: string[]
 ): Promise<ConsumedMaterialLine[]> {
   // A service component (tjänst) is work, not goods: the consumption is
   // recorded (one line without a place, for the report log and Ångra), but
@@ -321,21 +324,27 @@ async function drawMaterial(
   if (!(await isStockedArticle(tx, row.componentArticleId))) {
     return [{ componentArticleId: row.componentArticleId, quantity, materialConsumptionId: row.id, locationId: null }];
   }
-  const parts = await allocateOutflowLocations(tx, row.componentArticleId, quantity, locationId, { blockedChoice, batchId });
+  const parts = await allocateOutflowLocations(tx, row.componentArticleId, quantity, locationId, { blockedChoice, batchId, serialIds });
   const lines: ConsumedMaterialLine[] = [];
-  for (const part of parts) {
-    await assertLocationNotUnderCount(tx, part.locationId);
-    await tx.insert(stockTransactions).values({
+  if (parts.length === 0) return lines;
+  // Per PLACE, not per part: a serienummerstyrd component gives one part per
+  // number, often hundreds on one place. All the rows in one INSERT.
+  const places = [...new Set(parts.map((part) => part.locationId))];
+  for (const place of places) await assertLocationNotUnderCount(tx, place);
+  await tx.insert(stockTransactions).values(
+    parts.map((part) => ({
       articleId: row.componentArticleId,
       locationId: part.locationId,
       quantityDelta: String(-part.quantity),
-      transactionType: "mo_consumption",
+      transactionType: "mo_consumption" as const,
       referenceId: moId,
       createdBy,
       batchId: part.batchId ?? null,
-    });
-    // The draw may have emptied a temporary location.
-    await deactivateEmptyLocation(tx, part.locationId);
+    }))
+  );
+  // The draw may have emptied a temporary location.
+  for (const place of places) await deactivateEmptyLocation(tx, place);
+  for (const part of parts) {
     lines.push({
       componentArticleId: row.componentArticleId,
       quantity: part.quantity,
@@ -1061,7 +1070,16 @@ async function undoReportInTx(
   }
 
   // Drawn material back to where it was drawn from.
+  //
+  // Serienummer (steg 4): the lines that are serial numbers come back as an
+  // INFLOW of those numbers — a number that has come back into stock some
+  // other way cannot come back twice (409 serial-already-in-stock, naming it
+  // and where it stands). The material rows and the places first (one count
+  // check per place), then the numbers' rows locked sorted — last in the
+  // lock order — and only then the stock rows, in one INSERT.
   const lines = await tx.select().from(moReportMaterials).where(eq(moReportMaterials.moReportId, report.id));
+  const returns: { articleId: string; locationId: string; quantity: number; batchId: string | null }[] = [];
+  const checkedPlaces = new Set<string>();
   for (const line of lines) {
     const [row] = await tx
       .select()
@@ -1078,17 +1096,34 @@ async function undoReportInTx(
     // A service line (no place) was never drawn from stock: nothing to return.
     if (line.locationId === null) continue;
     const locationId = await resolveStockLocation(tx, row.componentArticleId, line.locationId);
-    await assertLocationNotUnderCount(tx, locationId);
-    await tx.insert(stockTransactions).values({
-      articleId: row.componentArticleId,
-      locationId,
-      quantityDelta: String(quantity),
-      transactionType: "mo_consumption",
-      referenceId: order.id,
-      createdBy: input.undoneBy,
-      // Batch (#8): back into the batch the part was drawn from.
-      batchId: line.batchId,
-    });
+    if (!checkedPlaces.has(locationId)) await assertLocationNotUnderCount(tx, locationId);
+    checkedPlaces.add(locationId);
+    // Batch (#8): back into the batch the part was drawn from.
+    returns.push({ articleId: row.componentArticleId, locationId, quantity, batchId: line.batchId });
+  }
+  const returnedBatchIds = returns.flatMap((r) => (r.batchId ? [r.batchId] : []));
+  const returnedSerials: string[] = [];
+  for (let i = 0; i < returnedBatchIds.length; i += 500) {
+    const kinds = await tx
+      .select({ id: stockBatches.id })
+      .from(stockBatches)
+      .where(and(inArray(stockBatches.id, returnedBatchIds.slice(i, i + 500)), eq(stockBatches.kind, "serial")));
+    returnedSerials.push(...kinds.map((k) => k.id));
+  }
+  await lockSerials(tx, returnedSerials);
+  await assertSerialsOutOfStock(tx, returnedSerials);
+  for (let i = 0; i < returns.length; i += 1000) {
+    await tx.insert(stockTransactions).values(
+      returns.slice(i, i + 1000).map((r) => ({
+        articleId: r.articleId,
+        locationId: r.locationId,
+        quantityDelta: String(r.quantity),
+        transactionType: "mo_consumption" as const,
+        referenceId: order.id,
+        createdBy: input.undoneBy,
+        batchId: r.batchId,
+      }))
+    );
   }
 
   // The operation's quantities, scrap rows and done flag.
@@ -2250,7 +2285,14 @@ export function createManufacturingRepository(db: Db) {
     async consumeMaterial(
       moId: string,
       rowId: string,
-      input: { locationId?: string; batchId?: string | null; quantity: number; createdBy: string; materialShortage?: MaterialShortageCheck }
+      input: {
+        locationId?: string;
+        batchId?: string | null;
+        serialIds?: string[];
+        quantity: number;
+        createdBy: string;
+        materialShortage?: MaterialShortageCheck;
+      }
     ): Promise<ConsumeMaterialResult> {
       return db.transaction(async (tx) => {
         // The order FOR UPDATE, before the row (the reports' order → rows):
@@ -2284,7 +2326,7 @@ export function createManufacturingRepository(db: Db) {
 
         // Förbruka: drawn where the stock is unless a location was chosen —
         // never from a chosen Spärrad lagerplats (409).
-        const lines = await drawMaterial(tx, row, input.quantity, input.locationId, moId, input.createdBy, "refuse", input.batchId);
+        const lines = await drawMaterial(tx, row, input.quantity, input.locationId, moId, input.createdBy, "refuse", input.batchId, input.serialIds);
         // Materialbrist: a throw here rolls the draw back.
         await assertMaterialAvailable(tx, lines, input.materialShortage ?? NO_MATERIAL_SHORTAGE_CHECK);
 

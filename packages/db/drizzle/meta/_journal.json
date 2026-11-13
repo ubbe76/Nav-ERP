@@ -1513,6 +1513,13 @@
       "when": 1794542895547,
       "tag": "0215_serienummer",
       "breakpoints": true
+    },
+    {
+      "idx": 216,
+      "version": "7",
+      "when": 1794545129762,
+      "tag": "0216_serienummer_vid_utleverans",
+      "breakpoints": true
     }
   ]
 }

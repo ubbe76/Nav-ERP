@@ -400,3 +400,62 @@ describe("allocateBatchOutflow — utgångna batcher", () => {
     expect(remainder).toBe(2);
   });
 });
+
+// Etapp 2, steg 4 — several chosen batch rows (serial numbers).
+describe("allocateBatchOutflow — flera valda (serienummer)", () => {
+  const serial = (locationId: string, number: string, age = 0): BatchCell => cell(locationId, number, 1, age);
+  const chosen = (...numbers: string[]) => numbers.map((n) => ({ batchId: `id-${n}`, batchNumber: n }));
+
+  it("takes exactly the chosen ones — whatever their age, wherever they stand", () => {
+    const { parts, remainder } = allocateBatchOutflow(
+      2,
+      [place({ locationId: "A1", quantityOnHand: 3 }), place({ locationId: "B2", quantityOnHand: 1 })],
+      [serial("A1", "S-1", 1), serial("A1", "S-2", 2), serial("A1", "S-3", 3), serial("B2", "S-4", 4)],
+      { batches: chosen("S-4", "S-2") }
+    );
+    expect(parts.map((p) => `${p.locationId}/${p.batchId}`).sort()).toEqual(["A1/id-S-2", "B2/id-S-4"]);
+    expect(remainder).toBe(0);
+  });
+
+  it("a chosen number that is not in stock on a usable place is refused, naming it — never a remainder", () => {
+    const places = [place({ locationId: "A1", quantityOnHand: 2 }), place({ locationId: "K1", quantityOnHand: 1, blocked: true })];
+    const cells = [serial("A1", "S-1"), serial("A1", "S-2"), serial("K1", "S-9")];
+    const refused = (numbers: string[]) => {
+      try {
+        allocateBatchOutflow(numbers.length, places, cells, { batches: chosen(...numbers) });
+      } catch (err) {
+        return err;
+      }
+      return null;
+    };
+    const missing = refused(["S-1", "S-7"]);
+    expect(missing).toBeInstanceOf(BatchInsufficientError);
+    expect((missing as Error).message).toBe("Serienummer S-7 finns inte i lager på en valbar plats");
+    // On a blocked place it is not usable either.
+    expect((refused(["S-9"]) as Error).message).toBe("Serienummer S-9 finns inte i lager på en valbar plats");
+  });
+
+  it("a chosen place: only the chosen numbers on it; an expired one is taken (chosen by hand)", () => {
+    const cells: BatchCell[] = [{ ...serial("A1", "S-1"), expiresOn: "2020-01-01" }, serial("A1", "S-2"), serial("B2", "S-3")];
+    expect(allocateBatchOutflow(1, [], cells, { locationId: "A1", batches: chosen("S-1"), expiredBefore: "2026-06-11" }).parts).toEqual([
+      { locationId: "A1", quantity: 1, batchId: "id-S-1" },
+    ]);
+    expect(() => allocateBatchOutflow(1, [], cells, { locationId: "A1", batches: chosen("S-3") })).toThrow(BatchInsufficientError);
+  });
+
+  it("Automatiskt on serial cells: Okänd first, then the oldest numbers, whole styck; what is missing is Okänd", () => {
+    const { parts, remainder } = allocateBatchOutflow(
+      4,
+      [place({ locationId: "A1", quantityOnHand: 4 })],
+      [serial("A1", "S-NY", 9), serial("A1", "S-GAMMAL", 1), serial("A1", "S-MELLAN", 5), cell("A1", null, 1)]
+    );
+    expect(parts.map((p) => [p.batchId, p.quantity])).toEqual([
+      [null, 1],
+      ["id-S-GAMMAL", 1],
+      ["id-S-MELLAN", 1],
+      ["id-S-NY", 1],
+    ]);
+    expect(remainder).toBe(0);
+    expect(allocateBatchOutflow(3, [place({ locationId: "A1", quantityOnHand: 1 })], [serial("A1", "S-1")]).remainder).toBe(2);
+  });
+});

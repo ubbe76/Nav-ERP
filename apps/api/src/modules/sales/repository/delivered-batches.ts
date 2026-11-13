@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { trackedSql } from "../../stock/service/batch-tracking.js";
-import { articles, deliveryRowLocations, deliveryRows, salesOrderRows, stockBatches, stockTransactions, type Db, type Tx } from "@navet/db";
+import { articles, deliveryRowLocations, deliveryRowSerials, deliveryRows, salesOrderRows, stockBatches, stockTransactions, type Db, type Tx } from "@navet/db";
 import { compareBatches } from "../../stock/service/outflow-allocation.js";
 import { batchAgeDateSql } from "../../stock/repository/batch-balances.js";
 
@@ -62,5 +62,54 @@ export async function deliveredBatchesForOrderRows(db: Db | Tx, salesOrderRowIds
       result.set(row.salesOrderRowId, entry);
     }
   }
+  return result;
+}
+
+// --- Serienummer (#8 etapp 2, steg 4) ---
+
+// The numbers each delivery row GAVE its styck (Serienummer skapas vid
+// utleverans — delivery_row_serials), per delivery row, for one delivery.
+export async function deliveryRowSerialNumbers(db: Db | Tx, where: { deliveryId: string }): Promise<Map<string, string[]>> {
+  const rows = await db
+    .select({ deliveryRowId: deliveryRowSerials.deliveryRowId, serialNumber: stockBatches.batchNumber })
+    .from(deliveryRowSerials)
+    .innerJoin(deliveryRows, eq(deliveryRows.id, deliveryRowSerials.deliveryRowId))
+    .innerJoin(stockBatches, eq(stockBatches.id, deliveryRowSerials.batchId))
+    .where(eq(deliveryRows.deliveryId, where.deliveryId));
+  const result = new Map<string, string[]>();
+  for (const row of rows) result.set(row.deliveryRowId, [...(result.get(row.deliveryRowId) ?? []), row.serialNumber]);
+  return result;
+}
+
+// Which serial numbers an order row's goods went out with — the invoice's
+// reader, the sibling of deliveredBatchesForOrderRows: the row's LIVE
+// delivery rows (not undone), BOTH ways a number gets there — a serial
+// number drawn from stock (the part's stock row, whatever the article's
+// Spårning says now: a serial number is always the styck's own) and a number
+// the delivery gave (delivery_row_serials). Numbers in natural order; a row
+// without any is absent. The numbers of an undone delivery row are burnt and
+// never listed.
+export async function deliveredSerialsForOrderRows(db: Db | Tx, salesOrderRowIds: readonly string[]): Promise<Map<string, string[]>> {
+  const ids = [...new Set(salesOrderRowIds)];
+  const result = new Map<string, string[]>();
+  const add = (salesOrderRowId: string, serialNumber: string) => result.set(salesOrderRowId, [...(result.get(salesOrderRowId) ?? []), serialNumber]);
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const part = ids.slice(i, i + CHUNK);
+    const drawn = await db
+      .select({ salesOrderRowId: deliveryRows.salesOrderRowId, serialNumber: stockBatches.batchNumber })
+      .from(deliveryRows)
+      .innerJoin(deliveryRowLocations, eq(deliveryRowLocations.deliveryRowId, deliveryRows.id))
+      .innerJoin(stockTransactions, eq(stockTransactions.id, deliveryRowLocations.stockTransactionId))
+      .innerJoin(stockBatches, eq(stockBatches.id, stockTransactions.batchId))
+      .where(and(inArray(deliveryRows.salesOrderRowId, part), isNull(deliveryRows.undoneAt), eq(stockBatches.kind, "serial")));
+    const given = await db
+      .select({ salesOrderRowId: deliveryRows.salesOrderRowId, serialNumber: stockBatches.batchNumber })
+      .from(deliveryRows)
+      .innerJoin(deliveryRowSerials, eq(deliveryRowSerials.deliveryRowId, deliveryRows.id))
+      .innerJoin(stockBatches, eq(stockBatches.id, deliveryRowSerials.batchId))
+      .where(and(inArray(deliveryRows.salesOrderRowId, part), isNull(deliveryRows.undoneAt)));
+    for (const row of [...drawn, ...given]) add(row.salesOrderRowId, row.serialNumber);
+  }
+  for (const [rowId, numbers] of result) result.set(rowId, numbers.sort((a, b) => a.localeCompare(b, "sv", { numeric: true })));
   return result;
 }

@@ -25,9 +25,10 @@ import { getNextOrderNumber } from "../../system/service/number-series.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { deactivateEmptyLocation } from "../service/location-lifecycle.js";
 import { isStockedArticleType } from "../service/stocked-article.js";
-import { BatchNotTrackedError } from "../service/batch.errors.js";
+import { BatchInsufficientError, BatchNotTrackedError, SerialCountNotUnitError, SerialOnOtherLocationError } from "../service/batch.errors.js";
 import { getOrCreateBatch } from "../service/batches.js";
-import { isTrackedArticle, batchTrackedSql, trackedSql } from "../service/batch-tracking.js";
+import { batchTrackedSql, trackedSql, trackingOf } from "../service/batch-tracking.js";
+import { assertSerialsOutOfStock, getOrCreateSerials, lockSerials } from "../service/serial-numbers.js";
 import { lockArticlesForOutflow } from "../service/outflow-locations.js";
 import { batchCellQuantity } from "./batch-balances.js";
 import { stockValuedDate } from "./valued-at.js";
@@ -170,6 +171,21 @@ async function lockOpenSession(tx: Tx, id: string) {
   if (!session) throw new StockCountNotFoundError(id);
   if (session.status !== "open") throw new StockCountNotOpenError(session.countNumber, session.status);
   return session;
+}
+
+// Where a serial number stands now (its one cell with a balance), null = out
+// of stock.
+async function serialPlace(tx: Db | Tx, batchId: string): Promise<{ locationId: string; name: string } | null> {
+  const [row] = await tx
+    .select({ locationId: stockTransactions.locationId, warehouseName: warehouses.name, locationName: stockLocations.name })
+    .from(stockTransactions)
+    .innerJoin(stockLocations, eq(stockLocations.id, stockTransactions.locationId))
+    .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
+    .where(eq(stockTransactions.batchId, batchId))
+    .groupBy(stockTransactions.locationId, warehouses.name, stockLocations.name)
+    .having(sql`sum(${stockTransactions.quantityDelta}) <> 0`)
+    .limit(1);
+  return row ? { locationId: row.locationId, name: `${row.warehouseName} — ${row.locationName}` } : null;
 }
 
 export function createStockCountRepository(db: Db, periods: PostingPeriodReader = noPostingPeriodLocks) {
@@ -371,6 +387,9 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
           stockTracked: trackedSql(),
           // Etapp 2: the batch's utgångsdatum (null = none / Okänd).
           expiresOn: stockBatches.expiresOn,
+          // batch | serial (0215), null for Okänd: a serial number's row is
+          // counted 0 or 1.
+          batchKind: stockBatches.kind,
         })
         .from(stockCountRows)
         .innerJoin(articles, eq(articles.id, stockCountRows.articleId))
@@ -460,12 +479,25 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
         // batch nobody booked), or without a number the Okänd row — and the
         // snapshot is that CELL's balance. Any other article has its one
         // row for the whole place, and a batch for it is refused.
-        const batchTracked = await isTrackedArticle(tx, input.articleId);
+        //
+        // Serienummer (steg 4): on a serienummerstyrd article (numbers in
+        // stock) the number is ONE serial number — found on the shelf, or
+        // scanned. It gets its own row (snapshot 0 or 1) unless it stands on
+        // ANOTHER place: 409 serial-on-other-location, naming it (move it
+        // here first — a count never moves goods between places).
+        const sort = await trackingOf(tx, input.articleId);
+        const batchTracked = sort !== null;
         if (input.batchNumber !== undefined && !batchTracked) throw new BatchNotTrackedError(article.articleNumber);
         const batch =
-          input.batchNumber !== undefined
-            ? await getOrCreateBatch(tx, { articleId: input.articleId, batchNumber: input.batchNumber, origin: "manual" })
-            : null;
+          input.batchNumber === undefined
+            ? null
+            : sort === "serial"
+              ? (await getOrCreateSerials(tx, { articleId: input.articleId, serialNumbers: [input.batchNumber], origin: "manual" }))[0]!
+              : await getOrCreateBatch(tx, { articleId: input.articleId, batchNumber: input.batchNumber, origin: "manual" });
+        if (batch !== null && sort === "serial") {
+          const elsewhere = await serialPlace(tx, batch.id);
+          if (elsewhere && elsewhere.locationId !== session.locationId) throw new SerialOnOtherLocationError(batch.batchNumber, elsewhere.name);
+        }
         const snapshot = batchTracked
           ? String(await batchCellQuantity(tx, input.articleId, session.locationId, batch?.id ?? null))
           : await balanceFor(tx, input.articleId, session.locationId);
@@ -490,6 +522,16 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
           patch.countedQuantity = input.countedQuantity === null ? null : String(input.countedQuantity);
         }
         if (input.note !== undefined) patch.note = input.note;
+        // Serienummer (steg 4): a serial number's row is counted 0 (missing)
+        // or 1 (there) — 400 serial-count-not-unit otherwise.
+        if (input.countedQuantity !== undefined && input.countedQuantity !== null && input.countedQuantity !== 0 && input.countedQuantity !== 1) {
+          const [serial] = await tx
+            .select({ serialNumber: stockBatches.batchNumber })
+            .from(stockCountRows)
+            .innerJoin(stockBatches, eq(stockBatches.id, stockCountRows.batchId))
+            .where(and(eq(stockCountRows.id, rowId), eq(stockCountRows.sessionId, sessionId), eq(stockBatches.kind, "serial")));
+          if (serial) throw new SerialCountNotUnitError(serial.serialNumber);
+        }
         const [row] = await tx
           .update(stockCountRows)
           .set(patch)
@@ -538,11 +580,15 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
             countedQuantity: stockCountRows.countedQuantity,
             note: stockCountRows.note,
             standardCost: articles.standardCost,
-            batchTracked: batchTrackedSql(),
-          tracking: articles.tracking,
+            // Lagerspårad now: a negative difference is a draw from a cell.
+            batchTracked: trackedSql(),
+            // The ROW's sort (never the article's): a serial number's row.
+            batchKind: stockBatches.kind,
+            batchNumber: stockBatches.batchNumber,
           })
           .from(stockCountRows)
           .leftJoin(articles, eq(articles.id, stockCountRows.articleId))
+          .leftJoin(stockBatches, eq(stockBatches.id, stockCountRows.batchId))
           .where(eq(stockCountRows.sessionId, id));
 
         const toBook = bookedRows(rows);
@@ -572,6 +618,26 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
           tx,
           toBook.filter((r) => r.batchTracked && Number(r.countedQuantity) < Number(r.snapshotQuantity)).map((r) => r.articleId)
         );
+
+        // Serienummer (steg 4): the serial numbers with a difference — their
+        // rows locked sorted on id (after the articles; the place is the
+        // session's own), then each proven: counted IN (+1) it must stand
+        // nowhere (409 serial-already-in-stock, naming it and its place),
+        // counted OUT (−1) it must still stand here (409 batch-insufficient).
+        // The snapshot is from the freeze; the proof is against the log now.
+        const serialDiffs = toBook.flatMap((r) =>
+          r.batchKind === "serial" && r.batchId !== null && Number(r.countedQuantity) !== Number(r.snapshotQuantity)
+            ? [{ batchId: r.batchId, batchNumber: r.batchNumber ?? "", diff: Number(r.countedQuantity) - Number(r.snapshotQuantity) }]
+            : []
+        );
+        if (serialDiffs.length > 0) {
+          await lockSerials(tx, serialDiffs.map((s) => s.batchId));
+          await assertSerialsOutOfStock(tx, serialDiffs.filter((s) => s.diff > 0).map((s) => s.batchId));
+          for (const serial of serialDiffs.filter((s) => s.diff < 0)) {
+            const place = await serialPlace(tx, serial.batchId);
+            if (place?.locationId !== session.locationId) throw new BatchInsufficientError(serial.batchNumber, 0, 1, true);
+          }
+        }
 
         let adjustments = 0;
         let counted = 0;

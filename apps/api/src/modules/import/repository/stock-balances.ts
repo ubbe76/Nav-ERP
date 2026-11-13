@@ -5,10 +5,10 @@ import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js"
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { lockArticlesForOutflow } from "../../stock/service/outflow-locations.js";
 import { allocateBatchOutflow, withBatchRemainder } from "../../stock/service/outflow-allocation.js";
-import { trackedArticleIds } from "../../stock/service/batch-tracking.js";
+import { articleTrackingByIds } from "../../stock/service/batch-tracking.js";
 import { getOrCreateBatch } from "../../stock/service/batches.js";
 import { assertSerialsOutOfStock, lockSerials } from "../../stock/service/serial-numbers.js";
-import { BatchNotTrackedError } from "../../stock/service/batch.errors.js";
+import { BatchNotTrackedError, SerialQuantityNotIntegerError } from "../../stock/service/batch.errors.js";
 import { batchCellQuantity, batchCellsForArticles } from "../../stock/repository/batch-balances.js";
 import { STOCK_IMPORT_NOTE, stockBatchCellKey, stockBatchKey, type StockBalanceImportPlan } from "../service/stock-balances.js";
 import { round4 } from "@navet/shared";
@@ -24,9 +24,16 @@ const CHUNK = 500;
 const chunks = <T>(items: T[]) => Array.from({ length: Math.ceil(items.length / CHUNK) }, (_, i) => items.slice(i * CHUNK, (i + 1) * CHUNK));
 
 // A decrease of `quantity` on the place, split over its batches (#8).
-async function decreaseParts(tx: Tx, articleId: string, locationId: string, quantity: number) {
+// Serienummer (steg 4): whole styck, the place's numbers oldest first, their
+// rows locked (the article lock is held; the place is resolved).
+async function decreaseParts(tx: Tx, articleId: string, locationId: string, quantity: number, serial: boolean) {
+  if (serial && !Number.isInteger(quantity)) {
+    const [article] = await tx.select({ articleNumber: articles.articleNumber }).from(articles).where(eq(articles.id, articleId));
+    throw new SerialQuantityNotIntegerError(article?.articleNumber ?? articleId, quantity);
+  }
   const cells = await batchCellsForArticles(tx, [articleId], { locationIds: [locationId] });
   const allocation = allocateBatchOutflow(quantity, [], cells, { locationId });
+  if (serial) await lockSerials(tx, allocation.parts.flatMap((part) => (part.batchId ? [part.batchId] : [])));
   return withBatchRemainder(allocation.parts, allocation.remainder, locationId).map((part) => ({
     quantity: -part.quantity,
     batchId: part.batchId ?? null,
@@ -162,7 +169,8 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
         // each other crosswise in the unique index (the sort is stable and
         // ignores case, so the file's first spelling is the one kept); they all get this
         // transaction's time, and the number decides their order (beslut 16).
-        const trackedIds = await trackedArticleIds(tx, plan.balances.map((row) => row.articleId));
+        const sorts = await articleTrackingByIds(tx, plan.balances.map((row) => row.articleId));
+        const trackedIds = new Set(sorts.keys());
         await lockArticlesForOutflow(tx, [...trackedIds]);
         const batchIds = new Map<string, string>();
         const named = plan.balances.flatMap((row) =>
@@ -275,7 +283,7 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
           // batch.
           const parts: { quantity: number; batchId: string | null }[] =
             row.batch === null && delta < 0 && trackedIds.has(row.articleId)
-              ? await decreaseParts(tx, row.articleId, locationId, -delta)
+              ? await decreaseParts(tx, row.articleId, locationId, -delta, sorts.get(row.articleId) === "serial")
               : [{ quantity: delta, batchId }];
           await tx.insert(stockTransactions).values(
             parts.map((part) => ({

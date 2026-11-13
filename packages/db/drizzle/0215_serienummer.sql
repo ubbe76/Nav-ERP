@@ -34,7 +34,7 @@ ON CONFLICT ("key") DO NOTHING;--> statement-breakpoint
 -- usually taken it already, sorted on id — lockSerials) and the two sums ride
 -- idx_stock_transactions_batch. AFTER ROW triggers run when the statement
 -- is done, so both legs of a move written in one INSERT are seen together.
--- SQLSTATE NV002 → 409 serial-balance-violated. The fast truncate and
+-- SQLSTATE NV003 → 409 serial-balance-violated. The fast truncate and
 -- editStockLog run under session_replication_role = replica and skip it.
 CREATE OR REPLACE FUNCTION nav_stock_transactions_serial_unit() RETURNS trigger
 LANGUAGE plpgsql AS $$
@@ -51,7 +51,7 @@ BEGIN
   SELECT batch_number INTO serial_number FROM stock_batches WHERE id = NEW.batch_id FOR NO KEY UPDATE;
   IF abs(NEW.quantity_delta) <> 1 THEN
     RAISE EXCEPTION 'Serienummer % kan bara bokas ett styck i taget (lagerrad %: %)', serial_number, NEW.id, NEW.quantity_delta
-      USING ERRCODE = 'NV002';
+      USING ERRCODE = 'NV003';
   END IF;
   SELECT coalesce(sum(quantity_delta), 0),
          coalesce(sum(quantity_delta) FILTER (WHERE location_id = NEW.location_id), 0)
@@ -59,7 +59,7 @@ BEGIN
     FROM stock_transactions WHERE batch_id = NEW.batch_id;
   IF total NOT IN (0, 1) OR on_place NOT IN (0, 1) THEN
     RAISE EXCEPTION 'Serienummer % får ha saldo 0 eller 1 (totalt %, på lagerplatsen %)', serial_number, total, on_place
-      USING ERRCODE = 'NV002';
+      USING ERRCODE = 'NV003';
   END IF;
   RETURN NULL;
 END;

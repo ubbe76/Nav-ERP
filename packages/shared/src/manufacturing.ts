@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { blankSafe, INT4_MAX, numericMax, optionalText } from "./coerce.js";
-import { batchChoiceSchema } from "./stock.js";
+import { batchChoiceSchema, serialChoiceSchema } from "./stock.js";
 import { configuratorSelectionSchema } from "./configurator.js";
 import { listQuerySchema, manufacturingOrderStatusListParam, statusListParam } from "./list.js";
 
@@ -414,6 +414,10 @@ export const consumeMaterialSchema = z.object({
   // Batch (#8): left out = Automatiskt (oldest batch first), null = Okänd,
   // an id = that batch of the component — it must cover the whole quantity.
   batchId: batchChoiceSchema,
+  // Serienummer (steg 4), a serienummerstyrd component (numbers in stock):
+  // the chosen or scanned numbers' ids — as many as the styck — or left out
+  // = Automatiskt, the oldest numbers. Not together with batchId.
+  serialIds: serialChoiceSchema,
   quantity: blankSafe(z.coerce.number().positive().max(numericMax(14, 4))),
   allowMaterialShortage: materialShortageOverrideSchema,
 });

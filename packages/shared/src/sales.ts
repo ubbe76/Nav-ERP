@@ -5,7 +5,7 @@ import { listQuerySchema, orderStatusListParam, statusListParam } from "./list.j
 import { configuratorSelectionSchema, orderRowConfigurationInputSchema } from "./configurator.js";
 
 import { blankSafe, numericMax } from "./coerce.js";
-import { batchChoiceSchema } from "./stock.js";
+import { batchChoiceSchema, serialChoiceSchema, serialNumbersSchema, SERIAL_NUMBERS_MAX } from "./stock.js";
 import { round4 } from "./money.js";
 import { businessDateSchema } from "./business-date.js";
 import { partnerDeliveryFields } from "./delivery.js";
@@ -544,10 +544,19 @@ export const setRowConfigurationSchema = z.object({
 });
 export type SetRowConfigurationInput = z.infer<typeof setRowConfigurationSchema>;
 
+// GET /serial-suggestions?articleId=&count= (Serienummer skapas vid utleverans).
+export const serialSuggestionsQuerySchema = z.object({
+  articleId: z.string().uuid(),
+  count: z.coerce.number().int().min(1).max(SERIAL_NUMBERS_MAX),
+});
+
 export const deliverGoodsSchema = z.object({
   locationId: z.string().uuid().optional(),
   // Batch (#8): as on a deliverBatch row.
   batchId: batchChoiceSchema,
+  // Serienummer (steg 4): as on a deliverBatch row.
+  serialIds: serialChoiceSchema,
+  serialNumbers: serialNumbersSchema.optional(),
   quantity: blankSafe(z.coerce.number().positive()),
 });
 export type DeliverGoodsInput = z.infer<typeof deliverGoodsSchema>;
@@ -573,6 +582,17 @@ export const deliverBatchSchema = z.object({
         // batch-insufficient when it does not cover it) — two chosen batches
         // are two deliveries.
         batchId: batchChoiceSchema,
+        // Serienummer, numbers created VID INLEVERANS (the article is
+        // lagerspårad): the chosen or scanned numbers — the ids of serial
+        // numbers in stock, exactly as many as the styck (the base unit) —
+        // or left out = Automatiskt (the oldest numbers). Not with batchId.
+        serialIds: serialChoiceSchema,
+        // Serienummer skapas VID UTLEVERANS (beslut 16–18): the numbers the
+        // styck get, typed or scanned — exactly as many as the styck and new
+        // to the article (409 serial-number-taken) — or left out = the next
+        // numbers of the article's series (GET /serial-suggestions shows
+        // them beforehand, without reserving). Refused on any other article.
+        serialNumbers: serialNumbersSchema.optional(),
       })
     )
     .min(1),

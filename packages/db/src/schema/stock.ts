@@ -126,7 +126,9 @@ export const articleAlternativeLocations = pgTable(
 // Okänd first, then the oldest batch (compareBatches, outflow-allocation.ts).
 // `origin` and the two order references say how the batch was CREATED —
 // information; the trace reads the log.
-export const stockBatchOriginEnum = pgEnum("stock_batch_origin", ["purchase_receipt", "manufacturing_order", "manual", "import"]);
+// "delivery" (0216): a serial number created VID UTLEVERANS — it never stands
+// in stock; delivery_row_serials says which delivery row it was given to.
+export const stockBatchOriginEnum = pgEnum("stock_batch_origin", ["purchase_receipt", "manufacturing_order", "manual", "import", "delivery"]);
 
 // Sort (#8 etapp 2, migration 0215): a row here is a batch or ONE serial
 // number — a serial number is a batch row whose balance is 0 or 1 (the

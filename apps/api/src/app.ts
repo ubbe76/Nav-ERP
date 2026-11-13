@@ -295,7 +295,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     // TO-rapport, justering, the article card, PATCH /settings) — mapped
     // once here, the writers live in several modules.
     // Serienummer (0215): the database guard behind the writers' rule
-    // (trigger stock_transactions_serial_unit, SQLSTATE NV002) — a serial
+    // (trigger stock_transactions_serial_unit, SQLSTATE NV003) — a serial
     // number's balance would be something else than 0 or 1. Only a writer
     // that forgot the rule gets here.
     if (isSerialBalanceViolation(err)) {

@@ -2432,7 +2432,7 @@ export function createSalesService(
       const overDeliveryPercent = await overDeliveryPercentForOrder(orderId);
       const result = await repo.deliverBatch(orderId, {
         locationId: input.locationId,
-        rows: [{ rowId, quantity: input.quantity, batchId: input.batchId }],
+        rows: [{ rowId, quantity: input.quantity, batchId: input.batchId, serialIds: input.serialIds, serialNumbers: input.serialNumbers }],
         createdBy,
         overDeliveryPercent,
       });
@@ -2443,6 +2443,8 @@ export function createSalesService(
           orderStatus: result.orderStatus,
           deliveryId: result.deliveryId,
           deliveryNumber: result.deliveryNumber,
+          // Serienummer skapas vid utleverans: the numbers the row gave.
+          assignedSerials: result.assignedSerials,
         };
       }
 
@@ -2465,7 +2467,13 @@ export function createSalesService(
       const result = await repo.deliverBatch(orderId, { ...input, createdBy, overDeliveryPercent });
       if (result.ok) {
         await logDelivery(orderId, result.deliveryNumber, input.rows, createdBy);
-        return { deliveryId: result.deliveryId, deliveryNumber: result.deliveryNumber, orderStatus: result.orderStatus };
+        return {
+          deliveryId: result.deliveryId,
+          deliveryNumber: result.deliveryNumber,
+          orderStatus: result.orderStatus,
+          // Serienummer skapas vid utleverans: [{ rowId, serialNumbers }] for the rows that gave numbers.
+          assignedSerials: result.assignedSerials,
+        };
       }
 
       switch (result.reason) {
@@ -2696,9 +2704,19 @@ export function createSalesService(
           undoable: r.undoable,
           // Where the goods go back, per part (base unit).
           locations: r.locations,
+          // Serienummer (steg 4): the row's numbers — drawn from stock or
+          // given at the delivery; those of an undone row are burnt.
+          serialNumbers: r.serialNumbers,
           baseUnit: r.baseUnitCode,
         })),
       };
+    },
+
+    // Serienummer skapas vid utleverans: the next `count` numbers the
+    // article's series would give — a suggestion, nothing is drawn or
+    // reserved (the delivery draws them in its own transaction).
+    async serialSuggestions(articleId: string, count: number) {
+      return { serialNumbers: await repo.previewSerialNumbers(articleId, count) };
     },
 
     // --- C3 Kundpriser: prislistor ---

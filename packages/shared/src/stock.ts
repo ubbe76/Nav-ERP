@@ -86,6 +86,11 @@ export const SERIAL_NUMBERS_MAX = 1000;
 // (trimmed, at most 50 characters each; compared case-insensitively).
 export const serialNumbersSchema = z.array(z.string().trim().min(1).max(50)).min(1).max(SERIAL_NUMBERS_MAX);
 
+// An OUTFLOW of a serienummerstyrd article (numbers created vid inleverans)
+// chooses its numbers by id — as many as the styck — or leaves them out:
+// Automatiskt, the oldest numbers.
+export const serialChoiceSchema = z.array(z.string().uuid()).min(1).max(SERIAL_NUMBERS_MAX).optional();
+
 // Utgångsdatum / Batchdatum on a write (etapp 2): an ISO day, "" = left out.
 export const batchDayInputSchema = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
@@ -119,7 +124,7 @@ export const updateStockBatchSchema = z
 export type UpdateStockBatchInput = z.infer<typeof updateStockBatchSchema>;
 export type ListStockBatchesQuery = z.infer<typeof listStockBatchesQuerySchema>;
 
-export const STOCK_BATCH_ORIGINS = ["purchase_receipt", "manufacturing_order", "manual", "import"] as const;
+export const STOCK_BATCH_ORIGINS = ["purchase_receipt", "manufacturing_order", "manual", "import", "delivery"] as const;
 export type StockBatchOrigin = (typeof STOCK_BATCH_ORIGINS)[number];
 
 export interface StockBatchListRow {
@@ -276,6 +281,10 @@ export const createStockTransactionSchema = z.object({
   // the place's batches oldest first (Okänd first, the rest as Okänd), null
   // = Okänd, an id = that batch, which must cover the quantity.
   batchId: batchChoiceSchema,
+  // Serienummer (steg 4): on a decrease of a serienummerstyrd article, the
+  // numbers taken — as many as the styck; left out = the place's numbers
+  // oldest first. Not together with batchId.
+  serialIds: serialChoiceSchema,
 });
 export type CreateStockTransactionInput = z.infer<typeof createStockTransactionSchema>;
 
@@ -296,6 +305,10 @@ export const createStockAdjustmentSchema = createStockTransactionSchema
   .refine((input) => input.batchId === undefined || input.quantityDelta < 0, {
     message: "batchId chooses the batch of a decrease — only with a negative quantityDelta",
     path: ["batchId"],
+  })
+  .refine((input) => input.serialIds === undefined || input.quantityDelta < 0, {
+    message: "serialIds chooses the serial numbers of a decrease — only with a negative quantityDelta",
+    path: ["serialIds"],
   })
   .refine((input) => input.expiresOn === undefined || input.batchNumber !== undefined, {
     message: "expiresOn is the utgångsdatum of the batch named by batchNumber",
@@ -319,6 +332,9 @@ export const createStockTransferSchema = z
           // pair of legs each), null = Okänd, an id = that batch for the
           // row's whole quantity — two chosen batches are two rows.
           batchId: batchChoiceSchema,
+          // Serienummer (steg 4): the numbers that move — as many as the
+          // styck; left out = the source's numbers, oldest first.
+          serialIds: serialChoiceSchema,
         })
       )
       .min(1),

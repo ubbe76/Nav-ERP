@@ -25,7 +25,7 @@ import { bankFileEntries } from "./banking";
 import { costCenters, projects } from "./dimensions";
 import { vatCodes, verifications } from "./economy";
 import { carriers, deliveryDayModeEnum, deliveryTerms, paymentTerms, quoteLossReasons, units } from "./register";
-import { stockLocations, stockTransactions } from "./stock";
+import { stockBatches, stockLocations, stockTransactions } from "./stock";
 
 // Kod på pallkort (pallet card code): what machine-readable code the pallet
 // card prints for the article number and the order number. The system
@@ -600,6 +600,28 @@ export const deliveryRowLocations = pgTable(
     index("idx_delivery_row_locations_row").on(table.deliveryRowId),
     index("delivery_row_locations_by_stock_transaction").on(table.stockTransactionId),
   ]
+);
+
+// Serienummer skapas vid utleverans (#8 etapp 2, beslut 16–18; migration
+// 0216): the serial numbers a delivery row GAVE its styck. The stock of such
+// an article is untracked (its stock rows carry no batch), so the number
+// cannot stand on the stock row — this link is where the trace of the number
+// begins (number → följesedel → kund). One number is given ONCE per article
+// (stock_batches' unique index) and to one delivery row (the primary key on
+// the number). Ångra utleverans keeps the rows: the numbers of an undone
+// delivery row are BURNT — derived from delivery_rows.undone_at, never
+// stored — and a new delivery gets new ones.
+export const deliveryRowSerials = pgTable(
+  "delivery_row_serials",
+  {
+    batchId: uuid("batch_id")
+      .primaryKey()
+      .references(() => stockBatches.id, { onDelete: "restrict" }),
+    deliveryRowId: uuid("delivery_row_id")
+      .notNull()
+      .references(() => deliveryRows.id, { onDelete: "cascade" }),
+  },
+  (table) => [index("idx_delivery_row_serials_row").on(table.deliveryRowId)]
 );
 
 // Kundfaktura (customer invoice) — C1. The invoice is its own document,

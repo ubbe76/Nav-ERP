@@ -10,9 +10,16 @@ export class BatchInsufficientError extends Error {
   constructor(
     readonly batchNumber: string,
     readonly available: number,
-    readonly requested: number
+    readonly requested: number,
+    // Chosen serial numbers (steg 4): the ones named are not in stock on a
+    // place the draw may take from.
+    readonly serial = false
   ) {
-    super(`Batch ${batchNumber} räcker inte: ${available} tillgängligt, ${requested} begärt`);
+    super(
+      serial
+        ? `Serienummer ${batchNumber} finns inte i lager på en valbar plats`
+        : `Batch ${batchNumber} räcker inte: ${available} tillgängligt, ${requested} begärt`
+    );
     this.name = "BatchInsufficientError";
   }
 }
@@ -109,7 +116,7 @@ export class SerialNumbersRequiredError extends Error {
 // or its numbers are created vid utleverans) — refused, never dropped.
 export class ArticleNotSerialTrackedError extends Error {
   constructor(readonly articleNumber: string) {
-    super(`Artikeln ${articleNumber} tar inga serienummer vid inleverans`);
+    super(`Artikeln ${articleNumber} tar inga serienummer här`);
     this.name = "ArticleNotSerialTrackedError";
   }
 }
@@ -164,6 +171,35 @@ export class SerialNumberTooLongError extends Error {
   }
 }
 
+// Inventering (steg 4): a serial number's row is counted 0 or 1.
+export class SerialCountNotUnitError extends Error {
+  constructor(readonly serialNumber: string) {
+    super(`Serienummer ${serialNumber} räknas som 0 (saknas) eller 1 (finns)`);
+    this.name = "SerialCountNotUnitError";
+  }
+}
+
+// Inventering (steg 4): the number stands on ANOTHER place — move it first.
+export class SerialOnOtherLocationError extends Error {
+  constructor(
+    readonly serialNumber: string,
+    readonly locationName: string
+  ) {
+    super(`Serienummer ${serialNumber} står på ${locationName} — flytta det hit först`);
+    this.name = "SerialOnOtherLocationError";
+  }
+}
+
+// Serienummer skapas vid utleverans (beslut 16–18): a number typed or
+// scanned at the delivery already exists on the article — delivered before,
+// burnt by an undone delivery, or a batch. A number is given once.
+export class SerialNumberTakenError extends Error {
+  constructor(readonly serialNumber: string) {
+    super(`Serienummer ${serialNumber} är redan använt på artikeln — välj ett annat`);
+    this.name = "SerialNumberTakenError";
+  }
+}
+
 // The article's Serienummerserie is not a serial number series.
 export class SerialSeriesInvalidError extends Error {
   constructor(readonly seriesKey: string) {
@@ -173,7 +209,7 @@ export class SerialSeriesInvalidError extends Error {
 }
 
 // The database guard (trigger stock_transactions_serial_unit, SQLSTATE
-// NV002): a serial number's balance would be something else than 0 or 1.
+// NV003 — NV002 is the anonymized employee's, 0170): a serial number's balance would be something else than 0 or 1.
 // Never reached when the writers follow the rule — the application answers
 // first with one of the errors above.
 export const SERIAL_BALANCE_VIOLATED = {
@@ -183,7 +219,7 @@ export const SERIAL_BALANCE_VIOLATED = {
 export function isSerialBalanceViolation(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const { code, cause } = err as { code?: string; cause?: unknown };
-  return code === "NV002" || (typeof cause === "object" && cause !== null && (cause as { code?: string }).code === "NV002");
+  return code === "NV003" || (typeof cause === "object" && cause !== null && (cause as { code?: string }).code === "NV003");
 }
 
 // An inflow names an existing batch with ANOTHER utgångsdatum than the batch
@@ -213,6 +249,8 @@ export function batchErrorStatus(err: unknown): 400 | 404 | 409 | null {
   if (err instanceof BatchInsufficientError || err instanceof BatchTrackingDisabledError || err instanceof BatchTrackingInUseError) return 409;
   if (err instanceof BatchExpiryMismatchError || err instanceof DuplicateBatchNumberError) return 409;
   if (err instanceof BatchKindMismatchError || err instanceof SerialAlreadyInStockError || err instanceof SerialNumberTooLongError) return 409;
+  if (err instanceof SerialOnOtherLocationError || err instanceof SerialNumberTakenError) return 409;
+  if (err instanceof SerialCountNotUnitError) return 400;
   if (
     err instanceof SerialQuantityNotIntegerError ||
     err instanceof SerialNumbersRequiredError ||
