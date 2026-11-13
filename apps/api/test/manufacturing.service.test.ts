@@ -189,9 +189,9 @@ describe("manufacturing service — Cykeltid on the routing", () => {
       runTimePerUnit: 2,
       cycleTimePerUnit: 1.5,
     });
-    expect(op.cycleTimePerUnit).toBe("1.5000");
+    expect(op.cycleTimePerUnit).toBe("1.50000000");
     const updated = await mfgService.updateRoutingOperation(parent.id, op.id, { cycleTimePerUnit: 1.25 });
-    expect(updated.cycleTimePerUnit).toBe("1.2500");
+    expect(updated.cycleTimePerUnit).toBe("1.25000000");
     const cleared = await mfgService.updateRoutingOperation(parent.id, op.id, { cycleTimePerUnit: null });
     expect(cleared.cycleTimePerUnit).toBeNull();
   });

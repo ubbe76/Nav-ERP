@@ -279,7 +279,7 @@ const operationFields = {
   description: z.string().trim().max(255).nullable().optional(),
   setupTime: decimals(10, 2).refine((v) => v >= 0, "Får inte vara negativt").nullable().optional(),
   setupFormula: formulaText.nullable().optional(),
-  runTimePerUnit: decimals(10, 4).refine((v) => v >= 0, "Får inte vara negativt").nullable().optional(),
+  runTimePerUnit: decimals(14, 8).refine((v) => v >= 0, "Får inte vara negativt").nullable().optional(),
   runFormula: formulaText.nullable().optional(),
   // Lego pricing (subcontract resources), like routing_operations.setup_price/unit_price; null clears.
   setupPrice: number2.refine((v) => v >= 0, "Får inte vara negativt").nullable().optional(),

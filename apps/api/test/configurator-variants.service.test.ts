@@ -142,8 +142,8 @@ describe("createVariants", () => {
     // Route: derived operations with the template's columns kept (comment, print flag, costing_only).
     const ops = await db.select().from(routingOperations).where(eq(routingOperations.articleId, variant.id)).orderBy(routingOperations.sequenceNo);
     expect(ops.map((o) => [o.sequenceNo, o.workCenterId, o.setupTime, o.runTimePerUnit, o.costingOnly, o.comment, o.printOnWorkCard])).toEqual([
-      [10, s.wcA.id, "5.00", "1.0000", false, "Dra åt för hand", true],
-      [20, s.wcB.id, "0.00", "6.0000", true, null, false],
+      [10, s.wcA.id, "5.00", "1.00000000", false, "Dra åt för hand", true],
+      [20, s.wcB.id, "0.00", "6.00000000", true, null, false],
     ]);
     // Structure: the derived materials, the SKRUV row linked to the variant's own op 10.
     const bom = await db.select().from(bomComponents).where(eq(bomComponents.parentArticleId, variant.id));
@@ -337,7 +337,7 @@ describe("createVariants — alternativa resurser", () => {
     const [row] = await service.createVariants(s.article.id, ONE, null);
     const ops = await mfgService.listRoutingOperations(row!.articleId!);
     expect(ops.find((o) => o.sequenceNo === 10)!.alternatives.map((a) => [a.code, a.rank, a.setupTime, a.runTimePerUnit])).toEqual([
-      ["205", 1, null, "0.5000"],
+      ["205", 1, null, "0.50000000"],
     ]);
     expect(ops.find((o) => o.sequenceNo === 20)!.alternatives).toEqual([]);
   });

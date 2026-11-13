@@ -15,7 +15,7 @@ import { useCan } from "../PermissionsProvider";
 import { apiFetch } from "../../lib/api";
 import { copiedNotice, copyArticles } from "../../lib/copiedArticles";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { formatQuantity, formatUnitPrice } from "../../lib/format";
+import { formatQuantity, formatRunMinutes, formatUnitPrice } from "../../lib/format";
 import { OPERATION_TIME_UNIT_LABELS, minutesPerUnitToSecondsPerUnit, minutesPerUnitToUnitsPerHour, toUnitQuantity } from "../../lib/units";
 import { operationLabel } from "./operation-label";
 import { bomDuplicateText, bomDuplicates } from "../../lib/bomDuplicates";
@@ -34,7 +34,7 @@ function formatMinutesPerUnit(minutesText: string, timeUnit: RoutingOperation["t
   if (timeUnit === "seconds_per_unit") {
     return `${minutesPerUnitToSecondsPerUnit(minutes).toLocaleString("sv-SE", { maximumFractionDigits: 2 })} sek`;
   }
-  return `${minutes.toLocaleString("sv-SE", { maximumFractionDigits: 4 })} min`;
+  return `${formatRunMinutes(minutes)} min`;
 }
 
 interface BeredningViewProps {

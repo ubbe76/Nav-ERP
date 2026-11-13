@@ -346,8 +346,8 @@ describe("configured TO — alternativa resurser", () => {
     const mo = await mfg.createFromSalesOrderRow(row.id, {}, null);
     const ops = await mfg.listOperations(mo.id);
     expect(ops.find((o) => o.sequenceNo === 10)!.resources).toEqual([
-      { workCenterId: s.wc10.id, code: "610", name: "Resurs 610", rank: 0, setupTime: "6.00", runTimePerUnit: "3.0000" },
-      { workCenterId: alt.id, code: "611", name: "Resurs 611", rank: 1, setupTime: "6.00", runTimePerUnit: "2.0000" },
+      { workCenterId: s.wc10.id, code: "610", name: "Resurs 610", rank: 0, setupTime: "6.00", runTimePerUnit: "3.00000000" },
+      { workCenterId: alt.id, code: "611", name: "Resurs 611", rank: 1, setupTime: "6.00", runTimePerUnit: "2.00000000" },
     ]);
     expect(ops.find((o) => o.sequenceNo === 20)!.resources).toEqual([]);
   });

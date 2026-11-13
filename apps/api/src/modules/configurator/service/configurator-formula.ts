@@ -499,7 +499,7 @@ function finite(x: number): number {
 }
 
 function evaluateAst(
-  ast: FormulaAst, values: FormulaValues, opts: { roundResult: boolean } = { roundResult: true },
+  ast: FormulaAst, values: FormulaValues, opts: { roundResult: boolean; decimals?: number } = { roundResult: true },
 ): { ok: true; value: number } | { ok: false; message: string } {
   const fail = (message: string): never => { throw new FormulaEvaluationError(message); };
 
@@ -601,7 +601,7 @@ function evaluateAst(
 
   try {
     const raw = finite(num(ast));
-    const value = opts.roundResult ? round4(raw) : raw;
+    const value = opts.roundResult ? Number(raw.toFixed(opts.decimals ?? 4)) : raw;
     return { ok: true, value: finite(value) };
   } catch (e) {
     if (e instanceof FormulaEvaluationError) return { ok: false, message: e.message };
@@ -611,11 +611,15 @@ function evaluateAst(
 
 /**
  * Evaluates a formula against effective values (key = upper-cased code). The result is finite and rounded
- * to 4 decimals, or an error message. Syntax errors are reported with their message; unknown functions and
+ * to `decimals` (4 — a quantity's scale; a run time passes RUN_TIME_DECIMALS, numeric(14,8)), or an error message. Syntax errors are reported with their message; unknown functions and
  * wrong argument counts are reported at evaluation too, so an unvalidated formula still cannot misbehave.
  */
-export function evaluateFormula(source: string, values: FormulaValues): { ok: true; value: number } | { ok: false; message: string } {
+export function evaluateFormula(
+  source: string,
+  values: FormulaValues,
+  decimals = 4
+): { ok: true; value: number } | { ok: false; message: string } {
   const parsed = parseFormula(source);
   if (!parsed.ok) return { ok: false, message: parsed.error.message };
-  return evaluateAst(parsed.ast, values);
+  return evaluateAst(parsed.ast, values, { roundResult: true, decimals });
 }

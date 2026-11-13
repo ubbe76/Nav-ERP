@@ -17,8 +17,8 @@ import {
   exportTable,
   plainDecimal,
   round2,
-  round4,
   roundToDecimals,
+  secondsPerUnitToMinutesPerUnit,
   tableCsv,
   toBaseQuantity,
   unitsPerHourToMinutesPerUnit,
@@ -255,11 +255,11 @@ export function routingTimeCells(r: Pick<RoutingExportRecord, "setupTime" | "run
   if (r.timeUnit === "seconds_per_unit") {
     return {
       setupTime: invertRounded(r.setupTime, (seconds) => round2(seconds / 60), r.setupTime * 60),
-      runTimePerUnit: invertRounded(r.runTimePerUnit, (seconds) => round4(seconds / 60), r.runTimePerUnit * 60),
+      runTimePerUnit: invertRounded(r.runTimePerUnit, secondsPerUnitToMinutesPerUnit, r.runTimePerUnit * 60),
       cycleTimePerUnit:
         r.cycleTimePerUnit === null || r.cycleTimePerUnit <= 0
           ? null
-          : invertRounded(r.cycleTimePerUnit, (seconds) => round4(seconds / 60), r.cycleTimePerUnit * 60),
+          : invertRounded(r.cycleTimePerUnit, secondsPerUnitToMinutesPerUnit, r.cycleTimePerUnit * 60),
       timeUnit: TIME_UNIT_WORDS.seconds_per_unit,
     };
   }

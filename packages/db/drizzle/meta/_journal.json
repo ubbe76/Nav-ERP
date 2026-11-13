@@ -1527,6 +1527,13 @@
       "when": 1794569933907,
       "tag": "0217_leverantorens_forval",
       "breakpoints": true
+    },
+    {
+      "idx": 218,
+      "version": "7",
+      "when": 1794606169722,
+      "tag": "0218_stycktid_precision",
+      "breakpoints": true
     }
   ]
 }

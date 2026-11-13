@@ -276,8 +276,8 @@ describe("reservationen med alternativa resurser", () => {
     // Op 10 on 120 with the row's times, Vald för hand, its weeks the check's
     // and locked; Op 20 stayed on its ordinarie — not flagged.
     expect(ops.map((o) => [o.sequenceNo, o.workCenterId, o.resourceLocked, o.planLocked, o.setupTime, o.runTimePerUnit])).toEqual([
-      [10, w.r120.id, true, true, "0.00", "60.0000"],
-      [20, w.r130.id, false, true, "0.00", "6.0000"],
+      [10, w.r120.id, true, true, "0.00", "60.00000000"],
+      [20, w.r130.id, false, true, "0.00", "6.00000000"],
     ]);
     expect(ops[0]!.resources.map((r) => [r.code, r.rank])).toEqual([
       ["110", 0],

@@ -120,7 +120,7 @@ describe("configurator lines and operations — CRUD and enriched detail", () =>
     });
     expect(op40).toMatchObject({
       sequenceNo: 40, workCenterId: s.wc.id, workCenterCode: s.wc.code, workCenterName: "Svets", description: "Montering hjul",
-      setupTime: null, setupFormula: "BREDD / 100", runTimePerUnit: "2.0000", runFormula: null,
+      setupTime: null, setupFormula: "BREDD / 100", runTimePerUnit: "2.00000000", runFormula: null,
     });
     const op30 = await service.createOperation(s.article.id, { conditions: [], sequenceNo: 30, workCenterId: s.wc.id, setupTime: 0, runTimePerUnit: 0.5 });
     expect((await service.getTemplate(s.article.id)).operations.map((o) => o.sequenceNo)).toEqual([30, 40]);

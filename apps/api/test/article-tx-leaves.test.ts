@@ -88,7 +88,7 @@ describe("insertRoutingOperations", () => {
     expect(rows[0]).toMatchObject({
       description: "Kapning",
       setupTime: "15.00",
-      runTimePerUnit: "1.2500",
+      runTimePerUnit: "1.25000000",
       comment: "Grada kanterna",
       costingOnly: true,
       printOnWorkCard: true,
@@ -96,7 +96,7 @@ describe("insertRoutingOperations", () => {
     });
     expect(rows[1]).toMatchObject({
       description: "Svetsning",
-      runTimePerUnit: "0.1667",
+      runTimePerUnit: "0.16670000",
       timeUnit: "units_per_hour",
       costingOnly: false,
       comment: null,

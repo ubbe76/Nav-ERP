@@ -137,7 +137,7 @@ export const configuratorOperations = pgTable(
     description: varchar("description", { length: 255 }),
     setupTime: numeric("setup_time", { precision: 10, scale: 2 }),
     setupFormula: varchar("setup_formula", { length: 500 }),
-    runTimePerUnit: numeric("run_time_per_unit", { precision: 10, scale: 4 }),
+    runTimePerUnit: numeric("run_time_per_unit", { precision: 14, scale: 8 }),
     runFormula: varchar("run_formula", { length: 500 }),
     // Lego (subcontract resource) pricing, as routing_operations.setup_price/unit_price; null = unpriced.
     setupPrice: numeric("setup_price", { precision: 14, scale: 2 }),
