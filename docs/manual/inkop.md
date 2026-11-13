@@ -48,7 +48,7 @@ En utländsk mottagare kräver dessutom **gatuadress** och **ort**, som fylls i 
 Tre uppgifter på leverantörskortet fylls i automatiskt på nya dokument till leverantören. De gäller alla sätt att skapa dokumentet — **+ Ny inköpsorder**, **Skapa ordrar** i behovsberäkningen, **Behöver beställas**, **Skapa inköpsorder** på tillverkningsorderns legooperation och **Skapa inköpsorder** från en förfrågan — och kan alltid ändras på dokumentet efteråt. En senare ändring på leverantörskortet rör inte dokument som redan finns.
 
 - **Frakt på vårt konto** (fliken **Villkor & frakt**) — är förvalet påslaget får nya förfrågningar och inköpsordrar kryssrutan **Frakt på vårt konto** ifylld (se [Önskat leveransdatum](#onskat-leveransdatum) för vad den skriver ut). En inköpsorder som skapas från en förfrågan tar förfrågans val, inte leverantörskortets.
-- **E-post för inköpsorder** (fliken **Villkor & frakt**) — adressen som inköpsordrar skickas till, till exempel leverantörens orderlåda. Är fältet tomt går ordern till huvudkontaktens e-post som förut. Fältet gäller bara inköpsordrar; förfrågningar går till huvudkontakten.
+- **E-post för inköpsorder** (fliken **Villkor & frakt**) — adressen som inköpsordrar skickas till, till exempel leverantörens orderlåda. Är fältet tomt går ordern till huvudkontaktens e-post som förut, och saknas den till leverantörens **E-post**. Fältet gäller bara inköpsordrar; förfrågningar går till huvudkontakten.
 - **Er referens** — en ny inköpsorder får namnet på leverantörens **Huvudkontakt** (fliken **Kontakter**) som **Er referens** när du inte anger något annat.
 
 ### Språk på leverantörens dokument
