@@ -10,6 +10,7 @@ import { createImportExportService } from "../src/modules/import/service/import-
 import { ImportValidationError, createImportService } from "../src/modules/import/service/import.service.js";
 import { suggestStockBalanceMapping } from "../src/modules/import/service/stock-balances.js";
 import { articleBatchBalances, batchCellsForArticles } from "../src/modules/stock/repository/batch-balances.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { BATCH_TRACKING_ENABLED_KEY } from "../src/modules/stock/service/batch-tracking.js";
 import { lockArticlesForOutflow } from "../src/modules/stock/service/outflow-locations.js";
@@ -121,7 +122,7 @@ describe("Importera lagersaldon — Batch", () => {
     const created = await db.select({ createdAt: stockBatches.createdAt }).from(stockBatches);
     expect(new Set(created.map((b) => b.createdAt.getTime())).size).toBe(1);
     // compareBatches: Okänd first, then (same age) the number, numerically.
-    expect((await articleBatchBalances(db, article.id)).map((b) => b.batchNumber)).toEqual([null, "L-1", "L-9", "L-10"]);
+    expect((await articleBatchBalances(db, article.id, stockholmToday())).map((b) => b.batchNumber)).toEqual([null, "L-1", "L-9", "L-10"]);
   });
 
   it("Antal is the CELL's balance after the import: a correction is booked in the batch, 0 empties it, the others are untouched", async () => {
@@ -277,12 +278,12 @@ describe("Exportera lagersaldon — Batch", () => {
     const file = await exports.exportFile("stockBalances", importExportQuerySchema.parse({ format: "csv" }));
     const content = typeof file.content === "string" ? Buffer.from(file.content, "utf8") : file.content;
     const parsedFile = await imports.parse("stockBalances", content);
-    expect(parsedFile.headers).toEqual(["Artikelnummer", "Lager", "Lagerplats", "Antal", "À-pris", "Batch"]);
+    expect(parsedFile.headers).toEqual(["Artikelnummer", "Lager", "Lagerplats", "Antal", "À-pris", "Batch", "Batchdatum", "Utgångsdatum"]);
     expect(parsedFile.rows).toEqual([
-      ["EX-B", "Huvudlager", "A1", "10", "", "L-1"],
-      ["EX-B", "Huvudlager", "A1", "2,5", "", "Okänd"],
-      ["EX-B", "Huvudlager", "B2", "4", "", "L-2"],
-      ["EX-P", "Huvudlager", "A1", "7", "", ""],
+      ["EX-B", "Huvudlager", "A1", "10", "", "L-1", "", ""],
+      ["EX-B", "Huvudlager", "A1", "2,5", "", "Okänd", "", ""],
+      ["EX-B", "Huvudlager", "B2", "4", "", "L-2", "", ""],
+      ["EX-P", "Huvudlager", "A1", "7", "", "", "", ""],
     ]);
 
     const roundTrip = { mapping: parsedFile.suggestedMapping, rows: parsedFile.rows };
@@ -291,5 +292,99 @@ describe("Exportera lagersaldon — Batch", () => {
     expect(await imports.commit("stockBalances", roundTrip)).toMatchObject({ created: 0, updated: 0 });
     expect(await rowsOf(tracked.id)).toHaveLength(3);
     expect(await rowsOf(plain.id)).toHaveLength(1);
+  });
+});
+
+// Etapp 2: Batchdatum (the batch's age) and Utgångsdatum.
+describe("Importera lagersaldon — Batchdatum och Utgångsdatum", () => {
+  const DATED = { ...MAPPING, Batchdatum: "batchDate", Utgångsdatum: "expiresOn" };
+  const dated = (rows: string[][]) => ({ mapping: DATED, rows });
+  const batchDates = async () =>
+    (await db.select().from(stockBatches).orderBy(asc(stockBatches.batchNumber))).map((b) => [b.batchNumber, b.batchDate, b.expiresOn]);
+
+  it("the headings map to the fields — and nothing else does", () => {
+    expect(suggestStockBalanceMapping(["Batch", "Batchdatum", "Utgångsdatum"])).toEqual({ Batch: "batchNumber", Batchdatum: "batchDate", Utgångsdatum: "expiresOn" });
+    expect(suggestStockBalanceMapping(["Datum", "Leveransdatum", "Senaste inleverans"])).toEqual({ Datum: null, Leveransdatum: null, "Senaste inleverans": null });
+  });
+
+  it("Batchdatum decides the order the batches are drawn in, before the number; Utgångsdatum is stored", async () => {
+    const article = await makeArticle("BD-1");
+    await imports.commit(
+      "stockBalances",
+      dated([
+        ["BD-1", "Huvudlager", "A1", "1", "", "L-1", "2026-03-01", ""],
+        ["BD-1", "Huvudlager", "A1", "1", "", "L-2", "2026-01-15", ""],
+        ["BD-1", "Huvudlager", "A1", "1", "", "L-3", "20251201", "2027/06/30"],
+        ["BD-1", "Huvudlager", "A1", "1", "", "L-4", "", ""],
+      ])
+    );
+    expect(await batchDates()).toEqual([
+      ["L-1", "2026-03-01", null],
+      ["L-2", "2026-01-15", null],
+      ["L-3", "2025-12-01", "2027-06-30"],
+      ["L-4", null, null],
+    ]);
+    // FEFO: the dated one first, then the undated by age — Batchdatum, and
+    // L-4 (no Batchdatum) by the day it was created, today.
+    expect((await articleBatchBalances(db, article.id, stockholmToday())).map((b) => b.batchNumber)).toEqual(["L-3", "L-2", "L-1", "L-4"]);
+  });
+
+  it("row errors: a date without a named batch, a bad date, two dates for one batch in the file", async () => {
+    await makeArticle("BD-2");
+    const preview = await imports.preview(
+      "stockBalances",
+      dated([
+        ["BD-2", "Huvudlager", "A1", "1", "", "", "2026-01-01", ""],
+        ["BD-2", "Huvudlager", "B1", "1", "", "Okänd", "", "2027-01-01"],
+        ["BD-2", "Huvudlager", "C1", "1", "", "L-1", "i går", ""],
+        ["BD-2", "Huvudlager", "D1", "1", "", "L-2", "2026-01-01", ""],
+        ["BD-2", "Huvudlager", "E1", "1", "", "L-2", "2026-02-01", ""],
+      ])
+    );
+    expect(preview.rows.map((r) => r.errors)).toEqual([
+      ["Batchdatum kräver ett batchnummer i kolumnen Batch"],
+      ["Utgångsdatum kräver ett batchnummer i kolumnen Batch"],
+      ['Ogiltigt batchdatum: "i går" (ÅÅÅÅ-MM-DD)'],
+      [],
+      ["Batch L-2 har olika batchdatum i filen (2026-01-01 och 2026-02-01)"],
+    ]);
+  });
+
+  it("fills in a batch without a date (also when the balance is unchanged); another date stays, with a warning", async () => {
+    const article = await makeArticle("BD-3");
+    await imports.commit("stockBalances", dated([["BD-3", "Huvudlager", "A1", "5", "", "L-1", "", ""]]));
+    expect(await batchDates()).toEqual([["L-1", null, null]]);
+
+    // The same balance, now with dates: not skipped, nothing booked.
+    const fill = dated([["BD-3", "Huvudlager", "A1", "5", "", "L-1", "2026-02-02", "2027-02-02"]]);
+    expect((await imports.preview("stockBalances", fill)).summary).toMatchObject({ update: 1, skip: 0, error: 0 });
+    expect(await imports.commit("stockBalances", fill)).toMatchObject({ created: 0, updated: 1 });
+    expect(await batchDates()).toEqual([["L-1", "2026-02-02", "2027-02-02"]]);
+    expect(await rowsOf(article.id)).toHaveLength(1);
+    // …and the same file again is skipped.
+    expect((await imports.preview("stockBalances", fill)).summary).toMatchObject({ skip: 1, update: 0 });
+
+    // Another date: the row goes through, the batch keeps its dates.
+    const other = dated([["BD-3", "Huvudlager", "A1", "7", "", "L-1", "2025-01-01", "2028-01-01"]]);
+    const preview = await imports.preview("stockBalances", other);
+    expect(preview.rows[0]!.errors).toEqual([]);
+    expect(preview.rows[0]!.warnings.slice(0, 2)).toEqual([
+      "Batch L-1 har redan batchdatum 2026-02-02 — det står kvar (ändra det under Lager → Spårbarhet)",
+      "Batch L-1 har redan utgångsdatum 2027-02-02 — det står kvar (ändra det under Lager → Spårbarhet)",
+    ]);
+    expect(await imports.commit("stockBalances", other)).toMatchObject({ updated: 1 });
+    expect(await batchDates()).toEqual([["L-1", "2026-02-02", "2027-02-02"]]);
+    expect(await cells(article.id)).toEqual(["A1/L-1=7"]);
+  });
+
+  it("export → import goes round with the dates", async () => {
+    await makeArticle("BD-4");
+    await imports.commit("stockBalances", dated([["BD-4", "Huvudlager", "A1", "3", "", "L-1", "2026-02-02", "2027-02-02"]]));
+    const file = await exports.exportFile("stockBalances", importExportQuerySchema.parse({ format: "csv" }));
+    const content = typeof file.content === "string" ? Buffer.from(file.content, "utf8") : file.content;
+    const parsedFile = await imports.parse("stockBalances", content);
+    expect(parsedFile.rows).toEqual([["BD-4", "Huvudlager", "A1", "3", "", "L-1", "2026-02-02", "2027-02-02"]]);
+    const roundTrip = { mapping: parsedFile.suggestedMapping, rows: parsedFile.rows };
+    expect((await imports.preview("stockBalances", roundTrip)).summary).toMatchObject({ skip: 1, error: 0, create: 0, update: 0 });
   });
 });

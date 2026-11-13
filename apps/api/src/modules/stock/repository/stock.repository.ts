@@ -24,7 +24,7 @@ import { assertLocationNotUnderCount } from "../service/count-guard.js";
 import { lockArticlesForOutflow } from "../service/outflow-locations.js";
 import { isStockedArticleType } from "../service/stocked-article.js";
 import { allocateBatchOutflow, articlePlacePreference, compareOutflowLocations, FALLBACK_LOCATION_NAME, withBatchRemainder } from "../service/outflow-allocation.js";
-import { isCheckViolation } from "../../system/service/db-errors.js";
+import { isCheckViolation, isUniqueViolation } from "../../system/service/db-errors.js";
 import { stockValuedAt } from "./valued-at.js";
 import { readArticleLocations, replaceArticleLocations } from "./article-locations.js";
 import {
@@ -37,6 +37,7 @@ import {
   type ListQuery,
   type ListStockTransactionsQuery,
   type ListStockBatchesQuery,
+  type UpdateStockBatchInput,
   type StockTransactionReference,
   type ListStockBalancesQuery,
   type ListStockLocationRegisterQuery,
@@ -50,9 +51,10 @@ import {
   round4,
   UNKNOWN_BATCH_LABEL,
 } from "@navet/shared";
-import { BatchNotTrackedError } from "../service/batch.errors.js";
-import { findArticleBatch, getOrCreateBatch } from "../service/batches.js";
-import { isBatchTrackedArticle } from "../service/batch-tracking.js";
+import { BatchNotTrackedError, DuplicateBatchNumberError } from "../service/batch.errors.js";
+import { findArticleBatch, getOrCreateBatch, normalizeBatchNumber } from "../service/batches.js";
+import { stockholmToday } from "../../system/service/delivery-days.js";
+import { isTrackedArticle, trackedSql } from "../service/batch-tracking.js";
 import { articleBatchBalances, batchCellsForArticles, pickBatchCellsForArticles } from "./batch-balances.js";
 import { createBatchTraceReader, listStockBatches } from "./batch-trace.repository.js";
 import { traceBatch, type BatchTraceLimits } from "../service/batch-trace.js";
@@ -374,7 +376,7 @@ export function createStockRepository(db: Db) {
         if (!isStockedArticleType(subject.type)) throw new ServiceArticleNotStockedError(subject.articleNumber);
         // Batch (#8). The flag is read FOR KEY SHARE (batch-tracking.ts), so
         // a flag change in progress is waited out.
-        const batchTracked = await isBatchTrackedArticle(tx, input.articleId);
+        const batchTracked = await isTrackedArticle(tx, input.articleId);
         if ((input.batchNumber !== undefined || typeof input.batchId === "string") && !batchTracked) {
           throw new BatchNotTrackedError(subject.articleNumber);
         }
@@ -434,7 +436,15 @@ export function createStockRepository(db: Db) {
         // goods are Okänd.
         const batch =
           input.batchNumber !== undefined && input.quantityDelta > 0
-            ? await getOrCreateBatch(tx, { articleId: input.articleId, batchNumber: input.batchNumber, origin: "manual", createdBy })
+            ? await getOrCreateBatch(tx, {
+                articleId: input.articleId,
+                batchNumber: input.batchNumber,
+                origin: "manual",
+                createdBy,
+                // Etapp 2: the new batch's utgångsdatum; another date than an
+                // existing batch has is refused (409 batch-expiry-mismatch).
+                expiresOn: input.expiresOn,
+              })
             : null;
 
         // Only inflows are a valuation event — an outflow doesn't get a cost.
@@ -519,7 +529,7 @@ export function createStockRepository(db: Db) {
         const transferId = randomUUID();
         for (const row of input.rows) {
           const [article] = await tx
-            .select({ articleNumber: articles.articleNumber, type: articles.type, batchTracked: articles.batchTracked })
+            .select({ articleNumber: articles.articleNumber, type: articles.type, batchTracked: trackedSql() })
             .from(articles)
             .where(eq(articles.id, row.articleId));
           if (!article) throw new ArticleNotFoundError(row.articleId);
@@ -746,23 +756,63 @@ export function createStockRepository(db: Db) {
     // Batch (#8): the pick list's cells for the batchstyrda among these
     // articles, in the order Automatiskt draws (batch-balances.ts).
     async pickBatchCellsForArticles(articleIds: string[], opts: { locationId?: string } = {}) {
-      return pickBatchCellsForArticles(db, articleIds, opts);
+      return pickBatchCellsForArticles(db, articleIds, { ...opts, today: stockholmToday() });
     },
 
     // Batch (#8): GET /articles/:id/batch-balances — null = no such article.
     // An article that is not batchstyrd shows no batches: the ones it had
     // stay in the log and come back when the flag is switched on again.
     async articleBatchBalances(articleId: string) {
-      const [article] = await db.select({ batchTracked: articles.batchTracked }).from(articles).where(eq(articles.id, articleId));
+      const [article] = await db.select({ tracking: articles.tracking }).from(articles).where(eq(articles.id, articleId));
       if (!article) return null;
-      return { batchTracked: article.batchTracked, batches: article.batchTracked ? await articleBatchBalances(db, articleId) : [] };
+      return {
+        batchTracked: article.tracking === "batch",
+        batches: article.tracking !== "none" ? await articleBatchBalances(db, articleId, stockholmToday()) : [],
+      };
     },
 
     // Spårbarhet (#8): the batch register and one batch's trace. The whole
     // trace reads ONE snapshot (repeatable read, read only — PIA's pattern),
     // so a level never sees a movement the level before it did not.
     async listBatches(query: ListStockBatchesQuery) {
-      return listStockBatches(db, query);
+      return listStockBatches(db, query, stockholmToday());
+    },
+
+    // PATCH /stock/batches/:id (etapp 2): the batch's dates and number. The
+    // batch row is not part of the append-only log. The row is locked FOR
+    // UPDATE and compared, so the caller can log what actually changed; a
+    // number another batch of the article has (case-insensitively, the
+    // unique index) is DuplicateBatchNumberError, the reserved name
+    // BatchNumberReservedError. null = no such batch.
+    async updateBatch(batchId: string, input: UpdateStockBatchInput) {
+      return db.transaction(async (tx) => {
+        const columns = {
+          id: stockBatches.id,
+          articleId: stockBatches.articleId,
+          batchNumber: stockBatches.batchNumber,
+          expiresOn: stockBatches.expiresOn,
+          batchDate: stockBatches.batchDate,
+        };
+        const [before] = await tx.select(columns).from(stockBatches).where(eq(stockBatches.id, batchId)).for("update");
+        if (!before) return null;
+        const patch: { expiresOn?: string | null; batchDate?: string | null; batchNumber?: string } = {};
+        if (input.expiresOn !== undefined && input.expiresOn !== before.expiresOn) patch.expiresOn = input.expiresOn;
+        if (input.batchDate !== undefined && input.batchDate !== before.batchDate) patch.batchDate = input.batchDate;
+        if (input.batchNumber !== undefined) {
+          const batchNumber = normalizeBatchNumber(input.batchNumber);
+          if (batchNumber !== before.batchNumber) patch.batchNumber = batchNumber;
+        }
+        if (Object.keys(patch).length === 0) return { before, after: before, changed: false };
+        try {
+          // A savepoint, so the unique violation does not abort the caller's
+          // view of the transaction before it is mapped.
+          const [after] = await tx.transaction((sp) => sp.update(stockBatches).set(patch).where(eq(stockBatches.id, batchId)).returning(columns));
+          return { before, after: after!, changed: true };
+        } catch (err) {
+          if (isUniqueViolation(err) && patch.batchNumber !== undefined) throw new DuplicateBatchNumberError(patch.batchNumber);
+          throw err;
+        }
+      });
     },
 
     async traceBatch(batchId: string, limits?: BatchTraceLimits) {

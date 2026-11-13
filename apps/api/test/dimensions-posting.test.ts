@@ -154,7 +154,7 @@ describe("Kräver kostnadsställe", () => {
     const alerts = createAlertsService({
       repo: alertsRepo,
       planning: { requirementProposals: async () => [], orderPlanSummaries: async () => new Map() },
-      settings: { supplierInvoiceDays: async () => 7, quoteFollowupDays: async () => 7 },
+      settings: { supplierInvoiceDays: async () => 7, quoteFollowupDays: async () => 7, batchExpiryDays: async () => 30 },
       today: () => TODAY,
     });
     const response = await alerts.alertsForUser({ role: "admin", permissions: [] });

@@ -49,7 +49,16 @@ export interface Article {
   barcode: string | null;
   isPhantom: boolean;
   // Batchstyrd (#8): stock is kept per batch; null/undefined = not tracked.
+  // Etapp 2: the alias of `tracking === "batch"`.
   batchTracked?: boolean;
+  // Spårning (#8 etapp 2): Ingen / Batch / Serienummer (serial cannot be
+  // chosen yet — the API answers 400 serial-tracking-not-available).
+  tracking?: ArticleTracking;
+  // Hållbarhet (dagar): a manufactured batch's utgångsdatum = the day it is
+  // received + this; null = none.
+  shelfLifeDays?: number | null;
+  // Serienummer skapas: Vid inleverans / Vid utleverans (only "receipt" yet).
+  serialAssignedAt?: "receipt" | "delivery";
   // Set when the article is a configurator template (left join on the server).
   configuratorMode?: "variants" | "to_order" | null;
   // Base unit (grundenhet): code + register id. Default purchase/sales units
@@ -267,7 +276,10 @@ export interface StockBalance {
 }
 
 // Saldo per batch (#8) — GET /stock/batch-balances, in draw order.
+export type ArticleTracking = "none" | "batch" | "serial";
+
 // batchId null = Okänd (stock from before the article became batch tracked).
+// Etapp 2: per article in FEFO order, the cells of an utgången batch last.
 export interface BatchBalanceRow {
   articleId: string;
   locationId: string | null;
@@ -277,6 +289,10 @@ export interface BatchBalanceRow {
   preference: number | null;
   batchId: string | null;
   batchNumber: string | null;
+  // Utgångsdatum (the last usable day) and whether it has passed —
+  // Automatiskt leaves an utgången cell alone; it can be chosen by hand.
+  expiresOn?: string | null;
+  expired?: boolean;
   quantity: string;
 }
 
@@ -287,6 +303,9 @@ export interface ArticleBatchBalances {
   batches: {
     batchId: string | null;
     batchNumber: string | null;
+    expiresOn?: string | null;
+    batchDate?: string | null;
+    expired?: boolean;
     total: string;
     locations: {
       locationId: string | null;
@@ -316,6 +335,10 @@ export interface StockBatchListRow {
   unitCode: string;
   origin: StockBatchOrigin;
   createdAt: string;
+  // Etapp 2: Utgångsdatum, Batchdatum (null = the day of createdAt), utgången.
+  expiresOn?: string | null;
+  batchDate?: string | null;
+  expired?: boolean;
   quantity: number;
 }
 export interface TraceBatchRef {
@@ -326,6 +349,8 @@ export interface TraceBatchRef {
   articleName: string;
   unitCode: string;
   batchTracked: boolean;
+  tracking?: ArticleTracking;
+  expiresOn?: string | null;
   origin: StockBatchOrigin | null;
   createdAt: string | null;
 }
@@ -1140,6 +1165,7 @@ export interface PurchaseOrderRow {
   articleType: ArticleType;
   // Batchstyrd (#8): the receipt asks for a Batch per row.
   articleBatchTracked?: boolean;
+  articleTracking?: ArticleTracking;
   confirmedDeliveryDate: string | null;
   // Always stored in the article's base unit; unitCode/unitFactor say which
   // unit the row was entered in (factor null = base unit).
@@ -1186,6 +1212,8 @@ export interface PurchaseReceipt {
   locationName: string | null;
   // Batch (#8) the goods went into (null = article not batch tracked).
   batchNumber?: string | null;
+  // Etapp 2: the batch's utgångsdatum.
+  expiresOn?: string | null;
   moReportId: string | null;
   createdAt: string;
   createdByName: string | null;
@@ -2005,6 +2033,7 @@ export interface SalesOrderRow {
   articleName: string;
   // Batchstyrd (#8): Leverera offers a Batch choice on the row.
   articleBatchTracked?: boolean;
+  articleTracking?: ArticleTracking;
   expectedDeliveryDate: string | null;
   // E3: only manufactured articles offer "Skapa tillverkningsorder".
   articleType: ArticleType;
@@ -2111,7 +2140,14 @@ export interface DeliveryRowsResponse {
     undoable: boolean;
     // Where the goods go back, one part per location the row was taken from
     // (quantity in the article's base unit); empty = not undoable.
-    locations: { locationId: string; warehouseName: string; locationName: string; quantity: number; batchNumber?: string | null }[];
+    locations: {
+      locationId: string;
+      warehouseName: string;
+      locationName: string;
+      quantity: number;
+      batchNumber?: string | null;
+      expiresOn?: string | null;
+    }[];
     // The article's base unit — the unit of the parts above.
     baseUnit: string;
   }[];
@@ -2877,6 +2913,7 @@ export interface MOMaterialConsumption {
   componentName: string;
   // Batchstyrd (#8): Förbruka offers a Batch choice.
   componentBatchTracked?: boolean;
+  componentTracking?: ArticleTracking;
   // Always stored in the component's base unit; unitCode/unitFactor say
   // which unit the BOM row was entered in (factor null = base unit).
   quantityPlanned: string;
@@ -3549,6 +3586,8 @@ export interface SystemSettings {
   alertSupplierInvoiceDays: number;
   // Offerter att följa upp inom (dagar), 0–60.
   alertQuoteFollowupDays: number;
+  // Batcher som går ut inom (dagar) — the avisering Utgångna batcher (0–365, förval 30).
+  alertBatchExpiryDays?: number;
   // Offertens giltighetstid (dagar), 0–365; 0 = ingen giltighetstid.
   quoteValidityDays: number;
   // Marginal i leveransprecisionen (#29), whole days 0–365 per side: Sen
@@ -5026,8 +5065,10 @@ export interface StockCountRow {
   // Batch (#8): batchTracked rows are counted per batch; batchId null +
   // batchNumber null = the Okänd row.
   batchTracked?: boolean;
+  tracking?: ArticleTracking;
   batchId?: string | null;
   batchNumber?: string | null;
+  expiresOn?: string | null;
 }
 
 // #26 — may an open count be booked per the day its underlag was created?

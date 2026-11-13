@@ -23,6 +23,7 @@ describe("the catalog", () => {
     expect(colours.slice(firstYellow).every((c) => c === "yellow")).toBe(true);
     expect(ALERT_KIND_CATALOG.map((d) => d.kind)).toEqual([
       "stock_negative",
+      "batch_expiry",
       "customer_invoice_overdue",
       "supplier_invoice_due",
       "quote_followup",
@@ -75,7 +76,7 @@ describe("visibleKinds", () => {
       "sales_order_late",
     ]);
     expect(visibleKinds(user(["tillverkning"]))).toEqual(["manufacturing_order_late", "manufacture_needed"]);
-    expect(visibleKinds(user(["lager"]))).toEqual(["stock_negative"]);
+    expect(visibleKinds(user(["lager"]))).toEqual(["stock_negative", "batch_expiry"]);
     expect(visibleKinds(user(["ekonomi"]))).toEqual(["recurring_verification_failed", "bank_unreconciled", "cost_center_missing"]);
     // Kvalitet: the open avvikelser past Åtgärd senast.
     expect(visibleKinds(user(["kvalitet"]))).toEqual(["deviations_overdue"]);

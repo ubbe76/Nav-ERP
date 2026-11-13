@@ -253,6 +253,9 @@ const systemSettingsFieldsSchema = z.object({
     alertSupplierInvoiceDays: z.number().int().min(0).max(60).optional(),
     // Offerter att följa upp inom (dagar) — the quote_followup alert's window.
     alertQuoteFollowupDays: z.number().int().min(0).max(60).optional(),
+    // Batcher som går ut inom (dagar) — the batch_expiry alert's window
+    // (#8 etapp 2; default 30).
+    alertBatchExpiryDays: z.number().int().min(0).max(365).optional(),
     // Offertens giltighetstid (dagar): the default Giltig t.o.m. of a new
     // quote = today + N; 0 = no validity date.
     quoteValidityDays: z.number().int().min(0).max(365).optional(),

@@ -6,6 +6,7 @@ import { buildApp } from "../src/app.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { articleBatchBalances, batchCellQuantity, batchCellsForArticles } from "../src/modules/stock/repository/batch-balances.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import {
   ArticleNotBatchTrackableError,
@@ -19,9 +20,9 @@ import {
 } from "../src/modules/stock/service/batch.errors.js";
 import {
   BATCH_TRACKING_ENABLED_KEY,
-  batchTrackedArticleIds,
+  trackedArticleIds,
   batchTrackingEnabledForShare,
-  isBatchTrackedArticle,
+  isTrackedArticle,
 } from "../src/modules/stock/service/batch-tracking.js";
 import { findArticleBatch, getOrCreateBatch } from "../src/modules/stock/service/batches.js";
 import { lockArticlesForOutflow } from "../src/modules/stock/service/outflow-locations.js";
@@ -176,7 +177,7 @@ describe("Batchstyrd and the setting Använd batch- och serienummer", () => {
     expect((await testSystemService.getSettings()).batchTrackingEnabled).toBe(true);
     const a = await makeArticle();
     expect((await articleService.updateArticle(a.id, { batchTracked: true }, null))!.batchTracked).toBe(true);
-    expect(await isBatchTrackedArticle(db, a.id)).toBe(true);
+    expect(await isTrackedArticle(db, a.id)).toBe(true);
     // Unchanged = no log row.
     await articleService.updateArticle(a.id, { batchTracked: true, name: "Plåt 2" });
     expect((await articleService.updateArticle(a.id, { batchTracked: false }))!.batchTracked).toBe(false);
@@ -186,7 +187,7 @@ describe("Batchstyrd and the setting Använd batch- och serienummer", () => {
 
     const created = await makeArticle({ batchTracked: true });
     expect(created.batchTracked).toBe(true);
-    expect(await batchTrackedArticleIds(db, [a.id, created.id, crypto.randomUUID()])).toEqual(new Set([created.id]));
+    expect(await trackedArticleIds(db, [a.id, created.id, crypto.randomUUID()])).toEqual(new Set([created.id]));
   });
 
   it("may always be switched off — also with stock in named batches, which stay in the log and come back", async () => {
@@ -242,7 +243,7 @@ describe("Batchstyrd and the setting Använd batch- och serienummer", () => {
     await expect(refused).rejects.toMatchObject({ articleCount: 2 });
     expect(await testSystemService.getSettings()).toMatchObject({ batchTrackingEnabled: true, quoteValidityDays: before });
 
-    await db.update(articles).set({ batchTracked: false });
+    await db.update(articles).set({ tracking: "none" });
     expect((await setEnabled(false)).batchTrackingEnabled).toBe(false);
     await expect(articleService.updateArticle(a.id, { batchTracked: true })).rejects.toThrow(BatchTrackingDisabledError);
   });
@@ -252,7 +253,7 @@ describe("Batchstyrd and the setting Använd batch- och serienummer", () => {
     const a = await makeArticle();
     const held = heldTransaction(async (tx) => {
       expect(await batchTrackingEnabledForShare(tx)).toBe(true);
-      await tx.update(articles).set({ batchTracked: true }).where(eq(articles.id, a.id));
+      await tx.update(articles).set({ tracking: "batch" }).where(eq(articles.id, a.id));
     });
     const outcome = await raceAgainst(held, () => setEnabled(false));
     expect(outcome).toBeInstanceOf(BatchTrackingInUseError);
@@ -267,7 +268,7 @@ describe("Batchstyrd and the setting Använd batch- och serienummer", () => {
     });
     const outcome = await raceAgainst(held, () => articleService.updateArticle(a.id, { batchTracked: true }));
     expect(outcome).toBeInstanceOf(BatchTrackingDisabledError);
-    expect(await isBatchTrackedArticle(db, a.id)).toBe(false);
+    expect(await isTrackedArticle(db, a.id)).toBe(false);
   });
 
   it("race: a flag change waits for an inflow that has already read the flag", async () => {
@@ -276,7 +277,7 @@ describe("Batchstyrd and the setting Använd batch- och serienummer", () => {
     const location = await makeLocation();
     const held = heldTransaction(async (tx) => {
       // What every inflow does first (FOR KEY SHARE) — it read "not batchstyrd"…
-      expect(await isBatchTrackedArticle(tx, a.id)).toBe(false);
+      expect(await isTrackedArticle(tx, a.id)).toBe(false);
       await tx.insert(stockTransactions).values({ articleId: a.id, locationId: location.id, quantityDelta: "5", transactionType: "inventory_adjustment" });
     });
     const outcome = await raceAgainst(held, () => articleService.updateArticle(a.id, { batchTracked: true }));
@@ -292,7 +293,7 @@ describe("Batchstyrd and the setting Använd batch- och serienummer", () => {
     const held = heldTransaction(async (tx) => {
       // updateArticle's lock (lockArticle) and its write.
       await tx.select({ id: articles.id }).from(articles).where(eq(articles.id, a.id)).for("update");
-      await tx.update(articles).set({ batchTracked: true }).where(eq(articles.id, a.id));
+      await tx.update(articles).set({ tracking: "batch" }).where(eq(articles.id, a.id));
     });
     const outcome = await raceAgainst(held, () => adjust(a.id, location.id, 5, "L-9"));
     // Before the change committed the batch would have been refused (batch-not-tracked).
@@ -423,7 +424,7 @@ describe("the log and the readers", () => {
     // GAMMAL is the older one, whatever order the rows were booked in.
     await db.update(stockBatches).set({ createdAt: new Date("2026-01-01T00:00:00Z") }).where(eq(stockBatches.batchNumber, "GAMMAL"));
 
-    const balances = await articleBatchBalances(db, a.id);
+    const balances = await articleBatchBalances(db, a.id, stockholmToday());
     expect(balances.map((b) => [b.batchNumber, b.origin, b.total, b.locations.map((l) => `${l.locationName}:${l.quantity}`)])).toEqual([
       [null, null, "1.0000", ["A1:1.0000"]],
       ["GAMMAL", "manual", "10.0000", ["A1:7.0000", "B2:3.0000"]],

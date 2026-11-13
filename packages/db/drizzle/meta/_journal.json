@@ -1499,6 +1499,13 @@
       "when": 1794505857108,
       "tag": "0213_batchnummer",
       "breakpoints": true
+    },
+    {
+      "idx": 214,
+      "version": "7",
+      "when": 1794540514045,
+      "tag": "0214_sparning_utgangsdatum",
+      "breakpoints": true
     }
   ]
 }

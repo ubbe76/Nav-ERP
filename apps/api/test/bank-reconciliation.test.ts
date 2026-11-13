@@ -548,7 +548,7 @@ describe("årsbokslut och avisering", () => {
     const alerts = createAlertsService({
       repo: createAlertsRepository(db),
       planning: { requirementProposals: async () => [], orderPlanSummaries: async () => new Map() },
-      settings: { supplierInvoiceDays: async () => 7, quoteFollowupDays: async () => 7 },
+      settings: { supplierInvoiceDays: async () => 7, quoteFollowupDays: async () => 7, batchExpiryDays: async () => 30 },
       today: () => `${BANK_YEAR}-10-20`,
     });
     const { groups } = await alerts.computeAlerts(["bank_unreconciled"]);

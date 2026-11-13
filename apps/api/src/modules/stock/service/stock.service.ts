@@ -9,6 +9,7 @@ import type {
   ListQuery,
   ListStockTransactionsQuery,
   ListStockBatchesQuery,
+  UpdateStockBatchInput,
   ListStockBalancesQuery,
   ListStockLocationRegisterQuery,
   ListStockLocationsQuery,
@@ -190,6 +191,25 @@ export function createStockService(repo: StockRepository, audit: AuditWriter = {
     // that is no longer batchstyrd are still in the log.
     async listBatches(query: ListStockBatchesQuery) {
       return repo.listBatches(query);
+    },
+
+    // PATCH /stock/batches/:id (etapp 2): correct a batch's utgångsdatum,
+    // Batchdatum or number. Logged (stock_batch / updated, before and after)
+    // after the commit, only when something changed.
+    async updateBatch(batchId: string, input: UpdateStockBatchInput, userId: string | null) {
+      const result = await repo.updateBatch(batchId, input);
+      if (!result) throw new StockBatchNotFoundError(batchId);
+      if (result.changed) {
+        const pick = (b: typeof result.before) => ({ batchNumber: b.batchNumber, expiresOn: b.expiresOn, batchDate: b.batchDate });
+        await audit.log({
+          entityType: "stock_batch",
+          entityId: batchId,
+          action: "updated",
+          detail: { articleId: result.after.articleId, before: pick(result.before), after: pick(result.after) },
+          userId,
+        });
+      }
+      return result.after;
     },
 
     async traceBatch(batchId: string, limits?: BatchTraceLimits) {

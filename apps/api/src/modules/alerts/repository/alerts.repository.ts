@@ -43,6 +43,7 @@ import {
 import { openAmountSql as invoiceOpenAmountSql } from "../../sales/repository/open-amounts.js";
 import { openAmountSql as supplierInvoiceOpenAmountSql } from "../../purchase/repository/open-amounts.js";
 import { PLUGIN_REFUSAL_ERRORS } from "../../system/service/plugin-webhook.js";
+import { listExpiringBatches, type ExpiringBatchRow } from "../../stock/repository/batch-expiry.js";
 import { createBankReconciliationRepository } from "../../banking/repository/bank-reconciliation.repository.js";
 
 // Aviseringar — one reader per kind, every one a question against the
@@ -145,11 +146,21 @@ export interface FailedEmailRow {
   createdAt: Date;
 }
 
+// Utgångna batcher: every row of the kind (the group's count is the list's
+// length; the response is cut to ALERT_ITEMS_LIMIT by the service).
+const EXPIRING_BATCHES_MAX = 5000;
+
 export function createAlertsRepository(db: Db) {
   // Bankavstämning: the unmatched statement entries, through the banking
   // module's own reader so "unmatched" has one definition.
   const bankReconciliation = createBankReconciliationRepository(db);
   return {
+    // Utgångna batcher (#8 etapp 2): the ONE definition in the stock
+    // module's leaf (batch-expiry.ts), which the batch register's filter
+    // `expiry=due` shares — the list is the group. Shortest date first.
+    async expiringBatches(horizon: string): Promise<ExpiringBatchRow[]> {
+      return (await listExpiringBatches(db, horizon, EXPIRING_BATCHES_MAX)).rows;
+    },
     async unreconciledBankEntries(before: string) {
       return bankReconciliation.unreconciledEntriesBefore(before);
     },

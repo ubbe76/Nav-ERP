@@ -1794,6 +1794,7 @@ export function createPurchaseService(
         createdBy,
         overReceiptPercent: purchaseOverReceiptPercent,
         batchNumber: input.batchNumber,
+        expiresOn: input.expiresOn,
       });
       if (result.ok) {
         const [order, article] = await Promise.all([
@@ -1858,7 +1859,7 @@ export function createPurchaseService(
         }
         // receiptId: the webb's notice offers Ångra on exactly this receipt.
         // batchNumber (#8): the batch the goods were booked in, null without one.
-        return { row: result.row, orderStatus: result.orderStatus, operationReport, receiptId: result.receiptId, batchNumber: result.batchNumber };
+        return { row: result.row, orderStatus: result.orderStatus, operationReport, receiptId: result.receiptId, batchNumber: result.batchNumber, expiresOn: result.expiresOn };
       }
 
       switch (result.reason) {

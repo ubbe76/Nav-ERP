@@ -1,3 +1,4 @@
+import { batchTrackedSql, trackedSql } from "../../stock/service/batch-tracking.js";
 import { randomUUID } from "node:crypto";
 import { and, asc, count, desc, eq, exists, getTableColumns, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -84,6 +85,7 @@ import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { allocateOutflowLocations, lockArticlesForOutflow } from "../../stock/service/outflow-locations.js";
 import { compareBatches } from "../../stock/service/outflow-allocation.js";
+import { batchAgeDateSql } from "../../stock/repository/batch-balances.js";
 import { isStockedArticle, stockedArticleIds } from "../../stock/service/stocked-article.js";
 import {
   PriceListInUseError,
@@ -1990,7 +1992,9 @@ export function createSalesRepository(db: Db) {
           // decide that without a second round-trip.
           articleType: articles.type,
           // Batch (#8): Utleverans offers a batch choice for a batchstyrd article.
-          articleBatchTracked: articles.batchTracked,
+          articleBatchTracked: batchTrackedSql(),
+          // Spårning (etapp 2): the sort; batchTracked above is its alias.
+          articleTracking: articles.tracking,
           // Printed as the articleInfo line on the quote/confirmation PDF
           // (renderSalesOrderPdf) via formatArticleAttributes — NOT on the
           // invoice PDF, which shares this same row query.
@@ -2455,7 +2459,7 @@ export function createSalesRepository(db: Db) {
             baseUnitCode: units.code,
             // Batch (#8): the documents print the parts' batches only while
             // the article is batchstyrd (decision 10).
-            batchTracked: articles.batchTracked,
+            batchTracked: trackedSql(),
             quantityDelivered: salesOrderRows.quantityDelivered,
             // Konfigurator 4b: the configured row's choices print on the note.
             configuration: salesOrderRows.configuration,
@@ -2492,6 +2496,10 @@ export function createSalesRepository(db: Db) {
           batchId: stockTransactions.batchId,
           batchNumber: stockBatches.batchNumber,
           batchCreatedAt: stockBatches.createdAt,
+          // Etapp 2: the batch's utgångsdatum (printed on the följesedel
+          // and the pallet card) and its age day (the FEFO order).
+          expiresOn: stockBatches.expiresOn,
+          batchAgeDate: batchAgeDateSql,
         })
         .from(deliveryRowLocations)
         .innerJoin(stockTransactions, eq(stockTransactions.id, deliveryRowLocations.stockTransactionId))
@@ -2505,7 +2513,15 @@ export function createSalesRepository(db: Db) {
         .orderBy(asc(warehouses.name), asc(stockLocations.name));
       const partsByRow = new Map<
         string,
-        { locationId: string; warehouseName: string; locationName: string; quantity: number; batchId: string | null; batchNumber: string | null }[]
+        {
+          locationId: string;
+          warehouseName: string;
+          locationName: string;
+          quantity: number;
+          batchId: string | null;
+          batchNumber: string | null;
+          expiresOn: string | null;
+        }[]
       >();
       const placeOrder = new Map<string, number>();
       partRows.forEach((part, index) => {
@@ -2523,6 +2539,7 @@ export function createSalesRepository(db: Db) {
           quantity: Number(p.quantity),
           batchId: p.batchId,
           batchNumber: p.batchNumber,
+          expiresOn: p.expiresOn,
         });
         partsByRow.set(p.deliveryRowId, list);
       }

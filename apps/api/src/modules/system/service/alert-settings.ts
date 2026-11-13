@@ -7,6 +7,8 @@
 export const ALERT_DIGEST_TIME_KEY = "alert_digest_time";
 export const ALERT_SUPPLIER_INVOICE_DAYS_KEY = "alert_supplier_invoice_days";
 export const ALERT_QUOTE_FOLLOWUP_DAYS_KEY = "alert_quote_followup_days";
+// Utgångna batcher (#8 etapp 2): batches whose utgångsdatum is within N days.
+export const ALERT_BATCH_EXPIRY_DAYS_KEY = "alert_batch_expiry_days";
 export const PUBLIC_BASE_URL_KEY = "public_base_url";
 
 export const DEFAULT_ALERT_DIGEST_TIME = "07:00";
@@ -14,6 +16,8 @@ export const DEFAULT_ALERT_SUPPLIER_INVOICE_DAYS = 7;
 export const MAX_ALERT_SUPPLIER_INVOICE_DAYS = 60;
 export const DEFAULT_ALERT_QUOTE_FOLLOWUP_DAYS = 7;
 export const MAX_ALERT_QUOTE_FOLLOWUP_DAYS = 60;
+export const DEFAULT_ALERT_BATCH_EXPIRY_DAYS = 30;
+export const MAX_ALERT_BATCH_EXPIRY_DAYS = 365;
 
 export const DIGEST_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -38,6 +42,11 @@ export function decodeAlertSupplierInvoiceDays(raw: string | null | undefined): 
 // Offerter att följa upp inom (dagar).
 export function decodeAlertQuoteFollowupDays(raw: string | null | undefined): number {
   return decodeDaysSetting(raw, DEFAULT_ALERT_QUOTE_FOLLOWUP_DAYS, MAX_ALERT_QUOTE_FOLLOWUP_DAYS);
+}
+
+// Batcher som går ut inom (dagar).
+export function decodeAlertBatchExpiryDays(raw: string | null | undefined): number {
+  return decodeDaysSetting(raw, DEFAULT_ALERT_BATCH_EXPIRY_DAYS, MAX_ALERT_BATCH_EXPIRY_DAYS);
 }
 
 // "" = not configured (the digest is sent without links). A trailing slash

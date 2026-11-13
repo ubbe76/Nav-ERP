@@ -1,3 +1,4 @@
+import { businessDateSchema } from "@navet/shared";
 // Hand-rolled CSV parser for the Monitor G5 import — deliberately no
 // dependency. RFC 4180 quoting ("" escape, quoted delimiters/newlines),
 // CRLF/LF/CR line endings, UTF-8 with windows-1252 fallback, and delimiter
@@ -209,4 +210,15 @@ export function normalizeDecimal(input: string): number | null {
   }
   const value = Number(normalized);
   return Number.isFinite(value) ? value : null;
+}
+
+// A day cell: YYYY-MM-DD (what an Excel date cell becomes, parse-file.ts),
+// also with / or . between the parts, or YYYYMMDD. null = not a date the
+// system can reason about (businessDateSchema's range).
+export function normalizeDay(input: string): string | null {
+  const text = input.trim();
+  const match = /^(\d{4})[-/.]?(\d{2})[-/.]?(\d{2})$/.exec(text);
+  if (!match) return null;
+  const day = `${match[1]}-${match[2]}-${match[3]}`;
+  return businessDateSchema.safeParse(day).success ? day : null;
 }

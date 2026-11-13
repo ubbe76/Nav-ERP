@@ -45,8 +45,8 @@ import { COPIED_ARTICLES_MAX, ERROR_CODES, type ImportExportArticleSelection } f
 import { codeFromName, errorBody } from "../../system/service/error-body.js";
 import { assertModeAllowed } from "../../configurator/service/configurator-rules.js";
 import { StockLocationNotFoundError } from "../../stock/service/stock.errors.js";
-import { batchTrackableArticle } from "../../stock/service/batch-tracking.js";
-import { ArticleNotBatchTrackableError, BatchTrackingDisabledError } from "../../stock/service/batch.errors.js";
+import { batchTrackableArticle, mentionsTracking, resolveTracking, type ArticleTracking } from "../../stock/service/batch-tracking.js";
+import { ArticleNotBatchTrackableError, BatchTrackingDisabledError, SerialTrackingNotAvailableError } from "../../stock/service/batch.errors.js";
 
 // Only domain errors the web has a translation for are reported by code; any
 // other error (a raw database error, a bug) must not leak its message.
@@ -745,10 +745,13 @@ export function createArticleService(
       // Batchstyrd (#8) is decided under the same lock, whenever the patch
       // mentions it (or the type/phantom, which may make the article one that
       // cannot be batchstyrd): the stock writers read the flag FOR KEY SHARE
-      // (batchTrackedArticleIds) and the draws hold the article FOR NO KEY
+      // (trackedArticleIds) and the draws hold the article FOR NO KEY
       // UPDATE, so the change waits for them and they for it.
-      let batchTrackedChange: { before: boolean; after: boolean } | null = null;
-      if (input.type !== undefined || input.isPhantom !== undefined || input.batchTracked !== undefined) {
+      let trackingChange: { before: ArticleTracking; after: ArticleTracking } | null = null;
+      // Serienummer skapas = Vid utleverans cannot be chosen until the
+      // serienummer step is built (like Spårning = Serienummer below).
+      if (input.serialAssignedAt === "delivery") throw new SerialTrackingNotAvailableError();
+      if (input.type !== undefined || input.isPhantom !== undefined || mentionsTracking(input)) {
         await repo.transaction(async (tx) => {
           const locked = await repo.lockArticle(tx, id);
           if (!locked) throw new ArticleNotFoundError(id);
@@ -759,14 +762,25 @@ export function createArticleService(
           // the setting cannot be switched off past this article). Off: always
           // allowed (beslut 10) — the batches stay in the log, are no longer
           // asked for or shown, and are there again if the flag comes back.
-          // An article that becomes a Tjänst or a phantom loses the flag.
+          // An article that becomes a Tjänst or a phantom loses the tracking.
+          // The request's `tracking`/`batchTracked` are resolved against the
+          // LOCKED row by the one rule (resolveTracking).
           const trackable = batchTrackableArticle({ type: input.type ?? locked.type, isPhantom: input.isPhantom ?? locked.isPhantom });
-          if (input.batchTracked === true && !trackable) throw new ArticleNotBatchTrackableError();
-          const batchTracked = trackable && (input.batchTracked ?? locked.batchTracked);
-          if (batchTracked && !locked.batchTracked && !(await repo.batchTrackingEnabled(tx))) throw new BatchTrackingDisabledError();
-          if (batchTracked !== locked.batchTracked) {
-            batchTrackedChange = { before: locked.batchTracked, after: batchTracked };
-            effective = { ...effective, batchTracked };
+          const wanted = resolveTracking(locked.tracking, input);
+          // Serienummer cannot be chosen until the serienummer step is built.
+          if (input.tracking === "serial") throw new SerialTrackingNotAvailableError();
+          const asksOn = input.tracking !== undefined ? input.tracking !== "none" : input.batchTracked === true;
+          if (asksOn && !trackable) throw new ArticleNotBatchTrackableError();
+          const tracking: ArticleTracking = trackable ? wanted : "none";
+          if (tracking !== "none" && locked.tracking === "none" && !(await repo.batchTrackingEnabled(tx))) throw new BatchTrackingDisabledError();
+          // The alias never reaches the UPDATE; the resolved sort does.
+          const { batchTracked: _alias, tracking: _sent, ...withoutTracking } = effective;
+          void _alias;
+          void _sent;
+          effective = withoutTracking;
+          if (tracking !== locked.tracking) {
+            trackingChange = { before: locked.tracking, after: tracking };
+            effective = { ...effective, tracking };
           }
           if (typeChanges || phantomChanges) {
             const mode = await repo.configuratorModeFor(id, tx);
@@ -791,7 +805,7 @@ export function createArticleService(
       // before) — only this flag turns a whole demand source on or off.
       // Batchstyrd (#8) is logged the same way: it changes how every stock
       // movement of the article is booked from here on.
-      const batchChange = batchTrackedChange as { before: boolean; after: boolean } | null;
+      const batchChange = trackingChange as { before: ArticleTracking; after: ArticleTracking } | null;
       if (batchChange) {
         await audit.log({
           entityType: "article",
@@ -799,8 +813,11 @@ export function createArticleService(
           action: "updated",
           detail: {
             articleNumber: article.articleNumber,
-            before: { batchTracked: batchChange.before },
-            after: { batchTracked: batchChange.after },
+            // Between Ingen and Batch the entry is the one it always was
+            // (batchTracked); a change that involves Serienummer names the sort.
+            ...(batchChange.before !== "serial" && batchChange.after !== "serial"
+              ? { before: { batchTracked: batchChange.before === "batch" }, after: { batchTracked: batchChange.after === "batch" } }
+              : { before: { tracking: batchChange.before }, after: { tracking: batchChange.after } }),
           },
           userId,
         });

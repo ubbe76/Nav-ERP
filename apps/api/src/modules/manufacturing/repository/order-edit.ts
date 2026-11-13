@@ -1,3 +1,4 @@
+import { batchTrackedSql } from "../../stock/service/batch-tracking.js";
 import { and, asc, eq, getTableColumns, isNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import {
@@ -57,7 +58,8 @@ export function selectMaterialRows(dbc: Db | Tx) {
       ...getTableColumns(moMaterialConsumptions),
       componentArticleNumber: articles.articleNumber,
       // Batch (#8): Förbruka offers a batch choice for a batchstyrd component.
-      componentBatchTracked: articles.batchTracked,
+      componentBatchTracked: batchTrackedSql(),
+      componentTracking: articles.tracking,
       componentName: articles.name,
       // The unit the row displays in: the unit snapshotted on the row,
       // falling back to the component's base unit.

@@ -22,6 +22,8 @@ const ref = (batchId: string | null, article = batchId ?? "RAW"): TraceBatchRef 
   articleName: article,
   unitCode: "st",
   batchTracked: true,
+  tracking: "batch",
+  expiresOn: null,
   origin: batchId === null ? null : "manual",
   createdAt: batchId === null ? null : "2026-01-01T00:00:00.000Z",
 });

@@ -463,7 +463,7 @@ describe("the alert invoice_scans_pending", () => {
     const alerts = createAlertsService({
       repo: createAlertsRepository(db),
       planning: { requirementProposals: async () => [], orderPlanSummaries: async () => new Map() },
-      settings: { supplierInvoiceDays: async () => 7, quoteFollowupDays: async () => 7 },
+      settings: { supplierInvoiceDays: async () => 7, quoteFollowupDays: async () => 7, batchExpiryDays: async () => 30 },
       today: () => TODAY,
     });
     const supplier = await makeSupplier();

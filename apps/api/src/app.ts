@@ -831,6 +831,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     settings: {
       supplierInvoiceDays: async () => (await systemService.getSettings()).alertSupplierInvoiceDays,
       quoteFollowupDays: async () => (await systemService.getSettings()).alertQuoteFollowupDays,
+      batchExpiryDays: async () => (await systemService.getSettings()).alertBatchExpiryDays,
     },
     log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });

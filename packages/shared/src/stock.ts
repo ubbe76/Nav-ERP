@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { listQuerySchema, statusListParam } from "./list.js";
 import { blankSafe } from "./coerce.js";
+import { businessDateSchema } from "./business-date.js";
 
 // Spärrade lagerplatser as a list filter: "true" = only blocked places,
 // "false" = without them, absent = all. NOT z.coerce.boolean() — that turns
@@ -79,11 +80,37 @@ export const batchNumberSchema = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
   z.string().trim().min(1).max(50).optional()
 );
+// Utgångsdatum / Batchdatum on a write (etapp 2): an ISO day, "" = left out.
+export const batchDayInputSchema = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  businessDateSchema.optional()
+);
 // GET /stock/batches (#8, Spårbarhet): the batch register — search on the
 // batch number or the article's number/name, optionally one article.
+// `expiry` (etapp 2) is the avisering Utgångna batcher's "Visa alla" — the
+// SAME rows: `due` = batches of spårade articles with stock on a place that
+// is not blocked and an utgångsdatum within the setting's window (expired
+// ones included), `expired` = only those already past it. Sorted on the date.
+export const STOCK_BATCH_EXPIRY_FILTERS = ["due", "expired"] as const;
 export const listStockBatchesQuerySchema = listQuerySchema.extend({
   articleId: z.string().uuid().optional(),
+  expiry: z.enum(STOCK_BATCH_EXPIRY_FILTERS).optional(),
 });
+
+// PATCH /stock/batches/:id (etapp 2): correct a batch's utgångsdatum,
+// Batchdatum (null clears either) or a mistyped number. The batch row is not
+// part of the append-only log; archived documents are not changed.
+export const updateStockBatchSchema = z
+  .object({
+    expiresOn: businessDateSchema.nullable().optional(),
+    batchDate: businessDateSchema.nullable().optional(),
+    batchNumber: z.string().trim().min(1).max(50).optional(),
+  })
+  .strict()
+  .refine((input) => input.expiresOn !== undefined || input.batchDate !== undefined || input.batchNumber !== undefined, {
+    message: "Nothing to change",
+  });
+export type UpdateStockBatchInput = z.infer<typeof updateStockBatchSchema>;
 export type ListStockBatchesQuery = z.infer<typeof listStockBatchesQuerySchema>;
 
 export const STOCK_BATCH_ORIGINS = ["purchase_receipt", "manufacturing_order", "manual", "import"] as const;
@@ -98,6 +125,11 @@ export interface StockBatchListRow {
   unitCode: string;
   origin: StockBatchOrigin;
   createdAt: string;
+  // Etapp 2: Utgångsdatum (the last usable day), Batchdatum (null = the day
+  // of createdAt) and whether the batch is utgången today (Stockholm day).
+  expiresOn: string | null;
+  batchDate: string | null;
+  expired: boolean;
   // Physical balance over every place (blocked ones included), base unit.
   quantity: number;
 }
@@ -116,6 +148,10 @@ export interface TraceBatchRef {
   // The article's flag NOW — a leaf without a batch is "Okänd" on a
   // batchstyrd article and "ej batchstyrd" otherwise.
   batchTracked: boolean;
+  // Etapp 2: the article's Spårning now (batchTracked = it is "batch"), and
+  // the batch's utgångsdatum (null = none, or Okänd).
+  tracking: "none" | "batch" | "serial";
+  expiresOn: string | null;
   origin: StockBatchOrigin | null;
   createdAt: string | null;
 }
@@ -227,6 +263,9 @@ export const createStockTransactionSchema = z.object({
   // Batch (#8): only on an inflow (positive delta) of a batchstyrd article
   // — left out, the goods are Okänd.
   batchNumber: batchNumberSchema,
+  // Etapp 2: the new batch's Utgångsdatum — only with batchNumber (an
+  // existing batch with another date is refused, 409 batch-expiry-mismatch).
+  expiresOn: batchDayInputSchema,
   // …and on a decrease (negative delta) the batch to take from: left out =
   // the place's batches oldest first (Okänd first, the rest as Okänd), null
   // = Okänd, an id = that batch, which must cover the quantity.
@@ -251,6 +290,10 @@ export const createStockAdjustmentSchema = createStockTransactionSchema
   .refine((input) => input.batchId === undefined || input.quantityDelta < 0, {
     message: "batchId chooses the batch of a decrease — only with a negative quantityDelta",
     path: ["batchId"],
+  })
+  .refine((input) => input.expiresOn === undefined || input.batchNumber !== undefined, {
+    message: "expiresOn is the utgångsdatum of the batch named by batchNumber",
+    path: ["expiresOn"],
   });
 
 // Lagerflytt — move balances from one stock location to another. Both legs of

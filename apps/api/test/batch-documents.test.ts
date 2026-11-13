@@ -399,3 +399,91 @@ describe("Lagerloggens export", () => {
     expect(xlsx.rawPayload.subarray(0, 2).toString()).toBe("PK");
   });
 });
+
+// Etapp 2: the batch's utgångsdatum on the följesedel, the pallet cards and
+// the pick list — never on the invoice.
+describe("Utgångsdatum på utskrifterna", () => {
+  const expires = (batchNumber: string, expiresOn: string) => db.update(stockBatches).set({ expiresOn }).where(eq(stockBatches.batchNumber, batchNumber));
+
+  it("formatBatchInfo prints the date after the number, in the document's language", () => {
+    expect(formatBatchInfo([{ batchNumber: "L-778", quantity: 6, expiresOn: "2027-03-01" }])).toBe("L-778 utg. 2027-03-01");
+    expect(
+      formatBatchInfo([
+        { batchNumber: "L-778", quantity: 4, expiresOn: "2027-03-01" },
+        { batchNumber: "L-778", quantity: 2, expiresOn: "2027-03-01" },
+        { batchNumber: "B", quantity: 2.5, expiresOn: null },
+      ])
+    ).toBe("L-778 utg. 2027-03-01 (6), B (2,50)");
+    expect(formatBatchInfo([{ batchNumber: "L-778", quantity: 6, expiresOn: "2027-03-01" }], { language: "en", whole: false })).toBe("L-778 exp. 2027-03-01 (6)");
+  });
+
+  it("följesedeln and the customer's pallet card carry the date of the batches that have one; the invoice does not", async () => {
+    const { article } = await stocked();
+    await expires("GAMMAL", "2031-03-01");
+    const { customer, order, row } = await makeOrder(article.id, 20);
+    const old = await batchId(article.id, "GAMMAL");
+    const young = await batchId(article.id, "NY");
+    const d = await deliver(order.id, [{ rowId: row.id, quantity: 4, batchId: old }]);
+    expect(pdfText((await salesService.deliveryNotePdf(d.deliveryId)).pdf)).toContain("Batch: GAMMAL utg. 2031-03-01");
+    expect(pdfText((await salesService.deliveryPalletCardPdf(d.deliveryId)).pdf)).toContain("GAMMAL utg. 2031-03-01");
+    // The parts of the delivery carry it for the web too.
+    const rows = await salesService.deliveryRows(d.deliveryId);
+    expect(rows.rows[0]!.locations.map((l) => [l.batchNumber, l.expiresOn])).toEqual([["GAMMAL", "2031-03-01"]]);
+    // A batch without a date prints as before.
+    const plain = await deliver(order.id, [{ rowId: row.id, quantity: 2, batchId: young }]);
+    expect(pdfText((await salesService.deliveryNotePdf(plain.deliveryId)).pdf)).not.toContain("utg.");
+
+    const draft = await invoiceService.create(
+      { customerId: customer.id, rows: [{ description: "Del", articleId: article.id, salesOrderRowId: row.id, quantity: 6, unitPrice: 10 }] },
+      user.id
+    );
+    const issued = (await invoiceService.issue(draft!.id, user.id))!;
+    const invoice = pdfText((await invoiceService.renderPdf(issued.id)).content);
+    expect(invoice).toContain("Batch: GAMMAL (4), NY (2)");
+    expect(invoice).not.toContain("utg.");
+    expect(invoice).not.toContain("2031-03-01");
+  });
+
+  it("an English customer reads exp.", async () => {
+    const { article } = await stocked();
+    await expires("NY", "2031-03-01");
+    const { order, row } = await makeOrder(article.id, 20, { language: "en" });
+    const d = await deliver(order.id, [{ rowId: row.id, quantity: 3, batchId: await batchId(article.id, "NY") }]);
+    expect(pdfText((await salesService.deliveryNotePdf(d.deliveryId)).pdf)).toContain("Batch: NY exp. 2031-03-01");
+    expect(pdfText((await salesService.deliveryPalletCardPdf(d.deliveryId)).pdf)).toContain("NY exp. 2031-03-01");
+  });
+
+  it("plocklistan: FEFO with the dates, and an utgången batch last, marked UTGÅNGEN — plocka inte", async () => {
+    const { article } = await stocked();
+    // NY is the younger batch but has the shorter date; GAMMAL has expired.
+    await expires("NY", "2031-03-01");
+    await expires("GAMMAL", "2020-01-01");
+    const { order } = await makeOrder(article.id, 10);
+    const flat = pdfText((await salesService.getPickListPdf(order.id)).content).replace(/\s+/g, " ");
+    const cells = [
+      "Huvudlager — A1 · Batch Okänd: 2",
+      "Huvudlager — A1 · Batch NY utg. 2031-03-01: 6",
+      "Huvudlager — A1 · Batch GAMMAL utg. 2020-01-01: 5 — UTGÅNGEN — plocka inte",
+      "Huvudlager — B2 · Batch GAMMAL utg. 2020-01-01: 4 — UTGÅNGEN — plocka inte",
+    ];
+    const positions = cells.map((cell) => flat.indexOf(cell));
+    expect(positions.every((p) => p >= 0), flat).toBe(true);
+    expect([...positions].sort((x, y) => x - y)).toEqual(positions);
+    expect(flat.split("UTGÅNGEN").length - 1).toBe(2);
+  });
+
+  it("TO:ns pallkort carries the batch's date once the first inleverans has made it", async () => {
+    const a1 = await makeLocation("A1");
+    const parent = await makeArticle({ type: "manufactured", defaultLocationId: a1.id, shelfLifeDays: 30 });
+    const workCenter = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
+    await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: workCenter.id, setupTime: 10, runTimePerUnit: 2 });
+    const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);
+    const [op] = await mfgService.listOperations(order.id);
+    // Before anything is received: the number alone.
+    expect(pdfText((await mfgService.getOperationPalletCardPdf(order.id, op!.id)).content)).not.toContain("utg.");
+    await mfgService.completeOperation(op!.id, parsed(completeOperationSchema, { quantityCompleted: 2 }), user.id);
+    const [batch] = await db.select().from(stockBatches).where(eq(stockBatches.articleId, parent.id));
+    expect(batch!.expiresOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(pdfText((await mfgService.getOperationPalletCardPdf(order.id, op!.id)).content)).toContain(`${order.orderNumber} utg. ${batch!.expiresOn}`);
+  });
+});

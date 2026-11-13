@@ -1,15 +1,15 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { articles, stockCountSessions, stockLocations, stockTransactions, warehouses, type Db, type Tx } from "@navet/db";
+import { articles, stockBatches, stockCountSessions, stockLocations, stockTransactions, warehouses, type Db, type Tx } from "@navet/db";
 import { FALLBACK_LOCATION_NAME, getOrCreateFallbackLocation, resolveStockLocation, usableArticleLocations } from "../../stock/service/location-resolver.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { lockArticlesForOutflow } from "../../stock/service/outflow-locations.js";
 import { allocateBatchOutflow, withBatchRemainder } from "../../stock/service/outflow-allocation.js";
-import { batchTrackedArticleIds } from "../../stock/service/batch-tracking.js";
+import { trackedArticleIds } from "../../stock/service/batch-tracking.js";
 import { getOrCreateBatch } from "../../stock/service/batches.js";
 import { BatchNotTrackedError } from "../../stock/service/batch.errors.js";
 import { batchCellQuantity, batchCellsForArticles } from "../../stock/repository/batch-balances.js";
-import { STOCK_IMPORT_NOTE, stockBatchCellKey, type StockBalanceImportPlan } from "../service/stock-balances.js";
+import { STOCK_IMPORT_NOTE, stockBatchCellKey, stockBatchKey, type StockBalanceImportPlan } from "../service/stock-balances.js";
 import { round4 } from "@navet/shared";
 
 // Lagersaldon (#3) — the import repository's stock half: the planner's
@@ -87,6 +87,25 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
       return map;
     },
 
+    // Etapp 2: the dates of the batches those articles have today.
+    async stockBatchDates(articleIds: string[]) {
+      const map = new Map<string, { expiresOn: string | null; batchDate: string | null }>();
+      for (const part of chunks([...new Set(articleIds)])) {
+        if (part.length === 0) continue;
+        const rows = await db
+          .select({
+            articleId: stockBatches.articleId,
+            batchNumber: stockBatches.batchNumber,
+            expiresOn: stockBatches.expiresOn,
+            batchDate: stockBatches.batchDate,
+          })
+          .from(stockBatches)
+          .where(inArray(stockBatches.articleId, part));
+        for (const row of rows) map.set(stockBatchKey(row.articleId, row.batchNumber), { expiresOn: row.expiresOn, batchDate: row.batchDate });
+      }
+      return map;
+    },
+
     async locationsUnderCount() {
       const rows = await db
         .select({ locationId: stockCountSessions.locationId })
@@ -139,12 +158,23 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
         // each other crosswise in the unique index (the sort is stable and
         // ignores case, so the file's first spelling is the one kept); they all get this
         // transaction's time, and the number decides their order (beslut 16).
-        const trackedIds = await batchTrackedArticleIds(tx, plan.balances.map((row) => row.articleId));
+        const trackedIds = await trackedArticleIds(tx, plan.balances.map((row) => row.articleId));
         await lockArticlesForOutflow(tx, [...trackedIds]);
         const batchIds = new Map<string, string>();
         const named = plan.balances.flatMap((row) =>
-          row.batch?.kind === "named" ? [{ articleId: row.articleId, batchNumber: row.batch.batchNumber }] : []
+          row.batch?.kind === "named"
+            ? [{ articleId: row.articleId, batchNumber: row.batch.batchNumber, batchDate: row.batchDate ?? null, expiresOn: row.expiresOn ?? null }]
+            : []
         );
+        // Etapp 2: the dates the file gives each batch (the plan refuses two
+        // different ones) — set when the batch is created or lacks them; a
+        // batch with another date keeps it ("keep": the plan warned).
+        const datesByBatch = new Map<string, { batchDate: string | null; expiresOn: string | null }>();
+        for (const item of named) {
+          const key = `${item.articleId}|${item.batchNumber.toLocaleLowerCase("sv")}`;
+          const dates = datesByBatch.get(key) ?? { batchDate: null, expiresOn: null };
+          datesByBatch.set(key, { batchDate: dates.batchDate ?? item.batchDate, expiresOn: dates.expiresOn ?? item.expiresOn });
+        }
         named.sort((a, b) => (a.articleId < b.articleId ? -1 : a.articleId > b.articleId ? 1 : a.batchNumber.toLocaleLowerCase("sv").localeCompare(b.batchNumber.toLocaleLowerCase("sv"), "sv", { numeric: true })));
         for (const row of plan.balances) {
           // The article stopped being batchstyrd between the plan and here.
@@ -156,7 +186,20 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
         for (const item of named) {
           const key = `${item.articleId}|${item.batchNumber.toLocaleLowerCase("sv")}`;
           if (batchIds.has(key)) continue;
-          batchIds.set(key, (await getOrCreateBatch(tx, { articleId: item.articleId, batchNumber: item.batchNumber, origin: "import" })).id);
+          const dates = datesByBatch.get(key)!;
+          batchIds.set(
+            key,
+            (
+              await getOrCreateBatch(tx, {
+                articleId: item.articleId,
+                batchNumber: item.batchNumber,
+                origin: "import",
+                batchDate: dates.batchDate,
+                expiresOn: dates.expiresOn,
+                onExpiryMismatch: "keep",
+              })
+            ).id
+          );
         }
 
         let created = 0;
@@ -190,7 +233,11 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
             current = await batchCellQuantity(tx, row.articleId, locationId, batchId);
           }
           const delta = round4(row.quantity - current);
-          if (delta === 0) continue;
+          if (delta === 0) {
+            // A row that only filled in its batch's dates (above).
+            if (row.datesOnly) updated++;
+            continue;
+          }
           // Without Batch an increase is Okänd. A decrease of a batchstyrd
           // article's whole place is taken from the place's batches oldest
           // first (Okänd first, what they do not cover as Okänd) — the pure

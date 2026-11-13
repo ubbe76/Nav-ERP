@@ -240,11 +240,12 @@ describe("alert digest job", () => {
     const verkstad = await makeUser({ permissions: ["terminal"] });
 
     const result = await digest.runDigestIfDue();
-    expect(computeCalls).toEqual([["stock_negative", "purchase_order_late"]]);
+    expect(computeCalls).toEqual([["stock_negative", "batch_expiry", "purchase_order_late"]]);
     expect(result.outcomes).toEqual(
       expect.arrayContaining([
         { userId: inkop.id, status: "sent", alertCount: 1 },
-        { userId: lager.id, status: "sent", alertCount: 1 },
+        // Lager sees two kinds: Negativt saldo and Utgångna batcher.
+        { userId: lager.id, status: "sent", alertCount: 2 },
         { userId: verkstad.id, status: "empty", alertCount: 0 },
       ])
     );

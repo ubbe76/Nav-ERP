@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  date,
   check,
   index,
   integer,
@@ -140,10 +141,21 @@ export const stockBatches = pgTable(
     // manufacturing.ts import this file.
     purchaseOrderId: uuid("purchase_order_id"),
     manufacturingOrderId: uuid("manufacturing_order_id"),
+    // Utgångsdatum (0214): the LAST usable day — the batch is utgången when
+    // expires_on < the Stockholm day. Null = no date. Set at the batch's
+    // first inflow (getOrCreateBatch), corrected with PATCH /stock/batches/:id
+    // — this table is not part of the append-only log.
+    expiresOn: date("expires_on"),
+    // Batchdatum (0214): the batch's AGE when it is not the day the row was
+    // created (saldoimporten). Null = created_at's Stockholm day.
+    batchDate: date("batch_date"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   },
   (table) => [
+    index("idx_stock_batches_expires_on")
+      .on(table.expiresOn)
+      .where(sql`${table.expiresOn} IS NOT NULL`),
     uniqueIndex("stock_batches_article_number_unique").on(table.articleId, sql`lower(${table.batchNumber})`),
     index("idx_stock_batches_manufacturing_order")
       .on(table.manufacturingOrderId)

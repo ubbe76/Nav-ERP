@@ -4,7 +4,7 @@ import { businessDateSchema } from "./business-date.js";
 import { materialShortageOverrideSchema } from "./manufacturing.js";
 import { listQuerySchema, orderStatusListParam, statusListParam } from "./list.js";
 import { blankSafe } from "./coerce.js";
-import { batchNumberSchema } from "./stock.js";
+import { batchDayInputSchema, batchNumberSchema } from "./stock.js";
 import { vatRateSchema } from "./vat.js";
 import { paymentReferenceSchema, supplierPaymentDetailsFields } from "./banking.js";
 import { partnerDeliveryFields } from "./delivery.js";
@@ -365,6 +365,12 @@ export const receiveGoodsSchema = z.object({
   // left out or "" = the IO number. A row split over several batches is
   // one receipt per batch (each its own kvitto, undone on its own).
   batchNumber: batchNumberSchema,
+  // Utgångsdatum (etapp 2) of the batch the goods are booked in (the named
+  // one, or the IO number's): the supplier's date, the batch's last usable
+  // day. Left out or "" = none — the server never computes one for bought
+  // goods. A batch that already has ANOTHER date is refused (409
+  // batch-expiry-mismatch); one without gets it. Only on a spårad article.
+  expiresOn: batchDayInputSchema,
   // Materialbrist: a lego row's receipt reports the TO operation, which
   // draws its linked material — report anyway after a 409 material-shortage
   // in mode "warn" (see materialShortageOverrideSchema in manufacturing.ts).

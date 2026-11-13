@@ -37,10 +37,12 @@ export const COPIED_INFORMATION_FIELDS = [
   "safetyStock",
   "stockControlled",
   "forecastControlled",
-  // Batchstyrd (#8) follows: a copy is the same kind of goods, and a
+  // Spårning (#8) follows: a copy is the same kind of goods, and a
   // variant inherits its template's. insertArticle drops it again when the
-  // new article cannot be batchstyrd (a Tjänst, a phantom, the setting off).
-  "batchTracked",
+  // new article cannot be spårad (a Tjänst, a phantom, the setting off).
+  "tracking",
+  "shelfLifeDays",
+  "serialAssignedAt",
   "orderQuantity",
   "rounding",
   "manufacturingLeadTimeDays",

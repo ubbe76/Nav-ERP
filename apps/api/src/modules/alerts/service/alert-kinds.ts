@@ -12,7 +12,7 @@ export interface AlertKindDef {
   // The kind's colour for ordering and for its rows. supplier_invoice_due
   // and quote_followup are the kinds whose rows differ: red once the date
   // has passed, yellow while it is only near (dueDateSeverity) — they sit
-  // among the reds.
+  // among the reds. batch_expiry is the third such kind.
   severity: AlertSeverity;
   rule: AccessRule;
   // The web page that lists every row of the kind ("Visa alla").
@@ -21,6 +21,10 @@ export interface AlertKindDef {
 
 export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
   { kind: "stock_negative", label: "Negativt saldo", severity: "red", rule: ["lager"], listHref: "/lager/saldon" },
+  // Utgångna batcher (#8 etapp 2): batches with stock on places that are
+  // not blocked whose utgångsdatum has passed (red) or is within N days
+  // (yellow). "Visa alla" is the batch register filtered on the same rows.
+  { kind: "batch_expiry", label: "Utgångna batcher", severity: "red", rule: ["lager"], listHref: "/lager/sparbarhet?expiry=due" },
   {
     kind: "customer_invoice_overdue",
     label: "Förfallna kundfakturor",
@@ -190,3 +194,6 @@ export function dueDateSeverity(date: string, today: string): AlertSeverity {
 }
 export const supplierInvoiceSeverity = dueDateSeverity;
 export const quoteFollowupSeverity = dueDateSeverity;
+// Utgångna batcher: the utgångsdatum is the LAST usable day, so the batch is
+// utgången (red) from the day after — the same comparison (isBatchExpired).
+export const batchExpirySeverity = dueDateSeverity;

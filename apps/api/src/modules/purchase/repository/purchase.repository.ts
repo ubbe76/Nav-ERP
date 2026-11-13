@@ -78,8 +78,8 @@ import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.
 import { lockArticlesForOutflow } from "../../stock/service/outflow-locations.js";
 import { isStockedArticle } from "../../stock/service/stocked-article.js";
 import { BatchNotTrackedError } from "../../stock/service/batch.errors.js";
-import { getOrCreateBatch } from "../../stock/service/batches.js";
-import { isBatchTrackedArticle } from "../../stock/service/batch-tracking.js";
+import { getOrCreateDatedBatch } from "../../stock/service/batches.js";
+import { isTrackedArticle, batchTrackedSql } from "../../stock/service/batch-tracking.js";
 import { batchCellQuantity } from "../../stock/repository/batch-balances.js";
 import { loadVatCodeBook } from "../../economy/repository/vat-codes.js";
 import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions } from "../../economy/service/dimension-check.js";
@@ -88,7 +88,7 @@ import { purchaseRowArrivalDate } from "../../planning/repository/effective-date
 export type ReceiveGoodsResult =
   // batchNumber (#8): the batch the goods were booked in — null for an
   // article that is not batchstyrd and for a row without a stock movement.
-  | { ok: true; row: typeof purchaseOrderRows.$inferSelect; orderStatus: PurchaseOrderStatus; receiptId: string; batchNumber: string | null }
+  | { ok: true; row: typeof purchaseOrderRows.$inferSelect; orderStatus: PurchaseOrderStatus; receiptId: string; batchNumber: string | null; expiresOn: string | null }
   | { ok: false; reason: "order_not_found" | "row_not_found" | "invalid_status" }
   | { ok: false; reason: "over_receipt"; maxQuantity: number };
 
@@ -270,7 +270,7 @@ export function createPurchaseRepository(db: Db) {
         moOperationDescription: moOperations.description,
         // Batch (#8): the TO's own article — its finished goods get the TO
         // number as their batch, printed on the lego pallet card.
-        moArticleBatchTracked: moArticles.batchTracked,
+        moArticleBatchTracked: batchTrackedSql(moArticles),
         rowCreatedAt: purchaseOrderRows.createdAt,
       })
       .from(purchaseOrderDispatchRows)
@@ -1198,7 +1198,8 @@ export function createPurchaseRepository(db: Db) {
           // counting (skanning, #4).
           articleType: articles.type,
           // Batch (#8): Inleverans shows the Batch field for a batchstyrd article.
-          articleBatchTracked: articles.batchTracked,
+          articleBatchTracked: batchTrackedSql(),
+          articleTracking: articles.tracking,
           // Skickat (avsändning lego): derived, base unit like quantityReceived.
           quantityDispatched: dispatchedQuantitySql(),
           // The unit the row displays in: the entered unit, falling back to
@@ -1300,7 +1301,7 @@ export function createPurchaseRepository(db: Db) {
     async receiveGoods(
       orderId: string,
       rowId: string,
-      input: { locationId?: string; quantity: number; createdBy: string; overReceiptPercent: number | null; batchNumber?: string }
+      input: { locationId?: string; quantity: number; createdBy: string; overReceiptPercent: number | null; batchNumber?: string; expiresOn?: string }
     ): Promise<ReceiveGoodsResult> {
       return db.transaction(async (tx) => {
         const [order] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, orderId));
@@ -1361,12 +1362,12 @@ export function createPurchaseRepository(db: Db) {
         // anything else (not batchstyrd, a lego or service row) is refused,
         // so an integration notices. One receipt = one batch: a row split
         // over several batches is several receipts, each undone on its own.
-        const batchTracked = stocked && (await isBatchTrackedArticle(tx, row.articleId));
-        if (input.batchNumber !== undefined && !batchTracked) {
+        const batchTracked = stocked && (await isTrackedArticle(tx, row.articleId));
+        if ((input.batchNumber !== undefined || input.expiresOn !== undefined) && !batchTracked) {
           const [article] = await tx.select({ articleNumber: articles.articleNumber }).from(articles).where(eq(articles.id, row.articleId));
           throw new BatchNotTrackedError(article?.articleNumber ?? row.articleId);
         }
-        let batch: { id: string; batchNumber: string } | null = null;
+        let batch: { id: string; batchNumber: string; expiresOn: string | null } | null = null;
         if (stocked) {
           // unit_cost is the SEK cost per unit at receipt time: the row's
           // purchase price (already in the article's base unit) converted at
@@ -1376,12 +1377,15 @@ export function createPurchaseRepository(db: Db) {
           const locationId = await resolveStockLocation(tx, row.articleId, input.locationId);
           await assertLocationNotUnderCount(tx, locationId);
           if (batchTracked) {
-            batch = await getOrCreateBatch(tx, {
+            batch = await getOrCreateDatedBatch(tx, {
               articleId: row.articleId,
               batchNumber: input.batchNumber ?? order.orderNumber,
               origin: "purchase_receipt",
               purchaseOrderId: orderId,
               createdBy: input.createdBy,
+              // Etapp 2: the supplier's utgångsdatum — set on a new batch,
+              // filled in on one without, refused when it differs.
+              expiresOn: input.expiresOn,
             });
           }
 
@@ -1423,7 +1427,7 @@ export function createPurchaseRepository(db: Db) {
           entityNumber: order.orderNumber,
           data: { receiptId: receipt!.id, rowId },
         });
-        return { ok: true, row: updatedRow!, orderStatus, receiptId: receipt!.id, batchNumber: batch?.batchNumber ?? null };
+        return { ok: true, row: updatedRow!, orderStatus, receiptId: receipt!.id, batchNumber: batch?.batchNumber ?? null, expiresOn: batch?.expiresOn ?? null };
       });
     },
 
@@ -1444,6 +1448,8 @@ export function createPurchaseRepository(db: Db) {
           // Batch (#8): read through the receipt's own stock row — the log is
           // append-only, so the link never drifts (null = Okänd / no stock row).
           batchNumber: stockBatches.batchNumber,
+          // Etapp 2: the batch's utgångsdatum now (null = none).
+          expiresOn: stockBatches.expiresOn,
         })
         .from(purchaseReceipts)
         .leftJoin(stockTransactions, eq(stockTransactions.id, purchaseReceipts.stockTransactionId))
@@ -1517,7 +1523,7 @@ export function createPurchaseRepository(db: Db) {
             .where(eq(stockTransactions.id, receipt.stockTransactionId));
           const batchId = booked?.batchId ?? null;
           let available = Number(balance?.quantity ?? 0);
-          if (batchId !== null || (await isBatchTrackedArticle(tx, row.articleId))) {
+          if (batchId !== null || (await isTrackedArticle(tx, row.articleId))) {
             available = Math.min(available, await batchCellQuantity(tx, row.articleId, receipt.locationId, batchId));
           }
           if (available < quantity) return { ok: false, reason: "insufficient_stock", available, required: quantity };

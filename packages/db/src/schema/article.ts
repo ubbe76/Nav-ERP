@@ -28,6 +28,14 @@ import { costCenters } from "./dimensions";
 // in drizzle-orm/pg-core.
 const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 
+// Spårning (#8, 0214): antingen eller.
+export const articleTrackingEnum = pgEnum("article_tracking", ["none", "batch", "serial"]);
+
+// Serienummer skapas (#8, beslut 16): vid inleverans (förval) or vid
+// utleverans — then the stock is untracked and the number is given at the
+// delivery. Carried from 0214; used from the serienummer step.
+export const articleSerialAssignedAtEnum = pgEnum("article_serial_assigned_at", ["receipt", "delivery"]);
+
 export const articleTypeEnum = pgEnum("article_type", [
   "manufactured",
   "purchased",
@@ -166,12 +174,20 @@ export const articles = pgTable("articles", {
   // quantity in article_forecasts — consumed by the month's real demand
   // (planning/service/forecast.ts). Every other article behaves as before.
   forecastControlled: boolean("forecast_controlled").notNull().default(false),
-  // Batchstyrd (#8, migration 0213): inflows of the article carry a batch
-  // (stock_batches) and outflows are allocated per batch, oldest first.
-  // Only while the system setting "Använd batch- och serienummer" is on;
-  // never a Tjänst or a phantom. Switching it off keeps the batches in the
-  // log — they are just no longer asked for or shown (stock.md, Batch).
-  batchTracked: boolean("batch_tracked").notNull().default(false),
+  // Spårning (#8; migration 0213 as the boolean batch_tracked, an enum since
+  // 0214): none | batch | serial — "antingen eller". With batch, inflows of
+  // the article carry a batch (stock_batches) and outflows are allocated per
+  // batch (FEFO, outflow-allocation.ts). Only while the system setting
+  // "Använd batch- och serienummer" is on; never a Tjänst or a phantom.
+  // Switching it off keeps the batches in the log — they are just no longer
+  // asked for or shown (stock.md, Batch). `serial` exists in the type but
+  // cannot be chosen until the serienummer step is built.
+  tracking: articleTrackingEnum("tracking").notNull().default("none"),
+  // Hållbarhet (dagar): a manufactured batch gets utgångsdatum = the day it
+  // is received + this (null = no date).
+  shelfLifeDays: integer("shelf_life_days"),
+  // Serienummer skapas: only meaningful with tracking = serial.
+  serialAssignedAt: articleSerialAssignedAtEnum("serial_assigned_at").notNull().default("receipt"),
   packageTypeId: uuid("package_type_id").references(() => packageTypes.id, { onDelete: "restrict" }),
   // Frakt — "egna mått" (used when the article has no package type + antal
   // per kolli): kolliart (null = Paket), stapelbar, pallplatser and flakmeter.
@@ -200,6 +216,7 @@ export const articles = pgTable("articles", {
     uniqueIndex("articles_barcode_unique").on(table.barcode).where(sql`${table.barcode} is not null`),
     // The check digit is the application's (gtin.ts); the database pins the shape.
     check("articles_barcode_format", sql`${table.barcode} ~ '^([0-9]{8}|[0-9]{12,14})$'`),
+    check("articles_shelf_life_days_range", sql`${table.shelfLifeDays} IS NULL OR ${table.shelfLifeDays} BETWEEN 1 AND 36500`),
   ]
 );
 

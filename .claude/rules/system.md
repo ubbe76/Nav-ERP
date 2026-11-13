@@ -123,3 +123,4 @@ TODO-posten "Nav som program (UI/UX)"; skisserna är privata.
 ## Använd batch- och serienummer (#8)
 
 - `batchTrackingEnabled` i `GET/PATCH /settings` (KV `batch_tracking_enabled`, av som förval; nyckeln och låsordningen ägs av lövet `stock/service/batch-tracking.ts`). Av ⇒ ingen artikel kan göras Batchstyrd; kan bara stängas av när ingen artikel är batchstyrd (409 `batch-tracking-in-use`) — raden skrivs före räkningen, se `stock.md` (Batch). Webben ska dölja kryssrutan Batchstyrd och sidan Spårbarhet när den är av (steg 3). Test: `stock-batches.test.ts`.
+- **Etapp 2 (0214):** inställningen gäller **Spårning** (Batch och Serienummer) — den stängs bara av när ingen artikel är spårad (`countTrackedArticles`). `alertBatchExpiryDays` (KV `alert_batch_expiry_days`, förval 30, 0–365, lövet `alert-settings.ts`) är fönstret för aviseringen Utgångna batcher och batchregistrets filter (`alerts.md`).

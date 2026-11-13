@@ -65,7 +65,8 @@ import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js"
 import { allocateOutflowLocations, lockArticlesForOutflow, type BlockedChoice } from "../../stock/service/outflow-locations.js";
 import { isStockedArticle } from "../../stock/service/stocked-article.js";
 import { getOrCreateBatch } from "../../stock/service/batches.js";
-import { isBatchTrackedArticle } from "../../stock/service/batch-tracking.js";
+import { isTrackedArticle, batchTrackedSql } from "../../stock/service/batch-tracking.js";
+import { expiryFromShelfLife, stockholmToday } from "../../system/service/delivery-days.js";
 import { batchCellQuantity } from "../../stock/repository/batch-balances.js";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
 import { listLegoPurchases } from "./lego-purchases.js";
@@ -509,7 +510,7 @@ async function receiveFinishedGoods(
   // receipt time — null (not 0) when no standard cost is set, since 0 would
   // be a false claim of zero value.
   const [producedArticle] = await tx
-    .select({ standardCost: articles.standardCost })
+    .select({ standardCost: articles.standardCost, shelfLifeDays: articles.shelfLifeDays })
     .from(articles)
     .where(eq(articles.id, order.articleId));
 
@@ -524,13 +525,20 @@ async function receiveFinishedGoods(
   // is the same batch, and nobody types anything. The flag as it is NOW
   // (read FOR KEY SHARE, batch-tracking.ts); the report log keeps the batch
   // (mo_reports.receipt_batch_id) so Ångra takes exactly it back.
-  const receiptBatch = (await isBatchTrackedArticle(tx, order.articleId))
+  const receiptBatch = (await isTrackedArticle(tx, order.articleId))
     ? await getOrCreateBatch(tx, {
         articleId: order.articleId,
         batchNumber: order.orderNumber,
         origin: "manufacturing_order",
         manufacturingOrderId: order.id,
         createdBy: opts.createdBy,
+        // Etapp 2 (beslut 7): utgångsdatum = the Stockholm day of THIS
+        // receipt + the article's Hållbarhet (dagar); nothing without one.
+        // The TO's batch is created at the first delinleverans and keeps
+        // that day's date — a later one computes a later date, which is not
+        // a conflict ("keep"); a batch still without a date gets it.
+        expiresOn: expiryFromShelfLife(stockholmToday(), producedArticle?.shelfLifeDays),
+        onExpiryMismatch: "keep",
       })
     : null;
 
@@ -933,7 +941,7 @@ async function undoReportInTx(
     // now, the goods must still be in that CELL too — the place may hold
     // enough in total while this batch is gone.
     let available = Number(balance?.quantity ?? 0);
-    if (report.receiptBatchId !== null || (await isBatchTrackedArticle(tx, order.articleId))) {
+    if (report.receiptBatchId !== null || (await isTrackedArticle(tx, order.articleId))) {
       available = Math.min(available, await batchCellQuantity(tx, order.articleId, report.receiptLocationId, report.receiptBatchId));
     }
     if (available < received) return { ok: false, reason: "insufficient_stock", available, required: received };
@@ -1913,7 +1921,13 @@ export function createManufacturingRepository(db: Db) {
           articleNameEn: articles.nameEn,
           articleUnitCodeEn: units.codeEn,
           // Batch (#8): the pallet cards print the TO number as the batch.
-          articleBatchTracked: articles.batchTracked,
+          articleBatchTracked: batchTrackedSql(),
+          // Etapp 2: the utgångsdatum of the TO's own batch, once the first
+          // delinleverans has created it (null before, or without hållbarhet).
+          receiptBatchExpiresOn: sql<string | null>`(
+            select sb.expires_on::text from stock_batches sb
+            where sb.article_id = ${manufacturingOrders.articleId} and lower(sb.batch_number) = lower(${manufacturingOrders.orderNumber})
+          )`,
         })
         .from(manufacturingOrders)
         .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))

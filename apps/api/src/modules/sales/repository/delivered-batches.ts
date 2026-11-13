@@ -1,6 +1,7 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { articles, deliveryRowLocations, deliveryRows, salesOrderRows, stockBatches, stockTransactions, type Db, type Tx } from "@navet/db";
 import { compareBatches } from "../../stock/service/outflow-allocation.js";
+import { batchAgeDateSql } from "../../stock/repository/batch-balances.js";
 
 // Batch (#8): which batches an order row's goods went out in — the invoice's
 // "Batch: …" line (decision 13). EN läsare: the row's LIVE delivery parts
@@ -13,7 +14,7 @@ import { compareBatches } from "../../stock/service/outflow-allocation.js";
 // document, decision 14); `complete` says whether they cover everything the
 // row has delivered, i.e. no part went out of Okänd. A row whose article is
 // not batchstyrd NOW is absent (decision 10: its batches are not shown).
-// Batches come oldest first (compareBatches), the order they were drawn in.
+// Batches come in compareBatches order (FEFO), the order they were drawn in.
 export interface DeliveredBatches {
   batches: { batchId: string; batchNumber: string; quantity: number }[];
   complete: boolean;
@@ -31,6 +32,9 @@ export async function deliveredBatchesForOrderRows(db: Db | Tx, salesOrderRowIds
         batchId: stockTransactions.batchId,
         batchNumber: stockBatches.batchNumber,
         batchCreatedAt: stockBatches.createdAt,
+        // For the order only (FEFO) — the invoice prints no dates.
+        expiresOn: stockBatches.expiresOn,
+        batchAgeDate: batchAgeDateSql,
         quantity: sql<string>`sum(${deliveryRowLocations.quantity})`,
       })
       .from(deliveryRows)
@@ -40,9 +44,16 @@ export async function deliveredBatchesForOrderRows(db: Db | Tx, salesOrderRowIds
       .innerJoin(salesOrderRows, eq(salesOrderRows.id, deliveryRows.salesOrderRowId))
       .innerJoin(articles, eq(articles.id, salesOrderRows.articleId))
       .where(
-        and(inArray(deliveryRows.salesOrderRowId, ids.slice(i, i + CHUNK)), isNull(deliveryRows.undoneAt), eq(articles.batchTracked, true))
+        and(inArray(deliveryRows.salesOrderRowId, ids.slice(i, i + CHUNK)), isNull(deliveryRows.undoneAt), ne(articles.tracking, "none"))
       )
-      .groupBy(deliveryRows.salesOrderRowId, stockTransactions.batchId, stockBatches.batchNumber, stockBatches.createdAt);
+      .groupBy(
+        deliveryRows.salesOrderRowId,
+        stockTransactions.batchId,
+        stockBatches.batchNumber,
+        stockBatches.createdAt,
+        stockBatches.expiresOn,
+        stockBatches.batchDate
+      );
     for (const row of [...rows].sort(compareBatches)) {
       const entry = result.get(row.salesOrderRowId) ?? { batches: [], complete: true };
       if (row.batchId === null || row.batchNumber === null) entry.complete = false;

@@ -66,6 +66,8 @@ import {
   ALERT_SUPPLIER_INVOICE_DAYS_KEY,
   decodeAlertDigestTime,
   decodeAlertQuoteFollowupDays,
+  decodeAlertBatchExpiryDays,
+  ALERT_BATCH_EXPIRY_DAYS_KEY,
   decodeAlertSupplierInvoiceDays,
   decodePublicBaseUrl,
   PUBLIC_BASE_URL_KEY,
@@ -414,6 +416,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       alertDigestTime: decodeAlertDigestTime(get(ALERT_DIGEST_TIME_KEY)),
       alertSupplierInvoiceDays: decodeAlertSupplierInvoiceDays(get(ALERT_SUPPLIER_INVOICE_DAYS_KEY)),
       alertQuoteFollowupDays: decodeAlertQuoteFollowupDays(get(ALERT_QUOTE_FOLLOWUP_DAYS_KEY)),
+      alertBatchExpiryDays: decodeAlertBatchExpiryDays(get(ALERT_BATCH_EXPIRY_DAYS_KEY)),
       publicBaseUrl: decodePublicBaseUrl(get(PUBLIC_BASE_URL_KEY)),
       // Uppföljning av offerter — quote-settings.ts owns the key and default.
       quoteValidityDays: decodeQuoteValidityDays(get(QUOTE_VALIDITY_DAYS_KEY)),
@@ -700,7 +703,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
         if (input.batchTrackingEnabled !== undefined) {
           await set(BATCH_TRACKING_ENABLED_KEY, String(input.batchTrackingEnabled));
           if (!input.batchTrackingEnabled) {
-            const tracked = await writer.countBatchTrackedArticles();
+            const tracked = await writer.countTrackedArticles();
             if (tracked > 0) throw new BatchTrackingInUseError(tracked);
           }
         }
@@ -846,6 +849,9 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
         }
         if (input.alertQuoteFollowupDays !== undefined) {
           await set(ALERT_QUOTE_FOLLOWUP_DAYS_KEY, String(input.alertQuoteFollowupDays));
+        }
+        if (input.alertBatchExpiryDays !== undefined) {
+          await set(ALERT_BATCH_EXPIRY_DAYS_KEY, String(input.alertBatchExpiryDays));
         }
         if (input.quoteValidityDays !== undefined) await set(QUOTE_VALIDITY_DAYS_KEY, String(input.quoteValidityDays));
         if (input.precisionSalesLateMarginDays !== undefined) {

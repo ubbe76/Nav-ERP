@@ -1,5 +1,19 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray, ne, sql, type SQL } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { articles, systemSettings, type Db, type Tx } from "@navet/db";
+import type { ArticleTracking } from "./article-tracking.js";
+
+export { isTracked, resolveTracking, mentionsTracking, type ArticleTracking } from "./article-tracking.js";
+
+// In a SELECT/WHERE with `articles` (or an alias of it) in scope. "Spårad"
+// (any sort) is what the mechanics ask; `batchTracked` in a response is the
+// backwards compatible alias = the sort is batch.
+export function trackedSql(table: { tracking: AnyPgColumn } = articles): SQL<boolean> {
+  return sql<boolean>`(${table.tracking} <> 'none')`;
+}
+export function batchTrackedSql(table: { tracking: AnyPgColumn } = articles): SQL<boolean> {
+  return sql<boolean>`(${table.tracking} = 'batch')`;
+}
 
 // Batchstyrd (#8) — the ONE place the article's flag and the system setting
 // are read by the stock writers and the article card.
@@ -10,7 +24,8 @@ export function batchTrackableArticle(article: { type: string; isPhantom: boolea
   return article.type !== "service" && !article.isPhantom;
 }
 
-// The batchstyrda among these articles (unknown ids are simply absent).
+// The sort per spårad article among these (unknown and untracked ids are
+// simply absent).
 // Read FOR KEY SHARE — the pattern and the reasoning of stockedArticleIds:
 // it is the lock the writer's stock_transactions INSERT takes on the article
 // anyway (its FK), only taken at the check. A flag change holds the article
@@ -18,23 +33,31 @@ export function batchTrackableArticle(article: { type: string; isPhantom: boolea
 // one is in progress waits and then sees the new flag, and a flag change
 // waits for an inflow that has already asked. KEY SHARE conflicts with
 // nothing else on articles (the outflow locks are FOR NO KEY UPDATE).
-export async function batchTrackedArticleIds(db: Db | Tx, articleIds: readonly string[]): Promise<Set<string>> {
+export async function articleTrackingByIds(db: Db | Tx, articleIds: readonly string[]): Promise<Map<string, Exclude<ArticleTracking, "none">>> {
   const ids = [...new Set(articleIds)];
-  if (ids.length === 0) return new Set();
-  const tracked = new Set<string>();
+  const tracked = new Map<string, Exclude<ArticleTracking, "none">>();
   for (let i = 0; i < ids.length; i += 500) {
     const rows = await db
-      .select({ id: articles.id, batchTracked: articles.batchTracked })
+      .select({ id: articles.id, tracking: articles.tracking })
       .from(articles)
       .where(inArray(articles.id, ids.slice(i, i + 500)))
       .for("key share");
-    for (const row of rows) if (row.batchTracked) tracked.add(row.id);
+    for (const row of rows) if (row.tracking !== "none") tracked.set(row.id, row.tracking);
   }
   return tracked;
 }
 
-export async function isBatchTrackedArticle(db: Db | Tx, articleId: string): Promise<boolean> {
-  return (await batchTrackedArticleIds(db, [articleId])).has(articleId);
+// The spårade (batch or serial) among these articles.
+export async function trackedArticleIds(db: Db | Tx, articleIds: readonly string[]): Promise<Set<string>> {
+  return new Set((await articleTrackingByIds(db, articleIds)).keys());
+}
+
+export async function isTrackedArticle(db: Db | Tx, articleId: string): Promise<boolean> {
+  return (await articleTrackingByIds(db, [articleId])).has(articleId);
+}
+
+export async function trackingOf(db: Db | Tx, articleId: string): Promise<ArticleTracking> {
+  return (await articleTrackingByIds(db, [articleId])).get(articleId) ?? "none";
 }
 
 // --- The system setting "Använd batch- och serienummer" (beslut 9) ---
@@ -65,10 +88,10 @@ export async function batchTrackingEnabledForShare(tx: Tx): Promise<boolean> {
 
 // For PATCH /settings switching the setting OFF — call AFTER the setting's
 // row is written in the same transaction.
-export async function countBatchTrackedArticles(db: Db | Tx): Promise<number> {
+export async function countTrackedArticles(db: Db | Tx): Promise<number> {
   const [row] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(articles)
-    .where(eq(articles.batchTracked, true));
+    .where(ne(articles.tracking, "none"));
   return row?.count ?? 0;
 }

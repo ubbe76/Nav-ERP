@@ -27,7 +27,7 @@ import { deactivateEmptyLocation } from "../service/location-lifecycle.js";
 import { isStockedArticleType } from "../service/stocked-article.js";
 import { BatchNotTrackedError } from "../service/batch.errors.js";
 import { getOrCreateBatch } from "../service/batches.js";
-import { isBatchTrackedArticle } from "../service/batch-tracking.js";
+import { isTrackedArticle, batchTrackedSql, trackedSql } from "../service/batch-tracking.js";
 import { lockArticlesForOutflow } from "../service/outflow-locations.js";
 import { batchCellQuantity } from "./batch-balances.js";
 import { stockValuedDate } from "./valued-at.js";
@@ -223,7 +223,7 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
         // Batch (#8): a batchstyrd article is counted per batch — one row
         // per cell with a balance (batch null = Okänd); every other article
         // has its one row, summed over whatever batches its log holds.
-        const countedBatch = sql<string | null>`case when ${articles.batchTracked} then ${stockTransactions.batchId} end`;
+        const countedBatch = sql<string | null>`case when ${articles.tracking} <> 'none' then ${stockTransactions.batchId} end`;
         const balances = await tx
           .select({
             articleId: stockTransactions.articleId,
@@ -365,7 +365,10 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
           // which articles may get another batch row.
           batchId: stockCountRows.batchId,
           batchNumber: stockBatches.batchNumber,
-          batchTracked: articles.batchTracked,
+          batchTracked: batchTrackedSql(),
+          tracking: articles.tracking,
+          // Etapp 2: the batch's utgångsdatum (null = none / Okänd).
+          expiresOn: stockBatches.expiresOn,
         })
         .from(stockCountRows)
         .innerJoin(articles, eq(articles.id, stockCountRows.articleId))
@@ -455,7 +458,7 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
         // batch nobody booked), or without a number the Okänd row — and the
         // snapshot is that CELL's balance. Any other article has its one
         // row for the whole place, and a batch for it is refused.
-        const batchTracked = await isBatchTrackedArticle(tx, input.articleId);
+        const batchTracked = await isTrackedArticle(tx, input.articleId);
         if (input.batchNumber !== undefined && !batchTracked) throw new BatchNotTrackedError(article.articleNumber);
         const batch =
           input.batchNumber !== undefined
@@ -533,7 +536,8 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
             countedQuantity: stockCountRows.countedQuantity,
             note: stockCountRows.note,
             standardCost: articles.standardCost,
-            batchTracked: articles.batchTracked,
+            batchTracked: batchTrackedSql(),
+          tracking: articles.tracking,
           })
           .from(stockCountRows)
           .leftJoin(articles, eq(articles.id, stockCountRows.articleId))

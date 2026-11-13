@@ -50,7 +50,7 @@ import {
 import type { DocumentPdfService, PalletCardPdfInput } from "../../mail/service/document-pdf.js";
 import { documentLanguageOf, localized } from "@navet/shared";
 import { documentTexts } from "../../mail/service/document-texts.js";
-import { extraDescriptionFor } from "../../mail/service/document-pdf.js";
+import { extraDescriptionFor, formatBatchLabel } from "../../mail/service/document-pdf.js";
 import { appendFilesToPdf, mergePdfs } from "../../mail/service/pdf-merge.js";
 import { ArticleNotFoundError, assertOrderableArticle, type ArticleFileReader, type ArticleUnitReader } from "../../article/service/article.service.js";
 import type { MaterialRow, OperationRowView } from "../repository/order-edit.js";
@@ -1240,7 +1240,8 @@ export function createManufacturingService(
         // Batch (#8, decision 17): the finished goods are received in the
         // batch named after the TO — known before anything is received, and
         // printed on both variants when the article is batchstyrd.
-        batch: order.articleBatchTracked ? order.orderNumber : null,
+        // Etapp 2: with the batch's utgångsdatum once it has one.
+        batch: order.articleBatchTracked ? formatBatchLabel(order.orderNumber, order.receiptBatchExpiresOn, language) : null,
       };
       return salesOrderRow
         ? {

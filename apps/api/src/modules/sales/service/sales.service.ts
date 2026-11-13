@@ -54,7 +54,7 @@ import type { PriceChainQuery, PriceMarkups, PriceResolution } from "./price-res
 import type { RegisterReferenceReader } from "../../register/service/register.service.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import type { MailService } from "../../mail/service/mail.service.js";
-import { formatBatchInfo, formatQuantity, type DocumentPdfService, type PalletCardPdfInput } from "../../mail/service/document-pdf.js";
+import { formatBatchInfo, formatBatchLabel, formatQuantity, type DocumentPdfService, type PalletCardPdfInput } from "../../mail/service/document-pdf.js";
 import { documentLanguageOf, localized, UNKNOWN_BATCH_LABEL, type DocumentLanguage } from "@navet/shared";
 import { documentTexts } from "../../mail/service/document-texts.js";
 import {
@@ -156,9 +156,23 @@ export interface StockBalanceReader {
   pickBatchCellsForArticles(
     articleIds: string[]
   ): Promise<
-    { articleId: string; warehouseName: string; locationName: string; blocked: boolean; batchNumber: string | null; quantity: string }[]
+    {
+      articleId: string;
+      warehouseName: string;
+      locationName: string;
+      blocked: boolean;
+      batchNumber: string | null;
+      // Etapp 2: the batch's utgångsdatum, and whether it is utgången today
+      // (such cells come last — Automatiskt leaves them alone).
+      expiresOn: string | null;
+      expired: boolean;
+      quantity: string;
+    }[]
   >;
 }
+
+// Plocklistan (etapp 2): after the cell of an utgången batch.
+export const EXPIRED_PICK_NOTE = "UTGÅNGEN — plocka inte";
 
 // Batch (#8) on the customer documents (följesedel, pallkort till kund): the
 // delivery row's NAMED batches, summed per batch in the row's unit — Okänd
@@ -166,12 +180,19 @@ export interface StockBalanceReader {
 // is no longer batchstyrd (decision 10). The quantities print as soon as the
 // batches do not cover the whole row on their own.
 function deliveryRowBatchInfo(
-  row: { batchTracked: boolean; unitFactor: string | null; locations: { quantity: number; batchNumber: string | null }[] },
+  row: {
+    batchTracked: boolean;
+    unitFactor: string | null;
+    locations: { quantity: number; batchNumber: string | null; expiresOn?: string | null }[];
+  },
   language: DocumentLanguage
 ): string | null {
   if (!row.batchTracked) return null;
   const named = row.locations.flatMap((part) =>
-    part.batchNumber === null ? [] : [{ batchNumber: part.batchNumber, quantity: toUnitQuantity(part.quantity, row.unitFactor) }]
+    part.batchNumber === null
+      ? []
+      : // Etapp 2: with the batch's utgångsdatum when it has one.
+        [{ batchNumber: part.batchNumber, quantity: toUnitQuantity(part.quantity, row.unitFactor), expiresOn: part.expiresOn ?? null }]
   );
   return formatBatchInfo(named, { language, whole: named.length === row.locations.length });
 }
@@ -2099,7 +2120,7 @@ export function createSalesService(
       // Batch (#8): a batchstyrd article prints its cells (place · batch) in
       // the order Automatiskt draws them, Okänd included — internal document.
       const batchCells = await stock.pickBatchCellsForArticles(openRows.map((r) => r.articleId));
-      const batchTrackedIds = new Set(openRows.filter((r) => r.articleBatchTracked).map((r) => r.articleId));
+      const batchTrackedIds = new Set(openRows.filter((r) => r.articleTracking !== "none").map((r) => r.articleId));
       const extraDescription = extraDescriptionFor(await settings.getSettings(), "pickList");
       const customerArticleNumbers = await repo.customerArticleNumberMap(order.customerId, openRows.map((r) => r.articleId));
 
@@ -2139,7 +2160,10 @@ export function createSalesService(
                 .filter((c) => c.articleId === r.articleId && !c.blocked)
                 .map(
                   (c) =>
-                    `${c.warehouseName} — ${c.locationName} · Batch ${c.batchNumber ?? UNKNOWN_BATCH_LABEL}: ${formatQuantity(c.quantity)}`
+                    // Etapp 2: the batch's utgångsdatum, and an utgången
+                    // cell (last in the list) marked — Automatiskt leaves it.
+                    `${c.warehouseName} — ${c.locationName} · Batch ${formatBatchLabel(c.batchNumber ?? UNKNOWN_BATCH_LABEL, c.expiresOn)}: ${formatQuantity(c.quantity)}` +
+                    (c.expired ? ` — ${EXPIRED_PICK_NOTE}` : "")
                 )
             : balances
                 .filter((b) => b.articleId === r.articleId && !b.blocked)

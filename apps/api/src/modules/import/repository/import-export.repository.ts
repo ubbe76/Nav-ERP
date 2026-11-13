@@ -116,7 +116,8 @@ export function createImportExportRepository(db: Db | Tx) {
             safetyStock: articles.safetyStock,
             stockControlled: articles.stockControlled,
             forecastControlled: articles.forecastControlled,
-            batchTracked: articles.batchTracked,
+            tracking: articles.tracking,
+            shelfLifeDays: articles.shelfLifeDays,
             manufacturingLeadTimeDays: articles.manufacturingLeadTimeDays,
             quantityPerPackage: articles.quantityPerPackage,
             primarySupplierNumber: suppliers.supplierNumber,
@@ -411,31 +412,37 @@ export function createImportExportRepository(db: Db | Tx) {
             // batch number, or "Okänd" for the rows without a batch — so the
             // file reads back as the saldoimport's cell rows. Every other
             // article sums over whatever batches its log holds, as before.
-            batchTracked: articles.batchTracked,
+            tracking: articles.tracking,
             batchNumber: stockBatches.batchNumber,
+            batchDate: stockBatches.batchDate,
+            expiresOn: stockBatches.expiresOn,
           })
           .from(stockTransactions)
           .innerJoin(articles, eq(articles.id, stockTransactions.articleId))
           .innerJoin(stockLocations, eq(stockLocations.id, stockTransactions.locationId))
           .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
-          .leftJoin(stockBatches, and(eq(stockBatches.id, stockTransactions.batchId), eq(articles.batchTracked, true)))
+          .leftJoin(stockBatches, and(eq(stockBatches.id, stockTransactions.batchId), ne(articles.tracking, "none")))
           .where(condition)
           .groupBy(
             articles.articleNumber,
-            articles.batchTracked,
+            articles.tracking,
             warehouses.name,
             stockLocations.name,
             stockLocations.id,
             stockBatches.id,
-            stockBatches.batchNumber
+            stockBatches.batchNumber,
+            stockBatches.batchDate,
+            stockBatches.expiresOn
           )
           .having(sql`sum(${stockTransactions.quantityDelta}) <> 0`)
       );
       return rows
-        .map(({ batchTracked, batchNumber, ...row }) => ({
+        .map(({ tracking, batchNumber, batchDate, expiresOn, ...row }) => ({
           ...row,
           quantity: Number(row.quantity),
-          batchNumber: batchTracked ? (batchNumber ?? UNKNOWN_BATCH_LABEL) : "",
+          batchNumber: tracking !== "none" ? (batchNumber ?? UNKNOWN_BATCH_LABEL) : "",
+          batchDate: batchDate ?? "",
+          expiresOn: expiresOn ?? "",
         }))
         .sort(
           (a, b) =>

@@ -51,6 +51,10 @@ const ALLOWED: Record<string, { reads: number; why: string }> = {
     reads: 7,
     why: "physical per cell (article, place, batch — #8): the cells Automatiskt allocates from, one cell's balance for Ångra and the saldoimport, the article card's Saldo per batch and the pick list's / batch choices' cells (with blocked as a flag); a blocked place is included, the callers decide",
   },
+  "modules/stock/repository/batch-expiry.ts": {
+    reads: 1,
+    why: "per batch on the places that are NOT blocked (#8 etapp 2, Utgångna batcher): the avisering and the batch register's filter — a batch moved to a Spärrad lagerplats is put aside and no longer counts; a named batch's cell never goes negative, so no debt hides in the sum",
+  },
   "modules/stock/service/location-lifecycle.ts": { reads: 1, why: "physical per place: locationHoldsStock" },
   "modules/stock/service/stocked-article.ts": {
     reads: 1,

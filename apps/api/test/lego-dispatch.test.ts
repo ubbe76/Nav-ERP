@@ -1088,7 +1088,7 @@ describe("Pallkort till legoleverantör — batch", () => {
     const frameOf = (pdf: Buffer) => pdfRects(pdf).filter((r) => r.width > 400 && r.height > 100)[0]!;
 
     // Straight on the row: the flag's own rules (the setting) are not this test's.
-    await db.update(articles).set({ batchTracked: true }).where(eq(articles.id, f.parent.id));
+    await db.update(articles).set({ tracking: "batch" }).where(eq(articles.id, f.parent.id));
     const after = await card();
     const text = pdfText(after);
     expect(text).toContain("BATCH");

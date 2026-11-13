@@ -9,6 +9,7 @@ import {
   createStockAdjustmentSchema,
   listStockBatchBalancesQuerySchema,
   listStockBatchesQuerySchema,
+  updateStockBatchSchema,
   createStockTransferSchema,
   createWarehouseSchema,
   listStockTransactionsQuerySchema,
@@ -266,6 +267,13 @@ export async function stockRoutes(
   // module's read rule (office); no prices. An unknown batch is 404
   // stock-batch-not-found (batchErrorStatus in app.ts).
   app.get("/stock/batches", async (req) => service.listBatches(listStockBatchesQuerySchema.parse(req.query)));
+
+  // Etapp 2: correct a batch's utgångsdatum, Batchdatum or number — the
+  // module's write rule (lager); logged. 404 stock-batch-not-found, 409
+  // duplicate-batch-number, 400 batch-number-reserved (batchErrorStatus).
+  app.patch<{ Params: { id: string } }>("/stock/batches/:id", async (req) =>
+    service.updateBatch(req.params.id, updateStockBatchSchema.parse(req.body), req.user?.id ?? null)
+  );
 
   app.get<{ Params: { id: string } }>("/stock/batches/:id/trace", async (req) => service.traceBatch(req.params.id));
 

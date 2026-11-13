@@ -67,10 +67,43 @@ export class ArticleNotBatchTrackableError extends Error {
   }
 }
 
+// Etapp 2: Spårning = Serienummer (and Serienummer skapas = Vid utleverans)
+// exists in the data from 0214 but cannot be chosen until the serienummer
+// step is built.
+export class SerialTrackingNotAvailableError extends Error {
+  constructor() {
+    super("Serienummer går inte att välja ännu — välj Ingen eller Batch");
+    this.name = "SerialTrackingNotAvailableError";
+  }
+}
+
+// An inflow names an existing batch with ANOTHER utgångsdatum than the batch
+// has — never silently overwritten; corrected with PATCH /stock/batches/:id.
+export class BatchExpiryMismatchError extends Error {
+  constructor(
+    readonly batchNumber: string,
+    readonly expiresOn: string,
+    readonly requested: string
+  ) {
+    super(`Batch ${batchNumber} har redan utgångsdatum ${expiresOn} — ${requested} skiljer sig. Rätta batchens datum under Lager → Spårbarhet eller ange samma datum`);
+    this.name = "BatchExpiryMismatchError";
+  }
+}
+
+// PATCH /stock/batches/:id: the new number is another batch of the article.
+export class DuplicateBatchNumberError extends Error {
+  constructor(readonly batchNumber: string) {
+    super(`Batchnumret ${batchNumber} finns redan på artikeln`);
+    this.name = "DuplicateBatchNumberError";
+  }
+}
+
 // The HTTP status of a batch error, null for anything else.
 export function batchErrorStatus(err: unknown): 400 | 404 | 409 | null {
   if (err instanceof StockBatchNotFoundError) return 404;
   if (err instanceof BatchInsufficientError || err instanceof BatchTrackingDisabledError || err instanceof BatchTrackingInUseError) return 409;
+  if (err instanceof BatchExpiryMismatchError || err instanceof DuplicateBatchNumberError) return 409;
+  if (err instanceof SerialTrackingNotAvailableError) return 400;
   if (err instanceof BatchNotTrackedError || err instanceof BatchNumberReservedError || err instanceof ArticleNotBatchTrackableError) return 400;
   return null;
 }

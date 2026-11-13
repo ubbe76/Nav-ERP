@@ -316,6 +316,10 @@ const MESSAGES: Record<string, MessageEntry> = {
   "batch-tracking-disabled": "Batch- och serienummer används inte — slå på inställningen under System först.",
   "batch-tracking-in-use": serverMessage("Det finns batchstyrda artiklar — stäng av Batchstyrd på dem innan inställningen stängs av."),
   "article-not-batch-trackable": "Tjänster och fantomartiklar kan inte vara batchstyrda.",
+  // Spårbarhet etapp 2: Spårning, utgångsdatum, rättelse av en batch.
+  "serial-tracking-not-available": "Serienummer går inte att välja ännu — välj Ingen eller Batch.",
+  "batch-expiry-mismatch": serverMessage("Batchen har redan ett annat utgångsdatum — ange samma datum eller rätta batchens datum under Lager → Spårbarhet."),
+  "duplicate-batch-number": serverMessage("Batchnumret finns redan på artikeln."),
   "forecast-month-outside-horizon": "Månaden ligger utanför prognoshorisonten — bara månader i horisonten kan få ett eget antal.",
   "default-location-blocked": "Lagerplatsen är spärrad och kan inte väljas som artikelns lagerplats — välj en annan.",
   // Lager-flikens Lagerplatser: the server names the place and the rule (Swedish).

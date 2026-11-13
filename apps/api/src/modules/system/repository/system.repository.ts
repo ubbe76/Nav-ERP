@@ -9,7 +9,7 @@ import type {
 import { DEFAULT_THEME_KEY } from "../service/theme-settings.js";
 import { documentNumberTaken } from "../service/number-series.js";
 import { lockThemeForSetting } from "./themes.repository.js";
-import { countBatchTrackedArticles } from "../../stock/service/batch-tracking.js";
+import { countTrackedArticles } from "../../stock/service/batch-tracking.js";
 import { readStorageUsage } from "./storage.js";
 import { exportStoredFiles } from "./file-export.js";
 
@@ -68,8 +68,8 @@ function settingsWriter(tx: Tx) {
     // Batch (#8): Använd batch- och serienummer can only be switched off
     // while no article is batchstyrd — counted AFTER the setting's row is
     // written in this transaction (batch-tracking.ts has the lock order).
-    countBatchTrackedArticles(): Promise<number> {
-      return countBatchTrackedArticles(tx);
+    countTrackedArticles(): Promise<number> {
+      return countTrackedArticles(tx);
     },
   };
 }

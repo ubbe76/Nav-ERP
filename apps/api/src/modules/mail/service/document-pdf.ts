@@ -176,12 +176,22 @@ export function formatRevisionInfo(
 // ones pass Okänd under its label. One batch covering the whole row prints
 // as the number alone, several (or one beside left-out parts) with their
 // quantities: "A123 (10), B456 (5)". Null when there is nothing to print.
+// Etapp 2: a part that carries its batch's utgångsdatum prints it after the
+// number — "L-778 utg. 2027-03-01 (6)" ("exp." in English); the callers
+// that must not print dates (the invoice) simply do not pass them.
+export function formatBatchLabel(batchNumber: string, expiresOn: string | null | undefined, language?: DocumentLanguage): string {
+  return expiresOn ? `${batchNumber} ${documentTexts(language ?? "sv").rowInfo.expires} ${expiresOn}` : batchNumber;
+}
+
 export function formatBatchInfo(
-  parts: readonly { batchNumber: string; quantity: number }[],
+  parts: readonly { batchNumber: string; quantity: number; expiresOn?: string | null }[],
   opts: { language?: DocumentLanguage; whole?: boolean } = {}
 ): string | null {
   const totals = new Map<string, number>();
-  for (const part of parts) totals.set(part.batchNumber, (totals.get(part.batchNumber) ?? 0) + part.quantity);
+  for (const part of parts) {
+    const label = formatBatchLabel(part.batchNumber, part.expiresOn, opts.language);
+    totals.set(label, (totals.get(label) ?? 0) + part.quantity);
+  }
   if (totals.size === 0) return null;
   if (totals.size === 1 && opts.whole !== false) return [...totals.keys()][0]!;
   return [...totals].map(([number, quantity]) => `${number} (${formatQuantity(String(Number(quantity.toFixed(4))), opts.language)})`).join(", ");

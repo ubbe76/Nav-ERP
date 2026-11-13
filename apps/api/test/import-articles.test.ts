@@ -1273,7 +1273,7 @@ describe("article import — Prognosstyrd", () => {
 // Batchstyrd (#8): Ja/Nej like Prognosstyrd — but Ja only while the setting
 // "Använd batch- och serienummer" is on and never on a tjänst or a fantom.
 describe("article import — Batchstyrd", () => {
-  const batchMapping = { Artikelnummer: "articleNumber", Benämning: "name", Artikeltyp: "type", Batchstyrd: "batchTracked" };
+  const batchMapping = { Artikelnummer: "articleNumber", Benämning: "name", Artikeltyp: "type", Batchstyrd: "tracking" };
   const SETTING = "batch_tracking_enabled";
   const setSetting = async (on: boolean) => {
     await db.execute(sql`DELETE FROM system_settings WHERE key = ${SETTING}`);
@@ -1302,12 +1302,12 @@ describe("article import — Batchstyrd", () => {
       },
       fakeDeps()
     );
-    expect(plan.creates[0]).toMatchObject({ articleNumber: "B-1", batchTracked: true });
-    expect(plan.creates[1]).toMatchObject({ articleNumber: "B-2", batchTracked: false });
-    expect(plan.creates[2]).not.toHaveProperty("batchTracked");
+    expect(plan.creates[0]).toMatchObject({ articleNumber: "B-1", tracking: "batch" });
+    expect(plan.creates[1]).toMatchObject({ articleNumber: "B-2", tracking: "none" });
+    expect(plan.creates[2]).not.toHaveProperty("tracking");
     expect(plan.rows[3]!.errors).toEqual(["En tjänst eller fantomartikel kan inte vara batchstyrd"]);
     expect(plan.rows[4]!.errors).toEqual(["En tjänst eller fantomartikel kan inte vara batchstyrd"]);
-    expect(plan.rows[5]!.errors).toEqual(['Ogiltigt värde för Batchstyrd: "Kanske" (Ja/Nej/1/0/true/false)']);
+    expect(plan.rows[5]!.errors).toEqual(['Ogiltigt värde för Spårning: "Kanske" (Ingen/Batch, eller Ja/Nej för Batchstyrd)']);
     expect(plan.rows[6]!.errors).toEqual([]);
   });
 
@@ -1323,14 +1323,14 @@ describe("article import — Batchstyrd", () => {
       },
       fakeDeps()
     );
-    expect(plan.rows[0]!.errors).toEqual(['Batchstyrd kan inte sättas — slå först på "Använd batch- och serienummer" under System → Inställningar']);
+    expect(plan.rows[0]!.errors).toEqual(['Spårning kan inte sättas — slå först på "Använd batch- och serienummer" under System → Inställningar']);
     expect(plan.rows[1]!.errors).toEqual([]);
     expect(plan.rows[2]!.errors).toEqual([]);
     expect(plan.hasErrors).toBe(true);
   });
 
   it("the commit reads the real setting: refused while off; stores Ja on create, switches it off and on again on update, leaves it on an empty cell", async () => {
-    const flag = async () => (await db.select({ f: articles.batchTracked }).from(articles).where(eq(articles.articleNumber, "B-10")))[0]?.f;
+    const flag = async () => (await db.select({ f: articles.tracking }).from(articles).where(eq(articles.articleNumber, "B-10")))[0]?.f;
     const commit = (cell: string) =>
       importService.commit("articles", { mapping: batchMapping, rows: [["B-10", "Batchartikel", "Köpt", cell]], defaults: { articleType: "purchased" } });
 
@@ -1339,17 +1339,17 @@ describe("article import — Batchstyrd", () => {
 
     await setSetting(true);
     await commit("Ja");
-    expect(await flag()).toBe(true);
+    expect(await flag()).toBe("batch");
     await commit("");
-    expect(await flag()).toBe(true);
+    expect(await flag()).toBe("batch");
     await commit("Nej");
-    expect(await flag()).toBe(false);
+    expect(await flag()).toBe("none");
     await commit("1");
-    expect(await flag()).toBe(true);
+    expect(await flag()).toBe("batch");
     // Switched off again while the setting is off: always allowed (decision 10).
     await setSetting(false);
     await commit("0");
-    expect(await flag()).toBe(false);
+    expect(await flag()).toBe("none");
   });
 });
 

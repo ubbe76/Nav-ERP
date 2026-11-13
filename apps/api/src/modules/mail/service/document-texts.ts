@@ -102,6 +102,8 @@ export interface DocumentTexts {
     deliveryDate: string;
     // Batch (#8): "Batch: A123 (10), B456 (5)" under a row.
     batch: string;
+    // Etapp 2: before a batch's utgångsdatum — "L-778 utg. 2027-03-01 (6)".
+    expires: string;
     // "Order KO… · Ert ordernr …" under an invoice row.
     orderReference: (orderNumber: string, customerOrderNumber: string | null) => string;
     // "Ytbehandling: … · Färg: …" and "Rev B · Ritn 4711 rev C".
@@ -317,6 +319,7 @@ const sv: DocumentTexts = {
     requestedDeliveryDate: "Önskat leveransdatum",
     deliveryDate: "Leveransdatum",
     batch: "Batch",
+    expires: "utg.",
     orderReference: (orderNumber, customerOrderNumber) =>
       `Order ${orderNumber}${customerOrderNumber ? ` · Ert ordernr ${customerOrderNumber}` : ""}`,
     surfaceTreatment: "Ytbehandling",
@@ -530,6 +533,7 @@ const en: DocumentTexts = {
     requestedDeliveryDate: "Requested delivery date",
     deliveryDate: "Delivery date",
     batch: "Batch",
+    expires: "exp.",
     orderReference: (orderNumber, customerOrderNumber) =>
       `Order ${orderNumber}${customerOrderNumber ? ` · Your order no. ${customerOrderNumber}` : ""}`,
     surfaceTreatment: "Surface treatment",
