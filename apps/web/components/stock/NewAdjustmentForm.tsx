@@ -11,6 +11,7 @@ import { locationOptionLabel } from "../../lib/stockLocations";
 import { apiFetch } from "../../lib/api";
 import { BatchSelect, useBatchBalances } from "./BatchSelect";
 import { BATCH_AUTO, batchIdField } from "../../lib/batch";
+import { SerialCellPicker } from "./SerialNumbers";
 import type { Article, ArticleBatchBalances, StockLocation } from "../../lib/types";
 import { Card } from "../ui/Card";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
@@ -29,6 +30,10 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
   const [batchNumber, setBatchNumber] = useState("");
   const [expiresOn, setExpiresOn] = useState("");
   const [batchChoice, setBatchChoice] = useState(BATCH_AUTO);
+  // Serienummer (#8 etapp 2): an increase names ONE number (Serienummer), a
+  // decrease picks the numbers to take (serialIds; none = the place's oldest).
+  const [serialNumber, setSerialNumber] = useState("");
+  const [serialIds, setSerialIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -44,6 +49,8 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
     setBatchNumber("");
     setExpiresOn("");
     setBatchChoice(BATCH_AUTO);
+    setSerialNumber("");
+    setSerialIds([]);
     if (!article) return;
     let cancelled = false;
     apiFetch<ArticleBatchBalances>(`/api/v1/articles/${article.id}/batch-balances`)
@@ -56,7 +63,8 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
     };
   }, [article]);
   const batchTracked = Boolean(batchInfo?.batchTracked);
-  const { rows: batchRows } = useBatchBalances(batchTracked && article ? [article.id] : []);
+  const serialStock = article?.tracking === "serial" && (article.serialAssignedAt ?? "receipt") === "receipt";
+  const { rows: batchRows } = useBatchBalances((batchTracked || serialStock) && article ? [article.id] : []);
 
   // A negative adjustment takes goods from a place: with "Artikelns lagerplats"
   // the API resolves the place by the inflow rule, which may not be where the
@@ -94,6 +102,8 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
             ? { batchNumber: batchNumber.trim(), ...(expiresOn ? { expiresOn } : {}) }
             : {}),
           ...(batchTracked && baseDelta < 0 ? batchIdField(batchChoice) : {}),
+          ...(serialStock && baseDelta > 0 && serialNumber.trim() ? { batchNumber: serialNumber.trim() } : {}),
+          ...(serialStock && baseDelta < 0 && serialIds.length > 0 ? { serialIds } : {}),
           transactionType: "inventory_adjustment",
           note: note || undefined,
         }),
@@ -186,6 +196,40 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
               value={expiresOn}
               disabled={batchNumber.trim() === ""}
               onChange={(e) => setExpiresOn(e.target.value)}
+            />
+          </Field>
+        )}
+        {article && serialStock && baseDelta > 0 && (
+          <Field label="Serienummer" htmlFor="adjustmentSerial">
+            <Input
+              id="adjustmentSerial"
+              size="md"
+              placeholder="Skriv eller skanna serienummer"
+              value={serialNumber}
+              onChange={(e) => setSerialNumber(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.preventDefault();
+              }}
+            />
+            <FormHint>Ett serienummer och ett styck per justering. Tomt: saldot bokas utan nummer (Okänd).</FormHint>
+          </Field>
+        )}
+        {article && serialStock && baseDelta < 0 && (
+          <Field label="Serienummer" htmlFor="adjustmentSerialChoice">
+            <SerialCellPicker
+              ariaLabel="Serienummer"
+              rows={batchRows}
+              articleId={article.id}
+              locationId={locationId || null}
+              value={serialIds}
+              onChange={(next) => {
+                setSerialIds(next);
+                // One styck per number: the decrease follows the picked numbers.
+                if (next.length > 0) {
+                  setUnitId("");
+                  setQuantityDelta(String(-next.length));
+                }
+              }}
             />
           </Field>
         )}

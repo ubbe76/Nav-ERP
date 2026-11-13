@@ -19,6 +19,8 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import { toBaseQuantity, toUnitQuantity } from "../../lib/units";
+import { serialCountOf } from "../../lib/serialInput";
+import { SerialNumbersInput, isStockSerial, useSerialModes } from "../stock/SerialNumbers";
 import {
   countScan,
   enteredQuantity,
@@ -122,6 +124,10 @@ export function GoodsReceiptPageClient({
   const { feedback, ok, warn, clear: clearFeedback } = useScanFeedback();
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [batches, setBatches] = useState<Record<string, RowBatches>>({});
+  // Serienummer (#8 etapp 2) per row: one number per styck, for the articles
+  // whose numbers are created at the receipt.
+  const [serials, setSerials] = useState<Record<string, string[]>>({});
+  const serialModes = useSerialModes(openRows.map((r) => ({ articleId: r.articleId, tracking: r.articleTracking })));
   const nextPartKey = useRef(1);
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState<string | null>(null);
@@ -168,6 +174,7 @@ export function GoodsReceiptPageClient({
   function goToOrder(id: string) {
     setCount(NO_COUNT);
     setBatches({});
+    setSerials({});
     setRowErrors({});
     setDone(null);
     setLastRowId(null);
@@ -344,6 +351,15 @@ export function GoodsReceiptPageClient({
       const scanRow = scanRows.find((r) => r.id === row.id)!;
       const quantity = Number(enteredQuantity(scanRow, count));
       const rowBatches = row.articleBatchTracked ? (batches[row.id] ?? NO_BATCHES) : NO_BATCHES;
+      const serialRow = isStockSerial(row.articleTracking, serialModes, row.articleId);
+      const rowSerials = serialRow ? (serials[row.id] ?? []) : [];
+      if (serialRow && quantity > 0) {
+        const styck = toBaseQuantity(quantity, row.unitFactor);
+        if (rowSerials.length !== styck) {
+          errors[row.id] = `Ange ett serienummer per styck — ${rowSerials.length} av ${styck} angivna.`;
+          continue;
+        }
+      }
       // One call per batch part (the main part first); a failed part stops
       // the row so the booked ones are always a prefix.
       const parts: { quantity: number; batchNumber: string; expiresOn: string; extraIndex: number | null }[] = [];
@@ -357,13 +373,14 @@ export function GoodsReceiptPageClient({
       for (const part of parts) {
         try {
           const result = await runWithShortageConfirm((allowMaterialShortage) =>
-            apiFetch<{ operationReport?: { ok: boolean; message?: string }; receiptId?: string }>(
+            apiFetch<{ operationReport?: { ok: boolean; message?: string }; receiptId?: string; receiptIds?: string[] }>(
               `/api/v1/purchase-orders/${selectedId}/rows/${row.id}/receive`,
               {
                 method: "POST",
                 body: JSON.stringify({
                   locationId: locationId || undefined,
                   quantity: toBaseQuantity(part.quantity, row.unitFactor),
+                  ...(serialRow ? { serialNumbers: rowSerials } : {}),
                   ...(row.articleBatchTracked && part.batchNumber ? { batchNumber: part.batchNumber } : {}),
                   // "" = no date (the API keeps the batch's own, or none).
                   ...(row.articleBatchTracked && part.expiresOn ? { expiresOn: part.expiresOn } : {}),
@@ -384,7 +401,9 @@ export function GoodsReceiptPageClient({
           }
           if (part.extraIndex === null) bookedRowIds.push(row.id);
           else bookedParts[row.id] = (bookedParts[row.id] ?? 0) + 1;
-          if (result.receiptId) receiptIds.push(result.receiptId);
+          // A serial row books one receipt per styck (receiptIds), the others one.
+          if (result.receiptIds && result.receiptIds.length > 0) receiptIds.push(...result.receiptIds);
+          else if (result.receiptId) receiptIds.push(result.receiptId);
           // Lego row: the receipt auto-reports the linked TO operation. The
           // receipt itself stands even when the report fails (e.g. the TO is
           // already done) — surface that as a row warning, not a failure.
@@ -400,6 +419,14 @@ export function GoodsReceiptPageClient({
           break;
         }
       }
+    }
+    // The numbers of the rows this run booked are used up.
+    if (bookedRowIds.length > 0) {
+      setSerials((prev) => {
+        const next = { ...prev };
+        for (const id of bookedRowIds) delete next[id];
+        return next;
+      });
     }
     // Drop the booked extra parts (the form keeps the failed ones).
     if (Object.keys(bookedParts).length > 0) {
@@ -422,6 +449,7 @@ export function GoodsReceiptPageClient({
       );
       setCount(NO_COUNT);
       setBatches({});
+      setSerials({});
       setLastRowId(null);
       clearFeedback();
     } else if (bookedRowIds.length > 0) {
@@ -641,6 +669,23 @@ export function GoodsReceiptPageClient({
                           scanField.current?.focus();
                         }}
                       />
+                      {isStockSerial(row.articleTracking, serialModes, row.articleId) && (
+                        <SerialNumbersInput
+                          ariaLabel={`Serienummer — ${row.articleNumber}`}
+                          value={serials[row.id] ?? []}
+                          count={serialCountOf(toBaseQuantity(Number(enteredQuantity(scanRows.find((r) => r.id === row.id)!, count)), row.unitFactor))}
+                          onChange={(next) => {
+                            setSerials((prev) => ({ ...prev, [row.id]: next }));
+                            // The quantity follows the numbers: one styck each.
+                            if (next.length > 0) {
+                              setCount({
+                                ...countRef.current,
+                                quantities: { ...countRef.current.quantities, [row.id]: String(toUnitQuantity(next.length, row.unitFactor)) },
+                              });
+                            }
+                          }}
+                        />
+                      )}
                       {row.articleBatchTracked && (
                         <RowBatchFields
                           row={row}

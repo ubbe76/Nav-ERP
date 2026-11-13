@@ -5,6 +5,8 @@ import { Card } from "../ui/Card";
 import { Input, Label, Select } from "../ui/Field";
 import { FormError, FormHint } from "../ui/Form";
 import { BatchSelect, useBatchBalances } from "../stock/BatchSelect";
+import { compressSerialNumbers } from "../../lib/serials";
+import { SerialCellPicker, isStockSerial, useSerialModes } from "../stock/SerialNumbers";
 import { BATCH_AUTO, batchIdField, expiredBatchLocationId } from "../../lib/batch";
 import { ScrapReasonFields } from "../quality/ScrapReasonFields";
 import { useScrapReasons } from "../../lib/useScrapReasons";
@@ -283,7 +285,7 @@ function OperationRow({
       );
       // Återkoppling (punkt 7): what was booked, with Ångra on this report.
       notify({
-        message: `Rapporterat ${formatQuantity(reported)} OK${scrapQty > 0 ? ` och ${formatQuantity(scrapQty)} kasserat` : ""} på ${moOperationLabel(op)}.`,
+        message: `Rapporterat ${formatQuantity(reported)} OK${scrapQty > 0 ? ` och ${formatQuantity(scrapQty)} kasserat` : ""} på ${moOperationLabel(op)}.${receivedSerialsText(completed)}`,
         action:
           canUndo && reportId
             ? {
@@ -408,6 +410,12 @@ function undoReportAction(orderId: string, reportId: string, onDone: () => void,
 
 // --- One material row: numbers, and Förbruka while something remains ---
 
+// "Mottagna serienummer: SN-1–SN-5." for a report that received numbers, else "".
+function receivedSerialsText(result: unknown): string {
+  const numbers = (result as { receivedSerialNumbers?: string[] } | null)?.receivedSerialNumbers ?? [];
+  return numbers.length > 0 ? ` Mottagna serienummer: ${compressSerialNumbers(numbers)}.` : "";
+}
+
 function MaterialRow({
   orderId,
   material: m,
@@ -429,7 +437,11 @@ function MaterialRow({
   // Batch (#8): Automatiskt / Okänd / a batch with stock (on the chosen location).
   const [batch, setBatch] = useState(BATCH_AUTO);
   const batchTracked = Boolean(m.componentBatchTracked);
-  const { rows: batchRows, reload: reloadBatches } = useBatchBalances(batchTracked ? [m.componentArticleId] : []);
+  // Serienummer (#8 etapp 2): numbers picked in stock (serialIds); none = the oldest.
+  const serialModes = useSerialModes([{ articleId: m.componentArticleId, tracking: m.componentTracking }]);
+  const serialStock = isStockSerial(m.componentTracking, serialModes, m.componentArticleId);
+  const [serialIds, setSerialIds] = useState<string[]>([]);
+  const { rows: batchRows, reload: reloadBatches } = useBatchBalances(batchTracked || serialStock ? [m.componentArticleId] : []);
   const open = Number(m.quantityConsumed) < Number(m.quantityPlanned);
   const quantity = typedQuantity ?? suggestedConsumeQuantity(m);
 
@@ -448,6 +460,7 @@ function MaterialRow({
               (batchTracked ? expiredBatchLocationId(batchRows, m.componentArticleId, batch) : undefined) ||
               undefined,
             ...(batchTracked ? batchIdField(batch) : {}),
+            ...(serialStock && serialIds.length > 0 ? { serialIds } : {}),
             // Untouched: the exact rest in the base unit. The prefill is
             // rounded in the row's unit, and turning it back (2 st shown as
             // 0,6667 förp of 3 st) gave 2,0001 st — refused as over-consumption.
@@ -468,6 +481,7 @@ function MaterialRow({
       });
       setTypedQuantity(null);
       setBatch(BATCH_AUTO);
+      setSerialIds([]);
       reloadBatches();
       onDone();
     } catch (err) {
@@ -504,6 +518,22 @@ function MaterialRow({
               />
               <span className={styles.unit}>{m.unitCode}</span>
             </Cell>
+            {serialStock && (
+              <Cell label="Serienummer" className={styles.batch}>
+                <SerialCellPicker
+                  rows={batchRows}
+                  articleId={m.componentArticleId}
+                  locationId={locationId || null}
+                  value={serialIds}
+                  onChange={(next) => {
+                    setSerialIds(next);
+                    // One styck per number: Antal follows the picked numbers.
+                    setTypedQuantity(next.length > 0 ? String(toUnitQuantity(next.length, m.unitFactor ?? null)) : null);
+                  }}
+                  ariaLabel={`Serienummer för ${m.componentArticleNumber} ${m.componentName}`}
+                />
+              </Cell>
+            )}
             {batchTracked && (
               <Cell label="Batch" className={styles.batch}>
                 <BatchSelect
@@ -740,7 +770,7 @@ function CompleteOrderRow({
       // what this Slutför order received and drew.
       const reportId = (closed as { reportId?: string }).reportId ?? null;
       notify({
-        message: `Ordern är slutförd${Number(quantity) > 0 ? ` — ${formatQuantity(Number(quantity))} st inlevererade` : ""}.`,
+        message: `Ordern är slutförd${Number(quantity) > 0 ? ` — ${formatQuantity(Number(quantity))} st inlevererade` : ""}.${receivedSerialsText(closed)}`,
         action: canUndo && reportId ? undoReportAction(orderId, reportId, onDone, "Slutför order är ångrad — ordern är öppen igen.") : undefined,
       });
       onDone();

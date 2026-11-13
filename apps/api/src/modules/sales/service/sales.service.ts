@@ -54,7 +54,7 @@ import type { PriceChainQuery, PriceMarkups, PriceResolution } from "./price-res
 import type { RegisterReferenceReader } from "../../register/service/register.service.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import type { MailService } from "../../mail/service/mail.service.js";
-import { formatBatchInfo, formatBatchLabel, formatQuantity, type DocumentPdfService, type PalletCardPdfInput } from "../../mail/service/document-pdf.js";
+import { formatBatchInfo, formatBatchLabel, formatQuantity, formatSerialInfo, type DocumentPdfService, type PalletCardPdfInput } from "../../mail/service/document-pdf.js";
 import { documentLanguageOf, localized, UNKNOWN_BATCH_LABEL, type DocumentLanguage } from "@navet/shared";
 import { documentTexts } from "../../mail/service/document-texts.js";
 import {
@@ -162,6 +162,8 @@ export interface StockBalanceReader {
       locationName: string;
       blocked: boolean;
       batchNumber: string | null;
+      // batch | serial — the cell's own sort (null = Okänd).
+      batchKind: "batch" | "serial" | null;
       // Etapp 2: the batch's utgångsdatum, and whether it is utgången today
       // (such cells come last — Automatiskt leaves them alone).
       expiresOn: string | null;
@@ -174,6 +176,55 @@ export interface StockBalanceReader {
 // Plocklistan (etapp 2): after the cell of an utgången batch.
 export const EXPIRED_PICK_NOTE = "UTGÅNGEN — plocka inte";
 
+// Plocklistans cells of one tracked article, in the order Automatiskt draws
+// (the reader's order): a batch cell is one line — "Huvudlager — A1 · Batch
+// L-778 utg. 2027-03-01: 6", Okänd under its label (internal document), an
+// utgången one marked. Serienummer: a cell is ONE styck, so a place's
+// numbers are written together, compressed — "Huvudlager — A1 · Serienummer
+// SN-001001–SN-001010: 10" — on the line of the place's first (oldest)
+// number; numbers with different utgångsdatum (or utgångna) keep lines of
+// their own, so the note still says exactly which ones.
+export function pickListCellLines(
+  cells: readonly {
+    locationId?: string;
+    warehouseName: string;
+    locationName: string;
+    batchNumber: string | null;
+    batchKind?: "batch" | "serial" | null;
+    expiresOn: string | null;
+    expired: boolean;
+    quantity: string;
+  }[]
+): string[] {
+  const lines: { place: string; expired: boolean; batch?: string; serials?: { key: string; numbers: string[]; expiresOn: string | null }; quantity: number }[] = [];
+  for (const cell of cells) {
+    const place = `${cell.warehouseName} — ${cell.locationName}`;
+    if (cell.batchKind === "serial" && cell.batchNumber !== null) {
+      const key = `${cell.locationId ?? place}|${cell.expiresOn ?? ""}|${cell.expired}`;
+      const line = lines.find((l) => l.serials?.key === key);
+      if (line) {
+        line.serials!.numbers.push(cell.batchNumber);
+        line.quantity += Number(cell.quantity);
+      } else {
+        lines.push({ place, expired: cell.expired, serials: { key, numbers: [cell.batchNumber], expiresOn: cell.expiresOn }, quantity: Number(cell.quantity) });
+      }
+    } else {
+      lines.push({
+        place,
+        expired: cell.expired,
+        batch: formatBatchLabel(cell.batchNumber ?? UNKNOWN_BATCH_LABEL, cell.expiresOn),
+        quantity: Number(cell.quantity),
+      });
+    }
+  }
+  return lines.map((line) => {
+    const what = line.serials
+      ? `Serienummer ${formatBatchLabel(formatSerialInfo(line.serials.numbers)!, line.serials.expiresOn)}`
+      : `Batch ${line.batch}`;
+    return `${line.place} · ${what}: ${formatQuantity(String(Number(line.quantity.toFixed(4))))}` + (line.expired ? ` — ${EXPIRED_PICK_NOTE}` : "");
+  });
+}
+
 // Batch (#8) on the customer documents (följesedel, pallkort till kund): the
 // delivery row's NAMED batches, summed per batch in the row's unit — Okänd
 // is never printed there (decision 14), and nothing at all once the article
@@ -183,18 +234,37 @@ function deliveryRowBatchInfo(
   row: {
     batchTracked: boolean;
     unitFactor: string | null;
-    locations: { quantity: number; batchNumber: string | null; expiresOn?: string | null }[];
+    locations: { quantity: number; batchNumber: string | null; batchKind?: "batch" | "serial" | null; expiresOn?: string | null }[];
   },
   language: DocumentLanguage
 ): string | null {
   if (!row.batchTracked) return null;
+  // The sort is the part's own (batchKind), never the article's: a serial
+  // number goes on the Serienummer line (deliveryRowSerialInfo), and a row
+  // with both (the article changed Spårning) prints both lines.
   const named = row.locations.flatMap((part) =>
-    part.batchNumber === null
+    part.batchNumber === null || part.batchKind === "serial"
       ? []
       : // Etapp 2: with the batch's utgångsdatum when it has one.
         [{ batchNumber: part.batchNumber, quantity: toUnitQuantity(part.quantity, row.unitFactor), expiresOn: part.expiresOn ?? null }]
   );
   return formatBatchInfo(named, { language, whole: named.length === row.locations.length });
+}
+
+// Serienummer on the customer documents: the delivery row's numbers — drawn
+// from stock or given at the delivery (`serialNumbers`, ONE list from
+// getDeliveryForPdf) — compressed. Unlike a batch, a serial number is the
+// styck's own identity, so it prints whatever the article's Spårning says
+// now (and an article with Serienummer skapas: Vid utleverans is not
+// lagerspårad at all). An undone row prints none: numbers drawn from stock
+// are back there, and numbers the delivery gave are burnt (decision 18).
+function serialCell(serialNumbers: string[]): { text: string; count: number } | null {
+  const text = formatSerialInfo(serialNumbers);
+  return text === null ? null : { text, count: new Set(serialNumbers).size };
+}
+
+function deliveryRowSerialNumbers(row: { serialNumbers: string[]; undoneAt: Date | null }): string[] {
+  return row.undoneAt === null ? row.serialNumbers : [];
 }
 
 // E3 (KO→TO-koppling): the narrow slice of the manufacturing service sales
@@ -2156,15 +2226,7 @@ export function createSalesService(
           // Spärrade lagerplatser are left out — Automatiskt never draws
           // there, so the paper says the same as the booking.
           locations: batchTrackedIds.has(r.articleId)
-            ? batchCells
-                .filter((c) => c.articleId === r.articleId && !c.blocked)
-                .map(
-                  (c) =>
-                    // Etapp 2: the batch's utgångsdatum, and an utgången
-                    // cell (last in the list) marked — Automatiskt leaves it.
-                    `${c.warehouseName} — ${c.locationName} · Batch ${formatBatchLabel(c.batchNumber ?? UNKNOWN_BATCH_LABEL, c.expiresOn)}: ${formatQuantity(c.quantity)}` +
-                    (c.expired ? ` — ${EXPIRED_PICK_NOTE}` : "")
-                )
+            ? pickListCellLines(batchCells.filter((c) => c.articleId === r.articleId && !c.blocked))
             : balances
                 .filter((b) => b.articleId === r.articleId && !b.blocked)
                 .map((b) =>
@@ -2607,6 +2669,7 @@ export function createSalesService(
           ),
           customerArticleNumber: customerArticleNumbers.get(r.articleId) ?? null,
           batchInfo: deliveryRowBatchInfo(r, language),
+          serialInfo: formatSerialInfo(deliveryRowSerialNumbers(r)),
         })),
       });
       return {
@@ -2670,6 +2733,9 @@ export function createSalesService(
             // Batch (#8): the kolli does not know its own batch — every
             // card of the row carries the row's named batches.
             batch: deliveryRowBatchInfo(pick.row, language),
+            // Serienummer: likewise the row's — compressed, or the count
+            // with a pointer to the följesedel when they do not fit the cell.
+            serial: serialCell(deliveryRowSerialNumbers(pick.row)),
             deliveryAddress: delivery.deliveryAddress
               ? {
                   address: delivery.deliveryAddress,

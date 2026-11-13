@@ -111,3 +111,10 @@ export const locationLabelsSchema = z
   .object({ locationIds: z.array(z.string().uuid()).min(1).max(500), ...labelPrintFields })
   .refine((d) => d.locationIds.length * d.copies <= MAX_LABELS, `Högst ${MAX_LABELS} etiketter per utskrift`);
 export type LocationLabelsInput = z.infer<typeof locationLabelsSchema>;
+
+// POST /stock/batches/labels (#8 etapp 2 steg 5): batch- and serienummer-
+// etiketter — one label per id (a stock_batches row of either sort) and copy.
+export const batchLabelsSchema = z
+  .object({ batchIds: z.array(z.string().uuid()).min(1).max(MAX_LABELS), ...labelPrintFields })
+  .refine((d) => d.batchIds.length * d.copies <= MAX_LABELS, `Högst ${MAX_LABELS} etiketter per utskrift`);
+export type BatchLabelsInput = z.infer<typeof batchLabelsSchema>;

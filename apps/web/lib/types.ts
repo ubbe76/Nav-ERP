@@ -51,14 +51,15 @@ export interface Article {
   // Batchstyrd (#8): stock is kept per batch; null/undefined = not tracked.
   // Etapp 2: the alias of `tracking === "batch"`.
   batchTracked?: boolean;
-  // Spårning (#8 etapp 2): Ingen / Batch / Serienummer (serial cannot be
-  // chosen yet — the API answers 400 serial-tracking-not-available).
+  // Spårning (#8 etapp 2): Ingen / Batch / Serienummer.
   tracking?: ArticleTracking;
   // Hållbarhet (dagar): a manufactured batch's utgångsdatum = the day it is
   // received + this; null = none.
   shelfLifeDays?: number | null;
-  // Serienummer skapas: Vid inleverans / Vid utleverans (only "receipt" yet).
+  // Serienummer skapas: Vid inleverans / Vid utleverans.
   serialAssignedAt?: "receipt" | "delivery";
+  // Serienummerserie: a serial number series key; null = the common one.
+  serialSeriesKey?: string | null;
   // Set when the article is a configurator template (left join on the server).
   configuratorMode?: "variants" | "to_order" | null;
   // Base unit (grundenhet): code + register id. Default purchase/sales units
@@ -202,6 +203,17 @@ export interface ArticleGroup {
 }
 
 // An article number series as offered when creating articles / groups.
+// GET /serial-number-series — the serial number series an article can use.
+export interface SerialNumberSeriesOption {
+  key: string;
+  name: string | null;
+  prefix: string;
+  digits: number;
+  isDefault: boolean;
+  // The next number the series would give; null = the series is full.
+  nextSerialNumber: string | null;
+}
+
 export interface ArticleNumberSeriesOption {
   key: string;
   name: string | null;
@@ -289,6 +301,8 @@ export interface BatchBalanceRow {
   preference: number | null;
   batchId: string | null;
   batchNumber: string | null;
+  // The cell's own sort: a batch or one serial number (null = Okänd).
+  batchKind?: "batch" | "serial" | null;
   // Utgångsdatum (the last usable day) and whether it has passed —
   // Automatiskt leaves an utgången cell alone; it can be chosen by hand.
   expiresOn?: string | null;
@@ -1216,6 +1230,8 @@ export interface PurchaseReceipt {
   batchNumber?: string | null;
   // Etapp 2: the batch's utgångsdatum.
   expiresOn?: string | null;
+  // Serienummer: a "serial" receipt is one styck, batchNumber is its number.
+  batchKind?: "batch" | "serial" | null;
   moReportId: string | null;
   createdAt: string;
   createdByName: string | null;
@@ -2149,9 +2165,13 @@ export interface DeliveryRowsResponse {
       quantity: number;
       batchNumber?: string | null;
       expiresOn?: string | null;
+      batchKind?: "batch" | "serial" | null;
     }[];
     // The article's base unit — the unit of the parts above.
     baseUnit: string;
+    // Serienummer: the row's numbers — drawn from stock or given at the
+    // delivery (those of an undone row are burnt).
+    serialNumbers?: string[];
   }[];
 }
 
@@ -3069,12 +3089,21 @@ export interface MOReport {
   purchaseOrderNumber: string | null;
   // Batch (#8) of the finished goods this report received (null = none).
   receiptBatchNumber?: string | null;
+  // Serienummer the report received (the finished goods of a serienummerstyrd article).
+  receiptSerialNumbers?: string[];
   createdAt: string;
   undoneAt: string | null;
   undoneByName: string | null;
   // locationName null = a service component (tjänst): consumed, never drawn from stock.
   // materialConsumptionId: the TO's material row the line drew for.
-  materials: { materialConsumptionId: string; articleNumber: string; quantity: string; locationName: string | null; batchNumber?: string | null }[];
+  materials: {
+    materialConsumptionId: string;
+    articleNumber: string;
+    quantity: string;
+    locationName: string | null;
+    batchNumber?: string | null;
+    batchKind?: "batch" | "serial" | null;
+  }[];
 }
 
 export type EmploymentType = "hourly" | "monthly";
@@ -3945,6 +3974,8 @@ export interface NumberSeries {
   // Only the user's own article series carry a name.
   name: string | null;
   forArticles: boolean;
+  // Serienummerserie (#8 etapp 2): true on the common "serial" and the user's own.
+  forSerials?: boolean;
   prefix: string;
   nextNumber: number;
   digits: number;
@@ -5073,6 +5104,8 @@ export interface StockCountRow {
   tracking?: ArticleTracking;
   batchId?: string | null;
   batchNumber?: string | null;
+  // The row's own sort: "serial" = one serial number, counted 0 or 1.
+  batchKind?: "batch" | "serial" | null;
   expiresOn?: string | null;
 }
 

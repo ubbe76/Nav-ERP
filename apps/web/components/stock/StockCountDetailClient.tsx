@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Table } from "../ui/Table";
 import { Button } from "../ui/Button";
-import { Field, Input } from "../ui/Field";
+import { Checkbox, Field, Input } from "../ui/Field";
 import { ArticlePicker } from "../ui/ArticlePicker";
 import { StatusPill } from "../ui/StatusPill";
 import { HelpLink } from "../ui/HelpLink";
@@ -51,16 +51,21 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
   const [counted, setCounted] = useState<Record<string, string>>({});
   const [addArticle, setAddArticle] = useState<Article | null>(null);
   // Batch (#8): a batch-tracked article is added with a batch (empty = Okänd).
+  // A serienummerstyrd article (numbers created at the receipt) is added with a number.
   const [addBatchTracked, setAddBatchTracked] = useState(false);
+  const [addSerialTracked, setAddSerialTracked] = useState(false);
   const [addBatchNumber, setAddBatchNumber] = useState("");
   useEffect(() => {
     setAddBatchTracked(false);
+    setAddSerialTracked(false);
     setAddBatchNumber("");
     if (!addArticle) return;
     let cancelled = false;
-    apiFetch<{ batchTracked: boolean }>(`/api/v1/articles/${addArticle.id}/batch-balances`)
+    apiFetch<Pick<Article, "tracking" | "batchTracked" | "serialAssignedAt">>(`/api/v1/articles/${addArticle.id}`)
       .then((r) => {
-        if (!cancelled) setAddBatchTracked(r.batchTracked);
+        if (cancelled) return;
+        setAddBatchTracked((r.tracking ?? (r.batchTracked ? "batch" : "none")) === "batch");
+        setAddSerialTracked(r.tracking === "serial" && (r.serialAssignedAt ?? "receipt") === "receipt");
       })
       .catch(() => {});
     return () => {
@@ -138,6 +143,9 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
   function serverValue(row: StockCountRow): string {
     return row.countedQuantity === null ? "" : String(Number(row.countedQuantity));
   }
+  // A serial number is counted 0 (not found) or 1 (found), by a checkbox.
+  const isSerialRow = (row: StockCountRow) => row.batchKind === "serial";
+  const hasSerialRows = session.rows.some(isSerialRow);
   function enteredCount(row: StockCountRow): string {
     return counted[row.id] ?? serverValue(row);
   }
@@ -331,7 +339,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
         method: "POST",
         body: JSON.stringify({
           articleId: addArticle.id,
-          ...(addBatchTracked && addBatchNumber.trim() ? { batchNumber: addBatchNumber.trim() } : {}),
+          ...((addBatchTracked || addSerialTracked) && addBatchNumber.trim() ? { batchNumber: addBatchNumber.trim() } : {}),
         }),
       });
       setAddArticle(null);
@@ -414,7 +422,9 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
       <Table<StockCountRow>
         columns={[
           { key: "articleNumber", label: "Artikel", width: "1fr" },
-          ...(session.rows.some((r) => r.batchTracked) ? [{ key: "batch", label: "Batch", width: "160px" }] : []),
+          ...(session.rows.some((r) => r.batchTracked || isSerialRow(r))
+            ? [{ key: "batch", label: hasSerialRows ? "Batch / serienummer" : "Batch", width: "160px" }]
+            : []),
           { key: "unit", label: "Enhet", width: "70px" },
           { key: "snapshotQuantity", label: "Bokfört", width: "100px", align: "right" },
           { key: "countedQuantity", label: "Räknat", width: "120px", align: "right" },
@@ -430,7 +440,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
             case "articleNumber":
               return `${row.articleNumber} — ${row.articleName}`;
             case "batch":
-              return row.batchTracked ? (
+              return row.batchTracked || isSerialRow(row) ? (
                 <>
                   {row.batchNumber ?? "Okänd"}
                   {row.expiresOn && (
@@ -447,6 +457,21 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
             case "snapshotQuantity":
               return formatQuantity(row.snapshotQuantity);
             case "countedQuantity":
+              if (open && isSerialRow(row)) {
+                const entered = enteredCount(row);
+                return (
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <Checkbox
+                      aria-label={`Hittad — ${row.articleNumber} ${row.batchNumber ?? ""}`.trim()}
+                      checked={entered === "1"}
+                      onChange={(e) => setCounted((c) => ({ ...c, [row.id]: e.target.checked ? "1" : "0" }))}
+                    />
+                    <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                      {entered === "" ? "ej räknad" : entered === "1" ? "finns" : "saknas"}
+                    </span>
+                  </label>
+                );
+              }
               return open ? (
                 <Input
                   aria-label={`Räknat antal för ${row.articleNumber}`}
@@ -530,9 +555,9 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
               <ArticlePicker id="countAddArticle" value={addArticle} onChange={setAddArticle} />
             </Field>
           </div>
-          {addArticle && addBatchTracked && (
+          {addArticle && (addBatchTracked || addSerialTracked) && (
             <div style={{ minWidth: 160 }}>
-              <Field label="Batch" htmlFor="countAddBatch">
+              <Field label={addSerialTracked ? "Serienummer" : "Batch"} htmlFor="countAddBatch">
                 <Input
                   id="countAddBatch"
                   size="sm"
@@ -547,6 +572,22 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
             Lägg till
           </Button>
           <div style={{ flex: 1 }} />
+          {hasSerialRows && (
+            <Button
+              variant="secondary"
+              disabled={pending}
+              onClick={() =>
+                setCounted((c) => {
+                  // Every serial number not yet counted is not there: 0.
+                  const next = { ...c };
+                  for (const r of session.rows) if (isSerialRow(r) && (next[r.id] ?? serverValue(r)) === "") next[r.id] = "0";
+                  return next;
+                })
+              }
+            >
+              Sätt oskannade till 0
+            </Button>
+          )}
           <Button variant="secondary" onClick={saveCounts} disabled={pending || dirtyRows.length === 0}>
             {pending ? "Sparar…" : `Spara räknade antal${dirtyRows.length > 0 ? ` (${dirtyRows.length})` : ""}`}
           </Button>

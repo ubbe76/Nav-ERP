@@ -182,6 +182,8 @@ export interface PickBatchCell {
   preference: number | null;
   batchId: string | null;
   batchNumber: string | null;
+  // batch | serial (0215) — the cell's own sort, null for Okänd.
+  batchKind: "batch" | "serial" | null;
   // Etapp 2: the batch's utgångsdatum and whether it is utgången today —
   // Automatiskt leaves such a cell alone (it can be chosen by hand).
   expiresOn: string | null;
@@ -216,6 +218,7 @@ export async function pickBatchCellsForArticles(
         sortOrder: articleAlternativeLocations.sortOrder,
         batchId: stockTransactions.batchId,
         batchNumber: stockBatches.batchNumber,
+        batchKind: stockBatches.kind,
         batchCreatedAt: stockBatches.createdAt,
         expiresOn: stockBatches.expiresOn,
         batchAgeDate: batchAgeDateSql,
@@ -247,6 +250,7 @@ export async function pickBatchCellsForArticles(
         articleAlternativeLocations.sortOrder,
         stockTransactions.batchId,
         stockBatches.batchNumber,
+        stockBatches.kind,
         stockBatches.createdAt,
         stockBatches.expiresOn,
         stockBatches.batchDate

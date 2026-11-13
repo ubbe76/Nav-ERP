@@ -19,6 +19,7 @@ import * as webPlugins from "../../web/lib/plugins.js";
 import * as webEinvoice from "../../web/lib/einvoice.js";
 import * as webMargin from "../../web/lib/margin.js";
 import * as webShipping from "../../web/lib/shipping.js";
+import * as webSerials from "../../web/lib/serials.js";
 
 describe("units mirror (apps/web/lib/units.ts)", () => {
   const factors = [null, undefined, "", 0, -2, 1, 0.5, 2, "2", "7.38", 12.5, 0.3, 1000];
@@ -224,5 +225,24 @@ describe("shipping mirror (freightModeText)", () => {
   it("has the same parcel kinds and shipment statuses", () => {
     expect(Object.keys(webShipping.PARCEL_KIND_LABELS).sort()).toEqual([...shared.parcelKindSchema.options].sort());
     expect(Object.keys(webShipping.SHIPMENT_STATUS_LABELS).sort()).toEqual([...shared.shipmentStatusSchema.options].sort());
+  });
+});
+
+describe("serials mirror (apps/web/lib/serials.ts)", () => {
+  it("compresses serial numbers like the shared helper", () => {
+    const lists = [
+      [],
+      ["SN-000003"],
+      ["SN-000002", "SN-000001"],
+      ["SN-000010", "SN-000009", "SN-000008", "SN-000012"],
+      ["A9", "A10", "A11", "B-1", "B-2", "B-3", "X"],
+      ["12", "13", "14", "ä-1", "a-1", "z-1", "SN-1", "sn-2", "SN-3"],
+      ["99999999999999999998", "99999999999999999999", "100000000000000000000"],
+    ];
+    for (const list of lists) {
+      expect(webSerials.compressSerialNumbers(list)).toBe(shared.compressSerialNumbers(list));
+      expect(webSerials.serialNumberRuns(list)).toEqual(shared.serialNumberRuns(list));
+      expect(webSerials.sortSerialNumbers(list)).toEqual(shared.sortSerialNumbers(list));
+    }
   });
 });

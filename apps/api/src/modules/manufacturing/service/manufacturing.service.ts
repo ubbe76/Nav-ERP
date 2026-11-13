@@ -50,7 +50,7 @@ import {
 import type { DocumentPdfService, PalletCardPdfInput } from "../../mail/service/document-pdf.js";
 import { documentLanguageOf, localized } from "@navet/shared";
 import { documentTexts } from "../../mail/service/document-texts.js";
-import { extraDescriptionFor, formatBatchLabel } from "../../mail/service/document-pdf.js";
+import { extraDescriptionFor, formatBatchLabel, formatSerialInfo } from "../../mail/service/document-pdf.js";
 import { appendFilesToPdf, mergePdfs } from "../../mail/service/pdf-merge.js";
 import { ArticleNotFoundError, assertOrderableArticle, type ArticleFileReader, type ArticleUnitReader } from "../../article/service/article.service.js";
 import type { MaterialRow, OperationRowView } from "../repository/order-edit.js";
@@ -1194,7 +1194,7 @@ export function createManufacturingService(
   async function buildOperationPalletCards(
     moId: string,
     operationId: string,
-    extras: { quantities?: number[]; printedAt: Date; reportedBy: string | null }
+    extras: { quantities?: number[]; printedAt: Date; reportedBy: string | null; reportId?: string }
   ) {
     const order = await repo.findManufacturingOrderById(moId);
     if (!order) throw new ManufacturingOrderNotFoundError(moId);
@@ -1230,6 +1230,18 @@ export function createManufacturingService(
     // Dokument på engelska (#7): the final card follows the customer's
     // language (it travels with the goods); the internal card is Swedish.
     const language = salesOrderRow ? documentLanguageOf(salesOrderRow.customerLanguage) : "sv";
+    // Serienummer (etapp 2): the numbers the TO has received so far (its
+    // live reports' receiptSerialNumbers) on the LAST operation's card —
+    // empty before the first inleverans, since a tillverkat styck gets its
+    // number when it is received (decision 9). The kolli does not know its
+    // own numbers; every card carries the order's — or, on a report's card
+    // (reportId), the numbers that report received.
+    const receivedSerials = isLast
+      ? (await repo.listReports(moId)).flatMap((report) =>
+          report.undoneAt === null && (extras.reportId === undefined || report.id === extras.reportId) ? report.receiptSerialNumbers : []
+        )
+      : [];
+    const serialText = formatSerialInfo(receivedSerials);
     // One card per kolli, numbered Kolli n av m.
     const cards: PalletCardPdfInput[] = quantities.map((quantity, i) => {
       const common = {
@@ -1247,6 +1259,7 @@ export function createManufacturingService(
         // printed on both variants when the article is batchstyrd.
         // Etapp 2: with the batch's utgångsdatum once it has one.
         batch: order.articleBatchTracked ? formatBatchLabel(order.orderNumber, order.receiptBatchExpiresOn, language) : null,
+        serial: serialText === null ? null : { text: serialText, count: new Set(receivedSerials).size },
       };
       return salesOrderRow
         ? {
@@ -2563,6 +2576,7 @@ export function createManufacturingService(
         quantities: quantities ?? (Number(report.quantityOk) > 0 ? [Number(report.quantityOk)] : undefined),
         printedAt: report.createdAt,
         reportedBy: report.employeeName ?? report.userName ?? null,
+        reportId,
       });
       const content = await pdf.renderPalletCard(cards);
       return { filename: documentTexts(language).filenames.palletCard(`${order.orderNumber}-op${operation.sequenceNo}`), content };

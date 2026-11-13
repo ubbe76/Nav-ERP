@@ -4,6 +4,7 @@ import {
   customers,
   deliveries,
   deliveryRowLocations,
+  deliveryRowSerials,
   deliveryRows,
   manufacturingOrders,
   purchaseOrders,
@@ -40,6 +41,16 @@ import { batchExpiryHorizon, expiringBatchCondition } from "./batch-expiry.js";
 
 const iso = (date: Date) => date.toISOString();
 
+// A serial number given at a delivery whose row was undone since: burnt
+// (decision 18) — derived from delivery_rows.undone_at, nothing is stored.
+// Written out with qualified names (a correlated subquery; delivery_row_
+// serials has batch_id as its primary key, so at most one row).
+const burntSql = sql<boolean>`exists (
+  select 1 from delivery_row_serials burnt_link
+  join delivery_rows burnt_row on burnt_row.id = burnt_link.delivery_row_id
+  where burnt_link.batch_id = ${stockBatches.id} and burnt_row.undone_at is not null
+)`;
+
 const batchRefColumns = {
   batchId: stockBatches.id,
   batchNumber: stockBatches.batchNumber,
@@ -52,6 +63,8 @@ const batchRefColumns = {
   expiresOn: stockBatches.expiresOn,
   origin: stockBatches.origin,
   createdAt: stockBatches.createdAt,
+  kind: stockBatches.kind,
+  burnt: burntSql,
 };
 
 function toRef(row: {
@@ -66,9 +79,11 @@ function toRef(row: {
   expiresOn: string | null;
   origin: TraceBatchRef["origin"];
   createdAt: Date | null;
+  kind: TraceBatchRef["kind"];
+  burnt: boolean | null;
 }): TraceBatchRef {
   const { stockTracked: _stockTracked, ...ref } = row;
-  return { ...ref, batchTracked: ref.tracking === "batch", createdAt: ref.createdAt ? iso(ref.createdAt) : null };
+  return { ...ref, batchTracked: ref.tracking === "batch", createdAt: ref.createdAt ? iso(ref.createdAt) : null, burnt: ref.burnt === true };
 }
 
 // What a set of TOs drew ("mo_consumption", net < 0) or received
@@ -107,7 +122,8 @@ async function moEdges(
       stockBatches.id,
       stockBatches.batchNumber,
       stockBatches.origin,
-      stockBatches.createdAt
+      stockBatches.createdAt,
+      stockBatches.kind
     )
     .having(type === "mo_consumption" ? sql`${net} < 0` : sql`${net} > 0`)
     // Per article: Okänd first, then the oldest batch (compareBatches' order).
@@ -118,6 +134,40 @@ async function moEdges(
     // Lagerspårad now (batch-tracking.ts) — not part of the trace's shape.
     stockTracked: ref.stockTracked === true,
     quantity: Math.abs(Number(quantity)),
+  }));
+}
+
+// The delivery row that gave each of these serial numbers (Serienummer
+// skapas: Vid utleverans), undone or not.
+async function givenAtDelivery(db: Db | Tx, batchIds: string[]) {
+  if (batchIds.length === 0) return [];
+  const rows = await db
+    .select({
+      batchId: deliveryRowSerials.batchId,
+      deliveryId: deliveries.id,
+      deliveryNumber: deliveries.deliveryNumber,
+      deliveryRowId: deliveryRows.id,
+      salesOrderId: salesOrders.id,
+      orderNumber: salesOrders.orderNumber,
+      salesOrderRowId: deliveryRows.salesOrderRowId,
+      customerId: customers.id,
+      customerName: customers.name,
+      deliveredAt: deliveries.deliveredAt,
+      rowQuantity: deliveryRows.quantity,
+      undoneAt: deliveryRows.undoneAt,
+    })
+    .from(deliveryRowSerials)
+    .innerJoin(deliveryRows, eq(deliveryRows.id, deliveryRowSerials.deliveryRowId))
+    .innerJoin(deliveries, eq(deliveries.id, deliveryRows.deliveryId))
+    .innerJoin(salesOrders, eq(salesOrders.id, deliveries.salesOrderId))
+    .innerJoin(customers, eq(customers.id, salesOrders.customerId))
+    .where(inArray(deliveryRowSerials.batchId, batchIds))
+    .orderBy(asc(deliveries.deliveredAt), asc(deliveries.id), asc(deliveryRowSerials.batchId));
+  return rows.map((r) => ({
+    ...r,
+    deliveredAt: iso(r.deliveredAt),
+    rowQuantity: Number(r.rowQuantity),
+    undoneAt: r.undoneAt ? iso(r.undoneAt) : null,
   }));
 }
 
@@ -266,7 +316,30 @@ export function createBatchTraceReader(db: Db | Tx): BatchTraceReader {
           customers.name
         )
         .orderBy(asc(deliveries.deliveredAt), asc(deliveries.id));
-      return rows.map((r) => ({ ...r, deliveredAt: iso(r.deliveredAt), quantity: Number(r.quantity) }));
+      // Serienummer skapas vid utleverans: such a number never stands in
+      // stock — its delivery is the row that GAVE it (delivery_row_serials).
+      // An undone row is kept here, with its stamp: the number is burnt and
+      // the trace shows the delivery as ångrad.
+      const given = await givenAtDelivery(db, batchIds);
+      return [
+        ...rows.map((r) => ({ ...r, deliveredAt: iso(r.deliveredAt), quantity: Number(r.quantity), undoneAt: null })),
+        ...given.map((g) => ({
+          batchId: g.batchId,
+          deliveryId: g.deliveryId,
+          deliveryNumber: g.deliveryNumber,
+          salesOrderId: g.salesOrderId,
+          orderNumber: g.orderNumber,
+          customerId: g.customerId,
+          customerName: g.customerName,
+          deliveredAt: g.deliveredAt,
+          quantity: 1,
+          undoneAt: g.undoneAt,
+        })),
+      ];
+    },
+
+    async deliveryOrigins(batchIds) {
+      return givenAtDelivery(db, batchIds);
     },
 
     async onHand(batchIds) {
@@ -306,6 +379,7 @@ export async function listStockBatches(
     conditions.push(or(ilike(stockBatches.batchNumber, pattern), ilike(articles.articleNumber, pattern), ilike(articles.name, pattern)));
   }
   if (query.articleId) conditions.push(eq(stockBatches.articleId, query.articleId));
+  if (query.kind) conditions.push(eq(stockBatches.kind, query.kind));
   // Etapp 2: the avisering's rows (batch-expiry.ts — the same condition).
   if (query.expiry === "due") conditions.push(expiringBatchCondition(await batchExpiryHorizon(db, today)));
   if (query.expiry === "expired") conditions.push(expiringBatchCondition(addDays(today, -1)));
@@ -321,6 +395,8 @@ export async function listStockBatches(
         articleName: articles.name,
         unitCode: units.code,
         origin: stockBatches.origin,
+        kind: stockBatches.kind,
+        burnt: burntSql,
         createdAt: stockBatches.createdAt,
         expiresOn: stockBatches.expiresOn,
         batchDate: stockBatches.batchDate,
@@ -353,6 +429,7 @@ export async function listStockBatches(
   return {
     rows: rows.map((r) => ({
       ...r,
+      burnt: r.burnt === true,
       createdAt: iso(r.createdAt),
       expired: isBatchExpired(r.expiresOn, today),
       quantity: quantityByBatch.get(r.id) ?? 0,

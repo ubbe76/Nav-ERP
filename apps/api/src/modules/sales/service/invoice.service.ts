@@ -40,7 +40,7 @@ import { rowConfigurationLines } from "../../configurator/service/configuration-
 import { documentTexts } from "../../mail/service/document-texts.js";
 import type { InvoiceableShipment, InvoiceRepository, InvoiceRowWrite, IssueStamp } from "../repository/invoice.repository.js";
 import type { DocumentPdfInput, DocumentSettingsReader, PaymentReminderPdfInput } from "../../mail/service/document-pdf.js";
-import { extraDescriptionFor, formatBatchInfo } from "../../mail/service/document-pdf.js";
+import { extraDescriptionFor, formatBatchInfo, formatSerialInfo } from "../../mail/service/document-pdf.js";
 import { ZeroAmountPostingError, type PostingVatCode } from "../../economy/service/verification-poster.js";
 import {
   documentVatCode,
@@ -605,6 +605,15 @@ export function createInvoiceService(
         { language, whole: delivered.complete }
       );
     };
+    // Serienummer (etapp 2): the same freeze, the same reader's sibling —
+    // the order row's live delivery rows' numbers (drawn from stock or given
+    // at the delivery; burnt numbers never), compressed. No credit-note line
+    // for the same reason as the batch.
+    const deliveredSerials = isCredit
+      ? new Map<string, string[]>()
+      : await repo.deliveredSerialsForOrderRows(rows.flatMap((r) => (r.salesOrderRowId ? [r.salesOrderRowId] : [])));
+    const serialInfoFor = (r: { salesOrderRowId: string | null }): string | null =>
+      formatSerialInfo((r.salesOrderRowId ? deliveredSerials.get(r.salesOrderRowId) : undefined) ?? []);
     // Credits: quantities stay positive, unit prices (and thus every
     // downstream line amount / total / Att betala) are negated — the
     // renderer itself never restructures its arithmetic for this, it just
@@ -715,6 +724,7 @@ export function createInvoiceService(
         customerArticleNumber: r.articleId ? (customerArticleNumbers.get(r.articleId) ?? null) : null,
         setupForArticleNumber: r.setupForArticleNumber,
         batchInfo: batchInfoFor(r),
+        serialInfo: serialInfoFor(r),
       })),
       showTotal: true,
       vat: { perRow: true },

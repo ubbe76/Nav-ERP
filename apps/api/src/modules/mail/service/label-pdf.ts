@@ -19,7 +19,10 @@ export type LabelFormat = "a4" | "single";
 
 export type LabelInput =
   | { kind: "article"; articleNumber: string; name: string; barcode: string | null }
-  | { kind: "location"; labelCode: string; name: string; warehouseName: string };
+  | { kind: "location"; labelCode: string; name: string; warehouseName: string }
+  // Batch- and serienummeretiketter (#8 etapp 2): the number is the code a
+  // scan resolves; the article it belongs to is the caption.
+  | { kind: "batch"; sort: "batch" | "serial"; number: string; articleNumber: string; name: string };
 
 const MM = 72 / 25.4;
 const A4 = { width: 595.28, height: 841.89 };
@@ -42,10 +45,11 @@ function drawLabel(doc: PDFKit.PDFDocument, label: LabelInput, box: Box, large: 
   const smallSize = large ? 9 : 6.5;
   const codeHeight = large ? 44 : 28;
 
-  const code = label.kind === "article" ? label.articleNumber : label.labelCode;
-  const title = label.kind === "article" ? label.articleNumber : label.name;
-  const caption = label.kind === "article" ? label.name : label.warehouseName;
-  const eyebrow = label.kind === "location" ? "LAGERPLATS" : null;
+  const code = label.kind === "article" ? label.articleNumber : label.kind === "batch" ? label.number : label.labelCode;
+  const title = label.kind === "article" ? label.articleNumber : label.kind === "batch" ? label.number : label.name;
+  const caption =
+    label.kind === "article" ? label.name : label.kind === "batch" ? `${label.articleNumber} · ${label.name}` : label.warehouseName;
+  const eyebrow = label.kind === "location" ? "LAGERPLATS" : label.kind === "batch" ? (label.sort === "serial" ? "SERIENUMMER" : "BATCH") : null;
 
   let y = inner.y;
   if (eyebrow) {

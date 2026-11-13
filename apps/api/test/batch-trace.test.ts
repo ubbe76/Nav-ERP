@@ -14,7 +14,9 @@ interface Mo {
   outputs: (string | null)[];
 }
 
-const ref = (batchId: string | null, article = batchId ?? "RAW"): TraceBatchRef => ({
+// An id that starts with "SN-" is a serial number of the article MOTOR.
+const isSerial = (batchId: string | null) => batchId !== null && batchId.startsWith("SN-");
+const ref = (batchId: string | null, article = isSerial(batchId) ? "MOTOR" : (batchId ?? "RAW")): TraceBatchRef => ({
   batchId,
   batchNumber: batchId,
   articleId: `art-${article}`,
@@ -26,6 +28,8 @@ const ref = (batchId: string | null, article = batchId ?? "RAW"): TraceBatchRef 
   expiresOn: null,
   origin: batchId === null ? null : "manual",
   createdAt: batchId === null ? null : "2026-01-01T00:00:00.000Z",
+  kind: batchId === null ? null : isSerial(batchId) ? "serial" : "batch",
+  burnt: false,
 });
 
 function fakeReader(mos: Mo[], extra: { receipts?: string[]; deliveries?: string[]; events?: [string, number][]; onHand?: string[] } = {}) {
@@ -213,5 +217,137 @@ describe("traceBatch (pure)", () => {
     const listed = (await traceBatch(many.reader, "TOP", { maxNodes: 4 }))!;
     expect(listed.truncated).toBe(true);
     expect(listed.forward.deliveries).toHaveLength(3);
+  });
+});
+
+// Serienummer (etapp 2 steg 5): the group node.
+describe("traceBatch (pure) — the serial group node", () => {
+  const sn = (i: number) => `SN-${String(i).padStart(3, "0")}`;
+  const numbers = Array.from({ length: 50 }, (_, i) => sn(i + 1));
+
+  it("a TO that produced 50 numbers is ONE node forward — children merged, counted as one node each against the ceiling", async () => {
+    const { reader, calls } = fakeReader([{ id: "TO-1", inputs: ["RAW1"], outputs: numbers }], {
+      deliveries: numbers.slice(0, 10),
+      onHand: numbers.slice(10),
+      events: numbers.slice(40).map((id): [string, number] => [id, -1]),
+    });
+    // root + TO-1 + the group + one följesedel + one event sort = 5 nodes.
+    const trace = (await traceBatch(reader, "RAW1", { maxNodes: 5 }))!;
+    expect(trace.truncated).toBe(false);
+    const [group, ...rest] = trace.forward.consumedBy[0]!.produced;
+    expect(rest).toEqual([]);
+    expect(group!.stop).toBeNull();
+    expect(group!.quantity).toBe(50);
+    expect(group!.batch).toMatchObject({ batchId: sn(1), kind: "serial", articleNumber: "MOTOR" });
+    expect(group!.serials).toEqual({ count: 50, numbers: `${sn(1)}–${sn(50)}`, batchIds: numbers });
+    // 10 numbers à 3 on the same följesedel: one entry, with exactly those numbers.
+    expect(group!.deliveries).toMatchObject([{ deliveryId: "d", quantity: 30, serialNumbers: `${sn(1)}–${sn(10)}` }]);
+    expect(group!.onHand).toEqual([{ locationId: "l", warehouseName: "Huvudlager", locationName: "A1", blocked: false, quantity: 40 }]);
+    expect(group!.events).toMatchObject([{ kind: "adjustment", quantity: -10 }]);
+    // Backward the root is one level: one round of reads.
+    expect(calls.rounds).toBe(1);
+    // One node less and the trace is cut: the event no longer fits.
+    const cut = (await traceBatch(reader, "RAW1", { maxNodes: 4 }))!;
+    expect(cut.truncated).toBe(true);
+    expect(cut.forward.consumedBy[0]!.produced[0]!.events).toEqual([]);
+  });
+
+  it("more than 200 numbers: every number in the text, the first 200 ids for links", async () => {
+    const many = Array.from({ length: 230 }, (_, i) => sn(i + 1));
+    const trace = (await traceBatch(fakeReader([{ id: "TO-1", inputs: ["RAW1"], outputs: many }]).reader, "RAW1"))!;
+    const group = trace.forward.consumedBy[0]!.produced[0]!;
+    expect(group.serials).toMatchObject({ count: 230, numbers: `${sn(1)}–${sn(230)}` });
+    expect(group.serials!.batchIds).toEqual(many.slice(0, 200));
+  });
+
+  it("a group is formed per TO and article: a lone number and a batch beside it are ordinary nodes; a single number as the root is its own node", async () => {
+    const trace = (await traceBatch(fakeReader([{ id: "TO-1", inputs: ["RAW1"], outputs: [sn(1), "HALF", sn(2), null] }, { id: "TO-2", inputs: ["RAW1"], outputs: [sn(9)] }]).reader, "RAW1"))!;
+    const [first, second] = trace.forward.consumedBy;
+    expect(first!.produced.map((node) => [node.batch.batchNumber, node.serials?.count ?? null, node.stop])).toEqual([
+      [sn(1), 2, null],
+      ["HALF", null, null],
+      [null, null, "unknown"],
+    ]);
+    expect(second!.produced.map((node) => [node.batch.batchNumber, node.serials ?? null])).toEqual([[sn(9), null]]);
+    const own = (await traceBatch(fakeReader([{ id: "TO-1", inputs: ["RAW1"], outputs: numbers }]).reader, sn(7)))!;
+    expect(own.forward.serials).toBeUndefined();
+    expect(own.backward.serials).toBeUndefined();
+    expect(backText(own.backward)).toBe(`${sn(7)}[TO-1(RAW1)]`);
+  });
+
+  it("backward: the numbers a TO drew are one node, their TOs and receipts merged; a diamond is expanded once, then a stub — also for a number that turns up alone", async () => {
+    const three = [sn(1), sn(2), sn(3)];
+    const { reader } = fakeReader(
+      [
+        { id: "TO-0", inputs: ["RAW1"], outputs: three },
+        { id: "TO-1", inputs: three, outputs: ["HALF"] },
+        { id: "TO-2", inputs: ["HALF", ...three, "RAW2"], outputs: ["FINAL"] },
+        { id: "TO-3", inputs: [sn(2)], outputs: ["RAW2"] },
+      ],
+      { receipts: three }
+    );
+    const trace = (await traceBatch(reader, "FINAL"))!;
+    expect(trace.truncated).toBe(false);
+    // Built depth first: the group is expanded where it is met first — under
+    // HALF's TO — and is a stub directly under FINAL's.
+    const [half, stub, raw2] = trace.backward.manufacturingOrders[0]!.materials;
+    const group = half!.manufacturingOrders[0]!.materials[0]!;
+    expect(group).toMatchObject({ stop: null, quantity: 3, serials: { count: 3, numbers: `${sn(1)}–${sn(3)}`, batchIds: three } });
+    // Three numbers from the same order and the same inköpsorder: one entry each.
+    expect(group!.receipts).toMatchObject([{ purchaseOrderId: "po", quantity: 30 }]);
+    expect(group!.manufacturingOrders).toMatchObject([{ manufacturingOrderId: "TO-0", quantity: 15 }]);
+    expect(group!.manufacturingOrders[0]!.materials.map(backText)).toEqual(["RAW1"]);
+    // The same three directly under FINAL's TO: a stub that still says which numbers.
+    expect(stub).toMatchObject({ stop: "repeated", serials: { count: 3 }, receipts: [], manufacturingOrders: [] });
+    // …and one of them alone under RAW2's TO.
+    expect(raw2!.manufacturingOrders[0]!.materials[0]).toMatchObject({ batch: { batchNumber: sn(2) }, stop: "repeated", manufacturingOrders: [] });
+    expect(raw2!.manufacturingOrders[0]!.materials[0]!.serials).toBeUndefined();
+  });
+
+  it("the ceiling: a group that does not fit is ONE stub with stop limit", async () => {
+    const { reader } = fakeReader([{ id: "TO-1", inputs: ["RAW1"], outputs: numbers }], { onHand: numbers });
+    // root + TO-1 = 2 nodes; the group is the third.
+    const trace = (await traceBatch(reader, "RAW1", { maxNodes: 2 }))!;
+    expect(trace.truncated).toBe(true);
+    expect(trace.forward.consumedBy[0]!.produced).toHaveLength(1);
+    expect(trace.forward.consumedBy[0]!.produced[0]).toMatchObject({ stop: "limit", serials: { count: 50 }, onHand: [], deliveries: [] });
+    // The depth ceiling likewise.
+    const shallow = (await traceBatch(reader, "RAW1", { maxDepth: 0 }))!;
+    expect(shallow.truncated).toBe(true);
+    expect(shallow.forward.consumedBy[0]!.produced[0]).toMatchObject({ stop: "limit", serials: { count: 50 } });
+  });
+
+  it("a number created at a delivery: backward carries the delivery that created it (root only); forward its delivery, ångrad when burnt", async () => {
+    const { reader } = fakeReader([]);
+    const origin = {
+      deliveryId: "d",
+      deliveryNumber: "FS-1",
+      deliveryRowId: "dr",
+      salesOrderId: "so",
+      orderNumber: "KO-1",
+      salesOrderRowId: "sor",
+      customerId: "c",
+      customerName: "Kund AB",
+      deliveredAt: "2026-02-01T00:00:00.000Z",
+      rowQuantity: 3,
+      undoneAt: "2026-02-02T00:00:00.000Z",
+    };
+    const withOrigin: BatchTraceReader = {
+      ...reader,
+      async deliveryOrigins(ids) {
+        return ids.includes(sn(1)) ? [{ batchId: sn(1), ...origin }] : [];
+      },
+      async deliveries(ids) {
+        return ids.includes(sn(1))
+          ? [{ batchId: sn(1), deliveryId: "d", deliveryNumber: "FS-1", salesOrderId: "so", orderNumber: "KO-1", customerId: "c", customerName: "Kund AB", deliveredAt: origin.deliveredAt, quantity: 1, undoneAt: origin.undoneAt }]
+          : [];
+      },
+    };
+    const trace = (await traceBatch(withOrigin, sn(1)))!;
+    expect(trace.backward).toMatchObject({ stop: null, receipts: [], manufacturingOrders: [], events: [], deliveryOrigin: origin });
+    expect(trace.forward.deliveries).toMatchObject([{ deliveryId: "d", quantity: 1, undoneAt: origin.undoneAt }]);
+    // A reader without the method, and a batch without an origin: no field.
+    expect((await traceBatch(reader, "RAW1"))!.backward.deliveryOrigin).toBeUndefined();
+    expect((await traceBatch(withOrigin, "RAW1"))!.backward.deliveryOrigin).toBeUndefined();
   });
 });

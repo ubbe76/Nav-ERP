@@ -210,7 +210,7 @@ export function InkopTab({ articleId }: { articleId: string }) {
           { key: "quantity", label: "Antal", width: "110px", align: "right" },
           { key: "unitPrice", label: "À-pris", width: "120px", align: "right" },
           { key: "locationName", label: "Lagerplats", width: "130px" },
-          ...(receipts.some((r) => r.batchNumber) ? [{ key: "batchNumber", label: "Batch", width: "120px" }] : []),
+          ...(receipts.some((r) => r.batchNumber) ? [{ key: "batchNumber", label: "Batch / serienummer", width: "150px" }] : []),
         ]}
         rows={receipts}
         emptyText="Inga inleveranser registrerade"

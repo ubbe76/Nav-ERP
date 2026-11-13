@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { and, asc, count, desc, eq, getTableColumns, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { customerArticleNumberMap } from "./customer-article-numbers.js";
-import { deliveredBatchesForOrderRows } from "./delivered-batches.js";
+import { deliveredBatchesForOrderRows, deliveredSerialsForOrderRows } from "./delivered-batches.js";
 import {
   articleGroups,
   articles,
@@ -1086,6 +1086,11 @@ export function createInvoiceRepository(db: Db) {
     // invoice PDF's "Batch: …" line (delivered-batches.ts, the one reader).
     async deliveredBatchesForOrderRows(salesOrderRowIds: string[]) {
       return deliveredBatchesForOrderRows(db, salesOrderRowIds);
+    },
+
+    // Serienummer: the order rows' delivered (not undone) serial numbers.
+    async deliveredSerialsForOrderRows(salesOrderRowIds: string[]) {
+      return deliveredSerialsForOrderRows(db, salesOrderRowIds);
     },
 
     async listRows(invoiceId: string) {

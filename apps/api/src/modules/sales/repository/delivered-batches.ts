@@ -32,6 +32,7 @@ export async function deliveredBatchesForOrderRows(db: Db | Tx, salesOrderRowIds
         salesOrderRowId: deliveryRows.salesOrderRowId,
         batchId: stockTransactions.batchId,
         batchNumber: stockBatches.batchNumber,
+        batchKind: stockBatches.kind,
         batchCreatedAt: stockBatches.createdAt,
         // For the order only (FEFO) — the invoice prints no dates.
         expiresOn: stockBatches.expiresOn,
@@ -51,13 +52,17 @@ export async function deliveredBatchesForOrderRows(db: Db | Tx, salesOrderRowIds
         deliveryRows.salesOrderRowId,
         stockTransactions.batchId,
         stockBatches.batchNumber,
+        stockBatches.kind,
         stockBatches.createdAt,
         stockBatches.expiresOn,
         stockBatches.batchDate
       );
     for (const row of [...rows].sort(compareBatches)) {
       const entry = result.get(row.salesOrderRowId) ?? { batches: [], complete: true };
-      if (row.batchId === null || row.batchNumber === null) entry.complete = false;
+      // A serial number is not a batch: it goes on the Serienummer line
+      // (deliveredSerialsForOrderRows), and the batches beside it then do
+      // not cover the row on their own.
+      if (row.batchId === null || row.batchNumber === null || row.batchKind === "serial") entry.complete = false;
       else entry.batches.push({ batchId: row.batchId, batchNumber: row.batchNumber, quantity: Number(row.quantity) });
       result.set(row.salesOrderRowId, entry);
     }

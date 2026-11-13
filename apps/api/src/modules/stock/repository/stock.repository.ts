@@ -278,6 +278,29 @@ export function createStockRepository(db: Db) {
       return ids.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
     },
 
+    // Etiketter (#8 etapp 2): what a batch or serienummer label prints, in
+    // the order asked for. The sort is the row's own.
+    async labelBatches(ids: string[]) {
+      const found: { id: string; batchNumber: string; kind: "batch" | "serial"; articleNumber: string; articleName: string }[] = [];
+      for (let i = 0; i < ids.length; i += 1000) {
+        found.push(
+          ...(await db
+            .select({
+              id: stockBatches.id,
+              batchNumber: stockBatches.batchNumber,
+              kind: stockBatches.kind,
+              articleNumber: articles.articleNumber,
+              articleName: articles.name,
+            })
+            .from(stockBatches)
+            .innerJoin(articles, eq(articles.id, stockBatches.articleId))
+            .where(inArray(stockBatches.id, ids.slice(i, i + 1000))))
+        );
+      }
+      const byId = new Map(found.map((row) => [row.id, row]));
+      return ids.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
+    },
+
     async listLocations(query: ListStockLocationsQuery = { includeInactive: false }) {
       const rows = await db
         .select(locationColumns)

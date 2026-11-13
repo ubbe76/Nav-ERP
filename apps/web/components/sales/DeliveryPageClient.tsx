@@ -15,6 +15,9 @@ import { useCountState, useScanFeedback, useScanQueue } from "../ui/useOrderScan
 import { ApiError, apiFetch } from "../../lib/api";
 import { BatchSelect, useBatchBalances } from "../stock/BatchSelect";
 import { BATCH_AUTO, batchIdField, expiredBatchLocationId } from "../../lib/batch";
+import { compressSerialNumbers } from "../../lib/serials";
+import { serialCountOf } from "../../lib/serialInput";
+import { DeliverySerialsField, SerialCellPicker, isDeliverySerial, isStockSerial, useSerialModes } from "../stock/SerialNumbers";
 import { outflowLocationChoices } from "../../lib/stockLocations";
 import { confirmDialog } from "../../lib/confirm";
 import { notify } from "../../lib/notice";
@@ -127,11 +130,23 @@ export function DeliveryPageClient({
   const [balances, setBalances] = useState<Record<string, ArticleLocationBalance[]>>({});
   // Batch (#8) per row: "" = Automatiskt. Only batch-tracked rows have a choice.
   const [rowBatches, setRowBatches] = useState<Record<string, string>>({});
+  // Serienummer (#8 etapp 2): numbers picked in stock (serialIds, stock per
+  // number) or given at the delivery (serialNumbers, Vid utleverans).
+  const serialModes = useSerialModes(openRows.map((r) => ({ articleId: r.articleId, tracking: r.articleTracking })));
+  const [rowSerialIds, setRowSerialIds] = useState<Record<string, string[]>>({});
+  const [rowGivenSerials, setRowGivenSerials] = useState<Record<string, string[]>>({});
+  const stockSerial = (r: SalesOrderRow) => isStockSerial(r.articleTracking, serialModes, r.articleId);
+  const deliverySerial = (r: SalesOrderRow) => isDeliverySerial(r.articleTracking, serialModes, r.articleId);
   const trackedArticleIds = useMemo(
     () => openRows.filter((r) => r.articleBatchTracked).map((r) => r.articleId),
     [openRows]
   );
-  const { rows: batchRows, reload: reloadBatches } = useBatchBalances(trackedArticleIds);
+  const serialStockArticleIds = useMemo(
+    () => openRows.filter((r) => isStockSerial(r.articleTracking, serialModes, r.articleId)).map((r) => r.articleId),
+    [openRows, serialModes]
+  );
+  const hasSerialRows = serialStockArticleIds.length > 0 || openRows.some((r) => isDeliverySerial(r.articleTracking, serialModes, r.articleId));
+  const { rows: batchRows, reload: reloadBatches } = useBatchBalances([...trackedArticleIds, ...serialStockArticleIds]);
   // A scanned lagerplats that GET /stock/locations leaves out (inactive: it
   // holds nothing), added to the select so the choice can be shown.
   const [scannedLocation, setScannedLocation] = useState<LocationOption | null>(null);
@@ -172,6 +187,8 @@ export function DeliveryPageClient({
   useEffect(() => {
     setRowLocations({});
     setRowBatches({});
+    setRowSerialIds({});
+    setRowGivenSerials({});
   }, [selectedId]);
   useEffect(() => {
     if (!openArticleKey) {
@@ -332,9 +349,24 @@ export function DeliveryPageClient({
     if (toDeliver.length === 0 || !selectedId) return;
     const deliveredOrderId = selectedId;
 
+    // Vid utleverans: the numbers shown must be one per styck.
+    const serialErrors: Record<string, string> = {};
+    for (const { row, quantity } of toDeliver) {
+      if (!deliverySerial(row)) continue;
+      const given = rowGivenSerials[row.id] ?? [];
+      const styck = toBaseQuantity(quantity, row.unitFactor);
+      if (given.length > 0 && given.length !== styck) {
+        serialErrors[row.id] = `Ange ett serienummer per styck — ${given.length} av ${styck} angivna.`;
+      }
+    }
+    if (Object.keys(serialErrors).length > 0) {
+      setRowErrors(serialErrors);
+      return;
+    }
+
     setPending(true);
     try {
-      const result = await apiFetch<{ deliveryId: string; deliveryNumber: string; orderStatus: string }>(
+      const result = await apiFetch<{ deliveryId: string; deliveryNumber: string; orderStatus: string; assignedSerials?: { rowId: string; serialNumbers: string[] }[] }>(
         `/api/v1/sales-orders/${selectedId}/deliver`,
         {
           method: "POST",
@@ -351,18 +383,24 @@ export function DeliveryPageClient({
                   : undefined) ||
                 undefined,
               ...(row.articleBatchTracked ? batchIdField(rowBatches[row.id] ?? BATCH_AUTO) : {}),
+              ...(stockSerial(row) && (rowSerialIds[row.id] ?? []).length > 0 ? { serialIds: rowSerialIds[row.id] } : {}),
+              ...(deliverySerial(row) && (rowGivenSerials[row.id] ?? []).length > 0 ? { serialNumbers: rowGivenSerials[row.id] } : {}),
             })),
           }),
         }
       );
+      // Serienummer given at the delivery, per row.
+      const assignedText = (result.assignedSerials ?? [])
+        .map((a) => `${openRows.find((r) => r.id === a.rowId)?.articleNumber ?? ""} ${compressSerialNumbers(a.serialNumbers)}`.trim())
+        .join("; ");
       setDone({
-        message: `${toDeliver.length} rad${toDeliver.length === 1 ? "" : "er"} utlevererade`,
+        message: `${toDeliver.length} rad${toDeliver.length === 1 ? "" : "er"} utlevererade${assignedText ? ` — serienummer: ${assignedText}` : ""}`,
         orderId: deliveredOrderId,
         deliveryId: result.deliveryId,
         deliveryNumber: result.deliveryNumber,
       });
       notify({
-        message: `Utlevererat ${toDeliver.length} rad${toDeliver.length === 1 ? "" : "er"} på ${order?.orderNumber ?? ""} — följesedel ${result.deliveryNumber}.`,
+        message: `Utlevererat ${toDeliver.length} rad${toDeliver.length === 1 ? "" : "er"} på ${order?.orderNumber ?? ""} — följesedel ${result.deliveryNumber}.${assignedText ? ` Serienummer: ${assignedText}.` : ""}`,
         action: {
           label: "Ångra…",
           run: async () => {
@@ -375,6 +413,8 @@ export function DeliveryPageClient({
       setLastRowId(null);
       setRowLocations({});
       setRowBatches({});
+      setRowSerialIds({});
+      setRowGivenSerials({});
       reloadBatches();
       clearFeedback();
       // Pallkort: auto-open the cards for the delivery (one page per row) —
@@ -597,6 +637,7 @@ export function DeliveryPageClient({
                 : []),
               { key: "location", label: "Lagerplats", width: "190px" },
               ...(trackedArticleIds.length > 0 ? [{ key: "batch", label: "Batch", width: "170px" }] : []),
+              ...(hasSerialRows ? [{ key: "serial", label: "Serienummer", width: "240px" }] : []),
               { key: "id", label: "Leverera nu", width: "180px", align: "right" },
             ]}
             rows={openRows}
@@ -646,6 +687,38 @@ export function DeliveryPageClient({
                       onChange={(v) => setRowBatches((prev) => ({ ...prev, [row.id]: v }))}
                     />
                   ) : null;
+                case "serial":
+                  if (stockSerial(row)) {
+                    return (
+                      <SerialCellPicker
+                        ariaLabel={`Serienummer — ${row.articleNumber}`}
+                        rows={batchRows}
+                        articleId={row.articleId}
+                        locationId={rowLocations[row.id] || locationId || null}
+                        value={rowSerialIds[row.id] ?? []}
+                        onChange={(next) => {
+                          setRowSerialIds((prev) => ({ ...prev, [row.id]: next }));
+                          // One styck per number: Leverera nu follows the picked numbers.
+                          const quantities = { ...countRef.current.quantities };
+                          if (next.length > 0) quantities[row.id] = String(toUnitQuantity(next.length, row.unitFactor));
+                          else delete quantities[row.id];
+                          setCount({ ...countRef.current, quantities });
+                        }}
+                      />
+                    );
+                  }
+                  if (deliverySerial(row)) {
+                    return (
+                      <DeliverySerialsField
+                        ariaLabel={`Serienummer — ${row.articleNumber}`}
+                        articleId={row.articleId}
+                        count={serialCountOf(toBaseQuantity(Number(enteredQuantity(scanRowOf(row), count)), row.unitFactor))}
+                        value={rowGivenSerials[row.id] ?? []}
+                        onChange={(next) => setRowGivenSerials((prev) => ({ ...prev, [row.id]: next }))}
+                      />
+                    );
+                  }
+                  return null;
                 case "id":
                   return (
                     <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>

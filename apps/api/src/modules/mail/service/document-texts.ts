@@ -104,6 +104,8 @@ export interface DocumentTexts {
     batch: string;
     // Etapp 2: before a batch's utgångsdatum — "L-778 utg. 2027-03-01 (6)".
     expires: string;
+    // Serienummer: "Serienummer: SN-001001–SN-001010, SN-001015" under a row.
+    serial: string;
     // "Order KO… · Ert ordernr …" under an invoice row.
     orderReference: (orderNumber: string, customerOrderNumber: string | null) => string;
     // "Ytbehandling: … · Färg: …" and "Rev B · Ritn 4711 rev C".
@@ -212,6 +214,12 @@ export interface DocumentTexts {
     reference: string;
     // Batch (#8): the bottom row's last cell.
     batch: string;
+    // Serienummer: its own cell after the batch — the numbers compressed,
+    // or, when they do not fit the cell, the count alone (serialCount on a
+    // TO card, serialOverflow on a delivery card, which has a följesedel).
+    serial: string;
+    serialCount: (count: number) => string;
+    serialOverflow: (count: number) => string;
   };
 
   deviation: {
@@ -320,6 +328,7 @@ const sv: DocumentTexts = {
     deliveryDate: "Leveransdatum",
     batch: "Batch",
     expires: "utg.",
+    serial: "Serienummer",
     orderReference: (orderNumber, customerOrderNumber) =>
       `Order ${orderNumber}${customerOrderNumber ? ` · Ert ordernr ${customerOrderNumber}` : ""}`,
     surfaceTreatment: "Ytbehandling",
@@ -416,6 +425,9 @@ const sv: DocumentTexts = {
     reportedBy: "RAPPORTERAD AV",
     reference: "REFERENS",
     batch: "BATCH",
+    serial: "SERIENUMMER",
+    serialCount: (count) => `${count} st`,
+    serialOverflow: (count) => `${count} st — se följesedel`,
   },
   deviation: {
     titles: { supplier: "Reklamation", customer: "Reklamationsbesked", internal: "Avvikelserapport" },
@@ -534,6 +546,7 @@ const en: DocumentTexts = {
     deliveryDate: "Delivery date",
     batch: "Batch",
     expires: "exp.",
+    serial: "Serial no.",
     orderReference: (orderNumber, customerOrderNumber) =>
       `Order ${orderNumber}${customerOrderNumber ? ` · Your order no. ${customerOrderNumber}` : ""}`,
     surfaceTreatment: "Surface treatment",
@@ -630,6 +643,9 @@ const en: DocumentTexts = {
     reportedBy: "REPORTED BY",
     reference: "REFERENCE",
     batch: "BATCH NO.",
+    serial: "SERIAL NO.",
+    serialCount: (count) => `${count} pcs`,
+    serialOverflow: (count) => `${count} pcs — see delivery note`,
   },
   deviation: {
     titles: { supplier: "Complaint", customer: "Complaint notice", internal: "Deviation report" },

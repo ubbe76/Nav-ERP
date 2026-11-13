@@ -55,7 +55,11 @@ import { CurrencyInput } from "../ui/CurrencyInput";
 import { OrderRateField } from "./OrderRateField";
 import { apiFetch } from "../../lib/api";
 import { BatchSelect, useBatchBalances } from "../stock/BatchSelect";
+import { notify } from "../../lib/notice";
 import { BATCH_AUTO, batchIdField, expiredBatchLocationId } from "../../lib/batch";
+import { compressSerialNumbers } from "../../lib/serials";
+import { serialCountOf } from "../../lib/serialInput";
+import { DeliverySerialsField, SerialCellPicker, isDeliverySerial, isStockSerial, useSerialModes } from "../stock/SerialNumbers";
 import { stashReleaseWarnings } from "../../lib/releaseWarnings";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { askBumpRevision } from "../../lib/revision";
@@ -2090,10 +2094,20 @@ function DeliverGoodsForm({
   const [batch, setBatch] = useState(BATCH_AUTO);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const { rows: batchRows } = useBatchBalances(rows.filter((r) => r.articleBatchTracked).map((r) => r.articleId));
+  // Serienummer (#8 etapp 2): picked in stock, or given at the delivery.
+  const serialModes = useSerialModes(rows.map((r) => ({ articleId: r.articleId, tracking: r.articleTracking })));
+  const [serialIds, setSerialIds] = useState<string[]>([]);
+  const [givenSerials, setGivenSerials] = useState<string[]>([]);
+  const { rows: batchRows } = useBatchBalances(
+    rows
+      .filter((r) => r.articleBatchTracked || isStockSerial(r.articleTracking, serialModes, r.articleId))
+      .map((r) => r.articleId)
+  );
   // Quantities are entered in the row's unit and converted to the base unit
   // before hitting the deliver endpoint (stock is always base).
   const selectedRow = rows.find((r) => r.id === rowId) ?? rows[0];
+  const stockSerial = selectedRow ? isStockSerial(selectedRow.articleTracking, serialModes, selectedRow.articleId) : false;
+  const deliverySerial = selectedRow ? isDeliverySerial(selectedRow.articleTracking, serialModes, selectedRow.articleId) : false;
   // Konfigurator 4c: delivering a configured row beyond its finished TOs warns, never blocks.
   const deliveryWarning = selectedRow
     ? configuredDeliveryWarning(selectedRow, toBaseQuantity(Number(quantity), selectedRow.unitFactor))
@@ -2102,12 +2116,19 @@ function DeliverGoodsForm({
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    if (deliverySerial && givenSerials.length > 0) {
+      const styck = toBaseQuantity(Number(quantity), selectedRow?.unitFactor ?? null);
+      if (givenSerials.length !== styck) {
+        setError(`Ange ett serienummer per styck — ${givenSerials.length} av ${styck} angivna.`);
+        return;
+      }
+    }
     setPending(true);
     try {
       // Same batch endpoint the utleveransrutinen uses (C2's
       // POST .../deliver), just with a single row — one code path, one
       // delivery-occasion/följesedel record either way.
-      await apiFetch(`/api/v1/sales-orders/${orderId}/deliver`, {
+      const result = await apiFetch<{ assignedSerials?: { rowId: string; serialNumbers: string[] }[] }>(`/api/v1/sales-orders/${orderId}/deliver`, {
         method: "POST",
         body: JSON.stringify({
           locationId:
@@ -2119,10 +2140,15 @@ function DeliverGoodsForm({
               rowId,
               quantity: toBaseQuantity(Number(quantity), selectedRow?.unitFactor ?? null),
               ...(selectedRow?.articleBatchTracked ? batchIdField(batch) : {}),
+              ...(stockSerial && serialIds.length > 0 ? { serialIds } : {}),
+              ...(deliverySerial && givenSerials.length > 0 ? { serialNumbers: givenSerials } : {}),
             },
           ],
         }),
       });
+      // The numbers given at the delivery are told once, here and on the följesedel.
+      const given = (result.assignedSerials ?? []).flatMap((a) => a.serialNumbers);
+      if (given.length > 0) notify({ message: `Serienummer: ${compressSerialNumbers(given)}.` });
       onDone();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte leverera"));
@@ -2142,6 +2168,8 @@ function DeliverGoodsForm({
           onChange={(e) => {
             setRowId(e.target.value);
             setBatch(BATCH_AUTO);
+            setSerialIds([]);
+            setGivenSerials([]);
           }}
         >
           {rows.map((r) => (
@@ -2189,6 +2217,33 @@ function DeliverGoodsForm({
             locationId={locationId || null}
             value={batch}
             onChange={setBatch}
+          />
+        </Field>
+      )}
+      {selectedRow && stockSerial && (
+        <Field label="Serienummer" htmlFor="deliverSerials">
+          <SerialCellPicker
+            ariaLabel="Serienummer"
+            rows={batchRows}
+            articleId={selectedRow.articleId}
+            locationId={locationId || null}
+            value={serialIds}
+            onChange={(next) => {
+              setSerialIds(next);
+              // One styck per number: Antal follows the picked numbers.
+              if (next.length > 0) setQuantity(String(toUnitQuantity(next.length, selectedRow.unitFactor)));
+            }}
+          />
+        </Field>
+      )}
+      {selectedRow && deliverySerial && (
+        <Field label="Serienummer" htmlFor="deliverSerials">
+          <DeliverySerialsField
+            ariaLabel="Serienummer"
+            articleId={selectedRow.articleId}
+            count={serialCountOf(toBaseQuantity(Number(quantity), selectedRow.unitFactor))}
+            value={givenSerials}
+            onChange={setGivenSerials}
           />
         </Field>
       )}

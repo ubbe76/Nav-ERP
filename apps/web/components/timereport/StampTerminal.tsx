@@ -1,5 +1,6 @@
 "use client";
 
+import { compressSerialNumbers } from "../../lib/serials";
 import { useScrapReasons } from "../../lib/useScrapReasons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -922,6 +923,9 @@ export function StampTerminal({
       clearStampOutFields();
       setError(null);
       setStep({ name: "home", employee });
+      // Serienummer (#8 etapp 2): the numbers the report received.
+      const received = (stopped as { receivedSerialNumbers?: string[] } | undefined)?.receivedSerialNumbers ?? [];
+      if (received.length > 0) setNotice(`Mottagna serienummer: ${compressSerialNumbers(received)}.`);
     } catch (err) {
       if (
         err instanceof ApiError &&

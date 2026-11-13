@@ -1,5 +1,5 @@
 import { renderLabelsPdf, type LabelInput } from "../../mail/service/label-pdf.js";
-import { formatLocationLabelCode, type LocationLabelsInput } from "@navet/shared";
+import { formatLocationLabelCode, type BatchLabelsInput, type LocationLabelsInput } from "@navet/shared";
 import type {
   ArticleLocationsInput,
   CreateStockLocationInput,
@@ -137,6 +137,26 @@ export function createStockService(repo: StockRepository, audit: AuditWriter = {
           labelCode: formatLocationLabelCode(l.labelNumber),
           name: l.name,
           warehouseName: l.warehouseName,
+        }))
+      );
+      return renderLabelsPdf(labels, input.format, input.start);
+    },
+
+    // Etiketter (#8 etapp 2): batch- and serienummeretiketter — one label
+    // per stock_batches row and copy, in the order asked for (the web sends
+    // a report's or an inleverans's numbers). Unknown ids are left out; none
+    // known is a 404. Readable whatever the setting or the article's
+    // Spårning says now — a label writes nothing.
+    async renderBatchLabels(input: BatchLabelsInput) {
+      const found = await repo.labelBatches([...new Set(input.batchIds)]);
+      if (found.length === 0) throw new StockBatchNotFoundError(input.batchIds[0]!);
+      const labels: LabelInput[] = found.flatMap((b) =>
+        Array.from({ length: input.copies }, () => ({
+          kind: "batch" as const,
+          sort: b.kind,
+          number: b.batchNumber,
+          articleNumber: b.articleNumber,
+          name: b.articleName,
         }))
       );
       return renderLabelsPdf(labels, input.format, input.start);

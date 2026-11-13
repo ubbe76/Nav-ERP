@@ -34,6 +34,8 @@ export function batchOptions(rows: BatchBalanceRow[], articleId: string, locatio
   for (const r of rows) {
     if (r.articleId !== articleId) continue;
     if (locationId && r.locationId !== locationId) continue;
+    // A serial number is chosen as a serienummer (SerialCellPicker), not as a batch.
+    if (r.batchKind === "serial") continue;
     const value = r.batchId ?? BATCH_UNKNOWN;
     const prev = byBatch.get(value);
     if (prev) prev.quantity += Number(r.quantity);
