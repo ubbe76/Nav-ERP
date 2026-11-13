@@ -1307,7 +1307,7 @@ describe("article import — Batchstyrd", () => {
     expect(plan.creates[2]).not.toHaveProperty("tracking");
     expect(plan.rows[3]!.errors).toEqual(["En tjänst eller fantomartikel kan inte vara batchstyrd"]);
     expect(plan.rows[4]!.errors).toEqual(["En tjänst eller fantomartikel kan inte vara batchstyrd"]);
-    expect(plan.rows[5]!.errors).toEqual(['Ogiltigt värde för Spårning: "Kanske" (Ingen/Batch, eller Ja/Nej för Batchstyrd)']);
+    expect(plan.rows[5]!.errors).toEqual(['Ogiltigt värde för Spårning: "Kanske" (Ingen/Batch/Serienummer, eller Ja/Nej för Batchstyrd)']);
     expect(plan.rows[6]!.errors).toEqual([]);
   });
 

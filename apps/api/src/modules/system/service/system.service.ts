@@ -16,6 +16,7 @@ import type {
 import { EXTRA_DESCRIPTION_DOCUMENTS, round2 } from "@navet/shared";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_ARTICLE_SERIES_KEY, documentSeriesTarget, formatSeriesNumber } from "./number-series.js";
+import { DEFAULT_SERIAL_SERIES_KEY } from "../../stock/service/serial-numbers.js";
 import type { SystemRepository } from "../repository/system.repository.js";
 import { createDatabaseBackup } from "./backup.js";
 import { decodeDeliveryDefaults, DELIVERY_SETTING_KEYS, type DeliveryDefaults } from "./delivery-days.js";
@@ -258,8 +259,11 @@ export class NumberSeriesNumberTakenError extends Error {
   }
 }
 
-const isOwnArticleSeries = (row: { key: string; forArticles: boolean }) =>
-  row.forArticles && row.key !== DEFAULT_ARTICLE_SERIES_KEY;
+// The user's own series: article number series and (0215) serial number
+// series. The built-in ones — "article", "serial" and the document series —
+// can be reconfigured but neither renamed nor deleted.
+const isOwnArticleSeries = (row: { key: string; forArticles: boolean; forSerials: boolean }) =>
+  (row.forArticles && row.key !== DEFAULT_ARTICLE_SERIES_KEY) || (row.forSerials && row.key !== DEFAULT_SERIAL_SERIES_KEY);
 
 export class SetupChargeArticleNotFoundError extends Error {
   constructor(id: string) {
@@ -523,7 +527,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
     async createArticleNumberSeries(input: CreateArticleNumberSeriesInput, userId: string | null = null) {
       // Keys are internal (they address the series in the API); the name is
       // what the user sees and picks.
-      const key = `article_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+      const key = `${input.forSerials ? "serial" : "article"}_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
       let row;
       try {
         row = await repo.createArticleNumberSeries(key, input);
@@ -535,7 +539,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
         entityType: "number_series",
         entityId: key,
         action: "created",
-        detail: { name: row.name, prefix: row.prefix, nextNumber: row.nextNumber, digits: row.digits },
+        detail: { name: row.name, prefix: row.prefix, nextNumber: row.nextNumber, digits: row.digits, ...(row.forSerials ? { forSerials: true } : {}) },
         userId,
       });
       return row;

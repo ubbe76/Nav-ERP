@@ -399,5 +399,9 @@ export const createArticleNumberSeriesSchema = z.object({
   prefix: z.string().max(20).default(""),
   nextNumber: blankSafe(z.coerce.number().int().positive()).default(1),
   digits: blankSafe(z.coerce.number().int().min(0).max(10)).default(0),
+  // Serienummerserier (#8 etapp 2, 0215): true makes it a serial number
+  // series (chosen on a serienummerstyrd article) instead of an article
+  // number series.
+  forSerials: z.boolean().optional(),
 });
 export type CreateArticleNumberSeriesInput = z.infer<typeof createArticleNumberSeriesSchema>;

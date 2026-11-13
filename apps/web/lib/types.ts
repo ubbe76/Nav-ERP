@@ -3910,10 +3910,13 @@ export type NumberSeriesKey =
   | "stock_count"
   | "quote"
   | "invoice_scan"
-  | "deviation";
+  | "deviation"
+  | "serial";
 
 export const NUMBER_SERIES_LABELS: Record<NumberSeriesKey, string> = {
   article: "Artikelnummer",
+  // Serienummer (#8 etapp 2): the common serial number series.
+  serial: "Serienummer",
   purchase_order: "Inköpsorder",
   quote: "Offert",
   sales_order: "Kundorder",

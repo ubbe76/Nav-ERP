@@ -67,6 +67,7 @@ export const STOCK_BALANCE_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "quantity", label: "Antal (saldo efter importen)", required: true },
   { field: "unitCost", label: "À-pris" },
   { field: "batchNumber", label: "Batch" },
+  { field: "serialNumber", label: "Serienummer" },
   { field: "batchDate", label: "Batchdatum" },
   { field: "expiresOn", label: "Utgångsdatum" },
 ];

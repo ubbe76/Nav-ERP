@@ -1,4 +1,5 @@
-import { and, asc, count, eq, isNotNull, lte, ne, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, eq, isNotNull, lte, sql, type SQL } from "drizzle-orm";
+import { trackedSql } from "../service/batch-tracking.js";
 import { articles, stockBatches, systemSettings, units, type Db, type Tx } from "@navet/db";
 import { ALERT_BATCH_EXPIRY_DAYS_KEY, decodeAlertBatchExpiryDays } from "../../system/service/alert-settings.js";
 import { addDays } from "../../system/service/delivery-days.js";
@@ -34,7 +35,7 @@ export function expiringBatchCondition(horizon: string): SQL {
   return and(
     isNotNull(stockBatches.expiresOn),
     lte(stockBatches.expiresOn, horizon),
-    ne(articles.tracking, "none"),
+    trackedSql(),
     sql`${batchUsableQuantitySql} > 0`
   )!;
 }

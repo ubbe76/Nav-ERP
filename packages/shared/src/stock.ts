@@ -80,6 +80,12 @@ export const batchNumberSchema = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
   z.string().trim().min(1).max(50).optional()
 );
+// Serienummer (etapp 2, 0215): at most this many numbers in one movement.
+export const SERIAL_NUMBERS_MAX = 1000;
+// An INFLOW of a serienummerstyrd article names one number per styck
+// (trimmed, at most 50 characters each; compared case-insensitively).
+export const serialNumbersSchema = z.array(z.string().trim().min(1).max(50)).min(1).max(SERIAL_NUMBERS_MAX);
+
 // Utgångsdatum / Batchdatum on a write (etapp 2): an ISO day, "" = left out.
 export const batchDayInputSchema = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),

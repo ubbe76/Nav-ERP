@@ -657,8 +657,8 @@ describe("import exports — the round trip", () => {
     ]);
 
     expect(await table("stockBalances")).toEqual([
-      { Artikelnummer: "007", Lager: "ZX Lager", Lagerplats: "A2", Antal: "100", "À-pris": "", Batch: "", Batchdatum: "", Utgångsdatum: "" },
-      { Artikelnummer: "EX-200", Lager: "ZX Lager", Lagerplats: "A1", Antal: "7,5", "À-pris": "", Batch: "", Batchdatum: "", Utgångsdatum: "" },
+      { Artikelnummer: "007", Lager: "ZX Lager", Lagerplats: "A2", Antal: "100", "À-pris": "", Batch: "", Serienummer: "", Batchdatum: "", Utgångsdatum: "" },
+      { Artikelnummer: "EX-200", Lager: "ZX Lager", Lagerplats: "A1", Antal: "7,5", "À-pris": "", Batch: "", Serienummer: "", Batchdatum: "", Utgångsdatum: "" },
     ]);
 
     const customerRows = await table("customers");

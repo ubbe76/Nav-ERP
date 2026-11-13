@@ -1,22 +1,21 @@
 import { eq, inArray, ne, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { articles, systemSettings, type Db, type Tx } from "@navet/db";
-import type { ArticleTracking } from "./article-tracking.js";
+import { stockTrackingOf, type StockTracking } from "./article-tracking.js";
 
-export { isTracked, resolveTracking, mentionsTracking, type ArticleTracking } from "./article-tracking.js";
+export { isTracked, resolveTracking, mentionsTracking, stockTrackingOf, type ArticleTracking, type StockTracking } from "./article-tracking.js";
 
-// In a SELECT/WHERE with `articles` (or an alias of it) in scope. "Spårad"
-// (any sort) is what the mechanics ask; `batchTracked` in a response is the
-// backwards compatible alias = the sort is batch.
-export function trackedSql(table: { tracking: AnyPgColumn } = articles): SQL<boolean> {
-  return sql<boolean>`(${table.tracking} <> 'none')`;
+// In a SELECT/WHERE with `articles` (or an alias of it) in scope.
+// trackedSql = LAGERSPÅRAD (stockTrackingOf in SQL — what the mechanics ask);
+// `batchTracked` in a response is the backwards compatible alias = the sort
+// is batch.
+type TrackingColumns = { tracking: AnyPgColumn; serialAssignedAt: AnyPgColumn };
+export function trackedSql(table: TrackingColumns = articles): SQL<boolean> {
+  return sql<boolean>`(${table.tracking} = 'batch' or (${table.tracking} = 'serial' and ${table.serialAssignedAt} = 'receipt'))`;
 }
 export function batchTrackedSql(table: { tracking: AnyPgColumn } = articles): SQL<boolean> {
   return sql<boolean>`(${table.tracking} = 'batch')`;
 }
-
-// Batchstyrd (#8) — the ONE place the article's flag and the system setting
-// are read by the stock writers and the article card.
 
 // A Tjänst is never stocked (stocked-article.ts) and a phantom never stands
 // in stock, so neither can carry a batch.
@@ -24,30 +23,34 @@ export function batchTrackableArticle(article: { type: string; isPhantom: boolea
   return article.type !== "service" && !article.isPhantom;
 }
 
-// The sort per spårad article among these (unknown and untracked ids are
-// simply absent).
+// The sort per LAGERSPÅRAD article among these (unknown ids, untracked
+// articles and serial numbers created vid utleverans are simply absent).
 // Read FOR KEY SHARE — the pattern and the reasoning of stockedArticleIds:
 // it is the lock the writer's stock_transactions INSERT takes on the article
-// anyway (its FK), only taken at the check. A flag change holds the article
-// FOR UPDATE (updateArticle under lockArticle), so an inflow that asks while
-// one is in progress waits and then sees the new flag, and a flag change
-// waits for an inflow that has already asked. KEY SHARE conflicts with
-// nothing else on articles (the outflow locks are FOR NO KEY UPDATE).
-export async function articleTrackingByIds(db: Db | Tx, articleIds: readonly string[]): Promise<Map<string, Exclude<ArticleTracking, "none">>> {
+// anyway (its FK), only taken at the check. A change of Spårning (or of
+// Serienummer skapas) holds the article FOR UPDATE (updateArticle under
+// lockArticle), so an inflow that asks while one is in progress waits and
+// then sees the new value, and the change waits for an inflow that has
+// already asked. KEY SHARE conflicts with nothing else on articles (the
+// outflow locks are FOR NO KEY UPDATE).
+export async function articleTrackingByIds(db: Db | Tx, articleIds: readonly string[]): Promise<Map<string, StockTracking>> {
   const ids = [...new Set(articleIds)];
-  const tracked = new Map<string, Exclude<ArticleTracking, "none">>();
+  const tracked = new Map<string, StockTracking>();
   for (let i = 0; i < ids.length; i += 500) {
     const rows = await db
-      .select({ id: articles.id, tracking: articles.tracking })
+      .select({ id: articles.id, tracking: articles.tracking, serialAssignedAt: articles.serialAssignedAt })
       .from(articles)
       .where(inArray(articles.id, ids.slice(i, i + 500)))
       .for("key share");
-    for (const row of rows) if (row.tracking !== "none") tracked.set(row.id, row.tracking);
+    for (const row of rows) {
+      const sort = stockTrackingOf(row);
+      if (sort !== null) tracked.set(row.id, sort);
+    }
   }
   return tracked;
 }
 
-// The spårade (batch or serial) among these articles.
+// The lagerspårade (batch, or serial numbers created vid inleverans) among these articles.
 export async function trackedArticleIds(db: Db | Tx, articleIds: readonly string[]): Promise<Set<string>> {
   return new Set((await articleTrackingByIds(db, articleIds)).keys());
 }
@@ -56,8 +59,9 @@ export async function isTrackedArticle(db: Db | Tx, articleId: string): Promise<
   return (await articleTrackingByIds(db, [articleId])).has(articleId);
 }
 
-export async function trackingOf(db: Db | Tx, articleId: string): Promise<ArticleTracking> {
-  return (await articleTrackingByIds(db, [articleId])).get(articleId) ?? "none";
+// The article's stock sort: "batch", "serial" or null (not lagerspårad).
+export async function trackingOf(db: Db | Tx, articleId: string): Promise<StockTracking | null> {
+  return (await articleTrackingByIds(db, [articleId])).get(articleId) ?? null;
 }
 
 // --- The system setting "Använd batch- och serienummer" (beslut 9) ---

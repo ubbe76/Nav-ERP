@@ -20,6 +20,7 @@ import {
   articleStandardCostHistory,
   articles,
   articleUnits,
+  numberSeries,
   bomComponents,
   configuratorTemplates,
   packageTypes,
@@ -55,7 +56,8 @@ import {
   resolveTracking,
   type ArticleTracking,
 } from "../../stock/service/batch-tracking.js";
-import { ArticleNotBatchTrackableError, BatchTrackingDisabledError, SerialTrackingNotAvailableError } from "../../stock/service/batch.errors.js";
+import { ArticleNotBatchTrackableError, BatchTrackingDisabledError } from "../../stock/service/batch.errors.js";
+import { assertSerialSeries, DEFAULT_SERIAL_SERIES_KEY } from "../../stock/service/serial-numbers.js";
 import { applyInformation, copyArticleParts, readCopySource } from "./article-copy.js";
 import { articleVatRateSql } from "./article-vat-rate.js";
 import { getOrCreateDefaultUnitId } from "./default-unit.js";
@@ -143,6 +145,7 @@ export async function insertArticle(tx: Tx, input: InsertArticleInput): Promise<
     tracking: mentionsTracking(input) ? resolveTracking("none", input) : undefined,
     shelfLifeDays: input.shelfLifeDays,
     serialAssignedAt: input.serialAssignedAt,
+    serialSeriesKey: input.serialSeriesKey,
     manufacturingLeadTimeDays: input.manufacturingLeadTimeDays ?? null,
     packageTypeId: input.packageTypeId,
     parcelKind: input.parcelKind ?? null,
@@ -173,9 +176,8 @@ export async function insertArticle(tx: Tx, input: InsertArticleInput): Promise<
   // batchTracked: false is "none" here — there is nothing to protect yet).
   const asked = mentionsTracking(input);
   if (asked) values.tracking = input.tracking ?? (input.batchTracked ? "batch" : "none");
-  // Serienummer (and Serienummer skapas = Vid utleverans) cannot be chosen
-  // until the serienummer step is built.
-  if ((asked && values.tracking === "serial") || input.serialAssignedAt === "delivery") throw new SerialTrackingNotAvailableError();
+  // Serienummerserie: must be a serial number series (400).
+  await assertSerialSeries(tx, input.serialSeriesKey);
   if (values.tracking !== undefined && values.tracking !== "none") {
     const trackable = batchTrackableArticle({ type: input.type, isPhantom: input.isPhantom === true });
     if (!trackable && asked) throw new ArticleNotBatchTrackableError();
@@ -322,6 +324,11 @@ export function createArticleRepository(db: Db) {
 
     // Batch (#8): the system setting "Använd batch- och serienummer", read
     // FOR SHARE in the transaction that switches an article's flag on.
+    // Serienummerserie: 400 serial-series-invalid unless it is one.
+    async assertSerialSeries(tx: Tx, key: string | null | undefined): Promise<void> {
+      return assertSerialSeries(tx, key);
+    },
+
     async batchTrackingEnabled(tx: Tx): Promise<boolean> {
       return batchTrackingEnabledForShare(tx);
     },
@@ -359,9 +366,15 @@ export function createArticleRepository(db: Db) {
     // Batch (#8): a change of Batchstyrd holds it too — it waits for a draw
     // in progress (FOR NO KEY UPDATE) and for an inflow that has already
     // read the flag (FOR KEY SHARE, trackedArticleIds).
-    async lockArticle(tx: Tx, id: string): Promise<{ id: string; type: ArticleType; isPhantom: boolean; tracking: ArticleTracking } | null> {
+    async lockArticle(tx: Tx, id: string): Promise<{ id: string; type: ArticleType; isPhantom: boolean; tracking: ArticleTracking; serialAssignedAt: "receipt" | "delivery" } | null> {
       const [row] = await tx
-        .select({ id: articles.id, type: articles.type, isPhantom: articles.isPhantom, tracking: articles.tracking })
+        .select({
+          id: articles.id,
+          type: articles.type,
+          isPhantom: articles.isPhantom,
+          tracking: articles.tracking,
+          serialAssignedAt: articles.serialAssignedAt,
+        })
         .from(articles)
         .where(eq(articles.id, id))
         .for("update");
@@ -684,6 +697,14 @@ export function createArticleRepository(db: Db) {
     },
 
     // Artikelnummerserier (article-number.ts).
+    // Serienummerserier (0215): the rows with for_serials — the common one
+    // first, then the user's own by name.
+    async listSerialNumberSeries() {
+      const rows = await db.select().from(numberSeries).where(eq(numberSeries.forSerials, true));
+      return rows.sort((a, b) =>
+        a.key === DEFAULT_SERIAL_SERIES_KEY ? -1 : b.key === DEFAULT_SERIAL_SERIES_KEY ? 1 : (a.name ?? "").localeCompare(b.name ?? "", "sv", { numeric: true })
+      );
+    },
     listArticleNumberSeries: () => listArticleNumberSeries(db),
     findArticleNumberSeries: (key: string) => findArticleNumberSeries(db, key),
     previewArticleNumber: (series: Awaited<ReturnType<typeof listArticleNumberSeries>>[number]) =>

@@ -188,6 +188,9 @@ export const articles = pgTable("articles", {
   shelfLifeDays: integer("shelf_life_days"),
   // Serienummer skapas: only meaningful with tracking = serial.
   serialAssignedAt: articleSerialAssignedAtEnum("serial_assigned_at").notNull().default("receipt"),
+  // Serienummerserie (0215): the article's own series; null = the common
+  // one ("serial"). A deleted series falls back to it (set null).
+  serialSeriesKey: varchar("serial_series_key", { length: 50 }).references(() => numberSeries.key, { onDelete: "set null" }),
   packageTypeId: uuid("package_type_id").references(() => packageTypes.id, { onDelete: "restrict" }),
   // Frakt — "egna mått" (used when the article has no package type + antal
   // per kolli): kolliart (null = Paket), stapelbar, pallplatser and flakmeter.

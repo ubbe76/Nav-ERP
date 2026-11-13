@@ -77,9 +77,16 @@ import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js"
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { lockArticlesForOutflow } from "../../stock/service/outflow-locations.js";
 import { isStockedArticle } from "../../stock/service/stocked-article.js";
-import { BatchNotTrackedError } from "../../stock/service/batch.errors.js";
+import {
+  ArticleNotSerialTrackedError,
+  BatchNotTrackedError,
+  SerialCountMismatchError,
+  SerialNumbersRequiredError,
+  SerialQuantityNotIntegerError,
+} from "../../stock/service/batch.errors.js";
+import { assertSerialsOutOfStock, getOrCreateSerials, lockSerials } from "../../stock/service/serial-numbers.js";
 import { getOrCreateDatedBatch } from "../../stock/service/batches.js";
-import { isTrackedArticle, batchTrackedSql } from "../../stock/service/batch-tracking.js";
+import { isTrackedArticle, batchTrackedSql, trackingOf } from "../../stock/service/batch-tracking.js";
 import { batchCellQuantity } from "../../stock/repository/batch-balances.js";
 import { loadVatCodeBook } from "../../economy/repository/vat-codes.js";
 import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions } from "../../economy/service/dimension-check.js";
@@ -88,7 +95,14 @@ import { purchaseRowArrivalDate } from "../../planning/repository/effective-date
 export type ReceiveGoodsResult =
   // batchNumber (#8): the batch the goods were booked in — null for an
   // article that is not batchstyrd and for a row without a stock movement.
-  | { ok: true; row: typeof purchaseOrderRows.$inferSelect; orderStatus: PurchaseOrderStatus; receiptId: string; batchNumber: string | null; expiresOn: string | null }
+  | { ok: true; row: typeof purchaseOrderRows.$inferSelect; orderStatus: PurchaseOrderStatus; receiptId: string;
+      // Serienummer: one kvitto per styck (receiptId is the first); else [receiptId].
+      receiptIds: string[];
+      batchNumber: string | null;
+      expiresOn: string | null;
+      // The serial numbers booked, in the request's order ([] otherwise).
+      serialNumbers: string[];
+    }
   | { ok: false; reason: "order_not_found" | "row_not_found" | "invalid_status" }
   | { ok: false; reason: "over_receipt"; maxQuantity: number };
 
@@ -1301,7 +1315,7 @@ export function createPurchaseRepository(db: Db) {
     async receiveGoods(
       orderId: string,
       rowId: string,
-      input: { locationId?: string; quantity: number; createdBy: string; overReceiptPercent: number | null; batchNumber?: string; expiresOn?: string }
+      input: { locationId?: string; quantity: number; createdBy: string; overReceiptPercent: number | null; batchNumber?: string; expiresOn?: string; serialNumbers?: string[] }
     ): Promise<ReceiveGoodsResult> {
       return db.transaction(async (tx) => {
         const [order] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, orderId));
@@ -1362,12 +1376,29 @@ export function createPurchaseRepository(db: Db) {
         // anything else (not batchstyrd, a lego or service row) is refused,
         // so an integration notices. One receipt = one batch: a row split
         // over several batches is several receipts, each undone on its own.
-        const batchTracked = stocked && (await isTrackedArticle(tx, row.articleId));
+        // Serienummer (etapp 2, beslut 5 and 14): a serienummerstyrd article
+        // whose numbers are created vid inleverans needs ONE number per styck
+        // — the receipt is not booked without all of them — and each styck
+        // becomes its own stock row (+1) and its own kvitto (quantity 1), so
+        // a mis-scanned number is undone on its own. Created vid utleverans:
+        // the article is not lagerspårad and is received as before.
+        const sort = stocked ? await trackingOf(tx, row.articleId) : null;
+        const batchTracked = sort !== null;
+        const articleNumberOf = async () =>
+          (await tx.select({ articleNumber: articles.articleNumber }).from(articles).where(eq(articles.id, row.articleId)))[0]?.articleNumber ?? row.articleId;
         if ((input.batchNumber !== undefined || input.expiresOn !== undefined) && !batchTracked) {
-          const [article] = await tx.select({ articleNumber: articles.articleNumber }).from(articles).where(eq(articles.id, row.articleId));
-          throw new BatchNotTrackedError(article?.articleNumber ?? row.articleId);
+          throw new BatchNotTrackedError(await articleNumberOf());
+        }
+        if (input.serialNumbers !== undefined && sort !== "serial") throw new ArticleNotSerialTrackedError(await articleNumberOf());
+        if (sort === "serial") {
+          if (input.serialNumbers === undefined || input.batchNumber !== undefined) throw new SerialNumbersRequiredError(await articleNumberOf());
+          if (!Number.isInteger(input.quantity)) throw new SerialQuantityNotIntegerError(await articleNumberOf(), input.quantity);
+          if (input.serialNumbers.length !== input.quantity) throw new SerialCountMismatchError(input.quantity, input.serialNumbers.length);
         }
         let batch: { id: string; batchNumber: string; expiresOn: string | null } | null = null;
+        let serials: { id: string; batchNumber: string }[] = [];
+        // One per kvitto: the stock row it booked (none for lego/tjänst).
+        let stockRows: { locationId: string; stockTransactionId: string }[] = [];
         if (stocked) {
           // unit_cost is the SEK cost per unit at receipt time: the row's
           // purchase price (already in the article's base unit) converted at
@@ -1375,8 +1406,9 @@ export function createPurchaseRepository(db: Db) {
           const unitCost = (Number(row.unitPrice) * Number(order.exchangeRate)).toFixed(4);
 
           const locationId = await resolveStockLocation(tx, row.articleId, input.locationId);
+          // Once per place, not per number.
           await assertLocationNotUnderCount(tx, locationId);
-          if (batchTracked) {
+          if (sort === "batch") {
             batch = await getOrCreateDatedBatch(tx, {
               articleId: row.articleId,
               batchNumber: input.batchNumber ?? order.orderNumber,
@@ -1387,47 +1419,89 @@ export function createPurchaseRepository(db: Db) {
               // filled in on one without, refused when it differs.
               expiresOn: input.expiresOn,
             });
+          } else if (sort === "serial") {
+            // The numbers (created when new; a number that is a batch on the
+            // article, or twice in the list, is refused), then their rows
+            // locked sorted on id — after the place, last in the lock order —
+            // and every one proven out of stock before anything is booked.
+            serials = await getOrCreateSerials(tx, {
+              articleId: row.articleId,
+              serialNumbers: input.serialNumbers!,
+              origin: "purchase_receipt",
+              purchaseOrderId: orderId,
+              createdBy: input.createdBy,
+              expiresOn: input.expiresOn,
+            });
+            await lockSerials(tx, serials.map((serial) => serial.id));
+            await assertSerialsOutOfStock(tx, serials.map((serial) => serial.id));
           }
 
-          const [movement] = await tx
+          const movements = await tx
             .insert(stockTransactions)
-            .values({
-              articleId: row.articleId,
-              locationId,
-              quantityDelta: String(input.quantity),
-              transactionType: "purchase_receipt",
-              referenceId: orderId,
-              createdBy: input.createdBy,
-              unitCost,
-              batchId: batch?.id ?? null,
-            })
-            .returning({ id: stockTransactions.id });
-          stock = { locationId, stockTransactionId: movement!.id };
+            .values(
+              (sort === "serial" ? serials.map((serial) => ({ quantity: 1, batchId: serial.id as string | null })) : [{ quantity: input.quantity, batchId: batch?.id ?? null }]).map(
+                (part) => ({
+                  articleId: row.articleId,
+                  locationId,
+                  quantityDelta: String(part.quantity),
+                  transactionType: "purchase_receipt" as const,
+                  referenceId: orderId,
+                  createdBy: input.createdBy,
+                  unitCost,
+                  batchId: part.batchId,
+                })
+              )
+            )
+            .returning({ id: stockTransactions.id, batchId: stockTransactions.batchId });
+          // In the numbers' order (RETURNING is matched on the batch, never
+          // trusted to keep the VALUES order).
+          const movementBySerial = new Map(movements.map((movement) => [movement.batchId, movement.id]));
+          stockRows =
+            sort === "serial"
+              ? serials.map((serial) => ({ locationId, stockTransactionId: movementBySerial.get(serial.id)! }))
+              : [{ locationId, stockTransactionId: movements[0]!.id }];
         }
 
-        // The receipt log row Ångra inleverans reverses — a lego row's TO
-        // report is linked by the service once it has been made.
-        const [receipt] = await tx
+        // The receipt log rows Ångra inleverans reverses — one per stock row
+        // (a serial number each, quantity 1), else one for the whole
+        // quantity. A lego row's TO report is linked by the service once it
+        // has been made.
+        const receipts = await tx
           .insert(purchaseReceipts)
-          .values({
-            purchaseOrderId: orderId,
-            purchaseOrderRowId: rowId,
-            quantity: String(input.quantity),
-            locationId: stock?.locationId ?? null,
-            stockTransactionId: stock?.stockTransactionId ?? null,
-            createdBy: input.createdBy,
-          })
-          .returning({ id: purchaseReceipts.id });
+          .values(
+            (stockRows.length > 0 ? stockRows : [null]).map((stock) => ({
+              purchaseOrderId: orderId,
+              purchaseOrderRowId: rowId,
+              quantity: sort === "serial" ? "1" : String(input.quantity),
+              locationId: stock?.locationId ?? null,
+              stockTransactionId: stock?.stockTransactionId ?? null,
+              createdBy: input.createdBy,
+            }))
+          )
+          .returning({ id: purchaseReceipts.id, stockTransactionId: purchaseReceipts.stockTransactionId });
+        const receiptByStockRow = new Map(receipts.map((r) => [r.stockTransactionId, r.id]));
+        const receiptIds = stockRows.length > 0 ? stockRows.map((stock) => receiptByStockRow.get(stock.stockTransactionId)!) : [receipts[0]!.id];
+        const receipt = { id: receiptIds[0]! };
 
         const orderStatus = await recomputeReceiptStatus(tx, orderId);
-        // Tillägg: one event per received row, on the order.
+        // Tillägg: one event per received row, on the order — once for the
+        // whole quantity, whatever the number of kvitton.
         await pluginEvents.emit(tx, {
           type: "purchase_order.received",
           entityId: orderId,
           entityNumber: order.orderNumber,
-          data: { receiptId: receipt!.id, rowId },
+          data: { receiptId: receipt.id, rowId },
         });
-        return { ok: true, row: updatedRow!, orderStatus, receiptId: receipt!.id, batchNumber: batch?.batchNumber ?? null, expiresOn: batch?.expiresOn ?? null };
+        return {
+          ok: true,
+          row: updatedRow!,
+          orderStatus,
+          receiptId: receipt.id,
+          receiptIds,
+          batchNumber: batch?.batchNumber ?? null,
+          expiresOn: batch?.expiresOn ?? null,
+          serialNumbers: serials.map((serial) => serial.batchNumber),
+        };
       });
     },
 
@@ -1448,6 +1522,8 @@ export function createPurchaseRepository(db: Db) {
           // Batch (#8): read through the receipt's own stock row — the log is
           // append-only, so the link never drifts (null = Okänd / no stock row).
           batchNumber: stockBatches.batchNumber,
+          // batch | serial (0215): a serial number's kvitto is one styck.
+          batchKind: stockBatches.kind,
           // Etapp 2: the batch's utgångsdatum now (null = none).
           expiresOn: stockBatches.expiresOn,
         })

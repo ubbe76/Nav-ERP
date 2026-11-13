@@ -204,7 +204,7 @@ import { createAlertDigestService } from "./modules/alerts/service/alert-digest.
 import { alertsRoutes } from "./modules/alerts/routes/alerts.routes.js";
 import { isBookkeepingLockViolation, isClosedFiscalYearViolation, isEmployeeAnonymizedViolation, isNumberOutOfRange } from "./modules/system/service/db-errors.js";
 import { StockLocationNotFoundError } from "./modules/stock/service/stock.errors.js";
-import { batchErrorStatus } from "./modules/stock/service/batch.errors.js";
+import { batchErrorStatus, isSerialBalanceViolation, SERIAL_BALANCE_VIOLATED } from "./modules/stock/service/batch.errors.js";
 import { documentNumberTakenError } from "./modules/system/service/number-series.js";
 import { errorBody } from "./modules/system/service/error-body.js";
 import { createQualityRepository } from "./modules/quality/repository/quality.repository.js";
@@ -294,6 +294,14 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     // Batch (#8): the batch errors of every batch-aware writer (inleverans,
     // TO-rapport, justering, the article card, PATCH /settings) — mapped
     // once here, the writers live in several modules.
+    // Serienummer (0215): the database guard behind the writers' rule
+    // (trigger stock_transactions_serial_unit, SQLSTATE NV002) — a serial
+    // number's balance would be something else than 0 or 1. Only a writer
+    // that forgot the rule gets here.
+    if (isSerialBalanceViolation(err)) {
+      app.log.error(err);
+      return reply.code(409).send({ error: SERIAL_BALANCE_VIOLATED.message, code: SERIAL_BALANCE_VIOLATED.code });
+    }
     const batchStatus = batchErrorStatus(err);
     if (batchStatus !== null) return reply.code(batchStatus).send(errorBody(err as Error));
     // A document series whose next number is already taken (Nummerserier

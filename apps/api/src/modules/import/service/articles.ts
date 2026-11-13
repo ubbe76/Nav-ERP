@@ -181,6 +181,8 @@ export interface ExistingArticle {
   standardCost: string | null;
   // Optional: the saldoimport and the article import read it (Spårning, #8).
   tracking?: ArticleTracking;
+  // Optional: only the saldoimport reads it (Serienummer skapas).
+  serialAssignedAt?: "receipt" | "delivery";
   // Optional: only the article import reads it.
   shelfLifeDays?: number | null;
   // Optional: only the article import reads it (Streckkod, #4).
@@ -752,16 +754,14 @@ export async function planArticleImport(
     if (trackingCell !== "") {
       const parsedCell = parseTrackingCell(trackingCell);
       if (parsedCell === null || parsedCell === undefined) {
-        errors.push(`Ogiltigt värde för Spårning: "${trackingCell}" (Ingen/Batch, eller Ja/Nej för Batchstyrd)`);
+        errors.push(`Ogiltigt värde för Spårning: "${trackingCell}" (Ingen/Batch/Serienummer, eller Ja/Nej för Batchstyrd)`);
       } else {
         const wanted = resolveTracking(existing?.tracking ?? "none", parsedCell);
         const target = existing
           ? { type: existing.type, isPhantom: existing.isPhantom }
           : { type: parsedType?.type ?? input.defaults?.articleType ?? "purchased", isPhantom: parsedType?.isPhantom ?? false };
         const asksOn = parsedCell.tracking !== undefined ? parsedCell.tracking !== "none" : parsedCell.batchTracked === true;
-        if (parsedCell.tracking === "serial") {
-          errors.push("Spårning Serienummer går inte att välja ännu — välj Ingen eller Batch");
-        } else if (asksOn && !batchTrackingEnabled) {
+        if (asksOn && !batchTrackingEnabled) {
           errors.push('Spårning kan inte sättas — slå först på "Använd batch- och serienummer" under System → Inställningar');
         } else if (asksOn && !batchTrackableArticle(target)) {
           errors.push("En tjänst eller fantomartikel kan inte vara batchstyrd");

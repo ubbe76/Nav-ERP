@@ -15,7 +15,7 @@ import {
   BatchExpiryMismatchError,
   BatchTrackingDisabledError,
   DuplicateBatchNumberError,
-  SerialTrackingNotAvailableError,
+  SerialSeriesInvalidError,
 } from "../src/modules/stock/service/batch.errors.js";
 import { BATCH_TRACKING_ENABLED_KEY, countTrackedArticles, isTrackedArticle, trackingOf } from "../src/modules/stock/service/batch-tracking.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
@@ -82,7 +82,7 @@ describe("resolveTracking — the one rule for `tracking` and the alias `batchTr
   });
 
   it("the new errors have their statuses", () => {
-    expect(batchErrorStatus(new SerialTrackingNotAvailableError())).toBe(400);
+    expect(batchErrorStatus(new SerialSeriesInvalidError("x"))).toBe(400);
     expect(batchErrorStatus(new BatchExpiryMismatchError("L-1", "2027-01-01", "2027-02-02"))).toBe(409);
     expect(batchErrorStatus(new DuplicateBatchNumberError("L-1"))).toBe(409);
   });
@@ -138,15 +138,39 @@ describe("the article's Spårning", () => {
     ]);
   });
 
-  it("Serienummer cannot be chosen yet — nor Serienummer skapas: Vid utleverans", async () => {
+  it("Serienummer and Serienummer skapas can be chosen (steg 3); the Serienummerserie must be a serial number series", async () => {
     await setEnabled(true);
-    await expect(makeArticle({ tracking: "serial" })).rejects.toThrow(SerialTrackingNotAvailableError);
-    await expect(makeArticle({ serialAssignedAt: "delivery" })).rejects.toThrow(SerialTrackingNotAvailableError);
-    const a = await makeArticle({ tracking: "batch", serialAssignedAt: "receipt" });
-    await expect(update(a.id, { tracking: "serial" })).rejects.toThrow(SerialTrackingNotAvailableError);
-    await expect(update(a.id, { serialAssignedAt: "delivery" })).rejects.toThrow(SerialTrackingNotAvailableError);
-    expect(await stored(a.id)).toMatchObject({ tracking: "batch", serialAssignedAt: "receipt" });
+    const a = await makeArticle({ tracking: "serial" });
+    expect(a).toMatchObject({ tracking: "serial", batchTracked: false, serialAssignedAt: "receipt", serialSeriesKey: null });
+    expect([await isTrackedArticle(db, a.id), await trackingOf(db, a.id)]).toEqual([true, "serial"]);
+    // Vid utleverans: serienummerstyrd, but the STOCK is not tracked (beslut 17).
+    expect(await update(a.id, { serialAssignedAt: "delivery" })).toMatchObject({ tracking: "serial", serialAssignedAt: "delivery" });
+    expect([await isTrackedArticle(db, a.id), await trackingOf(db, a.id)]).toEqual([false, null]);
+    expect(await countTrackedArticles(db)).toBe(1);
+    expect(await update(a.id, { serialAssignedAt: "receipt", serialSeriesKey: "serial" })).toMatchObject({ serialAssignedAt: "receipt", serialSeriesKey: "serial" });
+    expect(await update(a.id, { serialSeriesKey: null })).toMatchObject({ serialSeriesKey: null });
+    // An article number series, a document series and an unknown key are no serial series.
+    for (const key of ["article", "purchase_order", "finns-inte"]) {
+      await expect(update(a.id, { serialSeriesKey: key })).rejects.toThrow(SerialSeriesInvalidError);
+      await expect(makeArticle({ tracking: "serial", serialSeriesKey: key })).rejects.toThrow(SerialSeriesInvalidError);
+    }
+    // Batch ↔ Serienummer may always be switched (beslut 11), and both need the setting.
+    expect(await update(a.id, { tracking: "batch" })).toMatchObject({ tracking: "batch", batchTracked: true });
+    expect(await update(a.id, { tracking: "serial" })).toMatchObject({ tracking: "serial" });
+    await update(a.id, { tracking: "none" });
+    await db.delete(systemSettings).where(eq(systemSettings.key, BATCH_TRACKING_ENABLED_KEY));
+    await expect(update(a.id, { tracking: "serial" })).rejects.toThrow(BatchTrackingDisabledError);
+    await expect(makeArticle({ type: "service", tracking: "serial" })).rejects.toThrow(ArticleNotBatchTrackableError);
     expect(createArticleSchema.safeParse({ name: "x", type: "purchased", tracking: "lot" }).success).toBe(false);
+    // The changes are logged: the sort by name once Serienummer is involved, and Serienummer skapas on its own row.
+    const log = await db.select().from(auditLog).where(eq(auditLog.entityId, a.id)).orderBy(auditLog.createdAt);
+    expect(log.map((l) => [(l.detail as { before: unknown }).before, (l.detail as { after: unknown }).after])).toEqual([
+      [{ serialAssignedAt: "receipt" }, { serialAssignedAt: "delivery" }],
+      [{ serialAssignedAt: "delivery" }, { serialAssignedAt: "receipt" }],
+      [{ tracking: "serial" }, { tracking: "batch" }],
+      [{ tracking: "batch" }, { tracking: "serial" }],
+      [{ tracking: "serial" }, { tracking: "none" }],
+    ]);
   });
 
   it("an old client's batchTracked: false does not switch a serienummerstyrd article off; true makes it batch", async () => {
@@ -234,7 +258,7 @@ describe("artikelimporten — Spårning and Hållbarhet (dagar)", () => {
     expect((await preview([["I-2", "Två", "Köpt", "Batch", "14"]])).summary).toMatchObject({ error: 0 });
   });
 
-  it("row errors: Serienummer, a bad hållbarhet; the old Nej never switches a serienummerstyrd article off", async () => {
+  it("Serienummer is a word of its own; a bad hållbarhet is a row error; the old Nej never switches a serienummerstyrd article off", async () => {
     await setEnabled(true);
     await commit([["I-9", "Nio", "Köpt", "Ingen", ""]]);
     await forceSerial((await byNumber("I-9"))!.id);
@@ -245,13 +269,15 @@ describe("artikelimporten — Spårning and Hållbarhet (dagar)", () => {
       ["I-9", "Nio", "Köpt", "Nej", ""],
     ]);
     expect(result.rows.map((r) => r.errors)).toEqual([
-      ["Spårning Serienummer går inte att välja ännu — välj Ingen eller Batch"],
+      [],
       ['Hållbarheten ska vara ett helt antal dagar: "1,5"'],
       ["Hållbarheten är för lång (max 36500 dagar)"],
       [],
     ]);
     await commit([["I-9", "Nio", "Köpt", "Nej", ""]]);
     expect((await byNumber("I-9"))!.tracking).toBe("serial");
+    await commit([["I-4", "Fyra", "Köpt", "Serienummer", ""]]);
+    expect((await byNumber("I-4"))!.tracking).toBe("serial");
   });
 });
 
@@ -275,7 +301,7 @@ describe("the routes", () => {
     await app.close();
   });
 
-  it("POST/PATCH/GET /articles carry tracking, batchTracked, shelfLifeDays and serialAssignedAt; serial is 400 with its code", async () => {
+  it("POST/PATCH/GET /articles carry tracking, batchTracked, shelfLifeDays, serialAssignedAt and serialSeriesKey", async () => {
     expect((await asAdmin("PATCH", "/settings", { batchTrackingEnabled: true })).statusCode).toBe(200);
     const created = await asAdmin("POST", "/articles", { articleNumber: "RT-SP-1", name: "Plåt", type: "purchased", tracking: "batch", shelfLifeDays: 30 });
     expect(created.statusCode).toBe(201);
@@ -286,12 +312,11 @@ describe("the routes", () => {
     expect(off.json()).toMatchObject({ tracking: "none", batchTracked: false, shelfLifeDays: null });
     expect((await asAdmin("GET", `/articles/${id}`)).json()).toMatchObject({ tracking: "none", batchTracked: false });
 
-    for (const body of [{ tracking: "serial" }, { serialAssignedAt: "delivery" }]) {
-      const patch = await asAdmin("PATCH", `/articles/${id}`, body);
-      expect([patch.statusCode, patch.json().code]).toEqual([400, "serial-tracking-not-available"]);
-      const post = await asAdmin("POST", "/articles", { articleNumber: "RT-SP-2", name: "Plåt", type: "purchased", ...body });
-      expect([post.statusCode, post.json().code]).toEqual([400, "serial-tracking-not-available"]);
-    }
+    const serial = await asAdmin("PATCH", `/articles/${id}`, { tracking: "serial", serialAssignedAt: "delivery" });
+    expect(serial.json()).toMatchObject({ tracking: "serial", batchTracked: false, serialAssignedAt: "delivery", serialSeriesKey: null });
+    const badSeries = await asAdmin("PATCH", `/articles/${id}`, { serialSeriesKey: "article" });
+    expect([badSeries.statusCode, badSeries.json().code]).toEqual([400, "serial-series-invalid"]);
+    await asAdmin("PATCH", `/articles/${id}`, { tracking: "none", serialAssignedAt: "receipt" });
     const bad = await asAdmin("PATCH", `/articles/${id}`, { shelfLifeDays: "" });
     expect([bad.statusCode, bad.json().code]).toEqual([400, "validation-failed"]);
     expect((await asAdmin("GET", `/articles/${id}`)).json()).toMatchObject({ tracking: "none", serialAssignedAt: "receipt" });

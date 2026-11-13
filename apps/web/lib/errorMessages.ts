@@ -317,7 +317,17 @@ const MESSAGES: Record<string, MessageEntry> = {
   "batch-tracking-in-use": serverMessage("Det finns batchstyrda artiklar — stäng av Batchstyrd på dem innan inställningen stängs av."),
   "article-not-batch-trackable": "Tjänster och fantomartiklar kan inte vara batchstyrda.",
   // Spårbarhet etapp 2: Spårning, utgångsdatum, rättelse av en batch.
-  "serial-tracking-not-available": "Serienummer går inte att välja ännu — välj Ingen eller Batch.",
+  // Serienummer (0215): the server names the article, the number or the place.
+  "batch-kind-mismatch": serverMessage("Numret finns redan på artikeln som den andra sorten (batch eller serienummer)."),
+  "serial-quantity-not-integer": serverMessage("Artikeln är serienummerstyrd — antalet måste vara ett helt antal styck."),
+  "serial-numbers-required": serverMessage("Artikeln är serienummerstyrd — ange ett serienummer per styck."),
+  "article-not-serial-tracked": serverMessage("Artikeln tar inga serienummer vid inleverans."),
+  "serial-count-mismatch": serverMessage("Antalet serienummer stämmer inte med antalet styck."),
+  "serial-numbers-too-many": serverMessage("För många serienummer i en rörelse — dela upp den."),
+  "serial-already-in-stock": serverMessage("Serienumret finns redan i lager."),
+  "serial-number-too-long": serverMessage("Serienummerserien ger ett för långt nummer — ändra serien under System → Nummerserier."),
+  "serial-series-invalid": "Den valda nummerserien är ingen serienummerserie — välj en annan.",
+  "serial-balance-violated": "Ett serienummer kan bara finnas i ett exemplar i lager — rörelsen bokades inte.",
   "batch-expiry-mismatch": serverMessage("Batchen har redan ett annat utgångsdatum — ange samma datum eller rätta batchens datum under Lager → Spårbarhet."),
   "duplicate-batch-number": serverMessage("Batchnumret finns redan på artikeln."),
   "forecast-month-outside-horizon": "Månaden ligger utanför prognoshorisonten — bara månader i horisonten kan få ett eget antal.",

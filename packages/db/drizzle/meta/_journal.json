@@ -1506,6 +1506,13 @@
       "when": 1794540514045,
       "tag": "0214_sparning_utgangsdatum",
       "breakpoints": true
+    },
+    {
+      "idx": 215,
+      "version": "7",
+      "when": 1794542895547,
+      "tag": "0215_serienummer",
+      "breakpoints": true
     }
   ]
 }

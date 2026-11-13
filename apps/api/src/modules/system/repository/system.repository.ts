@@ -157,7 +157,15 @@ export function createSystemRepository(db: Db) {
     async createArticleNumberSeries(key: string, input: CreateArticleNumberSeriesInput) {
       const [row] = await db
         .insert(numberSeries)
-        .values({ key, ...input, forArticles: true })
+        .values({
+          key,
+          name: input.name,
+          prefix: input.prefix,
+          nextNumber: input.nextNumber,
+          digits: input.digits,
+          forArticles: input.forSerials !== true,
+          forSerials: input.forSerials === true,
+        })
         .returning();
       return row!;
     },

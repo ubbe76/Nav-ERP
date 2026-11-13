@@ -105,7 +105,7 @@ export function createStockCountService(deps: {
           snapshotQuantity: showBalances ? Number(r.snapshotQuantity) : null,
           // Batch (#8): one row per batch for a batchstyrd article — Okänd
           // under its label (internal document).
-          batch: r.tracking !== "none" ? (r.batchNumber ?? UNKNOWN_BATCH_LABEL) : null,
+          batch: r.stockTracked ? (r.batchNumber ?? UNKNOWN_BATCH_LABEL) : null,
         })),
       });
       return { filename: `raknelista-${session.countNumber}.pdf`, content };

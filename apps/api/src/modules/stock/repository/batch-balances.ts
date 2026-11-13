@@ -1,4 +1,5 @@
-import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { trackedSql } from "../service/batch-tracking.js";
 import { articleAlternativeLocations, articles, stockBatches, stockLocations, stockTransactions, warehouses, type Db, type Tx } from "@navet/db";
 import { articlePlacePreference, compareBatchCells, compareBatches, isBatchExpired, type BatchCell } from "../service/outflow-allocation.js";
 
@@ -232,7 +233,7 @@ export async function pickBatchCellsForArticles(
       .where(
         and(
           inArray(stockTransactions.articleId, ids.slice(i, i + CHUNK)),
-          ne(articles.tracking, "none"),
+          trackedSql(),
           opts.locationId ? eq(stockTransactions.locationId, opts.locationId) : undefined
         )
       )

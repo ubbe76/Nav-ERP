@@ -382,10 +382,15 @@ export class MoReportFromPurchaseReceiptError extends Error {
 export class MoReportStockMissingError extends Error {
   constructor(
     readonly available: number,
-    readonly required: number
+    readonly required: number,
+    // Serienummer (0215): the report's numbers that no longer stand on the
+    // place they were received to (the first 20 are named in the text).
+    readonly serialNumbers: string[] = []
   ) {
     super(
-      `Rapporteringen lade ${required.toLocaleString("sv-SE")} st i lager men bara ${available.toLocaleString("sv-SE")} st finns kvar på lagerplatsen`
+      serialNumbers.length > 0
+        ? `Serienummer ${serialNumbers.slice(0, 20).join(", ")}${serialNumbers.length > 20 ? ` och ${serialNumbers.length - 20} till` : ""} finns inte kvar på lagerplatsen rapporteringen lade ${serialNumbers.length === 1 ? "det" : "dem"} på — flytta tillbaka eller ångra rörelsen först`
+        : `Rapporteringen lade ${required.toLocaleString("sv-SE")} st i lager men bara ${available.toLocaleString("sv-SE")} st finns kvar på lagerplatsen`
     );
     this.name = "MoReportStockMissingError";
   }
@@ -781,7 +786,7 @@ export function createManufacturingService(
       case "invalid_status":
         throw new InvalidStatusTransitionError("Reports can only be undone while the order is open or done");
       case "insufficient_stock":
-        throw new MoReportStockMissingError(result.available, result.required);
+        throw new MoReportStockMissingError(result.available, result.required, result.serialNumbers ?? []);
     }
   }
 
@@ -2096,6 +2101,9 @@ export function createManufacturingService(
           // was not the last operation) and whether the order is now done.
           received: result.receipt?.received ?? 0,
           orderCompleted: result.receipt?.completed ?? false,
+          // Serienummer (0215): the numbers this report gave the styck it
+          // received ([] otherwise) — shown and labelled by the card/terminal.
+          receivedSerialNumbers: result.receivedSerialNumbers ?? [],
           // The report log row — a lego receipt links its IO receipt to it.
           reportId: result.reportId,
         };
@@ -2372,7 +2380,7 @@ export function createManufacturingService(
           userId: createdBy,
         });
         // The order as before, plus the Slutför order report (Ångra in the notice).
-        return { ...result.order, reportId: result.reportId };
+        return { ...result.order, reportId: result.reportId, receivedSerialNumbers: result.receivedSerialNumbers };
       }
 
       switch (result.reason) {

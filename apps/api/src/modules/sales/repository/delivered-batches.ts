@@ -1,4 +1,5 @@
-import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { trackedSql } from "../../stock/service/batch-tracking.js";
 import { articles, deliveryRowLocations, deliveryRows, salesOrderRows, stockBatches, stockTransactions, type Db, type Tx } from "@navet/db";
 import { compareBatches } from "../../stock/service/outflow-allocation.js";
 import { batchAgeDateSql } from "../../stock/repository/batch-balances.js";
@@ -44,7 +45,7 @@ export async function deliveredBatchesForOrderRows(db: Db | Tx, salesOrderRowIds
       .innerJoin(salesOrderRows, eq(salesOrderRows.id, deliveryRows.salesOrderRowId))
       .innerJoin(articles, eq(articles.id, salesOrderRows.articleId))
       .where(
-        and(inArray(deliveryRows.salesOrderRowId, ids.slice(i, i + CHUNK)), isNull(deliveryRows.undoneAt), ne(articles.tracking, "none"))
+        and(inArray(deliveryRows.salesOrderRowId, ids.slice(i, i + CHUNK)), isNull(deliveryRows.undoneAt), trackedSql())
       )
       .groupBy(
         deliveryRows.salesOrderRowId,

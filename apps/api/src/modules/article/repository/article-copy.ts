@@ -43,6 +43,7 @@ export const COPIED_INFORMATION_FIELDS = [
   "tracking",
   "shelfLifeDays",
   "serialAssignedAt",
+  "serialSeriesKey",
   "orderQuantity",
   "rounding",
   "manufacturingLeadTimeDays",

@@ -2120,7 +2120,7 @@ export function createSalesService(
       // Batch (#8): a batchstyrd article prints its cells (place · batch) in
       // the order Automatiskt draws them, Okänd included — internal document.
       const batchCells = await stock.pickBatchCellsForArticles(openRows.map((r) => r.articleId));
-      const batchTrackedIds = new Set(openRows.filter((r) => r.articleTracking !== "none").map((r) => r.articleId));
+      const batchTrackedIds = new Set(openRows.filter((r) => r.articleStockTracked).map((r) => r.articleId));
       const extraDescription = extraDescriptionFor(await settings.getSettings(), "pickList");
       const customerArticleNumbers = await repo.customerArticleNumberMap(order.customerId, openRows.map((r) => r.articleId));
 

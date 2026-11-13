@@ -51,10 +51,11 @@ import {
   round4,
   UNKNOWN_BATCH_LABEL,
 } from "@navet/shared";
-import { BatchNotTrackedError, DuplicateBatchNumberError } from "../service/batch.errors.js";
+import { BatchNotTrackedError, DuplicateBatchNumberError, SerialCountMismatchError } from "../service/batch.errors.js";
 import { findArticleBatch, getOrCreateBatch, normalizeBatchNumber } from "../service/batches.js";
 import { stockholmToday } from "../../system/service/delivery-days.js";
-import { isTrackedArticle, trackedSql } from "../service/batch-tracking.js";
+import { isTrackedArticle, trackedSql, trackingOf } from "../service/batch-tracking.js";
+import { assertSerialsOutOfStock, getOrCreateSerials, lockSerials } from "../service/serial-numbers.js";
 import { articleBatchBalances, batchCellsForArticles, pickBatchCellsForArticles } from "./batch-balances.js";
 import { createBatchTraceReader, listStockBatches } from "./batch-trace.repository.js";
 import { traceBatch, type BatchTraceLimits } from "../service/batch-trace.js";
@@ -376,7 +377,8 @@ export function createStockRepository(db: Db) {
         if (!isStockedArticleType(subject.type)) throw new ServiceArticleNotStockedError(subject.articleNumber);
         // Batch (#8). The flag is read FOR KEY SHARE (batch-tracking.ts), so
         // a flag change in progress is waited out.
-        const batchTracked = await isTrackedArticle(tx, input.articleId);
+        const sort = await trackingOf(tx, input.articleId);
+        const batchTracked = sort !== null;
         if ((input.batchNumber !== undefined || typeof input.batchId === "string") && !batchTracked) {
           throw new BatchNotTrackedError(subject.articleNumber);
         }
@@ -434,8 +436,29 @@ export function createStockRepository(db: Db) {
         }
         // An inflow names its batch (created on first use); without one the
         // goods are Okänd.
+        //
+        // Serienummer (0215): on a serienummerstyrd article the number IS a
+        // serial number — one styck (the delta must be 1), which must not
+        // stand in stock already; its row is locked after the place. Without
+        // a number the goods are Okänd, in any quantity (old stock must be
+        // correctable).
+        let serial: { id: string } | null = null;
+        if (sort === "serial" && input.batchNumber !== undefined && input.quantityDelta > 0) {
+          if (input.quantityDelta !== 1) throw new SerialCountMismatchError(input.quantityDelta, 1);
+          [serial = null] = await getOrCreateSerials(tx, {
+            articleId: input.articleId,
+            serialNumbers: [input.batchNumber],
+            origin: "manual",
+            createdBy,
+            expiresOn: input.expiresOn,
+          });
+          await lockSerials(tx, [serial!.id]);
+          await assertSerialsOutOfStock(tx, [serial!.id]);
+        }
         const batch =
-          input.batchNumber !== undefined && input.quantityDelta > 0
+          serial !== null
+            ? serial
+            : input.batchNumber !== undefined && input.quantityDelta > 0
             ? await getOrCreateBatch(tx, {
                 articleId: input.articleId,
                 batchNumber: input.batchNumber,
@@ -763,11 +786,11 @@ export function createStockRepository(db: Db) {
     // An article that is not batchstyrd shows no batches: the ones it had
     // stay in the log and come back when the flag is switched on again.
     async articleBatchBalances(articleId: string) {
-      const [article] = await db.select({ tracking: articles.tracking }).from(articles).where(eq(articles.id, articleId));
+      const [article] = await db.select({ tracking: articles.tracking, stockTracked: trackedSql() }).from(articles).where(eq(articles.id, articleId));
       if (!article) return null;
       return {
         batchTracked: article.tracking === "batch",
-        batches: article.tracking !== "none" ? await articleBatchBalances(db, articleId, stockholmToday()) : [],
+        batches: article.stockTracked ? await articleBatchBalances(db, articleId, stockholmToday()) : [],
       };
     },
 

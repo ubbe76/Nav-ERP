@@ -147,6 +147,10 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
   // the number it would issue right now.
   app.get("/article-number-series", async () => service.listArticleNumberSeries());
 
+  // Serienummerserier (#8 etapp 2) for the article card's Serienummerserie,
+  // each with the number it would issue next. The module's read rule.
+  app.get("/serial-number-series", async () => service.listSerialNumberSeries());
+
   app.get("/article-groups", async () => service.listArticleGroups());
 
   app.post("/article-groups", async (req, reply) => {

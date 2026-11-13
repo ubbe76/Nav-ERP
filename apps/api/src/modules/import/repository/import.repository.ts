@@ -34,7 +34,7 @@ import {
   batchTrackingEnabledForShare,
   decodeBatchTrackingEnabled,
 } from "../../stock/service/batch-tracking.js";
-import { ArticleNotBatchTrackableError, BatchTrackingDisabledError, SerialTrackingNotAvailableError } from "../../stock/service/batch.errors.js";
+import { ArticleNotBatchTrackableError, BatchTrackingDisabledError } from "../../stock/service/batch.errors.js";
 import { recordStandardCostHistory } from "../../article/repository/article.repository.js";
 import { bomRowCreatedAt } from "../../article/repository/bom-write.js";
 import { getOrCreateDefaultUnitId } from "../../article/repository/default-unit.js";
@@ -475,6 +475,7 @@ export function createImportRepository(db: Db | Tx) {
             articleCode: articleCodes.code,
             standardCost: articles.standardCost,
             tracking: articles.tracking,
+            serialAssignedAt: articles.serialAssignedAt,
             shelfLifeDays: articles.shelfLifeDays,
             barcode: articles.barcode,
             weight: articles.weight,
@@ -552,11 +553,7 @@ export function createImportRepository(db: Db | Tx) {
         // re-checked here: the preview read them without locks.
         const flagChanges = plan.updates.filter((u) => u.patch.tracking !== undefined);
         const switchedOn = new Set(flagChanges.filter((u) => u.patch.tracking !== "none").map((u) => u.id));
-        // Serienummer cannot be chosen yet (the plan refuses it per row; this
-        // is the commit's own check).
-        if (flagChanges.some((u) => u.patch.tracking === "serial") || plan.creates.some((c) => c.tracking === "serial")) {
-          throw new SerialTrackingNotAvailableError();
-        }
+
         const flagIds = flagChanges.map((u) => u.id).sort();
         for (const part of chunk(flagIds)) {
           if (part.length === 0) continue;

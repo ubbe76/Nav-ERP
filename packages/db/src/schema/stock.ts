@@ -128,6 +128,14 @@ export const articleAlternativeLocations = pgTable(
 // information; the trace reads the log.
 export const stockBatchOriginEnum = pgEnum("stock_batch_origin", ["purchase_receipt", "manufacturing_order", "manual", "import"]);
 
+// Sort (#8 etapp 2, migration 0215): a row here is a batch or ONE serial
+// number — a serial number is a batch row whose balance is 0 or 1 (the
+// trigger stock_transactions_serial_unit holds that). The names batch_id /
+// stock_batches / batchNumber carry both; the sort is always read from the
+// ROW, never from the article (an article that changed Spårning keeps its
+// old rows as they were).
+export const stockBatchKindEnum = pgEnum("stock_batch_kind", ["batch", "serial"]);
+
 export const stockBatches = pgTable(
   "stock_batches",
   {
@@ -136,6 +144,7 @@ export const stockBatches = pgTable(
       .notNull()
       .references(() => articles.id, { onDelete: "restrict" }),
     batchNumber: varchar("batch_number", { length: 50 }).notNull(),
+    kind: stockBatchKindEnum("kind").notNull().default("batch"),
     origin: stockBatchOriginEnum("origin").notNull(),
     // FKs (set null) declared by hand in the migration — purchase.ts and
     // manufacturing.ts import this file.

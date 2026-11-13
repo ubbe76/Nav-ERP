@@ -1,9 +1,10 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { stockBatches, type Db, type Tx } from "@navet/db";
 import { UNKNOWN_BATCH_LABEL } from "@navet/shared";
-import { BatchExpiryMismatchError, BatchNumberReservedError, StockBatchNotFoundError } from "./batch.errors.js";
+import { BatchExpiryMismatchError, BatchKindMismatchError, BatchNumberReservedError, StockBatchNotFoundError } from "./batch.errors.js";
 
 export type StockBatchOrigin = (typeof stockBatches.origin.enumValues)[number];
+export type StockBatchKind = (typeof stockBatches.kind.enumValues)[number];
 
 export interface StockBatchRef {
   id: string;
@@ -55,6 +56,11 @@ export interface GetOrCreateBatchInput {
   expiresOn?: string | null | undefined;
   batchDate?: string | null | undefined;
   onExpiryMismatch?: "refuse" | "keep";
+  // The sort of the row (0215): left out = a batch. A number that exists on
+  // the article as the OTHER sort is refused — 409 batch-kind-mismatch (the
+  // unique index covers both sorts). Several serial numbers at once go
+  // through getOrCreateSerials (serial-numbers.ts).
+  kind?: StockBatchKind;
 }
 
 // The ref alone — what most writers want.
@@ -67,6 +73,7 @@ export async function getOrCreateDatedBatch(db: Db | Tx, input: GetOrCreateBatch
   const batchNumber = normalizeBatchNumber(input.batchNumber);
   const expiresOn = input.expiresOn ?? null;
   const batchDate = input.batchDate ?? null;
+  const kind = input.kind ?? "batch";
   await db
     .insert(stockBatches)
     .values({
@@ -78,16 +85,24 @@ export async function getOrCreateDatedBatch(db: Db | Tx, input: GetOrCreateBatch
       createdBy: input.createdBy ?? null,
       expiresOn,
       batchDate,
+      kind,
     })
     .onConflictDoNothing();
   const read = async () => {
     const [found] = await db
-      .select({ id: stockBatches.id, batchNumber: stockBatches.batchNumber, expiresOn: stockBatches.expiresOn, batchDate: stockBatches.batchDate })
+      .select({
+        id: stockBatches.id,
+        batchNumber: stockBatches.batchNumber,
+        expiresOn: stockBatches.expiresOn,
+        batchDate: stockBatches.batchDate,
+        kind: stockBatches.kind,
+      })
       .from(stockBatches)
       .where(and(eq(stockBatches.articleId, input.articleId), sql`lower(${stockBatches.batchNumber}) = lower(${batchNumber})`));
     return found!;
   };
   let row = await read();
+  if (row.kind !== kind) throw new BatchKindMismatchError(row.batchNumber, row.kind);
   // Fill in what the batch lacks. The UPDATE's own WHERE (… IS NULL) decides
   // between two simultaneous inflows: the second waits for the first one's
   // row lock, changes nothing and is compared against the date that won.
@@ -103,7 +118,7 @@ export async function getOrCreateDatedBatch(db: Db | Tx, input: GetOrCreateBatch
   if (expiresOn !== null && row.expiresOn !== null && row.expiresOn !== expiresOn && (input.onExpiryMismatch ?? "refuse") === "refuse") {
     throw new BatchExpiryMismatchError(row.batchNumber, row.expiresOn, expiresOn);
   }
-  return row;
+  return { id: row.id, batchNumber: row.batchNumber, expiresOn: row.expiresOn, batchDate: row.batchDate };
 }
 
 // A CHOSEN batch (an outflow's batchId): it must exist and be the article's

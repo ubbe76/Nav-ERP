@@ -223,7 +223,7 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
         // Batch (#8): a batchstyrd article is counted per batch — one row
         // per cell with a balance (batch null = Okänd); every other article
         // has its one row, summed over whatever batches its log holds.
-        const countedBatch = sql<string | null>`case when ${articles.tracking} <> 'none' then ${stockTransactions.batchId} end`;
+        const countedBatch = sql<string | null>`case when ${trackedSql()} then ${stockTransactions.batchId} end`;
         const balances = await tx
           .select({
             articleId: stockTransactions.articleId,
@@ -367,6 +367,8 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
           batchNumber: stockBatches.batchNumber,
           batchTracked: batchTrackedSql(),
           tracking: articles.tracking,
+          // Lagerspårad: the row is one of the article's cells (stock.md).
+          stockTracked: trackedSql(),
           // Etapp 2: the batch's utgångsdatum (null = none / Okänd).
           expiresOn: stockBatches.expiresOn,
         })

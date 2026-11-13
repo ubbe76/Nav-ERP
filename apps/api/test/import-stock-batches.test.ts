@@ -278,12 +278,12 @@ describe("Exportera lagersaldon — Batch", () => {
     const file = await exports.exportFile("stockBalances", importExportQuerySchema.parse({ format: "csv" }));
     const content = typeof file.content === "string" ? Buffer.from(file.content, "utf8") : file.content;
     const parsedFile = await imports.parse("stockBalances", content);
-    expect(parsedFile.headers).toEqual(["Artikelnummer", "Lager", "Lagerplats", "Antal", "À-pris", "Batch", "Batchdatum", "Utgångsdatum"]);
+    expect(parsedFile.headers).toEqual(["Artikelnummer", "Lager", "Lagerplats", "Antal", "À-pris", "Batch", "Serienummer", "Batchdatum", "Utgångsdatum"]);
     expect(parsedFile.rows).toEqual([
-      ["EX-B", "Huvudlager", "A1", "10", "", "L-1", "", ""],
-      ["EX-B", "Huvudlager", "A1", "2,5", "", "Okänd", "", ""],
-      ["EX-B", "Huvudlager", "B2", "4", "", "L-2", "", ""],
-      ["EX-P", "Huvudlager", "A1", "7", "", "", "", ""],
+      ["EX-B", "Huvudlager", "A1", "10", "", "L-1", "", "", ""],
+      ["EX-B", "Huvudlager", "A1", "2,5", "", "Okänd", "", "", ""],
+      ["EX-B", "Huvudlager", "B2", "4", "", "L-2", "", "", ""],
+      ["EX-P", "Huvudlager", "A1", "7", "", "", "", "", ""],
     ]);
 
     const roundTrip = { mapping: parsedFile.suggestedMapping, rows: parsedFile.rows };
@@ -383,8 +383,105 @@ describe("Importera lagersaldon — Batchdatum och Utgångsdatum", () => {
     const file = await exports.exportFile("stockBalances", importExportQuerySchema.parse({ format: "csv" }));
     const content = typeof file.content === "string" ? Buffer.from(file.content, "utf8") : file.content;
     const parsedFile = await imports.parse("stockBalances", content);
-    expect(parsedFile.rows).toEqual([["BD-4", "Huvudlager", "A1", "3", "", "L-1", "2026-02-02", "2027-02-02"]]);
+    expect(parsedFile.rows).toEqual([["BD-4", "Huvudlager", "A1", "3", "", "L-1", "", "2026-02-02", "2027-02-02"]]);
     const roundTrip = { mapping: parsedFile.suggestedMapping, rows: parsedFile.rows };
     expect((await imports.preview("stockBalances", roundTrip)).summary).toMatchObject({ skip: 1, error: 0, create: 0, update: 0 });
+  });
+});
+
+// Serienummer (0215): the column names ONE serial number of a
+// serienummerstyrd article (numbers created vid inleverans); Antal 0 or 1.
+describe("Importera lagersaldon — Serienummer", () => {
+  const SERIAL = { ...MAPPING, Serienummer: "serialNumber" };
+  const serial = (rows: string[][]) => ({ mapping: SERIAL, rows });
+  const kinds = async () => (await db.select().from(stockBatches).orderBy(asc(stockBatches.batchNumber))).map((b) => [b.batchNumber, b.kind, b.origin]);
+
+  it("the heading maps to the field", () => {
+    expect(suggestStockBalanceMapping(["Batch", "Serienummer"])).toEqual({ Batch: "batchNumber", Serienummer: "serialNumber" });
+  });
+
+  it("Antal 1 puts the number on the place, Antal 0 takes it away; the same file again changes nothing; a row without a number is Okänd", async () => {
+    const article = await makeArticle("SN-1", { tracking: "serial", batchTracked: undefined });
+    const file = serial([
+      ["SN-1", "Huvudlager", "A1", "1", "", "", "S-001"],
+      ["SN-1", "Huvudlager", "A1", "1", "", "", "S-002"],
+      ["SN-1", "Huvudlager", "B2", "1", "", "", "S-003"],
+    ]);
+    expect((await imports.preview("stockBalances", file)).summary).toMatchObject({ create: 3, error: 0 });
+    expect(await imports.commit("stockBalances", file)).toMatchObject({ created: 3 });
+    expect(await cells(article.id)).toEqual(["A1/S-001=1", "A1/S-002=1", "B2/S-003=1"]);
+    expect(await kinds()).toEqual([
+      ["S-001", "serial", "import"],
+      ["S-002", "serial", "import"],
+      ["S-003", "serial", "import"],
+    ]);
+    expect((await imports.preview("stockBalances", file)).summary).toMatchObject({ skip: 3, create: 0, update: 0 });
+
+    await imports.commit(
+      "stockBalances",
+      serial([
+        ["SN-1", "Huvudlager", "A1", "0", "", "", "S-002"],
+        // Old stock without a number is the place's Okänd, in any quantity.
+        ["SN-1", "Huvudlager", "C3", "2,5", "", "", ""],
+      ])
+    );
+    expect(await cells(article.id)).toEqual(["A1/S-001=1", "B2/S-003=1", "C3/Okänd=2.5"]);
+    expect(await rowsOf(article.id)).toHaveLength(5);
+  });
+
+  it("row errors: another Antal than 0/1, a number twice in the file, Batch and Serienummer together, on another place, the wrong sort of article", async () => {
+    const article = await makeArticle("SN-2", { tracking: "serial", batchTracked: undefined });
+    await makeArticle("SN-B");
+    await makeArticle("SN-D", { tracking: "serial", serialAssignedAt: "delivery", batchTracked: undefined });
+    await imports.commit("stockBalances", serial([["SN-2", "Huvudlager", "A1", "1", "", "", "S-001"]]));
+    const preview = await imports.preview(
+      "stockBalances",
+      serial([
+        ["SN-2", "Huvudlager", "A1", "2", "", "", "S-010"],
+        ["SN-2", "Huvudlager", "A1", "1", "", "", "S-011"],
+        ["SN-2", "Huvudlager", "B2", "1", "", "", "s-011"],
+        ["SN-2", "Huvudlager", "A1", "1", "", "L-1", "S-012"],
+        ["SN-2", "Huvudlager", "B2", "1", "", "", "S-001"],
+        ["SN-2", "Huvudlager", "A1", "1", "", "L-1", ""],
+        ["SN-B", "Huvudlager", "A1", "1", "", "", "S-020"],
+        ["SN-D", "Huvudlager", "A1", "1", "", "", "S-030"],
+        // Vid utleverans: untracked stock, booked as before.
+        ["SN-D", "Huvudlager", "B2", "4", "", "", ""],
+      ])
+    );
+    expect(preview.rows.map((r) => r.errors)).toEqual([
+      ["Antal ska vara 0 eller 1 på en rad med Serienummer"],
+      [],
+      ["Serienummer s-011 förekommer flera gånger i filen"],
+      ["Ange antingen Batch eller Serienummer på raden, inte båda"],
+      ["Serienummer S-001 finns på Huvudlager — A1 — flytta det dit det ska stå, eller sätt Antal 0 där först"],
+      ["Artikeln SN-2 är serienummerstyrd — ange numret i kolumnen Serienummer, inte Batch"],
+      ["Artikeln SN-B får inga serienummer vid inleverans — ta bort Serienummer, eller gör artikeln serienummerstyrd (Serienummer skapas: Vid inleverans) först"],
+      ["Artikeln SN-D får inga serienummer vid inleverans — ta bort Serienummer, eller gör artikeln serienummerstyrd (Serienummer skapas: Vid inleverans) först"],
+      [],
+    ]);
+    expect(await cells(article.id)).toEqual(["A1/S-001=1"]);
+  });
+
+  it("a number that is a batch on the article is a row error; export → import goes round with the numbers in their own column", async () => {
+    const article = await makeArticle("SN-3");
+    await imports.commit("stockBalances", input([["SN-3", "Huvudlager", "A1", "3", "", "L-1"]]));
+    await articleService.updateArticle(article.id, { tracking: "serial" });
+    const clash = await imports.preview("stockBalances", serial([["SN-3", "Huvudlager", "A1", "1", "", "", "l-1"]]));
+    expect(clash.rows[0]!.errors).toEqual(["l-1 finns redan som batch på artikeln och kan inte användas som serienummer"]);
+    await imports.commit("stockBalances", serial([["SN-3", "Huvudlager", "A1", "1", "", "", "S-1"]]));
+
+    const file = await exports.exportFile("stockBalances", importExportQuerySchema.parse({ format: "csv" }));
+    const content = typeof file.content === "string" ? Buffer.from(file.content, "utf8") : file.content;
+    const parsedFile = await imports.parse("stockBalances", content);
+    expect(parsedFile.headers).toEqual(["Artikelnummer", "Lager", "Lagerplats", "Antal", "À-pris", "Batch", "Serienummer", "Batchdatum", "Utgångsdatum"]);
+    expect(parsedFile.rows).toEqual([
+      ["SN-3", "Huvudlager", "A1", "3", "", "L-1", "", "", ""],
+      ["SN-3", "Huvudlager", "A1", "1", "", "", "S-1", "", ""],
+    ]);
+    // The old BATCH cell of an article that is serienummerstyrd now is not importable as such
+    // (the column Batch is refused there) — the serial row reads back unchanged.
+    const roundTrip = { mapping: parsedFile.suggestedMapping, rows: [parsedFile.rows[1]!] };
+    expect((await imports.preview("stockBalances", roundTrip)).summary).toMatchObject({ skip: 1, error: 0 });
   });
 });

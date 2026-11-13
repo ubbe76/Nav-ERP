@@ -7,6 +7,7 @@ import { lockArticlesForOutflow } from "../../stock/service/outflow-locations.js
 import { allocateBatchOutflow, withBatchRemainder } from "../../stock/service/outflow-allocation.js";
 import { trackedArticleIds } from "../../stock/service/batch-tracking.js";
 import { getOrCreateBatch } from "../../stock/service/batches.js";
+import { assertSerialsOutOfStock, lockSerials } from "../../stock/service/serial-numbers.js";
 import { BatchNotTrackedError } from "../../stock/service/batch.errors.js";
 import { batchCellQuantity, batchCellsForArticles } from "../../stock/repository/batch-balances.js";
 import { STOCK_IMPORT_NOTE, stockBatchCellKey, stockBatchKey, type StockBalanceImportPlan } from "../service/stock-balances.js";
@@ -89,7 +90,7 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
 
     // Etapp 2: the dates of the batches those articles have today.
     async stockBatchDates(articleIds: string[]) {
-      const map = new Map<string, { expiresOn: string | null; batchDate: string | null }>();
+      const map = new Map<string, { expiresOn: string | null; batchDate: string | null; kind?: "batch" | "serial" }>();
       for (const part of chunks([...new Set(articleIds)])) {
         if (part.length === 0) continue;
         const rows = await db
@@ -98,10 +99,13 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
             batchNumber: stockBatches.batchNumber,
             expiresOn: stockBatches.expiresOn,
             batchDate: stockBatches.batchDate,
+            kind: stockBatches.kind,
           })
           .from(stockBatches)
           .where(inArray(stockBatches.articleId, part));
-        for (const row of rows) map.set(stockBatchKey(row.articleId, row.batchNumber), { expiresOn: row.expiresOn, batchDate: row.batchDate });
+        for (const row of rows) {
+          map.set(stockBatchKey(row.articleId, row.batchNumber), { expiresOn: row.expiresOn, batchDate: row.batchDate, kind: row.kind });
+        }
       }
       return map;
     },
@@ -163,7 +167,15 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
         const batchIds = new Map<string, string>();
         const named = plan.balances.flatMap((row) =>
           row.batch?.kind === "named"
-            ? [{ articleId: row.articleId, batchNumber: row.batch.batchNumber, batchDate: row.batchDate ?? null, expiresOn: row.expiresOn ?? null }]
+            ? [
+                {
+                  articleId: row.articleId,
+                  batchNumber: row.batch.batchNumber,
+                  batchDate: row.batchDate ?? null,
+                  expiresOn: row.expiresOn ?? null,
+                  kind: row.serial ? ("serial" as const) : ("batch" as const),
+                },
+              ]
             : []
         );
         // Etapp 2: the dates the file gives each batch (the plan refuses two
@@ -197,13 +209,18 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
                 batchDate: dates.batchDate,
                 expiresOn: dates.expiresOn,
                 onExpiryMismatch: "keep",
+                // 0215: the row's sort — a number that exists as the other
+                // one is refused (409 batch-kind-mismatch; the plan says so).
+                kind: item.kind,
               })
             ).id
           );
         }
 
-        let created = 0;
-        let updated = 0;
+        // The place of every row first (article → place), then the serial
+        // number rows the plan books, locked sorted on id — last in the lock
+        // order (serial-numbers.ts) — before anything is booked.
+        const rowLocations: string[] = [];
         for (const row of plan.balances) {
           const explicit =
             row.target.kind === "location"
@@ -218,6 +235,16 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
                   : null;
           const locationId = await resolveStockLocation(tx, row.articleId, explicit);
           await assertLocationNotUnderCount(tx, locationId);
+          rowLocations.push(locationId);
+        }
+        const serialKey = (row: (typeof plan.balances)[number]) =>
+          row.serial && row.batch?.kind === "named" ? batchIds.get(`${row.articleId}|${row.batch.batchNumber.toLocaleLowerCase("sv")}`)! : null;
+        await lockSerials(tx, plan.balances.flatMap((row) => serialKey(row) ?? []));
+
+        let created = 0;
+        let updated = 0;
+        for (const [index, row] of plan.balances.entries()) {
+          const locationId = rowLocations[index]!;
           // Antal is the balance of the whole place — or, with Batch, of
           // that cell (null = the Okänd cell); the difference is booked there.
           const batchId =
@@ -233,6 +260,9 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
             current = await batchCellQuantity(tx, row.articleId, locationId, batchId);
           }
           const delta = round4(row.quantity - current);
+          // Serienummer: a number put in stock must not stand anywhere
+          // (here it stands nowhere on this place — the delta is +1).
+          if (row.serial && delta > 0) await assertSerialsOutOfStock(tx, [batchId!]);
           if (delta === 0) {
             // A row that only filled in its batch's dates (above).
             if (row.datesOnly) updated++;

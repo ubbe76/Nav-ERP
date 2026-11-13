@@ -22,6 +22,7 @@ import {
 import { ilikePattern, type ListStockBatchesQuery, type StockBatchListRow, type TraceBatchRef } from "@navet/shared";
 import type { BatchTraceReader, TraceMoEdge } from "../service/batch-trace.js";
 import { isBatchExpired } from "../service/outflow-allocation.js";
+import { trackedSql } from "../service/batch-tracking.js";
 import { addDays } from "../../system/service/delivery-days.js";
 import { batchExpiryHorizon, expiringBatchCondition } from "./batch-expiry.js";
 
@@ -47,6 +48,7 @@ const batchRefColumns = {
   articleName: articles.name,
   unitCode: units.code,
   tracking: articles.tracking,
+  stockTracked: trackedSql(),
   expiresOn: stockBatches.expiresOn,
   origin: stockBatches.origin,
   createdAt: stockBatches.createdAt,
@@ -60,17 +62,23 @@ function toRef(row: {
   articleName: string;
   unitCode: string;
   tracking: TraceBatchRef["tracking"];
+  stockTracked?: boolean;
   expiresOn: string | null;
   origin: TraceBatchRef["origin"];
   createdAt: Date | null;
 }): TraceBatchRef {
-  return { ...row, batchTracked: row.tracking === "batch", createdAt: row.createdAt ? iso(row.createdAt) : null };
+  const { stockTracked: _stockTracked, ...ref } = row;
+  return { ...ref, batchTracked: ref.tracking === "batch", createdAt: ref.createdAt ? iso(ref.createdAt) : null };
 }
 
 // What a set of TOs drew ("mo_consumption", net < 0) or received
 // ("mo_receipt", net > 0) per (TO, article, batch). An undone or returned
 // row carries the batch of the row it reverses, so it nets itself away.
-async function moEdges(db: Db | Tx, manufacturingOrderIds: string[], type: "mo_consumption" | "mo_receipt"): Promise<TraceMoEdge[]> {
+async function moEdges(
+  db: Db | Tx,
+  manufacturingOrderIds: string[],
+  type: "mo_consumption" | "mo_receipt"
+): Promise<(TraceMoEdge & { stockTracked: boolean })[]> {
   if (manufacturingOrderIds.length === 0) return [];
   const net = sql<string>`sum(${stockTransactions.quantityDelta})`;
   const rows = await db
@@ -94,6 +102,7 @@ async function moEdges(db: Db | Tx, manufacturingOrderIds: string[], type: "mo_c
       articles.name,
       units.code,
       articles.tracking,
+      articles.serialAssignedAt,
       stockBatches.expiresOn,
       stockBatches.id,
       stockBatches.batchNumber,
@@ -106,6 +115,8 @@ async function moEdges(db: Db | Tx, manufacturingOrderIds: string[], type: "mo_c
   return rows.map(({ manufacturingOrderId, quantity, ...ref }) => ({
     manufacturingOrderId,
     batch: toRef(ref),
+    // Lagerspårad now (batch-tracking.ts) — not part of the trace's shape.
+    stockTracked: ref.stockTracked === true,
     quantity: Math.abs(Number(quantity)),
   }));
 }
@@ -168,7 +179,9 @@ export function createBatchTraceReader(db: Db | Tx): BatchTraceReader {
     // batches are not part of a batch trace.
     async materials(manufacturingOrderIds) {
       const edges = await moEdges(db, manufacturingOrderIds, "mo_consumption");
-      return edges.filter((edge) => edge.batch.batchId !== null || edge.batch.tracking !== "none");
+      return edges
+        .filter((edge) => edge.batch.batchId !== null || edge.stockTracked)
+        .map(({ stockTracked: _stockTracked, ...edge }) => edge);
     },
 
     async events(batchIds) {
@@ -217,7 +230,7 @@ export function createBatchTraceReader(db: Db | Tx): BatchTraceReader {
     },
 
     async outputs(manufacturingOrderIds) {
-      return moEdges(db, manufacturingOrderIds, "mo_receipt");
+      return (await moEdges(db, manufacturingOrderIds, "mo_receipt")).map(({ stockTracked: _stockTracked, ...edge }) => edge);
     },
 
     // Utleveranser: the row's parts (delivery_row_locations) point at their

@@ -6,12 +6,25 @@ import type { ArticleTracking } from "@navet/shared";
 
 export type { ArticleTracking };
 
-// Spårad = the article's inflows carry a batch row (a batch or, from the
-// serienummer step, a serial number) and its outflows are drawn per cell.
-// The MECHANICS (cells, locks, the count's seeding, the pick list) ask this;
-// rules about fields and texts ask for the sort.
+// The article's Spårning is something else than Ingen — what the system
+// setting "Använd batch- och serienummer" counts.
 export function isTracked(tracking: ArticleTracking): boolean {
   return tracking !== "none";
+}
+
+// LAGERSPÅRAD = the article's inflows carry a batch row (a batch, or one
+// serial number per styck) and its outflows are drawn per cell. The
+// MECHANICS (cells, locks, the count's seeding, the pick list, the inflows'
+// fields) ask this; rules about texts ask for the sort. A serienummerstyrd
+// article whose numbers are created VID UTLEVERANS (beslut 16–17) is NOT
+// lagerspårad: its stock is untracked like Okänd — inleverans and
+// tillverkning give no numbers, draws and counts ask for none — and the
+// number is given at the delivery.
+export type StockTracking = "batch" | "serial";
+export function stockTrackingOf(article: { tracking: ArticleTracking; serialAssignedAt: "receipt" | "delivery" }): StockTracking | null {
+  if (article.tracking === "batch") return "batch";
+  if (article.tracking === "serial" && article.serialAssignedAt === "receipt") return "serial";
+  return null;
 }
 
 // `tracking` wins when both are sent. `batchTracked: true` means batch — also

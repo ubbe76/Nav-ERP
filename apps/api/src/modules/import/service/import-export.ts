@@ -452,6 +452,9 @@ export interface StockBalanceExportRecord {
   // place); a batchstyrd article has one row per cell — the batch number,
   // or "Okänd" for the stock without a batch.
   batchNumber: string;
+  // Serienummer (0215): the cell is ONE serial number — the number stands
+  // here and Batch is "".
+  serialNumber: string;
   // Etapp 2: the named batch's Batchdatum and Utgångsdatum ("" = none).
   batchDate: string;
   expiresOn: string;
@@ -468,6 +471,7 @@ export function stockBalanceExportBlocks(records: StockBalanceExportRecord[]): I
       locationName: r.locationName,
       quantity: r.quantity,
       batchNumber: r.batchNumber,
+      serialNumber: r.serialNumber,
       batchDate: r.batchDate,
       expiresOn: r.expiresOn,
     }))

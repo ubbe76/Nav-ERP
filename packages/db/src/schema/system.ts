@@ -28,7 +28,9 @@ const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 // into the column's DEFAULT SQL). Numbers are now issued from application
 // code via number-series.ts's getNextOrderNumber, so admins can reconfigure
 // prefix/next number/padding per series.
-export const numberSeries = pgTable("number_series", {
+export const numberSeries = pgTable(
+  "number_series",
+  {
   key: varchar("key", { length: 50 }).primaryKey(), // "purchase_order" | "sales_order" | "manufacturing_order"
   prefix: varchar("prefix", { length: 20 }).notNull(),
   nextNumber: integer("next_number").notNull(),
@@ -39,7 +41,16 @@ export const numberSeries = pgTable("number_series", {
   // groups. Only rows with for_articles can number an article.
   name: varchar("name", { length: 100 }).unique(),
   forArticles: boolean("for_articles").notNull().default(false),
-});
+  // Serienummerserier (#8 etapp 2, migration 0215): "serial" is the common
+  // series every serienummerstyrd article without one of its own draws from
+  // (seeded, "SN-" + six digits); further ones are created by the user and
+  // chosen on the article (articles.serial_series_key). Only rows with
+  // for_serials can number a serial; numbers already on the article are
+  // stepped over (serial-numbers.ts).
+  forSerials: boolean("for_serials").notNull().default(false),
+  },
+  (table) => [check("number_series_one_register", sql`NOT (${table.forArticles} AND ${table.forSerials})`)]
+);
 
 // Free-form system-wide settings as key–value rows, so new toggles don't
 // need a migration each. Known keys: "allow_multiple_stamps" ("true"/"false",

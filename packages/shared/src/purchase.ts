@@ -4,7 +4,7 @@ import { businessDateSchema } from "./business-date.js";
 import { materialShortageOverrideSchema } from "./manufacturing.js";
 import { listQuerySchema, orderStatusListParam, statusListParam } from "./list.js";
 import { blankSafe } from "./coerce.js";
-import { batchDayInputSchema, batchNumberSchema } from "./stock.js";
+import { batchDayInputSchema, batchNumberSchema, serialNumbersSchema } from "./stock.js";
 import { vatRateSchema } from "./vat.js";
 import { paymentReferenceSchema, supplierPaymentDetailsFields } from "./banking.js";
 import { partnerDeliveryFields } from "./delivery.js";
@@ -371,6 +371,13 @@ export const receiveGoodsSchema = z.object({
   // goods. A batch that already has ANOTHER date is refused (409
   // batch-expiry-mismatch); one without gets it. Only on a spårad article.
   expiresOn: batchDayInputSchema,
+  // Serienummer (0215): a serienummerstyrd article (numbers created vid
+  // inleverans) takes ONE number per styck in the base unit, scanned or
+  // typed, and nothing is received without all of them (400
+  // serial-numbers-required / serial-count-mismatch; a number already in
+  // stock 409 serial-already-in-stock). Each styck becomes its own kvitto.
+  // Refused on any other article (400 article-not-serial-tracked).
+  serialNumbers: serialNumbersSchema.optional(),
   // Materialbrist: a lego row's receipt reports the TO operation, which
   // draws its linked material — report anyway after a 409 material-shortage
   // in mode "warn" (see materialShortageOverrideSchema in manufacturing.ts).

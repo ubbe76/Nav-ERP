@@ -1995,6 +1995,8 @@ export function createSalesRepository(db: Db) {
           articleBatchTracked: batchTrackedSql(),
           // Spårning (etapp 2): the sort; batchTracked above is its alias.
           articleTracking: articles.tracking,
+          // Lagerspårad: the pick list prints the article's cells.
+          articleStockTracked: trackedSql(),
           // Printed as the articleInfo line on the quote/confirmation PDF
           // (renderSalesOrderPdf) via formatArticleAttributes — NOT on the
           // invoice PDF, which shares this same row query.
