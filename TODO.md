@@ -41,6 +41,8 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — otydliga fel, texter och småbeteenden
 
+- [ ] **Utleverans med en order som inte kan levereras** (webbläsarkontrollen 2026-11-13): `/forsaljning/utleverans?order=<id>` öppnar en order som inte är Under tillverkning, och felet kommer först vid Rapportera som "Åtgärden går inte att göra i det här läget — ladda om sidan." (409 `invalid-status-transition`) — säg i stället direkt att ordern inte kan levereras och varför (status).
+
 - [ ] **Systemgranskningens rester (2026-11-11):** en nummerserie nära 20 tecken kan växa förbi kolumnen senare (9999 → 10000) och ger då 500 (22001 säger inte vilken kolumn); ett krockande LF-nummer får `DuplicateSupplierInvoiceNumberError`s text i stället för `document-number-taken`; backupen kan leverera en avkortad dump som lyckad om pg_dump avslutar med fel efter att stdout tagit slut; inköpets fakturaunderlag (`listInvoiceBasis`) läser bara lagerrader, så lego-/tjänsterader får ett ungefärligt mottagningsdatum.
 
 - [ ] **Importens igenkänning:** kundens/leverantörens adressmall utan Adressnamn och Förvald (bara nummer + Adressrad 1/Postnummer/Stad) känns igen som kund-/leverantörsfil och skriver adressen över motpartens egen — tvetydig mot kundmallen, så den rättades inte i importgranskningen (guiden visar typen före commit).
