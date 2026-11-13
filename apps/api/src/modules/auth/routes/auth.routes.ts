@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import {
+  changeOwnPasswordSchema,
   createUserSchema,
   listUsersQuerySchema,
   loginSchema,
@@ -20,6 +21,7 @@ import {
   RegistrationClosedError,
   SelfDeleteError,
   UserNotFoundError,
+  WrongCurrentPasswordError,
 } from "../service/auth.service.js";
 import type { UserSettingsService } from "../service/user-settings.service.js";
 import { crossSiteGuard, requireAuth, requireRole, SESSION_COOKIE } from "../middleware/auth.middleware.js";
@@ -142,6 +144,43 @@ export async function authRoutes(
       return await settings.updateSettings(req.user!.id, input);
     } catch (err) {
       if (err instanceof UnknownThemeError) return reply.code(400).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Byt lösenord (Mina inställningar): the signed-in user's own password.
+  // readOnlySafe like PATCH /me/settings — the account's own credential,
+  // never business data, so an Endast läsning account can change it too.
+  // A wrong current password counts in the login throttle under its own key
+  // (10 ⇒ 15 min), so the form is no way around the login's guard; the new
+  // password ends every other session and this one gets a fresh cookie.
+  app.post("/me/password", { preHandler: requireAuth(service), config: { readOnlySafe: true } }, async (req, reply) => {
+    const input = changeOwnPasswordSchema.parse(req.body);
+    const userId = req.user!.id;
+    const key = [`password:${userId}`];
+    try {
+      throttles.account.assertAllowed(key);
+      await service.changeOwnPassword(userId, input.currentPassword, input.newPassword);
+      throttles.account.recordSuccess(key);
+      const token = await service.sessionTokenFor(userId);
+      if (token) setSessionCookie(reply, token);
+      return reply.code(204).send();
+    } catch (err) {
+      if (err instanceof LoginThrottledError) {
+        return reply
+          .code(429)
+          .header("Retry-After", String(err.retryAfterSeconds))
+          .send({
+            error: "Too many wrong passwords",
+            code: "password-change-throttled",
+            retryAfterSeconds: err.retryAfterSeconds,
+          });
+      }
+      if (err instanceof WrongCurrentPasswordError) {
+        throttles.account.recordFailure(key);
+        return reply.code(400).send(errorBody(err));
+      }
+      if (err instanceof UserNotFoundError) return reply.code(404).send(errorBody(err));
       throw err;
     }
   });

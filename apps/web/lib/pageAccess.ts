@@ -18,6 +18,9 @@ const ENTRIES: readonly Entry[] = [
   { path: "/aviseringar", rule: ["office"] },
   { path: "/tillagg", rule: ["office"] },
   { path: "/hjalp", rule: ["any"] },
+  // Mina inställningar: the account's own settings (lösenord, e-postmallar,
+  // utseende) — every logged-in user, like the user menu.
+  { path: "/mina-installningar", rule: ["any"] },
   { path: "/ingen-behorighet", rule: ["any"] },
   { path: "/system", rule: ["admin"] },
   // Referensränta follows the customer invoices' API rule (read office, write

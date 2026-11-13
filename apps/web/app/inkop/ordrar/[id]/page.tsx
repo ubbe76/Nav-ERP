@@ -7,7 +7,6 @@ import { ReceiptsSection } from "../../../../components/purchase/ReceiptsSection
 import { MailSection } from "../../../../components/mail/MailSection";
 import { DeviationsSection } from "../../../../components/quality/DeviationsSection";
 import { AuditTrailSection } from "../../../../components/system/AuditTrailSection";
-import { documentMailTexts } from "../../../../lib/documentMailTexts";
 import { documentLanguageOf } from "../../../../lib/documentLanguage";
 import { apiGet } from "../../../../lib/api";
 import { countDrawings, getDocumentEmails } from "../../../../lib/mail";
@@ -43,10 +42,6 @@ export default async function PurchaseOrderDetailPage(props: { params: Promise<{
   // address, else the supplier's E-post.
   const defaultTo = order.defaultRecipient ?? "";
   const drawingCount = await countDrawings(rows.map((r) => r.articleId), cookieHeader);
-  const poMail = documentMailTexts(
-    { kind: "purchaseOrder", number: order.orderNumber },
-    documentLanguageOf(order.supplierLanguage)
-  );
   const mailable = order.status !== "cancelled" && order.status !== "closed";
 
   return (
@@ -88,8 +83,16 @@ export default async function PurchaseOrderDetailPage(props: { params: Promise<{
                   modalTitle: `Skicka ${order.orderNumber} via e-post`,
                   endpoint: `/api/v1/purchase-orders/${order.id}/send-email`,
                   ccSupplierId: order.supplierId,
-                  subject: poMail.subject,
-                  message: poMail.body,
+                  mail: {
+                    kind: "purchaseOrder",
+                    language: documentLanguageOf(order.supplierLanguage),
+                    values: {
+                      number: order.orderNumber,
+                      supplier: order.supplierName,
+                      contact: order.yourReference,
+                      deliveryDate: order.expectedDeliveryDate,
+                    },
+                  },
                 },
               ]
             : []

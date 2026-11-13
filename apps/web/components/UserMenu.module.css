@@ -111,3 +111,14 @@
   line-height: 1.4;
   color: var(--color-text-secondary);
 }
+
+.settingsLink {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--accent-fg);
+  text-decoration: none;
+}
+.settingsLink:hover {
+  text-decoration: underline;
+}

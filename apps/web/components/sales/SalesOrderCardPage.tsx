@@ -24,11 +24,11 @@ import shellStyles from "../AppShell.module.css";
 import Link from "next/link";
 import buttonStyles from "../ui/Button.module.css";
 import { HelpLink } from "../ui/HelpLink";
-import { documentMailTexts } from "../../lib/documentMailTexts";
 import { documentLanguageOf } from "../../lib/documentLanguage";
 import { SectionHeading } from "../ui/SectionHeading";
 import { DeviationsSection } from "../quality/DeviationsSection";
 import { formatStockholmDateTime } from "../../lib/date";
+import { round2 } from "../../lib/format";
 
 // Ångra utleverans: a följesedel whose rows are all undone.
 function isUndone(delivery: SalesDelivery) {
@@ -78,41 +78,58 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
   const sendButtons: SendButtonConfig[] = [];
   // Dokument på engelska (#7): the mail defaults follow the customer's language.
   const documentLanguage = documentLanguageOf(order.customerLanguage);
+  // E-postmallar: the order's own values for {kund} and {kontakt}.
+  const mailParty = { customer: order.customerName, contact: order.customerReference };
+  const orderSum = rows.reduce(
+    (sum, r) => sum + Number(r.quantityOrdered) * Number(r.unitPrice) * (1 - Number(r.discountPercent) / 100),
+    0
+  );
   if (order.status === "quote" || order.status === "ordered") {
-    const quoteMail = documentMailTexts({ kind: "quote", number: quoteNumber ?? order.orderNumber }, documentLanguage);
     sendButtons.push({
       label: "Skicka offert",
       modalTitle: `Skicka offert ${quoteNumber ?? order.orderNumber} via e-post`,
       endpoint: `/api/v1/sales-orders/${order.id}/send-email`,
-      subject: quoteMail.subject,
-      message: quoteMail.body,
+      mail: {
+        kind: "quote",
+        language: documentLanguage,
+        values: {
+          ...mailParty,
+          number: quoteNumber ?? order.orderNumber,
+          // {belopp} on a quote: the order's Summa (excl. moms), as on the card.
+          amount: { value: round2(orderSum), currency: order.currency },
+          validUntil: order.quoteValidUntil ?? null,
+        },
+      },
       extraBody: { variant: "quote" },
     });
   }
   if (kind === "order" && order.status !== "cancelled") {
-    const confirmationMail = documentMailTexts(
-      { kind: "orderConfirmation", number: order.orderNumber, quoteNumber: null },
-      documentLanguage
-    );
     sendButtons.push({
       label: "Skicka orderbekräftelse",
       modalTitle: `Skicka orderbekräftelse ${order.orderNumber} via e-post`,
       endpoint: `/api/v1/sales-orders/${order.id}/send-email`,
-      subject: confirmationMail.subject,
-      message: confirmationMail.body,
+      mail: {
+        kind: "orderConfirmation",
+        language: documentLanguage,
+        values: {
+          ...mailParty,
+          number: order.orderNumber,
+          deliveryDate: order.expectedDeliveryDate,
+          // {offertnummer}: the quote the order came from (confirmed or Skapa kundorder).
+          quoteNumber: fromQuote ?? order.sourceQuote?.quoteNumber ?? null,
+        },
+      },
       extraBody: { variant: "confirmation" },
     });
   }
   // The invoice exists once the order is invoiced. Its email goes to the
   // customer's invoice email when one is set.
   if (order.status === "invoiced" && order.invoiceNumber) {
-    const invoiceMail = documentMailTexts({ kind: "legacyInvoice", number: order.invoiceNumber }, documentLanguage);
     sendButtons.push({
       label: "Skicka faktura",
       modalTitle: `Skicka faktura ${order.invoiceNumber} via e-post`,
       endpoint: `/api/v1/sales-orders/${order.id}/send-invoice-email`,
-      subject: invoiceMail.subject,
-      message: invoiceMail.body,
+      mail: { kind: "invoice", language: documentLanguage, values: { ...mailParty, number: order.invoiceNumber } },
       to: customer?.invoiceEmail ?? undefined,
     });
   }

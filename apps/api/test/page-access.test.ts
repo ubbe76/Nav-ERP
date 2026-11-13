@@ -48,6 +48,8 @@ describe("page access table", () => {
         "/hjalp",
         "/hjalp/x1",
         "/ingen-behorighet",
+        // Mina inställningar is every account's own page.
+        "/mina-installningar",
         "/tillverkning",
         "/tillverkning/korplan",
         "/tillverkning/ordrar",

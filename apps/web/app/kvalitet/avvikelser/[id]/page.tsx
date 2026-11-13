@@ -7,7 +7,7 @@ import { MailSection } from "../../../../components/mail/MailSection";
 import buttonStyles from "../../../../components/ui/Button.module.css";
 import { HelpLink } from "../../../../components/ui/HelpLink";
 import { apiGet } from "../../../../lib/api";
-import { documentMailTexts } from "../../../../lib/documentMailTexts";
+import { deviationMailKind, type MailTextRequest } from "../../../../lib/mailText";
 import { documentLanguageOf } from "../../../../lib/documentLanguage";
 import { getDefaultRecipient, getDocumentEmails } from "../../../../lib/mail";
 import { DEVIATION_TYPE_LABELS, getResponsibleCandidates, type Deviation, type DeviationReason } from "../../../../lib/quality";
@@ -41,10 +41,15 @@ export default async function DeviationPage(props: { params: Promise<{ id: strin
   const lower = title.toLowerCase();
   // Dokument på engelska (#7): a customer/supplier deviation follows the
   // counterparty's language; internal ones stay Swedish.
-  const { subject, body: message } = documentMailTexts(
-    { kind: "deviation", number: deviation.deviationNumber, deviationType: deviation.type },
-    documentLanguageOf(deviation.counterpartyLanguage)
-  );
+  const mail: MailTextRequest = {
+    kind: deviationMailKind(deviation.type),
+    language: documentLanguageOf(deviation.counterpartyLanguage),
+    values: {
+      number: deviation.deviationNumber,
+      customer: deviation.type === "customer" ? deviation.counterpartyName : null,
+      supplier: deviation.type === "supplier" ? deviation.counterpartyName : null,
+    },
+  };
   const endpoint = `/api/v1/deviations/${deviation.id}/email`;
 
   return (
@@ -75,16 +80,14 @@ export default async function DeviationPage(props: { params: Promise<{ id: strin
             label: `Skicka ${lower}`,
             modalTitle: `Skicka ${lower} ${deviation.deviationNumber} via e-post`,
             endpoint,
-            subject,
-            message,
+            mail,
             extraBody: { includeDetails: false },
           },
           {
             label: `Skicka ${lower} med analys och åtgärd`,
             modalTitle: `Skicka ${lower} ${deviation.deviationNumber} med analys och åtgärd via e-post`,
             endpoint,
-            subject,
-            message,
+            mail,
             extraBody: { includeDetails: true },
           },
         ]}
