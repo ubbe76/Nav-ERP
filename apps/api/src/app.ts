@@ -69,6 +69,8 @@ import { createMailRepository } from "./modules/mail/repository/mail.repository.
 import { createMailService, type MailTransportFactory } from "./modules/mail/service/mail.service.js";
 import { createDocumentPdfService } from "./modules/mail/service/document-pdf.js";
 import { mailRoutes } from "./modules/mail/routes/mail.routes.js";
+import { mailTemplatesRoutes } from "./modules/mail/routes/mail-templates.routes.js";
+import { createMailTemplatesService } from "./modules/mail/service/mail-templates.service.js";
 import { createManufacturingRepository } from "./modules/manufacturing/repository/manufacturing.repository.js";
 import { copyRoutingAlternatives, insertRoutingOperations } from "./modules/manufacturing/repository/routing-write.js";
 import { createManufacturingService } from "./modules/manufacturing/service/manufacturing.service.js";
@@ -346,7 +348,8 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   const setupCode = createSetupCode();
   const authService = createAuthService(createAuthRepository(database), jwtSecret, auditRepository, setupCode);
   const permissionGroupService = createPermissionGroupService(createPermissionGroupRepository(database));
-  const userSettingsService = createUserSettingsService(createUserSettingsRepository(database));
+  const userSettingsRepository = createUserSettingsRepository(database);
+  const userSettingsService = createUserSettingsService(userSettingsRepository);
   // audit: the varugrupp's price markups (#16).
   // ABC-klassning (#10): the article register's class column/filter and
   // the card's class come from the planning service, built far below —
@@ -371,6 +374,12 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   // referenced from both customers and suppliers.
   const registerService = createRegisterService(createRegisterRepository(database));
   const systemService = createSystemService(createSystemRepository(database), auditRepository);
+  // E-postmallar (Mina inställningar): stored as a user setting, {företag}
+  // from Företagsinformation.
+  const mailTemplatesService = createMailTemplatesService({
+    store: userSettingsRepository,
+    companyName: async () => (await systemService.getCompanyInfo())?.name ?? null,
+  });
   // Egna teman: holds the custom themes' CSS in memory (one cache per app).
   const themesService = createThemesService({ repo: createThemesRepository(database), audit: auditRepository, settings: systemService });
   // Tillägg: installed plugins, their technical users and the webhook
@@ -1047,6 +1056,9 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
       // /auth/users and /me/settings which apply their own requireAuth
       // preHandler individually.
       await v1.register(authRoutes, { service: authService, settings: userSettingsService, throttles: credentialThrottles });
+      // The user's own e-mail templates (/me/mail-templates, /me/mail-text):
+      // requireAuth on each route, like /me/settings.
+      await v1.register(mailTemplatesRoutes, { auth: authService, service: mailTemplatesService });
       // Public: this route IS the OAuth2 client-credentials authentication mechanism.
       await v1.register(oauthRoutes, { service: oauthService, throttles: credentialThrottles });
       // Public: the theme CSS and picker data every page (login and the stamp

@@ -4,31 +4,22 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ChevronDown } from "lucide-react";
 import { Button } from "./ui/Button";
-import { ThemeToggle } from "./ThemeToggle";
-import { useUserPrefs } from "./UserPrefsProvider";
-import { useFavorites } from "./FavoritesProvider";
-import { DENSITY_LABELS, TABLE_DENSITIES } from "../lib/listColumns";
-import { FAVORITES_PLACEMENTS, FAVORITES_PLACEMENT_LABELS, favoritesPlacement, type FavoritesPlacement } from "../lib/overviewCards";
-import segmentedStyles from "./ThemeToggle.module.css";
-import { useThemeBoot } from "./ThemeBootProvider";
+import Link from "next/link";
+import { AppearanceControls } from "./settings/AppearanceControls";
 import { logout } from "../lib/api";
 import { clearBrowserTraces } from "../lib/commandPalette";
 import { INSTALL_PROMPT_EVENT, installOffer, type InstallOffer } from "../lib/installApp";
 import styles from "./UserMenu.module.css";
 
 // The user menu in the toolbar: who is logged in, the theme, Täthet, Dokument
-// i flikar, Favoriter (the sidebar and/or Översikten), Installera Nav
+// i flikar, Favoriter (the sidebar and/or Översikten) — AppearanceControls,
+// also on Mina inställningar —, a link to Mina inställningar, Installera Nav
 // (when the browser can install it), the version (a link to the release
 // notes) and Logga ut. Closes on Esc, on a click outside and when the page
 // changes.
 export function UserMenu({ userName, userRole }: { userName: string; userRole: string }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { boot } = useThemeBoot();
-  const { density, setDensity, documentTabs, setDocumentTabs } = useUserPrefs();
-  const { favorites, inSidebar, onOverview, setPlacement } = useFavorites();
-  const [placementSaving, setPlacementSaving] = useState(false);
-  const placement = favoritesPlacement(inSidebar, onOverview);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -87,15 +78,6 @@ export function UserMenu({ userName, userRole }: { userName: string; userRole: s
     };
   }, [open]);
 
-  async function choosePlacement(next: FavoritesPlacement) {
-    if (next === placement || placementSaving) return;
-    setPlacementSaving(true);
-    const saved = await setPlacement(next);
-    setPlacementSaving(false);
-    // Översikten draws its cards on the server.
-    if (saved && pathname === "/") router.refresh();
-  }
-
   async function handleLogout() {
     await logout();
     clearBrowserTraces();
@@ -132,70 +114,12 @@ export function UserMenu({ userName, userRole }: { userName: string; userRole: s
             <span className={styles.name}>{userName}</span>
             <span className={styles.role}>{userRole}</span>
           </div>
-          {/* An administrator may lock the theme (System → Teman). */}
-          {!boot.locked && (
-            <div className={styles.section}>
-              <span className={styles.label}>Tema</span>
-              <ThemeToggle />
-            </div>
-          )}
-          {/* Täthet (Nav som program, punkt 6): the row height of the tables. */}
+          <AppearanceControls classes={{ section: styles.section, label: styles.label }} />
           <div className={styles.section}>
-            <span className={styles.label}>Täthet</span>
-            <div className={segmentedStyles.segmented} role="radiogroup" aria-label="Täthet">
-              {TABLE_DENSITIES.map((d) => (
-                <button
-                  key={d}
-                  type="button"
-                  role="radio"
-                  aria-checked={density === d}
-                  data-active={density === d}
-                  onClick={() => setDensity(d)}
-                >
-                  {DENSITY_LABELS[d]}
-                </button>
-              ))}
-            </div>
+            <Link href="/mina-installningar" className={styles.settingsLink}>
+              Mina inställningar
+            </Link>
           </div>
-          {/* Flikar (punkt 5): documents as tabs on a wide screen. */}
-          <div className={styles.section}>
-            <span className={styles.label}>Dokument i flikar</span>
-            <div className={segmentedStyles.segmented} role="radiogroup" aria-label="Dokument i flikar">
-              {[true, false].map((on) => (
-                <button
-                  key={String(on)}
-                  type="button"
-                  role="radio"
-                  aria-checked={documentTabs === on}
-                  data-active={documentTabs === on}
-                  onClick={() => setDocumentTabs(on)}
-                >
-                  {on ? "På" : "Av"}
-                </button>
-              ))}
-            </div>
-          </div>
-          {/* Var favoriterna visas: the sidebar group and/or Översikten's card. */}
-          {favorites !== null && (
-            <div className={styles.section}>
-              <span className={styles.label}>Favoriter</span>
-              <div className={segmentedStyles.segmented} role="radiogroup" aria-label="Favoriter" aria-busy={placementSaving}>
-                {FAVORITES_PLACEMENTS.map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    role="radio"
-                    aria-checked={placement === p}
-                    data-active={placement === p}
-                    disabled={placementSaving}
-                    onClick={() => void choosePlacement(p)}
-                  >
-                    {FAVORITES_PLACEMENT_LABELS[p]}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
           {install && (
             <div className={styles.section}>
               {install.kind === "prompt" ? (

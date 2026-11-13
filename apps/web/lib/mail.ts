@@ -53,7 +53,7 @@ export async function fetchDefaultRecipient(
 }
 
 // Same lookup, plus the partner's document language (Språk) for the default
-// subject and text of the mail (documentMailTexts).
+// subject and text of the mail (the e-mail templates, POST /me/mail-text).
 export async function fetchDefaultRecipientAndLanguage(
   partnerBase: "suppliers" | "customers",
   partnerId: string

@@ -12,6 +12,16 @@ export function createUserSettingsRepository(db: Db) {
         .where(eq(userSettings.userId, userId));
     },
 
+    // One key's stored text (undefined = none) — settings that are not part of
+    // GET /me/settings (E-postmallar) read just their own row.
+    async get(userId: string, key: string): Promise<string | undefined> {
+      const [row] = await db
+        .select({ value: userSettings.value })
+        .from(userSettings)
+        .where(and(eq(userSettings.userId, userId), eq(userSettings.key, key)));
+      return row?.value || undefined;
+    },
+
     async upsert(userId: string, key: string, value: string) {
       await db
         .insert(userSettings)

@@ -476,6 +476,11 @@ describe("Endast läsning — the allowlist", () => {
         "POST /api/v1/articles/copied",
         "POST /api/v1/articles/copied/remove",
         "DELETE /api/v1/articles/copied",
+        // Mina inställningar: Byt lösenord writes the account's own password
+        // (users' choice 2026-11-13 — the account's own credential, like
+        // /me/settings), and the send dialogs' text is only filled in.
+        "POST /api/v1/me/password",
+        "POST /api/v1/me/mail-text",
       ].sort()
     );
   });

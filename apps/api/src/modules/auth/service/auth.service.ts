@@ -43,6 +43,15 @@ export class InvalidCredentialsError extends Error {
   }
 }
 
+// Byt lösenord: the current password given does not match. 400 — the
+// session is valid, only the field is wrong.
+export class WrongCurrentPasswordError extends Error {
+  constructor() {
+    super("The current password is wrong");
+    this.name = "WrongCurrentPasswordError";
+  }
+}
+
 export class UserNotFoundError extends Error {
   constructor(id: string) {
     super(`No user with id ${id}`);
@@ -414,6 +423,26 @@ export function createAuthService(
 
       const token = await issueToken({ sub: user.id, role: user.role, ver: user.tokenVersion });
       return { user: toPublicUser(user), token };
+    },
+
+    // Byt lösenord (Mina inställningar): the signed-in user's own password,
+    // behind the current one. Like the admin's Nytt lösenord it bumps
+    // token_version, so every earlier session of the account ends — the
+    // route gives this one a fresh cookie (sessionTokenFor).
+    async changeOwnPassword(userId: string, currentPassword: string, newPassword: string): Promise<void> {
+      const user = await repo.findById(userId);
+      if (!user || user.deletedAt || !user.active || user.kind !== "person") throw new UserNotFoundError(userId);
+      if (!(await bcrypt.compare(currentPassword, user.passwordHash))) throw new WrongCurrentPasswordError();
+      const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+      const written = await repo.update(userId, { passwordHash }, { losesAdmin: false, bumpTokenVersion: true });
+      if (!written) throw new UserNotFoundError(userId);
+      await audit.log({
+        entityType: "user",
+        entityId: user.email,
+        action: "updated",
+        detail: { changedFields: ["password"], password_changed: true, own: true },
+        userId,
+      });
     },
 
     // A fresh session for an account that is signed in right now — the

@@ -17,13 +17,16 @@ import { Form, FormActions, FormError } from "../ui/Form";
 import { formatStockholmDateTime } from "../../lib/date";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { hasUnsavedDrafts } from "../../lib/unsavedGuard";
+import type { MailTextRequest } from "../../lib/mailText";
+import { useMailText } from "./useMailText";
 
 export interface SendButtonConfig {
   label: string; // e.g. "Skicka via e-post", "Skicka offert"
   modalTitle: string;
   endpoint: string; // POST target, e.g. /api/v1/inquiries/:id/send-email
-  subject: string; // prefilled Ämne
-  message: string; // prefilled Meddelande
+  // Ämne and Meddelande are filled from the user's e-mail template
+  // (Mina inställningar) for this document when the dialog opens.
+  mail: MailTextRequest;
   extraBody?: Record<string, unknown>; // e.g. { variant: "quote" }
   // Overrides the shared default recipient (e.g. the customer's invoice
   // email for "Skicka faktura").
@@ -203,8 +206,8 @@ export function SendEmailModal({
   onSuccess: () => void;
 }) {
   const [to, setTo] = useState(config.to ?? defaultTo);
-  const [subject, setSubject] = useState(config.subject);
-  const [message, setMessage] = useState(config.message);
+  const text = useMailText(config.mail);
+  const { subject, setSubject, message, setMessage } = text;
   // Prechecked when the order's articles have drawings — easy to opt out of.
   const [attachDrawings, setAttachDrawings] = useState(drawingCount > 0);
   const [showPrices, setShowPrices] = useState(configurationPrices ?? false);
@@ -269,7 +272,7 @@ export function SendEmailModal({
   return (
     <Modal open={open} onClose={onClose} title={config.modalTitle}>
       <Form onSubmit={handleSubmit}>
-        <FormError>{error}</FormError>
+        <FormError>{error ?? text.error}</FormError>
 
         <Field label="Mottagare" htmlFor="mailTo">
           <Input id="mailTo" type="email" required value={to} onChange={(e) => setTo(e.target.value)} />
@@ -302,7 +305,15 @@ export function SendEmailModal({
         )}
 
         <Field label="Ämne" htmlFor="mailSubject">
-          <Input id="mailSubject" required maxLength={255} value={subject} onChange={(e) => setSubject(e.target.value)} />
+          <Input
+            id="mailSubject"
+            required
+            maxLength={255}
+            value={subject}
+            disabled={text.loading}
+            placeholder={text.loading ? "Hämtar…" : undefined}
+            onChange={(e) => setSubject(e.target.value)}
+          />
         </Field>
 
         <Field label="Meddelande" htmlFor="mailMessage">
@@ -312,6 +323,7 @@ export function SendEmailModal({
             rows={6}
             maxLength={5000}
             value={message}
+            disabled={text.loading}
             onChange={(e) => setMessage(e.target.value)}
             style={{ resize: "vertical", fontFamily: "inherit" }}
           />
@@ -338,7 +350,7 @@ export function SendEmailModal({
         )}
 
         <FormActions>
-          <Button type="submit" variant="primary" disabled={pending}>
+          <Button type="submit" variant="primary" disabled={pending || text.loading}>
             {pending ? "Skickar…" : "Skicka"}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>

@@ -26,7 +26,7 @@ Efter 10 misslyckade inloggningsförsök på samma konto spärras kontot i 15 mi
   - I en lista flyttar **↑** och **↓** en markerad rad, **Enter** öppnar den och **Esc** tar bort markeringen.
   - **Högerklick** på en rad öppnar radens ⋯-meny, där en sådan finns. Högerklickar du på en länk får du webbläsarens vanliga meny, till exempel för att öppna i en ny flik.
   - På sidor som inte är listor, och när en dialog är öppen, fungerar piltangenterna som vanligt.
-- **Användarmenyn** (knappen med dina initialer) visar ditt namn och din roll, **Installera Nav** när webbläsaren kan installera Nav som program (se [Installera som app](#installera-som-app)), **Täthet** för tabellerna (se [Listor: sök, filter och bläddring](#listor-sok-filter-och-bladdring)), **Dokument i flikar** (se [Flikar och delad vy](#flikar-och-delad-vy)), **Favoriter** (var dina favoriter visas, se [Favoriter](#favoriter)), väljaren för färgtema — **Ljust**, **Mörkt** och **Dracula** (ett mörkt tema i lila och rosa efter [Dracula](https://draculatheme.com), som används under MIT-licensen) —, vilken version av Nav|ERP du använder, t.ex. **Version 0.8.11**, och **Logga ut**. Klickar du på versionen öppnas versionssidan på naverp.se med vad som är nytt i varje version; versionen syns också i API:ets `GET /health`. Temavalet sparas på användaren och följer med mellan datorer, och gäller på alla sidor, även stämpelterminalen och inloggningen. Administratören kan välja ett förvalt tema för företaget, låsa valet (då döljs väljaren) och installera egna teman under **System → Teman** — de syns i väljaren bredvid de tre inbyggda.
+- **Användarmenyn** (knappen med dina initialer) visar ditt namn och din roll, **Installera Nav** när webbläsaren kan installera Nav som program (se [Installera som app](#installera-som-app)), **Täthet** för tabellerna (se [Listor: sök, filter och bläddring](#listor-sok-filter-och-bladdring)), **Dokument i flikar** (se [Flikar och delad vy](#flikar-och-delad-vy)), **Favoriter** (var dina favoriter visas, se [Favoriter](#favoriter)), länken **Mina inställningar** (se [Mina inställningar](#mina-installningar)), väljaren för färgtema — **Ljust**, **Mörkt** och **Dracula** (ett mörkt tema i lila och rosa efter [Dracula](https://draculatheme.com), som används under MIT-licensen) —, vilken version av Nav|ERP du använder, t.ex. **Version 0.8.11**, och **Logga ut**. Klickar du på versionen öppnas versionssidan på naverp.se med vad som är nytt i varje version; versionen syns också i API:ets `GET /health`. Temavalet sparas på användaren och följer med mellan datorer, och gäller på alla sidor, även stämpelterminalen och inloggningen. Administratören kan välja ett förvalt tema för företaget, låsa valet (då döljs väljaren) och installera egna teman under **System → Teman** — de syns i väljaren bredvid de tre inbyggda.
 - **Notiser:** efter en del rutiner — utleverans, inleverans och på en tillverkningsorder **Slutför**, **Förbruka**, **Rapportera tid** och **Slutför order** — visas en kort notis nere till höger med vad som gjordes, ofta med **Ångra** (eller **Ångra…** när det finns något att välja). Notisen försvinner efter några sekunder; håller du muspekaren över den stannar den, och **✕** stänger den direkt. Ett fel visas längre och i rött.
 - **När något hämtas:** en tabell som hämtar sina rader visar grå platshållarrader i tabellens form, och när du söker, filtrerar eller bläddrar i en lista bleknar de gamla raderna tills de nya har kommit.
 - **Statusraden** längst ned (på datorn) visar om Nav har kontakt med servern — **Ansluten**, **Sessionen har gått ut** (med en länk till **Logga in**) eller **Ingen kontakt med servern** —, vem som är inloggad med vilken roll, och versionen. Den kontrollerar kontakten en gång i minuten.
@@ -71,6 +71,47 @@ Installationen kräver att Nav nås över **https** — en installation som öpp
 - När sidomenyn är ihopfälld visas favoriterna som ikoner — för musen över en ikon för att se namnet.
 - En favorit till en sida som din behörighetsgrupp inte längre ger dig visas inte, men den finns kvar och kommer tillbaka om du får behörigheten igen. Under **Ändra** syns alla dina favoriter.
 - **Var favoriterna visas:** välj under **Favoriter** i användarmenyn (knappen med dina initialer uppe till höger): **Menyn** (högst upp i sidomenyn), **Översikten** (kortet **Favoriter** på Översikten) eller **Båda**. Kortet läggs först på Översikten och kan flyttas under [Anpassa Översikten](#anpassa-oversikten); där visas favoriterna som rutor med samma ikoner som i menyn, och kortet har en egen **Ändra**. Samma val finns också styckvis: kortet under **Anpassa** och bocken **Visa favoriterna i sidomenyn** under **Ändra**. Har du tagit bort både kortet och bocken syns favoriterna ingenstans, och inget alternativ är markerat i användarmenyn. Valet sparas på användaren.
+
+## Mina inställningar
+
+**Mina inställningar** öppnas från användarmenyn (knappen med dina initialer uppe till höger). Sidan gäller bara ditt eget konto och har tre delar.
+
+- **Utseende och arbetssätt:** **Tema**, **Täthet**, **Dokument i flikar** och **Favoriter** — samma val som i användarmenyn, som har kvar dem. Ett val sparas direkt och följer med dig mellan datorer.
+- **Byt lösenord:** skriv **Nuvarande lösenord**, **Nytt lösenord** (minst 8 tecken) och **Upprepa nytt lösenord** och klicka på **Byt lösenord**. Du loggas ut på andra datorer och telefoner där kontot är inloggat, men inte där du bytte. Skriver du fel nuvarande lösenord tio gånger spärras bytet i 15 minuter. Konton med **Endast läsning** kan också byta sitt lösenord. Har du glömt lösenordet kan en administratör sätta ett nytt under **System → Användare** (fältet **Nytt lösenord** när användaren ändras).
+- **E-postmallar:** texten som förifylls när du skickar ett dokument med e-post, se nedan.
+
+### E-postmallar
+
+När du skickar en offert, orderbekräftelse, faktura, kreditfaktura, betalningspåminnelse, förfrågan, inköpsorder, ett reklamationsbesked, en reklamation till leverantör eller en avvikelserapport förifylls **Ämne** och **Meddelande** ur din mall för dokumenttypen och dokumentets språk. Du kan fortfarande ändra texten i varje utskick. Mallen gäller bara dig — en kollega har sin egen.
+
+Utan egen mall används Navs förvalda text, till exempel *Hej! Se bifogad offert OF-1001. Med vänliga hälsningar* och ditt namn på raden efter hälsningen.
+
+Så ändrar du en mall:
+
+1. Välj **Dokument** och **Språk** (**Svenska** eller **Engelska**). En mall du har ändrat är märkt *(egen)*.
+2. Skriv **Ämne** och **Meddelande**. Klicka på en platshållare under **Infoga** för att lägga in den där markören står.
+3. **Förhandsvisning med exempeluppgifter** visar mejlet ifyllt med ditt namn, företagets namn och påhittade uppgifter för dokumentet.
+4. Klicka på **Spara**. **Ångra ändringarna** tar tillbaka det som är sparat, och **Återställ förval** tar bort din egen text så att Navs förvalda text gäller igen.
+
+Platshållarna skrivs inom klammerparenteser och fylls i när dialogen öppnas:
+
+| Platshållare | Blir | Finns för |
+|---|---|---|
+| `{nummer}` | Dokumentets nummer | Alla |
+| `{avsändare}` | Ditt namn | Alla |
+| `{företag}` | Företagets namn ur **Företagsinformation** | Alla |
+| `{kund}` | Kundens namn | Offert, orderbekräftelse, faktura, kreditfaktura, påminnelse, reklamationsbesked |
+| `{leverantör}` | Leverantörens namn | Förfrågan, inköpsorder, reklamation till leverantör |
+| `{kontakt}` | **Er referens** på dokumentet | Offert, orderbekräftelse, inköpsorder |
+| `{belopp}` | Beloppet med valuta: offertens summa exklusive moms, fakturans och kreditfakturans belopp inklusive moms, påminnelsens belopp kvar att betala | Offert, faktura, kreditfaktura, påminnelse |
+| `{förfallodatum}` | Förfallodatum | Faktura, påminnelse |
+| `{giltig}` | **Giltig t.o.m.** | Offert |
+| `{leveransdatum}` | Leveransdatum | Orderbekräftelse, förfrågan, inköpsorder |
+| `{offertnummer}` | Offerten som ordern kommer från | Orderbekräftelse |
+
+En platshållare som inte finns för dokumenttypen, eller som är felstavad, kan inte sparas — mallen visar vilken det gäller. Saknar dokumentet uppgiften blir platshållaren tom, så skriv till exempel inte *Hej {kontakt}!* om Er referens ofta saknas. Belopp skrivs på dokumentets språk (*12 500,00 kr* på svenska, *12,500.00 SEK* på engelska) och datum som *2026-12-31*.
+
+Konton med **Endast läsning** skickar inga dokument och kan därför inte ändra mallarna.
 
 ## Översikten
 

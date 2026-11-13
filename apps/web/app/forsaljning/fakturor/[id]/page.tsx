@@ -8,7 +8,8 @@ import { DeviationsSection } from "../../../../components/quality/DeviationsSect
 import { AuditTrailSection } from "../../../../components/system/AuditTrailSection";
 import { apiGet, getCurrentUser } from "../../../../lib/api";
 import { canOpen } from "../../../../lib/pageAccess";
-import { documentMailTexts } from "../../../../lib/documentMailTexts";
+import { mailAmount, type MailTextRequest } from "../../../../lib/mailText";
+import { round2 } from "../../../../lib/format";
 import { documentLanguageOf } from "../../../../lib/documentLanguage";
 import { getDocumentEmails } from "../../../../lib/mail";
 import type { VatCodeView } from "../../../../lib/vatCodes";
@@ -65,18 +66,29 @@ export default async function InvoiceDetailPage(props: { params: Promise<{ id: s
   // dedicated fakturamejl — a reminder should still reach someone.
   const reminderDefaultTo = customer?.invoiceEmail ?? customer?.email ?? "";
 
-  const invoiceMail = documentMailTexts(
-    { kind: invoice.type === "credit" ? "creditNote" : "invoice", number: invoice.invoiceNumber ?? "" },
-    documentLanguageOf(invoice.language)
-  );
+  // E-postmallar: {belopp} = the invoice's total incl. moms (positive on a
+  // credit note too, like the rows), {förfallodatum} on an invoice.
+  const invoiceMail: MailTextRequest = {
+    kind: invoice.type === "credit" ? "creditNote" : "invoice",
+    language: documentLanguageOf(invoice.language),
+    values: {
+      number: invoice.invoiceNumber ?? "",
+      customer: invoice.customerName,
+      // The card's Bruttobelopp: the rows' amounts and moms summed.
+      amount: mailAmount(
+        round2(invoice.rows.reduce((sum, r) => sum + Number(r.lineAmount) + Number(r.vatAmount), 0)),
+        invoice.currency
+      ),
+      dueDate: invoice.type === "credit" ? null : invoice.dueDate,
+    },
+  };
   const sendButtons: SendButtonConfig[] = canMail
     ? [
         {
           label: `Skicka ${documentLabel.toLowerCase()}`,
           modalTitle: `Skicka ${documentLabel.toLowerCase()} ${invoice.invoiceNumber} via e-post`,
           endpoint: `/api/v1/invoices/${invoice.id}/send-email`,
-          subject: invoiceMail.subject,
-          message: invoiceMail.body,
+          mail: invoiceMail,
           to: customer?.invoiceEmail ?? undefined,
           hint: customer?.invoiceDelivery === "peppol" ? "Kunden vill ha e-faktura" : undefined,
         },

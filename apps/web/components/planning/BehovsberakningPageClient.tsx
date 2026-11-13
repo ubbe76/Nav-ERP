@@ -17,7 +17,6 @@ import { useListColumns } from "../ui/ListColumns";
 import { FormActions, FormError, FormHint, FormNotice } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import { fetchPurchaseOrderRecipientAndLanguage } from "../../lib/mail";
-import { documentMailTexts } from "../../lib/documentMailTexts";
 import type { DocumentLanguage } from "../../lib/documentLanguage";
 import { createLegoInquiries } from "../../lib/legoInquiries";
 import { copiedNotice, copyArticles } from "../../lib/copiedArticles";
@@ -1157,8 +1156,11 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
             modalTitle: `Skicka ${mailTarget.orderNumber} via e-post`,
             endpoint: `/api/v1/purchase-orders/${mailTarget.id}/send-email`,
             ccSupplierId: mailTarget.supplierId,
-            subject: documentMailTexts({ kind: "purchaseOrder", number: mailTarget.orderNumber }, mailLanguage).subject,
-            message: documentMailTexts({ kind: "purchaseOrder", number: mailTarget.orderNumber }, mailLanguage).body,
+            mail: {
+              kind: "purchaseOrder",
+              language: mailLanguage,
+              values: { number: mailTarget.orderNumber, supplier: mailTarget.supplierName },
+            },
           }}
           defaultTo={mailTo}
           drawingCount={0}

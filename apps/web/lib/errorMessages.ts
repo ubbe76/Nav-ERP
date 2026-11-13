@@ -574,6 +574,16 @@ const MESSAGES: Record<string, MessageEntry> = {
       : "För många misslyckade inloggningsförsök — försök igen om en stund.";
   },
   "self-delete": "Du kan inte ta bort ditt eget konto.",
+  // Mina inställningar
+  "wrong-current-password": "Nuvarande lösenord stämmer inte.",
+  "password-change-throttled": (err) => {
+    const seconds = (err.body as { retryAfterSeconds?: number } | undefined)?.retryAfterSeconds;
+    const minutes = seconds ? Math.max(1, Math.ceil(seconds / 60)) : null;
+    return minutes
+      ? `För många felaktiga lösenord — försök igen om ${minutes} min.`
+      : "För många felaktiga lösenord — försök igen om en stund.";
+  },
+  "mail-template-placeholder": serverMessage("Mallen har en platshållare som inte finns för dokumenttypen."),
   "permission-group-in-use": "Gruppen används av användare — välj en grupp att flytta dem till.",
   "duplicate-permission-group-code": "Det finns redan en behörighetsgrupp med den koden.",
   // Endast läsning

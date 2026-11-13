@@ -10,7 +10,6 @@ import { FormError, FormHint } from "../ui/Form";
 import { PdfActions } from "../documents/PdfActions";
 import { SendEmailModal } from "../mail/MailSection";
 import { fetchDefaultRecipientAndLanguage } from "../../lib/mail";
-import { documentMailTexts } from "../../lib/documentMailTexts";
 import type { DocumentLanguage } from "../../lib/documentLanguage";
 import type { CreatedInquiry } from "../../lib/types";
 import styles from "../../app/tillverkning/behovsberakning/page.module.css";
@@ -100,8 +99,11 @@ export function CreatedInquiriesPanel({
             modalTitle: `Skicka ${mailTarget.inquiryNumber} via e-post`,
             endpoint: `/api/v1/inquiries/${mailTarget.id}/send-email`,
             ccSupplierId: mailTarget.supplierId,
-            subject: documentMailTexts({ kind: "inquiry", number: mailTarget.inquiryNumber }, mailLanguage).subject,
-            message: documentMailTexts({ kind: "inquiry", number: mailTarget.inquiryNumber }, mailLanguage).body,
+            mail: {
+              kind: "inquiry",
+              language: mailLanguage,
+              values: { number: mailTarget.inquiryNumber, supplier: mailTarget.supplierName },
+            },
           }}
           defaultTo={mailTo}
           drawingCount={0}

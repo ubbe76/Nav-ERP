@@ -50,7 +50,8 @@ import { Card } from "../ui/Card";
 import { DocumentActionBar } from "../documents/DocumentActionBar";
 import { GatedLink } from "../ui/GatedLink";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormStack } from "../ui/Form";
-import { documentMailTexts } from "../../lib/documentMailTexts";
+import { mailAmount } from "../../lib/mailText";
+import { useMailText } from "../mail/useMailText";
 import { documentLanguageOf } from "../../lib/documentLanguage";
 import buttonStyles from "../ui/Button.module.css";
 import fieldStyles from "../ui/Field.module.css";
@@ -962,12 +963,18 @@ function ReminderDialog({
 }) {
   const [to, setTo] = useState(defaultTo);
   // Dokument på engelska (#7): the reminder follows the invoice's stamped language.
-  const reminderMail = documentMailTexts(
-    { kind: "paymentReminder", number: invoice.invoiceNumber ?? "" },
-    documentLanguageOf(invoice.language)
-  );
-  const [subject, setSubject] = useState(reminderMail.subject);
-  const [message, setMessage] = useState(reminderMail.body);
+  // E-postmallar: {belopp} is what is left to pay.
+  const text = useMailText({
+    kind: "paymentReminder",
+    language: documentLanguageOf(invoice.language),
+    values: {
+      number: invoice.invoiceNumber ?? "",
+      customer: invoice.customerName,
+      amount: mailAmount(invoice.openAmount, invoice.currency),
+      dueDate: invoice.dueDate,
+    },
+  });
+  const { subject, setSubject, message, setMessage } = text;
   // Never pre-checked — the fee is an explicit choice every time (mirrors
   // sendReminderSchema's own withFee default(false) in packages/shared),
   // and impossible to check at all once the statutory one-time fee is spent.
@@ -998,14 +1005,22 @@ function ReminderDialog({
   return (
     <Modal open onClose={onClose} title={`Skicka betalningspåminnelse för faktura ${invoice.invoiceNumber}`}>
       <Form onSubmit={submit}>
-        <FormError>{error}</FormError>
+        <FormError>{error ?? text.error}</FormError>
 
         <Field label="Mottagare" htmlFor="remTo">
           <Input id="remTo" type="email" required value={to} onChange={(e) => setTo(e.target.value)} />
         </Field>
 
         <Field label="Ämne" htmlFor="remSubject">
-          <Input id="remSubject" required maxLength={255} value={subject} onChange={(e) => setSubject(e.target.value)} />
+          <Input
+            id="remSubject"
+            required
+            maxLength={255}
+            value={subject}
+            disabled={text.loading}
+            placeholder={text.loading ? "Hämtar…" : undefined}
+            onChange={(e) => setSubject(e.target.value)}
+          />
         </Field>
 
         <Field label="Meddelande" htmlFor="remMessage">
@@ -1015,6 +1030,7 @@ function ReminderDialog({
             rows={6}
             maxLength={5000}
             value={message}
+            disabled={text.loading}
             onChange={(e) => setMessage(e.target.value)}
             style={{ resize: "vertical", fontFamily: "inherit" }}
           />
@@ -1059,7 +1075,7 @@ function ReminderDialog({
         </a>
 
         <FormActions>
-          <Button type="submit" variant="primary" disabled={pending}>
+          <Button type="submit" variant="primary" disabled={pending || text.loading}>
             {pending ? "Skickar…" : "Skicka"}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
