@@ -27,7 +27,7 @@ import { createManufacturingRepository } from "../src/modules/manufacturing/repo
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { createPlanningRepository } from "../src/modules/planning/repository/planning.repository.js";
 import { createPlanningService } from "../src/modules/planning/service/planning.service.js";
-import { pdfText } from "./helpers/pdf.js";
+import { fact, pdfText } from "./helpers/pdf.js";
 import { testDocumentPdfService } from "./helpers/services.js";
 import { parsed } from "./helpers/parsed.js";
 import { unwiredSalesOrderLinks } from "./helpers/unwired";
@@ -170,10 +170,10 @@ describe("Giltig t.o.m.", () => {
     expect(note!.customerReference).toBe("Anna");
   });
 
-  it("is printed on the quote PDF only, as 'Offerten gäller till och med <date>.'", async () => {
+  it("is printed on the quote PDF only, as the fact 'Offerten gäller t.o.m.'", async () => {
     const { order } = await makeQuote({ quoteValidUntil: "2031-06-30" });
     const quote = await salesService.getSalesOrderPdf(order.id, "quote");
-    expect(pdfText(quote.content)).toContain("Offerten gäller till och med 2031-06-30.");
+    expect(pdfText(quote.content)).toContain(fact("Offerten gäller t.o.m.", "2031-06-30"));
     const confirmation = await salesService.getSalesOrderPdf(order.id, "confirmation");
     expect(pdfText(confirmation.content)).not.toContain("Offerten gäller");
 

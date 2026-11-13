@@ -315,12 +315,11 @@ export interface DocumentPdfInput {
   // Invoice-only meta lines under the date.
   dueDate?: Date | null;
   orderReference?: string | null;
-  // Credit note: the FA number of the invoice it credits — printed as the
-  // dictionary's meta.creditsInvoice line (Swedish keeps the "Ordernummer:
-  // Krediterar faktura X" wording the credit note always had).
+  // Credit note: the FA number of the invoice it credits — the fact
+  // "Krediterar faktura" (meta.creditedInvoice) in the header's facts box.
   creditedInvoiceNumber?: string | null;
   // Offerter (0138): the OF- number an order confirmation came from —
-  // "Vår offert: OF-1001" under the date. The callsite passes it only when
+  // "Vår offert OF-1001" in the facts box. The callsite passes it only when
   // the order's number differs from its quote number.
   quoteReference?: string | null;
   // Kundnummer — the customer's number in our register: live on quote/order
@@ -341,8 +340,8 @@ export interface DocumentPdfInput {
   // Leveransdatum (quote/order confirmation) — the day the customer gets the
   // goods; rows with a date of their own carry DocumentPdfRow.deliveryDate.
   deliveryDate?: string | null;
-  // Giltig t.o.m. (quote only): "Offerten gäller till och med <date>." under
-  // the meta lines. ISO date like every other date on the documents.
+  // Giltig t.o.m. (quote only): the fact "Offerten gäller t.o.m." in the
+  // facts box. ISO date like every other date on the documents.
   validUntil?: string | null;
   // Our customer number at the supplier (vårt kundnummer hos leverantören) —
   // printed on inquiry/PO. Deliberately NOT labelled "Vårt kundnr:", which
@@ -861,6 +860,105 @@ function drawTitleBarcode(doc: PDFKit.PDFDocument, text: string, titleY: number)
   if (width !== null) drawCode128(doc, text, PAGE_MARGIN + CONTENT_WIDTH - width, titleY - 2, 170, 24);
 }
 
+// ---------------------------------------------------------------------------
+// The outgoing documents' header (Mindre huvud, användarens val 2026-11-13):
+// the title right-aligned under the logo beside the company strip, then the
+// address blocks on the left and the facts — dates, numbers, references and
+// the terms — as label/value rows in a box on the right. Nothing is left out
+// compared with the old one-line-per-fact header; it is only arranged in two
+// columns, so the row table starts at about a quarter of the page instead of
+// half. EN implementation for offert, orderbekräftelse, faktura/kredit,
+// förfrågan, inköpsorder, följesedel and betalningspåminnelse — the internal
+// documents keep their own titles.
+// ---------------------------------------------------------------------------
+
+export interface HeaderFact {
+  label: string;
+  value: string;
+}
+
+export interface HeaderAddressBlock {
+  label: string;
+  name: string;
+  lines: string[];
+}
+
+const HEADING_WIDTH = 300;
+const ADDRESS_COLUMN_WIDTH = 230;
+const FACTS_X = PAGE_MARGIN + 250;
+const FACTS_WIDTH = PAGE_MARGIN + CONTENT_WIDTH - FACTS_X;
+
+// Title (with number) right-aligned, under the logo when there is one, and
+// the barcode (inköpsorderns nummer) under the title. Returns the y where the
+// address/facts area starts, below a thin rule.
+function drawDocumentHeading(
+  doc: PDFKit.PDFDocument,
+  header: { bottom: number; logoDrawn: boolean },
+  heading: { title: string; barcode?: string | null }
+): number {
+  const x = PAGE_MARGIN + CONTENT_WIDTH - HEADING_WIDTH;
+  let y = header.logoDrawn ? PAGE_MARGIN + 44 : PAGE_MARGIN;
+  doc.font(FONT_BOLD).fontSize(15).fillColor("#000000");
+  doc.text(heading.title, x, y, { width: HEADING_WIDTH, align: "right" });
+  y += doc.heightOfString(heading.title, { width: HEADING_WIDTH });
+  if (heading.barcode) {
+    const width = code128Width(heading.barcode, 170);
+    if (width !== null) {
+      drawCode128(doc, heading.barcode, PAGE_MARGIN + CONTENT_WIDTH - width, y + 2, 170, 24);
+      y += 28;
+    }
+  }
+  const rule = Math.max(y, header.bottom) + 8;
+  doc.moveTo(PAGE_MARGIN, rule).lineTo(PAGE_MARGIN + CONTENT_WIDTH, rule).strokeColor("#cccccc").lineWidth(0.5).stroke();
+  return rule + 12;
+}
+
+// Address blocks stacked on the left, facts as label/value rows on the
+// right. A long name, address line or value wraps inside its column and
+// pushes its own column down. Returns the y below the taller column.
+function drawAddressesAndFacts(
+  doc: PDFKit.PDFDocument,
+  top: number,
+  blocks: HeaderAddressBlock[],
+  facts: HeaderFact[]
+): number {
+  const left = PAGE_MARGIN;
+  // Without facts the addresses may use the whole width.
+  const blockWidth = facts.length > 0 ? ADDRESS_COLUMN_WIDTH : CONTENT_WIDTH;
+  let y = top;
+  blocks.forEach((block, i) => {
+    if (i > 0) y += 10;
+    doc.font(FONT_BOLD).fontSize(8).fillColor("#888888").text(block.label.toUpperCase(), left, y, { width: blockWidth });
+    y += 11;
+    doc.font(FONT_BOLD).fontSize(11).fillColor("#000000");
+    doc.text(block.name, left, y, { width: blockWidth });
+    y += doc.heightOfString(block.name, { width: blockWidth }) + 1;
+    doc.font(FONT).fontSize(10);
+    for (const line of block.lines) {
+      doc.text(line, left, y, { width: blockWidth });
+      y += doc.heightOfString(line, { width: blockWidth });
+    }
+  });
+
+  let fy = top;
+  if (facts.length > 0) {
+    doc.font(FONT).fontSize(9);
+    const labelWidth = Math.min(140, Math.max(70, ...facts.map((f) => doc.widthOfString(f.label) + 10)));
+    const valueWidth = FACTS_WIDTH - labelWidth;
+    for (const fact of facts) {
+      const height = Math.max(
+        doc.heightOfString(fact.label, { width: labelWidth - 6 }),
+        doc.heightOfString(fact.value, { width: valueWidth })
+      );
+      doc.fillColor("#666666").text(fact.label, FACTS_X, fy, { width: labelWidth - 6 });
+      doc.fillColor("#000000").text(fact.value, FACTS_X + labelWidth, fy, { width: valueWidth });
+      fy += height + 2.5;
+    }
+  }
+  doc.fillColor("#000000");
+  return Math.max(y, fy);
+}
+
 // Manufacturing order column layouts.
 const MO_OP_COLS = {
   seq: { x: 0, w: 30 },
@@ -1197,7 +1295,9 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
   // `landscape` is for wide internal reports (orderförteckningen); every
   // page-size-dependent position below reads doc.page, not the portrait
   // constants.
-  async function startDocument(options: { landscape?: boolean } = {}) {
+  // `compact` is the outgoing documents' strip (Mindre huvud, 2026-11-13):
+  // the street address and postal town share one line.
+  async function startDocument(options: { landscape?: boolean; compact?: boolean } = {}) {
     const [company, logo] = await Promise.all([system.getCompanyInfo(), system.getLogo()]);
 
     // bufferPages keeps pages addressable so the footer can be stamped on
@@ -1222,29 +1322,40 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     // for documents where every PAGE is a standalone paper (the pallet card
     // prints one card per page, and each card goes on its own pallet) —
     // every other renderer draws it once, on the first page only.
+    // Returns where the company lines end and whether a logo was drawn, so
+    // the outgoing documents can place their title beside the strip.
     const drawHeader = () => {
-      doc.font(FONT_BOLD).fontSize(14).text(company?.name || "", left, PAGE_MARGIN);
+      // The strip leaves room for the logo top-right.
+      const stripWidth = CONTENT_WIDTH - 140;
+      doc.font(FONT_BOLD).fontSize(14).text(company?.name || "", left, PAGE_MARGIN, { width: stripWidth });
       doc.font(FONT).fontSize(9).fillColor("#444444");
-      const companyLines = [
-        company?.address,
-        [company?.postalCode, company?.city].filter(Boolean).join(" "),
-        [company?.phone, company?.email].filter(Boolean).join(" · "),
-      ].filter((line): line is string => Boolean(line));
-      for (const line of companyLines) doc.text(line);
+      const postalTown = [company?.postalCode, company?.city].filter(Boolean).join(" ");
+      const companyLines = (
+        options.compact
+          ? [[company?.address, postalTown].filter(Boolean).join(" · ")]
+          : [company?.address, postalTown]
+      )
+        .concat([[company?.phone, company?.email].filter(Boolean).join(" · ")])
+        .filter((line): line is string => Boolean(line));
+      for (const line of companyLines) doc.text(line, { width: stripWidth });
+      const bottom = doc.y;
       doc.fillColor("#000000");
 
       // Logo top-right. pdfkit reads PNG/JPEG buffers; anything else is skipped.
+      let logoDrawn = false;
       if (logo?.logo) {
         try {
           doc.image(logo.logo, doc.page.width - PAGE_MARGIN - 120, PAGE_MARGIN - 5, { fit: [120, 45], align: "right" });
+          logoDrawn = true;
         } catch {
           // Unsupported image format — render without logo rather than failing the document.
         }
       }
+      return { bottom, logoDrawn };
     };
-    drawHeader();
+    const header = drawHeader();
 
-    return { doc, finished, company, drawHeader };
+    return { doc, finished, company, drawHeader, header };
   }
 
   // Payment/registration footer stamped on every page of OUTGOING documents
@@ -1366,153 +1477,70 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
   }
 
   async function render(input: DocumentPdfInput): Promise<Buffer> {
-    const { doc, finished, company } = await startDocument();
+    const { doc, finished, company, header } = await startDocument({ compact: true });
     const left = PAGE_MARGIN;
     const language = documentLanguageOf(input.language);
     const t = documentTexts(language);
     const num = (value: number, decimals = 2) => formatNumber(value, decimals, language);
     const meta = (label: string, value: string) => `${label}: ${value}`;
 
-    // --- Document title ---
-    let y = 130;
+    // --- Title, addresses and facts (drawDocumentHeading/drawAddressesAndFacts) ---
     const numberWithRevision = `${input.documentNumber}${input.revision != null ? ` / ${input.revision}` : ""}`;
-    doc.font(FONT_BOLD).fontSize(18).text(`${input.title} ${numberWithRevision}`, left, y);
-    if (input.documentNumberBarcode) drawTitleBarcode(doc, input.documentNumber, y);
-    y += 26;
-    doc
-      .font(FONT)
-      .fontSize(10)
-      .fillColor("#444444")
-      .text(meta(t.meta.date, documentDay(input.date)), left, y);
-    y += 14;
-    if (input.dueDate) {
-      doc.text(meta(t.meta.dueDate, documentDay(input.dueDate)), left, y);
-      y += 14;
-    }
-    if (input.orderReference) {
-      doc.text(meta(t.meta.orderNumber, input.orderReference), left, y);
-      y += 14;
-    }
-    if (input.creditedInvoiceNumber) {
-      doc.text(t.meta.creditsInvoice(input.creditedInvoiceNumber), left, y);
-      y += 14;
-    }
-    if (input.quoteReference) {
-      doc.text(meta(t.meta.ourQuote, input.quoteReference), left, y);
-      y += 14;
-    }
-    if (input.partnerNumber) {
-      doc.text(meta(t.meta.customerNumber, input.partnerNumber), left, y);
-      y += 14;
-    }
-    if (input.buyerVatNumber && input.buyerVatNumber.trim() !== "") {
-      doc.text(meta(t.meta.buyerVatNumber, input.buyerVatNumber.trim()), left, y);
-      y += 14;
-    }
-    if (input.customerOrderNumber) {
-      doc.text(meta(t.meta.customerOrderNumber, input.customerOrderNumber), left, y);
-      y += 14;
-    }
-    if (input.customerInquiryNumber) {
-      doc.text(meta(t.meta.customerInquiryNumber, input.customerInquiryNumber), left, y);
-      y += 14;
-    }
-    if (input.yourReference) {
-      doc.text(meta(t.meta.yourReference, input.yourReference), left, y);
-      y += 14;
-    }
-    if (input.ourReference) {
-      doc.text(meta(t.meta.ourReference, input.ourReference), left, y);
-      y += 14;
-    }
-    if (input.requestedDeliveryDate) {
-      doc.text(meta(t.meta.requestedDeliveryDate, input.requestedDeliveryDate), left, y);
-      y += 14;
-    }
-    if (input.deliveryDate) {
-      doc.text(meta(t.meta.deliveryDate, input.deliveryDate), left, y);
-      y += 14;
-    }
-    if (input.validUntil) {
-      doc.text(t.meta.quoteValidUntil(input.validUntil), left, y);
-      y += 14;
-    }
-    if (input.ourCustomerNumberAtSupplier) {
-      doc.text(meta(t.meta.ourCustomerNumberAtSupplier, input.ourCustomerNumberAtSupplier), left, y);
-      y += 14;
-    }
-    if (input.ourSupplierNumberAtCustomer) {
-      doc.text(meta(t.meta.ourSupplierNumberAtCustomer, input.ourSupplierNumberAtCustomer), left, y);
-      y += 14;
+    let y = drawDocumentHeading(doc, header, {
+      title: `${input.title} ${numberWithRevision}`,
+      barcode: input.documentNumberBarcode ? input.documentNumber : null,
+    });
+    const fact = (label: string, value: string | null | undefined): HeaderFact | null =>
+      value != null && value.trim() !== "" ? { label, value: value.trim() } : null;
+    const facts = [
+      fact(t.meta.date, documentDay(input.date)),
+      fact(t.meta.dueDate, input.dueDate ? documentDay(input.dueDate) : null),
+      fact(t.meta.orderNumber, input.orderReference),
+      fact(t.meta.creditedInvoice, input.creditedInvoiceNumber),
+      fact(t.meta.ourQuote, input.quoteReference),
+      fact(t.meta.customerNumber, input.partnerNumber),
+      fact(t.meta.buyerVatNumber, input.buyerVatNumber),
+      fact(t.meta.customerOrderNumber, input.customerOrderNumber),
+      fact(t.meta.customerInquiryNumber, input.customerInquiryNumber),
+      fact(t.meta.yourReference, input.yourReference),
+      fact(t.meta.ourReference, input.ourReference),
+      fact(t.meta.requestedDeliveryDate, input.requestedDeliveryDate),
+      fact(t.meta.deliveryDate, input.deliveryDate),
+      fact(t.meta.validUntil, input.validUntil),
+      fact(t.meta.ourCustomerNumberAtSupplier, input.ourCustomerNumberAtSupplier),
+      fact(t.meta.ourSupplierNumberAtCustomer, input.ourSupplierNumberAtCustomer),
+      fact(t.terms.deliveryTerm, input.deliveryTerm),
+      fact(t.terms.paymentTerm, input.paymentTerm),
+      fact(
+        t.terms.carrier,
+        input.carrier
+          ? `${input.carrier}${input.carrierCustomerNumber ? ` · ${meta(t.terms.ourCarrierCustomerNumber, input.carrierCustomerNumber)}` : ""}`
+          : null
+      ),
+    ].filter((f): f is HeaderFact => f !== null);
+    const blocks: HeaderAddressBlock[] = [
+      { label: input.partnerLabel, name: input.partner.name, lines: addressLines(input.partner, language) },
+      ...(input.deliveryAddress
+        ? [
+            {
+              label: t.deliveryAddressLabel,
+              name: input.deliveryAddress.label,
+              lines: addressLines(input.deliveryAddress, language),
+            },
+          ]
+        : []),
+    ];
+    y = drawAddressesAndFacts(doc, y, blocks, facts) + 14;
+
+    // Sentences under the header, across the page: the dröjsmålsränta terms
+    // and the privatperson note.
+    for (const line of [input.lateInterestText ?? null, input.pricesIncludeVat ? t.pricesIncludeVat : null]) {
+      if (!line) continue;
+      doc.font(FONT).fontSize(9).fillColor("#444444").text(line, left, y, { width: CONTENT_WIDTH });
+      y += doc.heightOfString(line, { width: CONTENT_WIDTH }) + 4;
     }
     doc.fillColor("#000000");
-    y += 10;
-
-    // --- Partner address block (+ delivery address block beside it) ---
-    // A name or address line too long for its column wraps INSIDE it and
-    // pushes the next line down (granskning 2026-11-11: a long customer name
-    // ran into the LEVERANSADRESS block beside it). `wrapped` is the extra
-    // height beyond one line, so a line that fits advances exactly as before.
-    const blockTop = y;
-    const partnerWidth = input.deliveryAddress ? 250 : CONTENT_WIDTH;
-    const wrapped = (text: string, width: number) =>
-      Math.max(0, doc.heightOfString(text, { width }) - doc.heightOfString("X", { width }));
-    doc.font(FONT_BOLD).fontSize(9).fillColor("#888888").text(input.partnerLabel.toUpperCase(), left, y);
-    y += 13;
-    doc.fillColor("#000000").font(FONT_BOLD).fontSize(11).text(input.partner.name, left, y, { width: partnerWidth });
-    y += 15 + wrapped(input.partner.name, partnerWidth);
-    doc.font(FONT).fontSize(10);
-    const partnerLines = addressLines(input.partner, language);
-    for (const line of partnerLines) {
-      doc.text(line, left, y, { width: partnerWidth });
-      y += 14 + wrapped(line, partnerWidth);
-    }
-
-    if (input.deliveryAddress) {
-      const deliveryX = left + 260;
-      let dy = blockTop;
-      doc.font(FONT_BOLD).fontSize(9).fillColor("#888888").text(t.deliveryAddressLabel, deliveryX, dy);
-      dy += 13;
-      doc
-        .fillColor("#000000")
-        .font(FONT_BOLD)
-        .fontSize(11)
-        .text(input.deliveryAddress.label, deliveryX, dy, { width: CONTENT_WIDTH - 260 });
-      dy += 15 + wrapped(input.deliveryAddress.label, CONTENT_WIDTH - 260);
-      doc.font(FONT).fontSize(10);
-      const deliveryLines = addressLines(input.deliveryAddress, language);
-      for (const line of deliveryLines) {
-        doc.text(line, deliveryX, dy, { width: CONTENT_WIDTH - 260 });
-        dy += doc.heightOfString(line, { width: CONTENT_WIDTH - 260 });
-      }
-      y = Math.max(y, dy);
-    }
-    y += 20;
-
-    // --- Terms (leverans-/betalningsvillkor, speditör) ---
-    const termLines = [
-      input.deliveryTerm ? meta(t.terms.deliveryTerm, input.deliveryTerm) : null,
-      input.paymentTerm ? meta(t.terms.paymentTerm, input.paymentTerm) : null,
-      input.carrier
-        ? `${meta(t.terms.carrier, input.carrier)}${input.carrierCustomerNumber ? ` · ${meta(t.terms.ourCarrierCustomerNumber, input.carrierCustomerNumber)}` : ""}`
-        : null,
-      input.lateInterestText ?? null,
-    ].filter((line): line is string => Boolean(line));
-    if (termLines.length > 0) {
-      doc.font(FONT).fontSize(10).fillColor("#444444");
-      for (const line of termLines) {
-        doc.text(line, left, y);
-        y += 14;
-      }
-      doc.fillColor("#000000");
-      y += 10;
-    }
-
-    if (input.pricesIncludeVat) {
-      doc.font(FONT).fontSize(10).fillColor("#444444").text(t.pricesIncludeVat, left, y);
-      doc.fillColor("#000000");
-      y += 18;
-    }
+    y += 6;
 
     // --- Row table ---
     // The Rabatt column only exists when some row carries a discount —
@@ -1784,43 +1812,28 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
   // the invoice, what they need here is the level, what is left and how to
   // pay it.
   async function renderPaymentReminder(input: PaymentReminderPdfInput): Promise<Buffer> {
-    const { doc, finished, company } = await startDocument();
+    const { doc, finished, company, header } = await startDocument({ compact: true });
     const left = PAGE_MARGIN;
     const language = documentLanguageOf(input.language);
     const t = documentTexts(language);
 
-    let y = 130;
-    doc.font(FONT_BOLD).fontSize(18).text(t.titles.paymentReminder(input.level), left, y);
-    y += 26;
-    doc.font(FONT).fontSize(10).fillColor("#444444");
-    doc.text(`${t.meta.date}: ${documentDay(input.printedAt)}`, left, y);
-    y += 14;
-    // The reference block — which invoice this is about.
-    doc.text(t.reminder.invoice(input.documentNumber), left, y);
-    y += 14;
-    if (input.invoiceDate) {
-      doc.text(`${t.reminder.invoiceDate}: ${documentDay(input.invoiceDate)}`, left, y);
-      y += 14;
-    }
-    if (input.dueDate) {
-      doc.text(`${t.reminder.dueDate}: ${documentDay(input.dueDate)}`, left, y);
-      y += 14;
-    }
-    doc.fillColor("#000000");
-    y += 10;
-
-    // Address block — the invoice's frozen snapshot, same layout as render().
-    doc.font(FONT_BOLD).fontSize(9).fillColor("#888888").text(t.partnerLabels.invoiceAddress.toUpperCase(), left, y);
-    y += 13;
-    doc.fillColor("#000000").font(FONT_BOLD).fontSize(11).text(input.partner.name, left, y);
-    y += 15;
-    doc.font(FONT).fontSize(10);
-    const partnerLines = addressLines(input.partner, language);
-    for (const line of partnerLines) {
-      doc.text(line, left, y);
-      y += 14;
-    }
+    // Same header as render(): the facts say which invoice this is about;
+    // the address is the invoice's frozen snapshot.
+    let y = drawDocumentHeading(doc, header, { title: t.titles.paymentReminder(input.level) });
+    const facts: HeaderFact[] = [
+      { label: t.meta.date, value: documentDay(input.printedAt) },
+      { label: t.reminder.invoiceNumber, value: input.documentNumber },
+      ...(input.invoiceDate ? [{ label: t.reminder.invoiceDate, value: documentDay(input.invoiceDate) }] : []),
+      ...(input.dueDate ? [{ label: t.reminder.dueDate, value: documentDay(input.dueDate) }] : []),
+    ];
+    y = drawAddressesAndFacts(
+      doc,
+      y,
+      [{ label: t.partnerLabels.invoiceAddress, name: input.partner.name, lines: addressLines(input.partner, language) }],
+      facts
+    );
     y += 20;
+    doc.font(FONT).fontSize(10).fillColor("#000000");
 
     const body = t.reminder.body;
     doc.text(body, left, y, { width: CONTENT_WIDTH });
@@ -1870,38 +1883,23 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
   }
 
   async function renderDeviationReport(input: DeviationReportPdfInput): Promise<Buffer> {
-    const { doc, finished, company } = await startDocument();
+    const { doc, finished, company, header } = await startDocument({ compact: true });
     const left = PAGE_MARGIN;
     const language = documentLanguageOf(input.language);
     const t = documentTexts(language);
 
-    let y = 130;
-    doc.font(FONT_BOLD).fontSize(18).text(input.title, left, y);
-    y += 26;
-    doc.font(FONT).fontSize(10).fillColor("#444444");
-    doc.text(`${t.deviation.number}: ${input.documentNumber}`, left, y);
-    y += 14;
-    doc.text(`${t.deviation.date}: ${input.date}`, left, y);
-    y += 14;
-    for (const ref of input.references) {
-      doc.text(`${ref.label}: ${ref.value}`, left, y, { width: CONTENT_WIDTH });
-      y += 14;
-    }
-    doc.fillColor("#000000");
-    y += 10;
-
-    if (input.partner) {
-      doc.font(FONT_BOLD).fontSize(9).fillColor("#888888").text(input.partnerLabel ?? "", left, y);
-      y += 13;
-      doc.fillColor("#000000").font(FONT_BOLD).fontSize(11).text(input.partner.name, left, y);
-      y += 15;
-      doc.font(FONT).fontSize(10);
-      for (const line of addressLines(input.partner, language)) {
-        doc.text(line, left, y);
-        y += 14;
-      }
-      y += 16;
-    }
+    // Same header as render(): the motpart on the left, number, date and
+    // the linked documents on the right.
+    let y = drawDocumentHeading(doc, header, { title: input.title });
+    const facts: HeaderFact[] = [
+      { label: t.deviation.number, value: input.documentNumber },
+      { label: t.deviation.date, value: input.date },
+      ...input.references.map((ref) => ({ label: ref.label, value: ref.value })),
+    ];
+    const blocks: HeaderAddressBlock[] = input.partner
+      ? [{ label: input.partnerLabel ?? "", name: input.partner.name, lines: addressLines(input.partner, language) }]
+      : [];
+    y = drawAddressesAndFacts(doc, y, blocks, facts) + 16;
 
     // One labelled paragraph per section; a section that would collide with
     // the footer starts on a fresh page (long texts flow on from there).
@@ -2133,50 +2131,36 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
   // the goods, so it gets the same company footer as the outgoing quote/PO/
   // invoice — see drawFooter's own comment on that split.
   async function renderDeliveryNote(input: DeliveryNotePdfInput): Promise<Buffer> {
-    const { doc, finished, company } = await startDocument();
+    const { doc, finished, company, header } = await startDocument({ compact: true });
     const left = PAGE_MARGIN;
     const language = documentLanguageOf(input.language);
     const t = documentTexts(language);
     const dn = t.deliveryNote;
 
-    let y = 130;
-    doc.font(FONT_BOLD).fontSize(18).text(`${t.titles.deliveryNote} ${input.documentNumber}`, left, y);
-    y += 26;
-    doc.font(FONT).fontSize(10).fillColor("#444444");
-    doc.text(`${dn.deliveryDate}: ${documentDay(input.deliveredAt)}`, left, y);
-    y += 14;
+    // Same header as render(): Kund and Leveransadress on the left, the
+    // delivery's facts on the right.
+    let y = drawDocumentHeading(doc, header, { title: `${t.titles.deliveryNote} ${input.documentNumber}` });
+    const fact = (label: string, value: string | null | undefined): HeaderFact | null =>
+      value != null && value.trim() !== "" ? { label, value: value.trim() } : null;
+    const facts = [
+      fact(dn.deliveryDate, documentDay(input.deliveredAt)),
+      fact(dn.orderNumber, input.orderNumber),
+      fact(dn.customerOrderNumber, input.customerOrderNumber),
+      fact(dn.customerReference, input.customerReference),
+      fact(dn.carrier, input.carrier?.carrierName),
+      fact(dn.trackingNumber, input.carrier?.trackingNumber),
+    ].filter((f): f is HeaderFact => f !== null);
+    const blocks: HeaderAddressBlock[] = [
+      { label: dn.customer, name: input.customerName, lines: [] },
+      ...(input.deliveryAddress
+        ? [{ label: dn.deliveryAddress, name: input.deliveryAddress.label, lines: addressLines(input.deliveryAddress, language) }]
+        : []),
+    ];
+    y = drawAddressesAndFacts(doc, y, blocks, facts) + 12;
     if (input.undoneAt) {
-      doc.font(FONT_BOLD).text(dn.undone(formatStockholmDateTime(input.undoneAt)), left, y).font(FONT);
-      y += 14;
+      doc.font(FONT_BOLD).fontSize(10).fillColor("#000000").text(dn.undone(formatStockholmDateTime(input.undoneAt)), left, y);
+      y += 16;
     }
-    doc.text(`${dn.orderNumber}: ${input.orderNumber}`, left, y);
-    y += 14;
-    doc.text(`${dn.customer}: ${input.customerName}`, left, y);
-    y += 14;
-    if (input.customerOrderNumber) {
-      doc.text(`${dn.customerOrderNumber}: ${input.customerOrderNumber}`, left, y);
-      y += 14;
-    }
-    if (input.customerReference) {
-      doc.text(`${dn.customerReference}: ${input.customerReference}`, left, y);
-      y += 14;
-    }
-    if (input.carrier?.carrierName) {
-      doc.text(`${dn.carrier}: ${input.carrier.carrierName}`, left, y);
-      y += 14;
-    }
-    if (input.carrier?.trackingNumber) {
-      doc.text(`${dn.trackingNumber}: ${input.carrier.trackingNumber}`, left, y);
-      y += 14;
-    }
-    if (input.deliveryAddress) {
-      const addressParts = [input.deliveryAddress.label, ...addressLines(input.deliveryAddress, language)];
-      const line = `${dn.deliveryAddress}: ${addressParts.join(", ")}`;
-      doc.text(line, left, y, { width: CONTENT_WIDTH });
-      y += doc.heightOfString(line, { width: CONTENT_WIDTH });
-    }
-    doc.fillColor("#000000");
-    y += 12;
 
     const drawTableHeader = () => {
       doc.font(FONT_BOLD).fontSize(9).fillColor("#555555");

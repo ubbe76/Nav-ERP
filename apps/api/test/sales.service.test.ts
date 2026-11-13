@@ -32,7 +32,7 @@ import { createDocumentPdfService } from "../src/modules/mail/service/document-p
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
-import { pdfText } from "./helpers/pdf.js";
+import { fact, pdfText } from "./helpers/pdf.js";
 import { stampOrderInvoiced } from "./helpers/services.js";
 import { parsed } from "./helpers/parsed.js";
 
@@ -1423,10 +1423,10 @@ describe("sales service — order header fields", () => {
     const { order, customer } = await makeQuoteWithRow(2);
 
     const quote = await salesService.getSalesOrderPdf(order.id, "quote");
-    expect(pdfText(quote.content)).toContain(`Kundnr: ${customer.customerNumber}`);
+    expect(pdfText(quote.content)).toContain(fact("Kundnr", customer.customerNumber));
 
     const confirmation = await salesService.getSalesOrderPdf(order.id, "confirmation");
-    expect(pdfText(confirmation.content)).toContain(`Kundnr: ${customer.customerNumber}`);
+    expect(pdfText(confirmation.content)).toContain(fact("Kundnr", customer.customerNumber));
   });
 
   it("prints article/drawing revisions on the order confirmation only when the setting is on", async () => {
@@ -1575,9 +1575,9 @@ describe("sales service — leveransdatum per rad", () => {
   it("prints Leveransdatum in the header and per row only where the row differs", async () => {
     const { order } = await orderWithTwoRows();
     const confirmation = pdfText((await salesService.getSalesOrderPdf(order.id, "confirmation")).content);
-    expect(confirmation).toContain("Leveransdatum: 2030-03-20");
-    expect(confirmation).toContain("Leveransdatum: 2030-03-06");
-    expect(confirmation.split("Leveransdatum:").length - 1).toBe(2);
+    expect(confirmation).toContain(fact("Leveransdatum", "2030-03-20")); // the header's fact
+    expect(confirmation).toContain("Leveransdatum: 2030-03-06"); // the differing row's info line
+    expect(confirmation.split("Leveransdatum:").length - 1).toBe(1);
 
     const pickList = pdfText((await salesService.getPickListPdf(order.id)).content);
     expect(pickList).toContain("Leveransdatum: 2030-03-06");

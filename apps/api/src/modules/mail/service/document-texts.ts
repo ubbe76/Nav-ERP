@@ -67,13 +67,12 @@ export interface DocumentTexts {
     ourReference: string;
     requestedDeliveryDate: string;
     deliveryDate: string;
-    quoteValidUntil: (date: string) => string;
+    // Giltig t.o.m. on a quote — a label in the header's facts box.
+    validUntil: string;
     ourCustomerNumberAtSupplier: string;
     ourSupplierNumberAtCustomer: string;
-    // Credit note: which invoice it credits. The Swedish line keeps the
-    // "Ordernummer:" prefix the credit note always printed (it reused the
-    // orderReference field) — the regression guard; English reads naturally.
-    creditsInvoice: (invoiceNumber: string) => string;
+    // Credit note: which invoice it credits (a fact label, the number is the value).
+    creditedInvoice: string;
   };
   terms: {
     deliveryTerm: string;
@@ -151,7 +150,8 @@ export interface DocumentTexts {
   pageOf: (page: number, pages: number) => string;
 
   reminder: {
-    invoice: (invoiceNumber: string) => string;
+    // The invoice the reminder is about — a fact label, the number is the value.
+    invoiceNumber: string;
     invoiceDate: string;
     dueDate: string;
     body: string;
@@ -297,10 +297,10 @@ const sv: DocumentTexts = {
     ourReference: "Vår referens",
     requestedDeliveryDate: "Önskat leveransdatum",
     deliveryDate: "Leveransdatum",
-    quoteValidUntil: (date) => `Offerten gäller till och med ${date}.`,
+    validUntil: "Offerten gäller t.o.m.",
     ourCustomerNumberAtSupplier: "Vårt kundnummer hos er",
     ourSupplierNumberAtCustomer: "Vårt leverantörsnr hos er",
-    creditsInvoice: (n) => `Ordernummer: Krediterar faktura ${n}`,
+    creditedInvoice: "Krediterar faktura",
   },
   terms: {
     deliveryTerm: "Leveransvillkor",
@@ -371,7 +371,7 @@ const sv: DocumentTexts = {
   },
   pageOf: (page, pages) => `Sida ${page} av ${pages}`,
   reminder: {
-    invoice: (n) => `Faktura ${n}`,
+    invoiceNumber: "Faktura",
     invoiceDate: "Fakturadatum",
     dueDate: "Förfallodatum",
     body: "Vi kan inte se att nedanstående faktura har betalats. Vänligen betala snarast.",
@@ -515,10 +515,10 @@ const en: DocumentTexts = {
     ourReference: "Our reference",
     requestedDeliveryDate: "Requested delivery date",
     deliveryDate: "Delivery date",
-    quoteValidUntil: (date) => `This quotation is valid until ${date}.`,
+    validUntil: "Valid until",
     ourCustomerNumberAtSupplier: "Our customer number with you",
     ourSupplierNumberAtCustomer: "Our supplier number with you",
-    creditsInvoice: (n) => `Credit note for invoice ${n}`,
+    creditedInvoice: "Credit note for invoice",
   },
   terms: {
     deliveryTerm: "Delivery terms",
@@ -589,7 +589,7 @@ const en: DocumentTexts = {
   },
   pageOf: (page, pages) => `Page ${page} of ${pages}`,
   reminder: {
-    invoice: (n) => `Invoice ${n}`,
+    invoiceNumber: "Invoice",
     invoiceDate: "Invoice date",
     dueDate: "Due date",
     body: "According to our records, the invoice below has not been paid. Please pay at your earliest convenience.",

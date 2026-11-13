@@ -30,7 +30,7 @@ import {
   type MailTransportFactory,
 } from "../src/modules/mail/service/mail.service.js";
 import { createDocumentPdfService } from "../src/modules/mail/service/document-pdf.js";
-import { pdfText } from "./helpers/pdf.js";
+import { fact, pdfText } from "./helpers/pdf.js";
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
@@ -1223,8 +1223,8 @@ describe("purchase service — document terms (villkor)", () => {
 
     const { content } = await purchaseService.getPurchaseOrderPdf(order.id);
     const text = pdfText(content);
-    expect(text).toContain("Er referens: Anna Andersson");
-    expect(text).toContain("Vår referens: Ubbe");
+    expect(text).toContain(fact("Er referens", "Anna Andersson"));
+    expect(text).toContain(fact("Vår referens", "Ubbe"));
     // Created (rev 1) + one row + the header update above = rev 3, printed
     // directly after the order number in the document title.
     expect(text).toContain(`${order.orderNumber} / 3`);
@@ -1412,13 +1412,13 @@ describe("our customer number at the supplier (vårt kundnummer hos leverantöre
       user.id
     );
     expect(pdfText((await purchaseService.getInquiryPdf(inquiry.id)).content)).toContain(
-      "Vårt kundnummer hos er: KUND-4711"
+      fact("Vårt kundnummer hos er", "KUND-4711")
     );
 
     const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     await purchaseService.addRow(order.id, { articleId: article.id, quantity: 1, unitPrice: 10 });
     expect(pdfText((await purchaseService.getPurchaseOrderPdf(order.id)).content)).toContain(
-      "Vårt kundnummer hos er: KUND-4711"
+      fact("Vårt kundnummer hos er", "KUND-4711")
     );
   });
 
@@ -1624,9 +1624,9 @@ describe("purchase service — önskat leveransdatum", () => {
     await purchaseService.addRow(order.id, { articleId: c.id, quantity: 1, unitPrice: 1, expectedDeliveryDate: "2030-03-15" });
 
     const text = pdfText((await purchaseService.getPurchaseOrderPdf(order.id)).content);
-    expect(text).toContain("Önskat leveransdatum: 2030-03-04");
-    expect(text).toContain("Önskat leveransdatum: 2030-03-15");
-    expect(text.split("Önskat leveransdatum:").length - 1).toBe(2); // header + the one differing row
+    expect(text).toContain(fact("Önskat leveransdatum", "2030-03-04")); // the header's fact
+    expect(text).toContain("Önskat leveransdatum: 2030-03-15"); // the differing row's info line
+    expect(text.split("Önskat leveransdatum:").length - 1).toBe(1); // only that row
   });
 
   it("prints the inquiry's Önskat leveransdatum on its PDF", async () => {
@@ -1638,7 +1638,7 @@ describe("purchase service — önskat leveransdatum", () => {
       user.id
     );
     const text = pdfText((await purchaseService.getInquiryPdf(inquiry.id)).content);
-    expect(text).toContain("Önskat leveransdatum: 2030-04-01");
+    expect(text).toContain(fact("Önskat leveransdatum", "2030-04-01"));
   });
 });
 

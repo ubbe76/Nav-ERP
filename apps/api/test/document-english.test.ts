@@ -30,7 +30,7 @@ import { createSystemRepository } from "../src/modules/system/repository/system.
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { createVerificationPoster } from "../src/modules/economy/service/verification-poster.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
-import { pdfText } from "./helpers/pdf.js";
+import { fact, pdfText } from "./helpers/pdf.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline, testArticleService } from "./helpers/services.js";
 import { resetVatCodes } from "./helpers/vat-codes.js";
 import { parsed } from "./helpers/parsed.js";
@@ -286,15 +286,15 @@ describe("quote and order confirmation in English", () => {
     const text = pdfText(quote.content);
     for (const part of [
       `Quotation ${order.orderNumber}`,
-      "Date:",
-      `Customer no.: ${customer.customerNumber}`,
-      "Your order number: PO-4711",
-      "Your reference: Ms Buyer",
+      "Date",
+      fact("Customer no.", `${customer.customerNumber}`),
+      fact("Your order number", "PO-4711"),
+      fact("Your reference", "Ms Buyer"),
       "CUSTOMER",
       "DELIVERY ADDRESS",
       "Germany",
-      "Delivery terms: EXW · Ex Works",
-      "Payment terms: 30 · 30 days net",
+      fact("Delivery terms", "EXW · Ex Works"),
+      fact("Payment terms", "30 · 30 days net"),
       "Item no.",
       "Description",
       "Qty",
@@ -328,7 +328,7 @@ describe("quote and order confirmation in English", () => {
     expectEnglish(text);
     // The quote's validity line follows the language.
     if (order.quoteValidUntil) {
-      expect(text).toContain(`This quotation is valid until ${order.quoteValidUntil}.`);
+      expect(text).toContain(fact("Valid until", `${order.quoteValidUntil}`));
       expect(text).not.toContain("Offerten gäller");
     }
 
@@ -340,7 +340,7 @@ describe("quote and order confirmation in English", () => {
     expect(confirmation.filename).toBe(`Order-confirmation-${confirmed.orderNumber}.pdf`);
     const confirmationText = pdfText(confirmation.content);
     expect(confirmationText).toContain(`Order confirmation ${confirmed.orderNumber}`);
-    expect(confirmationText).toContain(`Our quotation: ${order.orderNumber}`);
+    expect(confirmationText).toContain(fact("Our quotation", order.orderNumber));
     expect(confirmationText).not.toContain("Orderbekräftelse");
     expect(confirmationText).not.toContain("Vår offert");
     expectEnglish(confirmationText);
@@ -356,12 +356,12 @@ describe("quote and order confirmation in English", () => {
     const text = pdfText(quote.content);
     for (const part of [
       `Offert ${order.orderNumber}`,
-      "Datum:",
+      "Datum",
       "KUND",
       "LEVERANSADRESS",
       "Tyskland",
-      "Leveransvillkor: EXW · Från fabrik",
-      "Betalningsvillkor: 30 · 30 dagar netto",
+      fact("Leveransvillkor", "EXW · Från fabrik"),
+      fact("Betalningsvillkor", "30 · 30 dagar netto"),
       "Benämning",
       "Antal",
       "Diskbänk 1200",
@@ -390,7 +390,7 @@ describe("quote and order confirmation in English", () => {
     expect(text).toContain("Quotation");
     expect(text).toContain("Diskbänk 1200");
     expect(text).toContain("Borstat rostfritt stål");
-    expect(text).toContain("Delivery terms: EXW · Från fabrik");
+    expect(text).toContain(fact("Delivery terms", "EXW · Från fabrik"));
     expect(text).toMatch(/\dst/);
     expect(text).not.toContain("pcs");
     expectEnglish(text);
@@ -426,8 +426,8 @@ describe("invoice, credit note and payment reminder in English", () => {
     const text = pdfText(content);
     for (const part of [
       `Invoice ${issued.invoiceNumber}`,
-      "Due date:",
-      `Customer no.: ${customer.customerNumber}`,
+      "Due date",
+      fact("Customer no.", `${customer.customerNumber}`),
       "INVOICE ADDRESS",
       "Sink unit 1200",
       "Brushed stainless steel",
@@ -467,9 +467,9 @@ describe("invoice, credit note and payment reminder in English", () => {
     const reminder = pdfText(attachment.content);
     for (const part of [
       "Payment reminder 1",
-      `Invoice ${issued.invoiceNumber}`,
-      "Invoice date:",
-      "Due date:",
+      fact("Invoice", `${issued.invoiceNumber}`),
+      "Invoice date",
+      "Due date",
       "INVOICE ADDRESS",
       "According to our records, the invoice below has not been paid. Please pay at your earliest convenience.",
       "Invoice amount incl. VAT SEK",
@@ -501,7 +501,7 @@ describe("invoice, credit note and payment reminder in English", () => {
     expect(filename).toBe(`Credit-note-${issuedCredit.invoiceNumber}.pdf`);
     const text = pdfText(content);
     expect(text).toContain(`Credit note ${issuedCredit.invoiceNumber}`);
-    expect(text).toContain(`Credit note for invoice ${issued.invoiceNumber}`);
+    expect(text).toContain(fact("Credit note for invoice", `${issued.invoiceNumber}`));
     expect(text).not.toContain("Order number");
     expect(text).not.toContain("Krediterar");
     expect(text).not.toContain("Kreditfaktura");
@@ -523,7 +523,7 @@ describe("invoice, credit note and payment reminder in English", () => {
     expect(text).toContain("Goods to another EU country");
     expect(text).toContain("Intra-Community supply (Article 138 of the VAT Directive)");
     expect(text).not.toContain("Unionsintern");
-    expect(text).toContain(`Your VAT no.: DE123456789`);
+    expect(text).toContain(fact("Your VAT no.", "DE123456789"));
     expectEnglish(text);
 
     // With the English texts cleared the Swedish ones print on the next
@@ -570,12 +570,13 @@ describe("delivery note and the customer's pallet card in English", () => {
     const text = pdfText(content);
     for (const part of [
       `Delivery note ${deliveryNumber}`,
-      "Delivery date:",
-      `Order number: ${order.orderNumber}`,
-      "Customer: Customer Ltd",
-      "Your order number: PO-4711",
-      "Your reference: Ms Buyer",
-      "Delivery address: Werk 2, Hauptstraße 1, 10115 Berlin, Germany",
+      "Delivery date",
+      fact("Order number", order.orderNumber),
+      "CUSTOMERCustomer Ltd",
+      fact("Your order number", "PO-4711"),
+      fact("Your reference", "Ms Buyer"),
+      // The delivery address block: label, name and lines, joined by pdfText.
+      "DELIVERY ADDRESSWerk 2Hauptstraße 110115 BerlinGermany",
       "Item",
       "Description",
       "Delivered",
@@ -714,14 +715,14 @@ describe("request for quotation and purchase order in English", () => {
     const rfqText = pdfText(rfq.content);
     for (const part of [
       `Request for quotation ${inquiry.inquiryNumber}`,
-      "Date:",
-      "Requested delivery date: 2030-01-15",
-      "Our customer number with you: C-900",
+      "Date",
+      fact("Requested delivery date", "2030-01-15"),
+      fact("Our customer number with you", "C-900"),
       "SUPPLIER",
       "Supplier GmbH",
       "Germany",
-      "Delivery terms: EXW · Ex Works",
-      "Payment terms: 30 · 30 days net",
+      fact("Delivery terms", "EXW · Ex Works"),
+      fact("Payment terms", "30 · 30 days net"),
       "Item no.",
       "Description",
       "Qty",
@@ -752,9 +753,9 @@ describe("request for quotation and purchase order in English", () => {
     const poText = pdfText(po.content);
     for (const part of [
       `Purchase order ${order.orderNumber}`,
-      "Your reference: Herr Lieferant",
-      "Our reference: Buyer",
-      "Requested delivery date: 2030-01-15",
+      fact("Your reference", "Herr Lieferant"),
+      fact("Our reference", "Buyer"),
+      fact("Requested delivery date", "2030-01-15"),
       "SUPPLIER",
       "Sink unit 1200",
       "pcs",
@@ -781,7 +782,7 @@ describe("request for quotation and purchase order in English", () => {
     expect(rfq.filename).toBe(`${inquiry.inquiryNumber}.pdf`);
     expect(pdfText(rfq.content)).toContain(`Förfrågan ${inquiry.inquiryNumber}`);
     expect(pdfText(rfq.content)).toContain("Diskbänk 1200");
-    expect(pdfText(rfq.content)).toContain("Leveransvillkor: EXW · Från fabrik");
+    expect(pdfText(rfq.content)).toContain(fact("Leveransvillkor", "EXW · Från fabrik"));
     expect(pdfText(rfq.content)).not.toContain("Sink unit");
     const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), userId);
     await purchaseService.addRow(order.id, { articleId: base.article.id, quantity: 3, unitPrice: 10 });
@@ -820,9 +821,9 @@ describe("the complaint notice (reklamationsbesked) in English", () => {
     const text = pdfText(content);
     for (const part of [
       "Complaint notice",
-      `Number: ${complaint.deviationNumber}`,
-      "Date:",
-      "Your reference: REK-77",
+      fact("Number", complaint.deviationNumber),
+      "Date",
+      fact("Your reference", "REK-77"),
       "CUSTOMER",
       "Customer Ltd",
       "SUBJECT",
@@ -840,7 +841,7 @@ describe("the complaint notice (reklamationsbesked) in English", () => {
     ]) {
       expect(text).toContain(part);
     }
-    for (const swedish of ["Reklamationsbesked", "Nummer:", "Datum:", "Er referens", "ÄRENDE", "ARTIKEL", "ANTAL", "BESKRIVNING", "ORSAKSANALYS", "ÅTGÄRD", "BESLUT", "Godkänd", "Diskbänk", "2 st"]) {
+    for (const swedish of ["Reklamationsbesked", "Nummer", "Datum", "Er referens", "ÄRENDE", "ARTIKEL", "ANTAL", "BESKRIVNING", "ORSAKSANALYS", "ÅTGÄRD", "BESLUT", "Godkänd", "Diskbänk", "2 st"]) {
       expect(text).not.toContain(swedish);
     }
 

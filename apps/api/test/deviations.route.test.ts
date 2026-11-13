@@ -8,7 +8,7 @@ import { createAuthRepository } from "../src/modules/auth/repository/auth.reposi
 import { createAuthService } from "../src/modules/auth/service/auth.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { createQualityRepository, ORDER_ID_BATCH } from "../src/modules/quality/repository/quality.repository.js";
-import { pdfText } from "./helpers/pdf.js";
+import { fact, pdfText } from "./helpers/pdf.js";
 
 // Reklamationer och avvikelser through the real app: the register's routes
 // and their response shapes (the web is built against them), the link
@@ -462,7 +462,7 @@ describe("avvikelser: reklamationsrapporten", () => {
     expect(plain.statusCode).toBe(200);
     expect(plain.headers["content-type"]).toBe("application/pdf");
     const text = pdfText(plain.rawPayload);
-    for (const part of ["Reklamationsbesked", c.deviationNumber, "Restaurang Exempelkrogen AB", "Er referens: REK-77", `Kundorder: ${f.order.orderNumber}`, "Repad diskbänk", "Transportskada", "Repor på ovansidan"]) {
+    for (const part of ["Reklamationsbesked", c.deviationNumber, "Restaurang Exempelkrogen AB", fact("Er referens", "REK-77"), fact("Kundorder", f.order.orderNumber), "Repad diskbänk", "Transportskada", "Repor på ovansidan"]) {
       expect(text).toContain(part);
     }
     expect(text).not.toContain("Dålig emballering");
@@ -476,7 +476,7 @@ describe("avvikelser: reklamationsrapporten", () => {
     const s = (await admin.post("/deviations", { type: "supplier", title: "Fel antal", supplierId: f.supplier.id, purchaseOrderId: f.po.id })).json();
     const supplierPdf = pdfText((await admin.get(`/deviations/${s.id}/pdf`)).rawPayload);
     expect(supplierPdf).toContain("Reklamation");
-    expect(supplierPdf).toContain(`Inköpsorder: ${f.po.orderNumber}`);
+    expect(supplierPdf).toContain(fact("Inköpsorder", f.po.orderNumber));
     const internal = (await admin.post("/deviations", { type: "internal", title: "Maskinstopp" })).json();
     expect(pdfText((await admin.get(`/deviations/${internal.id}/pdf`)).rawPayload)).toContain("Avvikelserapport");
 

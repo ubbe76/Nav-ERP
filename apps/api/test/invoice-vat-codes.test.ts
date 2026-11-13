@@ -23,7 +23,7 @@ import { createDocumentPdfService } from "../src/modules/mail/service/document-p
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
-import { pdfText } from "./helpers/pdf.js";
+import { fact, pdfText } from "./helpers/pdf.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/services.js";
 import { resetVatCodes, vatCodeId } from "./helpers/vat-codes.js";
 import { vatRateGroupId } from "./helpers/vat-group.js";
@@ -612,7 +612,7 @@ describe("invoice PDF — momskoder", () => {
     const issued = await invoiceService.issue(draft!.id, user.id);
     const text = pdfText((await invoiceService.renderPdf(issued!.id)).content);
 
-    expect(text).toContain("Ert momsreg.nr: DE123456789");
+    expect(text).toContain(fact("Ert momsreg.nr", "DE123456789"));
     expect(text).toContain("Levererad 2026-01-15");
     // One summary line per code: 25 % and the two 0 % codes by name.
     expect(text).toContain("Moms (25 %)");

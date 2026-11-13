@@ -19,7 +19,7 @@ import { createDocumentPdfService } from "../src/modules/mail/service/document-p
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
-import { pdfText } from "./helpers/pdf.js";
+import { fact, pdfText } from "./helpers/pdf.js";
 import { parsed } from "./helpers/parsed.js";
 
 // Offerter (migration 0138): a quote is numbered from the OF- series and
@@ -229,7 +229,7 @@ describe("numbering", () => {
     expect(attachment.filename).toBe(`Orderbekraftelse-${result!.orderNumber}.pdf`);
     const text = pdfText(attachment.content);
     expect(text).toContain(`Orderbekräftelse ${result!.orderNumber}`);
-    expect(text).toContain(`Vår offert: ${order.orderNumber}`);
+    expect(text).toContain(fact("Vår offert", order.orderNumber));
   });
 
   it("a failed confirmation mail keeps the reserved KO- number for the retry, Förlorad gives the OF- number back", async () => {
@@ -332,7 +332,7 @@ describe("documents", () => {
     expect(confirmation.filename).toBe(`Orderbekraftelse-${confirmed.orderNumber}.pdf`);
     const text = pdfText(confirmation.content);
     expect(text).toContain(`Orderbekräftelse ${confirmed.orderNumber}`);
-    expect(text).toContain(`Vår offert: ${order.orderNumber}`);
+    expect(text).toContain(fact("Vår offert", order.orderNumber));
   });
 
   it("no Vår offert line on a direct order", async () => {

@@ -13,7 +13,7 @@ import { createShippingService } from "../src/modules/shipping/service/shipping.
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { createFakeFreightProvider } from "./helpers/fake-freight-provider.js";
-import { pdfText } from "./helpers/pdf.js";
+import { fact, pdfText } from "./helpers/pdf.js";
 import { testArticleService, testDocumentPdfService, testSystemService } from "./helpers/services.js";
 import { enableFreight, makeArticle, makeCustomer, makeDelivery, resetShipping } from "./helpers/shipping-fixtures.js";
 
@@ -65,8 +65,8 @@ describe("följesedeln och försändelsen", () => {
     const rates = await shipping.fetchRates(shipment.id);
     const { shipment: booked } = await shipping.book(shipment.id, { rateId: rates.rates[0]!.id }, null);
     const text = pdfText((await sales.deliveryNotePdf(delivery.deliveryId)).pdf);
-    expect(text).toContain("Transportör: DHL Freight");
-    expect(text).toContain(`Fraktsedelsnr: ${booked.trackingNumber}`);
+    expect(text).toContain(fact("Transportör", "DHL Freight"));
+    expect(text).toContain(fact("Fraktsedelsnr", `${booked.trackingNumber}`));
   });
 
   it("forgets a cancelled shipment on the delivery list", async () => {
