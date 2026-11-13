@@ -23,6 +23,7 @@ import { confirmDialog } from "../../lib/confirm";
 import { notify } from "../../lib/notice";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { configuredDeliveryWarning } from "../../lib/configuredDelivery";
+import { deliveryBlockedText } from "../../lib/deliveryBlocked";
 import { toBaseQuantity, toUnitQuantity } from "../../lib/units";
 import {
   countScan,
@@ -102,10 +103,16 @@ export function DeliveryPageClient({
   const router = useRouter();
   const order = selected;
   const selectedId = order?.id ?? null;
-  const openRows = useMemo(
+  const remainingRows = useMemo(
     () => rows.filter((r) => Number(r.quantityDelivered) < Number(r.quantityOrdered)),
     [rows]
   );
+  // ?order=<id> may name an order that is not Under tillverkning (a quote, a
+  // Bekräftad order, an avbruten one): say so at once and offer no rows to
+  // deliver, instead of a 409 at Rapportera. A fully delivered order keeps
+  // "Alla rader … redan levererade" (the routine's own result).
+  const blockedText = order && remainingRows.length > 0 ? deliveryBlockedText(order) : null;
+  const openRows = useMemo(() => (blockedText ? [] : remainingRows), [blockedText, remainingRows]);
   // Tillåten överleverans for the order's customer (#24): null = no limit.
   const overDeliveryPercent = order?.overDeliveryPercent === undefined ? 0 : order.overDeliveryPercent;
   // The open rows as the scan rules see them: remaining in the row's unit,
@@ -175,9 +182,9 @@ export function DeliveryPageClient({
   const scanField = useRef<HTMLInputElement>(null);
   // The props the queued scan handlers read — a handler may run after a
   // navigation it did not see.
-  const latest = useRef({ order, openRows, scanRows, rows, overDeliveryPercent, batchRows, serialModes, locationId });
+  const latest = useRef({ order, openRows, scanRows, rows, overDeliveryPercent, batchRows, serialModes, locationId, blockedText });
   useEffect(() => {
-    latest.current = { order, openRows, scanRows, rows, overDeliveryPercent, batchRows, serialModes, locationId };
+    latest.current = { order, openRows, scanRows, rows, overDeliveryPercent, batchRows, serialModes, locationId, blockedText };
   });
 
   // Frakt: "Boka transport" on the result block only when freight is
@@ -374,6 +381,13 @@ export function DeliveryPageClient({
       "salesOrder",
       current ? { openRows: currentRows, articleIds: allRows.map((r) => r.articleId) } : null
     );
+    // An order that cannot be delivered has no rows to count on: an article
+    // scan gets the reason, not "redan levererad" / "finns inte på".
+    const blocked = latest.current.blockedText;
+    if (blocked && ["count", "articleManual", "articleDone", "articleNotOnOrder"].includes(intent.kind)) {
+      warn(blocked);
+      return;
+    }
     switch (intent.kind) {
       case "location": {
         const m = intent.match;
@@ -732,7 +746,9 @@ export function DeliveryPageClient({
         />
       )}
 
-      {!order && (
+      {blockedText && <FormNotice role="status">{blockedText}</FormNotice>}
+
+      {(!order || blockedText) && (
         <div className={styles.openOrders}>
           <SectionHeading>Levererbara ordrar</SectionHeading>
           <Table<SalesOrder>
@@ -771,7 +787,7 @@ export function DeliveryPageClient({
         </div>
       )}
 
-      {order && openRows.length === 0 && <p>Alla rader på ordern är redan levererade.</p>}
+      {order && remainingRows.length === 0 && <p>Alla rader på ordern är redan levererade.</p>}
 
       {order && openRows.length > 0 && (
         <>
