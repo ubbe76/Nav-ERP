@@ -34,7 +34,20 @@ Det här känns igen:
 - **Lagerplatsens etikettkod** — **LP** följt av ett nummer (till exempel **LP0042**), se [Etiketter](#etiketter).
 - **Ordernummer** — inköpsorder, kundorder (även offertnumret) och tillverkningsorder, som på pallkorten.
 
-Koder läses med Code 128, EAN-8, EAN-13, UPC och QR.
+Koder läses med Code 128, EAN-8, EAN-13, UPC, QR och DataMatrix (när webbläsaren kan läsa formatet).
+
+**GS1-koder.** En GS1-128- eller DataMatrix-kod kan bära flera fält på en gång, och Nav tolkar:
+
+- **GTIN** (01) — artikeln slås upp på samma sätt som en Streckkod (EAN).
+- **Batch** (10) och **serienummer** (21) — numret som står i koden.
+- **Utgångsdatum** (17, annars bäst före 15).
+- **Antal** (30/37) visas men räknas inte om automatiskt.
+
+Fälten skiljs åt av en **gruppseparator** (GS/FNC1, ASCII 29) efter varje fält med variabel längd. Skannern ska skicka den: en handskanner i tangentbordsläge skickar den som **Ctrl+]**, och skanningsfältet lägger då separatorn i koden. Utan separatorn går gränsen mellan fälten inte att gissa — `10ABC21123` läses som batchen *ABC21123* — och blir det sammanslagna fältet för långt förkastas hela koden. En kod som inte går att tolka (fel kontrollsiffra, ogiltigt datum) tolkas inte alls, men hela koden slås ändå upp som artikelnummer, EAN, plats eller order.
+
+Skannar du ett batch- eller serienummer visar sidan en rad **GS1-kod** med GTIN, batch, serienummer och utgångsdatum, och träffen *Batch* eller *Serienummer* med saldot per lagerplats och en länk till [Spårbarhet](#sparbarhet-sidan). En skanning skapar aldrig något. Har koden en GTIN söks numret bara på just den artikeln.
+
+Så används GS1-koderna i rutinerna: [Inleverans](/hjalp/inkop#skanna-i-inleveransen), [Utleverans](/hjalp/forsaljning#skanna-vid-plock) och [Inventering](#skanna-vid-inventering).
 
 Skanningsfältet finns också i [Inleverans](/hjalp/inkop#skanna-i-inleveransen) och [Utleverans](/hjalp/forsaljning#skanna-vid-plock), där en skannad artikel räknas mot orderns rader, och i [Inventering](#skanna-vid-inventering), där lagerplatsen öppnar platsens inventering och artikeln tar fram raden att skriva räknat antal på.
 
@@ -217,6 +230,7 @@ Både listan **Lager → Inventering** och inventeringskortet har ett skanningsf
 - **Lagerplatsens etikett** (LP-koden) på listan öppnar platsens pågående inventering. Finns ingen öppnas **Ny inventering** med platsen förvald, så du väljer spärr och anteckning och klickar **Skapa inventeringsunderlag**. En inaktiv plats har inget saldo att inventera, och rutinen säger det. Räknelistan har platsens LP-kod som streckkod uppe till höger, så platsen kan också skannas från listan.
 - På inventeringskortet bekräftar platsens egen etikett att du står på rätt plats. En annan plats öppnar den platsens inventering — har du skrivit räknade antal som inte sparats frågar rutinen först (**Byt lagerplats**).
 - **Artikeln** — artikelnumret eller **Streckkod (EAN)** — markerar raden och ställer markören i **Räknat** med värdet markerat. Skriv det räknade antalet och tryck **Enter**: raden sparas direkt och markören går tillbaka till skanningsfältet, redo för nästa artikel. Vid inventering räknar varje skanning alltså inte upp antalet, som vid in- och utleverans — antalet på hyllan skrivs in.
+- **Batch- och serienummer.** En GS1-kod (eller ett skannat nummer) räknar mot rätt rad: ett **serienummer** med rad sätter **Räknat** till 1 direkt, och finns ingen rad läggs raden till med numret och 1. En **batch** med rad ger den radens **Räknat** markören; finns ingen rad läggs den till med batchen. Skannas bara artikeln och den har flera rader filtreras underlaget till artikelns rader (**Visa alla** visar alla igen); för serienummer uppmanas du skanna numret.
 - En artikel som **inte finns på underlaget** läggs till, som med **Lägg till artikel**, och får markören direkt. Rutinen varnar, så en felskanning syns och kan tas bort med **Ta bort**.
 
 Enter i **Räknat** sparar raden även när du skriver utan att skanna. **Spara räknade antal** finns kvar för flera inskrivna rader på en gång.
