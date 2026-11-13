@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { GatedLink } from "../ui/GatedLink";
 import { Table } from "../ui/Table";
@@ -11,7 +11,7 @@ import { SectionHeading } from "../ui/SectionHeading";
 import { Field, Input, Select } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
-import type { Article, ArticleLocations, StockBalance } from "../../lib/types";
+import type { Article, ArticleBatchBalances, ArticleLocations, StockBalance } from "../../lib/types";
 import { articleLocationRole, ownPrimaryLocationId } from "../../lib/stockLocations";
 import { ArticleLocationsCard } from "./ArticleLocationsCard";
 import { ForecastCard } from "./ForecastCard";
@@ -42,9 +42,31 @@ export function LagerTab({
   const [rounding, setRounding] = useState(article.rounding ?? "");
   const [leadTime, setLeadTime] = useState(article.manufacturingLeadTimeDays != null ? String(article.manufacturingLeadTimeDays) : "");
   const [forecastControlled, setForecastControlled] = useState(article.forecastControlled ?? false);
+  const [batchTracked, setBatchTracked] = useState(article.batchTracked ?? false);
+  const [batchSetting, setBatchSetting] = useState(false);
+  const [batchBalances, setBatchBalances] = useState<ArticleBatchBalances | null>(null);
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Batchstyrd shows only when the company uses batch numbers (or the article
+  // already is batch tracked); services and phantoms can't be.
+  useEffect(() => {
+    apiFetch<{ batchTrackingEnabled?: boolean }>("/api/v1/settings")
+      .then((s) => setBatchSetting(Boolean(s.batchTrackingEnabled)))
+      .catch(() => setBatchSetting(false));
+  }, []);
+  useEffect(() => {
+    if (!article.batchTracked) {
+      setBatchBalances(null);
+      return;
+    }
+    apiFetch<ArticleBatchBalances>(`/api/v1/articles/${article.id}/batch-balances`)
+      .then(setBatchBalances)
+      .catch(() => setBatchBalances(null));
+  }, [article.id, article.batchTracked, balances]);
+  const canBatchTrack = article.type !== "service" && !article.isPhantom;
+  const showBatchToggle = canBatchTrack && (batchSetting || Boolean(article.batchTracked));
 
   async function savePlanning(e: FormEvent) {
     e.preventDefault();
@@ -61,6 +83,7 @@ export function LagerTab({
           orderQuantity: orderQuantity.trim() === "" ? null : Number(orderQuantity),
           rounding: rounding.trim() === "" ? null : Number(rounding),
           forecastControlled,
+          ...(showBatchToggle && batchTracked !== Boolean(article.batchTracked) ? { batchTracked } : {}),
           // Only manufactured articles carry a lead time; others leave it untouched.
           ...(article.type === "manufactured"
             ? { manufacturingLeadTimeDays: leadTime.trim() === "" ? null : Number(leadTime) }
@@ -180,6 +203,19 @@ export function LagerTab({
             Prognosstyrd: behovsberäkningen planerar ett månadsbehov (snitt eller eget antal) för artikeln. Passar slutprodukter och
             reservdelar. Prognoskortet visas under Planering när artikeln är sparad som Prognosstyrd.
           </FormHint>
+          {showBatchToggle && (
+            <>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, margin: "12px 0 4px" }}>
+                <input type="checkbox" checked={batchTracked} onChange={(e) => setBatchTracked(e.target.checked)} />
+                Batchstyrd
+              </label>
+              <FormHint attached>
+                Batchstyrd: saldot hålls per batch. Befintligt saldo hamnar i batchen Okänd, som dras först; därefter
+                dras äldsta batch först. Batchnummer anges vid inleverans — tomt blir inköpsorderns nummer —
+                och tillverkade varor får tillverkningsordernumret som batch.
+              </FormHint>
+            </>
+          )}
           <p style={{ margin: "12px 0 4px" }}>
             ABC-klass: <strong>{article.abcClass ?? "—"}</strong>
           </p>
@@ -210,6 +246,46 @@ export function LagerTab({
           Visa lagerlogg
         </GatedLink>
       </p>
+
+      {article.batchTracked && batchBalances && batchBalances.batches.length > 0 && (
+        <Card style={{ marginBottom: 20 }}>
+          <SectionHeading>Saldo per batch</SectionHeading>
+          <Table<{ id: string } & ArticleBatchBalances["batches"][number]>
+            columns={[
+              { key: "batch", label: "Batch", width: "1fr" },
+              { key: "location", label: "Lagerplatser", width: "2fr" },
+              { key: "quantity", label: "Saldo", width: "140px", align: "right" },
+            ]}
+            rows={batchBalances.batches.map((b) => ({ ...b, id: b.batchId ?? "unknown" }))}
+            renderCell={(row, key) => {
+              if (key === "batch") {
+                return row.batchId ? (
+                  <GatedLink href={`/lager/sparbarhet?batch=${row.batchId}`} style={{ color: "var(--accent-fg)" }}>
+                    {row.batchNumber}
+                  </GatedLink>
+                ) : (
+                  "Okänd"
+                );
+              }
+              if (key === "location") {
+                return (
+                  <span>
+                    {row.locations.length === 0
+                      ? "—"
+                      : row.locations
+                          .map(
+                            (l) =>
+                              `${l.locationName ? `${l.warehouseName ? `${l.warehouseName} · ` : ""}${l.locationName}` : "—"} (${formatQuantity(l.quantity)})${l.blocked ? " — spärrad" : ""}`
+                          )
+                          .join(", ")}
+                  </span>
+                );
+              }
+              return formatQuantity(row.total);
+            }}
+          />
+        </Card>
+      )}
 
       {balances.length === 0 ? (
         <p>Inget saldo registrerat för denna artikel.</p>

@@ -88,6 +88,7 @@ export interface ArticleExportRecord {
   safetyStock: number | null;
   stockControlled: boolean;
   forecastControlled: boolean;
+  batchTracked: boolean;
   manufacturingLeadTimeDays: number | null;
   quantityPerPackage: number | null;
   /** The primary supplier (Inköp tab) and its catalogue lead time. */
@@ -137,6 +138,7 @@ export function articleExportBlocks(records: ArticleExportRecord[]): ImportExpor
       safetyStock: r.safetyStock,
       stockControlled: r.stockControlled ? "Lagerstyrd" : "Orderstyrd",
       forecastControlled: yesNo(r.forecastControlled),
+      batchTracked: yesNo(r.batchTracked),
       // Where the planner puts Ledtid: the article's own for a manufactured
       // one, the primary supplier's for a purchased one, nowhere for a service.
       leadTimeDays:
@@ -442,11 +444,15 @@ export interface StockBalanceExportRecord {
   warehouseName: string;
   locationName: string;
   quantity: number;
+  // Batch (#8): "" for an article that is not batchstyrd (one row per
+  // place); a batchstyrd article has one row per cell — the batch number,
+  // or "Okänd" for the stock without a batch.
+  batchNumber: string;
 }
 
-// Antal is the balance after the import, per article and place — today's
-// balance, so the import finds nothing to book. À-pris stays empty: it only
-// values an increase, and there is none.
+// Antal is the balance after the import, per article and place (and, for a
+// batchstyrd article, batch) — today's balance, so the import finds nothing
+// to book. À-pris stays empty: it only values an increase, and there is none.
 export function stockBalanceExportBlocks(records: StockBalanceExportRecord[]): ImportExportBlock[] {
   return blocksBy(records, (r) => r.articleNumber).map((rows) =>
     rows.map((r) => ({
@@ -454,6 +460,7 @@ export function stockBalanceExportBlocks(records: StockBalanceExportRecord[]): I
       warehouseName: r.warehouseName,
       locationName: r.locationName,
       quantity: r.quantity,
+      batchNumber: r.batchNumber,
     }))
   );
 }

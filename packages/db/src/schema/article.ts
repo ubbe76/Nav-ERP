@@ -166,6 +166,12 @@ export const articles = pgTable("articles", {
   // quantity in article_forecasts — consumed by the month's real demand
   // (planning/service/forecast.ts). Every other article behaves as before.
   forecastControlled: boolean("forecast_controlled").notNull().default(false),
+  // Batchstyrd (#8, migration 0213): inflows of the article carry a batch
+  // (stock_batches) and outflows are allocated per batch, oldest first.
+  // Only while the system setting "Använd batch- och serienummer" is on;
+  // never a Tjänst or a phantom. Switching it off keeps the batches in the
+  // log — they are just no longer asked for or shown (stock.md, Batch).
+  batchTracked: boolean("batch_tracked").notNull().default(false),
   packageTypeId: uuid("package_type_id").references(() => packageTypes.id, { onDelete: "restrict" }),
   // Frakt — "egna mått" (used when the article has no package type + antal
   // per kolli): kolliart (null = Paket), stapelbar, pallplatser and flakmeter.

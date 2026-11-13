@@ -5,6 +5,7 @@ import { listQuerySchema, orderStatusListParam, statusListParam } from "./list.j
 import { configuratorSelectionSchema, orderRowConfigurationInputSchema } from "./configurator.js";
 
 import { blankSafe, numericMax } from "./coerce.js";
+import { batchChoiceSchema } from "./stock.js";
 import { round4 } from "./money.js";
 import { businessDateSchema } from "./business-date.js";
 import { partnerDeliveryFields } from "./delivery.js";
@@ -545,6 +546,8 @@ export type SetRowConfigurationInput = z.infer<typeof setRowConfigurationSchema>
 
 export const deliverGoodsSchema = z.object({
   locationId: z.string().uuid().optional(),
+  // Batch (#8): as on a deliverBatch row.
+  batchId: batchChoiceSchema,
   quantity: blankSafe(z.coerce.number().positive()),
 });
 export type DeliverGoodsInput = z.infer<typeof deliverGoodsSchema>;
@@ -564,6 +567,12 @@ export const deliverBatchSchema = z.object({
         rowId: z.string().uuid(),
         quantity: blankSafe(z.coerce.number().positive()),
         locationId: z.string().uuid().optional(),
+        // Batch (#8), a batchstyrd article's row: left out = Automatiskt
+        // (oldest batch first, split over batches and places), null = Okänd,
+        // an id = that batch for the row's WHOLE quantity (409
+        // batch-insufficient when it does not cover it) — two chosen batches
+        // are two deliveries.
+        batchId: batchChoiceSchema,
       })
     )
     .min(1),

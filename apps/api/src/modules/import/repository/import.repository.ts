@@ -21,12 +21,20 @@ import {
   supplierContacts,
   supplierDeliveryAddresses,
   suppliers,
+  systemSettings,
   units,
   workCenters,
   type Db,
   type Tx,
 } from "@navet/db";
 import { getOrCreateFallbackLocation } from "../../stock/service/location-resolver.js";
+import {
+  batchTrackableArticle,
+  BATCH_TRACKING_ENABLED_KEY,
+  batchTrackingEnabledForShare,
+  decodeBatchTrackingEnabled,
+} from "../../stock/service/batch-tracking.js";
+import { ArticleNotBatchTrackableError, BatchTrackingDisabledError } from "../../stock/service/batch.errors.js";
 import { recordStandardCostHistory } from "../../article/repository/article.repository.js";
 import { bomRowCreatedAt } from "../../article/repository/bom-write.js";
 import { getOrCreateDefaultUnitId } from "../../article/repository/default-unit.js";
@@ -466,6 +474,7 @@ export function createImportRepository(db: Db | Tx) {
             groupCode: articleGroups.code,
             articleCode: articleCodes.code,
             standardCost: articles.standardCost,
+            batchTracked: articles.batchTracked,
             barcode: articles.barcode,
             weight: articles.weight,
             surfaceTreatment: articles.surfaceTreatment,
@@ -512,6 +521,16 @@ export function createImportRepository(db: Db | Tx) {
     // per import: the "st" unit and the "***" location, both created on
     // first use — the article module's getOrCreateDefaultUnitId, the ONE
     // implementation (also when "Styck" is already another unit's name).
+    // Batch (#8): the setting as the planner sees it (no lock — the commit
+    // reads it again FOR SHARE before it switches a flag on).
+    async batchTrackingEnabled(): Promise<boolean> {
+      const [row] = await db
+        .select({ value: systemSettings.value })
+        .from(systemSettings)
+        .where(eq(systemSettings.key, BATCH_TRACKING_ENABLED_KEY));
+      return decodeBatchTrackingEnabled(row?.value);
+    },
+
     async resolveDefaults(): Promise<{ unitId: string; locationId: string }> {
       const unitId = await getOrCreateDefaultUnitId(db);
       const locationId = await getOrCreateFallbackLocation(db);
@@ -523,6 +542,32 @@ export function createImportRepository(db: Db | Tx) {
     // makes the register step race-safe against a concurrent manual create.
     async executeArticlePlan(plan: ArticleImportPlan) {
       return db.transaction(async (tx) => {
+        // Batchstyrd (#8): the flag's own locks (stock.md, Batch → Låsen),
+        // taken before anything else is written. A flag CHANGE holds the
+        // article FOR UPDATE (inflows read the flag FOR KEY SHARE, which a
+        // plain UPDATE would not wait for), in id order; whoever switches a
+        // flag ON then holds the setting's row FOR SHARE to the commit —
+        // article first, then the setting, as updateArticle. Both rules are
+        // re-checked here: the preview read them without locks.
+        const flagChanges = plan.updates.filter((u) => u.patch.batchTracked !== undefined);
+        const switchedOn = new Set(flagChanges.filter((u) => u.patch.batchTracked === true).map((u) => u.id));
+        const flagIds = flagChanges.map((u) => u.id).sort();
+        for (const part of chunk(flagIds)) {
+          if (part.length === 0) continue;
+          const locked = await tx
+            .select({ id: articles.id, type: articles.type, isPhantom: articles.isPhantom })
+            .from(articles)
+            .where(inArray(articles.id, part))
+            .orderBy(asc(articles.id))
+            .for("update");
+          for (const row of locked) {
+            if (switchedOn.has(row.id) && !batchTrackableArticle(row)) throw new ArticleNotBatchTrackableError();
+          }
+        }
+        if (switchedOn.size > 0 || plan.creates.some((c) => c.batchTracked === true)) {
+          if (!(await batchTrackingEnabledForShare(tx))) throw new BatchTrackingDisabledError();
+        }
+
         const createdUnits: string[] = [];
         for (const part of chunk(plan.willCreate.units)) {
           if (part.length === 0) continue;
@@ -621,6 +666,7 @@ export function createImportRepository(db: Db | Tx) {
                 safetyStock: create.safetyStock != null ? String(create.safetyStock) : undefined,
                 stockControlled: create.stockControlled ?? false,
                 forecastControlled: create.forecastControlled ?? false,
+                batchTracked: create.batchTracked ?? false,
                 manufacturingLeadTimeDays: create.manufacturingLeadTimeDays ?? null,
               }))
             )
@@ -699,6 +745,7 @@ export function createImportRepository(db: Db | Tx) {
               ...(update.patch.forecastControlled !== undefined
                 ? { forecastControlled: update.patch.forecastControlled }
                 : {}),
+              ...(update.patch.batchTracked !== undefined ? { batchTracked: update.patch.batchTracked } : {}),
               ...(update.patch.manufacturingLeadTimeDays !== undefined
                 ? { manufacturingLeadTimeDays: update.patch.manufacturingLeadTimeDays }
                 : {}),

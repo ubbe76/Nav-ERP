@@ -7,6 +7,7 @@ import type {
 } from "@navet/shared";
 import type { StockCountRepository } from "../repository/stock-count.repository.js";
 import type { StockCountSheetPdfInput } from "../../mail/service/document-pdf.js";
+import { UNKNOWN_BATCH_LABEL } from "@navet/shared";
 import { StockCountNotFoundError } from "./stock.errors.js";
 // G1: append-only audit trail. Only the session-level status transitions
 // (posted/cancelled) are logged here — plain stock_transactions/transfers
@@ -102,6 +103,9 @@ export function createStockCountService(deps: {
           articleName: r.articleName,
           unit: r.unit,
           snapshotQuantity: showBalances ? Number(r.snapshotQuantity) : null,
+          // Batch (#8): one row per batch for a batchstyrd article — Okänd
+          // under its label (internal document).
+          batch: r.batchTracked ? (r.batchNumber ?? UNKNOWN_BATCH_LABEL) : null,
         })),
       });
       return { filename: `raknelista-${session.countNumber}.pdf`, content };

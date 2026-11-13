@@ -204,6 +204,7 @@ import { createAlertDigestService } from "./modules/alerts/service/alert-digest.
 import { alertsRoutes } from "./modules/alerts/routes/alerts.routes.js";
 import { isBookkeepingLockViolation, isClosedFiscalYearViolation, isEmployeeAnonymizedViolation, isNumberOutOfRange } from "./modules/system/service/db-errors.js";
 import { StockLocationNotFoundError } from "./modules/stock/service/stock.errors.js";
+import { batchErrorStatus } from "./modules/stock/service/batch.errors.js";
 import { documentNumberTakenError } from "./modules/system/service/number-series.js";
 import { errorBody } from "./modules/system/service/error-body.js";
 import { createQualityRepository } from "./modules/quality/repository/quality.repository.js";
@@ -290,6 +291,11 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     // (resolveStockLocation) — inleverans, utleverans, Förbruka, justering:
     // the client's mistake, mapped once here rather than in every route.
     if (err instanceof StockLocationNotFoundError) return reply.code(404).send(errorBody(err));
+    // Batch (#8): the batch errors of every batch-aware writer (inleverans,
+    // TO-rapport, justering, the article card, PATCH /settings) — mapped
+    // once here, the writers live in several modules.
+    const batchStatus = batchErrorStatus(err);
+    if (batchStatus !== null) return reply.code(batchStatus).send(errorBody(err as Error));
     // A document series whose next number is already taken (Nummerserier
     // refuses that; an import or a hand edit can still get there): the
     // create rolled back with its number, from any module — 409 with a

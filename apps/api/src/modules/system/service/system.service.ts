@@ -77,6 +77,8 @@ import { decodePrecisionMargins, PRECISION_MARGIN_KEYS } from "./precision-setti
 const SETUP_CHARGE_ARTICLE_KEY = "setup_charge_article_id";
 import { decodeDefaultTheme, DEFAULT_THEME_KEY, THEME_CHOICE_LOCKED_KEY } from "./theme-settings.js";
 import { UnknownThemeError } from "./themes.errors.js";
+import { BATCH_TRACKING_ENABLED_KEY, decodeBatchTrackingEnabled } from "../../stock/service/batch-tracking.js";
+import { BatchTrackingInUseError } from "../../stock/service/batch.errors.js";
 // G1: append-only audit trail. system_settings/company_info are singletons —
 // entityId is null (no natural per-row id); number_series/company_carrier
 // use their own readable key/code. updateSettings NEVER logs values — only
@@ -342,6 +344,9 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
 
     return {
       allowMultipleStamps: get(ALLOW_MULTIPLE_STAMPS_KEY) === "true",
+      // Använd batch- och serienummer (#8) — off unless switched on;
+      // batch-tracking.ts owns the key.
+      batchTrackingEnabled: decodeBatchTrackingEnabled(get(BATCH_TRACKING_ENABLED_KEY)),
       showRevisionsOnDocuments: get(SHOW_REVISIONS_ON_DOCUMENTS_KEY) === "true",
       // Unlike the other toggles this one defaults ON when never set.
       showOrderRevisionOnDocuments: get(SHOW_ORDER_REVISION_ON_DOCUMENTS_KEY) !== "false",
@@ -686,6 +691,18 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
 
         if (input.allowMultipleStamps !== undefined) {
           await set(ALLOW_MULTIPLE_STAMPS_KEY, String(input.allowMultipleStamps));
+        }
+        // Använd batch- och serienummer (#8): the row is written FIRST — the
+        // upsert waits for every transaction that is switching an article's
+        // Batchstyrd on (they hold the row FOR SHARE) — and only then are the
+        // batchstyrda articles counted; any left refuses the switch-off and
+        // rolls the whole PATCH back.
+        if (input.batchTrackingEnabled !== undefined) {
+          await set(BATCH_TRACKING_ENABLED_KEY, String(input.batchTrackingEnabled));
+          if (!input.batchTrackingEnabled) {
+            const tracked = await writer.countBatchTrackedArticles();
+            if (tracked > 0) throw new BatchTrackingInUseError(tracked);
+          }
         }
         if (input.showRevisionsOnDocuments !== undefined) {
           await set(SHOW_REVISIONS_ON_DOCUMENTS_KEY, String(input.showRevisionsOnDocuments));

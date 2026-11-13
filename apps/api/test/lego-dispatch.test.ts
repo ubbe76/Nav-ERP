@@ -3,6 +3,7 @@ import Fastify from "fastify";
 import { ZodError } from "zod";
 import { eq, sql } from "drizzle-orm";
 import {
+  articles,
   auditLog,
   companyInfo,
   db,
@@ -1067,5 +1068,33 @@ describe("the dispatch routes (inject, real service)", () => {
     });
     expect(closed.statusCode).toBe(409);
     expect(closed.json().code).toBe("invalid-status-transition");
+  });
+});
+
+// Batch (#8, decision 17): the TO number is the batch the finished goods are
+// received in — printed on the lego card when the TO's article is batchstyrd.
+describe("Pallkort till legoleverantör — batch", () => {
+  it("prints the TO number as BATCH only for a batchstyrd article, in the bottom row so the card still ends above the fold", async () => {
+    const f = await makeFixture({ supplierDeliveryAddress: true });
+    const dispatch = await purchaseService.createDispatch(
+      f.order.id,
+      { rows: [{ rowId: f.legoRow.id, quantity: 10, parcels: 1 }] },
+      f.user.id,
+    );
+    const card = async () => (await purchaseService.dispatchPalletCardPdf(f.order.id, dispatch.id)).pdf;
+
+    const before = await card();
+    expect(pdfText(before)).not.toContain("BATCH");
+    const frameOf = (pdf: Buffer) => pdfRects(pdf).filter((r) => r.width > 400 && r.height > 100)[0]!;
+
+    // Straight on the row: the flag's own rules (the setting) are not this test's.
+    await db.update(articles).set({ batchTracked: true }).where(eq(articles.id, f.parent.id));
+    const after = await card();
+    const text = pdfText(after);
+    expect(text).toContain("BATCH");
+    // The number itself: once in the TO reference, once as the batch.
+    expect(text.split(f.mo.orderNumber).length - 1).toBe(2);
+    expect(frameOf(after).height).toBe(frameOf(before).height);
+    expect(frameOf(after).y + frameOf(after).height).toBeLessThanOrEqual(841.89 / 2);
   });
 });

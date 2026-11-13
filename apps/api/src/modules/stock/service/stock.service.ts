@@ -8,6 +8,7 @@ import type {
   CreateWarehouseInput,
   ListQuery,
   ListStockTransactionsQuery,
+  ListStockBatchesQuery,
   ListStockBalancesQuery,
   ListStockLocationRegisterQuery,
   ListStockLocationsQuery,
@@ -20,6 +21,8 @@ import type { StockRepository } from "../repository/stock.repository.js";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import { ArticleLocationInvalidError, ArticleNotFoundError, StockLocationNotFoundError, WarehouseNotFoundError } from "./stock.errors.js";
 import { articleLocationInputProblem } from "./article-locations.js";
+import { StockBatchNotFoundError } from "./batch.errors.js";
+import type { BatchTraceLimits } from "./batch-trace.js";
 
 // Re-exported so route handlers keep importing their error types from the
 // service they call.
@@ -173,6 +176,33 @@ export function createStockService(repo: StockRepository, audit: AuditWriter = {
 
     async listTransactions(query: ListStockTransactionsQuery) {
       return repo.listTransactions(query);
+    },
+
+    // Batch (#8): the pick list's cells (plocklistan per batch).
+    // Also GET /stock/batch-balances — the batch choices of Utleverans,
+    // Förbruka, flytt and justering.
+    async pickBatchCellsForArticles(articleIds: string[], opts: { locationId?: string } = {}) {
+      return repo.pickBatchCellsForArticles(articleIds, opts);
+    },
+
+    // Spårbarhet (#8): GET /stock/batches and …/:id/trace. Readable whatever
+    // the setting says — reading harms nothing, and the batches of an article
+    // that is no longer batchstyrd are still in the log.
+    async listBatches(query: ListStockBatchesQuery) {
+      return repo.listBatches(query);
+    },
+
+    async traceBatch(batchId: string, limits?: BatchTraceLimits) {
+      const trace = await repo.traceBatch(batchId, limits);
+      if (!trace) throw new StockBatchNotFoundError(batchId);
+      return trace;
+    },
+
+    // Batch (#8): the article card's Saldo per batch.
+    async getArticleBatchBalances(articleId: string) {
+      const view = await repo.articleBatchBalances(articleId);
+      if (!view) throw new ArticleNotFoundError(articleId);
+      return view;
     },
 
     // Flera lagerplatser per artikel (0186) — GET/PUT /articles/:id/locations.

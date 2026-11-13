@@ -34,6 +34,7 @@ export const ARTICLE_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "safetyStock", label: "Säkerhetslager" },
   { field: "stockControlled", label: "Styrning" },
   { field: "forecastControlled", label: "Prognosstyrd" },
+  { field: "batchTracked", label: "Batchstyrd" },
   { field: "leadTimeDays", label: "Ledtid (dagar)" },
   // Revisioner: the article's active revision and a drawing number with its
   // active revision.
@@ -64,6 +65,7 @@ export const STOCK_BALANCE_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "locationName", label: "Lagerplats" },
   { field: "quantity", label: "Antal (saldo efter importen)", required: true },
   { field: "unitCost", label: "À-pris" },
+  { field: "batchNumber", label: "Batch" },
 ];
 
 // Mirrors SUPPLIER_PRICE_IMPORT_FIELDS in

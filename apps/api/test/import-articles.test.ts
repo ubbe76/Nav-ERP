@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { count, eq, inArray, sql } from "drizzle-orm";
 import { articleGroups, articleSuppliers, articles, db, stockLocations, suppliers, units } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
@@ -91,6 +91,9 @@ describe("createArticle — semantik importen beror på (bugfixar)", () => {
 
 // In-memory deps — the plan builder never touches Drizzle directly, so these
 // tests run without any database writes.
+// Batch (#8): the system setting as the fake deps answer it.
+const batchTrackingSetting = { enabled: false };
+
 function fakeDeps(
   existing: ExistingArticle[] = [],
   unitCodes: string[] = ["st"],
@@ -120,6 +123,9 @@ function fakeDeps(
     },
     async resolveDefaults() {
       return { unitId: "unit-st", locationId: "loc-fallback" };
+    },
+    async batchTrackingEnabled() {
+      return batchTrackingSetting.enabled;
     },
   };
 }
@@ -1259,6 +1265,89 @@ describe("article import — Prognosstyrd", () => {
     expect(await flag()).toBe(true);
     await commit("");
     expect(await flag()).toBe(true);
+    await commit("0");
+    expect(await flag()).toBe(false);
+  });
+});
+
+// Batchstyrd (#8): Ja/Nej like Prognosstyrd — but Ja only while the setting
+// "Använd batch- och serienummer" is on and never on a tjänst or a fantom.
+describe("article import — Batchstyrd", () => {
+  const batchMapping = { Artikelnummer: "articleNumber", Benämning: "name", Artikeltyp: "type", Batchstyrd: "batchTracked" };
+  const SETTING = "batch_tracking_enabled";
+  const setSetting = async (on: boolean) => {
+    await db.execute(sql`DELETE FROM system_settings WHERE key = ${SETTING}`);
+    if (on) await db.execute(sql`INSERT INTO system_settings (key, value) VALUES (${SETTING}, 'true')`);
+  };
+  afterEach(async () => {
+    batchTrackingSetting.enabled = false;
+    await setSetting(false);
+  });
+
+  it("suggests the column; with the setting on it plans Ja/Nej and refuses a tjänst, a fantom and a bad value", async () => {
+    expect(suggestArticleMapping(Object.keys(batchMapping))).toEqual(batchMapping);
+    batchTrackingSetting.enabled = true;
+    const plan = await planArticleImport(
+      {
+        mapping: batchMapping,
+        rows: [
+          ["B-1", "Ett", "Köpt", "Ja"],
+          ["B-2", "Två", "Tillverkad", "nej"],
+          ["B-3", "Tre", "Köpt", ""],
+          ["B-4", "Fyra", "Tjänst", "Ja"],
+          ["B-5", "Fem", "Fiktiv", "1"],
+          ["B-6", "Sex", "Köpt", "Kanske"],
+          ["B-7", "Sju", "Tjänst", "Nej"],
+        ],
+      },
+      fakeDeps()
+    );
+    expect(plan.creates[0]).toMatchObject({ articleNumber: "B-1", batchTracked: true });
+    expect(plan.creates[1]).toMatchObject({ articleNumber: "B-2", batchTracked: false });
+    expect(plan.creates[2]).not.toHaveProperty("batchTracked");
+    expect(plan.rows[3]!.errors).toEqual(["En tjänst eller fantomartikel kan inte vara batchstyrd"]);
+    expect(plan.rows[4]!.errors).toEqual(["En tjänst eller fantomartikel kan inte vara batchstyrd"]);
+    expect(plan.rows[5]!.errors).toEqual(['Ogiltigt värde för Batchstyrd: "Kanske" (Ja/Nej/1/0/true/false)']);
+    expect(plan.rows[6]!.errors).toEqual([]);
+  });
+
+  it("with the setting off, Ja is a row error in Swedish — Nej and an empty cell still go through", async () => {
+    const plan = await planArticleImport(
+      {
+        mapping: batchMapping,
+        rows: [
+          ["B-1", "Ett", "Köpt", "Ja"],
+          ["B-2", "Två", "Köpt", "Nej"],
+          ["B-3", "Tre", "Köpt", ""],
+        ],
+      },
+      fakeDeps()
+    );
+    expect(plan.rows[0]!.errors).toEqual(['Batchstyrd kan inte sättas — slå först på "Använd batch- och serienummer" under System → Inställningar']);
+    expect(plan.rows[1]!.errors).toEqual([]);
+    expect(plan.rows[2]!.errors).toEqual([]);
+    expect(plan.hasErrors).toBe(true);
+  });
+
+  it("the commit reads the real setting: refused while off; stores Ja on create, switches it off and on again on update, leaves it on an empty cell", async () => {
+    const flag = async () => (await db.select({ f: articles.batchTracked }).from(articles).where(eq(articles.articleNumber, "B-10")))[0]?.f;
+    const commit = (cell: string) =>
+      importService.commit("articles", { mapping: batchMapping, rows: [["B-10", "Batchartikel", "Köpt", cell]], defaults: { articleType: "purchased" } });
+
+    await expect(commit("Ja")).rejects.toThrow();
+    expect(await flag()).toBeUndefined();
+
+    await setSetting(true);
+    await commit("Ja");
+    expect(await flag()).toBe(true);
+    await commit("");
+    expect(await flag()).toBe(true);
+    await commit("Nej");
+    expect(await flag()).toBe(false);
+    await commit("1");
+    expect(await flag()).toBe(true);
+    // Switched off again while the setting is off: always allowed (decision 10).
+    await setSetting(false);
     await commit("0");
     expect(await flag()).toBe(false);
   });

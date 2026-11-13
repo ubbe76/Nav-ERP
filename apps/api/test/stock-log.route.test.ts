@@ -53,13 +53,13 @@ describe("lagerlogg — kostnadsdöljning", () => {
   it("CSV: cost columns only for ekonomi/admin, Källa and Vem for all", async () => {
     const withCost = await buildApp({ role: "user", permissions: ["ekonomi"] }).inject({ method: "GET", url: "/stock/transactions/csv?articleId=11111111-1111-4111-8111-111111111111" });
     const header = withCost.body.replace(/^﻿/, "").split(/\r?\n/)[0]!;
-    expect(header).toBe("Datum;Registrerad;Artikel;Lagerplats;Typ;Mängd;Saldo;Källa;Vem;À-pris;Värde;Anteckning");
+    expect(header).toBe("Datum;Registrerad;Artikel;Lagerplats;Batch;Typ;Mängd;Saldo;Källa;Vem;À-pris;Värde;Anteckning");
     expect(withCost.body).toContain("IO-1");
     expect(withCost.body).toContain("Kalle Kula");
 
     const without = await buildApp({ role: "user", permissions: ["lager"] }).inject({ method: "GET", url: "/stock/transactions/csv?articleId=11111111-1111-4111-8111-111111111111" });
     const header2 = without.body.replace(/^﻿/, "").split(/\r?\n/)[0]!;
-    expect(header2).toBe("Datum;Registrerad;Artikel;Lagerplats;Typ;Mängd;Saldo;Källa;Vem;Anteckning");
+    expect(header2).toBe("Datum;Registrerad;Artikel;Lagerplats;Batch;Typ;Mängd;Saldo;Källa;Vem;Anteckning");
     expect(without.body).not.toContain("12,5");
     expect(without.body).not.toContain("50,00");
   });
@@ -87,7 +87,7 @@ describe("lagerlogg — kostnadsdöljning", () => {
     });
     const res = await app.inject({ method: "GET", url: "/stock/transactions/csv" });
     const body = res.body.replace(/^\uFEFF/, "");
-    expect(body.split(/\r?\n/)[0]).toBe("Datum;Registrerad;Artikel;Lagerplats;Typ;Mängd;Källa;Vem;À-pris;Värde;Anteckning");
+    expect(body.split(/\r?\n/)[0]).toBe("Datum;Registrerad;Artikel;Lagerplats;Batch;Typ;Mängd;Källa;Vem;À-pris;Värde;Anteckning");
     expect(body).toContain("Flytt till Huvudlager — B2");
     expect(body).toContain("Flytt från Huvudlager — A1");
   });

@@ -53,6 +53,8 @@ export interface StockTransactionExportRow {
   articleName: string;
   warehouseName: string | null;
   locationName: string | null;
+  // Batch (#8): the row's batch number; null = Okänd / not batchstyrd.
+  batchNumber?: string | null;
   transactionType: StockTransactionType;
   quantityDelta: string | number;
   balance: string | number | null;
@@ -80,7 +82,7 @@ export function stockReferenceLabel(ref: StockTransactionReference | null, quant
   }
 }
 
-// Order mirrors the web table: Datum, Artikel, Lagerplats, Typ, Mängd, Saldo,
+// Order mirrors the web table: Datum, Artikel, Lagerplats, Batch, Typ, Mängd, Saldo,
 // Källa, Vem, À-pris, Värde, Anteckning — plus Registrerad after Datum, which
 // the web shows under the date only when the two differ (#26: Datum is the
 // värderingsdatum, Registrerad when the row was booked). Saldo is only included when the export
@@ -100,6 +102,8 @@ export function stockTransactionColumns(includeCost: boolean, includeBalance: bo
     },
     { label: "Artikel", value: (r) => `${r.articleNumber} — ${r.articleName}` },
     { label: "Lagerplats", value: (r) => (r.locationName ? `${r.warehouseName} — ${r.locationName}` : null) },
+    // Batch (#8): blank for Okänd and for articles without batches.
+    { label: "Batch", value: (r) => r.batchNumber ?? null },
     { label: "Typ", value: (r) => STOCK_TRANSACTION_TYPE_LABELS[r.transactionType] },
     { label: "Mängd", value: (r) => r.quantityDelta, format: "number" },
     ...(includeBalance ? [{ label: "Saldo", value: (r: StockTransactionExportRow) => r.balance, format: "number" as const }] : []),

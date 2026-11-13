@@ -47,6 +47,8 @@ import {
 } from "@navet/shared";
 import { getOrCreateFallbackLocation } from "../../stock/service/location-resolver.js";
 import { articleHoldsStock } from "../../stock/service/stocked-article.js";
+import { batchTrackableArticle, batchTrackingEnabledForShare } from "../../stock/service/batch-tracking.js";
+import { ArticleNotBatchTrackableError, BatchTrackingDisabledError } from "../../stock/service/batch.errors.js";
 import { applyInformation, copyArticleParts, readCopySource } from "./article-copy.js";
 import { articleVatRateSql } from "./article-vat-rate.js";
 import { getOrCreateDefaultUnitId } from "./default-unit.js";
@@ -131,6 +133,7 @@ export async function insertArticle(tx: Tx, input: InsertArticleInput): Promise<
     safetyStock: input.safetyStock ? String(input.safetyStock) : undefined,
     stockControlled: input.stockControlled ?? false,
     forecastControlled: input.forecastControlled ?? false,
+    batchTracked: input.batchTracked ?? false,
     manufacturingLeadTimeDays: input.manufacturingLeadTimeDays ?? null,
     packageTypeId: input.packageTypeId,
     parcelKind: input.parcelKind ?? null,
@@ -151,6 +154,18 @@ export async function insertArticle(tx: Tx, input: InsertArticleInput): Promise<
   const copyUnits = source !== null && source.unitId === input.unitId;
   if (copy && source && copy.parts.includes("information")) {
     applyInformation(values as Record<string, unknown>, input, source, copyUnits);
+  }
+  // Batchstyrd (#8): never a Tjänst or a phantom, and only while the system
+  // setting is on — read FOR SHARE and held until this transaction commits
+  // (batch-tracking.ts), so the setting cannot be switched off past a new
+  // batchstyrd article. Asked for in the request it is refused; brought
+  // along by Kopiera från (or a variant's template) it is just dropped.
+  if (values.batchTracked) {
+    const trackable = batchTrackableArticle({ type: input.type, isPhantom: input.isPhantom === true });
+    if (!trackable && input.batchTracked) throw new ArticleNotBatchTrackableError();
+    const enabled = trackable && (await batchTrackingEnabledForShare(tx));
+    if (trackable && !enabled && input.batchTracked) throw new BatchTrackingDisabledError();
+    if (!enabled) values.batchTracked = false;
   }
   // Streckkod: the same GTIN in another form (UPC-A/EAN-13) is a duplicate too.
   if (input.barcode) await assertBarcodeFree(tx, input.barcode, null);
@@ -286,6 +301,12 @@ export function createArticleRepository(db: Db) {
       return articleHoldsStock(tx, articleId);
     },
 
+    // Batch (#8): the system setting "Använd batch- och serienummer", read
+    // FOR SHARE in the transaction that switches an article's flag on.
+    async batchTrackingEnabled(tx: Tx): Promise<boolean> {
+      return batchTrackingEnabledForShare(tx);
+    },
+
     // Wrapped in a transaction around insertArticle. With copyFrom the source
     // is read from one snapshot (repeatable read). The transaction only
     // inserts new rows and never updates existing ones, which keeps
@@ -316,9 +337,12 @@ export function createArticleRepository(db: Db) {
     // template writers (createTemplate/updateTemplate/createVariants) read the
     // same row FOR SHARE, so the two serialise; they never take the template
     // row from here, so the lock order (template → article) cannot invert.
-    async lockArticle(tx: Tx, id: string): Promise<{ id: string; type: ArticleType; isPhantom: boolean } | null> {
+    // Batch (#8): a change of Batchstyrd holds it too — it waits for a draw
+    // in progress (FOR NO KEY UPDATE) and for an inflow that has already
+    // read the flag (FOR KEY SHARE, batchTrackedArticleIds).
+    async lockArticle(tx: Tx, id: string): Promise<{ id: string; type: ArticleType; isPhantom: boolean; batchTracked: boolean } | null> {
       const [row] = await tx
-        .select({ id: articles.id, type: articles.type, isPhantom: articles.isPhantom })
+        .select({ id: articles.id, type: articles.type, isPhantom: articles.isPhantom, batchTracked: articles.batchTracked })
         .from(articles)
         .where(eq(articles.id, id))
         .for("update");

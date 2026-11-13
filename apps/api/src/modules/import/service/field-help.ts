@@ -223,6 +223,14 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       example: "Ja",
     },
     {
+      field: "batchTracked",
+      label: "Batchstyrd",
+      required: false,
+      header: "Batchstyrd",
+      description: `Ja eller Nej (även 1/0). Ja gör att artikelns lager förs per batchnummer. Kräver att inställningen Använd batch- och serienummer är på (annars radfel) och går inte att sätta på en tjänst eller fantomartikel; Nej går alltid. En ny artikel utan värde blir Nej. ${UNTOUCHED}`,
+      example: "Nej",
+    },
+    {
       field: "leadTimeDays",
       label: "Ledtid (dagar)",
       required: false,
@@ -1744,6 +1752,16 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       header: "À-pris",
       description: `Värdet per grundenhet i kronor för det som läggs till, ${DECIMAL}. Tom cell betyder artikelns standardkostnad. Används bara när saldot ökar.`,
       example: "24,50",
+    },
+    {
+      field: "batchNumber",
+      label: "Batch",
+      required: false,
+      header: "Batch",
+      text: true,
+      description:
+        "Bara för batchstyrda artiklar: batchnumret, max 50 tecken — en batch som saknas skapas — eller Okänd för saldot utan batch. Antal är då batchens saldo på lagerplatsen efter importen, och samma artikel får stå på flera rader per lagerplats, en per batch. Tom cell betyder som förut hela lagerplatsens saldo, och en ökning hamnar i Okänd. Ange Batch på alla rader för en artikel och lagerplats, eller på ingen. Batcher som skapas i samma import tas ut i batchnummerordning. Batch på en artikel som inte är batchstyrd ger fel på raden.",
+      example: "L-2291",
     },
   ],
 };

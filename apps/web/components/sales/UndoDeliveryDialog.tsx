@@ -28,7 +28,7 @@ const fmtQty = (n: number) => n.toLocaleString("sv-SE");
 function putBackText(row: DeliveryRowsResponse["rows"][number]): string | null {
   if (row.locations.length === 0) return null;
   const parts = row.locations.map(
-    (l) => `${l.warehouseName} — ${l.locationName} (${fmtQty(l.quantity)} ${row.baseUnit})`
+    (l) => `${l.warehouseName} — ${l.locationName}${l.batchNumber ? `, batch ${l.batchNumber}` : ""} (${fmtQty(l.quantity)} ${row.baseUnit})`
   );
   const joined = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} och ${parts[parts.length - 1]}` : parts[0];
   return `Varorna läggs tillbaka på ${joined}.`;

@@ -100,6 +100,8 @@ export interface DocumentTexts {
     netWeight: (kg: string) => string;
     requestedDeliveryDate: string;
     deliveryDate: string;
+    // Batch (#8): "Batch: A123 (10), B456 (5)" under a row.
+    batch: string;
     // "Order KO… · Ert ordernr …" under an invoice row.
     orderReference: (orderNumber: string, customerOrderNumber: string | null) => string;
     // "Ytbehandling: … · Färg: …" and "Rev B · Ritn 4711 rev C".
@@ -206,6 +208,8 @@ export interface DocumentTexts {
     date: string;
     reportedBy: string;
     reference: string;
+    // Batch (#8): the bottom row's last cell.
+    batch: string;
   };
 
   deviation: {
@@ -312,6 +316,7 @@ const sv: DocumentTexts = {
     netWeight: (kg) => `Nettovikt: ${kg} kg`,
     requestedDeliveryDate: "Önskat leveransdatum",
     deliveryDate: "Leveransdatum",
+    batch: "Batch",
     orderReference: (orderNumber, customerOrderNumber) =>
       `Order ${orderNumber}${customerOrderNumber ? ` · Ert ordernr ${customerOrderNumber}` : ""}`,
     surfaceTreatment: "Ytbehandling",
@@ -407,6 +412,7 @@ const sv: DocumentTexts = {
     date: "DATUM",
     reportedBy: "RAPPORTERAD AV",
     reference: "REFERENS",
+    batch: "BATCH",
   },
   deviation: {
     titles: { supplier: "Reklamation", customer: "Reklamationsbesked", internal: "Avvikelserapport" },
@@ -523,6 +529,7 @@ const en: DocumentTexts = {
     netWeight: (kg) => `Net weight: ${kg} kg`,
     requestedDeliveryDate: "Requested delivery date",
     deliveryDate: "Delivery date",
+    batch: "Batch",
     orderReference: (orderNumber, customerOrderNumber) =>
       `Order ${orderNumber}${customerOrderNumber ? ` · Your order no. ${customerOrderNumber}` : ""}`,
     surfaceTreatment: "Surface treatment",
@@ -618,6 +625,7 @@ const en: DocumentTexts = {
     date: "DATE",
     reportedBy: "REPORTED BY",
     reference: "REFERENCE",
+    batch: "BATCH NO.",
   },
   deviation: {
     titles: { supplier: "Complaint", customer: "Complaint notice", internal: "Deviation report" },

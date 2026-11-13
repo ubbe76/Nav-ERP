@@ -10,7 +10,18 @@ import {
   type Tx,
 } from "@navet/db";
 import { resolveStockLocation } from "./location-resolver.js";
-import { allocateOutflow, articlePlacePreference, withRemainder, type OutflowCandidate, type OutflowPart } from "./outflow-allocation.js";
+import {
+  allocateBatchOutflow,
+  allocateOutflow,
+  articlePlacePreference,
+  withBatchRemainder,
+  withRemainder,
+  type OutflowCandidate,
+  type OutflowPart,
+} from "./outflow-allocation.js";
+import { BatchNotTrackedError } from "./batch.errors.js";
+import { findArticleBatch } from "./batches.js";
+import { batchCellsForArticles } from "../repository/batch-balances.js";
 import { StockLocationBlockedError } from "./stock.errors.js";
 
 // What a CHOSEN place that is blocked (Spärrad lagerplats, 0185) means for
@@ -64,9 +75,21 @@ export async function allocateOutflowLocations(
   articleId: string,
   quantity: number,
   locationId?: string | null,
-  opts: { blockedChoice?: BlockedChoice } = {}
+  opts: { blockedChoice?: BlockedChoice; batchId?: string | null } = {}
 ): Promise<OutflowPart[]> {
   await lockArticlesForOutflow(db, [articleId]);
+  // Batch (#8). The flag on the row just locked: a flag change takes the
+  // article FOR UPDATE (updateArticle), so it has either committed or waits
+  // for this draw. An article that is not batchstyrd takes the path below
+  // exactly as before — its parts carry no batchId.
+  const [subject] = await db
+    .select({ batchTracked: articles.batchTracked, articleNumber: articles.articleNumber })
+    .from(articles)
+    .where(eq(articles.id, articleId));
+  if (subject?.batchTracked) return allocateBatchTracked(db, articleId, quantity, locationId, opts);
+  // A chosen named batch is never dropped silently (null = Okänd is what
+  // every row of such an article is anyway).
+  if (typeof opts.batchId === "string") throw new BatchNotTrackedError(subject?.articleNumber ?? articleId);
   if (locationId) {
     // Revive first (resolveStockLocation's UPDATE of an inactive place takes
     // the row lock itself), then FOR SHARE: taking the share lock first and
@@ -97,6 +120,73 @@ export async function allocateOutflowLocations(
   // usable alternative place, else "***" (which can never be blocked). Every
   // one of the article's places is among the locked ones.
   return withRemainder(parts, remainder, await resolveStockLocation(db, articleId));
+}
+
+// The batchstyrd path (#8): the same locks in the same order — the article
+// is held by the caller, then the place(s) FOR SHARE — and the split per
+// cell (place, batch) with the pure rule allocateBatchOutflow:
+//
+//   place   batch          result
+//   chosen  chosen named   the cell must cover the quantity (409
+//                          batch-insufficient), one part
+//   chosen  chosen Okänd   one part (place, Okänd), may go negative
+//   chosen  automatic      the place's cells oldest first, no ceiling (a
+//                          chosen place may go negative); the rest Okänd there
+//   auto    chosen / auto  the candidates' cells, oldest batch first, each
+//                          place capped at its net balance; the rest Okänd
+//                          on resolveStockLocation's place (a chosen NAMED
+//                          batch that does not cover it is refused)
+//
+// `opts.batchId`: left out = automatic, null = Okänd, an id = that batch
+// (it must be the article's — 404 stock-batch-not-found). A blocked chosen
+// place is tried exactly as on the other path, and with "automatic" the
+// chosen batch follows into the automatic split. Batch rows are never
+// locked: a batch belongs to one article, and every draw of it holds the
+// article lock.
+async function allocateBatchTracked(
+  db: Db | Tx,
+  articleId: string,
+  quantity: number,
+  locationId: string | null | undefined,
+  opts: { blockedChoice?: BlockedChoice; batchId?: string | null }
+): Promise<OutflowPart[]> {
+  const batch =
+    opts.batchId === undefined
+      ? undefined
+      : opts.batchId === null
+        ? { batchId: null }
+        : await findArticleBatch(db, articleId, opts.batchId).then((found) => ({ batchId: found.id, batchNumber: found.batchNumber }));
+  if (locationId) {
+    const chosen = await resolveStockLocation(db, articleId, locationId);
+    const [place] = await db
+      .select({ blocked: stockLocations.blocked, name: stockLocations.name })
+      .from(stockLocations)
+      .where(eq(stockLocations.id, chosen))
+      .for("share");
+    if (!place?.blocked) {
+      const cells = await batchCellsForArticles(db, [articleId], { locationIds: [chosen] });
+      const { parts, remainder } = allocateBatchOutflow(quantity, [], cells, { locationId: chosen, batch });
+      return withBatchRemainder(parts, remainder, chosen);
+    }
+    if ((opts.blockedChoice ?? "refuse") === "refuse") {
+      const [warehouse] = await db
+        .select({ name: warehouses.name })
+        .from(stockLocations)
+        .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
+        .where(eq(stockLocations.id, chosen));
+      throw new StockLocationBlockedError(`${warehouse?.name ?? ""} — ${place.name}`);
+    }
+    // "automatic": fall through to the split below.
+  }
+
+  const candidateIds = await lockOutflowCandidates(db, articleId);
+  const [candidates, cells] =
+    candidateIds.length > 0
+      ? await Promise.all([readCandidates(db, articleId, candidateIds), batchCellsForArticles(db, [articleId], { locationIds: candidateIds })])
+      : [[], []];
+  const { parts, remainder } = allocateBatchOutflow(quantity, candidates, cells, { batch });
+  if (remainder <= 0) return parts;
+  return withBatchRemainder(parts, remainder, await resolveStockLocation(db, articleId));
 }
 
 // Balances and flags of the locked places, as the pure rule wants them.

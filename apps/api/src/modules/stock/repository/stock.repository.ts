@@ -8,6 +8,7 @@ import {
   purchaseOrders,
   salesOrders,
   stockBalances,
+  stockBatches,
   stockCountSessions,
   stockLocations,
   stockTransactions,
@@ -22,7 +23,7 @@ import { deactivateEmptyLocation, locationHoldsStock } from "../service/location
 import { assertLocationNotUnderCount } from "../service/count-guard.js";
 import { lockArticlesForOutflow } from "../service/outflow-locations.js";
 import { isStockedArticleType } from "../service/stocked-article.js";
-import { articlePlacePreference, compareOutflowLocations, FALLBACK_LOCATION_NAME } from "../service/outflow-allocation.js";
+import { allocateBatchOutflow, articlePlacePreference, compareOutflowLocations, FALLBACK_LOCATION_NAME, withBatchRemainder } from "../service/outflow-allocation.js";
 import { isCheckViolation } from "../../system/service/db-errors.js";
 import { stockValuedAt } from "./valued-at.js";
 import { readArticleLocations, replaceArticleLocations } from "./article-locations.js";
@@ -35,6 +36,7 @@ import {
   type CreateWarehouseInput,
   type ListQuery,
   type ListStockTransactionsQuery,
+  type ListStockBatchesQuery,
   type StockTransactionReference,
   type ListStockBalancesQuery,
   type ListStockLocationRegisterQuery,
@@ -45,7 +47,15 @@ import {
   type UpdateWarehouseInput,
   formatLocationLabelCode,
   parseLocationLabelCode,
+  round4,
+  UNKNOWN_BATCH_LABEL,
 } from "@navet/shared";
+import { BatchNotTrackedError } from "../service/batch.errors.js";
+import { findArticleBatch, getOrCreateBatch } from "../service/batches.js";
+import { isBatchTrackedArticle } from "../service/batch-tracking.js";
+import { articleBatchBalances, batchCellsForArticles, pickBatchCellsForArticles } from "./batch-balances.js";
+import { createBatchTraceReader, listStockBatches } from "./batch-trace.repository.js";
+import { traceBatch, type BatchTraceLimits } from "../service/batch-trace.js";
 import {
   ArticleNotFoundError,
   FallbackLocationNotBlockableError,
@@ -362,9 +372,70 @@ export function createStockRepository(db: Db) {
           .where(eq(articles.id, input.articleId));
         if (!subject) throw new ArticleNotFoundError(input.articleId);
         if (!isStockedArticleType(subject.type)) throw new ServiceArticleNotStockedError(subject.articleNumber);
+        // Batch (#8). The flag is read FOR KEY SHARE (batch-tracking.ts), so
+        // a flag change in progress is waited out.
+        const batchTracked = await isBatchTrackedArticle(tx, input.articleId);
+        if ((input.batchNumber !== undefined || typeof input.batchId === "string") && !batchTracked) {
+          throw new BatchNotTrackedError(subject.articleNumber);
+        }
+        // A decrease of a batchstyrd article is an outflow like any other:
+        // the article lock every draw takes, BEFORE the place is resolved
+        // (article → place) — the cells it is taken from must not be
+        // allocated twice.
+        if (batchTracked && input.quantityDelta < 0) await lockArticlesForOutflow(tx, [input.articleId]);
         // Location is mandatory — resolve article default / "***" when absent.
         const locationId = await resolveStockLocation(tx, input.articleId, input.locationId);
         await assertLocationNotUnderCount(tx, locationId);
+        // A decrease of a batchstyrd article is split per batch WITHIN the
+        // place with the pure rule (a chosen place: no ceiling, the place may
+        // go negative as it always could): the chosen batch — a named one
+        // must cover the quantity, 409 batch-insufficient — or the place's
+        // batches oldest first, Okänd first, and what they do not cover as
+        // Okänd. One row per batch; the answer is the FIRST row, as for every
+        // other justering, with `parts` listing all of them.
+        if (batchTracked && input.quantityDelta < 0) {
+          const chosen =
+            input.batchId === undefined
+              ? undefined
+              : input.batchId === null
+                ? { batchId: null, batchNumber: null }
+                : await findArticleBatch(tx, input.articleId, input.batchId).then((b) => ({ batchId: b.id, batchNumber: b.batchNumber }));
+          const cells = await batchCellsForArticles(tx, [input.articleId], { locationIds: [locationId] });
+          const allocation = allocateBatchOutflow(-input.quantityDelta, [], cells, { locationId, batch: chosen });
+          const parts = withBatchRemainder(allocation.parts, allocation.remainder, locationId);
+          const rows = await tx
+            .insert(stockTransactions)
+            .values(
+              parts.map((part) => ({
+                articleId: input.articleId,
+                locationId,
+                quantityDelta: String(-part.quantity),
+                transactionType: input.transactionType,
+                referenceId: input.referenceId,
+                note: input.note,
+                createdBy,
+                batchId: part.batchId ?? null,
+              }))
+            )
+            .returning();
+          await deactivateEmptyLocation(tx, locationId);
+          const numbers = new Map(cells.map((cell) => [cell.batchId, cell.batchNumber]));
+          return {
+            ...rows[0]!,
+            parts: rows.map((row) => ({
+              id: row.id,
+              quantityDelta: row.quantityDelta,
+              batchId: row.batchId,
+              batchNumber: row.batchId === null ? null : (numbers.get(row.batchId) ?? chosen?.batchNumber ?? null),
+            })),
+          };
+        }
+        // An inflow names its batch (created on first use); without one the
+        // goods are Okänd.
+        const batch =
+          input.batchNumber !== undefined && input.quantityDelta > 0
+            ? await getOrCreateBatch(tx, { articleId: input.articleId, batchNumber: input.batchNumber, origin: "manual", createdBy })
+            : null;
 
         // Only inflows are a valuation event — an outflow doesn't get a cost.
         // unit_cost is the article's current standard cost; null (not 0) when
@@ -389,6 +460,7 @@ export function createStockRepository(db: Db) {
             note: input.note,
             unitCost,
             createdBy,
+            batchId: batch?.id ?? null,
           })
           .returning();
         // A negative adjustment may have emptied the location.
@@ -447,11 +519,13 @@ export function createStockRepository(db: Db) {
         const transferId = randomUUID();
         for (const row of input.rows) {
           const [article] = await tx
-            .select({ articleNumber: articles.articleNumber, type: articles.type })
+            .select({ articleNumber: articles.articleNumber, type: articles.type, batchTracked: articles.batchTracked })
             .from(articles)
             .where(eq(articles.id, row.articleId));
           if (!article) throw new ArticleNotFoundError(row.articleId);
           if (!isStockedArticleType(article.type)) throw new ServiceArticleNotStockedError(article.articleNumber);
+          // The row is locked above, so the flag cannot change under the move.
+          if (!article.batchTracked && typeof row.batchId === "string") throw new BatchNotTrackedError(article.articleNumber);
 
           const [balance] = await tx
             .select({ quantityOnHand: sql<string>`coalesce(sum(${stockTransactions.quantityDelta}), 0)` })
@@ -467,26 +541,59 @@ export function createStockRepository(db: Db) {
             throw new InsufficientStockError(article.articleNumber, available, row.quantity);
           }
 
-          await tx.insert(stockTransactions).values([
-            {
-              articleId: row.articleId,
-              locationId: from.id,
-              quantityDelta: String(-row.quantity),
-              transactionType: "stock_transfer" as const,
-              referenceId: transferId,
-              note: input.note,
-              createdBy,
-            },
-            {
-              articleId: row.articleId,
-              locationId: to.id,
-              quantityDelta: String(row.quantity),
-              transactionType: "stock_transfer" as const,
-              referenceId: transferId,
-              note: input.note,
-              createdBy,
-            },
-          ]);
+          // Batch (#8): the batch follows the goods — one pair of legs per
+          // batch, both legs in the same batch. A chosen batch must hold the
+          // whole quantity on the source (a named one: 409
+          // batch-insufficient; Okänd: 409 insufficient-stock — a move never
+          // leaves a cell negative). Automatiskt takes the source's cells
+          // oldest first (Okänd first); the quantity is within the place's
+          // net balance (checked above), so the positive cells always cover
+          // it. An article that is not batchstyrd moves as one pair without
+          // a batch, exactly as before.
+          let moved: { quantity: number; batchId: string | null }[] = [{ quantity: row.quantity, batchId: null }];
+          if (article.batchTracked) {
+            const batch =
+              row.batchId === undefined
+                ? undefined
+                : row.batchId === null
+                  ? { batchId: null }
+                  : await findArticleBatch(tx, row.articleId, row.batchId).then((b) => ({ batchId: b.id, batchNumber: b.batchNumber }));
+            const cells = await batchCellsForArticles(tx, [row.articleId], { locationIds: [from.id] });
+            const { parts, remainder } = allocateBatchOutflow(row.quantity, [], cells, { locationId: from.id, batch });
+            if (remainder > 0) {
+              throw new InsufficientStockError(
+                `${article.articleNumber} (${UNKNOWN_BATCH_LABEL})`,
+                String(round4(row.quantity - remainder)),
+                row.quantity
+              );
+            }
+            moved = parts.map((part) => ({ quantity: part.quantity, batchId: part.batchId ?? null }));
+          }
+
+          await tx.insert(stockTransactions).values(
+            moved.flatMap((part) => [
+              {
+                articleId: row.articleId,
+                locationId: from.id,
+                quantityDelta: String(-part.quantity),
+                transactionType: "stock_transfer" as const,
+                referenceId: transferId,
+                note: input.note,
+                createdBy,
+                batchId: part.batchId,
+              },
+              {
+                articleId: row.articleId,
+                locationId: to.id,
+                quantityDelta: String(part.quantity),
+                transactionType: "stock_transfer" as const,
+                referenceId: transferId,
+                note: input.note,
+                createdBy,
+                batchId: part.batchId,
+              },
+            ])
+          );
         }
 
         const deactivatedSourceLocation = await deactivateEmptyLocation(tx, from.id);
@@ -636,6 +743,35 @@ export function createStockRepository(db: Db) {
     // Flera lagerplatser per artikel (0186): the Lager tab's card. The
     // replace runs in its own transaction (article-locations.ts takes the
     // locks); the answer is read after the commit.
+    // Batch (#8): the pick list's cells for the batchstyrda among these
+    // articles, in the order Automatiskt draws (batch-balances.ts).
+    async pickBatchCellsForArticles(articleIds: string[], opts: { locationId?: string } = {}) {
+      return pickBatchCellsForArticles(db, articleIds, opts);
+    },
+
+    // Batch (#8): GET /articles/:id/batch-balances — null = no such article.
+    // An article that is not batchstyrd shows no batches: the ones it had
+    // stay in the log and come back when the flag is switched on again.
+    async articleBatchBalances(articleId: string) {
+      const [article] = await db.select({ batchTracked: articles.batchTracked }).from(articles).where(eq(articles.id, articleId));
+      if (!article) return null;
+      return { batchTracked: article.batchTracked, batches: article.batchTracked ? await articleBatchBalances(db, articleId) : [] };
+    },
+
+    // Spårbarhet (#8): the batch register and one batch's trace. The whole
+    // trace reads ONE snapshot (repeatable read, read only — PIA's pattern),
+    // so a level never sees a movement the level before it did not.
+    async listBatches(query: ListStockBatchesQuery) {
+      return listStockBatches(db, query);
+    },
+
+    async traceBatch(batchId: string, limits?: BatchTraceLimits) {
+      return db.transaction((tx) => traceBatch(createBatchTraceReader(tx), batchId, limits), {
+        isolationLevel: "repeatable read",
+        accessMode: "read only",
+      });
+    },
+
     async articleLocations(articleId: string) {
       return readArticleLocations(db, articleId);
     },
@@ -662,6 +798,7 @@ export function createStockRepository(db: Db) {
       if (query.articleId) conditions.push(eq(stockTransactions.articleId, query.articleId));
       if (query.locationId) conditions.push(eq(stockTransactions.locationId, query.locationId));
       if (query.type) conditions.push(eq(stockTransactions.transactionType, query.type));
+      if (query.batchId) conditions.push(eq(stockTransactions.batchId, query.batchId));
       if (query.direction === "in") conditions.push(sql`${stockTransactions.quantityDelta} > 0`);
       if (query.direction === "out") conditions.push(sql`${stockTransactions.quantityDelta} < 0`);
       // from/to are Stockholm calendar days, inclusive.
@@ -708,6 +845,8 @@ export function createStockRepository(db: Db) {
           articleName: articles.name,
           locationName: stockLocations.name,
           warehouseName: warehouses.name,
+          // Batch (#8): a PK lookup per shown row; null = Okänd / no batch.
+          batchNumber: stockBatches.batchNumber,
           createdByName: users.name,
           value: sql<string | null>`${t.quantityDelta} * ${t.unitCost}`,
           balance: balanceSq ? balanceSq.balance : sql<string | null>`null`,
@@ -738,6 +877,7 @@ export function createStockRepository(db: Db) {
         .leftJoin(stockLocations, eq(stockLocations.id, stockTransactions.locationId))
         .leftJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
         .leftJoin(users, eq(users.id, stockTransactions.createdBy))
+        .leftJoin(stockBatches, eq(stockBatches.id, stockTransactions.batchId))
         .leftJoin(po, and(eq(t.transactionType, "purchase_receipt"), eq(po.id, t.referenceId)))
         .leftJoin(so, and(eq(t.transactionType, "sales_delivery"), eq(so.id, t.referenceId)))
         .leftJoin(

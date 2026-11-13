@@ -210,6 +210,7 @@ export function InkopTab({ articleId }: { articleId: string }) {
           { key: "quantity", label: "Antal", width: "110px", align: "right" },
           { key: "unitPrice", label: "À-pris", width: "120px", align: "right" },
           { key: "locationName", label: "Lagerplats", width: "130px" },
+          ...(receipts.some((r) => r.batchNumber) ? [{ key: "batchNumber", label: "Batch", width: "120px" }] : []),
         ]}
         rows={receipts}
         emptyText="Inga inleveranser registrerade"
@@ -223,6 +224,8 @@ export function InkopTab({ articleId }: { articleId: string }) {
               return `${formatUnitPrice(row.unitPrice)} ${row.currency}`;
             case "locationName":
               return row.locationName ?? "–";
+            case "batchNumber":
+              return row.batchNumber ?? "–";
             default:
               return row[key as keyof GoodsReceiptLogEntry] as string;
           }

@@ -24,6 +24,16 @@ export const listStockBalancesQuerySchema = listQuerySchema.extend({
 });
 export type ListStockBalancesQuery = z.infer<typeof listStockBalancesQuerySchema>;
 
+// GET /stock/batch-balances (#8): the cells of the batchstyrda among these
+// articles, optionally on one place.
+export const listStockBatchBalancesQuerySchema = z.object({
+  articleIds: z
+    .string()
+    .transform((raw) => raw.split(",").map((p) => p.trim()).filter((p) => p !== ""))
+    .pipe(z.array(z.string().uuid()).min(1).max(200)),
+  locationId: z.string().uuid().optional(),
+});
+
 export const stockTransactionTypeSchema = z.enum([
   "purchase_receipt",
   "sales_delivery",
@@ -50,6 +60,8 @@ export const listStockTransactionsQuerySchema = listQuerySchema.extend({
   direction: z.enum(["in", "out"]).optional(),
   from: isoDate.optional(),
   to: isoDate.optional(),
+  // Batch (#8): only the rows booked in this batch.
+  batchId: z.string().uuid().optional(),
 });
 export type ListStockTransactionsQuery = z.infer<typeof listStockTransactionsQuerySchema>;
 
@@ -58,6 +70,150 @@ export type StockTransactionReference =
   | { kind: "purchase_order" | "sales_order" | "manufacturing_order" | "stock_count"; id: string; number: string }
   | { kind: "manual" }
   | { kind: "transfer"; counterpartLocation: string };
+
+// Batch (#8). An INFLOW names its batch by number (the supplier's batch on
+// an inleverans, a number typed on a justering): trimmed, at most 50
+// characters, "" = left out — an empty field means the routine's default
+// (the IO number, or Okänd). Compared case-insensitively per article.
+export const batchNumberSchema = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().trim().min(1).max(50).optional()
+);
+// GET /stock/batches (#8, Spårbarhet): the batch register — search on the
+// batch number or the article's number/name, optionally one article.
+export const listStockBatchesQuerySchema = listQuerySchema.extend({
+  articleId: z.string().uuid().optional(),
+});
+export type ListStockBatchesQuery = z.infer<typeof listStockBatchesQuerySchema>;
+
+export const STOCK_BATCH_ORIGINS = ["purchase_receipt", "manufacturing_order", "manual", "import"] as const;
+export type StockBatchOrigin = (typeof STOCK_BATCH_ORIGINS)[number];
+
+export interface StockBatchListRow {
+  id: string;
+  batchNumber: string;
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  unitCode: string;
+  origin: StockBatchOrigin;
+  createdAt: string;
+  // Physical balance over every place (blocked ones included), base unit.
+  quantity: number;
+}
+
+// GET /stock/batches/:id/trace (#8). Everything is derived from the stock
+// log and the documents' own links; quantities are in the article's base
+// unit, moments ISO strings.
+export interface TraceBatchRef {
+  // null = Okänd (stock without a batch) — always a leaf.
+  batchId: string | null;
+  batchNumber: string | null;
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  unitCode: string;
+  // The article's flag NOW — a leaf without a batch is "Okänd" on a
+  // batchstyrd article and "ej batchstyrd" otherwise.
+  batchTracked: boolean;
+  origin: StockBatchOrigin | null;
+  createdAt: string | null;
+}
+// Why a node has no children of its own: null = it is expanded here;
+// "unknown" = Okänd (never followed); "repeated" = the same batch is already
+// expanded elsewhere in this tree (a diamond, or a cycle such as rework);
+// "limit" = the depth/node ceiling stopped the trace (truncated is true).
+export type TraceStop = null | "unknown" | "repeated" | "limit";
+export interface TraceEvent {
+  // A Lagerjustering (incl. the saldoimport) or an inventering's difference.
+  kind: "adjustment" | "stock_count";
+  stockCountId: string | null;
+  stockCountNumber: string | null;
+  at: string;
+  // Signed: positive under backward (a source), negative under forward.
+  quantity: number;
+  note: string | null;
+}
+export interface TraceReceipt {
+  purchaseOrderId: string;
+  orderNumber: string;
+  supplierId: string;
+  supplierName: string;
+  receivedAt: string;
+  quantity: number;
+}
+export interface TraceDelivery {
+  deliveryId: string;
+  deliveryNumber: string;
+  salesOrderId: string;
+  orderNumber: string;
+  customerId: string;
+  customerName: string;
+  deliveredAt: string;
+  quantity: number;
+}
+export interface TraceOnHand {
+  locationId: string;
+  warehouseName: string;
+  locationName: string;
+  blocked: boolean;
+  quantity: number;
+}
+export interface BackwardTraceNode {
+  batch: TraceBatchRef;
+  stop: TraceStop;
+  // How much of this batch the TO above it drew; null on the root.
+  quantity: number | null;
+  // Inleveranser (not undone) the batch came in through.
+  receipts: TraceReceipt[];
+  // The TO(s) whose finished goods are this batch, each with what it drew.
+  manufacturingOrders: {
+    manufacturingOrderId: string;
+    orderNumber: string;
+    // Received into this batch, net of undone reports.
+    quantity: number;
+    materials: BackwardTraceNode[];
+  }[];
+  // Positive adjustments / stock-count differences into the batch.
+  events: TraceEvent[];
+}
+export interface ForwardTraceNode {
+  batch: TraceBatchRef;
+  stop: TraceStop;
+  // How much the TO above it received into this batch; null on the root.
+  quantity: number | null;
+  // TOs that drew from the batch, each with the batch(es) it produced.
+  consumedBy: {
+    manufacturingOrderId: string;
+    orderNumber: string;
+    articleId: string;
+    articleNumber: string;
+    articleName: string;
+    // Drawn from this batch, net of undone/returned.
+    quantity: number;
+    // Empty = nothing received yet.
+    produced: ForwardTraceNode[];
+  }[];
+  // Utleveranser (rows not undone) the batch left in.
+  deliveries: TraceDelivery[];
+  // Negative adjustments / stock-count differences (kassation, svinn).
+  events: TraceEvent[];
+  // What is still in stock, per place.
+  onHand: TraceOnHand[];
+}
+export interface BatchTrace {
+  batch: TraceBatchRef;
+  backward: BackwardTraceNode;
+  forward: ForwardTraceNode;
+  // The ceiling (depth 12, 500 nodes per direction) cut something off.
+  truncated: boolean;
+}
+
+// An OUTFLOW chooses among the article's batches by id: left out =
+// Automatiskt (oldest first), null = Okänd.
+export const batchChoiceSchema = z.string().uuid().nullable().optional();
+// What a row without a batch is called everywhere — reserved as a number.
+export const UNKNOWN_BATCH_LABEL = "Okänd";
 
 export const createStockTransactionSchema = z.object({
   articleId: z.string().uuid(),
@@ -68,6 +224,13 @@ export const createStockTransactionSchema = z.object({
   transactionType: stockTransactionTypeSchema.exclude(["stock_transfer"]),
   referenceId: z.string().uuid().optional(),
   note: z.string().max(2000).optional(),
+  // Batch (#8): only on an inflow (positive delta) of a batchstyrd article
+  // — left out, the goods are Okänd.
+  batchNumber: batchNumberSchema,
+  // …and on a decrease (negative delta) the batch to take from: left out =
+  // the place's batches oldest first (Okänd first, the rest as Okänd), null
+  // = Okänd, an id = that batch, which must cover the quantity.
+  batchId: batchChoiceSchema,
 });
 export type CreateStockTransactionInput = z.infer<typeof createStockTransactionSchema>;
 
@@ -77,9 +240,18 @@ export type CreateStockTransactionInput = z.infer<typeof createStockTransactionS
 // price it; a free row typed as one of them would count as that document's
 // in FIFO, the latest purchase price and the stock log (granskningen
 // 2026-11-10). Omitted = inventory_adjustment; anything else is 400.
-export const createStockAdjustmentSchema = createStockTransactionSchema.extend({
-  transactionType: z.literal("inventory_adjustment").default("inventory_adjustment"),
-});
+export const createStockAdjustmentSchema = createStockTransactionSchema
+  .extend({
+    transactionType: z.literal("inventory_adjustment").default("inventory_adjustment"),
+  })
+  .refine((input) => input.batchNumber === undefined || input.quantityDelta > 0, {
+    message: "batchNumber names the batch of an inflow — only with a positive quantityDelta",
+    path: ["batchNumber"],
+  })
+  .refine((input) => input.batchId === undefined || input.quantityDelta < 0, {
+    message: "batchId chooses the batch of a decrease — only with a negative quantityDelta",
+    path: ["batchId"],
+  });
 
 // Lagerflytt — move balances from one stock location to another. Both legs of
 // every row are written in one transaction; see stock.repository.transferStock.
@@ -93,6 +265,11 @@ export const createStockTransferSchema = z
         z.object({
           articleId: z.string().uuid(),
           quantity: blankSafe(z.coerce.number().positive()),
+          // Batch (#8), a batchstyrd article: the batch follows the goods.
+          // Left out = Automatiskt (the source's batches, oldest first, one
+          // pair of legs each), null = Okänd, an id = that batch for the
+          // row's whole quantity — two chosen batches are two rows.
+          batchId: batchChoiceSchema,
         })
       )
       .min(1),
@@ -289,6 +466,9 @@ export type ListStockCountsQuery = z.infer<typeof listStockCountsQuerySchema>;
 
 export const addStockCountRowSchema = z.object({
   articleId: z.string().uuid(),
+  // Batch (#8), a batchstyrd article: the batch the new row counts (created
+  // when it is new); left out = the article's Okänd row.
+  batchNumber: batchNumberSchema,
 });
 export type AddStockCountRowInput = z.infer<typeof addStockCountRowSchema>;
 

@@ -68,6 +68,10 @@ export const extraDescriptionDocumentSchema = z.enum(EXTRA_DESCRIPTION_DOCUMENTS
 // instead, and PATCH with an empty string keeps the stored password.
 const systemSettingsFieldsSchema = z.object({
     allowMultipleStamps: z.boolean().optional(),
+    // Använd batch- och serienummer (#8), off by default: an article can
+    // only be made Batchstyrd while it is on, and it can only be switched
+    // off while no article is (409 batch-tracking-in-use).
+    batchTrackingEnabled: z.boolean().optional(),
     // Print the active article/drawing revisions per row on external
     // documents (offert/orderbekräftelse, inköpsorder, förfrågan).
     showRevisionsOnDocuments: z.boolean().optional(),

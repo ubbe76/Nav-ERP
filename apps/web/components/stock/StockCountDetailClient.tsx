@@ -49,6 +49,23 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
   const router = useRouter();
   const [counted, setCounted] = useState<Record<string, string>>({});
   const [addArticle, setAddArticle] = useState<Article | null>(null);
+  // Batch (#8): a batch-tracked article is added with a batch (empty = Okänd).
+  const [addBatchTracked, setAddBatchTracked] = useState(false);
+  const [addBatchNumber, setAddBatchNumber] = useState("");
+  useEffect(() => {
+    setAddBatchTracked(false);
+    setAddBatchNumber("");
+    if (!addArticle) return;
+    let cancelled = false;
+    apiFetch<{ batchTracked: boolean }>(`/api/v1/articles/${addArticle.id}/batch-balances`)
+      .then((r) => {
+        if (!cancelled) setAddBatchTracked(r.batchTracked);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [addArticle]);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -311,7 +328,10 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
     try {
       await apiFetch(`/api/v1/stock-counts/${session.id}/rows`, {
         method: "POST",
-        body: JSON.stringify({ articleId: addArticle.id }),
+        body: JSON.stringify({
+          articleId: addArticle.id,
+          ...(addBatchTracked && addBatchNumber.trim() ? { batchNumber: addBatchNumber.trim() } : {}),
+        }),
       });
       setAddArticle(null);
       router.refresh();
@@ -393,6 +413,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
       <Table<StockCountRow>
         columns={[
           { key: "articleNumber", label: "Artikel", width: "1fr" },
+          ...(session.rows.some((r) => r.batchTracked) ? [{ key: "batch", label: "Batch", width: "130px" }] : []),
           { key: "unit", label: "Enhet", width: "70px" },
           { key: "snapshotQuantity", label: "Bokfört", width: "100px", align: "right" },
           { key: "countedQuantity", label: "Räknat", width: "120px", align: "right" },
@@ -407,6 +428,8 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
           switch (key) {
             case "articleNumber":
               return `${row.articleNumber} — ${row.articleName}`;
+            case "batch":
+              return row.batchTracked ? (row.batchNumber ?? "Okänd") : "";
             case "unit":
               return row.unit ?? "—";
             case "snapshotQuantity":
@@ -495,6 +518,19 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
               <ArticlePicker id="countAddArticle" value={addArticle} onChange={setAddArticle} />
             </Field>
           </div>
+          {addArticle && addBatchTracked && (
+            <div style={{ minWidth: 160 }}>
+              <Field label="Batch" htmlFor="countAddBatch">
+                <Input
+                  id="countAddBatch"
+                  size="sm"
+                  placeholder="Okänd"
+                  value={addBatchNumber}
+                  onChange={(e) => setAddBatchNumber(e.target.value)}
+                />
+              </Field>
+            </div>
+          )}
           <Button variant="secondary" onClick={addRow} disabled={pending || !addArticle}>
             Lägg till
           </Button>

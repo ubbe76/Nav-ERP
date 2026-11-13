@@ -45,6 +45,8 @@ import { COPIED_ARTICLES_MAX, ERROR_CODES, type ImportExportArticleSelection } f
 import { codeFromName, errorBody } from "../../system/service/error-body.js";
 import { assertModeAllowed } from "../../configurator/service/configurator-rules.js";
 import { StockLocationNotFoundError } from "../../stock/service/stock.errors.js";
+import { batchTrackableArticle } from "../../stock/service/batch-tracking.js";
+import { ArticleNotBatchTrackableError, BatchTrackingDisabledError } from "../../stock/service/batch.errors.js";
 
 // Only domain errors the web has a translation for are reported by code; any
 // other error (a raw database error, a bug) must not leak its message.
@@ -739,12 +741,33 @@ export function createArticleService(
       // read above says they change): the comparison is made against the LOCKED
       // row, so a concurrent change can never slip past as "unchanged". A patch
       // without those fields writes as before.
-      if (input.type !== undefined || input.isPhantom !== undefined) {
+      //
+      // Batchstyrd (#8) is decided under the same lock, whenever the patch
+      // mentions it (or the type/phantom, which may make the article one that
+      // cannot be batchstyrd): the stock writers read the flag FOR KEY SHARE
+      // (batchTrackedArticleIds) and the draws hold the article FOR NO KEY
+      // UPDATE, so the change waits for them and they for it.
+      let batchTrackedChange: { before: boolean; after: boolean } | null = null;
+      if (input.type !== undefined || input.isPhantom !== undefined || input.batchTracked !== undefined) {
         await repo.transaction(async (tx) => {
           const locked = await repo.lockArticle(tx, id);
           if (!locked) throw new ArticleNotFoundError(id);
           const typeChanges = input.type !== undefined && input.type !== locked.type;
           const phantomChanges = input.isPhantom !== undefined && input.isPhantom !== locked.isPhantom;
+          // On: only an article that can carry a batch, and only while the
+          // system setting is on (read FOR SHARE and held to the commit —
+          // the setting cannot be switched off past this article). Off: always
+          // allowed (beslut 10) — the batches stay in the log, are no longer
+          // asked for or shown, and are there again if the flag comes back.
+          // An article that becomes a Tjänst or a phantom loses the flag.
+          const trackable = batchTrackableArticle({ type: input.type ?? locked.type, isPhantom: input.isPhantom ?? locked.isPhantom });
+          if (input.batchTracked === true && !trackable) throw new ArticleNotBatchTrackableError();
+          const batchTracked = trackable && (input.batchTracked ?? locked.batchTracked);
+          if (batchTracked && !locked.batchTracked && !(await repo.batchTrackingEnabled(tx))) throw new BatchTrackingDisabledError();
+          if (batchTracked !== locked.batchTracked) {
+            batchTrackedChange = { before: locked.batchTracked, after: batchTracked };
+            effective = { ...effective, batchTracked };
+          }
           if (typeChanges || phantomChanges) {
             const mode = await repo.configuratorModeFor(id, tx);
             if (mode) assertModeAllowed({ type: input.type ?? locked.type, isPhantom: input.isPhantom ?? locked.isPhantom }, mode);
@@ -766,6 +789,22 @@ export function createArticleService(
       // changes what the behovsberäkning plans for, which the log should
       // explain afterwards. The other planning fields are not logged (as
       // before) — only this flag turns a whole demand source on or off.
+      // Batchstyrd (#8) is logged the same way: it changes how every stock
+      // movement of the article is booked from here on.
+      const batchChange = batchTrackedChange as { before: boolean; after: boolean } | null;
+      if (batchChange) {
+        await audit.log({
+          entityType: "article",
+          entityId: id,
+          action: "updated",
+          detail: {
+            articleNumber: article.articleNumber,
+            before: { batchTracked: batchChange.before },
+            after: { batchTracked: batchChange.after },
+          },
+          userId,
+        });
+      }
       if (input.forecastControlled !== undefined && input.forecastControlled !== article.forecastControlled) {
         await audit.log({
           entityType: "article",

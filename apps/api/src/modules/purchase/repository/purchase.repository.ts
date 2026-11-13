@@ -28,6 +28,7 @@ import {
   salesOrderRows,
   salesOrders,
   stockLocations,
+  stockBatches,
   stockTransactions,
   supplierContacts,
   supplierDeliveryAddresses,
@@ -76,12 +77,18 @@ import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js"
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { lockArticlesForOutflow } from "../../stock/service/outflow-locations.js";
 import { isStockedArticle } from "../../stock/service/stocked-article.js";
+import { BatchNotTrackedError } from "../../stock/service/batch.errors.js";
+import { getOrCreateBatch } from "../../stock/service/batches.js";
+import { isBatchTrackedArticle } from "../../stock/service/batch-tracking.js";
+import { batchCellQuantity } from "../../stock/repository/batch-balances.js";
 import { loadVatCodeBook } from "../../economy/repository/vat-codes.js";
 import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions } from "../../economy/service/dimension-check.js";
 import { purchaseRowArrivalDate } from "../../planning/repository/effective-dates.js";
 
 export type ReceiveGoodsResult =
-  | { ok: true; row: typeof purchaseOrderRows.$inferSelect; orderStatus: PurchaseOrderStatus; receiptId: string }
+  // batchNumber (#8): the batch the goods were booked in — null for an
+  // article that is not batchstyrd and for a row without a stock movement.
+  | { ok: true; row: typeof purchaseOrderRows.$inferSelect; orderStatus: PurchaseOrderStatus; receiptId: string; batchNumber: string | null }
   | { ok: false; reason: "order_not_found" | "row_not_found" | "invalid_status" }
   | { ok: false; reason: "over_receipt"; maxQuantity: number };
 
@@ -241,6 +248,7 @@ export function createPurchaseRepository(db: Db) {
   // and lego reference — listDispatches and the pallet card share it.
   async function dispatchRowsByOrder(orderId: string) {
     const rowUnits = alias(units, "row_units");
+    const moArticles = alias(articles, "mo_articles");
     return db
       .select({
         id: purchaseOrderDispatchRows.id,
@@ -260,6 +268,9 @@ export function createPurchaseRepository(db: Db) {
         moOrderNumber: manufacturingOrders.orderNumber,
         moOperationSequenceNo: moOperations.sequenceNo,
         moOperationDescription: moOperations.description,
+        // Batch (#8): the TO's own article — its finished goods get the TO
+        // number as their batch, printed on the lego pallet card.
+        moArticleBatchTracked: moArticles.batchTracked,
         rowCreatedAt: purchaseOrderRows.createdAt,
       })
       .from(purchaseOrderDispatchRows)
@@ -270,6 +281,7 @@ export function createPurchaseRepository(db: Db) {
       .leftJoin(rowUnits, eq(rowUnits.id, purchaseOrderRows.unitId))
       .leftJoin(moOperations, eq(moOperations.id, purchaseOrderRows.moOperationId))
       .leftJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+      .leftJoin(moArticles, eq(moArticles.id, manufacturingOrders.articleId))
       .where(eq(purchaseOrderDispatches.purchaseOrderId, orderId))
       // The IO's row order (entry order), as the card lists the rows.
       .orderBy(asc(purchaseOrderRows.createdAt), asc(purchaseOrderRows.id), asc(purchaseOrderDispatchRows.id));
@@ -1185,6 +1197,8 @@ export function createPurchaseRepository(db: Db) {
           // A tjänst has nothing to scan — Inleverans leaves it out of the
           // counting (skanning, #4).
           articleType: articles.type,
+          // Batch (#8): Inleverans shows the Batch field for a batchstyrd article.
+          articleBatchTracked: articles.batchTracked,
           // Skickat (avsändning lego): derived, base unit like quantityReceived.
           quantityDispatched: dispatchedQuantitySql(),
           // The unit the row displays in: the entered unit, falling back to
@@ -1286,7 +1300,7 @@ export function createPurchaseRepository(db: Db) {
     async receiveGoods(
       orderId: string,
       rowId: string,
-      input: { locationId?: string; quantity: number; createdBy: string; overReceiptPercent: number | null }
+      input: { locationId?: string; quantity: number; createdBy: string; overReceiptPercent: number | null; batchNumber?: string }
     ): Promise<ReceiveGoodsResult> {
       return db.transaction(async (tx) => {
         const [order] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, orderId));
@@ -1340,7 +1354,20 @@ export function createPurchaseRepository(db: Db) {
         // A service row (tjänst) is work, not goods: no stock movement either
         // (stocked-article.ts) — the receipt row below still records it.
         let stock: { locationId: string; stockTransactionId: string } | null = null;
-        if (row.moOperationId === null && (await isStockedArticle(tx, row.articleId))) {
+        const stocked = row.moOperationId === null && (await isStockedArticle(tx, row.articleId));
+        // Batch (#8): a batchstyrd article's goods are booked in the batch
+        // the receipt names — the supplier's number, or the IO number when
+        // none is given — created on its first inflow. A batch sent for
+        // anything else (not batchstyrd, a lego or service row) is refused,
+        // so an integration notices. One receipt = one batch: a row split
+        // over several batches is several receipts, each undone on its own.
+        const batchTracked = stocked && (await isBatchTrackedArticle(tx, row.articleId));
+        if (input.batchNumber !== undefined && !batchTracked) {
+          const [article] = await tx.select({ articleNumber: articles.articleNumber }).from(articles).where(eq(articles.id, row.articleId));
+          throw new BatchNotTrackedError(article?.articleNumber ?? row.articleId);
+        }
+        let batch: { id: string; batchNumber: string } | null = null;
+        if (stocked) {
           // unit_cost is the SEK cost per unit at receipt time: the row's
           // purchase price (already in the article's base unit) converted at
           // the order's exchange rate ("rate against SEK", defaults to "1").
@@ -1348,6 +1375,15 @@ export function createPurchaseRepository(db: Db) {
 
           const locationId = await resolveStockLocation(tx, row.articleId, input.locationId);
           await assertLocationNotUnderCount(tx, locationId);
+          if (batchTracked) {
+            batch = await getOrCreateBatch(tx, {
+              articleId: row.articleId,
+              batchNumber: input.batchNumber ?? order.orderNumber,
+              origin: "purchase_receipt",
+              purchaseOrderId: orderId,
+              createdBy: input.createdBy,
+            });
+          }
 
           const [movement] = await tx
             .insert(stockTransactions)
@@ -1359,6 +1395,7 @@ export function createPurchaseRepository(db: Db) {
               referenceId: orderId,
               createdBy: input.createdBy,
               unitCost,
+              batchId: batch?.id ?? null,
             })
             .returning({ id: stockTransactions.id });
           stock = { locationId, stockTransactionId: movement!.id };
@@ -1386,7 +1423,7 @@ export function createPurchaseRepository(db: Db) {
           entityNumber: order.orderNumber,
           data: { receiptId: receipt!.id, rowId },
         });
-        return { ok: true, row: updatedRow!, orderStatus, receiptId: receipt!.id };
+        return { ok: true, row: updatedRow!, orderStatus, receiptId: receipt!.id, batchNumber: batch?.batchNumber ?? null };
       });
     },
 
@@ -1404,8 +1441,13 @@ export function createPurchaseRepository(db: Db) {
           createdByName: users.name,
           undoneAt: purchaseReceipts.undoneAt,
           undoneByName: undoer.name,
+          // Batch (#8): read through the receipt's own stock row — the log is
+          // append-only, so the link never drifts (null = Okänd / no stock row).
+          batchNumber: stockBatches.batchNumber,
         })
         .from(purchaseReceipts)
+        .leftJoin(stockTransactions, eq(stockTransactions.id, purchaseReceipts.stockTransactionId))
+        .leftJoin(stockBatches, eq(stockBatches.id, stockTransactions.batchId))
         .leftJoin(stockLocations, eq(stockLocations.id, purchaseReceipts.locationId))
         .leftJoin(users, eq(users.id, purchaseReceipts.createdBy))
         .leftJoin(undoer, eq(undoer.id, purchaseReceipts.undoneBy))
@@ -1464,7 +1506,20 @@ export function createPurchaseRepository(db: Db) {
             .select({ quantity: sql<string>`coalesce(sum(${stockTransactions.quantityDelta}), 0)` })
             .from(stockTransactions)
             .where(and(eq(stockTransactions.articleId, row.articleId), eq(stockTransactions.locationId, receipt.locationId)));
-          const available = Number(balance?.quantity ?? 0);
+          // Batch (#8): the goods go back out of the SAME batch the receipt
+          // booked them in — read from its stock row, whatever the article's
+          // flag says now (null = Okänd). With a batch on the row, or on an
+          // article that is batchstyrd now, they must still be in that CELL
+          // too: the place may hold enough in total while this batch is gone.
+          const [booked] = await tx
+            .select({ batchId: stockTransactions.batchId })
+            .from(stockTransactions)
+            .where(eq(stockTransactions.id, receipt.stockTransactionId));
+          const batchId = booked?.batchId ?? null;
+          let available = Number(balance?.quantity ?? 0);
+          if (batchId !== null || (await isBatchTrackedArticle(tx, row.articleId))) {
+            available = Math.min(available, await batchCellQuantity(tx, row.articleId, receipt.locationId, batchId));
+          }
           if (available < quantity) return { ok: false, reason: "insufficient_stock", available, required: quantity };
           await assertLocationNotUnderCount(tx, receipt.locationId);
           // An outflow: no unit_cost (D0) — it leaves at the moving average.
@@ -1475,6 +1530,7 @@ export function createPurchaseRepository(db: Db) {
             transactionType: "purchase_receipt",
             referenceId: orderId,
             createdBy: input.undoneBy,
+            batchId,
           });
           await deactivateEmptyLocation(tx, receipt.locationId);
         }

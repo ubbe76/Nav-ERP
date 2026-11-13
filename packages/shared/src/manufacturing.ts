@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { blankSafe, INT4_MAX, numericMax, optionalText } from "./coerce.js";
+import { batchChoiceSchema } from "./stock.js";
 import { configuratorSelectionSchema } from "./configurator.js";
 import { listQuerySchema, manufacturingOrderStatusListParam, statusListParam } from "./list.js";
 
@@ -410,6 +411,9 @@ export const materialShortageOverrideSchema = z.boolean().optional();
 
 export const consumeMaterialSchema = z.object({
   locationId: z.string().uuid().optional(),
+  // Batch (#8): left out = Automatiskt (oldest batch first), null = Okänd,
+  // an id = that batch of the component — it must cover the whole quantity.
+  batchId: batchChoiceSchema,
   quantity: blankSafe(z.coerce.number().positive().max(numericMax(14, 4))),
   allowMaterialShortage: materialShortageOverrideSchema,
 });

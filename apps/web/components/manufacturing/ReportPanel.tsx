@@ -4,6 +4,8 @@ import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Input, Label, Select } from "../ui/Field";
 import { FormError, FormHint } from "../ui/Form";
+import { BatchSelect, useBatchBalances } from "../stock/BatchSelect";
+import { BATCH_AUTO, batchIdField } from "../../lib/batch";
 import { ScrapReasonFields } from "../quality/ScrapReasonFields";
 import { useScrapReasons } from "../../lib/useScrapReasons";
 import { locationOptionLabel } from "../../lib/stockLocations";
@@ -424,6 +426,10 @@ function MaterialRow({
   const [typedQuantity, setTypedQuantity] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Batch (#8): Automatiskt / Okänd / a batch with stock (on the chosen location).
+  const [batch, setBatch] = useState(BATCH_AUTO);
+  const batchTracked = Boolean(m.componentBatchTracked);
+  const { rows: batchRows, reload: reloadBatches } = useBatchBalances(batchTracked ? [m.componentArticleId] : []);
   const open = Number(m.quantityConsumed) < Number(m.quantityPlanned);
   const quantity = typedQuantity ?? suggestedConsumeQuantity(m);
 
@@ -438,6 +444,7 @@ function MaterialRow({
           method: "POST",
           body: JSON.stringify({
             locationId: locationId || undefined,
+            ...(batchTracked ? batchIdField(batch) : {}),
             // Untouched: the exact rest in the base unit. The prefill is
             // rounded in the row's unit, and turning it back (2 st shown as
             // 0,6667 förp of 3 st) gave 2,0001 st — refused as over-consumption.
@@ -457,6 +464,8 @@ function MaterialRow({
         action: canUndo && reportId ? undoReportAction(orderId, reportId, onDone, "Förbrukningen är ångrad.") : undefined,
       });
       setTypedQuantity(null);
+      setBatch(BATCH_AUTO);
+      reloadBatches();
       onDone();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte förbruka materialet"));
@@ -492,6 +501,19 @@ function MaterialRow({
               />
               <span className={styles.unit}>{m.unitCode}</span>
             </Cell>
+            {batchTracked && (
+              <Cell label="Batch" className={styles.batch}>
+                <BatchSelect
+                  size="sm"
+                  aria-label={`Batch för ${m.componentArticleNumber} ${m.componentName}`}
+                  rows={batchRows}
+                  articleId={m.componentArticleId}
+                  locationId={locationId || null}
+                  value={batch}
+                  onChange={setBatch}
+                />
+              </Cell>
+            )}
             <div className={styles.action}>
               <Button type="submit" variant="secondary" size="small" disabled={pending}>
                 {pending ? "Förbrukar…" : "Förbruka"}

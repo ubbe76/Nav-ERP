@@ -65,10 +65,16 @@ export function StockTransactionsView({ transactions, locations, article, pageSi
   // Saldo only exists with an article filter (the API sends null otherwise).
   const showBalance = article !== null;
 
+  // Batch (#8): the column appears once a row carries a batch or the log is
+  // filtered on one — an installation without batches looks as before.
+  const batchFilter = params.get("batch");
+  const showBatch = batchFilter !== null || transactions.rows.some((r) => r.batchNumber);
+
   const columns = [
     { key: "createdAt", label: "Datum", width: "150px" },
     { key: "articleNumber", label: "Artikel", width: "minmax(160px, 1fr)" },
     { key: "locationName", label: "Lagerplats", width: "140px" },
+    ...(showBatch ? [{ key: "batch", label: "Batch", width: "120px" }] : []),
     { key: "transactionType", label: "Typ", width: "170px" },
     { key: "quantityDelta", label: "Mängd", width: "80px", align: "right" as const },
     ...(showBalance ? [{ key: "balance", label: "Saldo", width: "80px", align: "right" as const }] : []),
@@ -139,10 +145,23 @@ export function StockTransactionsView({ transactions, locations, article, pageSi
         </div>
         <ListExportLink
           endpoint="/api/v1/stock/transactions/csv"
-          renameParams={{ article: "articleId", location: "locationId" }}
+          renameParams={{ article: "articleId", location: "locationId", batch: "batchId" }}
         />
         {view.chooser}
       </ListToolbar>
+
+      {batchFilter && (
+        <p style={{ margin: "0 0 12px" }}>
+          Filtrerad på batch{transactions.rows[0]?.batchNumber ? ` ${transactions.rows[0].batchNumber}` : ""}.{" "}
+          <button
+            type="button"
+            style={{ background: "none", border: 0, padding: 0, color: "var(--accent-fg)", cursor: "pointer", font: "inherit" }}
+            onClick={() => setFilter("batch", null)}
+          >
+            Visa alla batcher
+          </button>
+        </p>
+      )}
 
       <Table<StockTransaction>
         columns={view.columns}
@@ -176,6 +195,14 @@ export function StockTransactionsView({ transactions, locations, article, pageSi
             case "locationName":
               // Stock can be tracked without locations.
               return row.locationName ? `${row.warehouseName} — ${row.locationName}` : "—";
+            case "batch":
+              return row.batchNumber ? (
+                <GatedLink href={`/lager/sparbarhet?search=${encodeURIComponent(row.batchNumber)}`} style={{ color: "var(--accent-fg)" }}>
+                  {row.batchNumber}
+                </GatedLink>
+              ) : (
+                (row.batchNumber ?? "")
+              );
             case "transactionType":
               return STOCK_TRANSACTION_TYPE_LABELS[row.transactionType];
             case "quantityDelta":

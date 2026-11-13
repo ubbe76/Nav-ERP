@@ -117,6 +117,11 @@
   color: var(--color-text-muted);
 }
 
+.batch {
+  grid-column: 5;
+  min-width: 0;
+}
+
 .action {
   grid-column: 6;
   justify-self: end;
@@ -189,6 +194,10 @@
 
   .qty {
     grid-column: span 2;
+  }
+
+  .batch {
+    grid-column: 1 / -1;
   }
 
   .cell {

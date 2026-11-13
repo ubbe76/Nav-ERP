@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, gt, ilike, inArray, isNotNull, isNull, lte, 
 import {
   articles,
   articleStandardCostHistory,
+  stockBatches,
   stockCountRows,
   stockCountSessions,
   stockLocations,
@@ -24,6 +25,11 @@ import { getNextOrderNumber } from "../../system/service/number-series.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { deactivateEmptyLocation } from "../service/location-lifecycle.js";
 import { isStockedArticleType } from "../service/stocked-article.js";
+import { BatchNotTrackedError } from "../service/batch.errors.js";
+import { getOrCreateBatch } from "../service/batches.js";
+import { isBatchTrackedArticle } from "../service/batch-tracking.js";
+import { lockArticlesForOutflow } from "../service/outflow-locations.js";
+import { batchCellQuantity } from "./batch-balances.js";
 import { stockValuedDate } from "./valued-at.js";
 import {
   ArticleNotFoundError,
@@ -214,15 +220,20 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
         // Services are never counted (tjänster lagerförs inte,
         // stocked-article.ts) — a balance one got before the rule stays as
         // history.
+        // Batch (#8): a batchstyrd article is counted per batch — one row
+        // per cell with a balance (batch null = Okänd); every other article
+        // has its one row, summed over whatever batches its log holds.
+        const countedBatch = sql<string | null>`case when ${articles.batchTracked} then ${stockTransactions.batchId} end`;
         const balances = await tx
           .select({
             articleId: stockTransactions.articleId,
+            batchId: countedBatch,
             quantity: sql<string>`sum(${stockTransactions.quantityDelta})`,
           })
           .from(stockTransactions)
           .innerJoin(articles, eq(articles.id, stockTransactions.articleId))
           .where(and(eq(stockTransactions.locationId, input.locationId), ne(articles.type, "service")))
-          .groupBy(stockTransactions.articleId)
+          .groupBy(stockTransactions.articleId, countedBatch)
           .having(sql`sum(${stockTransactions.quantityDelta}) <> 0`);
 
         if (balances.length > 0) {
@@ -230,6 +241,7 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
             balances.map((b) => ({
               sessionId: session!.id,
               articleId: b.articleId,
+              batchId: b.batchId,
               snapshotQuantity: b.quantity,
             }))
           );
@@ -348,12 +360,25 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
           snapshotQuantity: stockCountRows.snapshotQuantity,
           countedQuantity: stockCountRows.countedQuantity,
           note: stockCountRows.note,
+          // Batch (#8): the row's cell — null = Okänd (and the one row of an
+          // article that is not batchstyrd). batchTracked tells the card
+          // which articles may get another batch row.
+          batchId: stockCountRows.batchId,
+          batchNumber: stockBatches.batchNumber,
+          batchTracked: articles.batchTracked,
         })
         .from(stockCountRows)
         .innerJoin(articles, eq(articles.id, stockCountRows.articleId))
         .innerJoin(units, eq(units.id, articles.unitId))
+        .leftJoin(stockBatches, eq(stockBatches.id, stockCountRows.batchId))
         .where(eq(stockCountRows.sessionId, id))
-        .orderBy(asc(articles.articleNumber));
+        // Per article in the batches' own order: Okänd first, then the oldest.
+        .orderBy(
+          asc(articles.articleNumber),
+          sql`${stockBatches.createdAt} asc nulls first`,
+          asc(stockBatches.batchNumber),
+          asc(stockCountRows.id)
+        );
 
       const disturbedConditions = [
         eq(stockTransactions.locationId, session.locationId),
@@ -425,11 +450,24 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
         if (!article) throw new ArticleNotFoundError(input.articleId);
         if (!isStockedArticleType(article.type)) throw new ServiceArticleNotStockedError(article.articleNumber);
 
-        const snapshot = await balanceFor(tx, input.articleId, session.locationId);
+        // Batch (#8): a batchstyrd article gets one row per batch — the
+        // named one (created when it is new: goods found on the shelf with a
+        // batch nobody booked), or without a number the Okänd row — and the
+        // snapshot is that CELL's balance. Any other article has its one
+        // row for the whole place, and a batch for it is refused.
+        const batchTracked = await isBatchTrackedArticle(tx, input.articleId);
+        if (input.batchNumber !== undefined && !batchTracked) throw new BatchNotTrackedError(article.articleNumber);
+        const batch =
+          input.batchNumber !== undefined
+            ? await getOrCreateBatch(tx, { articleId: input.articleId, batchNumber: input.batchNumber, origin: "manual" })
+            : null;
+        const snapshot = batchTracked
+          ? String(await batchCellQuantity(tx, input.articleId, session.locationId, batch?.id ?? null))
+          : await balanceFor(tx, input.articleId, session.locationId);
         try {
           const [row] = await tx
             .insert(stockCountRows)
-            .values({ sessionId, articleId: input.articleId, snapshotQuantity: snapshot })
+            .values({ sessionId, articleId: input.articleId, batchId: batch?.id ?? null, snapshotQuantity: snapshot })
             .returning();
           return row!;
         } catch (err) {
@@ -490,10 +528,12 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
         const rows = await tx
           .select({
             articleId: stockCountRows.articleId,
+            batchId: stockCountRows.batchId,
             snapshotQuantity: stockCountRows.snapshotQuantity,
             countedQuantity: stockCountRows.countedQuantity,
             note: stockCountRows.note,
             standardCost: articles.standardCost,
+            batchTracked: articles.batchTracked,
           })
           .from(stockCountRows)
           .leftJoin(articles, eq(articles.id, stockCountRows.articleId))
@@ -518,6 +558,14 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
               session.createdAt
             )
           : null;
+
+        // Batch (#8): a negative difference on a batchstyrd article is an
+        // outflow from its cell — the article lock every draw takes, sorted,
+        // before any row is booked.
+        await lockArticlesForOutflow(
+          tx,
+          toBook.filter((r) => r.batchTracked && Number(r.countedQuantity) < Number(r.snapshotQuantity)).map((r) => r.articleId)
+        );
 
         let adjustments = 0;
         let counted = 0;
@@ -544,6 +592,8 @@ export function createStockCountRepository(db: Db, periods: PostingPeriodReader 
             createdBy: postedBy,
             unitCost,
             valuedAt,
+            // Batch (#8): the difference is booked in the row's cell.
+            batchId: row.batchId,
           });
           adjustments += 1;
           if (diff < 0) hasNegative = true;

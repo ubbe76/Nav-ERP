@@ -31,6 +31,8 @@ export default async function StockTransactionsPage(props: { searchParams: Promi
   const direction = single(searchParams.direction);
   const articleId = uuid(single(searchParams.article));
   const locationId = uuid(single(searchParams.location));
+  // Batch (#8): ?batch=<id> filters the log on one batch (from the article card / Spårbarhet).
+  const batchId = uuid(single(searchParams.batch));
   const clean: PageSearchParams = {
     search: searchParams.search,
     page: searchParams.page,
@@ -42,6 +44,7 @@ export default async function StockTransactionsPage(props: { searchParams: Promi
   const apiParams = new URLSearchParams(listApiQuery(clean, ["type", "direction", "from", "to"], pageSize));
   if (articleId) apiParams.set("articleId", articleId);
   if (locationId) apiParams.set("locationId", locationId);
+  if (batchId) apiParams.set("batchId", batchId);
 
   const [transactions, locations, article] = await Promise.all([
     apiGet<Paged<StockTransaction>>(`/api/v1/stock/transactions?${apiParams.toString()}`, cookieHeader),
