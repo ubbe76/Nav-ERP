@@ -243,16 +243,16 @@ Raden stoppas när artikeln inte finns, är en tjänst eller en fantomartikel, n
 
 ## Batchnummer och spårbarhet
 
-Med batchnummer vet du vilken omgång av en artikel som kom in, användes och levererades — så att du kan svara på "var kom den här leveransen ifrån" och "vilka kunder fick den här batchen".
+Med batchnummer vet du vilken omgång av en artikel som kom in, användes och levererades — så att du kan svara på "var kom den här leveransen ifrån" och "vilka kunder fick den här batchen". Med serienummer får varje enskilt styck ett eget nummer och spåras på samma sätt. Serienummer, utgångsdatum och Hållbarhet beskrivs i [Serienummer](#serienummer) och [Utgångsdatum och FEFO](#utgangsdatum-och-fefo) nedan.
 
-**Slå på funktionen.** Under **System → Inställningar** finns **Använd batch- och serienummer** (av som förval). På: artikelkortet får kryssrutan **Batchstyrd**, lagerrutinerna håller reda på vilken batch saldot tillhör och **Spårbarhet** syns i Lager-menyn. Av: allt fungerar som förut. Inställningen kan bara stängas av när ingen artikel är batchstyrd.
+**Slå på funktionen.** Under **System → Inställningar** finns **Använd batch- och serienummer** (av som förval). På: artikelkortet får fältet **Spårning** (**Ingen**, **Batch** eller **Serienummer**), lagerrutinerna håller reda på vilken batch saldot tillhör och **Spårbarhet** syns i Lager-menyn. Av: allt fungerar som förut. Inställningen kan bara stängas av när ingen artikel är batchstyrd.
 
-**Batchstyrd.** På artikelkortets flik **Lager** (under Planering) gör kryssrutan **Batchstyrd** att artikelns saldo hålls per batch. Den finns bara när inställningen är på, och inte för tjänster eller fantomartiklar. Du kan slå på den när som helst och stänga av den när som helst:
+**Spårning.** På artikelkortets flik **Lager** (under Planering) väljer du **Spårning**: **Ingen**, **Batch** (saldot hålls per batch) eller **Serienummer** (saldot hålls per nummer, ett styck per nummer). Fältet finns bara när inställningen är på, och inte för tjänster eller fantomartiklar. Spårningen kan bytas när som helst, även mellan Batch och Serienummer; gamla batcher och nummer ligger kvar och dras i vanlig ordning. Om Batch:
 
 - Det saldo som redan finns när du slår på den hamnar i batchen **Okänd**. Okänd dras först, därefter äldsta batch först.
 - Stänger du av den ligger batcherna kvar i loggen men visas och krävs inte längre. Slår du på den igen syns de som de var; uttag under tiden har dragits från Okänd.
-- Är en artikel batchstyrd visas kortet **Saldo per batch** på fliken Lager: batch, lagerplats och saldo, med Okänd först. Batchnumret är en länk till [spårningen](#sparbarhet-sidan).
-- Artikelimporten har en kolumn **Batchstyrd** (Ja/Nej), se [Importera artiklar](/hjalp/artiklar#importera-artiklar).
+- Är en artikel batchstyrd (eller serienummerstyrd) visas kortet **Saldo per batch** på fliken Lager: batch, lagerplats och saldo, med Okänd först. Batchnumret är en länk till [spårningen](#sparbarhet-sidan).
+- Artikelimporten har en kolumn **Spårning**, se [Importera artiklar](/hjalp/artiklar#importera-artiklar).
 
 **Inleverans.** I [Inleveransen](/hjalp/inkop#inleverans) får en batchstyrd rad fältet **Batch**: skriv eller skanna leverantörens batchnummer. Lämnar du fältet tomt blir inköpsorderns nummer batch. En rad som kommer i flera batcher delas med **Dela på flera batcher**: varje del får eget **Antal** och eget batchnummer, och **Ta bort** tar bort en del. Varje del bokförs som en egen inleverans som kan ångras för sig, och **Ångra inleverans** tar varorna ur samma batch igen. Batchen visas på inleveransen under Rapporteringar på inköpsordern.
 
@@ -265,7 +265,7 @@ Med batchnummer vet du vilken omgång av en artikel som kom in, användes och le
 - [Lagerflytt](#lagerflytt), där batchen följer med varorna,
 - [Justering](#justering) när du minskar saldot.
 
-Valen är **Automatiskt**, **Okänd** och batcherna som har saldo (med antal). En vald batch gäller hela radens antal och kan **aldrig gå minus** — räcker den inte avvisas bokningen. Vill du ta ur två batcher bokar du två rader. Bara Okänd kan gå minus. **Ångra utleverans** och återlämnat material läggs tillbaka i samma batch. En justering som ökar saldot har fältet **Batch** med platshållaren *Okänd*: skriv batchnumret, eller lämna tomt för Okänd.
+Valen är **Automatiskt**, **Okänd** och batcherna som har saldo (med antal). En vald batch gäller hela radens antal och kan **aldrig gå minus** — räcker den inte avvisas bokningen. Vill du ta ur två batcher bokar du två rader. Bara Okänd kan gå minus (ett serienummer har aldrig mer än ett styck). **Ångra utleverans** och återlämnat material läggs tillbaka i samma batch. En justering som ökar saldot har fältet **Batch** med platshållaren *Okänd*: skriv batchnumret, eller lämna tomt för Okänd.
 
 **Inventering.** En batchstyrd artikel räknas **per batch**: underlaget har en rad per batch och plats, och kolumnen **Batch** visar batchnumret eller *Okänd*. Skillnaden bokas i radens egen batch. Vid **Lägg till artikel** får en batchstyrd artikel fältet **Batch** (tomt = Okänd) för att lägga till en rad för en batch som inte fanns i underlaget.
 
@@ -287,14 +287,43 @@ Valen är **Automatiskt**, **Okänd** och batcherna som har saldo (med antal). E
 
 **Lager → Spårbarhet** (`/lager/sparbarhet`) följer en batch åt båda hållen. Raden syns i Lager-menyn bara när **Använd batch- och serienummer** är på.
 
-Utan vald batch visar sidan en lista över batcherna, nyast först, med kolumnerna **Batch**, **Artikel**, **Ursprung** (*Inleverans*, *Tillverkning*, *Manuell* eller *Import*), **Skapad** och **Saldo**. Sök på batchnummer, artikelnummer eller benämning. Klicka batchnumret för att öppna spårningen. Samma sida öppnas från länkarna till batchnummer på artikelkortets Saldo per batch, i lagerloggen, på inleveransen och i tillverkningsorderns rapporteringar. Knapparna **Alla batcher** och **Lagerlogg** tar dig tillbaka till listan respektive loggen för batchen.
+Utan vald batch visar sidan en lista över batcherna, nyast först, med kolumnerna **Batch**, **Artikel**, **Ursprung** (*Inleverans*, *Tillverkning*, *Manuell* eller *Import*), **Skapad** och **Saldo**. Sök på batch- eller serienummer, artikelnummer eller benämning. Filtret **Sort** (**Alla**, **Batch**, **Serienummer**) begränsar listan, och kolumnen **Sort** visar vilket det är; ett serienummer vars utleverans ångrats märks *bränt*. Kolumnen **Utgångsdatum** och filtret **Alla utgångsdatum** (**Utgår**, **Utgångna**) visar utgångsdatum. Klicka numret för att öppna spårningen. Samma sida öppnas från länkarna till batchnummer på artikelkortets Saldo per batch, i lagerloggen, på inleveransen och i tillverkningsorderns rapporteringar. Knapparna **Alla batcher** och **Lagerlogg** tar dig tillbaka till listan respektive loggen för batchen.
 
 För en vald batch visar sidan två kolumner (under varandra på en smal skärm):
 
 - **Bakåt — varifrån batchen kommer:** **Inleverans** (inköpsordern, leverantören, datum och antal), **Tillverkningsorder** (och under *Material* batcherna som gick åt, som ett indraget träd som fortsätter ner genom halvfabrikat) samt **Justering** och **Inventering** som lagt till saldo.
 - **Framåt — vart batchen har tagit vägen:** **Förbrukad i** tillverkningsordrar (med antal, och under *Tillverkad batch* batcherna de gav, som fortsätter framåt), **Utleverans** (kundorder, kund, följesedel, datum och antal), justeringar och inventeringar som minskat saldot (kassation, svinn) och **Kvar i lager** per lagerplats.
 
-Länkarna går till inköpsorder, tillverkningsorder, kundorder, kund, leverantör och artikel — för dig som har behörighet till sidan. En Okänd batch är alltid slutet på en gren och visas som *Okänd batch*. *visas ovan* betyder att samma batch redan är uppritad längre upp (t.ex. vid omarbetning), och *(fortsättningen visas inte)* att spårningen blev för djup eller stor; då står också en notis överst om att spårningen är avkortad. Ångrade inleveranser, rapporteringar och utleveranser räknas bort. Sidan kan öppnas även när inställningen är av — batcherna ligger kvar i loggen.
+Länkarna går till inköpsorder, tillverkningsorder, kundorder, kund, leverantör och artikel — för dig som har behörighet till sidan. En Okänd batch är alltid slutet på en gren och visas som *Okänd batch*. *visas ovan* betyder att samma batch redan är uppritad längre upp (t.ex. vid omarbetning), och *(fortsättningen visas inte)* att spårningen blev för djup eller stor; då står också en notis överst om att spårningen är avkortad. Ångrade inleveranser och rapporteringar räknas bort; en ångrad utleverans visas som *Utleverans (ångrad)*. Sidan kan öppnas även när inställningen är av — batcherna ligger kvar i loggen.
+
+### Serienummer
+
+Med **Spårning: Serienummer** har varje styck ett eget nummer. Antalet är alltid ett helt antal styck, ett nummer finns som mest en gång i lager (saldo 0 eller 1) och numret är unikt per artikel (skiftlägesokänsligt). Befintligt saldo när du byter till Serienummer hamnar som *Okänd* och dras först.
+
+**När numren skapas.** Fältet **Serienummer skapas** på artikelkortet väljer **Vid inleverans** (förval) eller **Vid utleverans**. **Serienummerserie** väljer artikelns serie ur listan (den gemensamma serien eller en egen); **Ny serie…** öppnar en liten ruta med **Namn**, **Prefix** och **Antal siffror** och **Skapa serie**. Serierna hanteras också under **System → Nummerserier** (**+ Ny serienummerserie**).
+
+- **Vid inleverans.** I [Inleveransen](/hjalp/inkop#inleverans) skriver eller skannar du ett nummer per styck i fältet **Skriv eller skanna serienummer**; inleveransen sparas inte förrän alla nummer finns (*Ange ett serienummer per styck*). Ett kvitto skapas per styck och visas grupperat under Rapporteringar, och **Ångra inleverans** ångrar ett nummer i taget. Tillverkade styck får nästa löpnummer ur serien när de **inlevereras** (rapporten), även i terminalen — inga nummer bränns på ordrar som aldrig blir klara; *Mottagna serienummer* visas efter rapporteringen.
+- **Vid utleverans.** Lagret räknas som vanligt utan nummer (som Okänd): inleverans och tillverkning ger inga nummer och uttag och inventering frågar inte efter nummer. I [Utleverans](/hjalp/forsaljning#utleverans) föreslås nästa nummer ur serien per styck (*Serienummer ur serien*); du kan skriva eller skanna ett annat, t.ex. från en märkskylt. Ett nummer som getts **bränns**: det används aldrig igen, och en **Ångra utleverans** ger heller inga nummer tillbaka — en ny utleverans får nya nummer.
+
+**Vid uttag.** **Automatiskt** tar de äldsta numren. I **Förbruka**, [Utleverans](/hjalp/forsaljning#utleverans), [Lagerflytt](#lagerflytt) och [Justering](#justering) kan du i stället skanna eller söka (*Skanna eller sök serienummer*) eller välja bland numren i lager (*Välj bland … i lager*); terminalen väljer alltid automatiskt. En justering som ökar saldot tar ett serienummer och ett styck per justering; utan nummer bokas saldot som Okänd.
+
+**Inventering.** Ett serienummer räknas per nummer: raden har en kryssruta **Hittad** (1 = finns, 0 = saknas). **Sätt oskannade till 0** sätter alla nummer som inte räknats till 0. Skillnaden bokas på numret.
+
+**Saldoimport.** [Importera lagersaldon](#importera-lagersaldon) har kolumnen **Serienummer** (Antal 1 eller 0), **Batchdatum** och **Utgångsdatum**; se [Importmallar](/hjalp/importmallar#lagersaldon).
+
+**Utskrifter.** Serienumren skrivs på följesedel, faktura (fryses när fakturan utfärdas) och plocklista, komprimerat när de är många (till exempel *SN-1001–SN-1010*). *Okänd* skrivs aldrig på ett dokument till kund.
+
+**Spårning.** [Spårbarhetssidan](#sparbarhet-sidan) följer ett serienummer som en batch. Många nummer med samma historia visas som en grupp (*12 serienummer: SN-1001–SN-1012*). Ett bränt nummer märks *Bränt (utleveransen ångrad)*. För ett nummer som skapades vid utleverans visar bakåtgrenen *Skapat vid utleverans* med följesedel, kundorder, kund och datum, och inget mer bakåt.
+
+Skanning av GS1-koder (till exempel batch-, utgångsdatum- och serienummerfälten i en streckkod) beskrivs i avsnittet [Skanna](#skanna).
+
+### Utgångsdatum och FEFO
+
+- **Utgångsdatum** anges per batch: fältet **Utgångsdatum (valfritt)** vid inleverans (även per del vid **Dela på flera batcher**) och vid en justering som ökar saldot, samt i saldoimporten. Tillverkade batcher får inleveransdagen plus artikelns **Hållbarhet (dagar)** (fält på artikelkortet för en batchstyrd artikel; tomt = inget datum).
+- **FEFO** — vid uttag med **Automatiskt** tas först **Okänd**, sedan batcher med utgångsdatum (kortast först) och sist batcher utan datum, äldsta först.
+- **Utgångna batcher tas inte av Automatiskt** (de kan väljas för hand). Finns bara utgånget saldo bokas bristen som Okänd minus. Behovsberäkningen räknar utgånget som saldo tills det kasseras eller flyttas till en spärrad plats.
+- **Ändra.** Batchens sida under **Lager → Spårbarhet** visar **Utgångsdatum** och en knapp **Ändra** (för dig med lagerbehörighet): dialogen har **Utgångsdatum**, **Batchdatum** och **Batchnummer**. Tomt batchdatum betyder dagen batchen skapades; tomt utgångsdatum tar bort datumet.
+- **Avisering.** [Aviseringen](/hjalp/aviseringar) **Utgångna batcher** visar utgångna och snart utgående batcher på ospärrade platser. Tidsgränsen sätts med **Batcher som går ut inom (dagar)** under System → Inställningar (förval 30).
 
 ## Prognos
 

@@ -25,6 +25,7 @@ import {
   type Article,
   type StockCountBookOn,
   type StockCountDetail,
+  type ScanGs1,
   type ScanMatch,
   type StockCountPostResult,
   type StockCountRow,
@@ -46,6 +47,13 @@ const articleLabel = (a: { articleNumber: string; name: string }) => `${a.articl
 // field. An article the sheet lacks is added first, as Lägg till artikel
 // does. No +1 per scan here: a handheld scanner types into the focused field,
 // so counting by scans and typing the count cannot be mixed.
+//
+// GS1 (#8 etapp 2 steg 6): a serienummer (a GS1 code's AI 21, or the number
+// itself) is the exception — its row is counted 1 at once (saved), one styck
+// is one styck; a number the sheet lacks is added first. A batch (AI 10, or
+// the batch number) marks THAT batch's row, added when it is missing. An
+// article scanned alone that has several rows (batches, serienummer) only
+// narrows the sheet to them — the user picks the row, or scans the number.
 export function StockCountDetailClient({ session }: { session: StockCountDetail }) {
   const router = useRouter();
   const [counted, setCounted] = useState<Record<string, string>>({});
@@ -86,6 +94,9 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
   const bookOn: StockCountBookOn = !backdating?.allowed ? "today" : (bookOnChoice ?? "count_date");
   const { feedback, ok, warn } = useScanFeedback();
   const [markedRowId, setMarkedRowId] = useState<string | null>(null);
+  // An article scanned without a number that names the row: the sheet shows
+  // only that article's rows until Visa alla.
+  const [filterArticle, setFilterArticle] = useState<{ id: string; label: string } | null>(null);
   const scanField = useRef<HTMLInputElement>(null);
   const countFields = useRef(new Map<string, HTMLInputElement>());
   // A row added by a scan arrives with the refresh; its field takes the
@@ -214,13 +225,42 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
     }
   }
 
-  const onScan = useScanQueue(async (code: string, matches: ScanMatch[]) => {
-    const current = latest.current;
-    const intent = resolveCountScan(matches, {
-      locationId: current.locationId,
-      open: current.status === "open",
-      rows: current.rows,
+  // The article of a scanned number, for the messages: from the sheet, else
+  // from what the scan answered.
+  function articleText(articleId: string, matches: ScanMatch[]): string {
+    const row = latest.current.rows.find((r) => r.articleId === articleId);
+    if (row) return articleLabel({ articleNumber: row.articleNumber, name: row.articleName });
+    for (const m of matches) {
+      if (m.kind === "article" && m.id === articleId) return articleLabel(m);
+      if (m.kind === "batch" && m.articleId === articleId) return articleLabel({ articleNumber: m.articleNumber, name: m.articleName });
+    }
+    return "";
+  }
+
+  // A scanned serienummer is there: Räknat = 1, saved at once.
+  async function countSerialRow(rowId: string, text: string) {
+    await apiFetch(`/api/v1/stock-counts/${latest.current.id}/rows/${rowId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ countedQuantity: 1 }),
     });
+    setCounted((c) => ({ ...c, [rowId]: "1" }));
+    setMarkedRowId(rowId);
+    ok(`${text} — finns, sparat`);
+    router.refresh();
+  }
+
+  const onScan = useScanQueue(async (code: string, matches: ScanMatch[], gs1: ScanGs1 | null) => {
+    const current = latest.current;
+    const intent = resolveCountScan(
+      matches,
+      {
+        locationId: current.locationId,
+        open: current.status === "open",
+        rows: current.rows,
+      },
+      gs1
+    );
+    if (intent.kind !== "chooseRow") setFilterArticle(null);
     switch (intent.kind) {
       case "thisLocation":
         ok(`${current.warehouseName} — ${current.locationName} är den här inventeringens plats`);
@@ -272,7 +312,68 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
         }
         return;
       }
+      case "chooseRow": {
+        const article = intent.match;
+        if (intent.rowIds.length > 0) setFilterArticle({ id: article.id, label: articleLabel(article) });
+        setMarkedRowId(null);
+        if (intent.serial) {
+          warn(`${articleLabel(article)} har serienummer — skanna serienumret`);
+        } else {
+          warn(`${articleLabel(article)} har ${intent.rowIds.length} rader — välj batchens rad och skriv räknat antal, eller skanna batchen`);
+        }
+        return;
+      }
+      case "serialRow": {
+        const text = `${articleText(intent.articleId, matches)}: serienummer ${intent.serialNumber}`;
+        try {
+          await countSerialRow(intent.rowId, text);
+        } catch (err) {
+          warn(apiErrorMessage(err, "Kunde inte spara raden"));
+        }
+        return;
+      }
+      case "addSerial": {
+        const text = `${articleText(intent.articleId, matches)}: serienummer ${intent.serialNumber}`;
+        try {
+          const row = await apiFetch<{ id: string }>(`/api/v1/stock-counts/${current.id}/rows`, {
+            method: "POST",
+            body: JSON.stringify({ articleId: intent.articleId, batchNumber: intent.serialNumber }),
+          });
+          const loaded = waitForLoad((s) => s.rows.some((r) => r.id === row.id));
+          await countSerialRow(row.id, `${text} fanns inte på underlaget och lades till`);
+          await loaded;
+        } catch (err) {
+          // 409 serial-on-other-location names the place the number stands on.
+          warn(apiErrorMessage(err, "Kunde inte lägga till serienumret"));
+        }
+        return;
+      }
+      case "batchRow":
+        ok(`${articleText(intent.articleId, matches)}: batch ${intent.batchNumber} — skriv räknat antal och tryck Enter`);
+        focusCount(intent.rowId);
+        return;
+      case "addBatch": {
+        const text = `${articleText(intent.articleId, matches)}: batch ${intent.batchNumber}`;
+        try {
+          const row = await apiFetch<{ id: string }>(`/api/v1/stock-counts/${current.id}/rows`, {
+            method: "POST",
+            body: JSON.stringify({ articleId: intent.articleId, batchNumber: intent.batchNumber }),
+          });
+          warn(`${text} fanns inte på underlaget och lades till — skriv räknat antal`);
+          focusCount(row.id);
+          const loaded = waitForLoad((s) => s.rows.some((r) => r.id === row.id));
+          router.refresh();
+          await loaded;
+        } catch (err) {
+          warn(apiErrorMessage(err, "Kunde inte lägga till batchen"));
+        }
+        return;
+      }
+      case "ambiguousNumber":
+        warn(`${intent.batchNumber} finns på flera artiklar — skanna artikeln eller lägg till raden för hand`);
+        return;
       case "articleNotCounting":
+      case "numberNotCounting":
         warn(`Inventeringen är ${STOCK_COUNT_STATUS_LABELS[current.status].toLowerCase()} — räknade antal kan inte ändras`);
         return;
       case "order":
@@ -418,6 +519,14 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
 
       <FormError>{error}</FormError>
       {message && <p>{message}</p>}
+      {filterArticle && (
+        <p style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <span>Visar bara raderna för {filterArticle.label}.</span>
+          <Button type="button" variant="secondary" size="small" onClick={() => setFilterArticle(null)}>
+            Visa alla
+          </Button>
+        </p>
+      )}
 
       <Table<StockCountRow>
         columns={[
@@ -432,7 +541,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
           { key: "warning", label: "", width: "170px" },
           { key: "actions", label: "", width: "80px", align: "right" },
         ]}
-        rows={session.rows}
+        rows={filterArticle ? session.rows.filter((r) => r.articleId === filterArticle.id) : session.rows}
         highlightedRowId={markedRowId}
         emptyText="Inga rader — lagerplatsen har inget bokfört saldo. Lägg till artiklar som hittas fysiskt."
         renderCell={(row, key) => {

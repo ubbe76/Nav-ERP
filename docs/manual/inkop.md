@@ -306,7 +306,7 @@ Sektionen **Historik** längst ner på orderkortet visar orderns egna händelser
 3. Radtabellen visar **Beställt** (totalt antal på raden), Enhet, **Mottaget** och **Rest** (beställt minus mottaget, det som återstår att leverera in) per rad — allt i radens enhet — och fältet **Ta emot nu** är förifyllt med restantalet. Justera antalen — rader som sätts till 0 hoppas över. Antalet räknas om till grundenheten när saldot bokförs.
 4. Klicka **Rapportera inleverans**. Varje rad bokförs som ett inleveranssaldo i lagret och orderstatusen uppdateras (**Delvis mottagen** tills allt är mottaget, därefter **Mottagen**). Eventuella fel visas per rad.
 
-En rad på en **batchstyrd** artikel har även fältet **Batch** (skriv eller skanna leverantörens batchnummer; tomt blir inköpsorderns nummer) och knappen **Dela på flera batcher** för en rad som kommer i flera batcher — se [Batchnummer och spårbarhet](/hjalp/lager#batchnummer-och-sparbarhet).
+En rad på en **serienummerstyrd** artikel (nummer vid inleverans) har fältet **Skriv eller skanna serienummer** med ett nummer per styck; alla krävs. Varje styck blir ett eget kvitto som kan ångras för sig — se [Serienummer](/hjalp/lager#serienummer). En batchstyrd rad har fältet **Utgångsdatum (valfritt)**. En rad på en **batchstyrd** artikel har även fältet **Batch** (skriv eller skanna leverantörens batchnummer; tomt blir inköpsorderns nummer) och knappen **Dela på flera batcher** för en rad som kommer i flera batcher — se [Batchnummer och spårbarhet](/hjalp/lager#batchnummer-och-sparbarhet).
 
 Enstaka rader kan fortfarande tas emot direkt på inköpsorderkortet med **Ta emot leverans**.
 

@@ -12,6 +12,7 @@ import { STOCK_BATCH_ORIGIN_LABELS, type StockBatchListRow } from "../../lib/typ
 const COLUMNS = [
   { key: "batchNumber", label: "Batch", width: "180px" },
   { key: "article", label: "Artikel", width: "1fr" },
+  { key: "kind", label: "Sort", width: "120px" },
   { key: "origin", label: "Ursprung", width: "130px" },
   { key: "expiresOn", label: "Utgångsdatum", width: "150px" },
   { key: "createdAt", label: "Skapad", width: "110px" },
@@ -23,7 +24,16 @@ export function BatchesList({ rows }: { rows: StockBatchListRow[] }) {
   const view = useListColumns(COLUMNS);
   return (
     <>
-      <ListToolbar placeholder="Sök batch, artikelnummer eller benämning…">
+      <ListToolbar placeholder="Sök batch- eller serienummer, artikelnummer eller benämning…">
+        <ListFilterSelect
+          param="kind"
+          allLabel="Alla"
+          ariaLabel="Filtrera på sort"
+          options={[
+            { value: "batch", label: "Batch" },
+            { value: "serial", label: "Serienummer" },
+          ]}
+        />
         <ListFilterSelect
           param="expiry"
           allLabel="Alla utgångsdatum"
@@ -45,10 +55,15 @@ export function BatchesList({ rows }: { rows: StockBatchListRow[] }) {
           switch (key) {
             case "batchNumber":
               return (
-                <Link href={`/lager/sparbarhet?batch=${row.id}`} style={{ color: "var(--accent-fg)" }}>
-                  {row.batchNumber}
-                </Link>
+                <>
+                  <Link href={`/lager/sparbarhet?batch=${row.id}`} style={{ color: "var(--accent-fg)" }}>
+                    {row.batchNumber}
+                  </Link>
+                  {row.burnt ? <span style={{ color: "var(--status-stopped-text)" }}> — bränt</span> : null}
+                </>
               );
+            case "kind":
+              return row.kind === "serial" ? "Serienummer" : "Batch";
             case "article":
               return (
                 <>

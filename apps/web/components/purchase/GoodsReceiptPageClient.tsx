@@ -10,7 +10,7 @@ import { SectionHeading } from "../ui/SectionHeading";
 import { Field, Input, Select } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
 import { ScanPanel } from "../ui/ScanInput";
-import { useCountState, useScanFeedback, useScanQueue } from "../ui/useOrderScan";
+import { useCountState, useScanFeedback, useScanQueue, useScanState } from "../ui/useOrderScan";
 import { apiFetch } from "../../lib/api";
 import { locationOptionLabel } from "../../lib/stockLocations";
 import { confirmDialog } from "../../lib/confirm";
@@ -19,15 +19,19 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import { toBaseQuantity, toUnitQuantity } from "../../lib/units";
-import { serialCountOf } from "../../lib/serialInput";
+import { SERIAL_NUMBERS_MAX, serialCountOf } from "../../lib/serialInput";
 import { SerialNumbersInput, isStockSerial, useSerialModes } from "../stock/SerialNumbers";
 import {
   countScan,
   enteredQuantity,
   hasCounted,
   isScannableRow,
+  placeBatchScan,
   purchaseScanDate,
+  receiptScanFields,
   resolveOrderScan,
+  serialScanDuplicate,
+  serialScanRow,
   type OrderCountState,
   type OrderScanRow,
 } from "../../lib/orderScan";
@@ -37,6 +41,7 @@ import {
   type PurchaseOrder,
   type PurchaseOrderRow,
   type PurchaseOrderStatus,
+  type ScanGs1,
   type ScanMatch,
   type StockLocation,
 } from "../../lib/types";
@@ -79,6 +84,15 @@ const articleLabel = (a: { articleNumber: string; name: string }) => `${a.articl
 // counts one per scan on the article's row — the first article scan clears
 // the prefilled amounts, so only what was counted is received (the rules are
 // lib/orderScan.ts, shared with Utleverans).
+//
+// GS1 (#8 etapp 2 steg 6): a code that carries a batch (AI 10) and an
+// utgångsdatum (17) counts in that batch on a batchstyrd rad — the row's
+// Batch/Utgångsdatum are filled when empty (a typed value is never
+// overwritten), another batch than the row's becomes a batch part. On a
+// serienummerrad a code with a serienummer (21) adds the number to the
+// row's list; scanned without one, the row waits for its numbers — the next
+// codes that are nothing else are taken as them. Everything scanned lands in
+// fields shown on the row, to be checked before Rapportera.
 export function GoodsReceiptPageClient({
   locations,
   selected,
@@ -123,10 +137,13 @@ export function GoodsReceiptPageClient({
   useUnsavedGuard(hasCounted(count));
   const { feedback, ok, warn, clear: clearFeedback } = useScanFeedback();
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
-  const [batches, setBatches] = useState<Record<string, RowBatches>>({});
+  const [batches, batchesRef, setBatches] = useScanState<Record<string, RowBatches>>({});
   // Serienummer (#8 etapp 2) per row: one number per styck, for the articles
   // whose numbers are created at the receipt.
-  const [serials, setSerials] = useState<Record<string, string[]>>({});
+  const [serials, serialsRef, setSerials] = useScanState<Record<string, string[]>>({});
+  // The serienummerrad that an article scan without a number left waiting
+  // for its numbers.
+  const awaitingSerialRow = useRef<string | null>(null);
   const serialModes = useSerialModes(openRows.map((r) => ({ articleId: r.articleId, tracking: r.articleTracking })));
   const nextPartKey = useRef(1);
   const [pending, setPending] = useState(false);
@@ -134,9 +151,9 @@ export function GoodsReceiptPageClient({
   const [lastRowId, setLastRowId] = useState<string | null>(null);
   // An article scanned before an order was chosen that is open on several
   // orders: the list narrows to them until one is picked.
-  const [articleOrders, setArticleOrders] = useState<{ article: ArticleMatch; orders: PurchaseOrder[] } | null>(null);
+  const [articleOrders, setArticleOrders] = useState<{ article: ArticleMatch; orders: PurchaseOrder[]; gs1: ScanGs1 | null } | null>(null);
   // The scan that chose the order: counted once the order's rows have loaded.
-  const pendingCount = useRef<{ orderId: string; article: ArticleMatch } | null>(null);
+  const pendingCount = useRef<{ orderId: string; article: ArticleMatch; gs1: ScanGs1 | null } | null>(null);
   const scanField = useRef<HTMLInputElement>(null);
   // A queued scan that switched order waits here until the new order has
   // loaded, so the next scan in the queue counts against it, not the old one.
@@ -158,9 +175,9 @@ export function GoodsReceiptPageClient({
   }
   // The props the queued scan handlers read — a handler may run after a
   // navigation it did not see.
-  const latest = useRef({ order, openRows, scanRows, rows });
+  const latest = useRef({ order, openRows, scanRows, rows, serialModes });
   useEffect(() => {
-    latest.current = { order, openRows, scanRows, rows };
+    latest.current = { order, openRows, scanRows, rows, serialModes };
     const waiter = orderWaiter.current;
     if (waiter && waiter.orderId === selectedId) {
       orderWaiter.current = null;
@@ -175,6 +192,7 @@ export function GoodsReceiptPageClient({
     setCount(NO_COUNT);
     setBatches({});
     setSerials({});
+    awaitingSerialRow.current = null;
     setRowErrors({});
     setDone(null);
     setLastRowId(null);
@@ -200,14 +218,114 @@ export function GoodsReceiptPageClient({
     goToOrder(next.id);
   }
 
-  function applyCount(article: ArticleMatch) {
-    const outcome = countScan(latest.current.scanRows, countRef.current, article.id);
+  // How the row's article is tracked in stock, as the scan rules ask: a
+  // serienummerrad only when the numbers are created at the receipt.
+  function rowTracking(row: PurchaseOrderRow): "batch" | "serial" | null {
+    if (isStockSerial(row.articleTracking, latest.current.serialModes, row.articleId)) return "serial";
+    return row.articleBatchTracked ? "batch" : null;
+  }
+
+  // The serienummerrader of an article, in styck (one number each).
+  function serialRowsOf(articleId: string) {
+    return latest.current.openRows
+      .filter((r) => r.articleId === articleId && rowTracking(r) === "serial")
+      .map((r) => ({
+        id: r.id,
+        articleId: r.articleId,
+        remainingStyck: Number(r.quantityOrdered) - Number(r.quantityReceived),
+        maxStyck: null,
+        date: purchaseScanDate(r, latest.current.order),
+      }));
+  }
+
+  // A scanned serienummer into a row's list; Ta emot nu follows the list.
+  function addScannedSerial(rowId: string, serialNumber: string) {
+    const row = latest.current.openRows.find((r) => r.id === rowId);
+    if (!row) return;
+    const label = articleLabel({ articleNumber: row.articleNumber, name: row.articleName });
+    setLastRowId(rowId);
+    if (serialScanDuplicate(serialsRef.current, serialNumber) !== null) {
+      warn(`Serienummer ${serialNumber} är redan skannat — ${label}`);
+      return;
+    }
+    const list = [...(serialsRef.current[rowId] ?? []), serialNumber];
+    if (list.length > SERIAL_NUMBERS_MAX) {
+      warn(`Högst ${SERIAL_NUMBERS_MAX} serienummer åt gången — ${label}`);
+      return;
+    }
+    setSerials((prev) => ({ ...prev, [rowId]: list }));
+    setCount({
+      counting: true,
+      quantities: { ...countRef.current.quantities, [rowId]: String(toUnitQuantity(list.length, row.unitFactor)) },
+    });
+    setDone(null);
+    const styck = Number(row.quantityOrdered) - Number(row.quantityReceived);
+    const text = `${label}: serienummer ${serialNumber} — ${list.length} av ${styck}`;
+    if (list.length > styck) warn(`${text} — mer än restantalet`);
+    else ok(text);
+  }
+
+  // An article scan, with what a GS1 code said next to the article.
+  function applyScan(article: ArticleMatch, gs1: ScanGs1 | null) {
+    const { scanRows: currentRows, openRows: currentOpen } = latest.current;
+    const serialRows = serialRowsOf(article.id);
+    const serialTarget =
+      serialRows.length > 0
+        ? serialScanRow(serialRows, article.id, Object.fromEntries(serialRows.map((r) => [r.id, (serialsRef.current[r.id] ?? []).length]))) ?? serialRows[0]!
+        : null;
+    // The row an ordinary count would take (Inleverans has no cap, so there
+    // always is one).
+    const counted = countScan(currentRows, countRef.current, article.id);
+    const targetId = serialTarget?.id ?? (counted.counted ? counted.rowId : null);
+    const row = currentOpen.find((r) => r.id === targetId);
+    const fields = receiptScanFields(row ? rowTracking(row) : null, gs1);
+    awaitingSerialRow.current = null;
+    if (!row || fields.kind === "plain") {
+      applyCount(article);
+      return;
+    }
+    if (fields.kind === "serial") {
+      addScannedSerial(row.id, fields.serialNumber);
+      // More numbers of the same article may follow as bare codes.
+      awaitingSerialRow.current = row.id;
+      return;
+    }
+    if (fields.kind === "awaitSerial") {
+      awaitingSerialRow.current = row.id;
+      setLastRowId(row.id);
+      // Counting starts — the prefilled restantal cannot stand without numbers.
+      setCount({ counting: true, quantities: { ...countRef.current.quantities, [row.id]: countRef.current.quantities[row.id] ?? "0" } });
+      ok(`${articleLabel(article)} har serienummer — skanna serienumren, ett per styck`);
+      return;
+    }
+    // A batch: on the row's own part, an extra part that has it, or a new one.
+    const current = batchesRef.current[row.id] ?? NO_BATCHES;
+    const placement = placeBatchScan(current, fields);
+    if (placement.target === "main") {
+      setBatches((prev) => ({ ...prev, [row.id]: { ...current, batchNumber: placement.batchNumber, expiresOn: placement.expiresOn } }));
+      applyCount(article, row.id, `batch ${fields.batchNumber}`);
+      return;
+    }
+    const parts =
+      placement.target === "part"
+        ? current.parts.map((p, i) => (i === placement.index ? { ...p, quantity: placement.quantity, expiresOn: placement.expiresOn } : p))
+        : [...current.parts, { key: nextPartKey.current++, quantity: placement.quantity, batchNumber: placement.batchNumber, expiresOn: placement.expiresOn }];
+    setBatches((prev) => ({ ...prev, [row.id]: { ...current, parts } }));
+    // Counting starts here too: the row's own part is not received unasked.
+    setCount({ counting: true, quantities: { ...countRef.current.quantities, [row.id]: countRef.current.quantities[row.id] ?? "0" } });
+    setLastRowId(row.id);
+    setDone(null);
+    ok(`${articleLabel(article)}: batch ${fields.batchNumber} — ${placement.quantity} ${row.unitCode ?? ""} i egen batchdel`.replace("  ", " "));
+  }
+
+  function applyCount(article: ArticleMatch, onlyRowId?: string, note?: string) {
+    const outcome = countScan(latest.current.scanRows, countRef.current, article.id, onlyRowId);
     if (!outcome.counted) return;
     setCount(outcome.state);
     setLastRowId(outcome.rowId);
     setDone(null);
     const row = latest.current.openRows.find((r) => r.id === outcome.rowId);
-    const text = `${articleLabel(article)}: ${outcome.quantity} av ${outcome.remaining} ${row?.unitCode ?? ""}`.trim();
+    const text = `${articleLabel(article)}: ${outcome.quantity} av ${outcome.remaining} ${row?.unitCode ?? ""}`.trim() + (note ? ` — ${note}` : "");
     if (outcome.over) warn(`${text} — mer än restantalet`);
     else ok(text);
   }
@@ -217,14 +335,14 @@ export function GoodsReceiptPageClient({
     const waiting = pendingCount.current;
     if (!waiting || waiting.orderId !== selectedId) return;
     pendingCount.current = null;
-    applyCount(waiting.article);
-    // applyCount reads refs only; rerun when the order's rows arrive.
+    applyScan(waiting.article, waiting.gs1);
+    // applyScan reads refs only; rerun when the order's rows arrive.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, scanRows]);
 
   const onScan = useScanQueue(handleScan, warn);
 
-  async function handleScan(code: string, matches: ScanMatch[]) {
+  async function handleScan(code: string, matches: ScanMatch[], gs1: ScanGs1 | null) {
     const { order: current, scanRows: currentRows, rows: allRows } = latest.current;
     const intent = resolveOrderScan(
       matches,
@@ -242,7 +360,7 @@ export function GoodsReceiptPageClient({
         return;
       }
       case "count":
-        applyCount(intent.match);
+        applyScan(intent.match, gs1);
         return;
       case "order": {
         const m = intent.match;
@@ -290,12 +408,12 @@ export function GoodsReceiptPageClient({
           return;
         }
         if (found.length === 1) {
-          pendingCount.current = { orderId: found[0]!.id, article };
+          pendingCount.current = { orderId: found[0]!.id, article, gs1 };
           goToOrder(found[0]!.id);
           await waitForOrder(found[0]!.id);
           return;
         }
-        setArticleOrders({ article, orders: found });
+        setArticleOrders({ article, orders: found, gs1 });
         ok(`${articleLabel(article)} väntas på ${found.length} ordrar — välj en`);
         return;
       }
@@ -304,16 +422,25 @@ export function GoodsReceiptPageClient({
           `${code} är en ${intent.match.kind === "salesOrder" ? "kundorder" : "tillverkningsorder"} — skanna en inköpsorder, en artikel eller en lagerplats`
         );
         return;
-      case "unknown":
+      case "unknown": {
+        // A serienummerrad is waiting for its numbers: a code that is nothing
+        // else is one of them (a GS1 code without an article: its AI 21).
+        const waiting = awaitingSerialRow.current;
+        const serialNumber = gs1 ? gs1.serial : code;
+        if (waiting && serialNumber && latest.current.openRows.some((r) => r.id === waiting)) {
+          addScannedSerial(waiting, serialNumber);
+          return;
+        }
         warn(`Ingen träff för ${code}`);
         return;
+      }
     }
   }
 
   // Picked from the list of orders waiting for a scanned article: that scan
   // counts on the chosen order.
   function pickArticleOrder(o: PurchaseOrder) {
-    if (articleOrders) pendingCount.current = { orderId: o.id, article: articleOrders.article };
+    if (articleOrders) pendingCount.current = { orderId: o.id, article: articleOrders.article, gs1: articleOrders.gs1 };
     clearFeedback();
     goToOrder(o.id);
   }

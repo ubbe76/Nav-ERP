@@ -355,6 +355,9 @@ export interface StockBatchListRow {
   expiresOn?: string | null;
   batchDate?: string | null;
   expired?: boolean;
+  // Sort: batch or serial number; burnt = a serial number whose delivery was undone.
+  kind?: "batch" | "serial";
+  burnt?: boolean;
   quantity: number;
 }
 export interface TraceBatchRef {
@@ -369,6 +372,27 @@ export interface TraceBatchRef {
   expiresOn?: string | null;
   origin: StockBatchOrigin | null;
   createdAt: string | null;
+  // null = Okänd; burnt = serial number burnt by an undone delivery.
+  kind?: "batch" | "serial" | null;
+  burnt?: boolean;
+}
+export interface TraceSerialGroup {
+  count: number;
+  numbers: string;
+  batchIds: string[];
+}
+export interface TraceSerialOrigin {
+  deliveryId: string;
+  deliveryNumber: string;
+  deliveryRowId: string;
+  salesOrderId: string;
+  orderNumber: string;
+  salesOrderRowId: string;
+  customerId: string;
+  customerName: string;
+  deliveredAt: string;
+  rowQuantity: number;
+  undoneAt: string | null;
 }
 export type TraceStop = null | "unknown" | "repeated" | "limit";
 export interface TraceEvent {
@@ -396,6 +420,8 @@ export interface TraceDelivery {
   customerName: string;
   deliveredAt: string;
   quantity: number;
+  undoneAt?: string | null;
+  serialNumbers?: string;
 }
 export interface TraceOnHand {
   locationId: string;
@@ -416,6 +442,8 @@ export interface BackwardTraceNode {
     materials: BackwardTraceNode[];
   }[];
   events: TraceEvent[];
+  serials?: TraceSerialGroup;
+  deliveryOrigin?: TraceSerialOrigin | null;
 }
 export interface ForwardTraceNode {
   batch: TraceBatchRef;
@@ -433,6 +461,7 @@ export interface ForwardTraceNode {
   deliveries: TraceDelivery[];
   events: TraceEvent[];
   onHand: TraceOnHand[];
+  serials?: TraceSerialGroup;
 }
 export interface BatchTrace {
   batch: TraceBatchRef;
@@ -869,6 +898,10 @@ export type ScanMatch =
       unitCode: string;
       active: boolean;
       matchedBy: "barcode" | "articleNumber";
+      // How the article's stock is tracked ("serial" only when the numbers
+      // are created at the receipt) — which of a GS1 code's batch and
+      // serienummer the article asks for.
+      stockTracking: "batch" | "serial" | null;
     }
   | { kind: "purchaseOrder"; id: string; orderNumber: string; status: string; partyName: string }
   | { kind: "salesOrder"; id: string; orderNumber: string; status: string; partyName: string }
@@ -879,11 +912,36 @@ export type ScanMatch =
       status: string;
       articleNumber: string;
       articleName: string;
+    }
+  // A batch or a serienummer that exists under the scanned number (GS1 AI
+  // 21, else AI 10, else the whole code), with where it stands.
+  | {
+      kind: "batch";
+      id: string;
+      batchNumber: string;
+      batchKind: "batch" | "serial";
+      articleId: string;
+      articleNumber: string;
+      articleName: string;
+      expiresOn: string | null;
+      quantityOnHand: number;
+      locations: { locationId: string; locationName: string; warehouseName: string; blocked: boolean; quantity: number }[];
     };
+
+// What a GS1 code (GS1-128, DataMatrix) said next to its GTIN — read by the
+// server (parseGs1); null = the code is no GS1 string.
+export interface ScanGs1 {
+  gtin: string | null;
+  batch: string | null;
+  serial: string | null;
+  expiresOn: string | null;
+  quantity: number | null;
+}
 
 export interface ScanResult {
   code: string;
   matches: ScanMatch[];
+  gs1: ScanGs1 | null;
 }
 
 // Base-data register entry (leveransvillkor / betalningsvillkor / speditörer).

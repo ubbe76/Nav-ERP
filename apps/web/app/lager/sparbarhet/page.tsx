@@ -30,7 +30,7 @@ export default async function TraceabilityPage(props: { searchParams: Promise<Pa
     : null;
   const list = batchId
     ? null
-    : await apiGet<Paged<StockBatchListRow>>(`/api/v1/stock/batches${listApiQuery(searchParams, ["expiry"], pageSize)}`, cookieHeader);
+    : await apiGet<Paged<StockBatchListRow>>(`/api/v1/stock/batches${listApiQuery(searchParams, ["expiry", "kind"], pageSize)}`, cookieHeader);
 
   // A search that finds exactly one batch opens its trace (the batch links in
   // the log and on the receipt are ?search=<number>).
