@@ -1092,6 +1092,12 @@ function VillkorTab({
   const [paymentTermId, setPaymentTermId] = useState(partner.paymentTermId ?? "");
   const [carrierId, setCarrierId] = useState(partner.carrierId ?? "");
   const [carrierCustomerNumber, setCarrierCustomerNumber] = useState(partner.carrierCustomerNumber ?? "");
+  // Leverantörens förval (suppliers only): Frakt på vårt konto on new
+  // inquiries / purchase orders, and the address a purchase order is sent to.
+  const storedFreightDefault = !isCustomer ? (partner as Supplier).freightPaidByUsDefault : false;
+  const storedPurchaseOrderEmail = !isCustomer ? ((partner as Supplier).purchaseOrderEmail ?? "") : "";
+  const [freightPaidByUsDefault, setFreightPaidByUsDefault] = useState(storedFreightDefault);
+  const [purchaseOrderEmail, setPurchaseOrderEmail] = useState(storedPurchaseOrderEmail);
   const [deliveryDays, setDeliveryDays] = useState<DeliveryDaysValue>({
     weekdays: partner.deliveryWeekdays,
     mode: partner.deliveryDayMode,
@@ -1188,6 +1194,11 @@ function VillkorTab({
             ? { lateInterest, lateInterestRate: agreedRate, ...(!privatePerson ? { lateFee } : {}) }
             : {}),
           ...(!isCustomer ? { defaultVatCodeId: defaultVatCodeId || null, defaultCostCenterId: defaultCostCenterId || null } : {}),
+          // Leverantörens förval: only what was changed is sent.
+          ...(!isCustomer && freightPaidByUsDefault !== storedFreightDefault ? { freightPaidByUsDefault } : {}),
+          ...(!isCustomer && purchaseOrderEmail.trim() !== storedPurchaseOrderEmail
+            ? { purchaseOrderEmail: orNull(purchaseOrderEmail) }
+            : {}),
           // E-faktura: a private person never gets Peppol invoices, so the
           // fields are hidden — and what is sent stays as it was saved.
           ...(isCustomer && !privatePerson ? { invoiceDelivery, peppolId: peppolId.trim() } : {}),
@@ -1404,6 +1415,33 @@ function VillkorTab({
             />
           </Field>
         </FormRow>
+
+        {!isCustomer && (
+          <>
+            <Field label="Frakt på vårt konto" htmlFor="freightPaidByUsDefault">
+              <Toggle
+                id="freightPaidByUsDefault"
+                checked={freightPaidByUsDefault}
+                onChange={(e) => setFreightPaidByUsDefault(e.target.checked)}
+              />
+            </Field>
+            <FormHint attached>
+              Förval på nya förfrågningar och inköpsordrar till leverantören — kan ändras på dokumentet.
+            </FormHint>
+            <Field label="E-post för inköpsorder" htmlFor="purchaseOrderEmail">
+              <Input
+                id="purchaseOrderEmail"
+                type="email"
+                maxLength={255}
+                value={purchaseOrderEmail}
+                onChange={(e) => setPurchaseOrderEmail(e.target.value)}
+              />
+            </Field>
+            <FormHint attached>
+              Hit skickas inköpsordrar. Tomt = huvudkontaktens e-post, annars leverantörens E-post.
+            </FormHint>
+          </>
+        )}
 
         <DeliveryDaysFields
           kind={isCustomer ? "customer" : "supplier"}

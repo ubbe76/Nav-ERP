@@ -12,6 +12,8 @@ export interface NewEmailLogEntry {
   documentType: EmailDocumentType;
   documentId: string | null;
   recipient: string;
+  // Kopia as sent (inquiry / purchase order); omitted = none.
+  cc?: string[];
   subject: string;
   message: string;
   attachDrawings: boolean;
@@ -40,7 +42,14 @@ export function createMailRepository(db: Db) {
       const conditions = [];
       if (query.search) {
         const pattern = ilikePattern(query.search);
-        conditions.push(or(ilike(emailLog.recipient, pattern), ilike(emailLog.subject, pattern)));
+        // Kopia is searched too — "who got this?" includes the copy.
+        conditions.push(
+          or(
+            ilike(emailLog.recipient, pattern),
+            ilike(emailLog.subject, pattern),
+            sql`array_to_string(${emailLog.cc}, ' ') ilike ${pattern}`
+          )
+        );
       }
       if (query.status) conditions.push(inArray(emailLog.status, query.status));
       if (query.documentType) conditions.push(eq(emailLog.documentType, query.documentType));

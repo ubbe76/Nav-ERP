@@ -20,7 +20,8 @@ import {
   listPurchaseInvoiceBasisQuerySchema,
   listPurchaseOrdersQuerySchema,
   listQuerySchema,
-  sendDocumentEmailSchema,
+  sendPurchaseOrderEmailSchema,
+  sendSupplierDocumentEmailSchema,
   setPurchaseOrderStatusSchema,
   updateArticleSupplierSchema,
   updateContactSchema,
@@ -53,6 +54,7 @@ import {
   PurchaseDispatchRowNotLegoError,
   PurchaseDispatchUndoneError,
   PurchaseOrderNotFoundError,
+  PurchaseOrderRecipientMissingError,
   PurchaseOrderRowHasDispatchesError,
   PurchaseOrderRowNotFoundError,
   PurchaseReceiptAlreadyUndoneError,
@@ -376,7 +378,7 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
   });
 
   app.post<{ Params: { id: string } }>("/inquiries/:id/send-email", async (req, reply) => {
-    const input = sendDocumentEmailSchema.parse(req.body);
+    const input = sendSupplierDocumentEmailSchema.parse(req.body);
     try {
       return await service.sendInquiryEmail(req.params.id, input);
     } catch (err) {
@@ -570,11 +572,13 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
   });
 
   app.post<{ Params: { id: string } }>("/purchase-orders/:id/send-email", async (req, reply) => {
-    const input = sendDocumentEmailSchema.parse(req.body);
+    const input = sendPurchaseOrderEmailSchema.parse(req.body);
     try {
       return await service.sendPurchaseOrderEmail(req.params.id, input);
     } catch (err) {
       if (err instanceof PurchaseOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      // No Mottagare sent and the supplier has no address to fall back on.
+      if (err instanceof PurchaseOrderRecipientMissingError) return reply.code(400).send(errorBody(err));
       return inquiryError(err, reply);
     }
   });

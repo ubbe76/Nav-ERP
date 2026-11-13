@@ -568,6 +568,7 @@ export function createImportExportRepository(db: Db | Tx) {
           vatNumber: row.vatNumber,
           contactName: row.contactName,
           email: row.email,
+          purchaseOrderEmail: row.purchaseOrderEmail,
           phone: row.phone,
           address: row.address,
           postalCode: row.postalCode,
@@ -580,6 +581,7 @@ export function createImportExportRepository(db: Db | Tx) {
           deliveryTerm: row.deliveryTermId ? (deliveryTermText.get(row.deliveryTermId) ?? null) : null,
           carrier: row.carrierId ? (carrierText.get(row.carrierId) ?? null) : null,
           carrierCustomerNumber: row.carrierCustomerNumber,
+          freightPaidByUsDefault: row.freightPaidByUsDefault,
         }))
         .sort((a, b) => byText(a.supplierNumber, b.supplierNumber));
     },

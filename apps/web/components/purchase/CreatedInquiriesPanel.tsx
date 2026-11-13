@@ -99,6 +99,7 @@ export function CreatedInquiriesPanel({
             label: "Maila",
             modalTitle: `Skicka ${mailTarget.inquiryNumber} via e-post`,
             endpoint: `/api/v1/inquiries/${mailTarget.id}/send-email`,
+            ccSupplierId: mailTarget.supplierId,
             subject: documentMailTexts({ kind: "inquiry", number: mailTarget.inquiryNumber }, mailLanguage).subject,
             message: documentMailTexts({ kind: "inquiry", number: mailTarget.inquiryNumber }, mailLanguage).body,
           }}

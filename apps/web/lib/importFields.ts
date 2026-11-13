@@ -162,6 +162,7 @@ export const SUPPLIER_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "vatNumber", label: "VAT-nummer" },
   { field: "contactName", label: "Kontaktperson" },
   { field: "email", label: "E-post" },
+  { field: "purchaseOrderEmail", label: "E-post för inköpsorder" },
   { field: "phone", label: "Telefon" },
   { field: "address", label: "Adress" },
   { field: "address2", label: "Adressrad 2" },
@@ -176,6 +177,7 @@ export const SUPPLIER_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "deliveryTerm", label: "Leveransvillkor" },
   { field: "carrier", label: "Leveranssätt/speditör" },
   { field: "carrierCustomerNumber", label: "Kundnummer hos speditör" },
+  { field: "freightPaidByUsDefault", label: "Frakt på vårt konto" },
 ];
 
 // Mirrors SUPPLIER_CONTACT_IMPORT_FIELDS in

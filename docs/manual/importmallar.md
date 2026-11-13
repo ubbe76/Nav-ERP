@@ -250,6 +250,7 @@ Bredvid **Ladda ned mall** har varje importflik knappen **Exportera**. Den hämt
 | **VAT-nummer** | Nej | Momsregistreringsnummer, max 30 tecken. Tom cell lämnar fältet orört på en befintlig post. | SE556987654301 |
 | **Kontaktperson** | Nej | Kontaktpersonens namn på leverantörskortets Allmänt-flik, max 255 tecken — kontaktregistret importeras separat som leverantörskontakter. | Bo Bengtsson |
 | **E-post** | Nej | Leverantörens e-postadress (dit förfrågningar och inköpsorder skickas), max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt på en ny post och orört på en befintlig, med en varning. | order@example.com |
+| **E-post för inköpsorder** | Nej | Adressen som inköpsorder skickas till, max 255 tecken — utan den går ordern till huvudkontakten eller leverantörens E-post. En ogiltig adress stoppar inte raden — fältet lämnas tomt på en ny post och orört på en befintlig, med en varning. | inkopsorder@example.com |
 | **Telefon** | Nej | Max 50 tecken. Tom cell lämnar fältet orört på en befintlig post. | 010-100 10 10 |
 | **Adress** | Nej | Postadressens första rad. Adress, Adressrad 2 och Adressrad 3 slås ihop till en adress med radbrytningar; är alla tre tomma lämnas adressen orörd. | Valsverksgatan 4 |
 | **Adressrad 2** | Nej | Postadressens andra rad, valfri — slås ihop med Adress. | Port C |
@@ -264,6 +265,7 @@ Bredvid **Ladda ned mall** har varje importflik knappen **Exportera**. Den hämt
 | **Leveransvillkor** | Nej | Leveransvillkorets kod eller namn i registret (skiftlägesokänsligt), max 100 tecken. Ett okänt värde skapas som nytt villkor. | Fritt vårt lager |
 | **Leveranssätt/speditör** | Nej | Speditörens kod eller namn i registret (skiftlägesokänsligt), max 100 tecken. Ett okänt värde skapas som ny speditör. | Exempelfrakt |
 | **Kundnummer hos speditör** | Nej | Vårt kundnummer hos leverantörens speditör, max 50 tecken. Tom cell lämnar fältet orört på en befintlig post. | F-98765 |
+| **Frakt på vårt konto** | Nej | Ja eller Nej (även 1/0). Ja gör att nya förfrågningar och inköpsordrar till leverantören får Frakt på vårt konto ifyllt. En ny leverantör utan värde blir Nej. Tom cell lämnar fältet orört på en befintlig post. | Ja |
 
 ## Leverantörskontakter
 

@@ -96,6 +96,8 @@ export const createInquirySchema = z.object({
   supplierId: z.string().uuid(),
   expectedDeliveryDate: z.string().date().optional(),
   note: z.string().optional(),
+  // "Frakt på vårt konto" — omitted = the supplier's förval.
+  freightPaidByUs: z.boolean().optional(),
   rows: z.array(inquiryRowSchema).min(1),
 });
 export type CreateInquiryInput = z.infer<typeof createInquirySchema>;
@@ -137,6 +139,9 @@ export const createSupplierSchema = z.object({
   supplierNumber: z.string().trim().min(1).max(50).optional(),
   contactName: z.string().max(255).optional(),
   email: z.string().email().max(255).optional(),
+  // E-post för inköpsorder — the recipient of a sent purchase order
+  // (omitted = the supplier's E-post).
+  purchaseOrderEmail: z.string().email().max(255).optional(),
   phone: z.string().max(50).optional(),
   address: z.string().optional(),
   postalCode: z.string().max(20).optional(),
@@ -147,6 +152,8 @@ export const createSupplierSchema = z.object({
   paymentTermId: z.string().uuid().optional(),
   carrierId: z.string().uuid().optional(),
   carrierCustomerNumber: z.string().max(50).optional(),
+  // Frakt på vårt konto (förval) for new inquiries and purchase orders.
+  freightPaidByUsDefault: z.boolean().default(false),
   // Our customer number at this supplier — printed on inquiry/PO.
   ourCustomerNumber: z.string().max(50).optional(),
   currency: z.string().regex(/^[A-Z]{3}$/, "3 stora bokstäver, t.ex. SEK").default("SEK"),
@@ -173,6 +180,7 @@ export const updateSupplierSchema = z
     supplierNumber: z.string().trim().min(1).max(50).optional(),
     contactName: z.string().max(255).nullable().optional(),
     email: z.string().email().max(255).nullable().optional(),
+    purchaseOrderEmail: z.string().email().max(255).nullable().optional(),
     phone: z.string().max(50).nullable().optional(),
     address: z.string().nullable().optional(),
     postalCode: z.string().max(20).nullable().optional(),
@@ -183,6 +191,7 @@ export const updateSupplierSchema = z
     paymentTermId: z.string().uuid().nullable().optional(),
     carrierId: z.string().uuid().nullable().optional(),
     carrierCustomerNumber: z.string().max(50).nullable().optional(),
+    freightPaidByUsDefault: z.boolean().optional(),
     ourCustomerNumber: z.string().max(50).nullable().optional(),
     currency: z.string().regex(/^[A-Z]{3}$/, "3 stora bokst\u00e4ver, t.ex. SEK").optional(),
     // Språk: not nullable — a supplier always has a document language.
@@ -210,9 +219,12 @@ export const createPurchaseOrderSchema = z.object({
   note: z.string().optional(),
   exchangeRate: blankSafe(z.coerce.number().positive()).optional(),
   // Er referens (the supplier's contact) / Vår referens (our buyer) —
-  // printed on the PO document when set.
+  // printed on the PO document when set. Er referens omitted = the name of
+  // the supplier's huvudkontakt; "" is an explicit "none".
   yourReference: z.string().max(100).optional(),
   ourReference: z.string().max(100).optional(),
+  // "Frakt på vårt konto" — omitted = the supplier's förval.
+  freightPaidByUs: z.boolean().optional(),
   // Projekt (kostnadsställen och projekt): follows into the supplier invoice.
   projectId: z.string().uuid().nullable().optional(),
   // Avvikelser: the deviation this document is created for (Skapa

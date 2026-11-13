@@ -1046,6 +1046,11 @@ export interface Supplier extends PartnerCardFields, SupplierPaymentFields {
   name: string;
   contactName: string | null;
   email: string | null;
+  // E-post för inköpsorder: where a purchase order is sent (null = the
+  // huvudkontakt's address, else E-post).
+  purchaseOrderEmail: string | null;
+  // Frakt på vårt konto (förval) on new inquiries and purchase orders.
+  freightPaidByUsDefault: boolean;
   phone: string | null;
   // Vårt kundnummer hos leverantören — printed on inquiry/PO.
   ourCustomerNumber: string | null;
@@ -1098,6 +1103,9 @@ export interface PurchaseOrder extends DocumentTermsFields {
   id: string;
   // Supplier's document language (GET :id only).
   supplierLanguage?: DocumentLanguage;
+  // GET :id only: who a sent order goes to — the supplier's E-post för
+  // inköpsorder, else its huvudkontakt's address, else its E-post.
+  defaultRecipient?: string | null;
   // GET :id only: the supplier's Momskod (förval, else derived from its
   // country — `derived`) and the VAT it charges with it (0 for EU, omvänd
   // moms, momsfritt). Live; null only with an empty code register.
@@ -3918,6 +3926,8 @@ export interface EmailLogEntry {
   documentId: string | null;
   linkKind: EmailLinkKind;
   recipient: string;
+  // Kopia as sent (inquiry / purchase order) — Skicka om sends the same.
+  cc: string[];
   subject: string;
   message: string;
   status: EmailStatus;

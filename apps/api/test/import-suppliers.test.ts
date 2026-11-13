@@ -947,3 +947,74 @@ describe("planSupplierImport — Språk (language)", () => {
     expect(Object.fromEntries(rows.map((r) => [r.number, r.language]))).toEqual({ "800": "en", "801": "sv" });
   });
 });
+
+// Inköp: leverantörens förval (migration 0217) — the columns Frakt på vårt
+// konto and E-post för inköpsorder.
+describe("planSupplierImport — leverantörens förval", () => {
+  const mapping = {
+    Leverantörsnummer: "supplierNumber",
+    Namn: "name",
+    "E-post för inköpsorder": "purchaseOrderEmail",
+    "Frakt på vårt konto": "freightPaidByUsDefault",
+  };
+
+  it("reads Ja/Nej (1/0), makes anything else a row error, and drops an invalid address with a warning", async () => {
+    const plan = await planSupplierImport(
+      {
+        mapping,
+        rows: [
+          ["700", "Lev Ett", "order@example.com", "Ja"],
+          ["701", "Lev Två", "", "nej"],
+          ["702", "Lev Tre", "", "kanske"],
+          ["703", "Lev Fyra", "inte en adress", "1"],
+          ["704", "Lev Fem", "", ""],
+        ],
+      },
+      fakeDeps()
+    );
+    expect(plan.rows.map((r) => r.errors)).toEqual([[], [], ["Ogiltigt värde 'kanske' för Frakt på vårt konto — ange Ja eller Nej"], [], []]);
+    expect(plan.rows[3]!.warnings).toEqual(["Ogiltig e-postadress 'inte en adress' — fältet lämnades tomt"]);
+    expect(plan.creates).toEqual([
+      { supplierNumber: "700", name: "Lev Ett", purchaseOrderEmail: "order@example.com", freightPaidByUsDefault: true },
+      { supplierNumber: "701", name: "Lev Två", freightPaidByUsDefault: false },
+      { supplierNumber: "703", name: "Lev Fyra", freightPaidByUsDefault: true },
+      { supplierNumber: "704", name: "Lev Fem" },
+    ]);
+  });
+
+  it("an empty cell leaves an existing supplier untouched", async () => {
+    const plan = await planSupplierImport(
+      { mapping, rows: [["700", "", "", ""], ["701", "", "ny@example.com", "Nej"]] },
+      fakeDeps({ "700": "11111111-1111-1111-1111-111111111111", "701": "22222222-2222-2222-2222-222222222222" })
+    );
+    expect(plan.updates).toEqual([
+      { id: "11111111-1111-1111-1111-111111111111", patch: {} },
+      { id: "22222222-2222-2222-2222-222222222222", patch: { purchaseOrderEmail: "ny@example.com", freightPaidByUsDefault: false } },
+    ]);
+  });
+
+  it("the template headings map themselves (E-post stays E-post) and the commit stores the values", async () => {
+    const suggested = suggestSupplierMapping(["Leverantörsnummer", "Namn", "E-post", "E-post för inköpsorder", "Frakt på vårt konto"]);
+    expect(suggested).toMatchObject({
+      "E-post": "email",
+      "E-post för inköpsorder": "purchaseOrderEmail",
+      "Frakt på vårt konto": "freightPaidByUsDefault",
+    });
+    await importService.commit("suppliers", {
+      mapping,
+      rows: [
+        ["800", "Stål AB", "order@example.com", "Ja"],
+        ["801", "Plåt AB", "", ""],
+      ],
+    });
+    // An update with empty cells keeps what the card says.
+    await importService.commit("suppliers", { mapping, rows: [["800", "Stål AB", "", ""]] });
+    const rows = await db
+      .select({ number: suppliers.supplierNumber, email: suppliers.purchaseOrderEmail, freight: suppliers.freightPaidByUsDefault })
+      .from(suppliers);
+    expect(Object.fromEntries(rows.map((r) => [r.number, [r.email, r.freight]]))).toEqual({
+      "800": ["order@example.com", true],
+      "801": [null, false],
+    });
+  });
+});

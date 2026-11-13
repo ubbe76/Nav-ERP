@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
 import { StatusPill } from "../ui/StatusPill";
@@ -9,7 +9,8 @@ import { Button } from "../ui/Button";
 import { Field, Input } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
 import type { DocumentLanguage } from "../../lib/documentLanguage";
-import { EMAIL_DOCUMENT_TYPE_LABELS, EMAIL_STATUS_PILL, type EmailLogEntry } from "../../lib/types";
+import { EMAIL_DOCUMENT_TYPE_LABELS, EMAIL_STATUS_PILL, type EmailLogEntry, type PartnerContact } from "../../lib/types";
+import { formatRecipients, MAX_EMAIL_CC, parseCcAddresses } from "../../lib/mailCc";
 import buttonStyles from "../ui/Button.module.css";
 import fieldStyles from "../ui/Field.module.css";
 import { Form, FormActions, FormError } from "../ui/Form";
@@ -27,6 +28,10 @@ export interface SendButtonConfig {
   // Overrides the shared default recipient (e.g. the customer's invoice
   // email for "Skicka faktura").
   to?: string;
+  // Kopia (förfrågan / inköpsorder): the supplier whose contacts (fliken
+  // Kontakter) can be ticked as copy recipients; typed addresses too. Unset
+  // = the dialog has no Kopia and sends no `cc`.
+  ccSupplierId?: string;
   // Small note next to the button (e.g. "Kunden vill ha e-faktura").
   hint?: string;
   // Navigate here after a successful send instead of refreshing (a quote's
@@ -147,6 +152,9 @@ export function MailSection({
                     </span>
                   );
                 }
+                // Kopia follows the recipient: "a@x (kopia: b@x, c@x)".
+                case "recipient":
+                  return formatRecipients(row.recipient, row.cc);
                 default:
                   return row[key as keyof EmailLogEntry] as string;
               }
@@ -202,10 +210,40 @@ export function SendEmailModal({
   const [showPrices, setShowPrices] = useState(configurationPrices ?? false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // Kopia: the supplier's contacts with an address (ticked ones) plus typed
+  // addresses. A failed lookup just leaves the typed field.
+  const ccSupplierId = config.ccSupplierId;
+  const [ccContacts, setCcContacts] = useState<PartnerContact[]>([]);
+  const [ccChecked, setCcChecked] = useState<string[]>([]);
+  const [ccText, setCcText] = useState("");
+  useEffect(() => {
+    if (!ccSupplierId) return;
+    let cancelled = false;
+    apiFetch<PartnerContact[]>(`/api/v1/suppliers/${ccSupplierId}/contacts`)
+      .then((contacts) => {
+        if (!cancelled) setCcContacts(contacts.filter((c) => c.email));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [ccSupplierId]);
+  // The recipient itself is not offered as a copy.
+  const offeredContacts = ccContacts.filter((c) => c.email!.trim().toLowerCase() !== to.trim().toLowerCase());
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    let cc: string[] | null = null;
+    if (ccSupplierId) {
+      const ticked = offeredContacts.filter((c) => ccChecked.includes(c.id)).map((c) => c.email!);
+      const parsed = parseCcAddresses(ticked, ccText, to);
+      if (!parsed.ok) {
+        setError(parsed.message);
+        return;
+      }
+      cc = parsed.addresses;
+    }
     setPending(true);
     try {
       await apiFetch(config.endpoint, {
@@ -215,6 +253,7 @@ export function SendEmailModal({
           subject,
           message,
           attachDrawings,
+          ...(cc !== null ? { cc } : {}),
           ...(configurationPrices !== null ? { showConfigurationPrices: showPrices } : {}),
           ...config.extraBody,
         }),
@@ -235,6 +274,32 @@ export function SendEmailModal({
         <Field label="Mottagare" htmlFor="mailTo">
           <Input id="mailTo" type="email" required value={to} onChange={(e) => setTo(e.target.value)} />
         </Field>
+
+        {ccSupplierId && (
+          <Field label="Kopia" htmlFor="mailCc">
+            {offeredContacts.map((contact) => (
+              <label key={contact.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14, marginBottom: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={ccChecked.includes(contact.id)}
+                  onChange={(e) =>
+                    setCcChecked((prev) => (e.target.checked ? [...prev, contact.id] : prev.filter((id) => id !== contact.id)))
+                  }
+                />
+                {contact.name} ({contact.email})
+              </label>
+            ))}
+            <Input
+              id="mailCc"
+              placeholder="Fler adresser, åtskilda med kommatecken"
+              value={ccText}
+              onChange={(e) => setCcText(e.target.value)}
+            />
+            <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+              Kryssa i leverantörens kontakter eller skriv adresser — högst {MAX_EMAIL_CC}.
+            </span>
+          </Field>
+        )}
 
         <Field label="Ämne" htmlFor="mailSubject">
           <Input id="mailSubject" required maxLength={255} value={subject} onChange={(e) => setSubject(e.target.value)} />

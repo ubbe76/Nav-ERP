@@ -10,7 +10,7 @@ import { AuditTrailSection } from "../../../../components/system/AuditTrailSecti
 import { documentMailTexts } from "../../../../lib/documentMailTexts";
 import { documentLanguageOf } from "../../../../lib/documentLanguage";
 import { apiGet } from "../../../../lib/api";
-import { countDrawings, getDefaultRecipient, getDocumentEmails } from "../../../../lib/mail";
+import { countDrawings, getDocumentEmails } from "../../../../lib/mail";
 import type {
   PurchaseDispatch,
   PurchaseOrder,
@@ -18,7 +18,6 @@ import type {
   PurchaseReceipt,
   RegisterEntry,
   StockLocation,
-  Supplier,
 } from "../../../../lib/types";
 import shellStyles from "../../../../components/AppShell.module.css";
 import { HelpLink } from "../../../../components/ui/HelpLink";
@@ -30,18 +29,19 @@ export default async function PurchaseOrderDetailPage(props: { params: Promise<{
   const order = await apiGet<PurchaseOrder>(`/api/v1/purchase-orders/${params.id}`, cookieHeader).catch(() => null);
   if (!order) notFound();
 
-  const [rows, receipts, dispatches, locations, emails, supplier, deliveryTerms, paymentTerms, carriers] = await Promise.all([
+  const [rows, receipts, dispatches, locations, emails, deliveryTerms, paymentTerms, carriers] = await Promise.all([
     apiGet<PurchaseOrderRow[]>(`/api/v1/purchase-orders/${params.id}/rows`, cookieHeader),
     apiGet<PurchaseReceipt[]>(`/api/v1/purchase-orders/${params.id}/receipts`, cookieHeader),
     apiGet<PurchaseDispatch[]>(`/api/v1/purchase-orders/${params.id}/dispatches`, cookieHeader),
     apiGet<StockLocation[]>("/api/v1/stock/locations", cookieHeader),
     getDocumentEmails(order.id, cookieHeader),
-    apiGet<Supplier>(`/api/v1/suppliers/${order.supplierId}`, cookieHeader).catch(() => null),
     apiGet<RegisterEntry[]>("/api/v1/delivery-terms", cookieHeader),
     apiGet<RegisterEntry[]>("/api/v1/payment-terms", cookieHeader),
     apiGet<RegisterEntry[]>("/api/v1/carriers", cookieHeader),
   ]);
-  const defaultTo = await getDefaultRecipient("suppliers", order.supplierId, supplier?.email ?? null, cookieHeader);
+  // The server's rule: E-post för inköpsorder, else the huvudkontakt's
+  // address, else the supplier's E-post.
+  const defaultTo = order.defaultRecipient ?? "";
   const drawingCount = await countDrawings(rows.map((r) => r.articleId), cookieHeader);
   const poMail = documentMailTexts(
     { kind: "purchaseOrder", number: order.orderNumber },
@@ -87,6 +87,7 @@ export default async function PurchaseOrderDetailPage(props: { params: Promise<{
                   label: "Skicka via e-post",
                   modalTitle: `Skicka ${order.orderNumber} via e-post`,
                   endpoint: `/api/v1/purchase-orders/${order.id}/send-email`,
+                  ccSupplierId: order.supplierId,
                   subject: poMail.subject,
                   message: poMail.body,
                 },

@@ -3,6 +3,7 @@ import { legoOneOffSql } from "../../manufacturing/repository/lego-one-off.js";
 import { alias } from "drizzle-orm/pg-core";
 import { loadPriceBreaks, replacePriceBreaks } from "./price-breaks.js";
 import { dispatchedQuantitySql } from "./dispatched-quantity.js";
+import { loadSupplierOrderDefaults, resolveOrderDefaults } from "./supplier-order-defaults.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 import {
   articleSupplierPriceHistory,
@@ -338,6 +339,11 @@ export function createPurchaseRepository(db: Db) {
       return loadVatCodeBook(db);
     },
 
+    // Leverantörens förval for a new order / the purchase order's recipient.
+    async supplierOrderDefaults(supplierId: string) {
+      return loadSupplierOrderDefaults(db, supplierId);
+    },
+
     async findSupplierById(id: string) {
       const [row] = await db
         .select({
@@ -517,6 +523,10 @@ export function createPurchaseRepository(db: Db) {
         // Terms are snapshotted from the supplier at creation (like the PO's
         // currency) — later changes on the supplier card don't touch documents.
         const [supplier] = await tx.select().from(suppliers).where(eq(suppliers.id, input.supplierId));
+        // Frakt på vårt konto: the supplier's förval unless the call says.
+        const defaults = resolveOrderDefaults(await loadSupplierOrderDefaults(tx, input.supplierId), {
+          freightPaidByUs: input.freightPaidByUs,
+        });
         const inquiryNumber = await getNextOrderNumber(tx, "inquiry");
         const [inquiry] = await tx
           .insert(inquiries)
@@ -528,6 +538,7 @@ export function createPurchaseRepository(db: Db) {
             deliveryTermId: supplier?.deliveryTermId ?? null,
             paymentTermId: supplier?.paymentTermId ?? null,
             carrierId: supplier?.carrierId ?? null,
+            freightPaidByUs: defaults.freightPaidByUs,
             createdBy,
           })
           .returning();
@@ -800,6 +811,12 @@ export function createPurchaseRepository(db: Db) {
           return { ok: false, reason: "invalid_status", status: inquiry.status };
         }
 
+        // Leverantörens förval: the inquiry's own Frakt på vårt konto wins
+        // (it started from the förval and may have been changed there); Er
+        // referens is the huvudkontakt — an inquiry has no reference.
+        const defaults = resolveOrderDefaults(await loadSupplierOrderDefaults(tx, inquiry.supplierId), {
+          freightPaidByUs: inquiry.freightPaidByUs,
+        });
         const orderNumber = await getNextOrderNumber(tx, "purchase_order");
         const [order] = await tx
           .insert(purchaseOrders)
@@ -808,12 +825,13 @@ export function createPurchaseRepository(db: Db) {
             supplierId: inquiry.supplierId,
             expectedDeliveryDate: inquiry.expectedDeliveryDate,
             note: inquiry.note,
+            yourReference: defaults.yourReference,
             currency: money.currency,
             exchangeRate: String(money.exchangeRate),
             deliveryTermId: inquiry.deliveryTermId,
             paymentTermId: inquiry.paymentTermId,
             carrierId: inquiry.carrierId,
-            freightPaidByUs: inquiry.freightPaidByUs,
+            freightPaidByUs: defaults.freightPaidByUs,
             createdBy,
           })
           .returning();
@@ -868,6 +886,10 @@ export function createPurchaseRepository(db: Db) {
       return db.transaction(async (tx) => {
         // Terms snapshotted from the supplier at creation, like currency.
         const [supplier] = await tx.select().from(suppliers).where(eq(suppliers.id, input.supplierId));
+        // Leverantörens förval (Frakt på vårt konto, Er referens = the
+        // huvudkontakt) — an explicit value in the call wins. Every way of
+        // creating an order from scratch ends here.
+        const defaults = resolveOrderDefaults(await loadSupplierOrderDefaults(tx, input.supplierId), input);
         const orderNumber = await getNextOrderNumber(tx, "purchase_order");
         const [row] = await tx
           .insert(purchaseOrders)
@@ -876,7 +898,8 @@ export function createPurchaseRepository(db: Db) {
             supplierId: input.supplierId,
             expectedDeliveryDate: input.expectedDeliveryDate,
             note: input.note,
-            yourReference: input.yourReference,
+            yourReference: defaults.yourReference,
+            freightPaidByUs: defaults.freightPaidByUs,
             ourReference: input.ourReference,
             // Projekt (kostnadsställen och projekt) — validated by the service.
             projectId: input.projectId ?? null,

@@ -20,6 +20,7 @@ import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { FormError } from "../ui/Form";
 import { formatStockholmDateTime } from "../../lib/date";
+import { formatRecipients } from "../../lib/mailCc";
 import { apiErrorMessage } from "../../lib/errorMessages";
 
 // Where each document type's card lives — for the Dokument column link.
@@ -127,6 +128,9 @@ export function EmailLogPageClient({ log, pageSize }: { log: Paged<EmailLogEntry
                 label
               );
             }
+            // Kopia follows the recipient: "a@x (kopia: b@x)".
+            case "recipient":
+              return formatRecipients(entry.recipient, entry.cc);
             case "status": {
               const pill = EMAIL_STATUS_PILL[entry.status];
               return (

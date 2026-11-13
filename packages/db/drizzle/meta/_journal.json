@@ -1520,6 +1520,13 @@
       "when": 1794545129762,
       "tag": "0216_serienummer_vid_utleverans",
       "breakpoints": true
+    },
+    {
+      "idx": 217,
+      "version": "7",
+      "when": 1794569933907,
+      "tag": "0217_leverantorens_forval",
+      "breakpoints": true
     }
   ]
 }

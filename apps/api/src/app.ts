@@ -66,7 +66,7 @@ import { createYearEndClosingService } from "./modules/economy/service/year-end-
 import { fixedAssetRoutes } from "./modules/economy/routes/fixed-asset.routes.js";
 import { yearEndRoutes } from "./modules/economy/routes/year-end.routes.js";
 import { createMailRepository } from "./modules/mail/repository/mail.repository.js";
-import { createMailService } from "./modules/mail/service/mail.service.js";
+import { createMailService, type MailTransportFactory } from "./modules/mail/service/mail.service.js";
 import { createDocumentPdfService } from "./modules/mail/service/document-pdf.js";
 import { mailRoutes } from "./modules/mail/routes/mail.routes.js";
 import { createManufacturingRepository } from "./modules/manufacturing/repository/manufacturing.repository.js";
@@ -231,6 +231,9 @@ export interface BuildAppOptions {
   // Rows per file in the import exports (#35) before they are split into a
   // .zip — the import's 10 000 by default; the tests lower it.
   importExportMaxRows?: number;
+  // The outgoing mail transport (nodemailer by default) — the tests send
+  // through a fake and read what went out.
+  mailTransport?: MailTransportFactory;
 }
 
 export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
@@ -407,7 +410,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   });
   // Outgoing email + printable PDFs (SMTP config and company header both
   // live in the system module).
-  const mailService = createMailService(createMailRepository(database), systemService);
+  const mailService = createMailService(createMailRepository(database), systemService, options.mailTransport);
   const documentPdfService = createDocumentPdfService(systemService);
   // Lagervärdering (D1) — read-only report over stock_transactions +
   // article_standard_cost_history, PDF drawn in the shared A4 template like
