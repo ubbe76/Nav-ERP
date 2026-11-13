@@ -523,7 +523,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.8.10 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.8.11 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -540,8 +540,8 @@ konfigurator. Frontend har in-/utloggning
 försäljning) med bevakningslista, där varje användare väljer sina egna kort
 (veckans leveranser och inleveranser, beläggning, fakturor, offerter,
 avvikelser m.fl.), sidan **Aviseringar** (negativa saldon,
-försenade ordrar, förfallna fakturor, offerter att följa upp m.fl., med
-valfri daglig sammanställning per e-post), sidomeny med undermenyer per modul,
+försenade ordrar, förfallna fakturor, offerter att följa upp m.fl.,
+grupperade per område, med valfri daglig sammanställning per e-post), sidomeny med undermenyer per modul,
 modulhubbar med grupperade listkort, och modul-UI för hela byggordningen.
 Alla registerlistor har serversidig fritextsökning, filtrering och
 paginering (`?search/filter/limit/offset` → `{ rows, total }`), så
