@@ -19,18 +19,24 @@ export function ManualStatusChange({
   statuses,
   current,
   onDone,
+  disabled = false,
+  title,
 }: {
   // e.g. "/api/v1/purchase-orders/<id>" — POSTed to {endpoint}/set-status.
   endpoint: string;
   statuses: Record<string, { label: string }>;
   current: string;
   onDone: () => void;
+  // A row open in Ändra on the card blocks it like the flow buttons: a new
+  // status could close the edit and drop the row's unsaved change.
+  disabled?: boolean;
+  title?: string;
 }) {
   const [open, setOpen] = useState(false);
 
   return (
     <>
-      <Button type="button" size="small" variant="ghost" onClick={() => setOpen(true)}>
+      <Button type="button" size="small" variant="ghost" disabled={disabled} title={title} onClick={() => setOpen(true)}>
         Ändra status manuellt
       </Button>
       <Modal open={open} onClose={() => setOpen(false)} title="Ändra status manuellt">

@@ -681,7 +681,7 @@ function AddInquiryRowForm({
             </Select>
           </Field>
           {legoOption && (
-            <Field label="Ställpris" htmlFor="inquiryRowSetupPrice">
+            <Field label={`Ställpris (${currencyLabel(currency)})`} htmlFor="inquiryRowSetupPrice">
               <Input
                 id="inquiryRowSetupPrice"
                 type="number"

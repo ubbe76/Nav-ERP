@@ -412,7 +412,7 @@ Rader vars artikel saknar förkalkyl kan inte mätas. De ingår i orderns summa 
 6. **Öppna igen** — bara i status Förlorad.
 7. **Avbryt order** (på en offert **Avbryt offert**) — möjligt i status Offert och Bekräftad (inte Order), och frågar först eftersom en avbruten order inte kan öppnas igen.
 
-Står en rad öppen i **Ändra** är knapparna i knappraden (**Lägg till rad**, **Skapa kundorder**, **Starta tillverkning**, **Leverera**, **Avbryt order** med flera) spärrade tills du sparat eller avbrutit raden. Ett orört **Á-pris** och en orörd **Rabatt (%)** skickas inte med när du sparar raden: samma antal behåller radens pris och prisursprung, och ett nytt antal prissätts om av priskedjan.
+Står en rad öppen i **Ändra** är knapparna i knappraden (**Lägg till rad**, **Skapa kundorder**, **Starta tillverkning**, **Leverera**, **Avbryt order** med flera) och **Ändra status manuellt** spärrade tills du sparat eller avbrutit raden. Ett orört **Á-pris** och en orörd **Rabatt (%)** skickas inte med när du sparar raden: samma antal behåller radens pris och prisursprung, och ett nytt antal prissätts om av priskedjan.
 
 | Status | Betydelse |
 |---|---|

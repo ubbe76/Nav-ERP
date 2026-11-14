@@ -24,13 +24,8 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — races med litet fönster
 
-- [ ] **Bekräftelsedialogen saknar dialogroll** (webbgranskningen 2026-11-11): `ConfirmDialogHost` (`lib/confirm.ts`) renderas utan `role="dialog"`/`aria-modal` och etikett, så skärmläsare och Playwright hittar den inte som dialog. Kontrollera även fokusfällan.
-
-- [ ] **Orderkortets e-post och manuell status under radredigering** (webbgranskningen 2026-11-11): medan en rad står öppen i **Ändra** spärras knappraden (Bekräfta, Leverera, Avbryt …), men **Skicka orderbekräftelse**/offertmejlet och **Ändra status manuellt** (`SalesOrderCardPage`/`ManualStatusChange`, utanför `SalesOrderDetail`) går fortfarande att klicka och skickar det sparade dokumentet utan radens ändring. Förslag: lyft `rowEditOpen` till kortsidan eller låt `useUnsavedGuard`-tillståndet spärra dokumentknapparna.
-
 - [ ] **Bokföringsspärrens triggers läser förälderns status utan lås** (delatgranskningen 2026-11-11, medvetet lämnad): `nav_verification_locked` och `nav_supplier_invoice_files_guard` (0095) läser verifikatet/fakturan med en vanlig SELECT, så en skrivare som INTE själv låser verifikatet kan lägga en rad på ett utkast samtidigt som ett annat anrop bokför det. Ingen kod gör så (`replaceRows`/`addRow`/`deleteRow`/`bookVerificationInTx` tar `FOR UPDATE` först) — bara ett skript når det. `FOR SHARE` i funktionerna rättar det men kan ge deadlock för en skrivare som lägger rader först och uppdaterar huvudet sedan; prövas mot alla bokföringsvägar innan.
 
-- [ ] **Två samtidiga Aktivera på olika revisioner** ger 409 med den missvisande texten "Revision … already exists" (artikelgranskningen 2026-11-11). (Reservplatsen `***`s race rättad i delatgranskningen, 0208.)
 - [ ] **Konfigurerade rader i behovsberäkningen och Leveranstidskontrollen** (`planning.service.ts` ~1166–1186, ~2002, ~3045) utvärderar sparade val utan att jämföra nyckeln — ett förval tillagt i mallen efteråt ger materialbehov för det nya förvalet tills Ändra konfiguration körs (TO-skapandet vägrar redan; `variantPrice` rättat i artikelgranskningen).
 
 - [ ] **Löneperiodens Lås mot odaterade ändringar:** personalkortet (standardschema, övertidsförval, Anställd från/till), dags- och veckoscheman, OB-regler, frånvarokoder och inställningarna kan ändras medan Lås räknar underlaget (tidgranskningen serialiserade bara de daterade skrivarna, `payroll-period-guard.ts`); `attest` läser öppen närvaro utanför transaktionen. OB-regelns namn har inget unikt index (förkontrollen ensam).
@@ -41,10 +36,8 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 - [ ] **Importens igenkänning:** kundens/leverantörens adressmall utan Adressnamn och Förvald (bara nummer + Adressrad 1/Postnummer/Stad) känns igen som kund-/leverantörsfil och skriver adressen över motpartens egen — tvetydig mot kundmallen, så den rättades inte i importgranskningen (guiden visar typen före commit).
 
-- [ ] **Á-pris-etiketten säger kr på en förfrågan i annan valuta** (planeringsgranskningens webbkontroll 2026-11-10): dialogen **Lägg till rad** på en förfrågan till en EUR-leverantör visar "Á-pris (kr/st)" (`InquiryDetail.tsx`; förfrågan har ingen egen valuta, `GET /inquiries/:id` bär sedan dess `supplierCurrency`). Kolla samma etikett på IO-kortet (manualen: "à-pris-etiketten visar `kr/{enhet}`").
 
 ### Låga — layout
-
 
 
 ### Låga — fel i manualen

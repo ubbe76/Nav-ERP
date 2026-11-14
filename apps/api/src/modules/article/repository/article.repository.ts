@@ -266,6 +266,27 @@ type ArticleListFilter = Omit<ListArticlesQuery, "limit" | "offset"> & {
   activeOnly?: boolean;
 };
 
+// Revisions change one at a time per article (or drawing): its row is locked
+// FOR NO KEY UPDATE first, before any revision, so two Aktivera on different
+// revisions at once run in turn and the second's switch-off sees the first's
+// new active revision. Without it both switched off the old one and the
+// second hit the one-active index — a 409 "Revision already exists"
+// (artikelgranskningen 2026-11-11). NO KEY UPDATE: the FK checks of rows
+// that reference the article (FOR KEY SHARE) are not held up.
+async function lockArticleForRevisions(tx: Tx, articleId: string): Promise<boolean> {
+  const [row] = await tx.select({ id: articles.id }).from(articles).where(eq(articles.id, articleId)).for("no key update");
+  return row !== undefined;
+}
+
+async function lockDrawingForRevisions(tx: Tx, drawingId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: articleDrawings.id })
+    .from(articleDrawings)
+    .where(eq(articleDrawings.id, drawingId))
+    .for("no key update");
+  return row !== undefined;
+}
+
 export function createArticleRepository(db: Db) {
   // The register's where — the ONE implementation behind list (page +
   // count) and listIds (Kopierat's query). A new filter goes here and
@@ -998,6 +1019,7 @@ export function createArticleRepository(db: Db) {
 
     async createRevision(articleId: string, input: CreateArticleRevisionInput) {
       return db.transaction(async (tx) => {
+        await lockArticleForRevisions(tx, articleId);
         const [existing] = await tx
           .select({ value: count() })
           .from(articleRevisions)
@@ -1017,7 +1039,8 @@ export function createArticleRepository(db: Db) {
       });
     },
 
-    // The revision is locked (and found) FIRST: an id that is not this
+    // The article is locked first (lockArticleForRevisions), then the
+    // revision is locked (and found): an id that is not this
     // article's must not get as far as deactivating the one in force — the
     // transaction committed that with nothing activated. FOR NO KEY UPDATE
     // (the UPDATE's own lock mode): a concurrent delete of it waits, while a
@@ -1025,6 +1048,7 @@ export function createArticleRepository(db: Db) {
     // not held up.
     async updateRevision(articleId: string, revisionId: string, input: UpdateArticleRevisionInput) {
       return db.transaction(async (tx) => {
+        if (!(await lockArticleForRevisions(tx, articleId))) return null;
         const [target] = await tx
           .select({ id: articleRevisions.id })
           .from(articleRevisions)
@@ -1126,6 +1150,7 @@ export function createArticleRepository(db: Db) {
     // to the article.
     async createDrawingRevision(drawingId: string, input: CreateArticleRevisionInput) {
       return db.transaction(async (tx) => {
+        await lockDrawingForRevisions(tx, drawingId);
         const [existing] = await tx
           .select({ value: count() })
           .from(articleDrawingRevisions)
@@ -1149,6 +1174,7 @@ export function createArticleRepository(db: Db) {
     // drawing's active one is switched off.
     async updateDrawingRevision(drawingId: string, revisionId: string, input: UpdateArticleRevisionInput) {
       return db.transaction(async (tx) => {
+        if (!(await lockDrawingForRevisions(tx, drawingId))) return null;
         const [target] = await tx
           .select({ id: articleDrawingRevisions.id })
           .from(articleDrawingRevisions)

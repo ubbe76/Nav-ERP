@@ -343,6 +343,8 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
             statuses={PURCHASE_ORDER_STATUS_PILL}
             current={order.status}
             onDone={() => router.refresh()}
+            disabled={rowEditOpen}
+            title={rowEditTitle}
           />
         }
       >
