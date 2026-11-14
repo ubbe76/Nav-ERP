@@ -22,6 +22,7 @@ import {
   type ManufacturingPlanReader,
 } from "../src/modules/planning/service/planning.service.js";
 import { parsed } from "./helpers/parsed.js";
+import { waitForLockWaiter } from "./helpers/year-end.js";
 import { unwiredSalesOrderLinks } from "./helpers/unwired";
 
 // Produktionsplanering against Postgres: a new TO is planned in its own
@@ -590,10 +591,10 @@ describe("concurrency", () => {
     first.catch(() => {});
     let second: ReturnType<typeof startSecond> | undefined;
     try {
-      await waitForLockWaiters(1);
+      await waitForLockWaiter();
       second = startSecond();
       second.catch(() => {});
-      await waitForLockWaiters(2);
+      await waitForLockWaiter(10_000, 2);
     } finally {
       release();
     }
@@ -618,20 +619,6 @@ describe("concurrency", () => {
     expect(await Promise.all(ops.map((op) => planRows(op.id)))).toEqual([[{ monday: W1, minutes: 1200 }], [{ monday: W1, minutes: 1200 }]]);
   });
 });
-
-// Polls until at least `n` sessions of this test database wait on a lock.
-async function waitForLockWaiters(n: number, timeoutMs = 10_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const result = await db.execute(
-      sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`
-    );
-    const [row] = [...result] as { n: number }[];
-    if ((row?.n ?? 0) >= n) return;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  throw new Error(`Fewer than ${n} transactions waiting on a lock`);
-}
 
 describe("readers of the plan", () => {
   it("the terminal, the TO list and the operations list carry the planned weeks", async () => {

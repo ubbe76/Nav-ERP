@@ -195,15 +195,17 @@ export async function prepareClosableYear(
 // Resolves once a backend in this database waits on a lock — the
 // deterministic "the other transaction is now blocked" signal for race
 // tests (instead of a sleep that may be too short on a loaded machine).
-export async function waitForLockWaiter(timeoutMs = 10_000): Promise<void> {
+// `count`: how many sessions must be waiting — two contenders queued behind
+// one holder, so the release lets them fight it out in queue order.
+export async function waitForLockWaiter(timeoutMs = 10_000, count = 1): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const result = await db.execute(
       sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`
     );
     const [row] = [...result] as { n: number }[];
-    if ((row?.n ?? 0) > 0) return;
+    if ((row?.n ?? 0) >= count) return;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  throw new Error("No transaction started waiting on a lock");
+  throw new Error(count === 1 ? "No transaction started waiting on a lock" : `Fewer than ${count} transactions waiting on a lock`);
 }

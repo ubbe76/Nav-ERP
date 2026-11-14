@@ -18,6 +18,7 @@ import {
 import { postingVatCode, resetVatCodes } from "./helpers/vat-codes.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { parsed } from "./helpers/parsed.js";
+import { waitForLockWaiter } from "./helpers/year-end.js";
 
 const repo = createEconomyRepository(db);
 const authRepo = createAuthRepository(db);
@@ -566,6 +567,39 @@ describe("vat report — settlement", () => {
     expect(await ledgerNet("2640", MAR.from, MAR.to)).toBe(0);
     expect(await ledgerNet("2650", MAR.from, MAR.to)).toBe(-150);
     expect(await ledgerNet("3740", MAR.from, MAR.to)).toBe(-0.1);
+  });
+
+  // The advisory lock is the only thing between two settles of the same
+  // period: the other's uncommitted settlement row is invisible to the
+  // overlap check. Both are queued behind a holder of the lock and released
+  // together — exactly one books, the other sees its committed row.
+  it("two settles of the same period at once: one books, the other is refused (the advisory lock)", async () => {
+    const { user } = await setupEconomy();
+    await bookSale(user.id, `${CURRENT_YEAR}-03-05`, 1000, "2610", 25);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let held!: () => void;
+    const holding = new Promise<void>((resolve) => (held = resolve));
+    const holder = db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('vat_settlements'))`);
+      held();
+      await gate;
+    });
+    await Promise.race([holding, holder]);
+    const first = vatReport.settle(MAR, user.id).then((r) => r, (err: unknown) => err);
+    const second = vatReport.settle(MAR, user.id).then((r) => r, (err: unknown) => err);
+    try {
+      await waitForLockWaiter(10_000, 2);
+    } finally {
+      release();
+    }
+    await holder;
+    const outcomes = await Promise.all([first, second]);
+    expect(outcomes.filter((o) => o instanceof VatPeriodAlreadySettledError)).toHaveLength(1);
+    expect(outcomes.filter((o) => !(o instanceof Error))).toHaveLength(1);
+    expect(await db.select().from(vatSettlements)).toHaveLength(1);
+    expect(await ledgerNet("2610", MAR.from, MAR.to)).toBe(0);
+    expect(await ledgerNet("2650", MAR.from, MAR.to)).toBe(-250);
   });
 
   it("validates period coverage like the report does", async () => {

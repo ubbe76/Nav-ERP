@@ -59,10 +59,15 @@ function legacyBox(number: string, s: Settings): string | null {
   return null;
 }
 
+// All seven settings the backfill's CTE reads.
 const SETTING_KEYS: Partial<Record<keyof Settings, string>> = {
   postingVatOut25: "posting_vat_out_25",
+  postingVatOut12: "posting_vat_out_12",
+  postingVatOut6: "posting_vat_out_6",
+  postingVatIn: "posting_vat_in",
   postingRevenue0: "posting_revenue_0",
   postingReminderFeeAccount: "posting_reminder_fee_account",
+  postingPaymentWriteOff: "posting_payment_writeoff",
 };
 
 async function reset() {
@@ -77,8 +82,13 @@ async function seedFixtures() {
     ["3911", "Hyresintäkter"],
     ["2611", "Utgående moms 25 % (egen)"],
     ["3800", "Aktiverat arbete"],
+    // Targets for the "every setting customized" variant.
+    ["2621", "Utgående moms 12 % (egen)"],
+    ["2631", "Utgående moms 6 % (egen)"],
+    ["2641", "Ingående moms (egen)"],
+    ["3741", "Öresutjämning (egen)"],
   ] as const) {
-    await db.execute(sql`INSERT INTO accounts (number, name) VALUES (${number}, ${name})`);
+    await db.execute(sql`INSERT INTO accounts (number, name) VALUES (${number}, ${name}) ON CONFLICT DO NOTHING`);
   }
   await db.execute(sql`UPDATE accounts SET vat_box = NULL`);
 }
@@ -108,6 +118,19 @@ describe("0102 vat_box backfill", () => {
         postingVatOut25: "2611",
         postingRevenue0: "3010",
         postingReminderFeeAccount: "3590",
+      },
+    },
+    {
+      label: "every setting customized",
+      settings: {
+        ...LEGACY_DEFAULTS,
+        postingVatOut25: "2611",
+        postingVatOut12: "2621",
+        postingVatOut6: "2631",
+        postingVatIn: "2641",
+        postingRevenue0: "3010",
+        postingReminderFeeAccount: "3590",
+        postingPaymentWriteOff: "3741",
       },
     },
   ];

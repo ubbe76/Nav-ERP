@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
-import { auditLog, db, yearEndClosingVerifications, yearEndClosings } from "@navet/db";
+import { auditLog, db, fiscalYears, yearEndClosingVerifications, yearEndClosings } from "@navet/db";
+import { FiscalYearClosedError } from "../src/modules/economy/service/accounting-period-lock.js";
 import { FiscalYearNotFoundError, YearEndClosingVerificationError } from "../src/modules/economy/service/economy.service.js";
 import { readVatAccountMovements } from "../src/modules/economy/service/vat-account-movements.js";
 import { ZeroAmountPostingError } from "../src/modules/economy/service/verification-poster.js";
@@ -60,6 +61,14 @@ describe("startClosing / updateClosingDate", () => {
     );
     const closing = await service.startClosing({ fiscalYearId: yearId, closingDate: `${YEAR}-12-20` }, user.id);
     expect(closing.closingDate).toBe(`${YEAR}-12-20`);
+  });
+
+  it("refuses to start a closing on a closed year, and writes neither a closing nor a log entry", async () => {
+    const { user, yearId } = await setupYearEnd();
+    await db.update(fiscalYears).set({ status: "closed", closedAt: new Date() }).where(eq(fiscalYears.id, yearId));
+    await expect(service.startClosing({ fiscalYearId: yearId }, user.id)).rejects.toBeInstanceOf(FiscalYearClosedError);
+    expect(await db.select().from(yearEndClosings)).toEqual([]);
+    expect(await db.select().from(auditLog).where(eq(auditLog.entityType, "year_end_closing"))).toEqual([]);
   });
 
   it("409s a second closing for the same year and 404s an unknown year", async () => {

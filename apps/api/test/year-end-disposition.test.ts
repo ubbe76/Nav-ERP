@@ -11,6 +11,7 @@ import { and, eq, gte, lte } from "drizzle-orm";
 import { AccountingPeriodLockedError } from "../src/modules/economy/service/accounting-period-lock.js";
 import { YearEndClosingVerificationError } from "../src/modules/economy/service/economy.service.js";
 import { testEconomyService } from "./helpers/services.js";
+import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import {
   NEXT_YEAR,
   YEAR,
@@ -54,6 +55,24 @@ describe("vinstdisposition", () => {
     await expect(
       service.bookProfitDisposition(closingId, { agmDate: `${YEAR}-12-31`, dividendAmount: 0 }, user.id)
     ).rejects.toBeInstanceOf(InvalidAgmDateError);
+  });
+
+  // A stämma that has not been held yet cannot have decided anything: the
+  // day after today is refused in the preview and the booking alike.
+  it("refuses an AGM date in the future, in the preview and the booking, and books nothing", async () => {
+    const { user } = await setupUserAndAccounts();
+    const closingId = await closedYear(user.id, 1000, 0);
+    const today = stockholmToday();
+    const tomorrow = new Date(Date.parse(`${today}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+    const before = await countVerifications("BS");
+    await expect(service.previewProfitDisposition(closingId, { agmDate: tomorrow, dividendAmount: 0 })).rejects.toBeInstanceOf(
+      InvalidAgmDateError
+    );
+    await expect(service.bookProfitDisposition(closingId, { agmDate: tomorrow, dividendAmount: 0 }, user.id)).rejects.toBeInstanceOf(
+      InvalidAgmDateError
+    );
+    expect(await countVerifications("BS")).toBe(before);
+    expect((await service.getClosing(closingId)).profitDisposition).toBeNull();
   });
 
   it("moves 2099 to 2898 and 2091 on the AGM date, once", async () => {
