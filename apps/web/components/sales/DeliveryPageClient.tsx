@@ -727,7 +727,12 @@ export function DeliveryPageClient({
             target={palletCardDeliveryId ? { kind: "delivery", deliveryId: palletCardDeliveryId } : null}
             onClose={() => setPalletCardDeliveryId(null)}
           />
-          <BookTransportButton deliveryId={done.deliveryId} shipment={null} enabled={freightEnabled} />
+          <BookTransportButton
+            deliveryId={done.deliveryId}
+            shipment={null}
+            enabled={freightEnabled}
+            defaultCarrierId={order?.carrierId ?? null}
+          />
           <button
             type="button"
             className={`${buttonStyles.button} ${buttonStyles.ghost}`}

@@ -4,6 +4,7 @@ import {
   addOrderFreightSchema,
   addShipmentDeliverySchema,
   bookShipmentSchema,
+  createManualShipmentSchema,
   createShipmentSchema,
   listShipmentsQuerySchema,
   openDeliveriesQuerySchema,
@@ -13,6 +14,7 @@ import {
   saveSelectionSchema,
   testFreightConnectionSchema,
   updateFreightSettingsSchema,
+  updateManualShipmentSchema,
   updateShipmentSchema,
 } from "@navet/shared";
 import { FreightAlreadyInvoicedError, FreightRowDeliveredError, SalesOrderCurrencyChangedError } from "../../sales/service/sales.errors.js";
@@ -26,6 +28,9 @@ import type { ShippingService } from "../service/shipping.service.js";
 import type { TrackingService } from "../service/tracking.service.js";
 import {
   DeliveryAlreadyShippedError,
+  ManualShipmentInvoicedError,
+  ShipmentCarrierNotFoundError,
+  ShipmentCarrierRequiredError,
   ShipmentDeliveryUndoneError,
   FreightBookingInProgressError,
   FreightBookingTakenOverError,
@@ -79,6 +84,7 @@ export function mapShippingError(reply: FastifyReply, err: unknown): FastifyRepl
   }
   if (
     err instanceof ShipmentNotFoundError ||
+    err instanceof ShipmentCarrierNotFoundError ||
     err instanceof ShipmentDeliveryNotFoundError ||
     err instanceof ShipmentFileNotFoundError ||
     err instanceof FreightOrderNotFoundError ||
@@ -88,6 +94,7 @@ export function mapShippingError(reply: FastifyReply, err: unknown): FastifyRepl
   }
   if (
     err instanceof MixedCustomersError ||
+    err instanceof ShipmentCarrierRequiredError ||
     err instanceof ShipmentNeedsDeliveryError ||
     err instanceof FreightPickupDayError ||
     err instanceof FreightNoSelectionError ||
@@ -98,6 +105,7 @@ export function mapShippingError(reply: FastifyReply, err: unknown): FastifyRepl
   }
   if (
     err instanceof InvalidShipmentStatusError ||
+    err instanceof ManualShipmentInvoicedError ||
     err instanceof DeliveryAlreadyShippedError ||
     err instanceof ShipmentDeliveryUndoneError ||
     err instanceof FreightNotConfiguredError ||
@@ -186,6 +194,24 @@ export async function shippingRoutes(
   app.post("/shipments", async (req, reply) => {
     const input = createShipmentSchema.parse(req.body);
     return run(reply, async () => reply.code(201).send(await service.create(input, req.user!.id)));
+  });
+
+  // Egna fraktsätt: registered as sent at once (Egen bil, Kunden hämtar, an
+  // own agreement) — works with Sendify switched off too.
+  app.post("/shipments/manual", async (req, reply) => {
+    const input = createManualShipmentSchema.parse(req.body);
+    return run(reply, async () => reply.code(201).send(await service.createManual(input, req.user!.id)));
+  });
+
+  app.patch("/shipments/:id/manual", async (req, reply) => {
+    const { id } = idParams.parse(req.params);
+    const input = updateManualShipmentSchema.parse(req.body);
+    return run(reply, () => service.updateManual(id, input, req.user!.id));
+  });
+
+  app.post("/shipments/:id/delivered", async (req, reply) => {
+    const { id } = idParams.parse(req.params);
+    return run(reply, () => service.markDelivered(id, req.user!.id));
   });
 
   app.patch("/shipments/:id", async (req, reply) => {

@@ -1,7 +1,7 @@
 import { ApiError } from "./api";
 import { apiErrorMessage } from "./errorMessages";
 import type { Status } from "../components/ui/StatusPill";
-import type { ParcelKind, ShipmentStatus } from "./types";
+import type { ParcelKind, ShipmentProvider, ShipmentStatus } from "./types";
 
 export const SHIPMENT_STATUS_LABELS: Record<ShipmentStatus, string> = {
   draft: "Utkast",
@@ -9,6 +9,14 @@ export const SHIPMENT_STATUS_LABELS: Record<ShipmentStatus, string> = {
   delivered: "Levererad",
   cancelled: "Avbruten",
 };
+
+// The status as the card and the lists say it: an own freight method
+// (Egna fraktsätt) is Skickad rather than Bokad, and Makulerad.
+export function shipmentStatusLabel(status: ShipmentStatus, provider: ShipmentProvider): string {
+  if (provider === "manual" && status === "booked") return "Skickad";
+  if (provider === "manual" && status === "cancelled") return "Makulerad";
+  return SHIPMENT_STATUS_LABELS[status];
+}
 
 export const SHIPMENT_STATUS_PILL: Record<ShipmentStatus, Status> = {
   draft: "draft",

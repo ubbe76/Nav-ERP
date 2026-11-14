@@ -213,3 +213,32 @@ export class InvalidFreightArticleError extends Error {
     this.name = "InvalidFreightArticleError";
   }
 }
+
+// Egna fraktsätt: no Speditör chosen and neither the order nor the customer
+// has one to take.
+export class ShipmentCarrierRequiredError extends Error {
+  constructor() {
+    super("Välj speditör — varken ordern eller kunden har någon");
+    this.name = "ShipmentCarrierRequiredError";
+  }
+}
+
+export class ShipmentCarrierNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Speditören hittades inte (${id})`);
+    this.name = "ShipmentCarrierNotFoundError";
+  }
+}
+
+// A manual shipment on an invoice (draft or issued) is not changed — the
+// invoice's freight row was made from it.
+export class ManualShipmentInvoicedError extends Error {
+  constructor(readonly invoiceNumber: string | null) {
+    super(
+      invoiceNumber
+        ? `Försändelsen är fakturerad på faktura ${invoiceNumber} och kan inte ändras`
+        : "Frakten ligger på ett fakturautkast — ta bort fraktraden från utkastet först"
+    );
+    this.name = "ManualShipmentInvoicedError";
+  }
+}

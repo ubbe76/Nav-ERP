@@ -26,6 +26,7 @@ import {
   quoteLossReasons,
   salesOrderRows,
   salesOrders,
+  shipments,
   suppliers,
   units,
   type Db,
@@ -108,6 +109,8 @@ const PARTNER_AND_DOCUMENT_REFERENCES = {
     ref(purchaseOrders, "purchase_orders", "inköpsorder|inköpsorder", purchaseOrders.carrierId),
     ref(inquiries, "inquiries", "förfrågan|förfrågningar", inquiries.carrierId),
     ref(companyCarriers, "company_carriers", "företagets speditörskonto|företagets speditörskonton", companyCarriers.carrierId, []),
+    // Egna fraktsätt (0220): a manual shipment's Speditör.
+    ref(shipments, "shipments", "försändelse|försändelser", shipments.carrierId),
   ],
 } satisfies Record<string, RegisterReference[]>;
 

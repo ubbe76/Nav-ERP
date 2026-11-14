@@ -21,7 +21,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { users } from "./auth";
-import { parcelKindEnum } from "./register";
+import { carriers, parcelKindEnum } from "./register";
 import { customers, deliveries } from "./sales";
 
 // Same local bytea helper as the other schema files (no built-in in drizzle).
@@ -98,6 +98,13 @@ export const shipments = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     shipmentNumber: varchar("shipment_number", { length: 20 }).notNull().unique(),
     status: shipmentStatusEnum("status").notNull().default("draft"),
+    // Egna fraktsätt (migration 0220): "sendify" = booked through the broker;
+    // "manual" = an own freight method (Egen bil, Kunden hämtar, an own
+    // agreement) — registered straight as booked, never sent anywhere, and
+    // carrier_id names it. Shared SHIPMENT_PROVIDERS lists the values.
+    provider: varchar("provider", { length: 20 }).notNull().default("sendify"),
+    // Speditören (the carriers register) of a manual shipment.
+    carrierId: uuid("carrier_id").references(() => carriers.id, { onDelete: "restrict" }),
     customerId: uuid("customer_id")
       .notNull()
       .references(() => customers.id, { onDelete: "restrict" }),
@@ -126,8 +133,10 @@ export const shipments = pgTable(
     senderReferenceManual: boolean("sender_reference_manual").notNull().default(false),
     receiverReference: varchar("receiver_reference", { length: 100 }),
     pickupDate: date("pickup_date").notNull(),
-    pickupFrom: time("pickup_from").notNull(),
-    pickupTo: time("pickup_to").notNull(),
+    // The pickup window — Sendify's only; null on a manual shipment, whose
+    // pickup_date is the day it was sent.
+    pickupFrom: time("pickup_from"),
+    pickupTo: time("pickup_to"),
     providerShipmentId: varchar("provider_shipment_id", { length: 100 }),
     lastRates: jsonb("last_rates").$type<StoredRates>(),
     ratesFetchedAt: timestamp("rates_fetched_at", { withTimezone: true }),
@@ -163,7 +172,15 @@ export const shipments = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("idx_shipments_customer").on(t.customerId), index("idx_shipments_status").on(t.status)]
+  (t) => [
+    index("idx_shipments_customer").on(t.customerId),
+    index("idx_shipments_status").on(t.status),
+    index("idx_shipments_carrier").on(t.carrierId),
+    check("shipments_provider_known", sql`${t.provider} IN ('sendify', 'manual')`),
+    check("shipments_manual_carrier", sql`${t.provider} <> 'manual' OR ${t.carrierId} IS NOT NULL`),
+    check("shipments_pickup_window", sql`${t.provider} = 'manual' OR (${t.pickupFrom} IS NOT NULL AND ${t.pickupTo} IS NOT NULL)`),
+    check("shipments_manual_not_draft", sql`${t.provider} <> 'manual' OR ${t.status} <> 'draft'`),
+  ]
 );
 
 // Följesedlar in a shipment. `active` goes false when the shipment is

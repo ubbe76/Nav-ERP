@@ -8,7 +8,7 @@ import { StatusPill } from "../ui/StatusPill";
 import { Table } from "../ui/Table";
 import shellStyles from "../AppShell.module.css";
 import listStyles from "../../app/forsaljning/ordrar/page.module.css";
-import { SHIPMENT_STATUS_LABELS, SHIPMENT_STATUS_PILL } from "../../lib/shipping";
+import { SHIPMENT_STATUS_LABELS, SHIPMENT_STATUS_PILL, shipmentStatusLabel } from "../../lib/shipping";
 import type { Customer, Paged, ShipmentListRow } from "../../lib/types";
 
 export function ShipmentsPageClient({
@@ -76,13 +76,14 @@ export function ShipmentsPageClient({
             case "deliveryNumbers":
               return s.deliveryNumbers ?? "–";
             case "carrier":
-              return s.carrierName ? `${s.carrierName} · ${s.productName}` : "–";
+              // A manual shipment has only its Speditör, no product.
+              return s.carrierName ? [s.carrierName, s.productName].filter(Boolean).join(" · ") : "–";
             case "trackingNumber":
               return s.trackingNumber ?? "–";
             case "pickupDate":
               return s.pickupDate;
             case "status":
-              return <StatusPill status={SHIPMENT_STATUS_PILL[s.status]} label={SHIPMENT_STATUS_LABELS[s.status]} compact />;
+              return <StatusPill status={SHIPMENT_STATUS_PILL[s.status]} label={shipmentStatusLabel(s.status, s.provider)} compact />;
             case "tracking":
               return s.trackingException ? (
                 <span style={{ color: "var(--status-stopped-text)" }}>{s.trackingText ?? "–"}</span>
