@@ -15,6 +15,7 @@
 Kan dölja allvarliga fel — och kan redan vara gjort.
 
 - [ ] **E-faktura, mottagning (#5) i produktion:** B2Brouters sandlåda publicerar aldrig i Peppol. Därför är tre saker inte provade: att **Ta emot e-faktura** verkligen gör företaget till mottagare (**Publicering**/**Peppol-katalogen** blir **Publicerad**), svaret 409 när organisationsnumret redan tas emot av en annan accesspunkt (sandlådan vägrar migreringskoder) och en riktig Peppol-faktura från en annan accesspunkt. Webhooken `received_invoice.created` kräver en Nav som nås utifrån med https, och den är inte heller provad hela vägen.
+- [ ] **Förmedlarna nShift och Shipmondo (0221) är inte provade mot riktiga konton** — byggda efter dokumentationen 2026-11-14 och släppta i 0.8.13. **Användarens beslut 2026-11-14: lämnas otestade** (båda kräver en registrering användaren inte vill göra). Obekräftat tills någon provar med nShifts Testläge eller Shipmondos sandlåda: nShifts måttenhet (skickas i m/m³), prisvalutan, Shipmondos pallkoder (`packaging`) för DHL Freight/DSV och att egna avtal prisfrågas. Automatisk spårning saknas för båda (nShift via `GET /alerts?fetchId=` med licensen TrackBack, Shipmondo via webhooks som kräver publik adress) — i dag **Markera levererad** för hand. Research i `private/superpowers/specs/2026-11-14-research-nshift.md`/`…-research-shipmondo.md`.
 - [ ] **Bankavgiften i en SEK-betalning till utlandet (camt.054):** en post i SEK till utländskt konto där avins belopp är betalfilens belopp plus avgiften matchas och avgiften bokförs som bankkostnad (migration 0209). Byggt efter SEB:s dokumenterade beteende (`TxAmt` "including charges", avgiften i `Chrgs` — parserns kommentar i `camt054-parser.ts`), men inte provat mot en riktig bankfil: okänt om avgiften verkligen står i `TxDtls/Chrgs` (eller `Ntry/Chrgs`) med `DBIT` i SEK, vilken `Br` banken skriver och om någon bank i stället drar avgiften som en egen post (då är posten redan exakt och inget ändras).
 
 ### Allvarliga — fel belopp, bokföring eller lön
@@ -117,8 +118,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 ### Hög
 
 ### Medel
-
-- [ ] **Förmedlarna nShift och Shipmondo — prova skarpt och spårning** (användarens önskemål 2026-11-11/14; etapp 1 Eget fraktsätt 0220 och etapp 2 nShift + Shipmondo 0221 byggda 2026-11-14 efter dokumentationen, **inte provade mot riktiga konton**). Kvar: (1) prova med nShift Testläge och Shipmondos sandlåda och bekräfta det obekräftade — nShifts måttenhet (skickas i m/m³), prisvalutan, Shipmondos pallkoder (`packaging`) för DHL Freight/DSV, att egna avtal prisfrågas; (2) automatisk spårning: nShift via kontoflödet `GET /alerts?fetchId=` (högst var 5:e minut, licens TrackBack) och Shipmondo via webhooks (Shipment Monitor, kräver publik adress) — i dag **Markera levererad** för hand. Spec: `private/superpowers/specs/2026-11-14-fler-frakttjanster-design.md`, research `…-research-nshift.md`/`…-research-shipmondo.md`.
 
 ### Låg
 
