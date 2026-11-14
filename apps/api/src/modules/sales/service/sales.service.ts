@@ -1072,13 +1072,16 @@ export function createSalesService(
     return quoteValidityDays > 0 ? addDays(stockholmToday(), quoteValidityDays) : null;
   }
 
+  // `customer`: the order's customer when the caller has already read it
+  // (Skriv ut and the mail read it for Visa tilläggspriser) — not read twice.
   async function renderSalesOrderPdf(
     order: NonNullable<Awaited<ReturnType<SalesRepository["findSalesOrderById"]>>>,
     variant: "quote" | "confirmation",
-    showConfigurationPrices: boolean
+    showConfigurationPrices: boolean,
+    preloadedCustomer?: Awaited<ReturnType<SalesRepository["findCustomerById"]>>
   ) {
     const [customer, rows, documentSettings, vatCodeTexts, freightArticleId] = await Promise.all([
-      repo.findCustomerById(order.customerId),
+      preloadedCustomer ?? repo.findCustomerById(order.customerId),
       repo.listRowsByOrder(order.id),
       settings.getSettings(),
       repo.vatCodeInvoiceTexts(),
@@ -1194,9 +1197,13 @@ export function createSalesService(
   // visiting address), with a due date from the payment term and a VAT
   // summary. Swedish v1: one rate, 25 %.
   async function renderInvoicePdf(
-    order: NonNullable<Awaited<ReturnType<SalesRepository["findSalesOrderById"]>>>
+    order: NonNullable<Awaited<ReturnType<SalesRepository["findSalesOrderById"]>>>,
+    preloadedCustomer?: Awaited<ReturnType<SalesRepository["findCustomerById"]>>
   ) {
-    const [customer, rows] = await Promise.all([repo.findCustomerById(order.customerId), repo.listRowsByOrder(order.id)]);
+    const [customer, rows] = await Promise.all([
+      preloadedCustomer ?? repo.findCustomerById(order.customerId),
+      repo.listRowsByOrder(order.id),
+    ]);
     const useInvoiceAddress = Boolean(customer!.invoiceAddress);
     const partner = useInvoiceAddress
       ? {
@@ -2205,7 +2212,7 @@ export function createSalesService(
         throw new InvalidStatusTransitionError(`Cannot print an order in status "${order.status}"`);
       }
       const customer = await repo.findCustomerById(order.customerId);
-      return renderSalesOrderPdf(order, variant, showConfigurationPrices ?? customer!.showConfigurationPrices);
+      return renderSalesOrderPdf(order, variant, showConfigurationPrices ?? customer!.showConfigurationPrices, customer);
     },
 
     // Plocklista — remaining quantities per row plus where the stock is.
@@ -2303,7 +2310,8 @@ export function createSalesService(
       const attachment = await renderSalesOrderPdf(
         reserved ? { ...order, orderNumber: reserved } : order,
         input.variant,
-        showPrices
+        showPrices,
+        customer
       );
       const drawings = input.attachDrawings
         ? await drawingAttachments((await repo.listRowsByOrder(orderId)).map((r) => r.articleId))
@@ -2503,11 +2511,11 @@ export function createSalesService(
       if (order.status !== "invoiced" || !order.invoiceNumber) {
         throw new InvalidStatusTransitionError(`Cannot email an invoice for an order in status "${order.status}"`);
       }
-      const attachment = await renderInvoicePdf(order);
+      const customer = await repo.findCustomerById(order.customerId);
+      const attachment = await renderInvoicePdf(order, customer);
       const drawings = input.attachDrawings
         ? await drawingAttachments((await repo.listRowsByOrder(orderId)).map((r) => r.articleId))
         : [];
-      const customer = await repo.findCustomerById(order.customerId);
       await mail.sendMail({
         documentType: "invoice",
         documentId: orderId,

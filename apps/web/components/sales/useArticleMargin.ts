@@ -37,6 +37,8 @@ export function useArticleSelfCost(articleId: string | null): number | null {
   return selfCostPerUnit;
 }
 
+const CONFIGURED_COST_DEBOUNCE_MS = 300;
+
 // Konfigurator 4c: a configured draft row's self cost — the förkalkyl of ITS
 // derived structure at the row's quantity (POST /configurator/:id/derive),
 // not the template's saved calculation. Same requestSeq guard as
@@ -52,23 +54,28 @@ export function useConfiguredSelfCost(
     templateId && selection && quantity && quantity > 0 ? JSON.stringify([templateId, selection, quantity]) : null;
   useEffect(() => {
     const seq = ++requestSeq.current;
-    if (!key) {
-      setCost(null);
-      return;
-    }
+    // The old cost belongs to the old quantity/choices: no TB until the new
+    // one is here, rather than a wrong one.
+    setCost(null);
+    if (!key) return;
     const [id, sel, qty] = JSON.parse(key) as [string, Record<string, unknown>, number];
-    apiFetch<{ costing: { selfCostPerUnit: number } | null }>(`/api/v1/configurator/${id}/derive`, {
-      method: "POST",
-      body: JSON.stringify({ selection: sel, quantity: qty }),
-    })
-      .then((r) => {
-        if (seq !== requestSeq.current) return;
-        const v = r.costing?.selfCostPerUnit;
-        setCost(v !== undefined && Number.isFinite(v) && v > 0 ? v : null);
+    // A derive is a full förkalkyl: wait until the typing pauses (the
+    // quantity field changes on every keystroke).
+    const timer = setTimeout(() => {
+      apiFetch<{ costing: { selfCostPerUnit: number } | null }>(`/api/v1/configurator/${id}/derive`, {
+        method: "POST",
+        body: JSON.stringify({ selection: sel, quantity: qty }),
       })
-      .catch(() => {
-        if (seq === requestSeq.current) setCost(null);
-      });
+        .then((r) => {
+          if (seq !== requestSeq.current) return;
+          const v = r.costing?.selfCostPerUnit;
+          setCost(v !== undefined && Number.isFinite(v) && v > 0 ? v : null);
+        })
+        .catch(() => {
+          if (seq === requestSeq.current) setCost(null);
+        });
+    }, CONFIGURED_COST_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
   }, [key]);
   return cost;
 }

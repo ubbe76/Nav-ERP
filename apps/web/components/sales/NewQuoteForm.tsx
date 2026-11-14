@@ -42,6 +42,7 @@ import {
   type DeliveryAddressDraft,
 } from "./DeliveryAddressChoice";
 import { Form, FormActions, FormError, FormHint, FormLineRow, FormLineRowTop, FormNotice, FormRow } from "../ui/Form";
+import { configuredEvaluationKey } from "../../lib/configuredEvaluationKey";
 
 interface CreateQuoteResponse {
   order: SalesOrder;
@@ -551,6 +552,8 @@ function QuoteRowFields({
   const currentFactor = unitOptions.find((o) => o.value === row.unitId)?.factor ?? 1;
   const unitCode = unitOptions.find((o) => o.value === row.unitId)?.code;
   const requestSeq = useRef(0);
+  // The configured row's evaluation the ConfigureModal delivered (see handleConfigured).
+  const modalEvaluatedKey = useRef<string | null>(null);
   // The touched flag as it is when a prefill response LANDS — the effect's
   // closure holds it as it was when the request left, so a price typed while
   // the request was in flight would otherwise be overwritten ("manuellt vinner").
@@ -605,6 +608,9 @@ function QuoteRowFields({
 
   function handleConfigured(draft: RowConfigurationDraft) {
     setConfigureTemplate(null);
+    // The dialog has just evaluated these choices for this quantity and
+    // customer — the effect below needn't ask again.
+    modalEvaluatedKey.current = configuredEvaluationKey(draft.selection, customerId, baseQuantity ?? 1, currency, exchangeRate);
     if (!row.priceTouched && draft.evaluation.price.unitPrice !== null) {
       onChange({
         configuration: draft,
@@ -694,6 +700,12 @@ function QuoteRowFields({
   const configuredSelection = row.configuration?.selection ?? null;
   useEffect(() => {
     if (!configuredSelection || !articleId || baseQuantity === null || !pricingKnown) return;
+    const key = configuredEvaluationKey(configuredSelection, customerId, baseQuantity, currency, exchangeRate);
+    if (modalEvaluatedKey.current === key) {
+      modalEvaluatedKey.current = null;
+      return;
+    }
+    modalEvaluatedKey.current = null;
     const seq = ++requestSeq.current;
     onChange({ pricing: true });
     apiFetch<ConfiguratorEvaluation>(`/api/v1/configurator/${articleId}/evaluate`, {
