@@ -11,6 +11,14 @@ import { apiErrorMessage } from "./errorMessages";
 // sequentially (no batch endpoint), mirroring the inleverans/utleverans
 // routines' per-row-endpoint loops. Never throws — a failed förfrågan is
 // reported in `errors` and the remaining suppliers still go out.
+// What createLegoInquiries answers — one förfrågan per supplier that got
+// one, and the suppliers that failed with their rows' article numbers. The
+// one shape the behovsberäkning, the lego dialog and the result panel share.
+export type LegoInquiryResult = {
+  created: CreatedInquiry[];
+  errors: { supplierName: string; articleNumbers: string[]; message: string }[];
+};
+
 export async function createLegoInquiries({
   suppliers,
   rows,
@@ -19,10 +27,7 @@ export async function createLegoInquiries({
   suppliers: { id: string; name: string }[];
   rows: LegoInquiryRowInput[];
   note?: string;
-}): Promise<{
-  created: CreatedInquiry[];
-  errors: { supplierName: string; articleNumbers: string[]; message: string }[];
-}> {
+}): Promise<LegoInquiryResult> {
   const created: CreatedInquiry[] = [];
   const errors: { supplierName: string; articleNumbers: string[]; message: string }[] = [];
 

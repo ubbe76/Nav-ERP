@@ -65,6 +65,10 @@ export interface PlannedDepreciation {
 // useful life or residual value it automatically re-spreads the remainder
 // (K2: ändrad bedömning av nyttjandeperiod) without touching booked rows.
 //
+// Each month is rounded to öre on its own, so the amounts may move by an
+// öre between months (2 777,78, 2 777,77 …) — the rounding differences end
+// up in the last month, never in a month in between.
+//
 // Months whose rounded amount is 0 produce no row (a row's amount must be
 // > 0) — the remainder still lands in the last month, and because the
 // schedule is keyed on the calendar (not on a row count) a skipped month

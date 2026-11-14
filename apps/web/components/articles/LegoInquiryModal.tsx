@@ -6,7 +6,7 @@ import { Button } from "../ui/Button";
 import { Field, Input, Textarea } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
-import { createLegoInquiries } from "../../lib/legoInquiries";
+import { createLegoInquiries, type LegoInquiryResult } from "../../lib/legoInquiries";
 import { SupplierCheckboxList } from "../purchase/SupplierCheckboxList";
 import { CreatedInquiriesPanel } from "../purchase/CreatedInquiriesPanel";
 import type { CreatedInquiry, MOOperation, Paged, RoutingOperation, Supplier } from "../../lib/types";
@@ -29,11 +29,6 @@ interface LegoInquiryModalProps {
   // After the förfrågningar are created (the TO card refreshes its links).
   onCreated?: () => void;
 }
-
-type LegoInquiryResult = {
-  created: CreatedInquiry[];
-  errors: { supplierName: string; articleNumbers: string[]; message: string }[];
-};
 
 // "Skicka förfrågan" for a single lego (subcontract) operation — from its row
 // in BeredningView (TO-less, routingOperationId) or on the TO card (linked,

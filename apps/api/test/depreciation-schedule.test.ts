@@ -50,9 +50,10 @@ describe("missingMonths", () => {
     const rows = missingMonths(PLAN, "2029-01");
     expect(rows).toHaveLength(36);
     expect(rows[0]).toEqual({ month: "2026-02", amount: 2777.78 });
-    // Recomputed per month: (100 000 − 21 × 2 777,78) / 15 = 2 777,7753 → 2 777,78
-    // still, but from month 22 on the rounded remainder drifts by a öre now and
-    // then (e.g. 2027-11 = 2 777,77); the last month takes whatever is left.
+    // Recomputed per month on what is left: after 21 months of 2 777,78 the
+    // remaining 100 000 − 58 333,38 = 41 666,62 over 15 months is 2 777,7747
+    // → 2 777,77 (month 22, 2027-11); from there the rounding moves between
+    // 2 777,77 and 2 777,78, and the last month takes whatever is left.
     expect(rows[21]).toEqual({ month: "2027-11", amount: 2777.77 });
     expect(rows[34]).toEqual({ month: "2028-12", amount: 2777.78 });
     expect(rows[35]).toEqual({ month: "2029-01", amount: 2777.77 });

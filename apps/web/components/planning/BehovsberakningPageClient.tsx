@@ -18,7 +18,7 @@ import { FormActions, FormError, FormHint, FormNotice } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import { fetchPurchaseOrderRecipientAndLanguage } from "../../lib/mail";
 import type { DocumentLanguage } from "../../lib/documentLanguage";
-import { createLegoInquiries } from "../../lib/legoInquiries";
+import { createLegoInquiries, type LegoInquiryResult } from "../../lib/legoInquiries";
 import { copiedNotice, copyArticles } from "../../lib/copiedArticles";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { stashReleaseWarnings } from "../../lib/releaseWarnings";
@@ -285,10 +285,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
   const [legoSupplierIds, setLegoSupplierIds] = useState<string[]>([]);
   const [legoSubmitting, setLegoSubmitting] = useState(false);
   const [legoSubmitError, setLegoSubmitError] = useState<string | null>(null);
-  const [inquiryResult, setInquiryResult] = useState<{
-    created: CreatedInquiry[];
-    errors: { supplierName: string; articleNumbers: string[]; message: string }[];
-  } | null>(null);
+  const [inquiryResult, setInquiryResult] = useState<LegoInquiryResult | null>(null);
 
   useEffect(() => {
     if (!mailTarget) return;

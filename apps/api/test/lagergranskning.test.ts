@@ -215,12 +215,18 @@ describe("lagergranskningen — status and stock races", () => {
     const { order } = await purchaseOrder([{ articleId: x.id, quantity: 5 }]);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
+    // Resolved once the holder has its locks: the contender starts only then
+    // (started together, the contender could win the race and nothing waits).
+    let held!: () => void;
+    const holding = new Promise<void>((resolve) => (held = resolve));
     // A receipt in flight: the order locked and turned partially_received.
     const receipt = db.transaction(async (tx) => {
       await tx.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.id, order.id)).for("update");
       await tx.update(purchaseOrders).set({ status: "partially_received" }).where(eq(purchaseOrders.id, order.id));
+      held();
       await gate;
     });
+    await Promise.race([holding, receipt]);
     const cancelling = purchaseService.cancel(order.id, user.id);
     // Handled at once: it can reject while the test still awaits the holder
     // (Vitest reports that as an unhandled rejection); the expect below reads it.
@@ -242,11 +248,17 @@ describe("lagergranskningen — status and stock races", () => {
     const { order, rows } = await purchaseOrder([{ articleId: x.id, quantity: 5 }]);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
+    // Resolved once the holder has its locks: the contender starts only then
+    // (started together, the contender could win the race and nothing waits).
+    let held!: () => void;
+    const holding = new Promise<void>((resolve) => (held = resolve));
     const cancel = db.transaction(async (tx) => {
       await tx.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.id, order.id)).for("update");
       await tx.update(purchaseOrders).set({ status: "cancelled" }).where(eq(purchaseOrders.id, order.id));
+      held();
       await gate;
     });
+    await Promise.race([holding, cancel]);
     const receiving = purchaseService.receiveGoods(order.id, rows[0]!.id, { quantity: 5 }, user.id);
     // Handled at once: it can reject while the test still awaits the holder
     // (Vitest reports that as an unhandled rejection); the expect below reads it.
@@ -269,11 +281,17 @@ describe("lagergranskningen — status and stock races", () => {
     await stock(x.id, l1.id, 10);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
+    // Resolved once the holder has its locks: the contender starts only then
+    // (started together, the contender could win the race and nothing waits).
+    let held!: () => void;
+    const holding = new Promise<void>((resolve) => (held = resolve));
     const draw = db.transaction(async (tx) => {
       await lockArticlesForOutflow(tx, [x.id]);
       await tx.insert(stockTransactions).values({ articleId: x.id, locationId: l1.id, quantityDelta: "-10", transactionType: "sales_delivery" });
+      held();
       await gate;
     });
+    await Promise.race([holding, draw]);
     const moving = stockService.transferStock({ fromLocationId: l1.id, toLocationId: l2.id, rows: [{ articleId: x.id, quantity: 10 }] }, user.id);
     // Handled at once: it can reject while the test still awaits the holder
     // (Vitest reports that as an unhandled rejection); the expect below reads it.
@@ -312,12 +330,18 @@ describe("lagergranskningen — status and stock races", () => {
     await db.update(manufacturingOrders).set({ status: "done" }).where(eq(manufacturingOrders.id, f.order.id));
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
+    // Resolved once the holder has its locks: the contender starts only then
+    // (started together, the contender could win the race and nothing waits).
+    let held!: () => void;
+    const holding = new Promise<void>((resolve) => (held = resolve));
     // E.g. an Ångra that reopens the order, holding it FOR UPDATE.
     const reopen = db.transaction(async (tx) => {
       await tx.select({ id: manufacturingOrders.id }).from(manufacturingOrders).where(eq(manufacturingOrders.id, f.order.id)).for("update");
       await tx.update(manufacturingOrders).set({ status: "in_progress" }).where(eq(manufacturingOrders.id, f.order.id));
+      held();
       await gate;
     });
+    await Promise.race([holding, reopen]);
     // The outcome caught right away: the close can reject while the test
     // still awaits `reopen`, which Vitest reports as an unhandled rejection.
     const closing = mfgService.close(f.order.id, user.id).then(
@@ -344,11 +368,17 @@ describe("lagergranskningen — status and stock races", () => {
     const [receipt] = await purchaseService.listReceipts(order.id);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
+    // Resolved once the holder has its locks: the contender starts only then
+    // (started together, the contender could win the race and nothing waits).
+    let held!: () => void;
+    const holding = new Promise<void>((resolve) => (held = resolve));
     const draw = db.transaction(async (tx) => {
       await lockArticlesForOutflow(tx, [x.id]);
       await tx.insert(stockTransactions).values({ articleId: x.id, locationId: a1.id, quantityDelta: "-10", transactionType: "sales_delivery" });
+      held();
       await gate;
     });
+    await Promise.race([holding, draw]);
     const undoing = purchaseService.undoReceipt(order.id, receipt!.id, user.id);
     // Handled at once: it can reject while the test still awaits the holder
     // (Vitest reports that as an unhandled rejection); the expect below reads it.
@@ -370,6 +400,10 @@ describe("lagergranskningen — status and stock races", () => {
     await stock(a.id, t.id, 5);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
+    // Resolved once the holder has its locks: the contender starts only then
+    // (started together, the contender could win the race and nothing waits).
+    let held!: () => void;
+    const holding = new Promise<void>((resolve) => (held = resolve));
     // The draw signals once it holds the retirement — waiting on pg_locks
     // (any transaction in the whole cluster) let another test worker's
     // transaction satisfy the wait before this one had locked anything.
@@ -381,8 +415,10 @@ describe("lagergranskningen — status and stock races", () => {
       await tx.insert(stockTransactions).values({ articleId: a.id, locationId: t.id, quantityDelta: "-5", transactionType: "sales_delivery" });
       expect(await deactivateEmptyLocation(tx, t.id)).toBe(true);
       retired();
+      held();
       await gate;
     });
+    await Promise.race([holding, draw]);
     await atGate;
     // B arrives on T: its FK check waits for the retirement, then the
     // trigger revives the place for it.
@@ -406,10 +442,16 @@ describe("lagergranskningen — status and stock races", () => {
     await stock(a.id, t.id, 5);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
+    // Resolved once the holder has its locks: the contender starts only then
+    // (started together, the contender could win the race and nothing waits).
+    let held!: () => void;
+    const holding = new Promise<void>((resolve) => (held = resolve));
     const inflow = db.transaction(async (tx) => {
       await tx.insert(stockTransactions).values({ articleId: b.id, locationId: t.id, quantityDelta: "10", transactionType: "inventory_adjustment" });
+      held();
       await gate;
     });
+    await Promise.race([holding, inflow]);
     await waitForCondition(async () => (await db.select().from(stockTransactions).where(eq(stockTransactions.articleId, b.id))).length === 0);
     const draw = db.transaction(async (tx) => {
       await lockArticlesForOutflow(tx, [a.id]);

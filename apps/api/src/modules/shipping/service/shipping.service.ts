@@ -63,6 +63,7 @@ import {
   ShipmentOnDraftInvoiceError,
 } from "./shipping.errors.js";
 import { toDetailView, toRatesView } from "./shipping.views.js";
+import { BOOKING_STALE_MS, CANCEL_STALE_MS } from "./stale-windows.js";
 
 // Försändelse — status flow draft → booked → delivered, cancelled from
 // draft/booked. Every transition and every "only in draft" rule lives here.
@@ -71,11 +72,8 @@ import { toDetailView, toRatesView } from "./shipping.views.js";
 // changed with updateManual — every draft-only path refuses them already.
 // No transaction is ever held open over an HTTP call to the provider.
 
-// A booking reservation older than this is treated as abandoned.
-export const BOOKING_STALE_MS = 2 * 60 * 1000;
-// Same for a cancel reservation (cancel_started_at) — the invoice side's
-// assertShipmentsBillable hard-codes the same 2 minutes.
-export const CANCEL_STALE_MS = 2 * 60 * 1000;
+// The reservations' windows (also the invoice side's assertShipmentsBillable).
+export { BOOKING_STALE_MS, CANCEL_STALE_MS } from "./stale-windows.js";
 
 const STATUS_TEXT: Record<ShipmentRow["status"], string> = {
   draft: "ett utkast",
