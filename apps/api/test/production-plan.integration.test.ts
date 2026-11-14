@@ -570,7 +570,35 @@ describe("concurrency", () => {
     await createOrder(world, 40, W4);
     const plan = () => planningService.planProductionRun(world.user.id);
     const create = () => mfgService.createManufacturingOrder({ articleId: world.article.id, quantity: 20, dueDate: W3 }, world.user.id);
-    const results = order === "plan first" ? await Promise.all([plan(), create()]) : await Promise.all([create(), plan()]);
+    // The order is made deterministic: a holder takes the plan lock, the
+    // first contender queues on it, then the second, and the lock is
+    // released — Postgres grants it in queue order. (Started together, the
+    // creation sometimes beat Planera in "plan first", and Planera then
+    // re-prioritised the new TO — v.10 where the test expected v.11.)
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let held!: () => void;
+    const holding = new Promise<void>((resolve) => (held = resolve));
+    const holder = db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('production_plan'))`);
+      held();
+      await gate;
+    });
+    await Promise.race([holding, holder]);
+    const [startFirst, startSecond] = order === "plan first" ? [plan, create] : [create, plan];
+    const first = startFirst();
+    first.catch(() => {});
+    let second: ReturnType<typeof startSecond> | undefined;
+    try {
+      await waitForLockWaiters(1);
+      second = startSecond();
+      second.catch(() => {});
+      await waitForLockWaiters(2);
+    } finally {
+      release();
+    }
+    await holder;
+    const results = await Promise.all([first, second!]);
     const created = results.find((r): r is Awaited<ReturnType<typeof create>> => "orderNumber" in r)!;
     const ops = await mfgService.listOperations(created.id);
     for (const op of ops) {
@@ -580,14 +608,30 @@ describe("concurrency", () => {
       expect(op.plannedStartWeek).not.toBeNull();
     }
     expect(await duplicateAllocations()).toEqual([]);
-    // Either order: the new TO was planned against the existing one (week 1
-    // full on R1 ⇒ week 2), never in between. Planera then re-prioritises:
-    // the new TO is due sooner and takes week 1.
-    expect(await Promise.all(ops.map((op) => planRows(op.id)))).toEqual([[{ monday: W2, minutes: 1200 }], [{ monday: W2, minutes: 1200 }]]);
+    // Plan first: Planera never saw the new TO, which was then planned
+    // against the existing one (week 1 full on R1 ⇒ week 2). Create first:
+    // the TO was planned in week 2 and Planera, right after, re-prioritised
+    // it — due sooner, it takes week 1. Never planned twice either way.
+    const afterBoth = order === "plan first" ? W2 : W1;
+    expect(await Promise.all(ops.map((op) => planRows(op.id)))).toEqual([[{ monday: afterBoth, minutes: 1200 }], [{ monday: afterBoth, minutes: 1200 }]]);
     await planningService.planProductionRun(world.user.id);
     expect(await Promise.all(ops.map((op) => planRows(op.id)))).toEqual([[{ monday: W1, minutes: 1200 }], [{ monday: W1, minutes: 1200 }]]);
   });
 });
+
+// Polls until at least `n` sessions of this test database wait on a lock.
+async function waitForLockWaiters(n: number, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const result = await db.execute(
+      sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`
+    );
+    const [row] = [...result] as { n: number }[];
+    if ((row?.n ?? 0) >= n) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Fewer than ${n} transactions waiting on a lock`);
+}
 
 describe("readers of the plan", () => {
   it("the terminal, the TO list and the operations list carry the planned weeks", async () => {
