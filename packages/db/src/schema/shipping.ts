@@ -74,7 +74,9 @@ export interface StoredRate {
   carrierCode: string;
   carrierName: string;
   productName: string;
-  price: number;
+  // null = no price from the broker (an own agreement without a price
+  // enquiry).
+  price: number | null;
   currency: string;
   daysMin: number | null;
   daysMax: number | null;
@@ -83,6 +85,9 @@ export interface StoredRate {
   expiresAt: string | null;
 }
 export interface StoredRates {
+  // The förmedlare the rates came from (an order's price probe; absent on
+  // rates stored before 0221 = Sendify).
+  broker?: string;
   fetchedAt: string;
   rates: StoredRate[];
   warnings: string[];
@@ -98,8 +103,8 @@ export const shipments = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     shipmentNumber: varchar("shipment_number", { length: 20 }).notNull().unique(),
     status: shipmentStatusEnum("status").notNull().default("draft"),
-    // Egna fraktsätt (migration 0220): "sendify" = booked through the broker;
-    // "manual" = an own freight method (Egen bil, Kunden hämtar, an own
+    // Egna fraktsätt (migration 0220): "sendify"/"nshift"/"shipmondo" (0221)
+    // = booked through that broker (förmedlare); "manual" = an own freight method (Egen bil, Kunden hämtar, an own
     // agreement) — registered straight as booked, never sent anywhere, and
     // carrier_id names it. Shared SHIPMENT_PROVIDERS lists the values.
     provider: varchar("provider", { length: 20 }).notNull().default("sendify"),
@@ -176,7 +181,7 @@ export const shipments = pgTable(
     index("idx_shipments_customer").on(t.customerId),
     index("idx_shipments_status").on(t.status),
     index("idx_shipments_carrier").on(t.carrierId),
-    check("shipments_provider_known", sql`${t.provider} IN ('sendify', 'manual')`),
+    check("shipments_provider_known", sql`${t.provider} IN ('sendify', 'nshift', 'shipmondo', 'manual')`),
     check("shipments_manual_carrier", sql`${t.provider} <> 'manual' OR ${t.carrierId} IS NOT NULL`),
     check("shipments_pickup_window", sql`${t.provider} = 'manual' OR (${t.pickupFrom} IS NOT NULL AND ${t.pickupTo} IS NOT NULL)`),
     check("shipments_manual_not_draft", sql`${t.provider} <> 'manual' OR ${t.status} <> 'draft'`),

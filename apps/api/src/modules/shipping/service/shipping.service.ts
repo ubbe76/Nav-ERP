@@ -17,7 +17,16 @@ import {
   type ShipmentRow,
   type ShippingRepository,
 } from "../repository/shipping.repository.js";
-import { FreightProviderError, type FreightProvider, type ProviderShipment } from "./freight-provider.js";
+import {
+  BROKER_LABELS,
+  BROKERS,
+  FreightProviderError,
+  type BookResult,
+  type BrokerName,
+  type FreightProvider,
+  type ProviderContext,
+  type ProviderShipment,
+} from "./freight-provider.js";
 import type { FreightSettings, FreightSettingsService, SenderParty } from "./freight-settings.service.js";
 import { suggestParcels } from "./parcels.js";
 import { pickupProblem, requestedPickupTime } from "./pickup.js";
@@ -97,6 +106,11 @@ const DOCUMENTS: Record<string, string> = { label: "Etikett", waybill: "Fraktsed
 
 type ParcelRow = Awaited<ReturnType<ShippingRepository["listParcels"]>>[number];
 
+// The broker a shipment goes through (a manual one never reaches a broker).
+function brokerOf(s: Pick<ShipmentRow, "provider">): BrokerName {
+  return (BROKERS as readonly string[]).includes(s.provider) ? (s.provider as BrokerName) : "sendify";
+}
+
 // A Sendify shipment's pickup window (never null there — CHECK
 // shipments_pickup_window); a manual shipment has none.
 function pickupSlotOf(s: Pick<ShipmentRow, "pickupDate" | "pickupFrom" | "pickupTo">) {
@@ -129,6 +143,10 @@ export function createShippingService(deps: {
     }
     if (bookingInProgress(s)) throw new FreightBookingInProgressError();
   }
+
+  // The shipment's own broker (förmedlare).
+  const providerFor = (s: Pick<ShipmentRow, "provider">, requireEnabled: boolean) =>
+    settings.provider({ requireEnabled, broker: brokerOf(s) });
 
   // Locks the row (FOR UPDATE — the booking claim waits for us) and checks
   // that it is an editable draft before running `fn`.
@@ -225,7 +243,10 @@ export function createShippingService(deps: {
   // fetch rates and store them. Caller has checked status/claim. Returns the
   // broker shipment the rates belong to — on a draft never priced before
   // it did not exist when the caller read the row (book()'s trace).
-  async function fetchRatesFor(s: ShipmentRow, provider: FreightProvider): Promise<{ stored: StoredRates; providerShipmentId: string }> {
+  async function fetchRatesFor(
+    s: ShipmentRow,
+    provider: FreightProvider
+  ): Promise<{ stored: StoredRates; providerShipmentId: string | null }> {
     const sender = await settings.sender();
     const parcels = await repo.listParcels(s.id);
     const missing = missingForBooking({ ...s, ...sender }, parcels.map((p) => ({ weightKg: Number(p.weightKg) })));
@@ -237,6 +258,18 @@ export function createShippingService(deps: {
     const pickupTime = requestedPickupTime(storedSlot, today)!;
 
     const payload = toProviderShipment(s, sender, parcels);
+    // A broker without drafts (Shipmondo) is priced from the shipment alone;
+    // the draft lives only in Nav.
+    if (!provider.remoteDrafts) {
+      const { rates, warnings } = await provider.getRates({ remoteId: null, shipment: payload, pickup: { date: s.pickupDate, time: pickupTime } });
+      const stored: StoredRates = { fetchedAt: now().toISOString(), warnings, rates: rates.map((r) => ({ id: randomUUID(), ...r })) };
+      await repo.transaction(async (tx) => {
+        await repo.upsertFreightProducts(provider.name, rates, tx);
+        const written = await repo.storeRates(tx, s.id, s.updatedAt, null, { ...sender, lastRates: stored, ratesFetchedAt: now() });
+        if (!written) throw new FreightShipmentChangedError();
+      });
+      return { stored, providerShipmentId: null };
+    }
     let providerId = s.providerShipmentId;
     // No lock is held over the broker calls, so the final write is optimistic:
     // it lands only if the draft still has the updated_at we read (saving the
@@ -259,7 +292,7 @@ export function createShippingService(deps: {
       }
       providerId = savedId;
     }
-    const { rates, warnings } = await provider.getRates(providerId, { date: s.pickupDate, time: pickupTime });
+    const { rates, warnings } = await provider.getRates({ remoteId: providerId, shipment: payload, pickup: { date: s.pickupDate, time: pickupTime } });
     const stored: StoredRates = {
       fetchedAt: now().toISOString(),
       warnings,
@@ -274,12 +307,21 @@ export function createShippingService(deps: {
     return { stored, providerShipmentId: ownId };
   }
 
+  // What a booking sends besides the token: the shipment as it stands and
+  // the pickup asked for (the brokers without a stored draft book from it).
+  async function bookingContext(s: ShipmentRow, remoteId: string | null): Promise<ProviderContext> {
+    const sender = await settings.sender();
+    const parcels = await repo.listParcels(s.id);
+    const time = requestedPickupTime(pickupSlotOf(s), settings.today()) ?? (s.pickupFrom ?? "08:00").slice(0, 5);
+    return { remoteId, shipment: toProviderShipment(s, sender, parcels), pickup: { date: s.pickupDate, time } };
+  }
+
   // Fetch the label/waybill the broker offered for the booking (label only
   // when it named nothing we know) and store them, replacing earlier copies.
   async function storeDocuments(id: string) {
     const s = await repo.findShipment(id);
     if (!s?.providerShipmentId) return;
-    const provider = await settings.provider({ requireEnabled: false });
+    const provider = await providerFor(s, false);
     const offered = s.documentTypes.filter((t) => t in DOCUMENTS);
     for (const type of offered.length > 0 ? offered.sort() : ["label"]) {
       const pdf = await provider.fetchDocument(s.providerShipmentId, type);
@@ -303,7 +345,7 @@ export function createShippingService(deps: {
 
     async create(input: CreateShipmentInput, userId: string | null) {
       const freight = await settings.read();
-      if (!freight.enabled) throw new FreightNotConfiguredError("disabled");
+      if ((await settings.enabledBrokers()).length === 0) throw new FreightNotConfiguredError("disabled");
       const { ids, ordered } = await deliveriesForNewShipment(input.deliveryIds);
 
       const slot = await settings.nextPickup();
@@ -324,8 +366,16 @@ export function createShippingService(deps: {
       // price then, become this shipment's selection — "Boka vald produkt"
       // works at once and its price check compares against what was quoted.
       const quotedOrder = await repo.findOrderForFreight(first.orderId);
-      const quoted =
-        quotedOrder?.freightProductId && quotedOrder.freightCarrierPrice !== null
+      // Förmedlaren: the one of the product the order (else the customer)
+      // chose, when it is switched on; else Förvald förmedlare; else the
+      // first one switched on. A product of another broker is dropped.
+      const preferredProductId = quotedOrder?.freightProductId ?? first.customerDefaultFreightProductId ?? null;
+      const preferredProduct = preferredProductId ? await repo.findFreightProduct(preferredProductId) : null;
+      const broker = (await settings.brokerFor(preferredProduct?.provider ?? null))!;
+      const productFits = preferredProduct !== null && preferredProduct.provider === broker;
+      const quoted = !productFits
+        ? {}
+        : quotedOrder?.freightProductId && quotedOrder.freightCarrierPrice !== null
           ? {
               freightProductId: quotedOrder.freightProductId,
               carrierPrice: quotedOrder.freightCarrierPrice,
@@ -346,6 +396,7 @@ export function createShippingService(deps: {
         id = await repo.insertShipment(
           {
             shipmentNumber,
+            provider: broker,
             customerId: first.customerId,
             ...recipient,
             ...sender,
@@ -491,7 +542,9 @@ export function createShippingService(deps: {
       await repo.transaction(async (tx) => {
         const s = await repo.lockShipment(tx, id);
         if (!s) throw new ShipmentNotFoundError(id);
-        if (s.provider !== "manual") throw new InvalidShipmentStatusError("Spårningen markerar en Sendify-försändelse som levererad");
+        // Sendify's tracking says delivered; the others (Eget fraktsätt,
+        // nShift and Shipmondo, not tracked automatically) are marked by hand.
+        if (s.provider === "sendify") throw new InvalidShipmentStatusError("Spårningen markerar en Sendify-försändelse som levererad");
         if (s.status !== "booked") throw new InvalidShipmentStatusError(`Försändelsen är ${STATUS_TEXT[s.status]}`);
         await repo.markManualDelivered(tx, id, now());
       });
@@ -501,6 +554,7 @@ export function createShippingService(deps: {
 
     async update(id: string, input: UpdateShipmentInput, _userId: string | null) {
       const priceOnly = Object.keys(input).every((k) => k === "customerPrice");
+      let switchedFrom: { broker: BrokerName; remoteId: string | null } | null = null;
       const freight = await settings.read();
       let slot: { date: string; timeFrom: string; timeTo: string } | null = null;
       if (input.pickupDate !== undefined) {
@@ -514,6 +568,25 @@ export function createShippingService(deps: {
         if (!s) throw new ShipmentNotFoundError(id);
         if (s.provider === "manual") {
           throw new InvalidShipmentStatusError("Försändelsen har ett eget fraktsätt — ändra den med Ändra på kortet");
+        }
+        // Byt förmedlare (draft only): the old broker's prices, product and
+        // draft no longer apply — its draft is deleted after the commit.
+        if (input.broker !== undefined && input.broker !== s.provider) {
+          assertDraft(s);
+          if (!(await settings.enabledBrokers()).includes(input.broker)) {
+            throw new FreightNotConfiguredError("disabled", BROKER_LABELS[input.broker]);
+          }
+          switchedFrom = { broker: brokerOf(s), remoteId: s.providerShipmentId };
+          await repo.updateShipment(tx, id, {
+            provider: input.broker,
+            providerShipmentId: null,
+            freightProductId: null,
+            carrierPrice: null,
+            carrierCurrency: null,
+            ...(s.customerPriceManual ? {} : { customerPrice: null }),
+            ...STALE_RATES,
+          });
+          if (Object.keys(input).length === 1) return;
         }
         if (priceOnly) {
           if (s.status === "cancelled") throw new InvalidShipmentStatusError("En avbruten försändelse kan inte ändras");
@@ -561,6 +634,14 @@ export function createShippingService(deps: {
         if (!priceOnly) Object.assign(patch, STALE_RATES);
         await repo.updateShipment(tx, id, patch);
       });
+      const old = switchedFrom as { broker: BrokerName; remoteId: string | null } | null;
+      if (old?.remoteId) {
+        try {
+          await (await settings.provider({ requireEnabled: false, broker: old.broker })).deleteShipment(old.remoteId);
+        } catch {
+          // best effort — an orphaned draft at the broker is harmless
+        }
+      }
       return get(id);
     },
 
@@ -621,9 +702,9 @@ export function createShippingService(deps: {
       await audit.log({ entityType: "shipment", entityId: id, action: "deleted", detail: { shipmentNumber: s.shipmentNumber }, userId });
       if (s.providerShipmentId) {
         try {
-          await (await settings.provider({ requireEnabled: false })).deleteShipment(s.providerShipmentId);
+          await (await providerFor(s, false)).deleteShipment(s.providerShipmentId);
         } catch {
-          // best effort — an orphaned draft at Sendify is harmless
+          // best effort — an orphaned draft at the broker is harmless
         }
       }
     },
@@ -637,10 +718,10 @@ export function createShippingService(deps: {
     // --- Priser, val, bokning ---
 
     async fetchRates(id: string) {
-      const provider = await settings.provider({ requireEnabled: true });
       const s = await repo.findShipment(id);
       if (!s) throw new ShipmentNotFoundError(id);
       assertDraft(s);
+      const provider = await providerFor(s, true);
       const { stored } = await fetchRatesFor(s, provider);
       return toRatesView(stored, await settings.read());
     },
@@ -648,7 +729,9 @@ export function createShippingService(deps: {
     // "Spara val": choose a rate without booking. Stored rates only — the
     // client never supplies a price.
     async saveSelection(id: string, rateId: string) {
-      const provider = await settings.provider({ requireEnabled: true });
+      const current = await repo.findShipment(id);
+      if (!current) throw new ShipmentNotFoundError(id);
+      const provider = await providerFor(current, true);
       const freight = await settings.read();
       await withDraft(id, async (tx, s) => {
         const rate = s.lastRates?.rates.find((r) => r.id === rateId);
@@ -657,16 +740,19 @@ export function createShippingService(deps: {
         const { ids } = await repo.upsertFreightProducts(provider.name, [rate], tx);
         await repo.updateShipment(tx, id, {
           freightProductId: ids.get(productKey(rate)) ?? null,
-          carrierPrice: String(rate.price),
+          carrierPrice: rate.price === null ? null : String(rate.price),
           carrierCurrency: rate.currency,
-          ...(s.customerPriceManual ? {} : { customerPrice: priceFor(rate.price, freight) }),
+          // No price from the broker (an own agreement): the kundpris is typed.
+          ...(s.customerPriceManual ? {} : { customerPrice: rate.price === null ? null : priceFor(rate.price, freight) }),
         });
       });
       return get(id);
     },
 
     async book(id: string, input: BookShipmentInput, userId: string | null) {
-      const provider = await settings.provider({ requireEnabled: true });
+      const current = await repo.findShipment(id);
+      if (!current) throw new ShipmentNotFoundError(id);
+      const provider = await providerFor(current, true);
       const freight = await settings.read();
       const claimed = await repo.claimBooking(id);
       if (!claimed) {
@@ -683,7 +769,7 @@ export function createShippingService(deps: {
       let providerShipmentId = claimed.providerShipmentId;
 
       let rate: StoredRate | null = null;
-      let booked: { trackingNumber: string | null; documentTypes: string[] };
+      let booked: BookResult;
       try {
         if ("rateId" in input) {
           // Draft edits clear last_rates, so stored rates always describe the
@@ -705,6 +791,7 @@ export function createShippingService(deps: {
           if (
             !input.confirmPriceChange &&
             claimed.carrierPrice !== null &&
+            match.price !== null &&
             priceChangeExceeds(Number(claimed.carrierPrice), match.price, freight.priceChangePercent)
           ) {
             throw new FreightPriceChangedError(Number(claimed.carrierPrice), match.price, match.currency);
@@ -715,7 +802,7 @@ export function createShippingService(deps: {
         // A shipment's rates always carry the token (only an order's price
         // probe is stored without one); a missing token cannot be booked.
         if (!rate.bookingToken) throw new FreightRateNotFoundError();
-        booked = await provider.book(rate.bookingToken);
+        booked = await provider.book(rate.bookingToken, await bookingContext(claimed, providerShipmentId));
       } catch (err) {
         await repo.releaseBooking(id, claimedAt);
         // No answer, a 5xx, or a 2xx we could not read: the transport may be
@@ -743,9 +830,13 @@ export function createShippingService(deps: {
       // this point is logged with everything needed to find the booking at
       // Sendify (the claim expires, the draft could otherwise be booked again
       // with no trace of the first transport). Never the API key.
+      // The booked shipment at the broker: a new id (nShift, Shipmondo) or
+      // the draft's.
+      const bookedRemoteId = booked.remoteId ?? providerShipmentId;
       const trace = {
         shipmentNumber: claimed.shipmentNumber,
-        providerShipmentId,
+        broker: provider.name,
+        providerShipmentId: bookedRemoteId,
         trackingNumber: booked.trackingNumber,
         carrier: rate.carrierName,
         product: rate.productName,
@@ -757,9 +848,10 @@ export function createShippingService(deps: {
         const { ids } = await repo.upsertFreightProducts(provider.name, [rate]);
         const marked = await repo.markBooked(id, claimedAt, {
           freightProductId: ids.get(productKey(rate)) ?? null,
-          carrierPrice: String(rate.price),
+          carrierPrice: rate.price === null ? null : String(rate.price),
           carrierCurrency: rate.currency,
-          derivedCustomerPrice: priceFor(rate.price, freight),
+          derivedCustomerPrice: rate.price === null ? null : priceFor(rate.price, freight),
+          ...(booked.remoteId ? { providerShipmentId: booked.remoteId } : {}),
           trackingNumber: booked.trackingNumber,
           documentTypes: booked.documentTypes,
           bookedAt: now(),
@@ -782,7 +874,16 @@ export function createShippingService(deps: {
 
       const warnings: string[] = [];
       try {
-        await storeDocuments(id);
+        // Documents that came with the booking are kept as they are (nShift's
+        // live an hour only); otherwise they are fetched.
+        if (booked.documents && booked.documents.length > 0) {
+          for (const doc of booked.documents) {
+            const stem = DOCUMENTS[doc.type] ?? "Etikett";
+            await repo.saveFile(id, doc.type, `${stem}-${claimed.shipmentNumber}.pdf`, doc.content);
+          }
+        } else {
+          await storeDocuments(id);
+        }
       } catch {
         warnings.push("Fraktsedel och etikett kunde inte hämtas — använd Hämta fraktsedel");
       }
@@ -825,7 +926,7 @@ export function createShippingService(deps: {
         await withDraft(id, (tx) => repo.cancelShipment(tx, id));
         if (s.providerShipmentId) {
           try {
-            await (await settings.provider({ requireEnabled: false })).deleteShipment(s.providerShipmentId);
+            await (await providerFor(s, false)).deleteShipment(s.providerShipmentId);
           } catch {
             // best effort — an orphaned draft at Sendify is harmless
           }
@@ -837,7 +938,7 @@ export function createShippingService(deps: {
         // invoices are left alone (the credit note is the remedy). The provider
         // is resolved BEFORE the claim (as book() does) so a missing key cannot
         // leave the claim set.
-        const provider = await settings.provider({ requireEnabled: false });
+        const provider = await providerFor(s, false);
         const claimedAt = await repo.transaction(async (tx) => {
           const row = await repo.lockShipment(tx, id);
           if (row?.status !== "booked") throw new InvalidShipmentStatusError("Försändelsen ändrades samtidigt — ladda om");

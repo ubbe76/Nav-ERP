@@ -9,7 +9,7 @@ import { formatSek } from "../../lib/shipping";
 import type { ShipmentRate, ShipmentRates } from "../../lib/types";
 
 // Alla transportörers priser för försändelsen, sorterade på pris (the API
-// sorts). Boka / Spara val per rad; Sendify's warnings under the table.
+// sorts). Boka / Spara val per rad; the broker's warnings under the table.
 export function RatesDialog({
   open,
   rates,
@@ -96,6 +96,9 @@ export function RatesTable({
               case "product":
                 return chosen ? <strong>{r.productName} (valt)</strong> : r.productName;
               case "price":
+                // An own agreement the broker gives no price for: booked all the
+                // same, the kundpris typed on the card.
+                if (r.price === null) return <span style={{ color: "var(--color-text-muted)" }}>Pris saknas</span>;
                 return r.currency === "SEK" ? formatSek(r.price) : `${r.price} ${r.currency}`;
               case "customerPrice":
                 return formatSek(r.customerPrice);

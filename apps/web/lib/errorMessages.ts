@@ -1189,6 +1189,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "einvoice-reception-not-found": serverMessage("Mottagningen hittades inte."),
   "freight-provider": serverMessage("Fraktbokningen misslyckades — försök igen senare."),
   "shipment-not-found": serverMessage("Försändelsen hittades inte."),
+  "freight-price-missing": serverMessage("Förmedlaren gav inget pris för produkten — lägg till fraktraden för hand."),
   // Egna fraktsätt.
   "shipment-carrier-required": serverMessage("Välj speditör — varken ordern eller kunden har någon."),
   "shipment-carrier-not-found": serverMessage("Speditören hittades inte."),

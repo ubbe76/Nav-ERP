@@ -23,11 +23,12 @@ import {
   formatDate,
   formatDateTime,
   formatSek,
+  BROKER_LABELS,
   SHIPMENT_STATUS_LABELS,
   SHIPMENT_STATUS_PILL,
   shippingErrorText,
 } from "../../lib/shipping";
-import type { OpenDelivery, ShipmentDetail, ShipmentRates } from "../../lib/types";
+import type { FreightBroker, OpenDelivery, ShipmentDetail, ShipmentRates } from "../../lib/types";
 import styles from "./ShipmentCard.module.css";
 
 const toDrafts = (s: ShipmentDetail): ParcelDraft[] =>
@@ -77,6 +78,19 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
   const draft = s.status === "draft";
   const canWrite = useCan()(["forsaljning"]);
   const tracked = s.status === "booked" || s.status === "delivered";
+  // Förmedlaren (0221). Sendify is tracked; nShift and Shipmondo are marked
+  // delivered by hand.
+  const broker = s.provider === "manual" ? "sendify" : s.provider;
+  const brokerName = BROKER_LABELS[broker];
+  const autoTracked = broker === "sendify";
+  // The brokers switched on, for a draft's Förmedlare.
+  const [brokers, setBrokers] = useState<FreightBroker[]>([]);
+  useEffect(() => {
+    if (!draft) return;
+    apiFetch<{ enabled: boolean; brokers: FreightBroker[] }>("/api/v1/freight-settings/status")
+      .then((status) => setBrokers(status.brokers))
+      .catch(() => setBrokers([]));
+  }, [draft]);
 
   // Rates dialog
   const [ratesOpen, setRatesOpen] = useState(false);
@@ -107,7 +121,7 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
   const unsaved = draft && (parcelsDirty || recipientDirty || pickupDirty);
   useUnsavedGuard(unsaved);
   const unsavedText = unsaved
-    ? `Spara ${[parcelsDirty && "kollina", recipientDirty && "mottagaren", pickupDirty && "upphämtningen"].filter(Boolean).join(", ")} innan du hämtar priser eller bokar — Sendify får det som är sparat.`
+    ? `Spara ${[parcelsDirty && "kollina", recipientDirty && "mottagaren", pickupDirty && "upphämtningen"].filter(Boolean).join(", ")} innan du hämtar priser eller bokar — ${brokerName} får det som är sparat.`
     : null;
 
   // Add följesedel
@@ -145,6 +159,22 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
   const post = <T,>(path: string, body?: unknown) =>
     apiFetch<T>(`/api/v1/shipments/${s.id}${path}`, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
   const patch = (body: unknown) => apiFetch<ShipmentDetail>(`/api/v1/shipments/${s.id}`, { method: "PATCH", body: JSON.stringify(body) });
+
+  // Byt förmedlare: the prices and the chosen product go (asked first when
+  // there are any).
+  async function changeBroker(next: FreightBroker) {
+    if (next === broker) return;
+    if ((s.rates || s.freightProduct) && !(await confirmDialog(`Byta förmedlare till ${BROKER_LABELS[next]}? Hämtade priser och vald produkt tas bort.`))) {
+      return;
+    }
+    const updated = await run(() => patch({ broker: next }), "Kunde inte byta förmedlare");
+    if (updated) apply(updated);
+  }
+
+  async function markDelivered() {
+    const updated = await run(() => post<ShipmentDetail>("/delivered"), "Kunde inte markera försändelsen som levererad");
+    if (updated) apply(updated);
+  }
 
   async function fetchRates() {
     const result = await run(() => post<ShipmentRates>("/rates"), "Kunde inte hämta priser");
@@ -199,7 +229,7 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
   }
 
   async function cancel() {
-    const question = s.status === "booked" ? "Avboka transporten hos Sendify?" : "Avbryta försändelsen?";
+    const question = s.status === "booked" ? `Avboka transporten hos ${brokerName}?` : "Avbryta försändelsen?";
     if (!(await confirmDialog(question))) return;
     const next = await run(() => post<ShipmentDetail>("/cancel"), "Kunde inte avbryta");
     if (next) {
@@ -335,6 +365,24 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
       <div className={styles.toolbar}>
         <StatusPill status={SHIPMENT_STATUS_PILL[s.status]} label={SHIPMENT_STATUS_LABELS[s.status]} />
         <GatedLink href={`/kunder/${s.customerId}`}>{s.customerName}</GatedLink>
+        {draft && canWrite && brokers.length > 1 ? (
+          <label className={styles.brokerPick}>
+            Förmedlare
+            <Select
+              value={broker}
+              disabled={pending || s.bookingInProgress || unsaved}
+              onChange={(e) => changeBroker(e.target.value as FreightBroker)}
+            >
+              {brokers.map((b) => (
+                <option key={b} value={b}>
+                  {BROKER_LABELS[b]}
+                </option>
+              ))}
+            </Select>
+          </label>
+        ) : (
+          <span className={styles.muted}>via {brokerName}</span>
+        )}
         <span className={styles.toolbarSpacer} />
         {draft && (
           <>
@@ -525,7 +573,7 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
                   value: s.freightProduct ? `${s.freightProduct.carrierName} · ${s.freightProduct.productName}` : <span className={styles.muted}>Ingen vald</span>,
                 },
                 {
-                  label: "Sendifys pris",
+                  label: `${brokerName}s pris`,
                   value: s.carrierCurrency === "SEK" || s.carrierPrice === null ? formatSek(s.carrierPrice) : `${s.carrierPrice} ${s.carrierCurrency}`,
                 },
                 {
@@ -565,7 +613,11 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
                   <Button type="submit" variant="secondary" disabled={pending}>Spara kundpris</Button>
                 </FormActions>
                 <FormHint>
-                  {s.customerPriceManual ? "Ändrat för hand — töm fältet och spara för att återgå till påslaget." : "Sendifys pris plus påslag enligt System → Frakt."}
+                  {s.customerPriceManual
+                    ? "Ändrat för hand — töm fältet och spara för att återgå till påslaget."
+                    : s.carrierPrice === null && s.freightProduct
+                      ? `${brokerName} gav inget pris för produkten — skriv kundpriset.`
+                      : `${brokerName}s pris plus påslag enligt System → Frakt.`}
                 </FormHint>
               </Form>
             )}
@@ -614,9 +666,13 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
           <SectionHeading
             spaced
             actions={
-              canWrite ? (
+              canWrite && autoTracked ? (
                 <Button type="button" variant="secondary" size="small" disabled={pending} onClick={refreshTracking}>
                   Uppdatera spårning
+                </Button>
+              ) : canWrite && s.status === "booked" ? (
+                <Button type="button" variant="secondary" size="small" disabled={pending} onClick={markDelivered}>
+                  Markera levererad
                 </Button>
               ) : undefined
             }
@@ -624,7 +680,10 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
             Spårning
           </SectionHeading>
           <p className={`${styles.trackingText} ${s.tracking.exception ? styles.exception : ""}`}>
-            {s.tracking.text ?? "Ingen spårningsinformation ännu"}
+            {s.tracking.text ??
+              (autoTracked
+                ? "Ingen spårningsinformation ännu"
+                : `${brokerName} spåras inte automatiskt — markera försändelsen som levererad när den kommit fram.`)}
           </p>
           <Facts
             rows={[

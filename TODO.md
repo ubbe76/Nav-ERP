@@ -122,7 +122,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
-- [ ] **Fler val av frakttjänster, etapp 2: en fraktförmedlare till** (användarens önskemål 2026-11-11, val 2026-11-14: *egna fraktsätt* och *fler fraktförmedlare*; transportörerna i dag DHL, DB Schenker, egna bilar/kunden hämtar). Etapp 1, **Eget fraktsätt** (0220), är klar. Kvar att besluta före bygget: vilken förmedlare (nShift Delivery/Unifaun, Logtrade …), att den har DHL Freight och DB Schenker med företagets egna avtal, testkonto/sandlåda, och om förmedlaren väljs per försändelse eller en åt gången. `shipments.provider` får ett nytt värde och `FreightProvider` en implementation. Spec: `private/superpowers/specs/2026-11-14-fler-frakttjanster-design.md`.
+- [ ] **Förmedlarna nShift och Shipmondo — prova skarpt och spårning** (användarens önskemål 2026-11-11/14; etapp 1 Eget fraktsätt 0220 och etapp 2 nShift + Shipmondo 0221 byggda 2026-11-14 efter dokumentationen, **inte provade mot riktiga konton**). Kvar: (1) prova med nShift Testläge och Shipmondos sandlåda och bekräfta det obekräftade — nShifts måttenhet (skickas i m/m³), prisvalutan, Shipmondos pallkoder (`packaging`) för DHL Freight/DSV, att egna avtal prisfrågas; (2) automatisk spårning: nShift via kontoflödet `GET /alerts?fetchId=` (högst var 5:e minut, licens TrackBack) och Shipmondo via webhooks (Shipment Monitor, kräver publik adress) — i dag **Markera levererad** för hand. Spec: `private/superpowers/specs/2026-11-14-fler-frakttjanster-design.md`, research `…-research-nshift.md`/`…-research-shipmondo.md`.
 
 ### Låg
 

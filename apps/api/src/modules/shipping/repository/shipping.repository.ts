@@ -445,12 +445,13 @@ export function createShippingRepository(db: Db) {
       return row ?? null;
     },
 
-    // Markera levererad on a manual shipment (no tracking sets it).
+    // Markera levererad on a shipment no tracking marks (Eget fraktsätt,
+    // nShift, Shipmondo).
     async markManualDelivered(tx: Tx, id: string, at: Date) {
       await tx
         .update(shipments)
         .set({ status: "delivered", deliveredAt: at, updatedAt: new Date() })
-        .where(and(eq(shipments.id, id), eq(shipments.provider, "manual"), eq(shipments.status, "booked")));
+        .where(and(eq(shipments.id, id), ne(shipments.provider, "sendify"), eq(shipments.status, "booked")));
     },
 
     async lockShipment(tx: Tx, id: string) {
@@ -586,7 +587,8 @@ export function createShippingRepository(db: Db) {
       tx: Tx,
       id: string,
       asReadUpdatedAt: Date,
-      providerShipmentId: string,
+      // null: a broker without drafts (Shipmondo) — the row must still have none.
+      providerShipmentId: string | null,
       patch: Omit<Partial<NewShipment>, "providerShipmentId">
     ): Promise<boolean> {
       const rows = await tx
@@ -596,7 +598,9 @@ export function createShippingRepository(db: Db) {
           and(
             eq(shipments.id, id),
             eq(shipments.status, "draft"),
-            eq(shipments.providerShipmentId, providerShipmentId),
+            providerShipmentId === null
+              ? isNull(shipments.providerShipmentId)
+              : eq(shipments.providerShipmentId, providerShipmentId),
             sql`date_trunc('milliseconds', ${shipments.updatedAt}) = ${asReadUpdatedAt.toISOString()}::timestamptz`
           )
         )
@@ -667,6 +671,9 @@ export function createShippingRepository(db: Db) {
       claimedAt: Date,
       values: Pick<NewShipment, "freightProductId" | "carrierPrice" | "carrierCurrency" | "trackingNumber" | "documentTypes" | "bookedAt" | "bookedBy"> & {
         derivedCustomerPrice: string | null;
+        // The booked shipment's id at the broker when it is not the draft's
+        // (nShift, Shipmondo) — cancel, documents and tracking go to it.
+        providerShipmentId?: string | null;
       }
     ): Promise<boolean> {
       const { derivedCustomerPrice, ...rest } = values;
@@ -771,7 +778,16 @@ export function createShippingRepository(db: Db) {
       const rows = await db
         .select({ id: shipments.id })
         .from(shipments)
-        .where(and(eq(shipments.status, "booked"), isNotNull(shipments.providerShipmentId), gt(shipments.bookedAt, bookedAfter)))
+        // Only Sendify is asked per shipment; nShift's feed and Shipmondo's
+        // webhooks are not polled here.
+        .where(
+          and(
+            eq(shipments.status, "booked"),
+            eq(shipments.provider, "sendify"),
+            isNotNull(shipments.providerShipmentId),
+            gt(shipments.bookedAt, bookedAfter)
+          )
+        )
         .orderBy(asc(shipments.bookedAt));
       return rows.map((r) => r.id);
     },

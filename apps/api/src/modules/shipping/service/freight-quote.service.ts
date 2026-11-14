@@ -3,6 +3,7 @@ import type { StoredRates } from "@navet/db";
 import { SALES_ORDER_EDITABLE_STATUSES, type ParcelInput } from "@navet/shared";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import { productKey, type ShippingRepository } from "../repository/shipping.repository.js";
+import { BROKERS, type BrokerName } from "./freight-provider.js";
 import type { FreightSettingsService } from "./freight-settings.service.js";
 import { suggestParcels } from "./parcels.js";
 import { pickupProblem, requestedPickupTime } from "./pickup.js";
@@ -18,6 +19,7 @@ import {
   FreightPickupDayError,
   FreightRateNotFoundError,
   FreightValidationError,
+  FreightPriceMissingError,
 } from "./shipping.errors.js";
 import { toRatesView } from "./shipping.views.js";
 
@@ -83,7 +85,10 @@ export function createFreightQuoteService<S extends SalesFreightWriter>(deps: {
     // the order. The probe is deleted whatever happens after it was created.
     async fetchRates(orderId: string, parcels: ParcelInput[]) {
       const { order } = await editableOrder(orderId);
-      const provider = await settings.provider({ requireEnabled: true });
+      // The order's probe goes to Förvald förmedlare (else the first one on).
+      const broker = await settings.brokerFor(null);
+      if (!broker) throw new FreightNotConfiguredError("disabled");
+      const provider = await settings.provider({ requireEnabled: true, broker });
       const recipient = resolveRecipient(
         await repo.recipientSource(order.customerId, order.deliveryAddressId, {
           customerOrderNumber: order.customerOrderNumber,
@@ -104,20 +109,20 @@ export function createFreightQuoteService<S extends SalesFreightWriter>(deps: {
       if (problem) throw new FreightPickupDayError(problem);
       const time = requestedPickupTime(slot, today)!;
 
-      const id = await provider.createShipment(
-        buildProviderShipment(recipient, sender, parcels, {
-          referenceId: order.orderNumber,
-          senderReference: order.orderNumber,
-          receiverReference: recipient.receiverReference,
-        })
-      );
+      const probe = buildProviderShipment(recipient, sender, parcels, {
+        referenceId: order.orderNumber,
+        senderReference: order.orderNumber,
+        receiverReference: recipient.receiverReference,
+      });
+      const id = provider.remoteDrafts ? await provider.createShipment(probe) : null;
       let stored: StoredRates;
       try {
-        const { rates, warnings } = await provider.getRates(id, { date: slot.date, time });
+        const { rates, warnings } = await provider.getRates({ remoteId: id, shipment: probe, pickup: { date: slot.date, time } });
         // Stored WITHOUT the booking tokens: the probe is deleted below so
         // they are dead, and the sales module returns freight_quote raw on
         // every order read — a token must never leave the API.
         stored = {
+          broker,
           fetchedAt: now().toISOString(),
           warnings,
           rates: rates.map(({ bookingToken: _token, ...r }) => ({ id: randomUUID(), ...r })),
@@ -125,7 +130,7 @@ export function createFreightQuoteService<S extends SalesFreightWriter>(deps: {
         await repo.upsertFreightProducts(provider.name, rates);
         await repo.saveOrderFreightQuote(order.id, stored);
       } finally {
-        await provider.deleteShipment(id).catch(() => undefined);
+        if (id) await provider.deleteShipment(id).catch(() => undefined);
       }
       return toRatesView(stored, await settings.read());
     },
@@ -139,8 +144,12 @@ export function createFreightQuoteService<S extends SalesFreightWriter>(deps: {
       const rate = order.freightQuote?.rates.find((r) => r.id === rateId);
       if (!rate) throw new FreightRateNotFoundError();
       if (rate.currency !== "SEK") throw new FreightCurrencyError();
-      const provider = await settings.provider({ requireEnabled: true });
-      const { ids } = await repo.upsertFreightProducts(provider.name, [rate]);
+      if (rate.price === null) throw new FreightPriceMissingError();
+      // The broker the probe went to (Sendify on a probe from before 0221).
+      const broker = (BROKERS as readonly string[]).includes(order.freightQuote?.broker ?? "")
+        ? (order.freightQuote!.broker as BrokerName)
+        : "sendify";
+      const { ids } = await repo.upsertFreightProducts(broker, [rate]);
       const productId = ids.get(productKey(rate));
       // The upsert keys its ids by the same productKey, so a miss means the
       // two have drifted apart — fail loudly rather than silently skip the

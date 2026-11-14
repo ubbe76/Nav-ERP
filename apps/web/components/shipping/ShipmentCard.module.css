@@ -174,3 +174,13 @@
 .back {
   margin-top: var(--space-5);
 }
+
+/* Förmedlare on a draft: the label beside its select. */
+.brokerPick {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}

@@ -12,7 +12,7 @@ import { formatRate } from "../../lib/currency";
 import type { ShipmentParcel, ShipmentRates } from "../../lib/types";
 
 // Fraktpris för en offert/kundorder: kolliförslaget från raderna (justerbart),
-// Sendifys priser och "Lägg till frakt" — fraktraden läggs till eller får nytt pris.
+// Förmedlarens priser och "Lägg till frakt" — fraktraden läggs till eller får nytt pris.
 export function FreightQuoteDialog({
   orderId,
   currency = "SEK",
@@ -156,7 +156,14 @@ export function FreightQuoteDialog({
           rates={rates}
           selectedProductKey={null}
           actions={(r) => (
-            <Button type="button" size="small" variant="primary" disabled={pending} onClick={() => addFreight(r.id)}>
+            <Button
+              type="button"
+              size="small"
+              variant="primary"
+              disabled={pending || r.price === null}
+              title={r.price === null ? "Pris saknas — lägg till fraktraden för hand" : undefined}
+              onClick={() => addFreight(r.id)}
+            >
               Lägg till frakt
             </Button>
           )}

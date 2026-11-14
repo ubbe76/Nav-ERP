@@ -48,6 +48,7 @@ import {
 } from "../../lib/vatCodes";
 import { useVatCodes } from "../../lib/useVatCodes";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { BROKER_LABELS } from "../../lib/shipping";
 
 // Prefixes https:// onto a bare domain (no "://" scheme) so the Webbsida
 // link always navigates instead of being treated as a relative path.
@@ -1468,6 +1469,8 @@ function VillkorTab({
                 .map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.carrierName} – {p.productName}
+                    {/* The förmedlare when it is not Sendify — the shipment is booked through it. */}
+                    {p.provider !== "sendify" ? ` (${BROKER_LABELS[p.provider as keyof typeof BROKER_LABELS] ?? p.provider})` : ""}
                   </option>
                 ))}
             </Select>

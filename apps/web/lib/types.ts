@@ -5858,8 +5858,9 @@ export type PalletCardCode = "none" | "barcode" | "qr";
 
 export type ParcelKind = "package" | "pallet" | "other";
 export type ShipmentStatus = "draft" | "booked" | "delivered" | "cancelled";
-// Egna fraktsätt: "manual" = registered by hand with a Speditör, never booked.
-export type ShipmentProvider = "sendify" | "manual";
+// Egna fraktsätt: "manual" = registered by hand with a Speditör, never
+// booked; otherwise the förmedlare it is booked through.
+export type ShipmentProvider = FreightBroker | "manual";
 
 export interface FreightSettings {
   enabled: boolean;
@@ -5874,7 +5875,31 @@ export interface FreightSettings {
   priceChangePercent: number;
   trackingInterval: "hourly" | "every_4h" | "daily";
   lastTrackingRunAt: string | null;
+  // Förmedlare (0221): Förvald förmedlare, which are on with credentials,
+  // and nShift's and Shipmondo's own settings (credentials write-only).
+  defaultBroker: FreightBroker;
+  anyEnabled: boolean;
+  enabledBrokers: FreightBroker[];
+  nshift: {
+    enabled: boolean;
+    testMode: boolean;
+    apiKeyIdSet: boolean;
+    apiSecretSet: boolean;
+    senderQuickId: string;
+    services: string[];
+    priceEnquiry: boolean;
+  };
+  shipmondo: {
+    enabled: boolean;
+    environment: "sandbox" | "production";
+    apiUserSet: boolean;
+    apiKeySet: boolean;
+    shipmondoRates: boolean;
+    ownAgreementProducts: string[];
+  };
 }
+
+export type FreightBroker = "sendify" | "nshift" | "shipmondo";
 
 export interface PickupTime {
   weekday: number;
@@ -5896,7 +5921,8 @@ export interface ShipmentRate {
   carrierCode: string;
   carrierName: string;
   productName: string;
-  price: number;
+  // null = the broker gives no price (an own agreement): Pris saknas.
+  price: number | null;
   currency: string;
   daysMin: number | null;
   daysMax: number | null;

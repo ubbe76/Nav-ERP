@@ -22,7 +22,7 @@ import { FreightProviderError, type ProviderShipment } from "../src/modules/ship
 import { createSendifyProvider, SENDIFY_MESSAGES } from "../src/modules/shipping/service/sendify-provider.js";
 import { createShippingService } from "../src/modules/shipping/service/shipping.service.js";
 import { FreightShipmentChangedError } from "../src/modules/shipping/service/shipping.errors.js";
-import { createFakeFreightProvider, SANDBOX_PRICES } from "./helpers/fake-freight-provider.js";
+import { createFakeFreightProvider, sampleContext, SANDBOX_PRICES } from "./helpers/fake-freight-provider.js";
 import { enableFreight, makeArticle, makeCustomer, makeDelivery, resetShipping } from "./helpers/shipping-fixtures.js";
 
 // Fraktgranskningen 2026-11-11: the external API's answers are whitelists,
@@ -262,7 +262,7 @@ describe("Sendify — ett olästbart 2xx på BOOK", () => {
     ["JSON that is not an object", () => new Response("[]", { status: 201, headers }), "[]"],
   ])("%s is booking-unknown with the request id, and logged", async (_name, response, body) => {
     const { provider, logged } = providerAnswering(response());
-    const err = await provider.book("tok-1").catch((e) => e);
+    const err = await provider.book("tok-1", sampleContext("snd-1")).catch((e) => e);
     expect(err).toBeInstanceOf(FreightProviderError);
     expect(err).toMatchObject({ kind: "booking-unknown", message: SENDIFY_MESSAGES.bookingUnknown, requestId: "req-77" });
     expect(logged).toEqual([{ method: "POST", path: "/shipments/book", status: expect.any(Number), requestId: "req-77", body }]);

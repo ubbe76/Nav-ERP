@@ -10,7 +10,8 @@ import { Table } from "../ui/Table";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { confirmDialog } from "../../lib/confirm";
-import { formatDateTime, shippingErrorText, WEEKDAYS } from "../../lib/shipping";
+import { BROKER_LABELS, formatDateTime, shippingErrorText, WEEKDAYS } from "../../lib/shipping";
+import { BrokerSettings } from "./BrokerSettings";
 import type { FreightProduct, FreightSettings, PickupTime } from "../../lib/types";
 import cardStyles from "../system/SettingsForm.module.css";
 
@@ -244,6 +245,8 @@ export function FreightSettingsForm({
         </Form>
       </div>
 
+      <BrokerSettings initial={initial} products={products} onProducts={setProducts} />
+
       <div className={cardStyles.card} style={{ marginTop: 18 }}>
         <SectionHeading>Upphämtningstider</SectionHeading>
         <FormHint>
@@ -283,7 +286,7 @@ export function FreightSettingsForm({
                 Testa anslutning
               </Button>
               <Button type="button" variant="secondary" disabled={busy || unsavedConnection || !apiKeySet} onClick={fetchProducts}>
-                Hämta transportörsprodukter
+                Hämta från Sendify
               </Button>
             </>
           }
@@ -301,12 +304,19 @@ export function FreightSettingsForm({
         {notice && <FormHint>{notice}</FormHint>}
         <Table<FreightProduct>
           columns={[
+            { key: "provider", label: "Förmedlare", width: "120px" },
             { key: "carrierName", label: "Transportör", width: "1fr" },
             { key: "productName", label: "Produkt", width: "2fr" },
           ]}
           rows={products}
           emptyText="Inga fraktprodukter ännu — hämta dem eller hämta priser på en försändelse"
-          renderCell={(p, key) => (key === "carrierName" ? p.carrierName : p.productName)}
+          renderCell={(p, key) =>
+            key === "provider"
+              ? (BROKER_LABELS[p.provider as keyof typeof BROKER_LABELS] ?? p.provider)
+              : key === "carrierName"
+                ? p.carrierName
+                : p.productName
+          }
         />
       </div>
     </>
