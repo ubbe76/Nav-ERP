@@ -39,3 +39,12 @@ export const ARTICLE_COPY_PART_REASONS: Partial<Record<ArticleCopyPart, string>>
   beredning: "Beredning kopieras bara till tillverkade artiklar",
   inkop: "Inköp kopieras bara till köpta artiklar och tjänster",
 };
+
+// Information pre-fills the form's own fields (Typ among them) only when it
+// is newly chosen — a new source, or Information added via Ändra — so
+// reopening the dialog never overwrites what the user typed since.
+// `previousParts`: the parts already chosen for THIS source, null for a new
+// one. The dialog judges the type rules by it, the form its pre-fill.
+export function informationIsNew(chosen: readonly ArticleCopyPart[], previousParts: readonly ArticleCopyPart[] | null): boolean {
+  return chosen.includes("information") && !previousParts?.includes("information");
+}

@@ -4323,11 +4323,6 @@ export interface DimensionRef {
 
 export type AccountingPeriodStatus = "open" | "locked";
 
-export const PERIOD_STATUS_LABELS: Record<AccountingPeriodStatus, string> = {
-  open: "Öppen",
-  locked: "Låst",
-};
-
 // One monthly period generated when its fiscal year was created — see
 // economy.repository.ts's createFiscalYearWithPeriods/findFiscalYearById.
 export interface AccountingPeriod {

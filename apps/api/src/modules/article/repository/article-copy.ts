@@ -1,7 +1,8 @@
 import { asc, eq, sql } from "drizzle-orm";
-import { articleSuppliers, articles, bomComponents, type Tx } from "@navet/db";
+import { articles, bomComponents, type Tx } from "@navet/db";
 import type { ArticleCopyPart, CreateArticleInput } from "@navet/shared";
 import { copyRouting } from "../../manufacturing/repository/routing-write.js";
+import { copySupplierCatalogInTx } from "../../purchase/repository/supplier-catalog-copy.js";
 import { insertBomRows } from "./bom-write.js";
 import { currentArticleFileSql } from "./drawing-files.js";
 
@@ -109,7 +110,7 @@ export async function copyArticleParts(
       SELECT ${targetId}, drawing_number FROM article_drawings WHERE article_id = ${sourceId} ORDER BY created_at, id`);
   }
   if (parts.includes("beredning")) await copyBeredning(tx, sourceId, targetId, copiedFiles);
-  if (parts.includes("inkop")) await copySupplierCatalog(tx, sourceId, targetId);
+  if (parts.includes("inkop")) await copySupplierCatalogInTx(tx, sourceId, targetId);
 }
 
 // The files in force — loose ones and the drawings' active revisions' — as
@@ -209,24 +210,4 @@ async function copyBeredning(tx: Tx, sourceId: string, targetId: string, copiedF
       costingOnly: row.costingOnly,
     }))
   );
-}
-
-// Inköp: the supplier catalog (huvudleverantör flag included) with each
-// row's stafflade priser.
-async function copySupplierCatalog(tx: Tx, sourceId: string, targetId: string) {
-  const rows = await tx
-    .select()
-    .from(articleSuppliers)
-    .where(eq(articleSuppliers.articleId, sourceId))
-    .orderBy(asc(articleSuppliers.createdAt), asc(articleSuppliers.id));
-  for (const { id: oldId, createdAt: _createdAt, articleId: _articleId, ...rest } of rows) {
-    const [inserted] = await tx
-      .insert(articleSuppliers)
-      .values({ ...rest, articleId: targetId })
-      .returning({ id: articleSuppliers.id });
-    await tx.execute(sql`
-      INSERT INTO article_supplier_price_breaks (article_supplier_id, from_quantity, price)
-      SELECT ${inserted!.id}, from_quantity, price
-      FROM article_supplier_price_breaks WHERE article_supplier_id = ${oldId}`);
-  }
 }

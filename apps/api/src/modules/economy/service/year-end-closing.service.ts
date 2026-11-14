@@ -410,8 +410,10 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
     closing: repo.ClosingRow,
     year: repo.FiscalYearRow,
     // wip: the PIA per the closing date, read by the caller outside any
-    // transaction (the reader may look rates up).
-    opts: { tolerant?: boolean; wip: WipCurrent }
+    // transaction (the reader may look rates up). inventory: the step view
+    // the caller has already computed (the bokslut page's GET builds it for
+    // the step card) — a stock valuation is not run twice per page.
+    opts: { tolerant?: boolean; wip: WipCurrent; inventory?: Awaited<ReturnType<typeof inventoryStepView>> }
   ): Promise<YearEndCheck[]> {
     const failed: YearEndCheck[] = [];
     let serial: Promise<unknown> = Promise.resolve();
@@ -498,7 +500,7 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
         attempt(
           "Lagervärderingen",
           async (): Promise<{ reason: "ledger" | "valuation"; ledger: number; value: number; currentValue: number } | null> => {
-            const inventoryStep = await inventoryStepView(executor, closing);
+            const inventoryStep = opts.inventory ?? (await inventoryStepView(executor, closing));
             return inventoryStep.status === "stale"
               ? {
                   reason: inventoryStep.staleReason!,
@@ -1219,12 +1221,13 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
     // views() only ever runs for a GET (detail(db)), so the PIA is read here.
     const wip = await currentWip(closing, year);
     const close = await loadCloseBlockers(executor, closing, year, wip);
+    const inventory = await inventoryStepView(executor, closing);
     return {
       history: await repo.listHistory(executor, closing.id),
       defaultInventoryMethod: await defaultInventoryMethod(executor, year),
       defaultWipBasis: await defaultWipBasis(executor, year),
       steps: {
-        inventory: await inventoryStepView(executor, closing),
+        inventory,
         workInProgress: await wipStepView(executor, closing, wip),
         depreciation: await depreciationStepView(executor, closing),
         accruals: await accrualsStepView(executor, closing),
@@ -1236,7 +1239,7 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
       checks: {
         stepBlockers: evaluateStepBlockers(close.gate),
         closeBlockers: close.blockers,
-        warnings: await loadWarnings(executor, closing, year, { tolerant: true, wip }),
+        warnings: await loadWarnings(executor, closing, year, { tolerant: true, wip, inventory }),
         draftVerifications: await repo.listDrafts(executor, year.id, DRAFT_LIST_LIMIT),
         // The blocker's count: the list above is capped, this is not.
         draftVerificationCount: close.gate.draftCount,

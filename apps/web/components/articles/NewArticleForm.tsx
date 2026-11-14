@@ -13,6 +13,7 @@ import {
   ARTICLE_COPY_PART_REASONS,
   ARTICLE_COPY_PARTS,
   articleCopyPartAllowed,
+  informationIsNew,
   type ArticleCopyPart,
 } from "../../lib/articleCopy";
 import type { Article, ArticleGroup, ArticleNumberSeriesOption, ArticleType, RegisterEntry, StockLocation } from "../../lib/types";
@@ -108,8 +109,7 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
   // chosen (a new source, or Information added via Ändra), so reopening the
   // dialog to change parts never overwrites what the user typed since.
   function confirmCopy(source: Article, chosenParts: ArticleCopyPart[]) {
-    const informationIsNew =
-      chosenParts.includes("information") && (copySource?.id !== source.id || !copyParts.includes("information"));
+    const informationIsNewNow = informationIsNew(chosenParts, copySource?.id === source.id ? copyParts : null);
     // A field the user filled in themselves wins over the source's value: it
     // counts as the user's when it differs from both the form's default and
     // what an earlier pick pre-filled.
@@ -118,7 +118,7 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
       current === def || current === applied[key];
     const next: typeof applied = {};
     let resultingType = type;
-    if (informationIsNew) {
+    if (informationIsNewNow) {
       if (free(type, "purchased", "type")) {
         resultingType = source.type;
         next.type = source.type;

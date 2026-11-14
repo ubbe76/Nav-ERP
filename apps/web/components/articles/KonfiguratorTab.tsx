@@ -134,7 +134,6 @@ export function KonfiguratorTab({ article, onChanged }: { article: Article; onCh
         <ModeModal
           open={dialog === "create"}
           articleId={article.id}
-          articleType={article.type}
           initial="variants"
           create
           onClose={() => setDialog(null)}
@@ -233,7 +232,6 @@ export function KonfiguratorTab({ article, onChanged }: { article: Article; onCh
       <ModeModal
         open={dialog === "change"}
         articleId={article.id}
-        articleType={article.type}
         initial={template.mode}
         onClose={() => setDialog(null)}
         onSaved={changed}
@@ -251,7 +249,6 @@ export function KonfiguratorTab({ article, onChanged }: { article: Article; onCh
 function ModeModal({
   open,
   articleId,
-  articleType,
   initial,
   create,
   onClose,
@@ -259,7 +256,6 @@ function ModeModal({
 }: {
   open: boolean;
   articleId: string;
-  articleType: Article["type"];
   initial: ConfiguratorMode;
   create?: boolean;
   onClose: () => void;
@@ -270,7 +266,6 @@ function ModeModal({
       <ModeForm
         key={initial}
         articleId={articleId}
-        articleType={articleType}
         initial={initial}
         create={create}
         onClose={onClose}
@@ -280,16 +275,16 @@ function ModeModal({
   );
 }
 
+// The tab exists only for manufactured articles (ArticleTabs), which both
+// modes require — nothing to block here.
 function ModeForm({
   articleId,
-  articleType,
   initial,
   create,
   onClose,
   onSaved,
 }: {
   articleId: string;
-  articleType: Article["type"];
   initial: ConfiguratorMode;
   create?: boolean;
   onClose: () => void;
@@ -298,7 +293,6 @@ function ModeForm({
   const [mode, setMode] = useState<ConfiguratorMode>(initial);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const toOrderBlocked = articleType !== "manufactured";
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -326,12 +320,7 @@ function ModeForm({
         onChange={setMode}
         options={[
           { value: "variants", label: CONFIGURATOR_MODE_LABELS.variants },
-          {
-            value: "to_order",
-            label: CONFIGURATOR_MODE_LABELS.to_order,
-            disabled: toOrderBlocked,
-            title: toOrderBlocked ? "Beställningsvara kräver en tillverkad artikel" : undefined,
-          },
+          { value: "to_order", label: CONFIGURATOR_MODE_LABELS.to_order },
         ]}
       />
       <FormHint>

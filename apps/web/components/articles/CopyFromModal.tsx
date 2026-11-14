@@ -10,6 +10,7 @@ import {
   ARTICLE_COPY_PART_REASONS,
   ARTICLE_COPY_PART_REQUIRES,
   ARTICLE_COPY_PARTS,
+  informationIsNew,
   articleCopyPartAllowed,
   type ArticleCopyPart,
 } from "../../lib/articleCopy";
@@ -66,8 +67,7 @@ function CopyFromChoices({ source, initialParts, formType, onCancel, onConfirm }
   // rules are judged against the type the new article will actually get.
   // Information already applied earlier (Ändra) pre-fills nothing — the
   // form's Typ, possibly changed since, stands.
-  const informationIsNew = checked.has("information") && !initialParts?.includes("information");
-  const effectiveType = informationIsNew ? source.type : formType;
+  const effectiveType = informationIsNew([...checked], initialParts ?? null) ? source.type : formType;
   // A part that needs another (Ritningsrevisioner → Ritningar och filer) is
   // allowed only while that one is chosen and allowed.
   const allowedPart = (part: ArticleCopyPart): boolean => {

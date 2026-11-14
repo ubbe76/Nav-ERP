@@ -1,6 +1,6 @@
 // apps/api/src/modules/configurator/service/configuration-lines.ts
 import type { DocumentLanguage, OrderRowConfiguration, VariantSelectionEntry } from "@navet/shared";
-import { formatNumber } from "../../mail/service/document-pdf.js";
+import { formatNumber } from "../../mail/service/number-format.js";
 import { documentTexts } from "../../mail/service/document-texts.js";
 
 // Konfigurator 4b: the choice lines printed under an order/invoice/pick-list/

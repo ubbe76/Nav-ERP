@@ -1526,8 +1526,14 @@ export function createConfiguratorService(deps: {
               throw new ConfiguratorVariantNumberTakenError(row.articleNumber!);
             case "too_long":
               throw new ConfiguratorVariantTooLongError(row.errors[0] ?? "Artikelnumret eller benämningen blir för lång");
-            default:
+            case "created":
+              // Only createVariants' answer says "created" — never a plan.
               throw new ConfiguratorInvalidConfigurationError(row.errors);
+            default: {
+              // Every status is handled above; a new one fails the build here.
+              const unhandled: never = row.status;
+              throw new Error(`Unhandled variant status ${String(unhandled)}`);
+            }
           }
         }))
       );
