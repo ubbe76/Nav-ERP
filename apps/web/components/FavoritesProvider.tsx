@@ -24,6 +24,10 @@ interface FavoritesValue {
   remove: (href: string) => Promise<boolean>;
   // Favoriter → Ändra: the edited list as a whole (order, names, removals).
   replace: (favorites: Favorite[]) => Promise<boolean>;
+  // The list is the behörighetsgrupp's förvalda favoriter, not the user's own.
+  fromGroup: boolean;
+  // Drop the user's own list: the group's förvalda favoriter again.
+  resetToGroup: () => Promise<boolean>;
 }
 
 const FavoritesContext = createContext<FavoritesValue>({
@@ -36,11 +40,13 @@ const FavoritesContext = createContext<FavoritesValue>({
   add: async () => false,
   remove: async () => false,
   replace: async () => false,
+  fromGroup: false,
+  resetToGroup: async () => false,
 });
 
 const ERROR_VISIBLE_MS = 8000;
 
-type Settings = { favorites: Favorite[] };
+type Settings = { favorites: Favorite[]; favoritesFromGroup?: boolean };
 
 // One list per page, shared by the sidebar group, the stars on the module
 // hubs and the page's own star (FavoriteToggle). The server reads the list
@@ -51,14 +57,18 @@ export function FavoritesProvider({
   initial,
   initialInSidebar = true,
   initialOnOverview = false,
+  initialFromGroup = false,
   children,
 }: {
   initial: Favorite[] | null;
   initialInSidebar?: boolean;
   initialOnOverview?: boolean;
+  initialFromGroup?: boolean;
   children: ReactNode;
 }) {
   const [favorites, setFavorites] = useState(initial);
+  const [fromGroup, setFromGroup] = useState(initialFromGroup);
+  useEffect(() => setFromGroup(initialFromGroup), [initialFromGroup]);
   const [inSidebar, setInSidebarState] = useState(initialInSidebar);
   useEffect(() => setInSidebarState(initialInSidebar), [initialInSidebar]);
   // Anpassa on Översikten changes the card list and re-renders the page.
@@ -108,6 +118,7 @@ export function FavoritesProvider({
             body: JSON.stringify({ favorites: next }),
           });
           show(saved.favorites);
+          setFromGroup(saved.favoritesFromGroup === true);
           setError(null);
           return true;
         } catch (err) {
@@ -122,6 +133,28 @@ export function FavoritesProvider({
     },
     [show]
   );
+
+  // Queued with the list's saves, like them.
+  const resetToGroup = useCallback((): Promise<boolean> => {
+    const run = async (): Promise<boolean> => {
+      try {
+        const saved = await apiFetch<Settings>("/api/v1/me/settings", {
+          method: "PATCH",
+          body: JSON.stringify({ favorites: null }),
+        });
+        show(saved.favorites);
+        setFromGroup(saved.favoritesFromGroup === true);
+        setError(null);
+        return true;
+      } catch (err) {
+        setError(apiErrorMessage(err, "Favoriterna kunde inte återställas."));
+        return false;
+      }
+    };
+    const result = queue.current.then(run);
+    queue.current = result;
+    return result;
+  }, [show]);
 
   const setInSidebar = useCallback(async (next: boolean): Promise<boolean> => {
     try {
@@ -176,8 +209,10 @@ export function FavoritesProvider({
         save((current) => (current.some((f) => f.href === favorite.href) ? current : [...current, favorite]), true),
       remove: (href) => save((current) => current.filter((f) => f.href !== href), true),
       replace: (list) => save(() => list, false),
+      fromGroup,
+      resetToGroup,
     }),
-    [favorites, save, inSidebar, setInSidebar, onOverview, setPlacement]
+    [favorites, save, inSidebar, setInSidebar, onOverview, setPlacement, fromGroup, resetToGroup]
   );
 
   return (

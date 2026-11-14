@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import {
   createPermissionGroupSchema,
   deletePermissionGroupQuerySchema,
+  permissionGroupDefaultFavoritesSchema,
   updatePermissionGroupSchema,
 } from "@navet/shared";
 import { requireRole } from "../middleware/auth.middleware.js";
@@ -48,6 +49,17 @@ export async function permissionGroupRoutes(app: FastifyInstance, opts: { servic
     } catch (err) {
       if (err instanceof PermissionGroupNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof DuplicatePermissionGroupCodeError) return reply.code(409).send(errorBody(err));
+      if (err instanceof PermissionGroupOwnedByPluginError) return reply.code(409).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  app.put<{ Params: { id: string } }>("/permission-groups/:id/default-favorites", admin, async (req, reply) => {
+    const { favorites } = permissionGroupDefaultFavoritesSchema.parse(req.body);
+    try {
+      return await service.setDefaultFavorites(req.params.id, favorites, req.user!.id);
+    } catch (err) {
+      if (err instanceof PermissionGroupNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof PermissionGroupOwnedByPluginError) return reply.code(409).send(errorBody(err));
       throw err;
     }

@@ -8,6 +8,7 @@ import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { HelpLink } from "../ui/HelpLink";
 import { PermissionGroupForm } from "./PermissionGroupForm";
+import { GroupFavoritesForm } from "./GroupFavoritesForm";
 import { PERMISSION_LABELS } from "../../lib/permissions";
 import type { PermissionGroup } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
@@ -16,6 +17,7 @@ export function PermissionGroupsPageClient({ groups }: { groups: PermissionGroup
   const router = useRouter();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<PermissionGroup | null>(null);
+  const [favoritesOf, setFavoritesOf] = useState<PermissionGroup | null>(null);
 
   return (
     <>
@@ -38,6 +40,7 @@ export function PermissionGroupsPageClient({ groups }: { groups: PermissionGroup
           { key: "name", label: "Namn", width: "1.4fr" },
           { key: "permissions", label: "Rättigheter", width: "2.6fr" },
           { key: "users", label: "Användare", width: "0.8fr", align: "right" },
+          { key: "favorites", label: "Förvalda favoriter", width: "1.1fr" },
         ]}
         rows={groups}
         renderCell={(group, key) => {
@@ -72,6 +75,14 @@ export function PermissionGroupsPageClient({ groups }: { groups: PermissionGroup
                 : group.permissions.map((p) => PERMISSION_LABELS[p]).join(", ");
             case "users":
               return group.userCount;
+            case "favorites":
+              // A plugin's group has no one to log in.
+              if (group.pluginId) return "—";
+              return (
+                <Button type="button" variant="ghost" size="small" onClick={() => setFavoritesOf(group)}>
+                  {group.defaultFavorites?.length ? `${group.defaultFavorites.length} st — Ändra` : "Välj"}
+                </Button>
+              );
             default:
               return null;
           }
@@ -86,6 +97,22 @@ export function PermissionGroupsPageClient({ groups }: { groups: PermissionGroup
             router.refresh();
           }}
         />
+      </Modal>
+
+      <Modal
+        open={favoritesOf !== null}
+        onClose={() => setFavoritesOf(null)}
+        title={favoritesOf ? `Förvalda favoriter — ${favoritesOf.code}` : ""}
+      >
+        {favoritesOf && (
+          <GroupFavoritesForm
+            group={favoritesOf}
+            onSuccess={() => {
+              setFavoritesOf(null);
+              router.refresh();
+            }}
+          />
+        )}
       </Modal>
 
       <Modal open={editing !== null} onClose={() => setEditing(null)} title={editing ? `Redigera ${editing.code}` : ""}>

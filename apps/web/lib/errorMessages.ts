@@ -699,6 +699,9 @@ const MESSAGES: Record<string, MessageEntry> = {
     "Leveranstiden kan bara kontrolleras för en offert, en bekräftad order eller en order under tillverkning."
   ),
   "row-configuration-locked": serverMessage("Konfigurationen kan inte ändras — raden har gått vidare."),
+  "row-template-not-to-order": serverMessage(
+    "Mallen är inte längre en beställningsvara, så antalet på raden kan inte ändras — ta bort raden och lägg in artikeln på nytt."
+  ),
   "row-configuration-outdated":
     "Mallen har ändrats sedan raden konfigurerades — öppna Ändra konfiguration och spara valen innan antalet ändras.",
   "row-configuration-changed":

@@ -36,15 +36,16 @@ export async function AppShell({ active, children }: AppShellProps) {
   const roleLabel = ROLE_LABELS[user.role] ?? user.role;
 
   return (
-    <FavoritesProvider initial={favorites.favorites} initialInSidebar={favorites.inSidebar} initialOnOverview={favorites.onOverview}>
+    <FavoritesProvider initial={favorites.favorites} initialInSidebar={favorites.inSidebar} initialOnOverview={favorites.onOverview} initialFromGroup={favorites.fromGroup}>
       <UserPrefsProvider
         className={styles.frame}
         initialDensity={favorites.density}
         initialListColumns={favorites.listColumns}
         initialDocumentTabs={favorites.documentTabs}
       >
-        <Nav active={active} role={user.role} permissions={user.permissions} />
+        {/* The sidebar inside too: its Favoriter → Ändra offers shortcuts by the user's access. */}
         <PermissionsProvider role={user.role} permissions={user.permissions}>
+          <Nav active={active} role={user.role} permissions={user.permissions} />
           <div className={styles.column}>
             <AppToolbar userName={user.name} userRole={roleLabel} />
             <main className={styles.main} data-app-main="">

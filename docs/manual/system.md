@@ -53,6 +53,10 @@ En ändring av en grupp gäller direkt — användarna behöver inte logga in ig
 
 En användare utan grupp (**Ingen åtkomst**) når bara hjälpen och sidan **Ingen behörighet**. Rollen **Arbetsledare** ger inte i sig åtkomst till modulerna: för att nå **Attestering** och **Löneunderlag** måste arbetsledaren också ha en grupp med **Personal & lön**. Personalregistret (**Personal & lön → Anställda**) och dess uppgifter är bara för administratörer och för arbetsledare vars grupp har **Personal & lön**; terminalen och TO-kortet ser bara anställningsnummer och namn.
 
+### Förvalda favoriter
+
+Kolumnen **Förvalda favoriter** visar hur många favoriter gruppen ger sina medlemmar. Klicka på **Välj** (eller **… st — Ändra**) för att välja dem i listan **Lägg till …**: under **Sidor** finns de sidor gruppens rättigheter öppnar och under **Genvägar** till exempel **+ Ny kundorder**. Namnen kan ändras och favoriterna flyttas med pilarna eller tas bort med **Ta bort**, och listan sparas med **Spara**. En medlem som inte har gjort några egna ändringar i sina favoriter ser gruppens lista, och en ändring här når alla sådana medlemmar direkt. När medlemmen själv ändrar sina favoriter blir listan hens egen (se [Favoriter](/hjalp/komma-igang#favoriter)). Ändringen syns i händelseloggen som **Förvalda favoriter ändrade**. Ett tilläggs grupp har inga favoriter.
+
 ### Ta bort grupp
 
 **Ta bort grupp** finns längst ned när man redigerar en grupp. Används gruppen inte av någon användare visas inget extra fält — efter bekräftelsen "Ta bort behörighetsgruppen \<kod\>?" tas gruppen bort direkt. Används gruppen av någon användare visas fältet **Flytta användarna till (vid borttagning)**, och du måste först välja en grupp där; användarna flyttas då dit. Utan val avvisas borttagningen.

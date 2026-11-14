@@ -335,16 +335,16 @@ export default async function OverviewPage() {
   const todayLabel = new Date().toLocaleDateString("sv-SE", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/Stockholm" });
 
   return (
-    <FavoritesProvider initial={favorites.favorites} initialInSidebar={favorites.inSidebar} initialOnOverview={favorites.onOverview}>
+    <FavoritesProvider initial={favorites.favorites} initialInSidebar={favorites.inSidebar} initialOnOverview={favorites.onOverview} initialFromGroup={favorites.fromGroup}>
     <UserPrefsProvider
       className={shellStyles.frame}
       initialDensity={favorites.density}
       initialListColumns={favorites.listColumns}
         initialDocumentTabs={favorites.documentTabs}
     >
-      <Nav active="Översikt" role={user.role} permissions={user.permissions} />
-
+      {/* The sidebar inside too: its Favoriter → Ändra offers shortcuts by the user's access. */}
       <PermissionsProvider role={user.role} permissions={user.permissions}>
+      <Nav active="Översikt" role={user.role} permissions={user.permissions} />
       <div className={shellStyles.column}>
       <AppToolbar userName={user.name} userRole={roleLabel} />
       <main className={shellStyles.main} data-app-main="">

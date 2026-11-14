@@ -103,7 +103,7 @@ import { StaffelConflict } from "../repository/article-sales-prices.js";
 // is reached through the injected RowConfigurationReader, never imported.
 import { selectionFromEntries } from "../../configurator/service/variant-identity.js";
 import { rowConfigurationLines } from "../../configurator/service/configuration-lines.js";
-import { ConfiguratorInvalidConfigurationError } from "../../configurator/service/configurator.errors.js";
+import { ConfiguratorInvalidConfigurationError, ConfiguratorNotToOrderModeError } from "../../configurator/service/configurator.errors.js";
 // Påslag (#16): the costing module's pure rounding of a percentage to the
 // header columns' two decimals — the same one effectiveMarkups uses.
 import { roundPercent } from "../../costing/service/markup-levels.js";
@@ -116,6 +116,7 @@ import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import {
   ConfigurationNotAllowedError,
   RowConfigurationOutdatedError,
+  RowTemplateNotToOrderError,
   ConfigurationRequiredError,
   CustomerPriceNotFoundError,
   CustomerArticleNumberNotFoundError,
@@ -1864,11 +1865,18 @@ export function createSalesService(
       // evaluation serves both the cost and the reprice below.
       let evaluated: RowConfigurationEvaluation | undefined;
       if (stored && quantityChanged) {
-        evaluated = await rowConfiguration.evaluate(stored.templateArticleId, selectionFromEntries(stored.selection), {
-          customerId: order.customerId,
-          quantity,
-          ...chainCurrency(orderPricing(order)),
-        });
+        try {
+          evaluated = await rowConfiguration.evaluate(stored.templateArticleId, selectionFromEntries(stored.selection), {
+            customerId: order.customerId,
+            quantity,
+            ...chainCurrency(orderPricing(order)),
+          });
+        } catch (err) {
+          if (err instanceof ConfiguratorNotToOrderModeError) {
+            throw new RowTemplateNotToOrderError((await articleFiles.getArticle(existing.articleId))?.articleNumber ?? existing.articleId);
+          }
+          throw err;
+        }
         if (!evaluated.valid || !evaluated.configuration) throw new ConfiguratorInvalidConfigurationError(evaluated.errors);
         // The stored choices resolve to another configuration than the row
         // shows (a förval added to the template since): its price and cost

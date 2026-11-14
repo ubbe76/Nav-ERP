@@ -31,6 +31,9 @@ export function favoriteHref(pathname: string, searchParams: URLSearchParams | {
 // failed read: the group then stays hidden.
 export interface FavoritesState {
   favorites: Favorite[] | null;
+  // The list is the behörighetsgrupp's förvalda favoriter (the user has not
+  // saved one of their own).
+  fromGroup: boolean;
   inSidebar: boolean;
   // Översikten shows the Favoriter card (`overviewCards`).
   onOverview: boolean;
@@ -50,6 +53,7 @@ export interface ShellSettings extends FavoritesState {
 export async function loadShellSettings(cookieHeader: string | undefined): Promise<ShellSettings> {
   const fallback: ShellSettings = {
     favorites: null,
+    fromGroup: false,
     inSidebar: true,
     onOverview: false,
     density: "normal",
@@ -60,6 +64,7 @@ export async function loadShellSettings(cookieHeader: string | undefined): Promi
   try {
     const settings = await apiGet<{
       favorites?: Favorite[];
+      favoritesFromGroup?: boolean;
       favoritesInSidebar?: boolean;
       overviewCards?: unknown;
       density?: string;
@@ -68,6 +73,7 @@ export async function loadShellSettings(cookieHeader: string | undefined): Promi
     }>("/api/v1/me/settings", cookieHeader);
     return {
       favorites: settings.favorites ?? null,
+      fromGroup: settings.favoritesFromGroup === true,
       inSidebar: settings.favoritesInSidebar !== false,
       onOverview: hasFavoritesCard(settings.overviewCards),
       density: settings.density === "compact" ? "compact" : "normal",

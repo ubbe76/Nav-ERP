@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, index, integer, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, check, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 
 // Roles: admin (everything, incl. System), supervisor (attest powers),
 // user. What a non-admin may open is decided by their permission group.
@@ -19,6 +19,9 @@ export const permissionGroups = pgTable("permission_groups", {
   code: varchar("code", { length: 20 }).notNull().unique(),
   name: varchar("name", { length: 100 }).notNull(),
   permissions: text("permissions").array().notNull().default(sql`'{}'::text[]`),
+  // Förvalda favoriter: [{ href, title }] a member gets until they save a
+  // list of their own (user_settings `favorites`); null = none.
+  defaultFavorites: jsonb("default_favorites").$type<{ href: string; title: string }[]>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

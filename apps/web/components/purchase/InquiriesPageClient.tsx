@@ -14,9 +14,12 @@ import { INQUIRY_STATUS_PILL, type Inquiry, type Paged } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import styles from "../../app/inkop/ordrar/page.module.css";
 import { HelpLink } from "../ui/HelpLink";
+import { useNewFromQuery } from "../../lib/useNewFromQuery";
 
 export function InquiriesPageClient({ inquiries, pageSize }: { inquiries: Paged<Inquiry>; pageSize: number }) {
   const [modalOpen, setModalOpen] = useState(false);
+  // + Ny … from a favourite or a hub link (?ny=1).
+  useNewFromQuery(() => setModalOpen(true));
 
   const view = useListColumns([
     { key: "inquiryNumber", label: "Nummer", width: "140px" },
