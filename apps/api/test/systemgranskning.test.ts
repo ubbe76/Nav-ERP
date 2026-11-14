@@ -18,6 +18,7 @@ import {
   purchaseOrders,
   purchaseReceipts,
   stockTransactions,
+  supplierInvoices,
   suppliers,
   systemSettings,
 } from "@navet/db";
@@ -53,7 +54,7 @@ async function resetSettings() {
 }
 
 beforeAll(async () => {
-  savedSeries = await db.select().from(numberSeries).where(inArray(numberSeries.key, ["purchase_order"]));
+  savedSeries = await db.select().from(numberSeries).where(inArray(numberSeries.key, ["purchase_order", "supplier_invoice"]));
   app = buildApp();
   await app.ready();
 });
@@ -122,6 +123,21 @@ describe("Säkerhetskopiering: an aborted download ends pg_dump", () => {
   });
 });
 
+describe("Säkerhetskopiering: a dump that fails after its output ended is not a finished backup", () => {
+  const child = (script: string): DumpProcess => spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "pipe"] });
+
+  it("errors the stream when pg_dump closes stdout and then exits non-zero", async () => {
+    // Output, then stdout closed (EOF for the reader), then the failure.
+    const script =
+      "const fs = require('fs'); fs.writeSync(1, '-- dump\\n'); fs.closeSync(1); setTimeout(() => { process.stderr.write('connection lost'); process.exit(1); }, 200);";
+    const { stream } = createDatabaseBackup("postgres://unused", new Date(), () => child(script));
+    const read = (async () => {
+      for await (const _chunk of stream) void _chunk;
+    })();
+    await expect(read).rejects.toThrow(/code 1: connection lost/);
+  });
+});
+
 // --- 2. Nummerserier ----------------------------------------------------------
 
 describe("Nummerserier: a series that cannot issue its next number is refused", () => {
@@ -185,6 +201,38 @@ describe("Nummerserier: a series that cannot issue its next number is refused", 
     expect(res.json()).toMatchObject({ code: "document-number-taken" });
     // The create rolled back with its number.
     expect((await series("purchase_order")).nextNumber).toBe(nextNumber - 1);
+    expect(await db.select().from(purchaseOrders)).toHaveLength(1);
+  });
+
+  it("a supplier invoice that meets a taken LF number answers document-number-taken, not the duplicate invoice number text", async () => {
+    const [supplier] = await db.insert(suppliers).values({ supplierNumber: `L-${randomUUID().slice(0, 8)}`, name: "Lev AB" }).returning();
+    const lf = (invoiceNumber: string) =>
+      asAdmin("POST", "/supplier-invoices", { supplierId: supplier!.id, invoiceNumber, invoiceDate: "2026-11-13" });
+    expect((await lf("F-1")).statusCode).toBe(201);
+    const { nextNumber } = await series("supplier_invoice");
+    await db.update(numberSeries).set({ nextNumber: nextNumber - 1 }).where(eq(numberSeries.key, "supplier_invoice"));
+
+    // Another invoice number from the same supplier: only the LF number collides.
+    const res = await lf("F-2");
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ code: "document-number-taken" });
+    expect(await db.select().from(supplierInvoices)).toHaveLength(1);
+    // The supplier's own invoice number twice is still the duplicate.
+    await db.update(numberSeries).set({ nextNumber: nextNumber + 5 }).where(eq(numberSeries.key, "supplier_invoice"));
+    expect((await lf("F-1")).json()).toMatchObject({ code: "duplicate-supplier-invoice-number" });
+  });
+
+  it("a series that outgrows its column (9999 → 10000) answers 409 document-number-too-long at the create, not 500", async () => {
+    // Exactly 20 characters at 9999 — Nummerserier accepts it.
+    const ok = await asAdmin("PATCH", "/number-series/purchase_order", { prefix: "INKOPSORDER-2026", digits: 4, nextNumber: 9999 });
+    expect(ok.statusCode).toBe(200);
+    expect((await createPurchaseOrder()).statusCode).toBe(201);
+
+    const res = await createPurchaseOrder();
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ code: "document-number-too-long", number: "INKOPSORDER-202610000" });
+    // The create rolled back with its number.
+    expect((await series("purchase_order")).nextNumber).toBe(10000);
     expect(await db.select().from(purchaseOrders)).toHaveLength(1);
   });
 

@@ -379,7 +379,7 @@ import {
   RiksbankUnavailableError,
 } from "../src/modules/system/service/exchange-rates.js";
 
-import { DocumentNumberTakenError, SeriesExhaustedError } from "../src/modules/system/service/number-series.js";
+import { DocumentNumberTakenError, DocumentNumberTooLongError, SeriesExhaustedError } from "../src/modules/system/service/number-series.js";
 import {
   BuiltInNumberSeriesError,
   DuplicateNumberSeriesNameError,
@@ -746,6 +746,7 @@ const cases: Array<[Error, string]> = [
   [new NumberSeriesTooLongError("purchase_order", "INKÖPSORDERNUMMER-1004", 20), ERROR_CODES.NUMBER_SERIES_TOO_LONG],
   [new NumberSeriesNumberTakenError("purchase_order", "IO-1004"), ERROR_CODES.NUMBER_SERIES_NUMBER_TAKEN],
   [new DocumentNumberTakenError("purchase_orders"), ERROR_CODES.DOCUMENT_NUMBER_TAKEN],
+  [new DocumentNumberTooLongError("purchase_orders", "IO-LONG-PREFIX-10000", 20), ERROR_CODES.DOCUMENT_NUMBER_TOO_LONG],
   [new DemoDataNotAvailableError(["customers"]), ERROR_CODES.DEMO_DATA_NOT_AVAILABLE],
   [new OrderRegisterTooLargeError(), ERROR_CODES.ORDER_REGISTER_TOO_LARGE],
   [new QuoteFollowupTooLargeError(), ERROR_CODES.QUOTE_FOLLOWUP_TOO_LARGE],

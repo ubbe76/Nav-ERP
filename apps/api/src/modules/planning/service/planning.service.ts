@@ -291,6 +291,12 @@ const OPEN_SALES_ORDER_STATUSES: ReadonlySet<string> = new Set(SALES_ORDER_EDITA
 // (prepareCreate's LinkedOrderStatusError), so the guard sits up front.
 const RESERVABLE_SALES_ORDER_STATUSES: ReadonlySet<string> = new Set(["confirmed", "in_production"]);
 
+// A beställningsvara row whose stored choices the template now resolves to
+// another configuration (a group added later with a förval) — the
+// behovsberäkningen's row, the färdigdatum's lead time and the
+// Leveranstidskontroll's row; the TO itself is refused the same way.
+export const TEMPLATE_CHANGED_MESSAGE = "Mallen har ändrats sedan raden konfigurerades — använd Ändra konfiguration";
+
 // Reservationen: the check run under the lock gave another delivery date
 // than the one the client was shown. 409 — the body carries the new result
 // so the dialog can show it and offer the button again. Nothing is written.
@@ -1197,7 +1203,7 @@ export function createPlanningService(
     // latest start (the component must be there when that TO begins).
     const groups = new Map<
       string,
-      { templateId: string; selection: ConfiguratorSelection; quantity: number; needs: ConfiguredRowNeed[] }
+      { templateId: string; configKey: string; selection: ConfiguratorSelection; quantity: number; needs: ConfiguredRowNeed[] }
     >();
     configured.forEach((r, i) => {
       const need = needs[i]!;
@@ -1205,6 +1211,7 @@ export function createPlanningService(
       const key = `${r.articleId}:${r.configuration.key}`;
       const g = groups.get(key) ?? {
         templateId: r.articleId,
+        configKey: r.configuration.key,
         selection: selectionFromEntries(r.configuration.selection),
         quantity: 0,
         needs: [],
@@ -1221,6 +1228,14 @@ export function createPlanningService(
         const s = await deps.configuredStructure(g.templateId, g.selection, g.quantity, { withCost: false });
         if (!s.valid) {
           for (const n of g.needs) n.error = s.errors[0] ?? "Konfigurationen är inte giltig";
+          continue;
+        }
+        // The stored choices now resolve to another configuration (a group
+        // added to the template later with a förval): no material for
+        // choices the row does not show — the TO is refused the same way
+        // (prepareCreate's key check) until Ändra konfiguration.
+        if (s.key !== g.configKey) {
+          for (const n of g.needs) n.error = TEMPLATE_CHANGED_MESSAGE;
           continue;
         }
         const operations = s.operations.map((o) => ({
@@ -1267,7 +1282,7 @@ export function createPlanningService(
   // TOs are deliberately NOT netted: an extra TO is the operator's decision)
   // ⇒ nothing to plan by. Ordinary rows and calls without a row keep the
   // pooled rule, whose overview demand is the remaining quantity already.
-  type ConfiguredRowRef = { configuration: ConfiguratorSelection };
+  type ConfiguredRowRef = { configuration: ConfiguratorSelection; key: string };
   async function firmDemandFor(
     articleId: string,
     today: string,
@@ -1277,7 +1292,7 @@ export function createPlanningService(
       const loaded = await repo.salesOrderRowForDueDate(salesOrderRowId);
       if (loaded?.configured && loaded.articleId === articleId) {
         const configuredRow: ConfiguredRowRef | null = loaded.configuration
-          ? { configuration: selectionFromEntries(loaded.configuration.selection) }
+          ? { configuration: selectionFromEntries(loaded.configuration.selection), key: loaded.configuration.key }
           : null;
         if (loaded.quantityOrdered - loaded.quantityDelivered <= 0) return { demand: null, configuredRow };
         const [row] = await toShipDates([loaded]);
@@ -1306,7 +1321,9 @@ export function createPlanningService(
     if (configuredRow && deps.configuredStructure) {
       try {
         const s = await deps.configuredStructure(articleId, configuredRow.configuration, quantity, { withCost: false });
-        if (s.valid) {
+        // A template changed since the row was configured falls back like
+        // an invalid one — the create refuses it until Ändra konfiguration.
+        if (s.valid && s.key === configuredRow.key) {
           return configuredLeadDays(
             articleLeadTimes.get(articleId),
             s.operations.map((o) => ({ workCenterId: o.workCenterId, setupTime: Number(o.setupTime), runTimePerUnit: Number(o.runTimePerUnit) })),
@@ -2006,6 +2023,9 @@ export function createPlanningService(
       articleId: string;
       quantity: number;
       selection: ConfiguratorSelection | null;
+      // A saved order row's key: its stored choices must still resolve to
+      // it (null for the form's rows, which are evaluated as typed).
+      storedKey?: string | null;
       coverage?: {
         quantityOrdered: number;
         quantityDelivered: number;
@@ -2035,6 +2055,7 @@ export function createPlanningService(
             articleId: r.articleId,
             quantity: r.rest,
             selection: r.configuration ? selectionFromEntries(r.configuration.selection) : null,
+            storedKey: r.configuration?.key ?? null,
             coverage: { quantityOrdered: r.quantityOrdered, quantityDelivered: r.quantityDelivered, linkedOrders: r.linkedOrders },
           }));
       }
@@ -2087,6 +2108,10 @@ export function createPlanningService(
       });
       if (!s.valid) {
         dtcRows.push({ key: r.key, articleId: r.articleId, quantity: r.quantity, error: s.errors[0] ?? "Konfigurationen är inte giltig" });
+        continue;
+      }
+      if (r.storedKey && s.key !== r.storedKey) {
+        dtcRows.push({ key: r.key, articleId: r.articleId, quantity: r.quantity, error: TEMPLATE_CHANGED_MESSAGE });
         continue;
       }
       const variantId = a.configuratorMode === "variants" && s.key ? await repo.findVariantByKey(r.articleId, s.key, dbc) : null;
@@ -3143,7 +3168,9 @@ export function createPlanningService(
                   proposal.articleId,
                   proposal.needDate,
                   proposal.quantity,
-                  linked.configuration ? { configuration: selectionFromEntries(linked.configuration.selection) } : null
+                  linked.configuration
+                    ? { configuration: selectionFromEntries(linked.configuration.selection), key: linked.configuration.key }
+                    : null
                 )
               : await this.suggestManufacturingDueDate(proposal.articleId, {
                   salesOrderRowId: proposal.salesOrderRowId,

@@ -357,6 +357,7 @@ export const ERROR_CODES = {
   NUMBER_SERIES_TOO_LONG: "number-series-too-long",
   NUMBER_SERIES_NUMBER_TAKEN: "number-series-number-taken",
   DOCUMENT_NUMBER_TAKEN: "document-number-taken",
+  DOCUMENT_NUMBER_TOO_LONG: "document-number-too-long",
   ORDER_REGISTER_TOO_LARGE: "order-register-too-large",
   QUOTE_FOLLOWUP_TOO_LARGE: "quote-followup-too-large",
   QUOTE_LOSS_REASON_INVALID: "quote-loss-reason-invalid",

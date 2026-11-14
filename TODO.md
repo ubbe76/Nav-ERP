@@ -26,13 +26,9 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 - [ ] **Bokföringsspärrens triggers läser förälderns status utan lås** (delatgranskningen 2026-11-11, medvetet lämnad): `nav_verification_locked` och `nav_supplier_invoice_files_guard` (0095) läser verifikatet/fakturan med en vanlig SELECT, så en skrivare som INTE själv låser verifikatet kan lägga en rad på ett utkast samtidigt som ett annat anrop bokför det. Ingen kod gör så (`replaceRows`/`addRow`/`deleteRow`/`bookVerificationInTx` tar `FOR UPDATE` först) — bara ett skript når det. `FOR SHARE` i funktionerna rättar det men kan ge deadlock för en skrivare som lägger rader först och uppdaterar huvudet sedan; prövas mot alla bokföringsvägar innan.
 
-- [ ] **Konfigurerade rader i behovsberäkningen och Leveranstidskontrollen** (`planning.service.ts` ~1166–1186, ~2002, ~3045) utvärderar sparade val utan att jämföra nyckeln — ett förval tillagt i mallen efteråt ger materialbehov för det nya förvalet tills Ändra konfiguration körs (TO-skapandet vägrar redan; `variantPrice` rättat i artikelgranskningen).
-
 - [ ] **Löneperiodens Lås mot odaterade ändringar:** personalkortet (standardschema, övertidsförval, Anställd från/till), dags- och veckoscheman, OB-regler, frånvarokoder och inställningarna kan ändras medan Lås räknar underlaget (tidgranskningen serialiserade bara de daterade skrivarna, `payroll-period-guard.ts`); `attest` läser öppen närvaro utanför transaktionen. OB-regelns namn har inget unikt index (förkontrollen ensam).
 
 ### Låga — otydliga fel, texter och småbeteenden
-
-- [ ] **Systemgranskningens rester (2026-11-11):** en nummerserie nära 20 tecken kan växa förbi kolumnen senare (9999 → 10000) och ger då 500 (22001 säger inte vilken kolumn); ett krockande LF-nummer får `DuplicateSupplierInvoiceNumberError`s text i stället för `document-number-taken`; backupen kan leverera en avkortad dump som lyckad om pg_dump avslutar med fel efter att stdout tagit slut; inköpets fakturaunderlag (`listInvoiceBasis`) läser bara lagerrader, så lego-/tjänsterader får ett ungefärligt mottagningsdatum.
 
 - [ ] **Importens igenkänning:** kundens/leverantörens adressmall utan Adressnamn och Förvald (bara nummer + Adressrad 1/Postnummer/Stad) känns igen som kund-/leverantörsfil och skriver adressen över motpartens egen — tvetydig mot kundmallen, så den rättades inte i importgranskningen (guiden visar typen före commit).
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createPlanningService, type ManufacturingOrderCreator } from "../src/modules/planning/service/planning.service.js";
+import { createPlanningService, TEMPLATE_CHANGED_MESSAGE, type ManufacturingOrderCreator } from "../src/modules/planning/service/planning.service.js";
 import type { PlanningRepository } from "../src/modules/planning/repository/planning.repository.js";
 import type { ArticleOverviewInput } from "../src/modules/planning/service/article-overview.js";
 import type { PartnerDeliveryFields } from "../src/modules/system/service/delivery-days.js";
@@ -569,10 +569,15 @@ describe("planning service — configured rows: one derivation per configuration
     { groupCode: "LOCK", groupName: "Lås", kind: "choice", valueCode: "B", valueName: "Lås B", value: "B", unit: null },
     { groupCode: "BREDD", groupName: "Bredd", kind: "number", valueCode: null, valueName: null, value: 1200, unit: "mm" },
   ];
-  const configuredRow = (rowId: string, quantityOrdered: number, key = "k1") => ({
+  // The key the fake derivation gives a selection: k1 for 1200 mm, k2 otherwise.
+  const keyOf = (bredd: unknown) => (bredd === 1200 ? "k1" : "k2");
+  const configuredRow = (rowId: string, quantityOrdered: number, key = "k1", bredd = key === "k1" ? 1200 : 1400) => ({
     rowId, salesOrderId: `so-${rowId}`, orderNumber: `KO-${rowId}`, customerName: "Kund AB", articleId: "t",
     expectedDeliveryDate: null, quantityOrdered, quantityDelivered: 0,
-    configuration: { templateArticleId: "t", key, selection, price: { base: 0, additions: [], unitPrice: 0, discountPercent: 0, source: "base" } },
+    configuration: {
+      templateArticleId: "t", key, selection: selection.map((e) => (e.groupCode === "BREDD" ? { ...e, value: bredd } : e)),
+      price: { base: 0, additions: [], unitPrice: 0, discountPercent: 0, source: "base" },
+    },
     linkedOrders: [] as { status: string; quantity: number; received: number }[],
   });
   const repo = (rows: ReturnType<typeof configuredRow>[], template: Record<string, unknown> = {}) =>
@@ -588,9 +593,9 @@ describe("planning service — configured rows: one derivation per configuration
         return rows as never;
       },
     });
-  const structure = (valid: boolean, quantity: number, errors: string[] = []) =>
+  const structure = (valid: boolean, quantity: number, errors: string[] = [], key = "k1") =>
     ({
-      valid, errors, templateArticleId: "t", key: "k1", selection: [], operations: [], cost: null,
+      valid, errors, templateArticleId: "t", key, selection: [], operations: [], cost: null,
       materials: valid ? [{ componentArticleId: "c", componentName: "c", totalQuantity: 2 * quantity, operationSequenceNo: null, unitId: null, unitFactor: null }] : [],
     }) as never;
   const listAll = (service: ReturnType<typeof createPlanningService>) =>
@@ -603,20 +608,36 @@ describe("planning service — configured rows: one derivation per configuration
       requirementsCacheMs: 0,
       configuredStructure: async (templateId, selection, quantity, opts) => {
         calls.push({ templateId, selection, quantity, opts });
-        return structure(true, quantity);
+        return structure(true, quantity, [], keyOf(selection.BREDD));
       },
     });
     const rows = await listAll(service);
     expect(calls).toEqual([
       { templateId: "t", selection: { LOCK: "B", BREDD: 1200 }, quantity: 3, opts: { withCost: false } },
-      { templateId: "t", selection: { LOCK: "B", BREDD: 1200 }, quantity: 5, opts: { withCost: false } },
+      { templateId: "t", selection: { LOCK: "B", BREDD: 1400 }, quantity: 5, opts: { withCost: false } },
     ]);
     expect(rows.find((r) => r.articleId === "c")).toMatchObject({ demandDerived: 16, proposalQuantity: 16, proposalKind: "purchase" });
     expect(rows.filter((r) => r.proposalKind === "configured").map((r) => [r.salesOrderRowId, r.proposalQuantity, r.configurationError, r.configurationSummary])).toEqual([
       ["r1", 1, null, "Lås: Lås B · Bredd: 1 200 mm"],
       ["r2", 2, null, "Lås: Lås B · Bredd: 1 200 mm"],
-      ["r3", 5, null, "Lås: Lås B · Bredd: 1 200 mm"],
+      ["r3", 5, null, "Lås: Lås B · Bredd: 1 400 mm"],
     ]);
+  });
+
+  it("a row whose stored choices now resolve to another key gets the template-changed error and cascades nothing", async () => {
+    // Stored as k2 but with the choices the template now resolves to k1
+    // (a förval added later): the same group key as the k2 rows, another derivation.
+    const service = createPlanningService(repo([configuredRow("r1", 1), configuredRow("r2", 2, "k2", 1200)]), {
+      ...noCreators,
+      requirementsCacheMs: 0,
+      configuredStructure: async (_t, selection, quantity) => structure(true, quantity, [], keyOf(selection.BREDD)),
+    });
+    const rows = await listAll(service);
+    expect(rows.filter((r) => r.proposalKind === "configured").map((r) => [r.salesOrderRowId, r.configurationError])).toEqual([
+      ["r1", null],
+      ["r2", TEMPLATE_CHANGED_MESSAGE],
+    ]);
+    expect(rows.find((r) => r.articleId === "c")).toMatchObject({ demandDerived: 2 });
   });
 
   it("rounds each row up to the template's step — the proposal and the summed derivation alike", async () => {

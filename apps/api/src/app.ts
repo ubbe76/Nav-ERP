@@ -209,7 +209,7 @@ import { alertsRoutes } from "./modules/alerts/routes/alerts.routes.js";
 import { isBookkeepingLockViolation, isClosedFiscalYearViolation, isEmployeeAnonymizedViolation, isNumberOutOfRange } from "./modules/system/service/db-errors.js";
 import { StockLocationNotFoundError } from "./modules/stock/service/stock.errors.js";
 import { batchErrorStatus, isSerialBalanceViolation, SERIAL_BALANCE_VIOLATED } from "./modules/stock/service/batch.errors.js";
-import { documentNumberTakenError } from "./modules/system/service/number-series.js";
+import { documentNumberTakenError, DocumentNumberTooLongError } from "./modules/system/service/number-series.js";
 import { errorBody } from "./modules/system/service/error-body.js";
 import { createQualityRepository } from "./modules/quality/repository/quality.repository.js";
 import { createQualityService } from "./modules/quality/service/quality.service.js";
@@ -319,6 +319,11 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     if (numberTaken) {
       app.log.error(err);
       return reply.code(409).send(errorBody(numberTaken));
+    }
+    // …or has outgrown its column (9999 → 10000 with a long prefix).
+    if (err instanceof DocumentNumberTooLongError) {
+      app.log.error(err);
+      return reply.code(409).send({ ...errorBody(err), number: err.number });
     }
     // GDPR (#2): the anonymized-employee guard (migration 0170).
     if (isEmployeeAnonymizedViolation(err)) {

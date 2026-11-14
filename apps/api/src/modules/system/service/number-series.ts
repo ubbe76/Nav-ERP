@@ -73,7 +73,14 @@ export async function getNextOrderNumber(db: Db | Tx, key: string): Promise<stri
     .returning();
   if (!row) throw new NumberSeriesNotConfiguredError(key);
 
-  return formatSeriesNumber(row.prefix, row.nextNumber - 1, row.digits);
+  const issued = formatSeriesNumber(row.prefix, row.nextNumber - 1, row.digits);
+  // A document series that has grown past its column (Nummerserier refuses
+  // a prefix/digits that do not fit, but 9999 → 10000 still gets there):
+  // the caller's transaction rolls the number back — 409 with a named
+  // code (app.ts), not the raw 22001 that never said which column.
+  const target = documentSeriesTarget(key);
+  if (target && Array.from(issued).length > target.width) throw new DocumentNumberTooLongError(target.table, issued, target.width);
+  return issued;
 }
 
 // How a series prints a number: the prefix and the number zero-padded to
@@ -159,6 +166,15 @@ export class DocumentNumberTakenError extends Error {
   constructor(readonly table: string) {
     super(`The next number in the series is already taken in ${table} — set Nästa nummer past it under System → Nummerserier`);
     this.name = "DocumentNumberTakenError";
+  }
+}
+
+// A document series' next number no longer fits its column — the series
+// outgrew it (getNextOrderNumber). Mapped once by the global error handler.
+export class DocumentNumberTooLongError extends Error {
+  constructor(readonly table: string, readonly number: string, readonly width: number) {
+    super(`The next number in the series (${number}) is longer than ${width} characters for ${table} — change the series under System → Nummerserier`);
+    this.name = "DocumentNumberTooLongError";
   }
 }
 

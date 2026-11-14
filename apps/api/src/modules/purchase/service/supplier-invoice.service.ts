@@ -101,6 +101,8 @@ export class SupplierInvoiceRowNotFoundError extends Error {
   }
 }
 
+const SUPPLIER_INVOICE_NUMBER_UNIQUE = "supplier_invoices_supplier_invoice_number_unique";
+
 export class DuplicateSupplierInvoiceNumberError extends Error {
   constructor(invoiceNumber: string) {
     super(`An invoice with number "${invoiceNumber}" already exists for this supplier`);
@@ -554,7 +556,9 @@ export function createSupplierInvoiceService(
           createdBy
         );
       } catch (err) {
-        if (isUniqueViolation(err)) throw new DuplicateSupplierInvoiceNumberError(input.invoiceNumber);
+        // Only the (supplier, invoice number) key — a taken LF number from
+        // the series is the global handler's document-number-taken.
+        if (isUniqueViolation(err, SUPPLIER_INVOICE_NUMBER_UNIQUE)) throw new DuplicateSupplierInvoiceNumberError(input.invoiceNumber);
         throw err;
       }
     },
@@ -715,7 +719,9 @@ export function createSupplierInvoiceService(
       } catch (err) {
         // The unique key is (supplier, invoice number), so a supplier change
         // alone can hit it too.
-        if (isUniqueViolation(err)) throw new DuplicateSupplierInvoiceNumberError(input.invoiceNumber ?? invoice.invoiceNumber);
+        if (isUniqueViolation(err, SUPPLIER_INVOICE_NUMBER_UNIQUE)) {
+          throw new DuplicateSupplierInvoiceNumberError(input.invoiceNumber ?? invoice.invoiceNumber);
+        }
         throw err;
       }
       // The repository's own status guard: an attest (or makulering) won the

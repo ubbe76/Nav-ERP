@@ -544,6 +544,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "number-series-too-long":
     "Nästa nummer blir längre än 20 tecken med prefixet och antalet siffror — korta prefixet eller minska antalet siffror.",
   "number-series-number-taken": "Nästa nummer finns redan på ett dokument — välj ett nästa nummer efter de som redan används.",
+  "document-number-too-long":
+    "Nästa nummer i nummerserien får inte plats (högst 20 tecken) — korta prefixet eller minska antalet siffror under System → Nummerserier.",
   "document-number-taken":
     "Numret som nummerserien gav finns redan på ett annat dokument — ändra Nästa nummer under System → Nummerserier och försök igen.",
   "order-register-too-large": "Urvalet har fler än 10 000 orderrader — avgränsa med datum, status eller kund/leverantör.",

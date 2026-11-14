@@ -2108,15 +2108,18 @@ export function createPurchaseRepository(db: Db) {
       // A lego row's ställpris counts once, as soon as anything is received
       // (the setup charge is not per unit).
       const receivedValue = sql<string>`COALESCE((SELECT SUM(por.quantity_received * por.unit_price + CASE WHEN por.quantity_received > 0 THEN COALESCE(por.setup_price, 0) ELSE 0 END) FROM ${purchaseOrderRows} por WHERE por.purchase_order_id = ${purchaseOrders.id}), 0)`;
-      // A pure lego order books no purchase_receipt (the units never touch
-      // stock — see arkitekturprincip 3), so the subquery comes back null for
-      // it even though the order is received. Fall back to the order's
-      // updated_at, which the receiving transaction's status recompute
-      // stamps at the same moment — a good approximation, though it can
-      // drift if the order is edited afterwards. Acceptable for a worklist.
-      // Live receipts only — an undone one (and its negative reversal) is
-      // not when the goods arrived.
-      const receivedAt = sql<string | null>`COALESCE((SELECT MAX(st.created_at) FROM ${stockTransactions} st WHERE st.reference_id = ${purchaseOrders.id} AND st.transaction_type = 'purchase_receipt' AND st.quantity_delta > 0 AND NOT EXISTS (SELECT 1 FROM ${purchaseReceipts} pr WHERE pr.stock_transaction_id = st.id AND pr.undone_at IS NOT NULL)), ${purchaseOrders.updatedAt})`;
+      // The receipt log (purchase_receipts) has every receipt — stock, lego
+      // and service rows alike (a lego or service row books no stock
+      // transaction, arkitekturprincip 3) — so it is read first. A receipt
+      // from before the log has only its stock transaction; an order with
+      // neither falls back to its updated_at, which the receiving
+      // transaction's status recompute stamped (it drifts if the order is
+      // edited afterwards). Live receipts only — an undone one (and its
+      // negative reversal) is not when the goods arrived.
+      const receivedAt = sql<string | null>`COALESCE(
+        (SELECT MAX(pr.created_at) FROM ${purchaseReceipts} pr WHERE pr.purchase_order_id = ${purchaseOrders.id} AND pr.undone_at IS NULL AND pr.quantity > 0),
+        (SELECT MAX(st.created_at) FROM ${stockTransactions} st WHERE st.reference_id = ${purchaseOrders.id} AND st.transaction_type = 'purchase_receipt' AND st.quantity_delta > 0 AND NOT EXISTS (SELECT 1 FROM ${purchaseReceipts} pr WHERE pr.stock_transaction_id = st.id AND pr.undone_at IS NOT NULL)),
+        ${purchaseOrders.updatedAt})`;
       const invoiceId = sql<string | null>`(SELECT si.id FROM ${supplierInvoices} si WHERE si.purchase_order_id = ${purchaseOrders.id} AND si.status <> 'cancelled' ORDER BY si.created_at DESC LIMIT 1)`;
       const invoiceRegistrationNumber = sql<string | null>`(SELECT si.registration_number FROM ${supplierInvoices} si WHERE si.purchase_order_id = ${purchaseOrders.id} AND si.status <> 'cancelled' ORDER BY si.created_at DESC LIMIT 1)`;
 
