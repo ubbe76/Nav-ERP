@@ -50,6 +50,12 @@ describe("fraktinställningar", () => {
       priceChangePercent: 5,
       trackingInterval: "hourly",
       lastTrackingRunAt: null,
+      // Förmedlare (0221): none on, Sendify förvald, nShift in Testläge.
+      defaultBroker: "sendify",
+      anyEnabled: false,
+      enabledBrokers: [],
+      nshift: { enabled: false, testMode: true, apiKeyIdSet: false, apiSecretSet: false, senderQuickId: "1", services: [], priceEnquiry: false },
+      shipmondo: { enabled: false, environment: "sandbox", apiUserSet: false, apiKeySet: false, shipmondoRates: true, ownAgreementProducts: [] },
     });
   });
 

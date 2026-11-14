@@ -7,6 +7,7 @@ import {
   stockholmIso,
   toSendifyShipment,
 } from "../src/modules/shipping/service/sendify-provider.js";
+import { sampleContext } from "./helpers/fake-freight-provider.js";
 
 const KEY = "secret-sendify-key-123";
 
@@ -125,7 +126,7 @@ describe("Sendify HTTP", () => {
       }),
     ]);
     const p = createSendifyProvider({ environment: "sandbox", apiKey: KEY }, { fetch: f.fn });
-    const result = await p.getRates("snd-1", { date: "2030-07-02", time: "09:00" });
+    const result = await p.getRates(sampleContext("snd-1", { date: "2030-07-02", time: "09:00" }));
     expect(JSON.parse(String(f.calls[0]!.init.body))).toEqual({ shipment_id: "snd-1", requested_pickup_time: "2030-07-02T09:00:00+02:00" });
     expect(result).toEqual({
       rates: [
@@ -192,13 +193,13 @@ describe("Sendify HTTP", () => {
   it("reports a network error on BOOK as booking-unknown", async () => {
     const f = fakeFetch([new TypeError("fetch failed")]);
     const p = createSendifyProvider({ environment: "sandbox", apiKey: KEY }, { fetch: f.fn, log: () => {} });
-    await expect(p.book("tok-1")).rejects.toMatchObject({ kind: "booking-unknown", message: SENDIFY_MESSAGES.bookingUnknown });
+    await expect(p.book("tok-1", sampleContext("snd-1"))).rejects.toMatchObject({ kind: "booking-unknown", message: SENDIFY_MESSAGES.bookingUnknown });
   });
 
   it("reports a 5xx on BOOK as booking-unknown, not as something to retry", async () => {
     const f = fakeFetch([json({}, 502)]);
     const p = createSendifyProvider({ environment: "sandbox", apiKey: KEY }, { fetch: f.fn, log: () => {} });
-    await expect(p.book("tok-1")).rejects.toMatchObject({ kind: "booking-unknown", message: SENDIFY_MESSAGES.bookingUnknown });
+    await expect(p.book("tok-1", sampleContext("snd-1"))).rejects.toMatchObject({ kind: "booking-unknown", message: SENDIFY_MESSAGES.bookingUnknown });
   });
 
   it("reports 401 as unauthorized with a hint about the settings page", async () => {
@@ -217,7 +218,7 @@ describe("Sendify HTTP", () => {
   it("books and returns the tracking number and document types", async () => {
     const f = fakeFetch([json({ main_tracking_id: "JJD000123", available_document_types: ["label", "waybill"] })]);
     const p = createSendifyProvider({ environment: "sandbox", apiKey: KEY }, { fetch: f.fn });
-    expect(await p.book("tok-1")).toEqual({ trackingNumber: "JJD000123", documentTypes: ["label", "waybill"] });
+    expect(await p.book("tok-1", sampleContext("snd-1"))).toEqual({ trackingNumber: "JJD000123", documentTypes: ["label", "waybill"] });
     expect(JSON.parse(String(f.calls[0]!.init.body))).toEqual({ booking_token: "tok-1" });
   });
 

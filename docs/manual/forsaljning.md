@@ -949,7 +949,7 @@ Det går inte att ångra bara en del av en rads antal. Ångra raden och leverera
 
 ## Frakt
 
-Frakten bokar transport hos en speditör direkt från en följesedel. Tjänsten förmedlas av Sendify, som erbjuder bland annat DHL, UPS, DSV, PostNord och Schenker; du jämför priser, bokar och skriver ut fraktsedel utan att lämna systemet. Funktionen måste vara **Aktiverad** under **System → Frakt** (se [System & inställningar](/hjalp/system#fraktinstallningar)) innan knappen **Boka transport** visas. Frakt som inte bokas via Sendify — egen bil, kunden hämtar eller ett eget avtal — registreras med [Eget fraktsätt](#eget-fraktsatt), som alltid finns.
+Frakten bokar transport hos en speditör direkt från en följesedel, via en förmedlare: **Sendify**, som erbjuder bland annat DHL, UPS, DSV, PostNord och Schenker, **nShift** med era egna avtal, eller **Shipmondo** med Shipmondos priser och era egna avtal. Du jämför priser, bokar och skriver ut fraktsedel utan att lämna systemet. Minst en förmedlare måste vara aktiverad under **System → Frakt** (se [Fraktinställningar](/hjalp/system#fraktinstallningar)) innan knappen **Boka transport** visas. Frakt som inte bokas via Sendify — egen bil, kunden hämtar eller ett eget avtal — registreras med [Eget fraktsätt](#eget-fraktsatt), som alltid finns.
 
 ### Skapa en försändelse
 
@@ -1031,9 +1031,17 @@ I Sendifys sandlåda fungerar full bokning bara med DHL, UPS och DSV. Mot produk
 
 Ingår inte i den här versionen: ombud/utlämningsställen och tull.
 
+### Förmedlare på försändelsen
+
+En ny försändelse får förmedlaren från orderns eller kundens fraktprodukt, annars den förvalda under **System → Frakt**. På ett utkast väljs förmedlaren i fältet **Förmedlare** bredvid kunden när flera är aktiverade; annars står det *via Sendify*, *via nShift* eller *via Shipmondo*. Byter du förmedlare tas hämtade priser och vald produkt bort (det frågas först), och priserna hämtas från den nya förmedlaren med **Hämta priser**.
+
+En produkt som förmedlaren inte ger något pris för — ett eget avtal utan prisfråga — visas med **Pris saknas** i prisdialogen. Den går att boka, men kundpriset skrivs då för hand på kortet; utan kundpris blir det ingen fraktrad på fakturan. På offerten och kundordern kan en sådan produkt inte läggas till med **Lägg till frakt**.
+
+Försändelser via nShift och Shipmondo spåras inte automatiskt. Kortet har i stället **Markera levererad** under **Spårning** när försändelsen är bokad. Fraktsedel och etikett sparas direkt vid bokningen, och **Hämta fraktsedel** hämtar dem igen från förmedlaren.
+
 ### Spårning
 
-Försändelsekortet har sektionen **Spårning** med senaste status från transportören, händelselistan och **Senast kontrollerad**. Statusarna visas på svenska (t.ex. **Beställd**, **Under transport**, **Levererad**, **Avvikelse**) och tider i svensk tid. Länken till transportörens spårning ligger på **Fraktsedelsnr** i sektionen **Frakt**. Status hämtas automatiskt: systemet kontrollerar var femte minut vilka försändelser som är på tur och kör enligt **Spårningsintervall** under **System → Frakt** (**Varje timme**, **Var fjärde timme** eller **Dagligen**). Under inställningen visas **Senaste spårningskörning**. Knappen **Uppdatera spårning** på kortet hämtar status direkt. Försändelser som bokades för mer än 60 dagar sedan spåras inte automatiskt (knappen fungerar fortfarande).
+Spårningen gäller försändelser som bokats via Sendify. Försändelsekortet har sektionen **Spårning** med senaste status från transportören, händelselistan och **Senast kontrollerad**. Statusarna visas på svenska (t.ex. **Beställd**, **Under transport**, **Levererad**, **Avvikelse**) och tider i svensk tid. Länken till transportörens spårning ligger på **Fraktsedelsnr** i sektionen **Frakt**. Status hämtas automatiskt: systemet kontrollerar var femte minut vilka försändelser som är på tur och kör enligt **Spårningsintervall** under **System → Frakt** (**Varje timme**, **Var fjärde timme** eller **Dagligen**). Under inställningen visas **Senaste spårningskörning**. Knappen **Uppdatera spårning** på kortet hämtar status direkt. Försändelser som bokades för mer än 60 dagar sedan spåras inte automatiskt (knappen fungerar fortfarande).
 
 Meddelar transportören ett undantag, t.ex. försenat eller skadat gods, markeras statusen med rött på kortet och i kolumnen **Spårning** i försändelselistan. Rapporterar transportören att godset levererats får försändelsen status **Levererad** och kortet visar **Levererad** med leveransdatum.
 

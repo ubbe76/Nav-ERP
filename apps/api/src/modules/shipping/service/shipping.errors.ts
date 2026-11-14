@@ -66,12 +66,18 @@ export class ShipmentNeedsDeliveryError extends Error {
 }
 
 export class FreightNotConfiguredError extends Error {
-  constructor(readonly reason: "disabled" | "no-key" | "no-article") {
+  // broker: the förmedlare's name in the text (default Sendify).
+  constructor(
+    readonly reason: "disabled" | "no-key" | "no-article",
+    broker = "Sendify"
+  ) {
     super(
       reason === "disabled"
-        ? "Frakten är inte aktiverad — se System → Frakt"
+        ? broker === "Sendify"
+          ? "Frakten är inte aktiverad — se System → Frakt"
+          : `${broker} är inte aktiverat — se System → Frakt`
         : reason === "no-key"
-          ? "API-nyckel för Sendify saknas — se System → Frakt"
+          ? `API-nyckel för ${broker} saknas — se System → Frakt`
           : "Fraktartikel saknas — se System → Frakt"
     );
     this.name = "FreightNotConfiguredError";
@@ -211,6 +217,15 @@ export class InvalidFreightArticleError extends Error {
   constructor() {
     super("Fraktartikeln finns inte");
     this.name = "InvalidFreightArticleError";
+  }
+}
+
+// Lägg till frakt with a product the broker gave no price for (an own
+// agreement without a price enquiry).
+export class FreightPriceMissingError extends Error {
+  constructor() {
+    super("Förmedlaren gav inget pris för produkten — lägg till fraktraden för hand");
+    this.name = "FreightPriceMissingError";
   }
 }
 

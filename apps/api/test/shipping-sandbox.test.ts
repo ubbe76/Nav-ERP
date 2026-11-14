@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createSendifyProvider } from "../src/modules/shipping/service/sendify-provider.js";
 import { addDays, nextPickup, stockholmNow } from "../src/modules/shipping/service/pickup.js";
+import { sampleContext } from "./helpers/fake-freight-provider.js";
 
 // Röktest mot Sendifys sandlåda — körs bara när SENDIFY_SANDBOX_API_KEY finns
 // i miljön (samma nyckel som ERPNext Sverige Frakts sandlådetest). I sandlådan
@@ -32,12 +33,12 @@ describe.skipIf(!KEY)("Sendify-sandlådan", () => {
 
     const weekdays = [1, 2, 3, 4, 5].map((weekday) => ({ weekday, timeFrom: "09:00", timeTo: "16:00" }));
     const slot = nextPickup(stockholmNow(new Date()), weekdays, new Set()) ?? { date: addDays(stockholmNow(new Date()).date, 1), timeFrom: "09:00" };
-    const { rates } = await p.getRates(id, { date: slot.date, time: slot.timeFrom });
+    const { rates } = await p.getRates({ ...sampleContext(id), pickup: { date: slot.date, time: slot.timeFrom } });
     expect(rates.length).toBeGreaterThan(0);
 
     const rate = rates.find((r) => ["dhl", "ups", "dsv"].some((c) => (r.carrierCode || r.carrierName).toLowerCase().includes(c)));
     expect(rate, "ingen DHL/UPS/DSV-produkt i sandlådan").toBeDefined();
-    const booked = await p.book(rate!.bookingToken);
+    const booked = await p.book(rate!.bookingToken, sampleContext(id));
     expect(booked.trackingNumber).toBeTruthy();
 
     const label = await p.fetchDocument(id, "label");

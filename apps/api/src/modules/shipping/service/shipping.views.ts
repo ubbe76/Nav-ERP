@@ -1,5 +1,5 @@
 import type { StoredRates } from "@navet/db";
-import type { ShipmentProvider } from "@navet/shared";
+import { SHIPMENT_PROVIDERS, type ShipmentProvider } from "@navet/shared";
 import type { ShipmentRow } from "../repository/shipping.repository.js";
 import { customerPriceFor } from "./pricing.js";
 import { trackingStatusLabel } from "./tracking-status.js";
@@ -11,7 +11,8 @@ export interface RateView {
   carrierCode: string;
   carrierName: string;
   productName: string;
-  price: number;
+  // null = no price from the broker (an own agreement): Pris saknas.
+  price: number | null;
   currency: string;
   daysMin: number | null;
   daysMax: number | null;
@@ -32,10 +33,12 @@ export function toRatesView(stored: StoredRates, markup: { markupPercent: number
     fetchedAt: stored.fetchedAt,
     warnings: stored.warnings,
     rates: [...stored.rates]
-      .sort((a, b) => a.price - b.price)
+      // Cheapest first; those without a price last.
+      .sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity))
       .map(({ bookingToken: _token, ...rate }) => ({
         ...rate,
-        customerPrice: rate.currency === "SEK" ? customerPriceFor(rate.price, markup.markupPercent, markup.markupAmount) : null,
+        customerPrice:
+          rate.currency === "SEK" && rate.price !== null ? customerPriceFor(rate.price, markup.markupPercent, markup.markupAmount) : null,
       })),
   };
 }
@@ -152,7 +155,7 @@ export function toDetailView(
     id: s.id,
     shipmentNumber: s.shipmentNumber,
     status: s.status,
-    provider: s.provider === "manual" ? "manual" : "sendify",
+    provider: (SHIPMENT_PROVIDERS as readonly string[]).includes(s.provider) ? (s.provider as ShipmentProvider) : "sendify",
     carrier: extras.carrier,
     customerId: s.customerId,
     customerName: extras.customerName,

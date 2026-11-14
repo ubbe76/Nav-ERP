@@ -69,7 +69,7 @@ Längst ner finns **Speditörer** — företagets egna kundnummer hos olika sped
 
 ## Fraktinställningar
 
-**System → Frakt** (bara administratörer) styr transportbokningen via Sendify, som används på [Försändelser](/hjalp/forsaljning#frakt). Kortet **Sendify** har fälten:
+**System → Frakt** (bara administratörer) styr transportbokningen, som används på [Försändelser](/hjalp/forsaljning#frakt). Transporten bokas via en förmedlare: **Sendify**, **nShift** eller **Shipmondo** (se [Förmedlare](#formedlare)). Kortet **Sendify** har fälten:
 
 - **Aktiverad** — slår på funktionen; utan den visas ingen **Boka transport**.
 - **Miljö** — **Sandlåda** (test) eller **Produktion**.
@@ -82,7 +82,35 @@ Längst ner finns **Speditörer** — företagets egna kundnummer hos olika sped
 
 Spara med **Spara**. Under **Upphämtningstider** kryssas varje veckodag som har upphämtning med tider **Från**/**Till**; en dag utan kryss har ingen upphämtning. Röda dagar i helgdagslistan har aldrig upphämtning, medan en kortdag räknas som en vanlig dag. Spara med **Spara upphämtningstider**.
 
-Under **Fraktprodukter** testar **Testa anslutning** nyckeln i fältet **API-nyckel** mot vald **Miljö** utan att spara den; är fältet tomt testas den sparade nyckeln. **Hämta transportörsprodukter** fyller listan över transportörer och produkter (**Transportör**, **Produkt**). Listan fylls också på när priser hämtas på en försändelse.
+Under **Fraktprodukter** testar **Testa anslutning** Sendify-nyckeln i fältet **API-nyckel** mot vald **Miljö** utan att spara den; är fältet tomt testas den sparade nyckeln. **Hämta från Sendify** fyller listan över fraktprodukter (**Förmedlare**, **Transportör**, **Produkt**). Listan fylls också på när priser hämtas på en försändelse.
+
+### Förmedlare
+
+Kortet **Förmedlare** har **Förvald förmedlare**. En ny försändelse bokas via den förvalda förmedlaren, om inte orderns eller kundens fraktprodukt hör till en annan förmedlare som är aktiverad. Är den förvalda inte aktiverad används den första som är det. Förmedlaren kan bytas på försändelsens utkast. Påslagen, fraktartikeln, avsändarkontakten och upphämtningstiderna ovan gäller alla förmedlare. Under fältet står vilka förmedlare som är aktiverade med sina uppgifter.
+
+nShift och Shipmondo är byggda efter förmedlarnas dokumentation och har ännu inte provats mot ett riktigt konto. Prova därför med **Testläge** eller **Sandlåda** innan de används skarpt.
+
+### nShift
+
+Kortet **nShift** gäller bokning med företagets **egna avtal** hos till exempel DHL Freight, DB Schenker och PostNord via nShift Delivery (tidigare Unifaun). nShift säljer ingen frakt till egna priser, så avtalen måste finnas: kundnumren läggs på avsändaren i nShift (Underhåll → Avsändare → Transportörer). Fälten:
+
+- **Aktiverad** och **Testläge** — i testläge skickas bokningarna inte till transportören och etiketterna märks TEST.
+- **Prisfråga via API** — hämtar priset för varje tjänst. Det kräver nShift Professional och att transportörens prisinloggning finns i nShift (DHL e-ID, DB Schenkers e-tjänster). Utan prisfråga visas tjänsterna med **Pris saknas** och kundpriset skrivs för hand.
+- **Nyckel-id** och **Hemlighet** — API-nyckeln skapas i nShift under Underhåll → API-nycklar, typ Web Services (REST), och kräver funktionen APIConnect. Uppgifterna visas aldrig igen; tomma fält behåller de sparade.
+- **Avsändar-ID i nShift** — avsändarens ID (quickId) i nShift, som bär kundnumren. Förval *1*.
+- **Tjänster att jämföra** — de tjänster som prisfrågas och erbjuds på försändelsen. Klicka först på **Hämta produkter**, som hämtar kontots tjänster från nShift.
+
+**Spara nShift** sparar kortet. **Testa anslutning** läser avsändaren i nShift med de inskrivna eller sparade uppgifterna.
+
+### Shipmondo
+
+Kortet **Shipmondo** gäller bokning till **Shipmondos egna priser** och med företagets **egna avtal** som aktiverats i Shipmondo (Inställningar → Frakt → Egna avtal). Från Sverige har Shipmondo egna priser för bland annat DHL Freight paket och pall och DSV Road paket; egna avtal går för DHL Freight, DSV Road (tidigare DB Schenker) inklusive pall och System, och PostNord. Fälten:
+
+- **Aktiverad**, **Miljö** (**Sandlåda** eller **Produktion**) och **Shipmondos priser** — det sista styr om Shipmondos egna priser hämtas.
+- **API-användare** och **API-nyckel** — skapas i Shipmondo under Inställningar → Integrationer → API. Uppgifterna visas aldrig igen; tomma fält behåller de sparade.
+- **Egna avtal att prisfråga** — produkterna med eget avtal som erbjuds på försändelsen. Klicka först på **Hämta produkter**. Priset för ett eget avtal är transportörens, när transportören ger något; annars visas **Pris saknas** och kundpriset skrivs för hand.
+
+**Spara Shipmondo** sparar kortet. **Testa anslutning** läser kontot i Shipmondo.
 
 ## E-faktura
 

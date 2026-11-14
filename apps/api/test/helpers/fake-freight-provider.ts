@@ -1,4 +1,4 @@
-import { FreightProviderError, type FreightProvider, type ProviderShipment, type Rate, type TrackingEvent } from "../../src/modules/shipping/service/freight-provider.js";
+import { FreightProviderError, type FreightProvider, type ProviderContext, type ProviderShipment, type Rate, type TrackingEvent } from "../../src/modules/shipping/service/freight-provider.js";
 
 // In-memory FreightProvider for the shipping tests. Every getRates issues
 // FRESH tokens (like Sendify) so a stale token is detectable; `state` lets a
@@ -56,6 +56,8 @@ export function createFakeFreightProvider(): FakeFreight {
 
   const provider: FreightProvider = {
     name: "sendify",
+    remoteDrafts: true,
+    tracks: true,
     async checkKey() {
       record("checkKey");
       return { team: "Testteam" };
@@ -72,7 +74,8 @@ export function createFakeFreightProvider(): FakeFreight {
     async deleteShipment(id) {
       record("deleteShipment", id);
     },
-    async getRates(id, pickup) {
+    // Recorded as (remote id, pickup) — the shape the tests read.
+    async getRates({ remoteId: id, pickup }) {
       record("getRates", id, pickup);
       if (state.ratesDelayMs > 0) await new Promise((r) => setTimeout(r, state.ratesDelayMs));
       if (state.ratesError) throw state.ratesError;
@@ -115,3 +118,31 @@ export function createFakeFreightProvider(): FakeFreight {
 }
 
 export const refused = (message: string) => new FreightProviderError(message, "validation");
+
+// A whole ProviderContext for calling a provider directly (Sendify ignores
+// all but the remote id; the brokers without drafts book from the shipment).
+const SAMPLE_PARTY = {
+  name: "Exempel AB",
+  addressLine1: "Gatan 1",
+  addressLine2: null,
+  postalCode: "12345",
+  city: "Staden",
+  countryCode: "SE",
+  contactName: "Anna",
+  phone: "0123-45 67 00",
+  email: "frakt@exempel.invalid",
+};
+export function sampleContext(remoteId: string | null, pickup = { date: "2030-07-02", time: "09:00" }): ProviderContext {
+  return {
+    remoteId,
+    pickup,
+    shipment: {
+      sender: SAMPLE_PARTY,
+      recipient: { ...SAMPLE_PARTY, name: "Kund AB" },
+      parcels: [{ kind: "package", lengthCm: 40, widthCm: 30, heightCm: 20, weightKg: 5, quantity: 1, stackable: true, loadingMeters: null, description: null }],
+      referenceId: "FR-1",
+      senderReference: null,
+      receiverReference: null,
+    },
+  };
+}

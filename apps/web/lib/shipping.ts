@@ -1,7 +1,16 @@
 import { ApiError } from "./api";
 import { apiErrorMessage } from "./errorMessages";
 import type { Status } from "../components/ui/StatusPill";
-import type { ParcelKind, ShipmentProvider, ShipmentStatus } from "./types";
+import type { FreightBroker, ParcelKind, ShipmentProvider, ShipmentStatus } from "./types";
+
+// Förmedlarna (0221).
+export const BROKER_LABELS: Record<FreightBroker, string> = { sendify: "Sendify", nshift: "nShift", shipmondo: "Shipmondo" };
+export const FREIGHT_BROKERS = Object.keys(BROKER_LABELS) as FreightBroker[];
+
+// The broker's name as the card says it ("Eget fraktsätt" for manual).
+export function providerLabel(provider: ShipmentProvider): string {
+  return provider === "manual" ? "Eget fraktsätt" : BROKER_LABELS[provider];
+}
 
 export const SHIPMENT_STATUS_LABELS: Record<ShipmentStatus, string> = {
   draft: "Utkast",

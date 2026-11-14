@@ -299,6 +299,8 @@ export function createSendifyProvider(config: FreightProviderConfig, deps: Sendi
 
   return {
     name: "sendify",
+    remoteDrafts: true,
+    tracks: true,
 
     async checkKey() {
       const data = await object("GET", "/status");
@@ -320,9 +322,10 @@ export function createSendifyProvider(config: FreightProviderConfig, deps: Sendi
       await call("DELETE", `/shipments/${encodeURIComponent(id)}`);
     },
 
-    async getRates(id, pickup) {
+    async getRates({ remoteId, pickup }) {
+      if (!remoteId) throw new FreightProviderError(SENDIFY_MESSAGES.unexpected, "unexpected");
       const data = await object("POST", "/shipments/rates", {
-        shipment_id: id,
+        shipment_id: remoteId,
         requested_pickup_time: stockholmIso(pickup.date, pickup.time),
       });
       const rates = (Array.isArray(data.rates) ? data.rates : []).map((r) => parseRate(r as Record<string, unknown>, null));

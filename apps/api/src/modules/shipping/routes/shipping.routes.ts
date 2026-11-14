@@ -6,6 +6,7 @@ import {
   bookShipmentSchema,
   createManualShipmentSchema,
   createShipmentSchema,
+  freightBrokerSchema,
   listShipmentsQuerySchema,
   openDeliveriesQuerySchema,
   orderFreightRatesSchema,
@@ -173,9 +174,11 @@ export async function shippingRoutes(
     return run(reply, () => settings.replacePickupTimes(input, req.user!.id));
   });
   app.post("/freight-settings/test", ADMIN, async (req, reply) => run(reply, () => settings.testConnection(testFreightConnectionSchema.parse(req.body ?? {}))));
-  app.post("/freight-settings/fetch-products", ADMIN, async (req, reply) =>
-    run(reply, () => settings.fetchProducts(req.user!.id))
-  );
+  app.post("/freight-settings/fetch-products", ADMIN, async (req, reply) => {
+    // broker omitted = Sendify (as before).
+    const { broker } = z.object({ broker: freightBrokerSchema.optional() }).parse(req.body ?? {});
+    return run(reply, () => settings.fetchProducts(req.user!.id, broker));
+  });
 
   // --- Försändelser ---
 

@@ -62,7 +62,11 @@ export type CreateShipmentInput = z.infer<typeof createShipmentSchema>;
 // Egna fraktsätt (migration 0220): "sendify" is booked through the broker,
 // "manual" is an own freight method (Egen bil, Kunden hämtar, an own
 // agreement with a carrier) — registered as sent, never booked anywhere.
-export const SHIPMENT_PROVIDERS = ["sendify", "manual"] as const;
+// Förmedlare (etapp 2, migration 0221): nShift and Shipmondo beside Sendify.
+export const FREIGHT_BROKERS = ["sendify", "nshift", "shipmondo"] as const;
+export type FreightBroker = (typeof FREIGHT_BROKERS)[number];
+export const freightBrokerSchema = z.enum(FREIGHT_BROKERS);
+export const SHIPMENT_PROVIDERS = [...FREIGHT_BROKERS, "manual"] as const;
 export type ShipmentProvider = (typeof SHIPMENT_PROVIDERS)[number];
 
 // The fraktsedelsnummer as typed (an own agreement's waybill); blank = none.
@@ -107,6 +111,9 @@ const optionalLine = (max: number) =>
 // customerPrice/senderReference = back to the derived value.
 export const updateShipmentSchema = z
   .object({
+    // Förmedlare of a draft: a change drops its rates, chosen product and the
+    // old broker's draft.
+    broker: freightBrokerSchema.optional(),
     recipientName: z.string().trim().min(1).max(255).optional(),
     recipientAddressLine1: optionalLine(255).optional(),
     recipientAddressLine2: optionalLine(255).optional(),
@@ -172,9 +179,46 @@ const apiKeyText = z
 export const TRACKING_INTERVALS = ["hourly", "every_4h", "daily"] as const;
 export type TrackingInterval = (typeof TRACKING_INTERVALS)[number];
 
+// A broker's product codes chosen in the settings (nShift's service ids to
+// price, Shipmondo's own-agreement products).
+const productCodeList = z.array(z.string().trim().min(1).max(40)).max(60);
+
+// nShift (Delivery) — own carrier agreements only: the key id + secret
+// (write-only like Sendify's key: "" keeps, null removes), the sender in
+// nShift that carries the customer numbers, the services to price, whether
+// prices are asked (Professional plan), and Testläge (test: true).
+export const nshiftSettingsSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    testMode: z.boolean().optional(),
+    apiKeyId: apiKeyText.nullable().optional(),
+    apiSecret: apiKeyText.nullable().optional(),
+    senderQuickId: z.string().trim().max(40).optional(),
+    services: productCodeList.optional(),
+    priceEnquiry: z.boolean().optional(),
+  })
+  .strict();
+
+// Shipmondo — its own rates (Shipmondos priser) and/or own agreements on the
+// chosen products; API user + API key (write-only).
+export const shipmondoSettingsSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    environment: z.enum(["sandbox", "production"]).optional(),
+    apiUser: apiKeyText.nullable().optional(),
+    apiKey: apiKeyText.nullable().optional(),
+    shipmondoRates: z.boolean().optional(),
+    ownAgreementProducts: productCodeList.optional(),
+  })
+  .strict();
+
 // PATCH /freight-settings. apiKey: "" = leave the stored key, null = remove it.
 export const updateFreightSettingsSchema = z
   .object({
+    // Förvald förmedlare for a new shipment without a chosen product.
+    defaultBroker: freightBrokerSchema.optional(),
+    nshift: nshiftSettingsSchema.optional(),
+    shipmondo: shipmondoSettingsSchema.optional(),
     enabled: z.boolean().optional(),
     environment: z.enum(["sandbox", "production"]).optional(),
     apiKey: apiKeyText.nullable().optional(),
@@ -192,8 +236,15 @@ export type UpdateFreightSettingsInput = z.infer<typeof updateFreightSettingsSch
 
 // "Testa anslutning": the key typed in the form (not yet saved) and the
 // environment selected there; both optional — omitted = the saved values.
+// broker omitted = Sendify (as before). apiSecret: nShift's secret /
+// Shipmondo's API key, with apiKey as the key id / API user.
 export const testFreightConnectionSchema = z
-  .object({ apiKey: apiKeyText.min(1).optional(), environment: z.enum(["sandbox", "production"]).optional() })
+  .object({
+    broker: freightBrokerSchema.optional(),
+    apiKey: apiKeyText.min(1).optional(),
+    apiSecret: apiKeyText.min(1).optional(),
+    environment: z.enum(["sandbox", "production"]).optional(),
+  })
   .strict();
 export type TestFreightConnectionInput = z.infer<typeof testFreightConnectionSchema>;
 

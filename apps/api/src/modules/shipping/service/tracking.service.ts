@@ -32,6 +32,8 @@ export function createTrackingService(deps: {
     const s = await repo.findShipment(id);
     if (!s) throw new ShipmentNotFoundError(id);
     if (s.provider === "manual") throw new InvalidShipmentStatusError("Ett eget fraktsätt har ingen spårning");
+    // nShift and Shipmondo are not tracked automatically yet (Markera levererad).
+    if (s.provider !== "sendify") throw new InvalidShipmentStatusError("Försändelsen spåras inte automatiskt — markera den som levererad när den kommit fram");
     if ((s.status !== "booked" && s.status !== "delivered") || !s.providerShipmentId) {
       throw new InvalidShipmentStatusError("Bara bokade försändelser kan spåras");
     }
