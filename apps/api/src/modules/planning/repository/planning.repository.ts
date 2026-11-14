@@ -1641,7 +1641,11 @@ export function createPlanningRepository(db: Db) {
           configuration: salesOrderRows.configuration,
         })
         .from(salesOrderRows)
-        .where(eq(salesOrderRows.salesOrderId, salesOrderId));
+        .where(eq(salesOrderRows.salesOrderId, salesOrderId))
+        // The order card's row order: the check's rows, batches and the
+        // reservation's TOs follow it (without it the order was whatever
+        // Postgres returned — two rows of one article came back reversed).
+        .orderBy(sql`${salesOrderRows.createdAt}`, sql`${salesOrderRows.id}`);
       // The TOs linked to the configured rows (a configured row's template
       // has no pool, so its own TOs are netted by uncoveredConfiguredQuantity
       // in the service — an ordinary row's linked TO is supply in the

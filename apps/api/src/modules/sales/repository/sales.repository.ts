@@ -522,6 +522,20 @@ async function writeSalesOrderHeader(dbc: Db | Tx, orderId: string, input: Updat
 // Content changes (header/terms/rows) bump the order's revision by 1 inside
 // the same transaction — status transitions and deliveries never do. Callers
 // can opt out per save via the bumpRevision flag (the UI asks on every save).
+// Rows → header, taken once and at the strongest mode by the row writers that
+// go on to bump the revision and recompute the status (updateRow,
+// replaceRowConfiguration, deleteRow) — right after their row lock. Before
+// 2026-11-14 the header was first touched weaker (the markups re-read's KEY
+// SHARE, the revision bump's NO KEY UPDATE) and taken FOR UPDATE only in
+// recomputeInProduction: that upgrade waited on any other transaction
+// holding a weaker header lock (addRow's KEY SHARE, an FK check), which in
+// turn waited on our NO KEY UPDATE — a deadlock (40P01, seen in the
+// concurrent header/row PATCH test). Holding FOR UPDATE from the start, the
+// writer waits BEFORE it holds anything on the header.
+async function lockOrderHeaderForRowWrite(tx: Tx, orderId: string): Promise<void> {
+  await tx.select({ id: salesOrders.id }).from(salesOrders).where(eq(salesOrders.id, orderId)).for("update");
+}
+
 async function bumpRevision(tx: Tx, orderId: string) {
   await tx
     .update(salesOrders)
@@ -1809,6 +1823,7 @@ export function createSalesRepository(db: Db) {
           .where(and(eq(salesOrderRows.id, rowId), eq(salesOrderRows.salesOrderId, orderId)))
           .for("update");
         if (!row) return { ok: false, reason: "row_not_found" };
+        await lockOrderHeaderForRowWrite(tx, orderId);
         if (patch.pricedWithMarkups !== undefined && !(await orderMarkupsUnchanged(tx, orderId, patch.pricedWithMarkups))) {
           return { ok: false, reason: "markups_changed" };
         }
@@ -1897,6 +1912,7 @@ export function createSalesRepository(db: Db) {
       return db.transaction(async (tx) => {
         const found = await rowConfigurationGuards(tx, orderId, rowId, true);
         if (!found.ok) return found;
+        await lockOrderHeaderForRowWrite(tx, orderId);
         if (patch.pricedWithMarkups !== undefined && !(await orderMarkupsUnchanged(tx, orderId, patch.pricedWithMarkups))) {
           return { ok: false, reason: "markups_changed" };
         }
@@ -1927,6 +1943,7 @@ export function createSalesRepository(db: Db) {
           .where(and(eq(salesOrderRows.id, rowId), eq(salesOrderRows.salesOrderId, orderId)))
           .for("update");
         if (!row) return { ok: false, reason: "row_not_found" };
+        await lockOrderHeaderForRowWrite(tx, orderId);
         if (Number(row.quantityDelivered) > 0) return { ok: false, reason: "row_has_deliveries" };
         // History the delivered quantity no longer shows: an undone delivery
         // keeps its delivery_rows (undone_at), a cancelled draft or a credited

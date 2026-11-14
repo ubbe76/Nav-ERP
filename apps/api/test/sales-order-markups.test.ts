@@ -615,6 +615,44 @@ describe("låsordningen — rad → order", () => {
     expect(ok).toMatchObject({ ok: true, repriced: [first!.id, second!.id].sort(), kept: [] });
   });
 
+  // 40P01 in the full suite 2026-11-14: a row writer touched the header
+  // weaker first (KEY SHARE, the revision bump's NO KEY UPDATE) and upgraded
+  // to FOR UPDATE only in recomputeInProduction. Deterministic here with
+  // addRow's own pattern as the other side: KEY SHARE on the header, then
+  // the revision bump. Before the fix the row PATCH held NO KEY UPDATE and
+  // waited for FOR UPDATE behind the KEY SHARE while the bump waited behind
+  // its NO KEY UPDATE — a deadlock every time. Now the row PATCH waits for
+  // FOR UPDATE before it holds anything on the header.
+  it("a row PATCH and a KEY SHARE holder that then bumps the revision (addRow's pattern) do not deadlock", async () => {
+    const { article, customer } = await calculatedOrder();
+    const { order, rows } = await createQuote({ customerId: customer.id, rows: [{ articleId: article.id, quantity: 1 }] });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let held!: () => void;
+    const holding = new Promise<void>((resolve) => (held = resolve));
+    const holder = db.transaction(async (tx) => {
+      await tx.select({ id: salesOrders.id }).from(salesOrders).where(eq(salesOrders.id, order.id)).for("key share");
+      held();
+      await gate;
+      await tx
+        .update(salesOrders)
+        .set({ revision: sql`${salesOrders.revision} + 1` })
+        .where(eq(salesOrders.id, order.id));
+    });
+    await Promise.race([holding, holder]);
+    const rowEdit = call(admin, "PATCH", `/sales-orders/${order.id}/rows/${rows[0]!.id}`, { quantity: 3 });
+    try {
+      await waitForLockWaiter();
+    } finally {
+      release();
+    }
+    await holder;
+    const res = await rowEdit;
+    expect(res.statusCode, res.body).toBe(200);
+    const [row] = await db.select({ quantity: salesOrderRows.quantityOrdered }).from(salesOrderRows).where(eq(salesOrderRows.id, rows[0]!.id));
+    expect(Number(row!.quantity)).toBe(3);
+  });
+
   it("concurrent header and row PATCHes never deadlock", async () => {
     const { article, customer } = await calculatedOrder();
     const { order, rows } = await createQuote({

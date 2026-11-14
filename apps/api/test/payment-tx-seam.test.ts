@@ -29,6 +29,7 @@ import {
   resetBanking,
   setupBanking,
 } from "./helpers/banking.js";
+import { waitForLockWaiter } from "./helpers/year-end.js";
 
 const poster = createVerificationPoster({ read: readPostingSettings });
 const supplierPayments_ = createSupplierPaymentService(createSupplierPaymentRepository(db), poster);
@@ -157,7 +158,8 @@ describe("leverantörsbetalning i anroparens transaktion", () => {
     await db.transaction(async (tx) => {
       await tx.select({ id: paymentBatchItems.id }).from(paymentBatchItems).where(eq(paymentBatchItems.id, item.id)).for("update");
       cancelling = supplierPayments_.cancel(created.paymentId, userId, { date: `${BANK_YEAR}-10-17` }).catch((err: unknown) => err);
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Until the cancellation queues on the batch row (no fixed sleep).
+      await waitForLockWaiter();
       // NOWAIT fails (55P03) if the waiting cancellation already holds the payment.
       const [payment] = await tx
         .select({ id: supplierPayments.id })
