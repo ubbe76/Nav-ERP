@@ -113,7 +113,9 @@ export const getArticleQuerySchema = z.object({
 // manufactured article and Inköp (supplier catalog) only to a purchased or
 // service article — enforced in the article service, mirrored in the web's
 // copy dialog (apps/web/lib/articleCopy.ts).
-export const articleCopyParts = ["information", "beredning", "inkop", "filer"] as const;
+// revisioner = the drawings' revisions with their files (older ones too),
+// only together with filer.
+export const articleCopyParts = ["information", "beredning", "inkop", "filer", "revisioner"] as const;
 export const articleCopyPartSchema = z.enum(articleCopyParts);
 export type ArticleCopyPart = z.infer<typeof articleCopyPartSchema>;
 export const ARTICLE_COPY_PART_TYPES: Partial<Record<ArticleCopyPart, readonly ArticleType[]>> = {
@@ -129,7 +131,8 @@ export const articleCopyFromSchema = z.object({
   parts: z
     .array(articleCopyPartSchema)
     .min(1)
-    .refine((parts) => new Set(parts).size === parts.length, "Each part may only be given once"),
+    .refine((parts) => new Set(parts).size === parts.length, "Each part may only be given once")
+    .refine((parts) => !parts.includes("revisioner") || parts.includes("filer"), "Ritningsrevisioner kopieras tillsammans med Ritningar och filer"),
 });
 export type ArticleCopyFromInput = z.infer<typeof articleCopyFromSchema>;
 

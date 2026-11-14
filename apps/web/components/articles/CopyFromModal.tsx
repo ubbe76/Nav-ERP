@@ -8,6 +8,7 @@ import { FormActions, FormHint, FormStack } from "../ui/Form";
 import {
   ARTICLE_COPY_PART_LABELS,
   ARTICLE_COPY_PART_REASONS,
+  ARTICLE_COPY_PART_REQUIRES,
   ARTICLE_COPY_PARTS,
   articleCopyPartAllowed,
   type ArticleCopyPart,
@@ -20,7 +21,8 @@ const PART_DESCRIPTIONS: Record<ArticleCopyPart, string> = {
     "Typ, grundenhet, standardkostnad, varugrupp, artikelkod, lagerplats och fantomartikel förifylls i formuläret. Övriga uppgifter på Allmänt, planeringen och de alternativa enheterna kopieras när artikeln skapas.",
   beredning: "Strukturens komponenter och operationerna, med materialets koppling till operationerna.",
   inkop: "Leverantörerna med huvudleverantör och stafflade priser.",
-  filer: "Ritningsnummer och bifogade filer.",
+  filer: "Ritningsnummer och bifogade filer. Utan Ritningsrevisioner följer bara de gällande filerna med, som lösa filer.",
+  revisioner: "Ritningarnas alla revisioner med kommentar och vilken som är aktiv, och varje revisions fil — även äldre revisioner.",
 };
 
 interface CopyFromModalProps {
@@ -66,7 +68,16 @@ function CopyFromChoices({ source, initialParts, formType, onCancel, onConfirm }
   // form's Typ, possibly changed since, stands.
   const informationIsNew = checked.has("information") && !initialParts?.includes("information");
   const effectiveType = informationIsNew ? source.type : formType;
-  const chosen = ARTICLE_COPY_PARTS.filter((part) => checked.has(part) && articleCopyPartAllowed(part, effectiveType));
+  // A part that needs another (Ritningsrevisioner → Ritningar och filer) is
+  // allowed only while that one is chosen and allowed.
+  const allowedPart = (part: ArticleCopyPart): boolean => {
+    const required = ARTICLE_COPY_PART_REQUIRES[part];
+    return (
+      articleCopyPartAllowed(part, effectiveType) &&
+      (required === undefined || (checked.has(required) && articleCopyPartAllowed(required, effectiveType)))
+    );
+  };
+  const chosen = ARTICLE_COPY_PARTS.filter((part) => checked.has(part) && allowedPart(part));
 
   function toggle(part: ArticleCopyPart, on: boolean) {
     const next = new Set(checked);
@@ -78,7 +89,8 @@ function CopyFromChoices({ source, initialParts, formType, onCancel, onConfirm }
   return (
     <FormStack>
       {ARTICLE_COPY_PARTS.map((part) => {
-        const allowed = articleCopyPartAllowed(part, effectiveType);
+        const allowed = allowedPart(part);
+        const required = ARTICLE_COPY_PART_REQUIRES[part];
         return (
           <div key={part} className={styles.copyChoice}>
             <label className={allowed ? styles.copyChoiceLabel : `${styles.copyChoiceLabel} ${styles.copyChoiceDisabled}`}>
@@ -91,13 +103,16 @@ function CopyFromChoices({ source, initialParts, formType, onCancel, onConfirm }
               {ARTICLE_COPY_PART_LABELS[part]}
             </label>
             <FormHint className={styles.copyChoiceHint}>
-              {allowed ? PART_DESCRIPTIONS[part] : ARTICLE_COPY_PART_REASONS[part]}
+              {allowed
+                ? PART_DESCRIPTIONS[part]
+                : (ARTICLE_COPY_PART_REASONS[part] ??
+                  (required ? `Kopieras tillsammans med ${ARTICLE_COPY_PART_LABELS[required]}` : ""))}
             </FormHint>
           </div>
         );
       })}
       <FormHint>
-        Lagersaldo, historik, revisioner, kundpriser, prislistor och konfigurator kopieras aldrig. Artikelnummer och
+        Lagersaldo, historik, artikelns revisioner, kundpriser, prislistor och konfigurator kopieras aldrig. Artikelnummer och
         benämning tas alltid från formuläret.
       </FormHint>
       <FormActions>
