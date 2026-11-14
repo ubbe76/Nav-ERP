@@ -15,7 +15,7 @@ import { createMailService } from "../src/modules/mail/service/mail.service.js";
 import { createDocumentPdfService } from "../src/modules/mail/service/document-pdf.js";
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
-import { customerPriceInputSchema, createArticleSchema, createCustomerSchema, createPriceListSchema } from "@navet/shared";
+import { customerPriceInputSchema, createArticleSchema, createCustomerSchema, createPriceListSchema, updateCustomerPriceSchema } from "@navet/shared";
 import { CustomerNotFoundError } from "../src/modules/sales/service/sales.service.js";
 import {
   CustomerPriceNotFoundError,
@@ -107,6 +107,28 @@ describe("customer prices (subresource CRUD)", () => {
     it("passes with exactly one target and exactly one value", () => {
       const result = customerPriceInputSchema.safeParse({ articleId: crypto.randomUUID(), unitPrice: 10 });
       expect(result.success).toBe(true);
+    });
+  });
+
+  // The PATCH's own rules: at most one of the two values (the issue on
+  // unitPrice, where the card shows it), at least one field, and each value
+  // alone — also with the other fields — passes.
+  describe("zod: updateCustomerPriceSchema", () => {
+    it("fails when both unitPrice and discountPercent are set, on unitPrice", () => {
+      const result = updateCustomerPriceSchema.safeParse({ unitPrice: 10, discountPercent: 5 });
+      expect(result.success).toBe(false);
+      expect(result.error!.issues).toEqual([
+        expect.objectContaining({ path: ["unitPrice"], message: "Only one of unitPrice and discountPercent may be provided" }),
+      ]);
+      // A zero is still a value: 0 and 0 is both.
+      expect(updateCustomerPriceSchema.safeParse({ unitPrice: 0, discountPercent: 0 }).success).toBe(false);
+    });
+
+    it("fails on an empty body and passes each value alone or with the other fields", () => {
+      expect(updateCustomerPriceSchema.safeParse({}).success).toBe(false);
+      expect(updateCustomerPriceSchema.parse({ unitPrice: "12.5", fromQuantity: 10 })).toEqual({ unitPrice: 12.5, fromQuantity: 10 });
+      expect(updateCustomerPriceSchema.parse({ discountPercent: 5, setupPrice: null })).toEqual({ discountPercent: 5, setupPrice: null });
+      expect(updateCustomerPriceSchema.parse({ fromQuantity: 2 })).toEqual({ fromQuantity: 2 });
     });
   });
 

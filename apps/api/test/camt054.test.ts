@@ -124,9 +124,15 @@ describe("Swedbank (primär profil)", () => {
     expect(parseCamt054(numeric).entries[0]!.reversal).toBe(true);
   });
 
+  // The fixture carries both parties, as a real return does: Dbtr is us (the
+  // original payer), Cdtr the supplier — so Cdtr must win, not the fallback.
   it("reads the return's counterparty from Cdtr — the original was our payment out", () => {
-    const [entry] = parseCamt054(fixture("camt054-swedbank-return.xml")).entries;
-    expect(entry!.counterpartyName).toBe("Exempelhydraulik AB");
+    const xml = fixture("camt054-swedbank-return.xml");
+    expect(xml).toContain("<Dbtr><Nm>Exempel Verkstad AB</Nm></Dbtr>");
+    expect(parseCamt054(xml).entries[0]!.counterpartyName).toBe("Exempelhydraulik AB");
+    // Only Dbtr left: the fallback names it rather than nothing.
+    const onlyDebtor = xml.replace("<Cdtr><Nm>Exempelhydraulik AB</Nm></Cdtr>", "");
+    expect(parseCamt054(onlyDebtor).entries[0]!.counterpartyName).toBe("Exempel Verkstad AB");
   });
 
   it("falls back to the other party when the expected one is missing", () => {

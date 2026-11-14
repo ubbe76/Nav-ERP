@@ -209,14 +209,23 @@ describe("steg 2 — lagerförändring", () => {
     expect(row!.inventoryMethod).toBe("moving_average");
   });
 
-  // Review Focus 1 (lager).
-  it("values the inventory as of a closing date before the year's last day", async () => {
+  // Review Focus 1 (lager): a non-zero difference, so a verification is
+  // actually booked — dated the closing date, never after it.
+  it("values the inventory as of a closing date before the year's last day and books on that date", async () => {
     const { user, yearId } = await setupYearEnd();
-    const valuation = fakeValuation(0);
+    await openingInventory(user.id, 180000);
+    const valuation = fakeValuation(212450);
     const service = buildYearEndService({ inventory: valuation.reader });
     const closing = await service.startClosing({ fiscalYearId: yearId, closingDate: `${YEAR}-12-20` }, user.id);
-    await service.bookInventory(closing.id, { method: "standard" }, user.id);
+    const result = await service.bookInventory(closing.id, { method: "standard" }, user.id);
     expect(valuation.calls.at(-1)).toEqual({ asOf: `${YEAR}-12-20`, method: "standard" });
+    expect(result.verification).toMatchObject({ displayNumber: `BS-${YEAR}-1`, date: `${YEAR}-12-20` });
+    expect(await verificationLines(result.verification!.id)).toEqual([
+      { account: "1460", debit: 32450, credit: 0 },
+      { account: "4990", debit: 0, credit: 32450 },
+    ]);
+    const dates = await db.select({ date: verifications.date }).from(verifications).orderBy(asc(verifications.date));
+    expect(dates.at(-1)!.date).toBe(`${YEAR}-12-20`);
   });
 
   // A service company: no stock, no 1460/4990 in the chart. Value 0 on an

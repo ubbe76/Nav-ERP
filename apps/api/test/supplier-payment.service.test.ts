@@ -41,9 +41,11 @@ import { createAuditRepository } from "../src/modules/system/repository/audit.re
 import {
   DEFAULT_POSTING_SETTINGS,
   setupPostingBaseline,
+  testEconomyRepository,
   testEconomyService,
   testSystemService,
 } from "./helpers/services.js";
+import { AccountingPeriodLockedError } from "../src/modules/economy/service/accounting-period-lock.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { parsed } from "./helpers/parsed.js";
 
@@ -99,15 +101,18 @@ async function makeSupplier(name = "Lev AB", paymentTermId: string | null = null
   return row!;
 }
 
-// payment_terms IS truncated by this suite, so the fixture is created fresh
-// every time. The codes/names below are still unique to this file ("45" and
-// "AP-KONTANT", never the "N30"/"30 dagar netto" purchase.service.test.ts and
-// sales.service.test.ts use, nor the "30"/"KONTANT" of
-// supplier-invoice.service.test.ts) so an aborted run of another suite can
-// never collide with them. The CODE is what the due date is derived from —
-// parseInt("45") days, NaN for anything that is not a number of days.
+// payment_terms IS truncated by this suite, but the fixture does not rely on
+// it: the name (unique too) gets a random suffix, and a code that is already
+// there is reused rather than colliding — so leftovers from an aborted run of
+// another suite in the same worker database can never fail it. The CODE is
+// what the due date is derived from — parseInt("45") days, NaN for anything
+// that is not a number of days — so it is kept as given.
 async function makePaymentTerm(code: string, name: string) {
-  const [row] = await db.insert(paymentTerms).values({ code, name }).returning();
+  const [row] = await db
+    .insert(paymentTerms)
+    .values({ code, name: `${name} (${crypto.randomUUID().slice(0, 8)})` })
+    .onConflictDoUpdate({ target: paymentTerms.code, set: { code } })
+    .returning();
   return row!;
 }
 
@@ -500,6 +505,8 @@ describe("leverantörsreskontra — betalningsregistrering", () => {
     // The whole debt goes off the payable; the 5 kr never paid is a gain.
     expect(byAccount["2440"]).toEqual({ number: "2440", debit: "1000.00", credit: "0.00" });
     expect(byAccount["3740"]).toEqual({ number: "3740", debit: "0.00", credit: "5.00" });
+    // Exactly these three rows — no fourth (e.g. a 0-row or a split write-off).
+    expect(verification.rows).toHaveLength(3);
     expectBalanced(verification.rows);
   });
 
@@ -526,6 +533,7 @@ describe("leverantörsreskontra — betalningsregistrering", () => {
     expect(byAccount["1930"]).toEqual({ number: "1930", debit: "0.00", credit: "1003.00" });
     expect(byAccount["2440"]).toEqual({ number: "2440", debit: "1000.00", credit: "0.00" });
     expect(byAccount["3740"]).toEqual({ number: "3740", debit: "3.00", credit: "0.00" });
+    expect(verification.rows).toHaveLength(3);
     expectBalanced(verification.rows);
   });
 
@@ -559,6 +567,37 @@ describe("leverantörsreskontra — betalningsregistrering", () => {
     expect(await countVerifications()).toBe(verificationsBefore);
     expect(await series("U")).toHaveLength(0);
     expect((await invoiceStatus(invoice.id)).status).toBe("approved");
+  });
+
+  // The period lock end to end, through the real service: a registration
+  // dated in a locked month is refused before anything is written, and a
+  // Makulera whose omföring would land in a locked month leaves the payment
+  // live — the invoice paid, no U omföring.
+  it("refuses a registration and a makulering in a locked period, and writes nothing", async () => {
+    const user = await makeUser();
+    const supplier = await makeSupplier();
+    const invoice = await makeApprovedInvoice(supplier.id, user.id, 1000);
+    const payment = await supplierPaymentService.create(
+      { supplierId: supplier.id, paymentDate: TODAY, bankAccountNumber: "1930", amount: 400, rows: [{ supplierInvoiceId: invoice.id, appliedAmount: 400 }] },
+      user.id
+    );
+    const verificationsBefore = await countVerifications();
+    const period = await testEconomyRepository.findPeriodForDate(TODAY);
+    await testEconomyService.lockPeriod(period!.id, user.id);
+
+    const registration = await supplierPaymentService
+      .create({ supplierId: supplier.id, paymentDate: TODAY, bankAccountNumber: "1930", amount: 600, rows: [{ supplierInvoiceId: invoice.id, appliedAmount: 600 }] }, user.id)
+      .catch((err: unknown) => err);
+    expect(registration).toBeInstanceOf(AccountingPeriodLockedError);
+    expect(await countPayments()).toBe(1);
+    expect((await invoiceStatus(invoice.id)).status).toBe("approved");
+
+    const cancel = await supplierPaymentService.cancel(payment.id, user.id).catch((err: unknown) => err);
+    expect(cancel).toBeInstanceOf(AccountingPeriodLockedError);
+    const [row] = await db.select().from(supplierPayments).where(eq(supplierPayments.id, payment.id));
+    expect(row!.cancelledAt).toBeNull();
+    expect(await countVerifications()).toBe(verificationsBefore);
+    expect(await series("U")).toHaveLength(1);
   });
 
   it("burns neither a UTB number nor a verifikatnummer on a rejected registration", async () => {

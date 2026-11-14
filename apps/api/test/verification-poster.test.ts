@@ -11,6 +11,7 @@ import {
   verificationRows,
   verifications,
   verificationSeries,
+  type Tx,
 } from "@navet/db";
 import { VAT_CODES, round2, type VatCode } from "@navet/shared";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -291,6 +292,35 @@ describe("verification poster — customer invoice", () => {
     const { rows } = await loadVerification(posted.verificationId);
     expectBalanced(rows);
     expect(byAccount(rows)["3108"]).toEqual({ debit: 0, credit: 1000 });
+  });
+
+  // A rule's account deactivated after the rule was written: the automatic
+  // path must not be a way around B1's refusal of inactive accounts — the
+  // same MissingPostingAccountError as a missing settings account, naming
+  // the rule's account and side, and nothing is written.
+  it("refuses a posting rule whose account has been deactivated (revenue and cost side)", async () => {
+    const { user } = await setupPosting();
+    const group = await makeArticleGroup("310", "Diskbänkar");
+    const revenue = await accountByNumber("3105");
+    const cost = await accountByNumber("4600");
+    await service.createPostingRule({ articleGroupId: group.id, vatCodeId: C.MP25.id, revenueAccountId: revenue.id, costAccountId: cost.id });
+    await service.updateAccount(revenue.id, { active: false });
+    await service.updateAccount(cost.id, { active: false });
+
+    const sale = await db
+      .transaction((tx) =>
+        poster.postCustomerInvoice(tx, CUSTOMER_DOC, [{ articleGroupId: group.id, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: C.MP25 }], user.id)
+      )
+      .catch((err: unknown) => err);
+    expect(sale).toBeInstanceOf(MissingPostingAccountError);
+    expect(sale).toMatchObject({ accountNumber: "3105", roleLabel: "posting rule revenue account" });
+
+    const purchase = await db
+      .transaction((tx) => poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: group.id, lineAmount: 1000, vatCode: null }], user.id))
+      .catch((err: unknown) => err);
+    expect(purchase).toBeInstanceOf(MissingPostingAccountError);
+    expect(purchase).toMatchObject({ accountNumber: "4600", roleLabel: "posting rule cost account" });
+    expect(await db.select().from(verifications)).toHaveLength(0);
   });
 
   it("falls through a matching rule that has no revenue account (cost-only rule) to the next step", async () => {
@@ -891,6 +921,27 @@ describe("verification poster — reversal", () => {
     ]);
   });
 
+  // The F series too, and the counter: the omföring takes the next number in
+  // its source's series and year, and the next booking the one after it.
+  it("books a customer invoice's reversal in series F with the next number, and advances the counter", async () => {
+    const { user } = await setupPosting();
+    const lines = [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: C.MP25 }];
+    const source = await db.transaction((tx) => poster.postCustomerInvoice(tx, CUSTOMER_DOC, lines, user.id));
+
+    const result = await db.transaction((tx) =>
+      poster.reverseBookedVerification(tx, source.verificationId, { date: CANCEL_DATE, description: "Kreditering FA-1001" }, user.id)
+    );
+    const reversal = await loadVerification((result as { verificationId: string }).verificationId);
+    expect(reversal).toMatchObject({ seriesCode: "F", verificationNumber: 2, reversesVerificationId: source.verificationId, date: CANCEL_DATE });
+    expect(byAccount(reversal.rows)).toEqual({ "1510": { debit: 0, credit: 1250 }, "2610": { debit: 250, credit: 0 }, "3001": { debit: 1000, credit: 0 } });
+
+    const [series] = await db.select().from(verificationSeries).where(eq(verificationSeries.code, "F"));
+    const counters = await db.select().from(verificationCounters).where(eq(verificationCounters.seriesId, series!.id));
+    expect(counters.map((c) => c.nextNumber)).toEqual([3]);
+    const next = await db.transaction((tx) => poster.postCustomerInvoice(tx, { ...CUSTOMER_DOC, invoiceNumber: "FA-1002" }, lines, user.id));
+    expect((await loadVerification(next.verificationId)).verificationNumber).toBe(3);
+  });
+
   it("reports alreadyReversed instead of booking a second reversal", async () => {
     const { user } = await setupPosting();
     const source = await postSupplier(user.id);
@@ -1456,6 +1507,22 @@ describe("verification poster — reminder fee", () => {
     await expect(poster.assertReminderFeePostable(db, REMINDER_DATE)).rejects.toBeInstanceOf(
       PaymentBankAccountConflictError
     );
+  });
+});
+
+// The payment and fee paths go through the same period guard as the
+// invoices: a date no fiscal year covers is NoAccountingPeriodForPosting,
+// and nothing is written (no series, no number).
+describe("verification poster — payment and fee dates outside every fiscal year", () => {
+  it.each([
+    ["customer payment", (tx: Tx, userId: string) => poster.postCustomerPayment(tx, { ...PAYMENT_DOC, paymentDate: UNCOVERED_DATE }, [{ appliedAmount: 1250, writeOffAmount: 0 }], userId)],
+    ["supplier payment", (tx: Tx, userId: string) => poster.postSupplierPayment(tx, { ...SUPPLIER_PAYMENT_DOC, paymentDate: UNCOVERED_DATE }, [{ appliedAmount: 125, writeOffAmount: 0 }], userId)],
+    ["reminder fee", (tx: Tx, userId: string) => poster.postReminderFee(tx, { ...REMINDER_DOC, reminderDate: UNCOVERED_DATE }, userId)],
+  ] as const)("refuses a %s dated outside every fiscal year", async (_label, post) => {
+    const { user } = await setupPosting();
+    await expect(db.transaction((tx) => post(tx, user.id))).rejects.toBeInstanceOf(NoAccountingPeriodForPostingError);
+    expect(await db.select().from(verifications)).toHaveLength(0);
+    expect(await db.select().from(verificationCounters)).toHaveLength(0);
   });
 });
 

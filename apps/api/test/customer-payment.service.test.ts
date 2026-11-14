@@ -460,6 +460,8 @@ describe("kundreskontra — betalningsregistrering", () => {
     expect(byAccount["1930"]).toEqual({ number: "1930", debit: "995.00", credit: "0.00" });
     expect(byAccount["1510"]).toEqual({ number: "1510", debit: "0.00", credit: "1000.00" });
     expect(byAccount["3740"]).toEqual({ number: "3740", debit: "5.00", credit: "0.00" });
+    // Exactly bank, fordran and öresutjämning — no fourth row.
+    expect(verification.rows).toHaveLength(3);
     expectBalanced(verification.rows);
   });
 
@@ -486,6 +488,8 @@ describe("kundreskontra — betalningsregistrering", () => {
     expect(byAccount["1930"]).toEqual({ number: "1930", debit: "1003.00", credit: "0.00" });
     expect(byAccount["1510"]).toEqual({ number: "1510", debit: "0.00", credit: "1000.00" });
     expect(byAccount["3740"]).toEqual({ number: "3740", debit: "0.00", credit: "3.00" });
+    // Exactly bank, fordran and öresutjämning — no fourth row.
+    expect(verification.rows).toHaveLength(3);
     expectBalanced(verification.rows);
   });
 
@@ -662,6 +666,8 @@ describe("kundreskontra — betalningsregistrering", () => {
     // 1000 off the invoice, 250 back onto the credit note → 750 net.
     expect(byAccount["1510"]).toEqual({ number: "1510", debit: "0.00", credit: "750.00" });
     expect(byAccount["3740"]).toEqual({ number: "3740", debit: "3.00", credit: "0.00" });
+    // The invoice and the credit note net into ONE 1510 row: three rows in all.
+    expect(verification.rows).toHaveLength(3);
 
     expect((await invoiceStatus(invoice.id)).status).toBe("paid");
     expect((await invoiceStatus(credit.id)).status).toBe("paid");

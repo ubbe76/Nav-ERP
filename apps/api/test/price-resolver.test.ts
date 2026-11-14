@@ -228,6 +228,31 @@ describe("resolvePrice", () => {
     expect(result?.price).toEqual({ unitPrice: 100, discountPercent: 20, source: "customer_article" });
   });
 
+  // An article without a varugrupp: the customer's group rules never match
+  // it (no "null group" rule), so the chain goes on to the list/base price —
+  // never an error, never another group's rule.
+  it("an article without a group skips the customer's group rules", async () => {
+    const customer = await makeCustomer();
+    const group = await articleService.createArticleGroup({ code: "312", name: "Grupp C" });
+    await addCustomerGroupPrice(customer.id, group.id, 1, { discountPercent: 30 });
+    const groupless = await makeArticle({ salesPrice: 100 });
+    expect(groupless.groupId).toBeNull();
+
+    expect((await resolvePrice(db, { customerId: customer.id, articleId: groupless.id, quantity: 1 }))?.price).toEqual({
+      unitPrice: 100,
+      discountPercent: 0,
+      source: "article",
+    });
+    const list = await makePriceList();
+    await assignPriceList(customer.id, list.id);
+    await addListRow(list.id, groupless.id, 1, 80);
+    expect((await resolvePrice(db, { customerId: customer.id, articleId: groupless.id, quantity: 1 }))?.price).toEqual({
+      unitPrice: 80,
+      discountPercent: 0,
+      source: "price_list",
+    });
+  });
+
   it("customer article rule beats group rule", async () => {
     const customer = await makeCustomer();
     const group = await articleService.createArticleGroup({ code: "311", name: "Grupp B" });

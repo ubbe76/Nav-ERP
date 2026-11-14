@@ -162,6 +162,27 @@ describe("ingående avskrivning", () => {
     expect(land.plannedMonths).toEqual([]);
   });
 
+  // Several broken rules at once: the check reports the first in its fixed
+  // order (pair → before the plan → after the plan → past month → above the
+  // base → value left on the last month), so the message is predictable and
+  // the user fixes the month before the amount.
+  it("names the first broken rule when an opening breaks several at once", async () => {
+    const { user, category } = await setupFixedAssets();
+    const messageOf = async (overrides: Parameters<typeof createAsset>[2]) =>
+      ((await createAsset(user.id, category.id, overrides).catch((err: unknown) => err)) as Error).message;
+
+    // Before the plan AND above the base ⇒ the month.
+    expect(await messageOf({ openingDepreciationThroughMonth: `${Y - 2}-02`, openingDepreciation: 999999 })).toBe(
+      "openingDepreciationThroughMonth must not be before depreciationStartMonth"
+    );
+    // After the plan AND above the base ⇒ the month, naming the plan's last month.
+    expect(await messageOf({ openingDepreciationThroughMonth: addMonths(LAST_MONTH, 1), openingDepreciation: 999999 })).toBe(
+      `openingDepreciationThroughMonth must not be after ${LAST_MONTH}, the last month of the useful life`
+    );
+    // Above the base on a valid month ⇒ the amount.
+    expect(await messageOf({ openingDepreciation: 120000.01 })).toBe("openingDepreciation must not exceed acquisitionCost − residualValue");
+  });
+
   it("can be edited or cleared before the first run and is locked after it", async () => {
     const { user, category } = await setupFixedAssets();
     const asset = await createAsset(user.id, category.id);

@@ -28,6 +28,7 @@ import {
 } from "../src/modules/economy/service/economy.service.js";
 import { assertPostablePeriod } from "../src/modules/economy/service/verification-poster.js";
 import { parsed } from "./helpers/parsed.js";
+import { waitForLockWaiter } from "./helpers/year-end.js";
 
 const repo = createEconomyRepository(db);
 const authRepo = createAuthRepository(db);
@@ -1013,6 +1014,35 @@ describe("economy service — reverse (Omför)", () => {
     await service.reverse(booked.id, user.id);
 
     await expect(service.reverse(booked.id, user.id)).rejects.toBeInstanceOf(AlreadyReversedError);
+  });
+
+  // The pre-check reads committed rows only: an Omför in flight passes it,
+  // and the partial unique index is what stops the second. Forced: a holder
+  // writes the omföring draft uncommitted, reverse() passes its pre-check and
+  // waits on the index, the holder commits ⇒ the same 409, one draft.
+  it("refuses an Omför that races another in flight with AlreadyReversedError via the unique index", async () => {
+    const { user, series, bank, revenue } = await setupEconomy();
+    const draft = await makeBalancedDraft(series, bank, revenue, user.id);
+    const booked = await service.book(draft.id, user.id);
+    const year = await repo.findFiscalYearForDate(stockholmToday());
+
+    let attempt: Promise<unknown> | undefined;
+    await db.transaction(async (holder) => {
+      await repo.createVerificationInTx(
+        holder,
+        { seriesId: series.id, fiscalYearId: year!.id, date: stockholmToday(), description: "Omföring i luften", reversesVerificationId: booked.id },
+        [
+          { accountId: bank.id, debit: 0, credit: 500, description: null },
+          { accountId: revenue.id, debit: 500, credit: 0, description: null },
+        ],
+        user.id
+      );
+      attempt = service.reverse(booked.id, user.id).catch((err: unknown) => err);
+      await waitForLockWaiter(); // reverse() is past its pre-check, on the index
+    });
+    expect(await attempt!).toBeInstanceOf(AlreadyReversedError);
+    const reversals = await db.select({ id: verifications.id }).from(verifications).where(eq(verifications.reversesVerificationId, booked.id));
+    expect(reversals).toHaveLength(1);
   });
 
   // The poster takes a booked omföring as its source's correction (a Makulera
