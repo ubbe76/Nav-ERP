@@ -55,7 +55,7 @@ import {
 } from "../repository/purchase.repository.js";
 import type { RegisterReferenceReader } from "../../register/service/register.service.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
-import type { MailService } from "../../mail/service/mail.service.js";
+import { mailSender, type MailService } from "../../mail/service/mail.service.js";
 import type { DeliveryAddressBlock, DocumentPdfService, PalletCardPdfInput } from "../../mail/service/document-pdf.js";
 import { documentLanguageOf, localized, round2, roundToDecimals, type DocumentLanguage } from "@navet/shared";
 import { documentTexts } from "../../mail/service/document-texts.js";
@@ -1292,7 +1292,8 @@ export function createPurchaseService(
     // means, so a draft transitions to sent — but only when SMTP succeeded
     // (sendMail throws otherwise). Later statuses are plain resends.
     // Kopia (input.cc): sent as Cc and logged, so Skicka om sends the same.
-    async sendInquiryEmail(id: string, input: SendDocumentEmailInput & { cc?: string[] }) {
+    // senderId: the user sending (their E-postsignatur, email_log.sender_id).
+    async sendInquiryEmail(id: string, input: SendDocumentEmailInput & { cc?: string[] }, senderId: string | null = null) {
       const inquiry = await repo.findInquiryById(id);
       if (!inquiry) throw new InquiryNotFoundError(id);
       if (inquiry.status === "ordered" || inquiry.status === "cancelled") {
@@ -1314,6 +1315,7 @@ export function createPurchaseService(
         message: input.message,
         attachments: dedupeAttachmentFilenames([attachment, ...extra]),
         attachDrawings: input.attachDrawings,
+        sender: mailSender(senderId, documentLanguageOf(inquiry.supplierLanguage)),
       });
       // The mail has gone: a status that moved meanwhile is no error — the
       // inquiry is returned as it now stands.
@@ -1692,7 +1694,8 @@ export function createPurchaseService(
     // Kopia (input.cc) is sent as Cc and logged, so Skicka om sends the same.
     async sendPurchaseOrderEmail(
       orderId: string,
-      input: Omit<SendDocumentEmailInput, "to"> & { to?: string; cc?: string[] }
+      input: Omit<SendDocumentEmailInput, "to"> & { to?: string; cc?: string[] },
+      senderId: string | null = null
     ) {
       const order = await repo.findPurchaseOrderById(orderId);
       if (!order) throw new PurchaseOrderNotFoundError(orderId);
@@ -1718,6 +1721,7 @@ export function createPurchaseService(
         message: input.message,
         attachments: dedupeAttachmentFilenames([attachment, ...extra]),
         attachDrawings: input.attachDrawings,
+        sender: mailSender(senderId, documentLanguageOf(order.supplierLanguage)),
       });
       // The mail has gone: an order that left draft meanwhile (cancelled,
       // confirmed by someone else) keeps its status and is returned re-read.

@@ -16,6 +16,7 @@ export * from "./import.js";
 export * from "./list.js";
 export * from "./mail.js";
 export * from "./mail-templates.js";
+export * from "./mail-signature.js";
 export * from "./money.js";
 export * from "./payment-tolerance.js";
 export * from "./register.js";

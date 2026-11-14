@@ -6,6 +6,7 @@ import type {
   CreateArticleNumberSeriesInput,
   CreateCompanyCarrierInput,
   ExtraDescriptionDocument,
+  MailSignatureCompanyField,
   ManufacturingMaterialShortage,
   PalletCardCode,
   UpdateCompanyCarrierInput,
@@ -13,7 +14,7 @@ import type {
   UpdateNumberSeriesInput,
   UpdateSystemSettingsInput,
 } from "@navet/shared";
-import { EXTRA_DESCRIPTION_DOCUMENTS, round2 } from "@navet/shared";
+import { DEFAULT_MAIL_SIGNATURE_COMPANY_FIELDS, EXTRA_DESCRIPTION_DOCUMENTS, MAIL_SIGNATURE_COMPANY_FIELDS, round2 } from "@navet/shared";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_ARTICLE_SERIES_KEY, documentSeriesTarget, formatSeriesNumber } from "./number-series.js";
 import { DEFAULT_SERIAL_SERIES_KEY } from "../../stock/service/serial-numbers.js";
@@ -110,6 +111,8 @@ const SHOW_ORDER_REVISION_ON_DOCUMENTS_KEY = "show_order_revision_on_documents";
 // Streckkod på inköpsorder (#23) — ON when unset, like the order revision.
 const PURCHASE_ORDER_BARCODE_KEY = "purchase_order_barcode";
 const EXTRA_DESCRIPTION_DOCUMENTS_KEY = "extra_description_documents";
+// E-postsignatur: the company details in every signature (a JSON list).
+const MAIL_SIGNATURE_COMPANY_FIELDS_KEY = "mail_signature_company_fields";
 const ATF_MINUTES_PER_WEEK_KEY = "atf_minutes_per_week";
 // Tillåt ATF-uttag via schemat (utjämning på veckoschemat) — off when unset.
 const SCHEDULE_BALANCING_KEY = "schedule_balancing";
@@ -321,6 +324,19 @@ function decodeExtraDescriptionDocuments(raw: string | null): ExtraDescriptionDo
   }
 }
 
+// Never set = the default; otherwise the stored list in the catalog's order,
+// unknown entries dropped (a broken value reads as the default).
+export function decodeMailSignatureCompanyFields(raw: string | null): MailSignatureCompanyField[] {
+  if (raw === null) return [...DEFAULT_MAIL_SIGNATURE_COMPANY_FIELDS];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [...DEFAULT_MAIL_SIGNATURE_COMPANY_FIELDS];
+    return MAIL_SIGNATURE_COMPANY_FIELDS.filter((field) => parsed.includes(field));
+  } catch {
+    return [...DEFAULT_MAIL_SIGNATURE_COMPANY_FIELDS];
+  }
+}
+
 async function* zipStoredFiles(files: AsyncIterable<ExportedFile>): AsyncGenerator<Buffer> {
   const zip = new ZipStreamWriter();
   const paths = new UniquePaths();
@@ -358,6 +374,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       showOrderRevisionOnDocuments: get(SHOW_ORDER_REVISION_ON_DOCUMENTS_KEY) !== "false",
       purchaseOrderBarcode: get(PURCHASE_ORDER_BARCODE_KEY) !== "false",
       extraDescriptionDocuments: decodeExtraDescriptionDocuments(get(EXTRA_DESCRIPTION_DOCUMENTS_KEY)),
+      mailSignatureCompanyFields: decodeMailSignatureCompanyFields(get(MAIL_SIGNATURE_COMPANY_FIELDS_KEY)),
       atfMinutesPerWeek: get(ATF_MINUTES_PER_WEEK_KEY) === null ? 0 : Number(get(ATF_MINUTES_PER_WEEK_KEY)),
       scheduleBalancing: get(SCHEDULE_BALANCING_KEY) === "true",
       payrollOvertimeThresholdMinutes:
@@ -726,6 +743,13 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
           await set(
             EXTRA_DESCRIPTION_DOCUMENTS_KEY,
             JSON.stringify(EXTRA_DESCRIPTION_DOCUMENTS.filter((kind) => chosen.has(kind)))
+          );
+        }
+        if (input.mailSignatureCompanyFields !== undefined) {
+          const chosen = new Set(input.mailSignatureCompanyFields);
+          await set(
+            MAIL_SIGNATURE_COMPANY_FIELDS_KEY,
+            JSON.stringify(MAIL_SIGNATURE_COMPANY_FIELDS.filter((field) => chosen.has(field)))
           );
         }
         if (input.atfMinutesPerWeek !== undefined) {

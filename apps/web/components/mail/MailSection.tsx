@@ -19,6 +19,7 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import { hasUnsavedDrafts } from "../../lib/unsavedGuard";
 import type { MailTextRequest } from "../../lib/mailText";
 import { useMailText } from "./useMailText";
+import { MailSignatureNote } from "./MailSignatureNote";
 
 export interface SendButtonConfig {
   label: string; // e.g. "Skicka via e-post", "Skicka offert"
@@ -330,6 +331,7 @@ export function SendEmailModal({
         </Field>
 
         <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>Dokumentet bifogas som PDF.</p>
+        <MailSignatureNote />
 
         {drawingCount > 0 && (
           <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>

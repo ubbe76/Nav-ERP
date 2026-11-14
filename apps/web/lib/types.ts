@@ -2,6 +2,7 @@ import type { EInvoiceAutoSendOutcome } from "./einvoice";
 import type { ManufacturingOrderConfiguration, OrderRowConfiguration } from "./configurator";
 import type { DocumentRateSourceValue } from "./currency";
 import type { DocumentLanguage } from "./documentLanguage";
+import type { MailSignatureCompanyField } from "./mailSignature";
 import type { Permission } from "./permissions";
 import type { MarkupLevel } from "./markupLevels";
 import type { VatBoxSetting, VatDeclarationBoxes, VatReportingPeriod } from "./vatBoxes";
@@ -3558,6 +3559,9 @@ export interface SystemSettings {
   // Documents that print the article's Extra benämning under the name, in
   // EXTRA_DESCRIPTION_DOCUMENTS order (empty = none).
   extraDescriptionDocuments: ExtraDescriptionDocument[];
+  // E-postsignatur: the company details every user's signature carries
+  // (Företagsinformation), in MAIL_SIGNATURE_COMPANY_FIELDS order.
+  mailSignatureCompanyFields: MailSignatureCompanyField[];
   // Print the order's own revision after the document number
   // ("Inköpsorder IO2500123 / 2") on offert/orderbekräftelse/inköpsorder.
   showOrderRevisionOnDocuments: boolean;

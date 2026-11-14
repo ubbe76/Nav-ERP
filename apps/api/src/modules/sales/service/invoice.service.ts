@@ -38,6 +38,7 @@ import {
 } from "@navet/shared";
 import { rowConfigurationLines } from "../../configurator/service/configuration-lines.js";
 import { documentTexts } from "../../mail/service/document-texts.js";
+import { mailSender, type MailSender } from "../../mail/service/mail.service.js";
 import type { InvoiceableShipment, InvoiceRepository, InvoiceRowWrite, IssueStamp } from "../repository/invoice.repository.js";
 import type { DocumentPdfInput, DocumentSettingsReader, PaymentReminderPdfInput } from "../../mail/service/document-pdf.js";
 import { extraDescriptionFor, formatBatchInfo, formatSerialInfo } from "../../mail/service/document-pdf.js";
@@ -83,6 +84,8 @@ export interface InvoiceMailSender {
     subject: string;
     message: string;
     attachments?: { filename: string; content: Buffer }[];
+    // E-postsignatur: the user sending and the invoice's language.
+    sender?: MailSender | null;
   }): Promise<unknown>;
 }
 
@@ -2039,7 +2042,8 @@ export function createInvoiceService(
     // Mirrors sendSalesOrderEmail's pattern: load → guard issued/paid →
     // render → mail.sendMail. No status transition — unlike the quote/order
     // confirmation, sending an invoice email never changes its lifecycle.
-    async sendEmail(id: string, input: SendInvoiceEmailInput) {
+    // senderId: the user sending (their E-postsignatur, email_log.sender_id).
+    async sendEmail(id: string, input: SendInvoiceEmailInput, senderId: string | null = null) {
       const invoice = await repo.findRawById(id);
       if (!invoice) throw new InvoiceNotFoundError(id);
       if (invoice.status !== "issued" && invoice.status !== "paid") {
@@ -2053,6 +2057,7 @@ export function createInvoiceService(
         subject: input.subject,
         message: input.message,
         attachments: [attachment],
+        sender: mailSender(senderId, documentLanguageOf(invoice.language)),
       });
     },
 
@@ -2105,7 +2110,9 @@ export function createInvoiceService(
     // re-send can never double-charge: the second attempt's guard, and behind
     // it the partial unique index invoice_reminders_one_fee, allow exactly one
     // fee row per invoice.
-    async sendReminder(id: string, input: SendReminderInput, userId: string) {
+    // userId stamps the reminder; senderId (default the same) is whose
+    // E-postsignatur the mail carries — Skicka om keeps the original sender's.
+    async sendReminder(id: string, input: SendReminderInput, userId: string, senderId: string | null = userId) {
       const invoice = await repo.findRawById(id);
       if (!invoice) throw new InvoiceNotFoundError(id);
       if (invoice.status !== "issued") {
@@ -2146,6 +2153,7 @@ export function createInvoiceService(
         subject: input.subject,
         message: input.message,
         attachments: [attachment],
+        sender: mailSender(senderId, documentLanguageOf(invoice.language)),
       });
 
       let result;

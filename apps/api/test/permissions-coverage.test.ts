@@ -28,6 +28,10 @@ const PUBLIC = new Set([
   "PUT /api/v1/me/mail-templates/:kind/:language",
   "DELETE /api/v1/me/mail-templates/:kind/:language",
   "POST /api/v1/me/mail-text",
+  // E-postsignatur: the session user's own signature.
+  "GET /api/v1/me/mail-signature",
+  "PUT /api/v1/me/mail-signature",
+  "POST /api/v1/me/mail-signature/preview",
   "POST /api/v1/auth/users",
   "GET /api/v1/auth/users",
   "PATCH /api/v1/auth/users/:id",

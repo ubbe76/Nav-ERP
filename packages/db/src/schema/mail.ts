@@ -1,5 +1,6 @@
 import { boolean, pgEnum, pgTable, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import { users } from "./auth";
 
 // Which business document an email carried. "test" rows come from the
 // "Skicka testmejl" button on /system/installningar and have no documentId.
@@ -48,6 +49,10 @@ export const emailLog = pgTable("email_log", {
     .array()
     .notNull()
     .default(sql`'{}'::text[]`),
+  // E-postsignatur (migration 0219): the user the mail was sent as — whose
+  // signature it carried; Skicka om signs with the same user's. Null = no
+  // user behind it (test mail, the digest) or sent before 0219.
+  senderId: uuid("sender_id").references(() => users.id, { onDelete: "set null" }),
   status: emailStatusEnum("status").notNull(),
   error: text("error"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

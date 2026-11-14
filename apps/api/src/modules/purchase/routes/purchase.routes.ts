@@ -380,7 +380,7 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
   app.post<{ Params: { id: string } }>("/inquiries/:id/send-email", async (req, reply) => {
     const input = sendSupplierDocumentEmailSchema.parse(req.body);
     try {
-      return await service.sendInquiryEmail(req.params.id, input);
+      return await service.sendInquiryEmail(req.params.id, input, req.user!.id);
     } catch (err) {
       return inquiryError(err, reply);
     }
@@ -574,7 +574,7 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
   app.post<{ Params: { id: string } }>("/purchase-orders/:id/send-email", async (req, reply) => {
     const input = sendPurchaseOrderEmailSchema.parse(req.body);
     try {
-      return await service.sendPurchaseOrderEmail(req.params.id, input);
+      return await service.sendPurchaseOrderEmail(req.params.id, input, req.user!.id);
     } catch (err) {
       if (err instanceof PurchaseOrderNotFoundError) return reply.code(404).send(errorBody(err));
       // No Mottagare sent and the supplier has no address to fall back on.

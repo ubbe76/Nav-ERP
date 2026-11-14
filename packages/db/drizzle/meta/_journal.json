@@ -1534,6 +1534,13 @@
       "when": 1794606169722,
       "tag": "0218_stycktid_precision",
       "breakpoints": true
+    },
+    {
+      "idx": 219,
+      "version": "7",
+      "when": 1794628288779,
+      "tag": "0219_epostsignatur",
+      "breakpoints": true
     }
   ]
 }

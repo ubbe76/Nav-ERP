@@ -20,6 +20,7 @@ import * as webEinvoice from "../../web/lib/einvoice.js";
 import * as webMargin from "../../web/lib/margin.js";
 import * as webShipping from "../../web/lib/shipping.js";
 import * as webSerials from "../../web/lib/serials.js";
+import * as webMailSignature from "../../web/lib/mailSignature.js";
 
 describe("units mirror (apps/web/lib/units.ts)", () => {
   const factors = [null, undefined, "", 0, -2, 1, 0.5, 2, "2", "7.38", 12.5, 0.3, 1000];
@@ -246,5 +247,14 @@ describe("serials mirror (apps/web/lib/serials.ts)", () => {
       expect(webSerials.serialNumberRuns(list)).toEqual(shared.serialNumberRuns(list));
       expect(webSerials.sortSerialNumbers(list)).toEqual(shared.sortSerialNumbers(list));
     }
+  });
+});
+
+describe("E-postsignatur mirror (apps/web/lib/mailSignature.ts)", () => {
+  it("has the shared field lists, and a label for every field", () => {
+    expect(webMailSignature.MAIL_SIGNATURE_USER_FIELDS).toEqual(shared.MAIL_SIGNATURE_USER_FIELDS);
+    expect(webMailSignature.MAIL_SIGNATURE_COMPANY_FIELDS).toEqual(shared.MAIL_SIGNATURE_COMPANY_FIELDS);
+    expect(Object.keys(webMailSignature.MAIL_SIGNATURE_USER_FIELD_LABELS)).toEqual([...shared.MAIL_SIGNATURE_USER_FIELDS]);
+    expect(Object.keys(webMailSignature.MAIL_SIGNATURE_COMPANY_FIELD_LABELS)).toEqual([...shared.MAIL_SIGNATURE_COMPANY_FIELDS]);
   });
 });

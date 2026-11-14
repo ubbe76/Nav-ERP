@@ -63,6 +63,8 @@ En användare utan grupp (**Ingen åtkomst**) når bara hjälpen och sidan **Ing
 
 Här finns också betalnings- och registreringsuppgifterna **VAT-nummer**, **Säte**, **Bankgiro**, **Plusgiro**, **Bank**, **BIC/SWIFT**, **IBAN** och kryssrutan **Godkänd för F-skatt**. De ifyllda uppgifterna skrivs ut i **sidfoten på alla utgående dokument** — förfrågan, inköpsorder, offert och orderbekräftelse — tillsammans med organisationsnumret, telefonen, e-posten och webbplatsen; tomma fält utelämnas. Interna dokument (plocklistan och TO-utskriften) får ingen sidfot.
 
+Under logotypen finns **E-postsignatur**. Där väljer du vilka företagsuppgifter som står i varje användares [e-postsignatur](/hjalp/komma-igang#e-postsignatur): **Logotyp**, **Företagsnamn**, **Adress**, **Telefon (växel)**, **E-post**, **Webbplats**, **Organisationsnummer**, **VAT-nummer** och **Säte**. Från början är logotypen, företagsnamnet, adressen, telefonen, webbplatsen och organisationsnumret ikryssade. Varje kryss sparas direkt och gäller alla användares signaturer. En uppgift som inte är ifylld i Företagsinformation är märkt *(inte ifyllt)* och utelämnas. Användarna väljer själva sina egna uppgifter och slår på signaturen under Mina inställningar.
+
 Längst ner finns **Speditörer** — företagets egna kundnummer hos olika speditörer (t.ex. "vårt DHL-konto 12345"). **+ Ny speditör** väljer en speditör ur [speditörsregistret](/hjalp/grunddata) och anger företagets kundnummer där; varje speditör kan bara läggas till en gång. Numret används på inköpssidan: när **Frakt på vårt konto** är ikryssad på en inköpsorder eller förfrågan och den valda speditören finns i listan, skrivs "Vårt kundnr" ut bredvid speditören på dokumentet (se [Inköp](/hjalp/inkop)).
 
 ## Fraktinställningar

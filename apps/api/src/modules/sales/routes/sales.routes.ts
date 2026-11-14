@@ -635,7 +635,7 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
   app.post<{ Params: { id: string } }>("/sales-orders/:id/send-email", async (req, reply) => {
     const input = sendSalesOrderEmailSchema.parse(req.body);
     try {
-      return await service.sendSalesOrderEmail(req.params.id, input);
+      return await service.sendSalesOrderEmail(req.params.id, input, req.user!.id);
     } catch (err) {
       if (err instanceof SalesOrderNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof InvalidStatusTransitionError || err instanceof SmtpNotConfiguredError) {
@@ -663,7 +663,7 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
   app.post<{ Params: { id: string } }>("/sales-orders/:id/send-invoice-email", async (req, reply) => {
     const input = sendDocumentEmailSchema.parse(req.body);
     try {
-      return await service.sendInvoiceEmail(req.params.id, input);
+      return await service.sendInvoiceEmail(req.params.id, input, req.user!.id);
     } catch (err) {
       if (err instanceof SalesOrderNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof InvalidStatusTransitionError || err instanceof SmtpNotConfiguredError) {

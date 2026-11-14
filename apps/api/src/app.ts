@@ -70,6 +70,8 @@ import { createMailService, type MailTransportFactory } from "./modules/mail/ser
 import { createDocumentPdfService } from "./modules/mail/service/document-pdf.js";
 import { mailRoutes } from "./modules/mail/routes/mail.routes.js";
 import { mailTemplatesRoutes } from "./modules/mail/routes/mail-templates.routes.js";
+import { mailSignatureRoutes } from "./modules/mail/routes/mail-signature.routes.js";
+import { createMailSignatureService } from "./modules/mail/service/mail-signature.js";
 import { createMailTemplatesService } from "./modules/mail/service/mail-templates.service.js";
 import { createManufacturingRepository } from "./modules/manufacturing/repository/manufacturing.repository.js";
 import { copyRoutingAlternatives, insertRoutingOperations } from "./modules/manufacturing/repository/routing-write.js";
@@ -346,7 +348,8 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   const auditRepository = createAuditRepository(database);
 
   const setupCode = createSetupCode();
-  const authService = createAuthService(createAuthRepository(database), jwtSecret, auditRepository, setupCode);
+  const authRepository = createAuthRepository(database);
+  const authService = createAuthService(authRepository, jwtSecret, auditRepository, setupCode);
   const permissionGroupService = createPermissionGroupService(createPermissionGroupRepository(database));
   const userSettingsRepository = createUserSettingsRepository(database);
   const userSettingsService = createUserSettingsService(userSettingsRepository);
@@ -419,7 +422,28 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   });
   // Outgoing email + printable PDFs (SMTP config and company header both
   // live in the system module).
-  const mailService = createMailService(createMailRepository(database), systemService, options.mailTransport);
+  // E-postsignatur (Mina inställningar): the user's part is a user setting,
+  // the company's comes from Företagsinformation and the setting
+  // mailSignatureCompanyFields. A send signs as its sender's account — gone
+  // or inactive = no signature.
+  const mailSignatureService = createMailSignatureService({
+    store: userSettingsRepository,
+    sources: {
+      user: async (id) => {
+        const user = await authRepository.findById(id);
+        return user && user.active && !user.deletedAt ? { name: user.name, email: user.email } : null;
+      },
+      company: () => systemService.getCompanyInfo(),
+      logo: async () => (await systemService.getLogo())?.logo ?? null,
+      companyFields: async () => (await systemService.getSettings()).mailSignatureCompanyFields,
+    },
+  });
+  const mailService = createMailService(
+    createMailRepository(database),
+    systemService,
+    options.mailTransport,
+    mailSignatureService
+  );
   const documentPdfService = createDocumentPdfService(systemService);
   // Lagervärdering (D1) — read-only report over stock_transactions +
   // article_standard_cost_history, PDF drawn in the shared A4 template like
@@ -1059,6 +1083,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
       // The user's own e-mail templates (/me/mail-templates, /me/mail-text):
       // requireAuth on each route, like /me/settings.
       await v1.register(mailTemplatesRoutes, { auth: authService, service: mailTemplatesService });
+      await v1.register(mailSignatureRoutes, { auth: authService, service: mailSignatureService });
       // Public: this route IS the OAuth2 client-credentials authentication mechanism.
       await v1.register(oauthRoutes, { service: oauthService, throttles: credentialThrottles });
       // Public: the theme CSS and picker data every page (login and the stamp

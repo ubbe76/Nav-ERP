@@ -3,6 +3,7 @@ import { costingMaterialSourceSchema, costingPreMaterialSourceSchema, costingSup
 import { deliveryDayModeSchema, transitDaysSchema } from "./delivery.js";
 import { themeIdSchema } from "./themes.js";
 import { blankSafe, INT4_MAX } from "./coerce.js";
+import { mailSignatureCompanyFieldsSchema } from "./mail-signature.js";
 
 // Materialbrist vid rapportering — see updateSystemSettingsSchema below.
 export const manufacturingMaterialShortageSchema = z.enum(["none", "warn", "block"]);
@@ -86,6 +87,9 @@ const systemSettingsFieldsSchema = z.object({
     // The documents that print the article's Extra benämning under the name
     // (the whole list; [] = none).
     extraDescriptionDocuments: z.array(extraDescriptionDocumentSchema).max(EXTRA_DESCRIPTION_DOCUMENTS.length).optional(),
+    // E-postsignatur: the company details every user's signature carries
+    // (Företagsinfo), in the catalog's order; never set = the default.
+    mailSignatureCompanyFields: mailSignatureCompanyFieldsSchema.optional(),
     atfMinutesPerWeek: z.number().int().min(0).max(600).optional(),
     // Tillåt ATF-uttag via schemat: week schedules may carry ordinary time and
     // ATF per week (utjämning — the last workday balances the week). Off =
