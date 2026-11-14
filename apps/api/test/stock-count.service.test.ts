@@ -153,6 +153,25 @@ describe("stock count sessions — create/list/get", () => {
   // the guarantee under races. Hold an uncommitted open session so the
   // pre-check passes, let createSession block on the index, then commit —
   // the 23505 must surface as StockCountAlreadyOpenError, not a raw 500.
+  it("steps the INV number by one per session and never reuses a cancelled session's number", async () => {
+    const a1 = await makeLocation("A1");
+    const b1 = await makeLocation("B1");
+    const first = await countRepo.createSession({ locationId: a1.id, blocksTransactions: false }, null);
+    await countRepo.cancelSession(first.id);
+    const second = await countRepo.createSession({ locationId: a1.id, blocksTransactions: false }, null);
+    const third = await countRepo.createSession({ locationId: b1.id, blocksTransactions: true }, null);
+    const split = (n: string) => {
+      const m = /^(.*?)(\d+)$/.exec(n);
+      expect(m, n).not.toBeNull();
+      return { prefix: m![1], value: Number(m![2]), digits: m![2]!.length };
+    };
+    const [p1, p2, p3] = [first, second, third].map((s) => split(s.countNumber));
+    expect(p1!.prefix).toBe("INV-");
+    expect([p2!.prefix, p3!.prefix]).toEqual([p1!.prefix, p1!.prefix]);
+    expect([p2!.digits, p3!.digits]).toEqual([p1!.digits, p1!.digits]);
+    expect([p2!.value - p1!.value, p3!.value - p2!.value]).toEqual([1, 1]);
+  });
+
   it("maps a create race lost on the unique index to StockCountAlreadyOpenError", async () => {
     const location = await makeLocation();
 
@@ -322,6 +341,20 @@ describe("stock count rows + posting", () => {
     expect(balances.rows[0]!.quantityOnHand).toBe("7.0000");
   });
 
+  // D0 rule 3: an inflow without a standard cost is valued as unknown (null),
+  // never as 0 — a 0 would drag the moving average and FIFO down.
+  it("a positive diff on an article without a standard cost books unit_cost null, never 0", async () => {
+    const location = await makeLocation();
+    const article = await makeArticle("ART-UTAN-PRIS");
+    await stockService.recordTransaction({ articleId: article.id, locationId: location.id, quantityDelta: 2, transactionType: "inventory_adjustment" });
+    const session = await countRepo.createSession({ locationId: location.id, blocksTransactions: false }, null);
+    const detail = await countRepo.getSession(session.id);
+    await countRepo.updateRow(session.id, detail!.rows[0]!.id, { countedQuantity: 5 });
+    await countRepo.postSession(session.id, null);
+    const booked = await db.select().from(stockTransactions).where(eq(stockTransactions.referenceId, session.id));
+    expect(booked.map((t) => [t.quantityDelta, t.unitCost])).toEqual([["3.0000", null]]);
+  });
+
   it("posting everything to zero empties and deactivates a temporary location", async () => {
     const { location, session } = await openSessionWithBalance(10);
     // Fasta lagerplatser (0179): only a temporary location is retired.
@@ -477,6 +510,30 @@ describe("frysvakten i skrivarna", () => {
     await expect(
       stockService.recordTransaction({ articleId: article.id, locationId: location.id, quantityDelta: 1, transactionType: "inventory_adjustment" })
     ).resolves.toBeDefined();
+  });
+
+  it("a posted blocking session releases the spärr: adjustments and transfers go through again", async () => {
+    const counted = await makeLocation("A1");
+    const free = await makeLocation("B1");
+    const article = await makeArticle();
+    await stockService.recordTransaction({ articleId: article.id, locationId: counted.id, quantityDelta: 10, transactionType: "inventory_adjustment" });
+    const session = await countRepo.createSession({ locationId: counted.id, blocksTransactions: true }, null);
+    const detail = await countRepo.getSession(session.id);
+    await countRepo.updateRow(session.id, detail!.rows[0]!.id, { countedQuantity: 8 });
+    await expect(
+      stockService.recordTransaction({ articleId: article.id, locationId: counted.id, quantityDelta: 1, transactionType: "inventory_adjustment" })
+    ).rejects.toBeInstanceOf(LocationUnderStockCountError);
+
+    await countRepo.postSession(session.id, null);
+    await expect(
+      stockService.recordTransaction({ articleId: article.id, locationId: counted.id, quantityDelta: 1, transactionType: "inventory_adjustment" })
+    ).resolves.toBeDefined();
+    const user = await makeUser();
+    await expect(
+      stockService.transferStock({ fromLocationId: counted.id, toLocationId: free.id, rows: [{ articleId: article.id, quantity: 2 }] }, user.id)
+    ).resolves.toBeDefined();
+    const balances = await stockService.getBalances({ articleId: article.id, limit: 50, offset: 0 });
+    expect(Object.fromEntries(balances.rows.map((r) => [r.locationId, r.quantityOnHand]))).toEqual({ [counted.id]: "7.0000", [free.id]: "2.0000" });
   });
 
   it("blocks transfers touching the counted location from either side", async () => {
