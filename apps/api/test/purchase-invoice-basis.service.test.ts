@@ -1,7 +1,7 @@
 import { createArticleSchema, createPurchaseOrderSchema, createStockLocationSchema, createSupplierInvoiceSchema, createSupplierSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { db, purchaseOrders } from "@navet/db";
+import { db, purchaseOrders, purchaseReceipts } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -222,11 +222,11 @@ describe("purchase invoice basis (fakturaunderlag)", () => {
     expect(all.rows.some((r) => r.id === b.order.id)).toBe(true);
   });
 
-  // 2f: a pure lego IO never books a purchase_receipt (the units come home
-  // via the MO's own mo_receipt), so the receivedAt subquery is null even
-  // though the order is fully received — the listing must fall back to the
-  // order's updated_at rather than showing no date at all.
-  it("falls back to the order's updated_at for a pure lego receipt (no purchase_receipt to derive receivedAt from)", async () => {
+  // 2f: a pure lego IO books no stock transaction (the units come home via
+  // the MO's own mo_receipt), but the receipt log has it — the date is the
+  // log's, and an edit of the order afterwards does not move it (the old
+  // updated_at fallback did; systemgranskningen 2026-11-11).
+  it("dates a pure lego receipt by the receipt log, not by the order's updated_at", async () => {
     const { user, supplier, parent, legoOp } = await makeLegoOperation();
     const order = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
     const row = await purchaseService.addRow(order.id, {
@@ -237,13 +237,21 @@ describe("purchase invoice basis (fakturaunderlag)", () => {
     });
     await purchaseService.confirm(order.id);
     await purchaseService.receiveGoods(order.id, row.id, { quantity: 2 }, user.id);
+    const [receipt] = await db.select().from(purchaseReceipts).where(eq(purchaseReceipts.purchaseOrderId, order.id));
+    expect(receipt!.stockTransactionId).toBeNull();
+
+    // The order is touched afterwards (a note, say).
+    await db.update(purchaseOrders).set({ updatedAt: new Date(Date.now() + 3_600_000) }).where(eq(purchaseOrders.id, order.id));
 
     const basis = await purchaseService.listInvoiceBasis({ limit: 50, offset: 0 });
     const entry = basis.rows.find((r) => r.id === order.id);
     expect(entry).toBeTruthy();
-    expect(entry!.receivedAt).toBeTruthy();
+    expect(new Date(entry!.receivedAt as unknown as string).getTime()).toBe(receipt!.createdAt.getTime());
 
+    // An undone receipt is not when the goods arrived: no live receipt ⇒ the old fallback.
+    await db.update(purchaseReceipts).set({ undoneAt: new Date() }).where(eq(purchaseReceipts.id, receipt!.id));
     const [dbOrder] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, order.id));
-    expect(new Date(entry!.receivedAt as unknown as string).getTime()).toBe(dbOrder!.updatedAt.getTime());
+    const again = (await purchaseService.listInvoiceBasis({ limit: 50, offset: 0 })).rows.find((r) => r.id === order.id);
+    expect(new Date(again!.receivedAt as unknown as string).getTime()).toBe(dbOrder!.updatedAt.getTime());
   });
 });

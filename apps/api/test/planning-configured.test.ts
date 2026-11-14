@@ -2,7 +2,11 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { articles, db } from "@navet/db";
 import { createPlanningRepository } from "../src/modules/planning/repository/planning.repository.js";
-import { ConfigurationRequiredError, createPlanningService } from "../src/modules/planning/service/planning.service.js";
+import {
+  ConfigurationRequiredError,
+  createPlanningService,
+  TEMPLATE_CHANGED_MESSAGE,
+} from "../src/modules/planning/service/planning.service.js";
 import { previousWorkingDay } from "../src/modules/planning/service/due-date-suggestion.js";
 import { CONFIGURED_MFG_TRUNCATE, confirmedRow, FULL, mfg, resetCostingSettings } from "./helpers/configured-manufacturing.js";
 import { makeArticle } from "./helpers/configurator.js";
@@ -229,6 +233,37 @@ describe("behovsberäkning — beställningsvara", () => {
     expect(created.manufacturingOrders).toEqual([]);
     expect(created.errors).toHaveLength(1);
     expect(created.errors[0]!.articleNumber).toBe(s.article.articleNumber);
+  });
+
+  it("a template given a förval after the row was configured: no material for the new choice until Ändra konfiguration", async () => {
+    const { s, order, row } = await confirmedRow();
+    expect((await list()).find((r) => r.articleId === s.parts.skruv.id)?.demandDerived ?? 0).toBeGreaterThan(0);
+
+    // A group added later with a förval: the stored choices now resolve to
+    // another key — the TO would be refused, so nothing is cascaded.
+    const montage = await configurator.createGroup(s.article.id, { code: "MONTAGE", name: "Montage", kind: "choice", required: false });
+    const ja = await configurator.createValue(s.article.id, montage.id, { code: "JA", name: "Med montage", priceAdd: 0, active: true });
+    await configurator.updateGroup(s.article.id, montage.id, { defaultValueId: ja.id });
+
+    const rows = await list();
+    const cfg = rows.find((r) => r.proposalKind === "configured")!;
+    expect(cfg.salesOrderRowId).toBe(row.id);
+    expect(cfg.configurationError).toBe(TEMPLATE_CHANGED_MESSAGE);
+    expect(rows.find((r) => r.articleId === s.parts.skruv.id)?.demandDerived ?? 0).toBe(0);
+
+    // Leveranstidskontrollen on the saved order says the same; the form's
+    // own (unsaved) choices are evaluated as typed.
+    const checked = await planning.checkDeliveryTime({ salesOrderId: order.id });
+    expect(checked.rows[0]!.readyDate).toBeNull();
+    expect(checked.rows[0]!.notes).toContain(TEMPLATE_CHANGED_MESSAGE);
+    const typed = await planning.checkDeliveryTime({ rows: [{ articleId: s.article.id, quantity: 1, configuration: { selection: FULL } }] });
+    expect(typed.rows[0]!.readyDate).not.toBeNull();
+
+    // The färdigdatum suggestion still answers (the template's own routing).
+    const date = futureWeekday(20);
+    await db.execute(sql`update sales_orders set expected_delivery_date = ${date} where id = ${order.id}`);
+    const suggestion = await planning.suggestManufacturingDueDate(s.article.id, { salesOrderRowId: row.id, quantity: 1 });
+    expect(suggestion?.dueDate).toBe(previousWorkingDay(date, new Set()));
   });
 
   it("the overview of a component and the calc agree (closingBalance === projected + demandDerived) with a planned configured TO", async () => {

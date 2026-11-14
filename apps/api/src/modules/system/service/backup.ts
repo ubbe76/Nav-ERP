@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createGzip } from "node:zlib";
-import { pipeline, type Readable } from "node:stream";
+import { pipeline, Transform, type Readable } from "node:stream";
 
 // Timestamped, sortable name, e.g. erp-2026-07-24_0905.sql.gz. UTC-based so it
 // is deterministic (and matches the nightly cron script's naming style).
@@ -36,11 +36,26 @@ export function createDatabaseBackup(databaseUrl: string, now: Date, spawnDump: 
   dump.stderr.on("data", (chunk) => {
     stderr += chunk.toString();
   });
-  // If pg_dump can't start or exits non-zero, tear down the gzip stream so the
-  // HTTP response errors out instead of shipping a truncated dump silently.
+  // If pg_dump can't start or exits non-zero, the HTTP response errors out
+  // instead of shipping a truncated dump silently. pg_dump can close its
+  // stdout before it exits with an error, so the end of stdout alone is not
+  // a finished dump: the gate below holds gzip's end until the process has
+  // exited 0 — otherwise the download completed (gzip ended) and the later
+  // exit code arrived too late to fail it.
+  const exited = new Promise<Error | null>((resolve) => {
+    dump.on("error", (err) => resolve(err));
+    dump.on("close", (code, signal) =>
+      resolve(code === 0 ? null : new Error(`pg_dump exited with ${signal ?? `code ${code}`}: ${stderr.trim()}`))
+    );
+  });
   dump.on("error", (err) => gzip.destroy(err));
-  dump.on("close", (code) => {
-    if (code !== 0) gzip.destroy(new Error(`pg_dump exited with code ${code}: ${stderr.trim()}`));
+  const gate = new Transform({
+    transform(chunk, _encoding, callback) {
+      callback(null, chunk);
+    },
+    flush(callback) {
+      void exited.then((err) => callback(err ?? undefined));
+    },
   });
 
   // An aborted download: Fastify destroys gzip when the client goes away.
@@ -49,7 +64,7 @@ export function createDatabaseBackup(databaseUrl: string, now: Date, spawnDump: 
   // api restarted. pipeline destroys stdout (the pipe's read end) with gzip,
   // and a pg_dump still running when the stream closed before the whole dump
   // was read is ended explicitly (SIGPIPE would need one more write).
-  pipeline(dump.stdout, gzip, () => {
+  pipeline(dump.stdout, gate, gzip, () => {
     // The error (an abort, pg_dump's exit) reaches the response through gzip.
   });
   gzip.on("close", () => {
