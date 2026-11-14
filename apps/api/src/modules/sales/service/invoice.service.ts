@@ -931,6 +931,30 @@ export function createInvoiceService(
     return derivedVatCode(ctx, articleId);
   }
 
+  // create() and createCredit(): the rows resolved SEQUENTIALLY (not
+  // Promise.all) with a running per-order-row tally, so two rows in one call
+  // linked to the same order row are checked cumulatively against the
+  // over-invoicing/over-credit guard, not each against the same stale
+  // pre-insert read. An invoice row adds its quantity, a credit row
+  // subtracts it (how each counts in the invoiced aggregate).
+  async function resolveRowsInBatch(
+    ctx: Parameters<typeof resolveRow>[0],
+    inputs: readonly Parameters<typeof resolveRow>[1][],
+    type: InvoiceType
+  ): Promise<InvoiceRowWrite[]> {
+    const batchAccumulated = new Map<string, number>();
+    const sign = type === "credit" ? -1 : 1;
+    const rows: InvoiceRowWrite[] = [];
+    for (const input of inputs) {
+      const resolved = await resolveRow(ctx, input, undefined, batchAccumulated, type);
+      rows.push(resolved);
+      if (resolved.salesOrderRowId) {
+        batchAccumulated.set(resolved.salesOrderRowId, (batchAccumulated.get(resolved.salesOrderRowId) ?? 0) + sign * resolved.quantity);
+      }
+    }
+    return rows;
+  }
+
   // Validates the optional delfakturering link and computes the unit
   // snapshot, momskod, leveransdatum and line/vat amounts.
   async function resolveRow(
@@ -1327,18 +1351,7 @@ export function createInvoiceService(
         }
       }
       const ctx = await rowContext(input.customerId, currency);
-      const batchAccumulated = new Map<string, number>();
-      const rows: InvoiceRowWrite[] = [];
-      for (const r of input.rows) {
-        const resolved = await resolveRow(ctx, r, undefined, batchAccumulated);
-        rows.push(resolved);
-        if (resolved.salesOrderRowId) {
-          batchAccumulated.set(
-            resolved.salesOrderRowId,
-            (batchAccumulated.get(resolved.salesOrderRowId) ?? 0) + resolved.quantity
-          );
-        }
-      }
+      const rows = await resolveRowsInBatch(ctx, input.rows, "invoice");
       let invoice;
       try {
         invoice = await repo.create(
@@ -1453,18 +1466,7 @@ export function createInvoiceService(
       // booked at the source invoice's rate (Skatteverket: a kreditnota is
       // converted with the original invoice's rate).
       const ctx = await rowContext(source.customerId, source.currency);
-      const batchAccumulated = new Map<string, number>();
-      const rows: InvoiceRowWrite[] = [];
-      for (const r of rowInputs) {
-        const resolved = await resolveRow(ctx, r, undefined, batchAccumulated, "credit");
-        rows.push(resolved);
-        if (resolved.salesOrderRowId) {
-          batchAccumulated.set(
-            resolved.salesOrderRowId,
-            (batchAccumulated.get(resolved.salesOrderRowId) ?? 0) - resolved.quantity
-          );
-        }
-      }
+      const rows = await resolveRowsInBatch(ctx, rowInputs, "credit");
 
       const credit = await repo.create(
         {

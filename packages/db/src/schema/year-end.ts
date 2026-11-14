@@ -186,5 +186,10 @@ export const profitDispositions = pgTable(
       .where(sql`${table.reversalVerificationId} IS NULL`),
     check("profit_disposition_dividend_nonnegative", sql`${table.dividendAmount} >= 0`),
     check("profit_disposition_nonzero", sql`${table.resultAmount} <> 0 OR ${table.dividendAmount} > 0`),
+    // The omföring is another verifikat than the disposition it reverses.
+    check(
+      "profit_disposition_reversal_distinct",
+      sql`${table.reversalVerificationId} IS NULL OR ${table.reversalVerificationId} <> ${table.verificationId}`
+    ),
   ]
 );

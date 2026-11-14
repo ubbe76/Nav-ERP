@@ -606,10 +606,10 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
       const unlocked = await repo.unlockPeriod(id);
       if (!unlocked) throw new PeriodNotLockedError(id);
 
-      const year = await repo.findFiscalYearById(period.fiscalYearId);
+      // The year read above (a period never changes year).
       await audit.log({
         entityType: "accounting_period",
-        entityId: `${year!.label}-${period.startDate.slice(0, 7)}`,
+        entityId: `${owningYear!.label}-${period.startDate.slice(0, 7)}`,
         action: "unlocked",
         detail: { reason },
         userId,

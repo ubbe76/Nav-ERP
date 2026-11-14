@@ -1223,7 +1223,8 @@ export function createPlanningService(
     const derivedDemands: DerivedDemand[] = [];
     for (const g of groups.values()) {
       try {
-        if (!deps.configuredStructure) throw new Error("ConfiguredStructureReader not wired");
+        // A wiring fault (no reader) lands on the row as text — in Swedish.
+        if (!deps.configuredStructure) throw new Error("Konfiguratorn är inte kopplad till behovsberäkningen");
         // Avvikelse 5: material only — the förkalkyl is not needed here.
         const s = await deps.configuredStructure(g.templateId, g.selection, g.quantity, { withCost: false });
         if (!s.valid) {

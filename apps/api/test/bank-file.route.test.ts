@@ -104,6 +104,13 @@ describe("/bank-files", () => {
     expect(download.headers["content-disposition"]).toContain("d.xml");
   });
 
+  it("a file over 20 MB is the same 400 as a truncated one, never the global 413, and nothing is stored", async () => {
+    const big = "x".repeat(20 * 1024 * 1024 + 10);
+    const res = await asUser(["inkop"]).inject({ method: "POST", url: "/bank-files", ...multipartFile("stor.xml", big) });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ code: "bank-file-parse", error: "Filen är större än 20 MB" });
+  });
+
   // Final review: what the columns would refuse is a 400 parse error, never a 500.
   it.each([
     ["an unreal booking date", { bookingDate: "2024-02-30", amount: 100, ref: "T1" }],

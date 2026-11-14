@@ -40,10 +40,18 @@ export async function bankFileRoutes(app: FastifyInstance, opts: { service: Bank
       file = undefined;
     }
     if (!file) return reply.code(400).send(errorBody(new BankFileParseError("Ingen fil bifogad")));
-    const data = await file.toBuffer();
-    // Multipart truncates rather than throwing at the 20 MB limit — a
-    // half-read bank file must never be stored.
-    if (file.file.truncated) return reply.code(400).send(errorBody(new BankFileParseError("Filen är större än 20 MB")));
+    // Over the 20 MB limit multipart either throws (FST_REQ_FILE_TOO_LARGE)
+    // or truncates — both are the same 400, and a half-read bank file is
+    // never stored. (Before, the throw reached the global handler as 413.)
+    const tooLarge = () => reply.code(400).send(errorBody(new BankFileParseError("Filen är större än 20 MB")));
+    let data: Buffer;
+    try {
+      data = await file.toBuffer();
+    } catch (err) {
+      if ((err as { code?: unknown } | null)?.code === "FST_REQ_FILE_TOO_LARGE") return tooLarge();
+      throw err;
+    }
+    if (file.file.truncated) return tooLarge();
     try {
       const result = await service.upload({ filename: file.filename, contentType: file.mimetype, data }, req.user!.id);
       return reply.code(result.created ? 201 : 200).send(result);

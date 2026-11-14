@@ -1,7 +1,7 @@
 // Årsbokslut — steg 1 Kontroller and the close gate as pure functions over
 // already-read facts (no DB imports), so every rule is unit-testable.
 import { round2 } from "@navet/shared";
-import { formatNumber } from "../../mail/service/document-pdf.js";
+import { formatNumber } from "../../mail/service/number-format.js";
 
 export type YearEndCheckCode =
   | "draft-verifications"
