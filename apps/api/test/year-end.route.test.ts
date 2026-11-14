@@ -6,13 +6,17 @@ import { buildApp } from "../src/app.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createAuthService } from "../src/modules/auth/service/auth.service.js";
+import { readPostingSettings } from "../src/modules/system/service/posting-settings.js";
 import { DEFAULT_POSTING_SETTINGS, testEconomyService } from "./helpers/services.js";
 import {
+  NEXT_YEAR,
   YEAR,
   accountId,
+  bookManual,
   buildYearEndApp,
   buildYearEndService,
   countVerifications,
+  createCalendarYear,
   prepareClosableYear,
   resetYearEnd,
   setupUserAndAccounts,
@@ -264,6 +268,50 @@ describe("year-end-closings routes", () => {
     await app.close();
   });
 
+  // The preview reads the query string, so dividendAmount arrives as text:
+  // coerced to a number, defaulted to 0 when absent, and a blank value is a
+  // 400 (blankSafe), never 0. The booking answers 201.
+  it("coerces the profit-disposition preview's query and books with 201", async () => {
+    const { user } = await setupUserAndAccounts();
+    const service = buildYearEndService();
+    const app = buildYearEndApp(user.id, { service });
+    const { closingId } = await prepareClosableYear(service, user.id, { revenue: 100000, cost: 40000 });
+    await service.bookResultTransfer(closingId, user.id);
+    await createCalendarYear(NEXT_YEAR);
+    await service.closeYear(closingId, user.id);
+    const agm = `${NEXT_YEAR}-05-20`;
+    const url = `/year-end-closings/${closingId}/profit-disposition-preview`;
+
+    const typed = await app.inject({ url: `${url}?agmDate=${agm}&dividendAmount=20000.5` });
+    expect(typed.statusCode).toBe(200);
+    expect(typed.json()).toMatchObject({ resultAmount: 60000, dividend: 20000.5, freeEquity: 60000, warnings: [] });
+    const absent = await app.inject({ url: `${url}?agmDate=${agm}` });
+    expect(absent.statusCode).toBe(200);
+    expect(absent.json().dividend).toBe(0);
+    for (const query of [`agmDate=${agm}&dividendAmount=`, `agmDate=${agm}&dividendAmount=tjugo`, `agmDate=${agm}&dividendAmount=-1`, "dividendAmount=100"]) {
+      const bad = await app.inject({ url: `${url}?${query}` });
+      expect(bad.statusCode, query).toBe(400);
+      expect(bad.json().code, query).toBe("validation-failed");
+    }
+
+    const booked = await app.inject({
+      method: "POST",
+      url: `/year-end-closings/${closingId}/profit-disposition`,
+      payload: { agmDate: agm, dividendAmount: 20000 },
+    });
+    expect(booked.statusCode).toBe(201);
+    expect(booked.json().verification).toMatchObject({ displayNumber: `BS-${NEXT_YEAR}-1`, date: agm });
+    const again = await app.inject({
+      method: "POST",
+      url: `/year-end-closings/${closingId}/profit-disposition`,
+      payload: { agmDate: agm, dividendAmount: 20000 },
+    });
+    expect(again.statusCode).toBe(409);
+    expect(again.json().code).toBe("profit-disposition-exists");
+    expect(await countVerifications("BS")).toBe(2); // the result transfer + the disposition
+    await app.close();
+  });
+
   it("POST /result-transfer 409s year-end-step-order before steps 2–4", async () => {
     const { user, yearId } = await setupYearEnd();
     const app = buildYearEndApp(user.id);
@@ -395,6 +443,53 @@ describe("year-end-closings in the real app", () => {
       expect(res.json()).toMatchObject({ code: "fiscal-year-closed" });
       expect(await countVerifications("BS")).toBe(0);
     } finally {
+      await app.close();
+    }
+  });
+
+  // The year-end keys of Konteringsregler: saved by the Ekonomi permission
+  // through PATCH /settings/posting, read by steg 2 and Produkter i arbete
+  // through the real settings reader, and "" resets each to its BAS default.
+  it("PATCH /settings/posting saves the inventory and PIA accounts the steps then book on", async () => {
+    const app = buildApp();
+    await app.ready();
+    const ekonomi = await sessionFor(app, "user", ["ekonomi"]);
+    const patch = (payload: Record<string, unknown>) =>
+      app.inject({ method: "PATCH", url: "/api/v1/settings/posting", headers: { cookie: ekonomi }, payload });
+    const reset = { postingInventory: "", postingInventoryChange: "", postingWip: "", postingWipChange: "" };
+    try {
+      const saved = await patch({ postingInventory: "1450", postingInventoryChange: "4990", postingWip: "1410", postingWipChange: "4940" });
+      expect(saved.statusCode).toBe(200);
+      expect(saved.json()).toMatchObject({ postingInventory: "1450", postingInventoryChange: "4990", postingWip: "1410", postingWipChange: "4940" });
+
+      const { user, yearId } = await setupYearEnd();
+      await bookManual(`${YEAR}-01-01`, [{ account: "1450", debit: 180000 }, { account: "2091", credit: 180000 }], user.id);
+      const service = buildYearEndService({
+        settings: { read: readPostingSettings },
+        inventory: { getValuation: async () => ({ totalValue: 212450, unvaluedCount: 0, groups: [] }) },
+        workInProgress: { getWorkInProgress: async () => ({ totalValue: 12000, unvaluedCount: 0, cappedCount: 0, rows: [] }) },
+      });
+      const closing = await service.startClosing({ fiscalYearId: yearId }, user.id);
+      const inventory = await service.previewInventory(closing.id);
+      expect(inventory).toMatchObject({ ledgerBalance: 180000, difference: 32450 });
+      expect(inventory.rows.map((row) => [row.accountNumber, row.debit, row.credit])).toEqual([
+        ["1450", 32450, 0],
+        ["4990", 0, 32450],
+      ]);
+      const wip = await service.previewWorkInProgress(closing.id);
+      expect(wip.rows.map((row) => [row.accountNumber, row.debit, row.credit])).toEqual([
+        ["1410", 12000, 0],
+        ["4940", 0, 12000],
+      ]);
+
+      const malformed = await patch({ postingWip: "14400" });
+      expect(malformed.statusCode).toBe(400);
+      expect(malformed.json().code).toBe("validation-failed");
+      const cleared = await patch(reset);
+      expect(cleared.statusCode).toBe(200);
+      expect(cleared.json()).toMatchObject({ postingInventory: "1460", postingInventoryChange: "4990", postingWip: "1440", postingWipChange: "4940" });
+    } finally {
+      await patch(reset); // system_settings outlives this file's reset
       await app.close();
     }
   });

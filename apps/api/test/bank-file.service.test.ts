@@ -8,6 +8,7 @@ import { computeOpenAmounts } from "../src/modules/purchase/repository/open-amou
 import { isUniqueViolation } from "../src/modules/system/service/db-errors.js";
 import { computeOcrNumber } from "../src/modules/system/service/ocr.js";
 import { testEconomyService } from "./helpers/services.js";
+import { countVerifications, verificationLines } from "./helpers/year-end.js";
 import { camtFile } from "./helpers/camt.js";
 import {
   buildBankFileService,
@@ -232,6 +233,14 @@ describe("inbetalningar (camt.054 kredit)", () => {
     expect(payments.every((p) => p.paymentDate === "2024-10-09" && p.bankAccountNumber === "1930" && p.bankFileEntryId !== null)).toBe(true);
     const series = await db.execute(sql`SELECT DISTINCT s.code FROM verifications v JOIN verification_series s ON s.id = v.series_id`);
     expect([...series].map((row) => (row as { code: string }).code)).toEqual(["K"]);
+    // Each K verification debits the bank account and credits kundfordringar
+    // with the payment's amount — nothing else.
+    for (const payment of payments) {
+      expect(await verificationLines(payment.verificationId!)).toEqual([
+        { account: "1510", debit: 0, credit: Number(payment.amount) },
+        { account: "1930", debit: Number(payment.amount), credit: 0 },
+      ]);
+    }
     const [fa5012] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, r.fa5012.id));
     expect(fa5012!.status).toBe("paid");
     const after = await files.incomingView(file.id);
@@ -299,9 +308,20 @@ describe("inbetalningar (camt.054 kredit)", () => {
     const { file } = await upload(fixtureXml("camt054-swedbank-credit.xml"));
     const [first] = await files.incomingView(file.id);
     const body = { entries: [{ entryId: first!.id, customerId: first!.proposal!.customerId!, rows: [{ invoiceId: first!.proposal!.rows[0]!.invoiceId, appliedAmount: 10000 }] }] };
-    const outcomes = await Promise.all([files.bookIncoming(file.id, body, userId), files.bookIncoming(file.id, body, userId)]);
-    expect(outcomes.flatMap((o) => o.results).filter((x) => x.ok)).toHaveLength(1);
+    // Force the overlap: hold the entry's row lock until both bookings wait
+    // on it, so the second really meets the first's committed payment.
+    let both: Promise<Awaited<ReturnType<typeof files.bookIncoming>>[]> | undefined;
+    await db.transaction(async (holder) => {
+      await holder.select({ id: bankFileEntries.id }).from(bankFileEntries).where(eq(bankFileEntries.id, first!.id)).for("update");
+      both = Promise.all([files.bookIncoming(file.id, body, userId), files.bookIncoming(file.id, body, userId)]);
+      await waitForLockWaiters(2);
+    });
+    const outcomes = await both!;
+    const results = outcomes.flatMap((o) => o.results);
+    expect(results.filter((x) => x.ok)).toHaveLength(1);
+    expect(results.find((x) => !x.ok)).toMatchObject({ ok: false, error: { code: "bank-entry-already-booked" } });
     expect((await db.select({ n: count() }).from(customerPayments))[0]!.n).toBe(1);
+    expect(await countVerifications("K")).toBe(1);
   });
 
   // Review Focus 4: the preview went stale before booking.
@@ -411,6 +431,16 @@ describe("utbetalningar (camt.054 debet och retur)", () => {
       ["2024-10-15", true, true],
       ["2024-10-15", true, true],
     ]);
+    // Series U, leverantörsskulder against the bank account, per payment.
+    expect(await countVerifications("U")).toBe(2);
+    expect(await db.select({ n: count() }).from(verifications)).toEqual([{ n: 2 }]);
+    for (const payment of payments) {
+      expect(await verificationLines(payment.verificationId!)).toEqual([
+        { account: "1930", debit: 0, credit: Number(payment.amount) },
+        { account: "2440", debit: Number(payment.amount), credit: 0 },
+      ]);
+    }
+    expect(payments.map((p) => Number(p.amount)).sort((a, b) => a - b)).toEqual([8850, 12500]);
     const after = await batches.get(batch.id);
     expect(after.status).toBe("exported");
     expect(after.confirmedCount).toBe(2);

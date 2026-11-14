@@ -221,7 +221,17 @@ describe("pain.001 — Swedbank (primär profil)", () => {
     const { xml, items } = buildPain001(input, profile);
     expect(xml).toContain("<Nm>Cafe och Co AB Gren</Nm>");
     expect(xml).toContain("<Ustrd>Avser order 7 och 8 Tack</Ustrd>");
-    expect(items[0]!.warnings).toHaveLength(2);
+    // The warnings say what is actually sent, field by field.
+    expect(items[0]!.warnings).toEqual([
+      'Mottagarens namn skickas som "Cafe och Co AB Gren"',
+      'Meddelandet skickas som "Avser order 7 och 8 Tack"',
+    ]);
+    // The other items: only the example's own "&" is rewritten, the rest go as written.
+    expect(items.slice(1).map((item) => item.warnings)).toEqual([
+      ['Mottagarens namn skickas som "Svets och Montage i Exempelby AB"'],
+      [],
+      [],
+    ]);
     expect(await validateAgainstXsd(xml, "pain.001.001.03")).toEqual([]);
   });
 

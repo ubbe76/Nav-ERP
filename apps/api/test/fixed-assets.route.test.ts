@@ -2,6 +2,8 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { expectXlsxMatchesCsv } from "./helpers/read-xlsx.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import Fastify from "fastify";
+import { eq } from "drizzle-orm";
+import { accounts, db } from "@navet/db";
 import { ZodError } from "zod";
 import { fixedAssetRoutes } from "../src/modules/economy/routes/fixed-asset.routes.js";
 import { PLAN_YEAR, accountId, resetFixedAssets, setupFixedAssets, testFixedAssetService } from "./helpers/fixed-assets.js";
@@ -210,6 +212,80 @@ describe("fixed-assets routes", () => {
     // Before any run the field is simply edited; the merged row is validated.
     expect(locked.statusCode).toBe(200);
     expect(locked.json().accumulatedDepreciation).toBe(45000);
+    await app.close();
+  });
+});
+
+// The register's 409s over HTTP: the BAS seeding with an inactive account,
+// and an asset's locks once a depreciation is booked or it is disposed.
+describe("fixed-asset 409s over HTTP", () => {
+  it("409s generate-bas with fixed-asset-bas-account-missing when a BAS account is inactive, creating nothing", async () => {
+    const { user } = await setupFixedAssets();
+    const app = buildFixedAssetApp(user.id);
+    const before = (await app.inject({ url: "/fixed-asset-categories" })).json().length;
+    await db.update(accounts).set({ active: false }).where(eq(accounts.number, "1259"));
+    const refused = await app.inject({ method: "POST", url: "/fixed-asset-categories/generate-bas" });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toMatchObject({ code: "fixed-asset-bas-account-missing", error: expect.stringContaining("1259") });
+    expect((await app.inject({ url: "/fixed-asset-categories" })).json()).toHaveLength(before);
+    await app.close();
+  });
+
+  it("409s field-locked, life-too-short and has-depreciation after a booked run, and not-active on a disposed asset", async () => {
+    const { user, category } = await setupFixedAssets();
+    const app = buildFixedAssetApp(user.id);
+    const asset = await testFixedAssetService.createAsset(
+      { name: "CNC-fräs", categoryId: category.id, acquisitionDate: `${PLAN_YEAR}-02-14`, acquisitionCost: 120000 },
+      user.id
+    );
+    await testFixedAssetService.bookDepreciation({ throughMonth: `${PLAN_YEAR}-06` }, user.id);
+    const patch = (payload: Record<string, unknown>) => app.inject({ method: "PATCH", url: `/fixed-assets/${asset.id}`, payload });
+
+    const cost = await patch({ acquisitionCost: "130000" });
+    expect(cost.statusCode).toBe(409);
+    expect(cost.json()).toMatchObject({ code: "fixed-asset-field-locked", error: expect.stringContaining("acquisitionCost") });
+    // Five months booked (Feb–Jun): a life of five would end on the last booked month with value left.
+    const short = await patch({ usefulLifeMonths: 5 });
+    expect(short.statusCode).toBe(409);
+    expect(short.json()).toMatchObject({ code: "fixed-asset-life-too-short", error: expect.stringContaining(`${PLAN_YEAR}-06`) });
+    const deleted = await app.inject({ method: "DELETE", url: `/fixed-assets/${asset.id}` });
+    expect(deleted.statusCode).toBe(409);
+    expect(deleted.json().code).toBe("fixed-asset-has-depreciation");
+    // A prospective life change that leaves months after the booked ones is fine.
+    expect((await patch({ usefulLifeMonths: 48 })).statusCode).toBe(200);
+
+    await testFixedAssetService.disposeAsset(asset.id, { disposalType: "scrap", disposalDate: `${PLAN_YEAR}-09-18` }, user.id);
+    const renamed = await patch({ name: "Såld fräs" });
+    expect(renamed.statusCode).toBe(409);
+    expect(renamed.json().code).toBe("fixed-asset-not-active");
+    expect((await app.inject({ url: `/fixed-assets/${asset.id}` })).json()).toMatchObject({ name: "CNC-fräs", status: "disposed" });
+    await app.close();
+  });
+
+  // The current month (isBookableMonth): an ordinary run (dated the month's
+  // last day) needs an ended month — 400 for this one — while a disposal's
+  // catch-up, dated the disposal day, is accepted through this month.
+  it("refuses an ordinary run through the current month but accepts a disposal today catching up through it", async () => {
+    const { user, category } = await setupFixedAssets();
+    const app = buildFixedAssetApp(user.id);
+    const asset = await testFixedAssetService.createAsset(
+      { name: "CNC-fräs", categoryId: category.id, acquisitionDate: `${PLAN_YEAR}-02-14`, acquisitionCost: 120000 },
+      user.id
+    );
+    const today = stockholmToday();
+    const thisMonth = today.slice(0, 7);
+    const run = await app.inject({ method: "POST", url: "/fixed-asset-depreciation-runs", payload: { throughMonth: thisMonth } });
+    expect(run.statusCode).toBe(400);
+    expect(run.json().code).toBe("depreciation-month-in-future");
+
+    const disposed = await app.inject({ method: "POST", url: `/fixed-assets/${asset.id}/dispose`, payload: { disposalType: "scrap", disposalDate: today } });
+    expect(disposed.statusCode).toBe(200);
+    expect(disposed.json().depreciationRun).toMatchObject({ displayNumber: expect.stringMatching(/^AV-/) });
+    // The catch-up runs through this month, dated the disposal day.
+    const runs = (await app.inject({ url: "/fixed-asset-depreciation-runs" })).json();
+    expect(runs.rows.map((row: { throughMonth: string; verification: { date: string } }) => [row.throughMonth, row.verification.date])).toEqual([
+      [thisMonth, today],
+    ]);
     await app.close();
   });
 });

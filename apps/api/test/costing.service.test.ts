@@ -368,6 +368,37 @@ describe("costing service — material source", () => {
     expect(below.calculation.materialCost).toBe("100.0000");
   });
 
+  // Flernivå: a sub-level is costed for its cascade quantity (parent × BOM),
+  // so its own components meet the staffel on THAT quantity — while the same
+  // article directly under the top meets it on its own row's quantity. The
+  // step is per row, never summed across the branches.
+  it("matches the staffel on each level's cascade quantity in a multi-level run", async () => {
+    costingSettings.costingMaterialSource = "supplier";
+    costingSettings.costingSupplierPriceTier = "tiered";
+    const leaf = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `LEAF-${crypto.randomUUID()}`, name: "Plåt", type: "purchased", standardCost: 99, active: true }));
+    const semi = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `SEMI-${crypto.randomUUID()}`, name: "Underrede", type: "manufactured", active: true }));
+    const top = await articleService.createArticle(parsed(createArticleSchema, { articleNumber: `TOP-${crypto.randomUUID()}`, name: "Diskbänk", type: "manufactured", active: true }));
+    await articleService.addBomComponent(semi.id, { componentArticleId: leaf.id, quantity: 3 });
+    await articleService.addBomComponent(top.id, { componentArticleId: semi.id, quantity: 2 });
+    await articleService.addBomComponent(top.id, { componentArticleId: leaf.id, quantity: 1 });
+    await setPrimarySupplierPrice(leaf.id, 25, [{ fromQuantity: 20, price: 20 }]);
+
+    // 5 off: the semi for 10 ⇒ its leaf 30 ≥ 20 at the step (600); the top's
+    // own leaf 5 < 20 at the grundpris (125).
+    const atStep = await costingService.preCalculate(top.id, 5, true, true);
+    expect(atStep.calculation).toMatchObject({ multiLevel: true, semiFinishedCost: "600.0000", materialCost: "125.0000" });
+    expect(atStep.warnings).toEqual([]);
+
+    // 3 off: the semi for 6 ⇒ its leaf 18 < 20 at the grundpris (450).
+    const below = await costingService.preCalculate(top.id, 3, true, true);
+    expect(below.calculation).toMatchObject({ semiFinishedCost: "450.0000", materialCost: "75.0000" });
+
+    // Grundpris: the cascade quantity changes nothing.
+    costingSettings.costingSupplierPriceTier = "base";
+    const base = await costingService.preCalculate(top.id, 5, true, true);
+    expect(base.calculation).toMatchObject({ semiFinishedCost: "750.0000", materialCost: "125.0000" });
+  });
+
   it("falls back to the standard cost and warns when the component has no supplier", async () => {
     const { parent } = await makeParentWithBom(10, 2);
     costingSettings.costingMaterialSource = "supplier";

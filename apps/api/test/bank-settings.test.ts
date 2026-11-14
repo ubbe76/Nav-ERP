@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { sql } from "drizzle-orm";
-import { companyInfo, db } from "@navet/db";
+import { eq, sql } from "drizzle-orm";
+import { auditLog, companyInfo, db } from "@navet/db";
 import { createBankSettingsRepository } from "../src/modules/banking/repository/bank-settings.repository.js";
 import { bankSettingsRoutes } from "../src/modules/banking/routes/bank-settings.routes.js";
 import { BankSettingsIncompleteError, InvalidBankSettingError } from "../src/modules/banking/service/banking.errors.js";
@@ -196,6 +196,31 @@ describe("bankinställningarna", () => {
     await db.update(companyInfo).set({ orgNumber: "SE 556677-8899 01", iban: "SE45 5000 0000 0583 9825 7466" });
     await service.update({ profile: "handelsbanken", initiatingPartyId: null }, userId);
     expect((await service.assertReady()).initiatingPartyId).toBe("556677889901");
+  });
+
+  // The id is checked against the MERGED profile: a bank change alone is
+  // refused when the stored id does not fit the new bank, and so is a new id
+  // that does not fit the bank sent with it — 400 over the route, nothing
+  // written, nothing logged; the same pair in a fitting combination saves.
+  it("refuses a PATCH whose profile and initiatingPartyId contradict each other, and writes nothing", async () => {
+    await configureSwedbank();
+    const app = buildRouteApp(bankSettingsRoutes, { service }, { id: userId });
+    const patch = (payload: Record<string, unknown>) => app.inject({ method: "PATCH", url: "/bank-settings", payload });
+    const auditRows = async () => (await db.select().from(auditLog).where(eq(auditLog.entityType, "bank_settings"))).length;
+
+    const storedIdDoesNotFit = await patch({ profile: "nordea" });
+    expect(storedIdDoesNotFit.statusCode).toBe(400);
+    expect(storedIdDoesNotFit.json()).toMatchObject({ code: "invalid-bank-setting", error: expect.stringMatching(/^Signer-ID .* har fel format$/) });
+    const sentIdDoesNotFit = await patch({ profile: "swedbank", initiatingPartyId: "NB4321" });
+    expect(sentIdDoesNotFit.statusCode).toBe(400);
+    expect(sentIdDoesNotFit.json().error).toMatch(/^Avtals-ID för betalfil .* har fel format$/);
+    expect(await service.read()).toMatchObject({ profile: "swedbank", initiatingPartyId: "123456789123B001", debitAccountKind: "bankgiro" });
+    expect(await auditRows()).toBe(0);
+
+    const fits = await patch({ profile: "nordea", initiatingPartyId: "NB4321" });
+    expect(fits.statusCode).toBe(200);
+    expect(fits.json()).toMatchObject({ profile: "nordea", initiatingPartyId: "NB4321" });
+    expect(await auditRows()).toBe(1);
   });
 
   it("moves the debit account to the new bank's first kind when the bank changes", async () => {

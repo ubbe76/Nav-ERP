@@ -3,7 +3,11 @@ import { eq } from "drizzle-orm";
 import { accountingPeriods, db, fiscalYears, verifications, yearEndClosings } from "@navet/db";
 import { readAccountBalances } from "../src/modules/economy/service/account-balances.js";
 import { createVatReportService } from "../src/modules/economy/service/vat-report.service.js";
-import { AccountingPeriodLockedError, InactiveAccountError } from "../src/modules/economy/service/economy.service.js";
+import {
+  AccountingPeriodLockedError,
+  InactiveAccountError,
+  YearEndClosingVerificationError,
+} from "../src/modules/economy/service/economy.service.js";
 import {
   InvalidAccrualAccountError,
   NextFiscalYearMissingError,
@@ -114,6 +118,33 @@ describe("steg 4 — periodiseringar", () => {
       [`BS-${NEXT_YEAR}-2`, "accruals", "cancellation"],
       [`BS-${NEXT_YEAR}-3`, "accruals", "accrual_reversal"],
     ]);
+  });
+
+  // The ownership guard on the pair the guide really booked (not a row
+  // inserted by hand): V, R and the re-run's cancellations all refuse the
+  // generic Omför, and no omföring draft is left behind.
+  it("refuses the generic Omför of the real V, R and both cancellations", async () => {
+    const { user, yearId } = await setupYearEnd();
+    const closing = await service.startClosing({ fiscalYearId: yearId }, user.id);
+    const first = await service.bookAccruals(closing.id, { rows: await rows() }, user.id);
+    const changed = await service.bookAccruals(closing.id, { rows: await rows(9100) }, user.id);
+    const ids = [
+      first.verification!.id,
+      first.reversalVerification!.id,
+      ...changed.cancelled.map((ref) => ref.id),
+      changed.verification!.id,
+      changed.reversalVerification!.id,
+    ];
+    expect(new Set(ids).size).toBe(6);
+    const before = await db.select({ id: verifications.id }).from(verifications);
+    for (const id of ids) {
+      // The first V is already cancelled by the re-run (its reversedBy is
+      // that cancellation); the refused Omför changes nothing on any of them.
+      const reversedBy = (await testEconomyService.findVerificationById(id)).reversedBy;
+      await expect(testEconomyService.reverse(id, user.id)).rejects.toBeInstanceOf(YearEndClosingVerificationError);
+      expect((await testEconomyService.findVerificationById(id)).reversedBy).toEqual(reversedBy);
+    }
+    expect(await db.select({ id: verifications.id }).from(verifications)).toHaveLength(before.length);
   });
 
   it("cancels the pair and stores none for an empty set", async () => {

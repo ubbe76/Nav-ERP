@@ -437,6 +437,33 @@ describe("A3 — kreditfakturorna överstiger aldrig fakturan", () => {
     await expect(invoiceService.issue(extra!.id, user.id)).rejects.toBeInstanceOf(CreditExceedsInvoiceError);
   });
 
+  // Two separate credit drafts of the SAME order row, while the invoice has a
+  // second row (so the amount guard alone would let 200 of 250 through): the
+  // quantity guard counts drafts at create, so the second draft is refused
+  // there — and frees up when the first draft is makulerad. Row B stays
+  // creditable throughout.
+  it("two credit drafts of the same order row: the second is refused at create until the first is makulerad", async () => {
+    const f = await order([1, 1]);
+    for (const row of f.rows) {
+      await salesService.deliverGoods(f.order.id, row.id, parsed(deliverGoodsSchema, { locationId: row.location.id, quantity: 1 }), user.id);
+    }
+    const [rowA, rowB] = f.rows;
+    const invoice = await draft(f.customerId, [linkedRow(rowA!, 1), linkedRow(rowB!, 1)]);
+    await invoiceService.issue(invoice.id, user.id);
+    const credit = (row: typeof rowA) =>
+      invoiceService.createCredit(invoice.id, parsed(createCreditInvoiceSchema, { rows: [linkedRow(row!, 1)] }), user.id);
+
+    const first = await credit(rowA);
+    await expect(credit(rowA)).rejects.toBeInstanceOf(OverCreditError);
+    const rowBCredit = await credit(rowB);
+    await invoiceService.cancel(first!.id, user.id);
+    const second = await credit(rowA);
+    expect((await invoiceService.issue(second!.id, user.id))!.status).toBe("issued");
+    expect((await invoiceService.issue(rowBCredit!.id, user.id))!.status).toBe("issued");
+    // Both rows fully credited: a third credit of row A is refused.
+    await expect(credit(rowA)).rejects.toBeInstanceOf(OverCreditError);
+  });
+
   // Both read "nothing credited yet" unless the source invoice serializes them.
   it("two credit drafts of one invoice issued at once: exactly one is issued", async () => {
     const f = await freeInvoice();

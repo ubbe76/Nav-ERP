@@ -39,6 +39,7 @@ import {
   testSystemService,
 } from "./helpers/services.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
+import { waitForLockWaiter } from "./helpers/year-end.js";
 
 // B3 kundreskontra, Task 6: betalningspåminnelser. The reminder is an email
 // with a PDF; the statutory one-time fee it may carry is a real bokförings-
@@ -310,6 +311,32 @@ describe("kundreskontra — betalningspåminnelser", () => {
 
     expect(Number((await remindersOf(invoice.id))[0]!.fee)).toBe(75);
     expect(await openAmountOf(invoice.id)).toBe(1075);
+  });
+
+  // Two fee reminders at once both pass the unlocked pre-check; the in-lock
+  // check under the invoice's FOR UPDATE is what turns the second into
+  // ReminderFeeAlreadyChargedError (not the index's 23505, not a second fee).
+  // Forced: a holder keeps the invoice locked until both wait on it.
+  it("refuses the second of two concurrent fee reminders under the invoice lock", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const invoice = await makeIssuedInvoice(customer.id, user.id, 1000);
+
+    let both: Promise<PromiseSettledResult<unknown>[]> | undefined;
+    await db.transaction(async (holder) => {
+      await holder.select({ id: invoices.id }).from(invoices).where(eq(invoices.id, invoice.id)).for("update");
+      both = Promise.allSettled([
+        invoiceService.sendReminder(invoice.id, { ...MAIL, withFee: true }, user.id),
+        invoiceService.sendReminder(invoice.id, { ...MAIL, withFee: true }, user.id),
+      ]);
+      await waitForLockWaiter(10_000, 2);
+    });
+    const outcomes = await both!;
+    expect(outcomes.filter((o) => o.status === "fulfilled")).toHaveLength(1);
+    const rejected = outcomes.find((o): o is PromiseRejectedResult => o.status === "rejected")!;
+    expect(rejected.reason).toBeInstanceOf(ReminderFeeAlreadyChargedError);
+    expect(await remindersOf(invoice.id)).toHaveLength(1);
+    expect(await openAmountOf(invoice.id)).toBe(1060);
   });
 
   it("refuses a second fee — through the service guard, and through the partial unique index for anything bypassing it", async () => {
