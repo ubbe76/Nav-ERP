@@ -5,15 +5,22 @@
 // keeps the two in sync. The server enforces the same rules (400).
 import type { ArticleType } from "./types";
 
-export type ArticleCopyPart = "information" | "beredning" | "inkop" | "filer";
+export type ArticleCopyPart = "information" | "beredning" | "inkop" | "filer" | "revisioner";
 
-export const ARTICLE_COPY_PARTS: readonly ArticleCopyPart[] = ["information", "beredning", "inkop", "filer"];
+export const ARTICLE_COPY_PARTS: readonly ArticleCopyPart[] = ["information", "beredning", "inkop", "filer", "revisioner"];
 
 export const ARTICLE_COPY_PART_LABELS: Record<ArticleCopyPart, string> = {
   information: "Information",
   beredning: "Beredning",
   inkop: "Inköp",
   filer: "Ritningar och filer",
+  revisioner: "Ritningsrevisioner",
+};
+
+// A part that is copied only together with another (the server refuses it
+// alone): Ritningsrevisioner sit on the drawings Ritningar och filer copies.
+export const ARTICLE_COPY_PART_REQUIRES: Partial<Record<ArticleCopyPart, ArticleCopyPart>> = {
+  revisioner: "filer",
 };
 
 const PART_TYPES: Partial<Record<ArticleCopyPart, readonly ArticleType[]>> = {

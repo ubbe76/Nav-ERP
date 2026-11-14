@@ -98,10 +98,12 @@ export async function copyArticleParts(
   }
   // Source file id → the copy's id, for the operations' file links.
   let copiedFiles = new Map<string, string>();
-  if (parts.includes("filer")) {
+  if (parts.includes("filer") && parts.includes("revisioner")) {
+    copiedFiles = await copyFilesWithRevisions(tx, sourceId, targetId);
+  } else if (parts.includes("filer")) {
     copiedFiles = await copyCurrentFiles(tx, sourceId, targetId);
-    // Drawing numbers only — their revision registers are revisions, which
-    // are never copied.
+    // Drawing numbers only — without Ritningsrevisioner the revisions stay
+    // behind.
     await tx.execute(sql`
       INSERT INTO article_drawings (article_id, drawing_number)
       SELECT ${targetId}, drawing_number FROM article_drawings WHERE article_id = ${sourceId} ORDER BY created_at, id`);
@@ -131,6 +133,51 @@ async function copyCurrentFiles(tx: Tx, sourceId: string, targetId: string): Pro
       RETURNING id
     )
     SELECT p.from_id, p.to_id FROM pairs p JOIN copied c ON c.id = p.to_id`);
+  return new Map(([...result] as { from_id: string; to_id: string }[]).map((row) => [row.from_id, row.to_id]));
+}
+
+// Ritningsrevisioner: the drawings with every revision (number, comment,
+// which one is active, its date) and each revision's file on the copied
+// revision — older revisions' files too, so the copy's Revisioner looks like
+// the source's. Loose files are copied as loose files. Drawings pair by
+// number and revisions by drawing + revision (both unique), so no id map is
+// needed. Returns only the LOOSE files (source → copy): an operation's
+// chosen drawing now brings its active revision's file through the drawing
+// itself (drawing-files.ts), so copyRoutingFileLinks has nothing to add for
+// it, and a revision's file must not become a chosen loose file.
+async function copyFilesWithRevisions(tx: Tx, sourceId: string, targetId: string): Promise<Map<string, string>> {
+  const result = await tx.execute(sql`
+    WITH pairs AS MATERIALIZED (
+      SELECT f.id AS from_id, gen_random_uuid() AS to_id, f.created_at, f.id AS sort_id
+      FROM article_files f WHERE f.article_id = ${sourceId} AND f.drawing_revision_id IS NULL
+    ), copied AS (
+      INSERT INTO article_files (id, article_id, filename, content_type, size_bytes, data)
+      SELECT p.to_id, ${targetId}, f.filename, f.content_type, f.size_bytes, f.data
+      FROM pairs p JOIN article_files f ON f.id = p.from_id
+      ORDER BY p.created_at, p.sort_id
+      RETURNING id
+    )
+    SELECT p.from_id, p.to_id FROM pairs p JOIN copied c ON c.id = p.to_id`);
+  await tx.execute(sql`
+    INSERT INTO article_drawings (article_id, drawing_number)
+    SELECT ${targetId}, drawing_number FROM article_drawings WHERE article_id = ${sourceId} ORDER BY created_at, id`);
+  await tx.execute(sql`
+    INSERT INTO article_drawing_revisions (drawing_id, revision, comment, is_active, created_at)
+    SELECT td.id, r.revision, r.comment, r.is_active, r.created_at
+    FROM article_drawing_revisions r
+    JOIN article_drawings sd ON sd.id = r.drawing_id AND sd.article_id = ${sourceId}
+    JOIN article_drawings td ON td.article_id = ${targetId} AND td.drawing_number = sd.drawing_number
+    ORDER BY r.created_at, r.id`);
+  await tx.execute(sql`
+    INSERT INTO article_files (article_id, filename, content_type, size_bytes, data, drawing_revision_id)
+    SELECT ${targetId}, f.filename, f.content_type, f.size_bytes, f.data, tr.id
+    FROM article_files f
+    JOIN article_drawing_revisions sr ON sr.id = f.drawing_revision_id
+    JOIN article_drawings sd ON sd.id = sr.drawing_id
+    JOIN article_drawings td ON td.article_id = ${targetId} AND td.drawing_number = sd.drawing_number
+    JOIN article_drawing_revisions tr ON tr.drawing_id = td.id AND tr.revision = sr.revision
+    WHERE f.article_id = ${sourceId}
+    ORDER BY f.created_at, f.id`);
   return new Map(([...result] as { from_id: string; to_id: string }[]).map((row) => [row.from_id, row.to_id]));
 }
 

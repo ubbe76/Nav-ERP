@@ -365,4 +365,49 @@ describe("Kopiera från — ritningar och filer", () => {
     const [op] = await mfg.listRoutingOperations(copy.id);
     expect(op!.drawings).toEqual([{ id: drawing!.id, drawingNumber: "R-1" }]);
   });
+  it("with Ritningsrevisioner: every revision with its file (the older one too), loose files loose, the operation's files through its drawing", async () => {
+    const f = await makeDrawingArticle();
+    const wc = await mfg.createWorkCenter(parsed(createWorkCenterSchema, { code: "100", name: "Svets", active: true }));
+    await mfg.createRoutingOperation(
+      f.article.id,
+      parsed(createRoutingOperationSchema, { sequenceNo: 10, workCenterId: wc.id, setupTime: 5, runTimePerUnit: 1, drawingIds: [f.drawing.id] })
+    );
+    const copy = await articleService.createArticle(
+      createArticleSchema.parse({
+        articleNumber: `KOPIA-${crypto.randomUUID().slice(0, 8)}`,
+        name: "Kopia",
+        type: "manufactured",
+        active: true,
+        copyFrom: { articleId: f.article.id, parts: ["beredning", "filer", "revisioner"] },
+      }) as CreateArticleInput
+    );
+    const [drawing] = await articleService.listDrawings(copy.id);
+    expect(drawing!.revisions.map((r) => [r.revision, r.isActive, r.file?.filename])).toEqual([
+      ["A", true, "a.png"],
+      ["B", false, "b.png"],
+    ]);
+    const files = await articleService.listFiles(copy.id);
+    expect(files.map((x) => [x.filename, x.drawingNumber, x.revision])).toEqual([
+      ["a.png", "R-1", "A"],
+      ["b.png", "R-1", "B"],
+      ["lös.png", null, null],
+    ]);
+    // The operation chose the drawing: its file is the active revision's,
+    // through the drawing — no revision file turned into a chosen loose file.
+    const [op] = await mfg.listRoutingOperations(copy.id);
+    expect(op!.drawings).toEqual([{ id: drawing!.id, drawingNumber: "R-1" }]);
+    expect(op!.files).toEqual([]);
+    const forOperation = await articleService.drawingFilesWithData({ articleId: copy.id, routingOperationId: op!.id });
+    expect(forOperation.map((x) => x.filename)).toEqual(["a.png"]);
+  });
+
+  it("refuses Ritningsrevisioner without Ritningar och filer", () => {
+    const result = createArticleSchema.safeParse({
+      articleNumber: "X-1",
+      name: "X",
+      type: "manufactured",
+      copyFrom: { articleId: crypto.randomUUID(), parts: ["revisioner"] },
+    });
+    expect(result.success).toBe(false);
+  });
 });
