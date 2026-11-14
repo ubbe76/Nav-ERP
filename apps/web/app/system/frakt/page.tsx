@@ -29,7 +29,7 @@ export default async function FreightSettingsPage() {
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Frakt</div>
-          <div className={shellStyles.meta}>Transportbokning via Sendify</div>
+          <div className={shellStyles.meta}>Transportbokning via Sendify, nShift och Shipmondo</div>
         </div>
         <HelpLink chapter="system" anchor="fraktinstallningar" label="Hjälp om fraktinställningar" />
       </div>

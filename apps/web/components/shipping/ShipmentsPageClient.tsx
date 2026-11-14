@@ -36,7 +36,7 @@ export function ShipmentsPageClient({
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Försändelser</div>
-          <div className={shellStyles.meta}>Transporter bokade via Sendify från följesedlar</div>
+          <div className={shellStyles.meta}>Transporter från följesedlar, bokade via en förmedlare eller med eget fraktsätt</div>
         </div>
         <HelpLink chapter="forsaljning" anchor="frakt" label="Hjälp om frakt" />
       </div>

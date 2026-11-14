@@ -24,7 +24,7 @@ Nav|ERP är en tidig version (0.x) och **inte redo för produktion**. Bara den s
 
 | Version | Får rättningar |
 |---|---|
-| 0.8.12 (senaste `main`) | Ja |
+| 0.8.13 (senaste `main`) | Ja |
 | Äldre | Nej — uppdatera till senaste |
 
 ## Driftsätt säkert

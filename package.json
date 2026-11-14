@@ -1,7 +1,7 @@
 {
   "name": "nav-erp",
   "private": true,
-  "version": "0.8.12",
+  "version": "0.8.13",
   "license": "GPL-3.0-or-later",
   "author": "Urban Källefors",
   "workspaces": [

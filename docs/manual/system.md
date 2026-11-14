@@ -75,7 +75,7 @@ Längst ner finns **Speditörer** — företagets egna kundnummer hos olika sped
 - **Miljö** — **Sandlåda** (test) eller **Produktion**.
 - **API-nyckel** — skapas i Sendify under Settings → API. Nyckeln visas aldrig igen: ett tomt fält behåller den sparade (fältet visar **Nyckel sparad**) och **Ta bort nyckel** raderar den.
 - **Avsändarkontakt**, **Telefon** och **E-post** — avsändarens kontaktuppgifter. Adressen hämtas från [Företagsinformation](#foretagsinformation); har adressen flera rader skickas den andra raden som avsändarens adressrad 2; tom telefon eller e-post ger företagets.
-- **Påslag (%)** och **Påslag (kr)** — läggs på Sendifys pris och bildar **Kundpris** på försändelsen.
+- **Påslag (%)** och **Påslag (kr)** — läggs på förmedlarens pris och bildar **Kundpris** på försändelsen.
 - **Bekräfta prisändring över (%)** — standard 5. Har priset ändrats mer än så sedan valet sparades krävs en bekräftelse vid bokning.
 - **Fraktartikel** — artikeln (normalt av typen Tjänst) som frakten faktureras som: på fakturans fraktrader, se [Frakt på fakturan](/hjalp/forsaljning#frakt-pa-fakturan), och som fraktraden **Lägg till frakt** lägger på offerten/kundordern, se [Frakt på offert och order](/hjalp/forsaljning#frakt-pa-offert-och-order). Utan fraktartikel går det att hämta priser men inte att lägga till frakten, och inga fraktrader föreslås i fakturadialogen.
 - **Spårningsintervall** — hur ofta spårningen körs automatiskt: **Varje timme**, **Var fjärde timme** eller **Dagligen**, se [Spårning](/hjalp/forsaljning#sparning). Under fältet visas **Senaste spårningskörning** (eller **Spårningen har inte körts ännu**).

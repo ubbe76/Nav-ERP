@@ -222,7 +222,7 @@ export const FORSALJNING_SECTIONS: ModuleNavSection[] = [
       {
         href: "/forsaljning/forsandelser",
         title: "Försändelser",
-        description: "Transportbokning via Sendify — priser, bokning, fraktsedel och avbokning.",
+        description: "Transportbokning via Sendify, nShift eller Shipmondo och eget fraktsätt — priser, bokning, fraktsedel och avbokning.",
       },
     ],
   },
@@ -774,7 +774,7 @@ export const SYSTEM_SECTIONS: ModuleNavSection[] = [
       {
         href: "/system/frakt",
         title: "Frakt",
-        description: "Sendify-koppling, avsändare, påslag, upphämtningstider och transportörsprodukter.",
+        description: "Förmedlarna Sendify, nShift och Shipmondo, avsändare, påslag, upphämtningstider och fraktprodukter.",
       },
       {
         href: "/system/e-faktura",

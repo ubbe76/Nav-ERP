@@ -523,7 +523,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.8.12 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.8.13 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -631,7 +631,12 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   (Peppol BIS Billing 3, faktura och kreditfaktura till företagskunder i
   Sverige och utomlands i fakturans valuta, skickad via accesspunkten
   B2Brouter automatiskt vid Utfärda eller med **Skicka e-faktura** på
-  fakturakortet, med leveransstatus på fakturan)
+  fakturakortet, med leveransstatus på fakturan); **frakt** från
+  följesedeln: transport bokad via en förmedlare — **Sendify**, **nShift**
+  eller **Shipmondo**, med förmedlarens priser eller företagets egna avtal —
+  med prisjämförelse, fraktsedel och spårning, eller registrerad som
+  **Eget fraktsätt** (egen bil, kunden hämtar, eget avtal) med speditör ur
+  registret; frakten faktureras som en fraktrad
 - **Grunddata** — delade register för leveransvillkor (förifyllbara med
   Combiterms), betalningsvillkor och speditörer, nåbara från både Inköp
   och Försäljning; villkoren ligger också på förfrågan, inköpsorder och

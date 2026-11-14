@@ -949,7 +949,7 @@ Det går inte att ångra bara en del av en rads antal. Ångra raden och leverera
 
 ## Frakt
 
-Frakten bokar transport hos en speditör direkt från en följesedel, via en förmedlare: **Sendify**, som erbjuder bland annat DHL, UPS, DSV, PostNord och Schenker, **nShift** med era egna avtal, eller **Shipmondo** med Shipmondos priser och era egna avtal. Du jämför priser, bokar och skriver ut fraktsedel utan att lämna systemet. Minst en förmedlare måste vara aktiverad under **System → Frakt** (se [Fraktinställningar](/hjalp/system#fraktinstallningar)) innan knappen **Boka transport** visas. Frakt som inte bokas via Sendify — egen bil, kunden hämtar eller ett eget avtal — registreras med [Eget fraktsätt](#eget-fraktsatt), som alltid finns.
+Frakten bokar transport hos en speditör direkt från en följesedel, via en förmedlare: **Sendify**, som erbjuder bland annat DHL, UPS, DSV, PostNord och Schenker, **nShift** med era egna avtal, eller **Shipmondo** med Shipmondos priser och era egna avtal. Du jämför priser, bokar och skriver ut fraktsedel utan att lämna systemet. Minst en förmedlare måste vara aktiverad under **System → Frakt** (se [Fraktinställningar](/hjalp/system#fraktinstallningar)) innan knappen **Boka transport** visas. Frakt som inte bokas via en förmedlare — egen bil, kunden hämtar eller ett eget avtal som bokas utanför Nav — registreras med [Eget fraktsätt](#eget-fraktsatt), som alltid finns.
 
 ### Skapa en försändelse
 
@@ -983,9 +983,9 @@ Svarar Sendify inte på bokningen, eller går svaret inte att läsa, visas *Send
 
 ### Efter bokning
 
-Försändelsen får status **Bokad** och sektionen **Frakt** visar **Produkt**, **Sendifys pris** och **Fraktsedelsnr** (som länk till spårning när transportören anger en sådan), samt **Fraktsedel** och/eller **Etikett** som PDF. Vissa transportörer ger bara en **Etikett** och ingen separat fraktsedel (t.ex. DHL Paket i Sendifys sandlåda). Saknas dokumenten klicka **Hämta fraktsedel**. Transportör och fraktsedelsnummer skrivs också ut på följesedelns PDF.
+Försändelsen får status **Bokad** och sektionen **Frakt** visar **Produkt**, förmedlarens pris (**Sendifys pris**, **nShifts pris** eller **Shipmondos pris**) och **Fraktsedelsnr** (som länk till spårning när transportören anger en sådan), samt **Fraktsedel** och/eller **Etikett** som PDF. Vissa transportörer ger bara en **Etikett** och ingen separat fraktsedel (t.ex. DHL Paket i Sendifys sandlåda). Saknas dokumenten klicka **Hämta fraktsedel**. Transportör och fraktsedelsnummer skrivs också ut på följesedelns PDF.
 
-**Kundpris (kr)** är Sendifys pris plus påslaget enligt **System → Frakt**. Det kan ändras för hand och sparas med **Spara kundpris**; töm fältet och spara för att återgå till påslaget.
+**Kundpris (kr)** är förmedlarens pris plus påslaget enligt **System → Frakt**. Det kan ändras för hand och sparas med **Spara kundpris**; töm fältet och spara för att återgå till påslaget.
 
 ### Avboka och ta bort
 
@@ -994,7 +994,7 @@ Försändelsen får status **Bokad** och sektionen **Frakt** visar **Produkt**, 
 
 ### Eget fraktsätt
 
-Frakt som inte bokas via Sendify registreras med **Eget fraktsätt**. Det gäller till exempel varor som går med egen bil, varor som kunden hämtar själv eller transporter med ett eget avtal hos DHL eller DB Schenker. **Eget fraktsätt** finns bredvid **Boka transport** i [Utleverans](#utleverans) och i listan **Följesedlar** på kundorderkortet, och fungerar även när frakten via Sendify inte är aktiverad.
+Frakt som inte bokas via en förmedlare registreras med **Eget fraktsätt**. Det gäller till exempel varor som går med egen bil, varor som kunden hämtar själv eller transporter med ett eget avtal hos DHL eller DB Schenker som bokas utanför Nav. **Eget fraktsätt** finns bredvid **Boka transport** i [Utleverans](#utleverans) och i listan **Följesedlar** på kundorderkortet, och fungerar även när ingen förmedlare är aktiverad.
 
 Dialogen **Eget fraktsätt** har fälten:
 
@@ -1011,17 +1011,17 @@ Försändelsekortet för ett eget fraktsätt visar **Frakt** (fraktsätt, spedit
 - **Markera levererad** — ger status **Levererad**. Ett eget fraktsätt har ingen spårning som gör det automatiskt.
 - **Makulera** — ger status **Makulerad** och frigör följesedeln, så att den kan få en ny försändelse. Ligger frakten på ett fakturautkast måste fraktraden tas bort från utkastet först.
 
-Priser, bokning, kollin, upphämtning, fraktsedel och spårning finns bara för försändelser som bokas via Sendify.
+Priser, bokning, kollin, upphämtning, fraktsedel och spårning finns bara för försändelser som bokas via en förmedlare.
 
 ### Frakt på offert och order
 
 Fraktpriset kan läggas på redan i offerten, innan det finns någon följesedel att boka från. Knappen **Kontrollera fraktpris** finns på kundorderkortet i statusarna **Offert**, **Bekräftad** och **Under tillverkning** (frakten måste vara **Aktiverad** under **System → Frakt**, och du behöver rättigheten Försäljning). Den öppnar dialogen **Fraktpris**:
 
 1. **Kollin** föreslås från orderns rader på samma sätt som på försändelsekortet (artiklarnas kollityp, **Antal per kolli** eller egna mått — raderna som redan är levererade räknas inte). Förslaget går att ändra rad för rad, fler kollin läggs till med **+ Kolli** och tas bort med ✕. Saknas vikt, mått eller fraktsätt på en artikel visas en varning ovanför tabellen. Kollina sparas inte — de används bara för prisfrågan.
-2. **Hämta priser** frågar Sendify med orderns leveransadress (saknas den används kundens förvalda leveransadress och annars besöksadressen), kundens huvudkontakt och nästa dag med upphämtning enligt upphämtningstiderna. Tabellen visar samma kolumner som på försändelsen: **Transportör**, **Produkt**, **Pris**, **Kundpris**, **Ledtid (dagar)**, **Upphämtning** och **Beräknad leverans**. **Kundpris** är Sendifys pris plus påslaget under **System → Frakt**. Bara priser i SEK kan väljas; övriga visas som **Bara SEK**. Saknas mottagarens adress, telefon eller e-post, eller finns ingen upphämtningsdag de närmaste 14 dagarna, visas felet i dialogen i stället för priser.
+2. **Hämta priser** frågar den förvalda förmedlaren under **System → Frakt** med orderns leveransadress (saknas den används kundens förvalda leveransadress och annars besöksadressen), kundens huvudkontakt och nästa dag med upphämtning enligt upphämtningstiderna. Tabellen visar samma kolumner som på försändelsen: **Transportör**, **Produkt**, **Pris**, **Kundpris**, **Ledtid (dagar)**, **Upphämtning** och **Beräknad leverans**. **Kundpris** är förmedlarens pris plus påslaget under **System → Frakt**. En produkt utan pris (**Pris saknas**) kan inte läggas till. Bara priser i SEK kan väljas; övriga visas som **Bara SEK**. Saknas mottagarens adress, telefon eller e-post, eller finns ingen upphämtningsdag de närmaste 14 dagarna, visas felet i dialogen i stället för priser.
 3. **Lägg till frakt** på önskad rad lägger till fraktartikeln som en orderrad med antal 1 och radens **Kundpris** som à-pris (ingen rabatt). Det kräver att en **Fraktartikel** är vald under **System → Frakt** — utan den går det att hämta priser, men **Lägg till frakt** ger felet **Fraktartikel saknas — se System → Frakt**. Finns fraktraden redan på ordern ersätts priset i stället — klicka **Lägg till frakt** på en annan produkt för att byta. Har fraktraden redan levererats kan den inte ändras (**Fraktraden är redan levererad och kan inte ändras**). Dialogen stängs och ordern laddas om.
 
-Under radtabellen och täckningsbidraget visas sedan raden **Fraktprodukt: {transportör} · {produkt} (offererat {pris})** med den valda produkten och Sendifys pris vid prisfrågan. Priset är en uppskattning och har ingen giltighetstid i systemet: fraktraden behåller det offererade kundpriset tills du klickar **Lägg till frakt** igen, och vid bokningen hämtas alltid nya priser hos Sendify.
+Under radtabellen och täckningsbidraget visas sedan raden **Fraktprodukt: {transportör} · {produkt} (offererat {pris})** med den valda produkten och förmedlarens pris vid prisfrågan. Priset är en uppskattning och har ingen giltighetstid i systemet: fraktraden behåller det offererade kundpriset tills du klickar **Lägg till frakt** igen, och vid bokningen hämtas alltid nya priser hos förmedlaren.
 
 När ordern är bekräftad och utlevererad skapas försändelsen med **Boka transport** som vanligt — den får orderns fraktprodukt förvald och det offererade priset som sparat val, så **Boka vald produkt** fungerar direkt. Har priset hunnit ändras mer än gränsen **Bekräfta prisändring över (%)** visas dialogen **Priset har ändrats** med offererat och nytt pris, och **Boka ändå** bokar till det nya priset. Fraktraden på ordern ändras inte av bokningen. Samlastas flera följesedlar i en försändelse är det den första ordern i listan vars produkt förväljs.
 
