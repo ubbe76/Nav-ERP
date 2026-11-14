@@ -1,7 +1,7 @@
 import {
   BANK_PROFILE_IDS,
   DEBIT_ACCOUNT_KINDS,
-  isLuhnValid,
+  isValidGiroNumber,
   isValidIban,
   normalizeDigits,
   type BankProfileId,
@@ -154,8 +154,7 @@ export function bankSettingsProblems(settings: BankSettings, company: CompanyBan
       if (!isValidIban(value)) problems.push(`${label} är ogiltigt i Företagsinformation`);
       else if (!value.startsWith("SE")) problems.push("Bara svenskt IBAN (SE…) stöds som debiteringskonto i Företagsinformation");
     } else {
-      const shape = settings.debitAccountKind === "bankgiro" ? /^\d{7,8}$/ : /^\d{2,8}$/;
-      if (!(shape.test(value) && isLuhnValid(value))) problems.push(`${label} är ogiltigt i Företagsinformation`);
+      if (!isValidGiroNumber(settings.debitAccountKind, value)) problems.push(`${label} är ogiltigt i Företagsinformation`);
     }
   }
   if (!company.name || company.name.trim() === "") problems.push("Företagets namn saknas i Företagsinformation");

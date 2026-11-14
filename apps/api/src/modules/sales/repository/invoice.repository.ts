@@ -63,6 +63,7 @@ import { articleVatFacts, articleVatRateSql } from "../../article/repository/art
 // Type-only (erased at compile time), so declaring the poster interface at
 // the consuming service does not create a runtime import cycle.
 import type { CustomerInvoicePoster, InvoiceReminderPoster } from "../service/invoice.service.js";
+import { CANCEL_STALE_MS } from "../../shipping/service/stale-windows.js";
 
 // The frozen values stamped onto the invoice at issue — computed by the
 // service (customer + payment term lookups) and written verbatim by
@@ -453,7 +454,8 @@ type HeaderPatch = {
 // Frakt-uppföljning: the shipments a write's freight rows bill, locked FOR
 // SHARE for the rest of the transaction — the cancellation's claim takes the
 // same rows FOR UPDATE, so the two serialize. resolveRow's unlocked pre-check
-// can be stale; this is the check that counts. 2 minutes = CANCEL_STALE_MS.
+// can be stale; this is the check that counts. The window is the shipping
+// module's CANCEL_STALE_MS (its leaf, stale-windows.ts).
 async function assertShipmentsBillable(tx: Tx, rows: { shipmentId: string | null }[]) {
   const ids = [...new Set(rows.map((r) => r.shipmentId).filter((id): id is string => id !== null))];
   if (ids.length === 0) return;
@@ -462,7 +464,7 @@ async function assertShipmentsBillable(tx: Tx, rows: { shipmentId: string | null
     .from(shipments)
     .where(inArray(shipments.id, ids))
     .for("share");
-  const staleBefore = Date.now() - 2 * 60 * 1000;
+  const staleBefore = Date.now() - CANCEL_STALE_MS;
   for (const s of locked) {
     const cancelling = s.cancelStartedAt !== null && s.cancelStartedAt.getTime() > staleBefore;
     if ((s.status !== "booked" && s.status !== "delivered") || cancelling) throw new ShipmentNotBillableError(s.shipmentNumber);

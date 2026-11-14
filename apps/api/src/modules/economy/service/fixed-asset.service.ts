@@ -29,7 +29,6 @@ import {
   withOpeningDepreciation,
   type BookedEntry,
   type DepreciationPlanInput,
-  type OpeningDepreciationFields,
   type PlannedDepreciation,
 } from "./depreciation-schedule.js";
 import { formatNumber, type DocumentPdfService, type FixedAssetPlanPdfInput } from "../../mail/service/document-pdf.js";
@@ -37,196 +36,39 @@ import { readAccountBalances } from "./account-balances.js";
 import { buildFixedAssetPlan, type FixedAssetPlan, type PlanAssetInput } from "./fixed-asset-plan.js";
 import { buildFixedAssetPlanTable } from "./fixed-asset-plan-csv.js";
 import { csvFile, type NamedTable } from "../../system/service/table-export.js";
-import { assertPostablePeriod, type VerificationPoster } from "./verification-poster.js";
+import { assertPostablePeriod, createAmountAccumulator, type VerificationPoster } from "./verification-poster.js";
+import {
+  FixedAssetCategoryNotFoundError,
+  DuplicateFixedAssetCategoryNameError,
+  FixedAssetCategoryInUseError,
+  FixedAssetCategoryAccountsNotDistinctError,
+  type CategoryAccountRole,
+  FixedAssetCategoryAccountRoleConflictError,
+  FixedAssetCategoryAccountsLockedError,
+  FixedAssetBasAccountMissingError,
+  FixedAssetNotFoundError,
+  SupplierInvoiceNotFoundError,
+  FixedAssetFieldLockedError,
+  FixedAssetNotActiveError,
+  FixedAssetHasDepreciationError,
+  FixedAssetLifeTooShortError,
+  InvalidFixedAssetValuesError,
+  InvalidOpeningDepreciationError,
+  DepreciationMonthInFutureError,
+  NothingToDepreciateError,
+  DepreciationRunNotFoundError,
+  DepreciationRunNotLatestError,
+  DisposalRunNotUndoableError,
+  RunPrecedesDisposalError,
+  InvalidDisposalDateError,
+} from "./fixed-asset.errors.js";
 
 // Anläggningsregister (ekonomi etapp 2, delprojekt 2). Owns every status
 // transition and every bookkeeping path of the register; the poster books,
 // the repository reads/writes, depreciation-schedule.ts does the arithmetic.
 
-// --- Errors (codes derived by errorBody; HTTP mapping in fixed-asset.routes.ts) ---
-
-export class FixedAssetCategoryNotFoundError extends Error {
-  constructor(id: string) {
-    super(`Fixed asset category ${id} not found`);
-    this.name = "FixedAssetCategoryNotFoundError";
-  }
-}
-
-export class DuplicateFixedAssetCategoryNameError extends Error {
-  constructor(name: string) {
-    super(`A fixed asset category named "${name}" already exists`);
-    this.name = "DuplicateFixedAssetCategoryNameError";
-  }
-}
-
-export class FixedAssetCategoryInUseError extends Error {
-  constructor(id: string) {
-    super(`Fixed asset category ${id} still has assets`);
-    this.name = "FixedAssetCategoryInUseError";
-  }
-}
-
-export class FixedAssetCategoryAccountsNotDistinctError extends Error {
-  constructor() {
-    super("The asset, accumulated depreciation and expense accounts must be three different accounts");
-    this.name = "FixedAssetCategoryAccountsNotDistinctError";
-  }
-}
-
-export type CategoryAccountRole = "asset" | "accumulated" | "expense" | "gain" | "loss";
-
-// An account that is the asset or ack account of a group (this one or
-// another) used in a different role — the per-account reconciliation would
-// net the two groups' bookings (assertAccountRolesAcrossCategories).
-export class FixedAssetCategoryAccountRoleConflictError extends Error {
-  constructor(
-    readonly accountNumber: string,
-    readonly role: CategoryAccountRole,
-    readonly categoryName: string,
-    readonly otherRole: CategoryAccountRole
-  ) {
-    super(`Account ${accountNumber} is the ${otherRole} account of group ${categoryName} and cannot be the ${role} account here`);
-    this.name = "FixedAssetCategoryAccountRoleConflictError";
-  }
-}
-
-// The asset, accumulated-depreciation and expense accounts are what the
-// group's depreciation (and its opening amounts) sit on in the ledger;
-// pointing the group elsewhere after the fact would make the register's
-// reconciliation read the wrong accounts. Gain/loss accounts, name and
-// useful life stay editable.
-export class FixedAssetCategoryAccountsLockedError extends Error {
-  constructor(public field: string) {
-    super(`${field} cannot be changed once the group has booked depreciation or opening depreciation`);
-    this.name = "FixedAssetCategoryAccountsLockedError";
-  }
-}
-
-export class FixedAssetBasAccountMissingError extends Error {
-  constructor(public accountNumber: string) {
-    super(`BAS account ${accountNumber} is missing or inactive — run Förifyll BAS-urval in the chart of accounts first`);
-    this.name = "FixedAssetBasAccountMissingError";
-  }
-}
-
-export class FixedAssetNotFoundError extends Error {
-  constructor(id: string) {
-    super(`Fixed asset ${id} not found`);
-    this.name = "FixedAssetNotFoundError";
-  }
-}
-
-export class SupplierInvoiceNotFoundError extends Error {
-  constructor(id: string) {
-    super(`Supplier invoice ${id} not found`);
-    this.name = "SupplierInvoiceNotFoundError";
-  }
-}
-
-// acquisitionDate/acquisitionCost/depreciationStartMonth/categoryId define
-// what has already been booked — changing them would make booked rows and
-// verifications wrong after the fact.
-export class FixedAssetFieldLockedError extends Error {
-  constructor(public field: string) {
-    super(`${field} cannot be changed once a depreciation has been booked`);
-    this.name = "FixedAssetFieldLockedError";
-  }
-}
-
-export class FixedAssetNotActiveError extends Error {
-  constructor(assetNumber: string) {
-    super(`Fixed asset ${assetNumber} is disposed`);
-    this.name = "FixedAssetNotActiveError";
-  }
-}
-
-export class FixedAssetHasDepreciationError extends Error {
-  constructor(assetNumber: string) {
-    super(`Fixed asset ${assetNumber} has booked depreciations and cannot be deleted`);
-    this.name = "FixedAssetHasDepreciationError";
-  }
-}
-
-// Prospective useful-life/start edits must leave at least one month after the
-// last booked one while a base remains — otherwise missingMonths() would
-// return [] forever and the asset could never finish depreciating.
-export class FixedAssetLifeTooShortError extends Error {
-  constructor(public lastBookedMonth: string) {
-    super(`The plan would end on or before ${lastBookedMonth}, the last booked month, while depreciable value remains`);
-    this.name = "FixedAssetLifeTooShortError";
-  }
-}
-
-export class InvalidFixedAssetValuesError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "InvalidFixedAssetValuesError";
-  }
-}
-
-// Ingående avskrivning that contradicts the plan (see assertOpeningDepreciation).
-export class InvalidOpeningDepreciationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "InvalidOpeningDepreciationError";
-  }
-}
-
-// Avskrivningar förbokas inte: the month must have ended (Stockholm time).
-export class DepreciationMonthInFutureError extends Error {
-  constructor(month: string) {
-    super(`Depreciation cannot be booked for ${month}: the month has not ended`);
-    this.name = "DepreciationMonthInFutureError";
-  }
-}
-
-export class NothingToDepreciateError extends Error {
-  constructor(month: string) {
-    super(`No depreciation is missing through ${month}`);
-    this.name = "NothingToDepreciateError";
-  }
-}
-
-export class DepreciationRunNotFoundError extends Error {
-  constructor(id: string) {
-    super(`Depreciation run ${id} not found`);
-    this.name = "DepreciationRunNotFoundError";
-  }
-}
-
-export class DepreciationRunNotLatestError extends Error {
-  constructor(id: string) {
-    super(`Depreciation run ${id} is not the latest — undo later runs first`);
-    this.name = "DepreciationRunNotLatestError";
-  }
-}
-
-export class DisposalRunNotUndoableError extends Error {
-  constructor(id: string) {
-    super(`Depreciation run ${id} belongs to a disposal and cannot be undone`);
-    this.name = "DisposalRunNotUndoableError";
-  }
-}
-
-// An ordinary run whose rows belong to a since-disposed asset: the disposal
-// verification took that asset's accumulated depreciation off the books, so
-// superseding the rows would leave the ack-konto debit uncleared and the
-// card, the plan and the ledger disagreeing forever. A disposal with
-// nothing to catch up leaves no run row of its own, so the latest-run and
-// disposal-run checks cannot see this case.
-export class RunPrecedesDisposalError extends Error {
-  constructor(id: string) {
-    super(`Depreciation run ${id} has rows for a disposed asset and cannot be undone`);
-    this.name = "RunPrecedesDisposalError";
-  }
-}
-
-export class InvalidDisposalDateError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "InvalidDisposalDateError";
-  }
-}
+// --- Errors: fixed-asset.errors.ts (re-exported for the importers) ---
+export * from "./fixed-asset.errors.js";
 
 export interface FixedAssetServiceDeps {
   db: Db;
@@ -465,7 +307,9 @@ function currentValue(asset: repo.FixedAssetRow, key: keyof UpdateFixedAssetInpu
   }
 }
 
-interface OpeningDepreciationCheck extends OpeningDepreciationFields {
+// The opening fields as numbers plus the plan fields they are checked
+// against (the row's OpeningDepreciationFields carry strings).
+interface OpeningDepreciationCheck {
   openingDepreciation: number;
   openingDepreciationThroughMonth: string | null; // "YYYY-MM"
   depreciationStartMonth: string; // "YYYY-MM"
@@ -636,22 +480,22 @@ export function createFixedAssetService(deps: FixedAssetServiceDeps) {
       loss: category.accounts.loss,
       intermediate,
     };
-    const net = new Map<string, { account: repo.AccountRef; amount: number }>();
+    // The poster's own netting (postFixedAssetDisposal), so the preview is
+    // the verifikat's rows.
+    const accumulator = createAmountAccumulator();
+    const accounts = new Map<string, repo.AccountRef>();
     for (const row of disposalPostingRows(amounts)) {
       const account = byRole[row.role];
       if (!account) throw new Error("A disposal with a price needs an intermediate account");
-      const current = net.get(account.id) ?? { account, amount: 0 };
-      current.amount = round2(current.amount + row.amount);
-      net.set(account.id, current);
+      accounts.set(account.id, account);
+      accumulator.add(account.id, row.amount);
     }
-    return [...net.values()]
-      .filter((row) => row.amount !== 0)
-      .map((row) => ({
-        accountNumber: row.account.number,
-        accountName: row.account.name,
-        debit: row.amount > 0 ? row.amount : 0,
-        credit: row.amount < 0 ? -row.amount : 0,
-      }));
+    return accumulator.toRows().map((row) => ({
+      accountNumber: accounts.get(row.accountId)!.number,
+      accountName: accounts.get(row.accountId)!.name,
+      debit: row.debit,
+      credit: row.credit,
+    }));
   }
 
   // Avskrivningsplanen's reads, on whatever executor getPlan hands in.
@@ -991,6 +835,9 @@ export function createFixedAssetService(deps: FixedAssetServiceDeps) {
         ) {
           throw new FixedAssetLifeTooShortError(lastLive);
         }
+        // On every PATCH, not just when an opening field is sent: cost,
+        // residual value and life are the check's other inputs (a lower
+        // cost may not undercut the opening amount). Pure and cheap.
         assertOpeningDepreciation(merged);
         if (remainingBase < 0) {
           throw new InvalidFixedAssetValuesError("residualValue would exceed the remaining book value");
@@ -1264,6 +1111,10 @@ export function createFixedAssetService(deps: FixedAssetServiceDeps) {
         const asset = await repo.findAssetForUpdate(tx, id);
         if (!asset) throw new FixedAssetNotFoundError(id);
         const { intermediate } = await validateDisposal(tx, asset, input);
+        // Before the catch-up run below: the disposal verifikat is dated the
+        // disposal day, and a locked period there must refuse the whole
+        // disposal before the run books its catch-up (runDepreciation books
+        // months in locked periods on its own date, so it would not stop it).
         await assertPostablePeriod(tx, input.disposalDate);
 
         const run = await service.runDepreciation(

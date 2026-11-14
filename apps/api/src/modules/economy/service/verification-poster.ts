@@ -545,7 +545,9 @@ type LoadedPostingRule = {
 // Kostnadsställen och projekt: one row per (account, cost center, project)
 // — two document rows on the same account but different objects stay two
 // verification rows, since the reports read the objects per row.
-function createAmountAccumulator() {
+// Exported for the anläggningsregister's disposal preview, which shows the
+// rows the posting will book — the same netting, not a second one.
+export function createAmountAccumulator() {
   const netByKey = new Map<string, { accountId: string; costCenterId: string | null; projectId: string | null; net: number }>();
   return {
     add(accountId: string, amount: number, dimensions: PostingDimensions = {}) {

@@ -1,4 +1,4 @@
-import { BIC_PATTERN, CLEARING_SYSTEMS, PAYMENT_REPORTING_CODE_PATTERN, isClearingSystem, isLuhnValid, isSepaCountry, isValidIban, isValidOcrReference } from "@navet/shared";
+import { BIC_PATTERN, CLEARING_SYSTEMS, PAYMENT_REPORTING_CODE_PATTERN, isClearingSystem, isLuhnValid, isSepaCountry, isValidGiroNumber, isValidIban, isValidOcrReference } from "@navet/shared";
 import { addDays } from "../banking-dates.js";
 import type { BankProfile } from "./bank-profiles.js";
 import {
@@ -45,8 +45,8 @@ function debitAccountProblem(debit: { kind: keyof typeof DEBIT_LABEL; value: str
   if (debit.kind === "iban" && isValidIban(debit.value) && !debit.value.startsWith("SE")) return "foreign";
   if (
     (debit.kind === "iban" && !isValidIban(debit.value)) ||
-    (debit.kind === "bankgiro" && !(/^\d{7,8}$/.test(debit.value) && isLuhnValid(debit.value))) ||
-    (debit.kind === "plusgiro" && !(/^\d{2,8}$/.test(debit.value) && isLuhnValid(debit.value)))
+    (debit.kind === "bankgiro" && !isValidGiroNumber("bankgiro", debit.value)) ||
+    (debit.kind === "plusgiro" && !isValidGiroNumber("plusgiro", debit.value))
   ) {
     return "invalid";
   }

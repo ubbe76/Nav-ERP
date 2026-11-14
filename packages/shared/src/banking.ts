@@ -36,6 +36,14 @@ export function normalizeDigits(value: string): string {
   return value.replace(/[\s-]/g, "");
 }
 
+// A bankgiro (7–8 digits) or plusgiro (2–8 digits) number, Luhn-checked —
+// the one shape rule for the debit account (bankinställningarna and the
+// pain.001 check).
+export function isValidGiroNumber(kind: "bankgiro" | "plusgiro", value: string): boolean {
+  const shape = kind === "bankgiro" ? /^\d{7,8}$/ : /^\d{2,8}$/;
+  return shape.test(value) && isLuhnValid(value);
+}
+
 // Mod 10 (Luhn) over the whole number, check digit last — bankgiro, plusgiro
 // and Bankgirot OCR references (whose length digit is optional, so Navs own
 // validateOcrNumber in ocr.ts does not fit supplier references).

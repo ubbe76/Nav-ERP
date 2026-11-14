@@ -12,6 +12,7 @@ import { SendEmailModal } from "../mail/MailSection";
 import { fetchDefaultRecipientAndLanguage } from "../../lib/mail";
 import type { DocumentLanguage } from "../../lib/documentLanguage";
 import type { CreatedInquiry } from "../../lib/types";
+import type { LegoInquiryResult } from "../../lib/legoInquiries";
 import styles from "../../app/tillverkning/behovsberakning/page.module.css";
 
 // Result card for the behovsberäkningens "Skapa förfrågan" flow — same shape
@@ -20,10 +21,7 @@ import styles from "../../app/tillverkning/behovsberakning/page.module.css";
 export function CreatedInquiriesPanel({
   result,
 }: {
-  result: {
-    created: CreatedInquiry[];
-    errors: { supplierName: string; articleNumbers: string[]; message: string }[];
-  };
+  result: LegoInquiryResult;
 }) {
   const [mailTarget, setMailTarget] = useState<CreatedInquiry | null>(null);
   const [mailTo, setMailTo] = useState<string | null>(null);
