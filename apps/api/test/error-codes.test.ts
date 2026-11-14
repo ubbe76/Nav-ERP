@@ -274,6 +274,7 @@ import {
   RowConfigurationLockedError,
   RowConfigurationChangedError,
   RowConfigurationOutdatedError,
+  RowTemplateNotToOrderError,
 } from "../src/modules/sales/service/sales.errors.js";
 import { ShipmentDeliveryUndoneError, ShipmentOnDraftInvoiceError } from "../src/modules/shipping/service/shipping.errors.js";
 import {
@@ -855,6 +856,7 @@ const cases: Array<[Error, string]> = [
   [new RowConfigurationLockedError("x"), ERROR_CODES.ROW_CONFIGURATION_LOCKED],
   [new RowConfigurationChangedError(), ERROR_CODES.ROW_CONFIGURATION_CHANGED],
   [new RowConfigurationOutdatedError("x"), ERROR_CODES.ROW_CONFIGURATION_OUTDATED],
+  [new RowTemplateNotToOrderError("x"), ERROR_CODES.ROW_TEMPLATE_NOT_TO_ORDER],
   [new WorkCenterNotFoundError("x"), ERROR_CODES.WORK_CENTER_NOT_FOUND],
   [new RoutingAlternativeInvalidError("x"), ERROR_CODES.ROUTING_ALTERNATIVE_INVALID],
   [new RoutingOperationHasAlternativesError("x"), ERROR_CODES.ROUTING_OPERATION_HAS_ALTERNATIVES],

@@ -15,11 +15,14 @@ import type { Customer, Paged } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { useCan } from "../PermissionsProvider";
+import { useNewFromQuery } from "../../lib/useNewFromQuery";
 
 export function CustomersPageClient({ customers, pageSize }: { customers: Paged<Customer>; pageSize: number }) {
   const router = useRouter();
   const canImport = useCan()(["admin"]);
   const [modalOpen, setModalOpen] = useState(false);
+  // + Ny … from a favourite or a hub link (?ny=1).
+  useNewFromQuery(() => setModalOpen(true));
 
   const view = useListColumns([
     { key: "customerNumber", label: "Kundnr", width: "110px" },

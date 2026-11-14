@@ -24,6 +24,7 @@ export function createPermissionGroupRepository(db: Db) {
           code: permissionGroups.code,
           name: permissionGroups.name,
           permissions: permissionGroups.permissions,
+          defaultFavorites: permissionGroups.defaultFavorites,
           userCount: liveUserCount,
           // Tillägg: the plugin that owns the group (its technical user's
           // group), null for an ordinary group.
@@ -36,6 +37,31 @@ export function createPermissionGroupRepository(db: Db) {
     async get(id: string) {
       const [row] = await db.select().from(permissionGroups).where(eq(permissionGroups.id, id));
       return row ?? null;
+    },
+
+    // Förvalda favoriter: the whole list replaced under the group's row lock,
+    // logged (before/after) only when it changes. [] is stored as null.
+    async setDefaultFavorites(id: string, favorites: { href: string; title: string }[], userId: string | null) {
+      return db.transaction(async (tx) => {
+        const [before] = await tx.select().from(permissionGroups).where(eq(permissionGroups.id, id)).for("update");
+        if (!before) return null;
+        const next = favorites.length > 0 ? favorites : null;
+        const [row] = await tx
+          .update(permissionGroups)
+          .set({ defaultFavorites: next, updatedAt: new Date() })
+          .where(eq(permissionGroups.id, id))
+          .returning();
+        if (JSON.stringify(before.defaultFavorites ?? []) !== JSON.stringify(next ?? [])) {
+          await tx.insert(auditLog).values({
+            entityType: "permission_group",
+            entityId: row!.code,
+            action: "default_favorites_changed",
+            detail: { before: before.defaultFavorites ?? [], after: next ?? [] },
+            userId,
+          });
+        }
+        return row!;
+      });
     },
 
     async create(values: { code: string; name: string; permissions: string[] }, userId: string | null) {

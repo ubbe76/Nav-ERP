@@ -63,6 +63,7 @@ import {
   ConfigurationNotAllowedError,
   ConfigurationRequiredError,
   RowConfigurationOutdatedError,
+  RowTemplateNotToOrderError,
   CustomerPriceNotFoundError,
   CustomerArticleNumberNotFoundError,
   DuplicateCustomerArticleNumberError,
@@ -523,7 +524,7 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       if (err instanceof ConfiguratorNotToOrderModeError) return reply.code(409).send(errorBody(err));
       // The stored choices resolve to another configuration (a förval added
       // to the template since): Ändra konfiguration, not a silent reprice.
-      if (err instanceof RowConfigurationOutdatedError) return reply.code(409).send(errorBody(err));
+      if (err instanceof RowConfigurationOutdatedError || err instanceof RowTemplateNotToOrderError) return reply.code(409).send(errorBody(err));
       if (err instanceof ConfiguratorTemplateNotFoundError) return reply.code(404).send(errorBody(err));
       // Påslag (#16 etapp 3): the chain priced the row with the order's
       // markups as read, and a header PATCH changed them meanwhile.

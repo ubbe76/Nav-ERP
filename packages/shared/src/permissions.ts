@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { UserRole } from "./auth.js";
+import { favoritesSchema } from "./user-settings.js";
 
 // Behörighetsgrupper — the fixed permission catalog. Menu permissions gate a
 // whole main menu (writes in that module); workshop permissions are the narrow
@@ -91,6 +92,11 @@ export type CreatePermissionGroupInput = z.infer<typeof createPermissionGroupSch
 
 export const updatePermissionGroupSchema = createPermissionGroupSchema.partial();
 export type UpdatePermissionGroupInput = z.infer<typeof updatePermissionGroupSchema>;
+
+// Förvalda favoriter (PUT /permission-groups/:id/default-favorites): the
+// list a member starts with until they save one of their own; [] = none.
+export const permissionGroupDefaultFavoritesSchema = z.object({ favorites: favoritesSchema }).strict();
+export type PermissionGroupDefaultFavoritesInput = z.infer<typeof permissionGroupDefaultFavoritesSchema>;
 
 export const deletePermissionGroupQuerySchema = z.object({
   replacementId: z.string().uuid().optional(),

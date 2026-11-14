@@ -13,6 +13,10 @@ import {
   PermissionGroupInUseError,
 } from "../src/modules/auth/service/permission-group.service.js";
 import { InvalidReplacementError } from "../src/modules/register/service/register.errors.js";
+import { permissionGroupDefaultFavoritesSchema, updateUserSettingsSchema } from "@navet/shared";
+import { createUserSettingsRepository } from "../src/modules/auth/repository/user-settings.repository.js";
+import { createUserSettingsService } from "../src/modules/auth/service/user-settings.service.js";
+import { parsed } from "./helpers/parsed.js";
 
 const SECRET = "test-secret";
 const authService = createAuthService(createAuthRepository(db), SECRET, createAuditRepository(db));
@@ -259,5 +263,49 @@ describe("permission group register", () => {
     await expect(groups.remove(g.id, "00000000-0000-0000-0000-000000000000")).rejects.toBeInstanceOf(InvalidReplacementError);
     await groups.remove(g.id);
     expect((await groups.list()).some((x) => x.id === g.id)).toBe(false);
+  });
+});
+
+// Förvalda favoriter (0223): a member without a list of their own gets the
+// group's, live; the first own list wins; null brings the group's back.
+describe("förvalda favoriter per behörighetsgrupp", () => {
+  const settings = createUserSettingsService(createUserSettingsRepository(db));
+  const kundorder = { href: "/forsaljning/ordrar?ny=1", title: "+ Ny kundorder" };
+  const lager = { href: "/lager", title: "Lager" };
+
+  it("a member gets the group's list until they save their own; null goes back; the change is logged", async () => {
+    const group = await makeGroup("FAV", ["forsaljning"]);
+    const user = await authService.createUser({ email: "fav@example.com", password: "correcthorsebattery", name: "Fav", role: "user", permissionGroupId: group.id });
+    expect(await settings.getSettings(user.id)).toMatchObject({ favorites: [], favoritesFromGroup: true });
+
+    await groups.setDefaultFavorites(group.id, [kundorder, lager]);
+    expect(await settings.getSettings(user.id)).toMatchObject({ favorites: [kundorder, lager], favoritesFromGroup: true });
+
+    // Own list (even an empty one) wins, and later group changes don't reach it.
+    await settings.updateSettings(user.id, parsed(updateUserSettingsSchema, { favorites: [lager] }));
+    await groups.setDefaultFavorites(group.id, [kundorder]);
+    expect(await settings.getSettings(user.id)).toMatchObject({ favorites: [lager], favoritesFromGroup: false });
+    await settings.updateSettings(user.id, parsed(updateUserSettingsSchema, { favorites: [] }));
+    expect(await settings.getSettings(user.id)).toMatchObject({ favorites: [], favoritesFromGroup: false });
+
+    // null = the group's list again.
+    await settings.updateSettings(user.id, parsed(updateUserSettingsSchema, { favorites: null }));
+    expect(await settings.getSettings(user.id)).toMatchObject({ favorites: [kundorder], favoritesFromGroup: true });
+
+    // [] clears the group's list (stored as null); each change logged once.
+    await groups.setDefaultFavorites(group.id, []);
+    expect((await groups.get(group.id)).defaultFavorites).toBeNull();
+    await groups.setDefaultFavorites(group.id, []);
+    const log = await db.execute<{ action: string }>(
+      sql`SELECT action FROM audit_log WHERE entity_type = 'permission_group' AND action = 'default_favorites_changed'`
+    );
+    expect([...log]).toHaveLength(3);
+  });
+
+  it("a user without a group has no default list, and the schema refuses a path outside Nav", async () => {
+    const user = await authService.createUser({ email: "nogroup@example.com", password: "correcthorsebattery", name: "Utan", role: "user" });
+    expect(await settings.getSettings(user.id)).toMatchObject({ favorites: [], favoritesFromGroup: true });
+    expect(permissionGroupDefaultFavoritesSchema.safeParse({ favorites: [{ href: "https://example.com", title: "Extern" }] }).success).toBe(false);
+    await expect(groups.setDefaultFavorites(crypto.randomUUID(), [])).rejects.toBeInstanceOf(PermissionGroupNotFoundError);
   });
 });

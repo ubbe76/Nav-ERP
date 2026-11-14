@@ -124,8 +124,11 @@ export const userSettingsSchema = z.object({
   // Egna teman: the user's chosen theme (a built-in id or a custom theme's
   // key); null = the company default. Checked to exist on PATCH.
   theme: themeIdSchema.nullable(),
-  // Favoriter (see favoriteSchema); [] = none yet.
+  // Favoriter (see favoriteSchema); [] = none. A user who has never saved a
+  // list of their own gets the behörighetsgrupp's förvalda favoriter
+  // (permission_groups.default_favorites) — favoritesFromGroup says so.
   favorites: favoritesSchema,
+  favoritesFromGroup: z.boolean(),
   // Where the favourites show: false hides the sidebar's Favoriter group (the
   // Översikten card "favorites" shows them instead). Default true.
   favoritesInSidebar: z.boolean(),
@@ -146,8 +149,11 @@ export type UserSettings = z.infer<typeof userSettingsSchema>;
 // listColumns is merged per list instead of replaced — two tabs adjusting
 // two lists must not undo each other — and null resets that list.
 export const updateUserSettingsSchema = userSettingsSchema
+  .omit({ favoritesFromGroup: true })
   .partial()
   .extend({
+    // null = drop the user's own list: the group's förvalda favoriter again.
+    favorites: favoritesSchema.nullable().optional(),
     listColumns: z
       .record(listColumnsKeySchema, listColumnsEntrySchema.nullable())
       .refine((lists) => Object.keys(lists).length <= MAX_LIST_COLUMN_LISTS, { message: "För många listor" })

@@ -7,6 +7,7 @@ import {
   ConfigurationRequiredError,
   PriceNotFoundError,
   RowConfigurationOutdatedError,
+  RowTemplateNotToOrderError,
 } from "../src/modules/sales/service/sales.errors.js";
 import { ConfiguratorInvalidConfigurationError, ConfiguratorNotToOrderModeError } from "../src/modules/configurator/service/configurator.errors.js";
 import { makeArticle } from "./helpers/configurator.js";
@@ -289,6 +290,27 @@ describe("configured rows — quantity change", () => {
     const [row] = await rowsOf(order.id);
     await configurator.updateGroup(article.id, bredd.id, { minValue: 1300 });
     await expect(salesService.updateRow(order.id, row!.id, { quantity: 2 } as never)).rejects.toBeInstanceOf(ConfiguratorInvalidConfigurationError);
+  });
+});
+
+describe("a row whose template left Beställningsvara", () => {
+  it("refuses a quantity change — also with an own à-pris — and says to add the row again; the same quantity still saves", async () => {
+    const { article } = await buildToOrder();
+    const c = await makeCustomer();
+    const { order } = await salesService.createQuote(
+      { customerId: c.id, rows: [{ articleId: article.id, quantity: 1, configuration: { selection: SEL } }] } as never,
+      null
+    );
+    const [row] = await rowsOf(order.id);
+    await configurator.updateTemplate(article.id, { mode: "variants" });
+    for (const input of [{ quantity: 2 }, { quantity: 2, unitPrice: 900 }]) {
+      const err = await salesService.updateRow(order.id, row!.id, input as never).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(RowTemplateNotToOrderError);
+      expect((err as Error).message).toMatch(/ta bort raden och lägg in artikeln på nytt/);
+    }
+    // No quantity change evaluates nothing: a price edit goes through.
+    await salesService.updateRow(order.id, row!.id, { quantity: 1, unitPrice: 990 } as never);
+    expect(Number((await rowsOf(order.id))[0]!.unitPrice)).toBe(990);
   });
 });
 

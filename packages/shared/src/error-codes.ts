@@ -515,6 +515,7 @@ export const ERROR_CODES = {
   // A quantity change on a beställningsvara row whose stored choices the
   // template now resolves differently (a förval added since).
   ROW_CONFIGURATION_OUTDATED: "row-configuration-outdated",
+  ROW_TEMPLATE_NOT_TO_ORDER: "row-template-not-to-order",
   WORK_CENTER_NOT_FOUND: "work-center-not-found",
   // Alternativa resurser (#15): the beredning's rules for an operation's alternatives
   ROUTING_ALTERNATIVE_INVALID: "routing-alternative-invalid",

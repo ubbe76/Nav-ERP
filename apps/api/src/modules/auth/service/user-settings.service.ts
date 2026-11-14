@@ -159,6 +159,17 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
   // system.service.ts's getSettings() pattern, just per-user instead of
   // global. A row with a stale/unrecognized value (e.g. a since-removed
   // option) falls back to the default rather than surfacing garbage.
+  // Favoriter: the user's own list once they have saved one (even []),
+  // otherwise their behörighetsgrupp's förvalda favoriter — read live, so a
+  // change on the group reaches every member who has not made the list
+  // their own. The first change (a star, Ändra) stores the list as the
+  // user's.
+  async function favoritesOf(userId: string, raw: string | undefined): Promise<{ favorites: Favorite[]; favoritesFromGroup: boolean }> {
+    if (raw !== undefined) return { favorites: decodeFavorites(raw), favoritesFromGroup: false };
+    const group = await repo.groupDefaultFavorites(userId);
+    return { favorites: group === null ? [] : decodeFavorites(JSON.stringify(group)), favoritesFromGroup: true };
+  }
+
   async function getSettings(userId: string): Promise<UserSettings> {
     const rows = await repo.getAll(userId);
     const byKey = new Map(rows.map((row) => [row.key, row.value] as const));
@@ -171,7 +182,7 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
       alertDigest: byKey.get(ALERT_DIGEST_KEY) === "true",
       alertDigestKinds: decodeAlertDigestKinds(byKey.get(ALERT_DIGEST_KINDS_KEY)),
       theme: decodeUserTheme(byKey.get(USER_THEME_SETTING_KEY)),
-      favorites: decodeFavorites(byKey.get(FAVORITES_KEY)),
+      ...(await favoritesOf(userId, byKey.get(FAVORITES_KEY))),
       favoritesInSidebar: byKey.get(FAVORITES_IN_SIDEBAR_KEY) !== "false",
       overviewCards: decodeOverviewCards(byKey.get(OVERVIEW_CARDS_KEY)),
       density: decodeDensity(byKey.get(DENSITY_KEY)),
@@ -205,7 +216,9 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
           input.alertDigestKinds === null ? "null" : JSON.stringify([...new Set(input.alertDigestKinds)])
         );
       }
-      if (input.favorites !== undefined) {
+      if (input.favorites === null) {
+        await repo.remove(userId, FAVORITES_KEY);
+      } else if (input.favorites !== undefined) {
         await repo.upsert(userId, FAVORITES_KEY, JSON.stringify(input.favorites));
       }
       if (input.favoritesInSidebar !== undefined) {

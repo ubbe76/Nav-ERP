@@ -29,6 +29,7 @@ import { HelpLink } from "../ui/HelpLink";
 import { plannedWeekLabel } from "../../lib/planning";
 import { useCan, useCanOpen } from "../PermissionsProvider";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { useNewFromQuery } from "../../lib/useNewFromQuery";
 
 const BULK_ACTIONS: OrderAction[] = ["release", "close", "cancel"];
 
@@ -49,6 +50,8 @@ export function ManufacturingOrdersPageClient({
   const readOnly = !useCan()(["tillverkning"]);
   const canOpen = useCanOpen();
   const [modalOpen, setModalOpen] = useState(false);
+  // + Ny … from a favourite or a hub link (?ny=1).
+  useNewFromQuery(() => setModalOpen(true), !readOnly);
   // Status actions straight from the list (NOTES.md #8): one row at a time
   // via the buttons in the Åtgärder column, or several at once via the
   // checkboxes and the bar under the table. Every call is the card's own

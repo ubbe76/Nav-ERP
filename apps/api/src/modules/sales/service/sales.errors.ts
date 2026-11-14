@@ -169,6 +169,20 @@ export class ConfigurationRequiredError extends Error {
 // template now resolves to another configuration — typically a group added
 // later with a förval, whose price addition the row's choices don't show.
 // The row is not repriced behind the choices' back: Ändra konfiguration.
+// 409: a quantity change on a beställningsvara row whose template has since
+// left the mode (Variantartiklar, or no configurator): the row cannot be
+// re-evaluated, and an own à-pris does not change that (as before — only
+// the message is new; whether an own à-pris should unlock it is an open
+// question in TODO) — the way forward is a new row.
+export class RowTemplateNotToOrderError extends Error {
+  constructor(public articleNumber: string) {
+    super(
+      `${articleNumber}: mallen är inte längre en beställningsvara, så antalet på raden kan inte ändras — ta bort raden och lägg in artikeln på nytt`
+    );
+    this.name = "RowTemplateNotToOrderError";
+  }
+}
+
 export class RowConfigurationOutdatedError extends Error {
   constructor(public articleNumber: string) {
     super(`${articleNumber}: mallen har ändrats sedan raden konfigurerades — använd Ändra konfiguration`);

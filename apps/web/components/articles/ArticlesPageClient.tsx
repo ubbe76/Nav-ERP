@@ -32,6 +32,7 @@ import { HelpLink } from "../ui/HelpLink";
 import { Checkbox } from "../ui/Field";
 import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
 import { LabelPrintDialog } from "../stock/LabelPrintDialog";
+import { useNewFromQuery } from "../../lib/useNewFromQuery";
 
 // The four columns that can be edited in the list; "" stands for "no group".
 type EditField = "name" | "type" | "groupId" | "unitId";
@@ -58,6 +59,8 @@ export function ArticlesPageClient({
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const canEdit = useCan()(["artiklar"]);
+  // + Ny … from a favourite or a hub link (?ny=1).
+  useNewFromQuery(() => setModalOpen(true), canEdit);
   const canImport = useCan()(["admin"]);
   // The list is read-only until Redigera is pressed; the mode survives
   // paging and search, and ends with Avsluta redigering or a clean save.

@@ -53,6 +53,16 @@ export function createPermissionGroupService(repo: PermissionGroupRepository) {
       }
     },
 
+    // Förvalda favoriter: what a member of the group starts with. A plugin's
+    // group has no one to log in, so it has none (refused like an update).
+    async setDefaultFavorites(id: string, favorites: { href: string; title: string }[], userId: string | null = null) {
+      await existing(id);
+      if (await repo.ownedByPlugin(id)) throw new PermissionGroupOwnedByPluginError();
+      const row = await repo.setDefaultFavorites(id, favorites, userId);
+      if (!row) throw new PermissionGroupNotFoundError(id);
+      return row;
+    },
+
     async usage(id: string) {
       await existing(id);
       return { users: await repo.liveUsers(id) };

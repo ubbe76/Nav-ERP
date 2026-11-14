@@ -139,6 +139,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   plugin_uninstalled: "Tillägg avinstallerat",
   // Prognos (#10): own monthly quantities changed on an article.
   forecast_updated: "Prognos ändrad",
+  default_favorites_changed: "Förvalda favoriter ändrade",
 };
 
 export function auditEntityTypeLabel(entityType: string): string {

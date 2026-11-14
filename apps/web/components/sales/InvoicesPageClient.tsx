@@ -46,6 +46,7 @@ import {
   type SalesVatCustomer,
 } from "../../lib/vatCodes";
 import { useVatCodes } from "../../lib/useVatCodes";
+import { useNewFromQuery } from "../../lib/useNewFromQuery";
 
 export function InvoicesPageClient({
   invoices,
@@ -59,6 +60,8 @@ export function InvoicesPageClient({
   // Opens straight into the create dialog when linked with ?orderId= (the
   // sales order's "Fakturera" action, Task 9).
   const [modalOpen, setModalOpen] = useState(Boolean(initialOrderId));
+  // + Ny … from a favourite or a hub link (?ny=1).
+  useNewFromQuery(() => setModalOpen(true));
 
   const view = useListColumns([
     { key: "invoiceNumber", label: "Nummer", width: "130px" },

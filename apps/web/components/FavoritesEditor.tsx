@@ -1,31 +1,30 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { useMemo, useState, type FormEvent } from "react";
 import { Button } from "./ui/Button";
-import { Checkbox, Input } from "./ui/Field";
+import { Checkbox } from "./ui/Field";
 import { Form, FormActions, FormError, FormHint } from "./ui/Form";
 import { useFavorites } from "./FavoritesProvider";
-import { FAVORITE_TITLE_MAX, type Favorite } from "../lib/favorites";
+import { useAccessUser } from "./PermissionsProvider";
+import { FavoriteListEditor } from "./FavoriteListEditor";
+import { confirmDialog } from "../lib/confirm";
+import { favoriteActionsFor } from "../lib/favoriteActions";
+import type { Favorite } from "../lib/favorites";
 import styles from "./FavoritesEditor.module.css";
 
-// Favoriter → Ändra: rename, reorder and remove, saved together as the new
-// list. Rendered inside a Modal, which mounts it afresh on every open.
+// Favoriter → Ändra: rename, reorder, remove and add shortcuts ("+ Ny …"),
+// saved together as the new list. Rendered inside a Modal, which mounts it
+// afresh on every open. A list that is still the behörighetsgrupp's
+// förvalda favoriter becomes the user's own on Spara; an own list can go
+// back to the group's.
 export function FavoritesEditor({ onDone }: { onDone: () => void }) {
-  const { favorites, replace, inSidebar, setInSidebar } = useFavorites();
+  const { favorites, replace, inSidebar, setInSidebar, fromGroup, resetToGroup } = useFavorites();
+  const user = useAccessUser();
+  const actions = useMemo(() => (user ? favoriteActionsFor(user) : []), [user]);
   const [rows, setRows] = useState<Favorite[]>(favorites ?? []);
   const [showInSidebar, setShowInSidebar] = useState(inSidebar);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-
-  function move(index: number, step: -1 | 1) {
-    setRows((current) => {
-      const next = [...current];
-      const [row] = next.splice(index, 1);
-      next.splice(index + step, 0, row!);
-      return next;
-    });
-  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -43,59 +42,29 @@ export function FavoritesEditor({ onDone }: { onDone: () => void }) {
     else setError("Favoriterna kunde inte sparas — försök igen.");
   }
 
+  async function backToGroup() {
+    const ok = await confirmDialog("Ersätta dina favoriter med behörighetsgruppens förvalda favoriter?", {
+      confirmLabel: "Använd gruppens favoriter",
+    });
+    if (!ok) return;
+    setPending(true);
+    const reset = await resetToGroup();
+    setPending(false);
+    if (reset) onDone();
+    else setError("Favoriterna kunde inte återställas — försök igen.");
+  }
+
   return (
     <Form onSubmit={submit}>
-      {rows.length === 0 ? (
-        <FormHint>Du har inga favoriter kvar.</FormHint>
-      ) : (
-        <ol className={styles.list}>
-          {rows.map((row, index) => (
-            <li key={row.href} className={styles.row}>
-              <div className={styles.name}>
-                <Input
-                  aria-label={`Namn på favorit ${index + 1}`}
-                  value={row.title}
-                  maxLength={FAVORITE_TITLE_MAX}
-                  onChange={(e) =>
-                    setRows((current) => current.map((r, i) => (i === index ? { ...r, title: e.target.value } : r)))
-                  }
-                />
-                <span className={styles.href}>{row.href}</span>
-              </div>
-              <div className={styles.actions}>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="small"
-                  aria-label={`Flytta upp ${row.title}`}
-                  disabled={index === 0}
-                  onClick={() => move(index, -1)}
-                >
-                  <ArrowUp size={14} aria-hidden="true" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="small"
-                  aria-label={`Flytta ned ${row.title}`}
-                  disabled={index === rows.length - 1}
-                  onClick={() => move(index, 1)}
-                >
-                  <ArrowDown size={14} aria-hidden="true" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="small"
-                  onClick={() => setRows((current) => current.filter((_, i) => i !== index))}
-                >
-                  Ta bort
-                </Button>
-              </div>
-            </li>
-          ))}
-        </ol>
+      {fromGroup && (
+        <FormHint>Listan är behörighetsgruppens förvalda favoriter. Sparar du en ändring blir den din egen.</FormHint>
       )}
+      <FavoriteListEditor
+        rows={rows}
+        onChange={setRows}
+        choices={[{ label: "Genvägar", options: actions }]}
+        emptyText="Du har inga favoriter. Lägg till en genväg nedan, eller stjärnmärk en sida med Favorit uppe till höger."
+      />
       <label className={styles.placement}>
         <Checkbox checked={showInSidebar} onChange={(e) => setShowInSidebar(e.target.checked)} />
         Visa favoriterna i sidomenyn
@@ -112,6 +81,11 @@ export function FavoritesEditor({ onDone }: { onDone: () => void }) {
         <Button type="button" variant="ghost" onClick={onDone}>
           Avbryt
         </Button>
+        {!fromGroup && (
+          <Button type="button" variant="ghost" disabled={pending} onClick={() => void backToGroup()}>
+            Använd gruppens favoriter
+          </Button>
+        )}
       </FormActions>
     </Form>
   );

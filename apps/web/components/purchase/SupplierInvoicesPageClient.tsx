@@ -43,6 +43,7 @@ import { Form, FormActions, FormError, FormHint, FormNotice, FormRow } from "../
 import { UNDERLAG_ACCEPT, uploadUnderlag } from "../documents/UnderlagSection";
 import { InvoiceRateField, SekAmountsLine } from "./InvoiceRateField";
 import { basisRowsSum, fetchPurchaseOrderBasis, type PreviewRow } from "../../lib/supplierInvoiceBasis";
+import { useNewFromQuery } from "../../lib/useNewFromQuery";
 
 export function SupplierInvoicesPageClient({
   invoices,
@@ -52,6 +53,8 @@ export function SupplierInvoicesPageClient({
   pageSize: number;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
+  // + Ny … from a favourite or a hub link (?ny=1).
+  useNewFromQuery(() => setModalOpen(true));
 
   const view = useListColumns([
     { key: "registrationNumber", label: "Reg.nr", width: "120px" },

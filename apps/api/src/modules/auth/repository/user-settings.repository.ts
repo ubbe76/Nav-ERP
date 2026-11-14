@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { userSettings, type Db } from "@navet/db";
+import { permissionGroups, userSettings, users, type Db } from "@navet/db";
 import { lockThemeForSetting } from "../../system/repository/themes.repository.js";
 import { USER_THEME_SETTING_KEY } from "../../system/service/theme-settings.js";
 
@@ -20,6 +20,21 @@ export function createUserSettingsRepository(db: Db) {
         .from(userSettings)
         .where(and(eq(userSettings.userId, userId), eq(userSettings.key, key)));
       return row?.value || undefined;
+    },
+
+    // Förvalda favoriter: the user's behörighetsgrupp's list (null = none,
+    // or no group).
+    async groupDefaultFavorites(userId: string): Promise<unknown> {
+      const [row] = await db
+        .select({ favorites: permissionGroups.defaultFavorites })
+        .from(users)
+        .innerJoin(permissionGroups, eq(permissionGroups.id, users.permissionGroupId))
+        .where(eq(users.id, userId));
+      return row?.favorites ?? null;
+    },
+
+    async remove(userId: string, key: string) {
+      await db.delete(userSettings).where(and(eq(userSettings.userId, userId), eq(userSettings.key, key)));
     },
 
     async upsert(userId: string, key: string, value: string) {

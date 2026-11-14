@@ -16,6 +16,7 @@ import styles from "../../app/tillverkning/tidrapporter/page.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { useCanOpenPersonal } from "../PermissionsProvider";
 import { formatQuantity } from "../../lib/format";
+import { useNewFromQuery } from "../../lib/useNewFromQuery";
 
 export function TimeReportsPageClient({
   reports,
@@ -31,6 +32,8 @@ export function TimeReportsPageClient({
   const router = useRouter();
   const canOpenPersonal = useCanOpenPersonal();
   const [modalOpen, setModalOpen] = useState(false);
+  // + Ny … from a favourite or a hub link (?ny=1).
+  useNewFromQuery(() => setModalOpen(true));
 
   const view = useListColumns([
     { key: "employeeName", label: "Anställd", width: "1fr" },

@@ -4265,6 +4265,8 @@ export interface PermissionGroup {
   // Tillägg: the plugin that owns the group (its technical user's group) —
   // managed under System → Tillägg, never assigned to a person.
   pluginId: string | null;
+  // Förvalda favoriter: what a member gets until they save their own; null = none.
+  defaultFavorites: { href: string; title: string }[] | null;
 }
 
 // --- Ekonomi (B1 grundbokföring): kontoplan, räkenskapsår och perioder ---
@@ -5818,6 +5820,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   plugin_secret_rotated: "Ny webbhookshemlighet",
   plugin_uninstalled: "Tillägg avinstallerat",
   forecast_updated: "Prognos ändrad",
+  default_favorites_changed: "Förvalda favoriter ändrade",
 };
 
 export function auditEntityTypeLabel(entityType: string): string {
