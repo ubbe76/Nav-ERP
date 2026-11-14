@@ -151,6 +151,7 @@ describe("configurator routes", () => {
     for (const url of [`${base}/groups/reorder`, `${base}/groups/${group.id}/values/reorder`, `${base}/rules/reorder`]) {
       const wrong = await app.inject({ method: "POST", url, payload: { ids: [crypto.randomUUID()] } });
       expect([wrong.statusCode, wrong.json().code]).toEqual([400, "validation-failed"]);
+      expect(wrong.json().issues).toEqual([expect.objectContaining({ path: ["ids"] })]);
     }
     await app.close();
   });

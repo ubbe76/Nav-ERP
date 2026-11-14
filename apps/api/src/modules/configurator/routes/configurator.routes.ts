@@ -23,7 +23,11 @@ type P = { id: string; groupId?: string; valueId?: string; ruleId?: string; line
 
 function sendError(reply: FastifyReply, err: unknown) {
   // A reorder with a wrong id set is a malformed request, not a conflict.
-  if (err instanceof E.ConfiguratorReorderMismatchError) return reply.code(400).send({ error: err.message, code: "validation-failed" });
+  // Same shape as every other validation-failed (the global handler's zod
+  // answer): issues with the field.
+  if (err instanceof E.ConfiguratorReorderMismatchError) {
+    return reply.code(400).send({ error: err.message, code: "validation-failed", issues: [{ path: ["ids"], code: "custom", message: err.message }] });
+  }
   // Valuta: evaluate/derive in a currency without a rate for today — the
   // caller sends exchangeRate.
   if (err instanceof ExchangeRateUnavailableError) return reply.code(409).send({ ...errorBody(err), currency: err.currency, date: err.date });
