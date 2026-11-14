@@ -1,5 +1,5 @@
 import { and, desc, eq, sql } from "drizzle-orm";
-import { articles, customerPrices, customers, priceListRows, priceLists, type Db, type Tx } from "@navet/db";
+import { articles, configuratorVariants, customerPrices, customers, priceListRows, priceLists, type Db, type Tx } from "@navet/db";
 import { fromSek, SEK, type CalculatedPriceDetail, type CalculatedPriceUnavailable, type PriceQuoteQuery, type PriceSource } from "@navet/shared";
 
 // setupPrice: the matched customer rule's ställpris (> 0 only), in the same
@@ -107,7 +107,14 @@ export async function resolvePrice(
   const rate = currency === SEK ? 1 : exchangeRate;
   if (rate === undefined || !(rate > 0)) throw new Error(`Pricing in ${currency} needs the order's exchange rate`);
   const [article] = await dbc
-    .select({ articleNumber: articles.articleNumber, salesPrice: articles.salesPrice, groupId: articles.groupId })
+    .select({
+      articleNumber: articles.articleNumber,
+      salesPrice: articles.salesPrice,
+      groupId: articles.groupId,
+      // The variant step below runs only for a variant — an ordinary article
+      // no longer costs a configurator lookup per pricing.
+      isVariant: sql<boolean>`exists (select 1 from ${configuratorVariants} cv where cv.article_id = ${articles.id})`,
+    })
     .from(articles)
     .where(eq(articles.id, articleId));
   if (!article) return null;
@@ -170,7 +177,7 @@ export async function resolvePrice(
     : undefined;
 
   // Variant step: only when the variant has no agreement of its own.
-  if (!articleRule && listPrice === null && opts.variantPrice) {
+  if (!articleRule && listPrice === null && opts.variantPrice && article.isVariant) {
     const viaTemplate = await opts.variantPrice({
       customerId,
       variantArticleId: articleId,

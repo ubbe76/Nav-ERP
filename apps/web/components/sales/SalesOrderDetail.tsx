@@ -91,6 +91,7 @@ import {
 import { alreadyOnDocumentText } from "../../lib/orderRowDuplicates";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow } from "../ui/Form";
 import { SuggestedDueDateField } from "../manufacturing/SuggestedDueDateField";
+import { configuredEvaluationKey } from "../../lib/configuredEvaluationKey";
 
 // Order is reached only through Skapa kundorder (the API refuses set-status
 // to it), so the manual status change never offers it.
@@ -1651,6 +1652,8 @@ function AddRowForm({
   const currentFactor = unitOptions.find((o) => o.value === unitId)?.factor ?? 1;
   const unitCode = unitOptions.find((o) => o.value === unitId)?.code;
   const requestSeq = useRef(0);
+  // The configured row's evaluation the ConfigureModal delivered (see handleConfigured).
+  const modalEvaluatedKey = useRef<string | null>(null);
   // The touched flag as it is when a prefill response LANDS — the effect's
   // closure holds it as it was when the request left, so a price typed while
   // the request was in flight would otherwise be overwritten ("manuellt vinner").
@@ -1690,6 +1693,9 @@ function AddRowForm({
   }
 
   function handleConfigured(draft: RowConfigurationDraft) {
+    // The dialog has just evaluated these choices at this quantity — the
+    // re-evaluation below needn't ask again.
+    modalEvaluatedKey.current = configuredEvaluationKey(draft.selection, customerId, baseQuantity ?? 1, currency, exchangeRate);
     setConfigureTemplate(null);
     setRowConfiguration(draft);
     setQuote(null);
@@ -1769,6 +1775,12 @@ function AddRowForm({
   const configuredSelection = rowConfiguration?.selection ?? null;
   useEffect(() => {
     if (!configuredSelection || !articleId || baseQuantity === null) return;
+    const key = configuredEvaluationKey(configuredSelection, customerId, baseQuantity, currency, exchangeRate);
+    if (modalEvaluatedKey.current === key) {
+      modalEvaluatedKey.current = null;
+      return;
+    }
+    modalEvaluatedKey.current = null;
     const seq = ++requestSeq.current;
     apiFetch<ConfiguratorEvaluation>(`/api/v1/configurator/${articleId}/evaluate`, {
       method: "POST",

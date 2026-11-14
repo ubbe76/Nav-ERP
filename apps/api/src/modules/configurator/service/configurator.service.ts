@@ -694,8 +694,10 @@ export function createConfiguratorService(deps: {
   // Everything deriveStructure needs, read without changing anything. The
   // template's ordinary structure and route come straight from
   // bom_components/routing_operations.
-  async function loadDerivationInput(ex: Db | Tx, articleId: string): Promise<DerivationInput> {
-    const detail = await loadOrThrow(ex, articleId);
+  // `preloaded`: the template the caller already read in the same snapshot
+  // (evaluateRowConfiguration) — not read a second time.
+  async function loadDerivationInput(ex: Db | Tx, articleId: string, preloaded?: ConfiguratorTemplateDetail): Promise<DerivationInput> {
+    const detail = preloaded ?? (await loadOrThrow(ex, articleId));
     const [baseBom, baseOperations] = await Promise.all([repo.listBaseBom(ex, articleId), repo.listBaseRouting(ex, articleId)]);
     return { detail, baseBom, baseOperations, ...toDeriveRows(detail) };
   }
@@ -791,9 +793,13 @@ export function createConfiguratorService(deps: {
   // The structure without its cost (cost: null), and the derivation core the
   // cost is computed from — null when the structure is not valid.
   async function readConfiguredStructure(
-    ex: Db | Tx, templateArticleId: string, selection: ConfiguratorSelection, quantity: number, opts: { allowVariants?: boolean } = {}
+    ex: Db | Tx,
+    templateArticleId: string,
+    selection: ConfiguratorSelection,
+    quantity: number,
+    opts: { allowVariants?: boolean; detail?: ConfiguratorTemplateDetail } = {}
   ): Promise<{ structure: ConfiguredStructure; core: DerivedStructureCore | null }> {
-    const loaded = await loadDerivationInput(ex, templateArticleId);
+    const loaded = await loadDerivationInput(ex, templateArticleId, opts.detail);
     // allowVariants: Leveranstidskontrollen reads a not-yet-made variant's
     // structure the same way (it never creates the variant).
     if (loaded.detail.mode !== "to_order" && !(opts.allowVariants && loaded.detail.mode === "variants")) {
@@ -1562,7 +1568,7 @@ export function createConfiguratorService(deps: {
         if (!evaluation.valid || evaluation.key === null) {
           return { ok: false as const, errors: [...evaluation.errors, ...evaluation.groups.flatMap((g) => g.errors)] };
         }
-        const derived = await readConfiguredStructure(tx, templateArticleId, selection, opts.quantity);
+        const derived = await readConfiguredStructure(tx, templateArticleId, selection, opts.quantity, { detail });
         return { ok: true as const, template, evaluation, effective, key: evaluation.key, derived };
       });
       if (!read.ok) return { valid: false, errors: read.errors, configuration: null, cost: null };

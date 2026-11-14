@@ -129,13 +129,13 @@ async function addCustomerGroupPrice(
 describe("resolvePrice", () => {
   // Konfigurator 4a: the optional variant step. A plain article is never a
   // variant — the reader answers undefined and the chain goes on unchanged.
-  it("a plain article: the variant reader answers undefined and the chain is unchanged with or without opts", async () => {
+  it("a plain article: the variant reader is never asked (the article row says it is no variant) and the chain is unchanged", async () => {
     const customer = await makeCustomer();
     const article = await makeArticle({ salesPrice: 100 });
     let calls = 0;
     const res = await resolvePrice(db, { customerId: customer.id, articleId: article.id, quantity: 1 }, { variantPrice: async () => { calls++; return undefined; } });
     expect(res?.price).toEqual({ unitPrice: 100, discountPercent: 0, source: "article" });
-    expect(calls).toBe(1); // called, answered "not a variant", chain continued
+    expect(calls).toBe(0); // not a variant: no configurator lookup per pricing
     const plain = await resolvePrice(db, { customerId: customer.id, articleId: article.id, quantity: 1 });
     expect(plain).toEqual(res);
   });
