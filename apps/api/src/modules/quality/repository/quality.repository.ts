@@ -100,6 +100,7 @@ const listColumns = {
   reasonId: deviations.reasonId,
   reasonCode: deviationReasons.code,
   reasonName: deviationReasons.name,
+  reasonNameEn: deviationReasons.nameEn,
   responsibleUserId: deviations.responsibleUserId,
   responsibleUserName: responsibleUsers.name,
   salesOrderId: deviations.salesOrderId,
@@ -784,6 +785,7 @@ export interface ListRow {
   reasonId: string | null;
   reasonCode: string | null;
   reasonName: string | null;
+  reasonNameEn: string | null;
   responsibleUserId: string | null;
   responsibleUserName: string | null;
   salesOrderId: string | null;

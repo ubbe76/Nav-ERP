@@ -626,6 +626,29 @@ function localizedTermLabel(code: string | null, name: string | null, nameEn: st
   return termLabel(code, name === null ? null : localized(name, nameEn, language));
 }
 
+// POST /quotes with several rows: every row is resolved (as before — the
+// promises all run), and when more than one carries an invalid
+// configuration the answer names each of them ("Rad 2: …"), so an
+// integration fixes them in one round instead of one per call. Any other
+// failure — or a single invalid row — is the first failing row's own error,
+// unchanged.
+async function resolveQuoteRows<T>(pending: Promise<T>[]): Promise<T[]> {
+  const settled = await Promise.allSettled(pending);
+  const failed = settled.flatMap((s, index) => (s.status === "rejected" ? [{ index, reason: s.reason as unknown }] : []));
+  if (failed.length === 0) return settled.map((s) => (s as PromiseFulfilledResult<T>).value);
+  const invalid = failed.filter(
+    (f): f is { index: number; reason: ConfiguratorInvalidConfigurationError } => f.reason instanceof ConfiguratorInvalidConfigurationError
+  );
+  if (invalid.length > 1 && invalid.length === failed.length) {
+    throw new ConfiguratorInvalidConfigurationError(
+      invalid.flatMap(({ index, reason }) =>
+        (reason.details.length > 0 ? reason.details : ["Konfigurationen är inte giltig"]).map((message) => `Rad ${index + 1}: ${message}`)
+      )
+    );
+  }
+  throw failed[0]!.reason;
+}
+
 export function createSalesService(
   repo: SalesRepository,
   registers: RegisterReferenceReader,
@@ -1654,7 +1677,7 @@ export function createSalesService(
       // reusable article, and the next order for the same choices reuses it.
       // The same article may appear on several rows (two configurations
       // resolving to one variant included) — each stays its own row.
-      const rows = await Promise.all(input.rows.map((r) => resolveRowInput(pricing, r, createdBy)));
+      const rows = await resolveQuoteRows(input.rows.map((r) => resolveRowInput(pricing, r, createdBy)));
       const quoteValidUntil = await resolveQuoteValidUntil(input);
       // Kostnadsställen och projekt on the header: must exist and be pickable.
       const dimensions = await repo.resolveDimensions({ costCenterId: input.costCenterId, projectId: input.projectId });

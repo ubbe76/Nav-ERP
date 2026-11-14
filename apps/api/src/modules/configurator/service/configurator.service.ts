@@ -961,7 +961,13 @@ export function createConfiguratorService(deps: {
     for (const row of candidates) {
       if (taken.has(row.articleNumber!) || planned.has(row.articleNumber!)) {
         row.status = "number_taken";
-        row.errors = [`Artikelnumret ${row.articleNumber} finns redan`];
+        // Say which: a number in the register, or one this run would give
+        // two combinations (their codes join to the same text).
+        row.errors = [
+          taken.has(row.articleNumber!)
+            ? `Artikelnumret ${row.articleNumber} finns redan`
+            : `Artikelnumret ${row.articleNumber} blir samma för två kombinationer i körningen — ändra alternativens koder`,
+        ];
         structures.delete(row);
       } else {
         planned.add(row.articleNumber!);

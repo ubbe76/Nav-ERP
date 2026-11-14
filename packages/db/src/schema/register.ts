@@ -96,6 +96,9 @@ export const deviationReasons = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     code: varchar("code", { length: 10 }).notNull().unique(),
     name: varchar("name", { length: 100 }).notNull().unique(),
+    // Dokument på engelska: Benämning (engelska), printed on an English
+    // complaint/complaint notice; null = the Swedish name. Not unique.
+    nameEn: varchar("name_en", { length: 100 }),
     appliesCustomer: boolean("applies_customer").notNull().default(false),
     appliesSupplier: boolean("applies_supplier").notNull().default(false),
     appliesInternal: boolean("applies_internal").notNull().default(false),

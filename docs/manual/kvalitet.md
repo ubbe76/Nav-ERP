@@ -102,7 +102,7 @@ Rapporten till en kund eller leverantör skrivs på motpartens **Språk** (**Sve
 
 ## Kvalitetsorsaker
 
-Orsakerna som avvikelser och kassationer väljer ur. Registret finns under **Kvalitet → Kvalitetsorsaker** och som fliken **Kvalitetsorsaker** under [Grunddata](/hjalp/grunddata#kvalitetsorsaker). Varje orsak har en **Kod** (versaler och siffror, högst 10 tecken) och en **Benämning**, och kryssrutorna **Kund**, **Leverantör**, **Intern** och **Kassation** som styr var orsaken kan väljas. Minst en måste vara ifylld.
+Orsakerna som avvikelser och kassationer väljer ur. Registret finns under **Kvalitet → Kvalitetsorsaker** och som fliken **Kvalitetsorsaker** under [Grunddata](/hjalp/grunddata#kvalitetsorsaker). Varje orsak har en **Kod** (versaler och siffror, högst 10 tecken) och en **Benämning**, och kryssrutorna **Kund**, **Leverantör**, **Intern** och **Kassation** som styr var orsaken kan väljas. Minst en måste vara ifylld. **Benämning (engelska)** skrivs på reklamationer och reklamationsbesked till en kund eller leverantör med språket engelska; lämnas fältet tomt skrivs den svenska benämningen.
 
 ## Kassation och orsaker
 

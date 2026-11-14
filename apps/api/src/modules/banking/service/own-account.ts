@@ -33,5 +33,10 @@ export function notificationAccountWarning(accounts: string[], company: CompanyA
   const foreign = accounts.filter((a) => !isOwnAccount(a, company));
   if (foreign.length === 0) return null;
   const which = foreign.length === 1 ? `kontot ${foreign[0]}, som inte är något` : `kontona ${foreign.join(", ")}, som inte är några`;
-  return `Avin gäller ${which} av företagets konton i Företagsinformation (IBAN, bankgiro, plusgiro). Kontrollera att filen hör till företaget.`;
+  const text = `Avin gäller ${which} av företagets konton i Företagsinformation (IBAN, bankgiro, plusgiro). Kontrollera att filen hör till företaget.`;
+  // Without the company's IBAN a bank account (BBAN) — what Swedbank reports
+  // behind a bankgiro — can never be recognised: say what makes it so.
+  return company.iban
+    ? text
+    : `${text} Är kontot företagets, lägg in företagets IBAN under System → Företagsinformation — då känns kontot igen, även när banken anger kontonumret utan IBAN.`;
 }

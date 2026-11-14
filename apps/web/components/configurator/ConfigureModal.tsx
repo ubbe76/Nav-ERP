@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { notify } from "../../lib/notice";
 import { formatMoney, formatSignedMoney, formatUnitPrice } from "../../lib/format";
 import { formatRate, SEK } from "../../lib/currency";
 import { draftLines } from "../../lib/configurationLines";
@@ -184,6 +185,11 @@ function ConfigureForm({ template, customerId, showPrice, quantity, currency, ex
         method: "POST",
         body: JSON.stringify({ selection: lastSelection.current }),
       });
+      // An existing variant that has been made inactive is reused (the
+      // choices are its), but never silently: say so beside the row.
+      if (!res.created && res.article.active === false) {
+        notify({ message: `Varianten ${res.article.articleNumber} fanns redan (inaktiv) och används.`, tone: "info" });
+      }
       onResolved?.(res);
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte hämta eller skapa varianten"));
@@ -204,6 +210,7 @@ function ConfigureForm({ template, customerId, showPrice, quantity, currency, ex
         {template.articleNumber} — {template.name}
       </FormHint>
       {notice && <FormNotice>{notice}</FormNotice>}
+      {!groups && !error && <FormHint>Hämtar mallens valgrupper…</FormHint>}
       {groups && groups.length === 0 && <FormNotice>Mallen har inga valgrupper.</FormNotice>}
       {groups && (
         <ConfigurationGroupFields

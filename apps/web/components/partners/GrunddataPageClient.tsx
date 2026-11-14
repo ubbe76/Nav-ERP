@@ -140,6 +140,12 @@ const TAB_CONFIG: Record<
     showActive: true,
     activeHint: "Inaktiva orsaker kan inte väljas på nya avvikelser eller kassationer.",
     showReasonFlags: true,
+    english: {
+      field: "nameEn",
+      label: "Benämning (engelska)",
+      maxLength: 100,
+      hint: "Skrivs på engelska reklamationer och reklamationsbesked. Tomt = den svenska benämningen.",
+    },
     writeRule: ["kvalitet"],
     deleteRule: ["admin"],
     moveHint: "Alla kopplade avvikelser och kassationer flyttas till den valda orsaken; därefter tas orsaken bort.",

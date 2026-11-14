@@ -1,6 +1,6 @@
 import { createArticleSchema, createStockAdjustmentSchema, createStockLocationSchema, updateSystemSettingsSchema } from "@navet/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { articles, auditLog, db, stockBatches, stockTransactions, systemSettings, type Tx } from "@navet/db";
 import { buildApp } from "../src/app.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
@@ -182,7 +182,12 @@ describe("Batchstyrd and the setting Använd batch- och serienummer", () => {
     await articleService.updateArticle(a.id, { batchTracked: true, name: "Plåt 2" });
     expect((await articleService.updateArticle(a.id, { batchTracked: false }))!.batchTracked).toBe(false);
 
-    const log = await db.select().from(auditLog).where(and(eq(auditLog.entityType, "article"), eq(auditLog.entityId, a.id)));
+    // In write order (no ORDER BY gave the rows in any order now and then).
+    const log = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.entityType, "article"), eq(auditLog.entityId, a.id)))
+      .orderBy(asc(auditLog.createdAt));
     expect(log.map((row) => (row.detail as { after: unknown }).after)).toEqual([{ batchTracked: true }, { batchTracked: false }]);
 
     const created = await makeArticle({ batchTracked: true });

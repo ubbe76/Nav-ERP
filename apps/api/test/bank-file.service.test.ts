@@ -174,8 +174,9 @@ describe("uppladdning", () => {
     const foreign = await upload(fixtureXml("camt054-nordea-credit.xml"));
     const flagged = await files.get(foreign.file.id);
     expect(flagged.accounts).toEqual(["SE4550000000058398257466"]);
+    // No IBAN in Företagsinformation: the warning says what makes the account known.
     expect(flagged.accountWarning).toBe(
-      "Avin gäller kontot SE4550000000058398257466, som inte är något av företagets konton i Företagsinformation (IBAN, bankgiro, plusgiro). Kontrollera att filen hör till företaget."
+      "Avin gäller kontot SE4550000000058398257466, som inte är något av företagets konton i Företagsinformation (IBAN, bankgiro, plusgiro). Kontrollera att filen hör till företaget. Är kontot företagets, lägg in företagets IBAN under System → Företagsinformation — då känns kontot igen, även när banken anger kontonumret utan IBAN."
     );
     await db.update(companyInfo).set({ iban: "SE45 5000 0000 0583 9825 7466" });
     expect((await files.get(foreign.file.id)).accountWarning).toBeNull();
@@ -184,6 +185,9 @@ describe("uppladdning", () => {
     // company's when the company's IBAN carries that account number.
     const bban = await upload(fixtureXml("camt054-swedbank-credit.xml"));
     expect(await files.get(bban.file.id)).toMatchObject({ accounts: ["821491234567890"], accountWarning: expect.stringContaining("821491234567890") });
+    // An IBAN that is another account: the plain warning, no tip.
+    const plain = (await files.get(bban.file.id)).accountWarning;
+    expect(plain).toMatch(/Kontrollera att filen hör till företaget\.$/);
     await db.update(companyInfo).set({ iban: "SE13 8000 0821 4912 3456 7890" });
     expect((await files.get(bban.file.id)).accountWarning).toBeNull();
   });

@@ -16,7 +16,7 @@ export type UpdateRegisterEntryInput = z.infer<typeof updateRegisterEntrySchema>
 
 // Dokument på engelska (#7): a blank English text is stored as null and the
 // document falls back to the Swedish one (localized in document-language.ts).
-const optionalEnglishText = (max: number) =>
+export const optionalEnglishText = (max: number) =>
   z.preprocess(
     (value) => (typeof value === "string" && value.trim() === "" ? null : value),
     z.string().trim().max(max).nullable()

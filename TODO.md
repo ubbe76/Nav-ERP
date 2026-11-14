@@ -51,17 +51,12 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 ### Låg
 
 - [ ] **Betalfiler i pain.001.001.09 (ISO 20022 version 2019)** — Nav skriver pain.001.001.03, som bankerna fortfarande tar (Nordeas MIG för .03 uppdaterades i september 2026); Nordea m.fl. går över till version 2019 på sikt. Bankprofilerna och golden-filerna behöver en andra version när någon bank slutar ta .03.
-- [ ] **Dokument på engelska:** avvikelseorsakens namn skrivs på svenska även på ett engelskt reklamationsbesked (`deviation_reasons` saknar `name_en`); en kreditfaktura kopierar källfakturans frakt-/ränterader med deras text, så en kredit till en kund som bytt språk efter fakturan får raderna på fakturans språk.
-- [ ] **Momsrapporten:** visar Deklarerad även när ett kvartal bara delvis överlappar en deklarerad månad — en hint "överlappar en deklarerad månad".
-- [ ] **Konfigurator:** återanvänd inaktiv variant läggs in tyst — visa "Varianten X fanns redan (inaktiv)"; antalsbyte på rad vars mall lämnat Beställningsvara saknar tips om att ange pris; `createQuote` rapporterar bara första ogiltiga rad; ingen laddningstext medan mallens grupper hämtas i Konfigurera; ingen "välj alla" i behovsberäkningens konfigurerade sektion; "— Välj —" kan inte tömma ett förval *(enligt spec)*.
-- [ ] **Varianter:** dubblettnummer inom samma körning säger "finns redan"; standardvärdeshjälpen nämner inte tomt mått / Med-Utan; Skapa variant är inaktiv i stället för dold vid ogiltig konfiguration.
+- [ ] **Dokument på engelska:** (avvikelseorsakens engelska namn klart 2026-11-14, 0222) en kreditfaktura kopierar källfakturans frakt-/ränterader med deras text, så en kredit till en kund som bytt språk efter fakturan får raderna på fakturans språk.
+- [ ] **Konfigurator:** antalsbyte på en beställningsvarurad vars mall har lämnat läget Beställningsvara vägras med "Mallen är inte i läget Beställningsvara" även med eget à-pris (utvärderingen körs alltid vid antalsbyte) — bestäm om antalet ska få ändras med eget à-pris och kvarstående förkalkyl, och ge då tipset; "— Välj —" kan inte tömma ett förval *(enligt spec)*. (Inaktiv variant, alla ogiltiga rader i `POST /quotes`, laddningstext och Välj alla klara 2026-11-14.)
 - [ ] **Konfigurator, prestanda:** `evaluateRowConfiguration` laddar mallen två gånger + full förkalkyl per utvärdering; derive per tangenttryck utan debounce (gammalt TB syns tills svaret kommer); extra evaluate direkt efter Lägg in; `createVariants`-förkalkylen läser på vanliga `db` medan transaktionen håller mallåset (upp till 200 lån i följd); variantsteget i `resolvePrice` gör en extra PK-uppslagning per prissättning; kunden hämtas två gånger per utskrift/mejl.
-- [ ] **Legoförfrågan:** artikelkolumnen i behovsberäkningen blir trång när en legorad har många förfrågningar.
 - [ ] **Kopiera från befintlig artikel:** ritningsrevisioner kopieras inte.
-- [ ] **Bankfiler:** kontovarningen kunde tipsa om att lägga in IBAN.
 - [ ] **Favoriter:** förvalda favoriter per behörighetsgrupp; åtgärdsgenvägar som **+ Ny kundorder** (kräver `?ny=1`-stöd på sidorna).
 - [ ] **Timkostnad per datum:** ingen rättelse av historiken i efterhand (en resurs som skapats med fel timkostnad behåller den för dagarna före rättelsen). Tidrapporterna sparar resursen sedan 0192, men tid rapporterad före 0192 saknar den och prissätts fortfarande om när operationen byter resurs, och en manuell tidrapport för en dag före ett byte får operationens nuvarande resurs (ingen rättelse av resursen i efterhand).
-- [ ] **Manualen, årsbokslutet:** nämn att värderingen faller tillbaka på standardpris (kommentaren "deterministisk" är för stark), att identisk periodisering med sedan inaktiverat konto ger 400 och att Omför-rådet för IB-spärren kan landa i år N+2 vid sent bokslut.
 
 ### Kodkvalitet
 

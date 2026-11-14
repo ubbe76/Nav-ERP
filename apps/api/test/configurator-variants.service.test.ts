@@ -223,6 +223,20 @@ describe("createVariants", () => {
     expect(Number(bl.salesPrice)).toBe(1100);
   });
 
+  it("two combinations in one run that join to the same number: the second is stopped with its own reason", async () => {
+    const s = await build();
+    // Two optional groups with the same code: Y=P1 alone and Z=P1 alone both
+    // join to …-P1.
+    const y = await service.createGroup(s.article.id, { code: "Y", name: "Tillval Y", kind: "choice", required: false });
+    await service.createValue(s.article.id, y.id, { code: "P1", name: "P1", priceAdd: 0, active: true });
+    const z = await service.createGroup(s.article.id, { code: "Z", name: "Tillval Z", kind: "choice", required: false });
+    await service.createValue(s.article.id, z.id, { code: "P1", name: "P1", priceAdd: 0, active: true });
+    const rows = await service.previewVariants(s.article.id, { sets: { LOCK: ["A"], BREDD: [1200], Y: ["P1", null], Z: [null, "P1"] }, calcQuantity: 10 });
+    const duplicate = rows.filter((r) => r.status === "number_taken");
+    expect(duplicate).toHaveLength(1);
+    expect(duplicate[0]!.errors[0]).toMatch(/blir samma för två kombinationer i körningen/);
+  });
+
   it("a taken article number stops that combination only", async () => {
     const s = await build();
     await testArticleService.createArticle({ articleNumber: `${s.article.articleNumber}-B-RD-1200`, name: "Upptaget", type: "purchased" } as never);

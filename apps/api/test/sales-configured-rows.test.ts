@@ -178,6 +178,27 @@ describe("configured rows — create", () => {
     expect(err).toBeInstanceOf(ConfiguratorInvalidConfigurationError);
     expect((err as ConfiguratorInvalidConfigurationError).details.join(" ")).toMatch(/Bredd/);
     expect(await db.select().from(salesOrderRows)).toEqual([]);
+
+    // Two invalid rows (and a valid one): one answer that names each row.
+    const both = await salesService
+      .createQuote(
+        {
+          customerId: c.id,
+          rows: [
+            { articleId: article.id, quantity: 1, configuration: { selection: { LOCK: "B" } } },
+            { articleId: article.id, quantity: 1, configuration: { selection: SEL } },
+            { articleId: article.id, quantity: 1, configuration: { selection: { BREDD: 1200 } } },
+          ],
+        } as never,
+        null
+      )
+      .catch((e: unknown) => e);
+    expect(both).toBeInstanceOf(ConfiguratorInvalidConfigurationError);
+    const details = (both as ConfiguratorInvalidConfigurationError).details;
+    expect(details.some((d) => d.startsWith("Rad 1: "))).toBe(true);
+    expect(details.some((d) => d.startsWith("Rad 3: "))).toBe(true);
+    expect(details.some((d) => d.startsWith("Rad 2: "))).toBe(false);
+    expect(await db.select().from(salesOrderRows)).toEqual([]);
   });
 
   // Delprojekt 5: a configuration on a variants template resolves the variant

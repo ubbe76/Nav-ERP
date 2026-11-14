@@ -710,9 +710,17 @@ export function MomsrapportPageClient({
 
             {activeSettlement ? (
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
-                <StatusPill status="done" label="Deklarerad" />
+                {/* Deklarerad only when the settlement covers the whole period —
+                    a quarter that merely overlaps a declared month is not. */}
+                {activeSettlement.fromDate <= report.from && activeSettlement.toDate >= report.to ? (
+                  <StatusPill status="done" label="Deklarerad" />
+                ) : (
+                  <StatusPill status="delayed" label="Delvis deklarerad" />
+                )}
                 <span>
-                  Momsomföring bokförd{" "}
+                  {activeSettlement.fromDate <= report.from && activeSettlement.toDate >= report.to
+                    ? "Momsomföring bokförd"
+                    : "Perioden överlappar en deklarerad period — momsomföring bokförd"}{" "}
                   <Link href={`/ekonomi/verifikat/${activeSettlement.verificationId}`}>
                     Verifikat {activeSettlement.displayNumber}
                   </Link>{" "}
