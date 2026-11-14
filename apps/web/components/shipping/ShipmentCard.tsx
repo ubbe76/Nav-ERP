@@ -46,7 +46,7 @@ const toDrafts = (s: ShipmentDetail): ParcelDraft[] =>
 
 // Label/value pairs for the read views (bokad/levererad/avbruten) — rows with
 // an empty value are left out so the summary stays short.
-function Facts({ rows }: { rows: { label: string; value: ReactNode }[] }) {
+export function Facts({ rows }: { rows: { label: string; value: ReactNode }[] }) {
   const shown = rows.filter((r) => r.value !== null && r.value !== undefined && r.value !== "");
   return (
     <dl className={styles.facts}>
@@ -61,7 +61,7 @@ function Facts({ rows }: { rows: { label: string; value: ReactNode }[] }) {
 }
 
 // "Postnummer Ort" as one line, skipping whichever part is missing.
-const postalLine = (postalCode: string | null, city: string | null) => [postalCode, city].filter(Boolean).join(" ");
+export const postalLine = (postalCode: string | null, city: string | null) => [postalCode, city].filter(Boolean).join(" ");
 
 // The parcels as the API would get them — what "unsaved" compares.
 function parcelsKey(parcels: ParcelDraft[]): string {
@@ -493,8 +493,8 @@ export function ShipmentCard({ initial }: { initial: ShipmentDetail }) {
                   <div className={styles.stack}>
                     <FormRow columns={3}>
                       <Field label="Datum" htmlFor="pickupDate"><Input id="pickupDate" name="pickupDate" type="date" defaultValue={s.pickupDate} /></Field>
-                      <Field label="Från" htmlFor="pickupFrom"><Input id="pickupFrom" name="pickupFrom" type="time" size="sm" defaultValue={s.pickupFrom} /></Field>
-                      <Field label="Till" htmlFor="pickupTo"><Input id="pickupTo" name="pickupTo" type="time" size="sm" defaultValue={s.pickupTo} /></Field>
+                      <Field label="Från" htmlFor="pickupFrom"><Input id="pickupFrom" name="pickupFrom" type="time" size="sm" defaultValue={s.pickupFrom ?? ""} /></Field>
+                      <Field label="Till" htmlFor="pickupTo"><Input id="pickupTo" name="pickupTo" type="time" size="sm" defaultValue={s.pickupTo ?? ""} /></Field>
                     </FormRow>
                     {s.pickupWarning && (
                       <p role="alert" className={styles.warning}>{s.pickupWarning}</p>

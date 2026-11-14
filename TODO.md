@@ -122,7 +122,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
-- [ ] **Fler val av frakttjänster** — fler frakttjänster att välja mellan än dagens Sendify-koppling (användarens önskemål 2026-11-11). Omfattningen är inte specad än.
+- [ ] **Fler val av frakttjänster, etapp 2: en fraktförmedlare till** (användarens önskemål 2026-11-11, val 2026-11-14: *egna fraktsätt* och *fler fraktförmedlare*; transportörerna i dag DHL, DB Schenker, egna bilar/kunden hämtar). Etapp 1, **Eget fraktsätt** (0220), är klar. Kvar att besluta före bygget: vilken förmedlare (nShift Delivery/Unifaun, Logtrade …), att den har DHL Freight och DB Schenker med företagets egna avtal, testkonto/sandlåda, och om förmedlaren väljs per försändelse eller en åt gången. `shipments.provider` får ett nytt värde och `FreightProvider` en implementation. Spec: `private/superpowers/specs/2026-11-14-fler-frakttjanster-design.md`.
 
 ### Låg
 

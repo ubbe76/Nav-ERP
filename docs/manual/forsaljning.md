@@ -949,7 +949,7 @@ Det går inte att ångra bara en del av en rads antal. Ångra raden och leverera
 
 ## Frakt
 
-Frakten bokar transport hos en speditör direkt från en följesedel. Tjänsten förmedlas av Sendify, som erbjuder bland annat DHL, UPS, DSV, PostNord och Schenker; du jämför priser, bokar och skriver ut fraktsedel utan att lämna systemet. Funktionen måste vara **Aktiverad** under **System → Frakt** (se [System & inställningar](/hjalp/system#fraktinstallningar)) innan knappen **Boka transport** visas.
+Frakten bokar transport hos en speditör direkt från en följesedel. Tjänsten förmedlas av Sendify, som erbjuder bland annat DHL, UPS, DSV, PostNord och Schenker; du jämför priser, bokar och skriver ut fraktsedel utan att lämna systemet. Funktionen måste vara **Aktiverad** under **System → Frakt** (se [System & inställningar](/hjalp/system#fraktinstallningar)) innan knappen **Boka transport** visas. Frakt som inte bokas via Sendify — egen bil, kunden hämtar eller ett eget avtal — registreras med [Eget fraktsätt](#eget-fraktsatt), som alltid finns.
 
 ### Skapa en försändelse
 
@@ -960,7 +960,7 @@ En **försändelse** (nummer `FR-…`) är en transport som hör till en eller f
 
 En följesedel kan bara ligga i en försändelse åt gången. Har följesedeln redan en försändelse visas i stället försändelsens nummer (med fraktsedelsnumret när transporten är bokad) som länk till försändelsekortet.
 
-Under **Försäljning → Försändelser** finns listan över alla försändelser med kolumnerna **Försändelse**, **Kund**, **Följesedlar**, **Transportör**, **Fraktsedelsnr**, **Upphämtning** och **Status**. Sökfältet söker på försändelse, kund, följesedel eller fraktsedelsnummer, och filtret **Alla statusar** väljer en av statusarna **Utkast**, **Bokad**, **Levererad** och **Avbruten**. Filtret **Alla kunder** visar bara en kunds försändelser.
+Under **Försäljning → Försändelser** finns listan över alla försändelser med kolumnerna **Försändelse**, **Kund**, **Följesedlar**, **Transportör**, **Fraktsedelsnr**, **Upphämtning** och **Status**. Sökfältet söker på försändelse, kund, följesedel eller fraktsedelsnummer, och filtret **Alla statusar** väljer en av statusarna **Utkast**, **Bokad**, **Levererad** och **Avbruten**. Filtret **Alla kunder** visar bara en kunds försändelser. En försändelse med eget fraktsätt visas som **Skickad** i stället för **Bokad** och **Makulerad** i stället för **Avbruten** (se [Eget fraktsätt](#eget-fraktsatt)).
 
 ### Försändelsekortet
 
@@ -992,6 +992,27 @@ Försändelsen får status **Bokad** och sektionen **Frakt** visar **Produkt**, 
 - **Avboka** (på en bokad försändelse) avbokar transporten hos Sendify och frigör följesedlarna. Vägrar Sendify avbokningen — t.ex. för att godset redan hämtats — står försändelsen kvar som **Bokad**. Har transporten redan avbokats hos Sendify (t.ex. i Sendifys eget gränssnitt) avbokas försändelsen i Nav utan fel. Ligger frakten som fraktrad på ett fakturautkast vägrar **Avboka** med **Frakten ligger på ett fakturautkast — ta bort fraktraden från utkastet innan du avbokar** (se [Frakt på fakturan](#frakt-pa-fakturan)); en utfärdad faktura hindrar inte avbokningen — krediteras frakten görs det med en kreditfaktura.
 - **Avbryt** avbryter ett utkast (status **Avbruten**) och **Ta bort utkast** raderar det helt. Båda bekräftas först.
 
+### Eget fraktsätt
+
+Frakt som inte bokas via Sendify registreras med **Eget fraktsätt**. Det gäller till exempel varor som går med egen bil, varor som kunden hämtar själv eller transporter med ett eget avtal hos DHL eller DB Schenker. **Eget fraktsätt** finns bredvid **Boka transport** i [Utleverans](#utleverans) och i listan **Följesedlar** på kundorderkortet, och fungerar även när frakten via Sendify inte är aktiverad.
+
+Dialogen **Eget fraktsätt** har fälten:
+
+- **Speditör** — väljs ur registret Speditörer under Grunddata, där du också lägger till till exempel *Egen bil* och *Kunden hämtar*. Förvalet är orderns speditör och annars kundens.
+- **Fraktsedelsnummer** — valfritt, till exempel numret på fraktsedeln från ert eget avtal.
+- **Skickad** — dagens datum som förval.
+- **Kundpris (kr)** — blir en fraktrad på fakturan, på samma sätt som för en bokad försändelse (se [Frakt på fakturan](#frakt-pa-fakturan)). Lämna fältet tomt om frakten inte ska faktureras, till exempel när kunden hämtar själv.
+
+**Registrera** skapar försändelsen direkt med status **Skickad**. Inget skickas till någon transportör. Följesedeln skriver ut speditören som **Transportör** och fraktsedelsnumret som **Fraktsedelsnr**.
+
+Försändelsekortet för ett eget fraktsätt visar **Frakt** (fraktsätt, speditör, fraktsedelsnummer, datum, kundpris och faktura), **Följesedlar** och **Mottagare**. Knapparna är:
+
+- **Ändra** — ändrar speditör, fraktsedelsnummer, kundpris och datum, så länge frakten inte ligger på en faktura.
+- **Markera levererad** — ger status **Levererad**. Ett eget fraktsätt har ingen spårning som gör det automatiskt.
+- **Makulera** — ger status **Makulerad** och frigör följesedeln, så att den kan få en ny försändelse. Ligger frakten på ett fakturautkast måste fraktraden tas bort från utkastet först.
+
+Priser, bokning, kollin, upphämtning, fraktsedel och spårning finns bara för försändelser som bokas via Sendify.
+
 ### Frakt på offert och order
 
 Fraktpriset kan läggas på redan i offerten, innan det finns någon följesedel att boka från. Knappen **Kontrollera fraktpris** finns på kundorderkortet i statusarna **Offert**, **Bekräftad** och **Under tillverkning** (frakten måste vara **Aktiverad** under **System → Frakt**, och du behöver rättigheten Försäljning). Den öppnar dialogen **Fraktpris**:
@@ -1018,7 +1039,7 @@ Meddelar transportören ett undantag, t.ex. försenat eller skadat gods, markera
 
 ### Frakt på fakturan
 
-En bokad försändelse som ännu inte fakturerats föreslås som fraktrad i fakturadialogen (se [Skapa en faktura](#skapa-en-faktura)). Raden hamnar i gruppen **Frakt** och består av fraktartikeln (**Fraktartikel** under **System → Frakt**), antal 1 och försändelsens kundpris i fakturans valuta — på en faktura i SEK är det **Kundpris (kr)** rakt av, på en faktura i annan valuta räknas kronpriset om med orderns kurs (en försändelse utan order med dagens kurs); priset går att ändra. Raden är förbockad från början när försändelsen är i den valuta fakturan får — den valda ordens valuta, annars kundens; frakt i en annan valuta kryssar du i själv, en valuta åt gången, och frakt vars valuta saknar kurs går inte att kryssa i förrän en kurs finns under **Ekonomi → Valutakurser**. Avbockas raden följer ingen frakt med. Har någon av orderna bakom försändelsen redan en rad med fraktartikeln (se [Frakt på offert och order](#frakt-pa-offert-och-order)) föreslås ingen fraktrad, så frakten faktureras inte två gånger. Spärren gäller åt andra hållet också: när försändelsens fraktrad ligger på en faktura vägrar **Lägg till frakt** på ordern med **Frakten för ordern är redan fakturerad via försändelse FR-… — ingen fraktrad läggs till**. Samlingsfaktureringen tar med frakten automatiskt och visar antalet i kolumnen **Frakter**.
+En bokad försändelse, eller en skickad försändelse med eget fraktsätt och kundpris, som ännu inte fakturerats föreslås som fraktrad i fakturadialogen (se [Skapa en faktura](#skapa-en-faktura)). Raden hamnar i gruppen **Frakt** och består av fraktartikeln (**Fraktartikel** under **System → Frakt**), antal 1 och försändelsens kundpris i fakturans valuta — på en faktura i SEK är det **Kundpris (kr)** rakt av, på en faktura i annan valuta räknas kronpriset om med orderns kurs (en försändelse utan order med dagens kurs); priset går att ändra. Raden är förbockad från början när försändelsen är i den valuta fakturan får — den valda ordens valuta, annars kundens; frakt i en annan valuta kryssar du i själv, en valuta åt gången, och frakt vars valuta saknar kurs går inte att kryssa i förrän en kurs finns under **Ekonomi → Valutakurser**. Avbockas raden följer ingen frakt med. Har någon av orderna bakom försändelsen redan en rad med fraktartikeln (se [Frakt på offert och order](#frakt-pa-offert-och-order)) föreslås ingen fraktrad, så frakten faktureras inte två gånger. Spärren gäller åt andra hållet också: när försändelsens fraktrad ligger på en faktura vägrar **Lägg till frakt** på ordern med **Frakten för ordern är redan fakturerad via försändelse FR-… — ingen fraktrad läggs till**. Samlingsfaktureringen tar med frakten automatiskt och visar antalet i kolumnen **Frakter**.
 
 En fraktrad tas bort genom att kryssrutan under **Frakt** avmarkeras. Benämning och pris på fraktraden kan ändras fritt; antalet är alltid 1. Är ingen fraktartikel vald under **System → Frakt** kan frakt inte faktureras.
 

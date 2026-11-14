@@ -1,4 +1,5 @@
 import type { StoredRates } from "@navet/db";
+import type { ShipmentProvider } from "@navet/shared";
 import type { ShipmentRow } from "../repository/shipping.repository.js";
 import { customerPriceFor } from "./pricing.js";
 import { trackingStatusLabel } from "./tracking-status.js";
@@ -43,6 +44,10 @@ export interface ShipmentDetailView {
   id: string;
   shipmentNumber: string;
   status: ShipmentRow["status"];
+  // Egna fraktsätt: "manual" = registered by hand with `carrier` (the
+  // Speditör); "sendify" = booked through the broker.
+  provider: ShipmentProvider;
+  carrier: { id: string; code: string; name: string } | null;
   customerId: string;
   customerName: string;
   recipientName: string;
@@ -67,9 +72,10 @@ export interface ShipmentDetailView {
   senderReference: string | null;
   senderReferenceManual: boolean;
   receiverReference: string | null;
+  // A manual shipment's date sent; Sendify's pickup day.
   pickupDate: string;
-  pickupFrom: string;
-  pickupTo: string;
+  pickupFrom: string | null;
+  pickupTo: string | null;
   freightProduct: { id: string; carrierCode: string; carrierName: string; productName: string } | null;
   carrierPrice: number | null;
   carrierCurrency: string | null;
@@ -119,6 +125,7 @@ export function toDetailView(
   extras: {
     customerName: string;
     product: { id: string; carrierCode: string; carrierName: string; productName: string } | null;
+    carrier: { id: string; code: string; name: string } | null;
     links: { deliveryId: string; deliveryNumber: string; orderId: string; orderNumber: string; deliveredAt: Date; active: boolean }[];
     parcels: {
       id: string;
@@ -145,6 +152,8 @@ export function toDetailView(
     id: s.id,
     shipmentNumber: s.shipmentNumber,
     status: s.status,
+    provider: s.provider === "manual" ? "manual" : "sendify",
+    carrier: extras.carrier,
     customerId: s.customerId,
     customerName: extras.customerName,
     recipientName: s.recipientName,
@@ -170,8 +179,8 @@ export function toDetailView(
     senderReferenceManual: s.senderReferenceManual,
     receiverReference: s.receiverReference,
     pickupDate: s.pickupDate,
-    pickupFrom: s.pickupFrom.slice(0, 5),
-    pickupTo: s.pickupTo.slice(0, 5),
+    pickupFrom: s.pickupFrom?.slice(0, 5) ?? null,
+    pickupTo: s.pickupTo?.slice(0, 5) ?? null,
     freightProduct: extras.product
       ? { id: extras.product.id, carrierCode: extras.product.carrierCode, carrierName: extras.product.carrierName, productName: extras.product.productName }
       : null,

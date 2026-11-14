@@ -1541,6 +1541,13 @@
       "when": 1794628288779,
       "tag": "0219_epostsignatur",
       "breakpoints": true
+    },
+    {
+      "idx": 220,
+      "version": "7",
+      "when": 1794633827937,
+      "tag": "0220_egna_fraktsatt",
+      "breakpoints": true
     }
   ]
 }

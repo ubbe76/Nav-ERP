@@ -197,7 +197,15 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
                 case "rowCount":
                   return row.rowCount;
                 case "shipment":
-                  return isUndone(row) ? null : <BookTransportButton deliveryId={row.id} shipment={row.shipment} enabled={freightStatus.enabled} />;
+                  return isUndone(row) ? null : (
+                    <BookTransportButton
+                      deliveryId={row.id}
+                      shipment={row.shipment}
+                      enabled={freightStatus.enabled}
+                      carriers={carriers}
+                      defaultCarrierId={order.carrierId ?? customer?.carrierId ?? null}
+                    />
+                  );
                 case "id":
                   return (
                     <span style={{ display: "inline-flex", gap: 12, alignItems: "center" }}>

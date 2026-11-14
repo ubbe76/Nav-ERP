@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { StoredRate, StoredRates, Tx } from "@navet/db";
-import type { BookShipmentInput, CreateShipmentInput, ListShipmentsQuery, ParcelInput, UpdateShipmentInput } from "@navet/shared";
+import type {
+  BookShipmentInput,
+  CreateManualShipmentInput,
+  CreateShipmentInput,
+  ListShipmentsQuery,
+  ParcelInput,
+  UpdateManualShipmentInput,
+  UpdateShipmentInput,
+} from "@navet/shared";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import {
   isActiveLinkViolation,
@@ -35,7 +43,10 @@ import {
   FreightShipmentChangedError,
   FreightValidationError,
   InvalidShipmentStatusError,
+  ManualShipmentInvoicedError,
   MixedCustomersError,
+  ShipmentCarrierNotFoundError,
+  ShipmentCarrierRequiredError,
   ShipmentDeliveryNotFoundError,
   ShipmentFileNotFoundError,
   ShipmentNeedsDeliveryError,
@@ -46,6 +57,9 @@ import { toDetailView, toRatesView } from "./shipping.views.js";
 
 // Försändelse — status flow draft → booked → delivered, cancelled from
 // draft/booked. Every transition and every "only in draft" rule lives here.
+// Egna fraktsätt (provider "manual", migration 0220) skip the draft: they
+// are registered as booked (Skickad), are never sent to a broker, and are
+// changed with updateManual — every draft-only path refuses them already.
 // No transaction is ever held open over an HTTP call to the provider.
 
 // A booking reservation older than this is treated as abandoned.
@@ -82,6 +96,12 @@ const STALE_RATES = { lastRates: null, ratesFetchedAt: null } satisfies Partial<
 const DOCUMENTS: Record<string, string> = { label: "Etikett", waybill: "Fraktsedel" };
 
 type ParcelRow = Awaited<ReturnType<ShippingRepository["listParcels"]>>[number];
+
+// A Sendify shipment's pickup window (never null there — CHECK
+// shipments_pickup_window); a manual shipment has none.
+function pickupSlotOf(s: Pick<ShipmentRow, "pickupDate" | "pickupFrom" | "pickupTo">) {
+  return { date: s.pickupDate, timeFrom: s.pickupFrom ?? "", timeTo: s.pickupTo ?? "" };
+}
 
 function toProviderShipment(s: ShipmentRow, sender: SenderParty, parcels: ParcelRow[]): ProviderShipment {
   return buildProviderShipment(s, sender, parcels, {
@@ -149,10 +169,27 @@ export function createShippingService(deps: {
     return warnings;
   }
 
+  // The följesedlar a new shipment gets, in the order given: all found, one
+  // customer, none undone, none already on a live shipment.
+  async function deliveriesForNewShipment(deliveryIds: string[]) {
+    const ids = [...new Set(deliveryIds)];
+    const found = await repo.findDeliveries(ids);
+    const ordered = ids.map((id) => {
+      const d = found.find((f) => f.id === id);
+      if (!d) throw new ShipmentDeliveryNotFoundError(id);
+      return d;
+    });
+    if (new Set(ordered.map((d) => d.customerId)).size > 1) throw new MixedCustomersError();
+    const undone = ordered.find((d) => !d.live);
+    if (undone) throw new ShipmentDeliveryUndoneError(undone.deliveryNumber);
+    await assertNotShipped(ids);
+    return { ids, ordered };
+  }
+
   async function get(id: string) {
     const s = await repo.findShipment(id);
     if (!s) throw new ShipmentNotFoundError(id);
-    const [links, parcels, files, trackingEvents, invoice, customerName, product, freight, configuredPickup] = await Promise.all([
+    const [links, parcels, files, trackingEvents, invoice, customerName, product, freight, configuredPickup, carrier] = await Promise.all([
       repo.shipmentDeliveries(id),
       repo.listParcels(id),
       repo.listFiles(id),
@@ -162,10 +199,12 @@ export function createShippingService(deps: {
       s.freightProductId ? repo.findFreightProduct(s.freightProductId) : Promise.resolve(null),
       settings.read(),
       s.status === "draft" ? settings.pickupFor(s.pickupDate) : Promise.resolve(null),
+      s.carrierId ? repo.findCarrier(s.carrierId) : Promise.resolve(null),
     ]);
     return toDetailView(s, {
       customerName: customerName ?? "",
       product,
+      carrier,
       links,
       parcels,
       files,
@@ -174,7 +213,7 @@ export function createShippingService(deps: {
       bookingInProgress: bookingInProgress(s),
       pickupWarning:
         s.status === "draft"
-          ? pickupProblem({ date: s.pickupDate, timeFrom: s.pickupFrom, timeTo: s.pickupTo }, configuredPickup, settings.today())
+          ? pickupProblem(pickupSlotOf(s), configuredPickup, settings.today())
           : null,
       markup: freight,
     });
@@ -192,7 +231,7 @@ export function createShippingService(deps: {
     const missing = missingForBooking({ ...s, ...sender }, parcels.map((p) => ({ weightKg: Number(p.weightKg) })));
     if (missing.length > 0) throw new FreightValidationError(missing);
     const today = settings.today();
-    const storedSlot = { date: s.pickupDate, timeFrom: s.pickupFrom, timeTo: s.pickupTo };
+    const storedSlot = pickupSlotOf(s);
     const problem = pickupProblem(storedSlot, await settings.pickupFor(s.pickupDate), today);
     if (problem) throw new FreightPickupDayError(problem);
     const pickupTime = requestedPickupTime(storedSlot, today)!;
@@ -265,17 +304,7 @@ export function createShippingService(deps: {
     async create(input: CreateShipmentInput, userId: string | null) {
       const freight = await settings.read();
       if (!freight.enabled) throw new FreightNotConfiguredError("disabled");
-      const ids = [...new Set(input.deliveryIds)];
-      const found = await repo.findDeliveries(ids);
-      const ordered = ids.map((id) => {
-        const d = found.find((f) => f.id === id);
-        if (!d) throw new ShipmentDeliveryNotFoundError(id);
-        return d;
-      });
-      if (new Set(ordered.map((d) => d.customerId)).size > 1) throw new MixedCustomersError();
-      const undone = ordered.find((d) => !d.live);
-      if (undone) throw new ShipmentDeliveryUndoneError(undone.deliveryNumber);
-      await assertNotShipped(ids);
+      const { ids, ordered } = await deliveriesForNewShipment(input.deliveryIds);
 
       const slot = await settings.nextPickup();
       if (!slot) {
@@ -345,6 +374,131 @@ export function createShippingService(deps: {
       return { shipment: await get(id), warnings };
     },
 
+    // Eget fraktsätt: registered as sent at once — no draft, no broker, no
+    // pickup window, no kollin — whether Sendify is switched on or not. The
+    // Speditör is the chosen one, else the order's, else the customer's.
+    async createManual(input: CreateManualShipmentInput, userId: string | null) {
+      const { ids, ordered } = await deliveriesForNewShipment(input.deliveryIds);
+      const first = ordered[0]!;
+      const carrierId = input.carrierId ?? (await repo.defaultCarrierFor(first.orderId, first.customerId));
+      if (!carrierId) throw new ShipmentCarrierRequiredError();
+      const carrier = await repo.findCarrier(carrierId);
+      if (!carrier) throw new ShipmentCarrierNotFoundError(carrierId);
+      const recipient = resolveRecipient(
+        await repo.recipientSource(first.customerId, first.deliveryAddressId, {
+          customerOrderNumber: first.customerOrderNumber,
+          customerReference: first.customerReference,
+        })
+      );
+      const sender = await settings.sender();
+      const customerPrice = input.customerPrice ?? null;
+      const shipmentNumber = await repo.nextShipmentNumber();
+      let id: string;
+      try {
+        id = await repo.insertShipment(
+          {
+            shipmentNumber,
+            provider: "manual",
+            carrierId: carrier.id,
+            status: "booked",
+            customerId: first.customerId,
+            ...recipient,
+            ...sender,
+            senderReference: senderReferenceFor(ordered.map((d) => d.deliveryNumber)),
+            pickupDate: input.shippedDate ?? settings.today().date,
+            pickupFrom: null,
+            pickupTo: null,
+            trackingNumber: input.trackingNumber ?? null,
+            customerPrice: customerPrice === null ? null : String(customerPrice),
+            customerPriceManual: customerPrice !== null,
+            bookedAt: now(),
+            bookedBy: userId,
+            createdBy: userId,
+          },
+          ids,
+          []
+        );
+      } catch (err) {
+        if (isActiveLinkViolation(err)) await assertNotShipped(ids);
+        throw err;
+      }
+      await audit.log({
+        entityType: "shipment",
+        entityId: id,
+        action: "created",
+        detail: {
+          shipmentNumber,
+          deliveries: ordered.map((d) => d.deliveryNumber),
+          provider: "manual",
+          carrier: carrier.name,
+          trackingNumber: input.trackingNumber ?? null,
+          customerPrice,
+        },
+        userId,
+      });
+      return { shipment: await get(id), warnings: [] as string[] };
+    },
+
+    // Ändra on a manual shipment: Speditör, fraktsedelsnummer, kundpris and
+    // the date it was sent — while sent or delivered and on no invoice (the
+    // invoice's freight row was made from it). Under the row lock, which an
+    // invoice taking the freight waits for (FOR SHARE).
+    async updateManual(id: string, input: UpdateManualShipmentInput, userId: string | null) {
+      const changes = await repo.transaction(async (tx) => {
+        const s = await repo.lockShipment(tx, id);
+        if (!s) throw new ShipmentNotFoundError(id);
+        if (s.provider !== "manual") throw new InvalidShipmentStatusError("Försändelsen bokas via Sendify och ändras inte så här");
+        if (s.status !== "booked" && s.status !== "delivered") {
+          throw new InvalidShipmentStatusError(`Försändelsen är ${STATUS_TEXT[s.status]} och kan inte ändras`);
+        }
+        const invoice = await repo.invoiceForShipment(id, tx);
+        if (invoice) throw new ManualShipmentInvoicedError(invoice.status === "draft" ? null : invoice.invoiceNumber);
+        const patch: Partial<NewShipment> = {};
+        const changed: Record<string, { before: unknown; after: unknown }> = {};
+        if (input.carrierId !== undefined && input.carrierId !== s.carrierId) {
+          const carrier = await repo.findCarrier(input.carrierId, tx);
+          if (!carrier) throw new ShipmentCarrierNotFoundError(input.carrierId);
+          patch.carrierId = carrier.id;
+          changed.carrierId = { before: s.carrierId, after: carrier.id };
+        }
+        if (input.trackingNumber !== undefined && input.trackingNumber !== s.trackingNumber) {
+          patch.trackingNumber = input.trackingNumber;
+          changed.trackingNumber = { before: s.trackingNumber, after: input.trackingNumber };
+        }
+        if (input.customerPrice !== undefined) {
+          const after = input.customerPrice === null ? null : String(input.customerPrice);
+          if ((s.customerPrice === null ? null : Number(s.customerPrice)) !== input.customerPrice) {
+            patch.customerPrice = after;
+            patch.customerPriceManual = after !== null;
+            changed.customerPrice = { before: s.customerPrice, after };
+          }
+        }
+        if (input.shippedDate !== undefined && input.shippedDate !== s.pickupDate) {
+          patch.pickupDate = input.shippedDate;
+          changed.shippedDate = { before: s.pickupDate, after: input.shippedDate };
+        }
+        if (Object.keys(patch).length > 0) await repo.updateShipment(tx, id, patch);
+        return changed;
+      });
+      if (Object.keys(changes).length > 0) {
+        await audit.log({ entityType: "shipment", entityId: id, action: "updated", detail: { changes }, userId });
+      }
+      return get(id);
+    },
+
+    // Markera levererad — a manual shipment has no tracking to say so.
+    async markDelivered(id: string, userId: string | null) {
+      await repo.transaction(async (tx) => {
+        const s = await repo.lockShipment(tx, id);
+        if (!s) throw new ShipmentNotFoundError(id);
+        if (s.provider !== "manual") throw new InvalidShipmentStatusError("Spårningen markerar en Sendify-försändelse som levererad");
+        if (s.status !== "booked") throw new InvalidShipmentStatusError(`Försändelsen är ${STATUS_TEXT[s.status]}`);
+        await repo.markManualDelivered(tx, id, now());
+      });
+      await audit.log({ entityType: "shipment", entityId: id, action: "delivered", detail: { manual: true }, userId });
+      return get(id);
+    },
+
     async update(id: string, input: UpdateShipmentInput, _userId: string | null) {
       const priceOnly = Object.keys(input).every((k) => k === "customerPrice");
       const freight = await settings.read();
@@ -358,6 +512,9 @@ export function createShippingService(deps: {
       await repo.transaction(async (tx) => {
         const s = await repo.lockShipment(tx, id);
         if (!s) throw new ShipmentNotFoundError(id);
+        if (s.provider === "manual") {
+          throw new InvalidShipmentStatusError("Försändelsen har ett eget fraktsätt — ändra den med Ändra på kortet");
+        }
         if (priceOnly) {
           if (s.status === "cancelled") throw new InvalidShipmentStatusError("En avbruten försändelse kan inte ändras");
         } else {
@@ -385,8 +542,8 @@ export function createShippingService(deps: {
         }
         if (input.pickupFrom !== undefined) patch.pickupFrom = input.pickupFrom;
         if (input.pickupTo !== undefined) patch.pickupTo = input.pickupTo;
-        const from = (patch.pickupFrom ?? s.pickupFrom).slice(0, 5);
-        const to = (patch.pickupTo ?? s.pickupTo).slice(0, 5);
+        const from = (patch.pickupFrom ?? s.pickupFrom ?? "").slice(0, 5);
+        const to = (patch.pickupTo ?? s.pickupTo ?? "").slice(0, 5);
         if (from >= to) throw new FreightPickupDayError("Upphämtningens Från måste vara före Till");
 
         if (input.customerPrice !== undefined) {
@@ -639,6 +796,7 @@ export function createShippingService(deps: {
       if (s.status !== "booked" && s.status !== "delivered") {
         throw new InvalidShipmentStatusError("Fraktsedel finns bara för bokade försändelser");
       }
+      if (s.provider === "manual") throw new InvalidShipmentStatusError("Ett eget fraktsätt har ingen fraktsedel från Sendify");
       await storeDocuments(id);
       return get(id);
     },
@@ -648,6 +806,21 @@ export function createShippingService(deps: {
     async cancel(id: string, userId: string | null) {
       const s = await repo.findShipment(id);
       if (!s) throw new ShipmentNotFoundError(id);
+      if (s.provider === "manual") {
+        // Makulera: nothing to cancel anywhere else — the row lock and the
+        // draft-invoice rule as for a booked Sendify shipment.
+        await repo.transaction(async (tx) => {
+          const row = await repo.lockShipment(tx, id);
+          if (row?.status !== "booked") {
+            throw new InvalidShipmentStatusError(`Försändelsen är ${STATUS_TEXT[row?.status ?? s.status]} och kan inte makuleras`);
+          }
+          const invoice = await repo.invoiceForShipment(id, tx);
+          if (invoice?.status === "draft") throw new ShipmentOnDraftInvoiceError();
+          await repo.cancelShipment(tx, id);
+        });
+        await audit.log({ entityType: "shipment", entityId: id, action: "cancelled", detail: { wasBooked: true, manual: true }, userId });
+        return get(id);
+      }
       if (s.status === "draft") {
         await withDraft(id, (tx) => repo.cancelShipment(tx, id));
         if (s.providerShipmentId) {
@@ -704,7 +877,14 @@ export function createShippingService(deps: {
       return new Map(
         rows.map((r) => [
           r.deliveryId,
-          { shipmentId: r.shipmentId, shipmentNumber: r.shipmentNumber, status: r.status, carrierName: r.carrierName, trackingNumber: r.trackingNumber },
+          {
+            shipmentId: r.shipmentId,
+            shipmentNumber: r.shipmentNumber,
+            status: r.status,
+            provider: r.provider,
+            carrierName: r.carrierName,
+            trackingNumber: r.trackingNumber,
+          },
         ])
       );
     },

@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, gt, gte, ilike, inArray, isNotNull, isNull, like, lte, ne, or, sql } from "drizzle-orm";
 import {
   articles,
+  carriers,
   companyInfo,
   customerContacts,
   customerDeliveryAddresses,
@@ -263,13 +264,16 @@ export function createShippingRepository(db: Db) {
           shipmentId: shipments.id,
           shipmentNumber: shipments.shipmentNumber,
           status: shipments.status,
-          carrierName: freightProducts.carrierName,
+          provider: shipments.provider,
+          // The broker product's carrier, or a manual shipment's Speditör.
+          carrierName: sql<string | null>`coalesce(${freightProducts.carrierName}, ${carriers.name})`,
           trackingNumber: shipments.trackingNumber,
         })
         .from(shipmentDeliveries)
         .innerJoin(shipments, eq(shipments.id, shipmentDeliveries.shipmentId))
         .innerJoin(deliveries, eq(deliveries.id, shipmentDeliveries.deliveryId))
         .leftJoin(freightProducts, eq(freightProducts.id, shipments.freightProductId))
+        .leftJoin(carriers, eq(carriers.id, shipments.carrierId))
         .where(and(eq(shipmentDeliveries.active, true), inArray(shipmentDeliveries.deliveryId, ids)));
     },
 
@@ -420,6 +424,33 @@ export function createShippingRepository(db: Db) {
     async findShipment(id: string, executor: Db | Tx = db) {
       const [row] = await executor.select().from(shipments).where(eq(shipments.id, id));
       return row ?? null;
+    },
+
+    // Egna fraktsätt: the Speditör a manual shipment takes when none is
+    // chosen — the order's, else the customer's (null = neither has one).
+    async defaultCarrierFor(orderId: string, customerId: string): Promise<string | null> {
+      const [row] = await db
+        .select({ order: salesOrders.carrierId, customer: customers.carrierId })
+        .from(customers)
+        .leftJoin(salesOrders, eq(salesOrders.id, orderId))
+        .where(eq(customers.id, customerId));
+      return row?.order ?? row?.customer ?? null;
+    },
+
+    async findCarrier(id: string, executor: Db | Tx = db) {
+      const [row] = await executor
+        .select({ id: carriers.id, code: carriers.code, name: carriers.name })
+        .from(carriers)
+        .where(eq(carriers.id, id));
+      return row ?? null;
+    },
+
+    // Markera levererad on a manual shipment (no tracking sets it).
+    async markManualDelivered(tx: Tx, id: string, at: Date) {
+      await tx
+        .update(shipments)
+        .set({ status: "delivered", deliveredAt: at, updatedAt: new Date() })
+        .where(and(eq(shipments.id, id), eq(shipments.provider, "manual"), eq(shipments.status, "booked")));
     },
 
     async lockShipment(tx: Tx, id: string) {
@@ -705,7 +736,8 @@ export function createShippingRepository(db: Db) {
             customerId: shipments.customerId,
             customerName: customers.name,
             deliveryNumbers,
-            carrierName: freightProducts.carrierName,
+            provider: shipments.provider,
+            carrierName: sql<string | null>`coalesce(${freightProducts.carrierName}, ${carriers.name})`,
             productName: freightProducts.productName,
             trackingNumber: shipments.trackingNumber,
             trackingText: shipments.lastTrackingText,
@@ -717,6 +749,7 @@ export function createShippingRepository(db: Db) {
           .from(shipments)
           .innerJoin(customers, eq(customers.id, shipments.customerId))
           .leftJoin(freightProducts, eq(freightProducts.id, shipments.freightProductId))
+          .leftJoin(carriers, eq(carriers.id, shipments.carrierId))
           .where(where)
           .orderBy(desc(shipments.createdAt))
           .limit(q.limit)

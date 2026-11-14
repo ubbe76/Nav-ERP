@@ -59,6 +59,45 @@ export const createShipmentSchema = z.object({
 });
 export type CreateShipmentInput = z.infer<typeof createShipmentSchema>;
 
+// Egna fraktsätt (migration 0220): "sendify" is booked through the broker,
+// "manual" is an own freight method (Egen bil, Kunden hämtar, an own
+// agreement with a carrier) — registered as sent, never booked anywhere.
+export const SHIPMENT_PROVIDERS = ["sendify", "manual"] as const;
+export type ShipmentProvider = (typeof SHIPMENT_PROVIDERS)[number];
+
+// The fraktsedelsnummer as typed (an own agreement's waybill); blank = none.
+const waybillNumber = z.preprocess(
+  (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+  z.string().trim().max(100).nullable()
+);
+
+// POST /shipments/manual — Eget fraktsätt for one or more följesedlar.
+// carrierId omitted = the order's Speditör, else the customer's (400
+// shipment-carrier-required when neither has one). shippedDate omitted =
+// today. customerPrice (kr) is what the invoice's freight row charges; null =
+// no freight on the invoice.
+export const createManualShipmentSchema = z.object({
+  deliveryIds: z.array(z.string().uuid()).min(1).max(50),
+  carrierId: z.string().uuid().optional(),
+  trackingNumber: waybillNumber.optional(),
+  customerPrice: optionalNonNegative(14, 2).optional(),
+  shippedDate: businessDateSchema.optional(),
+});
+export type CreateManualShipmentInput = z.infer<typeof createManualShipmentSchema>;
+
+// PATCH /shipments/:id/manual — only on a manual shipment that is sent or
+// delivered and on no invoice.
+export const updateManualShipmentSchema = z
+  .object({
+    carrierId: z.string().uuid().optional(),
+    trackingNumber: waybillNumber.optional(),
+    customerPrice: optionalNonNegative(14, 2).optional(),
+    shippedDate: businessDateSchema.optional(),
+  })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, "Inget att ändra");
+export type UpdateManualShipmentInput = z.infer<typeof updateManualShipmentSchema>;
+
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Expected HH:MM");
 const optionalLine = (max: number) =>
   z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? null : v), z.string().trim().max(max).nullable());

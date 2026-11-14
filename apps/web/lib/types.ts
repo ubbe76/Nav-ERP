@@ -5858,6 +5858,8 @@ export type PalletCardCode = "none" | "barcode" | "qr";
 
 export type ParcelKind = "package" | "pallet" | "other";
 export type ShipmentStatus = "draft" | "booked" | "delivered" | "cancelled";
+// Egna fraktsätt: "manual" = registered by hand with a Speditör, never booked.
+export type ShipmentProvider = "sendify" | "manual";
 
 export interface FreightSettings {
   enabled: boolean;
@@ -5936,6 +5938,9 @@ export interface ShipmentDetail {
   id: string;
   shipmentNumber: string;
   status: ShipmentStatus;
+  provider: ShipmentProvider;
+  // A manual shipment's Speditör.
+  carrier: { id: string; code: string; name: string } | null;
   customerId: string;
   customerName: string;
   recipientName: string;
@@ -5960,9 +5965,10 @@ export interface ShipmentDetail {
   senderReference: string | null;
   senderReferenceManual: boolean;
   receiverReference: string | null;
+  // A manual shipment's date sent (no window); Sendify's pickup day.
   pickupDate: string;
-  pickupFrom: string;
-  pickupTo: string;
+  pickupFrom: string | null;
+  pickupTo: string | null;
   freightProduct: { id: string; carrierCode: string; carrierName: string; productName: string } | null;
   carrierPrice: number | null;
   carrierCurrency: string | null;
@@ -5994,6 +6000,7 @@ export interface ShipmentListRow {
   id: string;
   shipmentNumber: string;
   status: ShipmentStatus;
+  provider: ShipmentProvider;
   customerId: string;
   customerName: string;
   deliveryNumbers: string | null;
@@ -6019,6 +6026,7 @@ export interface DeliveryShipmentInfo {
   shipmentId: string;
   shipmentNumber: string;
   status: ShipmentStatus;
+  provider: ShipmentProvider;
   carrierName: string | null;
   trackingNumber: string | null;
 }

@@ -31,6 +31,7 @@ export function createTrackingService(deps: {
   async function trackShipment(id: string): Promise<{ delivered: boolean }> {
     const s = await repo.findShipment(id);
     if (!s) throw new ShipmentNotFoundError(id);
+    if (s.provider === "manual") throw new InvalidShipmentStatusError("Ett eget fraktsätt har ingen spårning");
     if ((s.status !== "booked" && s.status !== "delivered") || !s.providerShipmentId) {
       throw new InvalidShipmentStatusError("Bara bokade försändelser kan spåras");
     }

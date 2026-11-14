@@ -15,6 +15,7 @@ import {
   deliveries,
   deliveryRows,
   fiscalYears,
+  carriers,
   freightProducts,
   invoiceDocuments,
   invoiceReminders,
@@ -495,7 +496,9 @@ export function createInvoiceRepository(db: Db) {
         shipmentId: shipments.id,
         shipmentNumber: shipments.shipmentNumber,
         customerId: shipments.customerId,
-        carrierName: freightProducts.carrierName,
+        // The broker product's carrier, or a manual shipment's Speditör
+        // (Egna fraktsätt) — the freight row says "Frakt Egen bil (FR-…)".
+        carrierName: sql<string | null>`coalesce(${freightProducts.carrierName}, ${carriers.name})`,
         productName: freightProducts.productName,
         customerPrice: shipments.customerPrice,
         bookedAt: shipments.bookedAt,
@@ -519,6 +522,7 @@ export function createInvoiceRepository(db: Db) {
       })
       .from(shipments)
       .leftJoin(freightProducts, eq(freightProducts.id, shipments.freightProductId))
+      .leftJoin(carriers, eq(carriers.id, shipments.carrierId))
       .where(
         and(
           customerId ? eq(shipments.customerId, customerId) : undefined,
