@@ -85,7 +85,9 @@ export async function mailRoutes(
 
   // Re-runs the original document send with the logged recipient/subject/
   // message against the document's CURRENT data — this is for failed sends,
-  // so regenerating the PDF is exactly what the user wants.
+  // so regenerating the PDF is exactly what the user wants. E-postsignatur:
+  // signed as the logged sender (the message already ends with their name);
+  // a row from before 0219 has none and goes out without, as it did.
   app.post<{ Params: { id: string } }>("/email-log/:id/resend", async (req, reply) => {
     try {
       const entry = await service.getEmailLogEntry(req.params.id);
@@ -100,28 +102,29 @@ export async function mailRoutes(
         message: entry.message,
         attachDrawings: entry.attachDrawings,
       };
+      const sender = entry.senderId;
       switch (entry.documentType) {
         // Kopia is replayed as logged (inquiry / purchase order).
         case "inquiry":
-          return await purchaseService.sendInquiryEmail(entry.documentId!, { ...input, cc: entry.cc });
+          return await purchaseService.sendInquiryEmail(entry.documentId!, { ...input, cc: entry.cc }, sender);
         case "purchase_order":
-          return await purchaseService.sendPurchaseOrderEmail(entry.documentId!, { ...input, cc: entry.cc });
+          return await purchaseService.sendPurchaseOrderEmail(entry.documentId!, { ...input, cc: entry.cc }, sender);
         // Visa tilläggspriser is replayed as logged (undefined on old rows ⇒
         // the customer's current setting, as a fresh send would).
         case "quote":
-          return await salesService.sendSalesOrderEmail(entry.documentId!, {
-            ...input,
-            variant: "quote",
-            showConfigurationPrices: entry.showConfigurationPrices ?? undefined,
-          });
+          return await salesService.sendSalesOrderEmail(
+            entry.documentId!,
+            { ...input, variant: "quote", showConfigurationPrices: entry.showConfigurationPrices ?? undefined },
+            sender
+          );
         case "order_confirmation":
-          return await salesService.sendSalesOrderEmail(entry.documentId!, {
-            ...input,
-            variant: "confirmation",
-            showConfigurationPrices: entry.showConfigurationPrices ?? undefined,
-          });
+          return await salesService.sendSalesOrderEmail(
+            entry.documentId!,
+            { ...input, variant: "confirmation", showConfigurationPrices: entry.showConfigurationPrices ?? undefined },
+            sender
+          );
         case "invoice":
-          return await invoiceService.sendEmail(entry.documentId!, input);
+          return await invoiceService.sendEmail(entry.documentId!, input, sender);
         // Betalningspåminnelse (B3): resending re-runs the whole reminder
         // routine against the invoice's CURRENT state — including a fresh
         // level and a new invoice_reminders row, which is exactly right for
@@ -130,7 +133,7 @@ export async function mailRoutes(
         // once and must be an explicit choice on the invoice card, never a
         // side effect of pressing "Skicka om".
         case "payment_reminder":
-          return await invoiceService.sendReminder(entry.documentId!, { ...input, withFee: false }, req.user!.id);
+          return await invoiceService.sendReminder(entry.documentId!, { ...input, withFee: false }, req.user!.id, sender);
         case "test":
           return await service.sendTestMail(entry.recipient);
         // Avvikelser: the reklamationsrapport with the logged details choice.
@@ -138,7 +141,8 @@ export async function mailRoutes(
           return await qualityService.sendEmail(
             entry.documentId!,
             { to: entry.recipient, subject: entry.subject, message: entry.message, includeDetails: entry.includeDetails ?? false },
-            req.user!.id
+            req.user!.id,
+            sender
           );
         case "alert_digest":
           throw new AlertDigestResendError();

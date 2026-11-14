@@ -16,7 +16,7 @@ import {
 import { formatNumber, type DocumentPdfService } from "../../mail/service/document-pdf.js";
 import { documentLanguageOf, localized, type DocumentLanguage } from "@navet/shared";
 import { documentTexts } from "../../mail/service/document-texts.js";
-import type { MailService } from "../../mail/service/mail.service.js";
+import { mailSender, type MailService } from "../../mail/service/mail.service.js";
 import { hasSignature } from "../../purchase/service/invoice-scan/file-signature.js";
 import { stockholmToday } from "../../system/service/delivery-days.js";
 import {
@@ -486,13 +486,15 @@ export function createQualityService(deps: {
         references,
         sections,
       });
-      return { filename: documentTexts(language).filenames.deviation(title, row.deviationNumber), content };
+      return { filename: documentTexts(language).filenames.deviation(title, row.deviationNumber), content, language };
     },
 
     // Skicka: the PDF as attachment through the mail module (email_log with
     // document type "deviation"); no status change, a history row on success.
-    async sendEmail(id: string, input: SendDeviationEmailInput, userId: string | null) {
-      const { filename, content } = await service.renderPdf(id, { details: input.includeDetails });
+    // userId logs the event; senderId (default the same) is whose
+    // E-postsignatur the mail carries — Skicka om keeps the original sender's.
+    async sendEmail(id: string, input: SendDeviationEmailInput, userId: string | null, senderId: string | null = userId) {
+      const { filename, content, language } = await service.renderPdf(id, { details: input.includeDetails });
       const logged = await deps.mail.sendMail({
         documentType: "deviation",
         documentId: id,
@@ -501,6 +503,7 @@ export function createQualityService(deps: {
         message: input.message,
         attachments: [{ filename, content }],
         includeDetails: input.includeDetails,
+        sender: mailSender(senderId, language),
       });
       await repo.logEmailSent(id, { emailLogId: logged.id, to: input.to, subject: input.subject, includeDetails: input.includeDetails }, userId);
       return logged;

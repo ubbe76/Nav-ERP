@@ -271,7 +271,7 @@ export async function invoiceRoutes(app: FastifyInstance, opts: { service: Invoi
   app.post<{ Params: { id: string } }>("/invoices/:id/send-email", async (req, reply) => {
     const input = sendDocumentEmailSchema.parse(req.body);
     try {
-      await service.sendEmail(req.params.id, input);
+      await service.sendEmail(req.params.id, input, req.user!.id);
       return reply.code(204).send();
     } catch (err) {
       return invoiceError(err, reply);

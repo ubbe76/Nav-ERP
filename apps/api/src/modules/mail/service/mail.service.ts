@@ -1,7 +1,8 @@
 import nodemailer from "nodemailer";
-import type { EmailDocumentType, ListEmailLogQuery } from "@navet/shared";
+import type { EmailDocumentType, ListEmailLogQuery, MailTemplateLanguage } from "@navet/shared";
 import type { SmtpConfig, SystemService } from "../../system/service/system.service.js";
 import type { MailRepository } from "../repository/mail.repository.js";
+import { SIGNATURE_LOGO_CID, signMail, type MailSignatureService } from "./mail-signature.js";
 
 export class SmtpNotConfiguredError extends Error {
   constructor() {
@@ -43,6 +44,18 @@ export function normalizeCc(cc: string[] | undefined, to: string): string[] {
   return result;
 }
 
+// E-postsignatur: who sends a document mail, and in which language (the
+// document's — the signature's labels follow it).
+export interface MailSender {
+  userId: string;
+  language: MailTemplateLanguage;
+}
+
+// The sender of a send, or null when no user is behind it.
+export function mailSender(userId: string | null | undefined, language: MailTemplateLanguage): MailSender | null {
+  return userId ? { userId, language } : null;
+}
+
 export interface OutgoingMail {
   documentType: EmailDocumentType;
   documentId: string | null;
@@ -66,6 +79,11 @@ export interface OutgoingMail {
   // Avvikelser: the reklamationsrapport's Orsaksanalys/Åtgärd/Beslut choice —
   // logged so Skicka om renders the same attachment. Null = not applicable.
   includeDetails?: boolean | null;
+  // The user the mail is from (email_log.sender_id): their E-postsignatur,
+  // when switched on, goes under the message — the mail then gets an HTML
+  // part with the company logo inline. Omitted/null = a mail no user sends
+  // (the test mail, the digest), without a signature.
+  sender?: MailSender | null;
 }
 
 // Minimal slice of nodemailer's Transporter — lets tests inject a fake
@@ -78,7 +96,9 @@ export interface MailTransport {
     subject: string;
     text: string;
     html?: string;
-    attachments?: { filename: string; content: Buffer }[];
+    // cid/contentType: the signature's inline logo (referenced as cid: in
+    // the HTML part).
+    attachments?: { filename: string; content: Buffer; cid?: string; contentType?: string }[];
   }): Promise<unknown>;
 }
 
@@ -97,7 +117,8 @@ const nodemailerTransportFactory: MailTransportFactory = (config) =>
 export function createMailService(
   repo: MailRepository,
   system: Pick<SystemService, "getSmtpConfig">,
-  transportFactory: MailTransportFactory = nodemailerTransportFactory
+  transportFactory: MailTransportFactory = nodemailerTransportFactory,
+  signatures: Pick<MailSignatureService, "forSending"> | null = null
 ) {
   return {
     // Sends one email and logs the attempt. Throws on failure (after logging)
@@ -110,6 +131,24 @@ export function createMailService(
       const from = config.fromName ? `"${config.fromName.replace(/"/g, "")}" <${fromEmail}>` : fromEmail;
       const transport = transportFactory(config);
       const cc = normalizeCc(mail.cc, mail.to);
+      const senderId = mail.sender?.userId ?? null;
+      // The sender's signature (only for a mail without its own HTML part).
+      const signature =
+        mail.sender && signatures && mail.html === undefined
+          ? await signatures.forSending(mail.sender.userId, mail.sender.language)
+          : null;
+      const signed = signature ? signMail(mail.message, signature) : null;
+      const attachments: { filename: string; content: Buffer; cid?: string; contentType?: string }[] = [
+        ...(mail.attachments ?? []),
+      ];
+      if (signed?.logo) {
+        attachments.push({
+          filename: signed.logo.filename,
+          content: signed.logo.content,
+          cid: SIGNATURE_LOGO_CID,
+          contentType: signed.logo.contentType,
+        });
+      }
 
       try {
         await transport.sendMail({
@@ -117,9 +156,9 @@ export function createMailService(
           to: mail.to,
           cc: cc.length > 0 ? cc : undefined,
           subject: mail.subject,
-          text: mail.message,
-          html: mail.html,
-          attachments: mail.attachments && mail.attachments.length > 0 ? mail.attachments : undefined,
+          text: signed ? signed.text : mail.message,
+          html: signed ? signed.html : mail.html,
+          attachments: attachments.length > 0 ? attachments : undefined,
         });
       } catch (err) {
         const cause = err instanceof Error ? err.message : String(err);
@@ -133,6 +172,7 @@ export function createMailService(
           attachDrawings: mail.attachDrawings ?? false,
           showConfigurationPrices: mail.showConfigurationPrices ?? null,
           includeDetails: mail.includeDetails ?? null,
+          senderId,
           status: "failed",
           error: cause,
         });
@@ -149,6 +189,7 @@ export function createMailService(
         attachDrawings: mail.attachDrawings ?? false,
         showConfigurationPrices: mail.showConfigurationPrices ?? null,
         includeDetails: mail.includeDetails ?? null,
+        senderId,
         status: "sent",
         error: null,
       });

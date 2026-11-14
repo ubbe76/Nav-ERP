@@ -1,4 +1,5 @@
 import type { AlertGroup } from "@navet/shared";
+import { escapeHtml } from "../../mail/service/mail-html.js";
 
 // Den dagliga sammanställningen — the mail itself. Pure: takes the groups
 // the digest job already filtered for the recipient and gives subject,
@@ -47,9 +48,7 @@ export function digestSubject(count: number, date: string): string {
   return `Nav: ${count === 1 ? "1 sak" : `${count} saker`} att bevaka — ${formatDigestDay(date)}`;
 }
 
-export function escapeHtml(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-}
+export { escapeHtml };
 
 function absolute(baseUrl: string, href: string | null): string | null {
   if (!baseUrl || !href) return null;

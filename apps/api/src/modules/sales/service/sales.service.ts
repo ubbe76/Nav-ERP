@@ -53,7 +53,7 @@ import type {
 import type { PriceChainQuery, PriceMarkups, PriceResolution } from "./price-resolver.js";
 import type { RegisterReferenceReader } from "../../register/service/register.service.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
-import type { MailService } from "../../mail/service/mail.service.js";
+import { mailSender, type MailService } from "../../mail/service/mail.service.js";
 import { formatBatchInfo, formatBatchLabel, formatQuantity, formatSerialInfo, type DocumentPdfService, type PalletCardPdfInput } from "../../mail/service/document-pdf.js";
 import { documentLanguageOf, localized, UNKNOWN_BATCH_LABEL, type DocumentLanguage } from "@navet/shared";
 import { documentTexts } from "../../mail/service/document-texts.js";
@@ -2243,7 +2243,8 @@ export function createSalesService(
     // the confirmation is what confirms the quote (quote → confirmed) — but
     // only when SMTP succeeded (sendMail throws otherwise). Sending the
     // quote never changes status, and later statuses are plain resends.
-    async sendSalesOrderEmail(orderId: string, input: SendSalesOrderEmailInput) {
+    // senderId: the user sending (their E-postsignatur, email_log.sender_id).
+    async sendSalesOrderEmail(orderId: string, input: SendSalesOrderEmailInput, senderId: string | null = null) {
       const order = await repo.findSalesOrderById(orderId);
       if (!order) throw new SalesOrderNotFoundError(orderId);
       if (order.status === "cancelled" || order.status === "lost") {
@@ -2285,6 +2286,7 @@ export function createSalesService(
         attachments: [attachment, ...drawings],
         attachDrawings: input.attachDrawings,
         showConfigurationPrices: showPrices,
+        sender: mailSender(senderId, documentLanguageOf(customer!.language)),
       });
       if (input.variant === "confirmation" && order.status === "quote") {
         // The mail is already sent; a quote that moved on meanwhile (e.g.
@@ -2464,7 +2466,7 @@ export function createSalesService(
       return renderInvoicePdf(order);
     },
 
-    async sendInvoiceEmail(orderId: string, input: SendDocumentEmailInput) {
+    async sendInvoiceEmail(orderId: string, input: SendDocumentEmailInput, senderId: string | null = null) {
       const order = await repo.findSalesOrderById(orderId);
       if (!order) throw new SalesOrderNotFoundError(orderId);
       if (order.status !== "invoiced" || !order.invoiceNumber) {
@@ -2474,6 +2476,7 @@ export function createSalesService(
       const drawings = input.attachDrawings
         ? await drawingAttachments((await repo.listRowsByOrder(orderId)).map((r) => r.articleId))
         : [];
+      const customer = await repo.findCustomerById(order.customerId);
       await mail.sendMail({
         documentType: "invoice",
         documentId: orderId,
@@ -2482,6 +2485,7 @@ export function createSalesService(
         message: input.message,
         attachments: [attachment, ...drawings],
         attachDrawings: input.attachDrawings,
+        sender: mailSender(senderId, documentLanguageOf(customer?.language)),
       });
       return order;
     },

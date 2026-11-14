@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "../ui/Button";
 import { Field, Input, Toggle } from "../ui/Field";
 import { API_URL, apiFetch, apiErrorFromBody } from "../../lib/api";
@@ -9,7 +9,8 @@ import styles from "./CompanyInfoForm.module.css";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { useUnsavedGuard } from "../../lib/unsavedGuard";
 
-export function CompanyInfoForm({ initial }: { initial: CompanyInfo }) {
+// children: further cards in the same column (the E-postsignatur choice).
+export function CompanyInfoForm({ initial, children }: { initial: CompanyInfo; children?: ReactNode }) {
   const [name, setName] = useState(initial.name);
   const [orgNumber, setOrgNumber] = useState(initial.orgNumber ?? "");
   const [address, setAddress] = useState(initial.address ?? "");
@@ -269,6 +270,7 @@ export function CompanyInfoForm({ initial }: { initial: CompanyInfo }) {
           </div>
         </div>
       </div>
+      {children}
     </div>
   );
 }

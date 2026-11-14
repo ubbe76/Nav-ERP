@@ -74,11 +74,12 @@ Installationen kräver att Nav nås över **https** — en installation som öpp
 
 ## Mina inställningar
 
-**Mina inställningar** öppnas från användarmenyn (knappen med dina initialer uppe till höger). Sidan gäller bara ditt eget konto och har tre delar.
+**Mina inställningar** öppnas från användarmenyn (knappen med dina initialer uppe till höger). Sidan gäller bara ditt eget konto och har fyra delar.
 
 - **Utseende och arbetssätt:** **Tema**, **Täthet**, **Dokument i flikar** och **Favoriter** — samma val som i användarmenyn, som har kvar dem. Ett val sparas direkt och följer med dig mellan datorer.
 - **Byt lösenord:** skriv **Nuvarande lösenord**, **Nytt lösenord** (minst 8 tecken) och **Upprepa nytt lösenord** och klicka på **Byt lösenord**. Du loggas ut på andra datorer och telefoner där kontot är inloggat, men inte där du bytte. Skriver du fel nuvarande lösenord tio gånger spärras bytet i 15 minuter. Konton med **Endast läsning** kan också byta sitt lösenord. Har du glömt lösenordet kan en administratör sätta ett nytt under **System → Användare** (fältet **Nytt lösenord** när användaren ändras).
 - **E-postmallar:** texten som förifylls när du skickar ett dokument med e-post, se nedan.
+- **E-postsignatur:** en signatur med dina och företagets uppgifter under mejlen du skickar, se [E-postsignatur](#e-postsignatur).
 
 ### E-postmallar
 
@@ -112,6 +113,21 @@ Platshållarna skrivs inom klammerparenteser och fylls i när dialogen öppnas:
 En platshållare som inte finns för dokumenttypen, eller som är felstavad, kan inte sparas — mallen visar vilken det gäller. Saknar dokumentet uppgiften blir platshållaren tom, så skriv till exempel inte *Hej {kontakt}!* om Er referens ofta saknas. Belopp skrivs på dokumentets språk (*12 500,00 kr* på svenska, *12,500.00 SEK* på engelska) och datum som *2026-12-31*.
 
 Konton med **Endast läsning** skickar inga dokument och kan därför inte ändra mallarna.
+
+### E-postsignatur
+
+Med en e-postsignatur får mejlen du skickar dina och företagets uppgifter under meddelandet, med företagets logotyp. Signaturen kommer med när du skickar en offert, orderbekräftelse, faktura, kreditfaktura, betalningspåminnelse, förfrågan, inköpsorder, ett reklamationsbesked, en reklamation till leverantör eller en avvikelserapport. Den gäller bara dig — en kollega har sin egen.
+
+1. Slå på **Lägg till signaturen i mejlen jag skickar**.
+2. Kryssa under **Ta med** i de uppgifter som ska stå i signaturen: **Namn**, **Befattning**, **Telefon**, **Mobil** och **E-post**. Befattning, telefon och mobil skriver du här. Namn och e-post kommer från ditt konto. Mallarna skriver redan ditt namn under hälsningen (`{avsändare}`), så kryssa bara i **Namn** om du har tagit bort det ur mallarna.
+3. **Förhandsvisning** visar signaturen som mottagaren ser den. Välj **Engelska** för att se den på engelska.
+4. Klicka på **Spara**.
+
+Under dina uppgifter står företagets uppgifter och logotyp. Vilka av dem som tas med väljer en administratör under [Företagsinformation](/hjalp/system#foretagsinformation). En uppgift som inte är ifylld utelämnas.
+
+Signaturen följer dokumentets språk. Mejl med ett dokument på engelska får engelska etiketter, till exempel *Phone* och *Reg. no*. Mejlet skickas med både en formaterad del och en ren textdel, så det går att läsa även i e-postprogram som bara visar text. Logotypen följer med i mejlet och visas bara om den är en PNG- eller JPEG-bild. I skickadialogen står *Din e-postsignatur läggs till under meddelandet.* när signaturen är påslagen. När ett misslyckat utskick skickas om från e-postloggen får mejlet signaturen hos den som skickade det första gången.
+
+Konton med **Endast läsning** skickar inga dokument och har därför ingen e-postsignatur.
 
 ## Översikten
 

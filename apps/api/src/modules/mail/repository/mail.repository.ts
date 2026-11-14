@@ -21,6 +21,8 @@ export interface NewEmailLogEntry {
   showConfigurationPrices: boolean | null;
   // Avvikelser: the reklamationsrapport's details choice; null = not applicable.
   includeDetails?: boolean | null;
+  // E-postsignatur: the user the mail was sent as; null = none.
+  senderId?: string | null;
   status: EmailStatus;
   error: string | null;
 }

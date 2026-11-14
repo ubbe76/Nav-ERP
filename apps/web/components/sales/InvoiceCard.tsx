@@ -52,6 +52,7 @@ import { GatedLink } from "../ui/GatedLink";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormStack } from "../ui/Form";
 import { mailAmount } from "../../lib/mailText";
 import { useMailText } from "../mail/useMailText";
+import { MailSignatureNote } from "../mail/MailSignatureNote";
 import { documentLanguageOf } from "../../lib/documentLanguage";
 import buttonStyles from "../ui/Button.module.css";
 import fieldStyles from "../ui/Field.module.css";
@@ -1037,6 +1038,7 @@ function ReminderDialog({
         </Field>
 
         <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>Påminnelsen bifogas som PDF.</p>
+        <MailSignatureNote />
 
         <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
           <input
