@@ -435,10 +435,15 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
   const selectedOnPage = selectableRows.filter((row) => (rowStates[row.id] ?? makeRowState(row)).selected).length;
   const allSelectedOnPage = selectableRows.length > 0 && selectedOnPage === selectableRows.length;
 
-  function toggleAll(selected: boolean) {
+  // The configured section's own "Välj alla" — just its rows.
+  const selectableConfigured = selectableRows.filter((r) => r.proposalKind === "configured");
+  const selectedConfigured = selectableConfigured.filter((row) => (rowStates[row.id] ?? makeRowState(row)).selected).length;
+  const allConfiguredSelected = selectableConfigured.length > 0 && selectedConfigured === selectableConfigured.length;
+
+  function toggleAll(selected: boolean, among: DisplayRow[] = selectableRows) {
     setRowStates((prev) => {
       const next = { ...prev };
-      for (const row of selectableRows) {
+      for (const row of among) {
         next[row.id] = { ...(prev[row.id] ?? makeRowState(row)), selected, touched: true };
       }
       return next;
@@ -894,16 +899,10 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
                       {row.moOrderNumber} · {row.moOperationLabel}
                     </div>
                   )}
-                  {isLego &&
-                    (row.openInquiries ?? []).map((inq) => (
-                      // Existing förfrågningar already covering this
-                      // operation — so a rerun of the routine doesn't read
-                      // as "nothing's been requested yet".
-                      <div key={inq.id} style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
-                        <GatedLink href={`/inkop/forfragningar/${inq.id}`}>Förfrågan {inq.inquiryNumber}</GatedLink> (
-                        {INQUIRY_STATUS_PILL[inq.status].label})
-                      </div>
-                    ))}
+                  {/* Existing förfrågningar already covering this operation —
+                      so a rerun of the routine doesn't read as "nothing's
+                      been requested yet". */}
+                  {isLego && (row.openInquiries ?? []).length > 0 && <LegoInquiryLinks inquiries={row.openInquiries!} />}
                 </>
               );
             case "onHand":
@@ -1002,7 +1001,20 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
           <SectionHeading spaced>Konfigurerade kundorderrader</SectionHeading>
           <Table<DisplayRow>
             columns={[
-              { key: "select", label: "", width: "36px" },
+              {
+                key: "select",
+                label: "",
+                width: "36px",
+                header: (
+                  <SelectAllCheckbox
+                    checked={allConfiguredSelected}
+                    indeterminate={selectedConfigured > 0 && !allConfiguredSelected}
+                    disabled={selectableConfigured.length === 0}
+                    onChange={(selected) => toggleAll(selected, selectableConfigured)}
+                    ariaLabel="Välj alla konfigurerade kundorderrader"
+                  />
+                ),
+              },
               { key: "order", label: "Kundorder", width: "minmax(110px, 1fr)" },
               { key: "customer", label: "Kund", width: "minmax(120px, 1fr)" },
               { key: "article", label: "Artikel", width: "minmax(160px, 1.5fr)" },
@@ -1193,4 +1205,30 @@ function LatestCell({ row, proposal }: { row: RequirementRow; proposal: Requirem
 // "Beräknad 08:12:03" — when the server computed the cached result.
 function formatComputedAt(iso: string): string {
   return new Date(iso).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Europe/Stockholm" });
+}
+
+// A lego row's open förfrågningar on one wrapping line, the first few and
+// "+ N till" for the rest — one line per förfrågan made the article column
+// very tall when an operation had been requested from many suppliers.
+const INQUIRY_LINKS_SHOWN = 3;
+function LegoInquiryLinks({ inquiries }: { inquiries: NonNullable<RequirementRow["openInquiries"]> }) {
+  const [expanded, setExpanded] = useState(false);
+  const shown = expanded ? inquiries : inquiries.slice(0, INQUIRY_LINKS_SHOWN);
+  const hidden = inquiries.length - shown.length;
+  return (
+    <div className={styles.inquiryLinks}>
+      {inquiries.length === 1 ? "Förfrågan " : "Förfrågningar "}
+      {shown.map((inq, i) => (
+        <span key={inq.id} className={styles.inquiryLink}>
+          <GatedLink href={`/inkop/forfragningar/${inq.id}`}>{inq.inquiryNumber}</GatedLink> ({INQUIRY_STATUS_PILL[inq.status].label})
+          {i < shown.length - 1 || hidden > 0 ? ", " : ""}
+        </span>
+      ))}
+      {hidden > 0 && (
+        <button type="button" className={styles.inquiryMore} onClick={() => setExpanded(true)}>
+          + {hidden} till
+        </button>
+      )}
+    </div>
+  );
 }

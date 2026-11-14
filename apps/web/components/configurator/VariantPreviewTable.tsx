@@ -24,7 +24,7 @@ function StatusCell({ row }: { row: VariantPreviewRow }) {
     case "invalid":
       return <span className={styles.stopped}>Stoppas: {row.errors.join(" · ")}</span>;
     case "number_taken":
-      return <span className={styles.stopped}>Numret finns redan</span>;
+      return <span className={styles.stopped}>{row.errors[0] ?? "Numret finns redan"}</span>;
     case "too_long":
       return <span className={styles.stopped}>{row.errors[0] ?? "För långt artikelnummer eller benämning"}</span>;
   }

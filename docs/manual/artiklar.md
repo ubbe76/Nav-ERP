@@ -283,7 +283,7 @@ Varianten får mallens grunduppgifter (som när du kopierar Information från en
 
 Knappen **Skapa varianter** (kräver behörighet att ändra artiklar) skapar flera varianter på en gång:
 
-1. För varje valgrupp väljer du vilka värden som ska ingå. Listval har en kryssruta per aktivt alternativ (alla ikryssade från början), ja/nej har **Med** och **Utan**, och mått skrivs som tal med decimalkomma åtskilda med semikolon, till exempel *800; 1000; 1200*. En grupp utan ikryssade alternativ utelämnas, och då gäller gruppens förval.
+1. För varje valgrupp väljer du vilka värden som ska ingå. Listval har en kryssruta per aktivt alternativ (alla ikryssade från början), ja/nej har **Med** och **Utan**, och mått skrivs som tal med decimalkomma åtskilda med semikolon, till exempel *800; 1000; 1200*. En grupp där inget är valt — inga ikryssade alternativ, varken **Med** eller **Utan**, eller ett tomt mått — utelämnas, och då gäller gruppens förval.
 2. Ange **Kalkylantal** — antalet som standardpriset kalkyleras för. Förvalet är artikelns orderkvantitet, annars 1.
 3. Klicka **Förhandsgranska**. Alla kombinationer visas med artikelnummer, benämning, **Försäljningspris**, **Standardpris** och **Status**, och en summering som *12 nya · 3 finns redan · 2 stoppas*. Statusen är *Ny*, *Finns redan* (länk till den befintliga varianten, som visas med sitt eget artikelnummer, sin benämning och sina priser), *Stoppas: …* (kombinationen är ogiltig enligt reglerna), *Numret finns redan* (artikelnumret används av en annan artikel) eller en text om att numret eller benämningen blir för lång.
 4. Klicka **Skapa N varianter**. Knappen är inaktiv tills förhandsgranskningen visar minst en ny variant, och förhandsgranskningen måste göras om efter varje ändring. Resultatet ersätter tabellen och nya varianter märks *Skapad*. Alla nya varianter skapas i en och samma körning — går något fel skapas ingen.
@@ -292,7 +292,7 @@ Högst 200 kombinationer kan skapas åt gången; blir det fler får du ett felme
 
 #### Skapa variant
 
-Under Testa konfiguration visas knappen **Skapa variant** när mallen är i läget Variantartiklar, konfigurationen är **Giltig** och du får ändra artiklar. Den öppnar en liten dialog för just det valda urvalet (grupper du inte har valt något i får gruppens förval) med förhandsgranskningsraden och fältet **Kalkylantal**; ändrar du antalet räknas raden om.
+Under Testa konfiguration finns knappen **Skapa variant** när mallen är i läget Variantartiklar och du får ändra artiklar. Den går att klicka när konfigurationen är **Giltig**. Den öppnar en liten dialog för just det valda urvalet (grupper du inte har valt något i får gruppens förval) med förhandsgranskningsraden och fältet **Kalkylantal**; ändrar du antalet räknas raden om.
 
 - *Ny* — klicka **Skapa**. Raden blir *Skapad* med länk till den nya artikeln, och knappen **Öppna …** tar dig dit.
 - *Finns redan* — knappen **Öppna** följt av artikelnumret (till exempel **Öppna 63000-B-RD**) tar dig till den befintliga varianten.

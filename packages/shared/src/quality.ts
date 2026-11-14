@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { blankSafe, numericStep, optionalText } from "./coerce.js";
 import { listQuerySchema } from "./list.js";
+import { optionalEnglishText } from "./register.js";
 import { sendDocumentEmailSchema } from "./mail.js";
 
 // Reklamationer och avvikelser (Kvalitet, migration 0153) — the shared
@@ -100,6 +101,9 @@ export const deviationReasonInputSchema = z
       .transform((value) => value.toUpperCase())
       .pipe(z.string().regex(/^[A-Z0-9]{1,10}$/, "Koden får bara innehålla versaler och siffror, högst 10 tecken")),
     name: z.string().trim().min(1).max(100),
+    // Benämning (engelska): printed on an English complaint/complaint notice;
+    // blank = null = the Swedish name.
+    nameEn: optionalEnglishText(100).optional(),
     appliesCustomer: z.boolean().default(false),
     appliesSupplier: z.boolean().default(false),
     appliesInternal: z.boolean().default(false),

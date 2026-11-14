@@ -458,7 +458,7 @@ export function createQualityService(deps: {
         const unit = row.unitCode ? ` ${localized(row.unitCode, row.unitCodeEn, language)}` : "";
         sections.push({ label: t.sections.quantity, text: `${formatQuantity(Number(row.quantity), language)}${unit}` });
       }
-      if (row.reasonName) sections.push({ label: t.sections.reason, text: row.reasonName });
+      if (row.reasonName) sections.push({ label: t.sections.reason, text: localized(row.reasonName, row.reasonNameEn, language) });
       if (row.description) sections.push({ label: t.sections.description, text: row.description });
       if (opts.details) {
         if (row.causeAnalysis) sections.push({ label: t.sections.causeAnalysis, text: row.causeAnalysis });

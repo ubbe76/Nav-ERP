@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { db, vatCodes } from "@navet/db";
+import { db, deviationReasons, vatCodes } from "@navet/db";
 import { createRoutingOperationSchema, createWorkCenterSchema, createArticleSchema, createPurchaseOrderSchema, createStockLocationSchema } from "@navet/shared";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -798,11 +798,18 @@ describe("the complaint notice (reklamationsbesked) in English", () => {
   it("follows the customer's language: English title, labels, article name, unit and decision; the internal report stays Swedish", async () => {
     const base = await makeBaseData();
     const customer = await makeCustomer("en", base);
+    // Kvalitetsorsakens Benämning (engelska) is printed on the English notice.
+    await db.execute(sql`TRUNCATE deviations, deviation_reasons CASCADE`);
+    const [reason] = await db
+      .insert(deviationReasons)
+      .values({ code: "TRANSP", name: "Transportskada", nameEn: "Transport damage", appliesCustomer: true, appliesInternal: true })
+      .returning();
     const complaint = await quality.create(
       {
         type: "customer",
         title: "Scratched sink",
         customerId: customer.id,
+        reasonId: reason!.id,
         counterpartyReference: "REK-77",
         articleId: base.article.id,
         quantity: 2,
@@ -837,15 +844,20 @@ describe("the complaint notice (reklamationsbesked) in English", () => {
       "CORRECTIVE ACTION",
       "DECISION",
       "Accepted",
+      "Transport damage",
       "Approved for F-tax",
     ]) {
       expect(text).toContain(part);
     }
-    for (const swedish of ["Reklamationsbesked", "Nummer", "Datum", "Er referens", "ÄRENDE", "ARTIKEL", "ANTAL", "BESKRIVNING", "ORSAKSANALYS", "ÅTGÄRD", "BESLUT", "Godkänd", "Diskbänk", "2 st"]) {
+    for (const swedish of ["Reklamationsbesked", "Nummer", "Datum", "Er referens", "ÄRENDE", "ARTIKEL", "ANTAL", "BESKRIVNING", "ORSAKSANALYS", "ÅTGÄRD", "BESLUT", "Godkänd", "Diskbänk", "2 st", "Transportskada"]) {
       expect(text).not.toContain(swedish);
     }
 
-    const internal = await quality.create({ type: "internal", title: "Sprucken svets", articleId: base.article.id, quantity: 1 }, null, { seePrices: true });
+    const internal = await quality.create(
+      { type: "internal", title: "Sprucken svets", articleId: base.article.id, quantity: 1, reasonId: reason!.id },
+      null,
+      { seePrices: true }
+    );
     const internalPdf = await quality.renderPdf(internal.id, { details: false });
     expect(internalPdf.filename).toBe(`Avvikelserapport-${internal.deviationNumber}.pdf`);
     const internalText = pdfText(internalPdf.content);
@@ -853,5 +865,8 @@ describe("the complaint notice (reklamationsbesked) in English", () => {
     expect(internalText).toContain("ÄRENDE");
     expect(internalText).toContain("SB-1200 Diskbänk 1200");
     expect(internalText).toContain("1 st");
+    expect(internalText).toContain("Transportskada");
+    expect(internalText).not.toContain("Transport damage");
+    await db.execute(sql`TRUNCATE deviations, deviation_reasons CASCADE`);
   });
 });

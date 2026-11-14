@@ -215,7 +215,8 @@ function CreateVariantsForm({ articleId, groups, defaultQuantity, onClose, onCha
             ))}
           </div>
           <FormHint>
-            En grupp utan ikryssade alternativ utelämnas, och då gäller gruppens förval.
+            En grupp där inget är valt — inga ikryssade alternativ, varken Med eller Utan, eller ett tomt mått — utelämnas,
+            och då gäller gruppens förval.
           </FormHint>
           <Field label="Kalkylantal" htmlFor="cfg-vars-quantity">
             <Input

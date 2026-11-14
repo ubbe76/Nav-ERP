@@ -53,7 +53,7 @@ Orsakerna man väljer när en offert markeras som **Förlorad** (se [Giltighetst
 
 ## Kvalitetsorsaker
 
-Orsakerna som [avvikelser](/hjalp/kvalitet) och kassationer väljer ur, t.ex. `TRANSPORT · Transportskada` och `MATERIAL · Materialfel`. Registret finns som fliken **Kvalitetsorsaker** här och under **Kvalitet → Kvalitetsorsaker**. Kolumnerna och kryssrutorna **Kund**, **Leverantör**, **Intern** och **Kassation** styr var orsaken kan väljas: på kundreklamationer, leverantörsavvikelser, interna avvikelser och när kasserat antal rapporteras. Minst en måste vara ikryssad.
+Orsakerna som [avvikelser](/hjalp/kvalitet) och kassationer väljer ur, t.ex. `TRANSPORT · Transportskada` och `MATERIAL · Materialfel`. Registret finns som fliken **Kvalitetsorsaker** här och under **Kvalitet → Kvalitetsorsaker**. Kolumnerna och kryssrutorna **Kund**, **Leverantör**, **Intern** och **Kassation** styr var orsaken kan väljas: på kundreklamationer, leverantörsavvikelser, interna avvikelser och när kasserat antal rapporteras. Minst en måste vara ikryssad. **Benämning (engelska)** skrivs på reklamationer och reklamationsbesked till en motpart med språket engelska; tomt = den svenska benämningen.
 
 - **+ Ny kvalitetsorsak** för egna orsaker. **Kod** skrivs med versaler och siffror (högst 10 tecken), **Benämning** högst 100; båda måste vara unika. Att skapa och ändra orsaker kräver rättigheten **Kvalitet**.
 - **Aktiv**: en inaktiv orsak kan inte väljas på nya avvikelser eller kassationer, men finns kvar där den redan används.
