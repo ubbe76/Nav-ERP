@@ -587,6 +587,8 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
               statuses={MANUAL_SALES_ORDER_STATUSES}
               current={order.status}
               onDone={() => router.refresh()}
+              disabled={rowEditOpen}
+              title={rowEditTitle}
             />
           )
         }
