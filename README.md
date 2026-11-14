@@ -523,7 +523,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.8.11 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.8.12 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -743,7 +743,8 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   bekräftad, orderbekräftelse bekräftar offerten — endast när utskicket
   lyckas), valbara ritningsbilagor (artikelfiler), nedladdningsbara
   PDF:er, utskickshistorik per kort och en central e-postlogg med
-  omskick av misslyckade utskick
+  omskick av misslyckade utskick; **e-postmallar** och en **e-postsignatur**
+  med företagets logotyp per användare under Mina inställningar
 - **Rapporter** — bland annat **orderförteckning** för kundorder och
   inköp (ordervärde och restvärde per order eller rad, som PDF och CSV),
   **offertuppföljning** (hit rate i antal och värde), marginal,
