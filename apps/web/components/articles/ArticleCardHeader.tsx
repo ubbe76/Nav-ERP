@@ -11,7 +11,6 @@ import { ArticleOverviewButton } from "./ArticleOverviewButton";
 import { Card } from "../ui/Card";
 import { HelpLink } from "../ui/HelpLink";
 import { GatedLink } from "../ui/GatedLink";
-import { useVariantOf } from "../../lib/useVariantOf";
 import { ARTICLE_TYPE_LABELS, type Article } from "../../lib/types";
 import styles from "./ArticleCardHeader.module.css";
 
@@ -22,7 +21,8 @@ import styles from "./ArticleCardHeader.module.css";
 // switcher.
 export function ArticleCardHeader({ article, totalOnHand, blockedOnHand = 0 }: { article: Article; totalOnHand: number; blockedOnHand?: number }) {
   const router = useRouter();
-  const variantOf = useVariantOf(article.id);
+  // Fetched with the article (?withVariantOf=true on the card page).
+  const variantOf = article.variantOf;
   const [labelOpen, setLabelOpen] = useState(false);
 
   return (

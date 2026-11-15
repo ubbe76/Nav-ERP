@@ -1,0 +1,20 @@
+/* Konfigurator tab: the lead line (Läge / not configurable) under the heading. */
+.lead {
+  margin-top: 0;
+}
+
+/* Visa i API: the checkbox line and its hint. */
+.publish {
+  margin-bottom: var(--space-3);
+}
+
+.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Ta bort konfigurator: the dialog's only paragraph. */
+.flush {
+  margin: 0;
+}

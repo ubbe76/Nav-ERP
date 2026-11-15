@@ -23,6 +23,13 @@ interface CacheEntry {
 }
 const searchCache = new Map<string, CacheEntry>();
 
+// The dialog `node` sits in, unless that dialog also holds `input` (a picker
+// inside a dialog moving focus within it).
+function otherDialog(node: EventTarget | null, input: Element): HTMLDialogElement | null {
+  const dialog = node instanceof Element ? node.closest("dialog") : null;
+  return dialog && !dialog.contains(input) ? dialog : null;
+}
+
 interface SearchPickerProps<T extends { id: string }> {
   id?: string;
   // Endpoint the picker searches, e.g. "/api/v1/customers" or
@@ -83,6 +90,10 @@ export function SearchPicker<T extends { id: string }>({
   // an Enter meant for the form into a new pick (the cached list restored on
   // focus need not contain the current value).
   const interacted = useRef(false);
+  // Focus left for a dialog that opened (a pick opening Konfigurera, the
+  // unsaved-changes question): the browser hands focus back when it closes,
+  // and that return must not open the list over what the dialog just did.
+  const leftForDialog = useRef(false);
   const listId = useId();
   const optionId = (index: number) => `${listId}-o${index}`;
 
@@ -270,11 +281,23 @@ export function SearchPicker<T extends { id: string }>({
         aria-activedescendant={open && visible[highlighted] ? optionId(highlighted) : undefined}
         value={display}
         placeholder={value && !open ? undefined : placeholder}
-        onFocus={() => {
+        onFocus={(e) => {
           // A blur timer from a quick refocus must not close the list again.
           if (blurRef.current) clearTimeout(blurRef.current);
           blurRef.current = null;
-          openList();
+          // Back from the dialog: focus comes from nowhere (its content is
+          // gone) or from inside it — a Tab from a neighbouring field still opens.
+          const returning = leftForDialog.current && (e.relatedTarget === null || otherDialog(e.relatedTarget, e.currentTarget) !== null);
+          leftForDialog.current = false;
+          if (!returning) openList();
+        }}
+        onMouseDown={(e) => {
+          // A click always opens: it precedes the focus (a dialog that closed
+          // without handing focus back leaves the flag set), and a focused
+          // input with its list closed (after a pick, Esc or a dialog's
+          // return) gets no new focus event.
+          leftForDialog.current = false;
+          if (!open && document.activeElement === e.currentTarget) openList();
         }}
         onChange={(e) => {
           const next = e.target.value;
@@ -285,7 +308,8 @@ export function SearchPicker<T extends { id: string }>({
           openAndSearch(next.trim());
         }}
         onKeyDown={onKeyDown}
-        onBlur={() => {
+        onBlur={(e) => {
+          leftForDialog.current = otherDialog(e.relatedTarget, e.currentTarget) !== null;
           // Delay so a mousedown on an option can complete its click first.
           blurRef.current = setTimeout(() => {
             blurRef.current = null;

@@ -1,5 +1,5 @@
 import type { EInvoiceAutoSendOutcome } from "./einvoice";
-import type { ManufacturingOrderConfiguration, OrderRowConfiguration } from "./configurator";
+import type { ManufacturingOrderConfiguration, OrderRowConfiguration, VariantOf } from "./configurator";
 import type { DocumentRateSourceValue } from "./currency";
 import type { DocumentLanguage } from "./documentLanguage";
 import type { MailSignatureCompanyField } from "./mailSignature";
@@ -129,6 +129,9 @@ export interface Article {
   forecastControlled: boolean;
   // ABC-klass (#10) — only when fetched with ?withAbc=true; null = outside the classification.
   abcClass?: AbcClass | null;
+  // Variant av … (the configurator) — only when fetched with ?withVariantOf=true;
+  // null = not a stocked variant.
+  variantOf?: VariantOf | null;
   active: boolean;
   createdAt: string;
   updatedAt: string;

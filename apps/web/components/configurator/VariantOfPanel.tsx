@@ -38,7 +38,7 @@ export function VariantOfPanel({ variantOf }: { variantOf: VariantOf }) {
           </tbody>
         </table>
       </div>
-      <p style={{ color: "var(--color-text-muted)", fontSize: 13 }}>
+      <p className={styles.footnote}>
         Standardpriset räknades vid kalkylantal {quantity}.
       </p>
     </div>

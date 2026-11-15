@@ -1,7 +1,6 @@
 "use client";
 
 import { Fragment, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { notify } from "../../lib/notice";
@@ -62,33 +61,14 @@ interface Props {
 
 // Konfigurera: pick a configuration on an order row; Lägg in fetches or
 // creates the variant article and hands it back to the form.
+// The order forms mount this inside their own <form>, hence the portal. Closing
+// it hands focus back to the article picker, which then keeps its result list
+// closed (SearchPicker) instead of covering the choice lines just entered.
 export function ConfigureModal(props: Props) {
-  // Rendered into document.body: the order forms mount this inside their own
-  // <form>, and a form must not contain another form.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  // Closing the dialog hands focus back to the article picker, which opens its
-  // result list on focus and would cover the choice lines just entered — let go of it.
-  const wasOpen = useRef(false);
-  useEffect(() => {
-    if (props.open) {
-      wasOpen.current = true;
-      return;
-    }
-    if (!wasOpen.current) return;
-    wasOpen.current = false;
-    const frame = requestAnimationFrame(() => {
-      const active = document.activeElement;
-      if (active instanceof HTMLInputElement && active.getAttribute("role") === "combobox") active.blur();
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [props.open]);
-  if (!mounted) return null;
-  return createPortal(
-    <Modal open={props.open} onClose={props.onCancel} title={props.title ?? "Konfigurera"}>
-      {props.open && props.template && <ConfigureForm key={props.openKey} {...props} template={props.template} />}
-    </Modal>,
-    document.body,
+  return (
+    <Modal portal open={props.open} onClose={props.onCancel} title={props.title ?? "Konfigurera"}>
+      {props.template && <ConfigureForm key={props.openKey} {...props} template={props.template} />}
+    </Modal>
   );
 }
 
@@ -201,8 +181,7 @@ function ConfigureForm({ template, customerId, showPrice, quantity, currency, ex
     <Form
       onSubmit={(e) => {
         e.preventDefault();
-        // React bubbles submit through portals: keep it from submitting the order form behind the dialog.
-        e.stopPropagation();
+        // The order form behind the dialog never sees this submit: the portal Modal stops it.
         if (result?.valid && !evaluating && !halfTyped && !pending) void insert();
       }}
     >

@@ -25,7 +25,7 @@ import { OperationSection } from "../configurator/OperationSection";
 import { TestConfigurationPanel } from "../configurator/TestConfigurationPanel";
 import { VariantSection } from "../configurator/VariantSection";
 import { VariantOfPanel } from "../configurator/VariantOfPanel";
-import { useVariantOf } from "../../lib/useVariantOf";
+import styles from "./KonfiguratorTab.module.css";
 
 type ModeDialog = null | "create" | "change" | "delete";
 
@@ -33,7 +33,8 @@ type ModeDialog = null | "create" | "change" | "delete";
 // option groups, rules and a test panel.
 export function KonfiguratorTab({ article, onChanged }: { article: Article; onChanged?: () => void | Promise<void> }) {
   const canEdit = useCan()(["artiklar"]);
-  const variantOf = useVariantOf(article.id);
+  // Fetched with the article (?withVariantOf=true on the card page).
+  const variantOf = article.variantOf;
   // undefined = loading, null = not a template.
   const [template, setTemplate] = useState<ConfiguratorTemplateView | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -56,9 +57,11 @@ export function KonfiguratorTab({ article, onChanged }: { article: Article; onCh
     }
   }, [article.id]);
 
+  // A stocked variant is never a template: its panel needs no template read.
+  const isVariant = variantOf != null;
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    if (!isVariant) void reload();
+  }, [reload, isVariant]);
 
   // Visa i API saves at once, then reloads the template.
   async function setPublished(published: boolean) {
@@ -103,7 +106,7 @@ export function KonfiguratorTab({ article, onChanged }: { article: Article; onCh
   // A stocked variant shows its choices read-only and nothing else.
   if (variantOf) return <VariantOfPanel variantOf={variantOf} />;
 
-  if (template === undefined || variantOf === undefined) {
+  if (template === undefined) {
     return (
       <div>
         <SectionHeading actions={help}>Konfigurator</SectionHeading>
@@ -117,7 +120,7 @@ export function KonfiguratorTab({ article, onChanged }: { article: Article; onCh
     return (
       <div>
         <SectionHeading actions={help}>Konfigurator</SectionHeading>
-        <p style={{ marginTop: 0 }}>
+        <p className={styles.lead}>
           Artikeln är inte konfigurerbar. Gör den konfigurerbar för att kunna sätta upp valgrupper, regler och priser
           som kunden väljer mellan på en offert eller order.
         </p>
@@ -165,13 +168,13 @@ export function KonfiguratorTab({ article, onChanged }: { article: Article; onCh
         Konfigurator
       </SectionHeading>
       <FormError margin="below">{error}</FormError>
-      <p style={{ marginTop: 0 }}>
+      <p className={styles.lead}>
         <strong>Läge:</strong> {CONFIGURATOR_MODE_LABELS[template.mode]}
         {template.published && <> · <strong>API</strong></>}
       </p>
       {canEdit && (
-        <div style={{ marginBottom: "var(--space-3)" }}>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-2)" }}>
+        <div className={styles.publish}>
+          <label className={styles.inline}>
             <Checkbox checked={template.published} disabled={publishing} onChange={(e) => void setPublished(e.target.checked)} />
             Visa i API
           </label>
@@ -387,7 +390,7 @@ function DeleteForm({
 
   return (
     <Form onSubmit={(e) => e.preventDefault()}>
-      <p style={{ margin: 0 }}>Valgrupper och regler tas bort. Artikeln blir en vanlig artikel.</p>
+      <p className={styles.flush}>Valgrupper och regler tas bort. Artikeln blir en vanlig artikel.</p>
       <FormError>{error}</FormError>
       <FormActions>
         <Button type="button" variant="danger" disabled={pending} onClick={() => void applyChange()}>

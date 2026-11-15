@@ -104,8 +104,12 @@ export type CopiedArticlesRemoveInput = z.infer<typeof copiedArticlesRemoveSchem
 
 // GET /articles/:id?withAbc=true — the card's ABC class (opt-in for the same
 // reason; the configurator and other readers call getArticle without it).
+// withVariantOf=true — the card's "Variant av …" (the stocked variant's
+// template and choices, null for any other article): one read for the
+// header and the Konfigurator tab instead of two GET …/variant-of.
 export const getArticleQuerySchema = z.object({
   withAbc: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
+  withVariantOf: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
 });
 
 // "Kopiera från befintlig artikel": the parts of a source article a new

@@ -14,6 +14,7 @@ import { Button } from "../ui/Button";
 import { FormError } from "../ui/Form";
 import { SectionHeading } from "../ui/SectionHeading";
 import { GroupModal } from "./GroupModal";
+import styles from "./Structure.module.css";
 
 interface GroupSectionProps {
   articleId: string;
@@ -119,14 +120,7 @@ export function GroupSection({
               return contentLabel(g);
             case "actions":
               return canEdit ? (
-                <span
-                  style={{
-                    display: "inline-flex",
-                    flexWrap: "wrap",
-                    gap: 4,
-                    justifyContent: "flex-end",
-                  }}
-                >
+                <span className={styles.actions}>
                   <Button
                     size="small"
                     variant="ghost"

@@ -78,3 +78,9 @@
 .muted {
   color: var(--color-text-secondary);
 }
+
+/* VariantOfPanel: the line under the choice list. */
+.footnote {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
