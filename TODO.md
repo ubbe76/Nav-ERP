@@ -69,7 +69,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 - [ ] **Frakt:** racetesterna i shipping-booking/invoice-freight bygger på fasta sömnar — polla om de flagnar; "ny försändelse 14:50 → första Hämta priser" bara testad på ren nivå; avbokning efter avbokning i Sendifys eget UI inte provad mot sandlådan.
 - [ ] **Konfigurator:** inga komponenttester (mallredigeringen, modalens PATCH) — repot saknar en testmiljö för React-komponenter (jsdom + Testing Library); de rena delarna (`selectionFromRaw`/`rawFromSelection`) är testade.
-- [ ] **Terminalen och närvaron:** anställd-cascade och FK-race; lego-inleverans; Slutför order över flera op; admin-fall; 2 s-gränsen.
 - [ ] **Artikelöversikten:** `toBeCloseTo` i invarianttestet om bråktal någonsin används.
 
 ### Att besluta

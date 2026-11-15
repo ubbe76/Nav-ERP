@@ -107,6 +107,52 @@ describe("employee default work centers (Förvalda stationer)", () => {
     expect(Object.keys(directory[0]!).sort()).toEqual(["active", "defaultWorkCenterIds", "employeeNumber", "id", "name"]);
   });
 
+  // The other cascade: Radera (GDPR, an employee without history) takes the
+  // stations with it — nothing for the work center to point back at.
+  it("drops the defaults with a deleted employee (FK cascade), and leaves the work centers", async () => {
+    const { employee, svets, kant } = await setup();
+    const user = await createAuthRepository(db).create({
+      email: `ewc-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "Admin", role: "admin",
+    });
+    await service.updateEmployee(employee.id, { defaultWorkCenterIds: [svets.id, kant.id], active: false });
+    await service.deleteEmployee(employee.id, user.id);
+    const left = [...(await db.execute(sql`SELECT count(*)::int AS n FROM employee_work_centers WHERE employee_id = ${employee.id}`))] as { n: number }[];
+    expect(left[0]!.n).toBe(0);
+    expect(await mfgService.listWorkCenters()).toHaveLength(2);
+  });
+
+  // The FK race: the work center is deleted after the existence check but
+  // before the set is written — the insert's FK violation is the same 404 as
+  // the check's, and the whole PATCH (name included) rolls back.
+  it("answers WorkCenterNotFoundError when the work center goes between the check and the insert, writing nothing", async () => {
+    const { employee, svets, kant } = await setup();
+    await service.updateEmployee(employee.id, { defaultWorkCenterIds: [svets.id] });
+    const repo = createTimeReportRepository(db);
+    let checks = 0;
+    const racing = createTimeReportService(
+      {
+        ...repo,
+        async missingWorkCenterIds(ids: string[]) {
+          checks += 1;
+          // The service's own check sees the work center; it is gone right after.
+          if (checks === 1) {
+            await db.execute(sql`DELETE FROM work_centers WHERE id = ${kant.id}`);
+            return [];
+          }
+          return repo.missingWorkCenterIds(ids);
+        },
+      },
+      mfgService,
+      { isDateLocked: async () => false },
+      { log: async () => {} }
+    );
+    const err = await racing.updateEmployee(employee.id, { name: "Annat namn", defaultWorkCenterIds: [svets.id, kant.id] }).catch((e) => e);
+    expect(err).toBeInstanceOf(WorkCenterNotFoundError);
+    expect((err as Error).message).toContain(kant.id);
+    const after = (await service.getEmployee(employee.id))!;
+    expect([after.name, after.defaultWorkCenterIds]).toEqual(["Urban", [svets.id]]);
+  });
+
   it("drops a deleted work center from the defaults (FK cascade)", async () => {
     const { employee, svets, kant } = await setup();
     await service.updateEmployee(employee.id, { defaultWorkCenterIds: [svets.id, kant.id] });
