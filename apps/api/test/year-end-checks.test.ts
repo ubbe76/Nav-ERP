@@ -26,6 +26,12 @@ describe("evaluateStepBlockers", () => {
     expect(codes).toEqual(["draft-verifications", "previous-year-open", "closing-period-locked", "closing-date-not-passed"]);
   });
 
+  it("names a closing date without a period on its own — never as a locked month", () => {
+    const missing = evaluateStepBlockers({ ...GATE, closingPeriodStatus: "missing" });
+    expect(missing.map((check) => check.code)).toEqual(["closing-period-missing"]);
+    expect(missing[0]!.message).toContain(GATE.closingDate);
+  });
+
   it("lets a closed previous year and a passed closing day through", () => {
     expect(evaluateStepBlockers({ ...GATE, previousYear: { label: "2023", status: "closed" }, today: "2025-01-01" })).toEqual([]);
   });

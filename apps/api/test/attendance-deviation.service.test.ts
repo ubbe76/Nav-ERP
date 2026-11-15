@@ -352,7 +352,7 @@ describe("tidig hemgång", () => {
     const stored = await session(opened.id);
     expect([stored.stoppedAt, stored.stopReasonId, stored.stopNote]).toEqual([at("15:20:00"), doctor.id, "tandläkare"]);
     const [entry] = await db.select().from(auditLog).where(eq(auditLog.action, "attendance_stopped"));
-    expect(entry!.detail).toMatchObject({ stopReasonId: doctor.id, stopNote: "tandläkare", overtimeDisposition: null });
+    expect(entry!.detail).toMatchObject({ stopReasonId: doctor.id, stopNote: "tandläkare", overtimeDisposition: null, pausedWorkSessions: 0 });
   });
 
   it("Ta ut ATF explains the departure — but only today's withdrawal by the same employee", async () => {
@@ -552,6 +552,9 @@ describe("attesteringen", () => {
       doctor.id,
       null,
     ]);
+    // The correction's log carries regel 7's effect on the work (none here).
+    const [logged] = await db.select().from(auditLog).where(and(eq(auditLog.entityId, opened.id), eq(auditLog.action, "updated")));
+    expect(logged!.detail).toMatchObject({ pausedWorkSessions: 0, movedPauses: 0 });
 
     // The reason already on the session may since have been inactivated.
     await db.update(attendanceDeviationReasons).set({ active: false }).where(eq(attendanceDeviationReasons.id, traffic.id));

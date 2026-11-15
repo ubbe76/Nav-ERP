@@ -34,8 +34,16 @@ const backfillSql = (() => {
 
 // The 0102 rule read the per-rate settings that migration 0142 moved onto
 // the momskoder; their old defaults are spelled out here for the port.
+// The account settings only (the posting settings also carry amounts and
+// switches, which the backfill never read).
+type AccountSettings = {
+  [K in keyof typeof DEFAULT_POSTING_SETTINGS as (typeof DEFAULT_POSTING_SETTINGS)[K] extends string ? K : never]: string;
+};
+const ACCOUNT_DEFAULTS = Object.fromEntries(
+  Object.entries(DEFAULT_POSTING_SETTINGS).filter(([, value]) => typeof value === "string")
+) as AccountSettings;
 const LEGACY_DEFAULTS = {
-  ...DEFAULT_POSTING_SETTINGS,
+  ...ACCOUNT_DEFAULTS,
   postingVatOut25: "2610",
   postingVatOut12: "2620",
   postingVatOut6: "2630",

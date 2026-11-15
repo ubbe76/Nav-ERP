@@ -7,6 +7,7 @@ export type YearEndCheckCode =
   | "draft-verifications"
   | "previous-year-open"
   | "closing-period-locked"
+  | "closing-period-missing"
   | "closing-date-not-passed"
   | "fiscal-year-not-ended"
   | "vat-unsettled"
@@ -38,7 +39,11 @@ export interface StepGateInput {
   closingDate: string;
   draftCount: number;
   previousYear: { label: string; status: "open" | "closed" } | null;
-  closingPeriodStatus: "open" | "locked";
+  // "missing": no accounting period covers the closing date (createFiscalYear
+  // always makes them; only a hand-edited database lacks one). Its own
+  // blocker — read as "locked" it offered Lås upp period for a month that
+  // does not exist.
+  closingPeriodStatus: "open" | "locked" | "missing";
 }
 
 // Gate for steps 2–5 (spec 4.2).
@@ -52,6 +57,12 @@ export function evaluateStepBlockers(gate: StepGateInput): YearEndCheck[] {
   }
   if (gate.closingPeriodStatus === "locked") {
     blockers.push({ code: "closing-period-locked", message: "Bokslutsmånaden är låst — lås upp den för att kunna bokföra bokslutet" });
+  }
+  if (gate.closingPeriodStatus === "missing") {
+    blockers.push({
+      code: "closing-period-missing",
+      message: `Bokslutsdagen ${gate.closingDate} ligger inte i någon räkenskapsperiod — inget av bokslutet kan bokföras`,
+    });
   }
   if (gate.closingDate >= gate.today) {
     blockers.push({ code: "closing-date-not-passed", message: `Bokslutsdagen ${gate.closingDate} har inte passerat` });

@@ -6,7 +6,7 @@ import type {
   SupplierPaymentInput,
 } from "@navet/shared";
 import { paymentExchangeDifference, round2 } from "@navet/shared";
-import { isUniqueViolation } from "../../system/service/db-errors.js";
+import { isReversalTaken } from "../../system/service/db-errors.js";
 import {
   CancelGuardError,
   SupplierPaymentGuardError,
@@ -343,7 +343,7 @@ export function createSupplierPaymentService(
           throw new SupplierPaymentAlreadyCancelledError(id);
         }
         // Same partial unique index as cancel() below.
-        if (isUniqueViolation(err)) throw new VerificationAlreadyReversedError();
+        if (isReversalTaken(err)) throw new VerificationAlreadyReversedError();
         throw err;
       }
     },
@@ -363,7 +363,7 @@ export function createSupplierPaymentService(
         // The partial unique index verifications_reverses_unique fired: an
         // unbooked manual Omför of the same verification is in the way (or one
         // committed while this cancellation was writing its own omföring).
-        if (isUniqueViolation(err)) throw new VerificationAlreadyReversedError();
+        if (isReversalTaken(err)) throw new VerificationAlreadyReversedError();
         throw err;
       }
       // Both reasons mean a concurrent call got there between the guard above

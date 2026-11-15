@@ -160,10 +160,12 @@ async function assertCreditWithinSource(tx: Tx, creditId: string, sourceId: stri
 // own transaction too, drafts included.
 // Credits count negative — the CASE expression is the ONLY place the sign
 // convention lives on the aggregation side.
+// `excludeInvoiceId`: leave one invoice's rows out (validateCommittedQuantities
+// adds its own rows by hand, whatever its status).
 export async function getInvoicedQuantitiesWith(
   executor: Db | Tx,
   salesOrderRowIds: string[],
-  opts: { includeDrafts: boolean }
+  opts: { includeDrafts: boolean; excludeInvoiceId?: string }
 ) {
   if (salesOrderRowIds.length === 0) return new Map<string, number>();
   const statuses: InvoiceStatus[] = opts.includeDrafts ? ["draft", "issued", "paid"] : ["issued", "paid"];
@@ -174,7 +176,13 @@ export async function getInvoicedQuantitiesWith(
     })
     .from(invoiceRows)
     .innerJoin(invoices, eq(invoiceRows.invoiceId, invoices.id))
-    .where(and(inArray(invoiceRows.salesOrderRowId, salesOrderRowIds), inArray(invoices.status, statuses)))
+    .where(
+      and(
+        inArray(invoiceRows.salesOrderRowId, salesOrderRowIds),
+        inArray(invoices.status, statuses),
+        opts.excludeInvoiceId ? ne(invoices.id, opts.excludeInvoiceId) : undefined
+      )
+    )
     .groupBy(invoiceRows.salesOrderRowId);
   return new Map(rows.filter((r) => r.salesOrderRowId !== null).map((r) => [r.salesOrderRowId!, Number(r.invoiced)]));
 }
@@ -190,11 +198,11 @@ export async function getInvoicedQuantitiesWith(
 // visible to the other's guard read) are only actually committed one at a
 // time, at issue.
 //
-// MUST run inside issueInvoice's transaction, BEFORE the status UPDATE flips
-// this invoice's own rows into the "issued" bucket — otherwise the
-// committed-quantities aggregation below (includeDrafts:false) would see
-// this invoice's own rows twice: once here (manually, signed by `type`) and
-// once via the aggregation itself.
+// Runs inside issueInvoice's transaction. This invoice's own rows are added
+// by hand (signed by `type`) and left out of the committed aggregation by id
+// (excludeInvoiceId) — so they are never counted twice, whether the status
+// UPDATE has flipped them into the "issued" bucket yet or not (it used to
+// depend on running before it).
 async function validateCommittedQuantities(tx: Tx, invoiceId: string, type: InvoiceType): Promise<void> {
   const rows = await tx
     .select({ salesOrderRowId: invoiceRows.salesOrderRowId, quantity: invoiceRows.quantity })
@@ -237,7 +245,7 @@ async function validateCommittedQuantities(tx: Tx, invoiceId: string, type: Invo
     .orderBy(asc(salesOrderRows.id))
     .for("update");
 
-  const committed = await getInvoicedQuantitiesWith(tx, rowIds, { includeDrafts: false });
+  const committed = await getInvoicedQuantitiesWith(tx, rowIds, { includeDrafts: false, excludeInvoiceId: invoiceId });
 
   if (type === "credit") {
     for (const [rowId, ownQty] of ownByRow) {

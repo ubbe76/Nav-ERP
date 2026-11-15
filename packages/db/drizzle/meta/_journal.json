@@ -1576,6 +1576,13 @@
       "when": 1794660720446,
       "tag": "0224_profit_disposition_reversal_distinct",
       "breakpoints": true
+    },
+    {
+      "idx": 225,
+      "version": "7",
+      "when": 1794733906465,
+      "tag": "0225_closed_year_period_insert_delete",
+      "breakpoints": true
     }
   ]
 }

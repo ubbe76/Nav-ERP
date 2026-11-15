@@ -13,6 +13,15 @@
 //
 // Optional constraintName (bankfiler): only that index counts — same
 // `constraint_name` lookup as isForeignKeyViolation below.
+// The partial unique index on verifications.reverses_verification_id: a
+// verification has at most one omföring. The makulering paths (payments,
+// supplier invoices) map exactly this 23505 to VerificationAlreadyReversedError
+// — any other unique violation in their transactions is a different error.
+export const VERIFICATION_REVERSES_UNIQUE = "verifications_reverses_unique";
+export function isReversalTaken(err: unknown): boolean {
+  return isUniqueViolation(err, VERIFICATION_REVERSES_UNIQUE);
+}
+
 export function isUniqueViolation(err: unknown, constraintName?: string): boolean {
   if (typeof err !== "object" || err === null) return false;
   const { code, cause } = err as { code?: string; cause?: unknown };

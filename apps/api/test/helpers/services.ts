@@ -9,6 +9,7 @@ import { BAS_STANDARD_ACCOUNTS } from "../../src/modules/economy/service/bas-acc
 import { createDocumentPdfService } from "../../src/modules/mail/service/document-pdf.js";
 import { createSystemRepository } from "../../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../../src/modules/system/service/system.service.js";
+import { decodePostingSettings } from "../../src/modules/system/service/posting-settings.js";
 
 // Shared collaborators for tests that only need a working service instance
 // (PDF rendering + article files) rather than exercising those parts.
@@ -26,32 +27,12 @@ export const testEconomyService = createEconomyService(testEconomyRepository, { 
 // year would go red the moment the real calendar rolls over.
 export const POSTING_BASELINE_YEAR = Number(stockholmToday().slice(0, 4));
 
-// The posting accounts as readPostingSettings resolves them with no settings
-// rows written (codeSetting fallbacks) — all BAS numbers, so seeding the
-// standard chart below makes every posting role resolve (the revenue/VAT
-// accounts come with the seeded momskoder, also BAS numbers). postingBank/
-// postingReminderFeeAccount/postingPaymentWriteOff (B3) are here to satisfy
-// PostingAccountNumbers' shape; nothing posts against them yet.
-export const DEFAULT_POSTING_SETTINGS = {
-  postingAccountsReceivable: "1510",
-  postingAccountsPayable: "2440",
-  postingDefaultCost: "4010",
-  postingBank: "1930",
-  postingReminderFeeAccount: "3540",
-  postingPaymentWriteOff: "3740",
-  // Momsrapport (B5).
-  postingVatSettlement: "2650",
-  // Årsbokslut (steg 2).
-  postingInventory: "1460",
-  postingInventoryChange: "4990",
-  // Årsbokslut, Produkter i arbete.
-  postingWip: "1440",
-  postingWipChange: "4940",
-  // Valuta.
-  postingFxGain: "3960",
-  postingFxLoss: "7960",
-  postingBankFees: "6570",
-} as const;
+// The posting settings as readPostingSettings resolves them with no settings
+// rows written — read from decodePostingSettings itself (every fallback), so
+// this can never drift from the system service's defaults. All BAS numbers,
+// so seeding the standard chart below makes every posting role resolve (the
+// revenue/VAT accounts come with the seeded momskoder, also BAS numbers).
+export const DEFAULT_POSTING_SETTINGS = decodePostingSettings(() => null);
 
 // Automatkontering (B2): issuing a customer invoice / approving a supplier
 // invoice books a verification, so every suite that does so needs a fiscal

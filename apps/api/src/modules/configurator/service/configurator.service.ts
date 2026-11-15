@@ -11,7 +11,7 @@ import type { Db, Tx } from "@navet/db";
 import type { InsertArticleInput } from "../../article/repository/article.repository.js";
 import type { BomRowInsert } from "../../article/repository/bom-write.js";
 import { ArticleNotFoundError, type ArticleService } from "../../article/service/article.service.js";
-import type { RoutingOperationInsert } from "../../manufacturing/repository/routing-write.js";
+import { routingCopyColumns, type RoutingOperationInsert } from "../../manufacturing/repository/routing-write.js";
 import { WorkCenterNotFoundError } from "../../manufacturing/service/manufacturing.service.js";
 import { CustomerNotFoundError } from "../../sales/service/sales.service.js";
 import type { ResolvedPrice } from "../../sales/service/price-resolver.js";
@@ -228,10 +228,7 @@ function toRoutingInsert(r: VariantRoutingRow): RoutingOperationInsert {
     setupTime: String(r.setupTime), runTimePerUnit: String(r.runTimePerUnit), costingOnly: r.costingOnly,
     setupPrice: num(r.setupPrice), unitPrice: num(r.unitPrice),
   };
-  if (r.copyFrom) {
-    const { id: _id, articleId: _articleId, ...rest } = r.copyFrom;
-    return { ...rest, ...derived } as RoutingOperationInsert;
-  }
+  if (r.copyFrom) return { ...routingCopyColumns(r.copyFrom), ...derived };
   return { ...derived, subcontractSupplierId: r.subcontractSupplierId, timeUnit: "minutes_per_unit" };
 }
 

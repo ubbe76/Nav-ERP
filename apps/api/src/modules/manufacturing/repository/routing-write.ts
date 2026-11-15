@@ -11,6 +11,15 @@ import { routingOperationAlternatives, routingOperationArticleFiles, routingOper
 // One operation without id/articleId — the caller supplies the article.
 export type RoutingOperationInsert = Omit<typeof routingOperations.$inferInsert, "id" | "articleId">;
 
+// A stored routing row as a new operation's columns: everything but its
+// identity (id, article). EN rule for every copy — Kopiera beredning
+// (copyRouting) and a variant's base operations (configurator's
+// toRoutingInsert) — so a new routing column follows both.
+export function routingCopyColumns(row: Record<string, unknown>): RoutingOperationInsert {
+  const { id: _id, articleId: _articleId, ...rest } = row;
+  return rest as RoutingOperationInsert;
+}
+
 // Inserts the rows for one article and returns sequenceNo → new id, so BOM
 // rows written afterwards can link their material to the operation. No-op on [].
 export async function insertRoutingOperations(
@@ -48,10 +57,11 @@ export async function copyRouting(
     .where(eq(routingOperations.articleId, sourceArticleId))
     .orderBy(asc(routingOperations.sequenceNo));
   const operationMap = new Map<string, string>();
-  for (const { id: oldId, articleId: _articleId, ...rest } of operations) {
+  for (const operation of operations) {
+    const oldId = operation.id;
     const [inserted] = await tx
       .insert(routingOperations)
-      .values({ ...rest, articleId: targetArticleId })
+      .values({ ...routingCopyColumns(operation), articleId: targetArticleId })
       .returning({ id: routingOperations.id });
     operationMap.set(oldId, inserted!.id);
     await tx.execute(sql`
