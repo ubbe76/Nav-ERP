@@ -20,10 +20,20 @@ import { PayrollPeriodLockedError } from "../service/period-lock.js";
 //     Writers already holding the month have committed by then and are in
 //     the basis; writers arriving later wait and are refused.
 //
-// Lock order: the period lock is taken FIRST in the transaction, before any
-// row lock (attendance row, stamps, employee row), months in ascending
-// order. Lås holds exactly one month and waits for nothing else, so no
-// cycle can form with a writer.
+// The UNDATED half: what the basis reads that belongs to no month — the
+// personnel card (standardschema, övertidsförval, Anställd från/till), day
+// and week schedules, OB rules, frånvarokoder and the payroll settings. Those
+// writers take ONE key (payroll_config) SHARED (they never wait for each
+// other); Lås takes it EXCLUSIVE right after its month, so a change in
+// flight commits before the basis is computed and one arriving waits until
+// the lock has committed — then goes through: an undated change is never
+// refused, it just applies from there on. Without it a schedule saved while
+// Lås computed could land half in the frozen basis.
+//
+// Lock order: the period locks are taken FIRST in the transaction, months in
+// ascending order, then payroll_config, then any row lock (attendance row,
+// stamps, employee row). Lås holds one month and the config key and waits
+// for nothing else; an undated writer holds no month. No cycle can form.
 const monthKey = (year: number, month: number) => year * 100 + month;
 
 function distinctMonths(dates: Iterable<string>): { year: number; month: number; date: string }[] {
@@ -72,3 +82,15 @@ export async function lockPayrollPeriodExclusivelyInTx(tx: Tx, year: number, mon
 // The first day of a period — the date the guard and the error speak of.
 export const payrollPeriodFirstDay = (year: number, month: number) =>
   `${year}-${String(month).padStart(2, "0")}-01`;
+
+// The undated writers' half: payroll_config shared, first in the transaction
+// (before any row lock). Held to the end of the transaction.
+export async function sharePayrollConfigInTx(tx: Tx): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock_shared(hashtext('payroll_config'), 0)`);
+}
+
+// Lås: payroll_config exclusively, right after the month — waits for every
+// undated writer in flight, and holds new ones until the lock has committed.
+export async function lockPayrollConfigExclusivelyInTx(tx: Tx): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('payroll_config'), 0)`);
+}

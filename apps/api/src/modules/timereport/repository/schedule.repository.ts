@@ -14,6 +14,7 @@ import type { CreateHolidayInput, ScheduleBreakInput, WeekScheduleDayInput } fro
 import {
   assertPayrollPeriodsOpenInTx,
   sharePayrollPeriodsInTx,
+  sharePayrollConfigInTx,
 } from "../../payroll/repository/payroll-period-guard.js";
 import { isoWeekRange } from "../service/iso-week.js";
 
@@ -92,6 +93,10 @@ export function createScheduleRepository(db: Db) {
       breaks: ScheduleBreakInput[];
     }) {
       return db.transaction(async (tx) => {
+        // Day and week schedules feed the löneunderlag — undated writers:
+        // payroll_config shared, so Lås never computes across a change
+        // (payroll-period-guard.ts).
+        await sharePayrollConfigInTx(tx);
         const [row] = await tx
           .insert(daySchedules)
           .values({
@@ -126,6 +131,7 @@ export function createScheduleRepository(db: Db) {
       }
     ) {
       return db.transaction(async (tx) => {
+        await sharePayrollConfigInTx(tx);
         const { breaks, ...fields } = input;
         const [row] =
           Object.keys(fields).length > 0
@@ -201,6 +207,7 @@ export function createScheduleRepository(db: Db) {
       atfMinutesPerWeek: number;
     }) {
       return db.transaction(async (tx) => {
+        await sharePayrollConfigInTx(tx);
         const [row] = await tx
           .insert(weekSchedules)
           .values({
@@ -231,6 +238,7 @@ export function createScheduleRepository(db: Db) {
       }
     ) {
       return db.transaction(async (tx) => {
+        await sharePayrollConfigInTx(tx);
         const { days, ...fields } = input;
         const [row] =
           Object.keys(fields).length > 0

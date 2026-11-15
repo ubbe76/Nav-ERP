@@ -10,6 +10,7 @@ import { DEFAULT_THEME_KEY } from "../service/theme-settings.js";
 import { documentNumberTaken } from "../service/number-series.js";
 import { lockThemeForSetting } from "./themes.repository.js";
 import { countTrackedArticles } from "../../stock/service/batch-tracking.js";
+import { sharePayrollConfigInTx } from "../../payroll/repository/payroll-period-guard.js";
 import { readStorageUsage } from "./storage.js";
 import { exportStoredFiles } from "./file-export.js";
 
@@ -63,6 +64,14 @@ function settingsWriter(tx: Tx) {
 
     setSetting(key: string, value: string) {
       return upsertSetting(tx, key, value);
+    },
+
+    // A setting the löneunderlag reads is an undated payroll write:
+    // payroll_config shared, FIRST in the transaction (before the article
+    // and theme row locks) — Lås never computes across it
+    // (payroll-period-guard.ts).
+    sharePayrollConfig(): Promise<void> {
+      return sharePayrollConfigInTx(tx);
     },
 
     // Batch (#8): Använd batch- och serienummer can only be switched off

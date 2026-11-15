@@ -71,7 +71,9 @@ export const absences = pgTable(
 export const obRules = pgTable("ob_rules", {
   id: uuid("id").primaryKey().defaultRandom(),
   code: varchar("code", { length: 20 }).notNull().unique(),
-  name: varchar("name", { length: 100 }).notNull(),
+  // Unique since migration 0227 (the service's pre-check alone let two
+  // simultaneous saves through); the migration renamed any duplicates first.
+  name: varchar("name", { length: 100 }).notNull().unique(),
   dayKind: obDayKindEnum("day_kind").notNull(),
   startTime: time("start_time").notNull(),
   endTime: time("end_time").notNull(),

@@ -1,9 +1,9 @@
-import { createWeekScheduleSchema } from "@navet/shared";
+import { createWeekScheduleSchema, updateDayScheduleSchema, updateWeekScheduleSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
-import { absences, auditLog, db, payrollAttestations, payrollPeriods, type Tx } from "@navet/db";
+import { absences, absenceTypes, attendanceSessions, auditLog, daySchedules, db, employees, obRules, payrollAttestations, payrollPeriods, systemSettings, type Tx } from "@navet/db";
 import { stockholmInstant } from "../src/modules/system/service/delivery-days.js";
-import { PAXML_CODES, testArticleService, testDocumentPdfService } from "./helpers/services.js";
+import { PAXML_CODES, testArticleService, testDocumentPdfService, testSystemService } from "./helpers/services.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createManufacturingRepository } from "../src/modules/manufacturing/repository/manufacturing.repository.js";
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
@@ -12,8 +12,14 @@ import { createPayrollRepository } from "../src/modules/payroll/repository/payro
 import {
   assertPayrollPeriodsOpenInTx,
   lockPayrollPeriodExclusivelyInTx,
+  sharePayrollConfigInTx,
 } from "../src/modules/payroll/repository/payroll-period-guard.js";
-import { UnattestedEmployeesError, createPayrollService } from "../src/modules/payroll/service/payroll.service.js";
+import {
+  DuplicatePayrollCodeError,
+  UnattestedEmployeesError,
+  UnfinishedAttendanceError,
+  createPayrollService,
+} from "../src/modules/payroll/service/payroll.service.js";
 import { PayrollPeriodLockedError, createPeriodLockChecker } from "../src/modules/payroll/service/period-lock.js";
 import { createAtfRepository } from "../src/modules/timereport/repository/atf.repository.js";
 import { createAtfService } from "../src/modules/timereport/service/atf.service.js";
@@ -425,6 +431,142 @@ describe("Lås mot skrivare som löneunderlaget läser", () => {
     ]);
 
     expect(created.map((h) => h.date)).toEqual(["2026-06-06"]);
+  });
+});
+
+describe("Lås mot de odaterade skrivarna", () => {
+  // What the basis reads that belongs to no month — the personnel card,
+  // schedules, OB rules, frånvarokoder, the payroll settings. Started while
+  // Lås computes, each waits (payroll_config) and then GOES THROUGH: the
+  // frozen basis is the one from before, the change applies from there on.
+  const undatedDays = (summary: Awaited<ReturnType<typeof service.getPeriodSummary>>) => JSON.stringify(summary.employees.map((e) => e.days));
+  const undatedWriters: {
+    name: string;
+    write: (f: Awaited<ReturnType<typeof seedAttestedPeriod>>) => Promise<unknown>;
+    applied: (f: Awaited<ReturnType<typeof seedAttestedPeriod>>) => Promise<boolean>;
+  }[] = [
+    {
+      name: "personalkortet",
+      write: (f) => timeReportRepository.updateEmployee(f.employee.id, { employedTo: "2026-05-15" }),
+      applied: async (f) => (await db.select().from(employees).where(eq(employees.id, f.employee.id)))[0]!.employedTo === "2026-05-15",
+    },
+    {
+      name: "en ny anställd",
+      write: () => timeReportRepository.createEmployee({ employeeNumber: "E-NY", name: "Ny Nilsson", active: true }),
+      applied: async () => (await db.select().from(employees).where(eq(employees.employeeNumber, "E-NY"))).length === 1,
+    },
+    {
+      name: "dagsschemat",
+      write: (f) => scheduleService.updateDaySchedule(f.daySchedule.id, parsed(updateDayScheduleSchema, { endTime: "15:00" })),
+      applied: async (f) => (await db.select().from(daySchedules).where(eq(daySchedules.id, f.daySchedule.id)))[0]!.endTime.startsWith("15:00"),
+    },
+    {
+      name: "veckoschemat",
+      write: (f) =>
+        scheduleService.updateWeekSchedule(
+          f.weekSchedule.id,
+          parsed(updateWeekScheduleSchema, { days: [1, 2, 3, 4].map((weekday) => ({ weekday, dayScheduleId: f.daySchedule.id })) })
+        ),
+      applied: async (f) => (await scheduleRepository.listWeekScheduleDaysByScheduleIds([f.weekSchedule.id])).length === 4,
+    },
+    {
+      name: "en OB-regel",
+      write: () => service.createObRule({ code: "OBK", name: "Kväll", dayKind: "weekday", startTime: "18:00", endTime: "22:00", paxmlCode: "OB1" }),
+      applied: async () => (await db.select().from(obRules)).length === 1,
+    },
+    {
+      name: "en frånvarokod",
+      write: (f) => service.updateAbsenceType(f.absenceType.id, { name: "Sjuk" }),
+      applied: async (f) => (await db.select().from(absenceTypes).where(eq(absenceTypes.id, f.absenceType.id)))[0]!.name === "Sjuk",
+    },
+    {
+      name: "övertidsgränsen i inställningarna",
+      write: () => testSystemService.updateSettings({ payrollOvertimeThresholdMinutes: 30 }),
+      applied: async () =>
+        (await db.select().from(systemSettings).where(eq(systemSettings.key, "payroll_overtime_threshold_minutes")))[0]?.value === "30",
+    },
+  ];
+  for (const writer of undatedWriters) {
+    it(`lets ${writer.name} wait while Lås is computing, then go through`, async () => {
+      const fixture = await seedAttestedPeriod();
+      try {
+        const before = undatedDays(await service.getPeriodSummary(YEAR, MONTH));
+
+        // writeDuringLock fails unless the write ends up waiting for a lock.
+        const { summary, error } = await writeDuringLock(fixture.user.id, () => writer.write(fixture));
+
+        expect(error).toBeNull();
+        expect(undatedDays(summary)).toBe(before);
+        expect(await writer.applied(fixture)).toBe(true);
+      } finally {
+        await db.delete(systemSettings).where(eq(systemSettings.key, "payroll_overtime_threshold_minutes"));
+      }
+    });
+  }
+
+  it("waits for a schedule change in flight and freezes a basis that has it", async () => {
+    const f = await seedAttestedPeriod();
+    const before = undatedDays(await service.getPeriodSummary(YEAR, MONTH));
+
+    // The writer's transaction as updateDaySchedule runs it: the config key,
+    // then the row — still uncommitted when Lås is pressed.
+    const writer = hold(async (tx) => {
+      await sharePayrollConfigInTx(tx);
+      await tx.update(daySchedules).set({ endTime: "15:00" }).where(eq(daySchedules.id, f.daySchedule.id));
+    });
+    await writer.locked;
+    const locking = service.lockPeriod(YEAR, MONTH, f.user.id);
+    try {
+      await waitForLockWaiter();
+    } finally {
+      writer.release();
+    }
+    await writer.done;
+
+    const frozen = undatedDays(await locking);
+    expect(frozen).not.toBe(before);
+    await service.unlockPeriod(YEAR, MONTH, f.user.id);
+    expect(undatedDays(await service.getPeriodSummary(YEAR, MONTH))).toBe(frozen);
+  });
+
+  it("attest waits for a Kom in flight and then refuses the unfinished basis", async () => {
+    const user = await makeUser();
+    const { weekSchedule } = await makeWeekSchedule();
+    const employee = await makeEmployee("Cia Carlsson", weekSchedule.id);
+    await addAttendance(employee.id, user.id, 4);
+
+    // A Kom on 29 May, uncommitted while Attestera is pressed: its INSERT
+    // holds the employee FOR KEY SHARE (the FK).
+    const kom = hold(async (tx) => {
+      await tx.insert(attendanceSessions).values({ employeeId: employee.id, startedAt: localDate(YEAR, MONTH, 29, 7), createdBy: user.id });
+    });
+    await kom.locked;
+    const attesting = failure(service.attest(YEAR, MONTH, employee.id, user.id));
+    try {
+      await waitForLockWaiter();
+    } finally {
+      kom.release();
+    }
+    await kom.done;
+
+    expect(await attesting).toBeInstanceOf(UnfinishedAttendanceError);
+    expect(await db.select().from(payrollAttestations)).toHaveLength(0);
+  });
+
+  it("keeps the OB rule's name unique in the database, not only in the pre-check", async () => {
+    await service.createObRule({ code: "OB1", name: "Kväll", dayKind: "weekday", startTime: "18:00", endTime: "22:00", paxmlCode: "OB1" });
+    // Past the service's pre-check, as a simultaneous save would be.
+    expect(
+      await failure(payrollRepository.createObRule({ code: "OB2", name: "Kväll", dayKind: "weekday", startTime: "19:00", endTime: "22:00", paxmlCode: "OB2" }))
+    ).toBeTruthy();
+    const both = await Promise.allSettled([
+      service.createObRule({ code: "OB3", name: "Natt", dayKind: "weekday", startTime: "22:00", endTime: "00:00", paxmlCode: "OB3" }),
+      service.createObRule({ code: "OB4", name: "Natt", dayKind: "weekday", startTime: "22:00", endTime: "00:00", paxmlCode: "OB4" }),
+    ]);
+    const refused = both.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
+    expect(refused).toHaveLength(1);
+    expect(refused[0]!.reason).toBeInstanceOf(DuplicatePayrollCodeError);
+    expect((refused[0]!.reason as Error).message).toBe("An entry named Natt already exists");
   });
 });
 
