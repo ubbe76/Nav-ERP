@@ -126,6 +126,35 @@ describe("POST /stamp-sessions/:id/stop with a stop time", () => {
     expect(new Date(ok.json().session.stoppedAt).getTime()).toBe(stoppedAt.getTime());
   });
 
+  // Regel 6's other roles: the stop time is the ROLE's (admin or
+  // arbetsledare), not the menus' — an office user with Tillverkning is
+  // refused like the shop floor, an admin without any group is let through.
+  // The future limit (1 min clock tolerance) holds for the admin too.
+  it("lets an admin set the stop time, refuses an office user with Tillverkning and a stop in the future", async () => {
+    const { stamp, startedAt } = await setup();
+    const url = `/api/v1/stamp-sessions/${stamp.id}/stop`;
+    const office = await session("user", ["tillverkning"]);
+    const refused = await app.inject({
+      method: "POST", url, headers: { cookie: office }, payload: { stoppedAt: new Date(startedAt.getTime() + 3_600_000).toISOString() },
+    });
+    expect([refused.statusCode, refused.json().code]).toEqual([403, "stop-time-not-allowed"]);
+
+    const email = `admin-${crypto.randomUUID()}@example.com`;
+    await authService.createUser({ email, password: "correcthorse", name: "A", role: "admin", permissionGroupId: null });
+    const login = await app.inject({ method: "POST", url: "/api/v1/auth/login", payload: { email, password: "correcthorse" } });
+    const admin = `session=${login.cookies.find((c) => c.name === "session")!.value}`;
+    const future = await app.inject({
+      method: "POST", url, headers: { cookie: admin }, payload: { stoppedAt: new Date(Date.now() + 5 * 60_000).toISOString() },
+    });
+    expect([future.statusCode, future.json().code]).toEqual([400, "invalid-stop-time"]);
+
+    const stoppedAt = new Date(startedAt.getTime() + 45 * 60_000);
+    const ok = await app.inject({ method: "POST", url, headers: { cookie: admin }, payload: { stoppedAt: stoppedAt.toISOString() } });
+    expect(ok.statusCode, ok.body).toBe(200);
+    expect(ok.json().timeReport.hours).toBe("0.75");
+    expect(new Date(ok.json().session.stoppedAt).getTime()).toBe(stoppedAt.getTime());
+  });
+
   it("regel 8: POST /attendance-sessions answers 409 with the forgotten attendance until forgottenStoppedAt is given", async () => {
     await setup(); // stamping in clocked the employee in (regel 5)
     const [attendance] = await timeReportService.listAttendanceSessions(true);

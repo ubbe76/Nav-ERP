@@ -1,8 +1,16 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, stampSessions } from "@navet/db";
-import { completeOperationSchema, stampOutSchema, createArticleSchema, createWorkCenterSchema } from "@navet/shared";
-import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
+import {
+  completeOperationSchema, stampOutSchema, createArticleSchema, createPurchaseOrderSchema, createSupplierSchema, createWorkCenterSchema,
+} from "@navet/shared";
+import { testArticleService, testDocumentPdfService, testSystemService } from "./helpers/services.js";
+import { createMailRepository } from "../src/modules/mail/repository/mail.repository.js";
+import { createMailService } from "../src/modules/mail/service/mail.service.js";
+import { createPurchaseRepository } from "../src/modules/purchase/repository/purchase.repository.js";
+import { createPurchaseService } from "../src/modules/purchase/service/purchase.service.js";
+import { createRegisterRepository } from "../src/modules/register/repository/register.repository.js";
+import { createRegisterService } from "../src/modules/register/service/register.service.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -25,8 +33,19 @@ const mfgService = createManufacturingService(mfgRepo, testDocumentPdfService, t
 const authRepo = createAuthRepository(db);
 const trRepo = createTimeReportRepository(db);
 const trService = createTimeReportService(trRepo, mfgService, { isDateLocked: async () => false }, { log: async () => {} });
+// The real cross-module wiring: a lego IO row's receipt reports the TO
+// operation through the manufacturing service (app.ts does the same).
+const purchaseService = createPurchaseService(
+  createPurchaseRepository(db),
+  createRegisterService(createRegisterRepository(db)),
+  createMailService(createMailRepository(db), testSystemService),
+  testDocumentPdfService,
+  testArticleService,
+  testSystemService,
+  mfgService
+);
 
-const TABLES = sql`TRUNCATE attendance_sessions, production_groups, stamp_sessions, time_reports, employees, mo_reports, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, bom_components, articles, payroll_periods, audit_log, users CASCADE`;
+const TABLES = sql`TRUNCATE purchase_receipts, purchase_order_rows, purchase_orders, suppliers, stock_transactions, attendance_sessions, production_groups, stamp_sessions, time_reports, employees, mo_reports, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, bom_components, articles, payroll_periods, audit_log, users CASCADE`;
 beforeEach(async () => {
   await db.execute(TABLES);
 });
@@ -161,6 +180,67 @@ describe("regel 10: a done operation stamps out everyone else", () => {
     expect(await openStamps(order.id)).toHaveLength(0);
     const reports = await mfgService.listReports(order.id);
     expect(reports.some((r) => r.source === "auto_close")).toBe(true);
+  });
+
+  // Two operations, two people: Slutför order (from the card, nothing
+  // finished on either operation) stamps out both — the order's scope, not
+  // the operation's.
+  it("Slutför order closes the stamps on every operation of a multi-operation order", async () => {
+    const { user, employee } = await setup();
+    const article = await articleService.createArticle(parsed(createArticleSchema, {
+      articleNumber: `SAC3-${crypto.randomUUID()}`, name: "Hylla", type: "manufactured", active: true,
+    }));
+    const wc = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "300", name: "Kant", hourlyRate: 400, overheadPercent: 10, active: true }));
+    for (const sequenceNo of [1, 2, 3]) {
+      await mfgService.createRoutingOperation(article.id, { sequenceNo, workCenterId: wc.id, setupTime: 5, runTimePerUnit: 1 });
+    }
+    const order = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 3 }, user.id);
+    const [first, second] = (await mfgService.listOperations(order.id)).sort((a, b) => a.sequenceNo - b.sequenceNo);
+    const colleague = await trRepo.createEmployee({ employeeNumber: "E-MULTI", name: "Lisa", active: true });
+    await trService.stampIn({ employeeId: employee.id, moOperationId: first!.id }, user.id);
+    await trService.stampIn({ employeeId: colleague.id, moOperationId: second!.id }, user.id);
+
+    await mfgService.complete(order.id, { quantity: 3 }, user.id);
+
+    expect(await openStamps(order.id)).toHaveLength(0);
+    const auto = (await reportRows(order.id)).filter((r) => r.source === "auto_close");
+    expect(auto.map((r) => r.employee_id).sort()).toEqual([employee.id, colleague.id].sort());
+    expect(auto.every((r) => Number(r.quantity_ok) === 0 && r.time_report_id !== null)).toBe(true);
+  });
+
+  // Lego: the IO receipt reports the last (lego) operation. A part receipt
+  // finishes nothing and leaves the stamp on operation 10 open; the receipt
+  // that completes the order stamps it out.
+  it("a lego receipt that completes the order closes the stamps on the order's other operations", async () => {
+    const user = await authRepo.create({ email: `sac-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "Ledare", role: "admin" });
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "Lego AB", active: true }));
+    const machine = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "110", name: "Svets", hourlyRate: 500, active: true }));
+    const lego = await mfgService.createWorkCenter(parsed(createWorkCenterSchema, { code: "910", name: "Ytbehandling", type: "subcontract", supplierId: supplier.id, active: true }));
+    const article = await articleService.createArticle(parsed(createArticleSchema, {
+      articleNumber: `SACL-${crypto.randomUUID()}`, name: "Legodetalj", type: "manufactured", active: true,
+    }));
+    await mfgService.createRoutingOperation(article.id, { sequenceNo: 10, workCenterId: machine.id, setupTime: 10, runTimePerUnit: 2 });
+    await mfgService.createRoutingOperation(article.id, { sequenceNo: 20, workCenterId: lego.id, setupTime: 0, runTimePerUnit: 0 });
+    const order = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 4 }, user.id);
+    const ops = (await mfgService.listOperations(order.id)).sort((a, b) => a.sequenceNo - b.sequenceNo);
+    const employee = await trRepo.createEmployee({ employeeNumber: "E-LEGO", name: "Olle", active: true });
+    const stamp = await trService.stampIn({ employeeId: employee.id, moOperationId: ops[0]!.id }, user.id);
+
+    const io = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
+    const row = await purchaseService.addRow(io.id, { articleId: article.id, quantity: 4, unitPrice: 100, setupPrice: 500, moOperationId: ops[1]!.id });
+    await purchaseService.confirm(io.id);
+
+    const part = await purchaseService.receiveGoods(io.id, row.id, { quantity: 1 }, user.id);
+    expect(part.operationReport).toEqual({ ok: true });
+    expect((await openStamps(order.id)).map((s) => s.id)).toEqual([stamp.id]);
+
+    const rest = await purchaseService.receiveGoods(io.id, row.id, { quantity: 3 }, user.id);
+    expect(rest.operationReport).toEqual({ ok: true });
+    expect((await mfgService.getManufacturingOrder(order.id))!.status).toBe("done");
+    expect(await openStamps(order.id)).toHaveLength(0);
+    const auto = (await reportRows(order.id)).filter((r) => r.source === "auto_close");
+    expect(auto.map((r) => r.employee_id)).toEqual([employee.id]);
+    expect(await timeReportCount(employee.id)).toBe(1);
   });
 
   it("a report that does not finish the operation leaves other stamps open", async () => {

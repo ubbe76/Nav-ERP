@@ -981,6 +981,54 @@ describe("rättad och glömd närvaro", () => {
     expect(new Date((await stampRow(stamp.id)).paused_at!).getTime()).toBe(newStop.getTime());
   });
 
+  // The tolerance is strict and two-sided: a pause stamped within 2 s of the
+  // old stop — after it or before it — is the same Gå hem and follows; one
+  // 2 s or more away is a pause of its own and stays.
+  it.each([
+    ["E-R7E", 1_999, true],
+    ["E-R7F", -1_999, true],
+    ["E-R7G", 2_000, false],
+    ["E-R7H", -2_500, false],
+  ] as const)("regel 7: the 2 s tolerance — %s, pause %i ms from the old stop, moves: %s", async (empNo, offsetMs, moves) => {
+    const { user, attendance, stamp } = await presentWithWork(empNo);
+    const start = new Date(Date.now() - 20 * H);
+    const oldStop = new Date(start.getTime() + 10 * H);
+    await db.execute(
+      sql`UPDATE attendance_sessions SET started_at = ${start.toISOString()}::timestamptz, stopped_at = ${oldStop.toISOString()}::timestamptz WHERE id = ${attendance.id}`
+    );
+    const pausedAt = new Date(oldStop.getTime() + offsetMs);
+    await db.execute(
+      sql`UPDATE stamp_sessions SET started_at = ${start.toISOString()}::timestamptz, paused_at = ${pausedAt.toISOString()}::timestamptz WHERE id = ${stamp.id}`
+    );
+    const newStop = new Date(start.getTime() + 8 * H);
+    const result = await timeReportService.updateAttendanceSession(attendance.id, { stoppedAt: newStop.toISOString() }, user.id);
+    expect([empNo, result.movedPauses], empNo).toEqual([empNo, moves ? 1 : 0]);
+    expect(new Date((await stampRow(stamp.id)).paused_at!).getTime(), empNo).toBe(moves ? newStop.getTime() : pausedAt.getTime());
+  });
+
+  // A stamp begun after the new stop (the person came back and stamped in
+  // before the supervisor moved Gå hem earlier) pauses where it started,
+  // never before its own start.
+  it("regel 7: a moved pause never lands before the stamp's own start", async () => {
+    const { user, attendance, stamp } = await presentWithWork("E-R7I");
+    const start = new Date(Date.now() - 20 * H);
+    const oldStop = new Date(start.getTime() + 10 * H);
+    const stampStart = new Date(start.getTime() + 9 * H);
+    await db.execute(
+      sql`UPDATE attendance_sessions SET started_at = ${start.toISOString()}::timestamptz, stopped_at = ${oldStop.toISOString()}::timestamptz WHERE id = ${attendance.id}`
+    );
+    await db.execute(
+      sql`UPDATE stamp_sessions SET started_at = ${stampStart.toISOString()}::timestamptz, paused_at = ${oldStop.toISOString()}::timestamptz WHERE id = ${stamp.id}`
+    );
+    const result = await timeReportService.updateAttendanceSession(
+      attendance.id,
+      { stoppedAt: new Date(start.getTime() + 8 * H).toISOString() },
+      user.id
+    );
+    expect(result.movedPauses).toBe(1);
+    expect(new Date((await stampRow(stamp.id)).paused_at!).getTime()).toBe(stampStart.getTime());
+  });
+
   it("regel 7: resumed work is untouched when the stop time moves", async () => {
     const { user, attendance, stamp } = await presentWithWork("E-R7D");
     const start = new Date(Date.now() - 20 * H);
