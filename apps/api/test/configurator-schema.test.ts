@@ -8,7 +8,7 @@ import {
 import {
   createConfiguratorGroupSchema, configuratorConditionSchema, createConfiguratorBomLineSchema, updateConfiguratorBomLineSchema,
   createConfiguratorOperationSchema, updateConfiguratorOperationSchema, createConfiguratorValueSchema, updateConfiguratorValueSchema,
-  deriveConfigurationSchema, configuratorSelectionSchema, variantSetsSchema, isOnNumberStep,
+  deriveConfigurationSchema, configuratorSelectionSchema, variantRequestSchema, variantSetsSchema, isOnNumberStep,
 } from "@navet/shared";
 import { makeArticle, resetConfigurator } from "./helpers/configurator.js";
 
@@ -98,6 +98,108 @@ describe("configurator schema", () => {
     expect(variantSetsSchema.safeParse({ HJUL: [false, null] }).success).toBe(false);
     expect(variantSetsSchema.safeParse({ HJUL: [true, false, null] }).success).toBe(false);
     expect(variantSetsSchema.safeParse({ HJUL: [true, false, true] }).success).toBe(false);
+  });
+
+  it("zod: a set holds 1–200 values; calcQuantity takes at most 4 decimals inside numeric(14,4)", () => {
+    const codes = (n: number) => Array.from({ length: n }, (_, i) => `V${i}`);
+    expect(variantSetsSchema.safeParse({ LOCK: codes(200) }).success).toBe(true);
+    expect(variantSetsSchema.safeParse({ LOCK: codes(201) }).success).toBe(false);
+    expect(variantSetsSchema.safeParse({ LOCK: [] }).success).toBe(false);
+    expect(variantSetsSchema.safeParse({ BREDD: Array.from({ length: 200 }, (_, i) => 800 + i) }).success).toBe(true);
+    expect(variantSetsSchema.safeParse({ BREDD: Array.from({ length: 201 }, (_, i) => 800 + i) }).success).toBe(false);
+    expect(variantSetsSchema.safeParse({ BREDD: [Number.POSITIVE_INFINITY] }).success).toBe(false);
+    expect(variantSetsSchema.safeParse({ BREDD: [1e10] }).success).toBe(false);
+    expect(variantSetsSchema.safeParse({ ["X".repeat(21)]: ["A"] }).success).toBe(false);
+    expect(variantSetsSchema.safeParse({ LOCK: ["X".repeat(21)] }).success).toBe(false);
+
+    const calc = (calcQuantity: unknown) => variantRequestSchema.safeParse({ calcQuantity });
+    expect(calc(1).success).toBe(true);
+    expect(calc("2.5").success).toBe(true);
+    expect(calc(1.2345).success).toBe(true);
+    expect(calc(1.23456).success).toBe(false);
+    expect(calc(0).success).toBe(false);
+    expect(calc(0.0001).success).toBe(true);
+    expect(calc(1e10).success).toBe(false);
+    // sets defaults to {} (Skapa varianter with only fixed groups).
+    expect(variantRequestSchema.parse({ calcQuantity: 1 }).sets).toEqual({});
+  });
+});
+
+// Every CHECK by name — a bare rejects.toThrow() passes for any error (a
+// missing column, a FK) — and the legal shape of each kind next to it.
+describe("configurator CHECKs by name", () => {
+  async function template() {
+    const article = await makeArticle();
+    await db.insert(configuratorTemplates).values({ articleId: article.id, mode: "variants" });
+    return article;
+  }
+
+  it("configurator_groups: each CHECK refuses its own case; a full choice, number and boolean group are accepted", async () => {
+    const t = await template();
+    const insert = (values: Partial<typeof configuratorGroups.$inferInsert> & Pick<typeof configuratorGroups.$inferInsert, "code" | "kind">) =>
+      db.insert(configuratorGroups).values({ articleId: t.id, name: "Grupp", sortOrder: 1, ...values }).returning();
+    const number = { kind: "number" as const, minValue: "0", maxValue: "5" };
+    const cases: [string, Parameters<typeof insert>[0]][] = [
+      ["configurator_groups_code_format", { code: "farg", kind: "choice" }],
+      ["configurator_groups_code_format", { code: "FÄRG", kind: "choice" }],
+      ["configurator_groups_number_fields", { code: "N1", kind: "number" }],
+      ["configurator_groups_number_fields", { code: "N2", kind: "number", minValue: "0" }],
+      ["configurator_groups_number_fields", { code: "C1", kind: "choice", unit: "mm" }],
+      ["configurator_groups_number_fields", { code: "C2", kind: "choice", minValue: "0", maxValue: "5" }],
+      ["configurator_groups_number_fields", { code: "B1", kind: "boolean", pricePerUnit: "1" }],
+      ["configurator_groups_min_max", { code: "N3", ...number, minValue: "10" }],
+      ["configurator_groups_step_positive", { code: "N4", ...number, step: "0" }],
+      ["configurator_groups_price_per_unit", { code: "N5", ...number, pricePerUnit: "-1" }],
+      ["configurator_groups_boolean_price", { code: "C3", kind: "choice", priceAdd: "10" }],
+      ["configurator_groups_required", { code: "B2", kind: "boolean", required: true }],
+      ["configurator_groups_article_field_choice", { code: "N6", ...number, articleField: "colour" }],
+    ];
+    for (const [name, values] of cases) {
+      await expect(insert(values), `${name} ${values.code}`).rejects.toSatisfy(hitsConstraint(name));
+    }
+
+    const [choice] = await insert({ code: "FARG", kind: "choice", required: true, articleField: "colour" });
+    const [red] = await db.insert(configuratorValues).values({ groupId: choice!.id, code: "RD", name: "Röd", sortOrder: 1 }).returning();
+    await db.update(configuratorGroups).set({ defaultValueId: red!.id }).where(eq(configuratorGroups.id, choice!.id));
+    await expect(insert({ code: "B3", kind: "boolean", defaultValueId: red!.id })).rejects.toSatisfy(hitsConstraint("configurator_groups_choice_default"));
+    await insert({ code: "BREDD", ...number, minValue: "800", maxValue: "3000", step: "50", defaultNumber: "1200", unit: "mm", pricePerUnit: "0.5", priceBaseValue: "800", required: true });
+    await insert({ code: "HJUL", kind: "boolean", priceAdd: "150" });
+    // min = max is a fixed measure, not a broken range.
+    await insert({ code: "DJUP", ...number, minValue: "600", maxValue: "600" });
+    expect((await db.select().from(configuratorGroups).where(eq(configuratorGroups.articleId, t.id))).map((g) => g.code).sort()).toEqual([
+      "BREDD",
+      "DJUP",
+      "FARG",
+      "HJUL",
+    ]);
+  });
+
+  it("configurator_values: the code format; configurator_operations: one of time/formula per pair and no negative times or prices", async () => {
+    const t = await template();
+    const [g] = await db.insert(configuratorGroups).values({ articleId: t.id, code: "LOCK", name: "Lock", kind: "choice", sortOrder: 1 }).returning();
+    await expect(db.insert(configuratorValues).values({ groupId: g!.id, code: "a", name: "A", sortOrder: 1 })).rejects.toSatisfy(
+      hitsConstraint("configurator_values_code_format")
+    );
+    await db.insert(configuratorValues).values({ groupId: g!.id, code: "A1", name: "A", sortOrder: 1 });
+
+    await db.insert(workCenters).values({ code: "986", name: "Konf-check" }).onConflictDoNothing();
+    const [wc] = await db.select().from(workCenters).where(eq(workCenters.code, "986"));
+    let seq = 10;
+    const op = (values: Partial<typeof configuratorOperations.$inferInsert>) =>
+      db.insert(configuratorOperations).values({ articleId: t.id, sequenceNo: (seq += 10), workCenterId: wc!.id, ...values });
+    const cases: [string, Partial<typeof configuratorOperations.$inferInsert>][] = [
+      ["configurator_operations_setup_one", { runTimePerUnit: "1" }],
+      ["configurator_operations_setup_one", { setupTime: "1", setupFormula: "2", runTimePerUnit: "1" }],
+      ["configurator_operations_run_one", { setupTime: "1" }],
+      ["configurator_operations_run_one", { setupTime: "1", runTimePerUnit: "1", runFormula: "BREDD" }],
+      ["configurator_operations_times_nonnegative", { setupTime: "-1", runTimePerUnit: "1" }],
+      ["configurator_operations_times_nonnegative", { setupTime: "1", runTimePerUnit: "-0.5" }],
+      ["configurator_operations_prices_nonnegative", { setupTime: "1", runTimePerUnit: "1", setupPrice: "-1" }],
+      ["configurator_operations_prices_nonnegative", { setupTime: "1", runTimePerUnit: "1", unitPrice: "-1" }],
+    ];
+    for (const [name, values] of cases) await expect(op(values), name).rejects.toSatisfy(hitsConstraint(name));
+    await op({ setupFormula: "BREDD / 100", runTimePerUnit: "0", setupPrice: "0", unitPrice: "12.5" });
+    await op({ setupTime: "0", runFormula: "BREDD / 60000" });
   });
 });
 

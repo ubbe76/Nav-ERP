@@ -2,14 +2,14 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@navet/db";
 import { createConfiguratorService } from "../src/modules/configurator/service/configurator.service.js";
 import {
-  ConfiguratorCodeTakenError, ConfiguratorModeNotAllowedError, ConfiguratorReferenceInUseError, ConfiguratorReorderMismatchError,
-  ConfiguratorTemplateExistsError, InvalidConfiguratorGroupError, InvalidConfiguratorRuleError,
+  ConfiguratorCodeTakenError, ConfiguratorGroupNotFoundError, ConfiguratorModeNotAllowedError, ConfiguratorReferenceInUseError,
+  ConfiguratorReorderMismatchError, ConfiguratorRuleNotFoundError, ConfiguratorTemplateExistsError, ConfiguratorTemplateNotFoundError,
+  ConfiguratorValueNotFoundError, InvalidConfiguratorGroupError, InvalidConfiguratorRuleError,
 } from "../src/modules/configurator/service/configurator.errors.js";
+import { updateArticleSchema } from "@navet/shared";
 import { makeArticle, resetConfigurator, testCostingService, variantTestDeps } from "./helpers/configurator.js";
+import { parsed } from "./helpers/parsed.js";
 import { testArticleService } from "./helpers/services.js";
-import {
-  ConfiguratorGroupNotFoundError, ConfiguratorRuleNotFoundError, ConfiguratorTemplateNotFoundError, ConfiguratorValueNotFoundError,
-} from "../src/modules/configurator/service/configurator.errors.js";
 import { ArticleNotFoundError } from "../src/modules/article/service/article.service.js";
 import { CustomerNotFoundError } from "../src/modules/sales/service/sales.service.js";
 import { ZodError } from "zod";
@@ -70,7 +70,7 @@ describe("configurator service", () => {
   it("refuses a type change on a template article that breaks the mode", async () => {
     const article = await makeArticle();
     await service.createTemplate(article.id, { mode: "to_order" });
-    await expect(testArticleService.updateArticle(article.id, { type: "purchased" } as never)).rejects.toBeInstanceOf(ConfiguratorModeNotAllowedError);
+    await expect(testArticleService.updateArticle(article.id, parsed(updateArticleSchema, { type: "purchased" }))).rejects.toBeInstanceOf(ConfiguratorModeNotAllowedError);
   });
 
   it("409s a duplicate group code and a duplicate value code", async () => {
@@ -391,13 +391,13 @@ describe("configurator service — further cases", () => {
   it("refuses making a template article phantom or anything but manufactured", async () => {
     const article = await makeArticle();
     await service.createTemplate(article.id, { mode: "variants" });
-    await expect(testArticleService.updateArticle(article.id, { isPhantom: true } as never)).rejects.toBeInstanceOf(ConfiguratorModeNotAllowedError);
-    await expect(testArticleService.updateArticle(article.id, { type: "purchased" } as never)).rejects.toBeInstanceOf(ConfiguratorModeNotAllowedError);
-    await expect(testArticleService.updateArticle(article.id, { type: "service" } as never)).rejects.toBeInstanceOf(ConfiguratorModeNotAllowedError);
+    await expect(testArticleService.updateArticle(article.id, parsed(updateArticleSchema, { isPhantom: true }))).rejects.toBeInstanceOf(ConfiguratorModeNotAllowedError);
+    await expect(testArticleService.updateArticle(article.id, parsed(updateArticleSchema, { type: "purchased" }))).rejects.toBeInstanceOf(ConfiguratorModeNotAllowedError);
+    await expect(testArticleService.updateArticle(article.id, parsed(updateArticleSchema, { type: "service" }))).rejects.toBeInstanceOf(ConfiguratorModeNotAllowedError);
     expect((await testArticleService.getArticle(article.id))!.type).toBe("manufactured");
     // an article without a template changes freely
     const free = await makeArticle();
-    expect((await testArticleService.updateArticle(free.id, { type: "service" } as never))!.type).toBe("service");
+    expect((await testArticleService.updateArticle(free.id, parsed(updateArticleSchema, { type: "service" })))!.type).toBe("service");
   });
 
   it("reorders values and rules; refuses duplicates and foreign ids", async () => {
@@ -465,5 +465,14 @@ describe("configurator service — further cases", () => {
     const other = await service.createGroup(article.id, { code: "YTA", name: "Yta", kind: "choice", required: false });
     const err = await service.updateGroup(article.id, other.id, { articleField: "colour" }).catch((e) => e);
     expect(err).toBeInstanceOf(InvalidConfiguratorGroupError);
+    // The other field names itself in the message too (ARTICLE_FIELD_NAME), on create and on update.
+    await service.updateGroup(article.id, other.id, { articleField: "surface_treatment" });
+    await expect(
+      service.createGroup(article.id, { code: "YTA2", name: "Finish", kind: "choice", required: false, articleField: "surface_treatment" })
+    ).rejects.toThrow("Ytbehandling fylls redan av valgruppen Yta");
+    const third = await service.createGroup(article.id, { code: "YTA3", name: "Lack", kind: "choice", required: false });
+    await expect(service.updateGroup(article.id, third.id, { articleField: "surface_treatment" })).rejects.toThrow(
+      "Ytbehandling fylls redan av valgruppen Yta"
+    );
   });
 });

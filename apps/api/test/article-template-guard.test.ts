@@ -40,6 +40,7 @@ import { makeArticle, makeVariantService } from "./helpers/configurator.js";
 import { buildToOrder } from "./helpers/configured-rows.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { parsed } from "./helpers/parsed.js";
+import { waitForLockWaiter } from "./helpers/year-end.js";
 
 // Delprojekt 3, Task 6: a template in mode `variants` is never put on a new
 // order row — the variants are — and a type/phantom change on a template
@@ -341,6 +342,31 @@ describe("routes map ArticleIsTemplateError to 409 article-is-template", () => {
     });
   }
 
+  // The pickers' query over HTTP: the strings "true"/"false" only (a bare 1
+  // or "yes" is a 400, never silently "on"), orderable=false is the plain
+  // list, and configurable matters only together with orderable.
+  it("GET /articles reads ?orderable= and ?configurable= as the pickers send them", async () => {
+    const { cookie } = await adminSession();
+    const mall = await template("variants");
+    const bestallningsvara = await template("to_order");
+    const plain = await makeArticle();
+    const listed = async (query: string) => {
+      const res = await app.inject({ url: `/api/v1/articles?limit=1000&${query}`, headers: { cookie } });
+      expect(res.statusCode, `${query}: ${res.body}`).toBe(200);
+      const ids = new Set((res.json() as { rows: { id: string }[] }).rows.map((r) => r.id));
+      return [mall.id, bestallningsvara.id, plain.id].map((id) => ids.has(id));
+    };
+    expect(await listed("orderable=true")).toEqual([false, false, true]);
+    expect(await listed("orderable=true&configurable=true")).toEqual([true, true, true]);
+    expect(await listed("orderable=false")).toEqual([true, true, true]);
+    expect(await listed("configurable=true")).toEqual([true, true, true]);
+    expect(await listed("orderable=true&configurable=false")).toEqual([false, false, true]);
+    for (const bad of ["orderable=1", "orderable=yes", "configurable=TRUE"]) {
+      const res = await app.inject({ url: `/api/v1/articles?${bad}`, headers: { cookie } });
+      expect([res.statusCode, res.json().code], bad).toEqual([400, "validation-failed"]);
+    }
+  });
+
   it("POST /quotes refuses the template for a human session", async () => {
     const { cookie } = await adminSession();
     const customer = await makeCustomer();
@@ -511,7 +537,9 @@ describe("låset vid typbyte", () => {
       .then(() => "resolved" as const, (err: unknown) => err)
       .finally(() => (settled = true));
     try {
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Proven by Postgres, not by a pause: the update's transaction sits in
+      // a lock wait behind the holder (and has not settled).
+      await waitForLockWaiter();
       expect(settled).toBe(false);
     } finally {
       // Always let the holder commit — a failed assertion must not leave the

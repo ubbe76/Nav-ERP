@@ -1,6 +1,8 @@
 // apps/api/test/helpers/configurator.ts
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
+import { createArticleSchema } from "@navet/shared";
+import { parsed } from "./parsed.js";
 import { insertArticle } from "../../src/modules/article/repository/article.repository.js";
 import { insertBomRows } from "../../src/modules/article/repository/bom-write.js";
 import {
@@ -70,11 +72,13 @@ export async function resetConfigurator() {
 }
 
 export async function makeArticle(overrides: { type?: "manufactured" | "purchased" | "service"; isPhantom?: boolean; salesPrice?: number } = {}) {
-  return testArticleService.createArticle({
-    articleNumber: `KONF-${crypto.randomUUID().slice(0, 8)}`,
-    name: "Papperskorg 50 l",
-    type: overrides.type ?? "manufactured",
-    isPhantom: overrides.isPhantom ?? false,
-    salesPrice: overrides.salesPrice,
-  } as never);
+  return testArticleService.createArticle(
+    parsed(createArticleSchema, {
+      articleNumber: `KONF-${crypto.randomUUID().slice(0, 8)}`,
+      name: "Papperskorg 50 l",
+      type: overrides.type ?? "manufactured",
+      isPhantom: overrides.isPhantom ?? false,
+      salesPrice: overrides.salesPrice,
+    })
+  );
 }

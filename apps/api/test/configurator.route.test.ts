@@ -1,7 +1,9 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { ZodError } from "zod";
-import { db } from "@navet/db";
+import { configuratorVariants, db } from "@navet/db";
+import { eq } from "drizzle-orm";
+import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { configuratorRoutes } from "../src/modules/configurator/routes/configurator.routes.js";
 import { publicConfiguratorRoutes } from "../src/modules/configurator/routes/public-configurator.routes.js";
 import { createConfiguratorService } from "../src/modules/configurator/service/configurator.service.js";
@@ -30,7 +32,7 @@ const service = createConfiguratorService({
 beforeEach(resetConfigurator);
 afterAll(resetConfigurator);
 
-function buildConfiguratorApp(opts: { user?: boolean } = {}) {
+function buildConfiguratorApp(opts: { user?: boolean; userId?: string } = {}) {
   const app = Fastify();
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof ZodError) {
@@ -40,7 +42,7 @@ function buildConfiguratorApp(opts: { user?: boolean } = {}) {
   });
   app.addHook("preHandler", async (req) => {
     if (opts.user === false) return; // created_by is an FK, so variant creation tests run without a user row
-    req.user = { id: crypto.randomUUID(), email: "test@example.com", name: "Testanvändare", role: "admin" } as never;
+    req.user = { id: opts.userId ?? crypto.randomUUID(), email: "test@example.com", name: "Testanvändare", role: "admin" } as never;
   });
   app.addHook("preHandler", rejectMalformedIds());
   app.register(configuratorRoutes, { service });
@@ -50,7 +52,7 @@ function buildConfiguratorApp(opts: { user?: boolean } = {}) {
   return app;
 }
 
-async function templateWithChoice(opts: { user?: boolean } = {}) {
+async function templateWithChoice(opts: { user?: boolean; userId?: string } = {}) {
   const article = await makeArticle({ salesPrice: 1000 });
   const app = buildConfiguratorApp(opts);
   const base = `/articles/${article.id}/configurator`;
@@ -74,14 +76,15 @@ describe("configurator routes", () => {
     const patched = await app.inject({ method: "PATCH", url: `/articles/${article.id}/configurator`, payload: { mode: "to_order" } });
     expect([patched.statusCode, patched.json().mode]).toEqual([200, "to_order"]);
     expect((await app.inject({ method: "DELETE", url: `/articles/${article.id}/configurator` })).statusCode).toBe(204);
-    expect((await app.inject({ method: "GET", url: `/articles/${article.id}/configurator` })).statusCode).toBe(404);
+    const gone = await app.inject({ method: "GET", url: `/articles/${article.id}/configurator` });
+    expect([gone.statusCode, gone.json().code]).toEqual([404, "configurator-template-not-found"]);
     await app.close();
   });
 
   it("404s an unknown article, and 400s a template on a phantom", async () => {
     const app = buildConfiguratorApp();
     const missing = await app.inject({ method: "POST", url: `/articles/${crypto.randomUUID()}/configurator`, payload: { mode: "variants" } });
-    expect(missing.statusCode).toBe(404);
+    expect([missing.statusCode, missing.json().code]).toEqual([404, "article-not-found"]);
     const phantom = await makeArticle({ isPhantom: true });
     const res = await app.inject({ method: "POST", url: `/articles/${phantom.id}/configurator`, payload: { mode: "variants" } });
     expect([res.statusCode, res.json().code]).toEqual([400, "configurator-mode-not-allowed"]);
@@ -89,7 +92,7 @@ describe("configurator routes", () => {
   });
 
   it("400s a bad group body and a rule target of the wrong shape; 409s a referenced delete with the messages", async () => {
-    const { app, base, group, a, b } = await templateWithChoice();
+    const { app, base, group, b } = await templateWithChoice();
     const bad = await app.inject({ method: "POST", url: `${base}/groups`, payload: { code: "lock", name: "X", kind: "choice" } });
     expect([bad.statusCode, bad.json().code]).toEqual([400, "validation-failed"]);
 
@@ -175,7 +178,10 @@ describe("configurator routes", () => {
     expect(cleared.json().groups[0]).toMatchObject({ code: "LOCK", value: null, defaulted: false, errors: ["Välj Lås"] });
 
     const plain = await makeArticle();
-    expect((await app.inject({ method: "POST", url: `/configurator/${plain.id}/evaluate`, payload: { selection: {} } })).statusCode).toBe(404);
+    const notTemplate = await app.inject({ method: "POST", url: `/configurator/${plain.id}/evaluate`, payload: { selection: {} } });
+    expect([notTemplate.statusCode, notTemplate.json().code]).toEqual([404, "configurator-template-not-found"]);
+    const unknownArticle = await app.inject({ method: "POST", url: `/configurator/${crypto.randomUUID()}/evaluate`, payload: { selection: {} } });
+    expect([unknownArticle.statusCode, unknownArticle.json().code]).toEqual([404, "configurator-template-not-found"]);
     const badBody = await app.inject({ method: "POST", url, payload: { selection: "x" } });
     expect([badBody.statusCode, badBody.json().code]).toEqual([400, "validation-failed"]);
     const noCustomer = await app.inject({
@@ -183,7 +189,7 @@ describe("configurator routes", () => {
       url,
       payload: { selection: { LOCK: "A" }, customerId: "00000000-0000-4000-8000-000000000000" },
     });
-    expect(noCustomer.statusCode).toBe(404);
+    expect([noCustomer.statusCode, noCustomer.json().code]).toEqual([404, "customer-not-found"]);
     await app.close();
   });
 
@@ -324,6 +330,24 @@ describe("configurator routes", () => {
       expect([wrong.statusCode, wrong.json().code]).toEqual([409, "configurator-not-variant-mode"]);
       await app.close();
     });
+  });
+
+  // Both creating routes stamp the signed-in user on the link row (the tests
+  // above run without a user row, since created_by is an FK).
+  it("records the route's user as created_by on Skapa varianter and on Konfigurera", async () => {
+    const user = await createAuthRepository(db).create({
+      email: `konf-${crypto.randomUUID()}@example.com`, passwordHash: "not-a-real-hash", name: "Konfiguratör", role: "admin",
+    });
+    const { app, article, base } = await templateWithChoice({ userId: user.id });
+    const created = await app.inject({ method: "POST", url: `${base}/variants`, payload: { sets: { LOCK: ["A"] }, calcQuantity: 1 } });
+    expect(created.statusCode).toBe(201);
+    const resolved = await app.inject({ method: "POST", url: `/configurator/${article.id}/variant`, payload: { selection: { LOCK: "B" } } });
+    expect(resolved.json().created).toBe(true);
+    const links = await db.select().from(configuratorVariants).where(eq(configuratorVariants.templateArticleId, article.id));
+    expect(links.map((l) => [l.articleId, l.createdBy]).sort()).toEqual(
+      [[created.json()[0].articleId, user.id], [resolved.json().article.id, user.id]].sort()
+    );
+    await app.close();
   });
 
   describe("POST /configurator/:articleId/variant", () => {
