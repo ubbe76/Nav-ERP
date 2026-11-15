@@ -234,9 +234,9 @@ function duplicateDeviationReason(err: unknown, input: { code?: string; name?: s
 // alone guards it (two rules of one name are harmless, the code is the key).
 function duplicatePayrollCode(err: unknown, table: "absence_types" | "ob_rules", input: { code?: string; name?: string }) {
   if (isUniqueViolation(err, `${table}_code_unique`)) return new DuplicatePayrollCodeError("code", input.code ?? "");
-  if (table === "absence_types" && isUniqueViolation(err, "absence_types_name_unique")) {
-    return new DuplicatePayrollCodeError("name", input.name ?? "");
-  }
+  // Both names are unique (the OB rule's since migration 0227 — the
+  // pre-check alone let two simultaneous saves through).
+  if (isUniqueViolation(err, `${table}_name_unique`)) return new DuplicatePayrollCodeError("name", input.name ?? "");
   return null;
 }
 
@@ -1185,12 +1185,16 @@ export function createPayrollService(
       if (period.status === "locked") throw new PayrollPeriodLockedError(from);
 
       // An employee still clocked in has an incomplete basis — attesting it
-      // would freeze a number that is going to change.
-      if (await hasOpenAttendance(employeeId, year, month)) throw new UnfinishedAttendanceError(employeeId);
+      // would freeze a number that is going to change. Checked inside the
+      // attestation's transaction, with the employee row held against a Kom
+      // in flight (repo.createAttestation).
+      const assertComplete = async () => {
+        if (await hasOpenAttendance(employeeId, year, month)) throw new UnfinishedAttendanceError(employeeId);
+      };
 
       let attestation;
       try {
-        attestation = await repo.createAttestation(period.id, employeeId, userId);
+        attestation = await repo.createAttestation(period.id, employeeId, userId, assertComplete);
       } catch (err) {
         if (isUniqueViolation(err)) throw new AlreadyAttestedError();
         throw err;

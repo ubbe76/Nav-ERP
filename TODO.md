@@ -20,25 +20,19 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Allvarliga — fel belopp, bokföring eller lön
 
-
 ### Medel — fel resultat i ovanliga lägen och 500-fel
 
 ### Låga — races med litet fönster
 
 - [ ] **Bokföringsspärrens triggers läser förälderns status utan lås** (delatgranskningen 2026-11-11, medvetet lämnad): `nav_verification_locked` och `nav_supplier_invoice_files_guard` (0095) läser verifikatet/fakturan med en vanlig SELECT, så en skrivare som INTE själv låser verifikatet kan lägga en rad på ett utkast samtidigt som ett annat anrop bokför det. Ingen kod gör så (`replaceRows`/`addRow`/`deleteRow`/`bookVerificationInTx` tar `FOR UPDATE` först) — bara ett skript når det. `FOR SHARE` i funktionerna rättar det men kan ge deadlock för en skrivare som lägger rader först och uppdaterar huvudet sedan; prövas mot alla bokföringsvägar innan.
 
-- [ ] **Löneperiodens Lås mot odaterade ändringar:** personalkortet (standardschema, övertidsförval, Anställd från/till), dags- och veckoscheman, OB-regler, frånvarokoder och inställningarna kan ändras medan Lås räknar underlaget (tidgranskningen serialiserade bara de daterade skrivarna, `payroll-period-guard.ts`); `attest` läser öppen närvaro utanför transaktionen. OB-regelns namn har inget unikt index (förkontrollen ensam).
-
 ### Låga — otydliga fel, texter och småbeteenden
 
 - [ ] **Importens igenkänning:** kundens/leverantörens adressmall utan Adressnamn och Förvald (bara nummer + Adressrad 1/Postnummer/Stad) känns igen som kund-/leverantörsfil och skriver adressen över motpartens egen — tvetydig mot kundmallen, så den rättades inte i importgranskningen (guiden visar typen före commit).
 
-
 ### Låga — layout
 
-
 ### Låga — fel i manualen
-
 
 ## Förbättringar
 

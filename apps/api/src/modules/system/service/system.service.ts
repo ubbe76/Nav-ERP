@@ -694,6 +694,16 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       // failing write leaves nothing half saved, and the audit entry after
       // commit lists exactly what was written.
       const changedKeys = await repo.writeSettings(async (writer) => {
+        // The settings the löneunderlag reads (övertidsgränsen, Marginal för
+        // avvikelser, Tillåt ATF-uttag via schemat): Lås must not compute
+        // across them — first, before any row lock.
+        if (
+          input.payrollOvertimeThresholdMinutes !== undefined ||
+          input.attendanceReasonToleranceMinutes !== undefined ||
+          input.scheduleBalancing !== undefined
+        ) {
+          await writer.sharePayrollConfig();
+        }
         const changedKeys: string[] = [];
         const set = async (key: string, value: string) => {
           changedKeys.push(key);

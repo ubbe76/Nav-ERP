@@ -33,7 +33,7 @@ import {
 } from "./employee-erasure.js";
 import { localDateOf } from "./stamp-close.js";
 // Leaf in the payroll module (schema + error only) — no cycle.
-import { assertPayrollPeriodsOpenInTx } from "../../payroll/repository/payroll-period-guard.js";
+import { assertPayrollPeriodsOpenInTx, sharePayrollConfigInTx } from "../../payroll/repository/payroll-period-guard.js";
 
 // What the stamp-in asks again on the locked rows (createStampSession).
 export interface StampTargetState {
@@ -184,9 +184,16 @@ export function createTimeReportRepository(db: Db) {
   }
 
   return {
+    // The personnel card feeds the löneunderlag (standardschema,
+    // övertidsförval, Anställd från/till, active) — an undated writer:
+    // payroll_config shared, so Lås never computes across a change
+    // (payroll-period-guard.ts).
     async createEmployee(input: CreateEmployeeInput) {
-      const [row] = await db.insert(employees).values(input).returning();
-      return row!;
+      return db.transaction(async (tx) => {
+        await sharePayrollConfigInTx(tx);
+        const [row] = await tx.insert(employees).values(input).returning();
+        return row!;
+      });
     },
 
     // GDPR (#2): what the personnel card's Radera/Anonymisera may do.
@@ -502,6 +509,8 @@ export function createTimeReportRepository(db: Db) {
     async updateEmployee(id: string, input: UpdateEmployeeInput) {
       const { defaultWorkCenterIds, ...fields } = input;
       return db.transaction(async (tx) => {
+        // An undated payroll writer (createEmployee) — before the row lock.
+        await sharePayrollConfigInTx(tx);
         const hasFields = Object.values(fields).some((value) => value !== undefined);
         const [row] = hasFields
           ? await tx

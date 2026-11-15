@@ -4,6 +4,7 @@ import {
   absenceTypes,
   attendanceDeviationReasons,
   auditLog,
+  employees,
   obRules,
   overtimeDispositions,
   payrollAttestations,
@@ -25,8 +26,10 @@ import type {
 import { PayrollPeriodLockedError } from "../service/period-lock.js";
 import {
   assertPayrollPeriodsOpenInTx,
+  lockPayrollConfigExclusivelyInTx,
   lockPayrollPeriodExclusivelyInTx,
   payrollPeriodFirstDay,
+  sharePayrollConfigInTx,
 } from "./payroll-period-guard.js";
 
 // Postgres `time` columns come back as "HH:MM:SS" — the API speaks "HH:MM".
@@ -87,22 +90,34 @@ export function createPayrollRepository(db: Db) {
       return row ?? null;
     },
 
+    // Frånvarokoder feed the basis (code, PAXml code, Tjänar in ATF): an
+    // undated writer — payroll_config shared, so Lås never computes across
+    // a change (payroll-period-guard.ts).
     async createAbsenceType(input: CreateAbsenceTypeInput) {
-      const [row] = await db.insert(absenceTypes).values(input).returning();
-      return row!;
+      return db.transaction(async (tx) => {
+        await sharePayrollConfigInTx(tx);
+        const [row] = await tx.insert(absenceTypes).values(input).returning();
+        return row!;
+      });
     },
 
     async updateAbsenceType(id: string, input: UpdateAbsenceTypeInput) {
-      const [row] = await db.update(absenceTypes).set(input).where(eq(absenceTypes.id, id)).returning();
-      return row ?? null;
+      return db.transaction(async (tx) => {
+        await sharePayrollConfigInTx(tx);
+        const [row] = await tx.update(absenceTypes).set(input).where(eq(absenceTypes.id, id)).returning();
+        return row ?? null;
+      });
     },
 
     // Seed helper: inserts the entry unless its code or name already exists
     // (any conflict skips — existing entries are never touched). Returns
     // true when a row was actually created.
     async createAbsenceTypeIfMissing(input: { code: string; name: string; paxmlCode: string; earnsAtf: boolean }) {
-      const rows = await db.insert(absenceTypes).values(input).onConflictDoNothing().returning();
-      return rows.length > 0;
+      return db.transaction(async (tx) => {
+        await sharePayrollConfigInTx(tx);
+        const rows = await tx.insert(absenceTypes).values(input).onConflictDoNothing().returning();
+        return rows.length > 0;
+      });
     },
 
     // --- Avvikelseorsaker ---
@@ -165,14 +180,21 @@ export function createPayrollRepository(db: Db) {
       return row ? mapObRule(row) : null;
     },
 
+    // OB rules feed the basis — undated writers, like the frånvarokoder.
     async createObRule(input: CreateObRuleInput) {
-      const [row] = await db.insert(obRules).values(input).returning();
-      return mapObRule(row!);
+      return db.transaction(async (tx) => {
+        await sharePayrollConfigInTx(tx);
+        const [row] = await tx.insert(obRules).values(input).returning();
+        return mapObRule(row!);
+      });
     },
 
     async updateObRule(id: string, input: UpdateObRuleInput) {
-      const [row] = await db.update(obRules).set(input).where(eq(obRules.id, id)).returning();
-      return row ? mapObRule(row) : null;
+      return db.transaction(async (tx) => {
+        await sharePayrollConfigInTx(tx);
+        const [row] = await tx.update(obRules).set(input).where(eq(obRules.id, id)).returning();
+        return row ? mapObRule(row) : null;
+      });
     },
 
     // --- Frånvaro (absence bookings) ---
@@ -337,9 +359,18 @@ export function createPayrollRepository(db: Db) {
 
     // Attest and its undo under the period guard: an attestation never
     // appears in, or disappears from, a period that Lås is freezing.
-    async createAttestation(periodId: string, employeeId: string, attestedBy: string) {
+    // `assertComplete` (the service's "still clocked in?" check) runs INSIDE
+    // the transaction, after the employee row is held FOR UPDATE: that
+    // conflicts with the FOR KEY SHARE an attendance INSERT (Kom) takes on its
+    // employee, so a Kom in flight has committed before the check reads
+    // (through the pool) and one arriving waits until the attestation has
+    // committed. Read before the transaction, a Kom in between was attested
+    // as a complete basis. Month first, then the row (the guard's order).
+    async createAttestation(periodId: string, employeeId: string, attestedBy: string, assertComplete: () => Promise<void> = async () => {}) {
       return db.transaction(async (tx) => {
         await assertPeriodOpenByIdInTx(tx, periodId);
+        await tx.select({ id: employees.id }).from(employees).where(eq(employees.id, employeeId)).for("update");
+        await assertComplete();
         const [row] = await tx.insert(payrollAttestations).values({ periodId, employeeId, attestedBy }).returning();
         return row!;
       });
@@ -379,6 +410,10 @@ export function createPayrollRepository(db: Db) {
       return db.transaction(async (tx) => {
         await tx.execute(sql`set local idle_in_transaction_session_timeout = '60s'`);
         await lockPayrollPeriodExclusivelyInTx(tx, year, month);
+        // The undated half (schedules, OB rules, frånvarokoder, the personnel
+        // card, the payroll settings): a change in flight commits first, one
+        // arriving waits until this lock has committed.
+        await lockPayrollConfigExclusivelyInTx(tx);
         const where = and(eq(payrollPeriods.year, year), eq(payrollPeriods.month, month));
         const [period] = await tx.select({ status: payrollPeriods.status }).from(payrollPeriods).where(where);
         if (!period || period.status !== "open") throw new PayrollPeriodLockedError(payrollPeriodFirstDay(year, month));
