@@ -3,8 +3,10 @@ import { eq, sql } from "drizzle-orm";
 import { articles, bomComponents, configuratorVariants, db, routingOperations } from "@navet/db";
 import {
   ConfiguratorInvalidConfigurationError, ConfiguratorNotVariantModeError, ConfiguratorTemplateNotFoundError,
-  ConfiguratorVariantNumberTakenError,
+  ConfiguratorVariantNumberTakenError, ConfiguratorVariantTooLongError,
 } from "../src/modules/configurator/service/configurator.errors.js";
+import { updateArticleSchema } from "@navet/shared";
+import { parsed } from "./helpers/parsed.js";
 import { createManufacturingRepository } from "../src/modules/manufacturing/repository/manufacturing.repository.js";
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { makeArticle, makeVariantService, resetConfigurator, testCostingSettings } from "./helpers/configurator.js";
@@ -163,6 +165,20 @@ describe("resolveVariant", () => {
     const err = await service.resolveVariant(s.article.id, SEL, null).catch((e) => e);
     expect(err).toBeInstanceOf(ConfiguratorVariantNumberTakenError);
     expect((err as Error).message).toBe(`Artikelnumret ${s.article.articleNumber}-A-RD-1200 finns redan`);
+  });
+
+  // The plan's too_long (variantIdentity) on the Konfigurera path: the order
+  // row's 400 with the identity's own text, and nothing written.
+  it("a number past the article limit ⇒ ConfiguratorVariantTooLongError with the identity's text, nothing created", async () => {
+    const s = await build();
+    // 45 + "-A-RD-1200" = 55 > 50.
+    await testArticleService.updateArticle(s.article.id, parsed(updateArticleSchema, { articleNumber: "L".repeat(45) }));
+    const before = (await db.select({ id: articles.id }).from(articles)).length;
+    const err = await service.resolveVariant(s.article.id, SEL, null).catch((e) => e);
+    expect(err).toBeInstanceOf(ConfiguratorVariantTooLongError);
+    expect((err as Error).message).toBe("Artikelnumret blir längre än 50 tecken");
+    expect(await variantRows()).toEqual([]);
+    expect((await db.select({ id: articles.id }).from(articles)).length).toBe(before);
   });
 
   it("two concurrent calls with the same selection give one variant", async () => {

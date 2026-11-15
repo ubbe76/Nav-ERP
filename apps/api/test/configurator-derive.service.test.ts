@@ -186,12 +186,19 @@ describe("configurator derive — structure and pre-costing", () => {
     expect(c.manufacturingCost).toBeCloseTo(960 + 1400 + 150 + 96, 6);
   });
 
-  it("the costing carries SVK: manufacturing cost plus Affo, per unit", async () => {
+  // A general markup ≠ 0 proves the markup stays out of SVK: it prices the
+  // calculation, never its cost (the variant's standard price is TVK/st).
+  it("the costing carries SVK: manufacturing cost plus Affo, per unit — never the general markup", async () => {
     const s = await build();
+    const selection = { LOCK: "A", BREDD: 1500, HJUL: true } as const;
     Object.assign(testCostingSettings, { costingAffoPercent: 10 });
-    const r = await service.derive(s.article.id, { selection: { LOCK: "A", BREDD: 1500, HJUL: true }, quantity: 10 });
+    const plain = await service.derive(s.article.id, { selection, quantity: 10 });
+    Object.assign(testCostingSettings, { costingGeneralMarkupPercent: 25 });
+    const r = await service.derive(s.article.id, { selection, quantity: 10 });
     expect(r.costing!.selfCost).toBeCloseTo(r.costing!.manufacturingCost * 1.1, 6);
     expect(r.costing!.selfCostPerUnit).toBeCloseTo(r.costing!.selfCost / 10, 6);
+    expect(r.costing!.selfCost).toBeCloseTo(plain.costing!.selfCost, 6);
+    expect(r.costing!.manufacturingCostPerUnit).toBeCloseTo(plain.costing!.manufacturingCostPerUnit, 6);
   });
 
   it("an invalid configuration gives derivable false and costing null", async () => {

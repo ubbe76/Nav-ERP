@@ -1,7 +1,12 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import Fastify from "fastify";
+import { ZodError } from "zod";
+import { manufacturingRoutes } from "../src/modules/manufacturing/routes/manufacturing.routes.js";
+import { createArticleSchema } from "@navet/shared";
+import { parsed } from "./helpers/parsed.js";
 import { and, eq, sql } from "drizzle-orm";
 import { configuratorTemplates, db, manufacturingOrders, moMaterialConsumptions, moOperations, stockTransactions } from "@navet/db";
-import type { ManufacturingOrderConfiguration } from "@navet/shared";
+import type { ManufacturingOrderConfiguration, OrderRowConfiguration } from "@navet/shared";
 import { createManufacturingRepository } from "../src/modules/manufacturing/repository/manufacturing.repository.js";
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import {
@@ -271,6 +276,37 @@ describe("configured TO — Kalkyl structure rows", () => {
     expect(mats.some((m) => m.componentArticleId === s.parts.skruv.id)).toBe(false);
     expect(mats.some((m) => m.componentArticleId === s.parts.plat.id)).toBe(true);
   });
+
+  // The two halves of explodeBom's "exclude" mode on the template's own
+  // structure, against the database: a phantom on a Kalkyl row is not walked
+  // (none of its parts reach the TO), and under a phantom the phantom row's
+  // link wins over the parts' own links to the phantom's own route (länkregeln).
+  it("skips a phantom on a Kalkyl row entirely, and gives a phantom's parts the phantom row's link, not their own", async () => {
+    const { s, row } = await confirmedRow(2);
+    const make = (name: string, extra: { type?: "manufactured"; isPhantom?: boolean } = {}) =>
+      testArticleService.createArticle(
+        parsed(createArticleSchema, { articleNumber: `F-${crypto.randomUUID().slice(0, 8)}`, name, type: extra.type ?? "purchased", isPhantom: extra.isPhantom ?? false, standardCost: 5 })
+      );
+    const linkedPhantom = await make("Fantom med egen rutt", { type: "manufactured", isPhantom: true });
+    const ownOp = await mfg.createRoutingOperation(linkedPhantom.id, { sequenceNo: 10, workCenterId: s.wc20.id, setupTime: 0, runTimePerUnit: 1 });
+    const inner = await make("Del under fantom");
+    await testArticleService.addBomComponent(linkedPhantom.id, { componentArticleId: inner.id, quantity: 3, routingOperationId: ownOp.id });
+    await testArticleService.addBomComponent(s.article.id, { componentArticleId: linkedPhantom.id, quantity: 1, routingOperationId: s.op10.id });
+
+    const kalkylPhantom = await make("Kalkylfantom", { type: "manufactured", isPhantom: true });
+    const hidden = await make("Del under kalkylfantom");
+    await testArticleService.addBomComponent(kalkylPhantom.id, { componentArticleId: hidden.id, quantity: 4 });
+    await testArticleService.addBomComponent(s.article.id, { componentArticleId: kalkylPhantom.id, quantity: 1, costingOnly: true });
+
+    const mo = await mfg.createFromSalesOrderRow(row.id, {}, null);
+    const mats = await matOf(mo.id);
+    const op10 = (await opsOf(mo.id)).find((o) => o.sequenceNo === 10)!;
+    const innerRows = mats.filter((m) => m.componentArticleId === inner.id);
+    expect(innerRows.map((m) => [Number(m.quantityPlanned), m.moOperationId])).toEqual([[6, op10.id]]);
+    expect(mats.some((m) => m.componentArticleId === hidden.id || m.componentArticleId === kalkylPhantom.id || m.componentArticleId === linkedPhantom.id)).toBe(false);
+    // Both phantoms are still in the configuration's förkalkyl (5 × 3 + 5 × 4 per unit on top of 168).
+    expect((mo.configuration as ManufacturingOrderConfiguration).cost.manufacturingCostPerUnit).toBe(168 + 15 + 20);
+  });
 });
 
 // Avvikelseanalys (#14): a configured TO's base is its OWN derived rows,
@@ -350,5 +386,71 @@ describe("configured TO — alternativa resurser", () => {
       { workCenterId: alt.id, code: "611", name: "Resurs 611", rank: 1, setupTime: "6.00", runTimePerUnit: "2.00000000" },
     ]);
     expect(ops.find((o) => o.sequenceNo === 20)!.resources).toEqual([]);
+  });
+});
+
+// The TO routes' answers for the configured paths: a refused choice is a 400
+// that carries the engine's messages as details, and a row reconfigured
+// between the derivation and the insert is a 409 — on both creating routes.
+describe("configured TO over HTTP", () => {
+  function appWith(service: ReturnType<typeof createManufacturingService>, userId: string) {
+    const app = Fastify();
+    app.setErrorHandler((err, _req, reply) => {
+      if (err instanceof ZodError) return reply.code(400).send({ error: "Validation failed", code: "validation-failed" });
+      throw err;
+    });
+    app.addHook("preHandler", async (req) => {
+      req.user = { id: userId, email: "test@example.com", name: "Test", role: "admin" } as never;
+    });
+    app.register(manufacturingRoutes, { service });
+    return app;
+  }
+
+  it("400 configurator-invalid-configuration with details for a refused choice on POST /manufacturing-orders", async () => {
+    const s = await buildToOrderWithStructure();
+    const user = await makeUser();
+    const app = appWith(mfg, user.id);
+    const res = await app.inject({
+      method: "POST",
+      url: "/manufacturing-orders",
+      payload: { articleId: s.article.id, quantity: 1, configuration: { selection: { LOCK: "B" } } },
+    });
+    expect([res.statusCode, res.json().code]).toEqual([400, "configurator-invalid-configuration"]);
+    expect(res.json().details).toEqual(expect.arrayContaining([expect.any(String)]));
+    expect(res.json().details.length).toBeGreaterThan(0);
+    expect(await db.select().from(manufacturingOrders)).toHaveLength(0);
+    await app.close();
+  });
+
+  it("409 row-configuration-changed when the row is reconfigured under Skapa TO and under POST /manufacturing-orders", async () => {
+    const { s, row } = await confirmedRow();
+    const user = await makeUser();
+    const reader = (t: string, sel: never, q: number, o?: { withCost?: boolean }) =>
+      configurator.deriveForManufacturing(t, sel, q, o).then(async (r) => {
+        await db.execute(sql`update sales_order_rows set configuration = jsonb_set(configuration, '{key}', '"changed"') where id = ${row.id}`);
+        return r;
+      });
+    const racing = createManufacturingService(
+      createManufacturingRepository(db),
+      testDocumentPdfService,
+      testArticleService,
+      {
+        findRowForManufacturing: salesRepository.findRowForManufacturing,
+        lockRowForManufacturing: salesRepository.lockRowForManufacturing,
+        markInProduction: markSalesOrderInProduction,
+      },
+      undefined,
+      reader as never
+    );
+    const app = appWith(racing, user.id);
+    const fromRow = await app.inject({ method: "POST", url: `/sales-orders/${row.salesOrderId}/rows/${row.id}/manufacturing-order`, payload: {} });
+    expect([fromRow.statusCode, fromRow.json().code]).toEqual([409, "row-configuration-changed"]);
+    // Reset the key the reader changed, so the second path races afresh.
+    await db.execute(sql`update sales_order_rows set configuration = jsonb_set(configuration, '{key}', to_jsonb(${(row.configuration as OrderRowConfiguration).key}::text)) where id = ${row.id}`);
+    const linked = await app.inject({ method: "POST", url: "/manufacturing-orders", payload: { salesOrderRowId: row.id, quantity: 1 } });
+    expect([linked.statusCode, linked.json().code]).toEqual([409, "row-configuration-changed"]);
+    expect(await db.select().from(manufacturingOrders)).toHaveLength(0);
+    expect(s.article.id).toBeTruthy();
+    await app.close();
   });
 });

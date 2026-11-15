@@ -892,7 +892,12 @@ describe("konfigurator 4c — beställningsvara", () => {
     expect([cfg.salesOrderRowId, cfg.active, cfg.proposalQuantity, cfg.configurationError]).toEqual(["r1", false, 0, null]);
   });
 
-  it("an invalid configured row keeps its error and has no cascade of its own", () => {
+  // The calc only lists the row with the engine's message; that an invalid
+  // row cascades nothing is the service's (it derives no material for it —
+  // "an invalid stored configuration … cascades nothing" in
+  // planning-configured.test.ts). Here: the row and its error reach the
+  // result, and the template's own row gets no proposal from it.
+  it("an invalid configured row is listed with the engine's message and gives the template no proposal", () => {
     const rows = computeRequirements(
       calcInput({
         articles: [article("T", { type: "manufactured", configuratorMode: "to_order" })],
@@ -901,7 +906,9 @@ describe("konfigurator 4c — beställningsvara", () => {
         ],
       })
     );
-    expect(rows.find((r) => r.proposalKind === "configured")!.configurationError).toBe("Konfigurationen är inte giltig");
+    const cfg = rows.find((r) => r.proposalKind === "configured")!;
+    expect([cfg.salesOrderRowId, cfg.configurationError]).toEqual(["r1", "Konfigurationen är inte giltig"]);
+    expect(rows.filter((r) => r.articleId === "T" && r.proposalKind !== "configured").every((r) => r.proposalQuantity === 0)).toBe(true);
   });
 });
 

@@ -68,7 +68,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 ### Testluckor
 
 - [ ] **Frakt:** racetesterna i shipping-booking/invoice-freight bygger på fasta sömnar — polla om de flagnar; "ny försändelse 14:50 → första Hämta priser" bara testad på ren nivå; avbokning efter avbokning i Sendifys eget UI inte provad mot sandlådan.
-- [ ] **Konfigurator:** schematestet tunt på positiva vägar och DB-CHECK:arna; dubbel errors-import, `makeArticle` `as never` och oanvända variabler; evaluate-404 asserterar bara status; pin-tester för krockande op vars villkor inte gäller, formelfel som kopplar bort en rad utan varning och standardfallet i pass A; `variantRequestSchema`/`variantSetsSchema` (200-tak, 4 decimaler), orderable-tolkningen, surface_treatment-namnfallback, lego-leverantörsförval på villkorad op; `created_by` via rutten; låstestet i article-template-guard bevisar väntan bara via tid; too_long via `resolveVariant`; HTTP-test av `?configurable`; route-test för 400 details och 409 row-configuration-changed; SVK-testet borde ha allmänt påslag ≠ 0; DB-test för costing-only/fantom-egen-länk-material; testnamnet "invalid configured row has no cascade" överlovar; enhetstest för `selectionFromRaw`/`rawFromSelection` med null; inga komponenttester (mallredigeringen, modalens PATCH).
+- [ ] **Konfigurator:** inga komponenttester (mallredigeringen, modalens PATCH) — repot saknar en testmiljö för React-komponenter (jsdom + Testing Library); de rena delarna (`selectionFromRaw`/`rawFromSelection`) är testade.
 - [ ] **Terminalen och närvaron:** anställd-cascade och FK-race; lego-inleverans; Slutför order över flera op; admin-fall; 2 s-gränsen.
 - [ ] **Artikelöversikten:** `toBeCloseTo` i invarianttestet om bråktal någonsin används.
 

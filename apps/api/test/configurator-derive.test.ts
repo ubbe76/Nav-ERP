@@ -268,6 +268,50 @@ describe("deriveStructure", () => {
     expect(r.errors).toEqual(["Operationsnummer 30 finns både i rutten och bland konfiguratorns operationer"]);
   });
 
+  // Rule 6 is judged only for an operation that applies: a clashing number
+  // whose conditions do not hold never reaches the route.
+  it("rule 6: a clashing operation number is no error while its conditions do not hold", () => {
+    const clash = op({ sequenceNo: 30, conditions: [hjulSelected] });
+    const r = derive({ HJUL: false, BREDD: 1200 }, { operations: [clash] });
+    expect([r.derivable, r.errors]).toEqual([true, []]);
+    expect(r.operations.map((x) => [x.kind, x.sequenceNo])).toEqual([["base", 10], ["base", 30]]);
+    // … and is reported (with the ordinary operation first) once it applies.
+    const applied = derive({ HJUL: true, BREDD: 1200 }, { operations: [clash] });
+    expect(applied.errors).toEqual(["Operationsnummer 30 finns både i rutten och bland konfiguratorns operationer"]);
+    expect(applied.operations.map((x) => [x.kind, x.sequenceNo])).toEqual([["base", 10], ["base", 30], ["configurator", 30]]);
+  });
+
+  // Rule 5's other branch: the operation applies but its formula failed — the
+  // line is unlinked, and the operation's own error is the only message.
+  it("rule 5: a line on an applicable operation whose formula failed is unlinked without a warning of its own", () => {
+    const o = op({ sequenceNo: 40, conditions: [hjulSelected], runTimePerUnit: null, runFormula: "okand * 2" });
+    const l = line({ configuratorOperationId: o.id, label: "Strukturrad 1 (Hjul)" });
+    const r = derive({ HJUL: true, BREDD: 1200 }, { lines: [l], operations: [o] });
+    expect(r.derivable).toBe(false);
+    expect(r.errors).toEqual(["Operation 40: Okänd kod OKAND"]);
+    expect(r.warnings).toEqual([]);
+    expect(r.operations.map((x) => x.sequenceNo)).toEqual([10, 30]);
+    expect(r.materials[2]).toMatchObject({ lineId: l.id, operation: null });
+  });
+
+  // Conditions are judged on the effective values after pass A, so a förval
+  // the customer never touched includes a line like an explicit choice — and
+  // an explicit empty choice (null) does not.
+  it("pass A: a line and an operation conditioned on the group's default are included when nothing is chosen", () => {
+    const l0 = lock();
+    l0.defaultValueId = l0.values[1]!.id; // B
+    const template = tpl([l0, hjul(), bredd()]);
+    const onB = line({ conditions: [isLock("B")], componentArticleId: ART.list, label: "Strukturrad 1 (List)" });
+    const opB = op({ sequenceNo: 40, conditions: [isLock("B")] });
+    const r = derive({ BREDD: 1200 }, { template, lines: [onB], operations: [opB] });
+    expect([r.derivable, r.errors]).toEqual([true, []]);
+    expect(r.materials.map((m) => m.componentArticleId)).toEqual([ART.plat, ART.skruv, ART.list]);
+    expect(r.operations.map((x) => x.sequenceNo)).toEqual([10, 30, 40]);
+    const cleared = derive({ BREDD: 1200, LOCK: null }, { template, lines: [onB], operations: [opB] });
+    expect(cleared.materials.map((m) => m.componentArticleId)).toEqual([ART.plat, ART.skruv]);
+    expect(cleared.operations.map((x) => x.sequenceNo)).toEqual([10, 30]);
+  });
+
   it("rule 7: the same component from two lines (and a base row) stays separate material rows", () => {
     const a = line({ componentArticleId: ART.plat, quantity: 1 });
     const b = line({ componentArticleId: ART.plat, quantity: 2 });

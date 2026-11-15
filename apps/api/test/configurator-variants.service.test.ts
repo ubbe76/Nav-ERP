@@ -1,7 +1,7 @@
 import { createStockLocationSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { articleCodes, articleFiles, articleUnits, articles, bomComponents, configuratorVariants, customers, db, routingOperations, salesOrderRows, salesOrders, units } from "@navet/db";
+import { articleCodes, articleFiles, articleUnits, articles, bomComponents, configuratorVariants, customers, db, routingOperations, salesOrderRows, salesOrders, suppliers, units } from "@navet/db";
 import type { VariantSelectionEntry } from "@navet/shared";
 import {
   ConfiguratorCodeLockedError, ConfiguratorNotVariantModeError, ConfiguratorReferenceInUseError, ConfiguratorTemplateHasVariantsError,
@@ -221,6 +221,31 @@ describe("createVariants", () => {
     ]);
     expect(Number(bl.standardCost)).toBe(141); // 1110 + 150 (lack) + 150 (lego) = 1410 / 10
     expect(Number(bl.salesPrice)).toBe(1100);
+  });
+
+  // Beredning's förval for a lego operation, on the variant's route: a
+  // conditional operation on a legoresurs takes the resource's supplier
+  // (variantRoutingRows), a base operation keeps the template row's own.
+  it("a conditional lego operation gets its resource's supplier; a base lego operation keeps the template's supplier", async () => {
+    const s = await build();
+    const [resourceSupplier, ownSupplier] = await db
+      .insert(suppliers)
+      .values(["Lackeraren", "Härdaren"].map((name) => ({ supplierNumber: `L-${crypto.randomUUID().slice(0, 8)}`, name })))
+      .returning();
+    await mfgService.updateWorkCenter(s.wcL.id, { supplierId: resourceSupplier!.id });
+    const wcH = await workCenter("205", 0, "subcontract");
+    const op40 = await mfgService.createRoutingOperation(s.article.id, { sequenceNo: 40, workCenterId: wcH.id, setupTime: 0, runTimePerUnit: 0 });
+    await db.update(routingOperations).set({ subcontractSupplierId: ownSupplier!.id }).where(eq(routingOperations.id, op40.id));
+
+    const [row] = await service.createVariants(s.article.id, { sets: { LOCK: ["A"], FARG: ["BL"], BREDD: [1200] }, calcQuantity: 10 }, null);
+    expect(row!.status).toBe("created");
+    const ops = await db.select().from(routingOperations).where(eq(routingOperations.articleId, row!.articleId!)).orderBy(routingOperations.sequenceNo);
+    expect(ops.map((o) => [o.sequenceNo, o.subcontractSupplierId])).toEqual([
+      [10, null],
+      [20, null],
+      [30, resourceSupplier!.id],
+      [40, ownSupplier!.id],
+    ]);
   });
 
   it("two combinations in one run that join to the same number: the second is stopped with its own reason", async () => {
