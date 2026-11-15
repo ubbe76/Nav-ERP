@@ -1896,11 +1896,14 @@ describe("invoice language (Språk, #7)", () => {
     expect((await invoiceService.getInvoice(draft!.id))!.language).toBe("sv");
   });
 
-  it("a credit note takes the customer's language at the credit's own issue, not the source invoice's", async () => {
+  // Användarens beslut 2026-11-15: the credit is written in the language of
+  // the invoice it credits — its copied freight and interest rows carry that
+  // invoice's texts, so the customer's new language made a mixed document.
+  it("a credit note takes the source invoice's language, also when the customer has changed since", async () => {
     const customer = await makeCustomer();
     const biller = await makeUser();
     const draft = await invoiceService.create(
-      { customerId: customer.id, rows: [{ description: "x", quantity: 1, unitPrice: 10 }] },
+      { customerId: customer.id, rows: [{ description: "Frakt DHL (FR-2026-12)", quantity: 1, unitPrice: 10 }] },
       biller.id
     );
     const issued = await invoiceService.issue(draft!.id, issuedBy);
@@ -1908,10 +1911,23 @@ describe("invoice language (Språk, #7)", () => {
 
     await salesService.updateCustomer(customer.id, { language: "en" });
     const credit = await invoiceService.createCredit(issued!.id, {}, biller.id);
+    // The draft previews (and the mail defaults use) the source's language.
+    expect((await invoiceService.getInvoice(credit!.id))!.language).toBe("sv");
     const issuedCredit = await invoiceService.issue(credit!.id, issuedBy);
-    expect(issuedCredit!.language).toBe("en");
-    // The source invoice keeps its stamp.
-    expect((await invoiceService.getInvoice(issued!.id))!.language).toBe("sv");
+    expect(issuedCredit!.language).toBe("sv");
+    expect((await invoiceService.getInvoice(credit!.id))!.rows[0]!.description).toBe("Frakt DHL (FR-2026-12)");
+    // A new invoice to the same customer is in English.
+    const next = await invoiceService.create(
+      { customerId: customer.id, rows: [{ description: "y", quantity: 1, unitPrice: 10 }] },
+      biller.id
+    );
+    expect((await invoiceService.issue(next!.id, issuedBy))!.language).toBe("en");
+
+    // And the other way round: an English invoice credited after the
+    // customer went back to Swedish stays English.
+    const english = await invoiceService.createCredit(next!.id, {}, biller.id);
+    await salesService.updateCustomer(customer.id, { language: "sv" });
+    expect((await invoiceService.issue(english!.id, issuedBy))!.language).toBe("en");
   });
 });
 

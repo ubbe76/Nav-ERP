@@ -576,8 +576,8 @@ export function createInvoiceService(
   // language (the preview); anything issued uses the language stamped at
   // Utfärda (invoices.language) — the archived PDF, reprints and the
   // reminders never change with the customer.
-  function invoiceLanguage(invoice: RawInvoice, customer: { language: string } | null): DocumentLanguage {
-    return invoice.status === "draft" ? documentLanguageOf(customer?.language) : documentLanguageOf(invoice.language);
+  async function invoiceLanguage(invoice: RawInvoice, customer: { language: string } | null): Promise<DocumentLanguage> {
+    return invoice.status === "draft" ? draftLanguage(invoice, customer) : documentLanguageOf(invoice.language);
   }
 
   async function buildPdf(invoice: RawInvoice) {
@@ -639,7 +639,7 @@ export function createInvoiceService(
     // suppliers.our_customer_number): the customer's number for us is theirs
     // to change, and a reprint should carry the current one.
     const customer = await repo.findCustomerById(invoice.customerId);
-    const language = invoiceLanguage(invoice, customer);
+    const language = await invoiceLanguage(invoice, customer);
     const texts = documentTexts(language);
 
     // Momskoder (spec 4.3): the invoice texts of the codes on the invoice,
@@ -1204,6 +1204,24 @@ export function createInvoiceService(
     return customer.vatNumber;
   }
 
+  // The language a draft is previewed in and Utfärda stamps (Dokument på
+  // engelska #7): the customer's current one, except on a credit note, which
+  // is written in the language of the invoice it credits (användarens beslut
+  // 2026-11-15) — its copied freight and interest rows carry that invoice's
+  // texts, so a customer who changed language since got a credit in two
+  // languages. Same source rule as issueVatNumber above; a credit note whose
+  // source is gone falls back to the customer's.
+  async function draftLanguage(
+    invoice: { type: InvoiceType; creditedInvoiceId: string | null },
+    customer: { language: string } | null
+  ): Promise<DocumentLanguage> {
+    if (invoice.type === "credit" && invoice.creditedInvoiceId) {
+      const source = await repo.findRawById(invoice.creditedInvoiceId);
+      if (source) return documentLanguageOf(source.language);
+    }
+    return documentLanguageOf(customer?.language);
+  }
+
   const service = {
     async list(query: ListInvoicesQuery) {
       return repo.list(query);
@@ -1257,7 +1275,7 @@ export function createInvoiceService(
       if (header.status === "draft") {
         const customer = await repo.findCustomerById(header.customerId);
         if (customer) {
-          language = documentLanguageOf(customer.language);
+          language = await draftLanguage(header, customer);
           buyerVatNumber = await issueVatNumber(header, customer);
           const check = {
             codes: rows.flatMap((row) => (isVatCode(row.vatCode.code) ? [row.vatCode.code] : [])),
@@ -1899,6 +1917,7 @@ export function createInvoiceService(
       // checked against) the number of the invoice it credits — the supply
       // it reverses was made to that number, whatever the customer's is now.
       const buyerVatNumber = await issueVatNumber(invoice, customer);
+      const language = await draftLanguage(invoice, customer);
 
       const now = new Date();
       // A Stockholm day, whatever the container's zone.
@@ -1935,7 +1954,7 @@ export function createInvoiceService(
         orgNumber: customer.orgNumber,
         vatNumber: buyerVatNumber,
         privatePerson: customer.privatePerson,
-        language: documentLanguageOf(customer.language),
+        language,
         paymentTermCode: paymentTerm?.code ?? null,
         paymentTermName: paymentTerm?.name ?? null,
       };
