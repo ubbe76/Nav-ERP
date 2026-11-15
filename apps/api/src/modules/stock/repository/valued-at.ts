@@ -8,7 +8,7 @@
 // Readers that ask "when was it registered" (the count's disturbed flag, the
 // receipt log, the latest draw) keep created_at on purpose.
 import { sql } from "drizzle-orm";
-import { stockTransactions } from "@navet/db";
+import { purchaseReceipts, stockTransactions } from "@navet/db";
 
 // The moment, mapped like created_at (a Date) so callers can swap one for the
 // other in a select.
@@ -31,3 +31,13 @@ export function stockValuedOnOrBefore(asOf: string) {
   return sql`${stockValuedAt} < ((${asOf}::date + 1)::timestamp AT TIME ZONE 'Europe/Stockholm')`;
 }
 
+
+// Bokför per (#19) — the same idea on the receipt log: when the goods
+// arrived. A receipt registered later for an earlier day carries received_at
+// (that day's end, the same moment as its stock row's valued_at); NULL = the
+// same as created_at. Every "when was it received" reader goes through this
+// (leveransprecision, the fakturaunderlag's Inlevererad, the IO card's Inleveranser,
+// the batch trace) — raw subqueries over an alias write the same coalesce.
+export const receiptReceivedAt = sql<Date>`coalesce(${purchaseReceipts.receivedAt}, ${purchaseReceipts.createdAt})`.mapWith(
+  purchaseReceipts.createdAt
+);

@@ -26,6 +26,8 @@ import { isStockedArticleType } from "../service/stocked-article.js";
 import { allocateBatchOutflow, articlePlacePreference, compareOutflowLocations, FALLBACK_LOCATION_NAME, withBatchRemainder } from "../service/outflow-allocation.js";
 import { isCheckViolation, isUniqueViolation } from "../../system/service/db-errors.js";
 import { stockValuedAt } from "./valued-at.js";
+import { assertStockBackdate, noPostingPeriodLocks, standardCostsAt, type PostingPeriodReader } from "./backdating.js";
+import { backdatedDay, backdatedInstant } from "../service/backdating.js";
 import { readArticleLocations, replaceArticleLocations } from "./article-locations.js";
 import {
   ilikePattern,
@@ -135,7 +137,10 @@ async function blockImpact(dbc: Db | Tx, id: string) {
   return { articlesWithStock: withStock?.n ?? 0, defaultForArticles: defaults?.n ?? 0 };
 }
 
-export function createStockRepository(db: Db) {
+// `periods` (#19): whether a backdated Lagerjustering's day may still be
+// written to — app.ts binds economy's postingPeriodLockOn; tests that never
+// backdate into a locked period leave it out.
+export function createStockRepository(db: Db, periods: PostingPeriodReader = noPostingPeriodLocks) {
   return {
     async createWarehouse(input: CreateWarehouseInput) {
       const [row] = await db.insert(warehouses).values(input).returning();
@@ -392,6 +397,10 @@ export function createStockRepository(db: Db) {
     },
 
     async createTransaction(input: CreateStockTransactionInput, createdBy?: string) {
+      // Bokför per (#19): an earlier day books every row of the adjustment at
+      // that day's end (valued_at); a later one is refused before anything.
+      const day = backdatedDay(input.valuedOn, stockholmToday());
+      const valuedAt = day === null ? null : backdatedInstant(day);
       return db.transaction(async (tx) => {
         const [subject] = await tx
           .select({ articleNumber: articles.articleNumber, type: articles.type })
@@ -415,6 +424,9 @@ export function createStockRepository(db: Db) {
         // Location is mandatory — resolve article default / "***" when absent.
         const locationId = await resolveStockLocation(tx, input.articleId, input.locationId);
         await assertLocationNotUnderCount(tx, locationId);
+        // The day must still be open, and the place not counted (or given an
+        // imported balance) that day or later — 409 stock-backdate-refused.
+        if (day !== null) await assertStockBackdate(tx, periods, day, [{ articleId: input.articleId, locationId }]);
         // A decrease of a batchstyrd article is split per batch WITHIN the
         // place with the pure rule (a chosen place: no ceiling, the place may
         // go negative as it always could): the chosen batch — a named one
@@ -455,6 +467,7 @@ export function createStockRepository(db: Db) {
                 note: input.note,
                 createdBy,
                 batchId: part.batchId ?? null,
+                valuedAt,
               }))
             )
             .returning();
@@ -508,9 +521,13 @@ export function createStockRepository(db: Db) {
 
         // Only inflows are a valuation event — an outflow doesn't get a cost.
         // unit_cost is the article's current standard cost; null (not 0) when
-        // none is set, since 0 would be a false claim of zero value.
+        // none is set, since 0 would be a false claim of zero value. A
+        // backdated increase takes the standard cost AT its moment (D1's
+        // history, the rule a count booked per underlagets datum uses).
         let unitCost: string | null = null;
-        if (input.quantityDelta > 0) {
+        if (input.quantityDelta > 0 && valuedAt !== null) {
+          unitCost = (await standardCostsAt(tx, [input.articleId], valuedAt)).get(input.articleId) ?? null;
+        } else if (input.quantityDelta > 0) {
           const [article] = await tx
             .select({ standardCost: articles.standardCost })
             .from(articles)
@@ -530,6 +547,7 @@ export function createStockRepository(db: Db) {
             unitCost,
             createdBy,
             batchId: batch?.id ?? null,
+            valuedAt,
           })
           .returning();
         // A negative adjustment may have emptied the location.

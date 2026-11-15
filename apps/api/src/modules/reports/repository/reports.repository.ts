@@ -249,8 +249,8 @@ export function createReportsRepository(db: Db) {
     // null). Same scalar-subquery idiom as purchase's listInvoiceBasis.
     async loadPurchasePrecisionOrders(): Promise<PrecisionOrderInput[]> {
       const lastReceipt = sql<string | null>`greatest(
-        (SELECT MAX(pr.created_at) FROM ${purchaseReceipts} pr WHERE pr.purchase_order_id = ${sql.raw('"purchase_orders"."id"')} AND pr.undone_at IS NULL),
-        (SELECT MAX(st.created_at) FROM ${stockTransactions} st WHERE st.reference_id = ${sql.raw('"purchase_orders"."id"')} AND st.transaction_type = 'purchase_receipt' AND st.quantity_delta > 0 AND NOT EXISTS (SELECT 1 FROM ${purchaseReceipts} pr WHERE pr.stock_transaction_id = st.id AND pr.undone_at IS NOT NULL))
+        (SELECT MAX(coalesce(pr.received_at, pr.created_at)) FROM ${purchaseReceipts} pr WHERE pr.purchase_order_id = ${sql.raw('"purchase_orders"."id"')} AND pr.undone_at IS NULL),
+        (SELECT MAX(coalesce(st.valued_at, st.created_at)) FROM ${stockTransactions} st WHERE st.reference_id = ${sql.raw('"purchase_orders"."id"')} AND st.transaction_type = 'purchase_receipt' AND st.quantity_delta > 0 AND NOT EXISTS (SELECT 1 FROM ${purchaseReceipts} pr WHERE pr.stock_transaction_id = st.id AND pr.undone_at IS NOT NULL))
       )`;
       const rows = await db
         .select({

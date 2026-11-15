@@ -394,6 +394,14 @@ export const receiveGoodsSchema = z.object({
   // draws its linked material — report anyway after a 409 material-shortage
   // in mode "warn" (see materialShortageOverrideSchema in manufacturing.ts).
   allowMaterialShortage: materialShortageOverrideSchema,
+  // Bokför per (#19): the Stockholm day the goods arrived — the stock row is
+  // valued at that day's end and the receipt counts as received then
+  // (leveransprecision, the receipt logs). Left out or today = now; a later
+  // day 400 stock-backdate-in-future; a lego row (it reports the TO
+  // operation) 400 purchase-receipt-backdate-lego; a closed year, a locked
+  // period or a count/saldoimport on the place that day or later 409
+  // stock-backdate-refused.
+  receivedOn: businessDateSchema.optional(),
 });
 export type ReceiveGoodsInput = z.infer<typeof receiveGoodsSchema>;
 

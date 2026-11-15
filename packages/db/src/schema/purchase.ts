@@ -394,6 +394,13 @@ export const purchaseReceipts = pgTable(
     moReportId: uuid("mo_report_id"),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    // Bokför per (#19, migration 0226): when the goods arrived, when the
+    // receipt was registered later for an earlier day (that day's end in
+    // Stockholm — the same moment as its stock row's valued_at). NULL = the
+    // same as created_at. Read through receiptReceivedAt
+    // (purchase/repository/received-at.ts): leveransprecision, the receipt
+    // logs, the fakturaunderlag's Inlevererad. created_at never changes.
+    receivedAt: timestamp("received_at", { withTimezone: true }),
     undoneAt: timestamp("undone_at", { withTimezone: true }),
     undoneBy: uuid("undone_by").references(() => users.id, { onDelete: "set null" }),
   },

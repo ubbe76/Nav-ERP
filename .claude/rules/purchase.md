@@ -62,6 +62,22 @@ Spec `private/superpowers/specs/2026-11-13-inkop-leverantorsforval-design.md`.
 - Varje inleverans skriver en rad i `purchase_receipts` i sin egen transaktion (antal i basenhet, plats + `stock_transaction_id` på vanliga rader, `mo_report_id` på lego-rader). **Länken skrivs i TO-rapportens transaktion** (`receiptLink` på `reportOperationQuantities`, manufacturings `PurchaseReceiptLink`): rapporten låser först kvittot (`claimReceiptForReportInTx`, före operationen — samma ordning som Ångra inleverans: kvitto → … → operation) och vägrar ett kvitto som hunnit ångras (`PurchaseReceiptUndoneError`, rapporten rullas tillbaka och blir `operationReport`-varningen), och `linkReceiptReportInTx` stämplar rapporten före commit. Förut länkades den efter rapportens commit — ett Ångra emellan backade bara IO-sidan, och en krasch emellan lämnade en rapport som varken IO- eller TO-kortet kunde ångra. Inleveransen och rapporten är fortfarande två commits (en TO i fel status får aldrig fälla inleveransen). Test: `inkopsgranskning.test.ts` (B11).
 - **Ångra** (`undoReceipt`, `POST /purchase-orders/:id/receipts/:receiptId/undo`) backar exakt raden i en transaktion: varorna ut som negativ `purchase_receipt` utan `unit_cost` (vägras när de inte finns kvar, `PurchaseReceiptStockMissingError`), radens mottagna antal ned och status omräknad (`recomputeReceiptStatus`: allt ⇒ received, något ⇒ partially_received, inget ⇒ confirmed); stängd order vägras. En lego-rads TO-rapport ångras i **samma** transaktion via `manufacturing.undoPurchaseReceiptReportInTx` (repo `undoReportInTx` med `fromPurchaseReceipt`; TO-kortet vägrar fortfarande sådana rapporter); en icke-öppen TO ger `PurchaseReceiptManufacturingOrderLockedError`.
 - **Låsordning rad → order** (`FOR UPDATE`) i både inleverans och ångra, samma som `updateRow`.
+- **Bokför per (#19, 0226):**
+  - **Kolumnen:** `receiveGoodsSchema.receivedOn` ger `purchase_receipts.received_at`, med samma tidpunkt (dagens slut) som `valued_at` på lagerraden. NULL betyder `created_at`. Regeln och domen står i `stock.md` (Bakdaterade lagerrörelser).
+  - **Servicen** vägrar ett senare datum (400) först. En **legorad** ger 400 `purchase-receipt-backdate-lego`: servicen prövar det före materialbristfrågan, och repot igen under radlåset (`reason: "backdate_lego"`).
+  - **En tjänsterad** får datumet. Den skriver ingen lagerrad, men perioddomen gäller ändå (`assertStockBackdate(…, [])`).
+  - **Ångra** registreras i dag (`valued_at` null).
+  - **Mottagen hela vägen (användarens val):** läsarna går via `receiptReceivedAt` (`stock/repository/valued-at.ts`), eller `stockValuedAt` på lagerraden:
+    - IO-kortets `listReceipts` (`receivedAt`, sorteras på det, `createdAt` står kvar);
+    - `listGoodsReceiptsByArticle` (`date`);
+    - fakturaunderlagets `receivedAt`;
+    - leveransprecisionen (`reports.md`);
+    - batchspårningens inleveransdatum.
+  - Audit-raden `goods_received` bär `receivedOn`.
+  - **Webben:** Inleverans och IO-kortets dialog har **Bokför per**.
+    - I rutinen återgår fältet till i dag vid ordervalet, och det är spärrat när ordern har legorader.
+    - I dialogen är det spärrat när en legorad är vald.
+    - **Inleveranser** visar mottagningsdagen med "Registrerad …".
 - Läsare av `purchase_receipt` som avser *inkommet* gods filtrerar `quantity_delta > 0` och bort ångrade kvitton. Webben: **Inleveranser** (`ReceiptsSection`) på IO-kortet.
 - **Ångrade kvitton överlever radens borttag (0208, användarens val i delatgranskningen 2026-11-11):** `purchase_receipts.purchase_order_row_id` är nullable med `ON DELETE SET NULL` (var CASCADE). `deleteRow` tillåter en rad vars alla kvitton är ångrade, och kvittona står då kvar utan rad — det är `undone_at` (läst via `stock_transaction_id`) som gör den återförda +raden till "inget inköp" i värderingen (senaste inköpspris, FIFO), inleveransloggen och senaste inleveransdatum; med CASCADE räknades den som ett riktigt inköp igen. Ett levande kvitto har alltid sin rad (`undoReceipt` vägrar annars som okänt). PIA:s legokälla joinar raden (`inner join`) och ser därför inte ett sådant kvitto — det var ändå ångrat. Webben visar **Borttagen rad**. Test: `purchase-receipt-undo.test.ts`.
 

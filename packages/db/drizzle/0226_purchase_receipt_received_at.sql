@@ -1,0 +1,1 @@
+ALTER TABLE "purchase_receipts" ADD COLUMN "received_at" timestamp with time zone;

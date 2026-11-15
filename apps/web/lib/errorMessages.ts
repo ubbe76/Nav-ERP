@@ -1174,6 +1174,10 @@ const MESSAGES: Record<string, MessageEntry> = {
     serverMessage("Inventeringen är redan registrerad eller avbruten och kan inte ändras."),
   "stock-count-backdate-refused": serverMessage("Inventeringen kan inte bokföras per det datumet."),
   "stock-count-already-open": serverMessage("Lagerplatsen har redan en pågående inventering."),
+  // Bokför per (#19): Lagerjustering and inleverans per an earlier day.
+  "stock-backdate-in-future": serverMessage("Datumet har inte kommit än — välj i dag eller ett tidigare datum."),
+  "stock-backdate-refused": serverMessage("Lagerrörelsen kan inte bokföras per det datumet — registrera den per i dag i stället."),
+  "purchase-receipt-backdate-lego": serverMessage("En legorad inlevereras alltid per i dag."),
   "duplicate-stock-count-row": serverMessage("Artikeln finns redan i inventeringen."),
   // System, register, permissions and API clients.
   "register-entry-not-found": "Posten finns inte längre — ladda om sidan.",

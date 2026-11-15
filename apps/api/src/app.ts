@@ -209,6 +209,7 @@ import { alertsRoutes } from "./modules/alerts/routes/alerts.routes.js";
 import { isBookkeepingLockViolation, isClosedFiscalYearViolation, isEmployeeAnonymizedViolation, isNumberOutOfRange } from "./modules/system/service/db-errors.js";
 import { StockLocationNotFoundError } from "./modules/stock/service/stock.errors.js";
 import { batchErrorStatus, isSerialBalanceViolation, SERIAL_BALANCE_VIOLATED } from "./modules/stock/service/batch.errors.js";
+import { backdateErrorStatus } from "./modules/stock/service/backdating.js";
 import { documentNumberTakenError, DocumentNumberTooLongError } from "./modules/system/service/number-series.js";
 import { errorBody } from "./modules/system/service/error-body.js";
 import { createQualityRepository } from "./modules/quality/repository/quality.repository.js";
@@ -311,6 +312,11 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     }
     const batchStatus = batchErrorStatus(err);
     if (batchStatus !== null) return reply.code(batchStatus).send(errorBody(err as Error));
+    // Bakdaterade lagerrörelser (#19): Lagerjustering and inleverans (two
+    // modules) refuse a later day (400) or a day that is locked or counted
+    // since (409) — mapped once, like the batch errors.
+    const backdateStatus = backdateErrorStatus(err);
+    if (backdateStatus !== null) return reply.code(backdateStatus).send(errorBody(err as Error));
     // A document series whose next number is already taken (Nummerserier
     // refuses that; an import or a hand edit can still get there): the
     // create rolled back with its number, from any module — 409 with a
@@ -381,7 +387,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     maxRows: options.importExportMaxRows,
   });
   // audit: Spärra/Släpp spärr on a stock location.
-  const stockService = createStockService(createStockRepository(database), auditRepository);
+  const stockService = createStockService(createStockRepository(database, { lockOn: postingPeriodLockOn }), auditRepository);
   // Shared base data (leveransvillkor/betalningsvillkor/speditörer) —
   // referenced from both customers and suppliers.
   const registerService = createRegisterService(createRegisterRepository(database));
@@ -550,7 +556,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     planReader
   );
   const purchaseService = createPurchaseService(
-    createPurchaseRepository(database),
+    createPurchaseRepository(database, { lockOn: postingPeriodLockOn }),
     registerService,
     mailService,
     documentPdfService,

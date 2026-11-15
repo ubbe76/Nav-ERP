@@ -1583,6 +1583,13 @@
       "when": 1794733906465,
       "tag": "0225_closed_year_period_insert_delete",
       "breakpoints": true
+    },
+    {
+      "idx": 226,
+      "version": "7",
+      "when": 1794761211219,
+      "tag": "0226_purchase_receipt_received_at",
+      "breakpoints": true
     }
   ]
 }

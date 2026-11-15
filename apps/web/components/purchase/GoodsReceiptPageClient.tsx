@@ -49,7 +49,7 @@ import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { FormError } from "../ui/Form";
 import styles from "./GoodsReceiptPageClient.module.css";
-import { formatStockholmDate } from "../../lib/date";
+import { formatStockholmDate, stockholmToday } from "../../lib/date";
 
 const RECEIVABLE: PurchaseOrderStatus[] = ["confirmed", "partially_received"];
 const NO_COUNT: OrderCountState = { counting: false, quantities: {} };
@@ -130,6 +130,15 @@ export function GoodsReceiptPageClient({
   );
 
   const [locationId, setLocationId] = useState(""); // "" = artikelns lagerplats
+  // Bokför per (#19): the day the goods arrived — an earlier day values them
+  // then and counts the order as received then. A lego row reports its TO
+  // operation now, so an order with one is received per today. Back to
+  // today for every new order: a forgotten earlier date must not follow.
+  const [today] = useState(stockholmToday);
+  const [receivedOn, setReceivedOn] = useState(today);
+  useEffect(() => setReceivedOn(today), [selectedId, today]);
+  const hasLegoRows = openRows.some((r) => r.moOperationId !== null);
+  const backdated = !hasLegoRows && receivedOn !== "" && receivedOn !== today;
   // A scanned lagerplats that GET /stock/locations leaves out (inactive — a
   // receipt into it reactivates it), added to the select so it can be shown.
   const [scannedLocation, setScannedLocation] = useState<LocationOption | null>(null);
@@ -507,6 +516,7 @@ export function GoodsReceiptPageClient({
                 body: JSON.stringify({
                   locationId: locationId || undefined,
                   quantity: toBaseQuantity(part.quantity, row.unitFactor),
+                  ...(backdated ? { receivedOn } : {}),
                   ...(serialRow ? { serialNumbers: rowSerials } : {}),
                   ...(row.articleBatchTracked && part.batchNumber ? { batchNumber: part.batchNumber } : {}),
                   // "" = no date (the API keeps the batch's own, or none).
@@ -676,6 +686,21 @@ export function GoodsReceiptPageClient({
             </Select>
           </Field>
         )}
+        {order && (
+          <Field label="Bokför per" htmlFor="receiptDate">
+            <Input
+              id="receiptDate"
+              type="date"
+              size="sm"
+              required
+              max={today}
+              value={hasLegoRows ? today : receivedOn}
+              disabled={hasLegoRows}
+              title={hasLegoRows ? "Ordern har legorader — de inlevereras alltid per i dag." : undefined}
+              onChange={(e) => setReceivedOn(e.target.value)}
+            />
+          </Field>
+        )}
         {order && pill && (
           <div className={styles.orderStatus}>
             <StatusPill status={pill.status} label={pill.label} />
@@ -686,6 +711,14 @@ export function GoodsReceiptPageClient({
         )}
       </div>
 
+      {order && backdated && (
+        <p style={{ marginTop: 0 }}>
+          Inleveransen bokförs per {receivedOn}: godset räknas in i lagervärderingen och leveransprecisionen den dagen.
+        </p>
+      )}
+      {order && hasLegoRows && (
+        <p style={{ marginTop: 0 }}>Ordern har legorader — de inlevereras alltid per i dag.</p>
+      )}
       {done && <p style={{ fontWeight: 600, marginTop: 0 }}>{done}</p>}
 
       {!order && (

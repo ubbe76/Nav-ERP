@@ -85,6 +85,7 @@ import {
   stockholmToday,
   suggestPurchaseDeliveryDate,
 } from "../../system/service/delivery-days.js";
+import { backdatedDay } from "../../stock/service/backdating.js";
 import { resolveSupplierPrice } from "./supplier-price.js";
 import { documentVatCode, supplierVatCode, vatCodeRef, type VatCodeBook } from "../../economy/service/document-vat-code.js";
 // G1: append-only audit trail — optional with a no-op default (see
@@ -290,6 +291,15 @@ export class PurchaseReceiptAlreadyUndoneError extends Error {
   constructor() {
     super("The receipt has already been undone");
     this.name = "PurchaseReceiptAlreadyUndoneError";
+  }
+}
+
+// Bokför per (#19): a lego row's receipt reports the TO operation (and draws
+// its material) now, so it is never booked on an earlier day.
+export class PurchaseReceiptBackdateLegoError extends Error {
+  constructor() {
+    super("En legorad inlevereras alltid per i dag: inleveransen rapporterar TO-operationen, som inte kan bakdateras.");
+    this.name = "PurchaseReceiptBackdateLegoError";
   }
 }
 
@@ -1796,6 +1806,8 @@ export function createPurchaseService(
     },
 
     async receiveGoods(orderId: string, rowId: string, input: ReceiveGoodsInput, createdBy: string) {
+      // Bokför per (#19): a later day is refused (400) before anything else.
+      const receivedOn = backdatedDay(input.receivedOn, stockholmToday());
       // Read outside the receipt's transaction: a settings change racing a
       // receipt may go either way, which is fine for a tolerance.
       const { purchaseOverReceiptPercent } = await settings.getSettings();
@@ -1808,6 +1820,11 @@ export function createPurchaseService(
       // user would confirm a shortage and then get the status/over-receipt
       // refusal anyway (the receipt's own transaction re-checks both).
       const existingRow = await repo.findRowById(rowId);
+      // A backdated lego row is refused before the Materialbrist question
+      // (the receipt's transaction refuses it again under the row lock).
+      if (receivedOn !== null && existingRow?.purchaseOrderId === orderId && existingRow.moOperationId !== null) {
+        throw new PurchaseReceiptBackdateLegoError();
+      }
       if (existingRow?.purchaseOrderId === orderId && existingRow.moOperationId !== null) {
         const order = await repo.findPurchaseOrderById(orderId);
         const openForReceipt = order?.status === "confirmed" || order?.status === "partially_received";
@@ -1831,6 +1848,7 @@ export function createPurchaseService(
         batchNumber: input.batchNumber,
         expiresOn: input.expiresOn,
         serialNumbers: input.serialNumbers,
+        receivedOn,
       });
       if (result.ok) {
         const [order, article] = await Promise.all([
@@ -1846,6 +1864,7 @@ export function createPurchaseService(
             quantity: input.quantity,
             ...(result.batchNumber !== null ? { batchNumber: result.batchNumber } : {}),
             ...(result.serialNumbers.length > 0 ? { serialNumbers: result.serialNumbers } : {}),
+            ...(receivedOn !== null ? { receivedOn } : {}),
           },
           userId: createdBy,
         });
@@ -1917,6 +1936,8 @@ export function createPurchaseService(
             allowedPercent: purchaseOverReceiptPercent ?? 0,
             maxQuantity: result.maxQuantity,
           });
+        case "backdate_lego":
+          throw new PurchaseReceiptBackdateLegoError();
       }
     },
 

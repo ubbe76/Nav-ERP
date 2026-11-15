@@ -46,6 +46,7 @@ import {
 } from "../../lib/types";
 import { alreadyOnDocumentText } from "../../lib/orderRowDuplicates";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow } from "../ui/Form";
+import { stockholmToday } from "../../lib/date";
 
 interface PurchaseOrderDetailProps {
   order: PurchaseOrder;
@@ -1116,6 +1117,12 @@ function ReceiveGoodsForm({
   // Quantities are entered in the row's unit and converted to the base unit
   // before hitting the receive endpoint (stock is always base).
   const selectedRow = rows.find((r) => r.id === rowId) ?? rows[0];
+  // Bokför per (#19): the day the goods arrived. A lego row reports its TO
+  // operation now, so it is always received per today.
+  const [today] = useState(stockholmToday);
+  const [receivedOn, setReceivedOn] = useState(today);
+  const legoRow = selectedRow?.moOperationId != null;
+  const backdated = !legoRow && receivedOn !== "" && receivedOn !== today;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -1130,6 +1137,7 @@ function ReceiveGoodsForm({
             body: JSON.stringify({
               locationId: locationId || undefined,
               quantity: toBaseQuantity(Number(quantity), selectedRow?.unitFactor ?? null),
+              ...(backdated ? { receivedOn } : {}),
               allowMaterialShortage,
             }),
           }
@@ -1208,7 +1216,26 @@ function ReceiveGoodsForm({
             onChange={(e) => setQuantity(e.target.value)}
           />
         </Field>
+        <Field label="Bokför per" htmlFor="receiveDate">
+          <Input
+            id="receiveDate"
+            type="date"
+            size="sm"
+            required
+            max={today}
+            value={legoRow ? today : receivedOn}
+            disabled={legoRow}
+            onChange={(e) => setReceivedOn(e.target.value)}
+          />
+        </Field>
       </FormRow>
+      {(legoRow || backdated) && (
+        <FormHint>
+          {legoRow
+            ? "En legorad inlevereras alltid per i dag — inleveransen rapporterar TO-operationen."
+            : `Godset räknas in i lagervärderingen och leveransprecisionen per ${receivedOn}.`}
+        </FormHint>
+      )}
 
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>

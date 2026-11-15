@@ -61,6 +61,7 @@ import {
   PurchaseReceiptManufacturingOrderLockedError,
   PurchaseReceiptNotFoundError,
   PurchaseReceiptStockMissingError,
+  PurchaseReceiptBackdateLegoError,
   RowHasReceiptsError,
   SupplierInactiveError,
   SupplierNotFoundError,
@@ -668,6 +669,7 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
         if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
         if (err instanceof OverReceiptError) return reply.code(409).send({ ...errorBody(err), ...err.limit });
         if (err instanceof LocationUnderStockCountError) return reply.code(409).send(errorBody(err));
+        if (err instanceof PurchaseReceiptBackdateLegoError) return reply.code(400).send(errorBody(err));
         // Materialbrist on a lego row in mode "warn": refused before the
         // goods were booked (a refusal in mode "block" comes AFTER the
         // receipt, as the operationReport warning on the 201).
