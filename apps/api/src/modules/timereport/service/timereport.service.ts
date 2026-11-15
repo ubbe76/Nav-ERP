@@ -886,6 +886,8 @@ export function createTimeReportService(
             stopNote: input.reason?.note || null,
             overtimeDisposition: disposition,
             atfTransactionId: input.atfTransactionId ?? null,
+            // How much open work this Gå hem paused (regel 1).
+            pausedWorkSessions: stopped.pausedWorkSessions,
           },
           userId: createdBy,
         });
@@ -1003,6 +1005,10 @@ export function createTimeReportService(
             stopNote: existing.stopNote,
           },
           after: { startedAt: newStartedAt, stoppedAt: newStoppedAt, ...reasons },
+          // Regel 7's effect on the work stamps: paused at the new stop, or
+          // pauses moved with it.
+          pausedWorkSessions,
+          movedPauses,
         },
         userId,
       });

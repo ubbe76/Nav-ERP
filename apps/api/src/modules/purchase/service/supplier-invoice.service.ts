@@ -23,7 +23,7 @@ import {
 } from "../repository/supplier-invoice.repository.js";
 import { InvalidStatusTransitionError, PurchaseOrderNotFoundError, SupplierNotFoundError } from "./purchase.service.js";
 import { ArticleNotFoundError } from "../../article/service/article.service.js";
-import { isUniqueViolation } from "../../system/service/db-errors.js";
+import { isReversalTaken, isUniqueViolation } from "../../system/service/db-errors.js";
 import { dueDateFromTerm } from "../../system/service/due-date.js";
 import type { PostingVatCode } from "../../economy/service/verification-poster.js";
 import {
@@ -882,7 +882,7 @@ export function createSupplierInvoiceService(
           // The partial unique index verifications_reverses_unique fired: a
           // manual Omför of the same verification committed while this
           // cancellation was writing its own omföring.
-          if (isUniqueViolation(err)) throw new VerificationAlreadyReversedError();
+          if (isReversalTaken(err)) throw new VerificationAlreadyReversedError();
           throw err;
         }
         if (!result.ok) {

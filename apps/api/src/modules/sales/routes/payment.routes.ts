@@ -84,7 +84,9 @@ export async function paymentRoutes(app: FastifyInstance, opts: { service: Payme
       // Reachable: the account picker offers every active account, so the
       // user CAN pick accounts receivable (or the write-off account) as the
       // betalkonto. The poster is the only place that knows those ids and
-      // refuses it there.
+      // refuses it there — and refuses the same collision from the posting
+      // settings too: a write-off, bank-fee or exchange-difference account
+      // set to the receivable itself (roleLabel names which one).
       err instanceof PaymentBankAccountConflictError
     ) {
       return reply.code(409).send(errorBody(err as Error));

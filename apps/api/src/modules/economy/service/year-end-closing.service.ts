@@ -310,7 +310,9 @@ export interface YearEndClosingServiceDeps {
   // Riksbanken — only ever outside a transaction.
   exchangeRates: ExchangeRateReader;
   fixedAssets: {
-    getPlan(query: { fiscalYearId: string }): Promise<FixedAssetPlan>;
+    // With an executor the plan is read through it (closeYear's strict
+    // warnings inside its transaction); without, on its own snapshot.
+    getPlan(query: { fiscalYearId: string }, executor?: Db | Tx): Promise<FixedAssetPlan>;
     runDepreciation(tx: Tx, input: RunDepreciationInput, userId: string): Promise<DepreciationRunResult | null>;
     missingDepreciation(executor: Db | Tx, throughMonth: string): Promise<{ assets: number; total: number }>;
   };
@@ -381,7 +383,7 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
       closingDate: closing.closingDate,
       draftCount: await repo.countDrafts(executor, year.id),
       previousYear: previous ? { label: previous.label, status: previous.status } : null,
-      closingPeriodStatus: period?.status ?? "locked",
+      closingPeriodStatus: period?.status ?? "missing",
     };
   }
 
@@ -486,7 +488,13 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
         ),
         attempt(
           "Anläggningsregistret",
-          async () => (await deps.fixedAssets.getPlan({ fiscalYearId: year.id })).reconciliation.filter((row) => row.mismatch).map(reconciliationLine),
+          // closeYear (strict) reads through its transaction, so the check
+          // sees what the close commits; the bokslut page (tolerant, on db)
+          // keeps the plan's own snapshot.
+          async () =>
+            (await deps.fixedAssets.getPlan({ fiscalYearId: year.id }, opts.tolerant ? undefined : executor)).reconciliation
+              .filter((row) => row.mismatch)
+              .map(reconciliationLine),
           [] as string[]
         ),
         attempt(

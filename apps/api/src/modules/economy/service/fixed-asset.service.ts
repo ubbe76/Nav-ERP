@@ -1183,8 +1183,11 @@ export function createFixedAssetService(deps: FixedAssetServiceDeps) {
 
     // Register and ledger are read from ONE snapshot (repeatable read, read
     // only): a depreciation run committing between the two reads would
-    // otherwise show as a deviation that is gone on the next load.
-    async getPlan(query: { fiscalYearId: string }): Promise<FixedAssetPlan> {
+    // otherwise show as a deviation that is gone on the next load. With an
+    // executor (the year-end close's own transaction, which already holds a
+    // consistent view and locks) the plan is read through it instead.
+    async getPlan(query: { fiscalYearId: string }, executor?: Db | Tx): Promise<FixedAssetPlan> {
+      if (executor) return readPlan(executor, query);
       return db.transaction((tx) => readPlan(tx, query), { isolationLevel: "repeatable read", accessMode: "read only" });
     },
 

@@ -3,7 +3,7 @@ import { customerPayments, type Tx } from "@navet/db";
 import type { CreatePaymentInput, ListOpenInvoicesQuery, ListPaymentsQuery } from "@navet/shared";
 import { receiptExchangeDifference, round2, SEK } from "@navet/shared";
 import { validateOcrNumber } from "../../system/service/ocr.js";
-import { isUniqueViolation } from "../../system/service/db-errors.js";
+import { isReversalTaken } from "../../system/service/db-errors.js";
 import {
   PaymentGuardError,
   type CustomerPaymentSekReason,
@@ -347,7 +347,7 @@ export function createPaymentService(
         // The partial unique index verifications_reverses_unique fired: an
         // unbooked manual Omför of the same verification is in the way (or one
         // committed while this cancellation was writing its own omföring).
-        if (isUniqueViolation(err)) throw new VerificationAlreadyReversedError();
+        if (isReversalTaken(err)) throw new VerificationAlreadyReversedError();
         throw err;
       }
       // Both reasons mean a concurrent call got there between the guard above

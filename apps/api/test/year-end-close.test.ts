@@ -5,7 +5,7 @@ import { accountingPeriods, auditLog, db, fiscalYears, profitDispositions, yearE
 import { readAccountBalances } from "../src/modules/economy/service/account-balances.js";
 import { FiscalYearClosedError } from "../src/modules/economy/service/accounting-period-lock.js";
 import { buildBalanceSheet, buildIncomeStatement } from "../src/modules/economy/service/financial-reports.service.js";
-import { isBookkeepingLockViolation } from "../src/modules/system/service/db-errors.js";
+import { isBookkeepingLockViolation, isClosedFiscalYearViolation } from "../src/modules/system/service/db-errors.js";
 import {
   NextFiscalYearClosedError,
   ProfitDispositionActiveError,
@@ -193,6 +193,19 @@ describe("steg 6 — stäng året", () => {
     ).rejects.toBeInstanceOf(FiscalYearClosedError);
     await expect(service.closeYear(closingId, user.id)).rejects.toBeInstanceOf(YearEndClosingClosedError);
     await expect(service.bookResultTransfer(closingId, user.id)).rejects.toBeInstanceOf(YearEndClosingClosedError);
+
+    // The database guard (0225) for any writer: no period added to or
+    // removed from a closed year — with the closed-year message, so the
+    // global handler answers 409 fiscal-year-closed.
+    const december = periods.find((p) => p.startDate === `${YEAR}-12-01`)!;
+    const deleted = await db.delete(accountingPeriods).where(eq(accountingPeriods.id, december.id)).catch((e) => e);
+    expect(isClosedFiscalYearViolation(deleted)).toBe(true);
+    const inserted = await db
+      .insert(accountingPeriods)
+      .values({ fiscalYearId: yearId, startDate: `${YEAR}-12-31`, endDate: `${YEAR}-12-31`, status: "open" })
+      .catch((e) => e);
+    expect(isClosedFiscalYearViolation(inserted)).toBe(true);
+    expect(await db.select().from(accountingPeriods).where(eq(accountingPeriods.fiscalYearId, yearId))).toHaveLength(12);
   });
 
   // The warning checks run strictly and one at a time inside the close's

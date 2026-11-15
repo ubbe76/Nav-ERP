@@ -149,11 +149,23 @@ export function createTimeReportRepository(db: Db) {
 
   // Going home: open work stays stamped in but pauses — the away time is
   // excluded from reported hours. Already-paused sessions are left as-is.
-  async function pauseOpenStampSessions(employeeId: string, at: Date, dbc: Db | Tx = db) {
+  // `startedBefore`: a stop time in the past (a supervisor's correction, the
+  // forgotten Gå hem) pauses only the work that had started by then — work
+  // stamped in after it belongs to the later day and is left alone. Gå hem
+  // itself pauses everything open at "now" (no filter: the database's and
+  // the API's clocks may differ by a few ms).
+  async function pauseOpenStampSessions(employeeId: string, at: Date, dbc: Db | Tx = db, opts: { startedBefore?: boolean } = {}) {
     const rows = await dbc
       .update(stampSessions)
       .set({ pausedAt: at })
-      .where(and(eq(stampSessions.employeeId, employeeId), isNull(stampSessions.stoppedAt), isNull(stampSessions.pausedAt)))
+      .where(
+        and(
+          eq(stampSessions.employeeId, employeeId),
+          isNull(stampSessions.stoppedAt),
+          isNull(stampSessions.pausedAt),
+          opts.startedBefore ? lt(stampSessions.startedAt, at) : undefined
+        )
+      )
       .returning({ id: stampSessions.id });
     return rows.length;
   }
@@ -747,19 +759,7 @@ export function createTimeReportRepository(db: Db) {
         let pausedWorkSessions = 0;
         let movedPauses = 0;
         if (effect?.kind === "pause") {
-          const rows = await tx
-            .update(stampSessions)
-            .set({ pausedAt: effect.at })
-            .where(
-              and(
-                eq(stampSessions.employeeId, effect.employeeId),
-                isNull(stampSessions.stoppedAt),
-                isNull(stampSessions.pausedAt),
-                lt(stampSessions.startedAt, effect.at)
-              )
-            )
-            .returning({ id: stampSessions.id });
-          pausedWorkSessions = rows.length;
+          pausedWorkSessions = await pauseOpenStampSessions(effect.employeeId, effect.at, tx, { startedBefore: true });
         } else if (effect?.kind === "move") {
           const rows = await tx
             .update(stampSessions)
@@ -812,17 +812,7 @@ export function createTimeReportRepository(db: Db) {
           .where(and(eq(attendanceSessions.id, staleId), unchangedTimes({ startedAt: stale.startedAt, stoppedAt: null })))
           .returning({ id: attendanceSessions.id });
         if (closed.length === 0) return null;
-        await tx
-          .update(stampSessions)
-          .set({ pausedAt: forgottenStoppedAt })
-          .where(
-            and(
-              eq(stampSessions.employeeId, employeeId),
-              isNull(stampSessions.stoppedAt),
-              isNull(stampSessions.pausedAt),
-              lt(stampSessions.startedAt, forgottenStoppedAt)
-            )
-          );
+        await pauseOpenStampSessions(employeeId, forgottenStoppedAt, tx, { startedBefore: true });
         await resumeOpenStampSessions(employeeId, now, tx);
         const [session] = await tx
           .insert(attendanceSessions)
