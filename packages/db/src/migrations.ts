@@ -39,7 +39,17 @@ export async function runMigrations(connectionString?: string) {
   // max_lifetime null: postgres.js otherwise recycles a connection after
   // 30–60 minutes, and a new connection would silently drop the session's
   // advisory lock between two migrations of a long run.
-  const client = postgres(connectionString ?? process.env.DATABASE_URL ?? DEFAULT_CONNECTION_STRING, { max: 1, max_lifetime: null });
+  // onnotice: the bookkeeping table's IF NOT EXISTS below says "already
+  // exists, skipping" on every start after the first (42P06/42P07) — logged
+  // as two raw objects by every api start and every test run. Any other
+  // notice (a migration's own RAISE NOTICE) is still printed.
+  const client = postgres(connectionString ?? process.env.DATABASE_URL ?? DEFAULT_CONNECTION_STRING, {
+    max: 1,
+    max_lifetime: null,
+    onnotice: (notice) => {
+      if (notice.code !== "42P06" && notice.code !== "42P07") console.log(notice);
+    },
+  });
   try {
     const migrations = readMigrationFiles({ migrationsFolder: MIGRATIONS_FOLDER });
     assertAscendingJournal(migrations.map((m) => m.folderMillis));

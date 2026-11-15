@@ -34,6 +34,17 @@ describe("requoteFor", () => {
     });
   });
 
+  // 12,3456 st shows as 1,2346 fp at 10 st/fp, which converts back to 12,346:
+  // still the same row, no quote (enteredBaseQuantity).
+  it("never reprices a unit switch into a unit where the shown quantity is rounded", () => {
+    const fp = { value: "fp", factor: 0.1 };
+    expect(requoteFor({ quantity: "1.2346", unitId: "fp", unitOptions: [{ value: "", factor: 1 }, fp], pricedBaseQuantity: 12.3456 })).toBeNull();
+    expect(requoteFor({ quantity: "1.3", unitId: "fp", unitOptions: [{ value: "", factor: 1 }, fp], pricedBaseQuantity: 12.3456 })).toEqual({
+      base: 13,
+      factor: 0.1,
+    });
+  });
+
   it("ignores a quantity that is not a positive number", () => {
     for (const quantity of ["", "0", "-2", "abc"]) {
       expect(requoteFor({ quantity, unitId: "", unitOptions: [], pricedBaseQuantity: 1 })).toBeNull();

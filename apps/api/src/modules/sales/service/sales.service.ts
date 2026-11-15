@@ -65,6 +65,8 @@ import {
   roundUpToMultiple,
   salesRowIsGoods,
   salesVatCode,
+  enteredBasePrice,
+  enteredBaseQuantity,
   toBasePrice,
   toBaseQuantity,
   toUnitPrice,
@@ -1834,15 +1836,17 @@ export function createSalesService(
         factor = selection.unitFactor;
       }
 
+      // An entry that shows the stored values in the (new) unit keeps them —
+      // a pure unit switch is no quantity change (enteredBaseQuantity).
       const quantity =
         input.quantity !== undefined
-          ? await roundForArticle(existing.articleId, toBaseQuantity(input.quantity, factor))
+          ? await roundForArticle(existing.articleId, enteredBaseQuantity(input.quantity, factor, Number(existing.quantityOrdered)))
           : undefined;
       // C3: re-resolve the price chain ONLY when the quantity changes and no
       // unitPrice was sent (a staffelbyte — new base quantity may cross a
       // price break); otherwise the row's existing price/discount survive
       // untouched (a unit-only or note-only PATCH doesn't reprice).
-      let unitPrice = input.unitPrice !== undefined ? toBasePrice(input.unitPrice, factor) : undefined;
+      let unitPrice = input.unitPrice !== undefined ? enteredBasePrice(input.unitPrice, factor, Number(existing.unitPrice)) : undefined;
       let discountPercent = input.discountPercent;
       // Påslag (#16, 0197): the price origin. Set here only when this method
       // prices the row itself — the chain at a new quantity (its step, or

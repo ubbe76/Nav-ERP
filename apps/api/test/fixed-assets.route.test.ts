@@ -290,6 +290,86 @@ describe("fixed-asset 409s over HTTP", () => {
   });
 });
 
+// The service suite's Review Focus cases (fixed-asset-depreciation.test.ts),
+// here as the codes the web sees.
+describe("depreciation Review Focus codes over HTTP", () => {
+  it("previews inactive-account and 409s missing-posting-account on a deactivated category account, booking nothing", async () => {
+    const { user, category } = await setupFixedAssets();
+    const app = buildFixedAssetApp(user.id);
+    await testFixedAssetService.createAsset(
+      { name: "CNC-fräs", categoryId: category.id, acquisitionDate: `${PLAN_YEAR}-02-14`, acquisitionCost: 120000 },
+      user.id
+    );
+    await db.update(accounts).set({ active: false }).where(eq(accounts.number, "1229"));
+    const preview = await app.inject({ url: `/fixed-asset-depreciation-runs/preview?throughMonth=${PLAN_YEAR}-06` });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json()).toMatchObject({ warnings: ["inactive-account"], inactiveAccounts: [{ accountNumber: "1229", role: "accumulated" }] });
+    const refused = await app.inject({ method: "POST", url: "/fixed-asset-depreciation-runs", payload: { throughMonth: `${PLAN_YEAR}-06` } });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().code).toBe("missing-posting-account");
+    expect((await app.inject({ url: "/fixed-asset-depreciation-runs" })).json().total).toBe(0);
+    await app.close();
+  });
+
+  it("400s no-accounting-period-for-posting for a run through a month without a period", async () => {
+    const { user, category } = await setupFixedAssets();
+    const app = buildFixedAssetApp(user.id);
+    await testFixedAssetService.createAsset(
+      { name: "Gammal", categoryId: category.id, acquisitionDate: `${PLAN_YEAR - 1}-12-01`, acquisitionCost: 60000 },
+      user.id
+    );
+    const refused = await app.inject({ method: "POST", url: "/fixed-asset-depreciation-runs", payload: { throughMonth: `${PLAN_YEAR - 1}-12` } });
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json().code).toBe("no-accounting-period-for-posting");
+    await app.close();
+  });
+});
+
+// disposalError tries the asset family first and falls back to the run
+// family: these are errors only the catch-up run or the period check raises.
+describe("disposal errors from the run family", () => {
+  async function disposable() {
+    const setup = await setupFixedAssets();
+    const asset = await testFixedAssetService.createAsset(
+      { name: "CNC-fräs", categoryId: setup.category.id, acquisitionDate: `${PLAN_YEAR}-02-14`, acquisitionCost: 120000 },
+      setup.user.id
+    );
+    return { ...setup, asset, app: buildFixedAssetApp(setup.user.id) };
+  }
+  const scrap = (date: string) => ({ disposalType: "scrap", disposalDate: date });
+
+  it("409s accounting-period-locked for a disposal day in a locked month and missing-posting-account from the catch-up", async () => {
+    const { user, asset, app, planYearId } = await disposable();
+    const year = await testEconomyService.findFiscalYearById(planYearId);
+    await testEconomyService.lockPeriod(year.periods.find((p) => p.startDate === `${PLAN_YEAR}-09-01`)!.id, user.id);
+    const locked = await app.inject({ method: "POST", url: `/fixed-assets/${asset.id}/dispose`, payload: scrap(`${PLAN_YEAR}-09-18`) });
+    expect(locked.statusCode).toBe(409);
+    expect(locked.json().code).toBe("accounting-period-locked");
+
+    await db.update(accounts).set({ active: false }).where(eq(accounts.number, "7830"));
+    const inactive = await app.inject({ method: "POST", url: `/fixed-assets/${asset.id}/dispose`, payload: scrap(`${PLAN_YEAR}-10-18`) });
+    expect(inactive.statusCode).toBe(409);
+    expect(inactive.json().code).toBe("missing-posting-account");
+
+    expect((await app.inject({ url: `/fixed-assets/${asset.id}` })).json().status).toBe("active");
+    expect((await app.inject({ url: "/fixed-asset-depreciation-runs" })).json().total).toBe(0);
+    await app.close();
+  });
+
+  it("400s no-accounting-period-for-posting for a disposal day without a period", async () => {
+    const { user, category } = await setupFixedAssets();
+    const app = buildFixedAssetApp(user.id);
+    const old = await testFixedAssetService.createAsset(
+      { name: "Gammal", categoryId: category.id, acquisitionDate: `${PLAN_YEAR - 1}-12-01`, acquisitionCost: 60000 },
+      user.id
+    );
+    const refused = await app.inject({ method: "POST", url: `/fixed-assets/${old.id}/dispose`, payload: scrap(`${PLAN_YEAR - 1}-12-15`) });
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json().code).toBe("no-accounting-period-for-posting");
+    await app.close();
+  });
+});
+
 describe("fixed-asset-depreciation-runs routes", () => {
   it("201s a run, 409s nothing-to-depreciate, 400s a future month and 409s a locked month", async () => {
     const { user, category, planYearId } = await setupFixedAssets();

@@ -57,6 +57,20 @@ export function toUnitPrice(basePrice: number, factor: UnitFactor): number {
   return round4(basePrice / parseFactor(factor));
 }
 
+// An entry that shows the stored base value exactly — a pure unit switch, or
+// an Ändra that resends what the row shows — IS the stored value. Converting
+// it back rounds a second time (round4 into the unit, round4 out again), so
+// 1,0001 st shown as 0,3 in a unit of factor 0,3 came back as 1 st and the
+// row counted as changed (and was repriced). One rule for the row PATCHes
+// and the cards (and the mirror in apps/web/lib/units.ts).
+export function enteredBaseQuantity(entered: number, factor: UnitFactor, storedBase: number): number {
+  return toUnitQuantity(storedBase, factor) === entered ? storedBase : toBaseQuantity(entered, factor);
+}
+
+export function enteredBasePrice(entered: number, factor: UnitFactor, storedBase: number): number {
+  return toUnitPrice(storedBase, factor) === entered ? storedBase : toBasePrice(entered, factor);
+}
+
 // Routing/MO operation time — "Tid/enhet" is always stored/returned in
 // minutes per unit (canonical, used unchanged by costing, capacity planning,
 // import and the external configurator API). The per-operation time_unit is
