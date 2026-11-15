@@ -18,6 +18,7 @@ import {
 import { readVatAccountMovements } from "../src/modules/economy/service/vat-account-movements.js";
 import { bucketMovements } from "../src/modules/economy/service/vat-report.service.js";
 import { postingVatCode } from "./helpers/vat-codes.js";
+import { bookingPoster } from "./helpers/booking-poster.js";
 
 // Momskoder in the automatkontering: which account each code posts to, the
 // "Alla momskoder" rule only for domestic codes, omvänd moms computed on a
@@ -46,7 +47,7 @@ const SETTINGS = {
   postingFxLoss: "7960",
   postingBankFees: "6570",
 };
-const poster = createVerificationPoster({ read: async () => SETTINGS });
+const poster = bookingPoster(createVerificationPoster({ read: async () => SETTINGS }));
 
 const C = {} as Record<VatCode, PostingVatCode>;
 beforeAll(async () => {

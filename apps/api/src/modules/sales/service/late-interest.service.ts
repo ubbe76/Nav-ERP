@@ -161,6 +161,10 @@ export function createLateInterestService(deps: LateInterestServiceDeps) {
     const rateMissing = new Set<string>();
     const rows: LateInterestCandidate[] = [];
     for (const source of sources) {
+      // A 0-kronorsfaktura never owed anything: no interest and, above all,
+      // no förseningsersättning (fullyPaidDate never sees it paid — no
+      // payment ever settles it — so it would count as late and open).
+      if (source.principal <= 0) continue;
       const paid = payments.get(source.invoiceId) ?? [];
       const active = (charges.get(source.invoiceId) ?? []).filter((charge) => charge.active);
       // The period starts the day after the due date, or after the last

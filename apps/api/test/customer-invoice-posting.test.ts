@@ -485,3 +485,91 @@ describe("kundfaktura — automatkontering vid utfärdande (B2)", () => {
     expect(loaded!.verificationDisplayNumber).toBeNull();
   });
 });
+
+// 0-kronorsfaktura (användarens beslut 2026-11-15): nothing is open, so the
+// invoice is paid the moment it is issued; a verification only when the rows
+// leave something on the accounts.
+describe("0-kronorsfaktura", () => {
+  it("issues a 0 kr invoice paid, numbered and without a verification", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const draft = await makeDraft(customer.id, [{ description: "Garantibyte", quantity: 2, unitPrice: 0, vatRate: 25 }], user.id);
+
+    const issued = await invoiceService.issue(draft.id, user.id);
+    expect(issued!.status).toBe("paid");
+    expect(issued!.invoiceNumber).toMatch(/^\D*\d+$/);
+    expect(issued!.paidAt).not.toBeNull();
+    expect(issued!.verificationId).toBeNull();
+    expect(await db.select().from(verifications)).toHaveLength(0);
+
+    const loaded = await invoiceService.getInvoice(draft.id);
+    expect(loaded!.status).toBe("paid");
+    expect(loaded!.openAmount).toBe(0);
+    expect(loaded!.verificationDisplayNumber).toBeNull();
+  });
+
+  it("books no verification when the rows cancel out on the same accounts", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const draft = await makeDraft(
+      customer.id,
+      [
+        { description: "Pump", quantity: 1, unitPrice: 400, vatRate: 25 },
+        { description: "Garanti", quantity: 1, unitPrice: -400, vatRate: 25 },
+      ],
+      user.id
+    );
+
+    const issued = await invoiceService.issue(draft.id, user.id);
+    expect(issued!.status).toBe("paid");
+    expect(issued!.verificationId).toBeNull();
+    expect(await db.select().from(verifications)).toHaveLength(0);
+  });
+
+  it("books the rows without a receivable when they net to 0 kr on different accounts", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const draft = await makeDraft(
+      customer.id,
+      [
+        { description: "Pump", quantity: 1, unitPrice: 400, vatRate: 25 }, // 400 + 100
+        { description: "Ersättning", quantity: 1, unitPrice: -500, vatRate: 0 }, // −500 + 0
+      ],
+      user.id
+    );
+
+    const issued = await invoiceService.issue(draft.id, user.id);
+    expect(issued!.status).toBe("paid");
+    expect(issued!.verificationId).not.toBeNull();
+    const verification = await verificationFor(draft.id);
+    expect(verification!.seriesCode).toBe("F");
+    expect(verification!.rows).toEqual([
+      { number: "3001", debit: "0.00", credit: "400.00" },
+      { number: "2610", debit: "0.00", credit: "100.00" },
+      { number: "3004", debit: "500.00", credit: "0.00" },
+    ]);
+    expectBalanced(verification!.rows);
+  });
+
+  it("issues a 0 kr credit note paid as well", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const draft = await makeDraft(customer.id, [{ description: "Garantibyte", quantity: 1, unitPrice: 0, vatRate: 25 }], user.id);
+    const issued = await invoiceService.issue(draft.id, user.id);
+
+    const credit = await invoiceService.createCredit(issued!.id, {}, user.id);
+    const issuedCredit = await invoiceService.issue(credit!.id, user.id);
+    expect(issuedCredit!.type).toBe("credit");
+    expect(issuedCredit!.status).toBe("paid");
+    expect(issuedCredit!.verificationId).toBeNull();
+  });
+
+  it("still refuses an invoice without rows", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const draft = await makeDraft(customer.id, [], user.id);
+    await expect(invoiceService.issue(draft.id, user.id)).rejects.toThrow();
+    const [row] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, draft.id));
+    expect(row!.status).toBe("draft");
+  });
+});
