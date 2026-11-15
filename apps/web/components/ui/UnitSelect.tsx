@@ -5,6 +5,7 @@ import { Select } from "./Field";
 import { apiFetch } from "../../lib/api";
 import type { Article, ArticleUnit } from "../../lib/types";
 import { round4 } from "../../lib/format";
+import { toUnitPrice, toUnitQuantity } from "../../lib/units";
 
 // Unit choice on an order/BOM row: the article's base unit plus its
 // alternative units. `value` is the unit's register id, "" = the base unit.
@@ -59,6 +60,20 @@ export function convertPriceInput(raw: string, fromFactor: number, toFactor: num
   const n = Number(raw);
   if (raw.trim() === "" || !Number.isFinite(n)) return raw;
   return String(round4((n * fromFactor) / toFactor));
+}
+
+// Ändra on a stored row: an entry that still shows the row's stored value
+// (enteredBaseQuantity's rule) converts from that value, not from the rounded
+// display — st → km → m comes back to the stored 1,2345 m instead of 1,2.
+// Anything else converts as convertQuantityInput.
+export function convertStoredQuantityInput(raw: string, fromFactor: number, toFactor: number, storedBase: number): string {
+  if (raw.trim() !== "" && Number(raw) === toUnitQuantity(storedBase, fromFactor)) return String(toUnitQuantity(storedBase, toFactor));
+  return convertQuantityInput(raw, fromFactor, toFactor);
+}
+
+export function convertStoredPriceInput(raw: string, fromFactor: number, toFactor: number, storedBase: number): string {
+  if (raw.trim() !== "" && Number(raw) === toUnitPrice(storedBase, fromFactor)) return String(toUnitPrice(storedBase, toFactor));
+  return convertPriceInput(raw, fromFactor, toFactor);
 }
 
 export function UnitSelect({

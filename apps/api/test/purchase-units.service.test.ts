@@ -120,6 +120,26 @@ describe("purchase — order rows in alternative units", () => {
     expect(updated?.unitCode).toBe("st");
   });
 
+  // The purchase card sends quantity and price on a unit switch; both are the
+  // stored ones as shown in the new unit (enteredBaseQuantity) — 245,8333 kr/st
+  // is 49,1667 kr/kg and used to come back as 245,8335.
+  it("keeps the stored quantity and price on a pure unit switch, also into a coarser unit", async () => {
+    const [fp] = await db.insert(units).values({ code: "fp", name: "Förpackning" }).returning();
+    const { order } = await makeOrder();
+    const article = await makeKgArticle("PU-5");
+    await articleService.addArticleUnit(article.id, { unitId: fp!.id, quantityPerBase: 0.1 });
+    await purchaseService.addRow(order.id, { articleId: article.id, quantity: 12.3456, unitPrice: 245.8333 });
+    const [row] = await purchaseService.listRows(order.id);
+
+    await purchaseService.updateRow(order.id, row!.id, { quantity: 61.728, unitPrice: 49.1667, unitId: kgId });
+    let [updated] = await purchaseService.listRows(order.id);
+    expect([updated?.quantityOrdered, updated?.unitPrice, updated?.unitId]).toEqual(["12.3456", "245.8333", kgId]);
+
+    await purchaseService.updateRow(order.id, row!.id, { quantity: 1.2346, unitPrice: 2458.333, unitId: fp!.id });
+    [updated] = await purchaseService.listRows(order.id);
+    expect([updated?.quantityOrdered, updated?.unitPrice, updated?.unitId]).toEqual(["12.3456", "245.8333", fp!.id]);
+  });
+
   it("rejects a unit the article does not have", async () => {
     const { order } = await makeOrder();
     const article = await articleService.createArticle({
@@ -173,5 +193,19 @@ describe("purchase — inquiry rows in alternative units", () => {
     expect(orderRow?.quantityOrdered).toBe("100.0000");
     expect(orderRow?.unitId).toBe(kgId);
     expect(Number(orderRow?.unitFactor)).toBe(5);
+  });
+
+  it("keeps the stored quantity and price when a row PATCH only switches unit", async () => {
+    const user = await makeUser();
+    const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "ACME AB", active: true }));
+    const article = await makeKgArticle("IN-2");
+    const { inquiry } = await purchaseService.createInquiry(
+      { supplierId: supplier.id, rows: [{ articleId: article.id, quantity: 12.3456, unitPrice: 245.8333 }] },
+      user.id
+    );
+    const [row] = await purchaseService.listInquiryRows(inquiry.id);
+    await purchaseService.updateInquiryRow(inquiry.id, row!.id, { quantity: 61.728, unitPrice: 49.1667, unitId: kgId });
+    const [updated] = await purchaseService.listInquiryRows(inquiry.id);
+    expect([updated?.quantity, updated?.unitPrice, updated?.unitCode]).toEqual(["12.3456", "245.8333", "kg"]);
   });
 });

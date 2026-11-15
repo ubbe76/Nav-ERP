@@ -102,6 +102,40 @@ describe("sales — order rows in alternative units", () => {
     expect(updated?.unitCode).toBe("st");
   });
 
+  // A pure unit switch re-sends the stored quantity/price as shown in the new
+  // unit; converting that back rounded twice (enteredBaseQuantity). 12,3456 st
+  // is 1,2346 fp at 10 st/fp (factor 0,1), which used to come back as
+  // 12,346 st — a quantity change that repriced a hand-written price from the
+  // chain — and 245,8333 kr/st is 49,1667 kr/kg, which came back as 245,8335.
+  it("keeps the stored quantity and price on a pure unit switch, also into a coarser unit", async () => {
+    const [fp] = await db.insert(units).values({ code: "fp", name: "Förpackning" }).returning();
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
+    const article = await makeKgArticle("SA-4");
+    await articleService.addArticleUnit(article.id, { unitId: fp!.id, quantityPerBase: 0.1 });
+    await articleService.updateArticle(article.id, { salesPrice: 100 });
+    const { order } = await salesService.createQuote(
+      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 12.3456, unitPrice: 245.8333 }], confirm: false },
+      null
+    );
+    const [row] = await salesService.listRows(order.id);
+    expect(row?.priceOrigin).toBe("manual");
+
+    // The order card on a pure switch: quantity in the new unit, no price.
+    await salesService.updateRow(order.id, row!.id, { quantity: 1.2346, unitId: fp!.id });
+    let [updated] = await salesService.listRows(order.id);
+    expect([updated?.quantityOrdered, updated?.unitPrice, updated?.priceOrigin, updated?.unitId]).toEqual(["12.3456", "245.8333", "manual", fp!.id]);
+
+    // Quantity and price as shown in kg.
+    await salesService.updateRow(order.id, row!.id, { quantity: 61.728, unitPrice: 49.1667, unitId: kgId });
+    [updated] = await salesService.listRows(order.id);
+    expect([updated?.quantityOrdered, updated?.unitPrice, updated?.priceOrigin]).toEqual(["12.3456", "245.8333", "manual"]);
+
+    // A quantity that does not show the stored one is converted as before.
+    await salesService.updateRow(order.id, row!.id, { quantity: 1.3, unitPrice: 2458.333, unitId: fp!.id });
+    [updated] = await salesService.listRows(order.id);
+    expect([updated?.quantityOrdered, updated?.unitPrice]).toEqual(["13.0000", "245.8333"]);
+  });
+
   it("rejects a unit the article does not have", async () => {
     const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
     const article = await articleService.createArticle({

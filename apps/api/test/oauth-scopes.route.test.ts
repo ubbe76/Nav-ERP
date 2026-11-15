@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { db, articles, customers, salesOrderRows, salesOrders, units } from "@navet/db";
+import { db, articles, customers, permissionGroups, salesOrderRows, salesOrders, units } from "@navet/db";
 import { API_CLIENT_SCOPES, type ApiClientScope } from "@navet/shared";
 import { buildApp } from "../src/app.js";
 
@@ -229,5 +229,69 @@ describe("rättigheterna gäller direkt", () => {
 
   it("leaves sessions alone", async () => {
     expect((await call("GET", "/configurator/templates", { cookie: admin })).statusCode).toBe(200);
+  });
+});
+
+// requireAuthOrClient: a valid session cookie wins and the bearer token in
+// the same request is never read — so a token can neither narrow a session
+// (scope, bound customer, whitelisted answer) nor widen it (Behörighet,
+// Endast läsning). A cookie the API does not accept falls through to the
+// token as if it were absent.
+describe("session och klienttoken i samma anrop", () => {
+  const GROUP_PREFIX = "DUAL";
+  afterAll(async () => db.execute(sql`DELETE FROM permission_groups WHERE code LIKE ${`${GROUP_PREFIX}%`}`));
+
+  async function userSession(permissions: string[], readOnly = false) {
+    const [group] = await db.insert(permissionGroups).values({ code: `${GROUP_PREFIX}${crypto.randomUUID().slice(0, 6)}`, name: "Dual", permissions }).returning();
+    const email = `dual-${crypto.randomUUID()}@example.com`;
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/users",
+      headers: { cookie: admin },
+      payload: { email, password: PASSWORD, name: "Dual", role: "user", permissionGroupId: group!.id, readOnly },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    return cookieOf(await app.inject({ method: "POST", url: "/api/v1/auth/login", payload: { email, password: PASSWORD } }));
+  }
+
+  it("serves the session in full: no scope, customer binding or whitelist from the token", async () => {
+    // A token with no quote scope, bound to the OTHER customer.
+    const narrow = await clientToken(["configurator:read"], otherCustomer);
+    const both = { cookie: admin, ...narrow.auth };
+    const created = await call("POST", "/quotes", both, quote(ownCustomer, true));
+    expect(created.statusCode, created.body).toBe(201);
+    expect(created.json().order).toMatchObject({ customerId: ownCustomer, status: "confirmed" });
+    // The session's answer, not the client's whitelist.
+    expect(created.json().order).toHaveProperty("createdBy");
+    expect(created.json().rows[0]).toHaveProperty("priceOrigin", "chain");
+    // The configurator scope: a session reaches an unpublished template too —
+    // here the list is simply the session's.
+    expect((await call("GET", "/configurator/templates", both)).statusCode).toBe(200);
+  });
+
+  it("never widens the session: Behörighet and Endast läsning hold with a full-scope token beside them", async () => {
+    const full = await clientToken([...API_CLIENT_SCOPES]);
+    const warehouse = await userSession(["lager"]);
+    const denied = await call("POST", "/quotes", { cookie: warehouse, ...full.auth }, quote(ownCustomer));
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json().code).toBe("forbidden");
+
+    const readOnly = await userSession(["forsaljning"], true);
+    const refused = await call("POST", "/quotes", { cookie: readOnly, ...full.auth }, quote(ownCustomer));
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json().code).toBe("read-only-account");
+    expect(await db.select().from(salesOrders)).toHaveLength(0);
+  });
+
+  it("falls through to the token when the cookie is not a valid session", async () => {
+    const bound = await clientToken(["quotes:create"], ownCustomer);
+    const stale = { cookie: "session=not-a-valid-token", ...bound.auth };
+    const mismatch = await call("POST", "/quotes", stale, quote(otherCustomer));
+    expect(mismatch.statusCode).toBe(403);
+    expect(mismatch.json().code).toBe("client-customer-mismatch");
+    const own = await call("POST", "/quotes", stale, quote(ownCustomer));
+    expect(own.statusCode).toBe(201);
+    expect(own.json().order).not.toHaveProperty("createdBy");
+    expect(own.json().rows[0]).not.toHaveProperty("priceOrigin");
   });
 });

@@ -5,6 +5,8 @@ import {
   type SupplierPaymentContext,
   roundUpToMultiple,
   supplierPaymentDetailsProblems,
+  enteredBasePrice,
+  enteredBaseQuantity,
   toBasePrice,
   toBaseQuantity,
   toUnitPrice,
@@ -1227,13 +1229,16 @@ export function createPurchaseService(
 
       const row = await repo.updateInquiryRow(inquiryId, rowId, {
         ...unitPatch,
+        // An entry that shows the stored values keeps them (enteredBaseQuantity).
         quantity:
           input.quantity !== undefined
-            ? await roundForArticle(existing.articleId, toBaseQuantity(input.quantity, factor))
+            ? await roundForArticle(existing.articleId, enteredBaseQuantity(input.quantity, factor, Number(existing.quantity)))
             : undefined,
         unitPrice:
           input.unitPrice !== undefined && input.unitPrice !== null
-            ? toBasePrice(input.unitPrice, factor)
+            ? existing.unitPrice !== null
+              ? enteredBasePrice(input.unitPrice, factor, Number(existing.unitPrice))
+              : toBasePrice(input.unitPrice, factor)
             : input.unitPrice,
         // Per order, not per unit — no factor.
         setupPrice: input.setupPrice,
@@ -1560,11 +1565,13 @@ export function createPurchaseService(
         rowId,
         {
           ...unitPatch,
+          // An entry that shows the stored values in the (new) unit keeps them
+          // — a pure unit switch changes neither (enteredBaseQuantity).
           quantity:
             input.quantity !== undefined
-              ? await roundForArticle(existing.articleId, toBaseQuantity(input.quantity, factor))
+              ? await roundForArticle(existing.articleId, enteredBaseQuantity(input.quantity, factor, Number(existing.quantityOrdered)))
               : undefined,
-          unitPrice: input.unitPrice !== undefined ? toBasePrice(input.unitPrice, factor) : undefined,
+          unitPrice: input.unitPrice !== undefined ? enteredBasePrice(input.unitPrice, factor, Number(existing.unitPrice)) : undefined,
           // Ställpris is entered per row (not per unit) — no unit conversion.
           setupPrice: input.setupPrice,
           expectedDeliveryDate: input.expectedDeliveryDate,

@@ -29,14 +29,14 @@ import { ArticlePicker } from "../ui/ArticlePicker";
 import { ConfigureModal } from "../configurator/ConfigureModal";
 import { ConfigurationLineList, ConfigurationLines } from "../configurator/ConfigurationLines";
 import { selectionFromEntries, type ConfiguratorEvaluation, type ConfiguratorSelection, type ResolveVariantResult, type RowConfigurationDraft, type VariantOf } from "../../lib/configurator";
-import { UnitSelect, convertPriceInput, convertQuantityInput, useUnitOptions, type UnitOption } from "../ui/UnitSelect";
+import { UnitSelect, convertPriceInput, convertQuantityInput, convertStoredPriceInput, convertStoredQuantityInput, useUnitOptions, type UnitOption } from "../ui/UnitSelect";
 import { DocumentHeaderCard } from "../documents/DocumentHeaderCard";
 import { DocumentActionBar } from "../documents/DocumentActionBar";
 import { ManualStatusChange } from "../documents/ManualStatusChange";
 import { TermsFields, termsFrom, termsLabel, termsPayload, type TermsRegisters, type TermsValue } from "../documents/TermsFields";
 import { formatStockholmDate, formatStockholmDateTime } from "../../lib/date";
 import { configuredDeliveryWarning } from "../../lib/configuredDelivery";
-import { toBaseQuantity, toBasePrice, toUnitPrice, toUnitQuantity } from "../../lib/units";
+import { enteredBaseQuantity, toBaseQuantity, toBasePrice, toUnitPrice, toUnitQuantity } from "../../lib/units";
 import { requoteFor } from "../../lib/rowRequote";
 import { marginLabel, useArticleSelfCost, useConfiguredSelfCost } from "./useArticleMargin";
 import { computeLineMargin, sumMargins } from "../../lib/margin";
@@ -209,6 +209,8 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   // back to the 10-tier, a pure unit switch never reprices, and nothing is
   // asked before the article's units have loaded).
   const editPricedBaseQuantityRef = useRef(0);
+  // The row's stored base quantity and price while Ändra is open.
+  const editStoredRef = useRef({ quantity: 0, price: 0 });
 
   const deliverable = rows.filter((r) => Number(r.quantityDelivered) < Number(r.quantityOrdered));
   // Valuta: the order's prices are in its currency; the rate (SEK per 1 unit,
@@ -377,6 +379,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     // quantityOrdered is already stored in the article's base unit — the
     // stored price belongs to it.
     editPricedBaseQuantityRef.current = Number(row.quantityOrdered);
+    editStoredRef.current = { quantity: Number(row.quantityOrdered), price: Number(row.unitPrice) };
     setEditPrice(String(toUnitPrice(Number(row.unitPrice), row.unitFactor)));
     setEditDiscountPercent(String(Number(row.discountPercent)));
     setEditPriceTouched(false);
@@ -388,9 +391,12 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     apiFetch<Article>(`/api/v1/articles/${row.articleId}`).then(setEditArticle).catch(() => {});
   }
 
+  // From the stored row while the entry still shows it, so switching units
+  // never moves the quantity or price by a rounding (convertStored…).
   function switchEditUnit(option: UnitOption) {
-    setEditQuantity((q) => convertQuantityInput(q, editFactor, option.factor));
-    setEditPrice((p) => convertPriceInput(p, editFactor, option.factor));
+    const stored = editStoredRef.current;
+    setEditQuantity((q) => convertStoredQuantityInput(q, editFactor, option.factor, stored.quantity));
+    setEditPrice((p) => convertStoredPriceInput(p, editFactor, option.factor, stored.price));
     setEditUnitId(option.value);
   }
 
@@ -445,7 +451,9 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     const quantityTouched = unitChanged || editQuantity !== editStart.quantity;
     const sendPrice = !omitUnitPriceOnEdit({
       priceTouched: editPriceTouched,
-      quantityChanged: quantityTouched && toBaseQuantity(Number(editQuantity), editFactor) !== Number(row.quantityOrdered),
+      quantityChanged:
+        quantityTouched &&
+        enteredBaseQuantity(Number(editQuantity), editFactor, Number(row.quantityOrdered)) !== Number(row.quantityOrdered),
       quote: editQuote,
     });
     const dateChanged = editDeliveryDate !== editStart.date;

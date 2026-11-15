@@ -6,6 +6,8 @@ import {
   runTimeInUnit,
   runTimeToMinutes,
   secondsPerUnitToMinutesPerUnit,
+  enteredBasePrice,
+  enteredBaseQuantity,
   toBasePrice,
   toBaseQuantity,
   toUnitPrice,
@@ -27,6 +29,18 @@ describe("unit conversion helpers", () => {
   it("converts prices in the opposite direction (12 kr/kg → 60 kr/st and back)", () => {
     expect(toBasePrice(12, 5)).toBe(60);
     expect(toUnitPrice(60, 5)).toBe(12);
+  });
+
+  it("keeps the stored base value for an entry that shows it, and converts anything else", () => {
+    // 12,3456 st at 10 st/fp shows as 1,2346 fp — converted back it is 12,346.
+    expect(toBaseQuantity(1.2346, 0.1)).toBe(12.346);
+    expect(enteredBaseQuantity(1.2346, 0.1, 12.3456)).toBe(12.3456);
+    expect(enteredBaseQuantity(1.3, 0.1, 12.3456)).toBe(13);
+    // 245,8333 kr/st shows as 49,1667 kr/kg — converted back it is 245,8335.
+    expect(toBasePrice(49.1667, 5)).toBe(245.8335);
+    expect(enteredBasePrice(49.1667, 5, 245.8333)).toBe(245.8333);
+    expect(enteredBasePrice(50, 5, 245.8333)).toBe(250);
+    expect(enteredBaseQuantity(7, null, 7)).toBe(7);
   });
 
   it("treats factor 1, null and undefined as identity", () => {

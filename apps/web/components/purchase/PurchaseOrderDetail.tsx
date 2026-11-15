@@ -19,7 +19,7 @@ import buttonStyles from "../ui/Button.module.css";
 import { Modal } from "../ui/Modal";
 import { Field, Input, Select, Toggle } from "../ui/Field";
 import { ArticlePicker } from "../ui/ArticlePicker";
-import { UnitSelect, convertPriceInput, convertQuantityInput, useUnitOptions, type UnitOption } from "../ui/UnitSelect";
+import { UnitSelect, convertPriceInput, convertQuantityInput, convertStoredPriceInput, convertStoredQuantityInput, useUnitOptions, type UnitOption } from "../ui/UnitSelect";
 import { DocumentHeaderCard } from "../documents/DocumentHeaderCard";
 import { DocumentActionBar } from "../documents/DocumentActionBar";
 import { ManualStatusChange } from "../documents/ManualStatusChange";
@@ -156,6 +156,8 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
     }
   }, [rowsEditable]);
   const editPricedBaseQuantityRef = useRef(0);
+  // The row's stored base quantity and price while Ändra is open.
+  const editStoredRef = useRef({ quantity: 0, price: 0 });
   const editRequestSeq = useRef(0);
   // The touched flag as it is when a prefill response LANDS — the effect's
   // closure holds it as it was when the request left, so a price typed while
@@ -230,6 +232,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
     setEditPriceTouched(false);
     setEditPriceTier(null);
     editPricedBaseQuantityRef.current = Number(row.quantityOrdered);
+    editStoredRef.current = { quantity: Number(row.quantityOrdered), price: Number(row.unitPrice) };
     setEditQuantity(String(toUnitQuantity(Number(row.quantityOrdered), row.unitFactor)));
     setEditPrice(String(toUnitPrice(Number(row.unitPrice), row.unitFactor)));
     setEditUnitId(row.unitId ?? "");
@@ -248,9 +251,12 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
     apiFetch<Article>(`/api/v1/articles/${row.articleId}`).then(setEditArticle).catch(() => {});
   }
 
+  // From the stored row while the entry still shows it, so switching units
+  // never moves the quantity or price by a rounding (convertStored…).
   function switchEditUnit(option: UnitOption) {
-    setEditQuantity((q) => convertQuantityInput(q, editFactor, option.factor));
-    setEditPrice((p) => convertPriceInput(p, editFactor, option.factor));
+    const stored = editStoredRef.current;
+    setEditQuantity((q) => convertStoredQuantityInput(q, editFactor, option.factor, stored.quantity));
+    setEditPrice((p) => convertStoredPriceInput(p, editFactor, option.factor, stored.price));
     setEditUnitId(option.value);
   }
 

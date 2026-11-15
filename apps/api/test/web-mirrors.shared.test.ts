@@ -33,6 +33,11 @@ describe("units mirror (apps/web/lib/units.ts)", () => {
         expect(webUnits.toUnitQuantity(q, f)).toBe(shared.toUnitQuantity(q, f));
         expect(webUnits.toBasePrice(q, f)).toBe(shared.toBasePrice(q, f));
         expect(webUnits.toUnitPrice(q, f)).toBe(shared.toUnitPrice(q, f));
+        for (const stored of [0, 1.0001, 12.3456, 245.8333]) {
+          expect(webUnits.enteredBaseQuantity(q, f, stored)).toBe(shared.enteredBaseQuantity(q, f, stored));
+          expect(webUnits.enteredBasePrice(q, f, stored)).toBe(shared.enteredBasePrice(q, f, stored));
+          expect(webUnits.enteredBaseQuantity(shared.toUnitQuantity(stored, f), f, stored)).toBe(stored);
+        }
       }
   });
 

@@ -134,6 +134,35 @@ describe("buildFixedAssetPlan (pure)", () => {
     expect(sold.categories[0]!.assets[0]).toMatchObject({ depreciationOpening: 45000, depreciationYear: 12000, depreciationDisposed: -57000, depreciationClosing: 0, acquisitionClosing: 0 });
   });
 
+  // A December booked in January (December was locked, so the next run
+  // caught it up on its own date) is next year's movement — the ledger
+  // carries it there, and the plan follows the date, not the month.
+  it("leaves a row dated after the year end out of the year and in the next year's opening", () => {
+    const late = asset({
+      acquisitionDate: "2026-01-10",
+      depreciations: [
+        { date: "2026-11-30", amount: 22000 },
+        { date: "2027-01-31", amount: 4000 },
+      ],
+    });
+    const plan = buildFixedAssetPlan({
+      fiscalYear: YEAR,
+      categories: [INVENTARIER],
+      assets: [late],
+      ledgerBalances: [{ accountId: "acc-1220", debit: 120000, credit: 0 }, { accountId: "acc-1229", debit: 0, credit: 22000 }],
+    });
+    expect(plan.categories[0]!.assets[0]).toMatchObject({ depreciationOpening: 0, depreciationYear: 22000, depreciationClosing: 22000, bookValueClosing: 98000 });
+    expect(plan.reconciliation.every((row) => !row.mismatch)).toBe(true);
+
+    const next = buildFixedAssetPlan({
+      fiscalYear: { id: "fy27", label: "2027", startDate: "2027-01-01", endDate: "2027-12-31" },
+      categories: [INVENTARIER],
+      assets: [late],
+      ledgerBalances: [],
+    });
+    expect(next.categories[0]!.assets[0]).toMatchObject({ depreciationOpening: 22000, depreciationYear: 4000, depreciationClosing: 26000 });
+  });
+
   it("flattens to CSV with one row per asset and a header", () => {
     const plan = buildFixedAssetPlan({ fiscalYear: YEAR, categories: [INVENTARIER], assets: [asset({})], ledgerBalances: [] });
     const csv = buildFixedAssetPlanCsv(plan);
