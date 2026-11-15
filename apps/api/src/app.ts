@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { customers, db, type Db } from "@navet/db";
 import { createArticleRepository, insertArticle } from "./modules/article/repository/article.repository.js";
 import { insertBomRows } from "./modules/article/repository/bom-write.js";
-import { createArticleService, type AbcClassReader } from "./modules/article/service/article.service.js";
+import { createArticleService, type AbcClassReader, type VariantOfReader } from "./modules/article/service/article.service.js";
 import { articleRoutes } from "./modules/article/routes/article.routes.js";
 import { createAuthRepository } from "./modules/auth/repository/auth.repository.js";
 import { createAuthService } from "./modules/auth/service/auth.service.js";
@@ -363,8 +363,12 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   // the card's class come from the planning service, built far below —
   // bound late like planReaderRef.
   const abcClassRef: { current: AbcClassReader | null } = { current: null };
+  // Variant av … on the card comes from the configurator, built below — the
+  // article module must not depend on it, so bound late the same way.
+  const variantOfRef: { current: VariantOfReader | null } = { current: null };
   const articleService = createArticleService(createArticleRepository(database), auditRepository, {
     abc: { abcClassByArticle: () => abcClassRef.current!.abcClassByArticle() },
+    variantOf: { variantOf: (id) => variantOfRef.current!.variantOf(id) },
   });
   // CSV import (Monitor G5): articles now; customers/suppliers reuse the
   // same module later. Admin-only routes.
@@ -847,6 +851,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });
   variantPriceRef.current = (q) => configuratorService.variantPrice(q);
+  variantOfRef.current = { variantOf: (id) => configuratorService.variantOfArticle(id) };
   configuredStructureRef.current = (t, s, q, o) => configuratorService.deriveForManufacturing(t, s, q, o);
   rowConfigurationRef.current = {
     evaluate: (t, s, o) => configuratorService.evaluateRowConfiguration(t, s, o),

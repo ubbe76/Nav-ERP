@@ -1545,6 +1545,12 @@ export function createConfiguratorService(deps: {
       return row;
     },
 
+    // The article card's Variant av … (GET /articles/:id?withVariantOf=true,
+    // bound late in app.ts): null for an article that is not a stocked variant.
+    variantOfArticle(articleId: string): Promise<VariantOf | null> {
+      return repo.variantOf(db, articleId);
+    },
+
     // Ändra konfiguration on a variant row: which template the row's article
     // came from and the variant's key (null = plain article, never a 404).
     async findVariantOf(articleId: string): Promise<{ templateArticleId: string; configKey: string } | null> {

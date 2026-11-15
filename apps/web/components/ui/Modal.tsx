@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import styles from "./Modal.module.css";
 
 interface ModalProps {
@@ -13,10 +14,22 @@ interface ModalProps {
   // Small centered card on phones too, instead of the full-screen sheet
   // (short questions such as the confirmation dialog).
   compact?: boolean;
+  // Rendered into document.body instead of in place, for a dialog mounted
+  // inside another <form> (Konfigurera in the order forms): a form must not
+  // contain another form. React still bubbles events through a portal along
+  // the component tree, so a submit inside stops at the dialog instead of
+  // also reaching the outer form's onSubmit.
+  portal?: boolean;
 }
 
-export function Modal({ open, onClose, title, children, wide = false, compact = false }: ModalProps) {
+export function Modal({ open, onClose, title, children, wide = false, compact = false, portal = false }: ModalProps) {
   const ref = useRef<HTMLDialogElement>(null);
+  // The portal needs document.body, so it renders from the first effect on
+  // (never during server rendering).
+  const [portalReady, setPortalReady] = useState(false);
+  useEffect(() => {
+    if (portal) setPortalReady(true);
+  }, [portal]);
   const titleId = useId();
   // Whether the press began on the backdrop: a text selection dragged out of
   // the box and released outside must not close the dialog.
@@ -35,9 +48,10 @@ export function Modal({ open, onClose, title, children, wide = false, compact = 
     } else if (!open && dialog.open) {
       dialog.close();
     }
-  }, [open]);
+    // portalReady: a portal dialog opened from the start exists only after it.
+  }, [open, portalReady]);
 
-  return (
+  const dialog = (
     <dialog
       ref={ref}
       className={[styles.dialog, wide && styles.wide, compact && styles.compact].filter(Boolean).join(" ")}
@@ -49,6 +63,7 @@ export function Modal({ open, onClose, title, children, wide = false, compact = 
         e.stopPropagation();
         onClose();
       }}
+      onSubmit={portal ? (e) => e.stopPropagation() : undefined}
       onMouseDown={(e) => {
         const d = ref.current;
         downOnBackdrop.current = !!d && e.target === d && outsideBox(d, e.clientX, e.clientY);
@@ -74,4 +89,6 @@ export function Modal({ open, onClose, title, children, wide = false, compact = 
       <div className={styles.body}>{open ? children : null}</div>
     </dialog>
   );
+  if (!portal) return dialog;
+  return portalReady ? createPortal(dialog, document.body) : null;
 }

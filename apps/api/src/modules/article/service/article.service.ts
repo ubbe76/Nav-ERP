@@ -6,6 +6,7 @@ import type {
   CopiedArticlesQuery,
   CopiedArticlesRemoveInput,
   CopiedArticlesSetInput,
+  VariantOf,
 } from "@navet/shared";
 // Kopierat (#28): the cap error is the repository leaf's (its transaction
 // throws it); re-exported so the routes import every article error from here.
@@ -380,10 +381,18 @@ export interface AbcClassReader {
   abcClassByArticle(): Promise<ReadonlyMap<string, AbcClass>>;
 }
 
+// Variant av … (the card, GET /articles/:id?withVariantOf=true): the stocked
+// variant's template and choices, null for any other article. Served by the
+// configurator and bound late in app.ts like the ABC reader — the article
+// module must not depend on the configurator. Absent (the fixtures) ⇒ null.
+export interface VariantOfReader {
+  variantOf(articleId: string): Promise<VariantOf | null>;
+}
+
 export function createArticleService(
   repo: ArticleRepository,
   audit: AuditWriter = { log: async () => {} },
-  readers: { abc?: AbcClassReader } = {}
+  readers: { abc?: AbcClassReader; variantOf?: VariantOfReader } = {}
 ) {
   const abcClasses = async (): Promise<ReadonlyMap<string, AbcClass> | null> => (readers.abc ? readers.abc.abcClassByArticle() : null);
   // article_group / markups_changed — only when a price markup actually
@@ -602,12 +611,24 @@ export function createArticleService(
     // too (null outside the classification's selection or without a reader)
     // — one whole classification per read, so it is opt-in: the
     // configurator and other modules call getArticle many times per request.
-    async getArticle(id: string, opts: { withAbc?: boolean } = {}): Promise<WithAbc<ArticleRow> | null> {
+    // `withVariantOf` (the card too): the configurator's Variant av … —
+    // opt-in for the same reason.
+    async getArticle(
+      id: string,
+      opts: { withAbc?: boolean; withVariantOf?: boolean } = {}
+    ): Promise<(WithAbc<ArticleRow> & { variantOf?: VariantOf | null }) | null> {
       const article = await repo.findById(id);
       if (!article) return null;
-      if (!opts.withAbc) return article;
-      const classes = await abcClasses();
-      return { ...article, abcClass: classes?.get(id) ?? null };
+      if (!opts.withAbc && !opts.withVariantOf) return article;
+      const [classes, variantOf] = await Promise.all([
+        opts.withAbc ? abcClasses() : undefined,
+        opts.withVariantOf ? (readers.variantOf?.variantOf(id) ?? null) : undefined,
+      ]);
+      return {
+        ...article,
+        ...(opts.withAbc ? { abcClass: classes?.get(id) ?? null } : {}),
+        ...(opts.withVariantOf ? { variantOf: variantOf ?? null } : {}),
+      };
     },
 
     // ABC-klassning: the class per row from ONE classification, only when

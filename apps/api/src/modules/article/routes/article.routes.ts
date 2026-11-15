@@ -116,8 +116,8 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
   );
 
   app.get<{ Params: { id: string } }>("/articles/:id", async (req, reply) => {
-    const { withAbc } = getArticleQuerySchema.parse(req.query);
-    const article = await service.getArticle(req.params.id, { withAbc });
+    const { withAbc, withVariantOf } = getArticleQuerySchema.parse(req.query);
+    const article = await service.getArticle(req.params.id, { withAbc, withVariantOf });
     if (!article) return reply.code(404).send({ error: "Article not found" });
     return article;
   });

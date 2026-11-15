@@ -10,7 +10,8 @@ export default async function ArticleDetailPage(props: { params: Promise<{ id: s
   const params = await props.params;
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
 
-  const article = await apiGet<Article>(`/api/v1/articles/${params.id}?withAbc=true`, cookieHeader).catch(() => null);
+  // withVariantOf: the header's "Variant av …" and the Konfigurator tab's choice list in the same read.
+  const article = await apiGet<Article>(`/api/v1/articles/${params.id}?withAbc=true&withVariantOf=true`, cookieHeader).catch(() => null);
   if (!article) notFound();
 
   const [bom, bomTree, balancesPage, calculations, routing, workCenters, groups, articleLocations] = await Promise.all([
