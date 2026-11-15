@@ -181,7 +181,8 @@ export interface StockBalanceImportPlan {
   hasErrors: boolean;
 }
 
-export const STOCK_IMPORT_NOTE = "Import av lagersaldo";
+// The note lives with the stock log (#19's backdating verdict reads it).
+export { STOCK_IMPORT_NOTE } from "../../stock/service/backdating.js";
 
 // Lagerspårad (batch-tracking.ts' stockTrackingOf) for the planner's article:
 // the fields are optional on ExistingArticle (older fakes carry none).

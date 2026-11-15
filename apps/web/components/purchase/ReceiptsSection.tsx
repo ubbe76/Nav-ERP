@@ -14,7 +14,7 @@ import { confirmDialog } from "../../lib/confirm";
 import { toUnitQuantity } from "../../lib/units";
 import { useCan } from "../PermissionsProvider";
 import type { PurchaseOrderRow, PurchaseOrderStatus, PurchaseReceipt } from "../../lib/types";
-import { formatStockholmDateTime } from "../../lib/date";
+import { formatStockholmDate, formatStockholmDateTime } from "../../lib/date";
 
 // Inleveranser on the IO card: every receipt (Ta emot leverans / the
 // Inleverans routine), newest first. Ångra inleverans reverses exactly that
@@ -24,6 +24,16 @@ import { formatStockholmDateTime } from "../../lib/date";
 
 function when(iso: string) {
   return formatStockholmDateTime(iso);
+}
+
+// Bokför per (#19): a receipt registered later for an earlier day shows that
+// day (its clock — the day's end — means nothing) and when it was registered.
+function receivedWhen(receipt: PurchaseReceipt): { text: string; registered: string | null } {
+  const receivedAt = receipt.receivedAt ?? receipt.createdAt;
+  if (receivedAt === receipt.createdAt) return { text: when(receipt.createdAt), registered: null };
+  const day = formatStockholmDate(receivedAt);
+  const registeredDay = formatStockholmDate(receipt.createdAt);
+  return day === registeredDay ? { text: when(receipt.createdAt), registered: null } : { text: day, registered: registeredDay };
 }
 
 function rowQuantity(receipt: PurchaseReceipt, row: PurchaseOrderRow | undefined) {
@@ -38,7 +48,7 @@ function undoQuestion(receipt: PurchaseReceipt, row: PurchaseOrderRow | undefine
     : `Varorna tas ut ur lager${receipt.locationName ? ` från ${receipt.locationName}` : ""}${
         receipt.batchNumber ? ` (${receipt.batchKind === "serial" ? "serienummer" : "batch"} ${receipt.batchNumber})` : ""
       } igen.`;
-  return `Ångra inleveransen ${when(receipt.createdAt)} av ${what}? ${effect}`;
+  return `Ångra inleveransen ${receivedWhen(receipt).text} av ${what}? ${effect}`;
 }
 
 // A serial receipt is one styck, so one receive call leaves one receipt per
@@ -114,7 +124,7 @@ export function ReceiptsSection({
     const numbers = live.map((r) => r.batchNumber ?? "");
     if (
       !(await confirmDialog(
-        `Ångra inleveransen ${when(group[0]!.createdAt)} av ${live.length} st ${row?.articleNumber ?? ""}? Serienummer ${serialListText(numbers)} tas ut ur lager igen.`,
+        `Ångra inleveransen ${receivedWhen(group[0]!).text} av ${live.length} st ${row?.articleNumber ?? ""}? Serienummer ${serialListText(numbers)} tas ut ur lager igen.`,
         { confirmLabel: "Ångra inleverans", danger: true }
       ))
     )
@@ -157,8 +167,20 @@ export function ReceiptsSection({
           const undone = group ? group.every((r) => r.undoneAt !== null) : receipt.undoneAt !== null;
           const muted = undone ? { color: "var(--color-text-muted)", textDecoration: "line-through" } : undefined;
           switch (key) {
-            case "createdAt":
-              return <span style={muted}>{when(receipt.createdAt)}</span>;
+            case "createdAt": {
+              const { text, registered } = receivedWhen(receipt);
+              return (
+                <span style={muted} title={registered ? `Registrerad ${when(receipt.createdAt)}` : undefined}>
+                  {text}
+                  {registered && (
+                    <>
+                      <br />
+                      <small>Registrerad {registered}</small>
+                    </>
+                  )}
+                </span>
+              );
+            }
             case "purchaseOrderRowId":
               return (
                 <span style={muted}>

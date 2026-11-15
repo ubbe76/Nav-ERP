@@ -26,6 +26,7 @@ import { isBatchExpired } from "../service/outflow-allocation.js";
 import { trackedSql } from "../service/batch-tracking.js";
 import { addDays } from "../../system/service/delivery-days.js";
 import { batchExpiryHorizon, expiringBatchCondition } from "./batch-expiry.js";
+import { receiptReceivedAt } from "./valued-at.js";
 
 // Spårbarhet (#8) — the reads behind GET /stock/batches and …/:id/trace.
 // A leaf (`Db | Tx`) that reads the purchase, sales and manufacturing tables
@@ -194,7 +195,7 @@ export function createBatchTraceReader(db: Db | Tx): BatchTraceReader {
           orderNumber: purchaseOrders.orderNumber,
           supplierId: suppliers.id,
           supplierName: suppliers.name,
-          receivedAt: purchaseReceipts.createdAt,
+          receivedAt: receiptReceivedAt,
           quantity: purchaseReceipts.quantity,
         })
         .from(stockTransactions)
@@ -202,7 +203,7 @@ export function createBatchTraceReader(db: Db | Tx): BatchTraceReader {
         .innerJoin(purchaseOrders, eq(purchaseOrders.id, purchaseReceipts.purchaseOrderId))
         .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
         .where(and(inArray(stockTransactions.batchId, batchIds), isNull(purchaseReceipts.undoneAt)))
-        .orderBy(asc(purchaseReceipts.createdAt), asc(purchaseReceipts.id));
+        .orderBy(asc(receiptReceivedAt), asc(purchaseReceipts.id));
       return rows.map((r) => ({ ...r, receivedAt: iso(r.receivedAt), quantity: Number(r.quantity) }));
     },
 

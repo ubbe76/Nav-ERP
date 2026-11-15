@@ -1303,6 +1303,9 @@ export interface PurchaseReceipt {
   // Serienummer: a "serial" receipt is one styck, batchNumber is its number.
   batchKind?: "batch" | "serial" | null;
   moReportId: string | null;
+  // Bokför per (#19): when the goods arrived — createdAt unless the receipt
+  // was registered later for an earlier day (that day's end).
+  receivedAt: string;
   createdAt: string;
   createdByName: string | null;
   undoneAt: string | null;

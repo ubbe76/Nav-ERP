@@ -66,7 +66,12 @@ Välj format i dialogen:
 
 **Lager → Transaktioner** (`/lager/transaktioner`) är hela loggen, nyast först. Kolumnerna är **Datum**, **Artikel**, **Lagerplats**, **Batch** (bara när någon rad har en batch, se [Batchnummer och spårbarhet](#batchnummer-och-sparbarhet)), **Typ**, **Mängd** (+/−), **Saldo**, **Källa**, **Vem**, **À-pris**, **Värde** och **Anteckning**. Från artikelkortets Lager-flik öppnar länken **Visa lagerlogg** loggen med artikeln förvald.
 
-**Datum** är dagen raden räknas på i lagervärderingen. Det är samma tidpunkt som raden registrerades, utom för en inventering som registrerats per underlagets datum (se [Räkna och registrera](#rakna-och-registrera)). Då står raden på tidpunkten då underlaget skapades, och registrerades den en annan dag står **Registrerad** med den dagen under datumet. Ordningen, datumfiltret och **Saldo** följer **Datum**. Exporten har båda tidpunkterna, i kolumnerna **Datum** och **Registrerad**.
+**Datum** är dagen raden räknas på i lagervärderingen. Det är samma tidpunkt som raden registrerades, med två undantag:
+
+- En inventering som registrerats per underlagets datum står på tidpunkten då underlaget skapades (se [Räkna och registrera](#rakna-och-registrera)).
+- En justering eller inleverans som bokförts per ett tidigare datum står på det datumet (se [Bokför per ett tidigare datum](#bokfor-per-ett-tidigare-datum)).
+
+Registrerades raden en annan dag står **Registrerad** med den dagen under datumet. Ordningen, datumfiltret och **Saldo** följer **Datum**. Exporten har båda tidpunkterna, i kolumnerna **Datum** och **Registrerad**.
 
 ### Filter
 
@@ -239,9 +244,30 @@ Enter i **Räknat** sparar raden även när du skriver utan att skanna. **Spara 
 
 **Lager → Justering** registrerar en enstaka saldojustering: välj artikel (artikelväljaren), lagerplats, ange **justeringen som +/− antal** (inte det räknade totalsaldot) och gärna en anteckning om orsaken. Klicka **Registrera justering** — justeringen bokförs som transaktion och syns direkt i saldot. En tjänst kan inte justeras — [tjänster lagerförs inte](/hjalp/artiklar#artikeltyper).
 
+**Bokför per** är förifyllt med i dag. Ett tidigare datum bokför justeringen på det datumet, se nedan.
+
 Justeringen är också det enda en integration kan boka direkt via API:t (`POST /stock/transactions`). Inleveranser, utleveranser, materialuttag och lagerflyttar görs i sina egna rutiner, som kopplar rörelsen till sitt dokument och sitt pris.
 
 Har artikeln alternativa enheter visas en **Enhet**-dropdown vid justeringsfältet — antalet kan då matas in i t.ex. kg och räknas om till grundenheten vid bokföringen (omräkningen visas som hjälptext innan du sparar).
+
+### Bokför per ett tidigare datum
+
+En justering som glömdes kan bokföras per dagen den egentligen hände. Välj det datumet i **Bokför per**.
+
+- **Värderingen:** justeringen räknas in i [lagervärderingen](#lagervardering) och i bokslutets **Lagerförändring** per det datumet.
+- **Transaktioner:** raden står sist på den dagen, med **Registrerad** och dagen du registrerade den under datumet.
+- **Priset:** en ökning får det standardpris artikeln hade det datumet.
+
+Samma fält finns i [Inleverans](/hjalp/inkop#inleverans) och i dialogen **Ta emot leverans** på inköpsordern. Där räknas godset också som mottaget det datumet.
+
+Ett datum vägras och inget bokförs när:
+
+- datumet ligger efter i dag;
+- datumet ligger i en låst bokföringsperiod eller ett stängt räkenskapsår;
+- artikeln har inventerats på lagerplatsen samma dag eller senare, eftersom inventeringen redan räknade godset. Det gäller en pågående inventering och en registrerad där artikeln räknades, men inte en avbruten;
+- lagerplatsen fick ett [importerat lagersaldo](#importera-lagersaldon) för artikeln samma dag eller senare.
+
+Registrera då rörelsen per i dag i stället. Är bokslutets **Lagerförändring** redan bokförd för året blir steget **Inaktuell** när lagervärdet ändras. Kör om steget, se [Lagerförändring](/hjalp/ekonomi#lagerforandring).
 
 ## Importera lagersaldon
 
@@ -378,4 +404,4 @@ Priset på ett inflöde sätts när det registreras: en inleverans från inköp 
 
 En artikel utan pris för vald metod visar **"—"** i kolumnen Värde och räknas inte med i summan — antalet syns ändå. Finns en eller flera sådana artiklar visas en hjälptext under kontrollerna med hur många det gäller, t.ex. *"3 artiklar saknar pris för vald metod och ingår inte i summan."* (böjs i singular: *"1 artikel saknar…"*).
 
-Värderingen räknar på lagerradernas **Datum** i [Transaktioner](#transaktioner), som kalenderdagar i svensk tid. Det är dagen raden registrerades, utom för en inventering som registrerats per underlagets datum. Andra lagerrörelser kan inte bakdateras in i en tidigare värdering.
+Värderingen räknar på lagerradernas **Datum** i [Transaktioner](#transaktioner), som kalenderdagar i svensk tid. Det är dagen raden registrerades, utom för en inventering som registrerats per underlagets datum och en justering eller inleverans som bokförts per ett tidigare datum (se [Bokför per ett tidigare datum](#bokfor-per-ett-tidigare-datum)). Utleveranser, materialuttag och tillverkningsinleveranser räknas alltid på dagen de registrerades.

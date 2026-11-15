@@ -89,6 +89,9 @@ import { assertSerialsOutOfStock, getOrCreateSerials, lockSerials } from "../../
 import { getOrCreateDatedBatch } from "../../stock/service/batches.js";
 import { isTrackedArticle, batchTrackedSql, trackingOf } from "../../stock/service/batch-tracking.js";
 import { batchCellQuantity } from "../../stock/repository/batch-balances.js";
+import { assertStockBackdate, noPostingPeriodLocks, type PostingPeriodReader } from "../../stock/repository/backdating.js";
+import { receiptReceivedAt, stockValuedAt } from "../../stock/repository/valued-at.js";
+import { backdatedInstant } from "../../stock/service/backdating.js";
 import { loadVatCodeBook } from "../../economy/repository/vat-codes.js";
 import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions } from "../../economy/service/dimension-check.js";
 import { purchaseRowArrivalDate } from "../../planning/repository/effective-dates.js";
@@ -104,7 +107,7 @@ export type ReceiveGoodsResult =
       // The serial numbers booked, in the request's order ([] otherwise).
       serialNumbers: string[];
     }
-  | { ok: false; reason: "order_not_found" | "row_not_found" | "invalid_status" }
+  | { ok: false; reason: "order_not_found" | "row_not_found" | "invalid_status" | "backdate_lego" }
   | { ok: false; reason: "over_receipt"; maxQuantity: number };
 
 // Row-level unit snapshot resolved by the service (null = the article's base
@@ -258,7 +261,10 @@ export type UndoReceiptResult =
   | { ok: false; reason: "receipt_not_found" | "already_undone" | "invalid_status" }
   | { ok: false; reason: "insufficient_stock"; available: number; required: number };
 
-export function createPurchaseRepository(db: Db) {
+// `periods` (#19): whether a backdated inleverans's day may still be written
+// to — app.ts binds economy's postingPeriodLockOn; tests that never backdate
+// into a locked period leave it out.
+export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = noPostingPeriodLocks) {
   // The dispatch rows of one order, joined with their IO row, article, unit
   // and lego reference — listDispatches and the pallet card share it.
   async function dispatchRowsByOrder(orderId: string) {
@@ -1338,8 +1344,21 @@ export function createPurchaseRepository(db: Db) {
     async receiveGoods(
       orderId: string,
       rowId: string,
-      input: { locationId?: string; quantity: number; createdBy: string; overReceiptPercent: number | null; batchNumber?: string; expiresOn?: string; serialNumbers?: string[] }
+      input: {
+        locationId?: string;
+        quantity: number;
+        createdBy: string;
+        overReceiptPercent: number | null;
+        batchNumber?: string;
+        expiresOn?: string;
+        serialNumbers?: string[];
+        // Bokför per (#19): the earlier Stockholm day the goods arrived (the
+        // service has refused a later one); null = now.
+        receivedOn?: string | null;
+      }
     ): Promise<ReceiveGoodsResult> {
+      const receivedOn = input.receivedOn ?? null;
+      const receivedAt = receivedOn === null ? null : backdatedInstant(receivedOn);
       return db.transaction(async (tx) => {
         const [order] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, orderId));
         if (!order) return { ok: false, reason: "order_not_found" };
@@ -1353,6 +1372,8 @@ export function createPurchaseRepository(db: Db) {
           .where(and(eq(purchaseOrderRows.id, rowId), eq(purchaseOrderRows.purchaseOrderId, orderId)))
           .for("update");
         if (!row) return { ok: false, reason: "row_not_found" };
+        // A lego row reports the TO operation now — never on an earlier day.
+        if (receivedOn !== null && row.moOperationId !== null) return { ok: false, reason: "backdate_lego" };
         // The order lock (after the row, the order updateRow takes them in)
         // serialises receipts and undos on different rows of one order, so
         // the status recomputed below always sees every row's final quantity.
@@ -1431,6 +1452,9 @@ export function createPurchaseRepository(db: Db) {
           const locationId = await resolveStockLocation(tx, row.articleId, input.locationId);
           // Once per place, not per number.
           await assertLocationNotUnderCount(tx, locationId);
+          // Bokför per (#19): the day still open and the place not counted (or
+          // given an imported balance) that day or later.
+          if (receivedOn !== null) await assertStockBackdate(tx, periods, receivedOn, [{ articleId: row.articleId, locationId }]);
           if (sort === "batch") {
             batch = await getOrCreateDatedBatch(tx, {
               articleId: row.articleId,
@@ -1472,6 +1496,7 @@ export function createPurchaseRepository(db: Db) {
                   createdBy: input.createdBy,
                   unitCost,
                   batchId: part.batchId,
+                  valuedAt: receivedAt,
                 })
               )
             )
@@ -1484,6 +1509,10 @@ export function createPurchaseRepository(db: Db) {
               ? serials.map((serial) => ({ locationId, stockTransactionId: movementBySerial.get(serial.id)! }))
               : [{ locationId, stockTransactionId: movements[0]!.id }];
         }
+
+        // A service row books no stock, but its receipt still counts as
+        // received on the day (leveransprecision) — the period must be open.
+        if (!stocked && receivedOn !== null) await assertStockBackdate(tx, periods, receivedOn, []);
 
         // The receipt log rows Ångra inleverans reverses — one per stock row
         // (a serial number each, quantity 1), else one for the whole
@@ -1499,6 +1528,7 @@ export function createPurchaseRepository(db: Db) {
               locationId: stock?.locationId ?? null,
               stockTransactionId: stock?.stockTransactionId ?? null,
               createdBy: input.createdBy,
+              receivedAt,
             }))
           )
           .returning({ id: purchaseReceipts.id, stockTransactionId: purchaseReceipts.stockTransactionId });
@@ -1538,6 +1568,8 @@ export function createPurchaseRepository(db: Db) {
           quantity: purchaseReceipts.quantity,
           locationName: stockLocations.name,
           moReportId: purchaseReceipts.moReportId,
+          // Bokför per (#19): when the goods arrived (createdAt = registered).
+          receivedAt: receiptReceivedAt,
           createdAt: purchaseReceipts.createdAt,
           createdByName: users.name,
           undoneAt: purchaseReceipts.undoneAt,
@@ -1557,7 +1589,7 @@ export function createPurchaseRepository(db: Db) {
         .leftJoin(users, eq(users.id, purchaseReceipts.createdBy))
         .leftJoin(undoer, eq(undoer.id, purchaseReceipts.undoneBy))
         .where(eq(purchaseReceipts.purchaseOrderId, orderId))
-        .orderBy(desc(purchaseReceipts.createdAt), desc(purchaseReceipts.id));
+        .orderBy(desc(receiptReceivedAt), desc(purchaseReceipts.createdAt), desc(purchaseReceipts.id));
     },
 
     // Ångra inleverans: reverses exactly what one receipt booked, in one
@@ -2021,7 +2053,9 @@ export function createPurchaseRepository(db: Db) {
         db
           .select({
             id: stockTransactions.id,
-            date: stockTransactions.createdAt,
+            // Bokför per (#19): the day the goods arrived — a backdated
+            // receipt's stock row is valued then.
+            date: stockValuedAt,
             quantity: stockTransactions.quantityDelta,
             orderNumber: purchaseOrders.orderNumber,
             supplierName: suppliers.name,
@@ -2036,7 +2070,7 @@ export function createPurchaseRepository(db: Db) {
           .innerJoin(purchaseOrderRows, rowJoin)
           .leftJoin(stockLocations, eq(stockLocations.id, stockTransactions.locationId))
           .where(where)
-          .orderBy(desc(stockTransactions.createdAt))
+          .orderBy(desc(stockValuedAt), desc(stockTransactions.id))
           .limit(query.limit)
           .offset(query.offset),
         db
@@ -2117,8 +2151,8 @@ export function createPurchaseRepository(db: Db) {
       // edited afterwards). Live receipts only — an undone one (and its
       // negative reversal) is not when the goods arrived.
       const receivedAt = sql<string | null>`COALESCE(
-        (SELECT MAX(pr.created_at) FROM ${purchaseReceipts} pr WHERE pr.purchase_order_id = ${purchaseOrders.id} AND pr.undone_at IS NULL AND pr.quantity > 0),
-        (SELECT MAX(st.created_at) FROM ${stockTransactions} st WHERE st.reference_id = ${purchaseOrders.id} AND st.transaction_type = 'purchase_receipt' AND st.quantity_delta > 0 AND NOT EXISTS (SELECT 1 FROM ${purchaseReceipts} pr WHERE pr.stock_transaction_id = st.id AND pr.undone_at IS NOT NULL)),
+        (SELECT MAX(coalesce(pr.received_at, pr.created_at)) FROM ${purchaseReceipts} pr WHERE pr.purchase_order_id = ${purchaseOrders.id} AND pr.undone_at IS NULL AND pr.quantity > 0),
+        (SELECT MAX(coalesce(st.valued_at, st.created_at)) FROM ${stockTransactions} st WHERE st.reference_id = ${purchaseOrders.id} AND st.transaction_type = 'purchase_receipt' AND st.quantity_delta > 0 AND NOT EXISTS (SELECT 1 FROM ${purchaseReceipts} pr WHERE pr.stock_transaction_id = st.id AND pr.undone_at IS NOT NULL)),
         ${purchaseOrders.updatedAt})`;
       const invoiceId = sql<string | null>`(SELECT si.id FROM ${supplierInvoices} si WHERE si.purchase_order_id = ${purchaseOrders.id} AND si.status <> 'cancelled' ORDER BY si.created_at DESC LIMIT 1)`;
       const invoiceRegistrationNumber = sql<string | null>`(SELECT si.registration_number FROM ${supplierInvoices} si WHERE si.purchase_order_id = ${purchaseOrders.id} AND si.status <> 'cancelled' ORDER BY si.created_at DESC LIMIT 1)`;

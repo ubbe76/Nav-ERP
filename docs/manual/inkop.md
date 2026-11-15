@@ -267,7 +267,7 @@ Medan en rad står öppen i **Ändra** är **Lägg till rad**, **Bekräfta**, **
 - **Moms** visas under radtabellen som **Summa exkl. moms**, **Moms … %** och **Summa inkl. moms**, och samma tre rader står sist på inköpsorderns PDF. Momsen avrundas till hela ören, så raderna går jämnt ihop (10,01 + 2,50 = 12,51). Momssatsen kommer från leverantörens **Momskod (förval)**, annars från koden som härleds ur leverantörens land (se [Land och momskod](#land-och-momskod)). Det är samma kod som en ny leverantörsfaktura förifylls med. En svensk momskod ger sin sats. Inköp från ett annat EU-land, utanför EU, med omvänd betalningsskyldighet eller momsfritt ger **0 %**, eftersom leverantören inte debiterar någon moms, och kortet säger det under raden. Koden läses när ordern visas eller skrivs ut. Ändras leverantörens momskod följer alltså även befintliga inköpsordrar med. Momsen bokförs inte förrän leverantörsfakturan attesteras.
 - **Lego-rader** skapas av [behovsberäkningen](/hjalp/tillverkning#behovsberakning) eller med **Skapa inköpsorder** i operationens **⋯**-meny på tillverkningsorderns kort (se [Legoinköp på TO-kortet](/hjalp/tillverkning#legoinkop-pa-to-kortet)) och är knutna till en operation på en tillverkningsorder. **Önskat leveransdatum** blir dagen operationen måste vara tillbaka för att tillverkningsordern ska bli klar till sitt färdigdatum (se lego-raderna under [Orderförslag och Skapa ordrar](/hjalp/tillverkning#orderforslag-och-skapa-ordrar)). Raden visar **Lego för** tillverkningsordernumret, operationen och eventuellt **Ställpris** under benämningen. Ställpriset (och antal, enhet, á-pris) redigeras med radens **Ändra** — fältet visas bara på lego-rader, tomt sparas som inget ställpris. På PDF:en skrivs samma TO-referens och ställpris ut under raden, samt **Nettovikt** (artikelns vikt × antal) när operationens **Visa nettovikt på legoinköpet** är ikryssad. Vid **Skicka via e-post** bifogas legoradernas ritningar **alltid** (artikelns filer eller operationens uppladdade ritning, enligt operationens ritningsval) — kryssrutan **Bifoga ritningar** styr bara övriga rader. Inleverans av en lego-rad avrapporterar operationen automatiskt, se [Inleverans](#inleverans).
 - **Bekräfta** ordern när den är beställd hos leverantören — eller mejla den med **Skicka via e-post**, vilket bekräftar ordern automatiskt (se [Skicka dokument via e-post](#skicka-dokument-via-e-post)).
-- Vid leverans: klicka **Ta emot leverans**, ange rad, lagerplats och antal i dialogen och klicka **Ta emot** — ett inleveranssaldo bokförs i lagret. Delleveranser stöds (status **Delvis mottagen** tills allt är mottaget). Hela ordern rapporteras smidigast i rutinen [Inleverans](#inleverans), som nås direkt med knappen **Inleveransrutinen**.
+- Vid leverans: klicka **Ta emot leverans**, ange rad, lagerplats, antal och **Bokför per** (förifyllt med i dag, se [Inleverans](#inleverans)) i dialogen och klicka **Ta emot** — ett inleveranssaldo bokförs i lagret. Delleveranser stöds (status **Delvis mottagen** tills allt är mottaget). Hela ordern rapporteras smidigast i rutinen [Inleverans](#inleverans), som nås direkt med knappen **Inleveransrutinen**.
 - **Stäng order** när den är färdighanterad; **Avbryt order** går att göra innan mottagning påbörjats.
 
 | Status | Betydelse |
@@ -283,7 +283,7 @@ På en lego-rad står under benämningen *Lego för TO-… · Op …* och, när 
 
 ### Ångra inleverans
 
-Sektionen **Inleveranser** på inköpsorderkortet listar varje inleverans som gjorts på ordern — med **Ta emot leverans** eller i rutinen [Inleverans](#inleverans) — senaste först: **Tid**, **Artikel**, **Antal** (i radens enhet), **Lagerplats** och vem som tog emot (**Av**).
+Sektionen **Inleveranser** på inköpsorderkortet listar varje inleverans som gjorts på ordern — med **Ta emot leverans** eller i rutinen [Inleverans](#inleverans) — senaste först: **Tid**, **Artikel**, **Antal** (i radens enhet), **Lagerplats** och vem som tog emot (**Av**). En inleverans som bokförts per ett tidigare datum visar det datumet under **Tid**, med **Registrerad** och registreringsdagen under. Ett ångrande registreras alltid i dag.
 
 **Ångra** backar exakt den inleveransen, efter en bekräftelse. Direkt efter en inleverans — **Ta emot leverans** på kortet eller **Rapportera inleverans** i rutinen — visar Nav också en notis nere till höger, t.ex. *Inlevererat 4 st 1001.*, med **Ångra**: den backar just den inleveransen (i rutinen alla rader som togs emot, den sista först) utan någon extra fråga. Kan en av dem inte ångras står det i notisen hur många som hann ångras. Ångrandet går till så här:
 
@@ -310,13 +310,24 @@ Sektionen **Historik** längst ner på orderkortet visar orderns egna händelser
 **Inköp → Inleverans** är rutinen för att rapportera mottagning av hela inköpsorder på en gång (en rad med en **tjänst** räknas upp på ordern men läggs aldrig i lager — [tjänster lagerförs inte](/hjalp/artiklar#artikeltyper)):
 
 1. Välj order i fältet **Inköpsorder** — sök på ordernummer, leverantör, artikelnummer eller benämning (till nytta när följesedeln bara visar leverantörens artiklar, inte vårt IO-nummer); varje träffrad visar datum, status och antal restrader. Så länge ingen order är vald visas i stället tabellen **Mottagbara ordrar** under sökfältet — samtliga ordrar i status **Bekräftad** eller **Delvis mottagen**, nyast först, klicka på ordernumret för att välja ("Inga ordrar väntar på inleverans." om listan är tom). Från inköpsorderkortet når du rutinen med ordern förvald via knappen **Inleveransrutinen**.
-2. Välj **Lagerplats** (gäller hela rapporteringen). Väljer du en [spärrad lagerplats](/hjalp/lager#sparrade-lagerplatser) (märkt *(spärrad)*) hamnar godset i karantän och räknas inte förrän spärren släpps eller godset flyttats.
+2. Välj **Lagerplats** (gäller hela rapporteringen). Väljer du en [spärrad lagerplats](/hjalp/lager#sparrade-lagerplatser) (märkt *(spärrad)*) hamnar godset i karantän och räknas inte förrän spärren släpps eller godset flyttats. **Bokför per** är förifyllt med i dag och gäller också hela rapporteringen, se nedan.
 3. Radtabellen visar **Beställt** (totalt antal på raden), Enhet, **Mottaget** och **Rest** (beställt minus mottaget, det som återstår att leverera in) per rad — allt i radens enhet — och fältet **Ta emot nu** är förifyllt med restantalet. Justera antalen — rader som sätts till 0 hoppas över. Antalet räknas om till grundenheten när saldot bokförs.
 4. Klicka **Rapportera inleverans**. Varje rad bokförs som ett inleveranssaldo i lagret och orderstatusen uppdateras (**Delvis mottagen** tills allt är mottaget, därefter **Mottagen**). Eventuella fel visas per rad.
 
 En rad på en **serienummerstyrd** artikel (nummer vid inleverans) har fältet **Skriv eller skanna serienummer** med ett nummer per styck; alla krävs. Varje styck blir ett eget kvitto som kan ångras för sig — se [Serienummer](/hjalp/lager#serienummer). En batchstyrd rad har fältet **Utgångsdatum (valfritt)**. En rad på en **batchstyrd** artikel har även fältet **Batch** (skriv eller skanna leverantörens batchnummer; tomt blir inköpsorderns nummer) och knappen **Dela på flera batcher** för en rad som kommer i flera batcher — se [Batchnummer och spårbarhet](/hjalp/lager#batchnummer-och-sparbarhet).
 
 Enstaka rader kan fortfarande tas emot direkt på inköpsorderkortet med **Ta emot leverans**.
+
+### Inleverans per ett tidigare datum
+
+En leverans som kom men inte registrerades kan bokföras per dagen den kom. Välj den dagen i **Bokför per**. Fältet återgår till i dag när du väljer en annan order.
+
+- **Lagret:** godset räknas in i lagervärderingen och bokslutets **Lagerförändring** per det datumet. Priset är inköpsorderns som vanligt.
+- **Mottagen:** ordern räknas som mottagen det datumet i [leveransprecisionen](/hjalp/rapporter#leveransprecision), i artikelns **Inleveranslogg**, i [Fakturaunderlag](#fakturaunderlag) och i listan **Inleveranser** på ordern.
+
+En **legorad** inlevereras alltid per i dag, eftersom inleveransen rapporterar operationen på tillverkningsordern. Har ordern legorader är **Bokför per** därför spärrat. En rad med en tjänst får datumet, men läggs inte i lager.
+
+Datumet vägras på samma sätt som för en justering, se [Bokför per ett tidigare datum](/hjalp/lager#bokfor-per-ett-tidigare-datum).
 
 ### Skanna i inleveransen
 

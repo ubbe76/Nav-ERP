@@ -16,6 +16,7 @@ import type { Article, ArticleBatchBalances, StockLocation } from "../../lib/typ
 import { Card } from "../ui/Card";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { stockholmToday } from "../../lib/date";
 
 export function NewAdjustmentForm({ locations }: { locations: StockLocation[] }) {
   const router = useRouter();
@@ -24,6 +25,10 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
   const [quantityDelta, setQuantityDelta] = useState("0");
   const [unitId, setUnitId] = useState(""); // "" = artikelns grundenhet
   const [note, setNote] = useState("");
+  // Bokför per (#19): an earlier day counts the adjustment in the valuation
+  // and the year-end per that day; today = registered now.
+  const [today] = useState(stockholmToday);
+  const [valuedOn, setValuedOn] = useState(today);
   // Batch (#8): a positive adjustment names the batch (empty = Okänd), a
   // negative one picks which batch to take from.
   const [batchInfo, setBatchInfo] = useState<ArticleBatchBalances | null>(null);
@@ -106,6 +111,7 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
           ...(serialStock && baseDelta < 0 && serialIds.length > 0 ? { serialIds } : {}),
           transactionType: "inventory_adjustment",
           note: note || undefined,
+          ...(valuedOn && valuedOn !== today ? { valuedOn } : {}),
         }),
       });
       router.push("/lager/transaktioner");
@@ -245,6 +251,15 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
             />
           </Field>
         )}
+
+        <Field label="Bokför per" htmlFor="valuedOn">
+          <Input id="valuedOn" type="date" size="sm" required max={today} value={valuedOn} onChange={(e) => setValuedOn(e.target.value)} />
+        </Field>
+        <FormHint attached>
+          {valuedOn && valuedOn !== today
+            ? `Justeringen räknas in i lagervärderingen och bokslutet per ${valuedOn}. Datumet får inte ligga i en låst period, och artikeln får inte ha inventerats på lagerplatsen samma dag eller senare.`
+            : "Ett tidigare datum räknar in justeringen i lagervärderingen per det datumet."}
+        </FormHint>
 
         <Field label="Anteckning (valfritt)" htmlFor="note">
           <Input id="note" value={note} onChange={(e) => setNote(e.target.value)} />

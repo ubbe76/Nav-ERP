@@ -332,6 +332,14 @@ export const createStockTransactionSchema = z.object({
   transactionType: stockTransactionTypeSchema.exclude(["stock_transfer"]),
   referenceId: z.string().uuid().optional(),
   note: z.string().max(2000).optional(),
+  // Bokför per (#19): the Stockholm day the movement counts on in everything
+  // "as of a date" (lagervärdering, bokslutets Lagerförändring, FIFO, the
+  // moving average) — an earlier day books it at that day's end
+  // (stock_transactions.valued_at). Left out or today = registered now; a
+  // later day is 400 stock-backdate-in-future, a closed year, a locked
+  // period or a count/saldoimport on the place that day or later 409
+  // stock-backdate-refused.
+  valuedOn: businessDateSchema.optional(),
   // Batch (#8): only on an inflow (positive delta) of a batchstyrd article
   // — left out, the goods are Okänd.
   batchNumber: batchNumberSchema,

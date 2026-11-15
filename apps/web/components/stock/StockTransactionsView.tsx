@@ -173,15 +173,18 @@ export function StockTransactionsView({ transactions, locations, article, pageSi
           switch (key) {
             case "createdAt": {
               // Datum is the värderingsdatum (#26); a stock count booked per
-              // underlagets datum also says when it was registered.
+              // underlagets datum, and a movement booked per an earlier day
+              // (Bokför per, #19), also says when it was registered.
               const valued = new Date(row.valuedAt).toLocaleString("sv-SE", { timeZone: "Europe/Stockholm" });
               if (row.valuedAt === row.createdAt) return valued;
               const registered = new Date(row.createdAt).toLocaleString("sv-SE", { timeZone: "Europe/Stockholm" });
-              // Same day: only the tooltip — the line is for another day.
+              // Same day: only the tooltip. Another day: the day it counts on
+              // — a backdated movement's clock (the day's end) means nothing.
+              const otherDay = registered.slice(0, 10) !== valued.slice(0, 10);
               return (
                 <span title={`Registrerad ${registered}`}>
-                  {valued}
-                  {registered.slice(0, 10) !== valued.slice(0, 10) && (
+                  {otherDay ? valued.slice(0, 10) : valued}
+                  {otherDay && (
                     <>
                       <br />
                       <small>Registrerad {registered.slice(0, 10)}</small>

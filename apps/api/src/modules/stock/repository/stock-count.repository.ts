@@ -1,7 +1,6 @@
 import { and, asc, count, desc, eq, gt, ilike, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import {
   articles,
-  articleStandardCostHistory,
   stockBatches,
   stockCountRows,
   stockCountSessions,
@@ -32,6 +31,7 @@ import { assertSerialsOutOfStock, getOrCreateSerials, lockSerials } from "../ser
 import { lockArticlesForOutflow } from "../service/outflow-locations.js";
 import { batchCellQuantity } from "./batch-balances.js";
 import { stockValuedDate } from "./valued-at.js";
+import { noPostingPeriodLocks, periodLockText, standardCostsAt, type PostingPeriodReader } from "./backdating.js";
 import {
   ArticleNotFoundError,
   ServiceArticleNotStockedError,
@@ -55,17 +55,10 @@ async function balanceFor(db: Db | Tx, articleId: string, locationId: string): P
   return row?.quantity ?? "0";
 }
 
-// Inventering per underlagets datum (#26). Bookkeeping lives in the economy
-// module, so whether the count's day may still be written to arrives through
-// this reader (app.ts binds economy's postingPeriodLockOn). No covering
-// accounting period is no lock — the stock log is not bookkeeping.
-export interface PostingPeriodReader {
-  lockOn(executor: Db | Tx, date: string): Promise<{ kind: "year_closed"; yearLabel: string } | { kind: "period_locked" } | null>;
-}
-
-// Tests that never backdate into a locked period build the repository without
-// economy; app.ts always passes the real reader.
-export const noPostingPeriodLocks: PostingPeriodReader = { lockOn: async () => null };
+// Inventering per underlagets datum (#26): the period reader, its refusal
+// texts and the standard cost at a moment live in the leaf backdating.ts,
+// shared with the backdated Lagerjustering and inleverans (#19).
+export { noPostingPeriodLocks, type PostingPeriodReader } from "./backdating.js";
 
 export type StockCountBackdateReason = "year_closed" | "period_locked" | "disturbed";
 
@@ -91,13 +84,8 @@ async function backdatingVerdict(
   bookedArticleIds: string[]
 ): Promise<{ countDate: string; reason: StockCountBackdateReason | null; reasonText: string | null }> {
   const countDate = stockholmDateOf(session.createdAt);
-  const lock = await periods.lockOn(executor, countDate);
-  if (lock?.kind === "year_closed") {
-    return { countDate, reason: "year_closed", reasonText: `Räkenskapsåret ${lock.yearLabel} är stängt.` };
-  }
-  if (lock?.kind === "period_locked") {
-    return { countDate, reason: "period_locked", reasonText: `Bokföringsperioden för ${countDate} är låst.` };
-  }
+  const lock = await periodLockText(executor, periods, countDate);
+  if (lock) return { countDate, reason: lock.reason, reasonText: lock.text };
   if (bookedArticleIds.length > 0) {
     const [moved] = await executor
       .select({ id: stockTransactions.id })
@@ -125,38 +113,6 @@ async function backdatingVerdict(
 // The rows postSession books: counted, with a difference against the snapshot.
 function bookedRows<T extends { snapshotQuantity: string; countedQuantity: string | null }>(rows: T[]): T[] {
   return rows.filter((r) => r.countedQuantity !== null && Number(r.countedQuantity) - Number(r.snapshotQuantity) !== 0);
-}
-
-// The standard cost each article had at `at` (D1's history: the latest row
-// with valid_from <= at). An article with no history at all keeps its
-// current standard cost (articles from before the history); one whose
-// history only starts later had none then — null, never 0 (D0).
-async function standardCostsAt(executor: Db | Tx, articleIds: string[], at: Date): Promise<Map<string, string | null>> {
-  const result = new Map<string, string | null>();
-  if (articleIds.length === 0) return result;
-  const history = await executor
-    .select({
-      articleId: articleStandardCostHistory.articleId,
-      cost: articleStandardCostHistory.cost,
-      validFrom: articleStandardCostHistory.validFrom,
-    })
-    .from(articleStandardCostHistory)
-    .where(inArray(articleStandardCostHistory.articleId, articleIds))
-    .orderBy(asc(articleStandardCostHistory.articleId), asc(articleStandardCostHistory.validFrom), asc(articleStandardCostHistory.id));
-  const current = await executor
-    .select({ id: articles.id, standardCost: articles.standardCost })
-    .from(articles)
-    .where(inArray(articles.id, articleIds));
-  const withHistory = new Set<string>();
-  for (const row of history) {
-    withHistory.add(row.articleId);
-    if (!result.has(row.articleId)) result.set(row.articleId, null);
-    if (row.validFrom.getTime() <= at.getTime()) result.set(row.articleId, row.cost);
-  }
-  for (const article of current) {
-    if (!withHistory.has(article.id)) result.set(article.id, article.standardCost ?? null);
-  }
-  return result;
 }
 
 // Loads the session FOR UPDATE and asserts it is still open — every mutation
