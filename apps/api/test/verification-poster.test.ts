@@ -31,6 +31,7 @@ import {
   type PostingVatCode,
 } from "../src/modules/economy/service/verification-poster.js";
 import { postingVatCode } from "./helpers/vat-codes.js";
+import { bookingPoster } from "./helpers/booking-poster.js";
 
 // Every momskod as the poster takes it, loaded once (the seeded vat_codes
 // rows are never truncated).
@@ -74,7 +75,8 @@ const DEFAULT_POSTING_SETTINGS = {
   postingWipChange: "4940",
 };
 let postingSettings = { ...DEFAULT_POSTING_SETTINGS };
-const poster = createVerificationPoster({ read: async () => postingSettings });
+const plainPoster = createVerificationPoster({ read: async () => postingSettings });
+const poster = bookingPoster(plainPoster);
 
 beforeEach(async () => {
   await db.execute(TRUNCATE);
@@ -542,19 +544,50 @@ describe("verification poster — customer invoice", () => {
     ).rejects.toBeInstanceOf(NoAccountingPeriodForPostingError);
   });
 
-  it("rejects a zero-amount invoice (ZeroAmountPostingError)", async () => {
+  // 0-kronorsfaktura (2026-11-15): nothing to book is no error — the
+  // issuing side stamps the invoice paid without a verification.
+  it("books nothing for a 0 kr invoice, nor for rows that cancel out on the same accounts", async () => {
     const { user } = await setupPosting();
 
-    await expect(
-      db.transaction((tx) =>
-        poster.postCustomerInvoice(
-          tx,
-          CUSTOMER_DOC,
-          [{ articleGroupId: null, lineAmount: 0, vatAmount: 0, vatRate: 25, vatCode: C.MP25 }],
-          user.id
-        )
+    const zero = await db.transaction((tx) =>
+      plainPoster.postCustomerInvoice(
+        tx,
+        CUSTOMER_DOC,
+        [{ articleGroupId: null, lineAmount: 0, vatAmount: 0, vatRate: 25, vatCode: C.MP25 }],
+        user.id
       )
-    ).rejects.toBeInstanceOf(ZeroAmountPostingError);
+    );
+    expect(zero).toBeNull();
+
+    const cancelled = await db.transaction((tx) =>
+      plainPoster.postCustomerInvoice(
+        tx,
+        CUSTOMER_DOC,
+        [
+          { articleGroupId: null, lineAmount: 400, vatAmount: 100, vatRate: 25, vatCode: C.MP25 },
+          { articleGroupId: null, lineAmount: -400, vatAmount: -100, vatRate: 25, vatCode: C.MP25 },
+        ],
+        user.id
+      )
+    );
+    expect(cancelled).toBeNull();
+    expect(await db.select().from(verifications)).toHaveLength(0);
+  });
+
+  it("does not look up an account for a 0 kr invoice", async () => {
+    const { user } = await setupPosting();
+    // The receivable account is gone: a garantileverans must still issue.
+    await db.update(accounts).set({ active: false }).where(eq(accounts.number, "1510"));
+
+    const zero = await db.transaction((tx) =>
+      plainPoster.postCustomerInvoice(
+        tx,
+        CUSTOMER_DOC,
+        [{ articleGroupId: null, lineAmount: 0, vatAmount: 0, vatRate: 25, vatCode: C.MP25 }],
+        user.id
+      )
+    );
+    expect(zero).toBeNull();
   });
 
   it("writes an audit entry through the caller's transaction", async () => {

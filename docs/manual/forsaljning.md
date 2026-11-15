@@ -613,7 +613,7 @@ Kunder med **Samlingsfaktura** ikryssat faktureras i stället via [Samlingsfaktu
 Statusflödet är **Utkast → Utfärdad → Betald**:
 
 - **Utfärda** (bekräftelsedialog: "Fakturan får nummer och låses") tilldelar fakturanummer ur **FA**-serien (se [System → Nummerserier](/hjalp/system)) och **OCR-nummer**, räknar fram **Förfallodatum** ur betalningsvillkoret och fryser kundens namn, fakturaadress och betalningsvillkor som de såg ut vid utfärdandet — senare ändringar på kundkortet påverkar aldrig en redan utfärdad faktura. Samtidigt **bokförs** fakturan automatiskt, se [Bokföring av fakturan](#bokforing-av-fakturan) nedan. Går bara från **Utkast**, och bara om fakturan har minst en rad. Har du ändrat **Betalningsvillkor**, **Notering** eller **Kurs** utan att klicka **Spara faktura** sparas ändringen först (dialogen säger det), så fakturan utfärdas med det du ser. En rad som står öppen i **Ändra** med osparade ändringar, eller en ifylld rad i **Lägg till rad** som inte lagts till, stoppar **Utfärda** tills du sparat, lagt till eller avbrutit den — annars skulle fakturan utfärdas utan ändringen. Lämnar du kortet med osparade ändringar frågar Nav först.
-- **Betald** sätts automatiskt — det finns ingen knapp för det. Så snart en registrerad betalning stänger fakturans öppna post helt (se [Kundreskontra](#kundreskontra) nedan) blir statusen Betald av sig själv, och en makulerad betalning som gjorde detta öppnar fakturan igen till Utfärdad. En kreditfaktura som blir helt kvittad mot en annan post på samma sätt blir Betald.
+- **Betald** sätts automatiskt — det finns ingen knapp för det. Så snart en registrerad betalning stänger fakturans öppna post helt (se [Kundreskontra](#kundreskontra) nedan) blir statusen Betald av sig själv, och en makulerad betalning som gjorde detta öppnar fakturan igen till Utfärdad. En kreditfaktura som blir helt kvittad mot en annan post på samma sätt blir Betald. En faktura på **0 kr**, till exempel en garantileverans, blir **Betald** direkt vid **Utfärda**, eftersom det inte finns något att betala, se [Faktura på 0 kr](#faktura-pa-0-kr).
 - **Avbryt faktura** går bara från **Utkast** → Avbruten och frågar först, eftersom en avbruten faktura inte kan öppnas igen — rättelser efter utfärdande görs i stället med en [kreditfaktura](#kreditfaktura).
 
 Avbruten är ett slutläge. Betald kan gå tillbaka till Utfärdad (se ovan), men aldrig längre än så — det finns ingen väg tillbaka till Utkast. Huvudet (Betalningsvillkor, Notering) och raderna kan bara ändras i läget **Utkast**.
@@ -624,7 +624,7 @@ Sektionen **Historik** längst ner på fakturakortet visar fakturans egna hände
 |---|---|
 | Utkast | Registrerad; huvud och rader redigerbara |
 | Utfärdad | Fakturanummer tilldelat (låst för redigering); har ett öppet belopp så länge det inte är fullt betalt |
-| Betald | Öppet belopp 0 — kan öppnas igen till Utfärdad om betalningen makuleras |
+| Betald | Öppet belopp 0 — kan öppnas igen till Utfärdad om betalningen makuleras; en faktura på 0 kr är Betald redan när den utfärdas |
 | Avbruten | Avbruten, bara möjligt från Utkast (slutläge) |
 
 Från och med **Utfärdad** visar fakturakortet fakturanummer, **OCR-nummer**, **Förfallodatum**, **Öppet belopp** och den frysta fakturaadressen i huvudet (**Öppet belopp** visas för både Utfärdad och Betald), samt **Faktura (PDF)** och **Skicka faktura** i sektionen E-post (mottagaren förifylls med kundens **E-post för faktura** när den är satt). PDF:ens betalningsruta längst ner visar OCR-numret och förfallodatumet tillsammans med bankgiro/plusgiro från [Företagsinformation](/hjalp/system).
@@ -712,6 +712,15 @@ Konteringen ser ut så här (en faktura i utländsk valuta bokförs på samma s�
 
 En **kreditfaktura** bokförs som en spegling av samma konton — kundfordran krediteras, intäkt och moms debiteras. Den är ett eget verifikat, inte en omföring av originalfakturans.
 
+#### Faktura på 0 kr
+
+En faktura vars totalbelopp är 0 kr, till exempel en garantileverans eller en ersättningsleverans, kan utfärdas som vilken faktura som helst. Den får fakturanummer, OCR-nummer och arkiverad PDF, och kundorderns rader räknas som fakturerade. Eftersom inget är öppet blir den **Betald** direkt vid **Utfärda** och kommer aldrig med i påminnelser eller [Räntefakturering](#rantefakturering).
+
+- **Alla rader är 0 kr**, eller raderna tar ut varandra på samma konton (en rad på 400 kr och en på −400 kr med samma momskod): ingenting bokförs, och fakturakortet visar *Inget verifikat — fakturan är på 0 kr* i stället för **Verifikat F-…**.
+- **Raderna går jämnt ut men på olika konton**, till exempel en vara med 25 % moms och en ersättningsrad med en 0 %-kod: verifikatet bokför intäkterna och momsen som vanligt men får ingen rad för kundfordran.
+
+Samma sak gäller en kreditfaktura på 0 kr.
+
 På fakturakortet visas **Verifikat F-…** med en länk till verifikatet (t.ex. **F-2026-12**: serie, räkenskapsår och löpnummer). Numret är en länk för den som har behörighet till [Ekonomi](/hjalp/ekonomi) (administratörer och användare vars behörighetsgrupp ger Ekonomi, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper)); för andra visas det som text.
 
 **Om bokföringen inte går att genomföra stoppas utfärdandet.** Fakturan förblir då **Utkast**, får inget fakturanummer och inget nummer bränns i FA-serien — nästa faktura fortsätter obruten. Det händer i dessa fall:
@@ -721,7 +730,6 @@ På fakturakortet visas **Verifikat F-…** med en länk till verifikatet (t.ex.
 - **Ett konto som konteringen behöver saknas eller är inaktivt** i kontoplanen. Lägg upp eller aktivera kontot under **Ekonomi → Kontoplan** (**Förifyll BAS-urval** lägger in hela standardurvalet på en gång).
 - **En rad har moms trots att momskoden är momsfri**, eller en annan sats än momskoden — rätta raden (*Fakturaraden har moms trots att momskoden är momsfri, eller en annan sats än momskoden — rätta raden.*).
 - **Köparens momsregistreringsnummer saknas eller har fel form** för en EU-försäljning eller omvänd betalningsskyldighet, se [Köparens momsnummer](#koparens-momsnummer).
-- **Fakturans totalbelopp är noll.** Det finns ingenting att bokföra, så fakturan kan inte utfärdas.
 
 ### Kreditfaktura
 

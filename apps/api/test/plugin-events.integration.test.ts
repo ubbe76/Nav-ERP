@@ -283,6 +283,21 @@ describe("every catalogue event is sent by its path", () => {
     ]);
   });
 
+  it("a 0-kronorsfaktura emits invoice.issued and invoice.paid at issue", async () => {
+    await setupPostingBaseline();
+    const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Garanti AB", active: true }));
+    await clear();
+    const draft = await invoiceService.create(
+      { customerId: customer.id, rows: [{ description: "Garantibyte", quantity: 1, unitPrice: 0, vatRate: 25 }] },
+      userId
+    );
+    const issued = (await invoiceService.issue(draft!.id, userId))!;
+    await expectEvents([
+      { type: "invoice.issued", entityId: issued.id, entityNumber: issued.invoiceNumber },
+      { type: "invoice.paid", entityId: issued.id, entityNumber: issued.invoiceNumber },
+    ]);
+  });
+
   it("purchase_order.created and purchase_order.received per received row", async () => {
     const supplier = await purchaseService.createSupplier(parsed(createSupplierSchema, { name: "ACME AB", active: true }));
     const article = await makeArticle();

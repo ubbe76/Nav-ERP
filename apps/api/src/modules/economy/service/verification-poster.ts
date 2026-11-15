@@ -909,12 +909,19 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
     // öre the rows leave over go on the largest row (net) and the largest VAT
     // row, so the verification always balances. The momskoder work on the
     // SEK base. A SEK invoice (rate 1) gets its own amounts back unchanged.
+    //
+    // 0-kronorsfaktura (användarens beslut 2026-11-15): an invoice whose
+    // total is 0 kr has no receivable. null = nothing to book — every row is
+    // 0 kr, or the rows cancel out on the same accounts — and the invoice is
+    // issued without a verification. Rows that net to 0 kr on DIFFERENT
+    // accounts (revenue on one code, a credit row on another) are still a
+    // verification, just without the receivable row.
     async postCustomerInvoice(
       tx: Tx,
       doc: CustomerInvoiceDocument,
       rows: CustomerInvoiceDocumentRow[],
       userId: string
-    ): Promise<{ verificationId: string; displayNumber: string }> {
+    ): Promise<{ verificationId: string; displayNumber: string } | null> {
       // Settings are read through the CALLER's own tx — one extra query on
       // the same connection as the rest of the posting, not a separate round
       // trip on its own connection outside the transaction boundary.
@@ -960,7 +967,12 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
 
       const ownGross = round2(ownRows.reduce((sum, row) => sum + row.lineAmount + row.vatAmount, 0));
       const gross = sek.grossAmount;
-      if (ownGross === 0 || gross === 0) throw new ZeroAmountPostingError();
+      // Every row 0 kr: nothing to book, and no account is looked up (a
+      // garantileverans must not fail on a missing revenue account).
+      if (ownRows.every((row) => row.lineAmount === 0 && row.vatAmount === 0)) return null;
+      // An open amount that converts to 0 SEK (unreachable at real rates)
+      // would be a receivable with no booking behind it.
+      if (ownGross !== 0 && gross === 0) throw new ZeroAmountPostingError();
 
       const sign = doc.type === "credit" ? -1 : 1;
       const resolveAccount = createPostingAccountResolver(tx);
@@ -988,6 +1000,10 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
         }
       }
 
+      const postingRows = amounts.toRows();
+      // The rows cancelled out account by account: nothing to book either.
+      if (postingRows.length === 0) return null;
+
       const series = await ensureSeries(tx, CUSTOMER_INVOICE_SERIES);
       const label = doc.type === "credit" ? "Kreditfaktura" : "Kundfaktura";
       return insertBookedVerification(
@@ -1004,7 +1020,7 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
                 : `, ${currency} ${formatDescriptionAmount(ownGross)} à ${formatDescriptionRate(rate)}`)
           ),
         },
-        amounts.toRows(),
+        postingRows,
         { source: "customer_invoice", document: doc.invoiceNumber },
         userId
       );

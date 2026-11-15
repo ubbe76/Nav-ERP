@@ -241,6 +241,18 @@ describe("Räntefakturering — kandidaterna", () => {
     expect(rows.map((r) => r.invoiceId)).toEqual([source.id]);
   });
 
+  // A 0-kronorsfaktura is paid at issue but no payment ever settles it, so
+  // fullyPaidDate never sees it paid — without the guard it was "open" and
+  // got 450 kr förseningsersättning.
+  it("lists nothing for a 0-kronorsfaktura past its due date", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer("Garanti AB");
+    const zero = await makeInvoice(customer.id, user.id, 0);
+    expect(zero.status).toBe("paid");
+
+    expect((await candidates()).rows).toEqual([]);
+  });
+
   it("offers no förseningsersättning to a privatperson, a customer without it, or when Debitera förseningsersättning is off", async () => {
     const user = await makeUser();
     const person = await makeCustomer("Anna", { privatePerson: true });

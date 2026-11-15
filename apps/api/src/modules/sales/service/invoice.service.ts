@@ -133,7 +133,8 @@ export interface CustomerInvoicePoster {
     // row's momskod as loaded in the same transaction.
     rows: { articleGroupId: string | null; lineAmount: number; vatAmount: number; vatRate: number; vatCode: PostingVatCode }[],
     userId: string
-  ): Promise<{ verificationId: string; displayNumber: string }>;
+    // null = nothing to book (a 0-kronorsfaktura): issued without a verification.
+  ): Promise<{ verificationId: string; displayNumber: string } | null>;
 }
 
 // Kundreskontra (B3): the påminnelseavgift half of the poster, declared at the

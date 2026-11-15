@@ -19,7 +19,7 @@ import { CostCenterSelect, NO_OBJECT, ProjectSelect } from "../economy/Dimension
 import { dimensionText, useDimensions } from "../../lib/dimensions";
 import { apiFetch } from "../../lib/api";
 import { isEInvoiceAutoSendProblem, type EInvoiceAutoSendOutcome } from "../../lib/einvoice";
-import { formatMoney, formatUnitPrice } from "../../lib/format";
+import { formatMoney, formatUnitPrice, round2 } from "../../lib/format";
 import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { formatRate, SEK } from "../../lib/currency";
 import { SekAmountsLine } from "../purchase/InvoiceRateField";
@@ -493,6 +493,8 @@ export function InvoiceCard({
             <VerificationRef id={invoice.verificationId} displayNumber={invoice.verificationDisplayNumber} canOpen={canOpenVerifications} />
           </span>
         )}
+        {/* 0-kronorsfaktura: issued paid, with nothing to book. */}
+        {!invoice.verificationId && invoice.status === "paid" && round2(grossAmount) === 0 && <span>Inget verifikat — fakturan är på 0 kr</span>}
       </div>
 
       {autoSend &&

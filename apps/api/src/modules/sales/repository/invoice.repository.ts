@@ -1420,7 +1420,7 @@ export function createInvoiceRepository(db: Db) {
             }
           }
 
-          const { verificationId } = await poster.postCustomerInvoice(
+          const posted = await poster.postCustomerInvoice(
             tx,
             {
               invoiceNumber,
@@ -1463,16 +1463,30 @@ export function createInvoiceRepository(db: Db) {
               FROM (VALUES ${values}) AS v(id, amount)
               WHERE invoice_rows.id = v.id`);
           }
-          const [posted] = await tx
+          // 0-kronorsfaktura: nothing is open, so the invoice is paid the
+          // moment it is issued — the reskontra's side effect, here because no
+          // payment will ever settle it. Booked or not (rows that net to 0 kr
+          // on different accounts still have a verification), the total
+          // decides.
+          const settled =
+            round2(postingRows.reduce((sum, postingRow) => sum + Number(postingRow.lineAmount) + Number(postingRow.vatAmount), 0)) === 0;
+          const issuedAt = new Date();
+          const [stamped] = await tx
             .update(invoices)
-            .set({ verificationId, grossAmountSek: String(sek.grossAmount) })
+            .set({
+              verificationId: posted?.verificationId ?? null,
+              grossAmountSek: String(sek.grossAmount),
+              ...(settled ? { status: "paid" as const, paidAt: issuedAt, updatedAt: issuedAt } : {}),
+            })
             .where(eq(invoices.id, id))
             .returning();
 
           await recomputeOrderInvoiceStatus(tx, id);
-          // Tillägg: invoice.issued (customer and credit invoices alike).
+          // Tillägg: invoice.issued (customer and credit invoices alike), and
+          // invoice.paid for a 0-kronorsfaktura as the payment would have.
           await pluginEvents.emit(tx, { type: "invoice.issued", entityId: id, entityNumber: invoiceNumber });
-          return { ok: true as const, invoice: posted! };
+          if (settled) await pluginEvents.emit(tx, { type: "invoice.paid", entityId: id, entityNumber: invoiceNumber });
+          return { ok: true as const, invoice: stamped! };
         });
       } catch (err) {
         if (err instanceof IssueRaceError) return { ok: false, reason: "race" };
