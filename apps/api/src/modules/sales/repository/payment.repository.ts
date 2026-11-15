@@ -551,7 +551,7 @@ export function createPaymentRepository(db: Db) {
         // A payment belongs to ONE customer (spec): kvittning happens
         // within the customer, never across two.
         if (invoice.customerId !== header.customerId) throw new PaymentGuardError("wrong_customer", detail);
-        // Reskontrans scope is exactly "issued" — a draft has no open
+        // The reskontra's scope is exactly "issued" — a draft has no open
         // item yet, a paid one has none left, and an invoice marked paid
         // before B3 is deliberately never reopened by this path.
         if (invoice.status !== "issued") throw new PaymentGuardError("not_issued", detail);
@@ -601,7 +601,7 @@ export function createPaymentRepository(db: Db) {
       const settings = await readPostingSettings(tx);
       const tolerance = round2(settings.paymentTolerance);
       const openAmounts = await computeOpenAmounts(tx, invoiceIds);
-      // Valuta: the SEK earlier live payments released from each invoice —
+      // Valuta: the SEK that earlier live payments released from each invoice —
       // read under the same lock, so a settling row releases exactly the rest.
       const releasedBefore = await computeReleasedSek(tx, invoiceIds);
 
