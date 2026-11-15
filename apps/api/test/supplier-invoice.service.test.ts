@@ -106,9 +106,11 @@ async function makeSupplier(name = "Lev AB", currency = "SEK") {
   return purchaseService.createSupplier(parsed(createSupplierSchema, { name, currency, active: true }));
 }
 
-// payment_terms is shared base data and is deliberately NOT in the TRUNCATE
-// above (same reasoning as number_series), so an entry a previous run left
-// behind is reused rather than re-inserted into its unique code/name.
+// payment_terms is not in the TRUNCATE above, and the cascade does not reach
+// it either (it is the referenced side: suppliers point at it, not the other
+// way round). Unlike number_series no migration seeds it — other suites in the
+// same worker database truncate it freely — so a term an earlier case or suite
+// left behind is reused rather than re-inserted into its unique code/name.
 async function makePaymentTerm(code: string, name: string) {
   const existing = (await registerService.paymentTerms.list()).find((term) => term.code === code);
   return existing ?? registerService.paymentTerms.create({ code, name });
