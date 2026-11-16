@@ -1749,7 +1749,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       header: "Lager",
       text: true,
       description:
-        "Lagrets namn, max 100 tecken. Ett lager som saknas skapas. Kräver Lagerplats. Lämna både Lager och Lagerplats tomma för att lägga saldot där en inleverans utan vald plats hamnar (se Lagerplats).",
+        "Lagrets namn, max 100 tecken. Ett lager som saknas skapas. Kräver Lagerplats. Lämna både Lager och Lagerplats tomma för att lägga saldot där en inleverans utan vald plats hamnar (se Lagerplats). När Flera lager är avstängt (System → Inställningar) kan kolumnen lämnas tom: Nav har då ett lager, och ett annat lagernamn än det är ett radfel.",
       example: "Huvudlager",
     },
     {
@@ -1759,7 +1759,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       header: "Lagerplats",
       text: true,
       description:
-        "Lagerplatsens namn i lagret, max 100 tecken. En plats som saknas skapas i lagret. Utan Lager måste platsnamnet finnas och vara unikt. Tom (och Lager tomt) betyder artikelns huvudplats (en spärrad hoppas över), annars första alternativa platsen, annars reservplatsen ***. Lagerplatsen *** är alltid reservplatsen, oavsett Lager.",
+        "Lagerplatsens namn i lagret, max 100 tecken. En plats som saknas skapas i lagret. Utan Lager måste platsnamnet finnas och vara unikt — när Flera lager är avstängt skapas en plats som saknas i det enda lagret. Tom (och Lager tomt) betyder artikelns huvudplats (en spärrad hoppas över), annars första alternativa platsen, annars reservplatsen ***. Lagerplatsen *** är alltid reservplatsen, oavsett Lager.",
       example: "A1-03",
     },
     {

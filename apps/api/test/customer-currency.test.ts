@@ -62,6 +62,10 @@ import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline, testSystemService } fro
 import { pdfText } from "./helpers/pdf.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { parsed } from "./helpers/parsed.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Valuta steg 3: kunder, prislistor, kundordrar, kundfakturor och
 // kundbetalningar i annan valuta än SEK — end to end on the real services,

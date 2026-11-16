@@ -11,7 +11,7 @@ import { BatchSelect, useBatchBalances } from "./BatchSelect";
 import { BATCH_AUTO, batchIdField, batchOptions } from "../../lib/batch";
 import { serialArticleIds } from "../../lib/serialInput";
 import { SerialCellPicker } from "./SerialNumbers";
-import { locationOptionLabel } from "../../lib/stockLocations";
+import { usePlaceLabels } from "./WarehouseMode";
 import type { StockBalance, StockLocation, StockTransferResult } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
 import { FormError } from "../ui/Form";
@@ -38,6 +38,7 @@ export function StockTransferPageClient({
   preselectedArticleId: string | null;
   balances: StockBalance[];
 }) {
+  const placeLabels = usePlaceLabels();
   const router = useRouter();
 
   const [toLocationId, setToLocationId] = useState("");
@@ -177,7 +178,7 @@ export function StockTransferPageClient({
             <option value="">Välj lagerplats…</option>
             {locations.map((l) => (
               <option key={l.id} value={l.id}>
-                {locationOptionLabel(l)}
+                {placeLabels.option(l)}
               </option>
             ))}
           </Select>
@@ -193,7 +194,7 @@ export function StockTransferPageClient({
             <option value="">Välj lagerplats…</option>
             {targetOptions.map((l) => (
               <option key={l.id} value={l.id}>
-                {locationOptionLabel(l)}
+                {placeLabels.option(l)}
               </option>
             ))}
           </Select>

@@ -29,6 +29,10 @@ import { ExchangeRateUnavailableError } from "../src/modules/system/service/exch
 import { parsed } from "./helpers/parsed.js";
 import { unwiredPostCalculationBatch, unwiredPreCalculationBatch, unwiredSalesOrderLinks } from "./helpers/unwired";
 import { editStockLog } from "./helpers/stock-log.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Produkter i arbete (#25) against Postgres: every source bounded to D, the
 // orders that count, avräknat at the stock price. "Before D" is made by

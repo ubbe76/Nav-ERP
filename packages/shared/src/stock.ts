@@ -490,7 +490,9 @@ const blockedNoteSchema = z
 // only goes with a blocked place.
 export const createStockLocationSchema = z
   .object({
-    warehouseId: z.string().uuid(),
+    // Utelämnat = the default warehouse (Flera lager off: the only one; it
+    // is created as Huvudlager when none exists) — stock/service/warehouse-mode.ts.
+    warehouseId: z.string().uuid().optional(),
     name: z.string().min(1).max(100),
     active: z.boolean().default(true),
     fixed: z.boolean().default(true),

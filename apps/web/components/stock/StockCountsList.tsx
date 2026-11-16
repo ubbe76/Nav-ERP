@@ -7,6 +7,7 @@ import { useListColumns } from "../ui/ListColumns";
 import { StatusPill } from "../ui/StatusPill";
 import { formatStockholmDateTime } from "../../lib/date";
 import { STOCK_COUNT_STATUS_LABELS, type StockCountSession } from "../../lib/types";
+import { usePlaceLabels } from "./WarehouseMode";
 
 const PILL_STATUS = { open: "running", posted: "done", cancelled: "stopped" } as const;
 
@@ -22,6 +23,7 @@ const COLUMNS = [
 // Lager → Inventering: the toolbar and the table — a client part of the
 // server page so the list has Kolumner (choice, widths, order).
 export function StockCountsList({ rows }: { rows: StockCountSession[] }) {
+  const placeLabels = usePlaceLabels();
   const view = useListColumns(COLUMNS);
   return (
     <>
@@ -47,7 +49,7 @@ export function StockCountsList({ rows }: { rows: StockCountSession[] }) {
             case "countNumber":
               return <Link href={`/lager/inventering/${row.id}`}>{row.countNumber}</Link>;
             case "location":
-              return `${row.warehouseName} — ${row.locationName}`;
+              return placeLabels.place(row.warehouseName, row.locationName);
             case "status":
               return <StatusPill status={PILL_STATUS[row.status]} label={STOCK_COUNT_STATUS_LABELS[row.status]} compact />;
             case "blocksTransactions":

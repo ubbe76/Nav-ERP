@@ -13,6 +13,7 @@ import { locationOptionLabel, moveInList, ownPrimaryLocationId } from "../../lib
 import type { ArticleLocationPlace, ArticleLocations, StockLocation } from "../../lib/types";
 import styles from "./ArticleLocationsCard.module.css";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { usePlaceLabels } from "../stock/WarehouseMode";
 
 const MAX_ALTERNATIVES = 20;
 
@@ -24,8 +25,8 @@ interface PlaceInfo {
   quantityOnHand?: string;
 }
 
-function placeLabel(p: PlaceInfo): string {
-  return locationOptionLabel(p, { inactive: true });
+function placeLabel(p: PlaceInfo, multipleWarehouses: boolean): string {
+  return locationOptionLabel(p, { inactive: true, multipleWarehouses });
 }
 
 function infoOf(p: ArticleLocationPlace): PlaceInfo {
@@ -43,6 +44,7 @@ export function ArticleLocationsCard({
   value: ArticleLocations;
   onSaved: (v: ArticleLocations) => void;
 }) {
+  const placeLabels = usePlaceLabels();
   const canEdit = useCan()(["artiklar", "lager"]);
   const [locations, setLocations] = useState<StockLocation[]>([]);
   // A stored *** huvudplats is the "*** (standard)" choice ("").
@@ -82,7 +84,7 @@ export function ArticleLocationsCard({
 
   function labelFor(id: string): string {
     const i = info.get(id);
-    return i ? placeLabel(i) : "Okänd plats";
+    return i ? placeLabel(i, placeLabels.multipleWarehouses) : "Okänd plats";
   }
 
   function add() {
@@ -142,7 +144,7 @@ export function ArticleLocationsCard({
             )}
             {primaryChoices.map((l) => (
               <option key={l.id} value={l.id}>
-                {locationOptionLabel(l)}
+                {placeLabels.option(l)}
               </option>
             ))}
           </Select>
@@ -212,7 +214,7 @@ export function ArticleLocationsCard({
               <option value="">Välj lagerplats…</option>
               {addChoices.map((l) => (
                 <option key={l.id} value={l.id}>
-                  {locationOptionLabel(l)}
+                  {placeLabels.option(l)}
                 </option>
               ))}
             </Select>

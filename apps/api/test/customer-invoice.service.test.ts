@@ -37,6 +37,10 @@ import { fact, pdfText } from "./helpers/pdf.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/services.js";
 import { vatRateGroupId } from "./helpers/vat-group.js";
 import { parsed } from "./helpers/parsed.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));

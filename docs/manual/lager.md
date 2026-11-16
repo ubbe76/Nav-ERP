@@ -97,11 +97,23 @@ Transaktionstyperna:
 
 ## Lagerplatser
 
-**Lager → Lagerplatser** hanterar lagerstrukturen: **lager** (t.ex. Huvudlager) med **lagerplatser** (t.ex. A1). Skapa nya med respektive +-knapp, och redigera befintliga med **Ändra** — namn, aktiv/inaktiv och (för lagerplatser) vilket lager platsen hör till samt om den är en **Fast lagerplats**. Kolumnen **Fast** i listan visar Ja eller Nej; en ny lagerplats är fast som förval (kryssrutan **Fast lagerplats** i **Ny lagerplats**). Se [Tomma lagerplatser städas bort](#tomma-lagerplatser-stadas-bort).
+**Lager → Lagerplatser** hanterar lagerplatserna (t.ex. A1). Skapa nya med **Ny lagerplats**, och redigera befintliga med **Ändra** — namn, aktiv/inaktiv och om platsen är en **Fast lagerplats**. Kolumnen **Fast** i listan visar Ja eller Nej; en ny lagerplats är fast som förval (kryssrutan **Fast lagerplats** i **Ny lagerplats**). Se [Tomma lagerplatser städas bort](#tomma-lagerplatser-stadas-bort).
 
-Listan över lagerplatser är sidindelad och har sökfältet **Sök lagerplats, lager eller etikettkod…**. Du kan söka på platsens namn, lagrets namn eller etikettkoden, till exempel *LP0042*. Tre filter begränsar listan:
+### Ett eller flera lager
 
-- **Alla lager** (eller ett enskilt lager).
+Som förval har Nav **ett lager**, som inte visas någonstans: nya lagerplatser hamnar i det, och platserna skrivs med bara sitt namn, till exempel *A1*, i listor, platsval, plocklistan, räknelistan och på etiketterna. Finns inget lager än skapas det som *Huvudlager* när den första lagerplatsen läggs upp.
+
+Behöver företaget flera lager slår administratören på **Flera lager** under [System → Inställningar](/hjalp/system#installningar). Då finns sektionen **Lager** överst på sidan, där lager skapas med **+**-knappen och redigeras med **Ändra** (namn, aktiv/inaktiv). **Ny lagerplats** och **Ändra** på en lagerplats får fältet **Lager**, listan får kolumnen och filtret **Lager**, och platserna skrivs med sitt lager framför, till exempel *Huvudlager — A1*, även på artikelkortet, i Saldon och i rutinerna.
+
+**Flera lager** kan bara stängas av när högst ett lager används. Ett lager används när det är aktivt eller har en aktiv lagerplats. Inaktivera de andra lagren och töm deras platser först. Reservlagret `***` med reservplatsen räknas aldrig. Medan inställningen är av går det inte att lägga till ett andra lager, återaktivera ett eller flytta en lagerplats till ett annat lager.
+
+Exporterna (CSV och Excel) har alltid kolumnen **Lager**, så att en exporterad fil går att läsa in igen.
+
+### Listan över lagerplatser
+
+Listan över lagerplatser är sidindelad och har sökfältet **Sök lagerplats eller etikettkod…** (med Flera lager **Sök lagerplats, lager eller etikettkod…**). Du kan söka på platsens namn, lagrets namn eller etikettkoden, till exempel *LP0042*. Filtren begränsar listan:
+
+- **Alla lager** (eller ett enskilt lager) — bara med Flera lager.
 - Status: **Aktiva** (förval), **Inaktiva** eller **Alla**. En plats som tömts och städats bort är inaktiv och syns bara under **Inaktiva** eller **Alla**.
 - **Alla lagerplatser** / **Bara spärrade** / **Utan spärrade**, som i [Saldon](#saldon).
 
@@ -277,6 +289,7 @@ En rad per artikel och lagerplats med kolumnerna **Artikelnummer**, **Lager**, *
 
 - **Antal är saldot efter importen**, som vid en inventering. Nav jämför med dagens saldo på platsen och bokar **skillnaden** som en vanlig lagerjustering med anteckningen *Import av lagersaldo* — den syns i [transaktionsloggen](#transaktioner) som alla andra lagerhändelser. Samma fil två gånger ändrar alltså ingenting, en rättad fil rättar saldot och **0** tömmer platsen. En rad där saldot redan stämmer räknas som överhoppad.
 - **Lager och Lagerplats** anger platsen. Ett lager eller en plats som saknas **skapas** — förhandsgranskningen visar vilka under **Skapas automatiskt**. Bara det som en rad faktiskt bokar ett saldo på skapas: en rad med Antal 0 på en plats som inte finns hoppas över utan att lägga upp vare sig lagret eller platsen. Lagerplatsen **`***`** är alltid reservplatsen, vilket lager raden än anger — något annat lager eller en andra plats med det namnet skapas aldrig. Bara Lagerplats fungerar när platsnamnet finns i ett enda lager. Är båda tomma hamnar saldot på artikelns huvudplats (en spärrad hoppas över), annars på första alternativa platsen, annars på reservplatsen **`***`**.
+- **Med ett lager** (Flera lager avstängt) kan kolumnen **Lager** lämnas tom: en lagerplats som saknas skapas i det enda lagret, och ett annat lagernamn än det lagret är ett radfel — inget andra lager skapas. Finns inget lager än blir det första lagret filen nämner det enda, annars *Huvudlager*. Se [Ett eller flera lager](#ett-eller-flera-lager).
 - **À-pris** värderar det som läggs till (kronor per grundenhet), så att [lagervärderingen](#lagervardering) stämmer från första dagen. Tom cell betyder artikelns standardkostnad — samma som en manuell justering. Saknas båda bokas ökningen utan värde, med en varning. En minskning värderas aldrig; den tar det som fanns.
 
 Raden stoppas när artikeln inte finns, är en tjänst eller en fantomartikel, när samma artikel står två gånger på samma plats, när antalet är negativt eller när platsen [inventeras](#inventering) med spärr. **Hoppa över rader som redan finns** lämnar platser där artikeln redan har ett saldo orörda. Importen är allt eller inget: har någon rad fel importeras ingenting.

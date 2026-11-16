@@ -1,4 +1,4 @@
-import { and, asc, eq, ne, or } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import {
   articleGroups,
   articles,
@@ -14,7 +14,6 @@ import {
   stockTransactions,
   suppliers,
   units,
-  warehouses,
   workCenters,
   type Db,
   type Tx,
@@ -24,7 +23,8 @@ import { insertArticle } from "../../article/repository/article.repository.js";
 import { insertBomRows } from "../../article/repository/bom-write.js";
 import { insertRoutingOperations } from "../../manufacturing/repository/routing-write.js";
 import { replacePriceBreaks } from "../../purchase/repository/price-breaks.js";
-import { FALLBACK_LOCATION_NAME, resolveStockLocation } from "../../stock/service/location-resolver.js";
+import { resolveStockLocation } from "../../stock/service/location-resolver.js";
+import { defaultWarehouseId } from "../../stock/service/warehouse-mode.js";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { DEMO_LOCATIONS, type DemoData, type DemoLocation } from "../service/demo-data.js";
@@ -90,14 +90,10 @@ async function unitIds(tx: Tx): Promise<Map<string, string>> {
 
 async function locationIds(tx: Tx): Promise<Record<DemoLocation, string>> {
   // Never the "***" fallback warehouse — on a fresh installation it is the
-  // only one, and the demo locations would read "*** — Råvarulager".
-  const [warehouse] = await tx
-    .select({ id: warehouses.id })
-    .from(warehouses)
-    .where(and(eq(warehouses.active, true), ne(warehouses.name, FALLBACK_LOCATION_NAME)))
-    .orderBy(asc(warehouses.name), asc(warehouses.id))
-    .limit(1);
-  const warehouseId = warehouse?.id ?? (await tx.insert(warehouses).values({ name: "Huvudlager" }).returning({ id: warehouses.id }))[0]!.id;
+  // only one, and the demo locations would read "*** — Råvarulager". The
+  // default warehouse (warehouse-mode.ts) is the first one in use, else a
+  // new Huvudlager — so never a second one with Flera lager off.
+  const warehouseId = await defaultWarehouseId(tx);
   const result = {} as Record<DemoLocation, string>;
   for (const [key, name] of Object.entries(DEMO_LOCATIONS) as [DemoLocation, string][]) {
     const [existing] = await tx

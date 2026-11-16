@@ -3552,6 +3552,9 @@ export interface SystemSettings {
   // Använd batch- och serienummer: off hides Batchstyrd on the article card
   // (409 batch-tracking-in-use while an article is batch tracked).
   batchTrackingEnabled: boolean;
+  // Flera lager: off = one warehouse that is never shown; can only be switched
+  // off while at most one is in use (409 multiple-warehouses-in-use).
+  multipleWarehouses: boolean;
   // Egna teman: the company's default theme (a built-in id or a custom
   // theme's key) and whether users may pick their own.
   defaultTheme: string;

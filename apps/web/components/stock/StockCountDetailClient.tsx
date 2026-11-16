@@ -32,6 +32,7 @@ import {
 } from "../../lib/types";
 import { formatQuantity, round4 } from "../../lib/format";
 import { useUnsavedGuard } from "../../lib/unsavedGuard";
+import { usePlaceLabels } from "./WarehouseMode";
 
 const PILL_STATUS = { open: "running", posted: "done", cancelled: "stopped" } as const;
 
@@ -55,6 +56,7 @@ const articleLabel = (a: { articleNumber: string; name: string }) => `${a.articl
 // article scanned alone that has several rows (batches, serienummer) only
 // narrows the sheet to them — the user picks the row, or scans the number.
 export function StockCountDetailClient({ session }: { session: StockCountDetail }) {
+  const placeLabels = usePlaceLabels();
   const router = useRouter();
   const [counted, setCounted] = useState<Record<string, string>>({});
   const [addArticle, setAddArticle] = useState<Article | null>(null);
@@ -263,7 +265,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
     if (intent.kind !== "chooseRow") setFilterArticle(null);
     switch (intent.kind) {
       case "thisLocation":
-        ok(`${current.warehouseName} — ${current.locationName} är den här inventeringens plats`);
+        ok(`${placeLabels.place(current.warehouseName, current.locationName)} är den här inventeringens plats`);
         return;
       case "otherLocation": {
         const m = intent.match;
@@ -275,12 +277,12 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
           return;
         }
         if (!href) {
-          warn(`${m.warehouseName} — ${m.name} är inaktiv och har inget saldo att inventera`);
+          warn(`${placeLabels.place(m.warehouseName, m.name)} är inaktiv och har inget saldo att inventera`);
           return;
         }
         if (
           dirtyRowsRef.current > 0 &&
-          !(await confirmDialog(`Gå till ${m.warehouseName} — ${m.name}? Räknade antal som inte sparats försvinner.`, {
+          !(await confirmDialog(`Gå till ${placeLabels.place(m.warehouseName, m.name)}? Räknade antal som inte sparats försvinner.`, {
             confirmLabel: "Byt lagerplats",
           }))
         ) {
@@ -481,7 +483,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
         <div>
           <div className={shellStyles.title}>Inventering {session.countNumber}</div>
           <div className={shellStyles.meta}>
-            {session.warehouseName} — {session.locationName} ({session.locationLabelCode})
+            {placeLabels.place(session.warehouseName, session.locationName)} ({session.locationLabelCode})
             {session.blocksTransactions ? " · Lagertransaktioner spärrade" : ""}
             {session.valuedOn && session.valuedOn !== stockholmDay(session.postedAt) ? ` · Bokförd per ${session.valuedOn}` : ""}
             {session.note ? ` · ${session.note}` : ""}

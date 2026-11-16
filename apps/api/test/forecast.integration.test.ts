@@ -28,6 +28,10 @@ import { createPlanningService, ForecastMonthOutsideHorizonError, ArticleNotFoun
 import { requirementsExportColumns } from "../src/modules/planning/service/export-columns.js";
 import type { AuditEntry } from "../src/modules/system/repository/audit.repository.js";
 import { parsed } from "./helpers/parsed.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Prognos (#10) against the database. "Today" is pinned to Monday
 // 2030-03-04: the default history window is 2029-03 … 2030-02, the horizon

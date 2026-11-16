@@ -42,6 +42,7 @@ import { normalizeDay, normalizeDecimal } from "./csv.js";
 import { stockTrackingOf } from "../../stock/service/article-tracking.js";
 import type { ExistingArticle } from "./articles.js";
 import { FALLBACK_LOCATION_NAME } from "../../stock/service/outflow-allocation.js";
+import { DEFAULT_WAREHOUSE_NAME } from "../../stock/service/warehouse-mode.js";
 import {
   resolveColumns,
   suggestMapping,
@@ -112,7 +113,16 @@ export interface ImportWarehouse {
 // createImportRepository, stubbed with Maps in tests.
 export interface StockBalanceImportDeps {
   articlesByNumber(numbers: string[]): Promise<Map<string, ExistingArticle>>;
-  stockPlaces(): Promise<{ warehouses: ImportWarehouse[]; locations: ImportStockLocation[] }>;
+  /**
+   * multipleWarehouses false (Flera lager off): the file is kept to one
+   * warehouse, defaultWarehouseName (null = none in use yet). Left out = on.
+   */
+  stockPlaces(): Promise<{
+    warehouses: ImportWarehouse[];
+    locations: ImportStockLocation[];
+    multipleWarehouses?: boolean;
+    defaultWarehouseName?: string | null;
+  }>;
   /** articleId -> where an inflow without a place lands (usableArticleLocations), when not "***". */
   usableArticleLocations(articleIds: string[]): Promise<Map<string, string>>;
   /** The "***" location, when it exists yet. */
@@ -270,6 +280,12 @@ export async function planStockBalanceImport(
   // actually created is collected from the BOOKED rows (willCreate below).
   const newWarehouses = new Map<string, string>();
   const newLocations = new Map<string, { warehouseName: string; locationName: string }>();
+  // Flera lager off (warehouse-mode.ts): ONE warehouse — the one in use, or
+  // the first the file names when none is (null until then). A Lagerplats
+  // without Lager that does not exist is created in it (Huvudlager when the
+  // file names none), and another Lager is a row error, never a second one.
+  const singleWarehouse = places.multipleWarehouses === false;
+  let singleName: string | null = places.defaultWarehouseName ?? null;
   // "<articleId>|<location key>|<batch>" — the same article and place (and
   // batch) twice is an error.
   const seen = new Set<string>();
@@ -414,7 +430,16 @@ export async function planStockBalanceImport(
       locationKey = fallbackId ?? "new:***";
     } else if (warehouseName !== "" && locationName === "") {
       errors.push("Lagerplats saknas — ange lagerplatsen i lagret, eller lämna båda tomma för artikelns lagerplats");
+    } else if (
+      singleWarehouse &&
+      warehouseName !== "" &&
+      warehouseName.toLowerCase() !== FALLBACK_LOCATION_NAME &&
+      singleName !== null &&
+      warehouseName.toLowerCase() !== singleName.toLowerCase()
+    ) {
+      errors.push(`Lagret ${warehouseName} finns inte — Flera lager är avstängt, så lämna Lager tomt eller skriv ${singleName}`);
     } else if (warehouseName !== "") {
+      if (singleWarehouse && singleName === null && warehouseName.toLowerCase() !== FALLBACK_LOCATION_NAME) singleName = warehouseName;
       if (warehouseName.length > 100 || locationName.length > 100) errors.push("Lager och lagerplats får vara högst 100 tecken");
       const matches = warehousesByName.get(warehouseName.toLowerCase()) ?? [];
       if (matches.length > 1) {
@@ -438,7 +463,18 @@ export async function planStockBalanceImport(
       } else if (target) locationKey = target.locationId;
     } else if (locationName !== "") {
       const matches = locationsByName.get(locationName.toLowerCase()) ?? [];
-      if (matches.length === 0) {
+      if (matches.length === 0 && singleWarehouse) {
+        // Created in the one warehouse, as if the row had named it.
+        if (locationName.length > 100) errors.push("Lager och lagerplats får vara högst 100 tecken");
+        singleName ??= DEFAULT_WAREHOUSE_NAME;
+        const warehouse = (warehousesByName.get(singleName.toLowerCase()) ?? [])[0];
+        const name = warehouse?.name ?? newWarehouses.get(singleName.toLowerCase()) ?? singleName;
+        if (!warehouse) newWarehouses.set(singleName.toLowerCase(), name);
+        const key = `${name.toLowerCase()}/${locationName.toLowerCase()}`;
+        if (!newLocations.has(key)) newLocations.set(key, { warehouseName: name, locationName });
+        target = { kind: "new", ...newLocations.get(key)! };
+        locationKey = `new:${key}`;
+      } else if (matches.length === 0) {
         errors.push(`Lagerplatsen ${locationName} finns inte — ange lager så skapas den`);
       } else if (matches.length > 1) {
         const where = matches.map((l) => warehouseNameById.get(l.warehouseId) ?? "?").join(", ");

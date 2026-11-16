@@ -11,6 +11,10 @@ import { createSalesRepository } from "../src/modules/sales/repository/sales.rep
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { parsed } from "./helpers/parsed.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Repository-level coverage for stock_transactions.unit_cost (D0): the
 // column is stamped only on the three inflow writers (purchase receipt,

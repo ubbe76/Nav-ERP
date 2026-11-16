@@ -12,7 +12,7 @@ import { SearchPicker } from "../ui/SearchPicker";
 import { ScanPanel } from "../ui/ScanInput";
 import { useCountState, useScanFeedback, useScanQueue, useScanState } from "../ui/useOrderScan";
 import { apiFetch } from "../../lib/api";
-import { locationOptionLabel } from "../../lib/stockLocations";
+import { usePlaceLabels } from "../stock/WarehouseMode";
 import { confirmDialog } from "../../lib/confirm";
 import { notify } from "../../lib/notice";
 import { apiErrorMessage } from "../../lib/errorMessages";
@@ -107,6 +107,7 @@ export function GoodsReceiptPageClient({
   // works without knowing the order number (like Monitor's ankomstlista).
   openOrders: PurchaseOrder[];
 }) {
+  const placeLabels = usePlaceLabels();
   const router = useRouter();
   const order = selected;
   const selectedId = order?.id ?? null;
@@ -365,7 +366,7 @@ export function GoodsReceiptPageClient({
           setScannedLocation({ id: m.id, name: m.name, warehouseName: m.warehouseName });
         }
         setLocationId(m.id);
-        ok(`Lagerplats: ${m.warehouseName} — ${m.name}${m.active ? "" : " (inaktiv, aktiveras vid inleveransen)"}`);
+        ok(`Lagerplats: ${placeLabels.place(m.warehouseName, m.name)}${m.active ? "" : " (inaktiv, aktiveras vid inleveransen)"}`);
         return;
       }
       case "count":
@@ -680,7 +681,7 @@ export function GoodsReceiptPageClient({
               <option value="">Artikelns lagerplats</option>
               {locationOptions.map((l) => (
                 <option key={l.id} value={l.id}>
-                  {locationOptionLabel(l)}
+                  {placeLabels.option(l)}
                 </option>
               ))}
             </Select>

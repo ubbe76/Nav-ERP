@@ -48,6 +48,10 @@ import { parsed } from "./helpers/parsed.js";
 import { testDocumentPdfService } from "./helpers/services.js";
 import { unwiredSalesOrderLinks } from "./helpers/unwired.js";
 import { waitForLockWaiter } from "./helpers/year-end.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Artikelgranskningen 2026-11-11: the article module, the register's units
 // and the scan — one block per finding (article.md, stock.md, scan.md,

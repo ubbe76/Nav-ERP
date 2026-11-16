@@ -13,6 +13,7 @@ import { useCan } from "../PermissionsProvider";
 import type { DeliveryRowsResponse, SalesOrderStatus } from "../../lib/types";
 import { compressSerialNumbers } from "../../lib/serials";
 import { formatStockholmDateTime } from "../../lib/date";
+import { usePlaceLabels } from "../stock/WarehouseMode";
 
 // Ångra utleverans: lists a följesedel's rows; Ångra on a row puts exactly
 // that row's goods back in stock and lowers the order row's delivered
@@ -26,11 +27,12 @@ const fmtQty = (n: number) => n.toLocaleString("sv-SE");
 
 // Where an undone row's goods go back: one part per location it was taken
 // from, in the article's base unit.
-function putBackText(row: DeliveryRowsResponse["rows"][number]): string | null {
+// `place` writes the place as the user sees it (Flera lager, usePlaceLabels).
+function putBackText(row: DeliveryRowsResponse["rows"][number], place: (warehouseName: string, locationName: string) => string): string | null {
   if (row.locations.length === 0) return null;
   const parts = row.locations.map(
     (l) =>
-      `${l.warehouseName} — ${l.locationName}${l.batchNumber ? `, ${l.batchKind === "serial" ? "serienummer" : "batch"} ${l.batchNumber}` : ""} (${fmtQty(l.quantity)} ${row.baseUnit})`
+      `${place(l.warehouseName, l.locationName)}${l.batchNumber ? `, ${l.batchKind === "serial" ? "serienummer" : "batch"} ${l.batchNumber}` : ""} (${fmtQty(l.quantity)} ${row.baseUnit})`
   );
   const joined = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} och ${parts[parts.length - 1]}` : parts[0];
   return `Varorna läggs tillbaka på ${joined}.`;
@@ -58,6 +60,7 @@ export function UndoDeliveryDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  const placeLabels = usePlaceLabels();
   const router = useRouter();
   const [data, setData] = useState<DeliveryRowsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -85,7 +88,7 @@ export function UndoDeliveryDialog({
       burnt.length > 0
         ? ` Serienummer ${compressSerialNumbers(burnt)} gavs vid utleveransen och bränns — de ges aldrig igen och kan inte skrivas in på nytt.`
         : "";
-    const question = `Ångra leveransen av ${what} på följesedel ${data?.deliveryNumber ?? ""}? ${putBackText(row) ?? "Varorna läggs tillbaka i lager."}${burntText} Orderns levererade antal minskas.`;
+    const question = `Ångra leveransen av ${what} på följesedel ${data?.deliveryNumber ?? ""}? ${putBackText(row, placeLabels.place) ?? "Varorna läggs tillbaka i lager."}${burntText} Orderns levererade antal minskas.`;
     if (!(await confirmDialog(question, { confirmLabel: "Ångra", danger: true }))) return;
     setError(null);
     setPendingId(row.id);
@@ -129,8 +132,8 @@ export function UndoDeliveryDialog({
                   {undone && burntSerials(row).length > 0 && (
                     <div style={{ fontSize: 12, ...mutedText }}>Bränt: {compressSerialNumbers(burntSerials(row))}</div>
                   )}
-                  {!undone && row.undoable && putBackText(row) && (
-                    <div style={{ fontSize: 12, ...mutedText }}>{putBackText(row)}</div>
+                  {!undone && row.undoable && putBackText(row, placeLabels.place) && (
+                    <div style={{ fontSize: 12, ...mutedText }}>{putBackText(row, placeLabels.place)}</div>
                   )}
                 </div>
                 {undone ? (

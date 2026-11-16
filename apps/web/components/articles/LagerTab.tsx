@@ -17,6 +17,7 @@ import { ArticleLocationsCard } from "./ArticleLocationsCard";
 import { ForecastCard } from "./ForecastCard";
 import { formatQuantity } from "../../lib/format";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { usePlaceLabels } from "../stock/WarehouseMode";
 
 interface RowWithId extends StockBalance {
   id: string;
@@ -33,6 +34,7 @@ export function LagerTab({
   balances: StockBalance[];
   articleLocations: ArticleLocations;
 }) {
+  const placeLabels = usePlaceLabels();
   const router = useRouter();
   const [places, setPlaces] = useState(articleLocations);
   const [reorderPoint, setReorderPoint] = useState(article.reorderPoint ?? "");
@@ -455,7 +457,7 @@ export function LagerTab({
                       : row.locations
                           .map(
                             (l) =>
-                              `${l.locationName ? `${l.warehouseName ? `${l.warehouseName} · ` : ""}${l.locationName}` : "—"} (${formatQuantity(l.quantity)})${l.blocked ? " — spärrad" : ""}`
+                              `${l.locationName ? placeLabels.place(l.warehouseName, l.locationName, " · ") : "—"} (${formatQuantity(l.quantity)})${l.blocked ? " — spärrad" : ""}`
                           )
                           .join(", ")}
                   </span>
@@ -472,7 +474,8 @@ export function LagerTab({
       ) : (
         <Table<RowWithId>
           columns={[
-            { key: "warehouseName", label: "Lager", width: "1fr" },
+            // Flera lager off: the one warehouse is never shown.
+            ...(placeLabels.multipleWarehouses ? [{ key: "warehouseName", label: "Lager", width: "1fr" }] : []),
             { key: "locationName", label: "Lagerplats", width: "1fr" },
             { key: "role", label: "Plats", width: "140px" },
             { key: "quantityOnHand", label: "Saldo", width: "140px", align: "right" },
@@ -513,6 +516,7 @@ export function LagerTab({
 // behind a fold (an article can have thousands); the stock from before the
 // article got numbers (Okänd) is a count without a list.
 function SerialBalances({ batches }: { batches: ArticleBatchBalances["batches"] }) {
+  const placeLabels = usePlaceLabels();
   interface PlaceRow {
     id: string;
     place: string;
@@ -526,7 +530,7 @@ function SerialBalances({ batches }: { batches: ArticleBatchBalances["batches"] 
       const key = l.locationId ?? "none";
       const row = byPlace.get(key) ?? {
         id: key,
-        place: l.locationName ? `${l.warehouseName ? `${l.warehouseName} · ` : ""}${l.locationName}` : "—",
+        place: l.locationName ? placeLabels.place(l.warehouseName, l.locationName, " · ") : "—",
         blocked: l.blocked,
         numbers: [],
         unknown: 0,

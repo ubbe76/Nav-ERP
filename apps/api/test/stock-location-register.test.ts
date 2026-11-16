@@ -13,6 +13,10 @@ import { stockRoutes } from "../src/modules/stock/routes/stock.routes.js";
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { parsed } from "./helpers/parsed.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Lagerplatsregistret (spec 2026-11-06 del 2): GET /stock/locations/register
 // and its CSV — search on place, warehouse and etikettkod, the filters, the

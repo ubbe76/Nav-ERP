@@ -89,10 +89,11 @@ export function createStockCountService(deps: {
     // for, so the counter isn't biased by the expected answer.
     async getCountSheetPdf(id: string, showBalances: boolean) {
       const session = await service.getSession(id);
+      const multipleWarehouses = await repo.multipleWarehouses();
       const content = await renderer().renderStockCountSheet({
         documentNumber: session.countNumber,
         printedAt: new Date(),
-        warehouseName: session.warehouseName,
+        warehouseName: multipleWarehouses ? session.warehouseName : null,
         locationName: session.locationName,
         locationLabelCode: session.locationLabelCode,
         blocksTransactions: session.blocksTransactions,

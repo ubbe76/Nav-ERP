@@ -79,6 +79,10 @@ import {
 } from "./helpers/services.js";
 import { parsed } from "./helpers/parsed.js";
 import { waitForLockWaiter } from "./helpers/year-end.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Försäljningsgranskningen 2026-11-10: the float edge of the invoicing
 // guards, order rows with history, credit notes that exceed their invoice,

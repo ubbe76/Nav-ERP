@@ -60,6 +60,10 @@ import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/servic
 import { FAKE_PDF, invoiceTwoRatesDiscount, SELLER } from "./helpers/ubl-fixtures.js";
 import { parsed } from "./helpers/parsed.js";
 import { pdfText } from "./helpers/pdf.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // E-fakturagranskningen 2026-11-10 (.claude/rules/einvoice.md: "Nyckeln och
 // Miljö", "Bara den valda miljöns rader", "Spår när automatiken inte

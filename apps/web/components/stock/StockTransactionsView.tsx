@@ -7,7 +7,7 @@ import { GatedLink } from "../ui/GatedLink";
 import { Field, Input } from "../ui/Field";
 import { Table } from "../ui/Table";
 import { useCan } from "../PermissionsProvider";
-import { locationOptionLabel } from "../../lib/stockLocations";
+import { usePlaceLabels } from "./WarehouseMode";
 import { formatUnitPrice } from "../../lib/format";
 import {
   STOCK_TRANSACTION_TYPE_LABELS,
@@ -59,6 +59,7 @@ const money = (value: string | null) =>
 const unitPrice = (value: string | null) => (value === null ? "—" : formatUnitPrice(value));
 
 export function StockTransactionsView({ transactions, locations, article, pageSize }: Props) {
+  const placeLabels = usePlaceLabels();
   const { params, setFilter } = useListNavigation();
   const can = useCan();
   const showCost = can(["ekonomi"]);
@@ -106,7 +107,7 @@ export function StockTransactionsView({ transactions, locations, article, pageSi
           param="location"
           allLabel="Alla lagerplatser"
           ariaLabel="Filtrera på lagerplats"
-          options={locations.map((l) => ({ value: l.id, label: locationOptionLabel(l, { inactive: true }) }))}
+          options={locations.map((l) => ({ value: l.id, label: placeLabels.option(l, { inactive: true }) }))}
         />
         <ListFilterSelect
           param="type"
@@ -197,7 +198,7 @@ export function StockTransactionsView({ transactions, locations, article, pageSi
               return `${row.articleNumber} — ${row.articleName}`;
             case "locationName":
               // Stock can be tracked without locations.
-              return row.locationName ? `${row.warehouseName} — ${row.locationName}` : "—";
+              return row.locationName ? placeLabels.place(row.warehouseName, row.locationName) : "—";
             case "batch":
               return row.batchNumber ? (
                 <GatedLink href={`/lager/sparbarhet?search=${encodeURIComponent(row.batchNumber)}`} style={{ color: "var(--accent-fg)" }}>

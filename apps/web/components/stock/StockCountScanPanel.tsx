@@ -7,6 +7,7 @@ import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { resolveCountScan } from "../../lib/countScan";
 import type { Paged, ScanMatch, StockCountSession } from "../../lib/types";
+import { usePlaceLabels } from "./WarehouseMode";
 
 type LocationMatch = Extract<ScanMatch, { kind: "location" }>;
 
@@ -31,6 +32,7 @@ export const ORDER_KIND_LABEL: Record<string, string> = {
 // Lager → Inventering (#4, etapp 4): scan a lagerplats label to open — or
 // start — that place's count.
 export function StockCountScanPanel() {
+  const placeLabels = usePlaceLabels();
   const router = useRouter();
   const { feedback, ok, warn } = useScanFeedback();
 
@@ -48,10 +50,10 @@ export function StockCountScanPanel() {
           return;
         }
         if (!href) {
-          warn(`${m.warehouseName} — ${m.name} är inaktiv och har inget saldo att inventera`);
+          warn(`${placeLabels.place(m.warehouseName, m.name)} är inaktiv och har inget saldo att inventera`);
           return;
         }
-        ok(`${m.warehouseName} — ${m.name}`);
+        ok(placeLabels.place(m.warehouseName, m.name));
         router.push(href);
         return;
       }

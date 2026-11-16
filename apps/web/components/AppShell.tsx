@@ -14,6 +14,8 @@ import { FavoritesProvider } from "./FavoritesProvider";
 import { getCurrentUser } from "../lib/api";
 import { loadShellSettings } from "../lib/favorites";
 import { UserPrefsProvider } from "./UserPrefsProvider";
+import { WarehouseModeProvider } from "./stock/WarehouseMode";
+import { loadMultipleWarehouses } from "../lib/warehouseMode";
 import styles from "./AppShell.module.css";
 
 const ROLE_LABELS: Record<string, string> = { admin: "Administratör", supervisor: "Arbetsledare", user: "Användare" };
@@ -31,7 +33,11 @@ interface AppShellProps {
 // keeps its own inline copy with the same parts.
 export async function AppShell({ active, children }: AppShellProps) {
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
-  const [user, favorites] = await Promise.all([getCurrentUser(cookieHeader), loadShellSettings(cookieHeader)]);
+  const [user, favorites, multipleWarehouses] = await Promise.all([
+    getCurrentUser(cookieHeader),
+    loadShellSettings(cookieHeader),
+    loadMultipleWarehouses(cookieHeader),
+  ]);
   if (!user) redirect("/login");
   const roleLabel = ROLE_LABELS[user.role] ?? user.role;
 
@@ -53,7 +59,10 @@ export async function AppShell({ active, children }: AppShellProps) {
               {/* One floating Artikelöversikt panel per page, opened from any
                   row's ArticleOverviewButton. The dashboard (own inline shell)
                   deliberately has none. */}
-              <ArticleOverviewProvider>{children}</ArticleOverviewProvider>
+              {/* Flera lager: whether a place is shown with its warehouse. */}
+              <WarehouseModeProvider multipleWarehouses={multipleWarehouses}>
+                <ArticleOverviewProvider>{children}</ArticleOverviewProvider>
+              </WarehouseModeProvider>
               <ConfirmDialogHost />
               <NoticeHost />
               <EmbeddedBridge />

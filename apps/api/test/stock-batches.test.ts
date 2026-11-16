@@ -31,6 +31,10 @@ import { createAuditRepository } from "../src/modules/system/repository/audit.re
 import { parsed } from "./helpers/parsed.js";
 import { testSystemService } from "./helpers/services.js";
 import { waitForLockWaiter } from "./helpers/year-end.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Batch (#8), steg 1: the batch register (getOrCreateBatch), the article's
 // flag Batchstyrd and the system setting it depends on, the justering as an

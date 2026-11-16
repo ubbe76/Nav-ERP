@@ -41,6 +41,7 @@ export function SettingsForm({
   const [materialShortage, setMaterialShortage] = useState(settings.manufacturingMaterialShortage);
   const [palletMismatch, setPalletMismatch] = useState(settings.palletCardAllowQuantityMismatch);
   const [batchTracking, setBatchTracking] = useState(settings.batchTrackingEnabled);
+  const [multipleWarehouses, setMultipleWarehouses] = useState(settings.multipleWarehouses);
   const [palletCardCode, setPalletCardCode] = useState(settings.palletCardCode);
   const [longOperationWeeks, setLongOperationWeeks] = useState(String(settings.planningLongOperationWeeks));
   const [longOperationSaved, setLongOperationSaved] = useState(false);
@@ -189,6 +190,11 @@ export function SettingsForm({
   async function toggleBatchTracking() {
     const updated = await save({ batchTrackingEnabled: !batchTracking });
     if (updated) setBatchTracking(updated.batchTrackingEnabled);
+  }
+
+  async function toggleMultipleWarehouses() {
+    const updated = await save({ multipleWarehouses: !multipleWarehouses });
+    if (updated) setMultipleWarehouses(updated.multipleWarehouses);
   }
 
   async function changePalletCardCode(next: SystemSettings["palletCardCode"]) {
@@ -675,6 +681,28 @@ export function SettingsForm({
           data-on={batchTracking}
           disabled={pending}
           onClick={toggleBatchTracking}
+        >
+          <span className={styles.knob} aria-hidden="true" />
+        </button>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Flera lager</div>
+          <div className={styles.description}>
+            På: lagerplatserna hör till lager som du lägger upp under Lager → Lagerplatser, och lagret visas framför
+            platsens namn. Av: Nav har ett lager som inte visas, och nya lagerplatser hamnar i det. Kan bara stängas av
+            när högst ett lager används.
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={multipleWarehouses}
+          aria-label="Flera lager"
+          className={styles.switch}
+          data-on={multipleWarehouses}
+          disabled={pending}
+          onClick={toggleMultipleWarehouses}
         >
           <span className={styles.knob} aria-hidden="true" />
         </button>

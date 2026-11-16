@@ -52,6 +52,10 @@ import { createAuditRepository } from "../src/modules/system/repository/audit.re
 import { pdfText } from "./helpers/pdf.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/services.js";
 import { parsed } from "./helpers/parsed.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Ångra utleverans: one delivery row reversed — stock back where it was
 // taken from, the order row's delivered quantity, the order status — and the

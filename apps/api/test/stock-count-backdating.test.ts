@@ -20,6 +20,10 @@ import { createUser, createCalendarYear, resetYearEnd } from "./helpers/year-end
 import { testEconomyService } from "./helpers/services.js";
 import { parsed } from "./helpers/parsed.js";
 import { editStockLog } from "./helpers/stock-log.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));

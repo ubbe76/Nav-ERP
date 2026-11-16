@@ -52,6 +52,10 @@ import { createStockService } from "../src/modules/stock/service/stock.service.j
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Tillverkningsgranskningen 2026-11-10: the races, float edges and wrong
 // answers the review of the manufacturing module found (A1–A6, B1–B12).
