@@ -92,6 +92,7 @@ import { alreadyOnDocumentText } from "../../lib/orderRowDuplicates";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow } from "../ui/Form";
 import { SuggestedDueDateField } from "../manufacturing/SuggestedDueDateField";
 import { configuredEvaluationKey } from "../../lib/configuredEvaluationKey";
+import { usePlaceLabels } from "../stock/WarehouseMode";
 
 // Order is reached only through Skapa kundorder (the API refuses set-status
 // to it), so the manual status change never offers it.
@@ -2109,6 +2110,7 @@ function DeliverGoodsForm({
   onDone: () => void;
   onCancel: () => void;
 }) {
+  const placeLabels = usePlaceLabels();
   const [rowId, setRowId] = useState(rows[0]?.id ?? "");
   const [locationId, setLocationId] = useState(""); // "" = artikelns lagerplats
   const [quantity, setQuantity] = useState("1");
@@ -2211,7 +2213,7 @@ function DeliverGoodsForm({
               <option value="">Automatiskt</option>
               {outflowLocationChoices(locations).map((l) => (
                 <option key={l.id} value={l.id}>
-                  {l.warehouseName} — {l.name}
+                  {placeLabels.place(l.warehouseName, l.name)}
                 </option>
               ))}
             </Select>

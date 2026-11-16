@@ -672,7 +672,8 @@ export interface StockCountSheetPdfRow {
 export interface StockCountSheetPdfInput {
   documentNumber: string;
   printedAt: Date;
-  warehouseName: string;
+  // null = Flera lager off: "Lagerplats: A1" without the warehouse.
+  warehouseName: string | null;
   locationName: string;
   // The place's label code (LP0042), printed as a barcode beside the title
   // so the counter can scan the place from the list (skanning, #4).
@@ -2035,7 +2036,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     doc.font(FONT).fontSize(10).fillColor("#444444");
     doc.text(`Utskriven: ${documentDay(input.printedAt)}`, left, y);
     y += 14;
-    doc.text(`Lagerplats: ${input.warehouseName} — ${input.locationName}`, left, y);
+    doc.text(`Lagerplats: ${input.warehouseName === null ? "" : `${input.warehouseName} — `}${input.locationName}`, left, y);
     y += 14;
     if (input.blocksTransactions) {
       doc.text("Lagertransaktioner är spärrade under inventeringen.", left, y);

@@ -5,13 +5,14 @@ import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
 import { Checkbox, Field, Input, Select } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
-import { locationOptionLabel } from "../../lib/stockLocations";
+import { usePlaceLabels } from "./WarehouseMode";
 import type { StockLocation } from "../../lib/types";
 import { Card } from "../ui/Card";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 import { apiErrorMessage } from "../../lib/errorMessages";
 
 export function NewStockCountForm({ locations, initialLocationId }: { locations: StockLocation[]; initialLocationId?: string }) {
+  const placeLabels = usePlaceLabels();
   const router = useRouter();
   const [locationId, setLocationId] = useState(initialLocationId ?? "");
   const [blocksTransactions, setBlocksTransactions] = useState(false);
@@ -62,7 +63,7 @@ export function NewStockCountForm({ locations, initialLocationId }: { locations:
             <option value="">Välj lagerplats…</option>
             {locations.map((l) => (
               <option key={l.id} value={l.id}>
-                {locationOptionLabel(l)}
+                {placeLabels.option(l)}
               </option>
             ))}
           </Select>

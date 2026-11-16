@@ -12,6 +12,7 @@ import { BatchNotTrackedError, SerialQuantityNotIntegerError } from "../../stock
 import { batchCellQuantity, batchCellsForArticles } from "../../stock/repository/batch-balances.js";
 import { STOCK_IMPORT_NOTE, stockBatchCellKey, stockBatchKey, type StockBalanceImportPlan } from "../service/stock-balances.js";
 import { round4 } from "@navet/shared";
+import { assertWarehouseLimit, beginWarehouseWrite, findDefaultWarehouse, readMultipleWarehouses } from "../../stock/service/warehouse-mode.js";
 
 // Lagersaldon (#3) — the import repository's stock half: the planner's
 // lookups (StockBalanceImportDeps, structurally) and the commit. Kept in its
@@ -42,12 +43,16 @@ async function decreaseParts(tx: Tx, articleId: string, locationId: string, quan
 
 export function createStockBalanceImportRepository(db: Db | Tx) {
   return {
+    // Flera lager off (warehouse-mode.ts): the planner keeps the file to the
+    // one warehouse — defaultWarehouse is the one a place goes into.
     async stockPlaces() {
-      const [warehouseRows, locationRows] = await Promise.all([
+      const [warehouseRows, locationRows, multipleWarehouses, defaultWarehouse] = await Promise.all([
         db.select({ id: warehouses.id, name: warehouses.name, active: warehouses.active }).from(warehouses),
         db.select({ id: stockLocations.id, warehouseId: stockLocations.warehouseId, name: stockLocations.name }).from(stockLocations),
+        readMultipleWarehouses(db),
+        findDefaultWarehouse(db),
       ]);
-      return { warehouses: warehouseRows, locations: locationRows };
+      return { warehouses: warehouseRows, locations: locationRows, multipleWarehouses, defaultWarehouseName: defaultWarehouse?.name ?? null };
     },
 
     // The resolver's own rule (0186): the huvudplats when it is active and
@@ -131,6 +136,13 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
     // are the preview's, not the truth at commit time.
     async executeStockBalancePlan(plan: StockBalanceImportPlan) {
       return db.transaction(async (tx) => {
+        // Flera lager off: the plan named one warehouse at most, but a
+        // warehouse or place created meanwhile could make it two — checked
+        // once every row's place is resolved, below. Only when the plan
+        // creates something: the rule's advisory lock is held to commit (a
+        // batch preview holds it until its rollback).
+        const creates = plan.willCreate.warehouses.length > 0 || plan.willCreate.stockLocations.length > 0;
+        const single = creates ? await beginWarehouseWrite(tx) : false;
         const createdWarehouses: string[] = [];
         const createdLocations: string[] = [];
         const warehouseIds = new Map(
@@ -245,6 +257,7 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
           await assertLocationNotUnderCount(tx, locationId);
           rowLocations.push(locationId);
         }
+        if (single) await assertWarehouseLimit(tx);
         const serialKey = (row: (typeof plan.balances)[number]) =>
           row.serial && row.batch?.kind === "named" ? batchIds.get(`${row.articleId}|${row.batch.batchNumber.toLocaleLowerCase("sv")}`)! : null;
         await lockSerials(tx, plan.balances.flatMap((row) => serialKey(row) ?? []));

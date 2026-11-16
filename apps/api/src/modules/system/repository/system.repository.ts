@@ -10,6 +10,7 @@ import { DEFAULT_THEME_KEY } from "../service/theme-settings.js";
 import { documentNumberTaken } from "../service/number-series.js";
 import { lockThemeForSetting } from "./themes.repository.js";
 import { countTrackedArticles } from "../../stock/service/batch-tracking.js";
+import { countWarehousesInUse } from "../../stock/service/warehouse-mode.js";
 import { sharePayrollConfigInTx } from "../../payroll/repository/payroll-period-guard.js";
 import { readStorageUsage } from "./storage.js";
 import { exportStoredFiles } from "./file-export.js";
@@ -79,6 +80,12 @@ function settingsWriter(tx: Tx) {
     // written in this transaction (batch-tracking.ts has the lock order).
     countTrackedArticles(): Promise<number> {
       return countTrackedArticles(tx);
+    },
+
+    // Flera lager can only be switched off while at most one warehouse is
+    // in use — counted AFTER the setting's row is written (warehouse-mode.ts).
+    countWarehousesInUse(): Promise<number> {
+      return countWarehousesInUse(tx);
     },
   };
 }

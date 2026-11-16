@@ -7,7 +7,7 @@ import { Field, Input, Select } from "../ui/Field";
 import { ArticlePicker } from "../ui/ArticlePicker";
 import { UnitSelect, convertQuantityInput, useUnitOptions } from "../ui/UnitSelect";
 import { toBaseQuantity } from "../../lib/units";
-import { locationOptionLabel } from "../../lib/stockLocations";
+import { usePlaceLabels } from "./WarehouseMode";
 import { apiFetch } from "../../lib/api";
 import { BatchSelect, useBatchBalances } from "./BatchSelect";
 import { BATCH_AUTO, batchIdField } from "../../lib/batch";
@@ -19,6 +19,7 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import { stockholmToday } from "../../lib/date";
 
 export function NewAdjustmentForm({ locations }: { locations: StockLocation[] }) {
+  const placeLabels = usePlaceLabels();
   const router = useRouter();
   const [article, setArticle] = useState<Article | null>(null);
   const [locationId, setLocationId] = useState(""); // "" = artikelns lagerplats
@@ -143,7 +144,7 @@ export function NewAdjustmentForm({ locations }: { locations: StockLocation[] })
             <option value="">Artikelns lagerplats</option>
             {locations.map((l) => (
               <option key={l.id} value={l.id}>
-                {locationOptionLabel(l)}
+                {placeLabels.option(l)}
               </option>
             ))}
           </Select>

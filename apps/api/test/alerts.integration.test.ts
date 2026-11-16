@@ -51,6 +51,10 @@ import { listStockBatchesQuerySchema, createStockLocationSchema } from "@navet/s
 import { vatCodeId } from "./helpers/vat-codes.js";
 import { parsed } from "./helpers/parsed.js";
 import { unwiredSalesOrderLinks } from "./helpers/unwired";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Aviseringar against Postgres: per kind one case that gives a row and one
 // borderline case that must not. "Today" is pinned to Monday 2030-03-04 (as

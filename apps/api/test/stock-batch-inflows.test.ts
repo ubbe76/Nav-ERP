@@ -33,6 +33,10 @@ import { getOrCreateBatch, getOrCreateDatedBatch } from "../src/modules/stock/se
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { parsed } from "./helpers/parsed.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Batch (#8), steg 1 — the inflows that carry a batch and their Ångra:
 // inleverans (the supplier's batch, empty = the IO number, a row split over

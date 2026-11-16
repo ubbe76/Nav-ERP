@@ -25,6 +25,10 @@ import { createSystemService } from "../src/modules/system/service/system.servic
 import { createVerificationPoster } from "../src/modules/economy/service/verification-poster.js";
 import { DEFAULT_POSTING_SETTINGS } from "./helpers/services.js";
 import { parsed } from "./helpers/parsed.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));

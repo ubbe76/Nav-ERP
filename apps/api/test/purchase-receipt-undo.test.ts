@@ -30,6 +30,10 @@ import { createStockRepository } from "../src/modules/stock/repository/stock.rep
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { parsed } from "./helpers/parsed.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Ångra inleverans: one receipt reversed — stock, the row's received
 // quantity and the order status; on a lego row the TO report it made, in the

@@ -10,6 +10,8 @@ import { getListPageSize } from "../../../lib/listPageSize";
 import type { Paged, StockBalance } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
 import { HelpLink } from "../../../components/ui/HelpLink";
+import { placeName } from "../../../lib/stockLocations";
+import { loadMultipleWarehouses } from "../../../lib/warehouseMode";
 
 
 export default async function StockPage(props: { searchParams: Promise<PageSearchParams> }) {
@@ -17,17 +19,17 @@ export default async function StockPage(props: { searchParams: Promise<PageSearc
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const pageSize = await getListPageSize();
   // Inventering is admin-only (the page and the API), so the button is too.
-  const user = await getCurrentUser(cookieHeader);
-  const balancesPage = await apiGet<Paged<StockBalance>>(
-    `/api/v1/stock/balances${listApiQuery(searchParams, ["blocked", "locationId"], pageSize)}`,
-    cookieHeader
-  );
+  const [user, balancesPage, multipleWarehouses] = await Promise.all([
+    getCurrentUser(cookieHeader),
+    apiGet<Paged<StockBalance>>(`/api/v1/stock/balances${listApiQuery(searchParams, ["blocked", "locationId"], pageSize)}`, cookieHeader),
+    loadMultipleWarehouses(cookieHeader),
+  ]);
   const balances: StockBalanceRow[] = balancesPage.rows.map((b) => ({ ...b, id: `${b.articleId}-${b.locationId}` }));
 
   // ?locationId= (from Visa saldon in Lagerplatser): say which place is shown.
   const locationId = typeof searchParams.locationId === "string" ? searchParams.locationId : undefined;
   const shown = locationId ? balancesPage.rows.find((b) => b.locationId === locationId) : undefined;
-  const locationLabel = shown ? `${shown.warehouseName ?? "—"} — ${shown.locationName ?? "—"}` : "vald lagerplats";
+  const locationLabel = shown ? placeName(shown.warehouseName, shown.locationName ?? "—", multipleWarehouses) : "vald lagerplats";
 
   return (
     <AppShell active="Lager">

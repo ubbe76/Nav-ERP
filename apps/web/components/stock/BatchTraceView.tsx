@@ -15,6 +15,7 @@ import type {
   TraceStop,
 } from "../../lib/types";
 import styles from "./BatchTraceView.module.css";
+import { usePlaceLabels } from "./WarehouseMode";
 
 const qty = (value: number, unit: string) => `${formatQuantity(value)} ${unit}`;
 
@@ -164,6 +165,7 @@ function BackwardNode({ node, root }: { node: BackwardTraceNode; root: boolean }
 }
 
 function ForwardNode({ node, root }: { node: ForwardTraceNode; root: boolean }) {
+  const placeLabels = usePlaceLabels();
   const unit = node.batch.unitCode;
   const empty = node.consumedBy.length === 0 && node.deliveries.length === 0 && node.events.length === 0 && node.onHand.length === 0;
   return (
@@ -219,7 +221,7 @@ function ForwardNode({ node, root }: { node: ForwardTraceNode; root: boolean }) 
           <div className={styles.muted}>Kvar i lager</div>
           {node.onHand.map((o) => (
             <Line key={o.locationId} kind="" amount={qty(o.quantity, unit)}>
-              {o.warehouseName} — {o.locationName}
+              {placeLabels.place(o.warehouseName, o.locationName)}
               {o.blocked ? " (spärrad)" : ""}
             </Line>
           ))}

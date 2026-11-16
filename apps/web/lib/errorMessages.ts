@@ -337,6 +337,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "batch-number-reserved": serverMessage("Batchnumret är reserverat — välj ett annat."),
   "batch-tracking-disabled": "Batch- och serienummer används inte — slå på inställningen under System först.",
   "batch-tracking-in-use": serverMessage("Det finns batchstyrda artiklar — stäng av Batchstyrd på dem innan inställningen stängs av."),
+  "multiple-warehouses-in-use": serverMessage("Mer än ett lager används — inaktivera alla utom ett, och töm deras lagerplatser, innan Flera lager stängs av."),
+  "multiple-warehouses-disabled": "Flera lager är avstängt — slå på det under System → Inställningar för att lägga till ett lager.",
   "article-not-batch-trackable": "Tjänster och fantomartiklar kan inte vara batchstyrda.",
   // Spårbarhet etapp 2: Spårning, utgångsdatum, rättelse av en batch.
   // Serienummer (0215): the server names the article, the number or the place.

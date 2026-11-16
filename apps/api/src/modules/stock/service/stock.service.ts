@@ -131,12 +131,14 @@ export function createStockService(repo: StockRepository, audit: AuditWriter = {
     async renderLocationLabels(input: LocationLabelsInput) {
       const found = await repo.labelLocations([...new Set(input.locationIds)]);
       if (found.length === 0) throw new StockLocationNotFoundError(input.locationIds[0]!);
+      // Flera lager off: the place only, never the hidden warehouse.
+      const multipleWarehouses = await repo.multipleWarehouses();
       const labels: LabelInput[] = found.flatMap((l) =>
         Array.from({ length: input.copies }, () => ({
           kind: "location" as const,
           labelCode: formatLocationLabelCode(l.labelNumber),
           name: l.name,
-          warehouseName: l.warehouseName,
+          warehouseName: multipleWarehouses ? l.warehouseName : null,
         }))
       );
       return renderLabelsPdf(labels, input.format, input.start);

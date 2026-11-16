@@ -46,6 +46,10 @@ import {
 import { createValuationService } from "../src/modules/stock/service/valuation.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { parsed } from "./helpers/parsed.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Spärrade lagerplatser (etapp 1, migration 0185): spärra/släpp as a
 // whitelisted transition with audit, the flows against a blocked place

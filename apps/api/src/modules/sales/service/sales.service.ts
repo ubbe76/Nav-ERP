@@ -186,7 +186,8 @@ export const EXPIRED_PICK_NOTE = "UTGÅNGEN — plocka inte";
 // numbers are written together, compressed — "Huvudlager — A1 · Serienummer
 // SN-001001–SN-001010: 10" — on the line of the place's first (oldest)
 // number; numbers with different utgångsdatum (or utgångna) keep lines of
-// their own, so the note still says exactly which ones.
+// their own, so the note still says exactly which ones. With Flera lager off
+// (`multipleWarehouses` false) the place is written without its warehouse.
 export function pickListCellLines(
   cells: readonly {
     locationId?: string;
@@ -197,11 +198,12 @@ export function pickListCellLines(
     expiresOn: string | null;
     expired: boolean;
     quantity: string;
-  }[]
+  }[],
+  multipleWarehouses = true
 ): string[] {
   const lines: { place: string; expired: boolean; batch?: string; serials?: { key: string; numbers: string[]; expiresOn: string | null }; quantity: number }[] = [];
   for (const cell of cells) {
-    const place = `${cell.warehouseName} — ${cell.locationName}`;
+    const place = multipleWarehouses ? `${cell.warehouseName} — ${cell.locationName}` : cell.locationName;
     if (cell.batchKind === "serial" && cell.batchNumber !== null) {
       const key = `${cell.locationId ?? place}|${cell.expiresOn ?? ""}|${cell.expired}`;
       const line = lines.find((l) => l.serials?.key === key);
@@ -360,6 +362,9 @@ export interface SalesSettingsReader extends DocumentSettingsReader {
       // Tillåten överleverans på kundorder (#24) — optional for the same
       // reason; absent = 0, never more than ordered.
       salesOverDeliveryPercent?: number | null;
+      // Flera lager (warehouse-mode.ts): false = the plocklista writes the
+      // place without the one warehouse. Optional — absent = shown.
+      multipleWarehouses?: boolean;
     }
   >;
 }
@@ -2233,7 +2238,9 @@ export function createSalesService(
       // the order Automatiskt draws them, Okänd included — internal document.
       const batchCells = await stock.pickBatchCellsForArticles(openRows.map((r) => r.articleId));
       const batchTrackedIds = new Set(openRows.filter((r) => r.articleStockTracked).map((r) => r.articleId));
-      const extraDescription = extraDescriptionFor(await settings.getSettings(), "pickList");
+      const pickSettings = await settings.getSettings();
+      const extraDescription = extraDescriptionFor(pickSettings, "pickList");
+      const multipleWarehouses = pickSettings.multipleWarehouses !== false;
       const customerArticleNumbers = await repo.customerArticleNumberMap(order.customerId, openRows.map((r) => r.articleId));
 
       const content = await pdf.renderPickList({
@@ -2268,12 +2275,12 @@ export function createSalesService(
           // Spärrade lagerplatser are left out — Automatiskt never draws
           // there, so the paper says the same as the booking.
           locations: batchTrackedIds.has(r.articleId)
-            ? pickListCellLines(batchCells.filter((c) => c.articleId === r.articleId && !c.blocked))
+            ? pickListCellLines(batchCells.filter((c) => c.articleId === r.articleId && !c.blocked), multipleWarehouses)
             : balances
                 .filter((b) => b.articleId === r.articleId && !b.blocked)
                 .map((b) =>
                   b.locationName
-                    ? `${b.warehouseName} — ${b.locationName}: ${formatQuantity(b.quantityOnHand)}`
+                    ? `${multipleWarehouses ? `${b.warehouseName} — ` : ""}${b.locationName}: ${formatQuantity(b.quantityOnHand)}`
                     : `Utan lagerplats: ${formatQuantity(b.quantityOnHand)}`
                 ),
         })),

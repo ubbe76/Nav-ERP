@@ -20,6 +20,7 @@ import type { Article, ArticleGroup, ArticleNumberSeriesOption, ArticleType, Reg
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 import { CopyFromModal } from "./CopyFromModal";
 import styles from "./NewArticleForm.module.css";
+import { usePlaceLabels } from "../stock/WarehouseMode";
 
 interface NewArticleFormProps {
   groups: ArticleGroup[];
@@ -32,6 +33,7 @@ interface NewArticleFormProps {
 }
 
 export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArticleFormProps) {
+  const placeLabels = usePlaceLabels();
   const router = useRouter();
   const [articleNumber, setArticleNumber] = useState("");
   const [name, setName] = useState("");
@@ -398,7 +400,7 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
               <option value="">*** (standard)</option>
               {outflowLocationChoices(locations).map((l) => (
                 <option key={l.id} value={l.id}>
-                  {l.warehouseName} — {l.name}
+                  {placeLabels.place(l.warehouseName, l.name)}
                 </option>
               ))}
             </Select>

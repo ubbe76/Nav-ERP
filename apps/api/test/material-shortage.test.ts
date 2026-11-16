@@ -32,6 +32,10 @@ import { createStockService } from "../src/modules/stock/service/stock.service.j
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
 import { parsed } from "./helpers/parsed.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Materialbrist vid rapportering: the system setting
 // manufacturing_material_shortage (none | warn | block) × every path that

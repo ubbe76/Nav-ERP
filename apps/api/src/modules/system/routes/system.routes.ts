@@ -84,6 +84,13 @@ export async function systemRoutes(app: FastifyInstance, opts: { service: System
     return { allowQuantityMismatch: settings.palletCardAllowQuantityMismatch };
   });
 
+  // Flera lager for the web frame (AppShell reads it on every page to show
+  // or hide the warehouse) — the one value, not the whole payload.
+  app.get("/settings/stock", async () => {
+    const settings = await service.getSettings();
+    return { multipleWarehouses: settings.multipleWarehouses };
+  });
+
   // Settings are readable by every office user (module read default). Writing
   // stays admin-only.
   app.get("/settings", async () => {

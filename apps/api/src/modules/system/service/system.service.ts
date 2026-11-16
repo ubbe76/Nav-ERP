@@ -83,6 +83,7 @@ import { decodeDefaultTheme, DEFAULT_THEME_KEY, THEME_CHOICE_LOCKED_KEY } from "
 import { UnknownThemeError } from "./themes.errors.js";
 import { BATCH_TRACKING_ENABLED_KEY, decodeBatchTrackingEnabled } from "../../stock/service/batch-tracking.js";
 import { BatchTrackingInUseError } from "../../stock/service/batch.errors.js";
+import { decodeMultipleWarehouses, MULTIPLE_WAREHOUSES_KEY, MultipleWarehousesInUseError } from "../../stock/service/warehouse-mode.js";
 // G1: append-only audit trail. system_settings/company_info are singletons —
 // entityId is null (no natural per-row id); number_series/company_carrier
 // use their own readable key/code. updateSettings NEVER logs values — only
@@ -369,6 +370,8 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       // Använd batch- och serienummer (#8) — off unless switched on;
       // batch-tracking.ts owns the key.
       batchTrackingEnabled: decodeBatchTrackingEnabled(get(BATCH_TRACKING_ENABLED_KEY)),
+      // Flera lager — off unless switched on; warehouse-mode.ts owns the key.
+      multipleWarehouses: decodeMultipleWarehouses(get(MULTIPLE_WAREHOUSES_KEY)),
       showRevisionsOnDocuments: get(SHOW_REVISIONS_ON_DOCUMENTS_KEY) === "true",
       // Unlike the other toggles this one defaults ON when never set.
       showOrderRevisionOnDocuments: get(SHOW_ORDER_REVISION_ON_DOCUMENTS_KEY) !== "false",
@@ -736,6 +739,15 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
           if (!input.batchTrackingEnabled) {
             const tracked = await writer.countTrackedArticles();
             if (tracked > 0) throw new BatchTrackingInUseError(tracked);
+          }
+        }
+        // Flera lager: the same order — the row first (it waits for every
+        // warehouse writer holding it FOR SHARE), then the count.
+        if (input.multipleWarehouses !== undefined) {
+          await set(MULTIPLE_WAREHOUSES_KEY, String(input.multipleWarehouses));
+          if (!input.multipleWarehouses) {
+            const inUse = await writer.countWarehousesInUse();
+            if (inUse > 1) throw new MultipleWarehousesInUseError(inUse);
           }
         }
         if (input.showRevisionsOnDocuments !== undefined) {

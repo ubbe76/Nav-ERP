@@ -10,7 +10,7 @@ import { SerialCellPicker, isStockSerial, useSerialModes } from "../stock/Serial
 import { BATCH_AUTO, batchIdField, expiredBatchLocationId } from "../../lib/batch";
 import { ScrapReasonFields } from "../quality/ScrapReasonFields";
 import { useScrapReasons } from "../../lib/useScrapReasons";
-import { locationOptionLabel } from "../../lib/stockLocations";
+import { usePlaceLabels } from "../stock/WarehouseMode";
 import { toBaseQuantity, toUnitQuantity } from "../../lib/units";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
@@ -75,12 +75,13 @@ function LocationOptions({
   locations: StockLocation[];
   emptyLabel?: string;
 }) {
+  const placeLabels = usePlaceLabels();
   return (
     <>
       <option value="">{emptyLabel}</option>
       {locations.map((l) => (
         <option key={l.id} value={l.id}>
-          {locationOptionLabel(l)}
+          {placeLabels.option(l)}
         </option>
       ))}
     </>

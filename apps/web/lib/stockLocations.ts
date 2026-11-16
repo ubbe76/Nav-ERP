@@ -10,13 +10,28 @@ export interface LocationOptionInput {
   active?: boolean;
 }
 
+// A place as the user sees it: "Huvudlager — K1", or just "K1" when Flera
+// lager is off (System → Inställningar; the one warehouse is never shown —
+// components read the setting with useMultipleWarehouses). A missing
+// warehouse name prints the place alone too. `separator` keeps the few
+// views that write "Huvudlager · K1" or "Huvudlager / K1".
+export function placeName(
+  warehouseName: string | null | undefined,
+  locationName: string,
+  multipleWarehouses: boolean,
+  separator = " — "
+): string {
+  return multipleWarehouses && warehouseName ? `${warehouseName}${separator}${locationName}` : locationName;
+}
+
 // "Huvudlager — K1", "Huvudlager — K1 (spärrad)". `inactive` adds "(inaktiv)"
 // for pickers that list inactive locations too (the logs filter).
-export function locationOptionLabel(l: LocationOptionInput, opts: { inactive?: boolean } = {}): string {
+// `multipleWarehouses` false (Flera lager off) leaves the warehouse out.
+export function locationOptionLabel(l: LocationOptionInput, opts: { inactive?: boolean; multipleWarehouses?: boolean } = {}): string {
   const tags: string[] = [];
   if (l.blocked) tags.push("spärrad");
   if (opts.inactive && l.active === false) tags.push("inaktiv");
-  return `${l.warehouseName} — ${l.name}${tags.length > 0 ? ` (${tags.join(", ")})` : ""}`;
+  return `${placeName(l.warehouseName, l.name, opts.multipleWarehouses ?? true)}${tags.length > 0 ? ` (${tags.join(", ")})` : ""}`;
 }
 
 // Locations a pure outflow may name: the spärrade ones are left out.

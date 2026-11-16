@@ -8,12 +8,13 @@ import { getListPageSize } from "../../../lib/listPageSize";
 import type { Paged, StockLocationRegisterRow, Warehouse } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
 import { HelpLink } from "../../../components/ui/HelpLink";
+import { loadMultipleWarehouses } from "../../../lib/warehouseMode";
 
 export default async function StockPlacesPage(props: { searchParams: Promise<PageSearchParams> }) {
   const searchParams = await props.searchParams;
   const pageSize = await getListPageSize();
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
-  const [warehouses, locationsPage] = await Promise.all([
+  const [warehouses, locationsPage, multipleWarehouses] = await Promise.all([
     apiGet<Warehouse[]>("/api/v1/stock/warehouses", cookieHeader),
     // The register is the one place that shows deactivated locations (status
     // filter) — a location emptied by a move or a delivery is deactivated.
@@ -21,6 +22,7 @@ export default async function StockPlacesPage(props: { searchParams: Promise<Pag
       `/api/v1/stock/locations/register${listApiQuery(searchParams, ["warehouseId", "status", "blocked"], pageSize)}`,
       cookieHeader
     ),
+    loadMultipleWarehouses(cookieHeader),
   ]);
 
   return (
@@ -33,7 +35,8 @@ export default async function StockPlacesPage(props: { searchParams: Promise<Pag
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
-        <WarehousesSection warehouses={warehouses} />
+        {/* Flera lager off (System → Inställningar): the one warehouse is never shown. */}
+        {multipleWarehouses && <WarehousesSection warehouses={warehouses} />}
         <LocationsSection locations={locationsPage.rows} total={locationsPage.total} pageSize={pageSize} warehouses={warehouses} />
       </div>
     </AppShell>

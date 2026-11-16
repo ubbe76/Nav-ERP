@@ -26,6 +26,10 @@ import { createStockService } from "../src/modules/stock/service/stock.service.j
 import { BuiltInNumberSeriesError } from "../src/modules/system/service/system.service.js";
 import { parsed } from "./helpers/parsed.js";
 import { testSystemService } from "./helpers/services.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Serienummer (#8 etapp 2, steg 3 — migration 0215): a serial number is a
 // stock_batches row with kind = 'serial' whose balance is 0 or 1. This file:

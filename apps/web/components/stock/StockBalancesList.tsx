@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo } from "react";
 import { ArticleOverviewButton } from "../articles/ArticleOverviewButton";
 import { Table } from "../ui/Table";
 import { ListExportLink, ListFilterSelect, ListToolbar } from "../ui/ListControls";
@@ -8,6 +9,7 @@ import { useListColumns } from "../ui/ListColumns";
 import { StatusPill } from "../ui/StatusPill";
 import { formatQuantity } from "../../lib/format";
 import type { StockBalance } from "../../lib/types";
+import { useMultipleWarehouses } from "./WarehouseMode";
 
 export interface StockBalanceRow extends StockBalance {
   id: string;
@@ -25,7 +27,10 @@ const COLUMNS = [
 // Lager → Saldon: the toolbar and the table — a client part of the server
 // page so the list has Kolumner (choice, widths, order) like the others.
 export function StockBalancesList({ rows }: { rows: StockBalanceRow[] }) {
-  const view = useListColumns(COLUMNS);
+  // Flera lager off: no Lager column (the one warehouse is never shown).
+  const multipleWarehouses = useMultipleWarehouses();
+  const columns = useMemo(() => (multipleWarehouses ? COLUMNS : COLUMNS.filter((c) => c.key !== "warehouseName")), [multipleWarehouses]);
+  const view = useListColumns(columns);
   return (
     <>
       <ListToolbar placeholder="Sök artikelnummer eller benämning…">

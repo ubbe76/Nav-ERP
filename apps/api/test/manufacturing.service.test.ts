@@ -33,6 +33,10 @@ import { createSalesRepository } from "../src/modules/sales/repository/sales.rep
 import { markSalesOrderInProduction } from "../src/modules/sales/service/production-transition.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { parsed } from "./helpers/parsed.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));

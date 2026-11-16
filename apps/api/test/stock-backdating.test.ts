@@ -48,6 +48,10 @@ import { addDays, stockholmToday } from "../src/modules/system/service/delivery-
 import { createCalendarYear, createUser, resetYearEnd } from "./helpers/year-end.js";
 import { parsed } from "./helpers/parsed.js";
 import { testArticleService, testDocumentPdfService, testSystemService } from "./helpers/services.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 const periods = { lockOn: postingPeriodLockOn };
 const articleService = createArticleService(createArticleRepository(db));

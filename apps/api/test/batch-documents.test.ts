@@ -41,6 +41,10 @@ import { createAuditRepository } from "../src/modules/system/repository/audit.re
 import { parsed } from "./helpers/parsed.js";
 import { pdfText } from "./helpers/pdf.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline, testArticleService, testDocumentPdfService, testSystemService } from "./helpers/services.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Batch (#8), steg 3a — the batch on the documents: följesedel and pallkort
 // till kund (named batches only, decision 14), plocklistan (the cells in the

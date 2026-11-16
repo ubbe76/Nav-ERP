@@ -12,6 +12,7 @@ import {
   type SerialAssignedAt,
 } from "../../lib/serialInput";
 import type { Article, ArticleTracking, BatchBalanceRow } from "../../lib/types";
+import { usePlaceLabels } from "./WarehouseMode";
 
 // Serienummer (#8 etapp 2): the fields every serial-number routine shares.
 //   SerialNumbersInput   — type or scan the numbers one by one (receipt, and
@@ -312,6 +313,7 @@ export function SerialCellPicker({
   onChange: (next: string[]) => void;
   ariaLabel: string;
 }) {
+  const placeLabels = usePlaceLabels();
   const cells = useMemo(() => serialCells(rows, articleId, locationId), [rows, articleId, locationId]);
   const [text, setText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -391,8 +393,7 @@ export function SerialCellPicker({
                 <span>{c.batchNumber}</span>
                 {c.locationName && (
                   <span style={muted}>
-                    {c.warehouseName ? `${c.warehouseName} · ` : ""}
-                    {c.locationName}
+                    {placeLabels.place(c.warehouseName, c.locationName, " · ")}
                     {c.blocked ? " — spärrad" : ""}
                   </span>
                 )}

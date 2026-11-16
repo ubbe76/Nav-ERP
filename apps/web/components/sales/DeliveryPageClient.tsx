@@ -56,6 +56,7 @@ import { PalletCardDialog } from "../documents/PalletCardDialog";
 import { UndoDeliveryDialog } from "./UndoDeliveryDialog";
 import styles from "./DeliveryPageClient.module.css";
 import { formatStockholmDate } from "../../lib/date";
+import { usePlaceLabels } from "../stock/WarehouseMode";
 
 const NO_COUNT: OrderCountState = { counting: false, quantities: {} };
 
@@ -100,6 +101,7 @@ export function DeliveryPageClient({
   // ordrar").
   openOrders: SalesOrder[];
 }) {
+  const placeLabels = usePlaceLabels();
   const router = useRouter();
   const order = selected;
   const selectedId = order?.id ?? null;
@@ -260,7 +262,7 @@ export function DeliveryPageClient({
     return `${cell.batchNumber ?? ""}${row ? ` — ${articleLabel({ articleNumber: row.articleNumber, name: row.articleName })}` : ""}`;
   };
   const placeText = (cell: { warehouseName: string | null; locationName: string | null }) =>
-    cell.locationName ? `${cell.warehouseName ? `${cell.warehouseName} — ` : ""}${cell.locationName}` : "en annan lagerplats";
+    cell.locationName ? placeLabels.place(cell.warehouseName, cell.locationName) : "en annan lagerplats";
 
   // A scanned serienummer: picks the number on its row (Serienummer), and
   // Leverera nu follows the picked numbers. true = the scan was a
@@ -391,7 +393,7 @@ export function DeliveryPageClient({
     switch (intent.kind) {
       case "location": {
         const m = intent.match;
-        const text = `Lagerplats: ${m.warehouseName} — ${m.name}`;
+        const text = `Lagerplats: ${placeLabels.place(m.warehouseName, m.name)}`;
         // A spärrad lagerplats is never drawn from (409 stock-location-blocked): not selected.
         if (m.blocked) {
           warn(`${text} — spärrad, uttag görs inte därifrån`);
@@ -681,7 +683,7 @@ export function DeliveryPageClient({
               <option value="">Automatiskt</option>
               {outflowLocationChoices(locationOptions).map((l) => (
                 <option key={l.id} value={l.id}>
-                  {l.warehouseName} — {l.name}
+                  {placeLabels.place(l.warehouseName, l.name)}
                 </option>
               ))}
             </Select>
@@ -857,7 +859,7 @@ export function DeliveryPageClient({
                       <option value="">Som ovan</option>
                       {onHand.map((b) => (
                         <option key={b.locationId} value={b.locationId}>
-                          {b.warehouseName} — {b.locationName} ({Number(b.quantityOnHand).toLocaleString("sv-SE")}{" "}
+                          {placeLabels.place(b.warehouseName, b.locationName)} ({Number(b.quantityOnHand).toLocaleString("sv-SE")}{" "}
                           {b.unitCode})
                         </option>
                       ))}

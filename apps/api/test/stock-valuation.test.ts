@@ -11,6 +11,10 @@ import { testDocumentPdfService } from "./helpers/services.js";
 import { pdfText } from "./helpers/pdf.js";
 import { stockholmToday } from "../src/modules/system/service/delivery-days.js";
 import { parsed } from "./helpers/parsed.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Service-level coverage for the lagervärdering report (D1): quantity comes
 // from stock_transactions (already historical, arkitekturprincip 1); the

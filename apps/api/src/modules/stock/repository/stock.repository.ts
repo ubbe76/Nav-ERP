@@ -28,6 +28,7 @@ import { isCheckViolation, isUniqueViolation } from "../../system/service/db-err
 import { stockValuedAt } from "./valued-at.js";
 import { assertStockBackdate, noPostingPeriodLocks, standardCostsAt, type PostingPeriodReader } from "./backdating.js";
 import { backdatedDay, backdatedInstant } from "../service/backdating.js";
+import { assertWarehouseLimit, beginWarehouseWrite, defaultWarehouseId, readMultipleWarehouses } from "../service/warehouse-mode.js";
 import { readArticleLocations, replaceArticleLocations } from "./article-locations.js";
 import {
   ilikePattern,
@@ -142,40 +143,59 @@ async function blockImpact(dbc: Db | Tx, id: string) {
 // backdate into a locked period leave it out.
 export function createStockRepository(db: Db, periods: PostingPeriodReader = noPostingPeriodLocks) {
   return {
+    // Flera lager off (warehouse-mode.ts): a second warehouse in use is
+    // refused — the rule's begin before the write, the count after it.
     async createWarehouse(input: CreateWarehouseInput) {
-      const [row] = await db.insert(warehouses).values(input).returning();
-      return row;
+      return db.transaction(async (tx) => {
+        const single = await beginWarehouseWrite(tx);
+        const [row] = await tx.insert(warehouses).values(input).returning();
+        if (single) await assertWarehouseLimit(tx);
+        return row;
+      });
     },
 
     // A place may be created blocked (a Karantän); blocked_at is the moment.
+    // Without warehouseId it goes into the default warehouse (Flera lager
+    // off: the only one, created as Huvudlager when none exists).
     async createLocation(input: CreateStockLocationInput) {
       if (input.name.trim() === FALLBACK_LOCATION_NAME) throw new StockLocationNameReservedError();
-      const { blocked, blockedNote, ...fields } = input;
+      const { blocked, blockedNote, warehouseId, ...fields } = input;
       const isBlocked = blocked === true;
       try {
-        const [row] = await db
-          .insert(stockLocations)
-          .values({
-            ...fields,
-            blocked: isBlocked,
-            blockedAt: isBlocked ? new Date() : null,
-            blockedNote: isBlocked ? (blockedNote ?? null) : null,
-          })
-          .returning();
-        return row!;
+        return await db.transaction(async (tx) => {
+          const single = await beginWarehouseWrite(tx);
+          const [row] = await tx
+            .insert(stockLocations)
+            .values({
+              ...fields,
+              warehouseId: warehouseId ?? (await defaultWarehouseId(tx)),
+              blocked: isBlocked,
+              blockedAt: isBlocked ? new Date() : null,
+              blockedNote: isBlocked ? (blockedNote ?? null) : null,
+            })
+            .returning();
+          if (single) await assertWarehouseLimit(tx);
+          return row!;
+        });
       } catch (err) {
         rethrowFallbackBlocked(err);
       }
     },
 
     async updateWarehouse(id: string, input: UpdateWarehouseInput) {
-      const [row] = await db.update(warehouses).set(input).where(eq(warehouses.id, id)).returning();
-      return row ?? null;
+      return db.transaction(async (tx) => {
+        const single = await beginWarehouseWrite(tx);
+        const [row] = await tx.update(warehouses).set(input).where(eq(warehouses.id, id)).returning();
+        if (row && single) await assertWarehouseLimit(tx);
+        return row ?? null;
+      });
     },
 
     async updateLocation(id: string, input: UpdateStockLocationInput) {
       try {
         return await db.transaction(async (tx) => {
+          // Moving or reactivating a place can put another warehouse in use.
+          const single = input.warehouseId !== undefined || input.active === true ? await beginWarehouseWrite(tx) : false;
           // The reserved name: the real "***" keeps it, no other place takes it.
           if (input.name !== undefined) {
             const [named] = await tx
@@ -207,6 +227,7 @@ export function createStockRepository(db: Db, periods: PostingPeriodReader = noP
             if (input.blockedNote !== undefined && !current.blocked) throw new StockLocationNotBlockedError(current.name);
           }
           const [row] = await tx.update(stockLocations).set(input).where(eq(stockLocations.id, id)).returning();
+          if (row && single) await assertWarehouseLimit(tx);
           return row ?? null;
         });
       } catch (err) {
@@ -266,6 +287,12 @@ export function createStockRepository(db: Db, periods: PostingPeriodReader = noP
 
     // Append-only: this is the only write path into stock. There is no update/delete
     // on balances — current quantity is always derived from stock_balances.
+    // Flera lager (warehouse-mode.ts) — the labels leave the warehouse out
+    // when it is off.
+    multipleWarehouses() {
+      return readMultipleWarehouses(db);
+    },
+
     async listWarehouses() {
       return db.select().from(warehouses).orderBy(asc(warehouses.name));
     },

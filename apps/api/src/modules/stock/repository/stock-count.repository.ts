@@ -44,6 +44,7 @@ import {
   StockCountRowNotFoundError,
   StockLocationNotFoundError,
 } from "../service/stock.errors.js";
+import { readMultipleWarehouses } from "../service/warehouse-mode.js";
 
 // Current derived balance for one article on one location — the same
 // SUM(quantity_delta) the stock_balances view aggregates, scoped to a pair.
@@ -146,6 +147,12 @@ async function serialPlace(tx: Db | Tx, batchId: string): Promise<{ locationId: 
 
 export function createStockCountRepository(db: Db, periods: PostingPeriodReader = noPostingPeriodLocks) {
   return {
+    // Flera lager (warehouse-mode.ts) — the räknelista leaves the warehouse
+    // out when it is off.
+    multipleWarehouses() {
+      return readMultipleWarehouses(db);
+    },
+
     // Freeze: allocates the INV number (document series — inside the tx, a
     // failed create must roll the number back too), seeds one row per
     // non-zero balance on the location, snapshot = the balance right now.

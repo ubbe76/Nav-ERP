@@ -22,6 +22,7 @@ import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
 import { LabelPrintDialog } from "./LabelPrintDialog";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
 import { useListColumns } from "../ui/ListColumns";
+import { usePlaceLabels } from "./WarehouseMode";
 
 type StockLocation = StockLocationRegisterRow;
 
@@ -46,6 +47,7 @@ export function LocationsSection({
   pageSize: number;
   warehouses: Warehouse[];
 }) {
+  const placeLabels = usePlaceLabels();
   const router = useRouter();
   const canWrite = useCan()(["lager"]);
   // Spärra…: the location whose dialog is open, and its note draft.
@@ -57,8 +59,9 @@ export function LocationsSection({
   const [newBlockedNote, setNewBlockedNote] = useState("");
   const [pickedWarehouseId, setWarehouseId] = useState("");
   // The first warehouse until one is picked — a warehouse created a moment ago
-  // (the list arrives with the refresh) is usable without a reload.
-  const warehouseId = pickedWarehouseId || warehouses[0]?.id || "";
+  // (the list arrives with the refresh) is usable without a reload. Not the
+  // reserve warehouse "***" (it sorts first) when there is another.
+  const warehouseId = pickedWarehouseId || (warehouses.find((w) => w.name !== "***") ?? warehouses[0])?.id || "";
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   // The create form's own error, shown at the form (the others show at the top).
@@ -95,7 +98,13 @@ export function LocationsSection({
     try {
       await apiFetch(`/api/v1/stock/locations/${row.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ name: editName, warehouseId: editWarehouseId, active: editActive, fixed: editFixed }),
+        // Flera lager off: the place stays in the one warehouse.
+        body: JSON.stringify({
+          name: editName,
+          ...(placeLabels.multipleWarehouses ? { warehouseId: editWarehouseId } : {}),
+          active: editActive,
+          fixed: editFixed,
+        }),
       });
       setEditingId(null);
       router.refresh();
@@ -118,7 +127,7 @@ export function LocationsSection({
         method: "POST",
         body: JSON.stringify({ note: blockNote.trim() || undefined }),
       });
-      const parts = [`${res.location.warehouseName} — ${res.location.name} är spärrad.`];
+      const parts = [`${placeLabels.place(res.location.warehouseName, res.location.name)} är spärrad.`];
       if (res.articlesWithStock > 0) {
         parts.push(`${res.articlesWithStock} ${res.articlesWithStock === 1 ? "artikel" : "artiklar"} har saldo där, som inte längre räknas.`);
       }
@@ -140,7 +149,7 @@ export function LocationsSection({
 
   async function release(row: StockLocation) {
     const ok = await confirmDialog(
-      `Släppa spärren på ${row.warehouseName} — ${row.name}? Saldot räknas igen i behovsberäkningen och kan tas med Automatiskt.`,
+      `Släppa spärren på ${placeLabels.place(row.warehouseName, row.name)}? Saldot räknas igen i behovsberäkningen och kan tas med Automatiskt.`,
       { confirmLabel: "Släpp spärr" }
     );
     if (!ok) return;
@@ -149,7 +158,7 @@ export function LocationsSection({
     setPending(true);
     try {
       await apiFetch(`/api/v1/stock/locations/${row.id}/unblock`, { method: "POST", body: "{}" });
-      setNotice(`Spärren på ${row.warehouseName} — ${row.name} är släppt.`);
+      setNotice(`Spärren på ${placeLabels.place(row.warehouseName, row.name)} är släppt.`);
       router.refresh();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte släppa spärren"));
@@ -172,7 +181,8 @@ export function LocationsSection({
         />
       ),
     },
-    { key: "warehouseName", label: "Lager", width: "minmax(84px, 1fr)" },
+    // Flera lager off: no Lager column, filter or picker.
+    ...(placeLabels.multipleWarehouses ? [{ key: "warehouseName", label: "Lager", width: "minmax(84px, 1fr)" }] : []),
     { key: "name", label: "Namn", width: "minmax(44px, 0.5fr)" },
     { key: "labelCode", label: "Etikettkod", width: "74px" },
     { key: "fixed", label: "Fast", width: "40px" },
@@ -200,13 +210,15 @@ export function LocationsSection({
       </SectionHeading>
       <FormError>{error}</FormError>
       {notice && <FormNotice>{notice}</FormNotice>}
-      <ListToolbar placeholder="Sök lagerplats, lager eller etikettkod…">
-        <ListFilterSelect
-          param="warehouseId"
-          allLabel="Alla lager"
-          ariaLabel="Filtrera på lager"
-          options={warehouses.map((w) => ({ value: w.id, label: w.name }))}
-        />
+      <ListToolbar placeholder={placeLabels.multipleWarehouses ? "Sök lagerplats, lager eller etikettkod…" : "Sök lagerplats eller etikettkod…"}>
+        {placeLabels.multipleWarehouses && (
+          <ListFilterSelect
+            param="warehouseId"
+            allLabel="Alla lager"
+            ariaLabel="Filtrera på lager"
+            options={warehouses.map((w) => ({ value: w.id, label: w.name }))}
+          />
+        )}
         <ListFilterSelect
           param="status"
           allLabel="Aktiva"
@@ -360,7 +372,7 @@ export function LocationsSection({
       <Modal open={blocking !== null} onClose={() => setBlocking(null)} title="Spärra lagerplats" compact>
         <Form onSubmit={submitBlock}>
           <p>
-            {blocking ? `${blocking.warehouseName} — ${blocking.name}` : ""}
+            {blocking ? placeLabels.place(blocking.warehouseName, blocking.name) : ""}
           </p>
           <Field label="Anteckning" htmlFor="blockNote">
             <Input
@@ -397,7 +409,7 @@ export function LocationsSection({
         title="Skriv ut lagerplatsetiketter"
       />
 
-      {warehouses.length === 0 ? (
+      {placeLabels.multipleWarehouses && warehouses.length === 0 ? (
         <p style={{ marginTop: 16 }}>Skapa ett lager ovan innan du kan lägga till en lagerplats.</p>
       ) : (
         <Card maxWidth={420} style={{ marginTop: 16 }}>
@@ -409,7 +421,8 @@ export function LocationsSection({
                 await apiFetch("/api/v1/stock/locations", {
                   method: "POST",
                   body: JSON.stringify({
-                    warehouseId,
+                    // Flera lager off: the server puts it in the one warehouse.
+                    ...(placeLabels.multipleWarehouses ? { warehouseId } : {}),
                     name,
                     fixed,
                     ...(newBlocked ? { blocked: true, blockedNote: newBlockedNote.trim() || undefined } : {}),
@@ -428,15 +441,17 @@ export function LocationsSection({
             }}>
             <strong>Ny lagerplats</strong>
 
-            <Field label="Lager" htmlFor="locationWarehouseId">
-              <Select id="locationWarehouseId" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
-                {warehouses.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
+            {placeLabels.multipleWarehouses && (
+              <Field label="Lager" htmlFor="locationWarehouseId">
+                <Select id="locationWarehouseId" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
+                  {warehouses.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
 
             <Field label="Namn" htmlFor="locationName">
               <Input id="locationName" required value={name} onChange={(e) => setName(e.target.value)} />

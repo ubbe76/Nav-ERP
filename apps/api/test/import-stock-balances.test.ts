@@ -9,6 +9,10 @@ import { ImportValidationError, createImportService } from "../src/modules/impor
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { parsed } from "./helpers/parsed.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // Lagersaldon (#3) through the import service and repository: Antal is the
 // balance AFTER the import, the difference is booked as an

@@ -19,7 +19,8 @@ export type LabelFormat = "a4" | "single";
 
 export type LabelInput =
   | { kind: "article"; articleNumber: string; name: string; barcode: string | null }
-  | { kind: "location"; labelCode: string; name: string; warehouseName: string }
+  // warehouseName null = Flera lager off: the label says the place only.
+  | { kind: "location"; labelCode: string; name: string; warehouseName: string | null }
   // Batch- and serienummeretiketter (#8 etapp 2): the number is the code a
   // scan resolves; the article it belongs to is the caption.
   | { kind: "batch"; sort: "batch" | "serial"; number: string; articleNumber: string; name: string };
@@ -69,8 +70,10 @@ function drawLabel(doc: PDFKit.PDFDocument, label: LabelInput, box: Box, large: 
   doc.text(title, inner.x, y, { width: textWidth, height: titleSize * 1.2, ellipsis: true, lineBreak: false });
   y += titleSize * 1.15;
   doc.font(FONT).fontSize(textSize);
-  doc.text(caption, inner.x, y, { width: textWidth, height: textSize * 1.2, ellipsis: true, lineBreak: false });
-  y += textSize * 1.2;
+  if (caption) {
+    doc.text(caption, inner.x, y, { width: textWidth, height: textSize * 1.2, ellipsis: true, lineBreak: false });
+    y += textSize * 1.2;
+  }
   if (label.kind === "article" && label.barcode) {
     doc.fontSize(smallSize).fillColor("#555555");
     doc.text(`EAN ${label.barcode}`, inner.x, y, { width: textWidth, lineBreak: false });

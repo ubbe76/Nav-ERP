@@ -23,6 +23,7 @@ import {
   type StockBalance,
 } from "../../lib/types";
 import styles from "./ScanPageClient.module.css";
+import { usePlaceLabels } from "./WarehouseMode";
 
 type Balance = StockBalance & { id: string };
 
@@ -97,6 +98,7 @@ export function ScanPageClient() {
 }
 
 function MatchCard({ match }: { match: ScanMatch }) {
+  const placeLabels = usePlaceLabels();
   switch (match.kind) {
     case "article":
       return (
@@ -126,7 +128,7 @@ function MatchCard({ match }: { match: ScanMatch }) {
                 {match.blocked && " · Spärrad"}
               </div>
               <div className={styles.title}>
-                {match.labelCode} · {match.warehouseName} / {match.name}
+                {match.labelCode} · {placeLabels.place(match.warehouseName, match.name, " / ")}
               </div>
             </div>
             <GatedLink href="/lager/platser" className={styles.link}>
@@ -164,7 +166,7 @@ function MatchCard({ match }: { match: ScanMatch }) {
               ]}
               rows={match.locations.map((l) => ({
                 id: l.locationId,
-                place: `${l.warehouseName} / ${l.locationName}`,
+                place: placeLabels.place(l.warehouseName, l.locationName, " / "),
                 blocked: l.blocked,
                 quantity: l.quantity,
               }))}
@@ -243,6 +245,7 @@ function OrderCard({ kind, href, number, sub, pill }: { kind: string; href: stri
 
 // Balance rows for the matched article (per location) or location (per article).
 function Balances({ query, mode, unit }: { query: string; mode: "article" | "location"; unit?: string }) {
+  const placeLabels = usePlaceLabels();
   const [state, setState] = useState<{ rows: Balance[]; total: number } | "failed" | null>(null);
 
   useEffect(() => {
@@ -276,7 +279,7 @@ function Balances({ query, mode, unit }: { query: string; mode: "article" | "loc
           if (key === "place") {
             return row.locationName ? (
               <>
-                {row.warehouseName} / {row.locationName}
+                {placeLabels.place(row.warehouseName, row.locationName, " / ")}
                 {row.locationBlocked && (
                   <span style={{ marginLeft: 8 }}>
                     <StatusPill status="stopped" label="Spärrad" compact />

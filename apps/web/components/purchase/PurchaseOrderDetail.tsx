@@ -3,7 +3,7 @@
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
 import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { notify } from "../../lib/notice";
-import { locationOptionLabel } from "../../lib/stockLocations";
+import { usePlaceLabels } from "../stock/WarehouseMode";
 import { useMemo, useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { RowDeviationLink } from "../quality/RowDeviationLink";
@@ -1108,6 +1108,7 @@ function ReceiveGoodsForm({
   onDone: () => void;
   onCancel: () => void;
 }) {
+  const placeLabels = usePlaceLabels();
   const router = useRouter();
   const [rowId, setRowId] = useState(rows[0]?.id ?? "");
   const [locationId, setLocationId] = useState(""); // "" = artikelns lagerplats
@@ -1198,7 +1199,7 @@ function ReceiveGoodsForm({
               <option value="">Artikelns lagerplats</option>
               {locations.map((l) => (
                 <option key={l.id} value={l.id}>
-                  {locationOptionLabel(l)}
+                  {placeLabels.option(l)}
                 </option>
               ))}
             </Select>

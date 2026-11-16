@@ -210,6 +210,7 @@ import { isBookkeepingLockViolation, isClosedFiscalYearViolation, isEmployeeAnon
 import { StockLocationNotFoundError } from "./modules/stock/service/stock.errors.js";
 import { batchErrorStatus, isSerialBalanceViolation, SERIAL_BALANCE_VIOLATED } from "./modules/stock/service/batch.errors.js";
 import { backdateErrorStatus } from "./modules/stock/service/backdating.js";
+import { warehouseModeErrorStatus } from "./modules/stock/service/warehouse-mode.js";
 import { documentNumberTakenError, DocumentNumberTooLongError } from "./modules/system/service/number-series.js";
 import { errorBody } from "./modules/system/service/error-body.js";
 import { createQualityRepository } from "./modules/quality/repository/quality.repository.js";
@@ -317,6 +318,11 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     // since (409) — mapped once, like the batch errors.
     const backdateStatus = backdateErrorStatus(err);
     if (backdateStatus !== null) return reply.code(backdateStatus).send(errorBody(err as Error));
+    // Flera lager off: a second warehouse in use (stock, the saldoimport,
+    // the exempeldata) or switching the setting off with several in use
+    // (PATCH /settings) — mapped once.
+    const warehouseModeStatus = warehouseModeErrorStatus(err);
+    if (warehouseModeStatus !== null) return reply.code(warehouseModeStatus).send(errorBody(err as Error));
     // A document series whose next number is already taken (Nummerserier
     // refuses that; an import or a hand edit can still get there): the
     // create rolled back with its number, from any module — 409 with a

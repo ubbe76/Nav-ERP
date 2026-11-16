@@ -47,6 +47,10 @@ import { EInvoiceProviderError } from "../src/modules/einvoice/service/einvoice-
 import { createFakeEinvoiceProvider, refused, unavailable } from "./helpers/fake-einvoice-provider.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/services.js";
 import { parsed } from "./helpers/parsed.js";
+import { allowMultipleWarehouses } from "./helpers/warehouses.js";
+
+// The fixtures use more than one warehouse (Flera lager, warehouse-mode.ts).
+allowMultipleWarehouses();
 
 // E-faktura (Peppol) — the service against Postgres with a fake access point
 // (spec §6): every guard of the send flow, the insert-before-call order, one
