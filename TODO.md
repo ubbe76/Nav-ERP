@@ -28,8 +28,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — otydliga fel, texter och småbeteenden
 
-- [ ] **Importens igenkänning:** kundens/leverantörens adressmall utan Adressnamn och Förvald (bara nummer + Adressrad 1/Postnummer/Stad) känns igen som kund-/leverantörsfil och skriver adressen över motpartens egen — tvetydig mot kundmallen, så den rättades inte i importgranskningen (guiden visar typen före commit).
-
 ### Låga — layout
 
 ### Låga — fel i manualen

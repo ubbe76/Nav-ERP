@@ -93,6 +93,25 @@ describe("detection of a trimmed contact template", () => {
   });
 });
 
+describe("detection of a trimmed delivery address template", () => {
+  it("reads the address template without Adressnamn and Förvald as delivery addresses, not as customers or suppliers", () => {
+    expect(detectImportEntity(["Kundnummer", "Adressrad 1", "Postnummer", "Stad"])).toBe("customerDeliveryAddresses");
+    expect(detectImportEntity(["Kundnummer", "Adressrad 1", "Adressrad 2", "Postnummer", "Stad", "Land"])).toBe("customerDeliveryAddresses");
+    expect(detectImportEntity(["Kundnummer", "Adressrad 1"])).toBe("customerDeliveryAddresses");
+    expect(detectImportEntity(["Leverantörsnummer", "Adressrad 1", "Postnummer", "Stad"])).toBe("supplierDeliveryAddresses");
+    expect(detectImportEntity(["Leverantörsnummer", "Adressrad 1"])).toBe("supplierDeliveryAddresses");
+  });
+
+  it("keeps a file with the customer or supplier template's own headings, or any other field, a customer or supplier file", () => {
+    // The trimmed customer and supplier templates: Adress and Postort.
+    expect(detectImportEntity(["Kundnummer", "Adress", "Postnummer", "Postort"])).toBe("customers");
+    expect(detectImportEntity(["Leverantörsnummer", "Adress", "Postnummer", "Postort"])).toBe("suppliers");
+    // Something besides the number and the address maps.
+    expect(detectImportEntity(["Kundnummer", "Adressrad 1", "Postnummer", "Stad", "Telefon"])).toBe("customers");
+    expect(detectImportEntity(["Leverantörsnummer", "Namn", "Adressrad 1", "Stad"])).toBe("suppliers");
+  });
+});
+
 describe("CSV reading", () => {
   it("drops rows of nothing but delimiters, as Excel writes for formatted empty rows", () => {
     const parsed = parseCsvBuffer(Buffer.from("Kundnummer;Namn;Ort\n1001;Kund AB;Småstad\n;;\n;;\n", "utf-8"));
