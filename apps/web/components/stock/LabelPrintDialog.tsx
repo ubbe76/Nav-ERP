@@ -1,32 +1,55 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { Field, Input, Select } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
-import { API_URL, apiErrorFromBody } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { openPostedPdf } from "../../lib/openPostedPdf";
 
 type LabelFormat = "a4" | "single";
 
+// The chosen format is remembered per browser — the same printer stands at
+// the same desk. A missing or blocked storage just means A4-ark.
+const FORMAT_KEY = "nav.labelFormat";
+function readStoredFormat(): LabelFormat | null {
+  try {
+    const value = localStorage.getItem(FORMAT_KEY);
+    return value === "a4" || value === "single" ? value : null;
+  } catch {
+    return null;
+  }
+}
+function storeFormat(format: LabelFormat) {
+  try {
+    localStorage.setItem(FORMAT_KEY, format);
+  } catch {
+    // Not remembering is fine; the choice still holds for this dialog.
+  }
+}
+
 // Etikettdialog: format, start position on the A4 sheet and copies per label.
-// `endpoint` is POST /articles/labels or /stock/locations/labels and `idsKey`
-// the body key that carries the ids (articleIds / locationIds). The returned
-// PDF opens in a new tab.
+// `endpoint` is POST /articles/labels, /stock/locations/labels or an
+// inköpsorder's /receipts/labels and `idsKey` the body key that carries the
+// ids. `maxIds` is the endpoint's own limit on the list (500 for articles and
+// places, 2 000 for receipts — a serial receive call is one id per styck).
+// The returned PDF opens in a new tab.
 export function LabelPrintDialog({
   open,
   onClose,
   endpoint,
   idsKey,
   ids,
+  maxIds = 500,
   title = "Skriv ut etiketter",
 }: {
   open: boolean;
   onClose: () => void;
   endpoint: string;
-  idsKey: "articleIds" | "locationIds";
+  idsKey: "articleIds" | "locationIds" | "receiptIds";
   ids: string[];
+  maxIds?: number;
   title?: string;
 }) {
   const [format, setFormat] = useState<LabelFormat>("a4");
@@ -34,6 +57,12 @@ export function LabelPrintDialog({
   const [copies, setCopies] = useState("1");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Read after mount — the server render has no storage.
+  useEffect(() => {
+    const stored = readStoredFormat();
+    if (stored) setFormat(stored);
+  }, []);
 
   async function print() {
     setError(null);
@@ -43,9 +72,9 @@ export function LabelPrintDialog({
       setError("Antal per etikett måste vara mellan 1 och 100");
       return;
     }
-    // Same limits as articleLabelsSchema/locationLabelsSchema in packages/shared.
-    if (ids.length > 500) {
-      setError("Högst 500 valda per utskrift");
+    // Same limits as the label schemas in packages/shared (scan.ts).
+    if (ids.length > maxIds) {
+      setError(`Högst ${maxIds.toLocaleString("sv-SE")} valda per utskrift`);
       return;
     }
     if (ids.length * copiesNumber > 2000) {
@@ -57,33 +86,14 @@ export function LabelPrintDialog({
       return;
     }
     setPending(true);
-    // The tab is opened inside the click so popup blockers allow it, and
-    // pointed at the PDF once it has arrived.
-    const tab = window.open("", "_blank");
     try {
-      const res = await fetch(`${API_URL}${endpoint}`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          [idsKey]: ids,
-          copies: copiesNumber,
-          format,
-          ...(format === "a4" && { start: startNumber }),
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw apiErrorFromBody(res.status, body, "Kunde inte skapa etiketterna");
-      }
-      const url = URL.createObjectURL(await res.blob());
-      if (tab) tab.location.href = url;
-      else window.open(url, "_blank");
-      // Leave the URL alive long enough for the tab to load it.
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      await openPostedPdf(
+        endpoint,
+        { [idsKey]: ids, copies: copiesNumber, format, ...(format === "a4" && { start: startNumber }) },
+        "Kunde inte skapa etiketterna"
+      );
       onClose();
     } catch (err) {
-      tab?.close();
       setError(apiErrorMessage(err, "Kunde inte skapa etiketterna"));
     } finally {
       setPending(false);
@@ -102,7 +112,15 @@ export function LabelPrintDialog({
           {ids.length} {ids.length === 1 ? "etikett vald" : "etiketter valda"}
         </FormHint>
         <Field label="Format" htmlFor="labelFormat">
-          <Select id="labelFormat" value={format} onChange={(e) => setFormat(e.target.value as LabelFormat)}>
+          <Select
+            id="labelFormat"
+            value={format}
+            onChange={(e) => {
+              const next = e.target.value as LabelFormat;
+              setFormat(next);
+              storeFormat(next);
+            }}
+          >
             <option value="a4">A4-ark (70 × 37 mm, 24 per ark)</option>
             <option value="single">Etikettskrivare (100 × 50 mm)</option>
           </Select>

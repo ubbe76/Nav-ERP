@@ -23,7 +23,22 @@ export type LabelInput =
   | { kind: "location"; labelCode: string; name: string; warehouseName: string | null }
   // Batch- and serienummeretiketter (#8 etapp 2): the number is the code a
   // scan resolves; the article it belongs to is the caption.
-  | { kind: "batch"; sort: "batch" | "serial"; number: string; articleNumber: string; name: string };
+  | { kind: "batch"; sort: "batch" | "serial"; number: string; articleNumber: string; name: string }
+  // Inleveransetikett: what one receipt put on the shelf. The article number
+  // is the code (as the article label); the rest is pre-formatted by the
+  // purchase service — quantity with the row's unit, the received Stockholm
+  // day, the place (null = no stock row) and "Batch …"/"Serienummer …".
+  | {
+      kind: "receipt";
+      articleNumber: string;
+      name: string;
+      quantity: string;
+      orderNumber: string;
+      supplierName: string;
+      receivedOn: string;
+      location: string | null;
+      tracking: string | null;
+    };
 
 const MM = 72 / 25.4;
 const A4 = { width: 595.28, height: 841.89 };
@@ -38,7 +53,73 @@ interface Box {
   height: number;
 }
 
+// The inleveransetikett: the article number with the quantity beside it,
+// the name, then the receipt's facts in small lines and the code at the
+// bottom — Code 128 across, else a QR square in the bottom right corner. The
+// number, quantity and name lie above the square and keep the full width;
+// only the small lines run beside it. Every line is one line with an
+// ellipsis, so nothing can push past the label.
+function drawReceiptLabel(doc: PDFKit.PDFDocument, label: Extract<LabelInput, { kind: "receipt" }>, box: Box, large: boolean) {
+  const pad = large ? 10 : 7;
+  const inner = { x: box.x + pad, y: box.y + pad, width: box.width - 2 * pad, height: box.height - 2 * pad };
+  const titleSize = large ? 18 : 12;
+  const nameSize = large ? 10 : 7.5;
+  const smallSize = large ? 8.5 : 6.5;
+  const codeHeight = large ? 34 : 22;
+
+  const barWidth = code128Width(label.articleNumber, inner.width);
+  // The square starts below the number and the name (31 resp. 38 pt down).
+  const qrSize = barWidth === null ? (large ? 84 : 60) : 0;
+  const factWidth = barWidth === null ? inner.width - qrSize - 6 : inner.width;
+  const line = (text: string, y: number, size: number, width = inner.width) => {
+    doc.text(text, inner.x, y, { width, height: size * 1.2, ellipsis: true, lineBreak: false });
+  };
+
+  let y = inner.y;
+  // Article number left, quantity right on the same line — the quantity
+  // keeps its width (at most 45 %), the number takes an ellipsis.
+  doc.font(FONT_BOLD).fontSize(titleSize).fillColor("#000000");
+  // A box exactly as wide as the text makes pdfkit wrap the unit away — a
+  // couple of points of slack keep "400 st" whole.
+  const quantityWidth = Math.min(doc.widthOfString(label.quantity) + 2, inner.width * 0.45);
+  line(label.articleNumber, y, titleSize, inner.width - quantityWidth - 6);
+  doc.text(label.quantity, inner.x + inner.width - quantityWidth, y, {
+    width: quantityWidth,
+    height: titleSize * 1.2,
+    ellipsis: true,
+    lineBreak: false,
+    align: "right",
+  });
+  y += titleSize * 1.15;
+  doc.font(FONT).fontSize(nameSize);
+  line(label.name, y, nameSize);
+  y += nameSize * 1.25;
+  doc.fontSize(smallSize);
+  const facts = [
+    `${label.orderNumber} · ${label.supplierName}`,
+    `Mottagen ${label.receivedOn}${label.location ? ` · ${label.location}` : ""}`,
+    ...(label.tracking ? [label.tracking] : []),
+  ];
+  for (const fact of facts) {
+    line(fact, y, smallSize, factWidth);
+    y += smallSize * 1.2;
+  }
+
+  if (barWidth !== null) {
+    const codeY = inner.y + inner.height - codeHeight - (smallSize + 2);
+    drawCode128(doc, label.articleNumber, inner.x + (inner.width - barWidth) / 2, codeY, inner.width, codeHeight);
+    doc.font(FONT).fontSize(smallSize);
+    doc.text(label.articleNumber, inner.x, codeY + codeHeight + 1, { width: inner.width, align: "center", lineBreak: false });
+  } else {
+    drawQrCode(doc, label.articleNumber, inner.x + inner.width - qrSize, inner.y + inner.height - qrSize, qrSize);
+  }
+}
+
 function drawLabel(doc: PDFKit.PDFDocument, label: LabelInput, box: Box, large: boolean) {
+  if (label.kind === "receipt") {
+    drawReceiptLabel(doc, label, box, large);
+    return;
+  }
   const pad = large ? 10 : 7;
   const inner = { x: box.x + pad, y: box.y + pad, width: box.width - 2 * pad, height: box.height - 2 * pad };
   const titleSize = large ? 20 : 13;

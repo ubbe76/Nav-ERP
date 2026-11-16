@@ -50,6 +50,8 @@ import { HelpLink } from "../ui/HelpLink";
 import { FormError } from "../ui/Form";
 import styles from "./GoodsReceiptPageClient.module.css";
 import { formatStockholmDate, stockholmToday } from "../../lib/date";
+import type { ReceiptPrintEntry } from "../../lib/receiptPrint";
+import { useReceiptPrint } from "./useReceiptPrint";
 
 const RECEIVABLE: PurchaseOrderStatus[] = ["confirmed", "partially_received"];
 const NO_COUNT: OrderCountState = { counting: false, quantities: {} };
@@ -158,6 +160,10 @@ export function GoodsReceiptPageClient({
   const nextPartKey = useRef(1);
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState<string | null>(null);
+  // Etikett och pallkort vid inleverans: what the last Rapportera received,
+  // printable from the buttons under the notice until the next order or run.
+  const [printRun, setPrintRun] = useState<{ orderId: string; entries: ReceiptPrintEntry[] } | null>(null);
+  const receiptPrint = useReceiptPrint(printRun?.orderId ?? "");
   const [lastRowId, setLastRowId] = useState<string | null>(null);
   // An article scanned before an order was chosen that is open on several
   // orders: the list narrows to them until one is picked.
@@ -205,6 +211,7 @@ export function GoodsReceiptPageClient({
     awaitingSerialRow.current = null;
     setRowErrors({});
     setDone(null);
+    setPrintRun(null);
     setLastRowId(null);
     setArticleOrders(null);
     router.replace(`/inkop/inleverans?order=${id}`);
@@ -269,6 +276,7 @@ export function GoodsReceiptPageClient({
       quantities: { ...countRef.current.quantities, [rowId]: String(toUnitQuantity(list.length, row.unitFactor)) },
     });
     setDone(null);
+    setPrintRun(null);
     const styck = Number(row.quantityOrdered) - Number(row.quantityReceived);
     const text = `${label}: serienummer ${serialNumber} — ${list.length} av ${styck}`;
     if (list.length > styck) warn(`${text} — mer än restantalet`);
@@ -325,6 +333,7 @@ export function GoodsReceiptPageClient({
     setCount({ counting: true, quantities: { ...countRef.current.quantities, [row.id]: countRef.current.quantities[row.id] ?? "0" } });
     setLastRowId(row.id);
     setDone(null);
+    setPrintRun(null);
     ok(`${articleLabel(article)}: batch ${fields.batchNumber} — ${placement.quantity} ${row.unitCode ?? ""} i egen batchdel`.replace("  ", " "));
   }
 
@@ -334,6 +343,7 @@ export function GoodsReceiptPageClient({
     setCount(outcome.state);
     setLastRowId(outcome.rowId);
     setDone(null);
+    setPrintRun(null);
     const row = latest.current.openRows.find((r) => r.id === outcome.rowId);
     const text = `${articleLabel(article)}: ${outcome.quantity} av ${outcome.remaining} ${row?.unitCode ?? ""}`.trim() + (note ? ` — ${note}` : "");
     if (outcome.over) warn(`${text} — mer än restantalet`);
@@ -467,6 +477,7 @@ export function GoodsReceiptPageClient({
   async function report() {
     setRowErrors({});
     setDone(null);
+    setPrintRun(null);
     setPending(true);
     const errors: Record<string, string> = {};
     let booked = 0;
@@ -479,6 +490,9 @@ export function GoodsReceiptPageClient({
     let reportedOperations = 0;
     // The receipts this run booked — the notice's Ångra takes them back.
     const receiptIds: string[] = [];
+    // … and what the run received, for Etiketter and Pallkort (a service row
+    // receives no goods).
+    const printEntries: ReceiptPrintEntry[] = [];
     const orderId = selectedId;
     const orderNumber = order?.orderNumber ?? "";
     // Extra batch parts a run booked, removed from the form afterwards so a
@@ -510,7 +524,12 @@ export function GoodsReceiptPageClient({
       for (const part of parts) {
         try {
           const result = await runWithShortageConfirm((allowMaterialShortage) =>
-            apiFetch<{ operationReport?: { ok: boolean; message?: string }; receiptId?: string; receiptIds?: string[] }>(
+            apiFetch<{
+              operationReport?: { ok: boolean; message?: string };
+              receiptId?: string;
+              receiptIds?: string[];
+              batchNumber?: string | null;
+            }>(
               `/api/v1/purchase-orders/${selectedId}/rows/${row.id}/receive`,
               {
                 method: "POST",
@@ -540,8 +559,24 @@ export function GoodsReceiptPageClient({
           if (part.extraIndex === null) bookedRowIds.push(row.id);
           else bookedParts[row.id] = (bookedParts[row.id] ?? 0) + 1;
           // A serial row books one receipt per styck (receiptIds), the others one.
-          if (result.receiptIds && result.receiptIds.length > 0) receiptIds.push(...result.receiptIds);
-          else if (result.receiptId) receiptIds.push(result.receiptId);
+          const partReceipts =
+            result.receiptIds && result.receiptIds.length > 0 ? result.receiptIds : result.receiptId ? [result.receiptId] : [];
+          receiptIds.push(...partReceipts);
+          if (partReceipts.length > 0 && row.articleType !== "service") {
+            printEntries.push({
+              key: partReceipts[0]!,
+              receiptIds: partReceipts,
+              articleNumber: row.articleNumber,
+              articleName: row.articleName,
+              quantity: part.quantity,
+              unit: row.unitCode,
+              detail: serialRow
+                ? `${partReceipts.length} serienummer`
+                : result.batchNumber
+                  ? `Batch ${result.batchNumber}`
+                  : null,
+            });
+          }
           // Lego row: the receipt auto-reports the linked TO operation. The
           // receipt itself stands even when the report fails (e.g. the TO is
           // already done) — surface that as a row warning, not a failure.
@@ -578,6 +613,7 @@ export function GoodsReceiptPageClient({
       });
     }
     setRowErrors(errors);
+    if (printEntries.length > 0 && orderId) setPrintRun({ orderId, entries: printEntries });
     if (booked > 0 && Object.keys(errors).length === 0) {
       setDone(
         `${booked} rad${booked === 1 ? "" : "er"} inlevererade` +
@@ -622,6 +658,7 @@ export function GoodsReceiptPageClient({
                     );
                   }
                   setDone(null);
+                  setPrintRun(null);
                   router.refresh();
                   return receiptIds.length === 1 ? "Inleveransen är ångrad." : `${receiptIds.length} inleveranser är ångrade.`;
                 },
@@ -721,6 +758,18 @@ export function GoodsReceiptPageClient({
         <p style={{ marginTop: 0 }}>Ordern har legorader — de inlevereras alltid per i dag.</p>
       )}
       {done && <p style={{ fontWeight: 600, marginTop: 0 }}>{done}</p>}
+      {printRun && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "0 0 12px" }}>
+          <span>Skriv ut för det som togs emot:</span>
+          <Button type="button" size="small" variant="secondary" onClick={() => receiptPrint.openLabels(printRun.entries)}>
+            Etiketter
+          </Button>
+          <Button type="button" size="small" variant="secondary" onClick={() => receiptPrint.openPalletCard(printRun.entries)}>
+            Pallkort
+          </Button>
+        </div>
+      )}
+      {receiptPrint.dialogs}
 
       {!order && (
         <div className={styles.openOrders}>

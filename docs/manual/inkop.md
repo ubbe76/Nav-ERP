@@ -291,6 +291,8 @@ Sektionen **Inleveranser** på inköpsorderkortet listar varje inleverans som gj
 - Radens mottagna antal minskar och orderstatusen räknas om: **Mottagen** blir **Delvis mottagen**, och när inget längre är mottaget blir ordern **Bekräftad** igen.
 - På en **lego-rad** ångras samtidigt rapporteringen som inleveransen gjorde på tillverkningsordern: operationens antal dras av, materialet läggs tillbaka i lager och färdiga varor från en sista operation tas ut ur lager igen. Allt sker på en gång, eller inte alls. Är tillverkningsordern inte längre öppen (t.ex. **Stängd**) kan inleveransen inte ångras.
 
+Knapparna **Etiketter** och **Pallkort** till höger om rubriken **Inleveranser** skriver ut inleveransetiketter och pallkort för alla inleveranser som inte är ångrade. Radens **⋯**-meny har **Skriv ut etikett** och **Skriv ut pallkort** för just den inleveransen. Etiketter och pallkort beskrivs under [Etiketter och pallkort vid inleverans](#etiketter-och-pallkort-vid-inleverans).
+
 En ångrad inleverans ligger kvar i listan, överstruken och märkt **Ångrad** med tid och vem som ångrade. Ångra kräver samma behörighet som att ta emot leverans (Inköp) och går bara när ordern är **Delvis mottagen** eller **Mottagen**, inte när den är stängd. När allt på en rad är ångrat kan raden tas bort; de ångrade inleveranserna ligger då kvar i listan med artikeln **Borttagen rad**. Ångrade inleveranser räknas inte i artikelns **Inleveranslogg**, i lagervärderingens senaste inköpspris eller i leveransprecisionen.
 
 Inleveranser som gjordes innan funktionen fanns (oktober 2026) finns också i listan och kan ångras. Undantaget är lego-inleveranser som gjordes innan tillverkningens rapporteringslogg fanns, eller vars avrapportering misslyckades.
@@ -317,6 +319,27 @@ Sektionen **Historik** längst ner på orderkortet visar orderns egna händelser
 En rad på en **serienummerstyrd** artikel (nummer vid inleverans) har fältet **Skriv eller skanna serienummer** med ett nummer per styck; alla krävs. Varje styck blir ett eget kvitto som kan ångras för sig — se [Serienummer](/hjalp/lager#serienummer). En batchstyrd rad har fältet **Utgångsdatum (valfritt)**. En rad på en **batchstyrd** artikel har även fältet **Batch** (skriv eller skanna leverantörens batchnummer; tomt blir inköpsorderns nummer) och knappen **Dela på flera batcher** för en rad som kommer i flera batcher — se [Batchnummer och spårbarhet](/hjalp/lager#batchnummer-och-sparbarhet).
 
 Enstaka rader kan fortfarande tas emot direkt på inköpsorderkortet med **Ta emot leverans**.
+
+### Etiketter och pallkort vid inleverans
+
+Efter **Rapportera inleverans** visas raden **Skriv ut för det som togs emot:** med knapparna **Etiketter** och **Pallkort**. De gäller det som just togs emot, även när en annan rad gav ett fel. Knapparna försvinner när du väljer en annan order, skannar nästa leverans, rapporterar igen eller ångrar från notisen. Samma knappar finns i sektionen **Inleveranser** på inköpsorderkortet (se [Ångra inleverans](#angra-inleverans)). Rader med en tjänst får ingen etikett.
+
+**Etiketter** öppnar etikettdialogen med samma format som artikeletiketterna: **A4-ark (70 × 37 mm, 24 per ark)** med **Börja på etikett** eller **Etikettskrivare (100 × 50 mm)**, och **Antal per etikett**. Formatet du väljer kommer webbläsaren ihåg till nästa gång. Varje inleverans får en etikett:
+
+- **Artikelnumret** står stort med det mottagna antalet och enheten bredvid. Under dem står benämningen.
+- Under benämningen står **inköpsordern** och **leverantören**, **Mottagen** med datumet och **lagerplatsen**, och **batchen** (med utgångsdatum) eller **serienumret**.
+- Artikelnumret står också som **streckkod** (Code 128) längst ner, så att etiketten kan skannas. Ett artikelnummer som inte kan bli en streckkod (å, ä, ö, eller för långt) får en QR-kod i hörnet.
+
+En serienummerrad får en etikett per serienummer. Lagret skrivs ut framför lagerplatsen bara när **Flera lager** är påslaget.
+
+**Pallkort** öppnar pallkortsdialogen med en ruta per inlevererad rad. Den fungerar som utleveransens: **Totalt antal**, **Antal kolli** och antal per kolli. Med flera rader hoppar **Antal kolli** 0 över raden. Pallkortet har rubriken **PALLKORT** och **INLEVERANS** och skrivs på övre halvan av arket så att det kan vikas. Det visar:
+
+- **Artikelnummer**, **Benämning**, **Antal** och **Kolli 1 av 2**,
+- **Leverantör** och **Inköpsorder**,
+- **Lagerplats** och **Mottagen** (datum och tid, eller bara datumet för en inleverans per ett tidigare datum),
+- **Mottagen av** och, när de finns, **Batch** och **Serienummer**.
+
+Artikelnumret och inköpsordern får en streckkod eller QR-kod efter inställningen **Kod på pallkort** (se [Inställningar](/hjalp/system#installningar)). En serienummerinleverans hamnar på ett kort med numren i rutan **Serienummer**. En ångrad inleverans kan inte skrivas ut.
 
 ### Inleverans per ett tidigare datum
 

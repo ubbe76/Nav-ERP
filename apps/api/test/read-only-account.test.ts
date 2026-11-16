@@ -451,6 +451,10 @@ describe("Endast läsning — the allowlist", () => {
         "POST /api/v1/stock/locations/labels",
         // … and batch- and serienummeretiketter (#8 etapp 2 steg 5).
         "POST /api/v1/stock/batches/labels",
+        // … and inleveransetiketter and pallkort INLEVERANS — POST for the
+        // receipt ids (a serial receive call is one id per styck).
+        "POST /api/v1/purchase-orders/:id/receipts/labels",
+        "POST /api/v1/purchase-orders/:id/receipts/pallet-card",
         // Påslag på offert och order (#16 etapp 3): the header's repricing
         // preview — the save is the header PATCH.
         "POST /api/v1/sales-orders/:id/markups/preview",

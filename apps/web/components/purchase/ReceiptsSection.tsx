@@ -1,12 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
 import { GatedLink } from "../ui/GatedLink";
 import { Button } from "../ui/Button";
 import { FormError } from "../ui/Form";
 import { SectionHeading } from "../ui/SectionHeading";
+import { RowMenu } from "../ui/RowMenu";
+import { useReceiptPrint } from "./useReceiptPrint";
+import { receiptPrintEntry, type ReceiptPrintEntry } from "../../lib/receiptPrint";
 import { apiFetch } from "../../lib/api";
 import { serialListText } from "../../lib/serialInput";
 import { apiErrorMessage } from "../../lib/errorMessages";
@@ -20,7 +23,9 @@ import { formatStockholmDate, formatStockholmDateTime } from "../../lib/date";
 // Inleverans routine), newest first. Ångra inleverans reverses exactly that
 // one receipt — the goods out of stock again (a lego row: the TO report it
 // made), the row's received quantity and the order status; an undone row
-// stays, greyed out. Quantities are shown in the row's unit.
+// stays, greyed out. Quantities are shown in the row's unit. Etiketter and
+// Pallkort (the heading: every live entry; a row's ⋯: that entry) print the
+// inleveransetikett and the pallkort INLEVERANS.
 
 function when(iso: string) {
   return formatStockholmDateTime(iso);
@@ -94,10 +99,16 @@ export function ReceiptsSection({
   const can = useCan();
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const print = useReceiptPrint(orderId);
 
   if (receipts.length === 0) return null;
   const entries = groupReceipts(receipts);
   const rowById = new Map(rows.map((r) => [r.id, r]));
+  // What each entry prints (null: undone, or a service row).
+  const printEntryById = new Map<string, ReceiptPrintEntry | null>(
+    entries.map((e) => [e.id, receiptPrintEntry(e.group ?? [e], e.purchaseOrderRowId ? rowById.get(e.purchaseOrderRowId) : undefined)])
+  );
+  const printable = [...printEntryById.values()].filter((e): e is ReceiptPrintEntry => e !== null);
   // A closed order is finished business; the API refuses it too.
   const canUndo = can(["inkop"]) && (orderStatus === "partially_received" || orderStatus === "received");
 
@@ -149,7 +160,24 @@ export function ReceiptsSection({
 
   return (
     <>
-      <SectionHeading spaced>Inleveranser</SectionHeading>
+      <SectionHeading
+        spaced
+        actions={
+          printable.length > 0 && (
+            <>
+              <Button type="button" size="small" variant="secondary" onClick={() => print.openLabels(printable)}>
+                Etiketter
+              </Button>
+              <Button type="button" size="small" variant="secondary" onClick={() => print.openPalletCard(printable)}>
+                Pallkort
+              </Button>
+            </>
+          )
+        }
+      >
+        Inleveranser
+      </SectionHeading>
+      {print.dialogs}
       <FormError margin="below">{error}</FormError>
       <Table<ReceiptEntry>
         columns={[
@@ -158,7 +186,7 @@ export function ReceiptsSection({
           { key: "quantity", label: "Antal", width: "110px", align: "right" },
           { key: "locationName", label: "Lagerplats", width: "minmax(0, 1fr)" },
           { key: "createdByName", label: "Av", width: "minmax(0, 1fr)" },
-          { key: "id", label: "", width: "170px", align: "right" },
+          { key: "id", label: "", width: "200px", align: "right" },
         ]}
         rows={entries}
         renderCell={(receipt, key) => {
@@ -260,25 +288,45 @@ export function ReceiptsSection({
                   </span>
                 );
               }
-              if (!canUndo) return null;
-              if (group) {
-                return group.filter((r) => r.undoneAt === null).length > 1 ? (
-                  <Button type="button" size="small" variant="secondary" disabled={pendingId !== null} onClick={() => undoGroup(group)}>
-                    {pendingId === receipt.id ? "Ångrar…" : "Ångra alla"}
-                  </Button>
-                ) : null;
+              {
+                const printEntry = printEntryById.get(receipt.id) ?? null;
+                const menu = printEntry && (
+                  <RowMenu
+                    items={[
+                      { label: "Skriv ut etikett", onSelect: () => print.openLabels([printEntry]) },
+                      { label: "Skriv ut pallkort", onSelect: () => print.openPalletCard([printEntry]) },
+                    ]}
+                  />
+                );
+                let undoButton: ReactNode = null;
+                if (canUndo && group) {
+                  undoButton =
+                    group.filter((r) => r.undoneAt === null).length > 1 ? (
+                      <Button type="button" size="small" variant="secondary" disabled={pendingId !== null} onClick={() => undoGroup(group)}>
+                        {pendingId === receipt.id ? "Ångrar…" : "Ångra alla"}
+                      </Button>
+                    ) : null;
+                } else if (canUndo) {
+                  undoButton = (
+                    <Button
+                      type="button"
+                      size="small"
+                      variant="secondary"
+                      disabled={pendingId !== null}
+                      onClick={() => undo(receipt)}
+                    >
+                      {pendingId === receipt.id ? "Ångrar…" : "Ångra"}
+                    </Button>
+                  );
+                }
+                if (!undoButton && !menu) return null;
+                return (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    {undoButton}
+                    {menu}
+                  </span>
+                );
               }
-              return (
-                <Button
-                  type="button"
-                  size="small"
-                  variant="secondary"
-                  disabled={pendingId !== null}
-                  onClick={() => undo(receipt)}
-                >
-                  {pendingId === receipt.id ? "Ångrar…" : "Ångra"}
-                </Button>
-              );
             default:
               return null;
           }

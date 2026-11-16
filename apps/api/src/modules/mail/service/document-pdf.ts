@@ -847,6 +847,21 @@ export type PalletCardPdfInput =
       // FÄRDIGT GODS LEVERERAS TILL — the IO's delivery address, else the
       // company's godsadress, else the company's address (label = name).
       deliverTo: DeliveryAddressBlock;
+    })
+  // Pallkort INLEVERANS (etikett och pallflagga vid inleverans): goes on the
+  // received pallet, internal and always Swedish. Its own grid —
+  // LEVERANTÖR | INKÖPSORDER (coded), LAGERPLATS | MOTTAGEN — and the bottom
+  // row MOTTAGEN AV (`reportedBy`) with the batch and serial cells; no
+  // REFERENS cell, the order number is already on the card.
+  | (PalletCardCommon & {
+      kind: "receipt";
+      supplierName: string;
+      purchaseOrderNumber: string;
+      // The place the goods were put; null (lego, service row) prints "—".
+      location: string | null;
+      // Pre-formatted: the receipt's day and time, or only the day of a
+      // backdated receipt.
+      received: string;
     });
 
 const PAGE_MARGIN = 50;
@@ -2561,7 +2576,9 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.rect(left, cardTop, CONTENT_WIDTH, 20).fill("#000000");
       doc.font(FONT_BOLD).fontSize(10).fillColor("#ffffff");
       doc.text(pc.title, left + pad, cardTop + 5.5, { lineBreak: false });
-      doc.text(card.kind === "final" ? pc.toCustomer : card.kind === "subcontract" ? pc.toSubcontractor : pc.internal, left, cardTop + 5.5, {
+      const band =
+        card.kind === "final" ? pc.toCustomer : card.kind === "subcontract" ? pc.toSubcontractor : card.kind === "receipt" ? pc.receipt : pc.internal;
+      doc.text(band, left, cardTop + 5.5, {
         width: CONTENT_WIDTH - pad,
         align: "right",
         lineBreak: false,
@@ -2727,6 +2744,21 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         thinLine(left + half, y, left + half, y + rowCHeight);
         codedCell(card.orderNumber, pc.ourOrderNumber, left + half, y, half, code);
         y += rowCHeight;
+      } else if (card.kind === "receipt") {
+        // Row B: LEVERANTÖR | INKÖPSORDER (coded, as the other cards' order
+        // numbers). Row C: LAGERPLATS | MOTTAGEN — "—" for a receipt without
+        // a place, so the grid keeps its shape.
+        const rowBHeight = codedCellHeight(code);
+        plainCell(card.supplierName || "—", pc.supplier, left, y, half);
+        thinLine(left + half, y, left + half, y + rowBHeight);
+        codedCell(card.purchaseOrderNumber, pc.purchaseOrder, left + half, y, half, code);
+        y += rowBHeight;
+        thinLine(left, y, right, y);
+        const rowCHeight = codedCellHeight("none");
+        plainCell(card.location || "—", pc.location, left, y, half);
+        thinLine(left + half, y, left + half, y + rowCHeight);
+        plainCell(card.received, pc.received, left + half, y, half);
+        y += rowCHeight;
       } else {
         const rowBHeight = codedCellHeight(code);
         codedCell(card.orderNumber, pc.manufacturingOrder, left, y, half, code);
@@ -2742,10 +2774,16 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       // small grey footer line was easy to miss on the dock. No reporter
       // (the delivery card never names one, a TO card only when known) ⇒
       // two cells instead of three.
+      // The receipt card has its date in the grid (MOTTAGEN) and its order
+      // number coded there, so its bottom row starts with who received.
       const bottomCells: [string, string][] = [
-        [pc.date, formatStockholmDateTime(card.printedAt ?? new Date())],
-        ...(card.reportedBy ? [[card.kind === "subcontract" ? pc.dispatchedBy : pc.reportedBy, card.reportedBy] as [string, string]] : []),
-        [pc.reference, card.reference || "—"],
+        ...(card.kind === "receipt"
+          ? [[pc.receivedBy, card.reportedBy || "—"] as [string, string]]
+          : ([
+              [pc.date, formatStockholmDateTime(card.printedAt ?? new Date())],
+              ...(card.reportedBy ? [[card.kind === "subcontract" ? pc.dispatchedBy : pc.reportedBy, card.reportedBy]] : []),
+              [pc.reference, card.reference || "—"],
+            ] as [string, string][])),
         // Batch (#8): in the bottom row, so the card's height never changes.
         ...(card.batch ? [[pc.batch, card.batch] as [string, string]] : []),
         ...(card.serial ? [[pc.serial, card.serial.text] as [string, string]] : []),

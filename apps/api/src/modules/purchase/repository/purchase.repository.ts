@@ -37,6 +37,7 @@ import {
   suppliers,
   units,
   users,
+  warehouses,
   workCenters,
   type Db,
 } from "@navet/db";
@@ -91,6 +92,7 @@ import { isTrackedArticle, batchTrackedSql, trackingOf } from "../../stock/servi
 import { batchCellQuantity } from "../../stock/repository/batch-balances.js";
 import { assertStockBackdate, noPostingPeriodLocks, type PostingPeriodReader } from "../../stock/repository/backdating.js";
 import { receiptReceivedAt, stockValuedAt } from "../../stock/repository/valued-at.js";
+import { readMultipleWarehouses } from "../../stock/service/warehouse-mode.js";
 import { backdatedInstant } from "../../stock/service/backdating.js";
 import { loadVatCodeBook } from "../../economy/repository/vat-codes.js";
 import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions } from "../../economy/service/dimension-check.js";
@@ -1590,6 +1592,57 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
         .leftJoin(undoer, eq(undoer.id, purchaseReceipts.undoneBy))
         .where(eq(purchaseReceipts.purchaseOrderId, orderId))
         .orderBy(desc(receiptReceivedAt), desc(purchaseReceipts.createdAt), desc(purchaseReceipts.id));
+    },
+
+    // Etikett och pallkort vid inleverans: the listed receipts of one order
+    // with what the label and the card print — the row's article and unit,
+    // the order and supplier, where the goods were put (null = no stock row:
+    // a lego or service row), when they arrived (Bokför per, #19) and the
+    // batch or serial number read through the receipt's own stock row, as
+    // listReceipts. Receipts of another order are simply not found.
+    // `multipleWarehouses` says whether the place is printed with its lager.
+    async findReceiptsForPrint(orderId: string, receiptIds: string[]) {
+      const rowUnits = alias(units, "row_units");
+      const [rows, multipleWarehouses] = await Promise.all([
+        db
+          .select({
+            id: purchaseReceipts.id,
+            purchaseOrderRowId: purchaseReceipts.purchaseOrderRowId,
+            quantity: purchaseReceipts.quantity,
+            receivedAt: receiptReceivedAt,
+            createdAt: purchaseReceipts.createdAt,
+            undoneAt: purchaseReceipts.undoneAt,
+            receivedByName: users.name,
+            orderNumber: purchaseOrders.orderNumber,
+            supplierName: suppliers.name,
+            unitFactor: purchaseOrderRows.unitFactor,
+            unitCode: sql<string | null>`coalesce(${rowUnits.code}, ${units.code})`,
+            articleNumber: articles.articleNumber,
+            articleName: articles.name,
+            locationName: stockLocations.name,
+            warehouseName: warehouses.name,
+            batchNumber: stockBatches.batchNumber,
+            batchKind: stockBatches.kind,
+            expiresOn: stockBatches.expiresOn,
+          })
+          .from(purchaseReceipts)
+          .innerJoin(purchaseOrders, eq(purchaseOrders.id, purchaseReceipts.purchaseOrderId))
+          .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
+          // Only an undone receipt outlives its row (0208) — and an undone
+          // receipt is refused anyway, so a left join keeps it findable.
+          .leftJoin(purchaseOrderRows, eq(purchaseOrderRows.id, purchaseReceipts.purchaseOrderRowId))
+          .leftJoin(articles, eq(articles.id, purchaseOrderRows.articleId))
+          .leftJoin(units, eq(units.id, articles.unitId))
+          .leftJoin(rowUnits, eq(rowUnits.id, purchaseOrderRows.unitId))
+          .leftJoin(stockLocations, eq(stockLocations.id, purchaseReceipts.locationId))
+          .leftJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
+          .leftJoin(stockTransactions, eq(stockTransactions.id, purchaseReceipts.stockTransactionId))
+          .leftJoin(stockBatches, eq(stockBatches.id, stockTransactions.batchId))
+          .leftJoin(users, eq(users.id, purchaseReceipts.createdBy))
+          .where(and(eq(purchaseReceipts.purchaseOrderId, orderId), inArray(purchaseReceipts.id, receiptIds))),
+        readMultipleWarehouses(db),
+      ]);
+      return { rows, multipleWarehouses };
     },
 
     // Ångra inleverans: reverses exactly what one receipt booked, in one

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { deviationLinkForbidden } from "../../quality/service/deviation-link-access.js";
 import { DeviationLinkNotAllowedError } from "../../quality/service/deviation-errors.js";
-import { articleCardWrite } from "../../auth/middleware/access-rules.js";
+import { articleCardWrite, LABEL_PRINT } from "../../auth/middleware/access-rules.js";
 import {
   createArticleSupplierSchema,
   createContactSchema,
@@ -12,6 +12,8 @@ import {
   createPurchaseOrderRowSchema,
   createPurchaseOrderSchema,
   dispatchPalletCardQuerySchema,
+  receiptLabelsSchema,
+  receiptPalletCardSchema,
   createSupplierSchema,
   idListQuerySchema,
   listGoodsReceiptsQuerySchema,
@@ -59,6 +61,7 @@ import {
   PurchaseOrderRowNotFoundError,
   PurchaseReceiptAlreadyUndoneError,
   PurchaseReceiptManufacturingOrderLockedError,
+  PurchaseReceiptRowsDifferError,
   PurchaseReceiptNotFoundError,
   PurchaseReceiptStockMissingError,
   PurchaseReceiptBackdateLegoError,
@@ -755,6 +758,53 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
         if (err instanceof PurchaseDispatchNotFoundError) return reply.code(404).send(errorBody(err));
         if (err instanceof PurchaseDispatchRowNotInDispatchError) return reply.code(400).send(errorBody(err));
         if (err instanceof PurchaseDispatchUndoneError) return reply.code(409).send(errorBody(err));
+        throw err;
+      }
+    }
+  );
+
+  // --- Etikett och pallkort vid inleverans ---
+
+  // Inleveransetiketter (A4-ark or etikettskrivare): one label per receipt
+  // and copy. POST for the id list — nothing is written (readOnlySafe), the
+  // labels' rule as the article/lagerplats/batch labels. 404 for a receipt
+  // not on the order, 409 for an undone one.
+  app.post<{ Params: { id: string } }>(
+    "/purchase-orders/:id/receipts/labels",
+    { config: { access: LABEL_PRINT, readOnlySafe: true } },
+    async (req, reply) => {
+      const input = receiptLabelsSchema.parse(req.body);
+      try {
+        const { filename, pdf: content } = await service.receiptLabelsPdf(req.params.id, input);
+        reply.header("Content-Type", "application/pdf");
+        reply.header("Content-Disposition", contentDisposition(filename, "inline"));
+        return reply.send(content);
+      } catch (err) {
+        if (err instanceof PurchaseReceiptNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof PurchaseReceiptAlreadyUndoneError) return reply.code(409).send(errorBody(err));
+        throw err;
+      }
+    }
+  );
+
+  // Pallkort INLEVERANS: { cards: [{ receiptIds, quantities }] } — one card
+  // per kolli quantity. A body (a serial entry lists every number's
+  // receipt), so POST and readOnlySafe like the labels. 400 when one card's
+  // receipts are on different rows.
+  app.post<{ Params: { id: string } }>(
+    "/purchase-orders/:id/receipts/pallet-card",
+    { config: { access: LABEL_PRINT, readOnlySafe: true } },
+    async (req, reply) => {
+      const input = receiptPalletCardSchema.parse(req.body);
+      try {
+        const { filename, pdf: content } = await service.receiptPalletCardPdf(req.params.id, input);
+        reply.header("Content-Type", "application/pdf");
+        reply.header("Content-Disposition", contentDisposition(filename, "inline"));
+        return reply.send(content);
+      } catch (err) {
+        if (err instanceof PurchaseReceiptNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof PurchaseReceiptAlreadyUndoneError) return reply.code(409).send(errorBody(err));
+        if (err instanceof PurchaseReceiptRowsDifferError) return reply.code(400).send(errorBody(err));
         throw err;
       }
     }

@@ -323,3 +323,11 @@ export const batchLabelsSchema = z
   .object({ batchIds: z.array(z.string().uuid()).min(1).max(MAX_LABELS), ...labelPrintFields })
   .refine((d) => d.batchIds.length * d.copies <= MAX_LABELS, `Högst ${MAX_LABELS} etiketter per utskrift`);
 export type BatchLabelsInput = z.infer<typeof batchLabelsSchema>;
+
+// POST /purchase-orders/:id/receipts/labels — inleveransetiketter: one label
+// per receipt (purchase_receipts row) and copy, in the order the ids are
+// sent. A serial receipt is one styck, so its numbers get one label each.
+export const receiptLabelsSchema = z
+  .object({ receiptIds: z.array(z.string().uuid()).min(1).max(MAX_LABELS), ...labelPrintFields })
+  .refine((d) => d.receiptIds.length * d.copies <= MAX_LABELS, `Högst ${MAX_LABELS} etiketter per utskrift`);
+export type ReceiptLabelsInput = z.infer<typeof receiptLabelsSchema>;

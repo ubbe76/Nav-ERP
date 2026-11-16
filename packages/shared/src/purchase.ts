@@ -363,6 +363,25 @@ export const dispatchPalletCardQuerySchema = z.object({
 });
 export type DispatchPalletCardQuery = z.infer<typeof dispatchPalletCardQuerySchema>;
 
+// Pallkort INLEVERANS (POST /purchase-orders/:id/receipts/pallet-card): one
+// entry per received row — `receiptIds` is one receipt, or the serial
+// receipts of one receive call (one per styck, all on the same row) — and one
+// card per listed kolli quantity, in the row's unit. A body rather than the
+// other cards' `?row=` query: a serial entry can carry up to 1 000 ids. The
+// kolli are never checked against the received total (as the other cards).
+export const receiptPalletCardSchema = z.object({
+  cards: z
+    .array(
+      z.object({
+        receiptIds: z.array(z.string().uuid()).min(1).max(1000),
+        quantities: z.array(blankSafe(z.coerce.number().min(numericStep(4)).max(numericMax(14, 4)))).min(1).max(50),
+      })
+    )
+    .min(1)
+    .max(200),
+});
+export type ReceiptPalletCardInput = z.infer<typeof receiptPalletCardSchema>;
+
 // Manual status override — any status, any direction, no transition guard.
 // Bypasses the state machine on purpose (Monitor-style); never books stock.
 export const setPurchaseOrderStatusSchema = z.object({
