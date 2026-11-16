@@ -28,8 +28,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — otydliga fel, texter och småbeteenden
 
-- [ ] **Importens igenkänning:** kundens/leverantörens adressmall utan Adressnamn och Förvald (bara nummer + Adressrad 1/Postnummer/Stad) känns igen som kund-/leverantörsfil och skriver adressen över motpartens egen — tvetydig mot kundmallen, så den rättades inte i importgranskningen (guiden visar typen före commit).
-
 ### Låga — layout
 
 ### Låga — fel i manualen
@@ -54,7 +52,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Testluckor
 
-- [ ] **Frakt:** racetesterna i shipping-booking/invoice-freight bygger på fasta sömnar — polla om de flagnar; "ny försändelse 14:50 → första Hämta priser" bara testad på ren nivå; avbokning efter avbokning i Sendifys eget UI inte provad mot sandlådan.
+- [ ] **Frakt:** "ny försändelse 14:50 → första Hämta priser" bara testad på ren nivå; avbokning efter avbokning i Sendifys eget UI inte provad mot sandlådan.
 - [ ] **Konfigurator:** inga komponenttester (mallredigeringen, modalens PATCH) — repot saknar en testmiljö för React-komponenter (jsdom + Testing Library); de rena delarna (`selectionFromRaw`/`rawFromSelection`) är testade.
 - [ ] **Artikelöversikten:** `toBeCloseTo` i invarianttestet om bråktal någonsin används.
 

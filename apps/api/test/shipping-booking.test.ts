@@ -42,12 +42,8 @@ beforeEach(async () => {
   Object.assign(fake.state, {
     prices: SANDBOX_PRICES.map((p) => ({ ...p })),
     expiresInMs: 60 * 60 * 1000,
-    createDelayMs: 0,
-    ratesDelayMs: 0,
     bookError: null,
-    bookDelayMs: 0,
     cancelError: null,
-    cancelDelayMs: 0,
     documentError: null,
     documentTypes: ["label", "waybill"],
     round: 0,
@@ -56,7 +52,10 @@ beforeEach(async () => {
     trackingError: null,
   });
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  fake.releaseAll();
+});
 afterAll(resetShipping);
 
 const count = (method: string) => fake.calls.filter((c) => c.method === method).length;
@@ -104,13 +103,14 @@ describe("priser", () => {
 
   it("drops prices quoted for parcels that were edited while the broker was answering", async () => {
     const { shipment } = await draft();
-    fake.state.ratesDelayMs = 200;
+    const broker = fake.hold("getRates");
     const fetching = service.fetchRates(shipment.id);
     // The broker call is in flight (no lock held): another user saves new kollin.
-    while (count("getRates") === 0) await new Promise((r) => setTimeout(r, 5));
+    await fake.reached("getRates");
     await service.replaceParcels(shipment.id, [
       { parcelKind: "pallet", lengthCm: 120, widthCm: 80, heightCm: 100, weightKg: 200, quantity: 1, stackable: false, loadingMeters: null, description: null },
     ]);
+    broker.release();
     await expect(fetching).rejects.toBeInstanceOf(FreightShipmentChangedError);
     // The stale quote (for the old parcels) must not be stored — the user has to fetch again.
     expect((await service.get(shipment.id)).rates).toBeNull();
@@ -154,14 +154,14 @@ describe("priser", () => {
     // between our read and the save of the broker id — that save must not
     // mask the edit.
     const { shipment } = await draft();
-    fake.state.createDelayMs = 200;
+    const broker = fake.hold("createShipment");
     const fetching = service.fetchRates(shipment.id);
-    while (count("createShipment") === 0) await new Promise((r) => setTimeout(r, 5));
+    await fake.reached("createShipment");
     await service.update(shipment.id, { recipientCity: "Malmö" }, null);
+    broker.release();
     await expect(fetching).rejects.toBeInstanceOf(FreightShipmentChangedError);
     expect((await service.get(shipment.id)).rates).toBeNull();
     // The broker's copy is still remembered — the next fetch updates it instead of creating another.
-    fake.state.createDelayMs = 0;
     await service.fetchRates(shipment.id);
     expect(count("createShipment")).toBe(1);
     expect(count("updateShipment")).toBe(1);
@@ -256,13 +256,14 @@ describe("boka", () => {
   it("keeps a manual customer price typed while the carrier call is in flight", async () => {
     const { shipment } = await draft();
     const rates = await service.fetchRates(shipment.id);
-    fake.state.bookDelayMs = 200;
+    const broker = fake.hold("book");
     const booking = service.book(shipment.id, { rateId: dhl(rates).id }, null);
     // Wait until the broker call is in flight: the reservation is held and
     // a price-only PATCH is still allowed.
-    while (count("book") === 0) await new Promise((r) => setTimeout(r, 5));
+    await fake.reached("book");
     const during = await service.update(shipment.id, { customerPrice: 777 }, null);
     expect(during).toMatchObject({ customerPrice: 777, customerPriceManual: true, bookingInProgress: true });
+    broker.release();
     const { shipment: booked } = await booking;
     expect(booked).toMatchObject({ status: "booked", carrierPrice: 412.4, customerPrice: 777, customerPriceManual: true });
   });
@@ -312,11 +313,16 @@ describe("boka", () => {
   it("books only once when Boka is clicked twice at the same time", async () => {
     const { shipment } = await draft();
     const rates = await service.fetchRates(shipment.id);
-    fake.state.bookDelayMs = 200;
-    const results = await Promise.allSettled([
+    const broker = fake.hold("book");
+    const attempts = [
       service.book(shipment.id, { rateId: dhl(rates).id }, null),
       service.book(shipment.id, { rateId: dhl(rates).id }, null),
-    ]);
+    ];
+    // One click reserves and is held at the broker, so the first to settle
+    // is the other one — refused by the reservation, whatever the timing.
+    await Promise.race(attempts.map((attempt) => attempt.catch(() => undefined)));
+    broker.release();
+    const results = await Promise.allSettled(attempts);
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     const rejected = results.find((r) => r.status === "rejected") as PromiseRejectedResult;
     expect(rejected.reason).toBeInstanceOf(FreightBookingInProgressError);
@@ -334,13 +340,14 @@ describe("boka", () => {
   it("a booker whose reservation was taken over neither marks nor frees the newer one", async () => {
     const { shipment } = await draft();
     const rates = await service.fetchRates(shipment.id);
-    fake.state.bookDelayMs = 200;
+    const broker = fake.hold("book");
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const first = service.book(shipment.id, { rateId: dhl(rates).id }, null);
-    await new Promise((r) => setTimeout(r, 50));
+    await fake.reached("book");
     // Another booking took the (by then stale) reservation over meanwhile.
     const takeover = new Date(Date.now() + 1000);
     await db.update(shipments).set({ bookingStartedAt: takeover }).where(eq(shipments.id, shipment.id));
+    broker.release();
     await expect(first).rejects.toBeInstanceOf(FreightBookingTakenOverError);
     const [row] = await db.select().from(shipments).where(eq(shipments.id, shipment.id));
     expect(row!.status).toBe("draft");
@@ -356,12 +363,13 @@ describe("boka", () => {
   it("a failed booking does not free a reservation another booker took over", async () => {
     const { shipment } = await draft();
     const rates = await service.fetchRates(shipment.id);
-    fake.state.bookDelayMs = 200;
+    const broker = fake.hold("book");
     fake.state.bookError = refused("Ogiltig token");
     const first = service.book(shipment.id, { rateId: dhl(rates).id }, null);
-    await new Promise((r) => setTimeout(r, 50));
+    await fake.reached("book");
     const takeover = new Date(Date.now() + 1000);
     await db.update(shipments).set({ bookingStartedAt: takeover }).where(eq(shipments.id, shipment.id));
+    broker.release();
     await expect(first).rejects.toThrow("Ogiltig token");
     const [row] = await db.select().from(shipments).where(eq(shipments.id, shipment.id));
     expect(row!.bookingStartedAt?.getTime()).toBe(takeover.getTime());

@@ -97,7 +97,8 @@ beforeEach(async () => {
   await setupPostingBaseline();
   await enableFreight();
   fake.calls.length = 0;
-  Object.assign(fake.state, { cancelError: null, cancelDelayMs: 0 });
+  Object.assign(fake.state, { cancelError: null });
+  fake.releaseAll();
   biller = (
     await authRepo.create({
       email: `freight-${crypto.randomUUID()}@example.com`,
@@ -462,12 +463,14 @@ describe("avboka med frakten på en faktura", () => {
   it("refuses a freight row while the cancellation is at Sendify", async () => {
     const { customer, delivery } = await deliveredOrder();
     const s = await bookedShipment(customer.id, delivery.deliveryId);
-    fake.state.cancelDelayMs = 200;
+    const broker = fake.hold("cancel");
     const cancelling = shippingService.cancel(s.id, null);
-    await new Promise((r) => setTimeout(r, 50));
+    // At Sendify: the reservation is committed before the broker is called.
+    await fake.reached("cancel");
     await expect(invoiceService.create({ customerId: customer.id, rows: [freightRow(s.id)] }, biller)).rejects.toBeInstanceOf(
       ShipmentNotBillableError
     );
+    broker.release();
     expect((await cancelling).status).toBe("cancelled");
   });
 

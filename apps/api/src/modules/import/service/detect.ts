@@ -110,6 +110,25 @@ const isContactFile = (present: Set<string>, headings: string[]) =>
 // with both Förvald and a bare Adressrad 1.
 const CUSTOMER_DELIVERY_ADDRESS_HEADINGS = ["leveransadressnamn", "adressnamn"];
 
+// The delivery address templates' own address headings. The customer and
+// supplier templates say Adress and Postort, and Monitor's exports put the
+// block name first ("Postadress – Adressrad 1"), so a bare Adressrad 1 or
+// Stad comes from an address template. With Adressnamn and Förvald dropped
+// (the manual says unused columns may go) the template was read as a
+// customer or supplier file and wrote the address over the partner's own;
+// a file that maps nothing but the number and an address is now an address
+// file — the safer reading, as an added delivery address overwrites nothing.
+// A hand-made customer file with Namn (or any other field) stays a customer
+// file.
+const ADDRESS_TEMPLATE_HEADINGS = ["adressrad1", "stad"];
+const ADDRESS_FIELDS = new Set(["address", "address2", "address3", "postalCode", "city", "country"]);
+function isBareAddressFile(present: Set<string>, mapped: (string | null)[], keyField: string): boolean {
+  return (
+    ADDRESS_TEMPLATE_HEADINGS.some((heading) => present.has(heading)) &&
+    mapped.every((field) => field === null || field === keyField || ADDRESS_FIELDS.has(field))
+  );
+}
+
 function detectCustomerFile(present: Set<string>, headers: string[]): ImportEntity | null {
   if (!CUSTOMER_KEY_HEADINGS.some((heading) => present.has(heading)) || present.has("artikelnummer")) return null;
   if (isContactFile(present, CUSTOMER_CONTACT_HEADINGS)) return "customerContacts";
@@ -123,6 +142,7 @@ function detectCustomerFile(present: Set<string>, headers: string[]): ImportEnti
   // number maps — Besöksadress (Nav has no visiting address) maps nothing
   // and stays unrecognised instead of updating every customer with nothing.
   const mapped = Object.values(suggestCustomerMapping(headers));
+  if (isBareAddressFile(present, mapped, "customerNumber")) return "customerDeliveryAddresses";
   return mapped.some((field) => field !== null && field !== "customerNumber") ? "customers" : null;
 }
 
@@ -153,9 +173,11 @@ function detectSupplierFile(present: Set<string>, headers: string[]): ImportEnti
   if (NOT_SUPPLIER_HEADINGS.some((heading) => present.has(heading))) return null;
   if (isContactFile(present, SUPPLIER_CONTACT_HEADINGS)) return "supplierContacts";
   if (SUPPLIER_DELIVERY_ADDRESS_HEADINGS.some((heading) => present.has(heading))) return "supplierDeliveryAddresses";
-  // Same rule as the customers: Besöksadress maps nothing but the number and
-  // stays unrecognised.
+  // Same rules as the customers: an address template without Adressnamn is
+  // an address file, and Besöksadress maps nothing but the number and stays
+  // unrecognised.
   const mapped = Object.values(suggestSupplierMapping(headers));
+  if (isBareAddressFile(present, mapped, "supplierNumber")) return "supplierDeliveryAddresses";
   return mapped.some((field) => field !== null && field !== "supplierNumber") ? "suppliers" : null;
 }
 

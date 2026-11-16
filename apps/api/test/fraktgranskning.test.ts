@@ -296,8 +296,8 @@ describe("försändelsen mot fejkleverantören", () => {
     auditEntries.length = 0;
     fake.calls.length = 0;
     Object.assign(fake.state, {
-      prices: SANDBOX_PRICES.map((p) => ({ ...p })), expiresInMs: 60 * 60 * 1000, createDelayMs: 0, ratesDelayMs: 0, ratesError: null,
-      bookError: null, bookDelayMs: 0, documentError: null, documentTypes: ["label", "waybill"], round: 0, created: [],
+      prices: SANDBOX_PRICES.map((p) => ({ ...p })), expiresInMs: 60 * 60 * 1000, ratesError: null,
+      bookError: null, documentError: null, documentTypes: ["label", "waybill"], round: 0, created: [],
     });
   });
   afterEach(() => vi.restoreAllMocks());
