@@ -2,21 +2,31 @@ import { FreightProviderError, type FreightProvider, type ProviderContext, type 
 
 // In-memory FreightProvider for the shipping tests. Every getRates issues
 // FRESH tokens (like Sendify) so a stale token is detectable; `state` lets a
-// test script failures and delays.
+// test script failures.
+//
+// The race tests hold a broker call instead of delaying it: `hold(method)`
+// makes the next calls of that method wait (after they are recorded) until
+// the test releases them, and `reached(method)` waits until such a call has
+// arrived — the reservation is then committed and the call is "at the
+// broker". A fixed delay only worked while the test's own work fitted in it.
+// `releaseAll` (afterEach) frees a hold a failed test left behind.
+export type HeldMethod = "createShipment" | "getRates" | "book" | "cancel";
+export interface FreightHold {
+  release(): void;
+}
 export interface FakeFreight {
   provider: FreightProvider;
   factory: () => FreightProvider;
   calls: { method: string; args: unknown[] }[];
+  hold(method: HeldMethod): FreightHold;
+  reached(method: HeldMethod, count?: number): Promise<void>;
+  releaseAll(): void;
   state: {
     prices: { carrierCode: string; carrierName: string; productName: string; price: number; currency: string }[];
     expiresInMs: number;
-    createDelayMs: number;
-    ratesDelayMs: number;
     ratesError: Error | null;
     bookError: Error | null;
-    bookDelayMs: number;
     cancelError: Error | null;
-    cancelDelayMs: number;
     documentError: Error | null;
     documentTypes: string[];
     round: number;
@@ -37,13 +47,9 @@ export function createFakeFreightProvider(): FakeFreight {
   const state: FakeFreight["state"] = {
     prices: SANDBOX_PRICES.map((p) => ({ ...p })),
     expiresInMs: 60 * 60 * 1000,
-    createDelayMs: 0,
-    ratesDelayMs: 0,
     ratesError: null,
     bookError: null,
-    bookDelayMs: 0,
     cancelError: null,
-    cancelDelayMs: 0,
     documentError: null,
     documentTypes: ["label", "waybill"],
     round: 0,
@@ -53,6 +59,28 @@ export function createFakeFreightProvider(): FakeFreight {
   };
   let nextId = 1;
   const record = (method: string, ...args: unknown[]) => calls.push({ method, args });
+  const holds = new Map<HeldMethod, { gate: Promise<void>; open: () => void }>();
+  const released = async (method: HeldMethod) => {
+    await holds.get(method)?.gate;
+  };
+  const hold = (method: HeldMethod): FreightHold => {
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    holds.set(method, { gate, open });
+    return {
+      release: () => {
+        if (holds.get(method)?.gate === gate) holds.delete(method);
+        open();
+      },
+    };
+  };
+  const reached = async (method: HeldMethod, count = 1) => {
+    while (calls.filter((c) => c.method === method).length < count) await new Promise((r) => setTimeout(r, 2));
+  };
+  const releaseAll = () => {
+    for (const { open } of holds.values()) open();
+    holds.clear();
+  };
 
   const provider: FreightProvider = {
     name: "sendify",
@@ -64,7 +92,7 @@ export function createFakeFreightProvider(): FakeFreight {
     },
     async createShipment(s) {
       record("createShipment", s);
-      if (state.createDelayMs > 0) await new Promise((r) => setTimeout(r, state.createDelayMs));
+      await released("createShipment");
       state.created.push(s);
       return `fake-${nextId++}`;
     },
@@ -77,7 +105,7 @@ export function createFakeFreightProvider(): FakeFreight {
     // Recorded as (remote id, pickup) — the shape the tests read.
     async getRates({ remoteId: id, pickup }) {
       record("getRates", id, pickup);
-      if (state.ratesDelayMs > 0) await new Promise((r) => setTimeout(r, state.ratesDelayMs));
+      await released("getRates");
       if (state.ratesError) throw state.ratesError;
       state.round++;
       const expiresAt = new Date(Date.now() + state.expiresInMs).toISOString();
@@ -94,7 +122,7 @@ export function createFakeFreightProvider(): FakeFreight {
     },
     async book(token) {
       record("book", token);
-      if (state.bookDelayMs > 0) await new Promise((r) => setTimeout(r, state.bookDelayMs));
+      await released("book");
       if (state.bookError) throw state.bookError;
       return { trackingNumber: `TRK-${token}`, documentTypes: state.documentTypes };
     },
@@ -105,7 +133,7 @@ export function createFakeFreightProvider(): FakeFreight {
     },
     async cancel(id) {
       record("cancel", id);
-      if (state.cancelDelayMs > 0) await new Promise((r) => setTimeout(r, state.cancelDelayMs));
+      await released("cancel");
       if (state.cancelError) throw state.cancelError;
     },
     async getTracking(id) {
@@ -114,7 +142,7 @@ export function createFakeFreightProvider(): FakeFreight {
       return state.tracking[id] ?? [];
     },
   };
-  return { provider, factory: () => provider, calls, state };
+  return { provider, factory: () => provider, calls, hold, reached, releaseAll, state };
 }
 
 export const refused = (message: string) => new FreightProviderError(message, "validation");

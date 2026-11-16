@@ -41,10 +41,7 @@ beforeEach(async () => {
   await enableFreight();
   Object.assign(fake.state, {
     prices: SANDBOX_PRICES.map((p) => ({ ...p })),
-    createDelayMs: 0,
-    ratesDelayMs: 0,
     bookError: null,
-    bookDelayMs: 0,
     round: 0,
     created: [],
   });
