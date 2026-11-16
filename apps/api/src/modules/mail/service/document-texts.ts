@@ -220,6 +220,12 @@ export interface DocumentTexts {
     serial: string;
     serialCount: (count: number) => string;
     serialOverflow: (count: number) => string;
+    // Pallkort INLEVERANS (kind "receipt"; always printed in Swedish).
+    receipt: string;
+    supplier: string;
+    location: string;
+    received: string;
+    receivedBy: string;
   };
 
   deviation: {
@@ -428,6 +434,11 @@ const sv: DocumentTexts = {
     serial: "SERIENUMMER",
     serialCount: (count) => `${count} st`,
     serialOverflow: (count) => `${count} st — se följesedel`,
+    receipt: "INLEVERANS",
+    supplier: "LEVERANTÖR",
+    location: "LAGERPLATS",
+    received: "MOTTAGEN",
+    receivedBy: "MOTTAGEN AV",
   },
   deviation: {
     titles: { supplier: "Reklamation", customer: "Reklamationsbesked", internal: "Avvikelserapport" },
@@ -646,6 +657,11 @@ const en: DocumentTexts = {
     serial: "SERIAL NO.",
     serialCount: (count) => `${count} pcs`,
     serialOverflow: (count) => `${count} pcs — see delivery note`,
+    receipt: "GOODS RECEIPT",
+    supplier: "SUPPLIER",
+    location: "LOCATION",
+    received: "RECEIVED",
+    receivedBy: "RECEIVED BY",
   },
   deviation: {
     titles: { supplier: "Complaint", customer: "Complaint notice", internal: "Deviation report" },

@@ -22,6 +22,8 @@ import type {
   CreateDeliveryAddressInput,
   CreatePurchaseDispatchInput,
   DispatchPalletCardRow,
+  ReceiptLabelsInput,
+  ReceiptPalletCardInput,
   CreateInquiryInput,
   CreateInquiryRowInput,
   CreatePurchaseOrderInput,
@@ -67,9 +69,14 @@ import { ArticleNotFoundError, assertPurchasableArticle } from "../../article/se
 import {
   extraDescriptionFor,
   formatArticleAttributes,
+  formatBatchLabel,
+  formatQuantity,
   formatRevisionInfo,
+  formatSerialInfo,
+  formatStockholmDateTime,
   type DocumentSettingsReader,
 } from "../../mail/service/document-pdf.js";
+import { renderLabelsPdf, type LabelInput } from "../../mail/service/label-pdf.js";
 import { isForeignKeyViolation, isUniqueViolation, isCheckViolation } from "../../system/service/db-errors.js";
 import type {
   SupplierDeliveryDateQuery,
@@ -82,6 +89,7 @@ import {
   deliveryHolidayWindow,
   deliverySummary,
   effectiveDeliverySettings,
+  stockholmDateOf,
   stockholmToday,
   suggestPurchaseDeliveryDate,
 } from "../../system/service/delivery-days.js";
@@ -381,6 +389,15 @@ export class PurchaseDispatchRowNotInDispatchError extends Error {
   constructor(id: string) {
     super(`Dispatch row ${id} is not on this dispatch`);
     this.name = "PurchaseDispatchRowNotInDispatchError";
+  }
+}
+
+// Pallkort INLEVERANS: the receipts of one card must be on the same row (one
+// receipt, or the serial receipts of one receive call).
+export class PurchaseReceiptRowsDifferError extends Error {
+  constructor() {
+    super("The receipts of one pallet card must be on the same order row");
+    this.name = "PurchaseReceiptRowsDifferError";
   }
 }
 
@@ -856,6 +873,30 @@ export function createPurchaseService(
       ? { address: company.deliveryAddress, postalCode: company.deliveryPostalCode, city: company.deliveryCity }
       : { address: company?.address ?? "", postalCode: company?.postalCode ?? null, city: company?.city ?? null };
     return { label: company?.name ?? "", ...goods, country: "SE" };
+  }
+
+  // Etikett och pallkort vid inleverans: every listed receipt found on the
+  // order (404 for the first that is not) and none undone (409 — its goods
+  // went out again). `place` prints the receipt's place as the other
+  // printouts do: with its lager only when Flera lager is on.
+  async function receiptsForPrint(orderId: string, receiptIds: string[]) {
+    const { rows, multipleWarehouses } = await repo.findReceiptsForPrint(orderId, [...new Set(receiptIds)]);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    for (const id of receiptIds) {
+      const receipt = byId.get(id);
+      if (!receipt) throw new PurchaseReceiptNotFoundError(id);
+      if (receipt.undoneAt) throw new PurchaseReceiptAlreadyUndoneError();
+    }
+    type PrintReceipt = (typeof rows)[number];
+    const place = (r: PrintReceipt) =>
+      r.locationName === null ? null : multipleWarehouses && r.warehouseName ? `${r.warehouseName} — ${r.locationName}` : r.locationName;
+    return { byId, orderNumber: rows[0]!.orderNumber, place };
+  }
+
+  // "400 st" — the receipt's base quantity in the row's unit.
+  function receiptQuantityText(r: { quantity: string; unitFactor: string | null; unitCode: string | null }) {
+    const quantity = formatQuantity(toUnitQuantity(Number(r.quantity), r.unitFactor));
+    return r.unitCode ? `${quantity} ${r.unitCode}` : quantity;
   }
 
   async function renderPurchaseOrderPdf(
@@ -2149,6 +2190,96 @@ export function createPurchaseService(
       }
       const content = await pdf.renderPalletCard(cards);
       return { pdf: content, filename: texts.filenames.palletCard(dispatch.orderNumber) };
+    },
+
+    // Etiketter vid inleverans: one label per receipt and copy, in the order
+    // the ids are sent — the article number as the code (what a scan
+    // resolves), the received quantity in the row's unit, the order and
+    // supplier, the day the goods arrived, the place and the batch or serial
+    // number. An unknown or foreign receipt ⇒ 404, an undone one ⇒ 409
+    // (nothing of it is in stock).
+    async receiptLabelsPdf(orderId: string, input: ReceiptLabelsInput) {
+      const { byId, orderNumber, place } = await receiptsForPrint(orderId, input.receiptIds);
+      const labels: LabelInput[] = [];
+      for (const id of input.receiptIds) {
+        const r = byId.get(id)!;
+        const label: LabelInput = {
+          kind: "receipt",
+          articleNumber: r.articleNumber ?? "",
+          name: r.articleName ?? "",
+          quantity: receiptQuantityText(r),
+          orderNumber: r.orderNumber,
+          supplierName: r.supplierName,
+          receivedOn: stockholmDateOf(r.receivedAt),
+          location: place(r),
+          tracking:
+            r.batchNumber === null
+              ? null
+              : r.batchKind === "serial"
+                ? `Serienummer ${r.batchNumber}`
+                : `Batch ${formatBatchLabel(r.batchNumber, r.expiresOn)}`,
+        };
+        for (let i = 0; i < input.copies; i += 1) labels.push(label);
+      }
+      const content = await renderLabelsPdf(labels, input.format, input.start);
+      return { pdf: content, filename: `inleveransetiketter-${orderNumber}.pdf` };
+    },
+
+    // Pallkort INLEVERANS: one card page per kolli, kind "receipt" — internal,
+    // always Swedish. Each entry is one received row: its receipts (one, or a
+    // serial receive call's) must share the row (400 otherwise), and each
+    // listed quantity is a kolli in the row's unit. Kod på pallkort is the
+    // system setting, as on the subcontractor's card.
+    async receiptPalletCardPdf(orderId: string, input: ReceiptPalletCardInput) {
+      const { byId, orderNumber, place } = await receiptsForPrint(
+        orderId,
+        input.cards.flatMap((c) => c.receiptIds)
+      );
+      const { palletCardCode: code } = await settings.getSettings();
+      const cards: PalletCardPdfInput[] = [];
+      for (const entry of input.cards) {
+        const receipts = entry.receiptIds.map((id) => byId.get(id)!);
+        const head = receipts[0]!;
+        if (receipts.some((r) => r.purchaseOrderRowId !== head.purchaseOrderRowId)) throw new PurchaseReceiptRowsDifferError();
+        // A row split over batches may share a card: every distinct batch,
+        // with its utgångsdatum, in the bottom row's BATCH cell.
+        const batches = [
+          ...new Set(
+            receipts
+              .filter((r) => r.batchNumber !== null && r.batchKind !== "serial")
+              .map((r) => formatBatchLabel(r.batchNumber!, r.expiresOn))
+          ),
+        ];
+        const serials = receipts.filter((r) => r.batchKind === "serial" && r.batchNumber !== null).map((r) => r.batchNumber!);
+        const serialText = formatSerialInfo(serials);
+        // A backdated receipt (Bokför per, #19) shows the day it arrived —
+        // its clock (the day's end) means nothing; otherwise when it was booked.
+        const received =
+          head.receivedAt.getTime() === head.createdAt.getTime()
+            ? formatStockholmDateTime(head.createdAt)
+            : stockholmDateOf(head.receivedAt);
+        entry.quantities.forEach((quantity, i) => {
+          cards.push({
+            kind: "receipt",
+            language: "sv",
+            code,
+            articleNumber: head.articleNumber ?? "",
+            articleName: head.articleName,
+            quantity,
+            unit: head.unitCode,
+            parcel: { index: i + 1, count: entry.quantities.length },
+            reportedBy: head.receivedByName,
+            batch: batches.length > 0 ? batches.join(", ") : null,
+            serial: serialText ? { text: serialText, count: serials.length } : null,
+            supplierName: head.supplierName,
+            purchaseOrderNumber: head.orderNumber,
+            location: place(head),
+            received,
+          });
+        });
+      }
+      const content = await pdf.renderPalletCard(cards);
+      return { pdf: content, filename: documentTexts("sv").filenames.palletCard(orderNumber) };
     },
 
     // --- Article supplier catalog (leverantörskatalog per artikel) ---

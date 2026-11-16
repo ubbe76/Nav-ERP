@@ -725,6 +725,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   // Ångra inleverans (IO card). The stock message names both quantities.
   "purchase-receipt-not-found": "Inleveransen finns inte — ladda om sidan.",
   "purchase-receipt-already-undone": "Inleveransen är redan ångrad — ladda om sidan.",
+  "purchase-receipt-rows-differ": "Ett pallkort kan bara gälla inleveranser på samma orderrad.",
   "purchase-receipt-stock-missing": serverMessage("De inlevererade varorna finns inte kvar på lagerplatsen."),
   "purchase-receipt-manufacturing-order-locked":
     "Tillverkningsordern som legoraden hör till är inte längre öppen — inleveransen kan inte ångras.",

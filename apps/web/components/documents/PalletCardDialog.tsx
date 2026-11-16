@@ -10,6 +10,8 @@ import { apiFetch } from "../../lib/api";
 import type { DeliveryRowsResponse } from "../../lib/types";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { round4 } from "../../lib/format";
+import { openPostedPdf } from "../../lib/openPostedPdf";
+import type { ReceiptPrintEntry } from "../../lib/receiptPrint";
 
 // GET /purchase-orders/:id/dispatches/:dispatchId/rows — the delivery's shape
 // (quantities in the row's unit) plus the parcel count saved with the dispatch.
@@ -29,7 +31,10 @@ export type PalletCardTarget =
   | { kind: "delivery"; deliveryId: string }
   // Avsändning lego: one block per dispatched row, kolli prefilled from the
   // parcel count saved with the dispatch.
-  | { kind: "dispatch"; orderId: string; dispatchId: string };
+  | { kind: "dispatch"; orderId: string; dispatchId: string }
+  // Pallkort INLEVERANS: one block per received entry (a receipt, or the
+  // serial receipts of one receive call), printed through a POST body.
+  | { kind: "receipt"; orderId: string; entries: ReceiptPrintEntry[] };
 
 const MAX_PARCELS = 50;
 
@@ -221,6 +226,7 @@ export function PalletCardDialog({ target, onClose }: { target: PalletCardTarget
       {target?.kind === "single" && <SingleForm target={target} onClose={onClose} />}
       {target?.kind === "delivery" && <DeliveryForm deliveryId={target.deliveryId} onClose={onClose} />}
       {target?.kind === "dispatch" && <DispatchForm orderId={target.orderId} dispatchId={target.dispatchId} onClose={onClose} />}
+      {target?.kind === "receipt" && <ReceiptForm orderId={target.orderId} entries={target.entries} onClose={onClose} />}
     </Modal>
   );
 }
@@ -386,6 +392,74 @@ function DispatchForm({ orderId, dispatchId, onClose }: { orderId: string; dispa
       <FormActions>
         <Button type="button" disabled={!data || !canPrint} onClick={print}>
           Skriv ut
+        </Button>
+        <Button type="button" variant="secondary" onClick={onClose}>
+          Avbryt
+        </Button>
+      </FormActions>
+    </>
+  );
+}
+
+function ReceiptForm({ orderId, entries, onClose }: { orderId: string; entries: ReceiptPrintEntry[]; onClose: () => void }) {
+  const [states, setStates] = useState<Record<string, ParcelState>>(() =>
+    Object.fromEntries(entries.map((e) => [e.key, initialParcels(e.quantity)]))
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const allowMismatch = useAllowMismatch();
+  // With several entries 0 kolli skips one (as the delivery's rows); a
+  // single entry always prints.
+  const several = entries.length > 1;
+
+  const active = entries.filter((e) => (states[e.key]?.parcels.length ?? 0) > 0);
+  const canPrint =
+    active.length > 0 &&
+    active.every((e) => {
+      const st = states[e.key] ?? initialParcels(null);
+      return parcelsValid(st) && (allowMismatch || matches(num(st.total), st.parcels));
+    });
+
+  async function print() {
+    setError(null);
+    setPending(true);
+    try {
+      await openPostedPdf(
+        `/api/v1/purchase-orders/${orderId}/receipts/pallet-card`,
+        { cards: active.map((e) => ({ receiptIds: e.receiptIds, quantities: (states[e.key]?.parcels ?? []).map((p) => num(p)) })) },
+        "Kunde inte skapa pallkortet"
+      );
+      onClose();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Kunde inte skapa pallkortet"));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <>
+      <FormError margin="below">{error}</FormError>
+      {several && <p style={{ marginTop: 0 }}>Antal kolli 0 hoppar över raden.</p>}
+      {entries.map((entry) => (
+        <fieldset key={entry.key} style={{ border: "1px solid var(--color-border)", borderRadius: 6, marginBottom: 12 }}>
+          <legend>
+            {entry.articleNumber} {entry.articleName}
+            {entry.detail && <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}> · {entry.detail}</span>}
+          </legend>
+          <ParcelEditor
+            state={states[entry.key] ?? initialParcels(entry.quantity)}
+            onChange={(next) => setStates((prev) => ({ ...prev, [entry.key]: next }))}
+            idPrefix={`palletCard-${entry.key}`}
+            unit={entry.unit}
+            allowZeroCount={several}
+            allowMismatch={allowMismatch}
+          />
+        </fieldset>
+      ))}
+      <FormActions>
+        <Button type="button" disabled={pending || !canPrint} onClick={() => void print()}>
+          {pending ? "Skapar…" : "Skriv ut"}
         </Button>
         <Button type="button" variant="secondary" onClick={onClose}>
           Avbryt

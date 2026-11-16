@@ -60,7 +60,9 @@ Välj format i dialogen:
 - **A4-ark (70 × 37 mm, 24 per ark)** — vanliga etikettark i en vanlig skrivare. **Börja på etikett** anger var på arket utskriften börjar (1–24, vänster till höger, uppifrån), så att ett halvanvänt ark kan användas igen.
 - **Etikettskrivare (100 × 50 mm)** — en etikett per sida för en etikettskrivare.
 
-**Antal per etikett** skriver ut flera exemplar av varje. Etikettkoden står i lagerplatsregistrets kolumn **Etikettkod**; den byts inte när platsen byter namn, så en uppsatt etikett gäller så länge platsen finns.
+**Antal per etikett** skriver ut flera exemplar av varje. Etikettkoden står i lagerplatsregistrets kolumn **Etikettkod**; den byts inte när platsen byter namn, så en uppsatt etikett gäller så länge platsen finns. Formatet du väljer kommer webbläsaren ihåg till nästa utskrift.
+
+Det som tas emot från en inköpsorder kan också få en etikett med antal, inköpsorder, leverantör, mottagningsdag, lagerplats och batch eller serienummer — se [Etiketter och pallkort vid inleverans](/hjalp/inkop#etiketter-och-pallkort-vid-inleverans).
 
 ## Transaktioner
 

@@ -82,8 +82,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
-- [ ] **Etikett och pallflagga vid inleverans** — skriv ut en etikett eller pallflagga för det som tas emot från en inköpsorder, direkt i Inleverans och i listan **Inleveranser** på inköpsorderkortet: artikelnummer (som streckkod) och benämning, antal och enhet, inköpsorder, leverantör, mottagningsdag, lagerplats och batch eller serienummer, i etikettformaten som finns (A4-ark och etikettskrivare). I dag finns artikeletiketter utan antal och order (artikelkortet, artikelregistret), batchetiketter (Spårbarhet) och pallkort för tillverkningsorder, utleverans och avsändning till lego, men inget vid inleverans.
-
 ### Låg
 
 - [ ] **Planering och beställningspunkt per lager** (vid behov, senare — användarens beslut 2026-11-07) → [#11](https://github.com/ubbe76/Nav-ERP/issues/11) *(hemsidan)*
