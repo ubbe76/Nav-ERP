@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
+import { ArticleLink } from "../articles/ArticleLink";
 import { Button } from "../ui/Button";
 import { FormError } from "../ui/Form";
 import { SectionHeading } from "../ui/SectionHeading";
@@ -119,7 +120,7 @@ export function DispatchesSection({
                 <span style={muted}>
                   {d.rows.map((r) => (
                     <div key={r.id}>
-                      {r.articleNumber} — {r.articleName}: {fmt(r.quantity)}{" "}
+                      <ArticleLink articleId={r.articleId}>{r.articleNumber}</ArticleLink> — {r.articleName}: {fmt(r.quantity)}{" "}
                       {r.unit}, {r.parcels} kolli
                     </div>
                   ))}

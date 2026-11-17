@@ -11,6 +11,7 @@ import { NewArticleForm } from "./NewArticleForm";
 import { OperationModal } from "./OperationModal";
 import { BomComponentModal } from "./BomComponentModal";
 import { LegoInquiryModal } from "./LegoInquiryModal";
+import { ArticleLink } from "./ArticleLink";
 import { useCan } from "../PermissionsProvider";
 import { apiFetch } from "../../lib/api";
 import { copiedNotice, copyArticles } from "../../lib/copiedArticles";
@@ -182,7 +183,9 @@ export function BeredningView({
             <span className={styles.compPosition} title={row.position ? `Pos. ${row.position}` : "Pos."}>
               {row.position ?? "—"}
             </span>
-            <span className={styles.compNumber}>{row.componentArticleNumber}</span>
+            <span className={styles.compNumber}>
+              <ArticleLink articleId={row.componentArticleId}>{row.componentArticleNumber}</ArticleLink>
+            </span>
             <span className={styles.compBenaming} title={row.componentName}>
               {row.componentIsPhantom ? `${row.componentName} · Fantom` : row.componentName}
             </span>

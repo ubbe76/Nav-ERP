@@ -14,6 +14,7 @@ import { RowDeviationLink } from "../quality/RowDeviationLink";
 import { newDeviationHref, type NewDeviationParams } from "../../lib/quality";
 import { RowMenu } from "../ui/RowMenu";
 import { ArticleOverviewButton } from "../articles/ArticleOverviewButton";
+import { ArticleLink } from "../articles/ArticleLink";
 import { GatedLink } from "../ui/GatedLink";
 import { StatusPill } from "../ui/StatusPill";
 import { SectionHeading } from "../ui/SectionHeading";
@@ -840,7 +841,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
               case "articleNumber":
                 return (
                   <>
-                    {row.articleNumber}
+                    <ArticleLink articleId={row.articleId}>{row.articleNumber}</ArticleLink>
                     <ArticleOverviewButton articleId={row.articleId} articleNumber={row.articleNumber} />
                   </>
                 );
