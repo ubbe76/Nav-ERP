@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "../../components/ui/Button";
 import { Field, Input } from "../../components/ui/Field";
 import { Wordmark } from "../../components/ui/Wordmark";
+import { ThemeToggle } from "../../components/ThemeToggle";
 import { login } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import styles from "./page.module.css";
@@ -68,6 +69,11 @@ export default function LoginPage() {
             {pending ? "Loggar in…" : "Logga in"}
           </Button>
         </Form>
+      </div>
+      {/* The colour theme before anyone has logged in: kept in this browser
+          only, hidden when the administrator has locked the theme. */}
+      <div className={styles.theme}>
+        <ThemeToggle browserOnly />
       </div>
     </div>
   );

@@ -1,8 +1,10 @@
 .wrapper {
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 16px;
   background: var(--color-bg);
   padding: 24px;
 }
@@ -31,4 +33,14 @@
 .submit {
   margin-top: 4px;
   width: 100%;
+}
+
+.theme {
+  display: flex;
+  justify-content: center;
+}
+
+/* A locked theme renders no picker — no empty gap under the card. */
+.theme:empty {
+  display: none;
 }

@@ -12,8 +12,9 @@ interface ThemeBootValue {
   // The theme on <html data-theme> right now (null before the first effect).
   theme: string | null;
   // The theme picker's choice: applied, stored in this browser and saved on
-  // the user.
-  choose: (id: string) => void;
+  // the user — except browserOnly (the login page): without a session there
+  // is no user to save it on, and PATCH /me/settings would only answer 401.
+  choose: (id: string, opts?: { browserOnly?: boolean }) => void;
 }
 
 const ThemeBootContext = createContext<ThemeBootValue>({ boot: FALLBACK_THEME_BOOT, theme: null, choose: () => {} });
@@ -57,7 +58,7 @@ export function ThemeBootProvider({ boot, children }: { boot: ThemeBootClient; c
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idsKey, boot.defaultTheme, boot.locked, boot.userTheme]);
 
-  const choose = useCallback((id: string) => {
+  const choose = useCallback((id: string, opts?: { browserOnly?: boolean }) => {
     applyTheme(id);
     setTheme(id);
     try {
@@ -65,6 +66,7 @@ export function ThemeBootProvider({ boot, children }: { boot: ThemeBootClient; c
     } catch {
       // Storage blocked — the choice still holds for this page view.
     }
+    if (opts?.browserOnly) return;
     // Saved on the user so it follows them between computers. Errors are
     // ignored: the choice then lives in this browser.
     apiFetch("/api/v1/me/settings", { method: "PATCH", body: JSON.stringify({ theme: id }) }).catch(() => {});
