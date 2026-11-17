@@ -435,8 +435,8 @@ Tidkoderna för löneunderlagsexporten, övertidsreglerna, ATF-intjäningen och 
 
 ### Förval och lås
 
-- **Förvalt tema för företaget** är temat som visas för alla som inte själva valt något, och på inloggningssidan innan någon loggat in.
-- **Lås temat för alla användare** döljer temaväljaren för alla och tvingar fram det förvalda temat.
+- **Förvalt tema för företaget** är temat som visas för alla som inte själva valt något, och på inloggningssidan så länge ingen valt ett tema i den webbläsaren.
+- **Lås temat för alla användare** döljer temaväljaren för alla, även på inloggningssidan, och tvingar fram det förvalda temat.
 
 Varje användares eget val sparas på användaren, så det följer med mellan datorer. Väljaren i användarmenyn (initialerna uppe till höger) visar alla teman — en segmenterad kontroll när det finns högst tre, annars en rullgardinslista med temanas namn. Ett tema som tas bort ersätts för dess användare av det förvalda.
 
