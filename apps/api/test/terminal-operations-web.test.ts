@@ -28,6 +28,7 @@ function op(over: Partial<TerminalOperation> = {}): TerminalOperation {
     dueDate: null,
     plannedStartDate: null,
     plannedEndDate: null,
+    runPosition: null,
     readiness: "ready",
     available: "20",
     materials: [],
@@ -52,6 +53,30 @@ describe("sortTerminalOperations", () => {
     const w46early = op({ orderNumber: "TO-6", plannedStartDate: "2026-11-09", plannedEndDate: "2026-11-09", dueDate: "2026-11-20" });
     const w45 = op({ orderNumber: "TO-7", plannedStartDate: "2026-11-02", plannedEndDate: "2026-11-02", dueDate: null });
     expect(sortTerminalOperations([unplanned, w46late, w46early, w45], "planned")).toEqual([w45, w46early, w46late, unplanned]);
+  });
+  it("planned: within a start day the place set by hand wins — gaps allowed, no place after the ordered, then as urgent", () => {
+    const day = { plannedStartDate: "2026-11-09", plannedEndDate: "2026-11-09" };
+    const third = op({ ...day, orderNumber: "TO-1", dueDate: "2026-11-10", runPosition: 7 });
+    const first = op({ ...day, orderNumber: "TO-9", dueDate: "2026-12-20", runPosition: 1 });
+    const second = op({ ...day, orderNumber: "TO-8", dueDate: null, runPosition: 3 });
+    const newLate = op({ ...day, orderNumber: "TO-3", dueDate: "2026-11-30" });
+    const newEarly = op({ ...day, orderNumber: "TO-4", dueDate: "2026-11-12" });
+    // The start day still comes first: a place on a later day never jumps ahead.
+    const earlierDay = op({ orderNumber: "TO-7", plannedStartDate: "2026-11-06", plannedEndDate: "2026-11-06", dueDate: "2026-12-30" });
+    const laterDay = op({ orderNumber: "TO-2", plannedStartDate: "2026-11-10", plannedEndDate: "2026-11-10", dueDate: "2026-11-01", runPosition: 1 });
+    const unplanned = op({ orderNumber: "TO-0", dueDate: "2026-10-01" });
+    expect(sortTerminalOperations([unplanned, laterDay, newLate, third, newEarly, second, earlierDay, first], "planned")).toEqual([
+      earlierDay,
+      first,
+      second,
+      third,
+      newEarly,
+      newLate,
+      laterDay,
+      unplanned,
+    ]);
+    // The place is read by Planerad dag only.
+    expect(sortTerminalOperations([first, third], "urgent")).toEqual([third, first]);
   });
   it("material: by first material number, no material last, then as urgent", () => {
     const none = op({ dueDate: "2026-10-01" });

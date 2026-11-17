@@ -672,6 +672,9 @@ export interface TerminalOperation {
   // null when unplanned — the terminal sorts on the start day.
   plannedStartDate: string | null;
   plannedEndDate: string | null;
+  // The place within the day set by hand in the körplan (#18); null = none.
+  // The terminal's Planerad dag sorts on it after the start day.
+  runPosition: number | null;
   readiness: Readiness;
   // What can be worked on per the readiness rule (terminal-readiness.ts).
   available: string;

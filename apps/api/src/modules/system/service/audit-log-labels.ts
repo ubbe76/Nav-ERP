@@ -90,6 +90,10 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   released: "Frisläppt",
   // Skapa saknade halvfabrikat (pegging #9) on the parent TO.
   component_orders_created: "Halvfabrikat skapade",
+  // Produktionsplanering: Flytta, Lås upp and the order within the day (#18).
+  operation_moved: "Operation flyttad",
+  operation_unlocked: "Operation upplåst",
+  run_order_changed: "Körordning ändrad",
   started: "Startad",
   closed: "Stängd",
   completed: "Färdigrapporterad",

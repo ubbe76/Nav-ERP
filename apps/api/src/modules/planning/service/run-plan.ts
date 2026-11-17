@@ -83,6 +83,10 @@ export interface RunPlanRow {
   plannedStartDate: string | null;
   plannedEndDate: string | null;
   planLocked: boolean;
+  // The place within the day set by hand (PUT /planning/run-plan/order);
+  // null = none — such a row comes after the ordered ones. Always null for
+  // a Planerad TO's route operation.
+  runPosition: number | null;
   status: RunPlanStatus;
   // What the readiness rule lets the operator work on now (the terminal's
   // `available`); null for a Planerad TO.
@@ -103,6 +107,10 @@ export interface RunPlanDay {
   rows: number;
   minutes: number;
   hours: number;
+  // The rows of this group can be ordered by hand: only a day. Försenad is
+  // sorted on its old days and places, Ej planerad has no day to be ordered
+  // within. (A row without moOperationId in a day is never sent.)
+  reorderable: boolean;
 }
 
 export interface RunPlanResult {
@@ -144,6 +152,13 @@ const compareNullLast = (a: string | null, b: string | null) => {
   if (a == null) return 1;
   if (b == null) return -1;
   return a < b ? -1 : 1;
+};
+
+const comparePosition = (a: number | null, b: number | null) => {
+  if (a === b) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return a - b;
 };
 
 export function buildRunPlan(input: {
@@ -198,6 +213,7 @@ export function buildRunPlan(input: {
       plannedStartDate: range?.start ?? null,
       plannedEndDate: range?.end ?? null,
       planLocked: op.planLocked ?? false,
+      runPosition: plannedOrder || op.moOperationId == null || range == null ? null : (op.runPosition ?? null),
       status: ready ? ready.readiness : "planned_order",
       available: ready ? ready.available : null,
       waitingForSequenceNo: ready && ready.readiness !== "ready" ? (previous.get(op.moOperationId!) ?? null) : null,
@@ -213,12 +229,15 @@ export function buildRunPlan(input: {
   ];
 
   // Försenade and Ej planerade are always in; a day up to and including
-  // T.o.m. (The order within a day by hand — run_position — is etapp 3.)
+  // T.o.m. Within a day: the place set by hand first (rows without one after
+  // the ordered ones — the places need not be dense), then the standard
+  // order.
   const listed = candidates
     .filter((row) => row.date == null || row.late || row.date <= input.toDate)
     .sort(
       (a, b) =>
         compareNullLast(a.date, b.date) ||
+        comparePosition(a.runPosition, b.runPosition) ||
         compareNullLast(a.dueDate, b.dueDate) ||
         a.orderNumber.localeCompare(b.orderNumber, "sv", { numeric: true }) ||
         a.sequenceNo - b.sequenceNo
@@ -237,6 +256,7 @@ export function buildRunPlan(input: {
         weekday: date ? isoWeekdayOf(date) : null,
         isoWeek: date ? isoWeekOf(date).isoWeek : null,
         late: kind === "late",
+        reorderable: kind === "day",
         rows: 0,
         sum: 0,
       };

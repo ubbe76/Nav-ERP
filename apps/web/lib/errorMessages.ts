@@ -751,6 +751,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "operation-not-plannable": serverMessage("Operationen kan inte planeras — den är klar, en legooperation, utan tid eller ordern är inte öppen."),
   "plan-date-in-past": "Dagen har passerat — välj i dag eller en senare dag.",
   // Körplan
+  "run-plan-order-changed": "Körplanen har ändrats — listan har lästs om.",
   "run-plan-subcontract-resource": "Resursen är en legoresurs — körplanen visar bara egna resurser.",
   "plan-date-no-capacity": serverMessage("Resursen har ingen kapacitet den dagen — välj en annan dag."),
   // Reservationen från Leveranstidskontrollen (the 409 body carries the new result).

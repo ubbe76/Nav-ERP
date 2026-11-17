@@ -86,6 +86,10 @@ export interface CapacityOperationRow {
   // without one count on the MO's due date. Empty = unplanned too.
   plannedDays?: PlannedDay[] | null;
   planLocked?: boolean;
+  // The place among the resource's operations with the same planned start
+  // day, set by hand in the körplan (mo_operations.run_position, #18). Read
+  // ONLY by the körplan — never by the book, Sen or the matrix.
+  runPosition?: number | null;
   plannedAt?: string | null; // ISO timestamp of the run that planned it
   // Alternativa resurser (#15): Vald för hand (mo_operations.resource_locked).
   resourceLocked?: boolean;

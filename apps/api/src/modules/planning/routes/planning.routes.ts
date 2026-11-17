@@ -12,6 +12,7 @@ import {
   missingComponentsSchema,
   moveOperationSchema,
   runPlanPdfQuerySchema,
+  runPlanOrderSchema,
   runPlanQuerySchema,
 } from "@navet/shared";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
@@ -33,6 +34,7 @@ import {
   OperationNotPlannableError,
   PlanDateInPastError,
   PlanDateNoCapacityError,
+  RunPlanOrderChangedError,
   RunPlanSubcontractResourceError,
   SalesOrderNotFoundError,
   SalesOrderNotOpenError,
@@ -364,6 +366,24 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
       return reply.send(pdf.content);
     } catch (err) {
       if (err instanceof RunPlanSubcontractResourceError) return reply.code(400).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Ordningen inom dagen (#18): the whole day's list on the resource in the
+  // wanted order. Module default write = tillverkning (arbetsledaren — the
+  // workshop profile reads the körplan but does not order it). No dates are
+  // touched. 409 run-plan-order-changed when the day's operations are not
+  // the ones sent: nothing written, the web reads the körplan again.
+  app.put("/planning/run-plan/order", async (req, reply) => {
+    const input = runPlanOrderSchema.parse(req.body);
+    try {
+      const result = await service.setRunPlanOrder(input, req.user!.id);
+      if (!result) return reply.code(404).send(errorBody(new WorkCenterNotFoundError(input.workCenterId)));
+      return result;
+    } catch (err) {
+      if (err instanceof RunPlanSubcontractResourceError) return reply.code(400).send(errorBody(err));
+      if (err instanceof RunPlanOrderChangedError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });

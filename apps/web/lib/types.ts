@@ -5764,6 +5764,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   issued: "Utfärdad",
   released: "Frisläppt",
   component_orders_created: "Halvfabrikat skapade",
+  operation_moved: "Operation flyttad",
+  operation_unlocked: "Operation upplåst",
+  run_order_changed: "Körordning ändrad",
   started: "Startad",
   report_undone: "Rapportering ångrad",
   closed: "Stängd",
@@ -6644,9 +6647,11 @@ export interface TerminalOperation {
   quantityCompleted: string | null;
   quantityScrapped: string;
   dueDate: string | null;
-  // Produktionsplanering: planned weeks (Mondays); null = unplanned.
+  // Produktionsplanering: the planned days; null = unplanned.
   plannedStartDate: string | null;
   plannedEndDate: string | null;
+  // The place within the day set by hand in the körplan; null = none.
+  runPosition: number | null;
   readiness: TerminalReadiness;
   available: string;
   materials: TerminalMaterial[];
@@ -7386,6 +7391,8 @@ export interface RunPlanRow {
   plannedStartDate: string | null;
   plannedEndDate: string | null;
   planLocked: boolean;
+  // The place within the day set by hand; null = none.
+  runPosition: number | null;
   status: RunPlanStatus;
   available: number | null;
   waitingForSequenceNo: number | null;
@@ -7400,6 +7407,14 @@ export interface RunPlanDay {
   rows: number;
   minutes: number;
   hours: number;
+  // Only a day's rows can be ordered by hand (PUT /planning/run-plan/order).
+  reorderable: boolean;
+}
+
+// PUT /planning/run-plan/order — the written order of one day.
+export interface RunPlanOrderResult {
+  date: string;
+  moOperationIds: string[];
 }
 
 export interface RunPlanStation {

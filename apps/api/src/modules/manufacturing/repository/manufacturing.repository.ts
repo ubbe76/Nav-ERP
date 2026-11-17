@@ -1347,6 +1347,7 @@ export function createManufacturingRepository(db: Db) {
           packingInstructions: moOperations.packingInstructions,
           plannedStartDate: moOperations.plannedStartDate,
           plannedEndDate: moOperations.plannedEndDate,
+          runPosition: moOperations.runPosition,
         })
         .from(moOperations)
         .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))

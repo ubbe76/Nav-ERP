@@ -11,6 +11,7 @@ import type {
   ListRequirementsQuery,
   MoveOperationInput,
   Paged,
+  RunPlanOrderInput,
   RunPlanPdfQuery,
   RunPlanQuery,
 } from "@navet/shared";
@@ -368,6 +369,17 @@ export class RunPlanSubcontractResourceError extends Error {
   constructor(public workCenterCode: string) {
     super(`${workCenterCode} är en legoresurs — körplanen visar bara egna resurser`);
     this.name = "RunPlanSubcontractResourceError";
+  }
+}
+
+// Ordningen inom dagen: the day's operations on the resource are not the
+// ones the client sent — one was moved, finished or switched resource in
+// the meantime, or an id is unknown. Nothing is written; the web reads the
+// körplan again. 409.
+export class RunPlanOrderChangedError extends Error {
+  constructor(public workCenterCode: string, public date: string) {
+    super(`Körplanen för ${workCenterCode} ${date} har ändrats — läs om listan`);
+    this.name = "RunPlanOrderChangedError";
   }
 }
 
@@ -2746,6 +2758,40 @@ export function createPlanningService(
         total: formatRunPlanHours(plan.totalHours),
       });
       return { filename: `korplan-${plan.workCenter.code}-${plan.toDate}.pdf`, content };
+    },
+
+    // Ordningen inom dagen (#18) — the WHOLE day's list on the resource in
+    // the wanted order ⇒ run_position 1..n. Steers only the körplan and the
+    // terminal's list: no date, no allocation and no lock is touched.
+    // Lock order: production_plan → the operations (FOR UPDATE, by id) —
+    // never the order row. null = the resource does not exist (404 in the
+    // route). Idempotent; the event is logged only when the order changed.
+    async setRunPlanOrder(input: RunPlanOrderInput, userId: string | null): Promise<{ date: string; moOperationIds: string[] } | null> {
+      const written = await repo.transaction(async (tx) => {
+        await lockProductionPlan(tx);
+        const workCenter = await repo.runPlanWorkCenter(tx, input.workCenterId);
+        if (!workCenter) return null;
+        if (workCenter.type === "subcontract") throw new RunPlanSubcontractResourceError(workCenter.code);
+        const current = await repo.lockRunPlanDayOperations(tx, workCenter.id, input.date);
+        const byId = new Map(current.map((o) => [o.id, o]));
+        if (current.length !== input.moOperationIds.length || input.moOperationIds.some((id) => !byId.has(id))) {
+          throw new RunPlanOrderChangedError(workCenter.code, input.date);
+        }
+        const changed = input.moOperationIds.some((id, i) => byId.get(id)!.runPosition !== i + 1);
+        if (changed) await repo.writeRunPositions(tx, input.moOperationIds);
+        return { workCenter, changed, orderNumbers: input.moOperationIds.map((id) => byId.get(id)!.orderNumber) };
+      });
+      if (!written) return null;
+      if (written.changed) {
+        await audit.log({
+          entityType: "production_plan",
+          entityId: null,
+          action: "run_order_changed",
+          detail: { workCenterCode: written.workCenter.code, date: input.date, orderNumbers: written.orderNumbers.join(", ") },
+          userId,
+        });
+      }
+      return { date: input.date, moOperationIds: input.moOperationIds };
     },
 
     // Planera — every open TO's pending operations placed on free capacity

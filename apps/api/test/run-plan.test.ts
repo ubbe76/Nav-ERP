@@ -506,10 +506,10 @@ describe("buildRunPlan (pure)", () => {
     ]);
     // The groups in list order: Försenad together, then each day, Ej planerad last.
     expect(result.days).toEqual([
-      { kind: "late", date: null, weekday: null, isoWeek: null, late: true, rows: 2, minutes: 100, hours: 1.67 },
-      { kind: "day", date: "2030-03-06", weekday: 3, isoWeek: 10, late: false, rows: 1, minutes: 50, hours: 0.83 },
-      { kind: "day", date: "2030-03-08", weekday: 5, isoWeek: 10, late: false, rows: 1, minutes: 50, hours: 0.83 },
-      { kind: "unplanned", date: null, weekday: null, isoWeek: null, late: false, rows: 1, minutes: 50, hours: 0.83 },
+      { kind: "late", date: null, weekday: null, isoWeek: null, late: true, rows: 2, minutes: 100, hours: 1.67, reorderable: false },
+      { kind: "day", date: "2030-03-06", weekday: 3, isoWeek: 10, late: false, rows: 1, minutes: 50, hours: 0.83, reorderable: true },
+      { kind: "day", date: "2030-03-08", weekday: 5, isoWeek: 10, late: false, rows: 1, minutes: 50, hours: 0.83, reorderable: true },
+      { kind: "unplanned", date: null, weekday: null, isoWeek: null, late: false, rows: 1, minutes: 50, hours: 0.83, reorderable: false },
     ]);
     expect(result.totalMinutes).toBe(250);
   });
@@ -567,6 +567,62 @@ describe("buildRunPlan (pure)", () => {
       ["TO-9", 20],
       ["TO-10", 10],
       ["TO-3", 10],
+    ]);
+  });
+
+  it("within a day the place set by hand comes first — holes allowed, rows without a place after them in the standard order", () => {
+    const on = (orderNumber: string, runPosition: number | null, dueDate: string | null = "2030-03-20", date = "2030-03-07") =>
+      op({ orderNumber, dueDate, runPosition, plannedDays: [{ date, minutes: 50 }] });
+    const result = plan("2030-03-06", "2030-03-08", [
+      on("TO-1", null, "2030-03-10"), // the most urgent, but nobody placed it
+      on("TO-2", 9),
+      on("TO-3", 2, null),
+      on("TO-4", 5, "2030-03-30"),
+      on("TO-5", null, null),
+      // The day is still the first key: place 1 on a later day never jumps ahead.
+      on("TO-6", 1, "2030-03-09", "2030-03-08"),
+      // Försenad: sorted on its own day and its old place.
+      on("TO-7", 2, "2030-03-01", "2030-03-05"),
+      on("TO-8", 1, "2030-03-02", "2030-03-05"),
+      on("TO-9", 1, "2030-03-03", "2030-03-04"),
+      // Ej planerad never has a place (a stray one on the row is not read).
+      op({ orderNumber: "TO-10", dueDate: null, runPosition: 1 }),
+    ]);
+    expect(result.rows.map((r) => [r.orderNumber, r.date, r.runPosition])).toEqual([
+      ["TO-9", "2030-03-04", 1],
+      ["TO-8", "2030-03-05", 1],
+      ["TO-7", "2030-03-05", 2],
+      ["TO-3", "2030-03-07", 2],
+      ["TO-4", "2030-03-07", 5],
+      ["TO-2", "2030-03-07", 9],
+      ["TO-1", "2030-03-07", null],
+      ["TO-5", "2030-03-07", null],
+      ["TO-6", "2030-03-08", 1],
+      ["TO-10", null, null],
+    ]);
+    // Only a day can be ordered by hand.
+    expect(result.days.map((d) => [d.kind, d.date, d.reorderable, d.rows])).toEqual([
+      ["late", null, false, 3],
+      ["day", "2030-03-07", true, 5],
+      ["day", "2030-03-08", true, 1],
+      ["unplanned", null, false, 1],
+    ]);
+  });
+
+  it("a Planerad TO's route operation is never placed: it follows the ordered rows of its day", () => {
+    const placed = op({ orderNumber: "TO-2", dueDate: "2030-03-30", runPosition: 1, plannedDays: [{ date: "2030-03-07", minutes: 50 }] });
+    const { moOperationId: _id, ...route } = op({ orderNumber: "TO-1", dueDate: "2030-03-07" });
+    const result = buildRunPlan({
+      today: "2030-03-06",
+      toDate: "2030-03-08",
+      workCenter,
+      stations: [],
+      operations: [placed],
+      plannedOrderOperations: [{ ...route, moOperationId: null, runPosition: 4 }],
+    });
+    expect(result.rows.map((r) => [r.orderNumber, r.moOperationId === null, r.runPosition, r.status])).toEqual([
+      ["TO-2", false, 1, "ready"],
+      ["TO-1", true, null, "planned_order"],
     ]);
   });
 });

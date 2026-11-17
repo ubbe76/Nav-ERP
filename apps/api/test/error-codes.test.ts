@@ -9,6 +9,7 @@ import {
   OperationNotPlannableError,
   PlanDateInPastError,
   PlanDateNoCapacityError,
+  RunPlanOrderChangedError,
   SalesOrderNotOpenError,
 } from "../src/modules/planning/service/planning.service.js";
 import { CostCalculationNotFinalError } from "../src/modules/costing/service/costing.service.js";
@@ -888,6 +889,7 @@ const cases: Array<[Error, string]> = [
   [new OperationNotPlannableError("done"), ERROR_CODES.OPERATION_NOT_PLANNABLE],
   [new PlanDateInPastError("2030-03-01", "2030-03-04"), ERROR_CODES.PLAN_DATE_IN_PAST],
   [new PlanDateNoCapacityError("2030-03-09", "110"), ERROR_CODES.PLAN_DATE_NO_CAPACITY],
+  [new RunPlanOrderChangedError("110", "2030-03-11"), ERROR_CODES.RUN_PLAN_ORDER_CHANGED],
   [new CostCalculationNotFinalError("calc-1", "preliminary"), ERROR_CODES.COST_CALCULATION_NOT_FINAL],
   [
     new DeliveryTimeChangedError("2030-03-20", { shipDate: null, deliveryDate: null, rows: [], notes: [], batches: [], usesAlternatives: false, ordinaryShipDate: null, ordinaryDeliveryDate: null }),

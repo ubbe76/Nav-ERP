@@ -555,6 +555,8 @@ export const ERROR_CODES = {
   OPERATION_NOT_PLANNABLE: "operation-not-plannable",
   PLAN_DATE_IN_PAST: "plan-date-in-past",
   PLAN_DATE_NO_CAPACITY: "plan-date-no-capacity",
+  // Ordningen inom dagen (#18): the day's operations are not the ones sent.
+  RUN_PLAN_ORDER_CHANGED: "run-plan-order-changed",
   // Sätt standardpris/försäljningspris from a preliminary efterkalkyl or one
   // with nothing received (the per-unit divisor is the received quantity).
   COST_CALCULATION_NOT_FINAL: "cost-calculation-not-final",

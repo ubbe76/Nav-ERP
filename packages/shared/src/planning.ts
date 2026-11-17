@@ -158,6 +158,20 @@ export type RunPlanQuery = z.infer<typeof runPlanQuerySchema>;
 export const runPlanPdfQuerySchema = runPlanQuerySchema.required({ workCenterId: true });
 export type RunPlanPdfQuery = z.infer<typeof runPlanPdfQuerySchema>;
 
+// PUT /planning/run-plan/order — the order within ONE day on a resource
+// (#18): the WHOLE day's list of operations in the wanted order. The order
+// only steers the körplan and the terminal's list, never a date.
+export const runPlanOrderSchema = z.object({
+  workCenterId: z.string().uuid(),
+  date: businessDateSchema,
+  moOperationIds: z
+    .array(z.string().uuid())
+    .min(1)
+    .max(500)
+    .refine((ids) => new Set(ids).size === ids.length, { message: "moOperationIds must be unique" }),
+});
+export type RunPlanOrderInput = z.infer<typeof runPlanOrderSchema>;
+
 // POST /planning/operations/:opId/move — Flytta: the operation starts on
 // `date` (the day's whole capacity, overload allowed) and is locked; with
 // moveFollowing the TO's later unlocked operations are replanned after it.

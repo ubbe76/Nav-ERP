@@ -20,13 +20,21 @@ function byUrgency(a: TerminalOperation, b: TerminalOperation): number {
 }
 
 // Produktionsplanering: the planner's order — planned start day ascending
-// (YYYY-MM-DD, so a string compare is a date compare), unplanned last, then as
-// urgent.
+// (YYYY-MM-DD, so a string compare is a date compare), unplanned last, then
+// the place within the day set by hand in the körplan (runPosition, none
+// last), then as urgent.
 function byPlannedDay(a: TerminalOperation, b: TerminalOperation): number {
   if (a.plannedStartDate !== b.plannedStartDate) {
     if (a.plannedStartDate === null) return 1;
     if (b.plannedStartDate === null) return -1;
     return a.plannedStartDate < b.plannedStartDate ? -1 : 1;
+  }
+  const pa = a.runPosition ?? null;
+  const pb = b.runPosition ?? null;
+  if (pa !== pb) {
+    if (pa === null) return 1;
+    if (pb === null) return -1;
+    return pa - pb;
   }
   return byUrgency(a, b);
 }

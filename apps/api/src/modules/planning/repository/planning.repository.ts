@@ -1196,6 +1196,7 @@ export function createPlanningRepository(db: Db) {
             quantityCompleted: moOperations.quantityCompleted,
             quantityScrapped: moOperations.quantityScrapped,
             planLocked: moOperations.planLocked,
+            runPosition: moOperations.runPosition,
             plannedAt: moOperations.plannedAt,
             resourceLocked: moOperations.resourceLocked,
           })
@@ -1435,6 +1436,43 @@ export function createPlanningRepository(db: Db) {
         .from(stampSessions)
         .where(isNull(stampSessions.stoppedAt));
       return new Set(rows.map((r) => r.moOperationId));
+    },
+
+    async runPlanWorkCenter(tx: Tx, workCenterId: string) {
+      const [row] = await tx
+        .select({ id: workCenters.id, code: workCenters.code, type: workCenters.type })
+        .from(workCenters)
+        .where(eq(workCenters.id, workCenterId));
+      return row ?? null;
+    },
+
+    // Ordningen inom dagen (#18) — the resource's pending operations on open
+    // TO:s whose planned start day is `date`, locked FOR UPDATE in id order
+    // (the caller holds the production_plan lock; never the order row).
+    async lockRunPlanDayOperations(tx: Tx, workCenterId: string, date: string) {
+      const rows = await tx.execute<{ id: string; order_number: string; run_position: number | null }>(sql`
+        SELECT o.id, mo.order_number, o.run_position
+        FROM mo_operations o
+        JOIN manufacturing_orders mo ON mo.id = o.manufacturing_order_id
+        WHERE o.work_center_id = ${workCenterId}::uuid
+          AND o.status = 'pending'
+          AND o.planned_start_date = ${date}::date
+          AND mo.status IN ('released', 'in_progress')
+        ORDER BY o.id
+        FOR UPDATE OF o`);
+      return [...rows].map((r) => ({ id: r.id, orderNumber: r.order_number, runPosition: r.run_position }));
+    },
+
+    // run_position = 1..n in the given order, ONE statement.
+    async writeRunPositions(tx: Tx, moOperationIds: string[]): Promise<void> {
+      const values = sql.join(
+        moOperationIds.map((id, i) => sql`(${id}::uuid, ${i + 1}::integer)`),
+        sql`, `
+      );
+      await tx.execute(sql`
+        UPDATE ${moOperations} AS o SET run_position = v.position
+        FROM (VALUES ${values}) AS v(id, position)
+        WHERE o.id = v.id`);
     },
 
     // The ONE writer of allocations: replaces each planned operation's days

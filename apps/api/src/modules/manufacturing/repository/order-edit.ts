@@ -498,6 +498,9 @@ export async function updateOperationInTx(
       // The days were booked on the old resource: a locked operation that
       // changes resource loses its lock and is replanned like any other.
       planLocked: workCenterChanged && op.planLocked ? false : undefined,
+      // The place within the day (körplanen, #18) was a place on the old
+      // resource — dropped even when the replanning gives the same day.
+      runPosition: workCenterChanged ? null : undefined,
       resourceLocked,
     })
     .where(eq(moOperations.id, opId));
