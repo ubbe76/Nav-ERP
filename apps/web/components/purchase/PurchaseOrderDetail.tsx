@@ -12,6 +12,7 @@ import { RowMenu } from "../ui/RowMenu";
 import { DeliveryAddressForm, formatDeliveryAddress } from "./DeliveryAddressForm";
 import { useCan } from "../PermissionsProvider";
 import { ArticleOverviewButton } from "../articles/ArticleOverviewButton";
+import { ArticleLink } from "../articles/ArticleLink";
 import { useRouter } from "next/navigation";
 import { Table, shareTrack } from "../ui/Table";
 import { Button } from "../ui/Button";
@@ -462,7 +463,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
               case "articleNumber":
                 return (
                   <>
-                    {row.articleNumber}
+                    <ArticleLink articleId={row.articleId}>{row.articleNumber}</ArticleLink>
                     <ArticleOverviewButton articleId={row.articleId} articleNumber={row.articleNumber} />
                   </>
                 );

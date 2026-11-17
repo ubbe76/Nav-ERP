@@ -7,6 +7,7 @@ import { formatQuantity } from "../../lib/format";
 import { DrawingsPanel } from "./RevisionerTab";
 import { SectionHeading } from "../ui/SectionHeading";
 import { BeredningView } from "./BeredningView";
+import { ArticleLink } from "./ArticleLink";
 import type {
   Article,
   ArticleGroup,
@@ -154,7 +155,15 @@ export function BeredningTab({
 
       <div>
         <div className={styles.activeArticle}>
-          Aktiv artikel: <strong>{selected.articleNumber}</strong> — {selected.name}
+          Aktiv artikel:{" "}
+          <strong>
+            {selected.articleId === article.id ? (
+              selected.articleNumber
+            ) : (
+              <ArticleLink articleId={selected.articleId}>{selected.articleNumber}</ArticleLink>
+            )}
+          </strong>{" "}
+          — {selected.name}
         </div>
 
         {/* The selected article's drawings (Ritningar i Beredningen). */}

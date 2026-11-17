@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
+import { ArticleLink } from "../articles/ArticleLink";
 import { GatedLink } from "../ui/GatedLink";
 import { Button } from "../ui/Button";
 import { FormError } from "../ui/Form";
@@ -212,7 +213,15 @@ export function ReceiptsSection({
             case "purchaseOrderRowId":
               return (
                 <span style={muted}>
-                  {row ? `${row.articleNumber} — ${row.articleName}` : receipt.purchaseOrderRowId === null ? "Borttagen rad" : "–"}
+                  {row ? (
+                    <>
+                      <ArticleLink articleId={row.articleId}>{row.articleNumber}</ArticleLink> — {row.articleName}
+                    </>
+                  ) : receipt.purchaseOrderRowId === null ? (
+                    "Borttagen rad"
+                  ) : (
+                    "–"
+                  )}
                   {group && (
                     <details style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
                       <summary style={{ cursor: "pointer" }}>

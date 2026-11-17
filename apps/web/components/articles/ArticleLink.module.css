@@ -1,0 +1,10 @@
+/* Only the real link is coloured: GatedLink renders a <span> with the same
+   class for a user who can't open the article card, and that stays plain. */
+a.link {
+  color: var(--accent-fg);
+  text-decoration: none;
+}
+
+a.link:hover {
+  text-decoration: underline;
+}
