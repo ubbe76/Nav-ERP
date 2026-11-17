@@ -1,7 +1,7 @@
 import { createArticleSchema, createCustomerSchema, createWeekScheduleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { db, manufacturingOrders, moOperationPlanDays, salesOrders } from "@navet/db";
+import { db, manufacturingOrders, moOperationPlanDays, salesOrders, systemSettings } from "@navet/db";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -33,6 +33,9 @@ import {
   type SalesOrderDateWriter,
   type ManufacturingPlanReader,
 } from "../src/modules/planning/service/planning.service.js";
+import { lockProductionPlan } from "../src/modules/planning/repository/plan-lock.js";
+import { PLANNING_QUEUE_TIME_DAYS_KEY } from "../src/modules/system/service/plan-settings.js";
+import { waitForLockWaiter } from "./helpers/year-end.js";
 import { parsed } from "./helpers/parsed.js";
 
 // Reservationen (POST /delivery-time-check/apply) against Postgres: the
@@ -111,7 +114,11 @@ const scheduleService = createScheduleService(createScheduleRepository(db), crea
   isDateLocked: async () => false,
 });
 
-function buildPlanning(manufacturing: ManufacturingOrderCreator = mfgService, salesOrderDates: SalesOrderDateWriter = salesService) {
+function buildPlanning(
+  manufacturing: ManufacturingOrderCreator = mfgService,
+  salesOrderDates: SalesOrderDateWriter = salesService,
+  today: () => string = () => TODAY
+) {
   return createPlanningService(createPlanningRepository(db), {
     purchase: {
       createPurchaseOrder: async () => {
@@ -122,7 +129,7 @@ function buildPlanning(manufacturing: ManufacturingOrderCreator = mfgService, sa
     },
     manufacturing,
     requirementsCacheMs: 0,
-    today: () => TODAY,
+    today,
     audit: {
       async log(entry) {
         auditEntries.push({ entityType: entry.entityType, entityId: entry.entityId, action: entry.action, detail: entry.detail });
@@ -136,12 +143,19 @@ planReaderRef.current = planningService;
 
 const TRUNCATE = sql`TRUNCATE mo_operation_plan_days, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations, manufacturing_orders, sales_order_rows, sales_orders, customers, routing_operations, work_centers, production_groups, holidays, week_schedule_days, week_schedules, day_schedule_breaks, day_schedules, stock_transactions, stock_locations, warehouses, bom_components, article_suppliers, articles, users CASCADE`;
 
+// system_settings is not truncated with the rest: the Standardkötid a test
+// sets must never reach the next test (or the next file on this worker).
+const clearQueueTime = () => db.delete(systemSettings).where(eq(systemSettings.key, PLANNING_QUEUE_TIME_DAYS_KEY));
+
 beforeEach(async () => {
   await db.execute(TRUNCATE);
+  await clearQueueTime();
+  planReaderRef.current = planningService;
   auditEntries.length = 0;
 });
 afterAll(async () => {
   await db.execute(TRUNCATE);
+  await clearQueueTime();
 });
 
 async function planRows(opId: string) {
@@ -489,5 +503,186 @@ describe("reservationen — Skapa tillverkningsordrar för det som saknas", () =
     const ops = await mfgService.listOperations(created.id);
     // The engine's own plan: from today, on free capacity.
     expect(await planRows(ops[0]!.id)).toEqual(TEN_HOURS_FROM_TODAY);
+  });
+});
+
+// --- Standardkötiden i kontrollen och reservationen (#18, etapp 2) ---------
+// The check walks the chain Planera walks: the next operation starts the
+// working day after the previous one is ready plus the Standardkötid, read
+// by the run that uses it (in the reservation: inside the transaction, under
+// the production_plan lock). KEDJA: Op 10 on R1, Op 20 on R2, Op 30 on R1,
+// 4 h each; a KO of 1.
+const FOUR_HOURS = (date: string) => [{ date, minutes: 240 }];
+
+async function seedChain() {
+  const world = await seedWorld();
+  const chain = await articleService.createArticle(parsed(createArticleSchema, {
+    articleNumber: `KEDJA-${crypto.randomUUID().slice(0, 8)}`,
+    name: "Tre operationer",
+    type: "manufactured",
+    active: true,
+  }));
+  await mfgService.createRoutingOperation(chain.id, { sequenceNo: 10, workCenterId: world.r1.id, setupTime: 240, runTimePerUnit: 0 });
+  await mfgService.createRoutingOperation(chain.id, { sequenceNo: 20, workCenterId: world.r2.id, setupTime: 240, runTimePerUnit: 0 });
+  await mfgService.createRoutingOperation(chain.id, { sequenceNo: 30, workCenterId: world.r1.id, setupTime: 240, runTimePerUnit: 0 });
+  const { order, row } = await confirmedOrder(world, chain.id, 1);
+  return { ...world, chain, order, row };
+}
+
+const batchDays = (check: { batches: { operations: { days: { date: string; minutes: number }[] }[] }[] }) =>
+  check.batches[0]!.operations.map((o) => o.days);
+
+async function orderPlan(moId: string) {
+  const ops = await mfgService.listOperations(moId);
+  return Promise.all(ops.map((o) => planRows(o.id)));
+}
+
+describe("Standardkötiden i Leveranstidskontrollen (#18)", () => {
+  it.each([
+    // Queue 0: the working day after. 1: + a day, twice. 0.5: ceil(0.5) = 1
+    // before Op 20, ceil(1.0) − 1 = 0 before Op 30 (rounded on the sum, S4).
+    [0, ["2030-03-04", "2030-03-05", "2030-03-06"], "2030-03-07"],
+    [1, ["2030-03-04", "2030-03-06", "2030-03-08"], "2030-03-11"],
+    [0.5, ["2030-03-04", "2030-03-06", "2030-03-07"], "2030-03-08"],
+  ])("the check's klar-dag is the day a TO created right after gets from Planera (queue %s)", async (queueDays, dates, delivery) => {
+    const w = await seedChain();
+    if (queueDays > 0) await systemService.updateSettings({ planningQueueTimeDays: queueDays });
+    const check = await planningService.checkDeliveryTime({ salesOrderId: w.order.id });
+    expect(batchDays(check)).toEqual(dates.map(FOUR_HOURS));
+    expect(check.rows[0]!.readyDate).toBe(dates[2]);
+    expect(check.batches[0]!.readyDate).toBe(dates[2]);
+    expect(check).toMatchObject({ shipDate: delivery, deliveryDate: delivery });
+
+    // A TO for the same article and quantity, planned by the engine in its
+    // own create transaction: the same days, the same finish.
+    const mo = await mfgService.createManufacturingOrder({ articleId: w.chain.id, quantity: 1 }, w.user.id);
+    expect(await orderPlan(mo.id)).toEqual(batchDays(check));
+    const ops = await mfgService.listOperations(mo.id);
+    expect(ops.map((o) => [o.plannedStartDate, o.plannedEndDate, o.planLocked])).toEqual(dates.map((d) => [d, d, false]));
+    expect((await planningService.orderPlanSummaries([mo.id])).get(mo.id)).toMatchObject({ plannedFinish: check.rows[0]!.readyDate });
+    // Planera again gives the same plan.
+    await planningService.planProductionRun(w.user.id);
+    expect(await orderPlan(mo.id)).toEqual(batchDays(check));
+  });
+
+  it("on a Friday with a queue time: the gaps count working days over the weekend — the check and Planera alike", async () => {
+    const w = await seedChain();
+    await systemService.updateSettings({ planningQueueTimeDays: 1 });
+    const friday = buildPlanning(mfgService, salesService, () => "2030-03-08");
+    planReaderRef.current = friday; // the new TO is planned by the same clock
+    const check = await friday.checkDeliveryTime({ salesOrderId: w.order.id });
+    // Friday; the working day after is Monday, + 1 = Tuesday; then Thursday.
+    expect(batchDays(check)).toEqual(["2030-03-08", "2030-03-12", "2030-03-14"].map(FOUR_HOURS));
+    expect(check).toMatchObject({ shipDate: "2030-03-15", deliveryDate: "2030-03-15" });
+    const mo = await mfgService.createManufacturingOrder({ articleId: w.chain.id, quantity: 1 }, w.user.id);
+    expect(await orderPlan(mo.id)).toEqual(batchDays(check));
+  });
+
+  it("the reservation's TO has exactly the check's days with a queue time, is locked and in time", async () => {
+    const w = await seedChain();
+    await systemService.updateSettings({ planningQueueTimeDays: 1 });
+    const check = await planningService.checkDeliveryTime({ salesOrderId: w.order.id });
+    expect(check.deliveryDate).toBe("2030-03-11");
+    const applied = await planningService.applyDeliveryTime(
+      { salesOrderId: w.order.id, deliveryDate: check.deliveryDate!, expectedOrders: 1 },
+      w.user.id
+    );
+    const mo = applied.manufacturingOrders[0]!;
+    expect(applied.warnings).toEqual([]);
+    expect(await orderPlan(mo.id)).toEqual(batchDays(check));
+    const ops = await mfgService.listOperations(mo.id);
+    expect(ops.map((o) => [o.sequenceNo, o.plannedStartDate, o.plannedEndDate, o.planLocked])).toEqual([
+      [10, "2030-03-04", "2030-03-04", true],
+      [20, "2030-03-06", "2030-03-06", true],
+      [30, "2030-03-08", "2030-03-08", true],
+    ]);
+    // The TO is due the day the check said it is ready — and the plan's
+    // finish is that day, so it is not Sen (the status reads the same queue).
+    expect(await mfgService.getManufacturingOrder(mo.id)).toMatchObject({ dueDate: "2030-03-08" });
+    expect((await planningService.orderPlanSummaries([mo.id])).get(mo.id)).toMatchObject({
+      plannedStartDate: "2030-03-04",
+      plannedEndDate: "2030-03-08",
+      plannedFinish: "2030-03-08",
+      late: false,
+    });
+    // Planera keeps the promised days.
+    const run = await planningService.planProductionRun(w.user.id);
+    expect(run.warnings.filter((x) => x.kind === "late" || x.kind === "sequence")).toEqual([]);
+    expect(await orderPlan(mo.id)).toEqual(batchDays(check));
+    expect(await salesOrderRow(w.order.id)).toMatchObject({ status: "in_production", expectedDeliveryDate: "2030-03-11" });
+  });
+
+  it("the Standardkötid changed between the check and the reservation: 409 delivery-time-changed with the new check — only when the date moves", async () => {
+    const w = await seedChain();
+    const check = await planningService.checkDeliveryTime({ salesOrderId: w.order.id });
+    expect(check.deliveryDate).toBe("2030-03-07");
+    // A one-operation order is checked too: no gap, so the queue cannot move it.
+    const single = await confirmedOrder(w, w.other.id, 4);
+    const singleCheck = await planningService.checkDeliveryTime({ salesOrderId: single.order.id });
+    expect(singleCheck.deliveryDate).toBe("2030-03-05");
+
+    await systemService.updateSettings({ planningQueueTimeDays: 1 });
+    const failure = await planningService
+      .applyDeliveryTime({ salesOrderId: w.order.id, deliveryDate: check.deliveryDate!, expectedOrders: 1 }, w.user.id)
+      .then(() => null, (err: unknown) => err);
+    expect(failure).toBeInstanceOf(DeliveryTimeChangedError);
+    const changed = failure as DeliveryTimeChangedError;
+    // Read under the lock, in the reservation's transaction: the new queue.
+    expect(changed.deliveryDate).toBe("2030-03-11");
+    expect(changed.result).toMatchObject({ shipDate: "2030-03-11", deliveryDate: "2030-03-11" });
+    expect(batchDays(changed.result)).toEqual(["2030-03-04", "2030-03-06", "2030-03-08"].map(FOUR_HOURS));
+    expect(await allManufacturingOrders()).toEqual([]);
+    expect(await allPlanRows()).toEqual([]);
+    expect(await salesOrderRow(w.order.id)).toMatchObject({ status: "confirmed", expectedDeliveryDate: null });
+    expect(auditEntries).toEqual([]);
+
+    // The date that did not move goes through with the new setting.
+    const one = await planningService.applyDeliveryTime({ salesOrderId: single.order.id, deliveryDate: singleCheck.deliveryDate! }, w.user.id);
+    expect(await orderPlan(one.manufacturingOrders[0]!.id)).toEqual(batchDays(singleCheck));
+    // And the new date of the chain, on the new check's days (R1 has the
+    // other TO's four hours today — Op 10 still fits beside them).
+    const again = await planningService.checkDeliveryTime({ salesOrderId: w.order.id });
+    expect(again.deliveryDate).toBe("2030-03-11");
+    const applied = await planningService.applyDeliveryTime({ salesOrderId: w.order.id, deliveryDate: "2030-03-11" }, w.user.id);
+    expect(await orderPlan(applied.manufacturingOrders[0]!.id)).toEqual(batchDays(again));
+  });
+
+  it("races a new TO under the production_plan lock with a queue time: the rerun sees it and the gaps move with it", async () => {
+    const w = await seedChain();
+    await systemService.updateSettings({ planningQueueTimeDays: 1 });
+    const check = await planningService.checkDeliveryTime({ salesOrderId: w.order.id });
+    expect(check.deliveryDate).toBe("2030-03-11");
+
+    // A TO of 8 h on R1 is being created — its transaction holds the lock
+    // (and has planned it on today) while the reservation starts.
+    let open!: () => void;
+    const holding = new Promise<void>((resolve) => (open = resolve));
+    let created!: () => void;
+    const inside = new Promise<void>((resolve) => (created = resolve));
+    const concurrent = db.transaction(async (tx) => {
+      await lockProductionPlan(tx);
+      await mfgService.createManufacturingOrderInTx(tx, { articleId: w.other.id, quantity: 8 }, w.user.id);
+      created();
+      await holding;
+    });
+    await inside;
+    const reservation = planningService.applyDeliveryTime({ salesOrderId: w.order.id, deliveryDate: check.deliveryDate!, expectedOrders: 1 }, w.user.id);
+    // Released even when the wait fails, so the open transaction never hangs the file.
+    await waitForLockWaiter().finally(open);
+    const [first, second] = await Promise.allSettled([concurrent, reservation]);
+    expect(first.status).toBe("fulfilled");
+    expect(second.status).toBe("rejected");
+    const changed = (second as PromiseRejectedResult).reason as DeliveryTimeChangedError;
+    expect(changed).toBeInstanceOf(DeliveryTimeChangedError);
+    // R1 is full today: Op 10 on Tuesday, and the whole chain a day later —
+    // Thursday, then Monday (the working day after Thursday + 1).
+    expect(batchDays(changed.result)).toEqual(["2030-03-05", "2030-03-07", "2030-03-11"].map(FOUR_HOURS));
+    expect(changed.deliveryDate).toBe("2030-03-12");
+    expect(await allManufacturingOrders()).toHaveLength(1); // the concurrent TO only
+    expect(await salesOrderRow(w.order.id)).toMatchObject({ status: "confirmed", expectedDeliveryDate: null });
+
+    const applied = await planningService.applyDeliveryTime({ salesOrderId: w.order.id, deliveryDate: "2030-03-12", expectedOrders: 1 }, w.user.id);
+    expect(await orderPlan(applied.manufacturingOrders[0]!.id)).toEqual(batchDays(changed.result));
+    expect((await mfgService.listOperations(applied.manufacturingOrders[0]!.id)).every((o) => o.planLocked)).toBe(true);
   });
 });

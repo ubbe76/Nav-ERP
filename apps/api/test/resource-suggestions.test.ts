@@ -318,6 +318,22 @@ describe("resourceSuggestions — the floor and the walk", () => {
     expect(dayAfterSwitch(w, "TO-1", 20, "wc-120")).toBe(out[0]!.toDate);
   });
 
+  it("measures against the load Byt replans against: the order's own other operations are not in its way (#18)", () => {
+    // Op 10 (110) is stored today, but 110 is full today now: Planera puts
+    // it on Tuesday. Op 20 (110, never planned) lies on its due date —
+    // Tuesday — in the load, but a replanning takes the whole order out
+    // first, so it does not push Op 10 to Wednesday. Op 20 may start
+    // Wednesday: 110 is full then, 120 free.
+    const op10 = op("TO-1", 10, 4, { plannedDays: days([MON, 4]) });
+    const op20 = op("TO-1", 20, 8, { resources: ALTERNATIVES, dueDate: TUE });
+    for (const [queueDays, expected] of [[0, WED], [1, THU]] as const) {
+      const w = world([load("wc-110", MON, 8), load("wc-110", WED, 8), load("wc-110", THU, 8), op10, op20], { queueDays });
+      const out = resourceSuggestions(w);
+      expect(out.map((s) => [s.sequenceNo, s.toCode, s.currentToDate, s.toDate, s.reason])).toEqual([[20, "120", null, expected, "unplanned"]]);
+      expect(dayAfterSwitch(w, "TO-1", 20, "wc-120")).toBe(expected);
+    }
+  });
+
   it("not overbooked: the floor follows the previous operation's own day", () => {
     const op10 = op("TO-1", 10, 4, { workCenterId: "wc-140", plannedDays: days([MON, 4]) });
     const op20 = op("TO-1", 20, 4, { resources: ALTERNATIVES, plannedDays: days([FRI, 4]) });

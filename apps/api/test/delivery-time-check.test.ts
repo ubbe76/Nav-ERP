@@ -11,12 +11,13 @@ import {
 } from "../src/modules/planning/service/delivery-time-check.js";
 import type { ArticleOverviewRow } from "../src/modules/planning/service/article-overview.js";
 import type { CapacityOperationRow } from "../src/modules/planning/service/capacity-calc.js";
+import { planProduction } from "../src/modules/planning/service/production-plan.js";
 
 // Pure tests — no database. Monday 2026-10-19 is today unless a test says
 // otherwise; capacity is placed per DAY (#18): Mon 19 – Fri 23, then Mon 26.
-// 110 works Mon–Fri, 8 h a day. ETAPP 1: the check runs with queue time 0
-// (the Standardkötid comes into the check in etapp 2), so the next operation
-// starts the working day after the previous one is ready.
+// 110 works Mon–Fri, 8 h a day. The next operation starts the working day
+// after the previous one is ready plus the Standardkötid (queueDays, 0 unless
+// a test sets it) — the chain Planera walks.
 const TODAY = "2026-10-19";
 
 function article(articleId: string, type: DtcArticle["type"] = "purchased", rounding: number | null = null): DtcArticle {
@@ -544,11 +545,91 @@ describe("Leveranstidskontroll — made, capacity per day", () => {
     expect(friday.rows[0]!.readyDate).toBe("2026-10-27");
   });
 
-  it("etapp 1: the check walks the chain with queue time 0; a given queueDays is waited between the operations", () => {
-    // The service does not pass the Standardkötid yet (etapp 2 does).
-    expect(checkDeliveryTime(made([op(10, 4), op(20, 4), op(30, 4)])).rows[0]!.readyDate).toBe("2026-10-21");
-    expect(checkDeliveryTime(made([op(10, 4), op(20, 4), op(30, 4)], { queueDays: 1 })).rows[0]!.readyDate).toBe("2026-10-23");
-    expect(checkDeliveryTime(made([op(10, 4), op(20, 4), op(30, 4)], { queueDays: 0.5 })).rows[0]!.readyDate).toBe("2026-10-22");
+  it("the Standardkötid is waited between the operations, rounded up on the accumulated sum (S4)", () => {
+    const three = [op(10, 4), op(20, 4), op(30, 4)];
+    const days = (queueDays: number, extra: Partial<DeliveryTimeCheckInput> = {}) =>
+      checkDeliveryTime(made(three, { queueDays, ...extra })).batches[0]!.operations.map((o) => o.days.map((d) => d.date));
+    expect(days(0)).toEqual([["2026-10-19"], ["2026-10-20"], ["2026-10-21"]]);
+    // One day: the working day after + 1, twice.
+    expect(days(1)).toEqual([["2026-10-19"], ["2026-10-21"], ["2026-10-23"]]);
+    // Half a day: ceil(0.5) = 1 before the second, ceil(1.0) − 1 = 0 before the third.
+    expect(days(0.5)).toEqual([["2026-10-19"], ["2026-10-21"], ["2026-10-22"]]);
+    // 1.5: 2 before the second, ceil(3.0) − 2 = 1 before the third.
+    expect(days(1.5)).toEqual([["2026-10-19"], ["2026-10-22"], ["2026-10-26"]]);
+    // The row's date, the steps and the ship date follow the last operation.
+    const queued = checkDeliveryTime(made(three, { queueDays: 1 }));
+    expect(queued.rows[0]!.readyDate).toBe("2026-10-23");
+    expect(queued.rows[0]!.chain.map((s) => (s.kind === "operation" ? [s.fromDate, s.toDate] : null))).toEqual([
+      ["2026-10-19", "2026-10-19"],
+      ["2026-10-21", "2026-10-21"],
+      ["2026-10-23", "2026-10-23"],
+    ]);
+    expect(queued).toMatchObject({ shipDate: "2026-10-26", deliveryDate: "2026-10-26" });
+  });
+
+  it("the queue counts the company's working days: over a weekend and past a holiday, and from a full day's next free day", () => {
+    const two = [op(10, 4), op(20, 4)];
+    // Friday: the working day after is Monday, + 1 = Tuesday; a holiday on Tuesday ⇒ Wednesday.
+    expect(checkDeliveryTime(made(two, { today: "2026-10-23", queueDays: 1 })).rows[0]!.readyDate).toBe("2026-10-27");
+    expect(checkDeliveryTime(made(two, { today: "2026-10-23", queueDays: 1, offDays: new Set(["2026-10-27"]) })).rows[0]!.readyDate).toBe("2026-10-28");
+    // The floor is Wednesday; 110 is full that day, so the operation is on Thursday.
+    const pushed = checkDeliveryTime(made(two, { queueDays: 1, existingOperations: [existing("wc-1", "2026-10-21", 8)] }));
+    expect(pushed.batches[0]!.operations.map((o) => o.days)).toEqual([
+      [{ date: "2026-10-19", minutes: 240 }],
+      [{ date: "2026-10-22", minutes: 240 }],
+    ]);
+  });
+
+  it("an operation without time takes no day and no queue; a lego operation takes its place in the chain (S6, S7)", () => {
+    // Op 20 has no time: Op 30 waits ONE gap after Op 10.
+    const skipped = checkDeliveryTime(made([op(10, 4), op(20, 0), op(30, 4)], { queueDays: 1 }));
+    expect(skipped.batches[0]!.operations.map((o) => o.days.map((d) => d.date))).toEqual([["2026-10-19"], [], ["2026-10-21"]]);
+    expect(skipped.rows[0]!.readyDate).toBe("2026-10-21");
+    // Lego between: sent Wednesday (the day after + 1), back 3 working days
+    // later (Monday), and Op 30 starts the working day after + 1 (Wednesday).
+    const lego: DtcWorkCenter = { ...wc1, workCenterId: "wc-l", code: "900", name: "Ytbehandling", type: "subcontract", weekScheduleId: null, leadTimeDays: 3 };
+    const between = checkDeliveryTime(
+      made([op(10, 4), op(20, 0, "wc-l"), op(30, 4)], { queueDays: 1, workCenters: new Map([["wc-1", wc1], ["wc-l", lego]]) })
+    );
+    expect(between.rows[0]!.chain.map((s) => s.date)).toEqual(["2026-10-19", "2026-10-26", "2026-10-28"]);
+  });
+
+  it.each([0, 0.5, 1, 1.5])("the check's days are the days Planera gives the same order (queue %s)", (queueDays) => {
+    // 110 has load on Tuesday and Thursday; Op 30 has no time. The same
+    // book, the same chain: the batch's allocation is the engine's plan.
+    const lego: DtcWorkCenter = { ...wc1, workCenterId: "wc-l", code: "900", name: "Ytbehandling", type: "subcontract", weekScheduleId: null, leadTimeDays: 2, queueTimeDays: 0.5 };
+    const workCenters = new Map([["wc-1", wc1], ["wc-l", lego]]);
+    const load = [existing("wc-1", "2026-10-20", 6), existing("wc-1", "2026-10-22", 8)];
+    const route = [op(10, 4), op(20, 12), op(30, 0), op(40, 0, "wc-l"), op(50, 6)];
+    const check = checkDeliveryTime(made(route, { queueDays, workCenters, existingOperations: load, rows: [row("m", 1)] }));
+    const base = input({ rows: [] });
+    const plan = planProduction({
+      today: TODAY,
+      offDays: base.offDays,
+      workCenters,
+      schedule: base.schedule,
+      queueDays,
+      existingOperations: load,
+      orders: [
+        {
+          id: "mo-new",
+          orderNumber: "TO-NY",
+          dueDate: null,
+          operations: route.map((o) => ({
+            ...existing(o.workCenterId, null, o.setupTime / 60),
+            moOperationId: `new-${o.sequenceNo}`,
+            manufacturingOrderId: "mo-new",
+            orderNumber: "TO-NY",
+            sequenceNo: o.sequenceNo,
+            started: false,
+          })),
+        },
+      ],
+    });
+    const planned = new Map(plan.plans.map((p) => [p.operationId, p.days]));
+    expect(check.batches[0]!.operations.map((o) => o.days)).toEqual(route.map((o) => planned.get(`new-${o.sequenceNo}`) ?? []));
+    expect(check.batches[0]!.readyDate).toBe(plan.orders[0]!.plannedFinish);
+    expect(check.rows[0]!.readyDate).toBe(plan.orders[0]!.plannedFinish);
   });
 
   it("material arriving mid-week: capacity from that day", () => {
@@ -786,6 +867,25 @@ describe("Leveranstidskontroll — configured rows, customer and errors", () => 
     );
     expect(result.rows[0]).toMatchObject({ readyDate: TODAY, notes: [] });
     expect(result.rows[0]!.chain).toEqual([expect.objectContaining({ kind: "supply", documentNumber: "TO-1", date: TODAY, late: false })]);
+  });
+
+  it("a linked TO with a lego operation after its planned ones is ready when the lego is back — the chain's floor with the queue", () => {
+    const lego: DtcWorkCenter = { ...wc1, workCenterId: "wc-l", code: "900", name: "Ytbehandling", type: "subcontract", weekScheduleId: null, leadTimeDays: 3 };
+    const legoOp = { ...existing("wc-l", "2026-11-30", 0), manufacturingOrderId: "mo-1", orderNumber: "TO-1", sequenceNo: 20 };
+    const check = (queueDays: number) =>
+      checkDeliveryTime(
+        input({
+          articles: articles(article("t", "manufactured")),
+          workCenters: new Map([["wc-1", wc1], ["wc-l", lego]]),
+          existingOperations: [plannedExisting, legoOp],
+          queueDays,
+          rows: [row("t", 1, { structure: { quantity: 0, operations: [], materials: [], covered: { quantity: 1, orders: [linked(1, "2026-11-30")] } } })],
+        })
+      ).rows[0]!.readyDate;
+    // Planned Monday the 26th; sent Tuesday, back three working days later.
+    expect(check(0)).toBe("2026-10-30");
+    // With a day's queue it is sent Wednesday: back Monday the 2nd.
+    expect(check(1)).toBe("2026-11-02");
   });
 
   it("a configured row fully covered by its linked TO gives no batch; a done TO is ready now", () => {
@@ -1095,6 +1195,68 @@ describe("Leveranstidskontroll — alternativa resurser", () => {
       ordinaryDeliveryDate: "2026-10-21",
     });
     expect(deliveryTimeAnswer(runs).rows[0]!.chain[0]).toMatchObject({ workCenterCode: "120", alternativeOf: { workCenterCode: "110", toDate: "2026-10-20" } });
+  });
+
+  it("an alternative that wins one day is not taken when the delivery date stays: the customer's delivery day decides", () => {
+    // 110 is full today only: Tuesday on 110, today on 120 — shipped
+    // Wednesday or Tuesday, but the customer only takes deliveries on
+    // Thursdays, so both are delivered the 22nd.
+    const runs = runDeliveryTimeChecks(
+      made([withAlternatives(8)], {
+        existingOperations: [existing("wc-1", "2026-10-19", 8)],
+        customer: { weekdays: [4], mode: "arrival", transitDays: 0 },
+      })
+    );
+    expect(runs.withAlternatives).toMatchObject({ shipDate: "2026-10-20", deliveryDate: "2026-10-22" });
+    expect(runs.ordinary).toMatchObject({ shipDate: "2026-10-21", deliveryDate: "2026-10-22" });
+    const answer = deliveryTimeAnswer(runs);
+    expect(answer).toMatchObject({ usesAlternatives: false, shipDate: "2026-10-21", deliveryDate: "2026-10-22", ordinaryDeliveryDate: null });
+    expect(answer.batches[0]!.operations).toEqual([
+      { sequenceNo: 10, workCenterId: "wc-1", workCenterCode: "110", workCenterName: "Kantpress", alternativeOf: null, days: [{ date: "2026-10-20", minutes: 480 }] },
+    ]);
+  });
+
+  it("with a queue time: the day an alternative wins on the first operation is a day won down the chain", () => {
+    // Two operations, a day's queue; 110 is full today. On 110: Tuesday and
+    // Thursday. Op 10 on 120 today ⇒ Op 20 on 110 Wednesday — a day earlier.
+    const runs = runDeliveryTimeChecks(
+      made([withAlternatives(8), op(20, 8)], { queueDays: 1, existingOperations: [existing("wc-1", "2026-10-19", 8)] })
+    );
+    const answer = deliveryTimeAnswer(runs);
+    expect(answer).toMatchObject({ usesAlternatives: true, shipDate: "2026-10-22", ordinaryShipDate: "2026-10-23" });
+    expect(answer.batches[0]!.operations.map((o) => [o.workCenterCode, o.alternativeOf?.toDate ?? null, o.days])).toEqual([
+      ["120", "2026-10-20", [{ date: "2026-10-19", minutes: 480 }]],
+      ["110", null, [{ date: "2026-10-21", minutes: 480 }]],
+    ]);
+    expect(runs.ordinary.batches[0]!.operations.map((o) => o.days.map((d) => d.date))).toEqual([["2026-10-20"], ["2026-10-22"]]);
+  });
+
+  it("the beskärningspass on days: a one-day win the date does not need goes back to the ordinarie", () => {
+    // Row A: 110 is full today, 120 free — a day earlier on 120 (today
+    // instead of Tuesday). Row C: 130 is full Monday–Wednesday, 140 only
+    // today — Tuesday on 140, Thursday on 130. C decides the date and needs
+    // 140; with it the date is Tuesday's, which A makes on 110 too.
+    const wc3: DtcWorkCenter = { ...wc1, workCenterId: "wc-3", code: "130", name: "Svets" };
+    const wc4: DtcWorkCenter = { ...wc1, workCenterId: "wc-4", code: "140", name: "Svets 2" };
+    const opC: DtcOperation = { ...op(10, 8, "wc-3"), alternatives: [{ workCenterId: "wc-4", setupTime: 480, runTimePerUnit: 0 }] };
+    const runs = runDeliveryTimeChecks(
+      input({
+        articles: articles(article("a", "manufactured"), article("c", "manufactured")),
+        routings: new Map([
+          ["a", [withAlternatives(8)]],
+          ["c", [opC]],
+        ]),
+        workCenters: new Map([...workCenters, ["wc-3", wc3], ["wc-4", wc4]]),
+        existingOperations: [existing("wc-1", "2026-10-19", 8), existing("wc-3", "2026-10-19", 24), existing("wc-4", "2026-10-19", 8)],
+        rows: [row("a", 1), row("c", 1)],
+      })
+    );
+    const answer = deliveryTimeAnswer(runs);
+    expect(answer).toMatchObject({ usesAlternatives: true, shipDate: "2026-10-21", ordinaryShipDate: "2026-10-23" });
+    expect(answer.batches.map((b) => [b.rowKey, b.operations[0]!.workCenterCode, b.operations[0]!.alternativeOf?.workCenterCode ?? null, b.readyDate])).toEqual([
+      ["r-a", "110", null, "2026-10-20"],
+      ["r-c", "140", "130", "2026-10-20"],
+    ]);
   });
 
   it("counts the alternatives only when they move the delivery date — otherwise the whole answer is the ordinarie run", () => {

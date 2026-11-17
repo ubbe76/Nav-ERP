@@ -397,6 +397,11 @@ export interface ResourceCandidate {
   // The operation's minutes on THIS resource — an alternative's own times,
   // or the ordinarie's where it has none (resolved by the caller).
   minutes: number;
+  // An ALTERNATIVE's trial is made against the load minus these days (the
+  // förslag: the order's own replannable load on that resource — a Byt
+  // replans the whole order, so its own stored days are not in its way).
+  // The base's come with the ChoiceBase. Left out = the whole load.
+  without?: readonly PlannedDay[];
 }
 
 // Where the base's klar-dag comes from. The check: a trial placement on
@@ -511,7 +516,7 @@ export function chooseResource(
 
   let best: { index: number; placement: PlacedPlacement } | null = null;
   for (const { c, index } of tried) {
-    const trial = book.peek(c.workCenter, c.minutes, { floor });
+    const trial = book.peek(c.workCenter, c.minutes, { floor, without: c.without });
     if (trial.horizonExceeded) continue;
     if (best === null || trial.toDate < best.placement.toDate) best = { index, placement: trial };
   }

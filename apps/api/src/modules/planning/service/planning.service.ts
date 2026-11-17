@@ -2238,7 +2238,7 @@ export function createPlanningService(
           capacityFactor: w.capacityFactor,
           leadTimeDays: leadTimeOf.get(w.workCenterId) ?? null,
           // Lego counts Ledtid + Kötid in the book (#18, S6) — the resource's
-          // own Kötid, not Standardkötiden (which the check gets in etapp 2).
+          // own Kötid; Standardkötiden is the chain's (queueDays below).
           queueTimeDays: w.queueTimeDays ?? null,
           // Valregeln never tries an inactive alternative.
           active: w.active,
@@ -2258,6 +2258,12 @@ export function createPlanningService(
       workCenters,
       schedule: { weekScheduleDays: capacity.weekScheduleDays, daySchedules: capacity.daySchedules, holidays: capacity.holidays },
       existingOperations: capacity.operations,
+      // Standardkötid as THIS run's load read it (loadCapacityInput reads
+      // loadLeadTimeDefaults through the same `dbc`): in the reservation
+      // that is inside the transaction, under the production_plan lock, so
+      // the check redone there counts the queue the TOs are planned with —
+      // and a setting changed since the client's check shows as another date.
+      queueDays: capacity.queueDays ?? 0,
       suppliers: new Map(
         suppliers.map((s) => [
           s.articleId,

@@ -1,6 +1,6 @@
 import { createArticleSchema, createWeekScheduleSchema, createWorkCenterSchema, stampOutSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { auditLog, db, moOperationResources, moOperations, moReports, stampSessions, systemSettings } from "@navet/db";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -21,6 +21,9 @@ import { markSalesOrderInProduction } from "../src/modules/sales/service/product
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
+import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
+import { PLANNING_QUEUE_TIME_DAYS_KEY } from "../src/modules/system/service/plan-settings.js";
+import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { createScheduleRepository } from "../src/modules/timereport/repository/schedule.repository.js";
 import { createScheduleService } from "../src/modules/timereport/service/schedule.service.js";
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
@@ -104,13 +107,19 @@ const costingService = createCostingService(createCostingRepository(db), {
 
 const TRUNCATE = sql`TRUNCATE cost_calculations, mo_operation_plan_days, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, holidays, week_schedule_days, week_schedules, day_schedule_breaks, day_schedules, attendance_sessions, stamp_sessions, time_reports, employees, stock_transactions, stock_locations, warehouses, bom_components, articles, audit_log, users CASCADE`;
 
+// system_settings is not truncated with the rest — the Standardkötid a test
+// sets must never reach the next test (or the next file on this worker).
+const SETTING_KEYS = ["planning_long_operation_weeks", PLANNING_QUEUE_TIME_DAYS_KEY];
+const systemService = createSystemService(createSystemRepository(db));
+
 beforeEach(async () => {
   suggestionReads = 0;
   await db.execute(TRUNCATE);
-  await db.delete(systemSettings).where(eq(systemSettings.key, "planning_long_operation_weeks"));
+  await db.delete(systemSettings).where(inArray(systemSettings.key, SETTING_KEYS));
 });
 afterAll(async () => {
   await db.execute(TRUNCATE);
+  await db.delete(systemSettings).where(inArray(systemSettings.key, SETTING_KEYS));
 });
 
 async function opRow(opId: string) {
@@ -704,6 +713,93 @@ describe("förslag på resurs (etapp 2)", () => {
     );
     expect(operation).toMatchObject({ workCenterId: w.r120.id, resourceLocked: true, plannedEndDate: suggestion!.toDate });
     expect(await opRow(op10!.id)).toMatchObject({ plannedStartDate: "2030-03-13", plannedEndDate: "2030-03-15" });
+  });
+
+  // #18, etapp 2: the förslag's day against the day Byt gives, on the day
+  // level and with a Standardkötid. Three operations so a decimal queue
+  // shows (0.5: a day before the second, none before the third): Op 10 on
+  // 130 (2 h), Op 20 on 140 (10 h) behind 30 h of other work, Op 30 on 110
+  // (10 h, 120 as an alternative) behind 120 h (W1–W3).
+  //   fresh      — the plan as Planera just wrote it.
+  //   stale      — the 30 h ahead on 140 are cancelled: Op 20 would be ready
+  //                earlier than its stored days, and the floor follows.
+  //   overbooked — 140 loses half its capacity: Op 20's stored days are
+  //                overbooked and Planera would put it a week later.
+  describe.each([
+    [0, { fresh: "2030-03-12", stale: "2030-03-08", overbooked: "2030-03-19" }],
+    [1, { fresh: "2030-03-13", stale: "2030-03-12", overbooked: "2030-03-20" }],
+    [0.5, { fresh: "2030-03-12", stale: "2030-03-11", overbooked: "2030-03-19" }],
+  ] as const)("the förslag's day is the day Byt gives (Standardkötid %s)", (queueDays, expectedDay) => {
+    async function seedChain() {
+      const w = await seedWorld();
+      await mfgService.cancel(w.order.id, w.user.id); // the seed's TO is no load here
+      if (queueDays > 0) await systemService.updateSettings({ planningQueueTimeDays: queueDays });
+      const article = async (prefix: string) =>
+        testArticleService.createArticle(parsed(createArticleSchema, { articleNumber: `${prefix}-${crypto.randomUUID().slice(0, 6)}`, name: prefix, type: "manufactured", active: true }));
+      const f140 = await article("F140");
+      await mfgService.createRoutingOperation(f140.id, { sequenceNo: 10, workCenterId: w.r140.id, setupTime: 1800, runTimePerUnit: 0 });
+      const filler140 = await mfgService.createManufacturingOrder({ articleId: f140.id, quantity: 1 }, w.user.id);
+      const f110 = await article("F110");
+      await mfgService.createRoutingOperation(f110.id, { sequenceNo: 10, workCenterId: w.r110.id, setupTime: 7200, runTimePerUnit: 0 });
+      await mfgService.createManufacturingOrder({ articleId: f110.id, quantity: 1 }, w.user.id);
+      const product = await article("S");
+      await mfgService.createRoutingOperation(product.id, { sequenceNo: 10, workCenterId: w.r130.id, setupTime: 120, runTimePerUnit: 0 });
+      await mfgService.createRoutingOperation(product.id, { sequenceNo: 20, workCenterId: w.r140.id, setupTime: 600, runTimePerUnit: 0 });
+      await mfgService.createRoutingOperation(product.id, {
+        sequenceNo: 30,
+        workCenterId: w.r110.id,
+        setupTime: 600,
+        runTimePerUnit: 0,
+        alternatives: [{ workCenterId: w.r120.id }],
+      });
+      const order = await mfgService.createManufacturingOrder({ articleId: product.id, quantity: 1 }, w.user.id);
+      const [op10, op20, op30] = await mfgService.listOperations(order.id);
+      // Behind the 120 h on 110: Monday and Tuesday of W4, whatever the queue.
+      expect([op10!.plannedEndDate, op20!.plannedEndDate, op30!.plannedEndDate]).toEqual(["2030-03-04", "2030-03-08", "2030-03-26"]);
+      return { w, filler140, order, op20: op20!, op30: op30! };
+    }
+
+    // Byt till X as the web sends it; the order is replanned in the same
+    // transaction. The switched operation must end on the förslag's day.
+    async function bytGivesTheSuggestedDay(world: Awaited<ReturnType<typeof seedChain>>, expectedToDate: string) {
+      const { w, order, op30 } = world;
+      const suggestion = (await operationView(order.id, op30.id)).suggestion;
+      expect(suggestion).toMatchObject({ workCenterId: w.r120.id, toDate: expectedToDate, currentToDate: "2030-03-26", reason: "overloaded" });
+      // Beläggning reads the same förslag.
+      expect((await planningService.getCapacity({ weeks: 4 })).summary.resourceSuggestions.map((s) => [s.moOperationId, s.toDate])).toEqual([
+        [op30.id, expectedToDate],
+      ]);
+      const { operation } = await mfgService.updateOperation(
+        order.id,
+        op30.id,
+        { workCenterId: suggestion!.workCenterId, expectedWorkCenterId: w.r110.id },
+        w.user.id
+      );
+      expect(operation).toMatchObject({ workCenterId: w.r120.id, resourceLocked: true, plannedEndDate: suggestion!.toDate });
+      // Planera right after gives the same days again — the switch's plan was Planera's.
+      await planningService.planProductionRun(w.user.id);
+      expect(await opRow(op30.id)).toMatchObject({ workCenterId: w.r120.id, plannedEndDate: suggestion!.toDate });
+      expect((await operationView(order.id, op30.id)).suggestion).toBeNull();
+    }
+
+    it("on the plan as it was just written", async () => {
+      await bytGivesTheSuggestedDay(await seedChain(), expectedDay.fresh);
+    });
+
+    it("after a stale plan: the previous operation would be ready earlier than its stored days", async () => {
+      const world = await seedChain();
+      await mfgService.cancel(world.filler140.id, world.w.user.id);
+      await bytGivesTheSuggestedDay(world, expectedDay.stale);
+      // The replanning moved Op 20 up to where the förslag counted from.
+      expect((await opRow(world.op20.id)).plannedEndDate! < "2030-03-08").toBe(true);
+    });
+
+    it("after an overbooked previous operation: never a day before Planera can put it", async () => {
+      const world = await seedChain();
+      await mfgService.updateWorkCenter(world.w.r140.id, { capacityFactor: 0.5 });
+      await bytGivesTheSuggestedDay(world, expectedDay.overbooked);
+      expect(await opRow(world.op20.id)).toMatchObject({ plannedEndDate: "2030-03-15" });
+    });
   });
 
   it("Byt till X sends its precondition: a moved operation, or one on another resource since, is refused and nothing changes", async () => {

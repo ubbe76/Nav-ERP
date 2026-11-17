@@ -1,7 +1,7 @@
 import { createArticleSchema, createCustomerSchema, createWeekScheduleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { db, manufacturingOrders, moOperationPlanDays, moOperations, salesOrders } from "@navet/db";
+import { db, manufacturingOrders, moOperationPlanDays, moOperations, salesOrders, systemSettings } from "@navet/db";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -30,6 +30,7 @@ import {
   DeliveryTimeChangedError,
   type ManufacturingPlanReader,
 } from "../src/modules/planning/service/planning.service.js";
+import { PLANNING_QUEUE_TIME_DAYS_KEY } from "../src/modules/system/service/plan-settings.js";
 import { waitForLockWaiter } from "./helpers/year-end.js";
 import { parsed } from "./helpers/parsed.js";
 
@@ -112,12 +113,18 @@ planReaderRef.current = planningService;
 
 const TRUNCATE = sql`TRUNCATE mo_operation_plan_days, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations, manufacturing_orders, sales_order_rows, sales_orders, customers, routing_operations, work_centers, production_groups, holidays, week_schedule_days, week_schedules, day_schedule_breaks, day_schedules, stock_transactions, stock_locations, warehouses, bom_components, article_suppliers, articles, users CASCADE`;
 
+// system_settings is not truncated with the rest: the Standardkötid a test
+// sets must never reach the next test (or the next file on this worker).
+const clearQueueTime = () => db.delete(systemSettings).where(eq(systemSettings.key, PLANNING_QUEUE_TIME_DAYS_KEY));
+
 beforeEach(async () => {
   await db.execute(TRUNCATE);
+  await clearQueueTime();
   auditEntries.length = 0;
 });
 afterAll(async () => {
   await db.execute(TRUNCATE);
+  await clearQueueTime();
 });
 
 async function planRows(opId: string) {
@@ -595,5 +602,93 @@ describe("granskningen av etapp 3", () => {
       [partMo!.orderNumber, { resourceSwitches: [{ sequenceNo: 10, fromCode: "110", toCode: "120" }] }],
       [topMo!.orderNumber, undefined],
     ]);
+  });
+});
+
+// #18, etapp 2 — the plan counts in days, so an alternative can win a single
+// day. It still counts only when the DELIVERY date gets earlier (S9: the
+// check's own guard), and with a Standardkötid the day won on the first
+// operation is a day won down the chain.
+describe("alternativ som vinner en dag (#18)", () => {
+  // 110 is full today only (8 h): Op 10 (10 h) is Tuesday–Wednesday on 110,
+  // today–Tuesday on 120.
+  async function seedOneDay() {
+    const w = await seedWorld({ fill110: false });
+    const f8 = await madeArticle("F8", [{ workCenterId: w.r110.id, setupTime: 480 }]);
+    await mfgService.createManufacturingOrder({ articleId: f8.id, quantity: 1 }, w.user.id);
+    return w;
+  }
+
+  it("counts when it moves the delivery date — with and without a queue time — and the reservation writes it on the check's days", async () => {
+    const w = await seedOneDay();
+    const check = await planningService.checkDeliveryTime({ salesOrderId: w.order.id });
+    // Op 20 the working day after Op 10: Wednesday on the alternative,
+    // Thursday on the ordinarie.
+    expect(check).toMatchObject({ usesAlternatives: true, deliveryDate: "2030-03-07", ordinaryDeliveryDate: "2030-03-08" });
+    expect(opStep(check, 10)).toMatchObject({ workCenterCode: "120", toDate: "2030-03-05", alternativeOf: { workCenterCode: "110", toDate: "2030-03-06" } });
+
+    // A day's queue: Op 20 two working days after Op 10 — Thursday or Friday.
+    await systemService.updateSettings({ planningQueueTimeDays: 1 });
+    const queued = await planningService.checkDeliveryTime({ salesOrderId: w.order.id });
+    expect(queued).toMatchObject({ usesAlternatives: true, deliveryDate: "2030-03-08", ordinaryDeliveryDate: "2030-03-11" });
+    expect(queued.batches[0]!.operations.map((o) => [o.sequenceNo, o.workCenterCode, o.days])).toEqual([
+      [10, "120", TEN_HOURS("2030-03-04", "2030-03-05")],
+      [20, "130", [{ date: "2030-03-07", minutes: 60 }]],
+    ]);
+
+    const applied = await planningService.applyDeliveryTime({ salesOrderId: w.order.id, deliveryDate: "2030-03-08", expectedOrders: 1 }, w.user.id);
+    expect(applied).toMatchObject({ usesAlternatives: true, shipDate: "2030-03-08" });
+    const ops = await mfgService.listOperations(applied.manufacturingOrders[0]!.id);
+    expect(ops.map((o) => [o.sequenceNo, o.workCenterId, o.resourceLocked, o.planLocked, o.plannedStartDate, o.plannedEndDate])).toEqual([
+      [10, w.r120.id, true, true, "2030-03-04", "2030-03-05"],
+      [20, w.r130.id, false, true, "2030-03-07", "2030-03-07"],
+    ]);
+    expect(await planRows(ops[0]!.id)).toEqual(TEN_HOURS("2030-03-04", "2030-03-05"));
+    expect(await planRows(ops[1]!.id)).toEqual([{ date: "2030-03-07", minutes: 60 }]);
+    // In time by the plan's own reading (the same chain, the same queue).
+    expect((await planningService.orderPlanSummaries([applied.manufacturingOrders[0]!.id])).get(applied.manufacturingOrders[0]!.id)).toMatchObject({
+      plannedFinish: "2030-03-07",
+      late: false,
+    });
+  });
+
+  it("is not taken when the day does not move the delivery date: the whole answer is the ordinarie, and nothing is Vald för hand", async () => {
+    const w = await seedOneDay();
+    await salesService.cancel(w.order.id, w.user.id); // the seed's order is no demand here
+    // A second row decides the date either way: 30 h on 130 — ready
+    // Thursday whether the product's Op 20 (130, 1 h) is there on Wednesday
+    // (Op 10 on 120) or on Thursday (Op 10 on 110).
+    const slow = await madeArticle("SEN", [{ workCenterId: w.r130.id, setupTime: 1800 }]);
+    const { order } = await salesService.createQuote(
+      {
+        customerId: w.customer.id,
+        confirm: true,
+        rows: [
+          { articleId: w.product.id, quantity: 10, unitPrice: 100 },
+          { articleId: slow.id, quantity: 1, unitPrice: 100 },
+        ],
+      },
+      w.user.id
+    );
+    const check = await planningService.checkDeliveryTime({ salesOrderId: order.id });
+    expect(check).toMatchObject({ usesAlternatives: false, shipDate: "2030-03-08", deliveryDate: "2030-03-08", ordinaryDeliveryDate: null });
+    expect(check.rows.map((r) => [r.readyDate, r.ordinaryReadyDate])).toEqual([
+      ["2030-03-07", "2030-03-07"],
+      ["2030-03-07", "2030-03-07"],
+    ]);
+    expect(check.batches.flatMap((b) => b.operations.map((o) => [o.workCenterCode, o.alternativeOf]))).toEqual([
+      ["110", null],
+      ["130", null],
+      ["130", null],
+    ]);
+
+    const applied = await planningService.applyDeliveryTime({ salesOrderId: order.id, deliveryDate: "2030-03-08", expectedOrders: 2 }, w.user.id);
+    expect(applied).toMatchObject({ usesAlternatives: false, manufacturingOrders: [expect.objectContaining({ resourceSwitches: [] }), expect.objectContaining({ resourceSwitches: [] })] });
+    const productOps = await mfgService.listOperations(applied.manufacturingOrders[0]!.id);
+    expect(productOps.map((o) => [o.sequenceNo, o.workCenterId, o.resourceLocked, o.planLocked])).toEqual([
+      [10, w.r110.id, false, true],
+      [20, w.r130.id, false, true],
+    ]);
+    expect(await planRows(productOps[0]!.id)).toEqual(TEN_HOURS("2030-03-05", "2030-03-06"));
   });
 });

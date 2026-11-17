@@ -1,7 +1,11 @@
 import { createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
-import { db, moOperationPlanDays } from "@navet/db";
+import { eq, isNull } from "drizzle-orm";
+import { db, holidays, moOperationPlanDays, systemSettings } from "@navet/db";
+import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
+import { addWorkingDays } from "../src/modules/system/service/delivery-days.js";
+import { PLANNING_QUEUE_TIME_DAYS_KEY } from "../src/modules/system/service/plan-settings.js";
+import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { createManufacturingRepository } from "../src/modules/manufacturing/repository/manufacturing.repository.js";
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { markSalesOrderInProduction } from "../src/modules/sales/service/production-transition.js";
@@ -25,12 +29,20 @@ function configurationKey(configuration: unknown): unknown {
   return configuration.key;
 }
 
+// system_settings is not truncated with the rest: the Standardkötid a test
+// sets must never reach the next test (or the next file on this worker).
+const clearQueueTime = () => db.delete(systemSettings).where(eq(systemSettings.key, PLANNING_QUEUE_TIME_DAYS_KEY));
+
 beforeEach(async () => {
   await resetConfiguredRows();
   await db.execute(CONFIGURED_MFG_TRUNCATE);
   await resetCostingSettings();
+  await clearQueueTime();
 });
-afterAll(resetConfiguredRows);
+afterAll(async () => {
+  await resetConfiguredRows();
+  await clearQueueTime();
+});
 
 // The manufacturing service as app.ts wires it for 4c + the plan reader.
 const planReaderRef: { current: ManufacturingPlanReader | null } = { current: null };
@@ -124,6 +136,39 @@ describe("reservationen — configured row", () => {
       NothingToReserveError
     );
     expect(await mfg.coverageForSalesOrderRows([row.id])).toEqual(new Map([[row.id, expect.objectContaining({ quantity: 2 })]]));
+  });
+
+  it("with a Standardkötid the derived operations wait it, the TO gets the check's days, and the next check reads the TO ready the same day (#18)", async () => {
+    const user = await makeUser();
+    const { order, row } = await confirmedRow(2);
+    const without = await planning.checkDeliveryTime({ salesOrderId: order.id });
+    await createSystemService(createSystemRepository(db)).updateSettings({ planningQueueTimeDays: 1 });
+    const check = await planning.checkDeliveryTime({ salesOrderId: order.id });
+    const [op10, op20] = check.batches[0]!.operations;
+    // "Today" is the real day here: the dates are read relative to Op 10's.
+    const offDays = new Set((await db.select({ date: holidays.date }).from(holidays).where(isNull(holidays.dayScheduleId))).map((h) => h.date));
+    const first = op10!.days[0]!.date;
+    expect(without.batches[0]!.operations[1]!.days.map((d) => d.date)).toEqual([addWorkingDays(first, 1, offDays)]);
+    // The working day after Op 10 is ready, plus the day's queue.
+    expect(op20!.days.map((d) => d.date)).toEqual([addWorkingDays(first, 2, offDays)]);
+    expect(check.rows[0]!.readyDate).toBe(op20!.days[0]!.date);
+    expect(check.shipDate).toBe(addWorkingDays(first, 3, offDays));
+
+    const applied = await planning.applyDeliveryTime({ salesOrderId: order.id, deliveryDate: check.deliveryDate!, expectedOrders: 1 }, user.id);
+    const moId = applied.manufacturingOrders[0]!.id;
+    const ops = await mfg.listOperations(moId);
+    expect(await planRows(ops[0]!.id)).toEqual(op10!.days);
+    expect(await planRows(ops[1]!.id)).toEqual(op20!.days);
+    expect(ops.map((o) => o.planLocked)).toEqual([true, true]);
+    expect((await planning.orderPlanSummaries([moId])).get(moId)).toMatchObject({ plannedFinish: check.rows[0]!.readyDate, late: false });
+
+    // The row's TO is its supply now, ready on its planned finish — the
+    // same day, so the promised date stands.
+    const again = await planning.checkDeliveryTime({ salesOrderId: order.id });
+    expect(again.batches).toEqual([]);
+    expect(again.rows[0]).toMatchObject({ readyDate: check.rows[0]!.readyDate, notes: [] });
+    expect(again).toMatchObject({ shipDate: check.shipDate, deliveryDate: check.deliveryDate });
+    expect(row.id).toBe(check.batches[0]!.rowKey);
   });
 
   it("rounds the batch up to the template's step and answers with the TO's own quantity", async () => {

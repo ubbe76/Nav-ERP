@@ -138,7 +138,17 @@ const compareText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 // never gives (granskningen av etapp 3); a stored day that has passed is no
 // plan any more (granskningen av etapp 2: the plan's age must not move the
 // floor). The earliest-of rule is only the comparison's (Valregeln,
-// currentToDate). An own operation with time but no plan stops the walk, as
+// currentToDate).
+//
+// The load every trial of an order is made against is Byt's (#18): the
+// replanning takes ALL the order's unlocked pending operations out of the
+// load and places them again in sequence, so the order's own stored days on
+// a resource are never in its way — not only the measured operation's own
+// (`ownLoad` below; an operation of the same order stored on the day after
+// an overbooked previous one would otherwise push the floor, and the förslag
+// would name a later day than Byt gives). The operations placed before the
+// measured one need not be booked back: each ends before the next one's
+// floor, so they never share a day with what is measured. An own operation with time but no plan stops the walk, as
 // Planera's horizonHit does: nothing after it gets a förslag. The base is
 // the operation's CURRENT resource (chooseResource with the stored base).
 export function resourceSuggestions(world: SuggestionWorld, onlyOrderIds?: ReadonlySet<string>): ResourceSuggestion[] {
@@ -170,6 +180,14 @@ export function resourceSuggestions(world: SuggestionWorld, onlyOrderIds?: Reado
     const pending = ops
       .filter((op) => op.operationStatus === "pending")
       .sort((a, b) => a.sequenceNo - b.sequenceNo || compareText(a.moOperationId, b.moOperationId));
+    // The order's own load Planera would place again (unlocked, pending),
+    // per resource, as the book holds it.
+    const ownLoad = new Map<string, PlannedDay[]>();
+    for (const op of pending) {
+      if (op.planLocked && hasPlan(op)) continue;
+      const days = operationLoadDays(op, world.today).filter((c): c is PlannedDay => c.date !== null);
+      if (days.length > 0) ownLoad.set(op.workCenterId, [...(ownLoad.get(op.workCenterId) ?? []), ...days]);
+    }
     for (const op of pending) {
       const wc = world.workCenters.get(op.workCenterId) ?? null;
       if (wc?.type === "subcontract") {
@@ -190,11 +208,11 @@ export function resourceSuggestions(world: SuggestionWorld, onlyOrderIds?: Reado
       const base: ChoiceBase = {
         // A last day that has passed is no plan — the trial decides.
         stored: lastStored !== null && lastStored >= world.today ? lastStored : null,
-        without: chunks.filter((c): c is PlannedDay => c.date !== null),
+        without: ownLoad.get(op.workCenterId) ?? [],
       };
       const floor = chain.floor();
       if (mayGetResourceSuggestion(op)) {
-        const suggestion = suggestFor(op, wc, minutes, floor, base);
+        const suggestion = suggestFor(op, wc, minutes, floor, base, ownLoad);
         if (suggestion) out.push(suggestion);
       }
       // Planera's horizonHit: an operation that did not fit (or was never
@@ -220,7 +238,8 @@ export function resourceSuggestions(world: SuggestionWorld, onlyOrderIds?: Reado
     wc: PlanWorkCenter | null,
     minutes: number,
     floor: string,
-    base: ChoiceBase
+    base: ChoiceBase,
+    ownLoad: ReadonlyMap<string, readonly PlannedDay[]>
   ): ResourceSuggestion | null {
     const others = [...(op.resources ?? [])]
       .filter((r) => r.workCenterId !== op.workCenterId)
@@ -230,6 +249,7 @@ export function resourceSuggestions(world: SuggestionWorld, onlyOrderIds?: Reado
       ...others.map((r) => ({
         workCenter: world.workCenters.get(r.workCenterId) ?? null,
         minutes: remainingOperationMinutes({ ...op, setupTime: r.setupTime, runTimePerUnit: r.runTimePerUnit }),
+        without: ownLoad.get(r.workCenterId),
       })),
     ];
     const choice = chooseResource(book, candidates, floor, base);

@@ -22,6 +22,7 @@ import { round4, roundUpToMultiple, roundToDecimals } from "@navet/shared";
 import { explodeOneLevel, type BomEdge } from "./requirements-calc.js";
 import { isFirmOverviewRow, type ArticleOverviewRow } from "./article-overview.js";
 import {
+  orderPlanStatus,
   routingOperationMinutes,
   type CapacityOperationRow,
   type DayScheduleNetRow,
@@ -145,13 +146,10 @@ export interface DeliveryTimeCheckInput {
   // planned days, the rest on their due date.
   existingOperations: CapacityOperationRow[];
   // Standardkötid between a batch's operations (nextOperationFloor) — the
-  // same chain Planera walks. ETAPP 1 OF #18: the service leaves this out
-  // (= 0), so the check's floor is "the next working day" WITHOUT the queue
-  // while Planera already counts it; etapp 2 loads it with
-  // loadLeadTimeDefaults in the same run (also inside the reservation's
-  // transaction) and the two agree. Until then a reserved TO keeps the
-  // check's days (they are written as they are and locked), so the only
-  // difference is the date the check promises with a queue time set.
+  // same chain Planera walks, so the day the check promises is the day a TO
+  // created right after gets. The service passes the value its own load
+  // read (in the reservation: inside the transaction, under the lock);
+  // left out = 0 (the pure tests).
   queueDays?: number;
   suppliers: Map<string, DtcSupplier>;
   customer: DeliverySettings | null;
@@ -568,9 +566,9 @@ function runCheck(input: DeliveryTimeCheckInput, options: CheckOptions): CheckRu
     const allocations: DtcBatch["operations"] = [];
     // The chain Planera walks (operationChain): the first operation may use
     // capacity from the day the material is ready, each next one from the
-    // working day after the previous is ready (+ the queue time, 0 until
-    // etapp 2 — see DeliveryTimeCheckInput.queueDays). Operations without
-    // time take no place in it.
+    // working day after the previous is ready plus the Standardkötid
+    // (DeliveryTimeCheckInput.queueDays). Operations without time take no
+    // place in it.
     const chain = operationChain(maxDate(materialReady, t0), input.queueDays ?? 0, offDays);
     for (const op of [...operations].sort((a, b) => a.sequenceNo - b.sequenceNo)) {
       const wc = input.workCenters.get(op.workCenterId);
@@ -764,18 +762,24 @@ function runCheck(input: DeliveryTimeCheckInput, options: CheckOptions): CheckRu
     return covered;
   }
 
-  // The day a linked TO is ready: the last planned day of its pending
-  // operations (never before t0 — a passed day is worked from today, as the
-  // book holds it), else its due date (null = undated).
+  // The day a linked TO is ready: its planned finish as Sen and pegging read
+  // it (orderPlanStatus — the last day of its pending operations' remaining
+  // allocation, a lego operation after them through the chain's floor with
+  // the Standardkötid and its own Ledtid + Kötid), never before t0. A TO
+  // with a pending operation that lacks a plan has no finish: then the last
+  // planned day it has, else its due date (null = undated).
   function linkedOrderReady(order: DtcLinkedOrder): string | null {
+    const own = input.existingOperations.filter((op) => op.manufacturingOrderId === order.manufacturingOrderId);
     let last: string | null = null;
-    for (const op of input.existingOperations) {
-      if (op.manufacturingOrderId !== order.manufacturingOrderId || op.operationStatus !== "pending") continue;
+    for (const op of own) {
+      if (op.operationStatus !== "pending") continue;
       for (const d of op.plannedDays ?? []) {
         if (last === null || d.date > last) last = d.date;
       }
     }
-    return last === null ? order.dueDate : maxDate(last, t0);
+    if (last === null) return order.dueDate;
+    const status = orderPlanStatus(own, { today, offDays, workCenters: input.workCenters, queueDays: input.queueDays ?? 0 });
+    return maxDate(status.planned && status.plannedFinish !== null ? status.plannedFinish : last, t0);
   }
 
   // A configured row: first what its linked TOs already make (a private
