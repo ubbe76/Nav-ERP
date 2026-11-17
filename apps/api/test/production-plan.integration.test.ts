@@ -540,6 +540,60 @@ describe("Flytta and Lås upp", () => {
     expect(await planRows(a.op20.id)).toEqual([...full("03-11", "03-12"), day("03-13", 240)]);
   });
 
+  it("a lego operation before the moved one keeps its place in the chain: Flytta and the next Planera count the same gaps, and a move to before the lego is back warns", async () => {
+    const world = await seedWorld();
+    const lego = await mfgService.createWorkCenter(
+      parsed(createWorkCenterSchema, { code: "901", name: "Lack AB", type: "subcontract", leadTimeDays: 2, active: true })
+    );
+    const article = await articleService.createArticle(parsed(createArticleSchema, {
+      articleNumber: `LEGO-${crypto.randomUUID().slice(0, 8)}`,
+      name: "Lackerad först",
+      type: "manufactured",
+      active: true,
+    }));
+    await mfgService.createRoutingOperation(article.id, { sequenceNo: 10, workCenterId: lego.id, setupTime: 0, runTimePerUnit: 0 });
+    await mfgService.createRoutingOperation(article.id, { sequenceNo: 20, workCenterId: world.r1.id, setupTime: 0, runTimePerUnit: 60 });
+    await mfgService.createRoutingOperation(article.id, { sequenceNo: 30, workCenterId: world.r2.id, setupTime: 0, runTimePerUnit: 60 });
+    // Standardkötid 0.5: rounded up on the accumulated sum, so the gap
+    // before the SECOND operation in the chain waits a day and the gap
+    // before the third none — the gap's ordinal decides the day.
+    await db.insert(systemSettings).values({ key: "planning_queue_time_days", value: "0.5" });
+    try {
+      const mo = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 4 }, world.user.id);
+      const ops = await mfgService.listOperations(mo.id);
+      const op20 = ops.find((o) => o.sequenceNo === 20)!;
+      const op30 = ops.find((o) => o.sequenceNo === 30)!;
+      // Sent today, back Wednesday 03-06; Op 20 after the first gap (a day's
+      // queue): Friday 03-08; Op 30 after the second (none): Monday 03-11.
+      expect(await planRows(op20.id)).toEqual([day("03-08", 240)]);
+      expect(await planRows(op30.id)).toEqual([day("03-11", 240)]);
+
+      // Op 20 to Tuesday 03-12 with the following: Op 30 is the THIRD in the
+      // chain — the working day after, no queue day (Wednesday 03-13). With
+      // the lego left out of the walk it was counted as the second (03-14).
+      const moved = await planningService.moveOperation(op20.id, { date: "2030-03-12", moveFollowing: true }, world.user.id);
+      expect(moved.warnings).toEqual([]);
+      expect(moved.following).toEqual([expect.objectContaining({ sequenceNo: 30, plannedStartDate: "2030-03-13", plannedEndDate: "2030-03-13" })]);
+      expect(await planRows(op30.id)).toEqual([day("03-13", 240)]);
+      // … and the next Planera agrees: nothing moves.
+      const run = await planningService.planProductionRun(world.user.id);
+      expect(run.warnings).toEqual([]);
+      expect(await planRows(op20.id)).toEqual([day("03-12", 240)]);
+      expect(await planRows(op30.id)).toEqual([day("03-13", 240)]);
+
+      // Op 20 to Tuesday 03-05 — before the lego is back (03-06): a sequence
+      // break, reported by Flytta as by Planera.
+      const early = await planningService.moveOperation(op20.id, { date: "2030-03-05", moveFollowing: false }, world.user.id);
+      expect(early.operation).toEqual({ plannedStartDate: "2030-03-05", plannedEndDate: "2030-03-05", planLocked: true });
+      expect(early.warnings).toEqual([expect.objectContaining({ kind: "sequence", sequenceNo: 20, workCenterCode: "101" })]);
+      expect(await planRows(op30.id)).toEqual([day("03-13", 240)]);
+      const again = await planningService.planProductionRun(world.user.id);
+      expect(again.warnings).toEqual([expect.objectContaining({ kind: "sequence", sequenceNo: 20, workCenterCode: "101" })]);
+    } finally {
+      await db.delete(systemSettings).where(eq(systemSettings.key, "planning_queue_time_days"));
+    }
+  });
+
   it("refuses a day before today (400 plan-date-in-past), writing nothing", async () => {
     const world = await seedWorld();
     const a = await createOrder(world, 20, W4);

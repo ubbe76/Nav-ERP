@@ -272,7 +272,10 @@ export function RunPlanPageClient() {
           {groups.map((group) => {
             const groupRows = rowsByGroup.get(groupKey(group)) ?? [];
             const orderable = canOrder && group.reorderable;
-            const ids = groupRows.flatMap((r) => (r.moOperationId ? [r.moOperationId] : []));
+            // The API decides per row: only the planned operations of the
+            // day — an unplanned one on its due date is not in the day's
+            // order, and sending it would be a 409 every time.
+            const ids = groupRows.flatMap((r) => (r.reorderable && r.moOperationId ? [r.moOperationId] : []));
             return (
             <section key={groupKey(group)} className={styles.group}>
               <h2 className={styles.groupHeader}>
@@ -284,7 +287,7 @@ export function RunPlanPageClient() {
                 rows={groupRows}
                 renderCell={(row, key) => {
                   if (key !== "move") return renderCell(row, key);
-                  const index = row.moOperationId ? ids.indexOf(row.moOperationId) : -1;
+                  const index = row.reorderable && row.moOperationId ? ids.indexOf(row.moOperationId) : -1;
                   if (index < 0) return null;
                   return renderCell(row, key, {
                     position: index,

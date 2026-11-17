@@ -69,6 +69,7 @@ import {
   capacityHorizon,
   computeCapacity,
   orderPlanStatus,
+  operationStarted,
   remainingOperationMinutes,
   type CapacityInput,
   type CapacityOperationRow,
@@ -1436,7 +1437,7 @@ export function createPlanningService(
   }
   // Påbörjad: something reported, or an open/paused stamp session.
   const startedOf = (op: CapacityOperationRow, stamped: ReadonlySet<string>) =>
-    (op.quantityCompleted ?? 0) > 0 || op.quantityScrapped > 0 || stamped.has(op.moOperationId);
+    operationStarted(op, stamped.has(op.moOperationId));
   function groupOrders(operations: CapacityOperationRow[], stamped: ReadonlySet<string>): PlanOrder[] {
     const byOrder = new Map<string, PlanOrder>();
     for (const op of operations) {
@@ -2872,6 +2873,13 @@ export function createPlanningService(
             o.operationStatus === "done" ||
             (o.sequenceNo > op.sequenceNo && input.moveFollowing && !o.planLocked);
           if (replan) orderOps.push({ ...o, started });
+          // A lego operation always walks with the order: the engine never
+          // books it, but it takes its place in the chain (its Ledtid and
+          // its gap) exactly as in Planera — left out, the gaps after it
+          // were counted one short (another day than the next Planera gives
+          // with a Standardkötid in half days) and a move to before the lego
+          // is back gave no sequence warning.
+          else if (world.workCenters.get(o.workCenterId)?.type === "subcontract") orderOps.push({ ...o, started });
           // Kept as it is: planned ⇒ fixed load and the sequence floor, like a
           // lock but reported as "ligger fast" rather than "låst"; unplanned
           // ⇒ its due-date bucket, untouched.

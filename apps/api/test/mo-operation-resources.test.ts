@@ -800,6 +800,33 @@ describe("förslag på resurs (etapp 2)", () => {
       await bytGivesTheSuggestedDay(world, expectedDay.overbooked);
       expect(await opRow(world.op20.id)).toMatchObject({ plannedEndDate: "2030-03-15" });
     });
+
+    it("after a previous operation that is stamped in with nothing reported: påbörjad as in Planera, so it is today", async () => {
+      const world = await seedChain();
+      // Someone began Op 20 (an open stamp, no quantity): Planera — and so
+      // the replanning after a Byt — starts it today instead of behind the
+      // 30 h on 140, and Op 30's floor follows. The förslag must count the
+      // same, or it names the fresh plan's day and Byt gives an earlier one.
+      const worker = await employee();
+      await db.insert(stampSessions).values({ employeeId: worker.id, moOperationId: world.op20.id, createdBy: world.w.user.id });
+      const { w, order, op30 } = world;
+      const suggestion = (await operationView(order.id, op30.id)).suggestion;
+      expect(suggestion).toMatchObject({ workCenterId: w.r120.id, currentToDate: "2030-03-26", reason: "overloaded" });
+      expect(suggestion!.toDate < expectedDay.fresh).toBe(true);
+      expect((await planningService.getCapacity({ weeks: 4 })).summary.resourceSuggestions.map((s) => [s.moOperationId, s.toDate])).toEqual([
+        [op30.id, suggestion!.toDate],
+      ]);
+      const { operation } = await mfgService.updateOperation(
+        order.id,
+        op30.id,
+        { workCenterId: suggestion!.workCenterId, expectedWorkCenterId: w.r110.id },
+        w.user.id
+      );
+      expect(operation).toMatchObject({ workCenterId: w.r120.id, resourceLocked: true, plannedEndDate: suggestion!.toDate });
+      expect(await opRow(world.op20.id)).toMatchObject({ plannedStartDate: "2030-03-04" });
+      await planningService.planProductionRun(w.user.id);
+      expect(await opRow(op30.id)).toMatchObject({ workCenterId: w.r120.id, plannedEndDate: suggestion!.toDate });
+    });
   });
 
   it("Byt till X sends its precondition: a moved operation, or one on another resource since, is refused and nothing changes", async () => {

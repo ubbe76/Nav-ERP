@@ -220,6 +220,39 @@ describe("PUT /planning/run-plan/order — ordna", () => {
     expect(await positions([fresh, ...orders])).toEqual([1, 5, 4, 3, 2]);
   });
 
+  it("an unplanned operation due on the day lies in the day's group but outside its order: the reorderable rows are exactly what the PUT takes", async () => {
+    const { w, cookie, orders, day, ids } = await plannedDay();
+    // An operation without time on the same resource: Planera never plans it
+    // (and clears a plan it had), so the körplan keys it on the due date.
+    const empty = await articleService.createArticle(
+      parsed(createArticleSchema, { articleNumber: `MARK-${crypto.randomUUID().slice(0, 8)}`, name: "Märkning", type: "manufactured", active: true })
+    );
+    await mfgService.createRoutingOperation(empty.id, { sequenceNo: 10, workCenterId: w.r110.id, setupTime: 0, runTimePerUnit: 0 });
+    const mo = await mfgService.createManufacturingOrder(parsed(createManufacturingOrderSchema, { articleId: empty.id, quantity: 1, dueDate: day }), w.user.id);
+    const [unplannedOp] = await mfgService.listOperations(mo.id);
+    await planera(cookie);
+    expect((await opRow(unplannedOp!.id)).plannedStartDate).toBeNull();
+    for (const o of orders) expect((await opRow(o.opId)).plannedStartDate).toBe(day);
+
+    const plan = await runPlan(cookie, w.r110.id, day);
+    expect(plan.days).toEqual([expect.objectContaining({ kind: "day", date: day, reorderable: true, rows: 5 })]);
+    const row = plan.rows.find((r) => r.moOperationId === unplannedOp!.id)!;
+    expect(row).toMatchObject({ date: day, planned: false, reorderable: false, runPosition: null });
+    const reorderable = plan.rows.filter((r) => r.reorderable).map((r) => r.moOperationId!);
+    expect([...reorderable].sort()).toEqual([...ids].sort());
+
+    // What the page sends after one Upp: the reorderable ids, two swapped.
+    const wanted = [reorderable[1]!, reorderable[0]!, ...reorderable.slice(2)];
+    const res = await putOrder(cookie, w.r110.id, day, wanted);
+    expect(res.statusCode, res.body).toBe(200);
+    const after = await runPlan(cookie, w.r110.id, day);
+    expect(after.rows.filter((r) => r.reorderable).map((r) => r.moOperationId)).toEqual(wanted);
+    // Every row with an id in the group (the list the page sent before) is refused.
+    const all = plan.rows.map((r) => r.moOperationId!);
+    expect(all).toHaveLength(5);
+    expect((await putOrder(cookie, w.r110.id, day, all)).statusCode).toBe(409);
+  });
+
   it("never touches a date: the whole plan and GET /planning/capacity are identical before and after", async () => {
     const { w, cookie, day, ids } = await plannedDay();
     // A hand-moved (locked) operation and a second resource in the picture.

@@ -10,7 +10,7 @@ import {
   type PlanProductionResult,
 } from "../src/modules/planning/service/production-plan.js";
 import type { PlanWorkCenter } from "../src/modules/planning/service/capacity-book.js";
-import type { CapacityOperationRow, PlannedDay } from "../src/modules/planning/service/capacity-calc.js";
+import { orderPlanStatus, type CapacityOperationRow, type PlannedDay } from "../src/modules/planning/service/capacity-calc.js";
 import { manufacturingLeadDays, type LeadTimeResource, type LeadTimeWork } from "../src/modules/planning/service/manufacturing-lead-time.js";
 import { addDays, addWorkingDays, isWorkingDay } from "../src/modules/system/service/delivery-days.js";
 
@@ -365,6 +365,38 @@ describe("Planera — lego, resources without calendar, horizon, Sen", () => {
       orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 0, { workCenterId: "wc-l" }), pop(o, 20, 4)])],
     });
     expect(plansOf(first)).toEqual([["a:20", days([MON2, 4])]]);
+  });
+
+  it("lego first on a day off (Saturday, Sunday, a röd dag): sent the next working day — one klar-dag for Planera, orderPlanStatus and Leveranstidskontrollen", () => {
+    const three: PlanWorkCenter = { ...lego, leadTimeDays: 3 };
+    const workCenters = new Map([["wc-1", wc1], ["wc-l", three]]);
+    const route = (o: PlanOrder) => [pop(o, 10, 0, { workCenterId: "wc-l" }), pop(o, 20, 4)];
+    const statusOf = (today: string, offDays: ReadonlySet<string>, operations: CapacityOperationRow[]) =>
+      orderPlanStatus(operations, { today, offDays, workCenters, queueDays: 0 });
+    // Saturday 24, Sunday 25 and Monday 26 all send it Monday 26: back
+    // Thursday 29 (not Wednesday 28 — Monday is the day it is sent, not day
+    // 1 of the lead time), Op 20 on Friday 30.
+    for (const today of [SAT, "2026-10-25", MON2]) {
+      const result = plan({ today, workCenters, orders: [order("a", "TO-1", null, route)] });
+      expect(plansOf(result), today).toEqual([["a:20", days(["2026-10-30", 4])]]);
+      const legoOnly = plan({ today, workCenters, orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 0, { workCenterId: "wc-l" })])] });
+      expect(legoOnly.orders[0]!.plannedFinish, today).toBe(THU2);
+      // Sen reads the same day, with and without the planned operation after it.
+      const o = order("a", "TO-1", null, route);
+      expect(statusOf(today, new Set(), [o.operations[0]!]).plannedFinish, today).toBe(THU2);
+      const planned = operationsWithPlan(o.operations, result);
+      expect(statusOf(today, new Set(), planned), today).toMatchObject({ planned: true, plannedFinish: "2026-10-30" });
+    }
+    // A röd dag today (Monday 19): sent Tuesday, back Friday.
+    const offDays = new Set([MON]);
+    const holiday = plan({
+      offDays,
+      schedule: { ...SCHEDULE, holidays: [{ date: MON, dayScheduleId: null }] },
+      workCenters,
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 0, { workCenterId: "wc-l" })])],
+    });
+    expect(holiday.orders[0]!.plannedFinish).toBe(FRI);
+    expect(statusOf(MON, offDays, [pop({ id: "a", orderNumber: "TO-1", dueDate: null }, 10, 0, { workCenterId: "wc-l" })]).plannedFinish).toBe(FRI);
   });
 
   it("Sen: a lego operation last in the route counts through its lead time", () => {

@@ -21,6 +21,7 @@ import {
 } from "./capacity-book.js";
 import {
   operationLoadDays,
+  operationStarted,
   remainingOperationMinutes,
   type CapacityOperationRow,
   type PlannedDay,
@@ -218,7 +219,10 @@ export function resourceSuggestions(world: SuggestionWorld, onlyOrderIds?: Reado
       // Planera's horizonHit: an operation that did not fit (or was never
       // planned) — nothing after it is planned, so nothing gets a förslag.
       if (!hasPlan(op)) break;
-      const started = (op.quantityCompleted ?? 0) > 0 || op.quantityScrapped > 0;
+      // Planera's påbörjad (operationStarted) — also an operation that is
+      // only stamped in: Byt's replanning forces it to today, so must the
+      // walk, or the next floor is another day than the switch gives.
+      const started = operationStarted(op, op.stamped === true);
       const measured = measureBase(book, { workCenter: wc, minutes }, floor, base, {
         forceStartDate: started ? world.today : undefined,
       });

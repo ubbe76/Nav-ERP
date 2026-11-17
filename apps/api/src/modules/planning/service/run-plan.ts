@@ -94,6 +94,12 @@ export interface RunPlanRow {
   // The previous operation's number when the row waits for it (partial or
   // not ready) — "Väntar på op N"; else null.
   waitingForSequenceNo: number | null;
+  // The row takes part in Ordningen inom dagen: an open TO's operation in a
+  // day group whose PLANNED start day is that day — exactly the set
+  // lockRunPlanDayOperations counts, so the day's reorderable ids are the
+  // list PUT /planning/run-plan/order wants. An unplanned operation lies on
+  // its due date and a Planerad TO's operation has no place: both false.
+  reorderable: boolean;
 }
 
 // One group of the list, in list order: Försenad first (every day before
@@ -107,9 +113,11 @@ export interface RunPlanDay {
   rows: number;
   minutes: number;
   hours: number;
-  // The rows of this group can be ordered by hand: only a day. Försenad is
-  // sorted on its old days and places, Ej planerad has no day to be ordered
-  // within. (A row without moOperationId in a day is never sent.)
+  // The group holds rows that can be ordered by hand (RunPlanRow.reorderable
+  // says which): only a day, and only its planned operations — a day can
+  // also hold an unplanned operation on its due date or a Planerad TO's
+  // operation. Försenad is sorted on its old days and places, Ej planerad
+  // has no day to be ordered within.
   reorderable: boolean;
 }
 
@@ -217,6 +225,7 @@ export function buildRunPlan(input: {
       status: ready ? ready.readiness : "planned_order",
       available: ready ? ready.available : null,
       waitingForSequenceNo: ready && ready.readiness !== "ready" ? (previous.get(op.moOperationId!) ?? null) : null,
+      reorderable: !plannedOrder && op.moOperationId != null && range != null && range.start >= input.today,
       minutes,
     };
   };
@@ -256,7 +265,7 @@ export function buildRunPlan(input: {
         weekday: date ? isoWeekdayOf(date) : null,
         isoWeek: date ? isoWeekOf(date).isoWeek : null,
         late: kind === "late",
-        reorderable: kind === "day",
+        reorderable: false,
         rows: 0,
         sum: 0,
       };
@@ -264,6 +273,7 @@ export function buildRunPlan(input: {
     }
     group.rows += 1;
     group.sum += row.minutes;
+    if (row.reorderable) group.reorderable = true;
   }
   const total = listed.reduce((sum, row) => sum + row.minutes, 0);
 

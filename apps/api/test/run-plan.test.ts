@@ -507,8 +507,9 @@ describe("buildRunPlan (pure)", () => {
     // The groups in list order: Försenad together, then each day, Ej planerad last.
     expect(result.days).toEqual([
       { kind: "late", date: null, weekday: null, isoWeek: null, late: true, rows: 2, minutes: 100, hours: 1.67, reorderable: false },
-      { kind: "day", date: "2030-03-06", weekday: 3, isoWeek: 10, late: false, rows: 1, minutes: 50, hours: 0.83, reorderable: true },
-      { kind: "day", date: "2030-03-08", weekday: 5, isoWeek: 10, late: false, rows: 1, minutes: 50, hours: 0.83, reorderable: true },
+      // Unplanned operations on their due dates: a day, but nothing to order.
+      { kind: "day", date: "2030-03-06", weekday: 3, isoWeek: 10, late: false, rows: 1, minutes: 50, hours: 0.83, reorderable: false },
+      { kind: "day", date: "2030-03-08", weekday: 5, isoWeek: 10, late: false, rows: 1, minutes: 50, hours: 0.83, reorderable: false },
       { kind: "unplanned", date: null, weekday: null, isoWeek: null, late: false, rows: 1, minutes: 50, hours: 0.83, reorderable: false },
     ]);
     expect(result.totalMinutes).toBe(250);
@@ -606,6 +607,29 @@ describe("buildRunPlan (pure)", () => {
       ["day", "2030-03-07", true, 5],
       ["day", "2030-03-08", true, 1],
       ["unplanned", null, false, 1],
+    ]);
+    // … and per row: every planned row of a day, never Försenad or Ej planerad.
+    expect(result.rows.filter((r) => r.reorderable).map((r) => r.orderNumber)).toEqual(["TO-3", "TO-4", "TO-2", "TO-1", "TO-5", "TO-6"]);
+  });
+
+  it("reorderable is per row: an unplanned operation lies on its due date in the day but is not in the day's order", () => {
+    const result = plan("2030-03-06", "2030-03-08", [
+      op({ orderNumber: "TO-1", dueDate: "2030-03-20", plannedDays: [{ date: "2030-03-07", minutes: 50 }] }),
+      // Unplanned (Planera clears a plan without time, or it hit the horizon): keyed on the due date.
+      op({ orderNumber: "TO-2", dueDate: "2030-03-07" }),
+      op({ orderNumber: "TO-3", dueDate: "2030-03-25", plannedDays: [{ date: "2030-03-07", minutes: 50 }] }),
+      // A day with only an unplanned operation has nothing to order.
+      op({ orderNumber: "TO-4", dueDate: "2030-03-08" }),
+    ]);
+    expect(result.rows.map((r) => [r.orderNumber, r.date, r.planned, r.reorderable])).toEqual([
+      ["TO-2", "2030-03-07", false, false],
+      ["TO-1", "2030-03-07", true, true],
+      ["TO-3", "2030-03-07", true, true],
+      ["TO-4", "2030-03-08", false, false],
+    ]);
+    expect(result.days.map((d) => [d.date, d.reorderable, d.rows])).toEqual([
+      ["2030-03-07", true, 3],
+      ["2030-03-08", false, 1],
     ]);
   });
 

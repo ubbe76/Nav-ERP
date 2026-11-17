@@ -1134,8 +1134,9 @@ export function createPlanningRepository(db: Db) {
       // `resources` (#15, the readers that suggest: Beläggning, Planera's
       // answer, the TO card): each operation's possible resources
       // (mo_operation_resources) and, for an operation that has them,
-      // whether it is rörd (operationTouchedSql) — two more set-based
-      // queries in the same batch, never per operation.
+      // whether it is rörd (operationTouchedSql), plus the operations with
+      // an open stamp session (instämplad) — three more set-based queries
+      // in the same batch, never per operation.
       opts: { orderIds?: string[]; resources?: boolean } = {}
       // queueDays = Standardkötid (#18): the gap the book and Sen put between
       // an order's operations. Read HERE, in the same batch and through the
@@ -1158,6 +1159,7 @@ export function createPlanningRepository(db: Db) {
         timeOnResources,
         resourceRows,
         touchedRows,
+        stampedRows,
         leadTimeDefaults,
       ] = await Promise.all([
         dbc
@@ -1264,6 +1266,13 @@ export function createPlanningRepository(db: Db) {
               .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
               .where(and(orderFilter, hasResources, operationTouchedSql()))
           : Promise.resolve([]),
+        // Instämplad: an open or paused stamp session — stampedOperationIds'
+        // own question, asked of EVERY operation: the förslag walk the whole
+        // order with Planera's påbörjad-rule, also past an operation
+        // without possible resources.
+        opts.resources
+          ? dbc.selectDistinct({ moOperationId: stampSessions.moOperationId }).from(stampSessions).where(isNull(stampSessions.stoppedAt))
+          : Promise.resolve([]),
         loadLeadTimeDefaults(dbc),
       ]);
 
@@ -1274,6 +1283,7 @@ export function createPlanningRepository(db: Db) {
         resourcesByOperation.set(row.moOperationId, list);
       }
       const touched = new Set(touchedRows.map((row) => row.moOperationId));
+      const stamped = new Set(stampedRows.map((row) => row.moOperationId));
 
       const plansByOperation = new Map<string, PlannedDay[]>();
       for (const row of planRows) {
@@ -1309,7 +1319,11 @@ export function createPlanningRepository(db: Db) {
           plannedDays: plansByOperation.get(r.moOperationId) ?? null,
           plannedAt: r.plannedAt === null ? null : r.plannedAt.toISOString(),
           ...(opts.resources
-            ? { resources: resourcesByOperation.get(r.moOperationId) ?? [], touched: touched.has(r.moOperationId) }
+            ? {
+                resources: resourcesByOperation.get(r.moOperationId) ?? [],
+                touched: touched.has(r.moOperationId),
+                stamped: stamped.has(r.moOperationId),
+              }
             : {}),
         })),
         weekScheduleDays: weekDayRows,

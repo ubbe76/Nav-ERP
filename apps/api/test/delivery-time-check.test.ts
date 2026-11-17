@@ -702,6 +702,13 @@ describe("Leveranstidskontroll — made, capacity per day", () => {
       made([op(10, 4), op(20, 0, "wc-l"), op(30, 4)], { workCenters: new Map([["wc-1", wc1], ["wc-l", lego]]) })
     );
     expect(between.rows[0]!.chain.map((s) => s.date)).toEqual(["2026-10-19", "2026-10-23", "2026-10-26"]);
+    // Lego first on a Saturday: sent Monday 26, back Thursday 29, the next
+    // operation Friday 30 — the very days Planera and orderPlanStatus give
+    // (production-plan.test.ts, "lego first on a day off").
+    for (const today of ["2026-10-24", "2026-10-25", "2026-10-26"]) {
+      const weekend = checkDeliveryTime(made([op(10, 0, "wc-l"), op(20, 4)], { today, workCenters: new Map([["wc-1", wc1], ["wc-l", lego]]) }));
+      expect(weekend.rows[0]!.chain.map((s) => s.date), today).toEqual(["2026-10-29", "2026-10-30"]);
+    }
   });
 
   it("a lego resource without lead time counts as 0 days, with a note", () => {

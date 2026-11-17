@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PlanWorkCenter } from "../src/modules/planning/service/capacity-book.js";
 import { planProduction } from "../src/modules/planning/service/production-plan.js";
-import type { CapacityOperationRow, OperationResourceOption, PlannedDay } from "../src/modules/planning/service/capacity-calc.js";
+import { operationStarted, type CapacityOperationRow, type OperationResourceOption, type PlannedDay } from "../src/modules/planning/service/capacity-calc.js";
 import {
   mayGetResourceSuggestion,
   resourceSuggestions,
@@ -253,7 +253,8 @@ function dayAfterSwitch(w: SuggestionWorld, orderNumber: string, sequenceNo: num
         dueDate: null,
         operations: mine.map((o) => ({
           ...(o.sequenceNo === sequenceNo ? { ...o, workCenterId: toWorkCenterId, resourceLocked: true } : o),
-          started: false,
+          // Planera's own påbörjad-rule (groupOrders in the service).
+          started: operationStarted(o, o.stamped === true),
         })),
       },
     ],
@@ -332,6 +333,30 @@ describe("resourceSuggestions — the floor and the walk", () => {
       expect(out.map((s) => [s.sequenceNo, s.toCode, s.currentToDate, s.toDate, s.reason])).toEqual([[20, "120", null, expected, "unplanned"]]);
       expect(dayAfterSwitch(w, "TO-1", 20, "wc-120")).toBe(expected);
     }
+  });
+
+  it("a previous operation that is stamped in but has nothing reported is påbörjad, as in Planera: it is today, and the floor follows", () => {
+    // Op 10 on 140 is today. Op 20 on 140 would wait for it (Tuesday), but
+    // it is begun already — an open stamp, nothing reported — and Planera
+    // forces a påbörjad operation to today. So Op 30 may start Tuesday: 110
+    // is full then (stored Wednesday), 120 is free ⇒ a förslag for Tuesday,
+    // the day Byt gives.
+    const op10 = op("TO-1", 10, 4, { workCenterId: "wc-140", plannedDays: days([MON, 4]) });
+    const op20 = (date: string, extra: Partial<CapacityOperationRow>) =>
+      op("TO-1", 20, 4, { workCenterId: "wc-140", plannedDays: days([date, 4]), ...extra });
+    const op30 = op("TO-1", 30, 4, { resources: ALTERNATIVES, plannedDays: days([WED, 4]) });
+    const stampedIn = world([load("wc-110", TUE, 8), op10, op20(MON, { stamped: true }), op30]);
+    const out = resourceSuggestions(stampedIn);
+    expect(out.map((s) => [s.sequenceNo, s.toCode, s.currentToDate, s.toDate])).toEqual([[30, "120", WED, TUE]]);
+    expect(dayAfterSwitch(stampedIn, "TO-1", 30, "wc-120")).toBe(TUE);
+    // The same with something reported (the rule's other half).
+    const reported = world([load("wc-110", TUE, 8), op10, op20(MON, { quantityScrapped: 1 }), op30]);
+    expect(resourceSuggestions(reported).map((s) => [s.sequenceNo, s.toCode, s.toDate])).toEqual([[30, "120", TUE]]);
+    // Not begun: Op 20 is Tuesday and Op 30 may start Wednesday, where 110
+    // is free — no förslag, and a Byt would give Wednesday too.
+    const waiting = world([load("wc-110", TUE, 8), op10, op20(TUE, {}), op30]);
+    expect(resourceSuggestions(waiting)).toEqual([]);
+    expect(dayAfterSwitch(waiting, "TO-1", 30, "wc-120")).toBe(WED);
   });
 
   it("not overbooked: the floor follows the previous operation's own day", () => {

@@ -7434,6 +7434,9 @@ export interface RunPlanRow {
   status: RunPlanStatus;
   available: number | null;
   waitingForSequenceNo: number | null;
+  // The row takes part in Ordningen inom dagen (a planned operation on its
+  // planned start day) — the day's reorderable ids are what the PUT wants.
+  reorderable: boolean;
 }
 
 export interface RunPlanDay {
@@ -7445,7 +7448,7 @@ export interface RunPlanDay {
   rows: number;
   minutes: number;
   hours: number;
-  // Only a day's rows can be ordered by hand (PUT /planning/run-plan/order).
+  // The group has rows that can be ordered by hand (RunPlanRow.reorderable).
   reorderable: boolean;
 }
 

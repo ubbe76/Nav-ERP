@@ -77,6 +77,14 @@ interface ExpandedCell {
   workCenterId: string;
   label: string;
   cell: CapacityCell;
+  // The matrix the cell was clicked in (viewOf). `col:3` is week 3 in one
+  // view and day 3 in another, so an expansion never survives a change of it.
+  view: string;
+}
+
+// The identity of a matrix's columns: Vecka/Dag and how many of them.
+function viewOf(res: CapacityResult): string {
+  return `${res.granularity}:${res.granularity === "day" ? res.days.length : res.weeks.length}`;
 }
 
 function cellsOf(resource: CapacityResourceRow, granularity: "week" | "day"): CapacityCell[] {
@@ -84,9 +92,11 @@ function cellsOf(resource: CapacityResourceRow, granularity: "week" | "day"): Ca
 }
 
 // After a reload (Flytta…/Lås upp): the expansion stays when its cell still
-// holds orders, with the fresh cell data; otherwise it closes.
+// holds orders, with the fresh cell data; otherwise it closes. Another view
+// (Vecka ↔ Dag, another number of columns) always closes it — also a cell
+// clicked in the old matrix while the new view was still loading.
 function refreshExpanded(prev: ExpandedCell | null, res: CapacityResult): ExpandedCell | null {
-  if (!prev) return null;
+  if (!prev || prev.view !== viewOf(res)) return null;
   const colKey = prev.key.slice(prev.workCenterId.length + 1);
   for (const group of res.groups) {
     const resource = group.resources.find((r) => r.workCenterId === prev.workCenterId);
@@ -192,7 +202,9 @@ export function BelaggningPageClient() {
   function toggleCell(resource: CapacityResourceRow, colKey: string, label: string, cell: CapacityCell) {
     if (cell.orders.length === 0) return;
     const key = `${resource.workCenterId}:${colKey}`;
-    setExpanded((prev) => (prev?.key === key ? null : { key, workCenterId: resource.workCenterId, label, cell }));
+    if (!data) return;
+    const view = viewOf(data);
+    setExpanded((prev) => (prev?.key === key ? null : { key, workCenterId: resource.workCenterId, label, cell, view }));
   }
 
   function openMove(resource: CapacityResourceRow, order: CapacityCellOrder) {

@@ -618,12 +618,13 @@ Välj **Resurs** (produktionsresurserna; legoresurser finns inte med eftersom de
 
 ### Ordningen inom dagen
 
-Med rättigheten Tillverkning har varje rad i en dagsgrupp knapparna **Upp** och **Ned** (på skärmen som pilar, med hjälptexterna *Flytta upp* och *Flytta ned*; **Upp** är avstängd för den översta raden och **Ned** för den understa). Ett klick byter plats med grannen, sparas direkt och listan läses om. Ingen bekräftelse behövs — det går att göra om. Har någon annan ändrat dagen under tiden får du ett meddelande om att körplanen har ändrats och listan läses om.
+Med rättigheten Tillverkning har varje **planerad** operation i en dagsgrupp knapparna **Upp** och **Ned** (på skärmen som pilar, med hjälptexterna *Flytta upp* och *Flytta ned*; **Upp** är avstängd för den översta av dagens planerade operationer och **Ned** för den understa). Ett klick byter plats med grannen, sparas direkt och listan läses om. Ingen bekräftelse behövs — det går att göra om. Har någon annan ändrat dagen under tiden får du ett meddelande om att körplanen har ändrats och listan läses om.
 
 - Ordningen styr **bara** körplanen, utskriften och stämpelterminalens sortering **Planerad dag** — aldrig vilka datum operationerna ligger på. Beläggning, förslag, Leveranstidskontroll och behovsberäkning ser den inte.
 - Ordningen **nollas** när operationen flyttas till en annan dag eller byter resurs; en operation som hamnar på samma startdag igen behåller sin plats. Nya operationer på dagen hamnar efter de ordnade.
 - En operation som sträcker sig över flera dagar ordnas på sin **startdag**.
-- **Försenad** och **Ej planerad** går inte att ordna, och inte heller en rad för en planerad TO (som saknar operationer än).
+- Bara operationer som är planerade på dagen går att ordna. En operation som inte är planerad — den står på färdigdatumets dag — saknar knapparna, och likaså en rad för en planerad TO (som saknar operationer än). De raderna står kvar på sin plats i standardordningen, efter de ordnade.
+- **Försenad** och **Ej planerad** går inte att ordna.
 
 ### Kolumnerna
 

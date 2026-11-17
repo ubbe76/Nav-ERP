@@ -5,7 +5,7 @@
 // employee-bound resolveEmployeeCalendar) and the group/resource matrix —
 // fully unit-testable without a database (same pattern as requirements-calc).
 import { isoWeekOf, isoWeekRange } from "../../timereport/service/schedule.service.js";
-import { addWorkingDays } from "../../system/service/delivery-days.js";
+import { addWorkingDays, nextWorkingDayOnOrAfter } from "../../system/service/delivery-days.js";
 import { ceilDays, MIN_PLAN_MINUTES, queueGapDays } from "./manufacturing-lead-time.js";
 // Types only — resource-suggestions.ts computes the förslag on these rows.
 import type { OperationResourceSuggestion, ResourceSuggestion } from "./resource-suggestions.js";
@@ -101,6 +101,10 @@ export interface CapacityOperationRow {
   // with `resources`; such an operation never gets a förslag. Left out =
   // only the row's own quantities and time flags count.
   touched?: boolean;
+  // Instämplad: an open or paused stamp session (stampedOperationIds) —
+  // loaded with `resources`. With the reported quantities it is Planera's
+  // påbörjad (operationStarted), which the förslag's walk must share.
+  stamped?: boolean;
 }
 
 export interface OperationResourceOption {
@@ -454,6 +458,18 @@ export function operationLoadDays(op: CapacityOperationRow, today: string): { da
   return [{ date: loadBucketDay(op.dueDate, today), minutes }];
 }
 
+// Påbörjad — ONE rule for Planera, Flytta, the replanning after a Byt and
+// the förslag's walk: something reported (OK or scrap) or an open/paused
+// stamp session. Such an operation is under way and starts TODAY whatever
+// the chain says. (Not `touched`: a finished stamp without quantities is
+// rörd — no förslag — but does not force today.)
+export function operationStarted(
+  op: Pick<CapacityOperationRow, "quantityCompleted" | "quantityScrapped">,
+  stamped: boolean
+): boolean {
+  return (op.quantityCompleted ?? 0) > 0 || op.quantityScrapped > 0 || stamped;
+}
+
 // --- The chain of an order's operations (#18, beslut 2) --------------------
 // The next operation starts the working day AFTER the previous one is ready,
 // plus the Standardkötid — ONE pure function for Planera, the planning of a
@@ -476,12 +492,20 @@ export function nextOperationFloor(
 
 // A lego operation sent on `floor` is back the supplier's Ledtid + Kötid
 // later, rounded up to whole working days (S6 — the lead time counts both).
+// The floor is normalised to a working day HERE, for every reader: a chain
+// that starts on `today` (Planera, orderPlanStatus, the förslag) would
+// otherwise count the Monday after a Saturday as day 1, one working day
+// earlier than Leveranstidskontrollen, which starts on the next working day.
 export function subcontractReadyDate(
   wc: { leadTimeDays?: number | null; queueTimeDays?: number | null },
   floor: string,
   offDays: ReadonlySet<string>
 ): string {
-  return addWorkingDays(floor, ceilDays(Math.max(0, (wc.leadTimeDays ?? 0) + (wc.queueTimeDays ?? 0))), offDays);
+  return addWorkingDays(
+    nextWorkingDayOnOrAfter(floor, offDays),
+    ceilDays(Math.max(0, (wc.leadTimeDays ?? 0) + (wc.queueTimeDays ?? 0))),
+    offDays
+  );
 }
 
 // The walk every reader of the chain makes, so none of them can count the

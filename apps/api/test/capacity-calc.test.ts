@@ -6,6 +6,7 @@ import {
   operationLoadDays,
   operationStartDate,
   orderPlanStatus,
+  subcontractReadyDate,
   plannedDateRange,
   remainingByPlannedDays,
   remainingOperationMinutes,
@@ -821,6 +822,15 @@ describe("orderPlanStatus — planned, plannedFinish and Sen through the book's 
     const legoOp = (sequenceNo: number, workCenterId = "wc-l") => op({ sequenceNo, workCenterId, dueDate: "2026-08-28" });
     // First in the route: sent today, no gap before it.
     expect(status([legoOp(10)], { workCenters: [["wc-l", lego(2)]] })).toMatchObject({ plannedFinish: FRI });
+    // … and on a day off it is sent the next working day (Leveranstids-
+    // kontrollen's t0): Saturday 22 and Sunday 23 ⇒ sent Monday 24, back
+    // Wednesday 26 — Monday is not day 1 of the lead time.
+    for (const today of ["2026-08-22", "2026-08-23", "2026-08-24"]) {
+      expect(status([legoOp(10)], { workCenters: [["wc-l", lego(2)]], today }), today).toMatchObject({ plannedFinish: "2026-08-26" });
+    }
+    expect(subcontractReadyDate(lego(2), "2026-08-22", new Set())).toBe("2026-08-26");
+    expect(subcontractReadyDate(lego(0), "2026-08-22", new Set())).toBe("2026-08-24");
+    expect(subcontractReadyDate(lego(2), "2026-08-24", new Set(["2026-08-24"]))).toBe("2026-08-27");
     // After an own operation ready Thursday: sent Friday, back Tuesday (2 days).
     expect(status([on(THU), legoOp(20)], { workCenters: [["wc-l", lego(2)]] })).toMatchObject({ plannedFinish: TUE2 });
     // Ledtid 1 + Kötid 0.5 ⇒ 2 days; a holiday on Monday pushes it a day.
