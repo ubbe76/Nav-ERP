@@ -53,8 +53,12 @@ export type ListAbcQuery = z.infer<typeof listAbcQuerySchema>;
 
 // Beläggning (E2) — the capacity matrix is a whole-dataset derivation, not a
 // paged list; the only knobs are the horizon and an optional group filter.
+// granularity=day (#18) answers with `days` day columns from today instead of
+// the week columns (`weeks` is then not read).
 export const capacityQuerySchema = z.object({
   weeks: z.coerce.number().int().min(1).max(26).default(8),
+  granularity: z.enum(["week", "day"]).default("week"),
+  days: z.coerce.number().int().min(7).max(42).default(14),
   productionGroupId: z.string().uuid().optional(),
 });
 export type CapacityQuery = z.infer<typeof capacityQuerySchema>;

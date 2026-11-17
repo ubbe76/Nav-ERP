@@ -2881,11 +2881,14 @@ export interface CapacityCellOrder {
   sequenceNo: number;
   dueDate: string | null;
   overdue: boolean;
-  // The operation's whole remaining time; hoursInWeek is the share this cell
-  // carries (a multi-week operation appears in one cell per planned week).
+  // The operation's whole remaining time; hoursInWeek is its share in the
+  // cell's week (week view: the cell itself; day view: the sum of its days in
+  // the ISO week of the cell's day), hoursInDay its share in a day cell
+  // (granularity=day; null in the week view).
   remainingHours: number;
   moOperationId: string;
   hoursInWeek: number;
+  hoursInDay: number | null;
   // Alternativa resurser (#15, etapp 2): förslag on another resource (null =
   // none), Vald för hand, and the ordinary resource's code on an alternative.
   suggestion: ResourceSuggestionOnOperation | null;
@@ -2893,7 +2896,7 @@ export interface CapacityCellOrder {
   ordinaryWorkCenterCode: string | null;
   // Produktionsplanering: false = unplanned (counted in the due-date week).
   planned: boolean;
-  // Mondays (YYYY-MM-DD); null when unplanned.
+  // The plan's first and last day (YYYY-MM-DD); null when unplanned.
   plannedStartDate: string | null;
   plannedEndDate: string | null;
   // Moved by hand — Planera leaves it where it is until Lås upp.
@@ -2914,7 +2917,27 @@ export interface CapacityCell {
   // The API's one overload rule: loadPercent > 100, or load in a week with
   // 0 h capacity (no percentage, but overloaded all the same).
   overloaded: boolean;
+  // Overloaded days in the cell's span: a week cell is red on its sum, but a
+  // day in it can be over while the week is not. Day cell 1/0, Senare/Utan
+  // datum 0.
+  overloadedDays: number;
   orders: CapacityCellOrder[];
+}
+
+// One day of a resource without its orders — Flytta's "ledigt 3 h av 8".
+export interface CapacityDayLoad {
+  date: string;
+  loadHours: number;
+  // null = the resource has no capacity calendar.
+  availableHours: number | null;
+  overloaded: boolean;
+}
+
+export interface CapacityDay {
+  date: string;
+  isoWeek: number;
+  // ISO 1 = Monday … 7 = Sunday.
+  weekday: number;
 }
 
 export interface CapacityResourceRow {
@@ -2925,8 +2948,13 @@ export interface CapacityResourceRow {
   active: boolean;
   capacityFactor: number;
   hasSchedule: boolean;
-  // Index-aligned with CapacityResult.weeks.
+  // Index-aligned with CapacityResult.weeks ([] in the day view).
   weeks: CapacityCell[];
+  // Index-aligned with CapacityResult.days ([] in the week view).
+  days: CapacityCell[];
+  // Every day of the visible columns, ascending — week view: the first
+  // week's Monday to the last week's Sunday; day view: the days.
+  dayLoads: CapacityDayLoad[];
   later: CapacityCell;
   undated: CapacityCell;
 }
@@ -2938,6 +2966,7 @@ export interface CapacityGroupBlock {
   name: string;
   resources: CapacityResourceRow[];
   weekTotals: CapacityCell[];
+  dayTotals: CapacityCell[];
   laterTotal: CapacityCell;
   undatedTotal: CapacityCell;
 }
@@ -2952,14 +2981,23 @@ export interface CapacityWeek {
 export interface CapacitySummary {
   // max(planned_at) over the operations; null = never planned.
   plannedAt: string | null;
+  // Overloaded resource cells in the view's columns (weeks or days).
   overloadedCells: number;
+  // Overloaded resource × day cells over the visible days.
+  overloadedDays: number;
   lateOrders: { manufacturingOrderId: string; orderNumber: string; dueDate: string; plannedFinish: string | null }[];
   unplannedOrders: { manufacturingOrderId: string; orderNumber: string }[];
   resourceSuggestions: ResourceSuggestionRow[];
 }
 
 export interface CapacityResult {
+  // The Stockholm day the API counted with — Flytta's earliest day.
+  today: string;
+  granularity: "week" | "day";
+  // [] in the day view.
   weeks: CapacityWeek[];
+  // [] in the week view.
+  days: CapacityDay[];
   groups: CapacityGroupBlock[];
   summary: CapacitySummary;
 }

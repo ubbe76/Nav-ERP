@@ -2660,7 +2660,11 @@ export function createPlanningService(
     },
 
     // Beläggning (E2) — fully derived at read time, like listRequirements.
-    async getCapacity(query: CapacityQuery): Promise<CapacityResult> {
+    // granularity/days are optional here (the route's schema defaults them):
+    // left out = the week view.
+    async getCapacity(
+      query: Pick<CapacityQuery, "weeks" | "productionGroupId"> & Partial<Pick<CapacityQuery, "granularity" | "days">>
+    ): Promise<CapacityResult> {
       // Anchor "today" in Europe/Stockholm — a UTC date would flip the week
       // column on Sunday evenings (winter time). sv-SE formats as YYYY-MM-DD.
       const today = todayFn();
@@ -2682,6 +2686,8 @@ export function createPlanningService(
       const result = computeCapacity(input, {
         today,
         weeks: query.weeks,
+        granularity: query.granularity,
+        days: query.days,
         offDays: world.offDays,
         queueDays: world.queueDays,
         resourceSuggestions: suggestions,

@@ -665,6 +665,7 @@ describe("computeCapacity — planned operations", () => {
     expect(result.summary).toEqual({
       plannedAt: "2026-08-18T10:00:00.000Z",
       overloadedCells: 0,
+      overloadedDays: 0,
       lateOrders: [],
       unplannedOrders: [{ manufacturingOrderId: "mo-u", orderNumber: "PO-U" }],
       resourceSuggestions: [],
@@ -766,6 +767,7 @@ describe("computeCapacity — planned operations", () => {
     expect(result.summary).toEqual({
       plannedAt: null,
       overloadedCells: 0,
+      overloadedDays: 0,
       lateOrders: [],
       unplannedOrders: [{ manufacturingOrderId: "mo-1", orderNumber: "PO-1" }],
       resourceSuggestions: [],
@@ -901,5 +903,186 @@ describe("computeCapacity — förslag på resurs", () => {
     });
     expect(resourceRow(result, "wc-1").weeks[0]!.orders[0]).toMatchObject({ resourceLocked: false, ordinaryWorkCenterCode: null, suggestion: null });
     expect(result.summary.resourceSuggestions).toEqual([]);
+  });
+});
+
+// Dagläget (#18, etapp 4): the load is bucketed per day in both views — the
+// day view shows the day cells, the week view their sums (S14).
+describe("computeCapacity — day view and overloadedDays", () => {
+  // TODAY is Wednesday 2026-08-19. 900 min planned Wed 300 / Thu 600 on an
+  // 8 h day: Thursday is over, the week (15 h of 40) is not.
+  const planned = () =>
+    op({
+      moOperationId: "op-a",
+      runTimePerUnit: 90,
+      orderQuantity: 10,
+      dueDate: "2026-09-30",
+      plannedDays: [
+        { date: "2026-08-19", minutes: 300 },
+        { date: "2026-08-20", minutes: 600 },
+      ],
+    });
+  const input = (operations: CapacityOperationRow[], extra: Partial<CapacityInput> = {}) =>
+    calcInput({ workCenters: [wc({ workCenterId: "wc-1", weekScheduleId: "ws-40" })], ...STD_WEEK, operations, ...extra });
+
+  it("answers with day columns from today; the week lists are empty", () => {
+    const result = computeCapacity(input([]), { today: TODAY, weeks: 8, granularity: "day", days: 7 });
+    expect(result.today).toBe(TODAY);
+    expect(result.granularity).toBe("day");
+    expect(result.weeks).toEqual([]);
+    expect(result.days).toEqual([
+      { date: "2026-08-19", isoWeek: 34, weekday: 3 },
+      { date: "2026-08-20", isoWeek: 34, weekday: 4 },
+      { date: "2026-08-21", isoWeek: 34, weekday: 5 },
+      { date: "2026-08-22", isoWeek: 34, weekday: 6 },
+      { date: "2026-08-23", isoWeek: 34, weekday: 7 },
+      { date: "2026-08-24", isoWeek: 35, weekday: 1 },
+      { date: "2026-08-25", isoWeek: 35, weekday: 2 },
+    ]);
+    const row = resourceRow(result, "wc-1");
+    expect(row.weeks).toEqual([]);
+    expect(row.days).toHaveLength(7);
+    expect(row.days.map((c) => c.availableHours)).toEqual([8, 8, 8, 0, 0, 8, 8]);
+    expect(result.groups[0]!.weekTotals).toEqual([]);
+    expect(result.groups[0]!.dayTotals).toHaveLength(7);
+    // 14 days when none is given.
+    expect(computeCapacity(input([]), { today: TODAY, weeks: 8, granularity: "day" }).days).toHaveLength(14);
+  });
+
+  it("the week view is unchanged in form: no day columns, today and the granularity on the answer", () => {
+    const result = computeCapacity(input([planned()]), { today: TODAY, weeks: 2 });
+    expect(result.today).toBe(TODAY);
+    expect(result.granularity).toBe("week");
+    expect(result.days).toEqual([]);
+    expect(result.weeks).toHaveLength(2);
+    const row = resourceRow(result, "wc-1");
+    expect(row.days).toEqual([]);
+    expect(result.groups[0]!.dayTotals).toEqual([]);
+    expect(row.weeks[0]!.orders[0]).toMatchObject({ hoursInWeek: 15, hoursInDay: null });
+  });
+
+  it("puts a planned operation on its days: the same overload rule per day cell", () => {
+    const result = computeCapacity(input([planned()]), { today: TODAY, weeks: 8, granularity: "day", days: 7 });
+    const [wed, thu, fri] = resourceRow(result, "wc-1").days;
+    expect(wed).toMatchObject({ loadHours: 5, availableHours: 8, loadPercent: 63, overloaded: false, overloadedDays: 0 });
+    expect(thu).toMatchObject({ loadHours: 10, availableHours: 8, loadPercent: 125, overloaded: true, overloadedDays: 1 });
+    expect(fri).toMatchObject({ loadHours: 0, availableHours: 8, loadPercent: 0, overloaded: false, orders: [] });
+    // One chip per day cell: the share of the day, of the day's week, and the whole.
+    expect(wed!.orders).toHaveLength(1);
+    expect(wed!.orders[0]).toMatchObject({ moOperationId: "op-a", hoursInDay: 5, hoursInWeek: 15, remainingHours: 15, plannedStartDate: "2026-08-19", plannedEndDate: "2026-08-20" });
+    expect(thu!.orders[0]).toMatchObject({ moOperationId: "op-a", hoursInDay: 10, hoursInWeek: 15 });
+    expect(result.summary.overloadedCells).toBe(1);
+    expect(result.summary.overloadedDays).toBe(1);
+    expect(result.groups[0]!.dayTotals[1]).toMatchObject({ loadHours: 10, availableHours: 8, overloaded: true, overloadedDays: 1 });
+  });
+
+  it("a week cell is the sum of its days and carries the overloaded days the sum hides", () => {
+    const result = computeCapacity(input([planned()]), { today: TODAY, weeks: 2 });
+    const row = resourceRow(result, "wc-1");
+    expect(row.weeks[0]).toMatchObject({ loadHours: 15, availableHours: 40, loadPercent: 38, overloaded: false, overloadedDays: 1 });
+    expect(row.weeks[1]).toMatchObject({ loadHours: 0, overloaded: false, overloadedDays: 0 });
+    // The red cells are the weeks'; the days are counted beside them.
+    expect(result.summary.overloadedCells).toBe(0);
+    expect(result.summary.overloadedDays).toBe(1);
+    expect(result.groups[0]!.weekTotals[0]).toMatchObject({ loadHours: 15, overloaded: false, overloadedDays: 1 });
+    // dayLoads: every visible day, Monday of the first week to Sunday of the last.
+    expect(row.dayLoads).toHaveLength(14);
+    expect(row.dayLoads[0]!.date).toBe("2026-08-17");
+    expect(row.dayLoads[13]!.date).toBe("2026-08-30");
+    expect(row.dayLoads.find((d) => d.date === "2026-08-19")).toEqual({ date: "2026-08-19", loadHours: 5, availableHours: 8, overloaded: false });
+    expect(row.dayLoads.find((d) => d.date === "2026-08-20")).toEqual({ date: "2026-08-20", loadHours: 10, availableHours: 8, overloaded: true });
+    expect(row.dayLoads.find((d) => d.date === "2026-08-22")).toEqual({ date: "2026-08-22", loadHours: 0, availableHours: 0, overloaded: false });
+  });
+
+  it("week cell = sum of the day cells, for load and capacity, with a holiday and a short day", () => {
+    const operations = [
+      planned(),
+      op({ moOperationId: "op-b", orderNumber: "PO-2", manufacturingOrderId: "mo-2", runTimePerUnit: 33, orderQuantity: 7, dueDate: "2026-08-25" }),
+      op({ moOperationId: "op-c", orderNumber: "PO-3", manufacturingOrderId: "mo-3", runTimePerUnit: 10, orderQuantity: 5, dueDate: "2026-08-01" }), // passed ⇒ today
+    ];
+    const extra = {
+      daySchedules: [...STD_WEEK.daySchedules, { id: "ds-half", netMinutes: 250 }],
+      holidays: [
+        { date: "2026-08-21", dayScheduleId: null },
+        { date: "2026-08-26", dayScheduleId: "ds-half" },
+      ],
+    };
+    const weekView = computeCapacity(input(operations, extra), { today: TODAY, weeks: 2 });
+    const dayView = computeCapacity(input(operations, extra), { today: TODAY, weeks: 2, granularity: "day", days: 12 }); // Wed … Sun next week
+    const weekRow = resourceRow(weekView, "wc-1");
+    const dayRow = resourceRow(dayView, "wc-1");
+    const sum = (cells: { loadHours: number; availableHours: number | null }[], pick: "loadHours" | "availableHours") =>
+      cells.reduce((n, c) => n + (c[pick] ?? 0), 0);
+    for (const [i, cell] of weekRow.weeks.entries()) {
+      const days = weekRow.dayLoads.slice(i * 7, i * 7 + 7);
+      expect(sum(days, "loadHours")).toBeCloseTo(cell.loadHours, 2);
+      expect(sum(days, "availableHours")).toBeCloseTo(cell.availableHours!, 2);
+      expect(cell.overloadedDays).toBe(days.filter((d) => d.overloaded).length);
+    }
+    // 4 × 8 h (Friday off) and 4 × 8 h + 250 min.
+    expect(weekRow.weeks.map((c) => c.availableHours)).toEqual([32, 36.17]);
+    // The day view's cells are the week view's days from today on.
+    expect(dayRow.dayLoads).toEqual(weekRow.dayLoads.slice(2));
+    expect(dayRow.days.map((c) => c.loadHours)).toEqual(weekRow.dayLoads.slice(2).map((d) => d.loadHours));
+    // Week 34 from today is the whole week's load (nothing lies before today).
+    expect(sum(dayRow.days.slice(0, 5), "loadHours")).toBeCloseTo(weekRow.weeks[0]!.loadHours, 2);
+  });
+
+  it("load on a day without capacity is an overloaded day, with no percentage", () => {
+    // Unplanned, due on the Saturday: 1 h on a 0 h day.
+    const result = computeCapacity(input([op({ dueDate: "2026-08-22" })]), { today: TODAY, weeks: 1, granularity: "day", days: 7 });
+    const saturday = resourceRow(result, "wc-1").days[3]!;
+    expect(saturday).toMatchObject({ loadHours: 1, availableHours: 0, loadPercent: null, overloaded: true, overloadedDays: 1 });
+    expect(saturday.orders[0]).toMatchObject({ planned: false, hoursInDay: 1, hoursInWeek: 1 });
+    const week = computeCapacity(input([op({ dueDate: "2026-08-22" })]), { today: TODAY, weeks: 1 });
+    expect(resourceRow(week, "wc-1").weeks[0]).toMatchObject({ loadHours: 1, availableHours: 40, overloaded: false, overloadedDays: 1 });
+  });
+
+  it("a resource without a calendar has no overloaded day", () => {
+    const result = computeCapacity(
+      calcInput({ workCenters: [wc({ workCenterId: "wc-1" })], operations: [op({ dueDate: "2026-08-20", runTimePerUnit: 600 })] }),
+      { today: TODAY, weeks: 1, granularity: "day", days: 7 }
+    );
+    const row = resourceRow(result, "wc-1");
+    expect(row.days[1]).toMatchObject({ loadHours: 100, availableHours: null, loadPercent: null, overloaded: false, overloadedDays: 0 });
+    expect(row.dayLoads[1]).toEqual({ date: "2026-08-20", loadHours: 100, availableHours: null, overloaded: false });
+    expect(result.summary.overloadedDays).toBe(0);
+  });
+
+  it("Senare and Utan datum follow the day columns", () => {
+    const result = computeCapacity(
+      input([
+        op({ moOperationId: "op-later", orderNumber: "PO-2", manufacturingOrderId: "mo-2", dueDate: "2026-08-26" }), // the day after the last column
+        op({ moOperationId: "op-last", orderNumber: "PO-3", manufacturingOrderId: "mo-3", dueDate: "2026-08-25" }),
+        op({ moOperationId: "op-undated", orderNumber: "PO-4", manufacturingOrderId: "mo-4", dueDate: null }),
+      ]),
+      { today: TODAY, weeks: 8, granularity: "day", days: 7 }
+    );
+    const row = resourceRow(result, "wc-1");
+    expect(row.days[6]!.orders.map((o) => o.moOperationId)).toEqual(["op-last"]);
+    expect(row.later.orders.map((o) => o.moOperationId)).toEqual(["op-later"]);
+    expect(row.later.orders[0]).toMatchObject({ hoursInDay: 1, hoursInWeek: 1 });
+    expect(row.later.overloadedDays).toBe(0);
+    expect(row.undated.orders.map((o) => o.moOperationId)).toEqual(["op-undated"]);
+  });
+
+  it("the capacity factor and the group's day totals: a day can be over for one member only", () => {
+    const result = computeCapacity(
+      calcInput({
+        productionGroups: [{ productionGroupId: "g-1", code: "G1", name: "Grupp" }],
+        workCenters: [
+          wc({ workCenterId: "wc-1", code: "100", weekScheduleId: "ws-40", productionGroupId: "g-1" }),
+          wc({ workCenterId: "wc-2", code: "200", weekScheduleId: "ws-40", capacityFactor: 2, productionGroupId: "g-1" }),
+        ],
+        ...STD_WEEK,
+        operations: [planned()],
+      }),
+      { today: TODAY, weeks: 1, granularity: "day", days: 7 }
+    );
+    expect(resourceRow(result, "wc-2").days[0]!.availableHours).toBe(16);
+    // Thursday: 10 h on wc-1's 8 h, but the group has 24 h.
+    expect(resourceRow(result, "wc-1").days[1]!.overloaded).toBe(true);
+    expect(result.groups[0]!.dayTotals[1]).toMatchObject({ loadHours: 10, availableHours: 24, overloaded: false, overloadedDays: 0 });
+    expect(result.summary.overloadedDays).toBe(1);
   });
 });

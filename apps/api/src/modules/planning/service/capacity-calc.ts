@@ -145,7 +145,12 @@ export interface CapacityCellOrder {
   dueDate: string | null;
   overdue: boolean;
   remainingHours: number; // the operation's whole remaining time
-  hoursInWeek: number; // its share in this cell — a planned operation spans cells
+  // Its share in this cell's WEEK — a planned operation spans cells. In the
+  // week view that is the cell itself; in the day view the sum of its days in
+  // the ISO week of the cell's day (Senare/Utan datum: the cell's share).
+  hoursInWeek: number;
+  // Its share in this DAY cell (granularity=day); null in the week view.
+  hoursInDay: number | null;
   planned: boolean;
   plannedStartDate: string | null; // the plan's first and last day; null when unplanned
   plannedEndDate: string | null;
@@ -173,7 +178,27 @@ export interface CapacityCell {
   // most overloaded a cell can be, not a neutral one. A resource WITHOUT a
   // schedule (availableHours null) is never overloaded: no capacity is known.
   overloaded: boolean;
+  // The overloaded DAYS in the cell's span (S14): a week cell is red on the
+  // week's sum, but a day in it can be over while the week is not — then
+  // this says how many. A day cell: 1 or 0. Senare/Utan datum: 0.
+  overloadedDays: number;
   orders: CapacityCellOrder[];
+}
+
+// One day of a resource without the orders: the load bucketed there and the
+// capacity that day — what Flytta's "ledigt 3 h av 8" reads, in both views.
+// The same finishCell rule as every cell (rounding, overload).
+export interface CapacityDayLoad {
+  date: string;
+  loadHours: number;
+  availableHours: number | null; // null = no capacity calendar
+  overloaded: boolean;
+}
+
+export interface CapacityDay {
+  date: string;
+  isoWeek: number;
+  weekday: number; // ISO 1 = Monday … 7 = Sunday
 }
 
 export interface CapacityResourceRow {
@@ -184,7 +209,11 @@ export interface CapacityResourceRow {
   active: boolean;
   capacityFactor: number;
   hasSchedule: boolean;
-  weeks: CapacityCell[]; // index-aligned with CapacityResult.weeks
+  weeks: CapacityCell[]; // index-aligned with CapacityResult.weeks ([] in the day view)
+  days: CapacityCell[]; // index-aligned with CapacityResult.days ([] in the week view)
+  // Every day of the visible columns (week view: the first week's Monday to
+  // the last week's Sunday; day view: the days), ascending.
+  dayLoads: CapacityDayLoad[];
   later: CapacityCell; // due date beyond the horizon
   undated: CapacityCell; // no due date
 }
@@ -195,6 +224,7 @@ export interface CapacityGroupBlock {
   name: string;
   resources: CapacityResourceRow[];
   weekTotals: CapacityCell[];
+  dayTotals: CapacityCell[];
   laterTotal: CapacityCell;
   undatedTotal: CapacityCell;
 }
@@ -208,7 +238,12 @@ export interface CapacityWeek {
 
 export interface CapacitySummary {
   plannedAt: string | null; // the latest plan run (max plannedAt over the operations)
-  overloadedCells: number; // resource × week cells with `overloaded`
+  // Resource cells with `overloaded` in the view's columns: resource × week
+  // (week view), resource × day (day view).
+  overloadedCells: number;
+  // Resource × day cells with `overloaded` over the visible days — in the
+  // week view the days a red OR a calm week cell hides.
+  overloadedDays: number;
   lateOrders: { manufacturingOrderId: string; orderNumber: string; dueDate: string | null; plannedFinish: string | null }[];
   unplannedOrders: { manufacturingOrderId: string; orderNumber: string }[];
   // Förslag på resurs (#15): every open operation's förslag, by order number
@@ -217,7 +252,12 @@ export interface CapacitySummary {
 }
 
 export interface CapacityResult {
-  weeks: CapacityWeek[];
+  // The Stockholm day the server counted with — the web's "today" (Flytta's
+  // earliest day) is this one, never the browser's.
+  today: string;
+  granularity: "week" | "day";
+  weeks: CapacityWeek[]; // [] in the day view
+  days: CapacityDay[]; // [] in the week view
   groups: CapacityGroupBlock[];
   summary: CapacitySummary;
 }
@@ -554,7 +594,7 @@ export function capacityHorizon(today: string, weeks: number): { firstMonday: st
 }
 
 function emptyCell(): CapacityCell {
-  return { loadHours: 0, availableHours: null, loadPercent: null, overloaded: false, orders: [] };
+  return { loadHours: 0, availableHours: null, loadPercent: null, overloaded: false, overloadedDays: 0, orders: [] };
 }
 
 function finishCell(cell: CapacityCell): CapacityCell {
@@ -572,6 +612,13 @@ function finishCell(cell: CapacityCell): CapacityCell {
   return cell;
 }
 
+// A day without its orders, through the same finishCell (the ONE overload
+// rule) as the cells.
+function dayLoadOf(date: string, loadHours: number, availableHours: number | null): CapacityDayLoad {
+  const cell = finishCell({ ...emptyCell(), loadHours, availableHours });
+  return { date, loadHours: cell.loadHours, availableHours: cell.availableHours, overloaded: cell.overloaded };
+}
+
 export function computeCapacity(
   input: CapacityInput,
   // offDays (full-day holidays) and queueDays (Standardkötid) only matter for
@@ -584,6 +631,10 @@ export function computeCapacity(
   options: {
     today: string;
     weeks: number;
+    // The day view (#18): `days` columns from today instead of the weeks.
+    // Left out = the week view.
+    granularity?: "week" | "day";
+    days?: number;
     offDays?: ReadonlySet<string>;
     queueDays?: number;
     resourceSuggestions?: ResourceSuggestion[];
@@ -646,24 +697,53 @@ export function computeCapacity(
     operations: input.operations.filter((op) => !subcontractIds.has(op.workCenterId)),
   };
 
-  // Week columns: the week containing `today` plus the following ones.
-  const { firstMonday } = capacityHorizon(options.today, options.weeks);
+  // Columns. Week view: the week containing `today` plus the following
+  // ones. Day view: `days` days from today. Either way the load is bucketed
+  // per DAY and every visible day is kept (`dates`), so a week cell is the
+  // sum of its days and the two views can never disagree.
+  const granularity = options.granularity ?? "week";
   const weeks: CapacityWeek[] = [];
-  for (let i = 0; i < options.weeks; i++) {
-    const monday = addDays(firstMonday, i * 7);
-    const { isoYear, isoWeek } = isoWeekOf(monday);
-    weeks.push({ isoYear, isoWeek, monday, sunday: addDays(monday, 6) });
+  const days: CapacityDay[] = [];
+  let firstDate: string;
+  let lastDate: string;
+  if (granularity === "day") {
+    firstDate = options.today;
+    lastDate = addDays(options.today, (options.days ?? 14) - 1);
+  } else {
+    const { firstMonday } = capacityHorizon(options.today, options.weeks);
+    for (let i = 0; i < options.weeks; i++) {
+      const monday = addDays(firstMonday, i * 7);
+      const { isoYear, isoWeek } = isoWeekOf(monday);
+      weeks.push({ isoYear, isoWeek, monday, sunday: addDays(monday, 6) });
+    }
+    firstDate = firstMonday;
+    lastDate = weeks[weeks.length - 1]!.sunday;
   }
-  const horizonSunday = weeks[weeks.length - 1]!.sunday;
-  const weekIndexOf = new Map(weeks.map((w, i) => [w.monday, i]));
+  const dates: string[] = [];
+  for (let date = firstDate; date <= lastDate; date = addDays(date, 1)) dates.push(date);
+  const dateIndexOf = new Map(dates.map((d, i) => [d, i]));
+  if (granularity === "day") {
+    for (const date of dates) {
+      days.push({ date, isoWeek: isoWeekOf(date).isoWeek, weekday: new Date(`${date}T00:00:00Z`).getUTCDay() || 7 });
+    }
+  }
+  // The column a visible day belongs to: its own (day view) or its week's.
+  const columnOf = (dateIndex: number) => (granularity === "day" ? dateIndex : Math.floor(dateIndex / 7));
+  const columnCount = granularity === "day" ? dates.length : weeks.length;
 
-  // Per-resource buckets: weeks[i], later, undated.
-  type Buckets = { weeks: CapacityCell[]; later: CapacityCell; undated: CapacityCell };
+  // Per-resource buckets: the view's columns, the load per visible day
+  // (minutes, index-aligned with `dates`), later, undated.
+  type Buckets = { columns: CapacityCell[]; dayMinutes: number[]; later: CapacityCell; undated: CapacityCell };
   const bucketsByResource = new Map<string, Buckets>();
   const bucketsFor = (workCenterId: string): Buckets => {
     let buckets = bucketsByResource.get(workCenterId);
     if (!buckets) {
-      buckets = { weeks: weeks.map(emptyCell), later: emptyCell(), undated: emptyCell() };
+      buckets = {
+        columns: Array.from({ length: columnCount }, emptyCell),
+        dayMinutes: dates.map(() => 0),
+        later: emptyCell(),
+        undated: emptyCell(),
+      };
       bucketsByResource.set(workCenterId, buckets);
     }
     return buckets;
@@ -683,23 +763,30 @@ export function computeCapacity(
     const hours = round2(minutes / 60);
 
     // The load is bucketed per DAY (operationLoadDays: a planned operation
-    // on its days, filled from the back; an unplanned one on its due date)
-    // and a week cell is the sum of its days — one entry per operation and
-    // cell, `hoursInWeek` its share there. (The day cells themselves and
-    // overloadedDays are read out by the matrix's day view, etapp 4.)
-    const perCell = new Map<CapacityCell, number>();
+    // on its days, filled from the back; an unplanned one on its due date).
+    // A week cell is the sum of its days — one entry per operation and
+    // cell, `hoursInWeek` its share of the week, `hoursInDay` of the day.
+    const perCell = new Map<CapacityCell, { minutes: number; monday: string | null }>();
+    const perWeek = new Map<string, number>();
     for (const chunk of operationLoadDays(operation, options.today)) {
       let cell: CapacityCell;
+      let monday: string | null = null;
       if (chunk.date == null) {
         cell = buckets.undated;
-      } else if (chunk.date > horizonSunday) {
+      } else if (chunk.date > lastDate) {
         cell = buckets.later;
       } else {
-        cell = buckets.weeks[weekIndexOf.get(mondayOf(chunk.date))!]!;
+        const dateIndex = dateIndexOf.get(chunk.date)!;
+        cell = buckets.columns[columnOf(dateIndex)]!;
+        buckets.dayMinutes[dateIndex]! += chunk.minutes;
+        monday = mondayOf(chunk.date);
+        perWeek.set(monday, (perWeek.get(monday) ?? 0) + chunk.minutes);
       }
-      perCell.set(cell, (perCell.get(cell) ?? 0) + chunk.minutes);
+      const entry = perCell.get(cell) ?? { minutes: 0, monday };
+      entry.minutes += chunk.minutes;
+      perCell.set(cell, entry);
     }
-    for (const [cell, cellMinutes] of perCell) {
+    for (const [cell, { minutes: cellMinutes, monday }] of perCell) {
       cell.loadHours += cellMinutes / 60;
       cell.orders.push({
         moOperationId: operation.moOperationId,
@@ -711,7 +798,8 @@ export function computeCapacity(
         dueDate: operation.dueDate,
         overdue,
         remainingHours: hours,
-        hoursInWeek: round2(cellMinutes / 60),
+        hoursInWeek: round2((monday != null ? perWeek.get(monday)! : cellMinutes) / 60),
+        hoursInDay: granularity === "day" ? round2(cellMinutes / 60) : null,
         planned,
         plannedStartDate: plannedRange?.start ?? null,
         plannedEndDate: plannedRange?.end ?? null,
@@ -727,7 +815,7 @@ export function computeCapacity(
 
   // Resource rows: active always, inactive only when carrying load.
   const carriesLoad = (b: Buckets | undefined) =>
-    !!b && (b.later.loadHours > 0 || b.undated.loadHours > 0 || b.weeks.some((c) => c.loadHours > 0));
+    !!b && (b.later.loadHours > 0 || b.undated.loadHours > 0 || b.columns.some((c) => c.loadHours > 0));
   const included = input.workCenters.filter((w) => w.active || carriesLoad(bucketsByResource.get(w.workCenterId)));
 
   const resourceRows = new Map<string, CapacityResourceRow>();
@@ -736,17 +824,31 @@ export function computeCapacity(
     // hasSchedule (kept as the response's name) = the resource has a
     // capacity calendar — a week schedule or hours per day.
     const hasSchedule = hasCapacityCalendar(workCenter);
-    if (hasSchedule) {
-      for (let i = 0; i < weeks.length; i++) {
-        buckets.weeks[i]!.availableHours = resolveWeekHoursFromLookups(
-          lookups,
-          workCenter,
-          workCenter.capacityFactor,
-          weeks[i]!.isoYear,
-          weeks[i]!.isoWeek
-        );
+    // Capacity per visible day (resourceDayMinutes × the factor); a week's
+    // is the sum of its seven days.
+    const dayAvailable = hasSchedule
+      ? dates.map((date) => (resourceDayMinutes(lookups, workCenter, date) / 60) * workCenter.capacityFactor)
+      : null;
+    if (dayAvailable) {
+      for (let i = 0; i < dates.length; i++) {
+        const cell = buckets.columns[columnOf(i)]!;
+        cell.availableHours = (cell.availableHours ?? 0) + dayAvailable[i]!;
       }
     }
+    const columns = buckets.columns.map(finishCell);
+    // The days without their orders. In the day view they ARE the cells.
+    const dayLoads =
+      granularity === "day"
+        ? columns.map((cell, i) => ({
+            date: dates[i]!,
+            loadHours: cell.loadHours,
+            availableHours: cell.availableHours,
+            overloaded: cell.overloaded,
+          }))
+        : dates.map((date, i) => dayLoadOf(date, buckets.dayMinutes[i]! / 60, dayAvailable ? dayAvailable[i]! : null));
+    dayLoads.forEach((day, i) => {
+      if (day.overloaded) columns[columnOf(i)]!.overloadedDays += 1;
+    });
     resourceRows.set(workCenter.workCenterId, {
       workCenterId: workCenter.workCenterId,
       code: workCenter.code,
@@ -755,7 +857,9 @@ export function computeCapacity(
       active: workCenter.active,
       capacityFactor: workCenter.capacityFactor,
       hasSchedule,
-      weeks: buckets.weeks.map(finishCell),
+      weeks: granularity === "day" ? [] : columns,
+      days: granularity === "day" ? columns : [],
+      dayLoads,
       later: finishCell(buckets.later),
       undated: finishCell(buckets.undated),
     });
@@ -788,12 +892,34 @@ export function computeCapacity(
       return finishCell(cell);
     };
 
+    // The group's days (the members' summed), for a week total's
+    // overloadedDays — the group can be over on a day no member is.
+    const groupDays = dates.map((date, i) => {
+      let loadHours = 0;
+      let availableHours: number | null = null;
+      for (const member of members) {
+        const day = member.dayLoads[i]!;
+        loadHours += day.loadHours;
+        if (day.availableHours != null) availableHours = (availableHours ?? 0) + day.availableHours;
+      }
+      return dayLoadOf(date, loadHours, availableHours);
+    });
+
     groups.push({
       productionGroupId: block.productionGroupId,
       code: block.code,
       name: block.name,
       resources: members,
-      weekTotals: weeks.map((_, i) => subtotal((row) => row.weeks[i]!)),
+      weekTotals: weeks.map((_, i) => {
+        const total = subtotal((row) => row.weeks[i]!);
+        total.overloadedDays = groupDays.slice(i * 7, i * 7 + 7).filter((d) => d.overloaded).length;
+        return total;
+      }),
+      dayTotals: days.map((_, i) => {
+        const total = subtotal((row) => row.days[i]!);
+        total.overloadedDays = total.overloaded ? 1 : 0;
+        return total;
+      }),
       laterTotal: subtotal((row) => row.later),
       undatedTotal: subtotal((row) => row.undated),
     });
@@ -814,7 +940,11 @@ export function computeCapacity(
     return a.orderNumber < b.orderNumber ? -1 : a.orderNumber > b.orderNumber ? 1 : 0;
   };
   const overloadedCells = [...resourceRows.values()].reduce(
-    (n, row) => n + row.weeks.filter((c) => c.overloaded).length,
+    (n, row) => n + (granularity === "day" ? row.days : row.weeks).filter((c) => c.overloaded).length,
+    0
+  );
+  const overloadedDays = [...resourceRows.values()].reduce(
+    (n, row) => n + row.dayLoads.filter((d) => d.overloaded).length,
     0
   );
   const lateOrders: CapacitySummary["lateOrders"] = [];
@@ -833,5 +963,12 @@ export function computeCapacity(
     a.orderNumber !== b.orderNumber ? (a.orderNumber < b.orderNumber ? -1 : 1) : a.sequenceNo - b.sequenceNo
   );
 
-  return { weeks, groups, summary: { plannedAt, overloadedCells, lateOrders, unplannedOrders, resourceSuggestions } };
+  return {
+    today: options.today,
+    granularity,
+    weeks,
+    days,
+    groups,
+    summary: { plannedAt, overloadedCells, overloadedDays, lateOrders, unplannedOrders, resourceSuggestions },
+  };
 }
