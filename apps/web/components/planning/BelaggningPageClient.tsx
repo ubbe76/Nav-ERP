@@ -14,13 +14,14 @@ import { apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatStockholmDateTime } from "../../lib/date";
-import { plannedDateLabel } from "../../lib/planning";
+import { plannedDateLabel, weekdayShortDate } from "../../lib/planning";
 import { planSuggestionNotice, suggestionCountLabel, suggestionShift, suggestionText } from "../../lib/resourceSuggestion";
 import { SwitchResourceButton } from "./SwitchResourceButton";
 import { useCan } from "../PermissionsProvider";
 import type {
   CapacityCell,
   CapacityCellOrder,
+  CapacityDay,
   CapacityGroupBlock,
   CapacityResourceRow,
   CapacityResult,
@@ -42,6 +43,8 @@ interface SwitchHandlers {
 
 const WEEK_OPTIONS = [4, 8, 13, 26];
 const DEFAULT_WEEKS = 8;
+const DAY_OPTIONS = [7, 14, 28];
+const DEFAULT_DAYS = 14;
 
 // Red is the API's `overloaded` flag (over 100 %, or load in a week whose
 // schedule gives 0 h — that one has no percentage), never re-derived here.
@@ -61,6 +64,12 @@ function weekLabel(week: CapacityWeek, spansMultipleYears: boolean): string {
   return spansMultipleYears ? `v.${week.isoWeek} ${week.isoYear}` : `v.${week.isoWeek}`;
 }
 
+// Day view column: "mån 16 nov", with the ISO week number on Mondays and the
+// first column.
+function dayLabel(day: CapacityDay, index: number): { title: string; week: string | null } {
+  return { title: weekdayShortDate(day.date), week: day.weekday === 1 || index === 0 ? `v.${day.isoWeek}` : null };
+}
+
 // Which cell is currently expanded (drill-down row shown right under its
 // resource). Carries the cell's own data — no re-fetch needed to render it.
 interface ExpandedCell {
@@ -68,6 +77,10 @@ interface ExpandedCell {
   workCenterId: string;
   label: string;
   cell: CapacityCell;
+}
+
+function cellsOf(resource: CapacityResourceRow, granularity: "week" | "day"): CapacityCell[] {
+  return granularity === "day" ? resource.days : resource.weeks;
 }
 
 // After a reload (Flytta…/Lås upp): the expansion stays when its cell still
@@ -78,8 +91,8 @@ function refreshExpanded(prev: ExpandedCell | null, res: CapacityResult): Expand
   for (const group of res.groups) {
     const resource = group.resources.find((r) => r.workCenterId === prev.workCenterId);
     if (!resource) continue;
-    const cell = colKey.startsWith("week:")
-      ? resource.weeks[Number(colKey.slice(5))]
+    const cell = colKey.startsWith("col:")
+      ? cellsOf(resource, res.granularity)[Number(colKey.slice(4))]
       : colKey === "later"
         ? resource.later
         : resource.undated;
@@ -116,6 +129,9 @@ export function BelaggningPageClient() {
   const weeksRaw = Number(searchParams.get("weeks"));
   const weeks = WEEK_OPTIONS.includes(weeksRaw) ? weeksRaw : DEFAULT_WEEKS;
   const productionGroupId = searchParams.get("productionGroupId") ?? "";
+  const dayView = searchParams.get("vy") === "dag";
+  const daysRaw = Number(searchParams.get("days"));
+  const days = DAY_OPTIONS.includes(daysRaw) ? daysRaw : DEFAULT_DAYS;
 
   // A changed filter/horizon closes the expansion; a plain reload (reloadTick)
   // keeps it, see refreshExpanded.
@@ -129,7 +145,9 @@ export function BelaggningPageClient() {
       lastQueryKey.current = queryKey;
       setExpanded(null);
     }
-    const qs = new URLSearchParams({ weeks: String(weeks) });
+    const qs = dayView
+      ? new URLSearchParams({ granularity: "day", days: String(days) })
+      : new URLSearchParams({ weeks: String(weeks) });
     if (productionGroupId) qs.set("productionGroupId", productionGroupId);
     apiFetch<CapacityResult>(`/api/v1/planning/capacity?${qs.toString()}`)
       .then((res) => {
@@ -196,7 +214,16 @@ export function BelaggningPageClient() {
 
   const overloadedList = data ? overloadedCellList(data) : [];
   const spansMultipleYears = data ? new Set(data.weeks.map((w) => w.isoYear)).size > 1 : false;
-  const gridTemplateColumns = data ? `220px repeat(${data.weeks.length + 2}, minmax(96px, 1fr))` : undefined;
+  // The loaded data decides the layout (a view switch shows the old matrix
+  // until the new one lands).
+  const dataIsDay = data?.granularity === "day";
+  const columnCount = data ? (dataIsDay ? data.days.length : data.weeks.length) : 0;
+  const gridTemplateColumns = data ? `220px repeat(${columnCount + 2}, minmax(${dataIsDay ? 84 : 96}px, 1fr))` : undefined;
+  const columnLabels: string[] = data
+    ? dataIsDay
+      ? data.days.map((d) => weekdayShortDate(d.date))
+      : data.weeks.map((w) => weekLabel(w, spansMultipleYears))
+    : [];
 
   return (
     <>
@@ -207,22 +234,53 @@ export function BelaggningPageClient() {
           ariaLabel="Filtrera på produktionsgrupp"
           options={groups.map((g) => ({ value: g.id, label: `${g.code} · ${g.name}` }))}
         />
-        <label htmlFor="weeksSelect" style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
-          Veckor
-        </label>
-        <Select
-          id="weeksSelect"
-          size="xs"
-          value={String(weeks)}
-          onChange={(e) => setFilter("weeks", Number(e.target.value) === DEFAULT_WEEKS ? null : e.target.value)}
-          aria-label="Antal veckor"
-        >
-          {WEEK_OPTIONS.map((w) => (
-            <option key={w} value={w}>
-              {w}
-            </option>
-          ))}
-        </Select>
+        <div className={styles.viewToggle} role="group" aria-label="Vy">
+          <button type="button" className={styles.viewButton} aria-pressed={!dayView} onClick={() => setFilter("vy", null)}>
+            Vecka
+          </button>
+          <button type="button" className={styles.viewButton} aria-pressed={dayView} onClick={() => setFilter("vy", "dag")}>
+            Dag
+          </button>
+        </div>
+        {dayView ? (
+          <>
+            <label htmlFor="daysSelect" style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+              Dagar
+            </label>
+            <Select
+              id="daysSelect"
+              size="xs"
+              value={String(days)}
+              onChange={(e) => setFilter("days", Number(e.target.value) === DEFAULT_DAYS ? null : e.target.value)}
+              aria-label="Antal dagar"
+            >
+              {DAY_OPTIONS.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </Select>
+          </>
+        ) : (
+          <>
+            <label htmlFor="weeksSelect" style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+              Veckor
+            </label>
+            <Select
+              id="weeksSelect"
+              size="xs"
+              value={String(weeks)}
+              onChange={(e) => setFilter("weeks", Number(e.target.value) === DEFAULT_WEEKS ? null : e.target.value)}
+              aria-label="Antal veckor"
+            >
+              {WEEK_OPTIONS.map((w) => (
+                <option key={w} value={w}>
+                  {w}
+                </option>
+              ))}
+            </Select>
+          </>
+        )}
         {canPlan && (
           <Button type="button" variant="primary" size="small" disabled={planBusy} onClick={runPlan}>
             {planBusy ? "Planerar…" : "Planera"}
@@ -274,6 +332,7 @@ export function BelaggningPageClient() {
       {data && (
         <PlanSummary
           summary={data.summary}
+          granularity={data.granularity}
           overloaded={overloadedList}
           open={summaryList}
           onOpen={(list) => setSummaryList((prev) => (prev === list ? null : list))}
@@ -287,11 +346,21 @@ export function BelaggningPageClient() {
         <div className={styles.scroller}>
           <div className={styles.grid} style={{ gridTemplateColumns }}>
             <div className={styles.headerLabel}>Resurs</div>
-            {data.weeks.map((w, i) => (
-              <div key={i} className={styles.headerCell}>
-                {weekLabel(w, spansMultipleYears)}
-              </div>
-            ))}
+            {dataIsDay
+              ? data.days.map((d, i) => {
+                  const l = dayLabel(d, i);
+                  return (
+                    <div key={i} className={styles.headerCell}>
+                      {l.week && <span className={styles.headerWeek}>{l.week}</span>}
+                      {l.title}
+                    </div>
+                  );
+                })
+              : data.weeks.map((w, i) => (
+                  <div key={i} className={styles.headerCell}>
+                    {weekLabel(w, spansMultipleYears)}
+                  </div>
+                ))}
             <div className={styles.headerCell}>Senare</div>
             <div className={styles.headerCell}>Odaterat</div>
 
@@ -299,8 +368,8 @@ export function BelaggningPageClient() {
               <GroupBlock
                 key={group.productionGroupId ?? "ungrouped"}
                 group={group}
-                weeks={data.weeks}
-                spansMultipleYears={spansMultipleYears}
+                granularity={data.granularity}
+                columnLabels={columnLabels}
                 expanded={expanded}
                 onCellClick={toggleCell}
                 canMove={canPlan}
@@ -314,6 +383,7 @@ export function BelaggningPageClient() {
 
       <MoveOperationDialog
         target={moveTarget}
+        today={data?.today ?? null}
         onClose={() => setMoveTarget(null)}
         onChanged={() => {
           // The Planera result no longer describes the plan.
@@ -327,8 +397,8 @@ export function BelaggningPageClient() {
 
 function GroupBlock({
   group,
-  weeks,
-  spansMultipleYears,
+  granularity,
+  columnLabels,
   expanded,
   onCellClick,
   canMove,
@@ -336,8 +406,8 @@ function GroupBlock({
   switchHandlers,
 }: {
   group: CapacityGroupBlock;
-  weeks: CapacityWeek[];
-  spansMultipleYears: boolean;
+  granularity: "week" | "day";
+  columnLabels: string[];
   expanded: ExpandedCell | null;
   onCellClick: (resource: CapacityResourceRow, colKey: string, label: string, cell: CapacityCell) => void;
   canMove: boolean;
@@ -352,8 +422,8 @@ function GroupBlock({
         <ResourceBlock
           key={resource.workCenterId}
           resource={resource}
-          weeks={weeks}
-          spansMultipleYears={spansMultipleYears}
+          granularity={granularity}
+          columnLabels={columnLabels}
           expanded={expanded}
           onCellClick={onCellClick}
           canMove={canMove}
@@ -365,19 +435,19 @@ function GroupBlock({
       <div className={styles.resourceLabel} data-summa="true">
         Summa
       </div>
-      {group.weekTotals.map((cell, i) => (
-        <CellView key={i} cell={cell} summa />
+      {(granularity === "day" ? group.dayTotals : group.weekTotals).map((cell, i) => (
+        <CellView key={i} cell={cell} summa granularity={granularity} />
       ))}
-      <CellView cell={group.laterTotal} summa />
-      <CellView cell={group.undatedTotal} summa />
+      <CellView cell={group.laterTotal} summa granularity={granularity} />
+      <CellView cell={group.undatedTotal} summa granularity={granularity} />
     </>
   );
 }
 
 function ResourceBlock({
   resource,
-  weeks,
-  spansMultipleYears,
+  granularity,
+  columnLabels,
   expanded,
   onCellClick,
   canMove,
@@ -385,8 +455,8 @@ function ResourceBlock({
   switchHandlers,
 }: {
   resource: CapacityResourceRow;
-  weeks: CapacityWeek[];
-  spansMultipleYears: boolean;
+  granularity: "week" | "day";
+  columnLabels: string[];
   expanded: ExpandedCell | null;
   onCellClick: (resource: CapacityResourceRow, colKey: string, label: string, cell: CapacityCell) => void;
   canMove: boolean;
@@ -394,7 +464,6 @@ function ResourceBlock({
   switchHandlers: SwitchHandlers;
 }) {
   const isExpandedHere = expanded?.workCenterId === resource.workCenterId;
-  const weekLabels = weeks.map((w) => weekLabel(w, spansMultipleYears));
 
   return (
     <>
@@ -411,13 +480,14 @@ function ResourceBlock({
         {!resource.active && <StatusPill status="draft" label="Inaktiv" compact />}
       </div>
 
-      {resource.weeks.map((cell, i) => {
-        const key = `week:${i}`;
-        const label = weekLabels[i] ?? "";
+      {cellsOf(resource, granularity).map((cell, i) => {
+        const key = `col:${i}`;
+        const label = columnLabels[i] ?? "";
         return (
           <CellView
             key={i}
             cell={cell}
+            granularity={granularity}
             active={expanded?.key === `${resource.workCenterId}:${key}`}
             onClick={cell.orders.length > 0 ? () => onCellClick(resource, key, label, cell) : undefined}
           />
@@ -425,11 +495,13 @@ function ResourceBlock({
       })}
       <CellView
         cell={resource.later}
+        granularity={granularity}
         active={expanded?.key === `${resource.workCenterId}:later`}
         onClick={resource.later.orders.length > 0 ? () => onCellClick(resource, "later", "Senare", resource.later) : undefined}
       />
       <CellView
         cell={resource.undated}
+        granularity={granularity}
         active={expanded?.key === `${resource.workCenterId}:undated`}
         onClick={
           resource.undated.orders.length > 0
@@ -443,6 +515,7 @@ function ResourceBlock({
           workCenterId={resource.workCenterId}
           label={`${resource.code} · ${resource.name} — ${expanded.label}`}
           orders={expanded.cell.orders}
+          granularity={granularity}
           onMove={canMove ? (order) => onMove(resource, order) : undefined}
           switchHandlers={switchHandlers}
         />
@@ -451,7 +524,7 @@ function ResourceBlock({
   );
 }
 
-function CellContent({ cell, flags = true }: { cell: CapacityCell; flags?: boolean }) {
+function CellContent({ cell, flags = true, granularity }: { cell: CapacityCell; flags?: boolean; granularity: "week" | "day" }) {
   const hasLocked = flags && cell.orders.some((o) => o.planLocked);
   const hasLate = flags && cell.orders.some((o) => o.late);
   const hasSuggestion = flags && cell.orders.some((o) => o.suggestion !== null);
@@ -471,6 +544,11 @@ function CellContent({ cell, flags = true }: { cell: CapacityCell; flags?: boole
             <div className={styles.fillBar} style={{ width: `${Math.min(cell.loadPercent, 100)}%` }} />
           </div>
         </>
+      )}
+      {granularity === "week" && cell.overloadedDays > 0 && (
+        <span className={styles.overloadedDays}>
+          {cell.overloadedDays === 1 ? "1 dag överbelagd" : `${cell.overloadedDays} dagar överbelagda`}
+        </span>
       )}
       {(hasLocked || hasLate || hasSuggestion) && (
         <span className={styles.cellFlags}>
@@ -499,9 +577,11 @@ function CellView({
   cell,
   active = false,
   summa = false,
+  granularity,
   onClick,
 }: {
   cell: CapacityCell;
+  granularity: "week" | "day";
   active?: boolean;
   summa?: boolean;
   onClick?: () => void;
@@ -529,7 +609,7 @@ function CellView({
       aria-expanded={clickable ? active : undefined}
       onKeyDown={clickable ? onKeyDown : undefined}
     >
-      <CellContent cell={cell} flags={!summa} />
+      <CellContent cell={cell} flags={!summa} granularity={granularity} />
     </div>
   );
 }
@@ -538,6 +618,7 @@ function ExpansionRow({
   workCenterId,
   label,
   orders,
+  granularity,
   onMove,
   switchHandlers,
 }: {
@@ -546,6 +627,7 @@ function ExpansionRow({
   workCenterId: string;
   label: string;
   orders: CapacityCellOrder[];
+  granularity: "week" | "day";
   onMove?: (order: CapacityCellOrder) => void;
   switchHandlers: SwitchHandlers;
 }) {
@@ -570,7 +652,7 @@ function ExpansionRow({
               <div className={styles.orderMeta}>
                 <span>Op {o.sequenceNo}</span>
                 <span>
-                  {formatHours(o.hoursInWeek)} h i veckan · {formatHours(o.remainingHours)} h kvar
+                  {granularity === "day" && o.hoursInDay !== null ? `${formatHours(o.hoursInDay)} h i dagen` : `${formatHours(o.hoursInWeek)} h i veckan`} · {formatHours(o.remainingHours)} h kvar
                 </span>
                 <span>{dates ?? "Ej planerad"}</span>
                 <span>{o.dueDate ? `Färdigt ${o.dueDate}` : "—"}</span>
@@ -691,13 +773,15 @@ function overloadedCellList(data: CapacityResult): OverloadedCell[] {
   const out: OverloadedCell[] = [];
   for (const group of data.groups) {
     for (const resource of group.resources) {
-      resource.weeks.forEach((cell, i) => {
+      cellsOf(resource, data.granularity).forEach((cell, i) => {
         if (!cell.overloaded) return;
+        const day = data.days[i];
         const week = data.weeks[i];
-        if (!week) return;
+        const label = data.granularity === "day" ? (day ? weekdayShortDate(day.date) : null) : week ? weekLabel(week, multiYear) : null;
+        if (label === null) return;
         out.push({
-          key: `${resource.workCenterId}:${week.monday}`,
-          text: `${resource.code} · ${resource.name}, ${weekLabel(week, multiYear)} — ${cell.loadPercent === null ? "ingen kapacitet" : `${cell.loadPercent}%`} (${formatHours(cell.loadHours)} av ${formatHours(cell.availableHours ?? 0)} h)`,
+          key: `${resource.workCenterId}:${day?.date ?? week?.monday}`,
+          text: `${resource.code} · ${resource.name}, ${label} — ${cell.loadPercent === null ? "ingen kapacitet" : `${cell.loadPercent}%`} (${formatHours(cell.loadHours)} av ${formatHours(cell.availableHours ?? 0)} h)`,
         });
       });
     }
@@ -709,12 +793,14 @@ function overloadedCellList(data: CapacityResult): OverloadedCell[] {
 // list (order numbers link to the order card).
 function PlanSummary({
   summary,
+  granularity,
   overloaded,
   open,
   onOpen,
   switchHandlers,
 }: {
   summary: CapacityResult["summary"];
+  granularity: "week" | "day";
   overloaded: OverloadedCell[];
   open: SummaryList | null;
   onOpen: (list: SummaryList) => void;
@@ -764,6 +850,12 @@ function PlanSummary({
               )}
             </span>
           ))}
+          {granularity === "week" && summary.overloadedDays > 0 && (
+            <span>
+              {" · "}
+              {summary.overloadedDays === 1 ? "1 överbelagd dag" : `${summary.overloadedDays} överbelagda dagar`}
+            </span>
+          )}
         </span>
       </div>
 

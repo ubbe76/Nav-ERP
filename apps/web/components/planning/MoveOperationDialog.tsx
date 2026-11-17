@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { Button } from "../ui/Button";
 import { Checkbox, Field, Input } from "../ui/Field";
-import { FormActions, FormError, FormNotice } from "../ui/Form";
+import { FormActions, FormError, FormHint, FormNotice } from "../ui/Form";
 import { Modal } from "../ui/Modal";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
@@ -31,32 +31,37 @@ function formatHours(hours: number): string {
 // Stockholm day). Moving locks the operation; Lås upp hands it back to Planera.
 export function MoveOperationDialog({
   target,
+  today,
   onClose,
   onChanged,
 }: {
   target: MoveTarget | null;
+  // The Stockholm day from the capacity response (never the browser's date);
+  // null where no capacity data was loaded (the order card).
+  today?: string | null;
   onClose: () => void;
   // The plan changed — the matrix reloads.
   onChanged: () => void;
 }) {
   return (
     <Modal open={target !== null} onClose={onClose} title="Flytta operation">
-      {target && <MoveForm target={target} onClose={onClose} onChanged={onChanged} />}
+      {target && <MoveForm target={target} today={today ?? stockholmToday()} onClose={onClose} onChanged={onChanged} />}
     </Modal>
   );
 }
 
 function MoveForm({
   target,
+  today,
   onClose,
   onChanged,
 }: {
   target: MoveTarget;
+  today: string;
   onClose: () => void;
   onChanged: () => void;
 }) {
   const { order, resource } = target;
-  const today = stockholmToday();
   const planStart = order.plannedStartDate;
   const [date, setDate] = useState(planStart && planStart >= today ? planStart : today);
   const [moveFollowing, setMoveFollowing] = useState(true);
@@ -108,6 +113,16 @@ function MoveForm({
     }
   }
 
+  // "ledigt 3 h av 8" from the resource's day loads, when the day is loaded;
+  // a day without capacity (weekend, red day) says so — a move there is refused.
+  const dayLoad = resource.dayLoads?.find((d) => d.date === date);
+  const freeText =
+    dayLoad && dayLoad.availableHours !== null
+      ? dayLoad.availableHours <= 0
+        ? "ingen kapacitet den dagen"
+        : `ledigt ${formatHours(Math.max(0, dayLoad.availableHours - dayLoad.loadHours))} h av ${formatHours(dayLoad.availableHours)}`
+      : null;
+
   const planned = movedDates
     ? plannedDateLabel(movedDates.start, movedDates.end)
     : plannedDateLabel(order.plannedStartDate, order.plannedEndDate);
@@ -136,6 +151,7 @@ function MoveForm({
 
       <Field label="Dag" htmlFor="moveDate">
         <Input id="moveDate" type="date" min={today} value={date} onChange={(e) => setDate(e.target.value)} disabled={busy || warnings !== null} />
+        {freeText && <FormHint>{freeText}</FormHint>}
       </Field>
 
       <label className={styles.check}>

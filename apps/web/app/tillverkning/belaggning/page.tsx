@@ -14,7 +14,7 @@ export default function BelaggningPage() {
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Beläggning</div>
-          <div className={shellStyles.meta}>Beläggning per resurs och vecka från släppta tillverkningsordrar</div>
+          <div className={shellStyles.meta}>Beläggning per resurs, vecka eller dag, från släppta tillverkningsordrar</div>
         </div>
         <HelpLink chapter="tillverkning" anchor="belaggning" label="Hjälp om beläggning" />
       </div>

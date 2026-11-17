@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { ArrowDown, ArrowUp } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatStockholmDate } from "../../lib/date";
 import { formatQuantity } from "../../lib/format";
 import { shortDate, weekdayShortDate } from "../../lib/planning";
-import type { RunPlanResult, RunPlanRow, RunPlanDay } from "../../lib/types";
+import type { RunPlanOrderResult, RunPlanResult, RunPlanRow, RunPlanDay } from "../../lib/types";
+import { useCan } from "../PermissionsProvider";
 import { Input, Select } from "../ui/Field";
 import { FormError, FormHint } from "../ui/Form";
 import { GatedLink } from "../ui/GatedLink";
@@ -75,9 +77,42 @@ const COLUMNS = [
   { key: "due", label: "Färdigdatum", width: "110px" },
   { key: "status", label: "Status", width: "minmax(190px, 1.5fr)" },
 ];
+// Upp/Ned: only shown in a reorderable group for users with Tillverkning.
+const MOVE_COLUMN = { key: "move", label: "Ordning", width: "96px" };
 
-function renderCell(row: TableRow, key: string) {
+interface MoveControls {
+  // Index of the row among its group's orderable rows, and their count.
+  position: number;
+  count: number;
+  busy: boolean;
+  onMove: (direction: -1 | 1) => void;
+}
+
+function renderCell(row: TableRow, key: string, move?: MoveControls) {
   switch (key) {
+    case "move":
+      return move ? (
+        <span className={styles.moveCell}>
+          <button
+            type="button"
+            className={styles.moveButton}
+            aria-label="Flytta upp"
+            disabled={move.busy || move.position === 0}
+            onClick={() => move.onMove(-1)}
+          >
+            <ArrowUp size={16} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className={styles.moveButton}
+            aria-label="Flytta ned"
+            disabled={move.busy || move.position === move.count - 1}
+            onClick={() => move.onMove(1)}
+          >
+            <ArrowDown size={16} aria-hidden="true" />
+          </button>
+        </span>
+      ) : null;
     case "week":
       return row.date ? weekdayShortDate(row.date) : "–";
     case "order":
@@ -117,9 +152,12 @@ export function RunPlanPageClient() {
   const resource = searchParams.get("resurs") ?? "";
   const tom = searchParams.get("tom") ?? "";
 
+  const canOrder = useCan()(["tillverkning"]);
   const [data, setData] = useState<RunPlanResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
+  const [ordering, setOrdering] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -142,7 +180,32 @@ export function RunPlanPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [resource, tom]);
+  }, [resource, tom, reloadTick]);
+
+  // Swap one row with its neighbour and send the whole day's order.
+  const moveRow = useCallback(
+    async (group: RunPlanDay, ids: string[], index: number, direction: -1 | 1) => {
+      const target = index + direction;
+      if (!resource || !group.date || target < 0 || target >= ids.length) return;
+      const next = [...ids];
+      [next[index], next[target]] = [next[target]!, next[index]!];
+      setOrdering(true);
+      setError(null);
+      try {
+        await apiFetch<RunPlanOrderResult>("/api/v1/planning/run-plan/order", {
+          method: "PUT",
+          body: JSON.stringify({ workCenterId: resource, date: group.date, moOperationIds: next }),
+        });
+      } catch (err) {
+        setError(apiErrorMessage(err, "Kunde inte ändra ordningen"));
+      } finally {
+        setOrdering(false);
+        // Also after a 409: the plan changed meanwhile, show it as it is.
+        setReloadTick((n) => n + 1);
+      }
+    },
+    [resource]
+  );
 
   const stations = data?.stations ?? [];
   const toDate = data?.toDate ?? "";
@@ -206,15 +269,34 @@ export function RunPlanPageClient() {
 
       {resource && data?.workCenter && data.rows.length > 0 && (
         <>
-          {groups.map((group) => (
+          {groups.map((group) => {
+            const groupRows = rowsByGroup.get(groupKey(group)) ?? [];
+            const orderable = canOrder && group.reorderable;
+            const ids = groupRows.flatMap((r) => (r.moOperationId ? [r.moOperationId] : []));
+            return (
             <section key={groupKey(group)} className={styles.group}>
               <h2 className={styles.groupHeader}>
                 <span>{groupTitle(group)}</span>
                 <span className={`${styles.groupHours} num`}>{formatHours(group.hours)} h</span>
               </h2>
-              <Table columns={COLUMNS} rows={rowsByGroup.get(groupKey(group)) ?? []} renderCell={renderCell} />
+              <Table
+                columns={orderable ? [...COLUMNS, MOVE_COLUMN] : COLUMNS}
+                rows={groupRows}
+                renderCell={(row, key) => {
+                  if (key !== "move") return renderCell(row, key);
+                  const index = row.moOperationId ? ids.indexOf(row.moOperationId) : -1;
+                  if (index < 0) return null;
+                  return renderCell(row, key, {
+                    position: index,
+                    count: ids.length,
+                    busy: ordering || loading,
+                    onMove: (direction) => void moveRow(group, ids, index, direction),
+                  });
+                }}
+              />
             </section>
-          ))}
+            );
+          })}
           <div className={styles.total}>
             <span>Totalt</span>
             <span className="num">{formatHours(data.totalHours)} h</span>
