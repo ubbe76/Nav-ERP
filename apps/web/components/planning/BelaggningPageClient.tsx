@@ -14,7 +14,7 @@ import { apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatStockholmDateTime } from "../../lib/date";
-import { plannedWeekLabel } from "../../lib/planning";
+import { plannedDateLabel } from "../../lib/planning";
 import { planSuggestionNotice, suggestionCountLabel, suggestionShift, suggestionText } from "../../lib/resourceSuggestion";
 import { SwitchResourceButton } from "./SwitchResourceButton";
 import { useCan } from "../PermissionsProvider";
@@ -153,7 +153,7 @@ export function BelaggningPageClient() {
 
   async function runPlan() {
     const ok = await confirmDialog(
-      "Planera om alla öppna tillverkningsordrar på ledig kapacitet? Veckor som flyttats för hand ligger kvar.",
+      "Planera om alla öppna tillverkningsordrar på ledig kapacitet? Operationer som flyttats för hand ligger kvar.",
       { confirmLabel: "Planera" }
     );
     if (!ok) return;
@@ -314,7 +314,6 @@ export function BelaggningPageClient() {
 
       <MoveOperationDialog
         target={moveTarget}
-        weeks={data?.weeks ?? []}
         onClose={() => setMoveTarget(null)}
         onChanged={() => {
           // The Planera result no longer describes the plan.
@@ -557,7 +556,7 @@ function ExpansionRow({
       <div className={styles.expansionInner}>
         <div className={styles.expansionTitle}>{label}</div>
         {orders.map((o) => {
-          const weeks = plannedWeekLabel(o.plannedStartWeek, o.plannedEndWeek);
+          const dates = plannedDateLabel(o.plannedStartDate, o.plannedEndDate);
           return (
             <div key={`${o.manufacturingOrderId}-${o.sequenceNo}`} className={styles.orderItem}>
               <div className={styles.orderMain}>
@@ -573,7 +572,7 @@ function ExpansionRow({
                 <span>
                   {formatHours(o.hoursInWeek)} h i veckan · {formatHours(o.remainingHours)} h kvar
                 </span>
-                <span>{weeks ?? "Ej planerad"}</span>
+                <span>{dates ?? "Ej planerad"}</span>
                 <span>{o.dueDate ? `Färdigt ${o.dueDate}` : "—"}</span>
                 {o.overdue && <StatusPill status="delayed" compact />}
                 {o.late && <StatusPill status="delayed" label="Sen" compact />}

@@ -10,15 +10,24 @@ import {
   type PlanProductionResult,
 } from "../src/modules/planning/service/production-plan.js";
 import type { PlanWorkCenter } from "../src/modules/planning/service/capacity-book.js";
-import type { CapacityOperationRow, PlannedWeek } from "../src/modules/planning/service/capacity-calc.js";
+import type { CapacityOperationRow, PlannedDay } from "../src/modules/planning/service/capacity-calc.js";
+import { manufacturingLeadDays, type LeadTimeResource, type LeadTimeWork } from "../src/modules/planning/service/manufacturing-lead-time.js";
+import { addDays, addWorkingDays, isWorkingDay } from "../src/modules/system/service/delivery-days.js";
 
-// Pure tests — no database. Monday 2026-10-19 is today; week 43 is Mon 19 –
-// Sun 25, week 44 Mon 26 – Sun 1 Nov, week 45 Mon 2 Nov, week 46 Mon 9 Nov.
+// Pure tests — no database. Monday 2026-10-19 is today unless a test says
+// otherwise; the plan counts per DAY (#18). 110 and 120 work Mon–Fri, 8 h.
 const TODAY = "2026-10-19";
-const W43 = "2026-10-19";
-const W44 = "2026-10-26";
-const W45 = "2026-11-02";
-const W46 = "2026-11-09";
+const MON = "2026-10-19";
+const TUE = "2026-10-20";
+const WED = "2026-10-21";
+const THU = "2026-10-22";
+const FRI = "2026-10-23";
+const SAT = "2026-10-24";
+const MON2 = "2026-10-26";
+const TUE2 = "2026-10-27";
+const WED2 = "2026-10-28";
+const THU2 = "2026-10-29";
+const MON3 = "2026-11-02";
 
 const wc1: PlanWorkCenter = {
   workCenterId: "wc-1",
@@ -29,13 +38,14 @@ const wc1: PlanWorkCenter = {
   hoursPerDay: null,
   capacityFactor: 1,
   leadTimeDays: null,
+  queueTimeDays: null,
 };
 const lego: PlanWorkCenter = { ...wc1, workCenterId: "wc-l", code: "900", name: "Ytbehandling", type: "subcontract", weekScheduleId: null, leadTimeDays: 5 };
 const noCalendar: PlanWorkCenter = { ...wc1, workCenterId: "wc-2", code: "200", weekScheduleId: null };
 const wc3: PlanWorkCenter = { ...wc1, workCenterId: "wc-3", code: "120", name: "Svets" };
 
 const h = (hours: number) => hours * 60;
-const weeks = (...list: [string, number][]): PlannedWeek[] => list.map(([monday, hours]) => ({ monday, minutes: h(hours) }));
+const days = (...list: [string, number][]): PlannedDay[] => list.map(([date, hours]) => ({ date, minutes: h(hours) }));
 
 // An operation of `hours` (as setup, nothing reported) on wc-1.
 function pop(order: PlanOrder | { id: string; orderNumber: string; dueDate: string | null }, sequenceNo: number, hours: number, extra: Partial<PlanOperation> = {}): PlanOperation {
@@ -69,6 +79,12 @@ function existing(hours: number, dueDate: string | null, extra: Partial<Capacity
   return { ...pop({ id: "mo-x", orderNumber: "TO-X", dueDate }, 10, hours), ...extra };
 }
 
+const SCHEDULE: PlanProductionInput["schedule"] = {
+  weekScheduleDays: [1, 2, 3, 4, 5].map((weekday) => ({ weekScheduleId: "ws-40", weekday, dayScheduleId: "ds-480" })),
+  daySchedules: [{ id: "ds-480", netMinutes: 480 }],
+  holidays: [],
+};
+
 function plan(partial: Partial<PlanProductionInput> & { orders: PlanOrder[] }): PlanProductionResult {
   return planProduction({
     today: TODAY,
@@ -79,37 +95,37 @@ function plan(partial: Partial<PlanProductionInput> & { orders: PlanOrder[] }): 
       ["wc-2", noCalendar],
       ["wc-3", wc3],
     ]),
-    schedule: {
-      weekScheduleDays: [1, 2, 3, 4, 5].map((weekday) => ({ weekScheduleId: "ws-40", weekday, dayScheduleId: "ds-480" })),
-      daySchedules: [{ id: "ds-480", netMinutes: 480 }],
-      holidays: [],
-    },
+    schedule: SCHEDULE,
+    queueDays: 0,
     ...partial,
   });
 }
 
-const plansOf = (r: PlanProductionResult) => r.plans.map((p) => [p.operationId, p.weeks] as const);
+const plansOf = (r: PlanProductionResult) => r.plans.map((p) => [p.operationId, p.days] as const);
+// One short operation per sequence number: where each one starts.
+const startsOf = (r: PlanProductionResult) => r.plans.map((p) => [p.operationId, p.startDate] as const);
 
 describe("Planera — priority and sequence", () => {
   it("plans TOs by due date ascending, null last, then order number; operations in sequence", () => {
     const result = plan({
       orders: [
-        order("b", "TO-2", "2026-11-06", (o) => [pop(o, 10, 30)]),
-        order("c", "TO-3", null, (o) => [pop(o, 10, 30)]),
-        order("a", "TO-1", "2026-10-30", (o) => [pop(o, 20, 10), pop(o, 10, 20)]),
+        order("b", "TO-2", "2026-11-06", (o) => [pop(o, 10, 12)]),
+        order("c", "TO-3", null, (o) => [pop(o, 10, 12)]),
+        order("a", "TO-1", "2026-10-30", (o) => [pop(o, 20, 4), pop(o, 10, 12)]),
       ],
     });
     expect(plansOf(result)).toEqual([
-      ["a:10", weeks([W43, 20])],
-      ["a:20", weeks([W43, 10])],
-      ["b:10", weeks([W43, 10], [W44, 20])],
-      ["c:10", weeks([W44, 20], [W45, 10])],
+      ["a:10", days([MON, 8], [TUE, 4])],
+      ["a:20", days([WED, 4])], // the working day after Op 10 is ready
+      ["b:10", days([TUE, 4], [WED, 4], [THU, 4])],
+      ["c:10", days([THU, 4], [FRI, 8])],
     ]);
-    expect(result.plans.map((p) => [p.startWeek, p.endWeek])).toEqual([[W43, W43], [W43, W43], [W43, W44], [W44, W45]]);
+    expect(result.plans.map((p) => [p.startDate, p.endDate])).toEqual([[MON, TUE], [WED, WED], [TUE, THU], [THU, FRI]]);
+    // Ready the day the last minute is placed — not the week's last day.
     expect(result.orders.map((o) => [o.orderNumber, o.plannedFinish, o.late])).toEqual([
-      ["TO-1", "2026-10-23", false],
-      ["TO-2", "2026-10-30", false],
-      ["TO-3", "2026-11-06", false],
+      ["TO-1", WED, false],
+      ["TO-2", THU, false],
+      ["TO-3", FRI, false],
     ]);
     expect(result.warnings).toEqual([]);
     expect(result.clear).toEqual([]);
@@ -122,21 +138,80 @@ describe("Planera — priority and sequence", () => {
     expect(compareOrderPriority(order("x", "TO-9", "2026-10-20", () => []), order("y", "TO-1", null, () => []))).toBeLessThan(0);
   });
 
-  it("the next operation may use what is left of the finishing week", () => {
-    const result = plan({ orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 50), pop(o, 20, 10)])] });
+  it("the next operation starts the working day after the previous one is ready — never the same day", () => {
+    const result = plan({ orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 12), pop(o, 20, 2), pop(o, 30, 24), pop(o, 40, 1)])] });
     expect(plansOf(result)).toEqual([
-      ["a:10", weeks([W43, 40], [W44, 10])],
-      ["a:20", weeks([W44, 10])],
+      ["a:10", days([MON, 8], [TUE, 4])],
+      ["a:20", days([WED, 2])], // Tuesday has 4 h free, but Op 10 is ready that day
+      ["a:30", days([THU, 8], [FRI, 8], [MON2, 8])],
+      ["a:40", days([TUE2, 1])],
     ]);
+    // Ready on a Friday ⇒ Monday.
+    const friday = plan({ orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 40), pop(o, 20, 1)])] });
+    expect(startsOf(friday)).toEqual([["a:10", MON], ["a:20", MON2]]);
   });
 
-  it("other open operations are existing load — planned ones in their planned weeks", () => {
+  it("the Standardkötid is waited between the operations, rounded up on the accumulated sum", () => {
+    const four = () => [order("a", "TO-1", null, (o) => [pop(o, 10, 1), pop(o, 20, 1), pop(o, 30, 1), pop(o, 40, 1)])];
+    expect(startsOf(plan({ orders: four() }))).toEqual([["a:10", MON], ["a:20", TUE], ["a:30", WED], ["a:40", THU]]);
+    expect(startsOf(plan({ orders: four(), queueDays: 1 }))).toEqual([["a:10", MON], ["a:20", WED], ["a:30", FRI], ["a:40", TUE2]]);
+    // 0.5: the gaps are 1, 0, 1 days — two days in all, as the lead time counts them.
+    expect(startsOf(plan({ orders: four(), queueDays: 0.5 }))).toEqual([["a:10", MON], ["a:20", WED], ["a:30", THU], ["a:40", MON2]]);
+    expect(startsOf(plan({ orders: four(), queueDays: 1.5 }))).toEqual([["a:10", MON], ["a:20", THU], ["a:30", MON2], ["a:40", THU2]]);
+  });
+
+  it("the gap is counted in the company's working days; the resource's own calendar decides from the floor", () => {
+    const two = () => [order("a", "TO-1", null, (o) => [pop(o, 10, 1), pop(o, 20, 1)])];
+    // A company holiday on Tuesday (the resource would work): the floor is Wednesday.
+    expect(startsOf(plan({ orders: two(), offDays: new Set([TUE]) }))).toEqual([["a:10", MON], ["a:20", WED]]);
+    // The resource is off Tuesday and Wednesday (its own calendar) though the
+    // company works: the floor is Tuesday, the first capacity Thursday.
+    const closed = { ...SCHEDULE, holidays: [{ date: TUE, dayScheduleId: null }, { date: WED, dayScheduleId: null }] };
+    expect(startsOf(plan({ orders: two(), schedule: closed }))).toEqual([["a:10", MON], ["a:20", THU]]);
+  });
+
+  it("the gap index counts only operations that take a place: done and 0-minute ones are not gaps", () => {
+    // With a queue of 0.5 the FIRST gap waits a day and the second none. If
+    // the done Op 10 or the empty Op 30 counted, Op 20 would wait and the
+    // days would shift.
     const result = plan({
-      existingOperations: [existing(40, "2026-10-21", { plannedWeeks: weeks([W44, 40]) })],
-      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 50)])],
+      queueDays: 0.5,
+      orders: [
+        order("a", "TO-1", null, (o) => [
+          pop(o, 10, 1, { operationStatus: "done" }),
+          pop(o, 20, 1),
+          pop(o, 30, 0),
+          pop(o, 40, 1),
+          pop(o, 50, 1),
+        ]),
+      ],
     });
-    // Week 43 is free (the existing load is planned in week 44), week 44 is full.
-    expect(plansOf(result)).toEqual([["a:10", weeks([W43, 40], [W45, 10])]]);
+    expect(startsOf(result)).toEqual([["a:20", MON], ["a:40", WED], ["a:50", THU]]);
+  });
+
+  it("other open operations are existing load — planned ones on their planned days", () => {
+    const result = plan({
+      existingOperations: [existing(8, WED, { plannedDays: days([TUE, 8]) })],
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 12)])],
+    });
+    // Monday is free (the existing load is planned on Tuesday), Tuesday is full.
+    expect(plansOf(result)).toEqual([["a:10", days([MON, 8], [WED, 4])]]);
+  });
+
+  it("mid-week and on a Friday: today is a whole day, the weekend is jumped", () => {
+    const orders = () => [order("a", "TO-1", null, (o) => [pop(o, 10, 12), pop(o, 20, 1)])];
+    expect(plansOf(plan({ today: WED, orders: orders() }))).toEqual([
+      ["a:10", days([WED, 8], [THU, 4])],
+      ["a:20", days([FRI, 1])],
+    ]);
+    const friday = plan({ today: FRI, orders: orders() });
+    expect(plansOf(friday)).toEqual([
+      ["a:10", days([FRI, 8], [MON2, 4])],
+      ["a:20", days([TUE2, 1])],
+    ]);
+    expect(friday.orders[0]!.plannedFinish).toBe(TUE2);
+    // One short operation on a Friday is ready that Friday.
+    expect(plan({ today: FRI, orders: [order("a", "TO-1", FRI, (o) => [pop(o, 10, 1)])] }).orders[0]).toMatchObject({ plannedFinish: FRI, late: false });
   });
 });
 
@@ -144,29 +219,35 @@ describe("Planera — locked, started, done", () => {
   it("a locked operation is existing load before anything is placed and is never replanned", () => {
     const result = plan({
       orders: [
-        order("a", "TO-1", "2026-10-23", (o) => [pop(o, 10, 30)]),
-        order("b", "TO-2", "2026-12-18", (o) => [pop(o, 10, 30, { planLocked: true, plannedWeeks: weeks([W43, 30]) })]),
+        order("a", "TO-1", TUE, (o) => [pop(o, 10, 12)]),
+        order("b", "TO-2", "2026-12-18", (o) => [pop(o, 10, 6, { planLocked: true, plannedDays: days([MON, 6]) })]),
       ],
     });
-    expect(plansOf(result)).toEqual([["a:10", weeks([W43, 10], [W44, 20])]]);
+    expect(plansOf(result)).toEqual([["a:10", days([MON, 2], [TUE, 8], [WED, 2])]]);
     expect(result.clear).toEqual([]);
     expect(result.warnings.map((w) => w.kind)).toEqual(["late"]);
   });
 
-  it("a locked operation sets the floor for the operations after it", () => {
-    const result = plan({
-      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 10, { planLocked: true, plannedWeeks: weeks([W45, 10]) }), pop(o, 20, 10)])],
-    });
-    expect(plansOf(result)).toEqual([["a:20", weeks([W45, 10])]]);
-    expect(result.orders[0]!.plannedFinish).toBe("2026-11-06");
+  it("after a locked operation the floor counts from its stored last day", () => {
+    const locked = (queueDays: number, planned: PlannedDay[]) =>
+      plan({
+        queueDays,
+        orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 12, { planLocked: true, plannedDays: planned }), pop(o, 20, 4)])],
+      });
+    const result = locked(0, days([WED, 8], [THU, 4]));
+    expect(plansOf(result)).toEqual([["a:20", days([FRI, 4])]]);
+    expect(result.orders[0]!.plannedFinish).toBe(FRI);
+    expect(plansOf(locked(1, days([WED, 8], [THU, 4])))).toEqual([["a:20", days([MON2, 4])]]);
+    // Locked on days that have passed: its load lies on today (and rolls on), the next one follows.
+    expect(startsOf(locked(0, days(["2026-10-15", 8], ["2026-10-16", 4])))).toEqual([["a:20", TUE]]);
   });
 
-  it("a locked operation starting before the previous one is done is a sequence break — a warning, never a block", () => {
+  it("a locked operation starting before the previous one is ready is a sequence break — a warning, never a block", () => {
     const result = plan({
-      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 70), pop(o, 20, 10, { planLocked: true, plannedWeeks: weeks([W43, 10]) })])],
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 12), pop(o, 20, 2, { planLocked: true, plannedDays: days([MON, 2]) })])],
     });
-    // The locked 10 h in week 43 count first: Op 10 gets 30 h there + 40 h in week 44.
-    expect(plansOf(result)).toEqual([["a:10", weeks([W43, 30], [W44, 40])]]);
+    // The locked 2 h on Monday count first: Op 10 gets 6 h there + 6 h on Tuesday.
+    expect(plansOf(result)).toEqual([["a:10", days([MON, 6], [TUE, 6])]]);
     expect(result.warnings).toEqual([
       {
         kind: "sequence",
@@ -174,98 +255,157 @@ describe("Planera — locked, started, done", () => {
         orderNumber: "TO-1",
         sequenceNo: 20,
         workCenterCode: "110",
-        message: "Op 20 på 110 är låst i veckan som börjar 2026-10-19, före föregående operation är klar (2026-10-30)",
+        message: "Op 20 på 110 är låst på 2026-10-19, före föregående operation är klar (2026-10-20)",
       },
     ]);
   });
 
-  it("a started operation is forced into the current week even when it is full", () => {
+  it("a break is only BEFORE the previous one is ready — a start inside the queue time is none (S13)", () => {
+    const lockedOn = (date: string) =>
+      plan({
+        queueDays: 2,
+        orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 4), pop(o, 20, 2, { planLocked: true, plannedDays: days([date, 2]) })])],
+      }).warnings;
+    // Op 10 is ready Monday; with the queue the floor would be Thursday.
+    expect(lockedOn(TUE)).toEqual([]); // inside the queue: a choice, not an error
+    expect(lockedOn(THU)).toEqual([]);
+    expect(lockedOn(MON).map((w) => w.kind)).toEqual(["sequence"]); // the same day is before it is ready
+  });
+
+  it("a started operation is forced to today even when the day is full", () => {
     const started = { orderQuantity: 10, setupTime: 0, runTimePerUnit: 60, quantityCompleted: 2, started: true };
     const result = plan({
-      existingOperations: [existing(40, "2026-10-21")],
+      existingOperations: [existing(8, MON)],
       orders: [
         order("a", "TO-1", "2026-10-23", (o) => [pop(o, 10, 0, started)]),
         order("b", "TO-2", "2026-10-30", (o) => [pop(o, 10, 0, { ...started, quantityCompleted: null, started: false })]),
       ],
     });
     expect(plansOf(result)).toEqual([
-      ["a:10", weeks([W43, 8])], // 8 left of 10, in the full week
-      ["b:10", weeks([W44, 10])], // not started: the next free week
+      ["a:10", days([MON, 8])], // 8 left of 10, on the full day
+      ["b:10", days([TUE, 8], [WED, 2])], // not started: the next free day
     ]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("started on a Saturday: the first day with capacity takes it, and a started operation is today whatever the chain says", () => {
+    const started = { orderQuantity: 10, setupTime: 0, runTimePerUnit: 60, quantityCompleted: 2, started: true };
+    const weekend = plan({
+      today: SAT,
+      existingOperations: [existing(8, MON2, { plannedDays: days([MON2, 8]) })],
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 0, started)])],
+    });
+    expect(plansOf(weekend)).toEqual([["a:10", days([MON2, 8])]]);
+    // Mid-week, the previous operation done: from today, no warning.
+    const midweek = plan({
+      today: WED,
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 1, { operationStatus: "done" }), pop(o, 20, 0, started), pop(o, 30, 1)])],
+    });
+    expect(plansOf(midweek)).toEqual([
+      ["a:20", days([WED, 8])],
+      ["a:30", days([THU, 1])],
+    ]);
+    expect(midweek.warnings).toEqual([]);
   });
 
   it("done operations and 0-minute operations have their plans cleared and do not move the floor", () => {
     const result = plan({
+      queueDays: 1,
       orders: [
         order("a", "TO-1", null, (o) => [
-          pop(o, 10, 10, { operationStatus: "done", plannedWeeks: weeks([W45, 10]) }),
-          pop(o, 20, 0, { plannedWeeks: weeks([W45, 1]) }),
+          pop(o, 10, 10, { operationStatus: "done", plannedDays: days([THU, 10]) }),
+          pop(o, 20, 0, { plannedDays: days([THU, 1]) }),
           pop(o, 30, 10, { operationStatus: "done" }), // no plan — nothing to clear
-          pop(o, 40, 10),
+          pop(o, 40, 4),
         ]),
       ],
     });
     expect(result.clear).toEqual(["a:10", "a:20"]);
-    expect(plansOf(result)).toEqual([["a:40", weeks([W43, 10])]]);
+    expect(plansOf(result)).toEqual([["a:40", days([MON, 4])]]);
   });
 
   it("a locked operation with nothing left is ignored", () => {
     const result = plan({
-      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 10, { planLocked: true, plannedWeeks: weeks([W46, 10]), quantityCompleted: 1, quantityScrapped: 0 }), pop(o, 20, 10)])],
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 10, { planLocked: true, plannedDays: days([MON3, 10]), quantityCompleted: 1, quantityScrapped: 0 }), pop(o, 20, 4)])],
     });
-    // Op 10 is complete (quantity 1 done) — Op 20 starts today, not after week 46.
-    expect(plansOf(result)).toEqual([["a:20", weeks([W43, 10])]]);
+    // Op 10 is complete (quantity 1 done) — Op 20 starts today, not after 2 November.
+    expect(plansOf(result)).toEqual([["a:20", days([MON, 4])]]);
   });
 });
 
 describe("Planera — lego, resources without calendar, horizon, Sen", () => {
-  it("a lego operation takes its lead time and is never allocated", () => {
+  it("a lego operation is sent the working day after the previous one, takes its lead time and is never allocated", () => {
     const result = plan({
-      orders: [order("a", "TO-1", "2026-10-28", (o) => [pop(o, 10, 4), pop(o, 20, 0, { workCenterId: "wc-l", plannedWeeks: weeks([W43, 1]) }), pop(o, 30, 4)])],
+      orders: [order("a", "TO-1", TUE2, (o) => [pop(o, 10, 4), pop(o, 20, 0, { workCenterId: "wc-l", plannedDays: days([MON, 1]) }), pop(o, 30, 4)])],
     });
-    // Op 10 ready Friday 23, + 5 working days = Friday 30, Op 30 in week 44.
+    // Op 10 ready Monday, sent Tuesday + 5 working days = Tuesday 27, Op 30 the day after.
     expect(plansOf(result)).toEqual([
-      ["a:10", weeks([W43, 4])],
-      ["a:30", weeks([W44, 4])],
+      ["a:10", days([MON, 4])],
+      ["a:30", days([WED2, 4])],
     ]);
     expect(result.clear).toEqual(["a:20"]);
-    expect(result.orders[0]).toMatchObject({ plannedFinish: "2026-10-30", late: true });
+    expect(result.orders[0]).toMatchObject({ plannedFinish: WED2, late: true });
   });
 
-  it("Sen is the last pending operation's finish — a lego operation last in the route counts through its lead time", () => {
+  it("a lego operation takes Ledtid + Kötid, rounded up — and the Standardkötid around it like any operation", () => {
+    const slow: PlanWorkCenter = { ...lego, leadTimeDays: 2, queueTimeDays: 1.5 }; // 4 working days
+    const run = (queueDays: number) =>
+      plan({
+        queueDays,
+        workCenters: new Map([["wc-1", wc1], ["wc-l", slow]]),
+        orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 4), pop(o, 20, 0, { workCenterId: "wc-l" }), pop(o, 30, 4)])],
+      });
+    // Sent Tuesday, back Monday 26, Op 30 on Tuesday 27.
+    expect(plansOf(run(0))).toEqual([["a:10", days([MON, 4])], ["a:30", days([TUE2, 4])]]);
+    // Queue 1: sent Wednesday, back Tuesday 27, Op 30 on Thursday 29.
+    expect(plansOf(run(1))).toEqual([["a:10", days([MON, 4])], ["a:30", days([THU2, 4])]]);
+    // First in the route: sent today, no gap before it.
+    const first = plan({
+      workCenters: new Map([["wc-1", wc1], ["wc-l", slow]]),
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 0, { workCenterId: "wc-l" }), pop(o, 20, 4)])],
+    });
+    expect(plansOf(first)).toEqual([["a:20", days([MON2, 4])]]);
+  });
+
+  it("Sen: a lego operation last in the route counts through its lead time", () => {
     const result = plan({
-      orders: [order("a", "TO-1", "2026-10-28", (o) => [pop(o, 10, 4), pop(o, 20, 0, { workCenterId: "wc-l" })])],
+      orders: [order("a", "TO-1", FRI, (o) => [pop(o, 10, 4), pop(o, 20, 0, { workCenterId: "wc-l" })])],
     });
     expect(result.warnings).toEqual([
       {
         kind: "late",
         manufacturingOrderId: "a",
         orderNumber: "TO-1",
-        dueDate: "2026-10-28",
-        plannedFinish: "2026-10-30",
-        message: "TO-1 blir klar 2026-10-30, efter färdigdatumet 2026-10-28",
+        dueDate: FRI,
+        plannedFinish: TUE2,
+        message: "TO-1 blir klar 2026-10-27, efter färdigdatumet 2026-10-23",
       },
     ]);
   });
 
-  it("an undated TO is never late; a dated one finishing on its due date is not late", () => {
+  it("an undated TO is never late; a dated one ready ON its due date is not late", () => {
     const result = plan({
       orders: [
-        order("a", "TO-1", null, (o) => [pop(o, 10, 50)]),
-        order("b", "TO-2", "2026-10-30", (o) => [pop(o, 10, 10)]),
+        order("a", "TO-1", null, (o) => [pop(o, 10, 12)]),
+        order("b", "TO-2", MON, (o) => [pop(o, 10, 4)]),
       ],
     });
     expect(result.warnings).toEqual([]);
-    expect(result.orders.map((o) => o.late)).toEqual([false, false]);
+    expect(result.orders.map((o) => [o.orderNumber, o.plannedFinish, o.late])).toEqual([
+      ["TO-2", MON, false],
+      ["TO-1", TUE, false],
+    ]);
+    // The day after the due date is late.
+    expect(plan({ orders: [order("b", "TO-2", MON, (o) => [pop(o, 10, 12)])] }).orders[0]).toMatchObject({ plannedFinish: TUE, late: true });
   });
 
-  it("a resource without a calendar plans everything in one week with a warning per resource and TO", () => {
+  it("a resource without a calendar plans each operation on one working day, with a warning per resource and TO", () => {
     const result = plan({
       orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 100, { workCenterId: "wc-2" }), pop(o, 20, 100, { workCenterId: "wc-2" })])],
     });
     expect(plansOf(result)).toEqual([
-      ["a:10", weeks([W43, 100])],
-      ["a:20", weeks([W43, 100])],
+      ["a:10", days([MON, 100])],
+      ["a:20", days([TUE, 100])],
     ]);
     expect(result.warnings).toEqual([
       {
@@ -277,6 +417,9 @@ describe("Planera — lego, resources without calendar, horizon, Sen", () => {
         message: "Resurs 200 saknar veckoschema och timmar per dag — Op 10 är planerad utan kapacitetsgräns",
       },
     ]);
+    // Never "ready on a Saturday": today a Saturday ⇒ Monday.
+    const weekend = plan({ today: SAT, orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 5, { workCenterId: "wc-2" })])] });
+    expect(weekend.orders[0]!.plannedFinish).toBe(MON2);
   });
 
   it("the horizon leaves the operation and everything after it unplanned, what fit before stays", () => {
@@ -284,18 +427,18 @@ describe("Planera — lego, resources without calendar, horizon, Sen", () => {
       horizonWeeks: 1,
       orders: [
         order("a", "TO-1", "2026-10-23", (o) => [
-          pop(o, 10, 10),
-          pop(o, 20, 50, { plannedWeeks: weeks([W43, 50]) }),
-          pop(o, 30, 5, { plannedWeeks: weeks([W44, 5]) }),
-          pop(o, 40, 5, { planLocked: true, plannedWeeks: weeks([W43, 5]) }), // locked: untouched
+          pop(o, 10, 4),
+          pop(o, 20, 50, { plannedDays: days([MON, 50]) }),
+          pop(o, 30, 5, { plannedDays: days([MON2, 5]) }),
+          pop(o, 40, 5, { planLocked: true, plannedDays: days([MON, 5]) }), // locked: untouched
         ]),
         // Another TO on another resource is unaffected.
-        order("b", "TO-2", "2026-10-30", (o) => [pop(o, 10, 10, { workCenterId: "wc-3" })]),
+        order("b", "TO-2", "2026-10-30", (o) => [pop(o, 10, 4, { workCenterId: "wc-3" })]),
       ],
     });
     expect(plansOf(result)).toEqual([
-      ["a:10", weeks([W43, 10])],
-      ["b:10", weeks([W43, 10])],
+      ["a:10", days([MON, 3], [TUE, 1])],
+      ["b:10", days([MON, 4])],
     ]);
     expect(result.clear).toEqual(["a:20", "a:30"]);
     expect(result.warnings).toEqual([
@@ -316,15 +459,15 @@ describe("Planera — lego, resources without calendar, horizon, Sen", () => {
     const result = plan({
       horizonWeeks: 1,
       orders: [
-        order("a", "TO-1", "2026-10-23", (o) => [pop(o, 10, 10), pop(o, 20, 50)]),
-        // Due later, so planned after TO-1: week 43 has 30 h left once
-        // TO-1's partial 30 h of Op 20 are given back.
+        order("a", "TO-1", "2026-10-23", (o) => [pop(o, 10, 4), pop(o, 20, 50)]),
+        // Due later, so planned after TO-1: the days Op 20 booked before the
+        // horizon (Tue–Fri) are given back.
         order("b", "TO-2", "2026-10-30", (o) => [pop(o, 10, 20)]),
       ],
     });
     expect(plansOf(result)).toEqual([
-      ["a:10", weeks([W43, 10])],
-      ["b:10", weeks([W43, 20])],
+      ["a:10", days([MON, 4])],
+      ["b:10", days([MON, 4], [TUE, 8], [WED, 8])],
     ]);
     expect(result.warnings.map((w) => [w.kind, w.orderNumber])).toEqual([["horizon", "TO-1"]]);
   });
@@ -351,90 +494,120 @@ describe("Planera — lego, resources without calendar, horizon, Sen", () => {
 
   it("an operation with less than a hundredth of a minute left is cleared, never planned", () => {
     const result = plan({
-      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 0, { setupTime: 0.0003, plannedWeeks: weeks([W43, 1]) }), pop(o, 20, 10)])],
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 0, { setupTime: 0.0003, plannedDays: days([MON, 1]) }), pop(o, 20, 4)])],
     });
     expect(result.clear).toEqual(["a:10"]);
-    expect(plansOf(result)).toEqual([["a:20", weeks([W43, 10])]]);
+    expect(plansOf(result)).toEqual([["a:20", days([MON, 4])]]);
   });
 });
 
 describe("Planera — Flytta (forced start on one operation)", () => {
-  it("places the moved operation in the chosen week and the following unlocked ones after it", () => {
+  it("places the moved operation on the chosen day and the following unlocked ones after it", () => {
     const result = plan({
-      forceStart: { operationId: "a:20", weekMonday: W45 },
+      forceStart: { operationId: "a:20", date: THU },
       orders: [
         order("a", "TO-1", null, (o) => [
-          pop(o, 10, 10, { planLocked: true, plannedWeeks: weeks([W43, 10]) }),
-          pop(o, 20, 10, { plannedWeeks: weeks([W43, 10]) }),
-          pop(o, 30, 10, { plannedWeeks: weeks([W43, 10]) }),
+          pop(o, 10, 4, { planLocked: true, plannedDays: days([MON, 4]) }),
+          pop(o, 20, 4, { plannedDays: days([TUE, 4]) }),
+          pop(o, 30, 4, { plannedDays: days([WED, 4]) }),
         ]),
       ],
     });
     expect(plansOf(result)).toEqual([
-      ["a:20", weeks([W45, 10])],
-      ["a:30", weeks([W45, 10])],
+      ["a:20", days([THU, 4])],
+      ["a:30", days([FRI, 4])],
     ]);
+    expect(result.plans[0]).toMatchObject({ startDate: THU, endDate: THU });
     expect(result.warnings).toEqual([]);
   });
 
-  it("moves a locked operation again, taking the week's whole capacity", () => {
+  it("moves a locked operation again, taking the day's whole capacity, then free capacity", () => {
     const result = plan({
-      existingOperations: [existing(40, "2026-11-04")], // week 45 is full
-      forceStart: { operationId: "a:10", weekMonday: W45 },
-      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 50, { planLocked: true, plannedWeeks: weeks([W43, 50]) })])],
+      existingOperations: [existing(12, THU)], // Thursday is full, Friday has 4 h left
+      forceStart: { operationId: "a:10", date: THU },
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 14, { planLocked: true, plannedDays: days([MON, 8], [TUE, 6]) })])],
     });
-    expect(plansOf(result)).toEqual([["a:10", weeks([W45, 40], [W46, 10])]]);
+    expect(plansOf(result)).toEqual([["a:10", days([THU, 8], [FRI, 4], [MON2, 2])]]);
   });
 
-  it("moving a later operation backwards is a sequence break", () => {
-    const result = plan({
-      forceStart: { operationId: "a:20", weekMonday: W43 },
-      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 10, { planLocked: true, plannedWeeks: weeks([W44, 10]) }), pop(o, 20, 10)])],
+  it("a day without capacity is not taken: the plan starts later, and the service refuses on startDate ≠ the chosen day", () => {
+    const moved = (date: string, extra: Partial<PlanProductionInput> = {}) =>
+      plan({ forceStart: { operationId: "a:10", date }, orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 4)])], ...extra }).plans[0]!.startDate;
+    expect(moved(THU)).toBe(THU);
+    expect(moved(SAT)).toBe(MON2); // a weekend
+    expect(moved(WED, { schedule: { ...SCHEDULE, holidays: [{ date: WED, dayScheduleId: null }] } })).toBe(THU); // a röd dag
+    // A resource without a calendar: not a working day.
+    const unscheduled = plan({
+      offDays: new Set([WED]),
+      forceStart: { operationId: "a:10", date: WED },
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 4, { workCenterId: "wc-2" })])],
     });
-    expect(plansOf(result)).toEqual([["a:20", weeks([W43, 10])]]);
+    expect(unscheduled.plans[0]!.startDate).toBe(THU);
+  });
+
+  it("moving a later operation to before the previous one is ready is a sequence break", () => {
+    const result = plan({
+      forceStart: { operationId: "a:20", date: MON },
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 4, { planLocked: true, plannedDays: days([TUE, 4]) }), pop(o, 20, 4)])],
+    });
+    expect(plansOf(result)).toEqual([["a:20", days([MON, 4])]]);
     expect(result.warnings).toEqual([
-      expect.objectContaining({ kind: "sequence", sequenceNo: 20, message: "Op 20 på 110 är flyttad i veckan som börjar 2026-10-19, före föregående operation är klar (2026-10-30)" }),
+      expect.objectContaining({ kind: "sequence", sequenceNo: 20, message: "Op 20 på 110 är flyttad till 2026-10-19, före föregående operation är klar (2026-10-20)" }),
+    ]);
+  });
+
+  it("moving into the queue time is no break; onto the previous operation's ready day is (S13)", () => {
+    const moved = (date: string) =>
+      plan({
+        queueDays: 2,
+        forceStart: { operationId: "a:20", date },
+        orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 4, { planLocked: true, plannedDays: days([TUE, 4]) }), pop(o, 20, 4)])],
+      });
+    expect(moved(WED).warnings).toEqual([]);
+    expect(plansOf(moved(WED))).toEqual([["a:20", days([WED, 4])]]);
+    expect(moved(TUE).warnings).toEqual([
+      expect.objectContaining({ message: "Op 20 på 110 är flyttad till 2026-10-20, före föregående operation är klar (2026-10-20)" }),
     ]);
   });
 
   it("moving forward without the following operations (passed as locked) is a sequence break on them", () => {
     const result = plan({
-      forceStart: { operationId: "a:10", weekMonday: W46 },
-      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 10), pop(o, 20, 10, { planLocked: true, plannedWeeks: weeks([W44, 10]) })])],
+      forceStart: { operationId: "a:10", date: THU },
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 4), pop(o, 20, 4, { planLocked: true, plannedDays: days([TUE, 4]) })])],
     });
-    expect(plansOf(result)).toEqual([["a:10", weeks([W46, 10])]]);
+    expect(plansOf(result)).toEqual([["a:10", days([THU, 4])]]);
     expect(result.warnings).toEqual([
-      expect.objectContaining({ kind: "sequence", sequenceNo: 20, message: "Op 20 på 110 är låst i veckan som börjar 2026-10-26, före föregående operation är klar (2026-11-13)" }),
+      expect.objectContaining({ kind: "sequence", sequenceNo: 20, message: "Op 20 på 110 är låst på 2026-10-20, före föregående operation är klar (2026-10-22)" }),
     ]);
   });
 
   it("an operation kept where it is by a move (fixed, not locked) says so in the sequence-break text", () => {
     const result = plan({
-      forceStart: { operationId: "a:10", weekMonday: W46 },
-      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 10), pop(o, 20, 10, { fixed: true, plannedWeeks: weeks([W44, 10]) })])],
+      forceStart: { operationId: "a:10", date: THU },
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 4), pop(o, 20, 4, { fixed: true, plannedDays: days([TUE, 4]) })])],
     });
     // Kept as fixed load: not replanned, not cleared.
-    expect(plansOf(result)).toEqual([["a:10", weeks([W46, 10])]]);
+    expect(plansOf(result)).toEqual([["a:10", days([THU, 4])]]);
     expect(result.clear).toEqual([]);
     expect(result.warnings).toEqual([
       expect.objectContaining({
         kind: "sequence",
         sequenceNo: 20,
-        message: "Op 20 på 110 är planerad och ligger fast i veckan som börjar 2026-10-26, före föregående operation är klar (2026-11-13)",
+        message: "Op 20 på 110 är planerad och ligger fast på 2026-10-20, före föregående operation är klar (2026-10-22)",
       }),
     ]);
   });
 
-  it("a started later operation forced into the current week before the previous one is done is a sequence break", () => {
+  it("a started later operation forced to today before the previous one is ready is a sequence break", () => {
     const started = { orderQuantity: 10, setupTime: 0, runTimePerUnit: 60, quantityCompleted: 2, started: true };
-    // Planera: Op 10 (50 h) finishes in week 44, Op 20 is under way and
-    // starts this week regardless.
+    // Planera: Op 10 (12 h) is ready Tuesday, Op 20 is under way and starts
+    // today regardless — on the day's whole capacity.
     const planned = plan({
-      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 50), pop(o, 20, 0, started)])],
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 12), pop(o, 20, 0, started)])],
     });
     expect(plansOf(planned)).toEqual([
-      ["a:10", weeks([W43, 40], [W44, 10])],
-      ["a:20", weeks([W43, 8])],
+      ["a:10", days([MON, 8], [TUE, 4])],
+      ["a:20", days([MON, 8])],
     ]);
     expect(planned.warnings).toEqual([
       {
@@ -443,56 +616,150 @@ describe("Planera — Flytta (forced start on one operation)", () => {
         orderNumber: "TO-1",
         sequenceNo: 20,
         workCenterCode: "110",
-        message: "Op 20 på 110 är påbörjad i veckan som börjar 2026-10-19, före föregående operation är klar (2026-10-30)",
+        message: "Op 20 på 110 är påbörjad och planerad från 2026-10-19, före föregående operation är klar (2026-10-20)",
       },
     ]);
-    // Flytta Op 10 to week 45 with the started Op 20 following: same break.
+    // Flytta Op 10 to Thursday with the started Op 20 following: same break.
     const moved = plan({
-      forceStart: { operationId: "a:10", weekMonday: W45 },
-      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 10), pop(o, 20, 0, started)])],
+      forceStart: { operationId: "a:10", date: THU },
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 4), pop(o, 20, 0, started)])],
     });
     expect(plansOf(moved)).toEqual([
-      ["a:10", weeks([W45, 10])],
-      ["a:20", weeks([W43, 8])],
+      ["a:10", days([THU, 4])],
+      ["a:20", days([MON, 8])],
     ]);
     expect(moved.warnings).toEqual([expect.objectContaining({ kind: "sequence", sequenceNo: 20 })]);
-    // In the same week as the previous one finishes: no break.
-    const same = plan({ orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 10), pop(o, 20, 0, started)])] });
-    expect(same.warnings).toEqual([]);
+    // The operation after the started one follows the LATEST ready day of the chain.
+    const after = plan({ orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 12), pop(o, 20, 0, started), pop(o, 30, 1)])] });
+    expect(startsOf(after)).toEqual([["a:10", MON], ["a:20", MON], ["a:30", WED]]);
   });
 });
 
 describe("Planera — determinism", () => {
   const orders = () => [
     order("c", "TO-3", "2026-11-13", (o) => [pop(o, 10, 20), pop(o, 20, 0, { workCenterId: "wc-l" }), pop(o, 30, 15)]),
-    order("a", "TO-1", "2026-10-30", (o) => [pop(o, 10, 25, { planLocked: true, plannedWeeks: weeks([W44, 25]) }), pop(o, 20, 10)]),
+    order("a", "TO-1", "2026-10-30", (o) => [pop(o, 10, 25, { planLocked: true, plannedDays: days([MON2, 8], [TUE2, 8], [WED2, 8], [THU2, 1]) }), pop(o, 20, 10)]),
     order("d", "TO-4", null, (o) => [pop(o, 10, 60, { workCenterId: "wc-2" }), pop(o, 20, 30)]),
     order("b", "TO-2", "2026-10-30", (o) => [pop(o, 10, 35, { orderQuantity: 10, setupTime: 0, runTimePerUnit: 210, quantityCompleted: 4, started: true })]),
+    order("e", "TO-5", "2026-11-20", (o) => [pop(o, 10, 3.3333), pop(o, 20, 0.0001), pop(o, 30, 7.7777), pop(o, 40, 13)]),
   ];
 
   it("two runs on the same input give the same plan", () => {
-    expect(plan({ orders: orders() })).toEqual(plan({ orders: orders() }));
+    expect(plan({ orders: orders(), queueDays: 0.5 })).toEqual(plan({ orders: orders(), queueDays: 0.5 }));
   });
 
-  it("a run on its own output gives the same plan again", () => {
-    const first = plan({ orders: orders() });
-    const planned = new Map(first.plans.map((p) => [p.operationId, p.weeks]));
-    const cleared = new Set(first.clear);
+  it.each([0, 0.5, 1])("a run on its own output gives the same plan again (queue %s)", (queueDays) => {
+    const first = plan({ orders: orders(), queueDays });
+    // The operations as the writer leaves them (rounded, cleared).
     const replanned = orders().map((o) => ({
       ...o,
-      operations: o.operations.map((op) =>
-        planned.has(op.moOperationId)
-          ? { ...op, plannedWeeks: planned.get(op.moOperationId)!, plannedAt: "2026-10-19T08:00:00.000Z" }
-          : cleared.has(op.moOperationId)
-            ? { ...op, plannedWeeks: null }
-            : op
-      ),
+      operations: operationsWithPlan(o.operations, first).map((op, i) => ({ ...op, started: o.operations[i]!.started })),
     }));
-    const second = plan({ orders: replanned });
+    const second = plan({ orders: replanned, queueDays });
     expect(second.plans).toEqual(first.plans);
     expect(second.warnings).toEqual(first.warnings);
     expect(second.orders).toEqual(first.orders);
     expect(second.clear).toEqual([]); // nothing left to clear
+    // …and as existing load for another run the plan is where it was placed:
+    // a new TO finds exactly the days the first run left free.
+    const fresh = () => [order("z", "TO-9", null, (o) => [pop(o, 10, 6)])];
+    const asLoad = replanned.flatMap((o) => o.operations.map((op) => ({ ...op, planLocked: true })));
+    // (Days compared: the stored load is rounded to hundredths of a minute.)
+    const daysOfZ = (r: PlanProductionResult) => r.plans.filter((p) => p.manufacturingOrderId === "z").map((p) => p.days.map((d) => d.date));
+    expect(daysOfZ(plan({ orders: fresh(), existingOperations: asLoad, queueDays }))).toEqual(
+      daysOfZ(plan({ orders: [...replanned, ...fresh()], queueDays }))
+    );
+  });
+});
+
+// Beslut 2 of #18: the plan and the lead time count alike. On an empty
+// resource with 8 h a day, a TO started on S is ready no later than S + its
+// lead time in working days — whatever the route, the queue time and the
+// holidays. (Without it a TO started on its latest start would be Sen.)
+describe("bok = ledtid — Planera never finishes later than the lead time says", () => {
+  const own: LeadTimeResource = { type: "machine", hoursPerDay: 8, leadTimeDays: null, queueTimeDays: null };
+  let seed = 18;
+  const random = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  const pick = <T,>(list: readonly T[]): T => list[Math.floor(random() * list.length)]!;
+
+  function scenario(legoShare: number) {
+    // A random working day as S, with a few holidays after it (röd dag for
+    // the resource and the company alike).
+    let start = addDays("2030-01-07", Math.floor(random() * 200));
+    const holidays: string[] = [];
+    for (let i = 0; i < 4; i++) holidays.push(addDays(start, 1 + Math.floor(random() * 25)));
+    const offDays = new Set(holidays);
+    while (!isWorkingDay(start, offDays)) start = addDays(start, 1);
+    const queueDays = pick([0, 0, 0.3, 0.5, 1, 1.5, 2]);
+    // Several suppliers: no lead time at all, whole and decimal Ledtid/Kötid.
+    const suppliers: PlanWorkCenter[] = [0, 1, 2].map((i) => ({
+      ...lego,
+      workCenterId: `wc-l${i}`,
+      code: `90${i}`,
+      leadTimeDays: pick([null, 0, 0.5, 1, 2.5, 4]),
+      queueTimeDays: pick([null, 0, 0.2, 0.5, 1]),
+    }));
+    const n = 1 + Math.floor(random() * 7);
+    const o = order("a", "TO-1", null, () => []);
+    const work: LeadTimeWork[] = [];
+    let legoCount = 0;
+    for (let i = 0; i < n; i++) {
+      const done = random() < 0.15;
+      if (random() < legoShare) {
+        const supplier = pick(suppliers);
+        if (!done) legoCount += 1;
+        o.operations.push(pop(o, (i + 1) * 10, 0, { workCenterId: supplier.workCenterId, operationStatus: done ? "done" : "pending" }));
+        work.push({
+          minutes: 0,
+          resource: { type: "subcontract", hoursPerDay: null, leadTimeDays: supplier.leadTimeDays, queueTimeDays: supplier.queueTimeDays },
+          done,
+        });
+        continue;
+      }
+      const kind = random();
+      const minutes = kind < 0.15 ? 0 : kind < 0.5 ? 1 + Math.floor(random() * 479) : 1 + Math.floor(random() * 2400);
+      o.operations.push(pop(o, (i + 1) * 10, 0, { setupTime: minutes, operationStatus: done ? "done" : "pending" }));
+      work.push({ minutes: done ? 0 : minutes, resource: own, done });
+    }
+    const result = plan({
+      today: start,
+      offDays,
+      queueDays,
+      workCenters: new Map<string, PlanWorkCenter>([["wc-1", wc1], ...suppliers.map((w) => [w.workCenterId, w] as [string, PlanWorkCenter])]),
+      schedule: { ...SCHEDULE, holidays: holidays.map((date) => ({ date, dayScheduleId: null })) },
+      orders: [o],
+    });
+    const leadDays = manufacturingLeadDays(null, work, { defaultLeadDays: 0, queueDays });
+    return { start, offDays, leadDays, legoCount, finish: result.orders[0]!.plannedFinish!, result };
+  }
+
+  // The same relation for every route: ready exactly on S + lead time − 1
+  // working days — the day before the lead time is up, so a TO started on
+  // its latest start (due − lead time) is ready the working day before due.
+  function holds(legoShare: number, runs: number): number {
+    let legoRoutes = 0;
+    for (let run = 0; run < runs; run++) {
+      const { start, offDays, leadDays, legoCount, finish, result } = scenario(legoShare);
+      if (legoCount >= 2) legoRoutes += 1;
+      expect(result.warnings.filter((w) => w.kind !== "long_operation")).toEqual([]);
+      expect(finish <= addWorkingDays(start, leadDays, offDays)).toBe(true);
+      expect(finish).toBe(addWorkingDays(start, Math.max(0, leadDays - 1), offDays));
+    }
+    return legoRoutes;
+  }
+
+  it("own operations only", () => {
+    holds(0, 400);
+  });
+
+  it("with lego operations in the route — several of them, L = 0 and decimal Ledtid/Kötid included", () => {
+    // A lego operation counts 1 + ceil(L + Q) in the lead time: the day it
+    // is sent and the days until it is back.
+    expect(holds(0.4, 600)).toBeGreaterThan(100);
+    expect(holds(1, 200)).toBeGreaterThan(100); // nothing but lego
   });
 });
 
@@ -572,7 +839,7 @@ describe("Planera — orimligt mycket tid", () => {
       orders: [
         order("a", "TO-1", null, (o) => [
           pop(o, 10, 200),
-          pop(o, 20, 170, { workCenterId: "wc-3", planLocked: true, plannedWeeks: weeks([W43, 40], [W44, 40], [W45, 40], [W46, 50]) }),
+          pop(o, 20, 170, { workCenterId: "wc-3", planLocked: true, plannedDays: days([MON, 40], [MON2, 40], [MON3, 40], ["2026-11-09", 50]) }),
         ]),
       ],
     });
@@ -624,32 +891,32 @@ describe("Planera — alternativa resurser", () => {
     const result = plan({
       orders: [
         order("a", "TO-1", null, (o) => [
-          pop(o, 10, 20, {
+          pop(o, 10, 4, {
             resources: [
-              { workCenterId: "wc-1", rank: 0, setupTime: h(20), runTimePerUnit: 0 },
-              { workCenterId: "wc-3", rank: 1, setupTime: h(5), runTimePerUnit: 0 },
+              { workCenterId: "wc-1", rank: 0, setupTime: h(4), runTimePerUnit: 0 },
+              { workCenterId: "wc-3", rank: 1, setupTime: h(1), runTimePerUnit: 0 },
             ],
           }),
         ]),
       ],
-      // wc-1 is full this week; wc-3 (the alternative) is empty.
-      existingOperations: [existing(40, W43)],
+      // wc-1 is full today; wc-3 (the alternative) is empty.
+      existingOperations: [existing(8, MON)],
     });
-    expect(plansOf(result)).toEqual([["a:10", weeks([W44, 20])]]);
+    expect(plansOf(result)).toEqual([["a:10", days([TUE, 4])]]);
   });
 
-  it("operationsWithPlan gives the operations as the writer leaves them: rounded weeks, cleared without weeks or lock", () => {
-    const a = pop({ id: "a", orderNumber: "TO-1", dueDate: null }, 10, 1, { plannedWeeks: weeks([W43, 1]) });
-    const b = pop({ id: "a", orderNumber: "TO-1", dueDate: null }, 20, 1, { plannedWeeks: weeks([W43, 1]), planLocked: true });
-    const c = pop({ id: "a", orderNumber: "TO-1", dueDate: null }, 30, 1, { plannedWeeks: weeks([W45, 1]) });
+  it("operationsWithPlan gives the operations as the writer leaves them: rounded days, cleared without days or lock", () => {
+    const a = pop({ id: "a", orderNumber: "TO-1", dueDate: null }, 10, 1, { plannedDays: days([MON, 1]) });
+    const b = pop({ id: "a", orderNumber: "TO-1", dueDate: null }, 20, 1, { plannedDays: days([MON, 1]), planLocked: true });
+    const c = pop({ id: "a", orderNumber: "TO-1", dueDate: null }, 30, 1, { plannedDays: days([WED, 1]) });
     const out = operationsWithPlan([a, b, c], {
-      plans: [{ operationId: a.moOperationId, manufacturingOrderId: "a", weeks: [{ monday: W44, minutes: 59.996 }], startWeek: W44, endWeek: W44 }],
+      plans: [{ operationId: a.moOperationId, manufacturingOrderId: "a", days: [{ date: TUE, minutes: 59.996 }], startDate: TUE, endDate: TUE }],
       clear: [b.moOperationId],
     });
-    expect(out.map((op) => [op.moOperationId, op.plannedWeeks, op.planLocked ?? false])).toEqual([
-      ["a:10", [{ monday: W44, minutes: 60 }], false],
+    expect(out.map((op) => [op.moOperationId, op.plannedDays, op.planLocked ?? false])).toEqual([
+      ["a:10", [{ date: TUE, minutes: 60 }], false],
       ["a:20", null, false],
-      ["a:30", weeks([W45, 1]), false],
+      ["a:30", days([WED, 1]), false],
     ]);
   });
 });

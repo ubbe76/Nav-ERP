@@ -627,7 +627,7 @@ export interface OrderRegisterPdfInput {
 }
 
 // Körplan (planning module formats every cell). Landscape A4: the resource's
-// pending operations grouped per week, a sum line per group and a total.
+// pending operations grouped per day, a sum line per group and a total.
 export interface RunPlanPdfInput {
   title: string;
   subtitle: string;
@@ -637,7 +637,7 @@ export interface RunPlanPdfInput {
     totalLabel: string;
     total: string;
     rows: {
-      week: string;
+      day: string;
       orderNumber: string;
       article: string;
       operation: string;
@@ -1084,9 +1084,9 @@ const ORDER_REGISTER_ROW_COLS = {
 
 // Körplan, same landscape width and table foot as the orderförteckning.
 const RUN_PLAN_COLS = {
-  week: { x: 0, w: 34 },
-  orderNumber: { x: 37, w: 72 },
-  article: { x: 112, w: 180 },
+  day: { x: 0, w: 52 },
+  orderNumber: { x: 55, w: 72 },
+  article: { x: 130, w: 162 },
   operation: { x: 295, w: 125 },
   remainingQuantity: { x: 423, w: 50 },
   remainingTime: { x: 476, w: 56 },
@@ -3373,7 +3373,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
 
     const header = () => {
       doc.font(FONT_BOLD).fontSize(8.5);
-      cell("Vecka", C.week);
+      cell("Dag", C.day);
       cell("TO", C.orderNumber);
       cell("Artikel", C.article);
       cell("Operation", C.operation);
@@ -3403,7 +3403,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
 
     header();
     for (const group of input.groups) {
-      // A week heading never lands alone at the foot of a page.
+      // A day heading never lands alone at the foot of a page.
       ensure(26);
       doc.font(FONT_BOLD).fontSize(9.5).text(group.heading, left, y, { width: 400, height: 12, ellipsis: true });
       y += 14;
@@ -3411,7 +3411,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       for (const row of group.rows) {
         ensure(12);
         doc.font(FONT).fontSize(8.5);
-        cell(row.week, C.week);
+        cell(row.day, C.day);
         cell(row.orderNumber, C.orderNumber);
         cell(row.article, C.article);
         cell(row.operation, C.operation);

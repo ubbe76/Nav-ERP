@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   buildScheduleLookups,
   computeCapacity,
-  loadBucketMonday,
-  operationLoadWeeks,
-  remainingByPlannedWeeks,
+  loadBucketDay,
+  operationLoadDays,
+  operationStartDate,
+  orderPlanStatus,
+  plannedDateRange,
+  remainingByPlannedDays,
   remainingOperationMinutes,
   resourceDayMinutes,
   setupDoneOnCurrentResource,
@@ -14,6 +17,7 @@ import {
   type CapacityOperationRow,
   type CapacityResult,
   type CapacityWorkCenter,
+  type PlanStatusWorkCenter,
 } from "../src/modules/planning/service/capacity-calc.js";
 
 // Pure calculation tests — no database, no TRUNCATE. This file is the
@@ -207,7 +211,7 @@ describe("resolveResourceWeekHours", () => {
   });
 });
 
-describe("resourceDayMinutes and loadBucketMonday (shared with Leveranstidskontrollen)", () => {
+describe("resourceDayMinutes and loadBucketDay (shared with Leveranstidskontrollen)", () => {
   const lookups = buildScheduleLookups(STD_WEEK.weekScheduleDays, STD_WEEK.daySchedules, [
     { date: "2026-08-19", dayScheduleId: null },
   ]);
@@ -236,10 +240,11 @@ describe("resourceDayMinutes and loadBucketMonday (shared with Leveranstidskontr
     expect(resourceDayMinutes(lookups, { weekScheduleId: "ws-40", hoursPerDay: 2 }, "2026-08-18")).toBe(480);
   });
 
-  it("buckets by the due date's week, past due into the first week, undated as null", () => {
-    expect(loadBucketMonday("2026-08-27", "2026-08-17")).toBe("2026-08-24");
-    expect(loadBucketMonday("2026-08-10", "2026-08-17")).toBe("2026-08-17");
-    expect(loadBucketMonday(null, "2026-08-17")).toBeNull();
+  it("buckets on the due date, a passed one today, undated as null", () => {
+    expect(loadBucketDay("2026-08-27", TODAY)).toBe("2026-08-27");
+    expect(loadBucketDay(TODAY, TODAY)).toBe(TODAY);
+    expect(loadBucketDay("2026-08-18", TODAY)).toBe(TODAY);
+    expect(loadBucketDay(null, TODAY)).toBeNull();
   });
 });
 
@@ -548,81 +553,101 @@ describe("subcontract exclusion", () => {
   });
 });
 
-// --- Produktionsplanering: planned weeks ----------------------------------
-// Rows without a plan give EXACTLY the results above — every test before this
-// line runs unchanged. The ones below add plans.
+// --- Produktionsplanering: planned days (#18) -----------------------------
+// Rows without a plan count on their due date (a week cell is the sum of its
+// days, so the tests above read as before). The ones below add plans.
 
-describe("remainingByPlannedWeeks and operationLoadWeeks (shared with the book and Planera)", () => {
-  const W45 = "2026-11-02";
-  const W46 = "2026-11-09";
+const WED = TODAY; // 2026-08-19
+const THU = "2026-08-20";
+const FRI = "2026-08-21";
+const MON2 = "2026-08-24";
+const TUE2 = "2026-08-25";
 
-  it("fills the allocation from the back: the work done is assumed in the earliest weeks", () => {
-    expect(remainingByPlannedWeeks(300, [{ monday: W45, minutes: 400 }, { monday: W46, minutes: 200 }], W45)).toEqual([
-      { monday: W45, minutes: 100 },
-      { monday: W46, minutes: 200 },
+describe("remainingByPlannedDays and operationLoadDays (shared with the book and Planera)", () => {
+  it("fills the allocation from the back: the work done is assumed on the earliest days", () => {
+    expect(remainingByPlannedDays(300, [{ date: THU, minutes: 400 }, { date: FRI, minutes: 200 }], WED)).toEqual([
+      { date: THU, minutes: 100 },
+      { date: FRI, minutes: 200 },
     ]);
-    expect(remainingByPlannedWeeks(150, [{ monday: W45, minutes: 400 }, { monday: W46, minutes: 200 }], W45)).toEqual([
-      { monday: W46, minutes: 150 },
-    ]);
-  });
-
-  it("puts an excess (Ångra rapportering) in the last week", () => {
-    expect(remainingByPlannedWeeks(700, [{ monday: W45, minutes: 400 }, { monday: W46, minutes: 200 }], W45)).toEqual([
-      { monday: W45, minutes: 400 },
-      { monday: W46, minutes: 300 },
+    expect(remainingByPlannedDays(150, [{ date: THU, minutes: 400 }, { date: FRI, minutes: 200 }], WED)).toEqual([
+      { date: FRI, minutes: 150 },
     ]);
   });
 
-  it("clamps weeks before the current week to it — the work can't happen in the past", () => {
+  it("puts an excess (Ångra rapportering) on the last day", () => {
+    expect(remainingByPlannedDays(700, [{ date: THU, minutes: 400 }, { date: FRI, minutes: 200 }], WED)).toEqual([
+      { date: THU, minutes: 400 },
+      { date: FRI, minutes: 300 },
+    ]);
+  });
+
+  it("clamps days before today to today — the work can't happen in the past", () => {
+    // Monday and Tuesday have passed: their 300 min lie on today.
     expect(
-      remainingByPlannedWeeks(
+      remainingByPlannedDays(
         600,
-        [{ monday: "2026-10-05", minutes: 100 }, { monday: "2026-10-12", minutes: 200 }, { monday: W45, minutes: 300 }],
-        "2026-10-19"
+        [{ date: "2026-08-17", minutes: 100 }, { date: "2026-08-18", minutes: 200 }, { date: FRI, minutes: 300 }],
+        WED
       )
     ).toEqual([
-      { monday: "2026-10-19", minutes: 300 },
-      { monday: W45, minutes: 300 },
+      { date: WED, minutes: 300 },
+      { date: FRI, minutes: 300 },
     ]);
+    // A plan wholly in the past is all today.
+    expect(remainingByPlannedDays(250, [{ date: "2026-08-14", minutes: 250 }], WED)).toEqual([{ date: WED, minutes: 250 }]);
   });
 
   it("gives nothing when nothing remains and sorts an unordered allocation", () => {
-    expect(remainingByPlannedWeeks(0, [{ monday: W45, minutes: 400 }], W45)).toEqual([]);
-    expect(remainingByPlannedWeeks(500, [{ monday: W46, minutes: 200 }, { monday: W45, minutes: 400 }], W45)).toEqual([
-      { monday: W45, minutes: 300 },
-      { monday: W46, minutes: 200 },
+    expect(remainingByPlannedDays(0, [{ date: THU, minutes: 400 }], WED)).toEqual([]);
+    expect(remainingByPlannedDays(500, [{ date: FRI, minutes: 200 }, { date: THU, minutes: 400 }], WED)).toEqual([
+      { date: THU, minutes: 300 },
+      { date: FRI, minutes: 200 },
     ]);
   });
 
-  it("operationLoadWeeks: unplanned ⇒ the due date's bucket, planned ⇒ the distribution, done ⇒ nothing", () => {
-    const firstMonday = "2026-08-17";
-    expect(operationLoadWeeks(op({ dueDate: "2026-08-27" }), firstMonday)).toEqual([{ monday: "2026-08-24", minutes: 60 }]);
-    expect(operationLoadWeeks(op({ dueDate: null }), firstMonday)).toEqual([{ monday: null, minutes: 60 }]);
-    expect(
-      operationLoadWeeks(op({ dueDate: "2026-08-27", plannedWeeks: [{ monday: "2026-08-24", minutes: 20 }, { monday: "2026-08-31", minutes: 40 }] }), firstMonday)
-    ).toEqual([
-      { monday: "2026-08-24", minutes: 20 },
-      { monday: "2026-08-31", minutes: 40 },
+  it("operationLoadDays: unplanned ⇒ the due date (passed ⇒ today), planned ⇒ the distribution, done ⇒ nothing", () => {
+    expect(operationLoadDays(op({ dueDate: "2026-08-27" }), TODAY)).toEqual([{ date: "2026-08-27", minutes: 60 }]);
+    expect(operationLoadDays(op({ dueDate: "2026-08-17" }), TODAY)).toEqual([{ date: TODAY, minutes: 60 }]);
+    expect(operationLoadDays(op({ dueDate: null }), TODAY)).toEqual([{ date: null, minutes: 60 }]);
+    expect(operationLoadDays(op({ dueDate: "2026-08-27", plannedDays: [{ date: THU, minutes: 20 }, { date: MON2, minutes: 40 }] }), TODAY)).toEqual([
+      { date: THU, minutes: 20 },
+      { date: MON2, minutes: 40 },
     ]);
-    expect(operationLoadWeeks(op({ operationStatus: "done", plannedWeeks: [{ monday: "2026-08-24", minutes: 60 }] }), firstMonday)).toEqual([]);
+    expect(operationLoadDays(op({ operationStatus: "done", plannedDays: [{ date: THU, minutes: 60 }] }), TODAY)).toEqual([]);
     // An empty plan is no plan.
-    expect(operationLoadWeeks(op({ dueDate: "2026-08-27", plannedWeeks: [] }), firstMonday)).toEqual([{ monday: "2026-08-24", minutes: 60 }]);
+    expect(operationLoadDays(op({ dueDate: "2026-08-27", plannedDays: [] }), TODAY)).toEqual([{ date: "2026-08-27", minutes: 60 }]);
+  });
+
+  it("plannedDateRange and operationStartDate: the plan's first and last day, else the due date — never clamped", () => {
+    const planned = op({ dueDate: "2026-08-27", plannedDays: [{ date: MON2, minutes: 40 }, { date: "2026-08-14", minutes: 20 }] });
+    expect(plannedDateRange(planned)).toEqual({ start: "2026-08-14", end: MON2 });
+    expect(operationStartDate(planned)).toBe("2026-08-14"); // before today: the körplan's Försenad
+    expect(plannedDateRange(op({ dueDate: "2026-08-27" }))).toBeNull();
+    expect(plannedDateRange(op({ plannedDays: [] }))).toBeNull();
+    expect(operationStartDate(op({ dueDate: "2026-08-10" }))).toBe("2026-08-10");
+    expect(operationStartDate(op({ dueDate: null }))).toBeNull();
   });
 });
 
 describe("computeCapacity — planned operations", () => {
-  const W34 = "2026-08-17";
-  const W35 = "2026-08-24";
   const W36 = "2026-08-31";
 
-  it("a planned operation appears in every week of its plan with its share; unplanned rows are untouched", () => {
+  it("a week cell is the sum of the operation's days there — one entry per operation and week", () => {
     const result = computeCapacity(
       calcInput({
         workCenters: [wc({ workCenterId: "wc-1", weekScheduleId: "ws-40" })],
         ...STD_WEEK,
         operations: [
-          // 10 h planned 5 h + 5 h, finishing Friday 28 Aug — the due date.
-          op({ moOperationId: "op-p", orderNumber: "PO-P", dueDate: "2026-08-28", runTimePerUnit: 60, plannedWeeks: [{ monday: W34, minutes: 300 }, { monday: W35, minutes: 300 }], planLocked: true, plannedAt: "2026-08-18T10:00:00.000Z" }),
+          // 10 h planned Thu 2 h + Fri 3 h + Mon 5 h, due Friday 28 Aug.
+          op({
+            moOperationId: "op-p",
+            orderNumber: "PO-P",
+            dueDate: "2026-08-28",
+            runTimePerUnit: 60,
+            plannedDays: [{ date: THU, minutes: 120 }, { date: FRI, minutes: 180 }, { date: MON2, minutes: 300 }],
+            planLocked: true,
+            plannedAt: "2026-08-18T10:00:00.000Z",
+          }),
           op({ moOperationId: "op-u", manufacturingOrderId: "mo-u", orderNumber: "PO-U", dueDate: "2026-08-28", runTimePerUnit: 6 }),
         ],
       }),
@@ -631,10 +656,10 @@ describe("computeCapacity — planned operations", () => {
     const row = resourceRow(result, "wc-1");
     expect(row.weeks.map((c) => c.loadHours)).toEqual([5, 6, 0]);
     expect(row.weeks[0]!.orders).toEqual([
-      expect.objectContaining({ moOperationId: "op-p", orderNumber: "PO-P", hoursInWeek: 5, remainingHours: 10, planned: true, plannedStartWeek: W34, plannedEndWeek: W35, planLocked: true, late: false }),
+      expect.objectContaining({ moOperationId: "op-p", orderNumber: "PO-P", hoursInWeek: 5, remainingHours: 10, planned: true, plannedStartDate: THU, plannedEndDate: MON2, planLocked: true, late: false }),
     ]);
-    expect(row.weeks[1]!.orders.map((o) => [o.orderNumber, o.hoursInWeek, o.planned, o.plannedStartWeek, o.planLocked])).toEqual([
-      ["PO-P", 5, true, W34, true],
+    expect(row.weeks[1]!.orders.map((o) => [o.orderNumber, o.hoursInWeek, o.planned, o.plannedStartDate, o.planLocked])).toEqual([
+      ["PO-P", 5, true, THU, true],
       ["PO-U", 1, false, null, false],
     ]);
     expect(result.summary).toEqual({
@@ -650,7 +675,7 @@ describe("computeCapacity — planned operations", () => {
     const result = computeCapacity(
       calcInput({
         workCenters: [wc({ workCenterId: "wc-1" })],
-        operations: [op({ runTimePerUnit: 60, quantityCompleted: 5, plannedWeeks: [{ monday: W34, minutes: 300 }, { monday: W35, minutes: 300 }] })],
+        operations: [op({ runTimePerUnit: 60, quantityCompleted: 5, plannedDays: [{ date: THU, minutes: 300 }, { date: MON2, minutes: 300 }] })],
       }),
       { today: TODAY, weeks: 2 }
     );
@@ -660,12 +685,12 @@ describe("computeCapacity — planned operations", () => {
     expect(row.weeks[1]!.orders[0]).toMatchObject({ hoursInWeek: 5, remainingHours: 5 });
   });
 
-  it("a plan beyond the horizon is `later`, past weeks are clamped into the current one", () => {
+  it("a plan beyond the horizon is `later`, passed days are clamped to today", () => {
     const result = computeCapacity(
       calcInput({
         workCenters: [wc({ workCenterId: "wc-1" })],
         operations: [
-          op({ moOperationId: "a", runTimePerUnit: 60, plannedWeeks: [{ monday: "2026-08-03", minutes: 300 }, { monday: "2026-10-05", minutes: 300 }] }),
+          op({ moOperationId: "a", runTimePerUnit: 60, plannedDays: [{ date: "2026-08-03", minutes: 300 }, { date: "2026-10-05", minutes: 150 }, { date: "2026-10-06", minutes: 150 }] }),
         ],
       }),
       { today: TODAY, weeks: 2 }
@@ -673,45 +698,47 @@ describe("computeCapacity — planned operations", () => {
     const row = resourceRow(result, "wc-1");
     expect(row.weeks[0]!.loadHours).toBe(5);
     expect(row.later.loadHours).toBe(5);
+    expect(row.later.orders).toHaveLength(1);
     expect(row.undated.loadHours).toBe(0);
   });
 
-  it("Sen: the last pending operation's finish after the due date, a lego operation through its lead time", () => {
+  it("Sen: ready after the due date — the plan's last day, a lego operation through the chain", () => {
     const lego = wc({ workCenterId: "wc-lego", code: "900", type: "subcontract", leadTimeDays: 5 });
     const planned = (extra: Partial<CapacityOperationRow>) =>
-      op({ workCenterId: "wc-1", runTimePerUnit: 60, plannedWeeks: [{ monday: W34, minutes: 600 }], ...extra });
-    const result = computeCapacity(
-      calcInput({
-        workCenters: [wc({ workCenterId: "wc-1", weekScheduleId: "ws-40" }), lego],
-        ...STD_WEEK,
-        operations: [
-          // In time: finishes Friday 21 Aug, due 26 Aug.
-          planned({ moOperationId: "a", manufacturingOrderId: "mo-a", orderNumber: "PO-A", dueDate: "2026-08-26" }),
-          // Late: the lego operation after it adds 5 working days ⇒ 28 Aug.
-          planned({ moOperationId: "b1", manufacturingOrderId: "mo-b", orderNumber: "PO-B", dueDate: "2026-08-26" }),
-          op({ moOperationId: "b2", manufacturingOrderId: "mo-b", orderNumber: "PO-B", dueDate: "2026-08-26", sequenceNo: 20, workCenterId: "wc-lego" }),
-          // Late: planned in week 35 (finishes 28 Aug), due 26 Aug.
-          planned({ moOperationId: "c", manufacturingOrderId: "mo-c", orderNumber: "PO-C", dueDate: "2026-08-26", plannedWeeks: [{ monday: W35, minutes: 600 }] }),
-          // Unplanned with a passed due date: Försenad, no planned finish.
-          op({ moOperationId: "d", manufacturingOrderId: "mo-d", orderNumber: "PO-D", dueDate: "2026-08-10" }),
-          // Done operations never make an order late.
-          planned({ moOperationId: "e", manufacturingOrderId: "mo-e", orderNumber: "PO-E", dueDate: "2026-08-10", operationStatus: "done" }),
-        ],
-      }),
-      { today: TODAY, weeks: 3 }
-    );
+      op({ workCenterId: "wc-1", runTimePerUnit: 60, plannedDays: [{ date: THU, minutes: 600 }], ...extra });
+    const input = calcInput({
+      workCenters: [wc({ workCenterId: "wc-1", weekScheduleId: "ws-40" }), lego],
+      ...STD_WEEK,
+      operations: [
+        // In time: ready Thursday 20 Aug, due 26 Aug.
+        planned({ moOperationId: "a", manufacturingOrderId: "mo-a", orderNumber: "PO-A", dueDate: "2026-08-26" }),
+        // Late: the lego operation is sent the working day after (Fri 21)
+        // and takes 5 working days ⇒ 28 Aug.
+        planned({ moOperationId: "b1", manufacturingOrderId: "mo-b", orderNumber: "PO-B", dueDate: "2026-08-26" }),
+        op({ moOperationId: "b2", manufacturingOrderId: "mo-b", orderNumber: "PO-B", dueDate: "2026-08-26", sequenceNo: 20, workCenterId: "wc-lego" }),
+        // Late: the plan's last day is the day after the due date.
+        planned({ moOperationId: "c", manufacturingOrderId: "mo-c", orderNumber: "PO-C", dueDate: "2026-08-26", plannedDays: [{ date: TUE2, minutes: 300 }, { date: "2026-08-27", minutes: 300 }] }),
+        // Unplanned with a passed due date: Försenad, no planned finish.
+        op({ moOperationId: "d", manufacturingOrderId: "mo-d", orderNumber: "PO-D", dueDate: "2026-08-10" }),
+        // Done operations never make an order late.
+        planned({ moOperationId: "e", manufacturingOrderId: "mo-e", orderNumber: "PO-E", dueDate: "2026-08-10", operationStatus: "done" }),
+        // Ready ON the due date is in time (it was the week's last day before #18).
+        planned({ moOperationId: "f", manufacturingOrderId: "mo-f", orderNumber: "PO-F", dueDate: "2026-08-26", plannedDays: [{ date: "2026-08-26", minutes: 600 }] }),
+      ],
+    });
+    const result = computeCapacity(input, { today: TODAY, weeks: 3 });
     const row = resourceRow(result, "wc-1");
     const lateByOrder = new Map(row.weeks.flatMap((c) => c.orders).map((o) => [o.orderNumber, o.late]));
-    expect(lateByOrder.get("PO-A")).toBe(false);
-    expect(lateByOrder.get("PO-B")).toBe(true);
-    expect(lateByOrder.get("PO-C")).toBe(true);
-    expect(lateByOrder.get("PO-D")).toBe(true);
+    expect(["PO-A", "PO-B", "PO-C", "PO-D", "PO-F"].map((n) => lateByOrder.get(n))).toEqual([false, true, true, true, false]);
     expect(result.summary.lateOrders).toEqual([
       { manufacturingOrderId: "mo-d", orderNumber: "PO-D", dueDate: "2026-08-10", plannedFinish: null },
       { manufacturingOrderId: "mo-b", orderNumber: "PO-B", dueDate: "2026-08-26", plannedFinish: "2026-08-28" },
-      { manufacturingOrderId: "mo-c", orderNumber: "PO-C", dueDate: "2026-08-26", plannedFinish: "2026-08-28" },
+      { manufacturingOrderId: "mo-c", orderNumber: "PO-C", dueDate: "2026-08-26", plannedFinish: "2026-08-27" },
     ]);
     expect(result.summary.unplannedOrders).toEqual([{ manufacturingOrderId: "mo-d", orderNumber: "PO-D" }]);
+    // The Standardkötid moves the lego operation's floor a day: sent Mon 24, back Mon 31.
+    const queued = computeCapacity(input, { today: TODAY, weeks: 3, queueDays: 1 });
+    expect(queued.summary.lateOrders.find((o) => o.orderNumber === "PO-B")).toMatchObject({ plannedFinish: "2026-08-31" });
   });
 
   it("counts overloaded resource cells", () => {
@@ -720,8 +747,9 @@ describe("computeCapacity — planned operations", () => {
         workCenters: [wc({ workCenterId: "wc-1", weekScheduleId: "ws-40" })],
         ...STD_WEEK,
         operations: [
-          op({ moOperationId: "a", runTimePerUnit: 270, plannedWeeks: [{ monday: W34, minutes: 2700 }] }), // 45 h in a 40 h week
-          op({ moOperationId: "b", manufacturingOrderId: "mo-2", orderNumber: "PO-2", runTimePerUnit: 240, plannedWeeks: [{ monday: W36, minutes: 2400 }] }), // exactly 40 h
+          // 45 h in a 40 h week, spread over its days.
+          op({ moOperationId: "a", runTimePerUnit: 270, plannedDays: [{ date: WED, minutes: 900 }, { date: THU, minutes: 900 }, { date: FRI, minutes: 900 }] }),
+          op({ moOperationId: "b", manufacturingOrderId: "mo-2", orderNumber: "PO-2", runTimePerUnit: 240, plannedDays: [{ date: W36, minutes: 2400 }] }), // exactly 40 h
         ],
       }),
       { today: TODAY, weeks: 3 }
@@ -741,6 +769,70 @@ describe("computeCapacity — planned operations", () => {
       lateOrders: [],
       unplannedOrders: [{ manufacturingOrderId: "mo-1", orderNumber: "PO-1" }],
       resourceSuggestions: [],
+    });
+  });
+});
+
+describe("orderPlanStatus — planned, plannedFinish and Sen through the book's chain", () => {
+  const own: PlanStatusWorkCenter = { type: "machine", weekScheduleId: "ws-40", hoursPerDay: null };
+  const lego = (leadTimeDays: number | null, queueTimeDays: number | null = null): PlanStatusWorkCenter => ({
+    type: "subcontract",
+    weekScheduleId: null,
+    hoursPerDay: null,
+    leadTimeDays,
+    queueTimeDays,
+  });
+  const status = (
+    operations: CapacityOperationRow[],
+    extra: { workCenters?: [string, PlanStatusWorkCenter][]; queueDays?: number; offDays?: string[]; today?: string } = {}
+  ) =>
+    orderPlanStatus(operations, {
+      today: extra.today ?? TODAY,
+      offDays: new Set(extra.offDays ?? []),
+      workCenters: new Map<string, PlanStatusWorkCenter>([["wc-1", own], ...(extra.workCenters ?? [])]),
+      queueDays: extra.queueDays,
+    });
+  const on = (date: string, extra: Partial<CapacityOperationRow> = {}) =>
+    op({ runTimePerUnit: 6, dueDate: "2026-08-28", plannedDays: [{ date, minutes: 60 }], ...extra });
+
+  it("the latest of the operations' last days; a passed plan is today", () => {
+    expect(status([on(THU), on(MON2, { sequenceNo: 20 })])).toEqual({ planned: true, plannedFinish: MON2, late: false });
+    // A later operation planned EARLIER (a sequence break) never pulls the finish back.
+    expect(status([on(MON2), on(THU, { sequenceNo: 20 })])).toMatchObject({ plannedFinish: MON2 });
+    // Planned last week and not worked: it lies on today — late when the due date has passed.
+    expect(status([on("2026-08-13", { dueDate: "2026-08-18" })])).toEqual({ planned: true, plannedFinish: TODAY, late: true });
+    expect(status([on("2026-08-13", { dueDate: TODAY })])).toMatchObject({ plannedFinish: TODAY, late: false });
+  });
+
+  it("unplanned: a pending operation with time and no plan — Sen is then the passed due date", () => {
+    expect(status([on(THU), op({ sequenceNo: 20, dueDate: "2026-08-28" })])).toEqual({ planned: false, plannedFinish: null, late: false });
+    expect(status([op({ dueDate: "2026-08-18" })])).toEqual({ planned: false, plannedFinish: null, late: true });
+    // An operation without time (Planera clears it) or done is not "unplanned".
+    expect(status([on(THU), op({ sequenceNo: 20, runTimePerUnit: 0, dueDate: "2026-08-28" })])).toMatchObject({ planned: true, plannedFinish: THU });
+    expect(status([on(THU), op({ sequenceNo: 20, runTimePerUnit: 0.0005, dueDate: "2026-08-28" })])).toMatchObject({ planned: true });
+    expect(status([on(THU), op({ sequenceNo: 5, operationStatus: "done", dueDate: "2026-08-28" })])).toMatchObject({ planned: true, plannedFinish: THU });
+    // Nothing pending at all: ready today.
+    expect(status([op({ operationStatus: "done", dueDate: "2026-08-18" })])).toEqual({ planned: true, plannedFinish: TODAY, late: true });
+  });
+
+  it("a lego operation: from the chain's floor, Ledtid + Kötid rounded up, in working days", () => {
+    const legoOp = (sequenceNo: number, workCenterId = "wc-l") => op({ sequenceNo, workCenterId, dueDate: "2026-08-28" });
+    // First in the route: sent today, no gap before it.
+    expect(status([legoOp(10)], { workCenters: [["wc-l", lego(2)]] })).toMatchObject({ plannedFinish: FRI });
+    // After an own operation ready Thursday: sent Friday, back Tuesday (2 days).
+    expect(status([on(THU), legoOp(20)], { workCenters: [["wc-l", lego(2)]] })).toMatchObject({ plannedFinish: TUE2 });
+    // Ledtid 1 + Kötid 0.5 ⇒ 2 days; a holiday on Monday pushes it a day.
+    expect(status([on(THU), legoOp(20)], { workCenters: [["wc-l", lego(1, 0.5)]], offDays: [MON2] })).toMatchObject({ plannedFinish: "2026-08-26" });
+    // The gaps are counted over the operations that take a place: with a
+    // Standardkötid of 0.5 the first gap waits a day, the second none.
+    expect(
+      status([on(THU), legoOp(20), legoOp(30, "wc-m")], { workCenters: [["wc-l", lego(1)], ["wc-m", lego(1)]], queueDays: 0.5 })
+    ).toMatchObject({ plannedFinish: "2026-08-27" }); // Thu → (Fri + 1) Mon, back Tue → Wed, back Thu
+    // An own operation planned after the lego one decides when it lies later.
+    expect(status([legoOp(10), on("2026-08-31", { sequenceNo: 20 })], { workCenters: [["wc-l", lego(2)]] })).toEqual({
+      planned: true,
+      plannedFinish: "2026-08-31",
+      late: true,
     });
   });
 });
@@ -771,8 +863,8 @@ describe("computeCapacity — förslag på resurs", () => {
       toWorkCenterId: "wc-2",
       toCode: "120",
       toName: "Kantpress 2",
-      currentToWeek: "2026-08-31",
-      toWeek: "2026-08-17",
+      currentToDate: "2026-08-31",
+      toDate: "2026-08-19",
       reason: "overloaded" as const,
     });
     const resources = [
@@ -796,7 +888,7 @@ describe("computeCapacity — förslag på resurs", () => {
     expect(cell("wc-1", "op-a")).toMatchObject({
       resourceLocked: false,
       ordinaryWorkCenterCode: null,
-      suggestion: { workCenterId: "wc-2", code: "120", name: "Kantpress 2", toWeek: "2026-08-17", currentToWeek: "2026-08-31", reason: "overloaded" },
+      suggestion: { workCenterId: "wc-2", code: "120", name: "Kantpress 2", toDate: "2026-08-19", currentToDate: "2026-08-31", reason: "overloaded" },
     });
     expect(cell("wc-2", "op-c")).toMatchObject({ resourceLocked: true, ordinaryWorkCenterCode: "110", suggestion: null });
     expect(result.summary.resourceSuggestions.map((s) => s.orderNumber)).toEqual(["PO-A", "PO-B"]);

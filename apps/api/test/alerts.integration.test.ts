@@ -99,7 +99,7 @@ const alerts = createAlertsService({
 const TRUNCATE = sql`TRUNCATE recurring_verification_runs, recurring_verifications, verification_template_rows, verification_templates, verification_series,
   email_log, einvoice_transmissions, invoice_rows, invoices, payment_batch_items, payment_batches,
   supplier_invoices, purchase_order_rows, purchase_orders, sales_order_rows, sales_orders, customers, suppliers, payment_terms,
-  mo_operation_plan_weeks, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations,
+  mo_operation_plan_days, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations,
   manufacturing_orders, routing_operations, work_centers, production_groups, stock_transactions, stock_locations, warehouses,
   bom_components, article_suppliers, articles, users CASCADE`;
 

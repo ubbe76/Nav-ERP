@@ -1,7 +1,7 @@
 import { createArticleSchema, createCustomerSchema, createWeekScheduleSchema, createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { db, manufacturingOrders, moOperationPlanWeeks, salesOrders } from "@navet/db";
+import { db, manufacturingOrders, moOperationPlanDays, salesOrders } from "@navet/db";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -37,7 +37,7 @@ import { parsed } from "./helpers/parsed.js";
 
 // Reservationen (POST /delivery-time-check/apply) against Postgres: the
 // check run again under the production_plan lock, a TO per shortage batch
-// (children before parents) planned in exactly the weeks the check booked,
+// (children before parents) planned on exactly the days the check booked,
 // the KO's Förväntat leveransdatum set and the row I tillverkning — all in
 // one transaction. "Today" is pinned to Monday 2030-03-04 as in
 // production-plan.integration.test.ts.
@@ -46,6 +46,23 @@ const W2 = "2030-03-11";
 const W3 = "2030-03-18";
 const W4 = "2030-03-25";
 const TODAY = W1;
+// The plan counts in days (#18): 10 h on a free 8 h resource is today and two
+// hours of tomorrow, and an operation is ready the day its last minute is
+// placed — not on the Friday of that week, as before.
+const TEN_HOURS_FROM_TODAY = [
+  { date: "2030-03-04", minutes: 480 },
+  { date: "2030-03-05", minutes: 120 },
+];
+const CHILD_READY = "2030-03-05";
+// The parent starts on the day its material is ready (R1 is free): Tuesday
+// and two hours of Wednesday.
+const PARENT_DAYS = [
+  { date: "2030-03-05", minutes: 480 },
+  { date: "2030-03-06", minutes: 120 },
+];
+const PARENT_READY = "2030-03-06";
+// Shipped the working day after the last ready date; delivered the same day.
+const DELIVERY = "2030-03-07";
 
 const articleService = createArticleService(createArticleRepository(db));
 const authRepo = createAuthRepository(db);
@@ -117,7 +134,7 @@ function buildPlanning(manufacturing: ManufacturingOrderCreator = mfgService, sa
 const planningService = buildPlanning();
 planReaderRef.current = planningService;
 
-const TRUNCATE = sql`TRUNCATE mo_operation_plan_weeks, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations, manufacturing_orders, sales_order_rows, sales_orders, customers, routing_operations, work_centers, production_groups, holidays, week_schedule_days, week_schedules, day_schedule_breaks, day_schedules, stock_transactions, stock_locations, warehouses, bom_components, article_suppliers, articles, users CASCADE`;
+const TRUNCATE = sql`TRUNCATE mo_operation_plan_days, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations, manufacturing_orders, sales_order_rows, sales_orders, customers, routing_operations, work_centers, production_groups, holidays, week_schedule_days, week_schedules, day_schedule_breaks, day_schedules, stock_transactions, stock_locations, warehouses, bom_components, article_suppliers, articles, users CASCADE`;
 
 beforeEach(async () => {
   await db.execute(TRUNCATE);
@@ -129,15 +146,15 @@ afterAll(async () => {
 
 async function planRows(opId: string) {
   const rows = await db
-    .select({ monday: moOperationPlanWeeks.weekMonday, minutes: moOperationPlanWeeks.minutes })
-    .from(moOperationPlanWeeks)
-    .where(eq(moOperationPlanWeeks.moOperationId, opId))
-    .orderBy(moOperationPlanWeeks.weekMonday);
-  return rows.map((r) => ({ monday: r.monday, minutes: Number(r.minutes) }));
+    .select({ date: moOperationPlanDays.planDate, minutes: moOperationPlanDays.minutes })
+    .from(moOperationPlanDays)
+    .where(eq(moOperationPlanDays.moOperationId, opId))
+    .orderBy(moOperationPlanDays.planDate);
+  return rows.map((r) => ({ date: r.date, minutes: Number(r.minutes) }));
 }
 
 async function allPlanRows() {
-  return db.select({ id: moOperationPlanWeeks.id }).from(moOperationPlanWeeks);
+  return db.select({ id: moOperationPlanDays.id }).from(moOperationPlanDays);
 }
 
 async function allManufacturingOrders() {
@@ -212,32 +229,33 @@ async function confirmedOrder(world: Awaited<ReturnType<typeof seedWorld>>, arti
 }
 
 describe("reservationen — Skapa tillverkningsordrar för det som saknas", () => {
-  it("creates the tree children before parents in the check's weeks, links level 1 to the row, sets the KO date and logs it", async () => {
+  it("creates the tree children before parents on the check's days, links level 1 to the row, sets the KO date and logs it", async () => {
     const world = await seedWorld();
     const { order, row } = await confirmedOrder(world, world.parent.id, 10);
     const before = await salesOrderRow(order.id);
     expect(before).toMatchObject({ status: "confirmed", expectedDeliveryDate: null });
     const check = await planningService.checkDeliveryTime({ salesOrderId: order.id });
     expect(check.deliveryDate).not.toBeNull();
-    // 10 h on R2 this week for the child (ready Friday), then 10 h on R1
-    // for the parent once its material is there — ready the Friday after,
-    // shipped and delivered the Monday after that.
+    // 10 h on R2 from today for the child (ready Tuesday), then 10 h on R1
+    // for the parent once its material is there — ready Wednesday, shipped
+    // and delivered on Thursday. (Before #18: ready on the Fridays of week
+    // 1 and 2, delivered Monday 2030-03-18.)
     expect(check.batches.map((b) => [b.level, b.articleNumber, b.quantity, b.readyDate])).toEqual([
-      [2, world.child.articleNumber, 10, "2030-03-08"],
-      [1, world.parent.articleNumber, 10, "2030-03-15"],
+      [2, world.child.articleNumber, 10, CHILD_READY],
+      [1, world.parent.articleNumber, 10, PARENT_READY],
     ]);
     const [childBatch, parentBatch] = check.batches;
-    expect(childBatch!.operations.map((o) => o.weeks)).toEqual([[{ monday: W1, minutes: 600 }]]);
-    expect(parentBatch!.operations[0]!.weeks.reduce((sum, w) => sum + w.minutes, 0)).toBe(600);
-    expect(check.deliveryDate).toBe(W3);
+    expect(childBatch!.operations.map((o) => o.days)).toEqual([TEN_HOURS_FROM_TODAY]);
+    expect(parentBatch!.operations.map((o) => o.days)).toEqual([PARENT_DAYS]);
+    expect(check.deliveryDate).toBe(DELIVERY);
 
     const applied = await planningService.applyDeliveryTime({ salesOrderId: order.id, deliveryDate: check.deliveryDate! }, world.user.id);
     const [childMo, parentMo] = applied.manufacturingOrders;
     // The parent's release warns of the child shortage (its TO has not
     // delivered yet) — a warning, never a refusal.
     expect(applied).toEqual({
-      deliveryDate: W3,
-      shipDate: W3,
+      deliveryDate: DELIVERY,
+      shipDate: DELIVERY,
       // No operation has an alternative (#15): the ordinarie run.
       usesAlternatives: false,
       manufacturingOrders: [
@@ -253,30 +271,25 @@ describe("reservationen — Skapa tillverkningsordrar för det som saknas", () =
     expect(childOrder).toMatchObject({
       status: "released",
       salesOrderRowId: null,
-      dueDate: "2030-03-08",
+      dueDate: CHILD_READY,
       note: `Skapad från leveranstidskontroll för ${order.orderNumber}`,
     });
     const parentOrder = (await mfgService.getManufacturingOrder(parentMo!.id))!;
-    expect(parentOrder).toMatchObject({ status: "released", salesOrderRowId: row.id, dueDate: "2030-03-15", note: null });
+    expect(parentOrder).toMatchObject({ status: "released", salesOrderRowId: row.id, dueDate: PARENT_READY, note: null });
     expect(parentOrder.salesOrder).toMatchObject({ id: order.id, orderNumber: order.orderNumber });
 
     // The plan is the check's allocation, written as given — not re-planned.
     const childOps = await mfgService.listOperations(childMo!.id);
     const parentOps = await mfgService.listOperations(parentMo!.id);
-    expect(await planRows(childOps[0]!.id)).toEqual([{ monday: W1, minutes: 600 }]);
-    expect(await planRows(parentOps[0]!.id)).toEqual(parentBatch!.operations[0]!.weeks);
-    // The promised weeks are locked (plan_locked): Planera keeps them.
-    expect(childOps[0]).toMatchObject({ plannedStartWeek: W1, plannedEndWeek: W1, planLocked: true });
-    expect(parentOps[0]).toMatchObject({
-      plannedStartWeek: parentBatch!.operations[0]!.weeks[0]!.monday,
-      plannedEndWeek: parentBatch!.operations[0]!.weeks.at(-1)!.monday,
-      planLocked: true,
-    });
-    // The parent starts on the Friday the child finishes and ends in W2.
-    expect(parentOps[0]!.plannedEndWeek).toBe(W2);
+    expect(await planRows(childOps[0]!.id)).toEqual(TEN_HOURS_FROM_TODAY);
+    expect(await planRows(parentOps[0]!.id)).toEqual(parentBatch!.operations[0]!.days);
+    // The promised days are locked (plan_locked): Planera keeps them.
+    expect(childOps[0]).toMatchObject({ plannedStartDate: "2030-03-04", plannedEndDate: CHILD_READY, planLocked: true });
+    // The parent starts on the day the child is ready.
+    expect(parentOps[0]).toMatchObject({ plannedStartDate: CHILD_READY, plannedEndDate: PARENT_READY, planLocked: true });
 
     // The KO: the date set without a revision bump, the row I tillverkning.
-    expect(await salesOrderRow(order.id)).toEqual({ status: "in_production", expectedDeliveryDate: W3, revision: before.revision });
+    expect(await salesOrderRow(order.id)).toEqual({ status: "in_production", expectedDeliveryDate: DELIVERY, revision: before.revision });
     const coverage = await mfgService.coverageForSalesOrderRows([row.id]);
     expect(coverage.get(row.id)?.quantity).toBe(10);
     const rows = await salesService.listRows(order.id);
@@ -295,7 +308,7 @@ describe("reservationen — Skapa tillverkningsordrar för det som saknas", () =
         entityType: "manufacturing_order",
         entityId: parentMo!.orderNumber,
         action: "created",
-        detail: { articleNumber: world.parent.articleNumber, quantity: 10, dueDate: "2030-03-15", salesOrderNumber: order.orderNumber },
+        detail: { articleNumber: world.parent.articleNumber, quantity: 10, dueDate: PARENT_READY, salesOrderNumber: order.orderNumber },
       },
       { entityType: "manufacturing_order", entityId: parentMo!.orderNumber, action: "released", detail: undefined },
       {
@@ -303,8 +316,8 @@ describe("reservationen — Skapa tillverkningsordrar för det som saknas", () =
         entityId: order.orderNumber,
         action: "delivery_time_applied",
         detail: {
-          deliveryDate: W3,
-          shipDate: W3,
+          deliveryDate: DELIVERY,
+          shipDate: DELIVERY,
           previousDeliveryDate: null,
           manufacturingOrders: [
             { orderNumber: childMo!.orderNumber, articleNumber: world.child.articleNumber, quantity: 10, level: 2 },
@@ -317,26 +330,26 @@ describe("reservationen — Skapa tillverkningsordrar för det som saknas", () =
 
     // The TOs now cover the row: the same date, nothing left to reserve.
     const again = await planningService.checkDeliveryTime({ salesOrderId: order.id });
-    expect(again.deliveryDate).toBe(W3);
+    expect(again.deliveryDate).toBe(DELIVERY);
     expect(again.batches).toEqual([]);
-    await expect(planningService.applyDeliveryTime({ salesOrderId: order.id, deliveryDate: W3 }, world.user.id)).rejects.toBeInstanceOf(
+    await expect(planningService.applyDeliveryTime({ salesOrderId: order.id, deliveryDate: DELIVERY }, world.user.id)).rejects.toBeInstanceOf(
       NothingToReserveError
     );
     expect(await allManufacturingOrders()).toHaveLength(2);
 
-    // Planera after the reservation: the engine would put the whole parent
-    // in this week (R1 is free and it knows nothing of the child's
-    // material) — the lock keeps the promised weeks.
+    // Planera after the reservation: the engine would start the parent
+    // today (R1 is free and it knows nothing of the child's material) — the
+    // lock keeps the promised days.
     await planningService.planProductionRun(world.user.id);
-    expect(await planRows(childOps[0]!.id)).toEqual([{ monday: W1, minutes: 600 }]);
-    expect(await planRows(parentOps[0]!.id)).toEqual(parentBatch!.operations[0]!.weeks);
+    expect(await planRows(childOps[0]!.id)).toEqual(TEN_HOURS_FROM_TODAY);
+    expect(await planRows(parentOps[0]!.id)).toEqual(PARENT_DAYS);
     const afterPlan = await mfgService.listOperations(parentMo!.id);
-    expect(afterPlan[0]).toMatchObject({ plannedEndWeek: W2, planLocked: true });
-    // Lås upp + Planera: the parent is pulled into this week — the lock was
-    // what held it.
+    expect(afterPlan[0]).toMatchObject({ plannedEndDate: PARENT_READY, planLocked: true });
+    // Lås upp + Planera: the parent is pulled to today — the lock was what
+    // held it.
     await planningService.unlockOperation(afterPlan[0]!.id, world.user.id);
     await planningService.planProductionRun(world.user.id);
-    expect((await mfgService.listOperations(parentMo!.id))[0]).toMatchObject({ plannedStartWeek: W1, plannedEndWeek: W1, planLocked: false });
+    expect((await mfgService.listOperations(parentMo!.id))[0]).toMatchObject({ plannedStartDate: "2030-03-04", plannedEndDate: "2030-03-05", planLocked: false });
   });
 
   it("refuses with delivery-time-changed when the number of TOs is not the one the client showed (expectedOrders)", async () => {
@@ -370,32 +383,33 @@ describe("reservationen — Skapa tillverkningsordrar för det som saknas", () =
     const world = await seedWorld();
     const { order } = await confirmedOrder(world, world.parent.id, 10);
     const check = await planningService.checkDeliveryTime({ salesOrderId: order.id });
-    expect(check.deliveryDate).toBe(W3);
-    // Fills R1 this week and the next: the parent's operation now lands in
-    // week 3, a week later than promised.
+    expect(check.deliveryDate).toBe(DELIVERY);
+    // Fills R1 this week and the next: the parent's operation now starts on
+    // Monday of week 3 (ready Tuesday, delivered Wednesday 03-20).
     await mfgService.createManufacturingOrder({ articleId: world.other.id, quantity: 80, dueDate: "2030-04-30" }, world.user.id);
+    const LATER = "2030-03-20";
 
     const failure = await planningService
       .applyDeliveryTime({ salesOrderId: order.id, deliveryDate: check.deliveryDate! }, world.user.id)
       .then(() => null, (err: unknown) => err);
     expect(failure).toBeInstanceOf(DeliveryTimeChangedError);
     const changed = failure as DeliveryTimeChangedError;
-    expect(changed.deliveryDate).toBe(W4);
-    expect(changed.result.deliveryDate).toBe(W4);
+    expect(changed.deliveryDate).toBe(LATER);
+    expect(changed.result.deliveryDate).toBe(LATER);
     expect(changed.result.batches).toHaveLength(2);
-    expect(changed.message).toContain(W4);
+    expect(changed.message).toContain(LATER);
 
     expect(await allManufacturingOrders()).toHaveLength(1);
     expect(await salesOrderRow(order.id)).toMatchObject({ status: "confirmed", expectedDeliveryDate: null });
     expect(auditEntries).toEqual([]);
 
-    // The new date is accepted, with the new result's weeks.
-    const applied = await planningService.applyDeliveryTime({ salesOrderId: order.id, deliveryDate: W4 }, world.user.id);
+    // The new date is accepted, with the new result's days.
+    const applied = await planningService.applyDeliveryTime({ salesOrderId: order.id, deliveryDate: LATER }, world.user.id);
     expect(applied.manufacturingOrders).toHaveLength(2);
     const parentOps = await mfgService.listOperations(applied.manufacturingOrders[1]!.id);
-    expect(await planRows(parentOps[0]!.id)).toEqual(changed.result.batches[1]!.operations[0]!.weeks);
-    expect(parentOps[0]!.plannedStartWeek).toBe(W3);
-    expect(await salesOrderRow(order.id)).toMatchObject({ status: "in_production", expectedDeliveryDate: W4 });
+    expect(await planRows(parentOps[0]!.id)).toEqual(changed.result.batches[1]!.operations[0]!.days);
+    expect(parentOps[0]).toMatchObject({ plannedStartDate: W3, plannedEndDate: "2030-03-19" });
+    expect(await salesOrderRow(order.id)).toMatchObject({ status: "in_production", expectedDeliveryDate: LATER });
   });
 
   it("is all or nothing: a failure on the second TO (the parent) leaves no TO, no plan rows and no date", async () => {
@@ -461,11 +475,11 @@ describe("reservationen — Skapa tillverkningsordrar för det som saknas", () =
     expect(await allManufacturingOrders()).toEqual([]);
   });
 
-  it("plans the TO by the engine with a warning when the given weeks do not match its operations (template changed)", async () => {
+  it("plans the TO by the engine with a warning when the given days do not match its operations (template changed)", async () => {
     const world = await seedWorld();
     const created = await db.transaction((tx) =>
       mfgService.createManufacturingOrderInTx(tx, { articleId: world.parent.id, quantity: 10, dueDate: W2 }, world.user.id, {
-        plannedWeeks: [{ sequenceNo: 99, weeks: [{ monday: W2, minutes: 600 }] }],
+        plannedDays: [{ sequenceNo: 99, days: [{ date: W2, minutes: 600 }] }],
       })
     );
     expect(created.releaseWarnings).toEqual([
@@ -473,7 +487,7 @@ describe("reservationen — Skapa tillverkningsordrar för det som saknas", () =
       expect.stringContaining("stämmer inte med leveranstidskontrollens"),
     ]);
     const ops = await mfgService.listOperations(created.id);
-    // The engine's own plan: this week, on free capacity.
-    expect(await planRows(ops[0]!.id)).toEqual([{ monday: W1, minutes: 600 }]);
+    // The engine's own plan: from today, on free capacity.
+    expect(await planRows(ops[0]!.id)).toEqual(TEN_HOURS_FROM_TODAY);
   });
 });

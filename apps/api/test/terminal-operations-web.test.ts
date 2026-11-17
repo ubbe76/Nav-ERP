@@ -26,8 +26,8 @@ function op(over: Partial<TerminalOperation> = {}): TerminalOperation {
     quantityCompleted: null,
     quantityScrapped: "0",
     dueDate: null,
-    plannedStartWeek: null,
-    plannedEndWeek: null,
+    plannedStartDate: null,
+    plannedEndDate: null,
     readiness: "ready",
     available: "20",
     materials: [],
@@ -46,11 +46,11 @@ describe("sortTerminalOperations", () => {
     const e = op({ orderNumber: "TO-9", dueDate: "2026-10-01", readiness: "not_ready" });
     expect(sortTerminalOperations([a, b, c, d, e], "urgent")).toEqual([e, d, c, b, a]);
   });
-  it("planned: planned start week ascending, unplanned last, then as urgent", () => {
+  it("planned: planned start day ascending, unplanned last, then as urgent", () => {
     const unplanned = op({ orderNumber: "TO-1", dueDate: "2026-10-01" });
-    const w46late = op({ orderNumber: "TO-5", plannedStartWeek: "2026-11-09", plannedEndWeek: "2026-11-16", dueDate: "2026-12-01" });
-    const w46early = op({ orderNumber: "TO-6", plannedStartWeek: "2026-11-09", plannedEndWeek: "2026-11-09", dueDate: "2026-11-20" });
-    const w45 = op({ orderNumber: "TO-7", plannedStartWeek: "2026-11-02", plannedEndWeek: "2026-11-02", dueDate: null });
+    const w46late = op({ orderNumber: "TO-5", plannedStartDate: "2026-11-09", plannedEndDate: "2026-11-16", dueDate: "2026-12-01" });
+    const w46early = op({ orderNumber: "TO-6", plannedStartDate: "2026-11-09", plannedEndDate: "2026-11-09", dueDate: "2026-11-20" });
+    const w45 = op({ orderNumber: "TO-7", plannedStartDate: "2026-11-02", plannedEndDate: "2026-11-02", dueDate: null });
     expect(sortTerminalOperations([unplanned, w46late, w46early, w45], "planned")).toEqual([w45, w46early, w46late, unplanned]);
   });
   it("material: by first material number, no material last, then as urgent", () => {

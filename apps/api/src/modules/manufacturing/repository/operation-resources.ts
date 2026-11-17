@@ -100,9 +100,9 @@ export interface ResourceSwitch {
 // EN skrivare av bytet: sets the resource and the target row's times on
 // each operation, conditioned on its current resource and on the target
 // being one of its rows, and sets resource_locked. plan_locked is cleared —
-// the weeks were booked on the old resource; the caller's plan writer
-// writes the new weeks afterwards (Ändra's replanOrderInTx, the
-// reservation's planned weeks). Returns the ids actually switched. The
+// the days were booked on the old resource; the caller's plan writer
+// writes the new days afterwards (Ändra's replanOrderInTx, the
+// reservation's planned days). Returns the ids actually switched. The
 // caller holds the operations' row locks (Ändra: lockOrderOperations); the
 // target resources are locked FOR SHARE after them (sorted, like the
 // snapshot), so a type change to lego cannot slip in under the switch.

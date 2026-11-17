@@ -31,7 +31,7 @@ const authService = createAuthService(createAuthRepository(db), "unused", create
 const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 
 const TRUNCATE = sql`TRUNCATE audit_log, inquiry_rows, inquiries, purchase_receipts, mo_report_materials, mo_reports, purchase_order_rows,
-  purchase_orders, article_suppliers, suppliers, mo_operation_plan_weeks, mo_material_consumptions, mo_operation_scrap, mo_operations,
+  purchase_orders, article_suppliers, suppliers, mo_operation_plan_days, mo_material_consumptions, mo_operation_scrap, mo_operations,
   manufacturing_orders, routing_operations, work_centers, production_groups, stock_transactions, bom_components, articles,
   user_settings, users CASCADE`;
 // Only this file's groups — the seeded ALLA/VERKSTAD belong to other files.

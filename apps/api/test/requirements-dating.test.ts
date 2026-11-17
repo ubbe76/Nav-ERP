@@ -27,7 +27,7 @@ const op = (partial: Partial<DatingMoOperation> & { manufacturingOrderId: string
   orderQuantity: 2,
   quantityCompleted: null,
   quantityScrapped: 0,
-  plannedStartWeek: null,
+  plannedStartDate: null,
   planLocked: false,
   ...partial,
 });
@@ -48,10 +48,11 @@ describe("buildLeadTimeContext", () => {
   });
 
   it("without a field the routing's minutes for the quantity plus the lego lead and queue time, rounded up", () => {
-    // 60 + 120 × 3 = 420 min / 480 = 0.875 days + lego 3 + 1 ⇒ 4.875 ⇒ 5.
-    expect(ctx.leadDaysFor("routed", 3)).toBe(5);
-    // 60 + 120 × 20 = 2460 / 480 = 5.125 + 4 ⇒ 9.125 ⇒ 10.
-    expect(ctx.leadDaysFor("routed", 20)).toBe(10);
+    // Counted like the plan (#18): 60 + 120 × 3 = 420 min ⇒ 1 day, and the
+    // lego operation the day it is sent + 3 + 1 ⇒ 5: 6 days.
+    expect(ctx.leadDaysFor("routed", 3)).toBe(6);
+    // 60 + 120 × 20 = 2460 / 480 = 5.125 ⇒ 6 days, + 5 ⇒ 11.
+    expect(ctx.leadDaysFor("routed", 20)).toBe(11);
   });
 
   it("no field and no routing ⇒ 0; Ledtid beställning comes from the resource", () => {
@@ -140,7 +141,7 @@ describe("computeMoStartDates", () => {
     expect(starts.get("none")).toBe("2030-03-04");
   });
 
-  it("an earlier unbinding plan loses to the lead time; a locked or reported-on plan and a later week win", () => {
+  it("an earlier unbinding plan loses to the lead time; a locked or reported-on plan and a later day win", () => {
     // Due Fri 2030-03-29; one operation of 2 × 480 min at 8 h/day ⇒ 2
     // working days ⇒ base Wed 03-27 ("early" has two operations ⇒ 4 days ⇒
     // Mon 03-25).
@@ -154,11 +155,11 @@ describe("computeMoStartDates", () => {
         { manufacturingOrderId: "undated", articleId: "r", quantity: 2, dueDate: null },
       ],
       operations: [
-        op({ manufacturingOrderId: "early", plannedStartWeek: "2030-03-18" }),
-        op({ manufacturingOrderId: "early", plannedStartWeek: "2030-03-11" }),
-        op({ manufacturingOrderId: "locked", plannedStartWeek: "2030-03-11", planLocked: true }),
-        op({ manufacturingOrderId: "reported", plannedStartWeek: "2030-03-11", quantityScrapped: 1 }),
-        op({ manufacturingOrderId: "later", plannedStartWeek: "2030-04-01" }),
+        op({ manufacturingOrderId: "early", plannedStartDate: "2030-03-18" }),
+        op({ manufacturingOrderId: "early", plannedStartDate: "2030-03-11" }),
+        op({ manufacturingOrderId: "locked", plannedStartDate: "2030-03-11", planLocked: true }),
+        op({ manufacturingOrderId: "reported", plannedStartDate: "2030-03-11", quantityScrapped: 1 }),
+        op({ manufacturingOrderId: "later", plannedStartDate: "2030-03-28" }), // the day after the base — a day, not a week
         op({ manufacturingOrderId: "undated" }),
       ],
       articleLeadTimes: new Map(),
@@ -168,7 +169,7 @@ describe("computeMoStartDates", () => {
     expect(starts.get("early")).toBe("2030-03-25");
     expect(starts.get("locked")).toBe("2030-03-11");
     expect(starts.get("reported")).toBe("2030-03-11");
-    expect(starts.get("later")).toBe("2030-04-01");
+    expect(starts.get("later")).toBe("2030-03-28");
     expect(starts.get("undated")).toBeNull();
   });
 });
@@ -230,8 +231,8 @@ describe("configuredLeadDays", () => {
       { workCenterId: "w2", setupTime: 0, runTimePerUnit: 0 },
     ];
     expect(configuredLeadDays(2, ops, 10, ctx)).toBe(2);
-    // 30 + 90 × 10 = 930 / 480 = 1.9375 + 4 ⇒ 5.9375 ⇒ 6.
-    expect(configuredLeadDays(null, ops, 10, ctx)).toBe(6);
+    // 30 + 90 × 10 = 930 / 480 = 1.9375 ⇒ 2 days, lego 1 + 4 ⇒ 7.
+    expect(configuredLeadDays(null, ops, 10, ctx)).toBe(7);
     expect(configuredLeadDays(undefined, [], 10, ctx)).toBe(0);
   });
 

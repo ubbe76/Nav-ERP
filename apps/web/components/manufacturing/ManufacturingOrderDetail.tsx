@@ -66,7 +66,7 @@ import { AuditTrailSection } from "../system/AuditTrailSection";
 import { Lock } from "lucide-react";
 import { suggestionText } from "../../lib/resourceSuggestion";
 import { SwitchResourceButton } from "../planning/SwitchResourceButton";
-import { plannedWeekLabel } from "../../lib/planning";
+import { plannedDateLabel } from "../../lib/planning";
 import { CoveredByCell, GoesToSection, coverageOfRow } from "./CoverageSections";
 import { MoveComponentsDialog } from "./MoveComponentsDialog";
 import { MissingComponentsDialog } from "./MissingComponentsDialog";
@@ -561,7 +561,7 @@ export function ManufacturingOrderDetail({
           columns={[
             { key: "sequenceNo", label: "Sekvensnr", width: "64px", align: "right" },
             { key: "workCenterName", label: "Operation", width: "minmax(100px, 1fr)" },
-            { key: "plannedWeek", label: "Planerad vecka", width: "80px" },
+            { key: "plannedWeek", label: "Planerad", width: "80px" },
             { key: "setupTime", label: "Ställtid (min)", width: "62px", align: "right" },
             { key: "runTimePerUnit", label: "Tid/enhet", width: "62px", align: "right" },
             { key: "status", label: "Status", width: "76px" },
@@ -696,18 +696,18 @@ export function ManufacturingOrderDetail({
                     )}
                   </div>
                 );
-              // Produktionsplanering: the planned weeks; Låst = moved by hand
+              // Produktionsplanering: the planned days; Låst = moved by hand
               // in the Beläggning and left alone by Planera.
               case "plannedWeek": {
                 if (row.status === "done" || row.workCenterType === "subcontract") return "–";
-                const weeks = plannedWeekLabel(row.plannedStartWeek, row.plannedEndWeek);
+                const weeks = plannedDateLabel(row.plannedStartDate, row.plannedEndDate);
                 if (!weeks) return <span style={{ color: "var(--color-text-muted)" }}>Ej planerad</span>;
                 return (
                   <span style={{ display: "inline-flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
                     {weeks}
                     {row.planLocked && (
                       <span
-                        title="Flyttad för hand — Planera låter veckan ligga kvar"
+                        title="Flyttad för hand — Planera låter dagen ligga kvar"
                         style={{
                           display: "inline-flex",
                           alignItems: "center",

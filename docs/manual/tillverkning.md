@@ -562,7 +562,7 @@ Ovanför matrisen står räknaren *N förslag på alternativ resurs* (bara när 
 
 ### Planera
 
-Knappen **Planera** (kräver rättigheten Tillverkning) planerar om alla öppna tillverkningsordrar på ledig kapacitet. Du får först frågan "Planera om alla öppna tillverkningsordrar på ledig kapacitet? Veckor som flyttats för hand ligger kvar." — bekräfta med **Planera**.
+Knappen **Planera** (kräver rättigheten Tillverkning) planerar om alla öppna tillverkningsordrar på ledig kapacitet. Du får först frågan "Planera om alla öppna tillverkningsordrar på ledig kapacitet? Operationer som flyttats för hand ligger kvar." — bekräfta med **Planera**.
 
 - Ordrarna tas i ordning efter **Planerat färdigdatum**, tidigast först (ordrar utan datum sist, sedan ordernummer), och varje orders operationer läggs i tur och ordning: nästa operation får börja samma vecka som föregående blev klar om det finns tid kvar. En operation som redan är påbörjad (rapporterad eller instämplad) planeras från innevarande vecka.
 - **Låsta** operationer (se [Flytta och Lås upp](#flytta-och-las-upp)) rörs inte — deras tid räknas som upptagen innan något annat planeras. Klara operationer får sin plan borttagen.
@@ -596,7 +596,7 @@ Observera att en grupps **Summa**-procent bara ställs mot de medlemmar som har 
 
 ## Körplan
 
-**Tillverkning → Körplan** visar de kommande arbetena på en resurs, vecka för vecka — det som körs på maskinen eller arbetsplatsen härnäst. Sidan går att skriva ut som underlag till verkstaden.
+**Tillverkning → Körplan** visar de kommande arbetena på en resurs, dag för dag — det som körs på maskinen eller arbetsplatsen härnäst. Sidan går att skriva ut som underlag till verkstaden.
 
 Välj **Resurs** (produktionsresurserna; legoresurser finns inte med eftersom de inte körs hos er) och **T.o.m. vecka**. Förvalet för **T.o.m. vecka** är nästa vecka; listan tar med allt som ligger till och med den veckan. Utan vald resurs står *Välj en resurs*, och finns inget att köra står *Inga kommande arbeten på resursen t.o.m. vecka N*.
 

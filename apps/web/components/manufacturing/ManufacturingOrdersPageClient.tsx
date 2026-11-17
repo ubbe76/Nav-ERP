@@ -26,7 +26,7 @@ import {
 import shellStyles from "../../components/AppShell.module.css";
 import styles from "../../app/tillverkning/ordrar/page.module.css";
 import { HelpLink } from "../ui/HelpLink";
-import { plannedWeekLabel } from "../../lib/planning";
+import { plannedDateLabel } from "../../lib/planning";
 import { useCan, useCanOpen } from "../PermissionsProvider";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { useNewFromQuery } from "../../lib/useNewFromQuery";
@@ -312,7 +312,7 @@ export function ManufacturingOrdersPageClient({
             // Produktionsplanering: planned weeks of the pending operations;
             // Sen = planned finish after the due date (or overdue unplanned).
             case "planned": {
-              const weeks = plannedWeekLabel(order.plannedStartWeek ?? null, order.plannedEndWeek ?? null);
+              const weeks = plannedDateLabel(order.plannedStartDate ?? null, order.plannedEndDate ?? null);
               return (
                 <span className={styles.plannedCell}>
                   {weeks ?? "—"}

@@ -2812,8 +2812,8 @@ export interface ManufacturingOrder {
   dueDate: string | null;
   // Produktionsplanering — on list rows and the single GET: min/max planned
   // week (Mondays) over the pending operations, null = unplanned; late = Sen.
-  plannedStartWeek?: string | null;
-  plannedEndWeek?: string | null;
+  plannedStartDate?: string | null;
+  plannedEndDate?: string | null;
   late?: boolean;
   // Pegging (#9): a halvfabrikat TO covering this order's need is late (Halvfabrikat sent).
   componentLate?: boolean;
@@ -2846,14 +2846,14 @@ export interface MOOperationSummary {
 // manufacturing orders' remaining operation time; the web side only renders
 // it, no client-side aggregation.
 // Alternativa resurser (#15, etapp 2): an operation's förslag — derived at
-// every read, never stored. toWeek/currentToWeek are Mondays (YYYY-MM-DD);
-// currentToWeek is null when the operation is unplanned.
+// every read, never stored. toDate/currentToDate are days (YYYY-MM-DD);
+// currentToDate is null when the operation is unplanned.
 export interface ResourceSuggestionOnOperation {
   workCenterId: string;
   code: string;
   name: string;
-  toWeek: string;
-  currentToWeek: string | null;
+  toDate: string;
+  currentToDate: string | null;
   reason: "overloaded" | "unplanned";
 }
 
@@ -2868,8 +2868,8 @@ export interface ResourceSuggestionRow {
   toWorkCenterId: string;
   toCode: string;
   toName: string;
-  currentToWeek: string | null;
-  toWeek: string;
+  currentToDate: string | null;
+  toDate: string;
   reason: "overloaded" | "unplanned";
 }
 
@@ -2894,8 +2894,8 @@ export interface CapacityCellOrder {
   // Produktionsplanering: false = unplanned (counted in the due-date week).
   planned: boolean;
   // Mondays (YYYY-MM-DD); null when unplanned.
-  plannedStartWeek: string | null;
-  plannedEndWeek: string | null;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
   // Moved by hand — Planera leaves it where it is until Lås upp.
   planLocked: boolean;
   // Planned finish is after the order's due date (Sen).
@@ -2988,14 +2988,14 @@ export interface PlanResult {
 
 // POST /planning/operations/:opId/move.
 export interface MoveOperationResult {
-  operation: { plannedStartWeek: string | null; plannedEndWeek: string | null; planLocked: boolean };
-  following: { moOperationId: string; sequenceNo: number; plannedStartWeek: string | null; plannedEndWeek: string | null }[];
+  operation: { plannedStartDate: string | null; plannedEndDate: string | null; planLocked: boolean };
+  following: { moOperationId: string; sequenceNo: number; plannedStartDate: string | null; plannedEndDate: string | null }[];
   warnings: PlanWarning[];
 }
 
 // POST /planning/operations/:opId/unlock.
 export interface UnlockOperationResult {
-  operation: { plannedStartWeek: string | null; plannedEndWeek: string | null; planLocked: boolean };
+  operation: { plannedStartDate: string | null; plannedEndDate: string | null; planLocked: boolean };
 }
 
 export interface MOMaterialConsumption {
@@ -3112,8 +3112,8 @@ export interface MOOperation {
   showNetWeight: boolean;
   // Produktionsplanering: planned weeks (Mondays), null = unplanned. A locked
   // plan was moved by hand and stays put through Planera.
-  plannedStartWeek: string | null;
-  plannedEndWeek: string | null;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
   planLocked: boolean;
   plannedAt: string | null;
   // Alternativa resurser: the possible resources ([] = none, so no choice) and
@@ -6645,8 +6645,8 @@ export interface TerminalOperation {
   quantityScrapped: string;
   dueDate: string | null;
   // Produktionsplanering: planned weeks (Mondays); null = unplanned.
-  plannedStartWeek: string | null;
-  plannedEndWeek: string | null;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
   readiness: TerminalReadiness;
   available: string;
   materials: TerminalMaterial[];
@@ -6695,13 +6695,13 @@ export type DtcStep =
       description: string | null;
       workCenterCode: string;
       workCenterName: string;
-      // Mondays of the first and last week the operation occupies.
-      fromWeek: string;
-      toWeek: string;
-      // Minutes booked per week (Mondays).
-      weeks?: { monday: string; minutes: number }[];
+      // First and last day the operation occupies.
+      fromDate: string;
+      toDate: string;
+      // Minutes booked per day.
+      days?: { date: string; minutes: number }[];
       date: string;
-      // Set when the step runs on an alternative resource; toWeek is the week
+      // Set when the step runs on an alternative resource; toDate is the day
       // the ordinary resource would have given.
       alternativeOf?: DtcAlternativeOf | null;
     }
@@ -6722,7 +6722,7 @@ export interface DtcAlternativeOf {
   workCenterCode: string;
   workCenterName: string;
   // null = the ordinary resource has no room within the horizon (two years).
-  toWeek: string | null;
+  toDate: string | null;
 }
 
 export interface DeliveryTimeCheckRow {
@@ -6753,7 +6753,7 @@ export interface DtcBatch {
     workCenterCode?: string;
     workCenterName?: string;
     alternativeOf?: DtcAlternativeOf | null;
-    weeks: { monday: string; minutes: number }[];
+    days: { date: string; minutes: number }[];
   }[];
 }
 
@@ -7380,21 +7380,21 @@ export interface RunPlanRow {
   remainingHours: number;
   setupDone: boolean;
   dueDate: string | null;
-  week: string | null;
+  date: string | null;
   late: boolean;
   planned: boolean;
-  plannedStartWeek: string | null;
-  plannedEndWeek: string | null;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
   planLocked: boolean;
   status: RunPlanStatus;
   available: number | null;
   waitingForSequenceNo: number | null;
 }
 
-export interface RunPlanWeek {
-  kind: "late" | "week" | "unplanned";
-  week: string | null;
-  isoYear: number | null;
+export interface RunPlanDay {
+  kind: "late" | "day" | "unplanned";
+  date: string | null;
+  weekday: number | null;
   isoWeek: number | null;
   late: boolean;
   rows: number;
@@ -7411,10 +7411,9 @@ export interface RunPlanStation {
 export interface RunPlanResult {
   workCenter: RunPlanStation | null;
   today: string;
-  currentWeek: string;
-  toWeek: string;
+  toDate: string;
   rows: RunPlanRow[];
-  weeks: RunPlanWeek[];
+  days: RunPlanDay[];
   totalMinutes: number;
   totalHours: number;
   stations: RunPlanStation[];

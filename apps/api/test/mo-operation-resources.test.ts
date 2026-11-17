@@ -102,7 +102,7 @@ const costingService = createCostingService(createCostingRepository(db), {
   }),
 });
 
-const TRUNCATE = sql`TRUNCATE cost_calculations, mo_operation_plan_weeks, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, holidays, week_schedule_days, week_schedules, day_schedule_breaks, day_schedules, attendance_sessions, stamp_sessions, time_reports, employees, stock_transactions, stock_locations, warehouses, bom_components, articles, audit_log, users CASCADE`;
+const TRUNCATE = sql`TRUNCATE cost_calculations, mo_operation_plan_days, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, holidays, week_schedule_days, week_schedules, day_schedule_breaks, day_schedules, attendance_sessions, stamp_sessions, time_reports, employees, stock_transactions, stock_locations, warehouses, bom_components, articles, audit_log, users CASCADE`;
 
 beforeEach(async () => {
   suggestionReads = 0;
@@ -146,7 +146,8 @@ async function terminalOpIds(workCenterId: string) {
 // stycktid som ordinarie); Op 20 on 140 (no alternatives). The TO is 10 st,
 // released and planned at creation.
 // With `fill110` a TO of 40 h on 110 is released first: it fills W1, so the
-// world's Op 10 is planned in W2 on a full 110 — while 120 and 130 are free.
+// world's Op 10 is planned from Monday of W2 on a full 110 — while 120 and
+// 130 are free.
 async function seedWorld(opts: { inactiveAlternative?: boolean; fill110?: boolean } = {}) {
   const user = await authRepo.create({ email: `alt-${crypto.randomUUID()}@example.com`, passwordHash: "x", name: "Planerare", role: "admin" });
   const day = await scheduleService.createDaySchedule({ code: "D8", name: "Dagtid 8h", startTime: "07:00", endTime: "15:00", breaks: [], active: true });
@@ -257,9 +258,9 @@ describe("the snapshot at release", () => {
 describe("Byt resurs — Ändra operationer", () => {
   it("a switch to an alternative takes the row's times, sets Vald för hand, keeps the rows, replans and logs before/after", async () => {
     const w = await seedWorld();
-    // A locked plan: the switch drops the lock, the weeks were booked on 110.
-    await planningService.moveOperation(w.op10.id, { weekMonday: W2, moveFollowing: true }, w.user.id);
-    expect(await opRow(w.op10.id)).toMatchObject({ planLocked: true, plannedStartWeek: W2 });
+    // A locked plan: the switch drops the lock, the days were booked on 110.
+    await planningService.moveOperation(w.op10.id, { date: W2, moveFollowing: true }, w.user.id);
+    expect(await opRow(w.op10.id)).toMatchObject({ planLocked: true, plannedStartDate: W2 });
 
     const { operation, warnings } = await mfgService.updateOperation(w.order.id, w.op10.id, { workCenterId: w.r120.id }, w.user.id);
     expect(warnings).toEqual(expect.any(Array));
@@ -270,8 +271,9 @@ describe("Byt resurs — Ändra operationer", () => {
       runTimePerUnit: "30.00000000",
       resourceLocked: true,
       planLocked: false,
-      // Replanned on 120's free capacity: this week (10 + 30 × 10 = 310 min).
-      plannedStartWeek: W1,
+      // Replanned on 120's free capacity: today (10 + 30 × 10 = 310 min).
+      plannedStartDate: W1,
+      plannedEndDate: W1,
     });
     expect(operation.resources.map((r) => r.code)).toEqual(["110", "120", "130"]);
     expect(await resourceRows(w.op10.id)).toHaveLength(3);
@@ -373,7 +375,7 @@ describe("Planera", () => {
       setupTime: before.setupTime,
       runTimePerUnit: before.runTimePerUnit,
       resourceLocked: true,
-      plannedStartWeek: W1,
+      plannedStartDate: W1,
     });
     expect(await resourceRows(w.op10.id)).toEqual(rowsBefore);
     // An untouched operation with alternatives stays on its ordinarie too.
@@ -505,15 +507,15 @@ describe("the costing reads the TO's resource", () => {
 // Planera's answer; Planera never switches; Byt till X (Ändra's PATCH with
 // only workCenterId) follows the förslag, which then ends.
 describe("förslag på resurs (etapp 2)", () => {
-  // 110 is full in W1 (the filler), so Op 10 (610 min) is planned in W2. On
-  // 120 (10 + 30 × 10 = 310 min) and 130 (5 + 60 × 10 = 605 min) it fits W1;
-  // the same week, so rank 1 (120) wins.
+  // 110 is full in W1 (the filler), so Op 10 (610 min) is planned on Monday
+  // and Tuesday of W2. On 120 (10 + 30 × 10 = 310 min) it is ready today, on
+  // 130 (5 + 60 × 10 = 605 min) tomorrow — the earliest DAY wins (120).
   const expected = (w: Awaited<ReturnType<typeof seedWorld>>) => ({
     workCenterId: w.r120.id,
     code: "120",
     name: "Kantpress 2",
-    toWeek: W1,
-    currentToWeek: W2,
+    toDate: W1,
+    currentToDate: "2030-03-12",
     reason: "overloaded",
   });
   const allOperations = () =>
@@ -530,7 +532,7 @@ describe("förslag på resurs (etapp 2)", () => {
 
   it("is the same on the TO card, in Beläggning and in Planera's answer — and Planera never touches the resource", async () => {
     const w = await seedWorld({ fill110: true });
-    expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r110.id, plannedStartWeek: W2, plannedEndWeek: W2 });
+    expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r110.id, plannedStartDate: W2, plannedEndDate: "2030-03-12" });
 
     // The TO card (seedWorld read it once already).
     suggestionReads = 0;
@@ -557,8 +559,8 @@ describe("förslag på resurs (etapp 2)", () => {
       toWorkCenterId: w.r120.id,
       toCode: "120",
       toName: "Kantpress 2",
-      currentToWeek: W2,
-      toWeek: W1,
+      currentToDate: "2030-03-12",
+      toDate: W1,
       reason: "overloaded",
     };
     expect(capacity.summary.resourceSuggestions).toEqual([listed]);
@@ -569,12 +571,12 @@ describe("förslag på resurs (etapp 2)", () => {
     const run = await planningService.planProductionRun(w.user.id);
     expect(run.resourceSuggestions).toEqual([listed]);
     expect(await allOperations()).toEqual(before);
-    expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r110.id, resourceLocked: false, plannedEndWeek: W2 });
+    expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r110.id, resourceLocked: false, plannedEndDate: "2030-03-12" });
     // The answer agrees with the plan it wrote, read back by the matrix.
     expect((await planningService.getCapacity({ weeks: 3 })).summary.resourceSuggestions).toEqual(run.resourceSuggestions);
   });
 
-  it("Byt till X with only the resource follows the förslag: the suggested week, Vald för hand, and the förslag is gone", async () => {
+  it("Byt till X with only the resource follows the förslag: the suggested day, Vald för hand, and the förslag is gone", async () => {
     const w = await seedWorld({ fill110: true });
     const suggestion = (await operationView(w.order.id, w.op10.id)).suggestion!;
     const { operation } = await mfgService.updateOperation(w.order.id, w.op10.id, { workCenterId: suggestion.workCenterId }, w.user.id);
@@ -583,7 +585,7 @@ describe("förslag på resurs (etapp 2)", () => {
       setupTime: "10.00",
       runTimePerUnit: "30.00000000",
       resourceLocked: true,
-      plannedEndWeek: suggestion.toWeek,
+      plannedEndDate: suggestion.toDate,
     });
     suggestionReads = 0;
     expect((await operationView(w.order.id, w.op10.id)).suggestion).toBeNull();
@@ -600,8 +602,8 @@ describe("förslag på resurs (etapp 2)", () => {
     const current = async () => (await operationView(w.order.id, w.op10.id)).suggestion;
     expect(await current()).toEqual(expected(w));
 
-    // Flytta locks the weeks: the planner's decision. Lås upp brings it back.
-    await planningService.moveOperation(w.op10.id, { weekMonday: W2, moveFollowing: true }, w.user.id);
+    // Flytta locks the days: the planner's decision. Lås upp brings it back.
+    await planningService.moveOperation(w.op10.id, { date: W2, moveFollowing: true }, w.user.id);
     expect(await current()).toBeNull();
     await planningService.unlockOperation(w.op10.id, w.user.id);
     expect(await current()).toEqual(expected(w));
@@ -654,20 +656,22 @@ describe("förslag på resurs (etapp 2)", () => {
     expect((await planningService.planProductionRun(w.user.id)).resourceSuggestions).toEqual([]);
   });
 
-  it("after an overbooked previous operation the förslag starts where Planera puts it — Byt gives exactly the förslag's week", async () => {
+  it("after an overbooked previous operation the förslag starts where Planera puts it — Byt gives exactly the förslag's day", async () => {
     const w = await seedWorld();
     await mfgService.cancel(w.order.id, w.user.id); // the seed's TO is no load here
     const article = async (prefix: string) =>
       testArticleService.createArticle(parsed(createArticleSchema, { articleNumber: `${prefix}-${crypto.randomUUID().slice(0, 6)}`, name: prefix, type: "manufactured", active: true }));
-    // 30 h on 140 and 80 h on 110 (W1–W2) come first.
+    // 30 h on 140 and 120 h on 110 (W1–W3) come first. (80 h before #18:
+    // Op 20's floor is now the working day after Op 10 is ready, so 110 has
+    // to be full a week longer for the ordinarie to be behind its load.)
     const f140 = await article("F140");
     await mfgService.createRoutingOperation(f140.id, { sequenceNo: 10, workCenterId: w.r140.id, setupTime: 1800, runTimePerUnit: 0 });
     await mfgService.createManufacturingOrder({ articleId: f140.id, quantity: 1 }, w.user.id);
     const f110 = await article("F110");
-    await mfgService.createRoutingOperation(f110.id, { sequenceNo: 10, workCenterId: w.r110.id, setupTime: 4800, runTimePerUnit: 0 });
+    await mfgService.createRoutingOperation(f110.id, { sequenceNo: 10, workCenterId: w.r110.id, setupTime: 7200, runTimePerUnit: 0 });
     await mfgService.createManufacturingOrder({ articleId: f110.id, quantity: 1 }, w.user.id);
-    // The order: Op 10 on 140 (10 h) fills 140's W1; Op 20 on 110 (10 h),
-    // 120 as an alternative, lands in W3 behind the 80 h.
+    // The order: Op 10 on 140 (10 h) fills 140's W1 (ready Friday 03-08);
+    // Op 20 on 110 (10 h), 120 as an alternative, lands in W4 behind the 120 h.
     const product = await article("S");
     await mfgService.createRoutingOperation(product.id, { sequenceNo: 10, workCenterId: w.r140.id, setupTime: 600, runTimePerUnit: 0 });
     await mfgService.createRoutingOperation(product.id, {
@@ -679,34 +683,35 @@ describe("förslag på resurs (etapp 2)", () => {
     });
     const order = await mfgService.createManufacturingOrder({ articleId: product.id, quantity: 1 }, w.user.id);
     const [op10, op20] = await mfgService.listOperations(order.id);
-    expect([op10!.plannedEndWeek, op20!.plannedEndWeek]).toEqual([W1, W3]);
+    expect([op10!.plannedEndDate, op20!.plannedEndDate]).toEqual(["2030-03-08", "2030-03-26"]);
 
-    // 140 loses half its capacity: Op 10's stored W1 is overbooked now — the
-    // 30 h ahead of it take W1's 20 h and 10 h of W2, so Planera puts Op 10
-    // in W2. The förslag starts there: 120 in W2, not in W1 as a floor from
-    // the stored week would promise.
+    // 140 loses half its capacity: Op 10's stored days are overbooked now —
+    // the 30 h ahead of it take 7.5 four-hour days (to Wednesday 03-13), so
+    // Planera puts Op 10 on 03-13…03-15. The förslag starts the working day
+    // after that: 120 on 03-18…03-19, not on 03-11…03-12 as a floor from the
+    // stored day (03-08) would promise.
     await mfgService.updateWorkCenter(w.r140.id, { capacityFactor: 0.5 });
     const suggestion = (await operationView(order.id, op20!.id)).suggestion;
-    expect(suggestion).toMatchObject({ workCenterId: w.r120.id, toWeek: W2, currentToWeek: W3, reason: "overloaded" });
+    expect(suggestion).toMatchObject({ workCenterId: w.r120.id, toDate: "2030-03-19", currentToDate: "2030-03-26", reason: "overloaded" });
 
     // Byt till 120: the order is replanned with Planera's rules and lands in
-    // exactly the förslag's week.
+    // exactly the förslag's day.
     const { operation } = await mfgService.updateOperation(
       order.id,
       op20!.id,
       { workCenterId: suggestion!.workCenterId, expectedWorkCenterId: w.r110.id },
       w.user.id
     );
-    expect(operation).toMatchObject({ workCenterId: w.r120.id, resourceLocked: true, plannedEndWeek: suggestion!.toWeek });
-    expect(await opRow(op10!.id)).toMatchObject({ plannedStartWeek: W2, plannedEndWeek: W2 });
+    expect(operation).toMatchObject({ workCenterId: w.r120.id, resourceLocked: true, plannedEndDate: suggestion!.toDate });
+    expect(await opRow(op10!.id)).toMatchObject({ plannedStartDate: "2030-03-13", plannedEndDate: "2030-03-15" });
   });
 
   it("Byt till X sends its precondition: a moved operation, or one on another resource since, is refused and nothing changes", async () => {
     const w = await seedWorld({ fill110: true });
     const byt = (expectedWorkCenterId: string) =>
       mfgService.updateOperation(w.order.id, w.op10.id, { workCenterId: w.r120.id, expectedWorkCenterId }, w.user.id);
-    // Flyttad since the förslag was read: the weeks are the planner's decision.
-    await planningService.moveOperation(w.op10.id, { weekMonday: W2, moveFollowing: true }, w.user.id);
+    // Flyttad since the förslag was read: the days are the planner's decision.
+    await planningService.moveOperation(w.op10.id, { date: W2, moveFollowing: true }, w.user.id);
     await expect(byt(w.r110.id)).rejects.toBeInstanceOf(MoOperationResourceChangedError);
     expect(await opRow(w.op10.id)).toMatchObject({ workCenterId: w.r110.id, planLocked: true, resourceLocked: false });
     // Ändra without the precondition still switches the locked operation:

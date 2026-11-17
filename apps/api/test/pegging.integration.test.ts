@@ -81,7 +81,7 @@ const planningService = createPlanningService(createPlanningRepository(db), {
 });
 planReaderRef.current = planningService;
 
-const TRUNCATE = sql`TRUNCATE mo_operation_plan_weeks, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, holidays, week_schedule_days, week_schedules, day_schedule_breaks, day_schedules, stock_transactions, stock_locations, warehouses, bom_components, article_suppliers, articles, users CASCADE`;
+const TRUNCATE = sql`TRUNCATE mo_operation_plan_days, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, holidays, week_schedule_days, week_schedules, day_schedule_breaks, day_schedules, stock_transactions, stock_locations, warehouses, bom_components, article_suppliers, articles, users CASCADE`;
 
 beforeEach(async () => {
   await db.execute(TRUNCATE);
@@ -198,28 +198,30 @@ describe("the chain product → halvfabrikat → raw material", () => {
     expect((await unplannedMfgService.listManufacturingOrders({ limit: 50, offset: 0, status: ["component_late"] })).total).toBe(0);
   });
 
-  it("a halvfabrikat TO ready in time is not late; a planned week after the need makes it late — the same finish as Sen", async () => {
+  it("a halvfabrikat TO ready in time is not late; a planned day after the need makes it late — the same finish as Sen", async () => {
     const world = await seedWorld();
     const parent = await mfgService.createManufacturingOrder({ articleId: world.product.id, quantity: 2, dueDate: "2030-03-29" }, world.user.id);
-    // Planned in W1 (free capacity) ⇒ plannedFinish Fri 2030-03-08, well
-    // before the need on 2030-03-22, although due only on Wed 2030-03-20.
+    // Planned today (free capacity) ⇒ plannedFinish 2030-03-04 — the day
+    // its last minute is placed (the week's Friday before #18) — well before
+    // the need on 2030-03-22, although due only on Wed 2030-03-20.
     const semi = await mfgService.createManufacturingOrder({ articleId: world.semi.id, quantity: 2, dueDate: "2030-03-20" }, world.user.id);
     const [op10] = await mfgService.listOperations(semi.id);
-    expect(op10).toMatchObject({ plannedStartWeek: W1, plannedEndWeek: W1 });
+    expect(op10).toMatchObject({ plannedStartDate: W1, plannedEndDate: W1 });
 
     let coverage = await planningService.getManufacturingOrderCoverage(parent.id);
     expect(coverage.componentLate).toBe(false);
-    expect(coverage.materials[0]!.allocations[0]).toMatchObject({ documentId: semi.id, readyDate: "2030-03-08", late: false, daysLate: 0 });
+    expect(coverage.materials[0]!.allocations[0]).toMatchObject({ documentId: semi.id, readyDate: "2030-03-04", late: false, daysLate: 0 });
     expect((await list("component_late")).total).toBe(0);
 
-    // Flytta the operation to W4: the plan finishes it Fri 2030-03-29 —
-    // after the need (5 working days) and after its own due date (Sen).
-    await planningService.moveOperation(op10!.id, { weekMonday: W4, moveFollowing: false }, world.user.id);
+    // Flytta the operation to Monday of W4: the plan finishes it that day,
+    // 2030-03-25 — after the need (1 working day) and after its own due
+    // date (Sen).
+    await planningService.moveOperation(op10!.id, { date: W4, moveFollowing: false }, world.user.id);
     coverage = await planningService.getManufacturingOrderCoverage(parent.id);
     expect(coverage.componentLate).toBe(true);
-    expect(coverage.materials[0]!.allocations[0]).toMatchObject({ documentId: semi.id, readyDate: "2030-03-29", late: true, daysLate: 5 });
+    expect(coverage.materials[0]!.allocations[0]).toMatchObject({ documentId: semi.id, readyDate: "2030-03-25", late: true, daysLate: 1 });
     const summaries = await planningService.orderPlanSummaries([semi.id]);
-    expect(summaries.get(semi.id)).toMatchObject({ late: true, plannedFinish: "2030-03-29", plannedEndWeek: W4 });
+    expect(summaries.get(semi.id)).toMatchObject({ late: true, plannedFinish: "2030-03-25", plannedEndDate: W4 });
     expect((await list("component_late")).rows.map((r) => r.id)).toEqual([parent.id]);
     // Sen is the halvfabrikat's, Halvfabrikat sent the product's.
     const rows = (await list()).rows;

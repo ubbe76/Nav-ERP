@@ -85,7 +85,7 @@ const planningService = createPlanningService(createPlanningRepository(db), {
 });
 planReaderRef.current = planningService;
 
-const TRUNCATE = sql`TRUNCATE audit_log, mo_operation_plan_weeks, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, holidays, week_schedule_days, week_schedules, day_schedule_breaks, day_schedules, stock_transactions, stock_locations, warehouses, bom_components, article_suppliers, configurator_templates, articles, users CASCADE`;
+const TRUNCATE = sql`TRUNCATE audit_log, mo_operation_plan_days, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, holidays, week_schedule_days, week_schedules, day_schedule_breaks, day_schedules, stock_transactions, stock_locations, warehouses, bom_components, article_suppliers, configurator_templates, articles, users CASCADE`;
 
 beforeEach(async () => {
   await db.execute(TRUNCATE);

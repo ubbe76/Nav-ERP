@@ -34,7 +34,7 @@ export interface DatingRoutingOperation {
 }
 
 // mo_operations of the open TOs: what remainingOperationMinutes needs plus
-// the planned start week (Produktionsplanering) and its lock — moStartDate
+// the planned start day (Produktionsplanering) and its lock — moStartDate
 // decides when the plan wins over the lead time.
 export interface DatingMoOperation {
   // Id and sequence number: the lego dating (computeLegoOperationDates)
@@ -52,7 +52,7 @@ export interface DatingMoOperation {
   // Reported time per resource (#15) — remainingOperationMinutes' setup rule.
   timeOnCurrentResource?: boolean;
   timeOnOtherResource?: boolean;
-  plannedStartWeek: string | null;
+  plannedStartDate: string | null; // mo_operations.planned_start_date
   planLocked: boolean;
 }
 
@@ -108,11 +108,11 @@ export function buildLeadTimeContext(input: {
 }
 
 // Every open TO's start date (moStartDate): the due date minus the lead
-// time, or the plan's earliest week when it is binding (locked or reported
+// time, or the plan's earliest day when it is binding (locked or reported
 // on) or later. A TO WITH operations
 // (released/in progress — or planned with a snapshot) is measured on its own
-// operations' remaining minutes plus the Standardkötid between the ones not
-// yet done — a partly reported TO needs less time, one with every operation
+// operations' remaining minutes plus the Standardkötid between the ones
+// with work left — a partly reported TO needs less time, one with every operation
 // done needs 0 (its done operations are passed as `done` work so the
 // Standardledtid never applies to it); a TO without any (an ordinary planned
 // TO has none before release) on the article's routing for its quantity,
@@ -137,7 +137,7 @@ export function computeMoStartDates(input: {
     result.set(
       order.manufacturingOrderId,
       moStartDate({
-        plannedStartWeeks: (ops ?? []).map((op) => op.plannedStartWeek),
+        plannedStartDates: (ops ?? []).map((op) => op.plannedStartDate),
         // Reported on (OK or scrap) = the work is under way, like Planera's
         // "påbörjad" (an open stamp session alone is not loaded here).
         planFixed: (ops ?? []).some(

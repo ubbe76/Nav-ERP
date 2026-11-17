@@ -1,4 +1,5 @@
 import { apiFetch } from "./api";
+import { plannedDateLabel, shortDate } from "./planning";
 import type { ApplyDeliveryTimeResult, DeliveryTimeCheckResult, DtcStep } from "./types";
 
 export interface DeliveryTimeCheckRequest {
@@ -69,17 +70,15 @@ export function formatDtcStep(step: DtcStep): string {
       return `Köps ${formatDtcQuantity(step.quantity)} ${step.articleNumber} — ankomst ${step.date} (${supplier}${lead})`;
     }
     case "operation": {
-      const from = isoWeekNumber(step.fromWeek);
-      const to = isoWeekNumber(step.toWeek);
-      const weeks = step.fromWeek === step.toWeek ? `vecka ${from}` : `vecka ${from}–${to}`;
-      // toWeek null = the ordinary resource has no room within the horizon —
+      const days = plannedDateLabel(step.fromDate, step.toDate);
+      // toDate null = the ordinary resource has no room within the horizon —
       // the same wording as formatDtcAlternativeSummary below.
       const ordinary =
-        step.alternativeOf && step.alternativeOf.toWeek !== null
-          ? `ordinarie v. ${isoWeekNumber(step.alternativeOf.toWeek)}`
-          : "ordinarie ger ingen vecka inom två år";
+        step.alternativeOf && step.alternativeOf.toDate !== null
+          ? `ordinarie ${shortDate(step.alternativeOf.toDate)}`
+          : "ordinarie ger ingen dag inom två år";
       const alt = step.alternativeOf ? ` (alternativ till ${step.alternativeOf.workCenterCode}, ${ordinary})` : "";
-      return `${step.articleNumber} op ${step.sequenceNo}${step.description ? ` ${step.description}` : ""} — ${step.workCenterName} (${step.workCenterCode})${alt}, ${weeks}, klar ${step.date}`;
+      return `${step.articleNumber} op ${step.sequenceNo}${step.description ? ` ${step.description}` : ""} — ${step.workCenterName} (${step.workCenterCode})${alt}, ${days}, klar ${step.date}`;
     }
     case "subcontract": {
       const days = step.leadTimeDays === null ? "" : ` ${step.leadTimeDays} dagar,`;

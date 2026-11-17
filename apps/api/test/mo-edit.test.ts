@@ -7,7 +7,7 @@ import {
   inquiries,
   inquiryRows,
   moMaterialConsumptions,
-  moOperationPlanWeeks,
+  moOperationPlanDays,
   moOperations,
   purchaseOrderRows,
   purchaseOrders,
@@ -109,7 +109,7 @@ const planningService = createPlanningService(createPlanningRepository(db), {
 });
 planReaderRef.current = planningService;
 
-const TRUNCATE = sql`TRUNCATE configurator_templates, mo_operation_plan_weeks, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, inquiry_rows, inquiries, purchase_order_rows, purchase_orders, work_centers, production_groups, holidays, week_schedule_days, week_schedules, day_schedule_breaks, day_schedules, attendance_sessions, stamp_sessions, time_reports, employees, stock_transactions, stock_locations, warehouses, bom_components, article_units, articles, suppliers, audit_log, users CASCADE`;
+const TRUNCATE = sql`TRUNCATE configurator_templates, mo_operation_plan_days, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, inquiry_rows, inquiries, purchase_order_rows, purchase_orders, work_centers, production_groups, holidays, week_schedule_days, week_schedules, day_schedule_breaks, day_schedules, attendance_sessions, stamp_sessions, time_reports, employees, stock_transactions, stock_locations, warehouses, bom_components, article_units, articles, suppliers, audit_log, users CASCADE`;
 
 beforeEach(async () => {
   await db.execute(TRUNCATE);
@@ -122,11 +122,11 @@ afterAll(async () => {
 
 async function planRows(opId: string) {
   const rows = await db
-    .select({ monday: moOperationPlanWeeks.weekMonday, minutes: moOperationPlanWeeks.minutes })
-    .from(moOperationPlanWeeks)
-    .where(eq(moOperationPlanWeeks.moOperationId, opId))
-    .orderBy(moOperationPlanWeeks.weekMonday);
-  return rows.map((r) => ({ monday: r.monday, minutes: Number(r.minutes) }));
+    .select({ date: moOperationPlanDays.planDate, minutes: moOperationPlanDays.minutes })
+    .from(moOperationPlanDays)
+    .where(eq(moOperationPlanDays.moOperationId, opId))
+    .orderBy(moOperationPlanDays.planDate);
+  return rows.map((r) => ({ date: r.date, minutes: Number(r.minutes) }));
 }
 
 async function opRow(opId: string) {
@@ -420,9 +420,13 @@ describe("operations", () => {
       planLocked: false,
     });
     expect(warnings).toEqual([]);
-    // 10 h on R1 (op 10) in W1, op 20 10 h on R2 in W1, the new op 10.5 h on R1 after op 20 — still W1.
-    expect(operation.plannedStartWeek).toBe(W1);
-    expect(await planRows(operation.id)).toEqual([{ monday: W1, minutes: 630 }]);
+    // 10 h on R1 (op 10) Monday–Tuesday, op 20 10 h on R2 Wednesday–Thursday (the working day
+    // after op 10 is ready), the new op 10.5 h on R1 the day after op 20: Friday and Monday.
+    expect(operation.plannedStartDate).toBe("2030-03-08");
+    expect(await planRows(operation.id)).toEqual([
+      { date: "2030-03-08", minutes: 480 },
+      { date: "2030-03-11", minutes: 150 },
+    ]);
     expect(await mfgService.listOperations(w.order.id)).toHaveLength(3);
     // The article's routing is untouched.
     expect(await mfgService.listRoutingOperations(w.parent.id)).toHaveLength(2);
@@ -441,7 +445,7 @@ describe("operations", () => {
     const { operation } = await mfgService.addOperation(w.order.id, { sequenceNo: 30, workCenterId: w.lego.id, setupTime: 0, runTimePerUnit: 0, unitPrice: 12.5 }, w.user.id);
     expect(operation).toMatchObject({ workCenterType: "subcontract", subcontractSupplierId: w.supplier.id, subcontractSupplierName: "Lego AB", unitPrice: "12.5000" });
     // Lego: no plan.
-    expect(operation.plannedStartWeek).toBeNull();
+    expect(operation.plannedStartDate).toBeNull();
     await expect(mfgService.updateOperation(w.order.id, w.op20.id, { sequenceNo: 30 }, w.user.id)).rejects.toBeInstanceOf(MoOperationSequenceTakenError);
   });
 
@@ -454,12 +458,12 @@ describe("operations", () => {
     expect(texts.operation).toMatchObject({ description: "Kapning", comment: null, quantityCompleted: "2.0000" });
     expect(texts.warnings).toEqual([]);
     expect((await opRow(w.op10.id))!.plannedAt?.getTime()).toBe(before!.plannedAt?.getTime());
-    // 60 → 300 min/st: 8 st remain ⇒ 40 h, started ⇒ from this week; R1 has 40 h in W1 minus nothing else.
+    // 60 → 300 min/st: 8 st remain ⇒ 40 h, started ⇒ from today; R1 has 8 h a day and nothing else on it.
     const times = await mfgService.updateOperation(w.order.id, w.op10.id, { runTimePerUnit: 300 }, w.user.id);
     expect(times.operation.runTimePerUnit).toBe("300.00000000");
-    expect(await planRows(w.op10.id)).toEqual([{ monday: W1, minutes: 2400 }]);
-    // Op 20 follows into W2 (R1 full in W1 ⇒ op 10 ends W1; op 20 needs 10 h on R2, W1 has room — it ends the same week).
-    expect((await opRow(w.op20.id))!.plannedStartWeek).toBe(W1);
+    expect(await planRows(w.op10.id)).toEqual(["2030-03-04", "2030-03-05", "2030-03-06", "2030-03-07", "2030-03-08"].map((date) => ({ date, minutes: 480 })));
+    // Op 20 follows: op 10 is ready on Friday, so op 20 starts on Monday (the same week, W1, before #18).
+    expect((await opRow(w.op20.id))!.plannedStartDate).toBe(W2);
     expect((await opRow(w.op10.id))!.plannedAt!.getTime()).toBeGreaterThan(before!.plannedAt!.getTime());
     expect(await auditRows("operation_changed")).toMatchObject([
       { detail: { sequenceNo: 10, workCenterCode: "101", before: { description: null }, after: { description: "Kapning" } } },
@@ -472,8 +476,8 @@ describe("operations", () => {
     await db.insert(systemSettings).values({ key: "planning_long_operation_weeks", value: "1" });
     const { warnings } = await mfgService.updateOperation(w.order.id, w.op20.id, { runTimePerUnit: 600 }, w.user.id);
     expect(warnings).toEqual([expect.stringContaining("Op 20 på 201 (P1 Produkt) har orimligt mycket tid: 100 h kvar")]);
-    // Planned anyway, over W1–W3.
-    expect((await opRow(w.op20.id))!.plannedStartWeek).toBe(W1);
+    // Planned anyway, from the working day after op 10 is ready (Tuesday).
+    expect((await opRow(w.op20.id))!.plannedStartDate).toBe("2030-03-06");
     expect((await planRows(w.op20.id)).reduce((s, r) => s + r.minutes, 0)).toBe(6000);
   });
 
@@ -516,11 +520,11 @@ describe("operations", () => {
     const w = await seedWorld();
     // Untouched: own → lego, supplier from the body, prices allowed.
     const toLego = await mfgService.updateOperation(w.order.id, w.op20.id, { workCenterId: w.lego.id, subcontractSupplierId: w.supplier.id, unitPrice: 9 }, w.user.id);
-    expect(toLego.operation).toMatchObject({ workCenterType: "subcontract", unitPrice: "9.0000", plannedStartWeek: null });
+    expect(toLego.operation).toMatchObject({ workCenterType: "subcontract", unitPrice: "9.0000", plannedStartDate: null });
     // Back to own: lego fields cleared.
     const back = await mfgService.updateOperation(w.order.id, w.op20.id, { workCenterId: w.r2.id }, w.user.id);
     expect(back.operation).toMatchObject({ workCenterType: "machine", subcontractSupplierId: null, unitPrice: null, setupPrice: null, showNetWeight: false });
-    expect(back.operation.plannedStartWeek).toBe(W1);
+    expect(back.operation.plannedStartDate).toBe("2030-03-06");
     // A time-only stamp counts as reported.
     const worker = await employee();
     const session = await timeReportService.stampIn({ employeeId: worker.id, moOperationId: w.op20.id }, w.user.id);
@@ -532,16 +536,16 @@ describe("operations", () => {
 
   it("releases the lock when a locked operation changes resource, keeps it on a time change", async () => {
     const w = await seedWorld();
-    await planningService.moveOperation(w.op20.id, { weekMonday: W2, moveFollowing: true }, w.user.id);
-    expect(await opRow(w.op20.id)).toMatchObject({ planLocked: true, plannedStartWeek: W2 });
-    // Time change: the lock and the weeks stay as booked — the remaining
-    // time is spread backwards over them at read time (operationLoadWeeks).
+    await planningService.moveOperation(w.op20.id, { date: W2, moveFollowing: true }, w.user.id);
+    expect(await opRow(w.op20.id)).toMatchObject({ planLocked: true, plannedStartDate: W2, plannedEndDate: "2030-03-12" });
+    // Time change: the lock and the days stay as booked — the remaining
+    // time is spread backwards over them at read time (operationLoadDays).
     await mfgService.updateOperation(w.order.id, w.op20.id, { runTimePerUnit: 120 }, w.user.id);
-    expect(await opRow(w.op20.id)).toMatchObject({ planLocked: true, plannedStartWeek: W2, plannedEndWeek: W2 });
-    expect((await planRows(w.op20.id)).map((r) => r.monday)).toEqual([W2]);
-    // Resource change: unlocked and replanned on free capacity — this week.
+    expect(await opRow(w.op20.id)).toMatchObject({ planLocked: true, plannedStartDate: W2, plannedEndDate: "2030-03-12" });
+    expect((await planRows(w.op20.id)).map((r) => r.date)).toEqual([W2, "2030-03-12"]);
+    // Resource change: unlocked and replanned on free capacity — the working day after op 10.
     const moved = await mfgService.updateOperation(w.order.id, w.op20.id, { workCenterId: w.r1.id }, w.user.id);
-    expect(moved.operation).toMatchObject({ planLocked: false, plannedStartWeek: W1, workCenterCode: "101" });
+    expect(moved.operation).toMatchObject({ planLocked: false, plannedStartDate: "2030-03-06", workCenterCode: "101" });
   });
 
   it("removes an untouched operation, unlinks its material (drawn at receipt) and replans", async () => {

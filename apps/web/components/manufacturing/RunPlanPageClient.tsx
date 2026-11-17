@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { formatStockholmDate, addDaysIso } from "../../lib/date";
+import { formatStockholmDate } from "../../lib/date";
 import { formatQuantity } from "../../lib/format";
-import { isoWeekNumber } from "../../lib/deliveryTimeCheck";
-import type { RunPlanResult, RunPlanRow, RunPlanWeek } from "../../lib/types";
-import { Select } from "../ui/Field";
+import { shortDate, weekdayShortDate } from "../../lib/planning";
+import type { RunPlanResult, RunPlanRow, RunPlanDay } from "../../lib/types";
+import { Input, Select } from "../ui/Field";
 import { FormError, FormHint } from "../ui/Form";
 import { GatedLink } from "../ui/GatedLink";
 import { StatusPill, type Status } from "../ui/StatusPill";
@@ -17,10 +17,8 @@ import { useListNavigation } from "../ui/ListControls";
 import buttonStyles from "../ui/Button.module.css";
 import styles from "./RunPlanPageClient.module.css";
 
-// Körplan: the waiting operations on one resource, grouped by week. The API
-// owns urval, ordning, veckonyckel and Tid kvar; this page only presents.
-
-const WEEKS_AHEAD = 52;
+// Körplan: the waiting operations on one resource, grouped by day. The API
+// owns urval, ordning, dagnyckel and Tid kvar; this page only presents.
 
 const formatHours = (hours: number): string =>
   hours.toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -48,26 +46,19 @@ const STATUS_PILL: Record<RunPlanRow["status"], Status> = {
 
 function groupOf(row: RunPlanRow): string {
   if (row.late) return "late";
-  if (row.week === null) return "unplanned";
-  return row.week;
+  if (row.date === null) return "unplanned";
+  return row.date;
 }
 
-function groupKey(week: RunPlanWeek): string {
-  return week.kind === "week" ? (week.week ?? "") : week.kind;
+function groupKey(day: RunPlanDay): string {
+  return day.kind === "day" ? (day.date ?? "") : day.kind;
 }
 
-function groupTitle(week: RunPlanWeek): string {
-  if (week.kind === "late") return "Försenad";
-  if (week.kind === "unplanned") return "Ej planerad";
-  return `Vecka ${week.isoWeek}`;
-}
-
-// "v.51", with the ISO year when it is not the current week's (short enough
-// for the picker on a phone). The ISO year is the year of the week's Thursday.
-function weekOptionLabel(monday: string, currentWeek: string | undefined): string {
-  const isoYear = (m: string) => addDaysIso(m, 3).slice(0, 4);
-  const year = currentWeek && isoYear(monday) !== isoYear(currentWeek) ? ` ${isoYear(monday)}` : "";
-  return `v.${isoWeekNumber(monday)}${year}`;
+// "mån 16 nov · v.47": the day with its ISO week number.
+function groupTitle(day: RunPlanDay): string {
+  if (day.kind === "late") return "Försenad";
+  if (day.kind === "unplanned") return "Ej planerad";
+  return `${day.date ? weekdayShortDate(day.date) : ""} · v.${day.isoWeek}`;
 }
 
 interface TableRow extends RunPlanRow {
@@ -75,7 +66,7 @@ interface TableRow extends RunPlanRow {
 }
 
 const COLUMNS = [
-  { key: "week", label: "Vecka", width: "70px" },
+  { key: "week", label: "Dag", width: "100px" },
   { key: "order", label: "TO", width: "110px" },
   { key: "article", label: "Artikel", width: "minmax(180px, 2fr)" },
   { key: "operation", label: "Operation", width: "minmax(150px, 2fr)" },
@@ -88,7 +79,7 @@ const COLUMNS = [
 function renderCell(row: TableRow, key: string) {
   switch (key) {
     case "week":
-      return row.week ? `v.${isoWeekNumber(row.week)}` : "–";
+      return row.date ? weekdayShortDate(row.date) : "–";
     case "order":
       return (
         <GatedLink href={`/tillverkning/ordrar/${row.manufacturingOrderId}`} className={styles.orderLink}>
@@ -136,7 +127,7 @@ export function RunPlanPageClient() {
     setError(null);
     const qs = new URLSearchParams();
     if (resource) qs.set("workCenterId", resource);
-    if (tom) qs.set("toWeek", tom);
+    if (tom) qs.set("toDate", tom);
     const query = qs.toString();
     apiFetch<RunPlanResult>(`/api/v1/planning/run-plan${query ? `?${query}` : ""}`)
       .then((res) => {
@@ -154,18 +145,12 @@ export function RunPlanPageClient() {
   }, [resource, tom]);
 
   const stations = data?.stations ?? [];
-  const toWeek = data?.toWeek ?? "";
-  const weekOptions: string[] = [];
-  if (data) {
-    for (let i = 0; i <= WEEKS_AHEAD; i++) weekOptions.push(addDaysIso(data.currentWeek, i * 7));
-    if (!weekOptions.includes(toWeek)) weekOptions.push(toWeek);
-    weekOptions.sort();
-  }
+  const toDate = data?.toDate ?? "";
 
   const pdfQuery = new URLSearchParams({ workCenterId: resource });
-  if (tom) pdfQuery.set("toWeek", tom);
+  if (tom) pdfQuery.set("toDate", tom);
 
-  const groups = (data?.weeks ?? []).filter((w) => w.rows > 0);
+  const groups = (data?.days ?? []).filter((w) => w.rows > 0);
   const rowsByGroup = new Map<string, TableRow[]>();
   for (const row of data?.rows ?? []) {
     const key = groupOf(row);
@@ -189,20 +174,15 @@ export function RunPlanPageClient() {
           </Select>
         </label>
         <label className={styles.field}>
-          <span className={styles.label}>T.o.m. vecka</span>
-          <Select
+          <span className={styles.label}>T.o.m.</span>
+          <Input
             size="sm"
-            value={toWeek}
+            type="date"
+            value={toDate}
             disabled={!data}
             onChange={(e) => setFilter("tom", e.target.value || null)}
-            aria-label="T.o.m. vecka"
-          >
-            {weekOptions.map((w) => (
-              <option key={w} value={w}>
-                {weekOptionLabel(w, data?.currentWeek)}
-              </option>
-            ))}
-          </Select>
+            aria-label="T.o.m."
+          />
         </label>
         {resource && data?.workCenter ? (
           <a
@@ -221,7 +201,7 @@ export function RunPlanPageClient() {
       {!resource && !error && <FormHint>Välj en resurs</FormHint>}
 
       {resource && data?.workCenter && data.rows.length === 0 && !loading && (
-        <FormHint>Inga kommande arbeten på resursen t.o.m. vecka {isoWeekNumber(toWeek)}</FormHint>
+        <FormHint>Inga kommande arbeten på resursen t.o.m. {shortDate(toDate)}</FormHint>
       )}
 
       {resource && data?.workCenter && data.rows.length > 0 && (

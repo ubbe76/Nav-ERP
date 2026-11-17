@@ -64,7 +64,6 @@ import {
 } from "./requirements-dating.js";
 import { legoReturnDate, NO_LEAD_TIME_DEFAULTS } from "./manufacturing-lead-time.js";
 import {
-  buildScheduleLookups,
   mondayOf,
   capacityHorizon,
   computeCapacity,
@@ -73,7 +72,7 @@ import {
   type CapacityInput,
   type CapacityOperationRow,
   type CapacityResult,
-  type PlannedWeek,
+  type PlannedDay,
 } from "./capacity-calc.js";
 import {
   buildArticleOverview,
@@ -115,7 +114,7 @@ import {
   type ResourceSuggestion,
 } from "./resource-suggestions.js";
 import { lockProductionPlan } from "../repository/plan-lock.js";
-import { buildRunPlan, defaultRunPlanToWeek, runPlanStations, type RunPlanResult, type RunPlanRow } from "./run-plan.js";
+import { buildRunPlan, defaultRunPlanToDate, runPlanStations, type RunPlanResult, type RunPlanRow } from "./run-plan.js";
 import type { RunPlanPdfInput } from "../../mail/service/document-pdf.js";
 import type { AuditEntry, AuditWriter } from "../../system/repository/audit.repository.js";
 import {
@@ -151,7 +150,6 @@ import { resolveSupplierPrice } from "../../purchase/service/supplier-price.js";
 import { configurationLines } from "../../configurator/service/configuration-lines.js";
 import { selectionFromEntries } from "../../configurator/service/variant-identity.js";
 import { addDays, previousWorkingDay } from "../../system/service/delivery-days.js";
-import { isoWeekOf } from "../../timereport/service/schedule.service.js";
 import type { ConfiguredStructureReader } from "../../configurator/service/configurator.service.js";
 
 // Own copy rather than importing the article module's class — planning
@@ -355,12 +353,12 @@ export class OperationNotPlannableError extends Error {
   }
 }
 
-// Flytta to a week before the current one: the work cannot happen in the
-// past (the engine would clamp it to the current week silently). 400.
-export class PlanWeekInPastError extends Error {
-  constructor(public weekMonday: string, public currentWeekMonday: string) {
-    super(`Veckan som börjar ${weekMonday} har passerat — en operation kan inte flyttas till en vecka före innevarande (${currentWeekMonday})`);
-    this.name = "PlanWeekInPastError";
+// Flytta to a day before today: the work cannot happen in the past (the
+// engine would clamp it to today silently). 400.
+export class PlanDateInPastError extends Error {
+  constructor(public date: string, public today: string) {
+    super(`${date} har passerat — en operation kan inte flyttas till en dag före i dag (${today})`);
+    this.name = "PlanDateInPastError";
   }
 }
 
@@ -377,6 +375,8 @@ export class RunPlanSubcontractResourceError extends Error {
 // on (the PDF). The web has its own labels for the same fields.
 const formatRunPlanHours = (hours: number) =>
   `${hours.toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace("−", "-")} h`;
+// The körplan PDF's day headings (Monday first).
+const RUN_PLAN_WEEKDAYS = ["mån", "tis", "ons", "tor", "fre", "lör", "sön"] as const;
 const formatRunPlanQuantity = (quantity: number) =>
   quantity.toLocaleString("sv-SE", { maximumFractionDigits: 4 }).replace("−", "-");
 function runPlanStatusLabel(row: RunPlanRow): string {
@@ -392,19 +392,18 @@ function runPlanStatusLabel(row: RunPlanRow): string {
   }
 }
 
-// Flytta to a week where the resource has no capacity at all (every day a
-// holiday, or no working day left of the current week): the forced start
-// took nothing and the operation would silently land — and be locked —
-// some later week. Refused instead (review 2026-11-10).
-export class PlanWeekNoCapacityError extends Error {
+// Flytta to a day where the resource has no capacity at all (a weekend, a
+// röd dag, a free day in its schedule — or, for a resource without a
+// calendar, not a working day): the forced start took nothing that day and
+// the operation would silently land — and be locked — some later day.
+// Refused instead (review 2026-11-10, per day since #18).
+export class PlanDateNoCapacityError extends Error {
   constructor(
-    public weekMonday: string,
+    public date: string,
     public workCenterCode: string
   ) {
-    super(
-      `${workCenterCode} har ingen kapacitet kvar vecka ${isoWeekOf(weekMonday).isoWeek} — välj en annan vecka`
-    );
-    this.name = "PlanWeekNoCapacityError";
+    super(`${workCenterCode} har ingen kapacitet ${date} — välj en annan dag`);
+    this.name = "PlanDateNoCapacityError";
   }
 }
 
@@ -419,26 +418,27 @@ export interface PlanRunResult {
   resourceSuggestions: ResourceSuggestion[];
 }
 
-export interface PlannedOperationWeeks {
-  plannedStartWeek: string | null;
-  plannedEndWeek: string | null;
+export interface PlannedOperationDates {
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
   planLocked: boolean;
 }
 
 export interface MoveOperationResult {
-  operation: PlannedOperationWeeks;
-  following: { moOperationId: string; sequenceNo: number; plannedStartWeek: string | null; plannedEndWeek: string | null }[];
+  operation: PlannedOperationDates;
+  following: { moOperationId: string; sequenceNo: number; plannedStartDate: string | null; plannedEndDate: string | null }[];
   warnings: PlanWarning[];
 }
 
 // The TO list's plan summary per order (min/max over the pending
-// operations' planned weeks, Sen from the plan walk).
+// operations' planned days, Sen from the plan walk).
 export interface OrderPlanSummary {
-  plannedStartWeek: string | null;
-  plannedEndWeek: string | null;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
   late: boolean;
-  // orderPlanStatus's finish (the plan's last week through weekFinishDay,
-  // lego through the resource's lead time, never before today) when the TO
+  // orderPlanStatus's finish (the last day of the plan's remaining
+  // allocation, lego through the resource's Ledtid + Kötid after the
+  // chain's floor, never before today) when the TO
   // is planned, else null. Pegging (#9) reads the TO's ready date as
   // plannedFinish ?? dueDate — the same rule that decides Sen, from the
   // same load, so the two can never disagree.
@@ -557,7 +557,7 @@ export type SetDueDatesOutcome =
 const OPEN_MO_STATUSES: ReadonlySet<string> = new Set(["released", "in_progress"]);
 // The händelselogg's view of a reservation's switch: "Op 20: 110 → 120".
 const switchAuditView = (s: ReservedResourceSwitch) => ({ sequenceNo: s.sequenceNo, fromCode: s.fromCode, toCode: s.toCode });
-const hasPlan = (op: CapacityOperationRow) => !!op.plannedWeeks && op.plannedWeeks.length > 0;
+const hasPlan = (op: CapacityOperationRow) => !!op.plannedDays && op.plannedDays.length > 0;
 
 export class ConfigurationRequiredError extends Error {
   constructor(public articleNumber: string) {
@@ -620,7 +620,7 @@ export interface ManufacturingOrderCreator {
     createdBy: string | null
   ): Promise<{ id: string; orderNumber: string; releaseWarnings?: string[] }>;
   // Reservationen: the same create inside the caller's transaction (the
-  // whole tree of TOs, all or nothing), with the weeks the check booked
+  // whole tree of TOs, all or nothing), with the days the check booked
   // written as the plan (by sequence number and resource — an alternative
   // the check chose is switched to, Vald för hand). With a salesOrderRowId
   // the TO is linked to the row and the KO flips to in_production, exactly
@@ -629,7 +629,7 @@ export interface ManufacturingOrderCreator {
     tx: Tx,
     input: { articleId?: string; salesOrderRowId?: string; quantity: number; note?: string; dueDate?: string | null },
     createdBy: string | null,
-    opts?: { plannedWeeks?: GivenOperationPlan[] } & GivenPlanOptions
+    opts?: { plannedDays?: GivenOperationPlan[] } & GivenPlanOptions
   ): Promise<{ id: string; orderNumber: string; quantity: string | number; releaseWarnings: string[]; createdAudit: AuditEntry }>;
   // Flytta halvfabrikaten (pegging #9): the TOs' due dates set inside the
   // planning transaction — the manufacturing module owns manufacturing_orders
@@ -648,15 +648,16 @@ export interface SalesOrderDateWriter {
 }
 
 // The reservation's given plan for one operation of a new TO (the check's
-// batch): the weeks to write, keyed by sequence number, and the resource the
+// batch): the days to write, keyed by sequence number, and the resource the
 // check placed it on. A resource other than the operation's own must be one
 // of its possible resources (mo_operation_resources) — then the operation
-// is switched to it (Vald för hand) before the weeks are written. Left out
-// = the operation's own resource.
+// is switched to it (Vald för hand) before the days are written. Left out
+// = the operation's own resource. The days are written as they are (no
+// engine run) through the one writer, which rounds them (roundPlanDays).
 export interface GivenOperationPlan {
   sequenceNo: number;
   workCenterId?: string;
-  weeks: PlannedWeek[];
+  days: PlannedDay[];
 }
 
 export interface GivenPlanOptions {
@@ -1392,7 +1393,9 @@ export function createPlanningService(
     const longOperationWeeks = await repo.longOperationWeeks?.(dbc);
     return { ...planWorldOf(capacity, today), longOperationWeeks };
   }
-  function planWorldOf(capacity: CapacityInput, today: string) {
+  // queueDays = Standardkötid as the load read it (this run's own value,
+  // never a process constant); the resources carry their own Kötid for lego.
+  function planWorldOf(capacity: CapacityInput & { queueDays?: number }, today: string) {
     const workCenters = new Map<string, PlanWorkCenter>(
       capacity.workCenters.map((w) => [
         w.workCenterId,
@@ -1405,12 +1408,14 @@ export function createPlanningService(
           hoursPerDay: w.hoursPerDay,
           capacityFactor: w.capacityFactor,
           leadTimeDays: w.leadTimeDays ?? null,
+          queueTimeDays: w.queueTimeDays ?? null,
           active: w.active,
         },
       ])
     );
     return {
       today,
+      queueDays: capacity.queueDays ?? 0,
       offDays: new Set(capacity.holidays.filter((h) => h.dayScheduleId === null).map((h) => h.date)) as ReadonlySet<string>,
       workCenters,
       schedule: { weekScheduleDays: capacity.weekScheduleDays, daySchedules: capacity.daySchedules, holidays: capacity.holidays },
@@ -1455,7 +1460,7 @@ export function createPlanningService(
     let own = world.operations.filter((o) => o.manufacturingOrderId === manufacturingOrderId);
     if (own.length === 0) return [];
     const plannedAt = new Date();
-    // The reservation's weeks are keyed by (sequence number, resource): when
+    // The reservation's days are keyed by (sequence number, resource): when
     // the TO's operations are not the ones the check planned (a configured
     // row whose template changed in between, an alternative that is not
     // among the operation's possible resources) the engine plans it on the
@@ -1490,8 +1495,8 @@ export function createPlanningService(
     }
     if (given) {
       // The alternatives the check chose: switched through the one switch
-      // writer (the row's times, Vald för hand) BEFORE the weeks are
-      // written — the weeks were booked on the alternative. The TO is this
+      // writer (the row's times, Vald för hand) BEFORE the days are
+      // written — the days were booked on the alternative. The TO is this
       // transaction's own, so no one else can have moved it.
       const switches = given.flatMap((g) => {
         const target = targetOf(g);
@@ -1520,15 +1525,15 @@ export function createPlanningService(
       for (const g of given) {
         const op = bySeq.get(g.sequenceNo);
         if (!op) continue;
-        const weeks = [...g.weeks].sort((a, b) => (a.monday < b.monday ? -1 : a.monday > b.monday ? 1 : 0));
-        if (weeks.length === 0) clear.push(op.moOperationId);
+        const days = [...g.days].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+        if (days.length === 0) clear.push(op.moOperationId);
         else {
           plans.push({
             operationId: op.moOperationId,
             manufacturingOrderId,
-            weeks,
-            startWeek: weeks[0]!.monday,
-            endWeek: weeks[weeks.length - 1]!.monday,
+            days,
+            startDate: days[0]!.date,
+            endDate: days[days.length - 1]!.date,
           });
         }
       }
@@ -1554,6 +1559,7 @@ export function createPlanningService(
       offDays: world.offDays,
       workCenters: world.workCenters,
       schedule: world.schedule,
+      queueDays: world.queueDays,
       orders: [ownOrder],
       existingOperations: others,
       longOperationWeeks: world.longOperationWeeks,
@@ -1584,6 +1590,7 @@ export function createPlanningService(
       offDays: world.offDays,
       workCenters: world.workCenters,
       schedule: world.schedule,
+      queueDays: world.queueDays,
       orders: groupOrders(own, stamped),
       existingOperations: others,
       longOperationWeeks: world.longOperationWeeks,
@@ -1602,18 +1609,17 @@ export function createPlanningService(
     const horizonTo = addDays(today, PLAN_HORIZON_WEEKS * 7 + 14);
     const capacity = await repo.loadCapacityInput(addDays(today, -7), horizonTo, dbc, { orderIds });
     const world = planWorldOf(capacity, today);
-    const lookups = buildScheduleLookups(capacity.weekScheduleDays, capacity.daySchedules, capacity.holidays);
     const byOrder = new Map<string, CapacityOperationRow[]>();
     for (const op of capacity.operations) byOrder.set(op.manufacturingOrderId, [...(byOrder.get(op.manufacturingOrderId) ?? []), op]);
     for (const [orderId, ops] of byOrder) {
-      const status = orderPlanStatus(ops, { today, offDays: world.offDays, lookups, workCenters: world.workCenters });
-      const mondays = ops
+      const status = orderPlanStatus(ops, { today, offDays: world.offDays, workCenters: world.workCenters, queueDays: world.queueDays });
+      const dates = ops
         .filter((op) => op.operationStatus === "pending" && hasPlan(op))
-        .flatMap((op) => op.plannedWeeks!.map((w) => w.monday))
+        .flatMap((op) => op.plannedDays!.map((d) => d.date))
         .sort();
       summaries.set(orderId, {
-        plannedStartWeek: mondays[0] ?? null,
-        plannedEndWeek: mondays[mondays.length - 1] ?? null,
+        plannedStartDate: dates[0] ?? null,
+        plannedEndDate: dates[dates.length - 1] ?? null,
         late: status.late,
         plannedFinish: status.planned ? status.plannedFinish : null,
       });
@@ -2231,6 +2237,9 @@ export function createPlanningService(
           hoursPerDay: w.hoursPerDay,
           capacityFactor: w.capacityFactor,
           leadTimeDays: leadTimeOf.get(w.workCenterId) ?? null,
+          // Lego counts Ledtid + Kötid in the book (#18, S6) — the resource's
+          // own Kötid, not Standardkötiden (which the check gets in etapp 2).
+          queueTimeDays: w.queueTimeDays ?? null,
           // Valregeln never tries an inactive alternative.
           active: w.active,
         },
@@ -2541,15 +2550,15 @@ export function createPlanningService(
             userId,
             // By (sequence number, resource): an operation the check put on
             // an alternative is switched to it, Vald för hand, before its
-            // weeks are written (planNewOrderInTx). On the date with
+            // days are written (planNewOrderInTx). On the date with
             // alternatives a TO that no longer matches is refused — the
             // engine's plan on the ordinarie would not hold the date.
             {
-              plannedWeeks: batch.operations.map((o) => ({ sequenceNo: o.sequenceNo, workCenterId: o.workCenterId, weeks: o.weeks })),
+              plannedDays: batch.operations.map((o) => ({ sequenceNo: o.sequenceNo, workCenterId: o.workCenterId, days: o.days })),
               refuseMismatch: result.usesAlternatives,
             }
           );
-          // The promised weeks are locked: Planera keeps them until Lås upp
+          // The promised days are locked: Planera keeps them until Lås upp
           // (operations without a plan — lego, 0 minutes, beyond the
           // horizon — have nothing to lock). With Vald för hand the resource
           // is locked too.
@@ -2656,6 +2665,7 @@ export function createPlanningService(
         today,
         weeks: query.weeks,
         offDays: world.offDays,
+        queueDays: world.queueDays,
         resourceSuggestions: suggestions,
         componentLateOrders: componentLate,
       });
@@ -2670,11 +2680,11 @@ export function createPlanningService(
     // null = the resource does not exist (the route answers 404).
     async getRunPlan(query: RunPlanQuery): Promise<RunPlanResult | null> {
       const today = todayFn();
-      const toWeek = query.toWeek ?? defaultRunPlanToWeek(today);
+      const toDate = query.toDate ?? defaultRunPlanToDate(today);
       const workCenters = await repo.runPlanWorkCenters();
       const stations = runPlanStations(workCenters);
       if (!query.workCenterId) {
-        return { workCenter: null, today, currentWeek: mondayOf(today), toWeek, rows: [], weeks: [], totalMinutes: 0, totalHours: 0, stations };
+        return { workCenter: null, today, toDate, rows: [], days: [], totalMinutes: 0, totalHours: 0, stations };
       }
       const workCenter = workCenters.find((w) => w.id === query.workCenterId);
       if (!workCenter) return null;
@@ -2684,37 +2694,38 @@ export function createPlanningService(
         repo.runPlanPlannedOrderOperations(workCenter.id),
       ]);
       // Beläggning's own loader, narrowed to the orders with work here: the
-      // same rows (quantities, time flags, planned weeks) the matrix reads.
+      // same rows (quantities, time flags, planned days) the matrix reads.
       // The calendars are not read by the körplan — no holiday span needed.
       const operations = orderIds.length === 0 ? [] : (await repo.loadCapacityInput(today, today, undefined, { orderIds })).operations;
-      return buildRunPlan({ today, toWeek, workCenter, stations, operations, plannedOrderOperations });
+      return buildRunPlan({ today, toDate, workCenter, stations, operations, plannedOrderOperations });
     },
 
-    // The körplan as a PDF (A4 landscape), the same selection as the list.
+    // The körplan as a PDF (A4 landscape), the same selection as the list,
+    // one group per day.
     async getRunPlanPdf(query: RunPlanPdfQuery): Promise<{ filename: string; content: Buffer } | null> {
       if (!deps.runPlanPdf) throw new Error("The körplan PDF renderer is not wired");
       const plan = await this.getRunPlan(query);
       if (!plan || !plan.workCenter) return null;
-      const weekLabel = (monday: string) => `vecka ${isoWeekOf(monday).isoWeek}`;
-      const rowsOf = (group: RunPlanResult["weeks"][number]) =>
+      const dayLabel = (date: string) => `${RUN_PLAN_WEEKDAYS[(new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7]} ${date}`;
+      const rowsOf = (group: RunPlanResult["days"][number]) =>
         plan.rows.filter((row) =>
-          group.kind === "late" ? row.late : group.kind === "unplanned" ? row.week == null : !row.late && row.week === group.week
+          group.kind === "late" ? row.late : group.kind === "unplanned" ? row.date == null : !row.late && row.date === group.date
         );
       const content = await deps.runPlanPdf.renderRunPlan({
         title: `Körplan — ${plan.workCenter.code} ${plan.workCenter.name}`,
-        subtitle: `T.o.m. ${weekLabel(plan.toWeek)} (${plan.toWeek} – ${addDays(plan.toWeek, 6)}) · Utskriven ${plan.today}`,
+        subtitle: `T.o.m. ${plan.toDate} · Utskriven ${plan.today}`,
         emptyText: "Inga väntande operationer på resursen i perioden.",
-        groups: plan.weeks.map((group) => ({
+        groups: plan.days.map((group) => ({
           heading:
             group.kind === "late"
               ? "Försenad"
               : group.kind === "unplanned"
                 ? "Ej planerad"
-                : `Vecka ${group.isoWeek} (${group.week} – ${addDays(group.week!, 6)})`,
-          totalLabel: group.kind === "week" ? `Summa vecka ${group.isoWeek}` : group.kind === "late" ? "Summa försenad" : "Summa ej planerad",
+                : `${dayLabel(group.date!)} (vecka ${group.isoWeek})`,
+          totalLabel: group.kind === "day" ? `Summa ${dayLabel(group.date!)}` : group.kind === "late" ? "Summa försenad" : "Summa ej planerad",
           total: formatRunPlanHours(group.hours),
           rows: rowsOf(group).map((row) => ({
-            week: row.week == null ? "–" : `v.${isoWeekOf(row.week).isoWeek}`,
+            day: row.date ?? "–",
             orderNumber: row.orderNumber,
             article: `${row.articleNumber} ${row.articleName}`,
             operation: row.description ? `Op ${row.sequenceNo} ${row.description}` : `Op ${row.sequenceNo}`,
@@ -2728,7 +2739,7 @@ export function createPlanningService(
         totalLabel: "Summa tid kvar",
         total: formatRunPlanHours(plan.totalHours),
       });
-      return { filename: `korplan-${plan.workCenter.code}-${plan.toWeek}.pdf`, content };
+      return { filename: `korplan-${plan.workCenter.code}-${plan.toDate}.pdf`, content };
     },
 
     // Planera — every open TO's pending operations placed on free capacity
@@ -2744,6 +2755,7 @@ export function createPlanningService(
           offDays: world.offDays,
           workCenters: world.workCenters,
           schedule: world.schedule,
+          queueDays: world.queueDays,
           orders,
           longOperationWeeks: world.longOperationWeeks,
         });
@@ -2770,25 +2782,26 @@ export function createPlanningService(
       return run;
     },
 
-    // Flytta — the operation starts in weekMonday (whole-week capacity,
+    // Flytta — the operation starts on `date` (the day's whole capacity,
     // overload allowed) and is locked. The TO's earlier operations and, without
-    // moveFollowing, its later ones keep their weeks (fixed load, like a
+    // moveFollowing, its later ones keep their days (fixed load, like a
     // lock); with moveFollowing the later unlocked ones are replanned from
-    // the new finish week. Everything else is existing load.
+    // the new finish day (next working day + Standardkötid). Everything else
+    // is existing load.
     async moveOperation(opId: string, input: MoveOperationInput, userId: string | null): Promise<MoveOperationResult> {
       const moved = await repo.transaction(async (tx) => {
         await lockProductionPlan(tx);
         const op = await repo.planOperation(opId, tx);
         if (!op) throw new OperationNotFoundError(opId);
-        const currentWeek = mondayOf(todayFn());
-        if (input.weekMonday < currentWeek) throw new PlanWeekInPastError(input.weekMonday, currentWeek);
+        const today = todayFn();
+        if (input.date < today) throw new PlanDateInPastError(input.date, today);
         if (op.operationStatus === "done") throw new OperationNotPlannableError("done");
         if (op.workCenterType === "subcontract") throw new OperationNotPlannableError("subcontract");
         if (!OPEN_MO_STATUSES.has(op.orderStatus)) throw new OperationNotPlannableError("order_not_open");
         const world = await loadPlanWorld(tx);
         const target = world.operations.find((o) => o.moOperationId === opId);
         if (!target) throw new OperationNotPlannableError("order_not_open");
-        // Under the book's threshold nothing would be written (roundPlanWeeks).
+        // Under the book's threshold nothing would be written (roundPlanDays).
         if (remainingOperationMinutes(target) < MIN_PLAN_MINUTES) throw new OperationNotPlannableError("no_time");
         const stamped = await repo.stampedOperationIds(tx);
 
@@ -2812,32 +2825,35 @@ export function createPlanningService(
           offDays: world.offDays,
           workCenters: world.workCenters,
           schedule: world.schedule,
+          queueDays: world.queueDays,
           orders: [{ id: op.manufacturingOrderId, orderNumber: op.orderNumber, dueDate: target.dueDate, operations: orderOps }],
           existingOperations: [...world.operations.filter((o) => o.manufacturingOrderId !== op.manufacturingOrderId), ...fixed],
-          forceStart: { operationId: opId, weekMonday: input.weekMonday },
+          forceStart: { operationId: opId, date: input.date },
           longOperationWeeks: world.longOperationWeeks,
         });
-        // The forced week took nothing (no capacity that week) — the book
-        // went on to the first free week. Rolled back, nothing written.
+        // The forced day took nothing (no capacity that day: a weekend, a
+        // röd dag, a free day in the schedule) — the book went on to the
+        // first day with capacity. Tested on the plan BEFORE the write, so
+        // nothing is written.
         const ownPlan = result.plans.find((p) => p.operationId === opId);
-        if (ownPlan && ownPlan.startWeek !== input.weekMonday) {
-          throw new PlanWeekNoCapacityError(input.weekMonday, op.workCenterCode);
+        if (ownPlan && ownPlan.startDate !== input.date) {
+          throw new PlanDateNoCapacityError(input.date, op.workCenterCode);
         }
         await repo.writeOperationPlans(tx, { plans: result.plans, clear: result.clear, plannedAt: new Date() });
         // Locked only when it got a plan — beyond the horizon it is cleared
-        // (the CHECK forbids a lock without weeks) and the warning says so.
+        // (the CHECK forbids a lock without days) and the warning says so.
         const placed = result.plans.some((p) => p.operationId === opId);
         const row = placed
           ? (await repo.setOperationLock(tx, opId, true))!
-          : { plannedStartWeek: null, plannedEndWeek: null, planLocked: false };
+          : { plannedStartDate: null, plannedEndDate: null, planLocked: false };
         const seqOf = new Map(orderOps.map((o) => [o.moOperationId, o.sequenceNo]));
         const following = [
           ...result.plans
             .filter((p) => p.operationId !== opId)
-            .map((p) => ({ moOperationId: p.operationId, sequenceNo: seqOf.get(p.operationId)!, plannedStartWeek: p.startWeek, plannedEndWeek: p.endWeek })),
+            .map((p) => ({ moOperationId: p.operationId, sequenceNo: seqOf.get(p.operationId)!, plannedStartDate: p.startDate, plannedEndDate: p.endDate })),
           ...result.clear
             .filter((id) => id !== opId && (seqOf.get(id) ?? 0) > op.sequenceNo)
-            .map((id) => ({ moOperationId: id, sequenceNo: seqOf.get(id)!, plannedStartWeek: null, plannedEndWeek: null })),
+            .map((id) => ({ moOperationId: id, sequenceNo: seqOf.get(id)!, plannedStartDate: null, plannedEndDate: null })),
         ].sort((a, b) => a.sequenceNo - b.sequenceNo);
         return { op, operation: row, following, warnings: result.warnings };
       });
@@ -2849,10 +2865,10 @@ export function createPlanningService(
           moOperationId: opId,
           sequenceNo: moved.op.sequenceNo,
           workCenterCode: moved.op.workCenterCode,
-          fromWeek: moved.op.plannedStartWeek,
-          toWeek: input.weekMonday,
-          plannedStartWeek: moved.operation.plannedStartWeek,
-          plannedEndWeek: moved.operation.plannedEndWeek,
+          fromDate: moved.op.plannedStartDate,
+          toDate: input.date,
+          plannedStartDate: moved.operation.plannedStartDate,
+          plannedEndDate: moved.operation.plannedEndDate,
           moveFollowing: input.moveFollowing,
           warnings: moved.warnings,
         },
@@ -2862,7 +2878,7 @@ export function createPlanningService(
     },
 
     // Lås upp — the allocation stays until the next Planera. Idempotent.
-    async unlockOperation(opId: string, userId: string | null): Promise<{ operation: PlannedOperationWeeks }> {
+    async unlockOperation(opId: string, userId: string | null): Promise<{ operation: PlannedOperationDates }> {
       const unlocked = await repo.transaction(async (tx) => {
         await lockProductionPlan(tx);
         const op = await repo.planOperation(opId, tx);

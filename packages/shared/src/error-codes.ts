@@ -553,8 +553,8 @@ export const ERROR_CODES = {
   // Produktionsplanering: Flytta / Lås upp on an operation
   OPERATION_NOT_FOUND: "operation-not-found",
   OPERATION_NOT_PLANNABLE: "operation-not-plannable",
-  PLAN_WEEK_IN_PAST: "plan-week-in-past",
-  PLAN_WEEK_NO_CAPACITY: "plan-week-no-capacity",
+  PLAN_DATE_IN_PAST: "plan-date-in-past",
+  PLAN_DATE_NO_CAPACITY: "plan-date-no-capacity",
   // Sätt standardpris/försäljningspris from a preliminary efterkalkyl or one
   // with nothing received (the per-unit divisor is the received quantity).
   COST_CALCULATION_NOT_FINAL: "cost-calculation-not-final",

@@ -1,9 +1,9 @@
 // Körplan — the list of a resource's coming work, in the order it is to be
 // done (spec 2026-11-12). Pure, no database imports, and NO rule of its own:
 // every figure is another reader's rule applied to the same row.
-//   - Vecka        operationStartWeek (capacity-calc.ts): the plan's first
-//                  week, else the due date's week — Beläggning's bucket for
-//                  an unplanned operation, before its clamp to this week.
+//   - Dag          operationStartDate (capacity-calc.ts): the plan's first
+//                  day, else the due date — Beläggning's bucket for an
+//                  unplanned operation, before its clamp to today (#18).
 //   - Tid kvar     remainingOperationMinutes / setupDoneOnCurrentResource
 //                  (capacity-calc.ts) — Beläggning's remaining hours.
 //   - Antal kvar   remainingOperationQuantity (terminal-readiness.ts).
@@ -23,8 +23,8 @@ import {
 } from "../../manufacturing/service/terminal-readiness.js";
 import {
   mondayOf,
-  operationStartWeek,
-  plannedWeekRange,
+  operationStartDate,
+  plannedDateRange,
   remainingOperationMinutes,
   setupDoneOnCurrentResource,
   type CapacityOperationRow,
@@ -73,13 +73,15 @@ export interface RunPlanRow {
   remainingHours: number;
   setupDone: boolean;
   dueDate: string | null;
-  // Veckonyckeln (a Monday): the plan's first week, else the due date's
-  // week; null = neither (Ej planerad). `late` = a week before the current.
-  week: string | null;
+  // Dagnyckeln: the plan's first day, else the due date; null = neither
+  // (Ej planerad). `late` = a day before today (Försenad — day granular,
+  // like Beläggning's overdue: a passed plan lies on today in the book until
+  // Planera runs, and the körplan says so).
+  date: string | null;
   late: boolean;
   planned: boolean;
-  plannedStartWeek: string | null;
-  plannedEndWeek: string | null;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
   planLocked: boolean;
   status: RunPlanStatus;
   // What the readiness rule lets the operator work on now (the terminal's
@@ -90,12 +92,12 @@ export interface RunPlanRow {
   waitingForSequenceNo: number | null;
 }
 
-// One group of the list, in list order: Försenad first (every week before
-// the current one together), then each week, Ej planerad last.
-export interface RunPlanWeek {
-  kind: "late" | "week" | "unplanned";
-  week: string | null; // the Monday for kind "week", else null
-  isoYear: number | null;
+// One group of the list, in list order: Försenad first (every day before
+// today together), then each day, Ej planerad last.
+export interface RunPlanDay {
+  kind: "late" | "day" | "unplanned";
+  date: string | null; // the day for kind "day", else null
+  weekday: number | null; // ISO 1 = Monday … 7 = Sunday
   isoWeek: number | null;
   late: boolean;
   rows: number;
@@ -104,13 +106,12 @@ export interface RunPlanWeek {
 }
 
 export interface RunPlanResult {
-  // null = no resource chosen yet: only `stations` (and the default week).
+  // null = no resource chosen yet: only `stations` (and the default T.o.m.).
   workCenter: { id: string; code: string; name: string } | null;
   today: string;
-  currentWeek: string;
-  toWeek: string;
+  toDate: string;
   rows: RunPlanRow[];
-  weeks: RunPlanWeek[];
+  days: RunPlanDay[];
   totalMinutes: number;
   totalHours: number;
   stations: RunPlanStation[];
@@ -122,10 +123,13 @@ const addDays = (date: string, days: number) => {
   return d.toISOString().slice(0, 10);
 };
 
-// T.o.m. vecka when none is given: next week (innevarande och nästa vecka).
-export function defaultRunPlanToWeek(today: string): string {
-  return addDays(mondayOf(today), 7);
+// T.o.m. when none is given: the Sunday of next week (innevarande och nästa
+// vecka — the same selection as before the plan counted in days, S12).
+export function defaultRunPlanToDate(today: string): string {
+  return addDays(mondayOf(today), 13);
 }
+
+const isoWeekdayOf = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay() || 7;
 
 // The resource picker: the terminal's stations — active, never lego.
 export function runPlanStations(workCenters: RunPlanWorkCenter[]): RunPlanStation[] {
@@ -144,7 +148,7 @@ const compareNullLast = (a: string | null, b: string | null) => {
 
 export function buildRunPlan(input: {
   today: string; // Stockholm day
-  toWeek: string; // Monday, inclusive
+  toDate: string; // inclusive
   workCenter: RunPlanWorkCenter;
   stations: RunPlanStation[];
   // EVERY operation of the open orders (released / in progress) that have
@@ -153,8 +157,6 @@ export function buildRunPlan(input: {
   // The Planerade TO:s operations on the resource.
   plannedOrderOperations: RunPlanPlannedOperation[];
 }): RunPlanResult {
-  const currentWeek = mondayOf(input.today);
-
   const byOrder = new Map<string, CapacityOperationRow[]>();
   for (const op of input.operations) byOrder.set(op.manufacturingOrderId, [...(byOrder.get(op.manufacturingOrderId) ?? []), op]);
   const readiness = new Map<string, { readiness: Readiness; available: number }>();
@@ -172,8 +174,8 @@ export function buildRunPlan(input: {
 
   const toRow = (op: RunPlanPlannedOperation, plannedOrder: boolean): RunPlanRow & { minutes: number } => {
     const minutes = remainingOperationMinutes(op);
-    const week = operationStartWeek(op);
-    const range = plannedWeekRange(op);
+    const date = operationStartDate(op);
+    const range = plannedDateRange(op);
     const ready = plannedOrder || op.moOperationId == null ? null : readiness.get(op.moOperationId)!;
     return {
       key: op.moOperationId ?? `${op.manufacturingOrderId}:${op.sequenceNo}`,
@@ -190,11 +192,11 @@ export function buildRunPlan(input: {
       remainingHours: round2(minutes / 60),
       setupDone: setupDoneOnCurrentResource(op),
       dueDate: op.dueDate,
-      week,
-      late: week != null && week < currentWeek,
+      date,
+      late: date != null && date < input.today,
       planned: range != null,
-      plannedStartWeek: range?.start ?? null,
-      plannedEndWeek: range?.end ?? null,
+      plannedStartDate: range?.start ?? null,
+      plannedEndDate: range?.end ?? null,
       planLocked: op.planLocked ?? false,
       status: ready ? ready.readiness : "planned_order",
       available: ready ? ready.available : null,
@@ -210,26 +212,34 @@ export function buildRunPlan(input: {
     ...input.plannedOrderOperations.map((op) => toRow(op, true)),
   ];
 
-  // Försenade and Ej planerade are always in; a week up to and including
-  // T.o.m. vecka.
+  // Försenade and Ej planerade are always in; a day up to and including
+  // T.o.m. (The order within a day by hand — run_position — is etapp 3.)
   const listed = candidates
-    .filter((row) => row.week == null || row.late || row.week <= input.toWeek)
+    .filter((row) => row.date == null || row.late || row.date <= input.toDate)
     .sort(
       (a, b) =>
-        compareNullLast(a.week, b.week) ||
+        compareNullLast(a.date, b.date) ||
         compareNullLast(a.dueDate, b.dueDate) ||
         a.orderNumber.localeCompare(b.orderNumber, "sv", { numeric: true }) ||
         a.sequenceNo - b.sequenceNo
     );
 
-  const groups: (Omit<RunPlanWeek, "minutes" | "hours"> & { sum: number })[] = [];
+  const groups: (Omit<RunPlanDay, "minutes" | "hours"> & { sum: number })[] = [];
   for (const row of listed) {
-    const kind: RunPlanWeek["kind"] = row.late ? "late" : row.week == null ? "unplanned" : "week";
-    const week = kind === "week" ? row.week : null;
-    let group = groups.find((g) => g.kind === kind && g.week === week);
-    if (!group) {
-      const iso = week ? isoWeekOf(week) : null;
-      group = { kind, week, isoYear: iso?.isoYear ?? null, isoWeek: iso?.isoWeek ?? null, late: kind === "late", rows: 0, sum: 0 };
+    const kind: RunPlanDay["kind"] = row.late ? "late" : row.date == null ? "unplanned" : "day";
+    const date = kind === "day" ? row.date : null;
+    // The list is sorted on the day, so a group's rows are consecutive.
+    let group = groups[groups.length - 1];
+    if (!group || group.kind !== kind || group.date !== date) {
+      group = {
+        kind,
+        date,
+        weekday: date ? isoWeekdayOf(date) : null,
+        isoWeek: date ? isoWeekOf(date).isoWeek : null,
+        late: kind === "late",
+        rows: 0,
+        sum: 0,
+      };
       groups.push(group);
     }
     group.rows += 1;
@@ -240,10 +250,9 @@ export function buildRunPlan(input: {
   return {
     workCenter: { id: input.workCenter.id, code: input.workCenter.code, name: input.workCenter.name },
     today: input.today,
-    currentWeek,
-    toWeek: input.toWeek,
+    toDate: input.toDate,
     rows: listed.map(({ minutes: _minutes, ...row }) => row),
-    weeks: groups.map(({ sum, ...g }) => ({ ...g, minutes: round2(sum), hours: round2(sum / 60) })),
+    days: groups.map(({ sum, ...g }) => ({ ...g, minutes: round2(sum), hours: round2(sum / 60) })),
     totalMinutes: round2(total),
     totalHours: round2(total / 60),
     stations: input.stations,
