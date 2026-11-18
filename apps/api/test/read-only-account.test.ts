@@ -503,6 +503,13 @@ describe("Endast läsning — the allowlist", () => {
         "POST /api/v1/conversations/:id/archive",
         "POST /api/v1/conversations/:id/unarchive",
         "POST /api/v1/conversations/:id/remove-from-board",
+        // Etapp 2 (0232): the same reasoning — who takes part in the
+        // account's own conversations and its own messages. The employee's
+        // reply from the terminal is NOT here. messages-participants.route.test.ts.
+        "POST /api/v1/conversations/:id/participants",
+        "DELETE /api/v1/conversations/:id/participants/:participantId",
+        "POST /api/v1/conversations/:id/leave",
+        "DELETE /api/v1/conversations/:id/messages/:messageId",
       ].sort()
     );
   });

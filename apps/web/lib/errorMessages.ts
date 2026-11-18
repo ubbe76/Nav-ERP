@@ -316,7 +316,12 @@ const MESSAGES: Record<string, MessageEntry> = {
       ? `Slutdatumet på terminalen ska ligga mellan ${body.min} och ${body.max}.`
       : "Slutdatumet på terminalen ska ligga mellan i dag och ett år framåt.";
   },
-  "conversation-not-owner": "Bara den som skrev meddelandet kan ta bort det från terminalen.",
+  "conversation-not-owner": "Bara den som startade konversationen kan göra det.",
+  "participant-already-added": "Någon av dem är redan med i konversationen — öppna dialogen igen och välj om.",
+  "participant-not-found": "Deltagaren är inte längre med i konversationen — ladda om sidan.",
+  "conversation-creator-cannot-leave":
+    "Du startade konversationen och kan inte lämna den — då kan ingen ta bort deltagare. Arkivera den i stället.",
+  "message-not-own": "Du kan bara radera dina egna meddelanden.",
   // The server names the field and the document (Swedish).
   "deviation-link-mismatch": serverMessage("Kopplingarna hör inte ihop — kontrollera kund/leverantör, order, rad och artikel."),
   "deviation-link-not-allowed": serverMessage("Dokumentet kan inte kopplas till avvikelsen."),

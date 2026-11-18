@@ -5,6 +5,7 @@ import {
   attendanceSessions,
   auditLog,
   employees,
+  messages,
   payrollPeriods,
   timeReports,
   type Db,
@@ -103,8 +104,21 @@ export async function lockEmployee(tx: Tx, employeeId: string) {
 // employee — a reason typed at the terminal whose attendance row was later
 // deleted — so it is scrubbed as in the anonymization.
 export async function deleteEmployeeInTx(tx: Tx, employeeId: string) {
+  // First: the FK then drops the sender (ON DELETE SET NULL), and the
+  // database only takes a senderless message that is deleted.
+  await eraseOwnMessages(tx, employeeId);
   await tx.delete(employees).where(eq(employees.id, employeeId));
   return { auditEntriesScrubbed: await scrubAuditFreeText(tx, employeeId) };
+}
+
+// Meddelanden: the replies the employee wrote at the terminal are free text
+// in the employee's own name — the text goes ("Meddelandet togs bort"), the
+// row stays so the thread can still be followed. Both erasure paths.
+async function eraseOwnMessages(tx: Tx, employeeId: string) {
+  await tx
+    .update(messages)
+    .set({ body: null, deletedAt: sql`now()` })
+    .where(and(eq(messages.senderEmployeeId, employeeId), isNotNull(messages.body)));
 }
 
 // Drops every free-text key (note, startNote, stopNote) wherever it sits in
@@ -153,6 +167,7 @@ export async function anonymizeEmployeeInTx(tx: Tx, employeeId: string) {
   await tx.update(timeReports).set({ note: null }).where(and(eq(timeReports.employeeId, employeeId), isNotNull(timeReports.note)));
   await tx.update(absences).set({ note: null }).where(and(eq(absences.employeeId, employeeId), isNotNull(absences.note)));
   await tx.update(atfTransactions).set({ note: null }).where(and(eq(atfTransactions.employeeId, employeeId), isNotNull(atfTransactions.note)));
+  await eraseOwnMessages(tx, employeeId);
 
   // The frozen payroll bases keep the number, not the name.
   await tx.execute(sql`

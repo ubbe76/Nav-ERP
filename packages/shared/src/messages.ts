@@ -4,7 +4,7 @@ import { listQuerySchema } from "./list.js";
 import { favoriteHrefSchema } from "./user-settings.js";
 
 // Meddelanden: conversations between users inside Nav (messages module,
-// migration 0231). Web mirror of the constants and pure helpers:
+// migrations 0231 and 0232). Web mirror of the constants and pure helpers:
 // apps/web/lib/messages.ts (web-messages.test.ts keeps them equal).
 export const CONVERSATION_SUBJECT_MAX = 200;
 export const MESSAGE_BODY_MAX = 5000;
@@ -18,7 +18,15 @@ export const MAX_EMPLOYEE_RECIPIENTS = 500;
 export const BOARD_DEFAULT_DAYS = 7;
 export const BOARD_MAX_DAYS = 365;
 
-// How a participant was addressed when the conversation was created:
+// A thread row is a message or a händelserad (someone added or removed
+// participants, or left).
+export const MESSAGE_KINDS = ["message", "event"] as const;
+export type MessageKind = (typeof MESSAGE_KINDS)[number];
+export const MESSAGE_EVENT_TYPES = ["added", "removed", "left"] as const;
+export type MessageEventType = (typeof MESSAGE_EVENT_TYPES)[number];
+
+// How a participant was addressed when the conversation was created (or the
+// participant added):
 // user = an office user (inbox), terminal = a terminal account (anslagstavla),
 // employee = someone in the personnel register (shown after the
 // anställningsnummer at the terminal, acknowledged with OK, läst).
@@ -64,6 +72,21 @@ export const createConversationSchema = z
   });
 export type CreateConversationInput = z.infer<typeof createConversationSchema>;
 
+// POST /conversations/:id/participants — Lägg till deltagare: the same
+// selection and rules as the recipients of a new conversation.
+export const addParticipantsSchema = z
+  .object({
+    recipientUserIds: uniqueIds(MAX_USER_RECIPIENTS).default([]),
+    recipientEmployeeIds: uniqueIds(MAX_EMPLOYEE_RECIPIENTS).default([]),
+    boardUntil: businessDateSchema.optional(),
+  })
+  .strict()
+  .refine((input) => input.recipientUserIds.length + input.recipientEmployeeIds.length > 0, {
+    message: "Välj minst en deltagare",
+    path: ["recipientUserIds"],
+  });
+export type AddParticipantsInput = z.infer<typeof addParticipantsSchema>;
+
 export const createMessageSchema = z.object({ body: messageBodySchema }).strict();
 export type CreateMessageInput = z.infer<typeof createMessageSchema>;
 
@@ -86,6 +109,14 @@ export const acknowledgeEmployeeMessagesSchema = z
   .object({ messageIds: z.array(z.string().uuid()).min(1).max(500) })
   .strict();
 export type AcknowledgeEmployeeMessagesInput = z.infer<typeof acknowledgeEmployeeMessagesSchema>;
+
+// Terminalen: the employee's reply in one of their own conversations.
+// messageIds = the conversation's messages the employee had on screen — the
+// reply reads up to the newest of them (without them: up to the reply).
+export const employeeReplySchema = z
+  .object({ body: messageBodySchema, messageIds: z.array(z.string().uuid()).min(1).max(500).optional() })
+  .strict();
+export type EmployeeReplyInput = z.infer<typeof employeeReplySchema>;
 
 // The inbox row's "senaste meddelandets början".
 export const MESSAGE_PREVIEW_LENGTH = 140;

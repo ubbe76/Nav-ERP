@@ -8,10 +8,16 @@ Knappa in ditt **anställningsnummer** på sifferknappsatsen och tryck Enter/OK.
 
 ## Meddelanden på terminalen
 
-Kontoret kan skriva till terminalen och till dig som anställd (se [Meddelanden](/hjalp/komma-igang#meddelanden-till-terminaler-och-anstallda)). Terminalen kan inte svara — prata med den som skrev.
+Kontoret kan skriva till terminalen och till dig som anställd (se [Meddelanden](/hjalp/komma-igang#meddelanden-till-terminaler-och-anstallda)). Meddelanden till terminalen går inte att svara på — prata med den som skrev. Meddelanden till dig själv kan du svara på.
 
 - **Till terminalen.** Ett meddelande till terminalen står överst på startvyn, ovanför sifferknappsatsen, med ämnet, vem som skrev och när. Alla ser det. Det står kvar till det datum avsändaren har valt, eller tills avsändaren tar bort det, och nya meddelanden visas inom en minut.
 - **Till dig.** Har du fått ett meddelande visas det direkt när du har knappat in ditt anställningsnummer, före stämplingsvalen: "du har ett nytt meddelande" med ämnet, vem som skrev, när och texten. Tryck **OK, läst** när du har läst — då kommer din hemvy, och avsändaren ser att du har läst. Meddelandet visas inte igen. Går terminalen tillbaka till startvyn innan du har tryckt **OK, läst** visas meddelandet nästa gång du knappar in ditt nummer.
+- **Svara.** Under varje meddelande till dig finns knappen **Svara**. Skriv ditt svar och tryck **Skicka** — svaret står i ditt namn hos dem på kontoret, och meddelandet räknas som läst. Har du fler meddelanden visas de igen efteråt, annars kommer din hemvy. **Tillbaka** går tillbaka till meddelandena utan att skicka. Du skriver på tre sätt:
+  - **Snabbsvar** — **OK**, **Tack!**, **Jag kommer** och **Ring mig**. Ett tryck fyller i texten, och du kan ändra den innan du trycker **Skicka**.
+  - **Skärmtangentbord** — terminalens eget tangentbord med å, ä och ö, siffror, **mellanslag**, backsteg (⌫), skift (⇧) och ny rad (↵). Första bokstaven i en mening blir stor av sig själv.
+  - **Enhetens tangentbord** — surfplattans eller telefonens eget tangentbord. Ett fysiskt tangentbord fungerar i båda lägena.
+
+  Växla mellan **Skärmtangentbord** och **Enhetens tangentbord** under textfältet. Valet sparas på terminalen. Så länge du skriver går terminalen inte tillbaka till startvyn; efter en minut utan tryck gör den det, och det du har skrivit skickas inte.
 
 ## Närvaro (kom/gå)
 

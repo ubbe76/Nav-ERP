@@ -1,8 +1,10 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import {
   acknowledgeEmployeeMessagesSchema,
+  addParticipantsSchema,
   createConversationSchema,
   createMessageSchema,
+  employeeReplySchema,
   listConversationsQuerySchema,
   markConversationReadSchema,
 } from "@navet/shared";
@@ -10,9 +12,13 @@ import { EMPLOYEE_MESSAGES, TERMINAL_READ } from "../../auth/middleware/access-r
 import { errorBody } from "../../system/service/error-body.js";
 import {
   BoardDateOutOfRangeError,
+  ConversationCreatorCannotLeaveError,
   ConversationNotFoundError,
   ConversationNotOwnerError,
   MessageNotFoundError,
+  MessageNotOwnError,
+  ParticipantAlreadyAddedError,
+  ParticipantNotFoundError,
   RecipientNotAvailableError,
   type MessagesService,
 } from "../service/messages.service.js";
@@ -26,20 +32,25 @@ import {
 // are the account's own communication, not business data (the same
 // reasoning as PATCH /me/settings; read-only-account.test.ts pins the list).
 //
-// The terminal's three routes follow the stamp terminal's rules instead and
+// The terminal's four routes follow the stamp terminal's rules instead and
 // its trust model: whoever stands at the terminal gives the
 // anställningsnummer. The board is TERMINAL_READ (it only ever answers the
 // caller's own account); an employee's messages need the terminal
 // permission itself (EMPLOYEE_MESSAGES) — also the read, which is personal
-// and not an office read. The acknowledgement is NOT
-// readOnlySafe — like stamping, it is refused for a read-only account.
+// and not an office read. The acknowledgement and the employee's reply are
+// NOT readOnlySafe — like stamping, they are refused for a read-only account.
 export async function messagesRoutes(app: FastifyInstance, opts: { service: MessagesService }) {
   const { service } = opts;
   type IdParams = { Params: { id: string } };
   const ownWrite = { config: { readOnlySafe: true } } as const;
 
   function messagesError(err: unknown, reply: FastifyReply) {
-    if (err instanceof ConversationNotFoundError || err instanceof MessageNotFoundError) return reply.code(404).send(errorBody(err));
+    if (err instanceof ConversationNotFoundError || err instanceof MessageNotFoundError || err instanceof ParticipantNotFoundError) {
+      return reply.code(404).send(errorBody(err));
+    }
+    if (err instanceof ParticipantAlreadyAddedError) return reply.code(409).send({ ...errorBody(err), recipientId: err.recipientId });
+    if (err instanceof ConversationCreatorCannotLeaveError) return reply.code(409).send(errorBody(err));
+    if (err instanceof MessageNotOwnError) return reply.code(403).send(errorBody(err));
     if (err instanceof RecipientNotAvailableError) return reply.code(400).send({ ...errorBody(err), recipientId: err.recipientId });
     if (err instanceof BoardDateOutOfRangeError) return reply.code(400).send({ ...errorBody(err), min: err.min, max: err.max });
     if (err instanceof ConversationNotOwnerError) return reply.code(403).send(errorBody(err));
@@ -109,6 +120,43 @@ export async function messagesRoutes(app: FastifyInstance, opts: { service: Mess
     }
   });
 
+  // Lägg till deltagare — any participant.
+  app.post<IdParams>("/conversations/:id/participants", ownWrite, async (req, reply) => {
+    const input = addParticipantsSchema.parse(req.body);
+    try {
+      return await service.addParticipants(req.user!, req.params.id, input);
+    } catch (err) {
+      return messagesError(err, reply);
+    }
+  });
+
+  // Ta bort — the one who started the conversation only.
+  app.delete<{ Params: { id: string; participantId: string } }>("/conversations/:id/participants/:participantId", ownWrite, async (req, reply) => {
+    try {
+      return await service.removeParticipant(req.user!, req.params.id, req.params.participantId);
+    } catch (err) {
+      return messagesError(err, reply);
+    }
+  });
+
+  // Lämna konversationen — everyone but the one who started it.
+  app.post<IdParams>("/conversations/:id/leave", ownWrite, async (req, reply) => {
+    try {
+      return await service.leave(req.user!, req.params.id);
+    } catch (err) {
+      return messagesError(err, reply);
+    }
+  });
+
+  // Radera — one's own message.
+  app.delete<{ Params: { id: string; messageId: string } }>("/conversations/:id/messages/:messageId", ownWrite, async (req, reply) => {
+    try {
+      return await service.deleteMessage(req.user!, req.params.id, req.params.messageId);
+    } catch (err) {
+      return messagesError(err, reply);
+    }
+  });
+
   app.get("/messages/unread", async (req) => service.unread(req.user!));
 
   app.get("/messages/recipients", async (req) => service.recipients(req.user!));
@@ -121,6 +169,20 @@ export async function messagesRoutes(app: FastifyInstance, opts: { service: Mess
     "/messages/employees/:employeeId/unread",
     { config: { access: EMPLOYEE_MESSAGES } },
     async (req) => service.employeeUnread(req.params.employeeId)
+  );
+
+  // … the employee's reply in one of their own conversations …
+  app.post<{ Params: { employeeId: string; conversationId: string } }>(
+    "/messages/employees/:employeeId/conversations/:conversationId/messages",
+    { config: { access: EMPLOYEE_MESSAGES } },
+    async (req, reply) => {
+      const input = employeeReplySchema.parse(req.body);
+      try {
+        return reply.code(201).send(await service.employeeReply(req.params.employeeId, req.params.conversationId, input));
+      } catch (err) {
+        return messagesError(err, reply);
+      }
+    }
   );
 
   // … and OK, läst.

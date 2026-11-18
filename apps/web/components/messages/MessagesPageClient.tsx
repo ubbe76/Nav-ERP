@@ -8,7 +8,7 @@ import { Button } from "../ui/Button";
 import { HelpLink } from "../ui/HelpLink";
 import { ListToolbar, Pagination, useListNavigation } from "../ui/ListControls";
 import { stockholmToday } from "../../lib/date";
-import { MESSAGES_REFRESH_MS, messageTime, otherParticipants, type ConversationDetail, type ConversationListRow } from "../../lib/messages";
+import { DELETED_MESSAGE_TEXT, MESSAGES_REFRESH_MS, messageTime, otherParticipants, type ConversationDetail, type ConversationListRow } from "../../lib/messages";
 import { notify } from "../../lib/notice";
 import { useNewFromQuery } from "../../lib/useNewFromQuery";
 import type { Paged } from "../../lib/types";
@@ -108,7 +108,7 @@ export function MessagesPageClient({
                 <span className={styles.inboxWith}>{otherParticipants(row.participants, userId) || "Bara du"}</span>
                 {last && (
                   <span className={styles.inboxPreview}>
-                    {last.senderId === userId ? "Du" : last.senderName}: {last.preview}
+                    {last.senderId === userId ? "Du" : last.senderName}: {last.deleted ? DELETED_MESSAGE_TEXT : last.preview}
                   </span>
                 )}
               </Link>

@@ -234,7 +234,7 @@
 .participant {
   display: inline-flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 2px 6px;
   padding: 4px 10px;
   border: 1px solid var(--color-border);
@@ -305,6 +305,47 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.message[data-deleted="true"] .messageBody {
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+/* Radera on one's own message. */
+.messageDelete {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.messageDelete:hover,
+.messageDelete:focus-visible {
+  background: var(--color-divider);
+  color: var(--color-text-primary);
+  outline: none;
+}
+.messageDelete:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* Händelserad: who added, removed or left — muted and centred. */
+.event {
+  align-self: center;
+  max-width: 100%;
+  padding: 2px 10px;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.participantActions {
+  margin-top: 10px;
+}
 .reply {
   display: flex;
   flex-direction: column;
@@ -358,6 +399,10 @@
   background: var(--color-divider);
   color: var(--color-text-primary);
   outline: none;
+}
+.chipRemove:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .recipientList {
   max-height: 220px;

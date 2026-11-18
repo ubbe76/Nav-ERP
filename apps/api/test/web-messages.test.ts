@@ -84,7 +84,7 @@ describe("the envelope's notice", () => {
 });
 
 describe("participants", () => {
-  const base = { employeeNumber: null, lastReadAt: null, read: null, boardUntil: null, onBoard: null };
+  const base = { participantId: "p1", employeeNumber: null, lastReadAt: null, read: null, boardUntil: null, onBoard: null };
   const stina: web.ConversationParticipant = { ...base, kind: "user", id: "u1", name: "Stina Säljare" };
   const ivar: web.ConversationParticipant = { ...base, kind: "user", id: "u2", name: "Ivar Inköpare" };
   const terminal: web.ConversationParticipant = { ...base, kind: "terminal", id: "u3", name: "Terminal Svets", boardUntil: "2026-11-25", onBoard: true };
@@ -131,5 +131,104 @@ describe("messagePreview (shared)", () => {
     const long = shared.messagePreview("ord ".repeat(100));
     expect(long.length).toBeLessThanOrEqual(shared.MESSAGE_PREVIEW_LENGTH);
     expect(long.endsWith("…")).toBe(true);
+  });
+});
+
+describe("händelserader — eventText", () => {
+  const row = (senderId: string, senderName: string, type: web.MessageEventType, names: (string | null)[]) => ({
+    senderId,
+    senderName,
+    event: { type, targets: names.map((name) => ({ kind: name === null ? null : ("user" as const), name })) },
+  });
+
+  it("says who added, removed or left — Du for the reader", () => {
+    expect(web.eventText(row("a", "Anna", "added", ["Bo", "Terminal Verkstad"]), "x")).toBe("Anna lade till Bo och Terminal Verkstad");
+    expect(web.eventText(row("a", "Anna", "added", ["Bo", "Cia", "Dan"]), "x")).toBe("Anna lade till Bo, Cia och Dan");
+    expect(web.eventText(row("a", "Anna", "removed", ["Bo"]), "x")).toBe("Anna tog bort Bo");
+    expect(web.eventText(row("b", "Bo", "left", []), "x")).toBe("Bo lämnade konversationen");
+    expect(web.eventText(row("a", "Anna", "removed", ["Bo"]), "a")).toBe("Du tog bort Bo");
+    expect(web.eventText({ senderId: "a", senderName: "Anna", event: null }, "x")).toBe("");
+  });
+
+  it("names an erased person neutrally", () => {
+    expect(web.eventText(row("a", "Anna", "added", [null]), "x")).toBe("Anna lade till en borttagen deltagare");
+    expect(web.eventText(row("a", "Anna", "added", ["Bo", null]), "x")).toBe("Anna lade till Bo och en borttagen deltagare");
+    expect(web.eventText(row("a", "Anna", "removed", [null, null]), "x")).toBe("Anna tog bort 2 borttagna deltagare");
+    expect(web.eventText(row("a", "Anna", "added", []), "x")).toBe("Anna lade till en borttagen deltagare");
+  });
+});
+
+describe("recipientsToAdd — Lägg till deltagare", () => {
+  it("leaves out those already in the conversation, per kind", () => {
+    const all = {
+      users: [
+        { id: "u1", name: "Anna" },
+        { id: "u2", name: "Bo" },
+      ],
+      terminals: [
+        { id: "t1", name: "Terminal Svets" },
+        { id: "t2", name: "Terminal Lager" },
+      ],
+      employees: [
+        { id: "u1", employeeNumber: "101", name: "Samma id som en användare" },
+        { id: "e2", employeeNumber: "102", name: "Cia" },
+      ],
+    };
+    const p = (kind: web.ParticipantKind, id: string) =>
+      ({ participantId: `p-${id}`, kind, id, name: "", employeeNumber: null, lastReadAt: null, read: null, boardUntil: null, onBoard: null }) satisfies web.ConversationParticipant;
+    expect(web.recipientsToAdd(all, [p("user", "u1"), p("terminal", "t2"), p("employee", "e2")])).toEqual({
+      users: [{ id: "u2", name: "Bo" }],
+      terminals: [{ id: "t1", name: "Terminal Svets" }],
+      employees: [{ id: "u1", employeeNumber: "101", name: "Samma id som en användare" }],
+    });
+  });
+});
+
+describe("terminalens skärmtangentbord", () => {
+  it("has every Swedish letter once, the digits, and the named keys", () => {
+    const keys = web.TERMINAL_KEYBOARD_ROWS.flat();
+    expect(new Set(keys).size).toBe(keys.length);
+    for (const letter of "abcdefghijklmnopqrstuvwxyzåäö0123456789") expect(keys).toContain(letter);
+    for (const named of ["shift", "backspace", "space", "enter"]) expect(keys).toContain(named);
+    // A phone's width: no row longer than the eleven keys the layout is sized for.
+    expect(Math.max(...web.TERMINAL_KEYBOARD_ROWS.map((row) => row.length))).toBeLessThanOrEqual(11);
+  });
+
+  it("types, capitalises with shift (å ä ö too), erases and stops at the limit", () => {
+    expect(web.applyTerminalKey("he", "j", false)).toBe("hej");
+    expect(web.applyTerminalKey("", "å", true)).toBe("Å");
+    expect(web.applyTerminalKey("", "ö", true)).toBe("Ö");
+    expect(web.applyTerminalKey("1", "2", true)).toBe("12");
+    expect(web.applyTerminalKey("Jag", "space", true)).toBe("Jag ");
+    expect(web.applyTerminalKey("rad", "enter", false)).toBe("rad\n");
+    expect(web.applyTerminalKey("hej", "backspace", false)).toBe("he");
+    expect(web.applyTerminalKey("", "backspace", false)).toBe("");
+    expect(web.applyTerminalKey("ok 👍", "backspace", false)).toBe("ok ");
+    expect(web.applyTerminalKey("hej", "shift", true)).toBe("hej");
+    expect(web.applyTerminalKey("abc", "d", false, 3)).toBe("abc");
+    expect(web.applyTerminalKey("x".repeat(shared.MESSAGE_BODY_MAX), "y", false)).toHaveLength(shared.MESSAGE_BODY_MAX);
+  });
+
+  it("starts a text and a sentence with a capital", () => {
+    expect(web.terminalKeyboardShiftDefault("")).toBe(true);
+    expect(web.terminalKeyboardShiftDefault("Hej. ")).toBe(true);
+    expect(web.terminalKeyboardShiftDefault("Va? ")).toBe(true);
+    expect(web.terminalKeyboardShiftDefault("Rad\n")).toBe(true);
+    expect(web.terminalKeyboardShiftDefault("Hej")).toBe(false);
+    expect(web.terminalKeyboardShiftDefault("Hej ")).toBe(false);
+    expect(web.terminalKeyboardShiftDefault("kl. 7.")).toBe(false);
+  });
+
+  it("uses the skärmtangentbord unless the terminal chose the device's", () => {
+    expect(web.terminalKeyboardModeOf(null)).toBe("screen");
+    expect(web.terminalKeyboardModeOf(undefined)).toBe("screen");
+    expect(web.terminalKeyboardModeOf("något annat")).toBe("screen");
+    expect(web.terminalKeyboardModeOf("screen")).toBe("screen");
+    expect(web.terminalKeyboardModeOf("device")).toBe("device");
+  });
+
+  it("has quick replies that fit a message", () => {
+    expect(web.TERMINAL_QUICK_REPLIES).toEqual(["OK", "Tack!", "Jag kommer", "Ring mig"]);
+    for (const text of web.TERMINAL_QUICK_REPLIES) expect(shared.employeeReplySchema.safeParse({ body: text }).success).toBe(true);
   });
 });

@@ -5,7 +5,9 @@ import {
   messagePreview,
   satisfiesRule,
   type AcknowledgeEmployeeMessagesInput,
+  type AddParticipantsInput,
   type CreateConversationInput,
+  type EmployeeReplyInput,
   type ListConversationsQuery,
   type Paged,
   type ParticipantKind,
@@ -14,7 +16,7 @@ import {
 } from "@navet/shared";
 import { addDays, stockholmToday } from "../../system/service/delivery-days.js";
 import { isEmployeeAnonymizedViolation, isForeignKeyViolation } from "../../system/service/db-errors.js";
-import type { MessageRow, MessagesRepository, NewParticipant, ParticipantRow } from "../repository/messages.repository.js";
+import type { EventTargetRow, MessageRow, MessagesRepository, NewParticipant, ParticipantRow } from "../repository/messages.repository.js";
 
 // Meddelanden: conversations between users, with terminal accounts
 // (anslagstavlan) and employees (shown after the anställningsnummer) as
@@ -51,11 +53,11 @@ export class BoardDateOutOfRangeError extends Error {
   }
 }
 
-// Ta bort från terminalen is the sender's (the one who created the
-// conversation). 403 conversation-not-owner.
+// Ta bort från terminalen and Ta bort (a participant) are the creator's
+// (the one who started the conversation). 403 conversation-not-owner.
 export class ConversationNotOwnerError extends Error {
   constructor(id: string) {
-    super(`Only the sender can remove conversation ${id} from the terminal`);
+    super(`Only the one who started conversation ${id} can do that`);
     this.name = "ConversationNotOwnerError";
   }
 }
@@ -69,6 +71,43 @@ export class MessageNotFoundError extends Error {
   }
 }
 
+// Lägg till deltagare named someone who already takes part. 409
+// participant-already-added.
+export class ParticipantAlreadyAddedError extends Error {
+  constructor(readonly recipientId: string) {
+    super(`${recipientId} already takes part in the conversation`);
+    this.name = "ParticipantAlreadyAddedError";
+  }
+}
+
+// Ta bort named a participant row that is not in the conversation. 404
+// participant-not-found.
+export class ParticipantNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Participant ${id} not found in the conversation`);
+    this.name = "ParticipantNotFoundError";
+  }
+}
+
+// The creator can neither leave nor be removed — nobody else could then
+// remove participants. Arkivera instead. 409
+// conversation-creator-cannot-leave.
+export class ConversationCreatorCannotLeaveError extends Error {
+  constructor(id: string) {
+    super(`The one who started conversation ${id} can not leave it`);
+    this.name = "ConversationCreatorCannotLeaveError";
+  }
+}
+
+// Radera is for one's own messages — not someone else's, not an employee's
+// reply and not a händelserad. 403 message-not-own.
+export class MessageNotOwnError extends Error {
+  constructor(id: string) {
+    super(`Message ${id} is not yours to delete`);
+    this.name = "MessageNotOwnError";
+  }
+}
+
 export interface MessageUser {
   id: string;
   role: UserRole;
@@ -76,6 +115,8 @@ export interface MessageUser {
 }
 
 export interface ParticipantView {
+  // The participant row (Ta bort names it).
+  participantId: string;
   kind: ParticipantKind;
   // The user's or the employee's id.
   id: string;
@@ -105,23 +146,48 @@ export function recipientKindOf(user: { role: UserRole; groupPermissions: readon
   return null;
 }
 
-function toParticipant(row: ParticipantRow, lastMessageAt: Date, today: string): ParticipantView {
+// A sender who has been erased from the personnel register since.
+export const ERASED_SENDER_NAME = "Borttagen anställd";
+
+function toParticipant(row: ParticipantRow, today: string): ParticipantView {
   const employee = row.kind === "employee";
   const terminal = row.kind === "terminal";
   return {
+    participantId: row.id,
     kind: row.kind,
     id: (row.userId ?? row.employeeId)!,
     name: row.name,
     employeeNumber: row.employeeNumber,
     lastReadAt: employee ? row.lastReadAt : null,
-    read: employee ? row.lastReadAt !== null && row.lastReadAt.getTime() >= lastMessageAt.getTime() : null,
+    read: employee ? row.lastReadAt !== null && !row.hasUnread : null,
     boardUntil: terminal ? row.boardUntil : null,
     onBoard: terminal ? row.boardUntil !== null && row.boardUntil >= today : null,
   };
 }
 
-function toMessage(row: MessageRow) {
-  return { id: row.id, senderId: row.senderId, senderName: row.senderName, body: row.body, createdAt: row.createdAt };
+// A thread row as the office sees it. A deleted message keeps its sender and
+// time ("Meddelandet togs bort"); a händelserad carries who it is about,
+// named now — `name: null` = erased since.
+function toMessage(row: MessageRow, targets: EventTargetRow[]) {
+  return {
+    id: row.id,
+    kind: row.kind,
+    senderId: row.senderId,
+    senderEmployeeId: row.senderEmployeeId,
+    senderName: row.senderName ?? ERASED_SENDER_NAME,
+    // Written by an employee at the stämpelterminal.
+    viaTerminal: row.kind === "message" && row.senderId === null,
+    body: row.body,
+    deleted: row.deletedAt !== null,
+    createdAt: row.createdAt,
+    event:
+      row.kind === "event" && row.eventType
+        ? {
+            type: row.eventType,
+            targets: targets.map((t) => ({ kind: t.userId ? ("user" as const) : t.employeeId ? ("employee" as const) : null, name: t.name })),
+          }
+        : null,
+  };
 }
 
 function groupBy<T>(rows: T[], key: (row: T) => string): Map<string, T[]> {
@@ -148,6 +214,48 @@ export function createMessagesService(repo: MessagesRepository) {
     return { users, terminals, employees: staff };
   }
 
+  // The recipients of a new conversation or Lägg till deltagare: the same
+  // selection, and a terminal among them gets the slutdatum.
+  async function resolveRecipients(
+    user: MessageUser,
+    input: { recipientUserIds: string[]; recipientEmployeeIds: string[]; boardUntil?: string }
+  ): Promise<NewParticipant[]> {
+    const available = await candidates(user);
+    const officeIds = new Set(available.users.map((u) => u.id));
+    const terminalIds = new Set(available.terminals.map((u) => u.id));
+    const employeeIds = new Set(available.employees.map((e) => e.id));
+
+    const recipients: NewParticipant[] = [];
+    for (const id of input.recipientUserIds) {
+      if (officeIds.has(id)) recipients.push({ kind: "user", userId: id });
+      else if (terminalIds.has(id)) recipients.push({ kind: "terminal", userId: id });
+      else throw new RecipientNotAvailableError(id);
+    }
+    for (const id of input.recipientEmployeeIds) {
+      if (!employeeIds.has(id)) throw new RecipientNotAvailableError(id);
+      recipients.push({ kind: "employee", employeeId: id });
+    }
+
+    // The slutdatum only exists for terminals; without one among the
+    // recipients a sent date is ignored.
+    if (recipients.some((r) => r.kind === "terminal")) {
+      const today = stockholmToday();
+      const max = addDays(today, BOARD_MAX_DAYS);
+      const until = input.boardUntil ?? addDays(today, BOARD_DEFAULT_DAYS);
+      if (until < today || until > max) throw new BoardDateOutOfRangeError(today, max);
+      for (const r of recipients) if (r.kind === "terminal") r.boardUntil = until;
+    }
+    return recipients;
+  }
+
+  // An employee removed or anonymized between the check and the write.
+  function asRecipientError(err: unknown, input: { recipientUserIds: string[]; recipientEmployeeIds: string[] }): unknown {
+    if (isForeignKeyViolation(err) || isEmployeeAnonymizedViolation(err)) {
+      return new RecipientNotAvailableError(input.recipientEmployeeIds[0] ?? input.recipientUserIds[0] ?? "");
+    }
+    return err;
+  }
+
   async function detail(user: MessageUser, id: string) {
     const conversation = await repo.findForUser(user.id, id);
     if (!conversation) throw new ConversationNotFoundError(id);
@@ -156,6 +264,7 @@ export function createMessagesService(repo: MessagesRepository) {
       repo.messagesOf([id]),
       repo.unreadCounts(user.id, [id]),
     ]);
+    const targets = groupBy(await repo.eventTargetsOf(thread.filter((m) => m.kind === "event").map((m) => m.id)), (t) => t.messageId);
     const today = stockholmToday();
     return {
       id: conversation.id,
@@ -168,8 +277,8 @@ export function createMessagesService(repo: MessagesRepository) {
       unreadCount: unread.get(id) ?? 0,
       // Ta bort från terminalen: the sender's, while something is shown.
       canRemoveFromBoard: conversation.createdBy === user.id,
-      participants: participants.map((p) => toParticipant(p, conversation.lastMessageAt, today)),
-      messages: thread.map(toMessage),
+      participants: participants.map((p) => toParticipant(p, today)),
+      messages: thread.map((m) => toMessage(m, targets.get(m.id) ?? [])),
     };
   }
 
@@ -209,9 +318,16 @@ export function createMessagesService(repo: MessagesRepository) {
             lastMessageAt: row.lastMessageAt,
             archived: row.archived,
             unreadCount: unread.get(row.id) ?? 0,
-            participants: (byConversation.get(row.id) ?? []).map((p) => toParticipant(p, row.lastMessageAt, today)),
+            participants: (byConversation.get(row.id) ?? []).map((p) => toParticipant(p, today)),
             lastMessage: newest
-              ? { senderId: newest.senderId, senderName: newest.senderName, preview: messagePreview(newest.body), createdAt: newest.createdAt }
+              ? {
+                  senderId: newest.senderId,
+                  senderName: newest.senderName ?? ERASED_SENDER_NAME,
+                  // A deleted message has no text left: the web writes "Meddelandet togs bort".
+                  preview: newest.body === null ? "" : messagePreview(newest.body),
+                  deleted: newest.deletedAt !== null,
+                  createdAt: newest.createdAt,
+                }
               : null,
           };
         }),
@@ -221,32 +337,7 @@ export function createMessagesService(repo: MessagesRepository) {
     getConversation: detail,
 
     async createConversation(user: MessageUser, input: CreateConversationInput) {
-      const available = await candidates(user);
-      const officeIds = new Set(available.users.map((u) => u.id));
-      const terminalIds = new Set(available.terminals.map((u) => u.id));
-      const employeeIds = new Set(available.employees.map((e) => e.id));
-
-      const recipients: NewParticipant[] = [];
-      for (const id of input.recipientUserIds) {
-        if (officeIds.has(id)) recipients.push({ kind: "user", userId: id });
-        else if (terminalIds.has(id)) recipients.push({ kind: "terminal", userId: id });
-        else throw new RecipientNotAvailableError(id);
-      }
-      for (const id of input.recipientEmployeeIds) {
-        if (!employeeIds.has(id)) throw new RecipientNotAvailableError(id);
-        recipients.push({ kind: "employee", employeeId: id });
-      }
-
-      // The slutdatum only exists for terminals; without one among the
-      // recipients a sent date is ignored.
-      if (recipients.some((r) => r.kind === "terminal")) {
-        const today = stockholmToday();
-        const max = addDays(today, BOARD_MAX_DAYS);
-        const until = input.boardUntil ?? addDays(today, BOARD_DEFAULT_DAYS);
-        if (until < today || until > max) throw new BoardDateOutOfRangeError(today, max);
-        for (const r of recipients) if (r.kind === "terminal") r.boardUntil = until;
-      }
-
+      const recipients = await resolveRecipients(user, input);
       let id: string;
       try {
         id = await repo.createConversation({
@@ -257,11 +348,7 @@ export function createMessagesService(repo: MessagesRepository) {
           recipients,
         });
       } catch (err) {
-        // An employee removed or anonymized between the check and the write.
-        if (isForeignKeyViolation(err) || isEmployeeAnonymizedViolation(err)) {
-          throw new RecipientNotAvailableError(input.recipientEmployeeIds[0] ?? input.recipientUserIds[0] ?? "");
-        }
-        throw err;
+        throw asRecipientError(err, input);
       }
       return detail(user, id);
     },
@@ -286,6 +373,50 @@ export function createMessagesService(repo: MessagesRepository) {
       return detail(user, conversationId);
     },
 
+    // Lägg till deltagare — any participant. The new ones see the whole
+    // thread, all of it unread; a händelserad says who added whom.
+    async addParticipants(user: MessageUser, conversationId: string, input: AddParticipantsInput) {
+      // Not a participant ⇒ 404 before anything is said about the recipients.
+      if (!(await repo.findForUser(user.id, conversationId))) throw new ConversationNotFoundError(conversationId);
+      const recipients = await resolveRecipients(user, input);
+      let result: Awaited<ReturnType<MessagesRepository["addParticipants"]>>;
+      try {
+        result = await repo.addParticipants(user.id, conversationId, recipients);
+      } catch (err) {
+        throw asRecipientError(err, input);
+      }
+      if (result === "not-participant") throw new ConversationNotFoundError(conversationId);
+      if (result !== "ok") throw new ParticipantAlreadyAddedError(result.duplicate);
+      return detail(user, conversationId);
+    },
+
+    // Ta bort — the creator only, and never the creator's own row.
+    async removeParticipant(user: MessageUser, conversationId: string, participantId: string) {
+      const result = await repo.removeParticipant(user.id, conversationId, participantId);
+      if (result === "not-participant") throw new ConversationNotFoundError(conversationId);
+      if (result === "not-owner") throw new ConversationNotOwnerError(conversationId);
+      if (result === "no-participant") throw new ParticipantNotFoundError(participantId);
+      if (result === "creator") throw new ConversationCreatorCannotLeaveError(conversationId);
+      return detail(user, conversationId);
+    },
+
+    // Lämna konversationen. Answers the unread summary (the envelope).
+    async leave(user: MessageUser, conversationId: string) {
+      const result = await repo.leave(user.id, conversationId);
+      if (result === "not-participant") throw new ConversationNotFoundError(conversationId);
+      if (result === "creator") throw new ConversationCreatorCannotLeaveError(conversationId);
+      return unread(user);
+    },
+
+    // Radera — one's own message. Deleting it again changes nothing.
+    async deleteMessage(user: MessageUser, conversationId: string, messageId: string) {
+      const result = await repo.deleteMessage(user.id, conversationId, messageId);
+      if (result === "not-participant") throw new ConversationNotFoundError(conversationId);
+      if (result === "no-message") throw new MessageNotFoundError(messageId);
+      if (result === "not-own") throw new MessageNotOwnError(messageId);
+      return detail(user, conversationId);
+    },
+
     async removeFromBoard(user: MessageUser, conversationId: string) {
       const conversation = await repo.findForUser(user.id, conversationId);
       if (!conversation) throw new ConversationNotFoundError(conversationId);
@@ -299,12 +430,17 @@ export function createMessagesService(repo: MessagesRepository) {
     // Terminalens anslagstavla for the logged-in terminal account.
     async terminalBoard(user: MessageUser) {
       const rows = await repo.listBoard(user.id, stockholmToday());
-      const thread = groupBy(await repo.messagesOf(rows.map((row) => row.id), BOARD_MESSAGES), (m) => m.conversationId);
+      const thread = groupBy(await repo.messagesOf(rows.map((row) => row.id), { limit: BOARD_MESSAGES }), (m) => m.conversationId);
       return rows.map((row) => ({
         id: row.id,
         subject: row.subject,
         boardUntil: row.boardUntil!,
-        messages: (thread.get(row.id) ?? []).map((m) => ({ id: m.id, senderName: m.senderName, body: m.body, createdAt: m.createdAt })),
+        messages: (thread.get(row.id) ?? []).map((m) => ({
+          id: m.id,
+          senderName: m.senderName ?? ERASED_SENDER_NAME,
+          body: m.body ?? "",
+          createdAt: m.createdAt,
+        })),
       }));
     },
 
@@ -319,9 +455,19 @@ export function createMessagesService(repo: MessagesRepository) {
           group = { conversationId: row.conversationId, subject: row.subject, messages: [] };
           out.push(group);
         }
-        group.messages.push({ id: row.id, senderName: row.senderName, body: row.body, createdAt: row.createdAt });
+        group.messages.push({ id: row.id, senderName: row.senderName ?? ERASED_SENDER_NAME, body: row.body, createdAt: row.createdAt });
       }
       return out;
+    },
+
+    // Svara från terminalen: the employee's own reply, in a conversation the
+    // employee takes part in — 404 otherwise, as for the office. An
+    // anonymized employee is refused by the database (NV002 → 409
+    // employee-anonymized in the global handler).
+    async employeeReply(employeeId: string, conversationId: string, input: EmployeeReplyInput) {
+      const id = await repo.addEmployeeMessage(employeeId, conversationId, input.body, input.messageIds);
+      if (!id) throw new ConversationNotFoundError(conversationId);
+      return { id };
     },
 
     // OK, läst.

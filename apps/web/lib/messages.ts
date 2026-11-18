@@ -17,6 +17,8 @@ export const MESSAGES_REFRESH_MS = 60 * 1000;
 export type ParticipantKind = "user" | "terminal" | "employee";
 
 export interface ConversationParticipant {
+  // The participant row — what Ta bort names.
+  participantId: string;
   kind: ParticipantKind;
   id: string;
   name: string;
@@ -30,12 +32,23 @@ export interface ConversationParticipant {
   onBoard: boolean | null;
 }
 
+export type MessageEventType = "added" | "removed" | "left";
+
+// One row of the thread: a message (deleted: no text left) or a händelserad
+// (`event`: who added/removed whom, or who left — named when it is read;
+// `name: null` = the person has been erased since).
 export interface ConversationMessage {
   id: string;
-  senderId: string;
+  kind: "message" | "event";
+  // null for an employee's reply from the stämpelterminal.
+  senderId: string | null;
+  senderEmployeeId: string | null;
   senderName: string;
-  body: string;
+  viaTerminal: boolean;
+  body: string | null;
+  deleted: boolean;
   createdAt: string;
+  event: { type: MessageEventType; targets: { kind: "user" | "employee" | null; name: string | null }[] } | null;
 }
 
 export interface ConversationLink {
@@ -52,7 +65,7 @@ export interface ConversationListRow {
   archived: boolean;
   unreadCount: number;
   participants: ConversationParticipant[];
-  lastMessage: { senderId: string; senderName: string; preview: string; createdAt: string } | null;
+  lastMessage: { senderId: string | null; senderName: string; preview: string; deleted: boolean; createdAt: string } | null;
 }
 
 export interface ConversationDetail {
@@ -88,6 +101,8 @@ export interface BoardConversation {
   boardUntil: string;
   messages: { id: string; senderName: string; body: string; createdAt: string }[];
 }
+// What the employee has not acknowledged, per conversation — the employee
+// can reply in each of them (Svara).
 export interface EmployeeUnreadConversation {
   conversationId: string;
   subject: string;
@@ -135,6 +150,79 @@ export function participantLabel(p: Pick<ConversationParticipant, "kind" | "name
 export function otherParticipants(participants: readonly ConversationParticipant[], selfId: string): string {
   const others = participants.filter((p) => !(p.kind !== "employee" && p.id === selfId));
   return others.map(participantLabel).join(", ");
+}
+
+// "Anna", "Anna och Bo", "Anna, Bo och Terminal Verkstad".
+export function joinNames(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} och ${names.at(-1)}`;
+}
+
+export const DELETED_MESSAGE_TEXT = "Meddelandet togs bort";
+const ERASED_TARGET = "en borttagen deltagare";
+
+// The händelserad's text: "Anna lade till Bo och Terminal Verkstad", "Anna
+// tog bort Bo", "Bo lämnade konversationen" — "Du" for the reader. The names
+// come from the API as they are NOW (an anonymized employee already has the
+// neutral name; an erased one has none).
+export function eventText(message: Pick<ConversationMessage, "senderId" | "senderName" | "event">, selfId: string): string {
+  const actor = message.senderId === selfId ? "Du" : message.senderName;
+  const event = message.event;
+  if (!event) return "";
+  if (event.type === "left") return `${actor} lämnade konversationen`;
+  const named = event.targets.map((t) => t.name).filter((name): name is string => name !== null);
+  const erased = event.targets.length - named.length;
+  const targets = joinNames([...named, ...(erased === 1 ? [ERASED_TARGET] : erased > 1 ? [`${erased} borttagna deltagare`] : [])]) || ERASED_TARGET;
+  return event.type === "added" ? `${actor} lade till ${targets}` : `${actor} tog bort ${targets}`;
+}
+
+// Lägg till deltagare: the recipient selection without those already in the
+// conversation.
+export function recipientsToAdd(all: MessageRecipients, participants: readonly ConversationParticipant[]): MessageRecipients {
+  const userIds = new Set(participants.filter((p) => p.kind !== "employee").map((p) => p.id));
+  const employeeIds = new Set(participants.filter((p) => p.kind === "employee").map((p) => p.id));
+  return {
+    users: all.users.filter((u) => !userIds.has(u.id)),
+    terminals: all.terminals.filter((u) => !userIds.has(u.id)),
+    employees: all.employees.filter((e) => !employeeIds.has(e.id)),
+  };
+}
+
+// --- Stämpelterminalen: the employee's reply ---
+
+// Snabbsvar: a tap fills the field, Skicka sends.
+export const TERMINAL_QUICK_REPLIES = ["OK", "Tack!", "Jag kommer", "Ring mig"] as const;
+
+// Skärmtangentbordet: QWERTY with å, ä and ö. The control keys are named.
+export const TERMINAL_KEYBOARD_ROWS: readonly (readonly string[])[] = [
+  ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
+  ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "å"],
+  ["a", "s", "d", "f", "g", "h", "j", "k", "l", "ö", "ä"],
+  ["shift", "z", "x", "c", "v", "b", "n", "m", ",", ".", "backspace"],
+  ["?", "!", "space", "-", "enter"],
+];
+
+// What one key of the skärmtangentbord does to the text. Shift is one-shot:
+// it capitalises the next letter and lets go. A new text (and one after . !
+// ? or a new line) starts with a capital on its own.
+export function terminalKeyboardShiftDefault(text: string): boolean {
+  return /(^|[.!?]\s+|\n)$/.test(text);
+}
+export function applyTerminalKey(text: string, key: string, shift: boolean, max: number = MESSAGE_BODY_MAX): string {
+  if (key === "backspace") return [...text].slice(0, -1).join("");
+  if (key === "shift") return text;
+  const typed = key === "space" ? " " : key === "enter" ? "\n" : shift ? key.toLocaleUpperCase("sv-SE") : key;
+  return text.length + typed.length > max ? text : text + typed;
+}
+
+// Which keyboard the terminal uses for the reply: its own skärmtangentbord
+// (the default — the textarea then gets inputMode="none" so the tablet's
+// keyboard does not cover it) or the device's. Remembered per terminal
+// (browser) in localStorage.
+export type TerminalKeyboardMode = "screen" | "device";
+export const TERMINAL_KEYBOARD_STORAGE_KEY = "nav.terminal.replyKeyboard";
+export function terminalKeyboardModeOf(stored: string | null | undefined): TerminalKeyboardMode {
+  return stored === "device" ? "device" : "screen";
 }
 
 // A time in Swedish time: only the clock for today, the date too otherwise.

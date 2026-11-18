@@ -42,7 +42,20 @@ import {
 import { plannedDateLabel } from "../../lib/planning";
 import { formatElapsed, formatQuantity, operationProgress, type OperationProgress } from "../../lib/stampSessions";
 import { formatHours } from "./SchedulesPageClient";
-import { MESSAGES_REFRESH_MS, messageTime, type BoardConversation, type EmployeeUnreadConversation } from "../../lib/messages";
+import {
+  MESSAGES_REFRESH_MS,
+  MESSAGE_BODY_MAX,
+  TERMINAL_KEYBOARD_ROWS,
+  TERMINAL_KEYBOARD_STORAGE_KEY,
+  TERMINAL_QUICK_REPLIES,
+  applyTerminalKey,
+  messageTime,
+  terminalKeyboardModeOf,
+  terminalKeyboardShiftDefault,
+  type BoardConversation,
+  type EmployeeUnreadConversation,
+  type TerminalKeyboardMode,
+} from "../../lib/messages";
 import styles from "./StampTerminal.module.css";
 
 type Step =
@@ -56,6 +69,15 @@ type Step =
   // before the stamp choices. `proceed` opens what the number would have
   // opened without them (the home view, or the forgotten stamp-out).
   | { name: "messages"; employee: EmployeeDirectoryEntry; unread: EmployeeUnreadConversation[]; proceed: () => void }
+  // Svara: the employee's own reply in one of those conversations, written
+  // from the messages step. Back (or a sent reply) returns there.
+  | {
+      name: "reply";
+      employee: EmployeeDirectoryEntry;
+      unread: EmployeeUnreadConversation[];
+      proceed: () => void;
+      conversation: EmployeeUnreadConversation;
+    }
   | {
       name: "deviation";
       employee: EmployeeDirectoryEntry;
@@ -112,6 +134,10 @@ function durationText(minutes: number) {
 }
 
 const IDLE_RESET_MS = 60_000;
+
+// Skärmtangentbordets named keys: what stands on them and what they are called.
+const KEYBOARD_KEY_FACES: Record<string, string> = { shift: "⇧", backspace: "⌫", space: "mellanslag", enter: "↵" };
+const KEYBOARD_KEY_LABELS: Record<string, string> = { shift: "Skift", backspace: "Backsteg", space: "Mellanslag", enter: "Ny rad" };
 
 // Stockholm calendar day (YYYY-MM-DD), same as dayKey in InProgressPageClient.
 function stockholmDay(iso: string | number) {
@@ -190,6 +216,29 @@ export function StampTerminal({
   // Anslagstavlan: the conversations addressed to this terminal's account,
   // shown above the keypad until their slutdatum.
   const [board, setBoard] = useState<BoardConversation[]>([]);
+  // Svara: the reply being written, the skärmtangentbord's shift (null = the
+  // text decides: a capital first and after a full stop) and which keyboard
+  // this terminal uses — remembered in the browser, the screen's own first.
+  const [replyText, setReplyText] = useState("");
+  const [replyShift, setReplyShift] = useState<boolean | null>(null);
+  const [keyboardMode, setKeyboardMode] = useState<TerminalKeyboardMode>("screen");
+  const replyField = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    try {
+      setKeyboardMode(terminalKeyboardModeOf(window.localStorage.getItem(TERMINAL_KEYBOARD_STORAGE_KEY)));
+    } catch {
+      // no storage (private window): the skärmtangentbord
+    }
+  }, []);
+  function chooseKeyboard(mode: TerminalKeyboardMode) {
+    setKeyboardMode(mode);
+    try {
+      window.localStorage.setItem(TERMINAL_KEYBOARD_STORAGE_KEY, mode);
+    } catch {
+      // the choice then lasts until the page is reloaded
+    }
+    if (mode === "device") replyField.current?.focus();
+  }
 
   // Live clock + elapsed tickers.
   useEffect(() => {
@@ -231,6 +280,8 @@ export function StampTerminal({
     setRows([]);
     setMaterials([]);
     setListError(null);
+    setReplyText("");
+    setReplyShift(null);
   }, [clearStampOutFields]);
   // What the idle timeout does — normally back to the keypad, but after Ta
   // ut ATF the withdrawal is already registered, so the deviation step
@@ -272,12 +323,17 @@ export function StampTerminal({
     devReasonId,
     devNote,
     devOvertime,
+    replyText,
+    replyShift,
+    keyboardMode,
     onIdle,
   ]);
 
   // Browsing a long operation list (scroll/touch) counts as activity, so the
-  // operator isn't sent back to the keypad mid-scroll.
-  const listActive = step.name === "pickOperations" && !busy;
+  // operator isn't sent back to the keypad mid-scroll. So does everything
+  // done while writing a reply — a key that changes nothing in the text
+  // (arrows, shift, a full field) and reading the messages above it.
+  const listActive = (step.name === "pickOperations" || step.name === "reply" || step.name === "messages") && !busy;
   useEffect(() => {
     if (!listActive) return;
     const bump = () => {
@@ -460,6 +516,53 @@ export function StampTerminal({
       setBusy(false);
     }
     proceed();
+  }
+
+  // Svara: opens the reply for one of the conversations on the messages step.
+  function openReply(step: Extract<Step, { name: "messages" }>, conversation: EmployeeUnreadConversation) {
+    setError(null);
+    setReplyText("");
+    setReplyShift(null);
+    setStep({ name: "reply", employee: step.employee, unread: step.unread, proceed: step.proceed, conversation });
+  }
+
+  // Skicka: the reply stands in the employee's own name and reads the
+  // conversation up to what was on screen. The conversations left are shown
+  // again; with none left the stamp choices open. A failed send keeps the
+  // text — nothing typed at a terminal is thrown away by an error.
+  async function sendReply(step: Extract<Step, { name: "reply" }>) {
+    const body = replyText.trim();
+    if (busy || !body) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch(`/api/v1/messages/employees/${step.employee.id}/conversations/${step.conversation.conversationId}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ body, messageIds: step.conversation.messages.map((m) => m.id) }),
+      });
+    } catch (err) {
+      setError(apiErrorMessage(err, "Svaret kunde inte skickas."));
+      return;
+    } finally {
+      setBusy(false);
+    }
+    setReplyText("");
+    setReplyShift(null);
+    setNotice("Svaret är skickat.");
+    const left = step.unread.filter((c) => c.conversationId !== step.conversation.conversationId);
+    if (left.length > 0) setStep({ name: "messages", employee: step.employee, unread: left, proceed: step.proceed });
+    else step.proceed();
+  }
+
+  // One key of the skärmtangentbord.
+  function pressReplyKey(key: string) {
+    const shift = replyShift ?? terminalKeyboardShiftDefault(replyText);
+    if (key === "shift") {
+      setReplyShift(!shift);
+      return;
+    }
+    setReplyText((text) => applyTerminalKey(text, key, shift));
+    setReplyShift(null);
   }
 
   // Rule 8: the attendance has been open since an earlier day — ask when
@@ -1207,6 +1310,9 @@ export function StampTerminal({
                       <div className={styles.messageText}>{m.body}</div>
                     </div>
                   ))}
+                  <button type="button" className={styles.replyButton} disabled={busy} onClick={() => openReply(step, item)}>
+                    Svara
+                  </button>
                 </article>
               ))}
             </div>
@@ -1214,10 +1320,114 @@ export function StampTerminal({
               type="button"
               className={styles.bigAction}
               disabled={busy}
-              onClick={() => acknowledgeMessages(step.employee, step.unread, step.proceed)}
+              onClick={() => {
+                setNotice(null);
+                void acknowledgeMessages(step.employee, step.unread, step.proceed);
+              }}
             >
               OK, läst
             </button>
+          </section>
+        )}
+
+        {step.name === "reply" && (
+          <section className={styles.listStep} aria-label="Svara på meddelandet">
+            <div className={styles.prompt}>
+              Svara <span className={styles.promptMeta}>({step.employee.name})</span>
+            </div>
+            <article className={styles.boardItem}>
+              <h2 className={styles.boardSubject}>{step.conversation.subject}</h2>
+              {step.conversation.messages.map((m) => (
+                <div key={m.id} className={styles.boardMessage}>
+                  <div className={styles.messageMeta}>
+                    {m.senderName} · {messageTime(m.createdAt, stockholmToday())}
+                  </div>
+                  <div className={styles.messageText}>{m.body}</div>
+                </div>
+              ))}
+            </article>
+            <div className={styles.quickReplies} role="group" aria-label="Snabbsvar">
+              {TERMINAL_QUICK_REPLIES.map((text) => (
+                <button
+                  key={text}
+                  type="button"
+                  className={styles.quickReply}
+                  disabled={busy}
+                  onClick={() => {
+                    setReplyText(text);
+                    setReplyShift(null);
+                  }}
+                >
+                  {text}
+                </button>
+              ))}
+            </div>
+            <textarea
+              ref={replyField}
+              className={`${styles.note} ${styles.replyText}`}
+              aria-label="Ditt svar"
+              placeholder="Skriv ditt svar…"
+              rows={3}
+              maxLength={MESSAGE_BODY_MAX}
+              // The skärmtangentbord: the tablet's own keyboard stays down
+              // (a physical keyboard still types here).
+              inputMode={keyboardMode === "screen" ? "none" : "text"}
+              value={replyText}
+              onChange={(e) => {
+                setReplyText(e.target.value);
+                setReplyShift(null);
+              }}
+            />
+            <div className={styles.keyboardChoice} role="group" aria-label="Tangentbord">
+              {(
+                [
+                  ["screen", "Skärmtangentbord"],
+                  ["device", "Enhetens tangentbord"],
+                ] as const
+              ).map(([mode, label]) => (
+                <button key={mode} type="button" aria-pressed={keyboardMode === mode} onClick={() => chooseKeyboard(mode)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {keyboardMode === "screen" && (
+              <div className={styles.screenKeyboard} role="group" aria-label="Skärmtangentbord">
+                {TERMINAL_KEYBOARD_ROWS.map((row, index) => (
+                  <div key={index} className={styles.keyboardRow}>
+                    {row.map((key) => {
+                      const shift = replyShift ?? terminalKeyboardShiftDefault(replyText);
+                      const letter = key.length === 1;
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          className={styles.keyboardKey}
+                          data-key={letter ? undefined : key}
+                          aria-label={KEYBOARD_KEY_LABELS[key]}
+                          aria-pressed={key === "shift" ? shift : undefined}
+                          disabled={busy}
+                          // Keeps the caret's field focused, so a physical keyboard goes on typing there.
+                          onPointerDown={(e) => e.preventDefault()}
+                          onClick={() => pressReplyKey(key)}
+                        >
+                          {letter ? (shift ? key.toLocaleUpperCase("sv-SE") : key) : KEYBOARD_KEY_FACES[key]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            )}
+            <button type="button" className={styles.bigAction} disabled={busy || replyText.trim() === ""} onClick={() => sendReply(step)}>
+              {busy ? "Skickar…" : "Skicka"}
+            </button>
+            <BackRow
+              disabled={busy}
+              onBack={() => {
+                setError(null);
+                setStep({ name: "messages", employee: step.employee, unread: step.unread, proceed: step.proceed });
+              }}
+            />
           </section>
         )}
 
