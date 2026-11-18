@@ -98,6 +98,7 @@ Varje fil har `paths:` i sin frontmatter och läses bara in när du läser en fi
 | `permissions.md` | behörighetsgrupper, Personal & lön, Endast läsning, inloggningsvakterna, API-klienter |
 | `alerts.md` | aviseringarna och den dagliga sammanställningen |
 | `mail.md` | e-post, e-postloggen, dokumentutskick, PDF-fällor |
+| `messages.md` | meddelanden mellan användare, oläst härlett, terminalens anslagstavla, meddelanden till anställda |
 | `register.md` | grunddata-registren, villkor på dokumenten, radering med kopplingsflytt |
 | `reports.md` | orderförteckning, offertuppföljning, leveransprecision per motpart |
 | `quality.md` | reklamationer och avvikelser, Avvikelseorsaker, genvägarnas `deviationId`, reklamationsrapporten |

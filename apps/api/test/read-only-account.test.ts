@@ -491,6 +491,18 @@ describe("Endast läsning — the allowlist", () => {
         // /me/settings), and the send dialogs' text is only filled in.
         "POST /api/v1/me/password",
         "POST /api/v1/me/mail-text",
+        // Meddelanden: the account's own communication with other users —
+        // they DO write (conversations, messages, the participant's own
+        // read/archive marks), never business data (users' choice
+        // 2026-11-18, messages.md). The terminal's OK, läst
+        // (POST /messages/employees/:employeeId/read) is NOT here: like
+        // stamping it is refused. messages.route.test.ts.
+        "POST /api/v1/conversations",
+        "POST /api/v1/conversations/:id/messages",
+        "POST /api/v1/conversations/:id/read",
+        "POST /api/v1/conversations/:id/archive",
+        "POST /api/v1/conversations/:id/unarchive",
+        "POST /api/v1/conversations/:id/remove-from-board",
       ].sort()
     );
   });

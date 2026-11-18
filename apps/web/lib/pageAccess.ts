@@ -16,6 +16,9 @@ const SHARED_REGISTERS: PageRule = ["artiklar", "inkop", "forsaljning", "kvalite
 const ENTRIES: readonly Entry[] = [
   { path: "/", exact: true, rule: ["office"] },
   { path: "/aviseringar", rule: ["office"] },
+  // Meddelanden: the inbox of every office user (the messages module's
+  // rule). A terminal account reads its anslagstavla on the stamp terminal.
+  { path: "/meddelanden", rule: ["office"] },
   { path: "/tillagg", rule: ["office"] },
   { path: "/hjalp", rule: ["any"] },
   // Mina inställningar: the account's own settings (lösenord, e-postmallar,

@@ -42,6 +42,7 @@ import {
 import { plannedDateLabel } from "../../lib/planning";
 import { formatElapsed, formatQuantity, operationProgress, type OperationProgress } from "../../lib/stampSessions";
 import { formatHours } from "./SchedulesPageClient";
+import { MESSAGES_REFRESH_MS, messageTime, type BoardConversation, type EmployeeUnreadConversation } from "../../lib/messages";
 import styles from "./StampTerminal.module.css";
 
 type Step =
@@ -51,6 +52,10 @@ type Step =
   | { name: "stampOut"; employee: EmployeeDirectoryEntry; session: StampSession }
   | { name: "atf"; employee: EmployeeDirectoryEntry; atf: AtfStatus; scheduledMinutes: number | null }
   | { name: "forgotten"; employee: EmployeeDirectoryEntry; attendanceId: string; startedAt: string }
+  // Meddelanden till den anställde: shown right after the anställningsnummer,
+  // before the stamp choices. `proceed` opens what the number would have
+  // opened without them (the home view, or the forgotten stamp-out).
+  | { name: "messages"; employee: EmployeeDirectoryEntry; unread: EmployeeUnreadConversation[]; proceed: () => void }
   | {
       name: "deviation";
       employee: EmployeeDirectoryEntry;
@@ -182,6 +187,9 @@ export function StampTerminal({
   const [reloadKey, setReloadKey] = useState(0);
   const listRequest = useRef(0);
   const [now, setNow] = useState(() => Date.now());
+  // Anslagstavlan: the conversations addressed to this terminal's account,
+  // shown above the keypad until their slutdatum.
+  const [board, setBoard] = useState<BoardConversation[]>([]);
 
   // Live clock + elapsed tickers.
   useEffect(() => {
@@ -336,6 +344,30 @@ export function StampTerminal({
       });
   }, [inOperationList, stationIds, materialId, reloadKey]);
 
+  // Anslagstavlan is read whenever the keypad comes back and once a minute
+  // while it shows (the terminal stays open for days). A failed read keeps
+  // what is shown.
+  const onKeypad = step.name === "keypad";
+  useEffect(() => {
+    if (!onKeypad) return;
+    let cancelled = false;
+    async function load() {
+      if (document.visibilityState === "hidden") return;
+      try {
+        const rows = await apiFetch<BoardConversation[]>("/api/v1/messages/terminal-board");
+        if (!cancelled) setBoard(rows);
+      } catch {
+        // keep the board as it is
+      }
+    }
+    void load();
+    const timer = window.setInterval(load, MESSAGES_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [onKeypad]);
+
   // Badge scanners type the employee number and send Enter — accept hardware
   // keyboard input on the keypad step.
   useEffect(() => {
@@ -368,6 +400,7 @@ export function StampTerminal({
     // turning done stamps everyone out, regel 10) or attendance fixed in
     // Attestering must not show up stale. On failure the cached lists do.
     let attendance = openAttendance;
+    let unread: EmployeeUnreadConversation[] = [];
     try {
       if (!employee) {
         try {
@@ -387,15 +420,46 @@ export function StampTerminal({
       } catch {
         // keep the cached lists
       }
+      // Meddelanden till den anställde. A failed read never stops the
+      // stamping — the messages show the next time instead.
+      try {
+        unread = await apiFetch<EmployeeUnreadConversation[]>(`/api/v1/messages/employees/${employee.id}/unread`);
+      } catch {
+        unread = [];
+      }
     } finally {
       setBusy(false);
     }
-    const open = attendance.find((a) => a.employeeId === employee.id);
-    if (open && stockholmDay(open.startedAt) < stockholmDay(Date.now())) {
-      void openForgotten(employee, open.id, open.startedAt);
-      return;
+    const found = employee;
+    const open = attendance.find((a) => a.employeeId === found.id);
+    const proceed = () => {
+      if (open && stockholmDay(open.startedAt) < stockholmDay(Date.now())) {
+        void openForgotten(found, open.id, open.startedAt);
+        return;
+      }
+      setStep({ name: "home", employee: found });
+    };
+    if (unread.length > 0) setStep({ name: "messages", employee: found, unread, proceed });
+    else proceed();
+  }
+
+  // OK, läst: the messages on screen are acknowledged for the employee, then
+  // the stamp choices open. A failed acknowledgement does not stop the
+  // stamping either — the messages come back the next time.
+  async function acknowledgeMessages(employee: EmployeeDirectoryEntry, unread: EmployeeUnreadConversation[], proceed: () => void) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await apiFetch(`/api/v1/messages/employees/${employee.id}/read`, {
+        method: "POST",
+        body: JSON.stringify({ messageIds: unread.flatMap((c) => c.messages.map((m) => m.id)) }),
+      });
+    } catch {
+      // shown again at the next stamp
+    } finally {
+      setBusy(false);
     }
-    setStep({ name: "home", employee });
+    proceed();
   }
 
   // Rule 8: the attendance has been open since an earlier day — ask when
@@ -989,6 +1053,23 @@ export function StampTerminal({
       <main className={styles.stage}>
         {step.name === "keypad" && (
           <section className={styles.keypadStep} aria-label="Ange anställningsnummer">
+            {board.length > 0 && (
+              <div className={styles.board} role="region" aria-label="Meddelanden till terminalen">
+                {board.map((item) => (
+                  <article key={item.id} className={styles.boardItem}>
+                    <h2 className={styles.boardSubject}>{item.subject}</h2>
+                    {item.messages.map((m) => (
+                      <div key={m.id} className={styles.boardMessage}>
+                        <div className={styles.messageMeta}>
+                          {m.senderName} · {messageTime(m.createdAt, stockholmToday())}
+                        </div>
+                        <div className={styles.messageText}>{m.body}</div>
+                      </div>
+                    ))}
+                  </article>
+                ))}
+              </div>
+            )}
             <div className={styles.prompt}>Knappa in ditt anställningsnummer</div>
             <div className={`${styles.entry} num`} aria-live="polite">
               {entry || <span className={styles.entryPlaceholder}>—</span>}
@@ -1105,6 +1186,38 @@ export function StampTerminal({
               Ta ut ATF
             </button>
             <BackRow disabled={busy} onBack={() => setStep({ name: "home", employee: step.employee })} />
+          </section>
+        )}
+
+        {step.name === "messages" && (
+          <section className={styles.listStep} aria-label="Meddelanden till dig">
+            <div className={styles.prompt}>
+              {step.employee.name.split(" ")[0]}, du har{" "}
+              {step.unread.reduce((n, c) => n + c.messages.length, 0) === 1 ? "ett nytt meddelande" : "nya meddelanden"}
+            </div>
+            <div className={styles.board}>
+              {step.unread.map((item) => (
+                <article key={item.conversationId} className={styles.boardItem}>
+                  <h2 className={styles.boardSubject}>{item.subject}</h2>
+                  {item.messages.map((m) => (
+                    <div key={m.id} className={styles.boardMessage}>
+                      <div className={styles.messageMeta}>
+                        {m.senderName} · {messageTime(m.createdAt, stockholmToday())}
+                      </div>
+                      <div className={styles.messageText}>{m.body}</div>
+                    </div>
+                  ))}
+                </article>
+              ))}
+            </div>
+            <button
+              type="button"
+              className={styles.bigAction}
+              disabled={busy}
+              onClick={() => acknowledgeMessages(step.employee, step.unread, step.proceed)}
+            >
+              OK, läst
+            </button>
           </section>
         )}
 

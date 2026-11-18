@@ -306,6 +306,17 @@ const MESSAGES: Record<string, MessageEntry> = {
   "invoice-scan-busy": "En AI-tolkning av filen pågår redan — vänta tills den är klar och försök igen.",
   // Reklamationer och avvikelser (Kvalitet)
   "deviation-not-found": "Avvikelsen finns inte längre — ladda om sidan.",
+  // Meddelanden.
+  "conversation-not-found": "Konversationen finns inte, eller så är du inte med i den.",
+  "message-not-found": "Meddelandet finns inte i konversationen — ladda om sidan.",
+  "recipient-not-available": "En mottagare går inte längre att skriva till — öppna dialogen igen och välj om.",
+  "board-date-out-of-range": (err) => {
+    const body = err.body as { min?: unknown; max?: unknown } | undefined;
+    return typeof body?.min === "string" && typeof body.max === "string"
+      ? `Slutdatumet på terminalen ska ligga mellan ${body.min} och ${body.max}.`
+      : "Slutdatumet på terminalen ska ligga mellan i dag och ett år framåt.";
+  },
+  "conversation-not-owner": "Bara den som skrev meddelandet kan ta bort det från terminalen.",
   // The server names the field and the document (Swedish).
   "deviation-link-mismatch": serverMessage("Kopplingarna hör inte ihop — kontrollera kund/leverantör, order, rad och artikel."),
   "deviation-link-not-allowed": serverMessage("Dokumentet kan inte kopplas till avvikelsen."),

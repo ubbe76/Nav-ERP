@@ -28,6 +28,8 @@ const NOT_IN_NAV = new Set([
   "/ingen-behorighet",
   // Mina inställningar: the account's own page, linked from the user menu.
   "/mina-installningar",
+  // Meddelanden: the inbox, reached from the envelope in the toolbar and Ctrl+K.
+  "/meddelanden",
   // Reached from + Nytt verifikat on the verification list.
   "/ekonomi/verifikat/nytt",
   // The sidebar's own entries — module roots ARE the grids.

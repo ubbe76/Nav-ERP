@@ -28,7 +28,7 @@ export const FAVORITE_TITLE_MAX = 60;
 // A path inside Nav only: one leading slash — never "//host" or "/\host",
 // which a browser resolves to another site — and no whitespace, backslash or
 // control characters.
-const favoriteHrefSchema = z
+export const favoriteHrefSchema = z
   .string()
   .max(500)
   .regex(/^\/(?![/\\])[^\s\\\p{Cc}]*$/u);

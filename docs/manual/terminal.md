@@ -4,7 +4,14 @@
 
 ## Identifiera dig
 
-Knappa in ditt **anställningsnummer** på sifferknappsatsen och tryck Enter/OK. En streckkodsläsare som "skriver" numret + Enter fungerar också. Därefter visas din hemvy med närvarostatus, dagens schema och dina pågående stämplingar.
+Knappa in ditt **anställningsnummer** på sifferknappsatsen och tryck Enter/OK. En streckkodsläsare som "skriver" numret + Enter fungerar också. Därefter visas din hemvy med närvarostatus, dagens schema och dina pågående stämplingar — eller först ett [meddelande till dig](#meddelanden-pa-terminalen), om du har fått ett.
+
+## Meddelanden på terminalen
+
+Kontoret kan skriva till terminalen och till dig som anställd (se [Meddelanden](/hjalp/komma-igang#meddelanden-till-terminaler-och-anstallda)). Terminalen kan inte svara — prata med den som skrev.
+
+- **Till terminalen.** Ett meddelande till terminalen står överst på startvyn, ovanför sifferknappsatsen, med ämnet, vem som skrev och när. Alla ser det. Det står kvar till det datum avsändaren har valt, eller tills avsändaren tar bort det, och nya meddelanden visas inom en minut.
+- **Till dig.** Har du fått ett meddelande visas det direkt när du har knappat in ditt anställningsnummer, före stämplingsvalen: "du har ett nytt meddelande" med ämnet, vem som skrev, när och texten. Tryck **OK, läst** när du har läst — då kommer din hemvy, och avsändaren ser att du har läst. Meddelandet visas inte igen. Går terminalen tillbaka till startvyn innan du har tryckt **OK, läst** visas meddelandet nästa gång du knappar in ditt nummer.
 
 ## Närvaro (kom/gå)
 

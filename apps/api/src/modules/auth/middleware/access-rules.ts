@@ -13,6 +13,13 @@ export const articleCardWrite = (moduleWrite: AccessRule): AccessRule => ["artik
 // terminal permission (tillverkning implies it).
 export const TERMINAL_READ: AccessRule = ["office", "terminal"];
 export const TERMINAL_WRITE: AccessRule = ["terminal"];
+// Meddelanden till en anställd (shown after the anställningsnummer at the
+// terminal, acknowledged with OK, läst): the read AND the acknowledgement
+// need the terminal permission itself. Deliberately not an office read —
+// what was written to one employee is not for every office user to fetch by
+// employee id; the terminal's trust model (whoever stands there gives the
+// number) is the only path. messages.md.
+export const EMPLOYEE_MESSAGES: AccessRule = ["terminal"];
 // Tillverkningsorder i läsläge (and what the terminal needs from an order).
 // Also the körplan (GET /planning/run-plan[/pdf], the user's decision
 // 2026-11-12: "verkstaden och kontoret") — read like a TO, so the terminal's

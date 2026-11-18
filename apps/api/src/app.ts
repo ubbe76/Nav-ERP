@@ -206,6 +206,9 @@ import { createAlertsService } from "./modules/alerts/service/alerts.service.js"
 import { createAlertDigestRepository } from "./modules/alerts/repository/alert-digest.repository.js";
 import { createAlertDigestService } from "./modules/alerts/service/alert-digest.service.js";
 import { alertsRoutes } from "./modules/alerts/routes/alerts.routes.js";
+import { createMessagesRepository } from "./modules/messages/repository/messages.repository.js";
+import { createMessagesService } from "./modules/messages/service/messages.service.js";
+import { messagesRoutes } from "./modules/messages/routes/messages.routes.js";
 import { isBookkeepingLockViolation, isClosedFiscalYearViolation, isEmployeeAnonymizedViolation, isNumberOutOfRange } from "./modules/system/service/db-errors.js";
 import { StockLocationNotFoundError } from "./modules/stock/service/stock.errors.js";
 import { batchErrorStatus, isSerialBalanceViolation, SERIAL_BALANCE_VIOLATED } from "./modules/stock/service/batch.errors.js";
@@ -1184,6 +1187,14 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
         // Aviseringar: one read, every office user; the kinds are filtered per
         // user in the service (admin-only Utskick som misslyckades included).
         await registerModule(protectedRoutes, alertsRoutes, { service: alertsService }, { read: office, write: ["admin"] });
+        // Meddelanden: every office user reads and writes their own
+        // conversations; the terminal's routes carry their own rules.
+        await registerModule(
+          protectedRoutes,
+          messagesRoutes,
+          { service: createMessagesService(createMessagesRepository(database)) },
+          { read: office, write: office }
+        );
         // Kvalitet → Avvikelser: every office user reads (the order cards
         // list their cases), Kvalitet writes.
         await registerModule(protectedRoutes, qualityRoutes, { service: qualityService }, { read: office, write: ["kvalitet"] });

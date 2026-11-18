@@ -929,3 +929,49 @@
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
+
+/* Meddelanden: the anslagstavla above the keypad (conversations addressed to
+   this terminal's account) and an employee's own messages after the
+   anställningsnummer, acknowledged with OK, läst. */
+.board {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.boardItem {
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.boardSubject {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+.boardMessage {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.messageMeta {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.messageText {
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.4;
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

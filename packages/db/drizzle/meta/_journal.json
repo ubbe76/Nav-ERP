@@ -1618,6 +1618,13 @@
       "when": 1794998661667,
       "tag": "0230_invoice_customer",
       "breakpoints": true
+    },
+    {
+      "idx": 231,
+      "version": "7",
+      "when": 1795016194713,
+      "tag": "0231_messages",
+      "breakpoints": true
     }
   ]
 }
