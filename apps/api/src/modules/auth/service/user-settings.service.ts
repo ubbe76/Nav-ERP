@@ -163,11 +163,19 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
   // otherwise their behörighetsgrupp's förvalda favoriter — read live, so a
   // change on the group reaches every member who has not made the list
   // their own. The first change (a star, Ändra) stores the list as the
-  // user's.
-  async function favoritesOf(userId: string, raw: string | undefined): Promise<{ favorites: Favorite[]; favoritesFromGroup: boolean }> {
-    if (raw !== undefined) return { favorites: decodeFavorites(raw), favoritesFromGroup: false };
+  // user's. The group's count is read either way: "Använd gruppens
+  // favoriter" is only offered when there is a list to go back to — on a
+  // group without one it emptied the user's favourites (2026-11-18).
+  async function favoritesOf(
+    userId: string,
+    raw: string | undefined
+  ): Promise<{ favorites: Favorite[]; favoritesFromGroup: boolean; groupFavoritesCount: number }> {
     const group = await repo.groupDefaultFavorites(userId);
-    return { favorites: group === null ? [] : decodeFavorites(JSON.stringify(group)), favoritesFromGroup: true };
+    const groupFavorites = group === null ? [] : decodeFavorites(JSON.stringify(group));
+    if (raw !== undefined) {
+      return { favorites: decodeFavorites(raw), favoritesFromGroup: false, groupFavoritesCount: groupFavorites.length };
+    }
+    return { favorites: groupFavorites, favoritesFromGroup: true, groupFavoritesCount: groupFavorites.length };
   }
 
   async function getSettings(userId: string): Promise<UserSettings> {

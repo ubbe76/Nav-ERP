@@ -2,20 +2,8 @@
 // parts — the pages it can go to (the sidebar's modules and every function in
 // lib/moduleNav.ts), the text matching, the record searches and the recent
 // list. The component is components/CommandPalette.tsx.
-import {
-  ARTIKLAR_SECTIONS,
-  EKONOMI_SECTIONS,
-  FORSALJNING_SECTIONS,
-  INKOP_SECTIONS,
-  KVALITET_SECTIONS,
-  LAGER_SECTIONS,
-  PERSONAL_SECTIONS,
-  RAPPORTER_SECTIONS,
-  SYSTEM_SECTIONS,
-  TILLVERKNING_SECTIONS,
-  sectionsForUser,
-  type ModuleNavSection,
-} from "./moduleNav";
+import { sectionsForUser } from "./moduleNav";
+import { NAV_MODULES } from "./navModules";
 import { canOpen } from "./pageAccess";
 import type { Permission } from "./permissions";
 
@@ -29,19 +17,6 @@ export interface PalettePage {
   module: string;
 }
 
-const MODULES: { title: string; href: string; sections: ModuleNavSection[] }[] = [
-  { title: "Artiklar", href: "/artiklar", sections: ARTIKLAR_SECTIONS },
-  { title: "Inköp", href: "/inkop", sections: INKOP_SECTIONS },
-  { title: "Försäljning", href: "/forsaljning", sections: FORSALJNING_SECTIONS },
-  { title: "Tillverkning", href: "/tillverkning", sections: TILLVERKNING_SECTIONS },
-  { title: "Lager", href: "/lager", sections: LAGER_SECTIONS },
-  { title: "Personal & lön", href: "/personal", sections: PERSONAL_SECTIONS },
-  { title: "Kvalitet", href: "/kvalitet", sections: KVALITET_SECTIONS },
-  { title: "Ekonomi", href: "/ekonomi", sections: EKONOMI_SECTIONS },
-  { title: "Rapporter", href: "/rapporter", sections: RAPPORTER_SECTIONS },
-  { title: "System", href: "/system", sections: SYSTEM_SECTIONS },
-];
-
 const TOP_PAGES: PalettePage[] = [
   { href: "/", title: "Översikt", module: "" },
   { href: "/aviseringar", title: "Aviseringar", module: "" },
@@ -54,7 +29,7 @@ const TOP_PAGES: PalettePage[] = [
 // that would be refused.
 export function palettePages(user: PaletteUser): PalettePage[] {
   const pages: PalettePage[] = TOP_PAGES.filter((p) => canOpen(user, p.href));
-  for (const mod of MODULES) {
+  for (const mod of NAV_MODULES) {
     if (!canOpen(user, mod.href)) continue;
     pages.push({ href: mod.href, title: mod.title, module: "" });
     for (const section of sectionsForUser(mod.sections, user)) {

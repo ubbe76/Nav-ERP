@@ -91,8 +91,9 @@ const NAV_ICONS: Record<NavItem, ReactNode> = {
 };
 
 // A favourite's icon: the module's own for a module page, else the hub row's
-// (or the row it lies under — a card under its register), else a star.
-function favoriteIcon(href: string): ReactNode {
+// (or the row it lies under — a card under its register), else a star. Also
+// Översikten's Favoriter card, which sizes it down with CSS.
+export function favoriteIcon(href: string): ReactNode {
   const path = href.split("?")[0];
   const moduleItem = NAV_ITEMS.find((item) => NAV_LINKS[item] === path);
   if (moduleItem) return NAV_ICONS[moduleItem];

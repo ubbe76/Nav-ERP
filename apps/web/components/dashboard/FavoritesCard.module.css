@@ -1,39 +1,75 @@
-/* Översikten's Favoriter card: the user's favourites as tiles. */
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr));
-  gap: 10px;
+/* Översikten's Favoriter card: the favourites as a row of links per module,
+   the modules one after the other in the user's order and wrapping — a
+   handful of favourites take one short line. */
+.groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 32px;
 }
 
-.tile {
+.group {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.groupTitle {
+  margin: 0 0 3px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--color-divider);
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+/* The links' hover background reaches 8px past the text, so the first
+   icon lines up with the module name above it. */
+.list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 2px;
+  margin: 0 -8px;
+  padding: 0;
+  list-style: none;
+}
+.list > li {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.link {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 7px;
   min-width: 0;
-  padding: 12px 14px;
-  border: 1px solid var(--color-border);
+  padding: 4px 8px;
   border-radius: var(--radius-control);
-  background: var(--color-surface);
   color: var(--color-text-primary);
   font-family: var(--font-body);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   text-decoration: none;
-  transition: background 150ms ease, border-color 150ms ease;
+  transition: background 120ms ease;
 }
-.tile:hover {
+.link:hover {
   background: var(--color-divider);
-  border-color: var(--color-border-control);
 }
-.tile:focus-visible {
+.link:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
 .icon {
   display: flex;
   flex-shrink: 0;
   color: var(--color-text-secondary);
+}
+/* favoriteIcon draws the sidebar's 18px icons. */
+.icon svg {
+  width: 15px;
+  height: 15px;
 }
 
 .label {
