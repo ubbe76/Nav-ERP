@@ -1,3 +1,36 @@
+/* One group per module (lib/favoriteGroups.ts), its arrows moving the whole
+   group; the rows' arrows stay inside it. */
+.groups {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.groupHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.groupTitle {
+  flex: 1;
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
 .list {
   list-style: none;
   margin: 0;
