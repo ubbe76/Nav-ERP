@@ -523,7 +523,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.8.18 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.8.19 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -595,11 +595,13 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   annan leverantör än inköpsorderns; leverantörens faktura laddas upp som **underlag** (PDF/bild)
   redan vid registreringen och kan inte tas bort efter attest); leverantörernas
   **e-fakturor via Peppol** hämtas färdigtolkade till Fakturainkorgen med
-  originalet sparat; **avsändning till legoleverantör** med pallkort, och en
-  egen leveransadress på inköpsordern
+  originalet sparat; **avsändning till legoleverantör** med pallkort, en
+  egen leveransadress på inköpsordern, och **byt leverantör** på en
+  inköpsorder som ännu inte tagits emot
 - **Försäljning** — kunder med kundkort (samma flikupplägg som
   leverantörskortet plus fliken **Adresser**: besöksadress på Allmänt,
-  fakturaadress med **e-post för faktura**, och flera valbara
+  fakturaadress med **e-post för faktura**, en **fakturakund** när fakturan
+  ska gå till en annan kund än beställaren, och flera valbara
   **leveransadresser** med förvaldsmarkering) och **kundens artikelnummer**
   (utskrivet som "Ert art.nr" på dokumenten), **CSV-import av kunder** (admin, samma guide som leverantörs- och artikelimporten),
   offert/order med fullt
@@ -620,7 +622,8 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   eller per kund) och möjlighet att **ångra en utleverans**
   per leveransrad så länge den inte är fakturerad; ny offert eller kundorder (skapas
   direkt som bekräftad) från kundkortet eller listan; offerter med
-  **giltighetstid** som kan markeras **Förlorad** med förlustorsak; kundpriser med
+  **giltighetstid** som kan markeras **Förlorad** med förlustorsak; **byt kund**
+  på offert och order innan något levererats eller fakturerats; kundpriser med
   **ställpris** som läggs på ordern som en egen ställkostnadsrad; **påslag per
   varugrupp, kund eller order** som ger ett **Kalkylpris** ur artikelns
   förkalkyl när kunden saknar kundpris och prislistepris (ett ändrat
