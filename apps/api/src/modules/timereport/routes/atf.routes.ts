@@ -14,7 +14,7 @@ import { ForbiddenError } from "../../auth/middleware/permission.middleware.js";
 export async function atfRoutes(app: FastifyInstance, opts: { service: AtfService }) {
   const { service } = opts;
 
-  app.get<{ Params: { id: string } }>("/employees/:id/atf", { config: { access: TERMINAL_READ } }, async (req, reply) => {
+  app.get<{ Params: { id: string } }>("/employees/:id/atf", { config: { access: TERMINAL_READ, terminalPinEmployee: "params.id" } }, async (req, reply) => {
     try {
       return await service.getAtfStatus(req.params.id);
     } catch (err) {
@@ -28,7 +28,7 @@ export async function atfRoutes(app: FastifyInstance, opts: { service: AtfServic
   // withdrawal (1–1440 min) is anyone's who may stamp, but an adjustment
   // rewrites the balance by up to ±100 000 min and is the personnel card's
   // alone — Personal & lön AND admin/supervisor, like the card itself.
-  app.post<{ Params: { id: string } }>("/employees/:id/atf-transactions", { config: { access: ATF_WITHDRAW } }, async (req, reply) => {
+  app.post<{ Params: { id: string } }>("/employees/:id/atf-transactions", { config: { access: ATF_WITHDRAW, terminalPinEmployee: "params.id" } }, async (req, reply) => {
     const input = createAtfTransactionSchema.parse(req.body);
     if (input.type === "adjustment") {
       const user = req.user!;

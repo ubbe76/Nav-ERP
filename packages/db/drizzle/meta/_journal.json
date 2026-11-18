@@ -1632,6 +1632,13 @@
       "when": 1795024149290,
       "tag": "0232_messages_participants",
       "breakpoints": true
+    },
+    {
+      "idx": 233,
+      "version": "7",
+      "when": 1795025388056,
+      "tag": "0233_terminal_pin",
+      "breakpoints": true
     }
   ]
 }

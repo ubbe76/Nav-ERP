@@ -510,6 +510,13 @@ describe("Endast läsning — the allowlist", () => {
         "DELETE /api/v1/conversations/:id/participants/:participantId",
         "POST /api/v1/conversations/:id/leave",
         "DELETE /api/v1/conversations/:id/messages/:messageId",
+        // Terminalkod: the code after the anställningsnummer. Like a login
+        // (which a read-only account also makes) it changes no business
+        // data — only the counter of wrong attempts — and without it a
+        // read-only account at the terminal could not read what it reads
+        // with the setting off. Välj en kod (POST …/terminal-pin) is NOT
+        // here. terminal-pin.route.test.ts.
+        "POST /api/v1/employees/:id/terminal-pin/verify",
       ].sort()
     );
   });

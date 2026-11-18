@@ -259,6 +259,18 @@ export const attendanceOutSchema = z.object({
 });
 export type AttendanceOutInput = z.infer<typeof attendanceOutSchema>;
 
+// Terminalkod (Kräv kod i stämpelterminalen): the employee's own code at the
+// stämpelterminal — exactly four digits, a string (0042 is a code). No rule
+// against simple codes: 0000 and 1234 are allowed (the manual advises).
+export const TERMINAL_PIN_LENGTH = 4;
+export const terminalPinSchema = z.string().regex(/^\d{4}$/, "Koden ska vara exakt 4 siffror");
+// Välj en kod (POST /employees/:id/terminal-pin) and the code after the
+// anställningsnummer (POST …/terminal-pin/verify).
+export const terminalPinInputSchema = z.object({ pin: terminalPinSchema });
+export type TerminalPinInput = z.infer<typeof terminalPinInputSchema>;
+// The header that carries the bevistoken a right code gave.
+export const TERMINAL_PIN_HEADER = "x-terminal-pin-token";
+
 // Ställ eller produktion (#14 etapp 3): what reported time was spent on, for
 // the efterkalkyl's avvikelseanalys. Optional everywhere and never required by
 // the server — null/absent = ej uppdelad. The terminal offers it with the

@@ -4,6 +4,7 @@ import {
   atfTransactions,
   attendanceSessions,
   auditLog,
+  employeeTerminalPins,
   employees,
   messages,
   payrollPeriods,
@@ -168,6 +169,9 @@ export async function anonymizeEmployeeInTx(tx: Tx, employeeId: string) {
   await tx.update(absences).set({ note: null }).where(and(eq(absences.employeeId, employeeId), isNotNull(absences.note)));
   await tx.update(atfTransactions).set({ note: null }).where(and(eq(atfTransactions.employeeId, employeeId), isNotNull(atfTransactions.note)));
   await eraseOwnMessages(tx, employeeId);
+  // Terminalkoden and its spärr go with the personal data (Radera needs
+  // nothing: the row cascades with the employee).
+  await tx.delete(employeeTerminalPins).where(eq(employeeTerminalPins.employeeId, employeeId));
 
   // The frozen payroll bases keep the number, not the name.
   await tx.execute(sql`

@@ -60,6 +60,10 @@ import styles from "./StampTerminal.module.css";
 
 type Step =
   | { name: "keypad" }
+  // Kräv kod i stämpelterminalen: the employee's own four-digit code, asked
+  // for after the anställningsnummer and before anything of the employee's
+  // opens. "choose" then "repeat" the first time (no code chosen yet).
+  | { name: "pin"; employee: EmployeeDirectoryEntry; mode: "enter" | "choose" | "repeat"; first?: string }
   | { name: "home"; employee: EmployeeDirectoryEntry }
   | { name: "pickOperations"; employee: EmployeeDirectoryEntry }
   | { name: "stampOut"; employee: EmployeeDirectoryEntry; session: StampSession }
@@ -135,6 +139,19 @@ function durationText(minutes: number) {
 
 const IDLE_RESET_MS = 60_000;
 
+// Terminalkod: the code's length, the header its bevistoken travels in (as
+// TERMINAL_PIN_HEADER in shared) and how long before the token runs out the
+// terminal returns to the keypad on its own.
+const PIN_LENGTH = 4;
+const PIN_HEADER = "X-Terminal-Pin-Token";
+const PIN_EXPIRY_MARGIN_MS = 30_000;
+const PIN_PROMPTS = { enter: "Ange din kod", choose: "Välj en kod", repeat: "Upprepa koden" } as const;
+
+function lockedText(lockedUntil: string) {
+  const time = new Date(lockedUntil).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Stockholm" });
+  return `För många felaktiga försök — koden är spärrad till kl. ${time}. Försök igen då, eller be en administratör nollställa koden.`;
+}
+
 // Skärmtangentbordets named keys: what stands on them and what they are called.
 const KEYBOARD_KEY_FACES: Record<string, string> = { shift: "⇧", backspace: "⌫", space: "mellanslag", enter: "↵" };
 const KEYBOARD_KEY_LABELS: Record<string, string> = { shift: "Skift", backspace: "Backsteg", space: "Mellanslag", enter: "Ny rad" };
@@ -152,6 +169,7 @@ export function StampTerminal({
   allowMultipleStamps,
   timeKindSplit = false,
   restSuggestStamp = false,
+  pinRequired: initialPinRequired = false,
 }: {
   employees: EmployeeDirectoryEntry[];
   initialOpenSessions: StampSession[];
@@ -163,6 +181,9 @@ export function StampTerminal({
   // Rest som förslag i antalsfältet → Stämpling: Antal OK starts with Kvar —
   // unless someone else has an open stamp on the same operation.
   restSuggestStamp?: boolean;
+  // Kräv kod i stämpelterminalen: the code step after the anställningsnummer.
+  // Off = no step and no extra request, exactly as before.
+  pinRequired?: boolean;
 }) {
   const [step, setStep] = useState<Step>({ name: "keypad" });
   // The terminal stays open for days: a number not in the list loaded with
@@ -170,6 +191,19 @@ export function StampTerminal({
   // since, or made active again).
   const [employees, setEmployees] = useState(initialEmployees);
   const [entry, setEntry] = useState("");
+  // Terminalkod: the digits typed on the code step (shown as dots), the
+  // bevistoken a right code gave — sent with every request made for the
+  // employee and thrown away on every return to the keypad — and the timer
+  // that returns there just before the token runs out.
+  const [pinEntry, setPinEntry] = useState("");
+  // The setting as the page loaded it — and switched on here when the server
+  // says so: the terminal stays open for days, and a setting turned on since
+  // shows as a refused request (terminal-pin-required). The next number then
+  // gets the code step without a reload.
+  const [pinRequired, setPinRequired] = useState(initialPinRequired);
+  const pinToken = useRef<string | null>(null);
+  const pinTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const busyNow = useRef(false);
   const [openSessions, setOpenSessions] = useState(initialOpenSessions);
   const [openAttendance, setOpenAttendance] = useState(initialOpenAttendance);
   const [error, setError] = useState<string | null>(null);
@@ -264,6 +298,10 @@ export function StampTerminal({
   const resetToKeypad = useCallback(() => {
     setStep({ name: "keypad" });
     setEntry("");
+    setPinEntry("");
+    pinToken.current = null;
+    if (pinTimer.current) clearTimeout(pinTimer.current);
+    pinTimer.current = null;
     setError(null);
     clearStampOutFields();
     setAtfHours("");
@@ -305,6 +343,7 @@ export function StampTerminal({
     step,
     busy,
     entry,
+    pinEntry,
     note,
     markDone,
     quantityOk,
@@ -344,6 +383,43 @@ export function StampTerminal({
     events.forEach((name) => window.addEventListener(name, bump, { passive: true, capture: true }));
     return () => events.forEach((name) => window.removeEventListener(name, bump, { capture: true }));
   }, [listActive, onIdle]);
+
+  // Terminalkod: every request made FOR the employee (stamping, reporting,
+  // the employee's messages, ATF, the schedule) carries the bevistoken — a
+  // new such request must go through here, or a terminal account is refused
+  // (403 terminal-pin-required) while the setting is on. Without a token
+  // (the setting off) this is apiFetch.
+  function employeeFetch<T>(path: string, init?: RequestInit): Promise<T> {
+    const token = pinToken.current;
+    return apiFetch<T>(path, token ? { ...init, headers: { ...init?.headers, [PIN_HEADER]: token } } : init).catch((err: unknown) => {
+      if (err instanceof ApiError && err.code === "terminal-pin-required") setPinRequired(true);
+      throw err;
+    });
+  }
+  useEffect(() => {
+    busyNow.current = busy;
+  });
+  // Keeps the token and returns to the keypad shortly before it runs out —
+  // as the idle timeout does, and never in the middle of a request.
+  function holdProof(proof: { token: string; expiresAt: string }) {
+    pinToken.current = proof.token;
+    if (pinTimer.current) clearTimeout(pinTimer.current);
+    const expire = () => {
+      if (busyNow.current) {
+        pinTimer.current = setTimeout(expire, 2000);
+        return;
+      }
+      setNotice("Tiden för koden har gått ut — knappa in ditt anställningsnummer och din kod igen.");
+      onIdle();
+    };
+    pinTimer.current = setTimeout(expire, Math.max(0, new Date(proof.expiresAt).getTime() - Date.now() - PIN_EXPIRY_MARGIN_MS));
+  }
+  useEffect(
+    () => () => {
+      if (pinTimer.current) clearTimeout(pinTimer.current);
+    },
+    []
+  );
 
   const refresh = useCallback(async () => {
     const [sessions, attendance] = await Promise.all([
@@ -439,6 +515,20 @@ export function StampTerminal({
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  // The code step takes a hardware keyboard too.
+  useEffect(() => {
+    if (step.name !== "pin") return;
+    const current = step;
+    function onKey(e: KeyboardEvent) {
+      if (/^[0-9]$/.test(e.key)) setPinEntry((v) => (v + e.key).slice(0, PIN_LENGTH));
+      else if (e.key === "Backspace") setPinEntry((v) => v.slice(0, -1));
+      else if (e.key === "Enter") void submitPin(current);
+      else if (e.key === "Escape") resetToKeypad();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   async function confirmEntry() {
     if (busy) return;
     if (!entry) {
@@ -452,11 +542,7 @@ export function StampTerminal({
     setEntry("");
     setBusy(true);
     let employee = employees.find(matches);
-    // Fresh lists before deciding: stamps closed elsewhere (an operation
-    // turning done stamps everyone out, regel 10) or attendance fixed in
-    // Attestering must not show up stale. On failure the cached lists do.
-    let attendance = openAttendance;
-    let unread: EmployeeUnreadConversation[] = [];
+    let open: (() => void) | null = null;
     try {
       if (!employee) {
         try {
@@ -471,22 +557,69 @@ export function StampTerminal({
           return;
         }
       }
-      try {
-        attendance = (await refresh()).attendance;
-      } catch {
-        // keep the cached lists
+      if (pinRequired) {
+        // Kräv kod i stämpelterminalen: nothing of the employee's is read or
+        // shown before the code — only whether one is chosen and whether it
+        // is locked.
+        await askForPin(employee);
+        return;
       }
-      // Meddelanden till den anställde. A failed read never stops the
-      // stamping — the messages show the next time instead.
-      try {
-        unread = await apiFetch<EmployeeUnreadConversation[]>(`/api/v1/messages/employees/${employee.id}/unread`);
-      } catch {
-        unread = [];
-      }
+      open = await loadEmployeeView(employee);
     } finally {
       setBusy(false);
     }
-    const found = employee;
+    open?.();
+  }
+
+  // Opens the code step for the employee: Ange din kod, or Välj en kod when
+  // none is chosen. A locked code stays on the keypad with the time. The
+  // caller holds `busy`.
+  async function askForPin(employee: EmployeeDirectoryEntry) {
+    pinToken.current = null;
+    if (pinTimer.current) clearTimeout(pinTimer.current);
+    pinTimer.current = null;
+    try {
+      const status = await apiFetch<{ pinSet: boolean; lockedUntil: string | null }>(`/api/v1/employees/${employee.id}/terminal-pin`);
+      if (status.lockedUntil) {
+        resetToKeypad();
+        setError(lockedText(status.lockedUntil));
+        return;
+      }
+      setPinEntry("");
+      setStep({ name: "pin", employee, mode: status.pinSet ? "enter" : "choose" });
+    } catch (err) {
+      resetToKeypad();
+      setError(apiErrorMessage(err, "Koden kunde inte kontrolleras."));
+    }
+  }
+
+  // What the number opens: the employee's unread messages first, then the
+  // home view (or the forgotten stamp-out). Reads only — the caller holds
+  // `busy` and calls the returned function when it has let go of it.
+  async function loadEmployeeView(found: EmployeeDirectoryEntry): Promise<() => void> {
+    // Fresh lists before deciding: stamps closed elsewhere (an operation
+    // turning done stamps everyone out, regel 10) or attendance fixed in
+    // Attestering must not show up stale. On failure the cached lists do.
+    let attendance = openAttendance;
+    let unread: EmployeeUnreadConversation[] = [];
+    try {
+      attendance = (await refresh()).attendance;
+    } catch {
+      // keep the cached lists
+    }
+    // Meddelanden till den anställde. A failed read never stops the
+    // stamping — the messages show the next time instead.
+    try {
+      unread = await employeeFetch<EmployeeUnreadConversation[]>(`/api/v1/messages/employees/${found.id}/unread`);
+    } catch (err) {
+      // The setting was switched on since this page loaded (or the code was
+      // nollställd a moment ago): the code step, never the home view.
+      if (err instanceof ApiError && err.code === "terminal-pin-required") {
+        await askForPin(found);
+        return () => {};
+      }
+      unread = [];
+    }
     const open = attendance.find((a) => a.employeeId === found.id);
     const proceed = () => {
       if (open && stockholmDay(open.startedAt) < stockholmDay(Date.now())) {
@@ -495,8 +628,66 @@ export function StampTerminal({
       }
       setStep({ name: "home", employee: found });
     };
-    if (unread.length > 0) setStep({ name: "messages", employee: found, unread, proceed });
-    else proceed();
+    return () => {
+      if (unread.length > 0) setStep({ name: "messages", employee: found, unread, proceed });
+      else proceed();
+    };
+  }
+
+  // OK on the code step. Ange din kod checks the code; Välj en kod asks for
+  // it once more (Upprepa koden) and then stores it. A right or a newly
+  // chosen code gives the bevistoken and opens what the number opens.
+  async function submitPin(current: Extract<Step, { name: "pin" }>) {
+    if (busy) return;
+    const { employee, mode } = current;
+    if (pinEntry.length !== PIN_LENGTH) {
+      setError(`Koden ska vara ${PIN_LENGTH} siffror.`);
+      return;
+    }
+    const pin = pinEntry;
+    setPinEntry("");
+    setError(null);
+    if (mode === "choose") {
+      setStep({ name: "pin", employee, mode: "repeat", first: pin });
+      return;
+    }
+    if (mode === "repeat" && pin !== current.first) {
+      setError("Koderna var inte lika — välj en kod igen.");
+      setStep({ name: "pin", employee, mode: "choose" });
+      return;
+    }
+    let open: (() => void) | null = null;
+    setBusy(true);
+    try {
+      const proof = await apiFetch<{ token: string; expiresAt: string }>(
+        `/api/v1/employees/${employee.id}/terminal-pin${mode === "enter" ? "/verify" : ""}`,
+        { method: "POST", body: JSON.stringify({ pin }) }
+      );
+      holdProof(proof);
+      if (mode === "repeat") setNotice("Koden är vald.");
+      open = await loadEmployeeView(employee);
+    } catch (err) {
+      const code = err instanceof ApiError ? err.code : undefined;
+      if (code === "terminal-pin-locked") {
+        // Nothing more to do here until the spärr runs out.
+        resetToKeypad();
+        setError(apiErrorMessage(err, "Koden är spärrad."));
+      } else if (code === "terminal-pin-not-set") {
+        // Nollställd by an administrator since the number was entered.
+        setStep({ name: "pin", employee, mode: "choose" });
+        setError("Koden har nollställts — välj en ny kod.");
+      } else if (code === "terminal-pin-already-set") {
+        setStep({ name: "pin", employee, mode: "enter" });
+        setError(apiErrorMessage(err, "En kod är redan vald."));
+      } else {
+        if (mode === "repeat") setStep({ name: "pin", employee, mode: "choose" });
+        setError(apiErrorMessage(err, "Koden kunde inte kontrolleras."));
+      }
+      return;
+    } finally {
+      setBusy(false);
+    }
+    open?.();
   }
 
   // OK, läst: the messages on screen are acknowledged for the employee, then
@@ -506,7 +697,7 @@ export function StampTerminal({
     if (busy) return;
     setBusy(true);
     try {
-      await apiFetch(`/api/v1/messages/employees/${employee.id}/read`, {
+      await employeeFetch(`/api/v1/messages/employees/${employee.id}/read`, {
         method: "POST",
         body: JSON.stringify({ messageIds: unread.flatMap((c) => c.messages.map((m) => m.id)) }),
       });
@@ -536,7 +727,7 @@ export function StampTerminal({
     setBusy(true);
     setError(null);
     try {
-      await apiFetch(`/api/v1/messages/employees/${step.employee.id}/conversations/${step.conversation.conversationId}/messages`, {
+      await employeeFetch(`/api/v1/messages/employees/${step.employee.id}/conversations/${step.conversation.conversationId}/messages`, {
         method: "POST",
         body: JSON.stringify({ body, messageIds: step.conversation.messages.map((m) => m.id) }),
       });
@@ -571,7 +762,7 @@ export function StampTerminal({
     setBusy(true);
     try {
       const day = stockholmDay(startedAt);
-      const calendar = await apiFetch<ResolvedCalendarDay[]>(
+      const calendar = await employeeFetch<ResolvedCalendarDay[]>(
         `/api/v1/employees/${employee.id}/schedule-calendar?from=${day}&to=${day}`
       );
       const end = calendar[0]?.daySchedule?.endTime;
@@ -707,7 +898,7 @@ export function StampTerminal({
       for (let i = 0; i < operations.length; i++) {
         const operation = operations[i]!;
         try {
-          const res = await apiFetch<{ attendanceStarted?: boolean }>("/api/v1/stamp-sessions", {
+          const res = await employeeFetch<{ attendanceStarted?: boolean }>("/api/v1/stamp-sessions", {
             method: "POST",
             body: JSON.stringify({
               employeeId: employee.id,
@@ -784,7 +975,7 @@ export function StampTerminal({
     const { reason, forgottenStoppedAt } = answers;
     setBusy(true);
     try {
-      await apiFetch("/api/v1/attendance-sessions", {
+      await employeeFetch("/api/v1/attendance-sessions", {
         method: "POST",
         body: JSON.stringify({
           employeeId: employee.id,
@@ -830,7 +1021,7 @@ export function StampTerminal({
   async function goHome(employee: EmployeeDirectoryEntry, attendanceId: string, answers?: AttendanceOutInput) {
     setBusy(true);
     try {
-      const result = await apiFetch<{ pausedWorkSessions: number }>(
+      const result = await employeeFetch<{ pausedWorkSessions: number }>(
         `/api/v1/attendance-sessions/${attendanceId}/stop`,
         { method: "POST", ...(answers ? { body: JSON.stringify(answers) } : {}) }
       );
@@ -862,8 +1053,8 @@ export function StampTerminal({
     try {
       const today = stockholmToday();
       const [atf, calendar] = await Promise.all([
-        apiFetch<AtfStatus>(`/api/v1/employees/${employee.id}/atf`),
-        apiFetch<ResolvedCalendarDay[]>(
+        employeeFetch<AtfStatus>(`/api/v1/employees/${employee.id}/atf`),
+        employeeFetch<ResolvedCalendarDay[]>(
           `/api/v1/employees/${employee.id}/schedule-calendar?from=${today}&to=${today}`
         ),
       ]);
@@ -886,7 +1077,7 @@ export function StampTerminal({
     }
     setBusy(true);
     try {
-      const transaction = await apiFetch<{ id: string }>(`/api/v1/employees/${employee.id}/atf-transactions`, {
+      const transaction = await employeeFetch<{ id: string }>(`/api/v1/employees/${employee.id}/atf-transactions`, {
         method: "POST",
         body: JSON.stringify({
           date: stockholmToday(),
@@ -924,7 +1115,7 @@ export function StampTerminal({
     const hoursText = formatHours(Math.round(pending.hours * 60));
     setBusy(true);
     try {
-      await apiFetch(`/api/v1/attendance-sessions/${pending.attendanceId}/stop`, {
+      await employeeFetch(`/api/v1/attendance-sessions/${pending.attendanceId}/stop`, {
         method: "POST",
         body: JSON.stringify({ ...answers, atfTransactionId: pending.atfTransactionId }),
       });
@@ -976,7 +1167,7 @@ export function StampTerminal({
     if (busy) return; // a double tap on Avbryt must not stop twice
     setBusy(true);
     try {
-      await apiFetch(`/api/v1/attendance-sessions/${pending.attendanceId}/stop`, {
+      await employeeFetch(`/api/v1/attendance-sessions/${pending.attendanceId}/stop`, {
         method: "POST",
         body: JSON.stringify({
           ...(reason ? { reason } : {}),
@@ -1015,7 +1206,7 @@ export function StampTerminal({
     setBusy(true);
     try {
       try {
-        await apiFetch(`/api/v1/stamp-sessions/${session.id}/stop`, {
+        await employeeFetch(`/api/v1/stamp-sessions/${session.id}/stop`, {
           method: "POST",
           body: JSON.stringify({ quantityOk: 0, quantityScrapped: 0 }),
         });
@@ -1026,7 +1217,7 @@ export function StampTerminal({
         return;
       }
       try {
-        await apiFetch("/api/v1/stamp-sessions", {
+        await employeeFetch("/api/v1/stamp-sessions", {
           method: "POST",
           body: JSON.stringify({
             employeeId: employee.id,
@@ -1065,7 +1256,7 @@ export function StampTerminal({
     setShortageQuestion(null);
     setBusy(true);
     try {
-      const stopped = await apiFetch(`/api/v1/stamp-sessions/${session.id}/stop`, {
+      const stopped = await employeeFetch(`/api/v1/stamp-sessions/${session.id}/stop`, {
         method: "POST",
         body: JSON.stringify({
           note: note.trim() || undefined,
@@ -1199,6 +1390,48 @@ export function StampTerminal({
                 ? "Ingen är närvarostämplad just nu."
                 : `${openAttendance.length} närvarande: ${openAttendance.map((s) => s.employeeName).join(", ")}`}
             </p>
+          </section>
+        )}
+
+        {step.name === "pin" && (
+          <section className={styles.keypadStep} aria-label={PIN_PROMPTS[step.mode]}>
+            <div className={styles.prompt}>
+              {PIN_PROMPTS[step.mode]}{" "}
+              <span className={`${styles.promptMeta} num`}>(anställningsnummer {step.employee.employeeNumber})</span>
+            </div>
+            <div className={styles.entry} role="status" aria-label={`${pinEntry.length} av ${PIN_LENGTH} siffror`}>
+              <span aria-hidden="true">
+                {"●".repeat(pinEntry.length)}
+                <span className={styles.entryPlaceholder}>{"○".repeat(PIN_LENGTH - pinEntry.length)}</span>
+              </span>
+            </div>
+            <div className={styles.keypad}>
+              {["1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "OK"].map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={`${styles.key} ${key === "OK" ? styles.keyOk : ""}`}
+                  aria-label={key === "⌫" ? "Radera" : undefined}
+                  disabled={busy}
+                  onClick={() => {
+                    setNotice(null);
+                    if (key === "OK") void submitPin(step);
+                    else if (key === "⌫") setPinEntry((v) => v.slice(0, -1));
+                    else setPinEntry((v) => (v + key).slice(0, PIN_LENGTH));
+                  }}
+                >
+                  {key}
+                </button>
+              ))}
+            </div>
+            <p className={styles.hint}>
+              {step.mode === "enter"
+                ? "Har du glömt koden? En administratör kan nollställa den, så väljer du en ny."
+                : step.mode === "choose"
+                  ? "Välj fyra siffror som bara du känner till. Du anger koden varje gång du har knappat in ditt anställningsnummer."
+                  : "Knappa in samma fyra siffror en gång till."}
+            </p>
+            <BackRow label="Avbryt" disabled={busy} onBack={resetToKeypad} />
           </section>
         )}
 

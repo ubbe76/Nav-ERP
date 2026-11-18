@@ -168,6 +168,25 @@ export const employees = pgTable("employees", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Terminalkod (migration 0233): the four-digit code an employee chooses at
+// the stämpelterminal when the setting Kräv kod i stämpelterminalen is on.
+// A table of its own, never columns on employees: every employee read is a
+// select() of the whole row, and the hash must not be able to ride along in
+// any answer. A row exists exactly when a code is chosen — the administrator's
+// Nollställ terminalkoden (and an anonymization) deletes it, a deleted
+// employee takes it along (cascade). failedAttempts counts wrong codes in a
+// row and lockedUntil is the spärr; both are written under the row's lock.
+export const employeeTerminalPins = pgTable("employee_terminal_pins", {
+  employeeId: uuid("employee_id")
+    .primaryKey()
+    .references(() => employees.id, { onDelete: "cascade" }),
+  pinHash: text("pin_hash").notNull(),
+  // Rides in the bevistoken: a code chosen anew ends the tokens of the old one.
+  setAt: timestamp("set_at", { withTimezone: true }).notNull().defaultNow(),
+  failedAttempts: integer("failed_attempts").notNull().default(0),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
+});
+
 // Förvalda stationer: the work centers an employee usually works at — the
 // stamp terminal preselects them when the employee identifies. Everyone may
 // still pick any station; this only sets the starting filter.

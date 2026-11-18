@@ -8,13 +8,19 @@ Löneblocket i Nav|ERP täcker flödet frånvaro → attestering → låsning �
 
 **Personal & lön → Anställda** kräver rollen administratör, eller rollen arbetsledare tillsammans med en behörighetsgrupp som har **Personal & lön** (menyvalet syns inte för andra, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper)) — personalkortet visar bland annat frånvaro, som räknas som hälsodata. Sidan listar de anställda; klicka på namnet för att öppna **personalkortet** med fem flikar:
 
-- **Allmänt** — anställningsnummer (används i stämpelterminalen), namn, aktiv, telefon, e-post och adress med postnummer/postort samt **Förvalda stationer** — de resurser den anställde brukar arbeta vid. Stämpelterminalen väljer dem när personen identifierar sig, se [Stämpelterminalen](/hjalp/terminal).
+- **Allmänt** — anställningsnummer (används i stämpelterminalen), namn, aktiv, telefon, e-post och adress med postnummer/postort samt **Förvalda stationer** — de resurser den anställde brukar arbeta vid. Stämpelterminalen väljer dem när personen identifierar sig, se [Stämpelterminalen](/hjalp/terminal). Här finns också sektionen **Terminalkod**, se [Terminalkoden](#terminalkoden).
 - **Anställning** — personnummer, anställd från/till, anställningsform (timlön/månadslön), lön och veckoarbetstid.
 - **Schema** — standardschema och kalenderöverstyrningar, se [Personal & tid](/hjalp/personal-tid#schema-per-anstalld).
 - **Frånvaro** — registrering av frånvaro (sjukfrånvaro, semester m.m.), se [Frånvaro på personalkortet](#franvaro-pa-personalkortet) nedan.
 - **ATF** — arbetstidsförkortning, se [Personal & tid](/hjalp/personal-tid#atf-arbetstidsforkortning).
 
 > **Övertidsersättning** anger hur den anställdas övertid ersätts som standard: **Utbetalning** (förvalt) eller **Komptid**. Valet styr vilka tidkoder övertiden får i löneunderlaget och PAXml-exporten, och kan frångås för enskilda dagar i Attesteringens dagdetalj — se [Utbetalning eller komptid](#utbetalning-eller-komptid).
+
+### Terminalkoden
+
+Är inställningen **Kräv kod i stämpelterminalen** på (se [Inställningar](/hjalp/system#installningar)) väljer varje anställd själv en kod på 4 siffror i stämpelterminalen, se [Kod efter anställningsnumret](/hjalp/terminal#kod-efter-anstallningsnumret). Sektionen **Terminalkod** på personalkortets flik **Allmänt** visar **Kod vald** eller **Ingen kod** — aldrig själva koden — och om koden är spärrad efter för många felaktiga försök.
+
+Har någon glömt sin kod, eller är den spärrad, trycker du **Nollställ terminalkoden** och bekräftar. Koden tas bort och spärren hävs, och nästa gång den anställde knappar in sitt anställningsnummer i terminalen står det **Välj en kod**. Knappen visas när en kod är vald, för den som får ändra i **Personal & lön**. Nollställningen, liksom när en kod väljs eller spärras, loggas i händelseloggen med anställningsnumret — aldrig koden. Raderas eller anonymiseras den anställde tas koden bort.
 
 ### Radera eller anonymisera en anställd
 

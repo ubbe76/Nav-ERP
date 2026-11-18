@@ -29,7 +29,7 @@ export default async function StampTerminalPage() {
     apiGet<StampSession[]>("/api/v1/stamp-sessions?open=true", cookieHeader),
     apiGet<AttendanceSession[]>("/api/v1/attendance-sessions?open=true", cookieHeader),
     apiGet<TerminalStation[]>("/api/v1/terminal/stations", cookieHeader),
-    apiGet<{ allowMultipleStamps: boolean; timeKindSplit?: boolean; restSuggestStamp?: boolean }>("/api/v1/settings/terminal", cookieHeader),
+    apiGet<{ allowMultipleStamps: boolean; timeKindSplit?: boolean; restSuggestStamp?: boolean; terminalPinRequired?: boolean }>("/api/v1/settings/terminal", cookieHeader),
   ]);
 
   // The terminal has no AppShell, so it mounts the app's confirmation dialog
@@ -49,6 +49,7 @@ export default async function StampTerminalPage() {
         allowMultipleStamps={settings.allowMultipleStamps}
         timeKindSplit={settings.timeKindSplit === true}
         restSuggestStamp={suggestsRest(settings, "stamp")}
+        pinRequired={settings.terminalPinRequired === true}
       />
       <ConfirmDialogHost />
     </PermissionsProvider>

@@ -4,7 +4,18 @@
 
 ## Identifiera dig
 
-Knappa in ditt **anställningsnummer** på sifferknappsatsen och tryck Enter/OK. En streckkodsläsare som "skriver" numret + Enter fungerar också. Därefter visas din hemvy med närvarostatus, dagens schema och dina pågående stämplingar — eller först ett [meddelande till dig](#meddelanden-pa-terminalen), om du har fått ett.
+Knappa in ditt **anställningsnummer** på sifferknappsatsen och tryck Enter/OK. En streckkodsläsare som "skriver" numret + Enter fungerar också. Därefter visas din hemvy med närvarostatus, dagens schema och dina pågående stämplingar — eller först ett [meddelande till dig](#meddelanden-pa-terminalen), om du har fått ett. Kräver företaget en kod frågar terminalen efter den först, se [Kod efter anställningsnumret](#kod-efter-anstallningsnumret).
+
+## Kod efter anställningsnumret
+
+Är inställningen **Kräv kod i stämpelterminalen** på (System → Inställningar, se [Inställningar](/hjalp/system#installningar)) frågar terminalen efter din egen kod på 4 siffror när du har knappat in anställningsnumret. Ingenting som är ditt — hemvyn, stämplingarna, rapporteringen eller meddelandena till dig — öppnas före koden, så ingen kan stämpla åt dig eller läsa dina meddelanden genom att kunna ditt nummer. Är inställningen av frågar terminalen bara efter numret.
+
+- **Välj en kod.** Första gången har du ingen kod. Terminalen visar **Välj en kod**: knappa in fyra siffror och tryck **OK**, och sedan samma siffror en gång till när det står **Upprepa koden**. Var siffrorna inte lika får du börja om. När koden är vald står det "Koden är vald." och du kommer vidare. Koden väljer du själv, och ingen annan kan se den — inte heller en administratör. Alla kombinationer är tillåtna, men välj hellre något annat än 0000, 1234 eller ditt anställningsnummer.
+- **Ange din kod.** Därefter visar terminalen **Ange din kod** varje gång du har knappat in ditt nummer. Siffrorna visas som prickar. **⌫** raderar en siffra, **OK** bekräftar och **Avbryt** går tillbaka till startvyn. Ett vanligt tangentbord fungerar också.
+- **Fel kod.** Terminalen säger hur många försök du har kvar. Efter 5 fel i rad spärras koden i 15 minuter, och terminalen säger vilket klockslag du kan försöka igen. En rätt kod nollställer räkningen.
+- **Glömd kod.** Be en administratör eller arbetsledare trycka **Nollställ terminalkoden** på ditt personalkort (se [Terminalkoden](/hjalp/lon#terminalkoden)). Då tas koden och en eventuell spärr bort, och nästa gång du knappar in ditt nummer väljer du en ny kod.
+
+Koden gäller för ett besök vid terminalen: när terminalen går tillbaka till startvyn — med **Klar**, efter en stämpling eller efter en minut utan tryck — får nästa person ange nummer och kod på nytt. Står du kvar längre än en kvart i sträck går terminalen tillbaka till startvyn av sig själv, och du knappar in nummer och kod igen. Också kodstegen går tillbaka till startvyn efter en minut utan tryck.
 
 ## Meddelanden på terminalen
 

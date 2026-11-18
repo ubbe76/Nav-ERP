@@ -167,14 +167,14 @@ export async function messagesRoutes(app: FastifyInstance, opts: { service: Mess
   // … what an employee has not acknowledged (after the anställningsnummer) …
   app.get<{ Params: { employeeId: string } }>(
     "/messages/employees/:employeeId/unread",
-    { config: { access: EMPLOYEE_MESSAGES } },
+    { config: { access: EMPLOYEE_MESSAGES, terminalPinEmployee: "params.employeeId" } },
     async (req) => service.employeeUnread(req.params.employeeId)
   );
 
   // … the employee's reply in one of their own conversations …
   app.post<{ Params: { employeeId: string; conversationId: string } }>(
     "/messages/employees/:employeeId/conversations/:conversationId/messages",
-    { config: { access: EMPLOYEE_MESSAGES } },
+    { config: { access: EMPLOYEE_MESSAGES, terminalPinEmployee: "params.employeeId" } },
     async (req, reply) => {
       const input = employeeReplySchema.parse(req.body);
       try {
@@ -188,7 +188,7 @@ export async function messagesRoutes(app: FastifyInstance, opts: { service: Mess
   // … and OK, läst.
   app.post<{ Params: { employeeId: string } }>(
     "/messages/employees/:employeeId/read",
-    { config: { access: EMPLOYEE_MESSAGES } },
+    { config: { access: EMPLOYEE_MESSAGES, terminalPinEmployee: "params.employeeId" } },
     async (req) => service.acknowledgeEmployee(req.params.employeeId, acknowledgeEmployeeMessagesSchema.parse(req.body))
   );
 }

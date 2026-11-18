@@ -113,6 +113,11 @@ const systemSettingsFieldsSchema = z.object({
     // Ställ or Produktion and the manual reports get Typ. Off = no type is
     // offered; the server never requires one either way.
     timeKindSplit: z.boolean().optional(),
+    // Kräv kod i stämpelterminalen: after the anställningsnummer the terminal
+    // asks for the employee's own four-digit code, and the API refuses a
+    // terminal account's calls for an employee without the proof that code
+    // gives (timereport.md). Off = exactly as before.
+    terminalPinRequired: z.boolean().optional(),
     // PAXml löneart codes used by the payroll export — must match the
     // payroll system's own löneartstabell. An empty string is accepted (it
     // means "clear the override") and getSettings() decodes it back to the

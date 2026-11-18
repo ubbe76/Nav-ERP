@@ -86,7 +86,7 @@ Varje fil har `paths:` i sin frontmatter och läses bara in när du läser en fi
 | `production-planning.md` | planerade veckor, kapacitet, Leveranstidskontroll och reservationen |
 | `delivery-days.md` | fasta leveransdagar, transport- och arbetsdagar, datumintervallet |
 | `configurator.md` | varianter, beställningsvara, konfigurerad TO, externt API |
-| `timereport.md` | närvaro, stämpling, automatisk utstämpling, avvikelser och övertidsval |
+| `timereport.md` | närvaro, stämpling, automatisk utstämpling, avvikelser och övertidsval, terminalkoden |
 | `economy.md` | automatkontering, manuell bokföring, återkommande verifikat, rapporter, SIE, räkenskapsinformation |
 | `vat.md` | momskoder, momsrapport och omföring, periodisk sammanställning, importmoms |
 | `currency.md` | valuta på dokument och betalningar, kurser, priskedjan |

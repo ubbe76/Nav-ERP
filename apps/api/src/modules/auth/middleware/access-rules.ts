@@ -20,6 +20,11 @@ export const TERMINAL_WRITE: AccessRule = ["terminal"];
 // employee id; the terminal's trust model (whoever stands there gives the
 // number) is the only path. messages.md.
 export const EMPLOYEE_MESSAGES: AccessRule = ["terminal"];
+// Terminalkod (Kräv kod i stämpelterminalen): choosing and showing the code
+// is the terminal's own — whoever may stamp. The status (is a code chosen,
+// is it locked) is also the personnel card's, which resets the code.
+export const TERMINAL_PIN: AccessRule = ["terminal"];
+export const TERMINAL_PIN_STATUS: AccessRule = ["terminal", "personal"];
 // Tillverkningsorder i läsläge (and what the terminal needs from an order).
 // Also the körplan (GET /planning/run-plan[/pdf], the user's decision
 // 2026-11-12: "verkstaden och kontoret") — read like a TO, so the terminal's

@@ -32,6 +32,7 @@ import {
 import { formatHours } from "./SchedulesPageClient";
 import { FranvaroTab } from "./FranvaroTab";
 import { EmployeeErasureSection } from "./EmployeeErasureSection";
+import { EmployeeTerminalPinSection } from "./EmployeeTerminalPinSection";
 import { formatStockholmDate, stockholmToday, stockholmYear } from "../../lib/date";
 import styles from "./EmployeeTabs.module.css";
 import { Card } from "../ui/Card";
@@ -117,6 +118,7 @@ export function EmployeeTabs({
       {openedTabs.has("Allmänt") && (
         <div hidden={activeTab !== "Allmänt"}>
           <AllmantTab employee={employee} stations={stations} onDirtyChange={setTabDirty("Allmänt")} />
+          <EmployeeTerminalPinSection employeeId={employee.id} employeeName={employee.name} />
           {userRole === "admin" && (
             <EmployeeErasureSection employeeId={employee.id} employeeName={employee.name} active={employee.active} />
           )}

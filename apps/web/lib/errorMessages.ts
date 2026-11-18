@@ -85,6 +85,13 @@ const MESSAGES: Record<string, MessageEntry> = {
     "Den anställde kan inte raderas eller anonymiseras än — markera som inaktiv, stäng öppna stämplingar och lås löneperioderna först.",
   "employee-has-history": "Den anställde har tid eller lön i systemet och kan bara anonymiseras, inte raderas.",
   "employee-anonymized": "Den anställde är anonymiserad och kan inte ändras.",
+  // Terminalkod (Kräv kod i stämpelterminalen). The server's texts for a
+  // wrong and a locked code say how many attempts are left and until when.
+  "terminal-pin-required": "Ange din kod igen — knappa in anställningsnumret och koden.",
+  "terminal-pin-wrong": serverMessage("Fel kod."),
+  "terminal-pin-locked": serverMessage("För många felaktiga försök — koden är spärrad en stund."),
+  "terminal-pin-already-set": "En kod är redan vald. Har du glömt den kan en administratör nollställa den.",
+  "terminal-pin-not-set": "Ingen kod är vald — välj en kod först.",
   "already-attested": "Medarbetaren är redan attesterad.",
   "attestation-not-found": "Ingen attestering hittades.",
   "article-not-found": "Artikeln hittades inte.",

@@ -76,6 +76,7 @@ export async function systemRoutes(app: FastifyInstance, opts: { service: System
       timeKindSplit: settings.timeKindSplit,
       restSuggestStamp: settings.restSuggestStamp,
       restSuggestReport: settings.restSuggestReport,
+      terminalPinRequired: settings.terminalPinRequired,
     };
   });
 

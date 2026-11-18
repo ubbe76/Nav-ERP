@@ -190,6 +190,10 @@ import { scheduleRoutes } from "./modules/timereport/routes/schedule.routes.js";
 import { createAtfRepository } from "./modules/timereport/repository/atf.repository.js";
 import { createAtfService } from "./modules/timereport/service/atf.service.js";
 import { atfRoutes } from "./modules/timereport/routes/atf.routes.js";
+import { createTerminalPinRepository } from "./modules/timereport/repository/terminal-pin.repository.js";
+import { createTerminalPinService } from "./modules/timereport/service/terminal-pin.service.js";
+import { terminalPinRoutes } from "./modules/timereport/routes/terminal-pin.routes.js";
+import { enforceTerminalPin } from "./modules/timereport/middleware/terminal-pin.middleware.js";
 import { createDemoDataService } from "./modules/demo/service/demo-data.service.js";
 import { demoDataRoutes } from "./modules/demo/routes/demo-data.routes.js";
 import { createOnboardingService } from "./modules/system/service/onboarding.service.js";
@@ -954,6 +958,13 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   );
   const atfRepository = createAtfRepository(database);
   const atfService = createAtfService(atfRepository, timeReportRepository, systemService, periodLockChecker);
+  // Terminalkod (Kräv kod i stämpelterminalen): the employee's own code at
+  // the terminal and the bevistoken the guard below asks for.
+  const terminalPinService = createTerminalPinService(createTerminalPinRepository(database), {
+    jwtSecret,
+    required: async () => (await systemService.getSettings()).terminalPinRequired,
+    audit: auditRepository,
+  });
   // Löneunderlag: base-data registers (frånvarokoder/OB-regler), absence
   // bookings, the period summary, attestation and period locking. Reuses
   // timeReportRepository as both the employee reader (existence checks +
@@ -1132,6 +1143,9 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
         protectedRoutes.addHook("preHandler", requireAuth(authService));
         protectedRoutes.addHook("preHandler", enforceAccess());
         protectedRoutes.addHook("preHandler", rejectMalformedIds());
+        // Terminalkod: a terminal account's calls for an employee need the
+        // bevistoken while the setting is on (routes with terminalPinEmployee).
+        protectedRoutes.addHook("preHandler", enforceTerminalPin(terminalPinService));
         await registerModule(protectedRoutes, articleRoutes, { service: articleService }, { read: office, write: ["artiklar"] });
         await registerModule(protectedRoutes, templateConfiguratorRoutes, { service: configuratorService }, { read: office, write: ["artiklar"] });
         await registerModule(protectedRoutes, importRoutes, { service: importService }, adminOnly);
@@ -1207,6 +1221,8 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
         await registerModule(protectedRoutes, timeReportRoutes, { service: timeReportService }, { read: office, write: ["tillverkning"] });
         await registerModule(protectedRoutes, scheduleRoutes, { service: scheduleService }, { read: office, write: ["tillverkning"] });
         await registerModule(protectedRoutes, atfRoutes, { service: atfService }, { read: office, write: ["tillverkning"] });
+        // Every route carries its own rule (the terminal's, or Personal & lön).
+        await registerModule(protectedRoutes, terminalPinRoutes, { service: terminalPinService }, { read: ["personal"], write: ["personal"] });
         // Personal & lön: the whole payroll module (lönekoder, frånvaro,
         // övertidsval, löneperiod, attest, export) is the personal menu, reads
         // included; GET /attendance-deviation-reasons keeps its terminal rule.
