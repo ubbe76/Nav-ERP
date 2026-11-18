@@ -60,7 +60,9 @@ export const config = {
   // admin-only, so without the exemption the page guard below would send a
   // non-admin following the manual's Ladda ned mallen link to
   // /ingen-behorighet (and a visitor from the website to /login).
+  // robots.txt (app/robots.ts) is exempt so a search engine reads the
+  // Disallow instead of being sent to the login page.
   matcher: [
-    "/((?!api/v1|_next/static|_next/image|importmallar/|favicon.ico|favicon-16x16.png|favicon-32x32.png|apple-icon.png|manifest.webmanifest|android-chrome-192x192.png|android-chrome-512x512.png).*)",
+    "/((?!api/v1|_next/static|_next/image|importmallar/|favicon.ico|favicon-16x16.png|favicon-32x32.png|apple-icon.png|manifest.webmanifest|android-chrome-192x192.png|android-chrome-512x512.png|robots.txt).*)",
   ],
 };
