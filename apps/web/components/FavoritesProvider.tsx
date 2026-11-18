@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { apiFetch } from "../lib/api";
 import { apiErrorMessage } from "../lib/errorMessages";
 import { MAX_FAVORITES, type Favorite } from "../lib/favorites";
+import { withFavorite } from "../lib/favoriteGroups";
 import { hasFavoritesCard, overviewCardsWithFavorites, type FavoritesPlacement } from "../lib/overviewCards";
 import styles from "./FavoritesProvider.module.css";
 
@@ -206,7 +207,7 @@ export function FavoritesProvider({
       setPlacement,
       has: (href) => favorites?.some((f) => f.href === href) ?? false,
       add: (favorite) =>
-        save((current) => (current.some((f) => f.href === favorite.href) ? current : [...current, favorite]), true),
+        save((current) => (current.some((f) => f.href === favorite.href) ? current : withFavorite(current, favorite)), true),
       remove: (href) => save((current) => current.filter((f) => f.href !== href), true),
       replace: (list) => save(() => list, false),
       fromGroup,

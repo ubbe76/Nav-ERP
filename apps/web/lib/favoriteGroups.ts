@@ -1,6 +1,10 @@
-// Översikten's Favoriter card groups the favourites by the module they belong
-// to, in the sidebar's order, with the user's own order inside each group.
-// Pure — the API suite tests it (web-favorite-groups.test.ts).
+// Favourites grouped by the module they belong to — Översikten's Favoriter
+// card and the list editor (Ändra, a behörighetsgrupp's förvalda favoriter).
+// The list stays one flat, ordered `{ href, title }[]`; the groups' order is
+// the order their first favourite appears in it, and the editor saves the
+// list module by module, so moving a group or a favourite within its group
+// is just a new flat order. Pure — the API suite tests it
+// (web-favorite-groups.test.ts).
 import { NAV_MODULES } from "./navModules";
 
 // Favourites outside every module: Översikt, Aviseringar, Hjälp, Mina
@@ -39,17 +43,64 @@ export function favoriteModule(href: string): string | null {
   return best?.title ?? null;
 }
 
+// The groups in the order their first favourite appears, the favourites in
+// list order within each.
 export function groupFavorites<T extends { href: string }>(favorites: readonly T[]): FavoriteGroup<T>[] {
-  const byModule = new Map<string, T[]>();
+  const groups: FavoriteGroup<T>[] = [];
   for (const favorite of favorites) {
     const title = favoriteModule(favorite.href) ?? OTHER_FAVORITES;
-    const group = byModule.get(title);
-    if (group) group.push(favorite);
-    else byModule.set(title, [favorite]);
+    const group = groups.find((g) => g.title === title);
+    if (group) group.favorites.push(favorite);
+    else groups.push({ title, favorites: [favorite] });
   }
-  const order = [...NAV_MODULES.map((mod) => mod.title), OTHER_FAVORITES];
-  return order.flatMap((title) => {
-    const group = byModule.get(title);
-    return group ? [{ title, favorites: group }] : [];
+  return groups;
+}
+
+function flatten<T>(groups: readonly FavoriteGroup<T>[]): T[] {
+  return groups.flatMap((group) => group.favorites);
+}
+
+function moved<T>(list: readonly T[], index: number, step: -1 | 1): T[] {
+  const target = index + step;
+  if (index < 0 || index >= list.length || target < 0 || target >= list.length) return [...list];
+  const next = [...list];
+  const [item] = next.splice(index, 1);
+  next.splice(target, 0, item!);
+  return next;
+}
+
+// Moves a whole module's group one step, its favourites with it.
+export function moveFavoriteGroup<T extends { href: string }>(
+  favorites: readonly T[],
+  groupIndex: number,
+  step: -1 | 1
+): T[] {
+  return flatten(moved(groupFavorites(favorites), groupIndex, step));
+}
+
+// Moves a favourite one step within its own group — never past its edge.
+export function moveFavoriteInGroup<T extends { href: string }>(
+  favorites: readonly T[],
+  groupIndex: number,
+  index: number,
+  step: -1 | 1
+): T[] {
+  return flatten(
+    groupFavorites(favorites).map((group, i) =>
+      i === groupIndex ? { ...group, favorites: moved(group.favorites, index, step) } : group
+    )
+  );
+}
+
+// A new favourite goes after the last one of its module, or last of all when
+// it starts a new group. The rest of the list keeps its order (a star click
+// never reshuffles the sidebar).
+export function withFavorite<T extends { href: string }>(favorites: readonly T[], favorite: T): T[] {
+  const title = favoriteModule(favorite.href) ?? OTHER_FAVORITES;
+  let last = -1;
+  favorites.forEach((f, i) => {
+    if ((favoriteModule(f.href) ?? OTHER_FAVORITES) === title) last = i;
   });
+  if (last < 0) return [...favorites, favorite];
+  return [...favorites.slice(0, last + 1), favorite, ...favorites.slice(last + 1)];
 }

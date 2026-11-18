@@ -1,6 +1,6 @@
 /* Översikten's Favoriter card: the favourites as a row of links per module,
-   the modules one after the other in the sidebar's order and wrapping —
-   a handful of favourites take one short line. */
+   the modules one after the other in the user's order and wrapping — a
+   handful of favourites take one short line. */
 .groups {
   display: flex;
   flex-wrap: wrap;

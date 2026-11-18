@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 // Översikten's Favoriter card groups the favourites by module — the web's
 // pure grouping, loaded directly like the other web files.
-import { OTHER_FAVORITES, favoriteModule, groupFavorites } from "../../web/lib/favoriteGroups.js";
+import {
+  OTHER_FAVORITES,
+  favoriteModule,
+  groupFavorites,
+  moveFavoriteGroup,
+  moveFavoriteInGroup,
+  withFavorite,
+} from "../../web/lib/favoriteGroups.js";
 import { NAV_MODULES } from "../../web/lib/navModules.js";
 
 describe("Favoriter på Översikten, grupperade per modul", () => {
@@ -38,20 +45,92 @@ describe("Favoriter på Översikten, grupperade per modul", () => {
     }
   });
 
-  it("orders the groups as the sidebar, keeps the user's order inside each, and ends with Övrigt", () => {
-    const favorites = [
-      { href: "/aviseringar", title: "Aviseringar" },
+  const favorites = [
+    { href: "/aviseringar", title: "Aviseringar" },
+    { href: "/forsaljning/ordrar", title: "Kundorder" },
+    { href: "/artiklar", title: "Artiklar" },
+    { href: "/kunder", title: "Kunder" },
+    { href: "/forsaljning/fakturor", title: "Fakturor" },
+    { href: "/hjalp", title: "Hjälp" },
+  ];
+  const titles = (list: readonly { title: string }[]) => list.map((f) => f.title);
+
+  it("orders the groups by their first favourite and keeps the user's order inside each", () => {
+    const groups = groupFavorites(favorites);
+    expect(groups.map((g) => g.title)).toEqual([OTHER_FAVORITES, "Försäljning", "Artiklar"]);
+    expect(titles(groups[0]!.favorites)).toEqual(["Aviseringar", "Hjälp"]);
+    expect(titles(groups[1]!.favorites)).toEqual(["Kundorder", "Kunder", "Fakturor"]);
+    expect(groups.flatMap((g) => g.favorites)).toHaveLength(favorites.length);
+    expect(groupFavorites([])).toEqual([]);
+  });
+
+  it("moves a whole group, its favourites with it, and saves the list module by module", () => {
+    // Försäljning up past Övrigt.
+    expect(titles(moveFavoriteGroup(favorites, 1, -1))).toEqual([
+      "Kundorder",
+      "Kunder",
+      "Fakturor",
+      "Aviseringar",
+      "Hjälp",
+      "Artiklar",
+    ]);
+    // Artiklar down: already last — the list comes back grouped, nothing lost.
+    expect(titles(moveFavoriteGroup(favorites, 2, 1))).toEqual([
+      "Aviseringar",
+      "Hjälp",
+      "Kundorder",
+      "Kunder",
+      "Fakturor",
+      "Artiklar",
+    ]);
+  });
+
+  it("moves a favourite only within its group", () => {
+    // Kunder (second in Försäljning) up to first.
+    expect(titles(moveFavoriteInGroup(favorites, 1, 1, -1))).toEqual([
+      "Aviseringar",
+      "Hjälp",
+      "Kunder",
+      "Kundorder",
+      "Fakturor",
+      "Artiklar",
+    ]);
+    // Kundorder (first in Försäljning) up: stays — never into Övrigt.
+    expect(titles(moveFavoriteInGroup(favorites, 1, 0, -1))).toEqual([
+      "Aviseringar",
+      "Hjälp",
+      "Kundorder",
+      "Kunder",
+      "Fakturor",
+      "Artiklar",
+    ]);
+    // Fakturor (last) down: stays.
+    expect(titles(moveFavoriteInGroup(favorites, 1, 2, 1)).slice(2, 5)).toEqual(["Kundorder", "Kunder", "Fakturor"]);
+  });
+
+  it("adds a favourite after the last one of its module, or last when it starts a group", () => {
+    const grouped = moveFavoriteGroup(favorites, 0, -1);
+    expect(titles(withFavorite(grouped, { href: "/forsaljning/offerter", title: "Offerter" }))).toEqual([
+      "Aviseringar",
+      "Hjälp",
+      "Kundorder",
+      "Kunder",
+      "Fakturor",
+      "Offerter",
+      "Artiklar",
+    ]);
+    expect(titles(withFavorite(grouped, { href: "/lager/saldon", title: "Lagersaldon" })).at(-1)).toBe("Lagersaldon");
+    // The rest of an ungrouped list keeps its order.
+    const loose = [
       { href: "/forsaljning/ordrar", title: "Kundorder" },
       { href: "/artiklar", title: "Artiklar" },
       { href: "/kunder", title: "Kunder" },
-      { href: "/forsaljning/fakturor", title: "Fakturor" },
-      { href: "/hjalp", title: "Hjälp" },
     ];
-    const groups = groupFavorites(favorites);
-    expect(groups.map((g) => g.title)).toEqual(["Artiklar", "Försäljning", OTHER_FAVORITES]);
-    expect(groups[1]!.favorites.map((f) => f.title)).toEqual(["Kundorder", "Kunder", "Fakturor"]);
-    expect(groups[2]!.favorites.map((f) => f.title)).toEqual(["Aviseringar", "Hjälp"]);
-    expect(groups.flatMap((g) => g.favorites)).toHaveLength(favorites.length);
-    expect(groupFavorites([])).toEqual([]);
+    expect(titles(withFavorite(loose, { href: "/forsaljning/fakturor", title: "Fakturor" }))).toEqual([
+      "Kundorder",
+      "Artiklar",
+      "Kunder",
+      "Fakturor",
+    ]);
   });
 });
