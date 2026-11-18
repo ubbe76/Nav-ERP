@@ -203,6 +203,14 @@ Där en artikel ska väljas (orderrader, tillverkningsorder, struktur) finns en 
 | **Ändra / Ta bort** | Radknappar i tabeller; Ta bort kräver bekräftelse |
 | Namn/nummer i en lista | Öppnar postens kort eller detaljsida |
 
+## Utskrifter
+
+**Skriv ut** på ett dokument, en lista eller en etikett öppnar webbläsarens utskriftsdialog direkt, där du väljer skrivare — Nav väljer aldrig skrivare åt dig. Det fungerar likadant i webbläsaren och i den installerade appen (Chrome, Edge, Firefox). Knappen visar **Skriver ut…** medan PDF:en hämtas. **Ladda ner PDF** sparar i stället filen på datorn utan att skriva ut.
+
+Vid etiketter och pallkort väljer du format i dialogen (**A4-ark** eller **Etikettskrivare**, se [Lager](/hjalp/lager)); skrivaren väljer du sedan i utskriftsdialogen, och där ska pappersstorleken stämma med formatet.
+
+**Safari** på iPhone, iPad och Mac kan inte skriva ut en PDF på det sättet: där öppnas PDF:en i en ny flik, och du skriver ut med **Dela → Skriv ut** (iPhone/iPad) eller **Arkiv → Skriv ut** (Mac). Tillåt popup-fönster för Nav om fliken inte öppnas.
+
 ## Licens
 
 Nav|ERP är fri programvara, © 2026 Urban Källefors, och sprids under **GNU General Public License version 3 eller senare** (GPL-3.0-or-later). Du får använda, sprida och ändra programmet enligt licensens villkor; det levereras utan garanti. Den fullständiga licenstexten finns i filen `LICENSE` i källkoden.

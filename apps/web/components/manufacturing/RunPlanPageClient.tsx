@@ -1,5 +1,6 @@
 "use client";
 
+import { PrintButton } from "../documents/PrintButton";
 import { useCallback, useEffect, useState } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { useSearchParams } from "next/navigation";
@@ -16,7 +17,6 @@ import { GatedLink } from "../ui/GatedLink";
 import { StatusPill, type Status } from "../ui/StatusPill";
 import { Table } from "../ui/Table";
 import { useListNavigation } from "../ui/ListControls";
-import buttonStyles from "../ui/Button.module.css";
 import styles from "./RunPlanPageClient.module.css";
 
 // Körplan: the waiting operations on one resource, grouped by day. The API
@@ -248,14 +248,7 @@ export function RunPlanPageClient() {
           />
         </label>
         {resource && data?.workCenter ? (
-          <a
-            href={`/api/v1/planning/run-plan/pdf?${pdfQuery.toString()}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`${buttonStyles.button} ${buttonStyles.ghost}`}
-          >
-            Skriv ut
-          </a>
+          <PrintButton href={`/api/v1/planning/run-plan/pdf?${pdfQuery.toString()}`} size="default" />
         ) : null}
       </div>
 

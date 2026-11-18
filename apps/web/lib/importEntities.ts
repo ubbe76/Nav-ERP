@@ -96,7 +96,7 @@ export const IMPORT_ENTITIES: Record<string, ImportEntityConfig> = {
         key: "printCommentOnWorkCard",
         label: "Skriv ut kommentaren på arbetskortet",
         hint:
-          "Kommentaren från filen (kolumnen Instruktion) skrivs ut på utskriften Skriv ut TO (PDF). Filen bär ingen egen kolumn för valet, så det gäller alla rader med kommentar. Utan kryss sparas kommentaren men syns bara på artikelkortet — den kan kryssas i per operation efteråt.",
+          "Kommentaren från filen (kolumnen Instruktion) skrivs ut på utskriften Skriv ut TO. Filen bär ingen egen kolumn för valet, så det gäller alla rader med kommentar. Utan kryss sparas kommentaren men syns bara på artikelkortet — den kan kryssas i per operation efteråt.",
       },
     ],
   },

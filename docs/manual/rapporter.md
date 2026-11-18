@@ -18,7 +18,7 @@ Urvalet gäller **orderraderna**: leveransdatum, artikel, varugrupp, artikelkod 
 
 Värdena räknas per rad: antal × à-pris med radens rabatt (kundorder) och ställpriset (inköp; ställpriset räknas som rest tills något på raden är mottaget). Inköpsordrar i annan valuta visas i sin valuta; summorna överst och på utskriften är omräknade till SEK med orderns växelkurs. Antal och à-pris visas i radens enhet.
 
-**Skriv ut** öppnar förteckningen som PDF (liggande A4) med urvalet i rubriken, och **Exportera** ger samma urval som fil (**CSV** eller **Excel**) — med **Visa rader** en rad per orderrad med orderns uppgifter upprepade, så att den går att filtrera i Excel. Ett urval med fler än 10 000 orderrader avvisas; avgränsa då med datum, status eller kund/leverantör.
+**Skriv ut** öppnar utskriftsdialogen för förteckningen (liggande A4) med urvalet i rubriken, och **Exportera** ger samma urval som fil (**CSV** eller **Excel**) — med **Visa rader** en rad per orderrad med orderns uppgifter upprepade, så att den går att filtrera i Excel. Ett urval med fler än 10 000 orderrader avvisas; avgränsa då med datum, status eller kund/leverantör.
 
 ## Offertuppföljning
 

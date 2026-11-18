@@ -335,7 +335,7 @@ Beskrivningen visas **i stället för resursnamnet** överallt där operationen 
 - artikelkortets operationslista och strukturradens **Operation**-lista,
 - tillverkningsorderns operationstabell, dess kort **Rapportera** (**Slutför**, **Förbruka** och **Rapportera tid**),
 - stämpelterminalens val av operation (resursen står kvar på raden under),
-- utskriften **Skriv ut TO (PDF)**, där kolumnen heter **Operation**.
+- utskriften **Skriv ut TO**, där kolumnen heter **Operation**.
 
 **Lämnas fältet tomt visas resursnamnet** — ingen rad blir tom.
 
@@ -345,7 +345,7 @@ Beskrivningen kan också läsas in från fil — kolumnen **Operationens benämn
 
 #### Kommentar på operationen
 
-Fältet **Kommentar (valfritt)** på operationen är fritext för information och instruktioner till momentet — max 1000 tecken. Kryssrutan **Skriv ut på arbetskortet** under fältet avgör om texten följer med ut på utskriften **Skriv ut TO (PDF)**, där den skrivs under sin operationsrad (se [Tillverkning](/hjalp/tillverkning#skriv-ut-to)).
+Fältet **Kommentar (valfritt)** på operationen är fritext för information och instruktioner till momentet — max 1000 tecken. Kryssrutan **Skriv ut på arbetskortet** under fältet avgör om texten följer med ut på utskriften **Skriv ut TO**, där den skrivs under sin operationsrad (se [Tillverkning](/hjalp/tillverkning#skriv-ut-to)).
 
 - Utan kryss sparas kommentaren men syns bara här på artikelkortet — använd det för noteringar som hör till beredningen snarare än till verkstadsgolvet.
 - Kryssrutan går inte att sätta så länge kommentarsfältet är tomt, och töms texten släcks krysset.
@@ -355,7 +355,7 @@ Kommentaren kan också läsas in från fil — kolumnen **Instruktion** i rappor
 
 #### Packinstruktion på operationen
 
-Fältet **Packinstruktion (valfritt)** på operationen är fritext för hur artiklarna packas inför nästa operation/avsändning — max 1000 tecken. Till skillnad från kommentaren är det här verkstadsgolvets information, inte beredarens: texten skrivs **alltid** ut under sin operationsrad på utskriften **Skriv ut TO (PDF)** (prefixet **"Packning: "**) när den är satt, oavsett om **Skriv ut på arbetskortet** är ikryssad — den kryssrutan styr bara kommentaren. Packinstruktionen visas också i stämpelterminalen, både i operationslistan och i utstämplingsvyn (se [Stämpelterminalen](/hjalp/terminal)).
+Fältet **Packinstruktion (valfritt)** på operationen är fritext för hur artiklarna packas inför nästa operation/avsändning — max 1000 tecken. Till skillnad från kommentaren är det här verkstadsgolvets information, inte beredarens: texten skrivs **alltid** ut under sin operationsrad på utskriften **Skriv ut TO** (prefixet **"Packning: "**) när den är satt, oavsett om **Skriv ut på arbetskortet** är ikryssad — den kryssrutan styr bara kommentaren. Packinstruktionen visas också i stämpelterminalen, både i operationslistan och i utstämplingsvyn (se [Stämpelterminalen](/hjalp/terminal)).
 
 **Texten fryses vid frisläppet**, precis som beskrivningen, tiderna och kommentaren — tillverkningsordern får en kopia när den frisläpps, och en senare ändring i rutten påverkar inte en redan frisläppt order.
 
@@ -368,7 +368,7 @@ Fältet **Tid/enhet** har en liten enhetsväxlare bredvid — **min/st** (förva
 - Att klicka en annan enhet räknar om det redan inmatade talet direkt (t.ex. 7 st/h blir 8,57142857 min/st och 0,75 min/st blir 45 sek/st) i stället för att nollställa fältet.
 - I **st/h**-läge måste talet vara **större än 0** — en operation kan inte ha 0 styck per timme. Är fältet 0 eller tomt visas felet "Antal per timme måste vara större än 0" när formuläret sparas; vill du ange 0 i stycktid växlar du tillbaka till **min/st**.
 - Minuterna sparas med 8 decimaler, så även korta tider blir exakta: 0,05 sek/st sparas som 0,00083333 min/st, och 36 000 st/h som 0,00166667 min/st. En tid du skriver i **sek/st** eller **st/h** visas därför tillbaka som du skrev den. Sekunder och st/h visas med högst 2 decimaler, så en tid som är skriven i minuter kan visas avrundad i en annan enhet — 13 min/st visas som 4,62 st/h. Att du bara byter visningsenhet ändrar inte den lagrade tiden i minuter — kalkylen läser alltid de lagrade minuterna.
-- Beredningslistan, tillverkningsorderns operationstabell och utskriften **Skriv ut TO (PDF)** visar Stycktid i den enhet operationen sparades med (t.ex. "7 st/h" eller "45 sek"); ett värde på 0 (eller mindre) i **st/h** visas i minuter.
+- Beredningslistan, tillverkningsorderns operationstabell och utskriften **Skriv ut TO** visar Stycktid i den enhet operationen sparades med (t.ex. "7 st/h" eller "45 sek"); ett värde på 0 (eller mindre) i **st/h** visas i minuter.
 - **Byt enhet direkt i listan:** varje operationsrad i beredningslistan har samma **min/st | sek/st | st/h**-växlare i kolumnen **Tid/enhet**. Ett klick sparar valet direkt utan att dialogen öppnas och ändrar bara visningen — de lagrade minuterna är desamma. **st/h** är avstängd på en rad med stycktid 0 (håll muspekaren över knappen så visas "Kräver stycktid större än 0").
 - **Lego-operationer** har ingen tidsenhet — växlaren är dold tillsammans med tidsfälten, både i dialogen och i listan, se [Lego-operationer](#lego-operationer) nedan.
 
@@ -740,7 +740,7 @@ Kryssrutan **Hoppa över rader som redan finns** i steget **Kolumner** finns på
 I steget **Förhandsgranska** visas de överhoppade raderna med åtgärden **Hoppas över** och en orsak. I steget **Resultat** räknas de som **överhoppade** och listas i tabellen **Överhoppade rader**:
 
 - **Spara som fil** laddar ner hela listan som en CSV-fil (`overhoppade-…`) med alla mappade kolumner — öppna den i Excel för att se vad som inte kom in, rätta och importera om.
-- **Skriv ut** öppnar listan i ett eget fönster och startar utskriften.
+- **Skriv ut** öppnar listan i ett eget fönster och startar utskriften (en HTML-sida, inte en PDF).
 
 Listan på skärmen visar högst 200 rader, men den sparade och den utskrivna listan innehåller alltid alla.
 
@@ -791,7 +791,7 @@ Kolumner: **Artikelnummer**, **Sekvensnr** och **Resurs** är obligatoriska; **S
 - **Cykeltid** är operationens produktiva tid per styck (se [Cykeltid på operationen](#cykeltid-pa-operationen)). Operationslistans kolumn **Cykeltid** hamnar här — den lästes tidigare som ett alias för Stycktid, men gör inte det längre. Den räknas om med **samma Tidsenhet som Stycktid** (med antal/timme är 120 st/h lika med 0,5 min/st), 0 eller en tom cell betyder ingen cykeltid, och på en **legoresurs** ignoreras den. Med **Uppdatera befintliga operationer** skrivs bara en ifylld cell (0 tömmer cykeltiden).
 - **Beskrivning** är operationens namn (operationslistans **Operationens benämning**), max 255 tecken — en längre text blir ett radfel. En kolumn med rubriken **Beskrivning** hamnar här, inte i Kommentar. Se [Beskrivning på operationen](#beskrivning-pa-operationen).
 - **Kalkyl** förstår Ja/Nej, 1/0 och true/false; tom cell betyder Nej. Se [Kalkyloperationer](#kalkyloperationer).
-- **Kommentar** är operationens fritext (operationslistans **Instruktion**), max 1000 tecken — en längre text blir ett radfel. Kryssrutan **Skriv ut kommentaren på arbetskortet** i steget **Kolumner** avgör om texterna skrivs ut på utskriften **Skriv ut TO (PDF)**: filen bär ingen egen kolumn för valet, så det gäller alla rader som har en kommentar. Utan kryss sparas kommentaren men skrivs inte ut — krysset kan sättas per operation efteråt på artikelkortet, se [Kommentar på operationen](#kommentar-pa-operationen).
+- **Kommentar** är operationens fritext (operationslistans **Instruktion**), max 1000 tecken — en längre text blir ett radfel. Kryssrutan **Skriv ut kommentaren på arbetskortet** i steget **Kolumner** avgör om texterna skrivs ut på utskriften **Skriv ut TO**: filen bär ingen egen kolumn för valet, så det gäller alla rader som har en kommentar. Utan kryss sparas kommentaren men skrivs inte ut — krysset kan sättas per operation efteråt på artikelkortet, se [Kommentar på operationen](#kommentar-pa-operationen).
 - **Packinstruktion**, max 1000 tecken — en längre text blir ett radfel, aldrig en tyst avkortning. Se [Packinstruktion på operationen](#packinstruktion-pa-operationen).
 - **Nya rader som standard.** Finns sekvensnumret redan på artikeln blir raden ett fel — ta bort den ur filen, eller kryssa i **Hoppa över rader som redan finns** (se [Hoppa över befintliga rader](#hoppa-over-befintliga-rader)). Operationer kan alltså läggas till på en artikel som redan har en rutt, så länge sekvensnumren är nya.
 - **Uppdatera befintliga operationer** är kryssrutan i steget **Kolumner** som i stället skriver över en operation som redan finns (samma artikel och sekvensnummer) med filens **resurs, ställtid, stycktid, tidsenhet och Kalkyl**, samt **beskrivning, kommentar och packinstruktion** för de celler som är ifyllda — en tom textcell lämnar det sparade värdet orört, och utskriftsvalet för kommentaren följer kryssrutan **Skriv ut kommentaren på arbetskortet** bara på rader som har en kommentar som skiljer sig från den sparade (en oförändrad kommentar, som i en export som läses in igen, behåller sitt utskriftsval). Det är så en rutt som importerats med fel tidsenhet rättas: kör om Operationslistan med kryssrutan i, så räknas tiderna om enligt **Enhet**-kolumnen. En operation som har material kopplat till sig kan inte märkas Kalkyl — raden blir ett fel tills operationskopplingen tagits bort på strukturraden, precis som på artikelkortet. Förhandsgranskningen visar raderna som **Uppdateras**. Frisläppta tillverkningsordrar påverkas inte — de behåller sin kopia av operationerna från frisläppet. Kryssrutan kan inte kombineras med **Hoppa över rader som redan finns**; kryssar du i den ena släcks den andra.

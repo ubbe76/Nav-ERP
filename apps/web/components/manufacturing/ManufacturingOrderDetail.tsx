@@ -70,6 +70,7 @@ import { plannedDateLabel } from "../../lib/planning";
 import { CoveredByCell, GoesToSection, coverageOfRow } from "./CoverageSections";
 import { MoveComponentsDialog } from "./MoveComponentsDialog";
 import { MissingComponentsDialog } from "./MissingComponentsDialog";
+import { PrintButton } from "../documents/PrintButton";
 import { DocumentActionBar } from "../documents/DocumentActionBar";
 import { formatStockholmDateTime } from "../../lib/date";
 
@@ -329,12 +330,13 @@ export function ManufacturingOrderDetail({
           </Button>
         )}
         {/* Shop-floor printout — the article's drawings are appended. */}
+        <PrintButton href={`/api/v1/manufacturing-orders/${order.id}/pdf`} label="Skriv ut TO" size="default" />
         <a
           href={`/api/v1/manufacturing-orders/${order.id}/pdf`}
           className={`${buttonStyles.button} ${buttonStyles.ghost}`}
           download
         >
-          Skriv ut TO (PDF)
+          Ladda ner PDF
         </a>
         {statusActions
           .filter((action) => ACTION_LABELS[action].variant === "danger")

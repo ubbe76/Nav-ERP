@@ -1,5 +1,6 @@
 "use client";
 
+import { PrintButton } from "../documents/PrintButton";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -70,13 +71,11 @@ export function VerifikatPageClient({
           <div className={shellStyles.meta}>{verifications.total.toLocaleString("sv-SE")} verifikat</div>
         </div>
         <div className={shellStyles.topbarActions}>
-          <a
+          <PrintButton
             href={`${API_URL}/api/v1/verification-list/pdf?${printParams.toString()}`}
-            download
-            className={`${buttonStyles.button} ${buttonStyles.ghost}`}
-          >
-            Skriv ut lista (PDF)
-          </a>
+            label="Skriv ut lista (PDF)"
+            size="default"
+          />
           <ExportMenu csvHref={`${API_URL}/api/v1/verification-list/csv?${printParams.toString()}`} />
           <Button type="button" variant="ghost" onClick={() => setAllocateOpen(true)}>
             Fördela över perioder
