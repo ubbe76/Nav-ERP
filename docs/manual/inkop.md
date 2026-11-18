@@ -298,6 +298,36 @@ En ångrad inleverans ligger kvar i listan, överstruken och märkt **Ångrad** 
 
 Inleveranser som gjordes innan funktionen fanns (oktober 2026) finns också i listan och kan ångras. Undantaget är lego-inleveranser som gjordes innan tillverkningens rapporteringslogg fanns, eller vars avrapportering misslyckades.
 
+### Byt leverantör
+
+En order som ska läggas hos en annan leverantör behöver inte göras om. Knappen **Byt leverantör…** på orderkortet finns så länge ordern är **Utkast** eller **Bekräftad** (och du har behörigheten Inköp) och gäller både vanliga inköpsordrar och legoinköpsordrar.
+
+1. Välj leverantören under **Ny leverantör**. Nav visar direkt vad bytet innebär — inget sparas ännu.
+2. Läs förhandsvisningen: **Valuta och kurs**, det som hämtas **Från den nya leverantören** och varje rad med nuvarande pris → nytt pris och varifrån priset kommer.
+3. Spara med **Byt leverantör**.
+
+**Priserna.** En rad där den nya leverantören har ett pris i leverantörskatalogen (artikelkortets flik **Inköp**, med staffel för radens antal) får det priset — raden är märkt *katalog*. Katalogpriset används bara när det är i orderns nya valuta. Övriga rader behåller sitt pris och är märkta **Se över priset**: *oförändrat* när valutan är densamma, *omräknat* när ordern byter valuta. En legorad läser aldrig katalogen; dess ställpris räknas om på samma sätt.
+
+**Valutan.** Har den nya leverantören en annan valuta byter ordern valuta och får dagens kurs (samma källa som när en order skapas). Priser som inte kommer ur katalogen räknas om så att värdet i kronor är detsamma. Saknas dagens kurs visas fältet **Växelkurs** — ange kursen och välj **Förhandsvisa**. Har leverantörerna samma valuta behåller ordern sin kurs.
+
+**Från den nya leverantören** hämtas, precis som på en ny order: **Leveransvillkor**, **Betalningsvillkor**, **Speditör**, **Frakt på vårt konto** och **Er referens** (leverantörens huvudkontakt). **Vår referens**, **Önskat leveransdatum** (på ordern och raderna), **Notering**, **Projekt**, **Leveransadress** och radernas antal och enheter ändras inte.
+
+**Bekräftat leveransdatum tas bort**, både orderns och radernas egna — det var den gamla leverantörens löfte. Dialogen säger då *Bekräftat leveransdatum tas bort — den nya leverantören bekräftar sitt eget.* Fyll i datumet igen när den nya leverantören har bekräftat.
+
+**En bekräftad order går tillbaka till Utkast.** Dialogen säger *Ordern går tillbaka till Utkast. Meddela … att ordern inte gäller längre.* — Nav skickar inget till den gamla leverantören. Bekräfta och skicka sedan ordern till den nya leverantören som vanligt. Ordern behåller sitt nummer, **Rev** höjs med ett och bytet loggas i **Historik** som **Leverantör bytt**.
+
+**När leverantören inte kan bytas.** Har något redan hänt med ordern hos den gamla leverantören visas orsaken i dialogen och **Byt leverantör** är avstängd:
+
+- ordern har en inleverans — ångra den först (se [Ångra inleverans](#angra-inleverans)); en ångrad inleverans hindrar inte,
+- ordern har en avsändning till legoleverantören — ångra avsändningen först (se [Avsändning lego](#avsandning-lego)),
+- ordern är kopplad till en leverantörsfaktura, även ett utkast — ta bort kopplingen eller avbryt fakturan; en avbruten faktura hindrar inte,
+- ordern hör till en avvikelse hos den nuvarande leverantören (en makulerad avvikelse hindrar inte),
+- ordern är delvis mottagen, mottagen, stängd eller avbruten.
+
+Har någon ändrat ordern, kursen eller katalogpriset efter att förhandsvisningen hämtades sparas inget: dialogen visar *Förhandsvisningen gäller inte längre — granska ändringarna igen.* tillsammans med den nya förhandsvisningen.
+
+**Legoinköpsorder.** Tillverkningsorderns legooperation har kvar sin egen leverantör — den styr vart *kommande* legoinköp för operationen föreslås. Ändra den på tillverkningsordern om även de ska gå till den nya leverantören. En förfrågan som ordern skapades från ändras inte.
+
 ### Manuell statusändring
 
 Knappen **Ändra status manuellt** längst till höger i orderkortets knapprad låter dig sätta vilken status som helst, åt vilket håll som helst — även från Avbruten eller Stängd. Välj status i dialogen och klicka **Byt status**; en bekräftelsedialog visas eftersom ändringen hoppar över orderflödets regler. Statusbytet bokför **aldrig** lager — inleveranser som redan är bokförda ligger kvar, och inget tas emot av att sätta status Mottagen.
@@ -414,7 +444,7 @@ Fakturan registreras i **leverantörens valuta** — står leverantören som EUR
 
 Under beloppsfälten visas **I SEK vid godkännande: netto … kr · moms … kr · brutto … kr** — vad fakturan bokförs som, se [Bokföring av leverantörsfakturan](#bokforing-av-leverantorsfakturan). Rader som hämtas från en inköpsorder kommer med orderns à-priser — kontrollera att de är i fakturans valuta; beloppen i huvudet är det som gäller.
 
-**Betalas till en annan leverantör.** Ibland kommer fakturan från någon annan än leverantören du beställde av, t.ex. ett factoringbolag eller ett moderbolag. Välj då leverantören du beställde av under **Leverantör** (så att dess inköpsorder går att hämta), kryssa i **Betalas till en annan leverantör** och välj leverantören fakturan ska betalas till under **Betalas till**. Fakturan registreras på den leverantören — det är den som syns i reskontran och får betalningen — medan raderna förblir matchade mot inköpsordern. På fakturakortet kan leverantören ändras under **Leverantör (betalas till)** så länge fakturan är ett **Utkast**; valutan följer då med från den nya leverantören, och bytet loggas i **Historik** som **Leverantör ändrad**.
+**Betalas till en annan leverantör.** Ibland kommer fakturan från någon annan än leverantören du beställde av, t.ex. ett factoringbolag eller ett moderbolag. Välj då leverantören du beställde av under **Leverantör** (så att dess inköpsorder går att hämta), kryssa i **Betalas till en annan leverantör** och välj leverantören fakturan ska betalas till under **Betalas till**. Fakturan registreras på den leverantören — det är den som syns i reskontran och får betalningen — medan raderna förblir matchade mot inköpsordern. På fakturakortet kan leverantören ändras under **Leverantör (betalas till)** så länge fakturan är ett **Utkast**; valutan följer då med från den nya leverantören, och bytet loggas i **Historik** som **Leverantör bytt**.
 
 Rader kan läggas till med **Beskrivning**, **Artikel** (valfri — frakt- och avgiftsrader saknar artikel), **Antal**, **À-pris** och **Momskod** — tom betyder **Följer fakturan (…)** med fakturans kod i parentes, annars en egen momskod för just den raden (t.ex. frakt med svensk moms på en faktura i övrigt med omvänd moms). Det är huvudets **Momsbelopp** som bokförs; radens momskod styr vilket kostnadskonto och vilken omvänd moms raden får. Radens belopp räknas ut automatiskt (Antal × À-pris). Rader kan också läggas till i efterhand på fakturakortet så länge fakturan är i **Utkast**.
 

@@ -234,6 +234,104 @@ export const createPurchaseOrderSchema = z.object({
 });
 export type CreatePurchaseOrderInput = z.infer<typeof createPurchaseOrderSchema>;
 
+// Byt leverantör på en inköpsorder (draft/confirmed, nothing received,
+// dispatched or invoiced). The preview answers what the change would do;
+// the change itself sends back what the user saw (`expected`: the new
+// currency and rate and every row's new price, base unit) and is refused
+// with 409 + the fresh preview when that no longer holds. `exchangeRate` is
+// the typed rate when today's is missing (as on a new order); it is only
+// read when the order changes currency.
+export const changePurchaseOrderSupplierPreviewSchema = z
+  .object({
+    supplierId: z.string().uuid(),
+    exchangeRate: blankSafe(z.coerce.number().min(numericStep(6)).max(numericMax(12, 6))).optional(),
+  })
+  .strict();
+export type ChangePurchaseOrderSupplierPreviewInput = z.infer<typeof changePurchaseOrderSupplierPreviewSchema>;
+
+export const changePurchaseOrderSupplierSchema = z
+  .object({
+    supplierId: z.string().uuid(),
+    exchangeRate: blankSafe(z.coerce.number().min(numericStep(6)).max(numericMax(12, 6))).optional(),
+    expected: z
+      .object({
+        // The supplier the order had when the preview was made.
+        supplierId: z.string().uuid(),
+        currency: z.string().length(3),
+        exchangeRate: blankSafe(z.coerce.number().min(numericStep(6)).max(numericMax(12, 6))),
+        rows: z
+          .array(
+            z
+              .object({
+                rowId: z.string().uuid(),
+                unitPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))),
+                setupPrice: blankSafe(z.coerce.number().nonnegative().max(numericMax(12, 2))).nullable(),
+              })
+              .strict()
+          )
+          .max(2000),
+      })
+      .strict(),
+  })
+  .strict();
+export type ChangePurchaseOrderSupplierInput = z.infer<typeof changePurchaseOrderSupplierSchema>;
+
+// Where a row's price after the change comes from: the new supplier's
+// catalog (staffel included), the old price converted to the new currency
+// at the same value in kronor, or the old price as it was.
+export type SupplierChangePriceOrigin = "catalog" | "converted" | "unchanged";
+
+export type SupplierChangeBlockerCode =
+  | "invalid-status-transition"
+  | "purchase-order-has-receipts"
+  | "purchase-order-has-dispatches"
+  | "purchase-order-has-supplier-invoices"
+  | "purchase-order-has-deviations";
+
+export interface SupplierChangePreview {
+  orderId: string;
+  orderNumber: string;
+  status: PurchaseOrderStatus;
+  // A confirmed order goes back to Utkast — the old supplier must be told.
+  revertsToDraft: boolean;
+  // Bekräftat leveransdatum was the old supplier's promise: the order's and
+  // the rows' are cleared by the change. True when there is one to clear;
+  // `confirmedDeliveryDate` (here and per row) is what is cleared.
+  clearsConfirmedDates: boolean;
+  confirmedDeliveryDate: string | null;
+  from: { supplierId: string; supplierName: string; currency: string; exchangeRate: number };
+  to: { supplierId: string; supplierName: string; currency: string; exchangeRate: number };
+  // What the order takes from the new supplier, as a new order would.
+  terms: {
+    deliveryTerm: string | null;
+    paymentTerm: string | null;
+    carrier: string | null;
+    freightPaidByUs: boolean;
+    yourReference: string | null;
+  };
+  // Why the supplier cannot be changed (Swedish text); empty = allowed.
+  blockers: { code: SupplierChangeBlockerCode; message: string }[];
+  // Prices in the article's base unit, like the row's own columns.
+  rows: {
+    rowId: string;
+    articleId: string;
+    articleNumber: string;
+    articleName: string;
+    quantity: number;
+    unitCode: string;
+    unitFactor: number | null;
+    lego: boolean;
+    confirmedDeliveryDate: string | null;
+    before: { unitPrice: number; setupPrice: number | null };
+    after: { unitPrice: number; setupPrice: number | null };
+    origin: SupplierChangePriceOrigin;
+    // No catalog price at the new supplier — the price needs a look.
+    review: boolean;
+    // Lego: the TO operation still names another supplier (not changed here).
+    operationSupplierDiffers: boolean;
+  }[];
+}
+
 // quantity/unitPrice are entered in the chosen unit (base unit when unitId
 // is omitted/null) and stored converted to the article's base unit.
 // `bumpRevision: false` saves without bumping the order's revision — the

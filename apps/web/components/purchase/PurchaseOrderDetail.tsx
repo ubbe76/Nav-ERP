@@ -10,6 +10,7 @@ import { RowDeviationLink } from "../quality/RowDeviationLink";
 import { newDeviationHref, type NewDeviationParams } from "../../lib/quality";
 import { RowMenu } from "../ui/RowMenu";
 import { DeliveryAddressForm, formatDeliveryAddress } from "./DeliveryAddressForm";
+import { ChangeSupplierDialog, type SupplierChangePreview } from "./ChangeSupplierDialog";
 import { useCan } from "../PermissionsProvider";
 import { ArticleOverviewButton } from "../articles/ArticleOverviewButton";
 import { ArticleLink } from "../articles/ArticleLink";
@@ -84,7 +85,11 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
     articleId: row.articleId,
   });
 
-  const [modal, setModal] = useState<"header" | "deliveryAddress" | "addRow" | "receive" | null>(null);
+  const [modal, setModal] = useState<"header" | "deliveryAddress" | "addRow" | "receive" | "changeSupplier" | null>(null);
+  // Byt leverantör: what the last change did — the reminder to tell the old
+  // supplier and the rows whose price needs a look. Shown until dismissed;
+  // not stored (the händelselogg has the change).
+  const [supplierChange, setSupplierChange] = useState<SupplierChangePreview | null>(null);
   const dims = useDimensions();
   const [rowError, setRowError] = useState<string | null>(null);
   const [rowPending, setRowPending] = useState(false);
@@ -387,6 +392,12 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
           </>
         )}
 
+        {(order.status === "draft" || order.status === "confirmed") && canInkop && (
+          <Button type="button" variant="secondary" disabled={actionPending !== null || rowEditOpen} title={rowEditTitle} onClick={() => setModal("changeSupplier")}>
+            Byt leverantör…
+          </Button>
+        )}
+
         {order.status === "received" && (
           <Button type="button" variant="primary" disabled={actionPending !== null} onClick={() => runAction("close")}>
             {actionPending === "close" ? "Arbetar…" : "Stäng order"}
@@ -399,6 +410,22 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
           </Button>
         )}
       </DocumentActionBar>
+
+      {supplierChange && (
+        <FormNotice style={{ marginBottom: 12 }}>
+          Leverantören är bytt till {supplierChange.to.supplierName}.
+          {supplierChange.revertsToDraft &&
+            ` Ordern är tillbaka i Utkast — meddela ${supplierChange.from.supplierName} att ordern inte gäller längre.`}
+          {supplierChange.rows.some((r) => r.review) &&
+            ` Se över priset på ${supplierChange.rows
+              .filter((r) => r.review)
+              .map((r) => r.articleNumber)
+              .join(", ")}.`}{" "}
+          <Button type="button" size="small" variant="ghost" onClick={() => setSupplierChange(null)}>
+            Stäng
+          </Button>
+        </FormNotice>
+      )}
 
       <DocumentHeaderCard
         pill={pill}
@@ -682,6 +709,19 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
 
       <Modal open={modal === "header"} onClose={() => setModal(null)} title="Ändra orderhuvud">
         <EditHeaderForm order={order} registers={registers} onDone={refresh} onCancel={() => setModal(null)} />
+      </Modal>
+
+      <Modal open={modal === "changeSupplier"} onClose={() => setModal(null)} title="Byt leverantör">
+        {modal === "changeSupplier" && (
+          <ChangeSupplierDialog
+            order={order}
+            onCancel={() => setModal(null)}
+            onDone={(change) => {
+              setSupplierChange(change);
+              refresh();
+            }}
+          />
+        )}
       </Modal>
 
       <Modal open={modal === "deliveryAddress"} onClose={() => setModal(null)} title="Leveransadress">

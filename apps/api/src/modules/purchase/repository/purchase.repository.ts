@@ -4,6 +4,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { loadPriceBreaks, replacePriceBreaks } from "./price-breaks.js";
 import { dispatchedQuantitySql } from "./dispatched-quantity.js";
 import { loadSupplierOrderDefaults, resolveOrderDefaults } from "./supplier-order-defaults.js";
+import { changeOrderSupplier, loadSupplierChangeFacts } from "./supplier-change.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 import {
   articleSupplierPriceHistory,
@@ -43,6 +44,7 @@ import {
 } from "@navet/db";
 import {
   ilikePattern,
+  type ChangePurchaseOrderSupplierInput,
   type CreateArticleSupplierInput,
   type CreateContactInput,
   type CreateDeliveryAddressInput,
@@ -952,6 +954,20 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
         .leftJoin(projects, eq(projects.id, purchaseOrders.projectId))
         .where(eq(purchaseOrders.id, id));
       return row ?? null;
+    },
+
+    // Byt leverantör: the facts for the preview (unlocked) and the one
+    // writing transaction — both in the leaf supplier-change.ts.
+    async supplierChangeFacts(orderId: string, supplierId: string) {
+      return loadSupplierChangeFacts(db, orderId, supplierId);
+    },
+
+    async changeSupplier(
+      orderId: string,
+      input: ChangePurchaseOrderSupplierInput,
+      rate: { from: string; to: string; rate: number }
+    ) {
+      return changeOrderSupplier(db, orderId, input, rate);
     },
 
     // Kostnadsställen och projekt: the one dimension rule (dimension-check.ts)
