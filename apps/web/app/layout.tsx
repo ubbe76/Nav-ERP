@@ -23,6 +23,10 @@ const figtree = Figtree({
 export const metadata: Metadata = {
   title: "nav | ERP",
   description: "Produktions-ERP för svenska tillverkande företag",
+  // A company's business system never belongs in a search engine (see
+  // app/robots.ts): noindex on every page, for a crawler that ignores the
+  // Disallow or reaches a page from a link.
+  robots: { index: false, follow: false },
   // The pregenerated favicon set from Design/logo/favicon — favicon.ico ships
   // via the app/ file convention, the rest from public/. apple must be listed
   // here too: defining `icons` at all suppresses the apple-icon.png file

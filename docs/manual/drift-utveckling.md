@@ -111,6 +111,10 @@ Systemet kan köras på en Windows-dator med **Docker Desktop** och WSL 2 — sa
 - **Ladda ner en kopia på begäran** under **System → Säkerhetskopiering** fungerar som vanligt i webbläsaren.
 - Datorn måste vara igång för att systemet ska nås.
 
+## Sökmotorer
+
+Nav|ERP ber sökmotorerna att hålla sig borta. `/robots.txt` stänger ute alla sökrobotar, och varje sida har `noindex`. En installation som nås från internet, till exempel en demo, hamnar därför inte på Google. Inloggningssidan räknas inte heller som en dubblett i Search Console för en domän som också har en webbplats. Ska företaget synas i sökningar är det en egen webbplats som ska göra det, inte affärssystemet.
+
 ## Tekniska begränsningar
 
 - **Formulärens rullistor hämtar högst 1000 poster.** Registerlistorna (artiklar, kunder, ordrar …) söker och bläddrar serversidigt och skalar till tusentals poster, och artikelval görs med den sökbara artikelväljaren — men vissa rullistor i formulär (kund- och leverantörsval, ordervalen i Inleverans/Utleverans, orderlistan i stämpelterminalen) hämtar fortfarande hela registret upp till 1000 poster. Växer ett register förbi det behöver rullistan ersättas med en sökbar väljare.
