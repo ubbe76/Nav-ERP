@@ -587,7 +587,17 @@ export function createInvoiceService(
       documentSettings ? await documentSettings.getSettings() : {},
       "invoice"
     );
-    const customerArticleNumbers = await repo.customerArticleNumberMap(invoice.customerId, rows.map((r) => r.articleId));
+    // Kundens artikelnummer is the ORDERING customer's (Fakturakund, 0230):
+    // a row billed from an order prints that order's customer's number, a
+    // free row the invoice's own customer's. One lookup per customer.
+    const articleNumberCustomerOf = (r: { orderCustomerId: string | null }) => r.orderCustomerId ?? invoice.customerId;
+    const customerArticleNumbers = new Map<string, Map<string, string>>();
+    for (const customerId of new Set(rows.map(articleNumberCustomerOf))) {
+      customerArticleNumbers.set(
+        customerId,
+        await repo.customerArticleNumberMap(customerId, rows.filter((r) => articleNumberCustomerOf(r) === customerId).map((r) => r.articleId))
+      );
+    }
     const isCredit = invoice.type === "credit";
     // Batch (#8, decision 13): the order row's delivered, not undone, NAMED
     // batches as they are when the PDF is built — at Utfärda, since the PDF
@@ -714,7 +724,15 @@ export function createInvoiceService(
         // Which order (and the customer's own order number) the row settles
         // — per row rather than in the header, since a samlingsfaktura mixes
         // several orders. Free rows print nothing.
-        orderReference: r.salesOrderRowId ? texts.rowInfo.orderReference(r.salesOrderNumber ?? "", r.customerOrderNumber) : null,
+        // Fakturakund: the ordering customer too, when it is not the one
+        // the invoice is addressed to.
+        orderReference: r.salesOrderRowId
+          ? texts.rowInfo.orderReference(
+              r.salesOrderNumber ?? "",
+              r.customerOrderNumber,
+              r.orderCustomerId && r.orderCustomerId !== invoice.customerId ? `${r.orderCustomerNumber} ${r.orderCustomerName}` : null
+            )
+          : null,
         // Leveransdatum (ML 17 kap. 24 § p. 7): printed next to the order
         // reference only when it differs from the invoice date.
         deliveredDate: r.deliveryDate && r.deliveryDate !== invoice.invoiceDate ? r.deliveryDate : null,
@@ -726,7 +744,7 @@ export function createInvoiceService(
         extraDescription: extraDescription(
           r.articleExtraDescription ? localized(r.articleExtraDescription, r.articleExtraDescriptionEn, language) : null
         ),
-        customerArticleNumber: r.articleId ? (customerArticleNumbers.get(r.articleId) ?? null) : null,
+        customerArticleNumber: r.articleId ? (customerArticleNumbers.get(articleNumberCustomerOf(r))?.get(r.articleId) ?? null) : null,
         setupForArticleNumber: r.setupForArticleNumber,
         batchInfo: batchInfoFor(r),
         serialInfo: serialInfoFor(r),
@@ -1052,8 +1070,19 @@ export function createInvoiceService(
     if (salesOrderRowId) {
       const orderRow = await repo.findSalesOrderRowForInvoicing(salesOrderRowId);
       if (!orderRow) throw new SalesOrderRowMismatchError("The linked sales order row does not exist");
-      if (orderRow.customerId !== invoiceCustomerId) {
-        throw new SalesOrderRowMismatchError("The linked sales order row belongs to a different customer");
+      // Fakturakund (0230): the order belongs on the invoice of the
+      // customer it is billed to — its fakturakund, else the orderer. Two
+      // links are kept as they are, so a later change of the order's
+      // fakturakund never locks an existing invoice: a row re-resolved with
+      // the order row it already has (PATCH on a draft), and a credit row
+      // for an order row that WAS invoiced to this customer (the credit
+      // follows its source invoice).
+      if (orderRow.billToCustomerId !== invoiceCustomerId) {
+        const keepsLink = existingRow?.salesOrderRowId === salesOrderRowId;
+        const creditsOwnInvoice = type === "credit" && (await repo.orderRowInvoicedTo(salesOrderRowId, invoiceCustomerId));
+        if (!keepsLink && !creditsOwnInvoice) {
+          throw new SalesOrderRowMismatchError("The linked sales order row belongs to a different customer");
+        }
       }
       if (articleId === null || orderRow.articleId !== articleId) {
         throw new SalesOrderRowMismatchError("The linked sales order row is for a different article");

@@ -186,9 +186,19 @@ export const customers = pgTable("customers", {
   lateInterest: boolean("late_interest").notNull().default(true),
   lateInterestRate: numeric("late_interest_rate", { precision: 5, scale: 2 }),
   lateFee: boolean("late_fee").notNull().default(true),
+  // Fakturakund (migration 0230): the customer the invoices for this
+  // customer's orders go to — the default a new quote/order copies to
+  // sales_orders.invoice_customer_id. null = the customer itself. Never a
+  // chain: a customer that has one cannot be someone else's, and the one
+  // chosen has none of its own (checked in the service under both rows'
+  // locks — a CHECK cannot see the other row).
+  invoiceCustomerId: uuid("invoice_customer_id").references((): AnyPgColumn => customers.id, { onDelete: "restrict" }),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
+  check("customers_invoice_customer_not_self", sql`${table.invoiceCustomerId} <> ${table.id}`),
+  // "Fakturakund åt" on the card, the chain check and the restrict FK's lookup.
+  index("idx_customers_invoice_customer").on(table.invoiceCustomerId).where(sql`invoice_customer_id IS NOT NULL`),
   check("customers_delivery_weekdays", sql`${table.deliveryWeekdays} <@ '{1,2,3,4,5,6,7}'::smallint[]`),
   check("customers_transit_days", sql`${table.transitDays} between 0 and 60`),
   check("customers_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`),
@@ -451,6 +461,13 @@ export const salesOrders = pgTable("sales_orders", {
   // the old way is the same row and has none. restrict: the quote cannot be
   // deleted from under its orders.
   sourceQuoteId: uuid("source_quote_id").references((): AnyPgColumn => salesOrders.id, { onDelete: "restrict" }),
+  // Fakturakund (migration 0230): the customer this order is invoiced to —
+  // copied from customers.invoice_customer_id at creation, changeable in the
+  // header. null = the ordering customer. Prices, statistics and deliveries
+  // stay the ordering customer's; only the invoice (its customer, and so
+  // address, VAT, language, terms, ledger) follows this. Every reader of
+  // "who is billed" uses coalesce(invoice_customer_id, customer_id).
+  invoiceCustomerId: uuid("invoice_customer_id").references(() => customers.id, { onDelete: "restrict" }),
   invoiceNumber: varchar("invoice_number", { length: 20 }).unique(),
   invoicedAt: timestamp("invoiced_at", { withTimezone: true }),
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
@@ -465,6 +482,9 @@ export const salesOrders = pgTable("sales_orders", {
     sql`(${table.generalMarkupPercent} is null or ${table.generalMarkupPercent} between 0 and 1000) and (${table.materialMarkupPercent} is null or ${table.materialMarkupPercent} between 0 and 1000)`
   ),
   check("sales_orders_source_quote_not_self", sql`${table.sourceQuoteId} <> ${table.id}`),
+  check("sales_orders_invoice_customer_not_orderer", sql`${table.invoiceCustomerId} <> ${table.customerId}`),
+  // The invoice dialog's and the collective run's "orders billed to X".
+  index("idx_sales_orders_invoice_customer").on(table.invoiceCustomerId).where(sql`invoice_customer_id IS NOT NULL`),
   // The quote card's "Ordrar från offerten" and the restrict FK's lookup.
   index("idx_sales_orders_source_quote").on(table.sourceQuoteId).where(sql`source_quote_id IS NOT NULL`),
 ]);

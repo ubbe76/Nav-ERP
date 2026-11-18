@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { and, asc, count, desc, eq, getTableColumns, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { customerArticleNumberMap } from "./customer-article-numbers.js";
+import { billToCustomerIdSql } from "./invoice-customer.js";
 import { deliveredBatchesForOrderRows, deliveredSerialsForOrderRows } from "./delivered-batches.js";
 import {
   articleGroups,
@@ -358,6 +359,8 @@ export type InvoiceRowWrite = {
 
 // The row's objects as { id, code, name } | null on every row read.
 const rowCostCenters = alias(costCenters, "invoice_row_cost_centers");
+// Fakturakund (0230): the ordering customer of an invoice row's order.
+const orderCustomers = alias(customers, "invoice_row_order_customers");
 const rowProjects = alias(projects, "invoice_row_projects");
 const rowDimensionColumns = {
   costCenter: { id: rowCostCenters.id, code: rowCostCenters.code, name: rowCostCenters.name },
@@ -497,6 +500,19 @@ export function createInvoiceRepository(db: Db) {
   // instead. customerId null = every customer (the collective invoicing
   // candidates). A plain function, like getInvoicedQuantities, so
   // listCollectiveInvoicingCandidates below can call it directly.
+  // Fakturakund (0230): who a shipment's freight is billed to — the paying
+  // customer (fakturakund, else the orderer) of the order behind its first
+  // live följesedel (the same "first följesedel" rule as orderCurrency
+  // below), else the shipment's own customer. Written out by hand with
+  // qualified names: it is used both in a SELECT list and in WHERE (drizzle
+  // renders interpolated columns unqualified in a SELECT list).
+  const shipmentBillToSql = sql<string>`coalesce((
+    select coalesce(so.invoice_customer_id, so.customer_id) from shipment_deliveries sd
+    join deliveries d on d.id = sd.delivery_id
+    join sales_orders so on so.id = d.sales_order_id
+    where sd.shipment_id = shipments.id and sd.active
+    order by d.delivery_number limit 1), shipments.customer_id)`;
+
   async function listInvoiceableShipments(
     customerId: string | null,
     freightArticleId: string
@@ -505,7 +521,8 @@ export function createInvoiceRepository(db: Db) {
       .select({
         shipmentId: shipments.id,
         shipmentNumber: shipments.shipmentNumber,
-        customerId: shipments.customerId,
+        // Fakturakund (0230): the customer the freight is billed to.
+        customerId: shipmentBillToSql,
         // The broker product's carrier, or a manual shipment's Speditör
         // (Egna fraktsätt) — the freight row says "Frakt Egen bil (FR-…)".
         carrierName: sql<string | null>`coalesce(${freightProducts.carrierName}, ${carriers.name})`,
@@ -535,7 +552,7 @@ export function createInvoiceRepository(db: Db) {
       .leftJoin(carriers, eq(carriers.id, shipments.carrierId))
       .where(
         and(
-          customerId ? eq(shipments.customerId, customerId) : undefined,
+          customerId ? sql`${shipmentBillToSql} = ${customerId}` : undefined,
           inArray(shipments.status, ["booked", "delivered"]),
           isNotNull(shipments.customerPrice),
           sql`not exists (select 1 from ${invoiceRows} where ${invoiceRows.shipmentId} = ${shipments.id})`,
@@ -601,6 +618,8 @@ export function createInvoiceRepository(db: Db) {
           unitFactor: salesOrderRows.unitFactor,
           unitPrice: salesOrderRows.unitPrice,
           customerId: salesOrders.customerId,
+          // Fakturakund (0230): the customer the order is invoiced to.
+          billToCustomerId: billToCustomerIdSql,
           orderNumber: salesOrders.orderNumber,
           // Valuta: a row is billed in its order's currency only.
           currency: salesOrders.currency,
@@ -664,7 +683,9 @@ export function createInvoiceRepository(db: Db) {
         })
         .from(salesOrderRows)
         .innerJoin(salesOrders, eq(salesOrders.id, salesOrderRows.salesOrderId))
-        .innerJoin(customers, eq(customers.id, salesOrders.customerId))
+        // Fakturakund (0230): the candidate is the PAYING customer — its
+        // flag decides, and every orderer's orders billed to it count.
+        .innerJoin(customers, eq(customers.id, billToCustomerIdSql))
         .where(
           and(
             eq(customers.collectiveInvoicing, true),
@@ -771,6 +792,11 @@ export function createInvoiceRepository(db: Db) {
         .select({
           orderId: salesOrders.id,
           orderNumber: salesOrders.orderNumber,
+          // Fakturakund (0230): the ordering customer — the dialog names it
+          // when the invoice goes to another one.
+          orderCustomerId: salesOrders.customerId,
+          orderCustomerNumber: customers.customerNumber,
+          orderCustomerName: customers.name,
           // Valuta: an invoice takes one currency — the dialog groups on it.
           currency: salesOrders.currency,
           exchangeRate: salesOrders.exchangeRate,
@@ -794,12 +820,15 @@ export function createInvoiceRepository(db: Db) {
         })
         .from(salesOrderRows)
         .innerJoin(salesOrders, eq(salesOrders.id, salesOrderRows.salesOrderId))
+        .innerJoin(customers, eq(customers.id, salesOrders.customerId))
         .innerJoin(articles, eq(articles.id, salesOrderRows.articleId))
         .innerJoin(units, eq(units.id, articles.unitId))
         .leftJoin(rowUnits, eq(rowUnits.id, salesOrderRows.unitId))
         .where(
           and(
-            eq(salesOrders.customerId, customerId),
+            // Fakturakund (0230): the orders billed to this customer —
+            // its own without a fakturakund, and others' that name it.
+            sql`${billToCustomerIdSql} = ${customerId}`,
             inArray(salesOrders.status, ["delivered", "in_production", "invoiced"]),
             sql`${salesOrderRows.quantityDelivered} > 0`
           )
@@ -818,6 +847,9 @@ export function createInvoiceRepository(db: Db) {
         {
           orderId: string;
           orderNumber: string;
+          customerId: string;
+          customerNumber: string;
+          customerName: string;
           currency: string;
           exchangeRate: string;
           rows: {
@@ -844,7 +876,16 @@ export function createInvoiceRepository(db: Db) {
         if (rest <= 0) continue;
         let order = orders.get(r.orderId);
         if (!order) {
-          order = { orderId: r.orderId, orderNumber: r.orderNumber, currency: r.currency, exchangeRate: r.exchangeRate, rows: [] };
+          order = {
+            orderId: r.orderId,
+            orderNumber: r.orderNumber,
+            customerId: r.orderCustomerId,
+            customerNumber: r.orderCustomerNumber,
+            customerName: r.orderCustomerName,
+            currency: r.currency,
+            exchangeRate: r.exchangeRate,
+            rows: [],
+          };
           orders.set(r.orderId, order);
         }
         order.rows.push({
@@ -874,7 +915,8 @@ export function createInvoiceRepository(db: Db) {
         .select({
           id: shipments.id,
           shipmentNumber: shipments.shipmentNumber,
-          customerId: shipments.customerId,
+          // Fakturakund (0230): the customer the freight is billed to.
+          customerId: shipmentBillToSql,
           status: shipments.status,
           // Written out by hand: in a SELECT list drizzle renders interpolated
           // columns unqualified, so `${shipments.id}` became a bare "id" that
@@ -1124,6 +1166,12 @@ export function createInvoiceRepository(db: Db) {
           articleNameEn: articles.nameEn,
           articleExtraDescriptionEn: articles.extraDescriptionEn,
           salesOrderNumber: salesOrders.orderNumber,
+          // Fakturakund (0230): the ordering customer of the row's order —
+          // printed (and shown on the card) when the invoice went to
+          // another customer; its Ert art.nr is the row's.
+          orderCustomerId: salesOrders.customerId,
+          orderCustomerNumber: orderCustomers.customerNumber,
+          orderCustomerName: orderCustomers.name,
           // Printed with the order number under the row on the invoice PDF —
           // a samlingsfaktura mixes orders, so "Ert ordernummer" is per row.
           customerOrderNumber: salesOrders.customerOrderNumber,
@@ -1161,6 +1209,7 @@ export function createInvoiceRepository(db: Db) {
         .leftJoin(rowUnits, eq(rowUnits.id, invoiceRows.unitId))
         .leftJoin(salesOrderRows, eq(salesOrderRows.id, invoiceRows.salesOrderRowId))
         .leftJoin(salesOrders, eq(salesOrders.id, salesOrderRows.salesOrderId))
+        .leftJoin(orderCustomers, eq(orderCustomers.id, salesOrders.customerId))
         .leftJoin(setupMainRows, eq(setupMainRows.id, salesOrderRows.setupForRowId))
         .leftJoin(setupMainArticles, eq(setupMainArticles.id, setupMainRows.articleId))
         .leftJoin(shipments, eq(shipments.id, invoiceRows.shipmentId))
@@ -1214,6 +1263,27 @@ export function createInvoiceRepository(db: Db) {
     // text snapshotted onto the invoice at issue.
     // A free row's article and the header's payment term: unknown ⇒ 404 in
     // the service, not the FK's 23503 (500).
+    // Fakturakund (0230): has this order row been invoiced to this customer
+    // (an issued or paid invoice of theirs)? A credit note follows its
+    // source invoice's customer even when the order has since been pointed
+    // at another fakturakund.
+    async orderRowInvoicedTo(salesOrderRowId: string, customerId: string) {
+      const [row] = await db
+        .select({ id: invoiceRows.id })
+        .from(invoiceRows)
+        .innerJoin(invoices, eq(invoices.id, invoiceRows.invoiceId))
+        .where(
+          and(
+            eq(invoiceRows.salesOrderRowId, salesOrderRowId),
+            eq(invoices.customerId, customerId),
+            eq(invoices.type, "invoice"),
+            inArray(invoices.status, ["issued", "paid"])
+          )
+        )
+        .limit(1);
+      return row !== undefined;
+    },
+
     async articleExists(id: string) {
       const [row] = await db.select({ id: articles.id }).from(articles).where(eq(articles.id, id));
       return row !== undefined;

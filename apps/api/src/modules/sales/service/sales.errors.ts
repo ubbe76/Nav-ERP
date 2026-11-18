@@ -324,3 +324,36 @@ export class SalesOrderRowsLockedError extends Error {
     this.name = "SalesOrderRowsLockedError";
   }
 }
+
+// Fakturakund (migration 0230): the customer an order's invoices go to, on
+// the customer card (the förval) and on the order header. One class and
+// code per refusal.
+// The chosen fakturakund does not exist. 404.
+export class InvoiceCustomerNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Fakturakunden ${id} finns inte`);
+    this.name = "InvoiceCustomerNotFoundError";
+  }
+}
+// The chosen fakturakund is inactive. 400.
+export class InvoiceCustomerInactiveError extends Error {
+  constructor(customerNumber: string) {
+    super(`Kund ${customerNumber} är inaktiv och kan inte väljas som fakturakund`);
+    this.name = "InvoiceCustomerInactiveError";
+  }
+}
+// No chain: the chosen fakturakund has a fakturakund of its own. 400.
+export class InvoiceCustomerHasInvoiceCustomerError extends Error {
+  constructor(customerNumber: string) {
+    super(`Kund ${customerNumber} har själv en fakturakund och kan inte väljas som fakturakund`);
+    this.name = "InvoiceCustomerHasInvoiceCustomerError";
+  }
+}
+// No chain, the other way: the customer is already the fakturakund of
+// another customer and cannot get one of its own. 400.
+export class CustomerIsInvoiceCustomerError extends Error {
+  constructor(customerNumbers: string[]) {
+    super(`Kunden är fakturakund åt ${customerNumbers.join(", ")} och kan inte själv ha en fakturakund`);
+    this.name = "CustomerIsInvoiceCustomerError";
+  }
+}

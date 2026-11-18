@@ -1059,6 +1059,11 @@ const MESSAGES: Record<string, MessageEntry> = {
   "sales-order-row-mismatch":
     "Orderraden som fakturaraden pekar på finns inte, tillhör en annan kund eller gäller en annan artikel — välj en annan orderrad.",
   "not-collective-customer": "Kunden är inte markerad för samlingsfaktura.",
+  // Fakturakund: the server names the customers.
+  "invoice-customer-not-found": "Fakturakunden finns inte längre — välj en annan kund.",
+  "invoice-customer-inactive": serverMessage("Kunden är inaktiv och kan inte väljas som fakturakund."),
+  "invoice-customer-has-invoice-customer": serverMessage("Kunden har själv en fakturakund och kan inte väljas som fakturakund."),
+  "customer-is-invoice-customer": serverMessage("Kunden är fakturakund åt en annan kund och kan inte själv ha en fakturakund."),
   "price-list-not-found": "Prislistan finns inte längre — ladda om sidan.",
   "price-list-row-not-found": "Prislistraden finns inte längre — ladda om sidan.",
   "price-not-found": "Det finns inget pris för artikeln.",

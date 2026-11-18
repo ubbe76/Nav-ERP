@@ -16,6 +16,8 @@ import { RowMenu } from "../ui/RowMenu";
 import { ArticleOverviewButton } from "../articles/ArticleOverviewButton";
 import { ArticleLink } from "../articles/ArticleLink";
 import { GatedLink } from "../ui/GatedLink";
+import { SearchPicker } from "../ui/SearchPicker";
+import type { CustomerRef } from "../../lib/types";
 import { StatusPill } from "../ui/StatusPill";
 import { SectionHeading } from "../ui/SectionHeading";
 import { useCan } from "../PermissionsProvider";
@@ -672,9 +674,10 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
 
         {order.status === "delivered" && (
           <Link
+            // Fakturakund: the flag and the customer are the PAYING customer's.
             href={
               order.customerCollectiveInvoicing
-                ? `/forsaljning/samlingsfakturering?customerId=${order.customerId}`
+                ? `/forsaljning/samlingsfakturering?customerId=${order.billToCustomerId ?? order.customerId}`
                 : `/forsaljning/fakturor?orderId=${order.id}`
             }
             className={`${buttonStyles.button} ${buttonStyles.ghost}`}
@@ -766,6 +769,18 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
             : []),
           { label: "Leveransvillkor", value: termsLabel(order.deliveryTermCode, order.deliveryTermName) },
           { label: "Betalningsvillkor", value: termsLabel(order.paymentTermCode, order.paymentTermName) },
+          ...(order.invoiceCustomer
+            ? [
+                {
+                  label: "Fakturakund",
+                  value: (
+                    <GatedLink href={`/kunder/${order.invoiceCustomer.id}`}>
+                      {order.invoiceCustomer.customerNumber} {order.invoiceCustomer.name}
+                    </GatedLink>
+                  ),
+                },
+              ]
+            : []),
           { label: "Speditör", value: termsLabel(order.carrierCode, order.carrierName) },
           { label: "Leveransadress", value: deliveryText, wide: true },
         ]}
@@ -1341,6 +1356,8 @@ function EditHeaderForm({
 }) {
   const [customerOrderNumber, setCustomerOrderNumber] = useState(order.customerOrderNumber ?? "");
   const [customerInquiryNumber, setCustomerInquiryNumber] = useState(order.customerInquiryNumber ?? "");
+  // Fakturakund: the customer the order is invoiced to; empty = the orderer.
+  const [invoiceCustomer, setInvoiceCustomer] = useState<CustomerRef | null>(order.invoiceCustomer ?? null);
   // A quote edits Kundens förfrågan; Kundens ordernummer only when an older
   // quote already has one (so it can be corrected or cleared). An order
   // edits both.
@@ -1438,6 +1455,12 @@ function EditHeaderForm({
         setPending(false);
       }
     }
+    // Fakturakund: sent only when changed. The order's payment term then
+    // follows the paying customer — unless the user chose a term in this
+    // same save, so an untouched term is left out of the payload.
+    const invoiceCustomerChanged = (invoiceCustomer?.id ?? null) !== (order.invoiceCustomerId ?? null);
+    const termsSent: Record<string, unknown> = { ...termsPayload(terms) };
+    if (invoiceCustomerChanged && (termsSent.paymentTermId ?? null) === (order.paymentTermId ?? null)) delete termsSent.paymentTermId;
     const bumpRevision = await askBumpRevision(order.revision);
     setPending(true);
     try {
@@ -1453,7 +1476,8 @@ function EditHeaderForm({
           costCenterId: costCenterId || null,
           projectId: projectId || null,
           ...deliveryAddressPayload(deliveryAddressId, newDeliveryAddress, null),
-          ...termsPayload(terms),
+          ...termsSent,
+          ...(invoiceCustomerChanged ? { invoiceCustomerId: invoiceCustomer?.id ?? null } : {}),
           // Giltig t.o.m. only exists on a quote (the API refuses it otherwise).
           ...(order.status === "quote" || order.status === "ordered" ? { quoteValidUntil: quoteValidUntil || null } : {}),
           ...markups,
@@ -1620,6 +1644,23 @@ function EditHeaderForm({
       )}
 
       <TermsFields registers={registers} value={terms} onChange={setTerms} />
+
+      <Field label="Fakturakund" htmlFor="headerInvoiceCustomer">
+        <SearchPicker<CustomerRef>
+          id="headerInvoiceCustomer"
+          endpoint="/api/v1/customers"
+          value={invoiceCustomer}
+          onChange={setInvoiceCustomer}
+          excludeId={order.customerId}
+          formatLabel={(c) => `${c.customerNumber} — ${c.name}`}
+          placeholder="Beställaren — sök kundnummer eller namn…"
+          emptyText="Inga kunder matchar sökningen"
+        />
+      </Field>
+      <FormHint attached>
+        Fakturan går till den här kunden i stället för beställaren (tomt = beställaren). Gäller fakturor som skapas från nu;
+        betalningsvillkoret följer fakturakunden om du inte själv ändrar det här.
+      </FormHint>
 
       <DeliveryAddressChoice
         idPrefix="header"

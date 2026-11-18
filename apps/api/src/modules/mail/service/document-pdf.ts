@@ -334,6 +334,9 @@ export interface DocumentPdfInput {
   // "Vår offert OF-1001" in the facts box. The callsite passes it only when
   // the order's number differs from its quote number.
   quoteReference?: string | null;
+  // Fakturakund (0230): "Fakturamottagare 1002 Namn" on a quote/order
+  // confirmation whose order is invoiced to another customer.
+  invoiceRecipient?: string | null;
   // Kundnummer — the customer's number in our register: live on quote/order
   // confirmation, the frozen snapshot on invoices. Sales documents only.
   partnerNumber?: string | null;
@@ -1512,6 +1515,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       fact(t.meta.creditedInvoice, input.creditedInvoiceNumber),
       fact(t.meta.ourQuote, input.quoteReference),
       fact(t.meta.customerNumber, input.partnerNumber),
+      fact(t.meta.invoiceRecipient, input.invoiceRecipient),
       fact(t.meta.buyerVatNumber, input.buyerVatNumber),
       fact(t.meta.customerOrderNumber, input.customerOrderNumber),
       fact(t.meta.customerInquiryNumber, input.customerInquiryNumber),

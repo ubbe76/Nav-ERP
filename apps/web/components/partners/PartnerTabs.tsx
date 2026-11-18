@@ -27,6 +27,8 @@ import type {
 import { PluginTabContent, pluginTabId, usePluginTabs } from "../plugins/PluginTabs";
 import styles from "./PartnerTabs.module.css";
 import { Card } from "../ui/Card";
+import { SearchPicker } from "../ui/SearchPicker";
+import type { CustomerRef } from "../../lib/types";
 import { CurrencyInput } from "../ui/CurrencyInput";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormSaved } from "../ui/Form";
 import { SupplierPaymentDetailsSection } from "../banking/SupplierPaymentDetailsSection";
@@ -1104,6 +1106,11 @@ function VillkorTab({
     mode: partner.deliveryDayMode,
     transitDays: partner.transitDays === null ? "" : String(partner.transitDays),
   });
+  // Fakturakund (customers only): the customer this one's invoices go to.
+  // Sent only when changed — the server checks every choice it is sent.
+  const storedInvoiceCustomer = isCustomer ? ((partner as Customer).invoiceCustomer ?? null) : null;
+  const invoiceCustomerFor = isCustomer ? ((partner as Customer).invoiceCustomerFor ?? []) : [];
+  const [invoiceCustomer, setInvoiceCustomer] = useState<CustomerRef | null>(storedInvoiceCustomer);
   const [priceListId, setPriceListId] = useState(isCustomer ? ((partner as Customer).priceListId ?? "") : "");
   const selectedPriceList = priceLists?.find((list) => list.id === priceListId) ?? null;
   // Kundrabatt (%) — blanket discount, price chain's last fallback. Stored as
@@ -1177,6 +1184,9 @@ function VillkorTab({
           deliveryDayMode: deliveryDays.mode,
           transitDays,
           ...(isCustomer ? { priceListId: priceListId || null } : {}),
+          ...(isCustomer && (invoiceCustomer?.id ?? null) !== (storedInvoiceCustomer?.id ?? null)
+            ? { invoiceCustomerId: invoiceCustomer?.id ?? null }
+            : {}),
           // blankSafe on the API side rejects "" outright — an emptied field
           // means "no discount", sent as 0, never as a blank string.
           ...(isCustomer
@@ -1257,6 +1267,36 @@ function VillkorTab({
         {isCustomer && collectiveInvoicing && (
           <FormHint attached>
             Faktureras via Försäljning → Samlingsfakturering. &quot;Ny faktura&quot; är spärrad för kunden.
+          </FormHint>
+        )}
+        {isCustomer && invoiceCustomerFor.length === 0 && (
+          <>
+            <Field label="Fakturakund" htmlFor="invoiceCustomerId">
+              <SearchPicker<CustomerRef>
+                id="invoiceCustomerId"
+                endpoint="/api/v1/customers"
+                value={invoiceCustomer}
+                onChange={(next) => {
+                  setInvoiceCustomer(next);
+                  setDirty(true);
+                }}
+                excludeId={partner.id}
+                formatLabel={(c) => `${c.customerNumber} — ${c.name}`}
+                placeholder="Kunden själv — sök kundnummer eller namn…"
+                emptyText="Inga kunder matchar sökningen"
+              />
+            </Field>
+            <FormHint attached>
+              Fakturorna för kundens order går till den här kunden — förval på nya offerter och order, kan ändras på ordern.
+              Tomt = kunden själv. Priserna är alltid beställarens; adress, moms, språk, betalningsvillkor och reskontra är
+              fakturakundens.
+            </FormHint>
+          </>
+        )}
+        {isCustomer && invoiceCustomerFor.length > 0 && (
+          <FormHint>
+            Fakturakund åt: {invoiceCustomerFor.map((c) => `${c.customerNumber} ${c.name}`).join(", ")}. Kunden kan därför inte själv ha en
+            fakturakund.
           </FormHint>
         )}
         {isCustomer && (

@@ -224,6 +224,10 @@ export const createCustomerSchema = z.object({
   lateInterest: z.boolean().default(true),
   lateInterestRate: lateInterestRateSchema.nullable().optional(),
   lateFee: z.boolean().default(true),
+  // Fakturakund (0230): the customer the invoices for this customer's
+  // orders go to — the default a new quote/order takes. null/omitted (or
+  // the customer itself) = the customer.
+  invoiceCustomerId: z.string().uuid().nullable().optional(),
   active: z.boolean().default(true),
   ...partnerDeliveryFields,
 });
@@ -282,6 +286,8 @@ export const updateCustomerSchema = z
     lateInterest: z.boolean().optional(),
     lateInterestRate: lateInterestRateSchema.nullable().optional(),
     lateFee: z.boolean().optional(),
+    // Fakturakund: omitted = unchanged, null (or the customer itself) = none.
+    invoiceCustomerId: z.string().uuid().nullable().optional(),
     active: z.boolean().optional(),
     ...partnerDeliveryFields,
   })
@@ -361,6 +367,13 @@ export const updateSalesOrderHeaderSchema = z
     deliveryTermId: z.string().uuid().nullable().optional(),
     paymentTermId: z.string().uuid().nullable().optional(),
     carrierId: z.string().uuid().nullable().optional(),
+    // Fakturakund (0230): the customer the order is invoiced to — null (or
+    // the ordering customer itself) = the ordering customer. Not in
+    // createQuoteSchema: a new order takes the customer's förval, and an API
+    // client never chooses who is billed. A change only decides invoices
+    // created afterwards; the order's payment term follows it unless the
+    // same PATCH sends paymentTermId.
+    invoiceCustomerId: z.string().uuid().nullable().optional(),
     // Set by "Använd datumet" in Leveranstidskontroll on the order card.
     // businessDateSchema: the date feeds the planning's date arithmetic.
     expectedDeliveryDate: businessDateSchema.nullable().optional(),

@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import {
   createContactSchema,
   createCustomerSchema,
@@ -84,6 +84,10 @@ import {
   MarkupRepricingConflictError,
   MarkupRepricingNotConfirmedError,
   SalesOrderMarkupsChangedError,
+  InvoiceCustomerNotFoundError,
+  InvoiceCustomerInactiveError,
+  InvoiceCustomerHasInvoiceCustomerError,
+  CustomerIsInvoiceCustomerError,
 } from "../service/sales.errors.js";
 import { ExchangeRateUnavailableError } from "../../system/service/exchange-rates.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
@@ -111,6 +115,20 @@ import { CUSTOMER_CSV_COLUMNS, PRICE_LIST_CSV_COLUMNS, SALES_ORDER_CSV_COLUMNS }
 
 // This module is registered inside app.ts's protected route scope, so
 // requireAuth has already run and req.user is guaranteed to be set.
+// Fakturakund (0230): the answers shared by the customer card and the order
+// header — an unknown choice is a 404, an unselectable one a 400.
+function invoiceCustomerError(err: unknown, reply: FastifyReply): FastifyReply | null {
+  if (err instanceof InvoiceCustomerNotFoundError) return reply.code(404).send(errorBody(err));
+  if (
+    err instanceof InvoiceCustomerInactiveError ||
+    err instanceof InvoiceCustomerHasInvoiceCustomerError ||
+    err instanceof CustomerIsInvoiceCustomerError
+  ) {
+    return reply.code(400).send(errorBody(err));
+  }
+  return null;
+}
+
 export async function salesRoutes(app: FastifyInstance, opts: { service: SalesService }) {
   const { service } = opts;
 
@@ -152,6 +170,8 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       // through to the global 500 and the series-exhausted dictionary entry
       // was dead code.
       if (err instanceof SeriesExhaustedError) return reply.code(409).send(errorBody(err));
+      const refused = invoiceCustomerError(err, reply);
+      if (refused) return refused;
       throw err;
     }
   });
@@ -169,6 +189,8 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       if (err instanceof PriceListNotFoundError) return reply.code(400).send(errorBody(err));
       if (err instanceof InvalidFreightProductError) return reply.code(400).send(errorBody(err));
       if (err instanceof DuplicateCustomerNumberError) return reply.code(409).send(errorBody(err));
+      const refused = invoiceCustomerError(err, reply);
+      if (refused) return refused;
       throw err;
     }
   });
@@ -421,6 +443,8 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       // kept changing under the repricing.
       if (err instanceof MarkupRepricingNotConfirmedError) return reply.code(409).send({ ...errorBody(err), repricing: err.repricing });
       if (err instanceof MarkupRepricingConflictError) return reply.code(409).send(errorBody(err));
+      const refused = invoiceCustomerError(err, reply);
+      if (refused) return refused;
       throw err;
     }
   });

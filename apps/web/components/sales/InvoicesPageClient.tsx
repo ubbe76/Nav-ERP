@@ -294,7 +294,8 @@ export function NewInvoiceForm({
     apiFetch<SalesOrder>(`/api/v1/sales-orders/${initialOrderId}`)
       .then((order) => {
         pendingOrderNumberRef.current = order.orderNumber;
-        return apiFetch<Customer>(`/api/v1/customers/${order.customerId}`);
+        // Fakturakund: the invoice is the PAYING customer's.
+        return apiFetch<Customer>(`/api/v1/customers/${order.billToCustomerId ?? order.customerId}`);
       })
       .then((c) => setCustomer(c))
       .catch(() => {
@@ -742,6 +743,7 @@ export function NewInvoiceForm({
                       />
                       {o.orderNumber} ({o.rows.length} rad{o.rows.length === 1 ? "" : "er"})
                       {o.currency !== SEK && ` · ${o.currency}`}
+                      {o.customerId !== customerId && ` · Beställare: ${o.customerNumber} ${o.customerName}`}
                     </label>
                   );
                 })}

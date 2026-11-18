@@ -60,6 +60,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   created: "Skapad",
   updated: "Ändrad",
   markups_changed: "Påslag ändrade",
+  invoice_customer_changed: "Fakturakund ändrad",
   vat_code_changed: "Momskod ändrad",
   onboarding_number_series_reviewed: "Nummerserier granskade",
   deleted: "Borttagen",

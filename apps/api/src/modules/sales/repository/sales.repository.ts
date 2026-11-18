@@ -78,6 +78,12 @@ import {
 } from "@navet/shared";
 import { salesOrderLate } from "../../planning/repository/late-orders.js";
 import { documentKindSql } from "./document-kind.js";
+import {
+  assertInvoiceCustomerForCustomer,
+  billToCustomerIdSql,
+  listInvoiceCustomerFor,
+  loadInvoiceCustomerChoice,
+} from "./invoice-customer.js";
 import { getNextOrderNumber, insertWithSeriesNumber } from "../../system/service/number-series.js";
 import { pluginEvents } from "../../system/service/plugin-events.js";
 import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions } from "../../economy/service/dimension-check.js";
@@ -121,6 +127,10 @@ const orderCostCenters = alias(costCenters, "order_cost_centers");
 const orderProjects = alias(projects, "order_projects");
 // Skapa kundorder från offert: the quote an order was created from.
 const sourceQuotes = alias(salesOrders, "source_quotes");
+// Fakturakund (0230): the customer an order is invoiced to, when not the orderer.
+const invoiceCustomers = alias(customers, "invoice_customers");
+// …and the paying customer's own payment term, for the order's snapshot.
+const customerInvoiceCustomers = alias(customers, "customer_invoice_customers");
 
 // A plain sales_orders row (from insert/update … returning) with its derived
 // document kind, so every write path answers in the same shape as the reads.
@@ -659,6 +669,8 @@ export function createSalesRepository(db: Db) {
       // Tillägg: customer.created commits with the customer.
       const insert = (customerNumber: string) =>
         db.transaction(async (tx) => {
+          // Fakturakund: exists, active, no chain — under the chosen row's lock.
+          if (values.invoiceCustomerId) await assertInvoiceCustomerForCustomer(tx, null, values.invoiceCustomerId);
           const [row] = await tx
             .insert(customers)
             .values({ ...values, customerNumber })
@@ -683,6 +695,10 @@ export function createSalesRepository(db: Db) {
         ...overDeliveryUpdate(overDelivery, overDeliveryPercent),
       };
       return db.transaction(async (tx) => {
+        // Fakturakund: the customer itself is "none" (the service normalizes
+        // too); a real choice is checked under both customers' row locks.
+        if (set.invoiceCustomerId === id) set.invoiceCustomerId = null;
+        if (set.invoiceCustomerId) await assertInvoiceCustomerForCustomer(tx, id, set.invoiceCustomerId);
         const [row] = await tx.update(customers).set(set).where(eq(customers.id, id)).returning();
         if (row) await pluginEvents.emit(tx, { type: "customer.updated", entityId: row.id, entityNumber: row.customerNumber });
         return row ?? null;
@@ -707,8 +723,12 @@ export function createSalesRepository(db: Db) {
           carrierName: carriers.name,
           defaultFreightCarrierName: freightProducts.carrierName,
           defaultFreightProductName: freightProducts.productName,
+          // Fakturakund (0230): the card's field.
+          invoiceCustomerNumber: customerInvoiceCustomers.customerNumber,
+          invoiceCustomerName: customerInvoiceCustomers.name,
         })
         .from(customers)
+        .leftJoin(customerInvoiceCustomers, eq(customerInvoiceCustomers.id, customers.invoiceCustomerId))
         .leftJoin(deliveryTerms, eq(deliveryTerms.id, customers.deliveryTermId))
         .leftJoin(paymentTerms, eq(paymentTerms.id, customers.paymentTermId))
         .leftJoin(carriers, eq(carriers.id, customers.carrierId))
@@ -720,6 +740,15 @@ export function createSalesRepository(db: Db) {
     // Momskoder: the company's name and invoice text per code (Swedish and
     // English — #7), for the quote/order confirmation (renderSalesOrderPdf)
     // and the card's momssummering.
+    // Fakturakund: the customers that name this one ("Fakturakund åt"), and
+    // a customer as a candidate for an order's choice.
+    async listInvoiceCustomerFor(customerId: string) {
+      return listInvoiceCustomerFor(db, customerId);
+    },
+    async findInvoiceCustomerChoice(id: string) {
+      return loadInvoiceCustomerChoice(db, id);
+    },
+
     async vatCodeInvoiceTexts() {
       const book = await loadVatCodeBook(db);
       return new Map(
@@ -1055,6 +1084,9 @@ export function createSalesRepository(db: Db) {
           }
         }
         const { newDeliveryAddress, ...fields } = input;
+        // Fakturakund: the ordering customer itself is "none" — decided
+        // under the order's lock (the CHECK would refuse it otherwise).
+        if (fields.invoiceCustomerId === order.customerId) fields.invoiceCustomerId = null;
         if (newDeliveryAddress) {
           fields.deliveryAddressId = (await insertNewDeliveryAddress(tx, order.customerId, newDeliveryAddress)).id;
         }
@@ -1104,6 +1136,11 @@ export function createSalesRepository(db: Db) {
         // Terms are snapshotted from the customer at creation (like the PO's
         // currency) — later changes on the customer card don't touch orders.
         const [customer] = await tx.select().from(customers).where(eq(customers.id, input.customerId));
+        // Fakturakund (0230): the customer's förval, copied as it is. The
+        // payment term printed on the quote/confirmation is then the paying
+        // customer's (the invoice takes that customer's term at Utfärda).
+        const invoiceCustomerId = customer?.invoiceCustomerId ?? null;
+        const billTo = invoiceCustomerId ? await loadInvoiceCustomerChoice(tx, invoiceCustomerId) : null;
         // Offerter (0138): a quote is numbered from its own series (OF-) and
         // carries the number twice — order_number (what every reader shows)
         // and quote_number (the reference that survives the confirmation).
@@ -1123,8 +1160,9 @@ export function createSalesRepository(db: Db) {
             customerReference: input.customerReference,
             deliveryAddressId,
             deliveryTermId: customer?.deliveryTermId ?? null,
-            paymentTermId: customer?.paymentTermId ?? null,
+            paymentTermId: (billTo ? billTo.paymentTermId : customer?.paymentTermId) ?? null,
             carrierId: customer?.carrierId ?? null,
+            invoiceCustomerId,
             expectedDeliveryDate: input.expectedDeliveryDate,
             note: input.note,
             quoted: !input.confirm,
@@ -1201,7 +1239,13 @@ export function createSalesRepository(db: Db) {
           customerName: customers.name,
           // The order card's "Fakturera" points at the samlingsfakturering
           // routine instead of the invoice dialog for flagged customers.
-          customerCollectiveInvoicing: customers.collectiveInvoicing,
+          // Fakturakund (0230): the flag of the customer the order is billed
+          // to — the fakturakund's when the order has one.
+          customerCollectiveInvoicing: sql<boolean>`coalesce(${invoiceCustomers.collectiveInvoicing}, ${customers.collectiveInvoicing})`,
+          customerNumber: customers.customerNumber,
+          billToCustomerId: billToCustomerIdSql,
+          invoiceCustomerNumber: invoiceCustomers.customerNumber,
+          invoiceCustomerName: invoiceCustomers.name,
           // Språk (#7): the language the quote/order confirmation/delivery
           // note are printed in (live) — the card's mail defaults follow it.
           customerLanguage: customers.language,
@@ -1237,6 +1281,7 @@ export function createSalesRepository(db: Db) {
         })
         .from(salesOrders)
         .innerJoin(customers, eq(customers.id, salesOrders.customerId))
+        .leftJoin(invoiceCustomers, eq(invoiceCustomers.id, salesOrders.invoiceCustomerId))
         .leftJoin(sourceQuotes, eq(sourceQuotes.id, salesOrders.sourceQuoteId))
         .leftJoin(customerDeliveryAddresses, eq(customerDeliveryAddresses.id, salesOrders.deliveryAddressId))
         .leftJoin(deliveryTerms, eq(deliveryTerms.id, salesOrders.deliveryTermId))
@@ -1542,6 +1587,7 @@ export function createSalesRepository(db: Db) {
             quoted: false,
             quoteValidUntil: null,
             customerId: quote.customerId,
+            invoiceCustomerId: quote.invoiceCustomerId,
             customerOrderNumber: quote.customerOrderNumber,
             customerInquiryNumber: quote.customerInquiryNumber,
             customerReference: quote.customerReference,
