@@ -523,7 +523,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.8.17 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.8.18 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -669,10 +669,12 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   **Skapa ordrar** (resultatet
   återanvänds en minut, **Uppdatera** räknar om), **artikelöversikt**
   med lagersaldo och löpande disponibelt antal, beläggning per
-  resurs och vecka och **produktionsplanering** (operationerna planeras
-  på resursernas lediga kapacitet vecka för vecka med **Planera**,
-  flyttas och låses för hand, och en ny tillverkningsorder planeras
-  direkt); **Leveranstidskontroll** på kundordern räknar fram ett
+  resurs, vecka eller dag och **produktionsplanering per dag**
+  (operationerna planeras på resursernas lediga kapacitet dag för dag med
+  **Planera**, nästa operation nästa arbetsdag plus kötid, flyttas till en
+  dag och låses för hand, och en ny tillverkningsorder planeras direkt);
+  **körplan** per resurs och dag där arbetsledaren ordnar dagens arbeten;
+  **Leveranstidskontroll** på kundordern räknar fram ett
   leveransdatum ur lager, inköp och kapacitet och kan skapa och låsa
   tillverkningsordrarna för det som saknas
 - **Tidrapportering & personal** — **stämpelterminal** (helskärmsvy för en
