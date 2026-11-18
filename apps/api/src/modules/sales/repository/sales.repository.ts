@@ -717,12 +717,13 @@ export function createSalesRepository(db: Db) {
       return row ?? null;
     },
 
-    // Momskoder: the company's invoice text per code (Swedish and English —
-    // #7), for the quote/order confirmation (renderSalesOrderPdf).
+    // Momskoder: the company's name and invoice text per code (Swedish and
+    // English — #7), for the quote/order confirmation (renderSalesOrderPdf)
+    // and the card's momssummering.
     async vatCodeInvoiceTexts() {
       const book = await loadVatCodeBook(db);
       return new Map(
-        [...book.byCode.values()].map((row) => [row.code, { invoiceText: row.invoiceText, invoiceTextEn: row.invoiceTextEn }] as const)
+        [...book.byCode.values()].map((row) => [row.code, { name: row.name, nameEn: row.nameEn, invoiceText: row.invoiceText, invoiceTextEn: row.invoiceTextEn }] as const)
       );
     },
 

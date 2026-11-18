@@ -308,7 +308,8 @@ describe("quote and order confirmation in English", () => {
       "1,234.50", // the unit price, en-GB
       "1,111.05", // 1 234,50 × 0,9
       "10%", // the discount, English style
-      "Total SEK",
+      "Total excl. VAT SEK",
+      "Total incl. VAT SEK",
       "Reg. no: 556000-0001",
       "VAT no: SE556000000101",
       "Registered office: Kiruna",

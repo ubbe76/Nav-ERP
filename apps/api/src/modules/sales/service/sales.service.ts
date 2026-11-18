@@ -57,6 +57,7 @@ import { mailSender, type MailService } from "../../mail/service/mail.service.js
 import { formatBatchInfo, formatBatchLabel, formatQuantity, formatSerialInfo, type DocumentPdfService, type PalletCardPdfInput } from "../../mail/service/document-pdf.js";
 import { documentLanguageOf, localized, UNKNOWN_BATCH_LABEL, type DocumentLanguage } from "@navet/shared";
 import { documentTexts } from "../../mail/service/document-texts.js";
+import { salesOrderRowVat, salesOrderVatSummary } from "./order-vat.js";
 import {
   customerVatNumberWarning,
   customerVatTreatment,
@@ -1079,6 +1080,33 @@ export function createSalesService(
     return quoteValidityDays > 0 ? addDays(stockholmToday(), quoteValidityDays) : null;
   }
 
+  // Moms på offert och kundorder: each row's momskod (salesVatCode — the
+  // derivation the invoice row gets) with its net and VAT (order-vat.ts).
+  // ONE place for the PDF and the card's vatSummary.
+  function orderRowVat(
+    rows: Awaited<ReturnType<SalesRepository["listRowsByOrder"]>>,
+    customer: SalesVatCustomer,
+    freightArticleId: string | null,
+    codeTexts: Awaited<ReturnType<SalesRepository["vatCodeInvoiceTexts"]>>,
+    language: DocumentLanguage
+  ) {
+    return rows.map((r) => {
+      const code = salesVatCode({
+        customer,
+        isGoods: salesRowIsGoods({ articleId: r.articleId, articleType: r.articleType, freightArticleId }),
+        articleRate: Number(r.articleVatRate),
+      });
+      const text = codeTexts.get(code);
+      return salesOrderRowVat({
+        quantity: Number(r.quantityOrdered),
+        unitPrice: Number(r.unitPrice),
+        discountPercent: Number(r.discountPercent),
+        code,
+        name: text ? localized(text.name, text.nameEn, language) : code,
+      });
+    });
+  }
+
   // `customer`: the order's customer when the caller has already read it
   // (Skriv ut and the mail read it for Visa tilläggspriser) — not read twice.
   async function renderSalesOrderPdf(
@@ -1106,13 +1134,8 @@ export function createSalesService(
     // Momskoder (spec 4.5): each row's VAT follows the momskod the invoice
     // row will get (salesVatCode) — an EU customer sees 0 % already on the
     // quote — and the codes' invoice texts are printed like on the invoice.
-    const rowCodes = rows.map((r) =>
-      salesVatCode({
-        customer: customer!,
-        isGoods: salesRowIsGoods({ articleId: r.articleId, articleType: r.articleType, freightArticleId }),
-        articleRate: Number(r.articleVatRate),
-      })
-    );
+    const rowVat = orderRowVat(rows, customer!, freightArticleId, vatCodeTexts, language);
+    const rowCodes = rowVat.map((vat) => vat.code);
     const usedCodes = new Set<VatCode>(rowCodes);
     const vatTexts = VAT_CODE_CATALOG.flatMap((entry) => {
       const code = usedCodes.has(entry.code) ? vatCodeTexts.get(entry.code) : undefined;
@@ -1145,9 +1168,14 @@ export function createSalesService(
         unit: localized(r.unitCode, r.unitCodeEn, language),
         unitPrice: String(toUnitPrice(Number(r.unitPrice), r.unitFactor)),
         discountPercent: r.discountPercent,
-        // The row's momskod rate — only used when pricesIncludeVat
-        // (privatperson) grosses up the cells.
-        vatRate: vatCodeEntry(rowCodes[i]!).rate,
+        // Moms på offert: the row's momskod, net and VAT exactly as the
+        // invoice row will carry them (order-vat.ts) — the summary below the
+        // table groups them per rate/code, and privatperson grosses up the
+        // cells with them.
+        vatRate: rowVat[i]!.rate,
+        vatCode: { code: rowVat[i]!.code, name: rowVat[i]!.name },
+        lineAmount: String(rowVat[i]!.lineAmount),
+        vatAmount: String(rowVat[i]!.vatAmount),
         revisionInfo: formatRevisionInfo(revisions?.get(r.articleId), language),
         articleInfo: formatArticleAttributes(
           {
@@ -1165,6 +1193,12 @@ export function createSalesService(
         deliveryDate: ownDeliveryDate(r.expectedDeliveryDate, order.expectedDeliveryDate),
       })),
       showTotal: true,
+      // Summa exkl. moms / Moms (X %) på … per sats / Summa inkl. moms — the
+      // invoice's lines, without Att betala. Privatperson keeps its own block
+      // (Summa inkl. moms + Varav moms, pricesIncludeVat below). No Moms i
+      // SEK line on a quote in another currency: that is the invoice's (ML
+      // 17 kap. 29 §).
+      vat: customer!.privatePerson ? null : { perRow: true, grossLabel: "totalInclVat" },
       vatTexts,
       deliveryDate: order.expectedDeliveryDate,
       // Giltig t.o.m. is printed on the quote only — the confirmation is
@@ -1728,11 +1762,14 @@ export function createSalesService(
       const found = await repo.findSalesOrderById(id);
       if (!found) return found;
       const { sourceQuoteNumber, ...order } = found;
-      const [overDeliveryPercent, customer, ordersFromQuote] = await Promise.all([
+      const [overDeliveryPercent, customer, ordersFromQuote, rows, vatCodeTexts, freightArticleId] = await Promise.all([
         overDeliveryPercentFor(order.customerId),
         repo.findCustomerById(order.customerId),
         // Only a quote can have given orders (source_quote_id points at one).
         order.documentKind === "quote" ? repo.listOrdersFromQuote(order.id) : [],
+        repo.listRowsByOrder(order.id),
+        repo.vatCodeInvoiceTexts(),
+        freight.freightArticleId(),
       ]);
       return {
         ...order,
@@ -1742,6 +1779,11 @@ export function createSalesService(
         sourceQuote: order.sourceQuoteId && sourceQuoteNumber ? { id: order.sourceQuoteId, quoteNumber: sourceQuoteNumber } : null,
         ordersFromQuote,
         overDeliveryPercent,
+        // Moms på offert och kundorder: the card's summary, the same figures
+        // the quote/order confirmation prints and the invoice will carry —
+        // in the order's currency, the codes' Swedish names. Prices are
+        // office data; so is this route (module read = office).
+        vatSummary: customer ? salesOrderVatSummary(orderRowVat(rows, customer, freightArticleId, vatCodeTexts, "sv")) : null,
         customerMarkups: {
           generalMarkupPercent: customer?.generalMarkupPercent ?? null,
           materialMarkupPercent: customer?.materialMarkupPercent ?? null,

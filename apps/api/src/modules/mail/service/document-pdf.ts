@@ -68,9 +68,10 @@ export interface DocumentPdfRow {
   // Ställkostnad: the article number of the row this setup charge belongs to
   // — printed as "Ställkostnad för X" (quote, order confirmation, invoice).
   setupForArticleNumber?: string | null;
-  // Invoice-only: this row's VAT rate, used to group the perRow VAT summary
-  // (DocumentPdfInput.vat = { perRow: true }) — ignored by every other
-  // document type and by the single-rate vat: { rate } branch.
+  // Invoice, quote and order confirmation: this row's VAT rate, used to group
+  // the perRow VAT summary (DocumentPdfInput.vat = { perRow: true }) —
+  // ignored by every other document type and by the single-rate
+  // vat: { rate } branch.
   vatRate?: number | null;
   // Invoice-only: the row's momskod — the perRow VAT summary groups per code
   // (rate + code), so two 0 % codes print as two lines with their own names.
@@ -81,8 +82,10 @@ export interface DocumentPdfRow {
   // posting and the API list/card sum). When present these are the
   // authority for both this row's own "Summa" cell and every total below —
   // quantity × unitPrice is display-unit-converted and can diverge from them
-  // by a rounding öre. Every other document type (inquiry/PO/quote/order)
-  // never sets these, so their rows keep the old quantity × unitPrice math
+  // by a rounding öre. The quote/order confirmation sets them too — derived
+  // with the invoice row's own rule (salesRowAmounts, sales/service/
+  // order-vat.ts), so its sums are the invoice's. The inquiry and the PO
+  // never set these, so their rows keep the old quantity × unitPrice math
   // via the fallback below.
   lineAmount?: string | null;
   vatAmount?: string | null;
@@ -288,7 +291,12 @@ export interface DocumentPdfInput {
   // "totalInclVat" — nothing is to be paid on an order); { perRow: true }
   // groups DocumentPdfRow.vatRate into one "Moms (X %)" line per distinct
   // rate (the customer invoice module).
-  vat?: { rate: number; grossLabel?: "amountDue" | "totalInclVat" } | { perRow: true } | null;
+  // The quote and the order confirmation use perRow with `grossLabel`
+  // "totalInclVat": the same lines, ending in Summa inkl. moms.
+  vat?:
+    | { rate: number; grossLabel?: "amountDue" | "totalInclVat" }
+    | { perRow: true; grossLabel?: "amountDue" | "totalInclVat" }
+    | null;
   // Momskoder: the invoice texts of the codes on the document ("Unionsintern
   // leverans …", "Omvänd betalningsskyldighet") — printed once each under the
   // totals, in the order given (the catalog's). Sales documents only.
@@ -1229,7 +1237,9 @@ function discountFactor(raw: string | null | undefined): number {
 // two lines. Rows without a vatCode group by rate alone (code null).
 export type PerRowVatGroup = { rate: number; code: string | null; name: string | null; net: number; vatAmount: number };
 
-export function computePerRowVatGroups(rows: DocumentPdfRow[]): PerRowVatGroup[] {
+export function computePerRowVatGroups(
+  rows: Pick<DocumentPdfRow, "quantity" | "unitPrice" | "discountPercent" | "vatRate" | "vatCode" | "lineAmount" | "vatAmount">[]
+): PerRowVatGroup[] {
   const groups = new Map<string, PerRowVatGroup>();
   for (const row of rows) {
     if (row.unitPrice === null) continue;
@@ -1763,7 +1773,13 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         y += line.advance;
       }
       doc.font(FONT_BOLD).fontSize(10);
-      doc.text(t.totals.amountDue(input.currency), labelX, y, { width: labelW, align: "right" });
+      // The quote/order confirmation ends in Summa inkl. moms — nothing is to
+      // be paid on an order.
+      const grossLabel =
+        "grossLabel" in input.vat! && input.vat.grossLabel === "totalInclVat"
+          ? t.totals.totalInclVat(input.currency)
+          : t.totals.amountDue(input.currency);
+      doc.text(grossLabel, labelX, y, { width: labelW, align: "right" });
       doc.text(num(total + vatTotal), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
     } else if (input.showTotal) {
       doc.font(FONT_BOLD).fontSize(10);
