@@ -4,6 +4,7 @@ import { AppShell } from "../../../../components/AppShell";
 import { ManufacturingOrderDetail } from "../../../../components/manufacturing/ManufacturingOrderDetail";
 import { apiGet, getCurrentUser } from "../../../../lib/api";
 import { satisfiesRule } from "../../../../lib/permissions";
+import { suggestsRest, type RestSuggestionSettings } from "../../../../lib/restSuggestion";
 import type {
   CostCalculation,
   EmployeeDirectoryEntry,
@@ -50,8 +51,11 @@ export default async function ManufacturingOrderDetailPage(props: { params: Prom
     apiGet<LegoPurchaseOperation[]>(`/api/v1/manufacturing-orders/${params.id}/lego-purchases`, cookieHeader).catch(
       () => [] as LegoPurchaseOperation[]
     ),
-    // Typ on Rapportera tid; never fails the card.
-    apiGet<{ timeKindSplit?: boolean }>("/api/v1/settings/terminal", cookieHeader).catch(() => ({ timeKindSplit: false })),
+    // Typ on Rapportera tid and Rest som förslag → Rapportering; never fails
+    // the card (a failed read keeps the defaults).
+    apiGet<RestSuggestionSettings & { timeKindSplit?: boolean }>("/api/v1/settings/terminal", cookieHeader).catch(
+      () => ({ timeKindSplit: false }) as RestSuggestionSettings & { timeKindSplit?: boolean }
+    ),
   ]);
 
   return (
@@ -79,6 +83,7 @@ export default async function ManufacturingOrderDetailPage(props: { params: Prom
         legoPurchases={legoPurchases}
         canUndoReports={canUndoReports}
         timeKindSplit={timeSettings.timeKindSplit === true}
+        suggestRest={suggestsRest(timeSettings, "report")}
       />
 
       <DeviationsSection

@@ -100,6 +100,7 @@ export function GoodsReceiptPageClient({
   selected,
   rows,
   openOrders,
+  suggestRest,
 }: {
   locations: StockLocation[];
   selected: PurchaseOrder | null;
@@ -108,6 +109,9 @@ export function GoodsReceiptPageClient({
   // list shown below the picker while no order is selected, so the routine
   // works without knowing the order number (like Monitor's ankomstlista).
   openOrders: PurchaseOrder[];
+  // System setting Rest som förslag i antalsfältet → Inleverans: the Ta emot
+  // nu fields start with the remaining amount (true) or empty (false).
+  suggestRest: boolean;
 }) {
   const placeLabels = usePlaceLabels();
   const router = useRouter();
@@ -146,7 +150,7 @@ export function GoodsReceiptPageClient({
   // receipt into it reactivates it), added to the select so it can be shown.
   const [scannedLocation, setScannedLocation] = useState<LocationOption | null>(null);
   const { count, countRef, setCount } = useCountState(NO_COUNT);
-  useUnsavedGuard(hasCounted(count));
+  useUnsavedGuard(hasCounted(count, suggestRest));
   const { feedback, ok, warn, clear: clearFeedback } = useScanFeedback();
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [batches, batchesRef, setBatches] = useScanState<Record<string, RowBatches>>({});
@@ -225,7 +229,7 @@ export function GoodsReceiptPageClient({
     // would go without a word.
     if (
       next.id !== latest.current.order?.id &&
-      hasCounted(countRef.current) &&
+      hasCounted(countRef.current, suggestRest) &&
       !(await confirmDialog(`Byta till ${next.orderNumber}? Det du har räknat på ${latest.current.order?.orderNumber ?? "ordern"} tas inte emot.`, { confirmLabel: "Byt order" }))
     ) {
       return;
@@ -392,7 +396,7 @@ export function GoodsReceiptPageClient({
           warn(`${m.orderNumber} kan inte tas emot — ${PURCHASE_ORDER_STATUS_PILL[m.status as PurchaseOrderStatus]?.label ?? m.status}`);
           return;
         }
-        if (hasCounted(countRef.current) && !(await confirmDialog(`Byta till ${m.orderNumber}? Det du har räknat på ${current?.orderNumber} tas inte emot.`, { confirmLabel: "Byt order" }))) {
+        if (hasCounted(countRef.current, suggestRest) && !(await confirmDialog(`Byta till ${m.orderNumber}? Det du har räknat på ${current?.orderNumber} tas inte emot.`, { confirmLabel: "Byt order" }))) {
           return;
         }
         pendingCount.current = null;
@@ -466,10 +470,16 @@ export function GoodsReceiptPageClient({
   }
 
   async function resetToRemaining() {
-    if (hasCounted(count) && !(await confirmDialog("Det du har räknat ersätts med restantalen.", { confirmLabel: "Fyll i restantal" }))) {
+    if (hasCounted(count, suggestRest) && !(await confirmDialog("Det du har räknat ersätts med restantalen.", { confirmLabel: "Fyll i restantal" }))) {
       return;
     }
-    setCount(NO_COUNT);
+    // With the rest suggested, no typed values is the rest; without, the rest
+    // has to be written into the fields.
+    setCount(
+      suggestRest
+        ? NO_COUNT
+        : { counting: false, quantities: Object.fromEntries(scanRows.map((r) => [r.id, String(r.remaining)])) }
+    );
     setLastRowId(null);
     clearFeedback();
   }
@@ -500,7 +510,7 @@ export function GoodsReceiptPageClient({
     const bookedParts: Record<string, number> = {};
     for (const row of openRows) {
       const scanRow = scanRows.find((r) => r.id === row.id)!;
-      const quantity = Number(enteredQuantity(scanRow, count));
+      const quantity = Number(enteredQuantity(scanRow, count, suggestRest));
       const rowBatches = row.articleBatchTracked ? (batches[row.id] ?? NO_BATCHES) : NO_BATCHES;
       const serialRow = isStockSerial(row.articleTracking, serialModes, row.articleId);
       const rowSerials = serialRow ? (serials[row.id] ?? []) : [];
@@ -629,10 +639,15 @@ export function GoodsReceiptPageClient({
     } else if (bookedRowIds.length > 0) {
       setCount({
         ...countRef.current,
-        quantities: { ...countRef.current.quantities, ...Object.fromEntries(bookedRowIds.map((id) => [id, "0"])) },
+        quantities: { ...countRef.current.quantities, ...Object.fromEntries(bookedRowIds.map((id) => [id, suggestRest ? "0" : ""])) },
       });
     }
     setPending(false);
+    // Every field empty or 0 (the rest is not suggested): say so instead of
+    // answering with nothing.
+    if (booked === 0 && Object.keys(errors).length === 0) {
+      notify({ message: "Ingen rad har något antal att ta emot. Fyll i Ta emot nu.", tone: "info" });
+    }
     // Återkoppling (punkt 7): Ångra takes back every receipt of this run, last
     // first — each is its own transaction, so a refusal part-way says how far
     // it got.
@@ -868,7 +883,7 @@ export function GoodsReceiptPageClient({
                         step="any"
                         size="sm"
                         aria-label={`Ta emot nu — ${row.articleNumber}`}
-                        value={enteredQuantity(scanRows.find((r) => r.id === row.id)!, count)}
+                        value={enteredQuantity(scanRows.find((r) => r.id === row.id)!, count, suggestRest)}
                         onChange={(e) =>
                           setCount({ ...countRef.current, quantities: { ...countRef.current.quantities, [row.id]: e.target.value } })
                         }
@@ -883,7 +898,7 @@ export function GoodsReceiptPageClient({
                         <SerialNumbersInput
                           ariaLabel={`Serienummer — ${row.articleNumber}`}
                           value={serials[row.id] ?? []}
-                          count={serialCountOf(toBaseQuantity(Number(enteredQuantity(scanRows.find((r) => r.id === row.id)!, count)), row.unitFactor))}
+                          count={serialCountOf(toBaseQuantity(Number(enteredQuantity(scanRows.find((r) => r.id === row.id)!, count, suggestRest)), row.unitFactor))}
                           onChange={(next) => {
                             setSerials((prev) => ({ ...prev, [row.id]: next }));
                             // The quantity follows the numbers: one styck each.

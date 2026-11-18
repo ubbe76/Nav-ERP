@@ -651,6 +651,14 @@
   outline-offset: 1px;
 }
 
+/* Why Antal OK is empty although Kvar is known: someone else stamps on the
+   operation too (Rest som förslag → Stämpling). */
+.restNote {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-secondary);
+}
+
 /* Per-stint quantity report at stamp-out (Antal OK / Kasserat). */
 .quantityRow {
   display: grid;

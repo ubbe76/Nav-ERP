@@ -91,6 +91,9 @@ interface ManufacturingOrderDetailProps {
   canUndoReports: boolean;
   // Dela tid i ställ och produktion (System → Inställningar).
   timeKindSplit?: boolean;
+  // Rest som förslag i antalsfältet → Rapportering: Antal klart starts with
+  // the remaining amount (default) or empty.
+  suggestRest?: boolean;
 }
 
 export function ManufacturingOrderDetail({
@@ -106,6 +109,7 @@ export function ManufacturingOrderDetail({
   legoPurchases,
   canUndoReports,
   timeKindSplit = false,
+  suggestRest = true,
 }: ManufacturingOrderDetailProps) {
   const router = useRouter();
   const can = useCan();
@@ -943,6 +947,7 @@ export function ManufacturingOrderDetail({
             employees={employees}
             timeReports={timeReports}
             timeKindSplit={timeKindSplit}
+            suggestRest={suggestRest}
             canUndoReports={canUndoReports}
             onDone={() => router.refresh()}
           />

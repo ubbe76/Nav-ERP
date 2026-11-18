@@ -2,7 +2,8 @@ import { headers } from "next/headers";
 import { AppShell } from "../../../components/AppShell";
 import { GoodsReceiptPageClient } from "../../../components/purchase/GoodsReceiptPageClient";
 import { apiGet } from "../../../lib/api";
-import type { Paged, PurchaseOrder, PurchaseOrderRow, StockLocation } from "../../../lib/types";
+import { suggestsRest } from "../../../lib/restSuggestion";
+import type { Paged, PurchaseOrder, PurchaseOrderRow, StockLocation, SystemSettings } from "../../../lib/types";
 
 // Inleverans — pick a receivable purchase order and report the whole receipt
 // at once. ?order=<id> preselects (linked from the order card).
@@ -29,9 +30,18 @@ export default async function GoodsReceiptPage(props: { searchParams: Promise<{ 
     ? await apiGet<PurchaseOrderRow[]>(`/api/v1/purchase-orders/${selected.id}/rows`, cookieHeader)
     : [];
 
+  // Rest som förslag i antalsfältet (a failed read keeps the default).
+  const settings = await apiGet<SystemSettings>("/api/v1/settings", cookieHeader).catch(() => null);
+
   return (
     <AppShell active="Inköp">
-      <GoodsReceiptPageClient locations={locations} selected={selected} rows={rows} openOrders={openOrders.rows} />
+      <GoodsReceiptPageClient
+        locations={locations}
+        selected={selected}
+        rows={rows}
+        openOrders={openOrders.rows}
+        suggestRest={suggestsRest(settings, "receipt")}
+      />
     </AppShell>
   );
 }

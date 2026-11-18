@@ -62,8 +62,10 @@ export async function systemRoutes(app: FastifyInstance, opts: { service: System
   });
 
   // The settings the stamp terminal reads (multiple stamps, attendance reason
-  // and overtime-choice behaviour, Dela tid i ställ och produktion) — so the
-  // workshop profile never needs the full settings payload.
+  // and overtime-choice behaviour, Dela tid i ställ och produktion, Rest som
+  // förslag vid stämpling) — so the workshop profile never needs the full
+  // settings payload. The TO card reads it too: besides Typ on Rapportera
+  // tid it takes Rest som förslag → Rapportering from here.
   app.get("/settings/terminal", { config: { access: TERMINAL_READ } }, async () => {
     const settings = await service.getSettings();
     return {
@@ -72,6 +74,8 @@ export async function systemRoutes(app: FastifyInstance, opts: { service: System
       attendanceReasonToleranceMinutes: settings.attendanceReasonToleranceMinutes,
       terminalOvertimeChoice: settings.terminalOvertimeChoice,
       timeKindSplit: settings.timeKindSplit,
+      restSuggestStamp: settings.restSuggestStamp,
+      restSuggestReport: settings.restSuggestReport,
     };
   });
 
