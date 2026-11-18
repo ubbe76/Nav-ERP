@@ -276,15 +276,21 @@ describe("förvalda favoriter per behörighetsgrupp", () => {
   it("a member gets the group's list until they save their own; null goes back; the change is logged", async () => {
     const group = await makeGroup("FAV", ["forsaljning"]);
     const user = await authService.createUser({ email: "fav@example.com", password: "correcthorsebattery", name: "Fav", role: "user", permissionGroupId: group.id });
-    expect(await settings.getSettings(user.id)).toMatchObject({ favorites: [], favoritesFromGroup: true });
+    expect(await settings.getSettings(user.id)).toMatchObject({ favorites: [], favoritesFromGroup: true, groupFavoritesCount: 0 });
 
     await groups.setDefaultFavorites(group.id, [kundorder, lager]);
-    expect(await settings.getSettings(user.id)).toMatchObject({ favorites: [kundorder, lager], favoritesFromGroup: true });
+    expect(await settings.getSettings(user.id)).toMatchObject({
+      favorites: [kundorder, lager],
+      favoritesFromGroup: true,
+      groupFavoritesCount: 2,
+    });
 
     // Own list (even an empty one) wins, and later group changes don't reach it.
     await settings.updateSettings(user.id, parsed(updateUserSettingsSchema, { favorites: [lager] }));
     await groups.setDefaultFavorites(group.id, [kundorder]);
-    expect(await settings.getSettings(user.id)).toMatchObject({ favorites: [lager], favoritesFromGroup: false });
+    // The group's count still reaches the member with an own list — Ändra
+    // offers "Använd gruppens favoriter" only when it is not 0.
+    expect(await settings.getSettings(user.id)).toMatchObject({ favorites: [lager], favoritesFromGroup: false, groupFavoritesCount: 1 });
     await settings.updateSettings(user.id, parsed(updateUserSettingsSchema, { favorites: [] }));
     expect(await settings.getSettings(user.id)).toMatchObject({ favorites: [], favoritesFromGroup: false });
 
@@ -304,7 +310,12 @@ describe("förvalda favoriter per behörighetsgrupp", () => {
 
   it("a user without a group has no default list, and the schema refuses a path outside Nav", async () => {
     const user = await authService.createUser({ email: "nogroup@example.com", password: "correcthorsebattery", name: "Utan", role: "user" });
-    expect(await settings.getSettings(user.id)).toMatchObject({ favorites: [], favoritesFromGroup: true });
+    expect(await settings.getSettings(user.id)).toMatchObject({ favorites: [], favoritesFromGroup: true, groupFavoritesCount: 0 });
+    // An own list on a user without a group: nothing to go back to.
+    await settings.updateSettings(user.id, parsed(updateUserSettingsSchema, { favorites: [lager] }));
+    expect(await settings.getSettings(user.id)).toMatchObject({ favorites: [lager], favoritesFromGroup: false, groupFavoritesCount: 0 });
+    // Read-only: PATCH refuses it (the schema is strict).
+    expect(updateUserSettingsSchema.safeParse({ groupFavoritesCount: 3 }).success).toBe(false);
     expect(permissionGroupDefaultFavoritesSchema.safeParse({ favorites: [{ href: "https://example.com", title: "Extern" }] }).success).toBe(false);
     await expect(groups.setDefaultFavorites(crypto.randomUUID(), [])).rejects.toBeInstanceOf(PermissionGroupNotFoundError);
   });

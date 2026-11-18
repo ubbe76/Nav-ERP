@@ -1,22 +1,30 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Button } from "./ui/Button";
 import { Checkbox } from "./ui/Field";
 import { Form, FormActions, FormError, FormHint } from "./ui/Form";
 import { useFavorites } from "./FavoritesProvider";
 import { useAccessUser } from "./PermissionsProvider";
 import { FavoriteListEditor } from "./FavoriteListEditor";
+import { apiFetch } from "../lib/api";
 import { confirmDialog } from "../lib/confirm";
 import { favoriteActionsFor } from "../lib/favoriteActions";
 import type { Favorite } from "../lib/favorites";
+import { notify } from "../lib/notice";
 import styles from "./FavoritesEditor.module.css";
 
 // Favoriter → Ändra: rename, reorder, remove and add shortcuts ("+ Ny …"),
 // saved together as the new list. Rendered inside a Modal, which mounts it
 // afresh on every open. A list that is still the behörighetsgrupp's
 // förvalda favoriter becomes the user's own on Spara; an own list can go
-// back to the group's.
+// back to the group's — offered only when the group has a list (on a group
+// without one the button emptied the user's favourites, 2026-11-18), with
+// Ångra in a notice afterwards.
+
+function favoritesCount(n: number): string {
+  return n === 1 ? "1 favorit" : `${n} favoriter`;
+}
 export function FavoritesEditor({ onDone }: { onDone: () => void }) {
   const { favorites, replace, inSidebar, setInSidebar, fromGroup, resetToGroup } = useFavorites();
   const user = useAccessUser();
@@ -25,6 +33,24 @@ export function FavoritesEditor({ onDone }: { onDone: () => void }) {
   const [showInSidebar, setShowInSidebar] = useState(inSidebar);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // The behörighetsgrupp's förvalda favoriter, read when the dialog opens
+  // (the Modal mounts the editor afresh) — null until then, 0 on a failed
+  // read, so the button stays hidden unless there is a list to go back to.
+  const [groupCount, setGroupCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    apiFetch<{ groupFavoritesCount?: number }>("/api/v1/me/settings")
+      .then((settings) => {
+        if (live) setGroupCount(settings.groupFavoritesCount ?? 0);
+      })
+      .catch(() => {
+        if (live) setGroupCount(0);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -43,15 +69,38 @@ export function FavoritesEditor({ onDone }: { onDone: () => void }) {
   }
 
   async function backToGroup() {
-    const ok = await confirmDialog("Ersätta dina favoriter med behörighetsgruppens förvalda favoriter?", {
-      confirmLabel: "Använd gruppens favoriter",
-    });
+    if (!groupCount) return;
+    // The saved list — what Ångra puts back (unsaved edits in the dialog are
+    // dropped either way).
+    const previous = favorites ?? [];
+    const own = previous.length === 0 ? "din tomma favoritlista" : `dina ${favoritesCount(previous.length)}`;
+    const ok = await confirmDialog(
+      `Ersätta ${own} med behörighetsgruppens ${favoritesCount(groupCount)}? Du kan ångra direkt efteråt.`,
+      { confirmLabel: "Använd gruppens favoriter" }
+    );
     if (!ok) return;
     setPending(true);
     const reset = await resetToGroup();
     setPending(false);
-    if (reset) onDone();
-    else setError("Favoriterna kunde inte återställas — försök igen.");
+    if (!reset) {
+      setError("Favoriterna kunde inte återställas — försök igen.");
+      return;
+    }
+    onDone();
+    notify({
+      message: `Favoriterna är nu behörighetsgruppens ${favoritesCount(groupCount)}.`,
+      tone: "success",
+      action:
+        previous.length > 0
+          ? {
+              label: "Ångra",
+              run: async () => {
+                if (!(await replace(previous))) throw new Error("Favoriterna kunde inte läggas tillbaka — försök igen.");
+                return "Dina favoriter är tillbaka.";
+              },
+            }
+          : undefined,
+    });
   }
 
   return (
@@ -81,7 +130,7 @@ export function FavoritesEditor({ onDone }: { onDone: () => void }) {
         <Button type="button" variant="ghost" onClick={onDone}>
           Avbryt
         </Button>
-        {!fromGroup && (
+        {!fromGroup && groupCount !== null && groupCount > 0 && (
           <Button type="button" variant="ghost" disabled={pending} onClick={() => void backToGroup()}>
             Använd gruppens favoriter
           </Button>
