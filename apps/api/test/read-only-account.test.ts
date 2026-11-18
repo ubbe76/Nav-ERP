@@ -491,6 +491,32 @@ describe("Endast läsning — the allowlist", () => {
         // /me/settings), and the send dialogs' text is only filled in.
         "POST /api/v1/me/password",
         "POST /api/v1/me/mail-text",
+        // Meddelanden: the account's own communication with other users —
+        // they DO write (conversations, messages, the participant's own
+        // read/archive marks), never business data (users' choice
+        // 2026-11-18, messages.md). The terminal's OK, läst
+        // (POST /messages/employees/:employeeId/read) is NOT here: like
+        // stamping it is refused. messages.route.test.ts.
+        "POST /api/v1/conversations",
+        "POST /api/v1/conversations/:id/messages",
+        "POST /api/v1/conversations/:id/read",
+        "POST /api/v1/conversations/:id/archive",
+        "POST /api/v1/conversations/:id/unarchive",
+        "POST /api/v1/conversations/:id/remove-from-board",
+        // Etapp 2 (0232): the same reasoning — who takes part in the
+        // account's own conversations and its own messages. The employee's
+        // reply from the terminal is NOT here. messages-participants.route.test.ts.
+        "POST /api/v1/conversations/:id/participants",
+        "DELETE /api/v1/conversations/:id/participants/:participantId",
+        "POST /api/v1/conversations/:id/leave",
+        "DELETE /api/v1/conversations/:id/messages/:messageId",
+        // Terminalkod: the code after the anställningsnummer. Like a login
+        // (which a read-only account also makes) it changes no business
+        // data — only the counter of wrong attempts — and without it a
+        // read-only account at the terminal could not read what it reads
+        // with the setting off. Välj en kod (POST …/terminal-pin) is NOT
+        // here. terminal-pin.route.test.ts.
+        "POST /api/v1/employees/:id/terminal-pin/verify",
       ].sort()
     );
   });

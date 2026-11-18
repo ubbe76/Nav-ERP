@@ -85,6 +85,13 @@ const MESSAGES: Record<string, MessageEntry> = {
     "Den anställde kan inte raderas eller anonymiseras än — markera som inaktiv, stäng öppna stämplingar och lås löneperioderna först.",
   "employee-has-history": "Den anställde har tid eller lön i systemet och kan bara anonymiseras, inte raderas.",
   "employee-anonymized": "Den anställde är anonymiserad och kan inte ändras.",
+  // Terminalkod (Kräv kod i stämpelterminalen). The server's texts for a
+  // wrong and a locked code say how many attempts are left and until when.
+  "terminal-pin-required": "Ange din kod igen — knappa in anställningsnumret och koden.",
+  "terminal-pin-wrong": serverMessage("Fel kod."),
+  "terminal-pin-locked": serverMessage("För många felaktiga försök — koden är spärrad en stund."),
+  "terminal-pin-already-set": "En kod är redan vald. Har du glömt den kan en administratör nollställa den.",
+  "terminal-pin-not-set": "Ingen kod är vald — välj en kod först.",
   "already-attested": "Medarbetaren är redan attesterad.",
   "attestation-not-found": "Ingen attestering hittades.",
   "article-not-found": "Artikeln hittades inte.",
@@ -306,6 +313,22 @@ const MESSAGES: Record<string, MessageEntry> = {
   "invoice-scan-busy": "En AI-tolkning av filen pågår redan — vänta tills den är klar och försök igen.",
   // Reklamationer och avvikelser (Kvalitet)
   "deviation-not-found": "Avvikelsen finns inte längre — ladda om sidan.",
+  // Meddelanden.
+  "conversation-not-found": "Konversationen finns inte, eller så är du inte med i den.",
+  "message-not-found": "Meddelandet finns inte i konversationen — ladda om sidan.",
+  "recipient-not-available": "En mottagare går inte längre att skriva till — öppna dialogen igen och välj om.",
+  "board-date-out-of-range": (err) => {
+    const body = err.body as { min?: unknown; max?: unknown } | undefined;
+    return typeof body?.min === "string" && typeof body.max === "string"
+      ? `Slutdatumet på terminalen ska ligga mellan ${body.min} och ${body.max}.`
+      : "Slutdatumet på terminalen ska ligga mellan i dag och ett år framåt.";
+  },
+  "conversation-not-owner": "Bara den som startade konversationen kan göra det.",
+  "participant-already-added": "Någon av dem är redan med i konversationen — öppna dialogen igen och välj om.",
+  "participant-not-found": "Deltagaren är inte längre med i konversationen — ladda om sidan.",
+  "conversation-creator-cannot-leave":
+    "Du startade konversationen och kan inte lämna den — då kan ingen ta bort deltagare. Arkivera den i stället.",
+  "message-not-own": "Du kan bara radera dina egna meddelanden.",
   // The server names the field and the document (Swedish).
   "deviation-link-mismatch": serverMessage("Kopplingarna hör inte ihop — kontrollera kund/leverantör, order, rad och artikel."),
   "deviation-link-not-allowed": serverMessage("Dokumentet kan inte kopplas till avvikelsen."),

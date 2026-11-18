@@ -3642,6 +3642,9 @@ export interface SystemSettings {
   // Dela tid i ställ och produktion: the terminal and the time report forms
   // offer Ställ / Produktion (off = exactly as before).
   timeKindSplit: boolean;
+  // Kräv kod i stämpelterminalen: the terminal asks for the employee's own
+  // four-digit code after the anställningsnummer (off = exactly as before).
+  terminalPinRequired: boolean;
   // Print active article/drawing revisions per row on external documents.
   showRevisionsOnDocuments: boolean;
   // Documents that print the article's Extra benämning under the name, in

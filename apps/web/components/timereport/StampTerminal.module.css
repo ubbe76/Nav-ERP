@@ -929,3 +929,218 @@
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
+
+/* Meddelanden: the anslagstavla above the keypad (conversations addressed to
+   this terminal's account) and an employee's own messages after the
+   anställningsnummer, acknowledged with OK, läst. */
+.board {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.boardItem {
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.boardSubject {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+.boardMessage {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.messageMeta {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.messageText {
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.4;
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Svara: the employee's reply — snabbsvar, the text field and the terminal's
+   own skärmtangentbord (QWERTY with å, ä, ö) in the keypad's look. Every key
+   shrinks with the screen (flex: 1 1 0, min-width: 0), so a phone's width
+   never scrolls sideways. */
+.replyButton {
+  align-self: flex-start;
+  min-height: 48px;
+  padding: 0 22px;
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 2px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.replyButton:hover {
+  background: var(--color-bg);
+}
+.replyButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.replyButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.quickReplies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.quickReply {
+  min-height: 48px;
+  padding: 0 16px;
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+.quickReply:hover {
+  background: var(--color-bg);
+}
+.quickReply:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.quickReply:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.replyText {
+  width: 100%;
+  font-size: 17px;
+  line-height: 1.4;
+}
+/* Skärmtangentbord | Enhetens tangentbord — remembered per terminal. */
+.keyboardChoice {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  padding: 3px;
+  background: var(--color-divider);
+  border-radius: var(--radius-control);
+}
+.keyboardChoice button {
+  min-width: 0;
+  min-height: 44px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: var(--radius-control-sm);
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.keyboardChoice button[aria-pressed="true"] {
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+}
+.keyboardChoice button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.screenKeyboard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* Keys are tapped, never selected or zoomed by a double tap. */
+  touch-action: manipulation;
+  user-select: none;
+}
+.keyboardRow {
+  display: flex;
+  gap: 5px;
+}
+.keyboardKey {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 52px;
+  padding: 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.keyboardKey:hover {
+  background: var(--color-bg);
+}
+.keyboardKey:active {
+  transform: scale(0.97);
+}
+.keyboardKey:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.keyboardKey:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.keyboardKey[data-key="shift"],
+.keyboardKey[data-key="backspace"],
+.keyboardKey[data-key="enter"] {
+  flex-grow: 1.6;
+}
+.keyboardKey[data-key="space"] {
+  flex-grow: 6;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+.keyboardKey[aria-pressed="true"] {
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  border-color: transparent;
+}
+
+@media (max-width: 640px) {
+  .keyboardRow {
+    gap: 3px;
+  }
+  .keyboardKey {
+    height: 46px;
+    font-size: 17px;
+  }
+  .keyboardKey[data-key="space"] {
+    font-size: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .keyboardKey:active {
+    transform: none;
+  }
+}

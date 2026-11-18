@@ -134,6 +134,8 @@ const ATTENDANCE_REASON_TOLERANCE_MINUTES_KEY = "attendance_reason_tolerance_min
 const TERMINAL_OVERTIME_CHOICE_KEY = "terminal_overtime_choice";
 // Dela tid i ställ och produktion (#14 etapp 3) — off when unset.
 const TIME_KIND_SPLIT_KEY = "time_kind_split";
+// Kräv kod i stämpelterminalen — off when unset.
+const TERMINAL_PIN_REQUIRED_KEY = "terminal_pin_required";
 const PAXML_CODE_WORKED_KEY = "paxml_code_worked";
 const PAXML_CODE_OVERTIME_KEY = "paxml_code_overtime";
 const PAXML_CODE_OVERTIME_OFF_SCHEDULE_KEY = "paxml_code_overtime_off_schedule";
@@ -398,6 +400,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
         get(ATTENDANCE_REASON_TOLERANCE_MINUTES_KEY) === null ? 5 : Number(get(ATTENDANCE_REASON_TOLERANCE_MINUTES_KEY)),
       terminalOvertimeChoice: get(TERMINAL_OVERTIME_CHOICE_KEY) === "true",
       timeKindSplit: get(TIME_KIND_SPLIT_KEY) === "true",
+      terminalPinRequired: get(TERMINAL_PIN_REQUIRED_KEY) === "true",
       paxmlCodeWorked: codeSetting(get(PAXML_CODE_WORKED_KEY), "TID"),
       paxmlCodeOvertime: codeSetting(get(PAXML_CODE_OVERTIME_KEY), "ÖT1"),
       paxmlCodeOvertimeOffSchedule: codeSetting(get(PAXML_CODE_OVERTIME_OFF_SCHEDULE_KEY), "ÖT2"),
@@ -811,6 +814,9 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
         }
         if (input.timeKindSplit !== undefined) {
           await set(TIME_KIND_SPLIT_KEY, String(input.timeKindSplit));
+        }
+        if (input.terminalPinRequired !== undefined) {
+          await set(TERMINAL_PIN_REQUIRED_KEY, String(input.terminalPinRequired));
         }
         if (input.paxmlCodeWorked !== undefined) await set(PAXML_CODE_WORKED_KEY, input.paxmlCodeWorked);
         if (input.paxmlCodeOvertime !== undefined) await set(PAXML_CODE_OVERTIME_KEY, input.paxmlCodeOvertime);

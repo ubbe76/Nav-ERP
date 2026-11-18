@@ -190,6 +190,10 @@ import { scheduleRoutes } from "./modules/timereport/routes/schedule.routes.js";
 import { createAtfRepository } from "./modules/timereport/repository/atf.repository.js";
 import { createAtfService } from "./modules/timereport/service/atf.service.js";
 import { atfRoutes } from "./modules/timereport/routes/atf.routes.js";
+import { createTerminalPinRepository } from "./modules/timereport/repository/terminal-pin.repository.js";
+import { createTerminalPinService } from "./modules/timereport/service/terminal-pin.service.js";
+import { terminalPinRoutes } from "./modules/timereport/routes/terminal-pin.routes.js";
+import { enforceTerminalPin } from "./modules/timereport/middleware/terminal-pin.middleware.js";
 import { createDemoDataService } from "./modules/demo/service/demo-data.service.js";
 import { demoDataRoutes } from "./modules/demo/routes/demo-data.routes.js";
 import { createOnboardingService } from "./modules/system/service/onboarding.service.js";
@@ -206,6 +210,9 @@ import { createAlertsService } from "./modules/alerts/service/alerts.service.js"
 import { createAlertDigestRepository } from "./modules/alerts/repository/alert-digest.repository.js";
 import { createAlertDigestService } from "./modules/alerts/service/alert-digest.service.js";
 import { alertsRoutes } from "./modules/alerts/routes/alerts.routes.js";
+import { createMessagesRepository } from "./modules/messages/repository/messages.repository.js";
+import { createMessagesService } from "./modules/messages/service/messages.service.js";
+import { messagesRoutes } from "./modules/messages/routes/messages.routes.js";
 import { isBookkeepingLockViolation, isClosedFiscalYearViolation, isEmployeeAnonymizedViolation, isNumberOutOfRange } from "./modules/system/service/db-errors.js";
 import { StockLocationNotFoundError } from "./modules/stock/service/stock.errors.js";
 import { batchErrorStatus, isSerialBalanceViolation, SERIAL_BALANCE_VIOLATED } from "./modules/stock/service/batch.errors.js";
@@ -951,6 +958,13 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   );
   const atfRepository = createAtfRepository(database);
   const atfService = createAtfService(atfRepository, timeReportRepository, systemService, periodLockChecker);
+  // Terminalkod (Kräv kod i stämpelterminalen): the employee's own code at
+  // the terminal and the bevistoken the guard below asks for.
+  const terminalPinService = createTerminalPinService(createTerminalPinRepository(database), {
+    jwtSecret,
+    required: async () => (await systemService.getSettings()).terminalPinRequired,
+    audit: auditRepository,
+  });
   // Löneunderlag: base-data registers (frånvarokoder/OB-regler), absence
   // bookings, the period summary, attestation and period locking. Reuses
   // timeReportRepository as both the employee reader (existence checks +
@@ -1129,6 +1143,9 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
         protectedRoutes.addHook("preHandler", requireAuth(authService));
         protectedRoutes.addHook("preHandler", enforceAccess());
         protectedRoutes.addHook("preHandler", rejectMalformedIds());
+        // Terminalkod: a terminal account's calls for an employee need the
+        // bevistoken while the setting is on (routes with terminalPinEmployee).
+        protectedRoutes.addHook("preHandler", enforceTerminalPin(terminalPinService));
         await registerModule(protectedRoutes, articleRoutes, { service: articleService }, { read: office, write: ["artiklar"] });
         await registerModule(protectedRoutes, templateConfiguratorRoutes, { service: configuratorService }, { read: office, write: ["artiklar"] });
         await registerModule(protectedRoutes, importRoutes, { service: importService }, adminOnly);
@@ -1184,6 +1201,14 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
         // Aviseringar: one read, every office user; the kinds are filtered per
         // user in the service (admin-only Utskick som misslyckades included).
         await registerModule(protectedRoutes, alertsRoutes, { service: alertsService }, { read: office, write: ["admin"] });
+        // Meddelanden: every office user reads and writes their own
+        // conversations; the terminal's routes carry their own rules.
+        await registerModule(
+          protectedRoutes,
+          messagesRoutes,
+          { service: createMessagesService(createMessagesRepository(database)) },
+          { read: office, write: office }
+        );
         // Kvalitet → Avvikelser: every office user reads (the order cards
         // list their cases), Kvalitet writes.
         await registerModule(protectedRoutes, qualityRoutes, { service: qualityService }, { read: office, write: ["kvalitet"] });
@@ -1196,6 +1221,8 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
         await registerModule(protectedRoutes, timeReportRoutes, { service: timeReportService }, { read: office, write: ["tillverkning"] });
         await registerModule(protectedRoutes, scheduleRoutes, { service: scheduleService }, { read: office, write: ["tillverkning"] });
         await registerModule(protectedRoutes, atfRoutes, { service: atfService }, { read: office, write: ["tillverkning"] });
+        // Every route carries its own rule (the terminal's, or Personal & lön).
+        await registerModule(protectedRoutes, terminalPinRoutes, { service: terminalPinService }, { read: ["personal"], write: ["personal"] });
         // Personal & lön: the whole payroll module (lönekoder, frånvaro,
         // övertidsval, löneperiod, attest, export) is the personal menu, reads
         // included; GET /attendance-deviation-reasons keeps its terminal rule.

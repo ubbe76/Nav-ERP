@@ -163,7 +163,7 @@ export async function scheduleRoutes(app: FastifyInstance, opts: { service: Sche
 
   app.get<{ Params: { id: string }; Querystring: { from?: string; to?: string } }>(
     "/employees/:id/schedule-calendar",
-    { config: { access: TERMINAL_READ } },
+    { config: { access: TERMINAL_READ, terminalPinEmployee: "params.id" } },
     async (req, reply) => {
       // Real calendar dates (ZodError ⇒ 400 validation-failed): the regex
       // this replaced let 2026-02-30 and 2026-13-01 through to a 500.

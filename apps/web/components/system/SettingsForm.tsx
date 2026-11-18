@@ -33,6 +33,7 @@ export function SettingsForm({
 }) {
   const [allowMultipleStamps, setAllowMultipleStamps] = useState(settings.allowMultipleStamps);
   const [timeKindSplit, setTimeKindSplit] = useState(settings.timeKindSplit ?? false);
+  const [terminalPinRequired, setTerminalPinRequired] = useState(settings.terminalPinRequired ?? false);
   const [showRevisionsOnDocuments, setShowRevisionsOnDocuments] = useState(settings.showRevisionsOnDocuments);
   const [showOrderRevisionOnDocuments, setShowOrderRevisionOnDocuments] = useState(
     settings.showOrderRevisionOnDocuments
@@ -131,6 +132,11 @@ export function SettingsForm({
   async function toggleTimeKindSplit() {
     const updated = await save({ timeKindSplit: !timeKindSplit });
     if (updated) setTimeKindSplit(updated.timeKindSplit);
+  }
+
+  async function toggleTerminalPinRequired() {
+    const updated = await save({ terminalPinRequired: !terminalPinRequired });
+    if (updated) setTerminalPinRequired(updated.terminalPinRequired);
   }
 
   async function toggleShowRevisions() {
@@ -470,6 +476,29 @@ export function SettingsForm({
           data-on={timeKindSplit}
           disabled={pending}
           onClick={toggleTimeKindSplit}
+        >
+          <span className={styles.knob} aria-hidden="true" />
+        </button>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Kräv kod i stämpelterminalen</div>
+          <div className={styles.description}>
+            På: efter anställningsnumret frågar stämpelterminalen efter den anställdes egen kod på 4 siffror, innan
+            stämpling, rapportering och meddelanden öppnas. Första gången väljer den anställde sin kod själv i
+            terminalen. En glömd kod nollställs på personalkortet (Personal &amp; lön → Anställda → Nollställ
+            terminalkoden). Av: terminalen frågar bara efter anställningsnumret.
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={terminalPinRequired}
+          aria-label="Kräv kod i stämpelterminalen"
+          className={styles.switch}
+          data-on={terminalPinRequired}
+          disabled={pending}
+          onClick={toggleTerminalPinRequired}
         >
           <span className={styles.knob} aria-hidden="true" />
         </button>

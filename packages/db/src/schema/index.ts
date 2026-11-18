@@ -27,3 +27,4 @@ export * from "./dimensions";
 export * from "./budget";
 export * from "./invoice-scan";
 export * from "./quality";
+export * from "./messages";

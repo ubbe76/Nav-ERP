@@ -20,6 +20,7 @@ export interface PalettePage {
 const TOP_PAGES: PalettePage[] = [
   { href: "/", title: "Översikt", module: "" },
   { href: "/aviseringar", title: "Aviseringar", module: "" },
+  { href: "/meddelanden", title: "Meddelanden", module: "" },
   { href: "/hjalp", title: "Hjälp", module: "" },
 ];
 

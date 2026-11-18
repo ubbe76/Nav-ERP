@@ -219,7 +219,7 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
     }
   );
 
-  app.post("/stamp-sessions", { config: { access: TERMINAL_WRITE } }, async (req, reply) => {
+  app.post("/stamp-sessions", { config: { access: TERMINAL_WRITE, terminalPinEmployee: "body.employeeId" } }, async (req, reply) => {
     const input = stampInSchema.parse(req.body);
     try {
       const session = await service.stampIn(input, req.user!.id);
@@ -243,7 +243,7 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
     }
   });
 
-  app.post<{ Params: { id: string } }>("/stamp-sessions/:id/stop", { config: { access: TERMINAL_WRITE } }, async (req, reply) => {
+  app.post<{ Params: { id: string } }>("/stamp-sessions/:id/stop", { config: { access: TERMINAL_WRITE, terminalPinEmployee: "stampSession" } }, async (req, reply) => {
     const input = stampOutSchema.parse(req.body ?? {});
     // Regel 6: only a supervisor on Pågående arbete may say when the stint
     // ended — the terminal (shop-floor profile) always stops it now.
@@ -289,7 +289,7 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
     return sessions.map(({ startReasonId: _a, startNote: _b, stopReasonId: _c, stopNote: _d, ...rest }) => rest);
   });
 
-  app.post("/attendance-sessions", { config: { access: TERMINAL_WRITE } }, async (req, reply) => {
+  app.post("/attendance-sessions", { config: { access: TERMINAL_WRITE, terminalPinEmployee: "body.employeeId" } }, async (req, reply) => {
     const input = attendanceInSchema.parse(req.body);
     try {
       const session = await service.attendanceIn(input, req.user!.id);
@@ -314,7 +314,7 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
 
   // Gå hem. The body is optional (older terminals send none): an early
   // departure's reason, the day's overtime choice, Ta ut ATF's withdrawal.
-  app.post<{ Params: { id: string } }>("/attendance-sessions/:id/stop", { config: { access: TERMINAL_WRITE } }, async (req, reply) => {
+  app.post<{ Params: { id: string } }>("/attendance-sessions/:id/stop", { config: { access: TERMINAL_WRITE, terminalPinEmployee: "attendanceSession" } }, async (req, reply) => {
     const input = attendanceOutSchema.parse(req.body ?? {});
     try {
       return await service.attendanceOut(req.params.id, req.user!.id, input);

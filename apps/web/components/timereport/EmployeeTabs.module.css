@@ -144,3 +144,8 @@
   margin: 12px 0 16px;
   padding-left: 20px;
 }
+
+.pinStatus {
+  margin: 0 0 8px;
+  color: var(--color-text-primary);
+}
