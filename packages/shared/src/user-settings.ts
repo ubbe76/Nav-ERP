@@ -129,6 +129,10 @@ export const userSettingsSchema = z.object({
   // (permission_groups.default_favorites) — favoritesFromGroup says so.
   favorites: favoritesSchema,
   favoritesFromGroup: z.boolean(),
+  // How many förvalda favoriter the behörighetsgrupp has (0 = none, or no
+  // group) — Ändra offers "Använd gruppens favoriter" only when there are
+  // some, and says how many. Read-only, like favoritesFromGroup.
+  groupFavoritesCount: z.number().int().min(0).max(MAX_FAVORITES),
   // Where the favourites show: false hides the sidebar's Favoriter group (the
   // Översikten card "favorites" shows them instead). Default true.
   favoritesInSidebar: z.boolean(),
@@ -149,7 +153,7 @@ export type UserSettings = z.infer<typeof userSettingsSchema>;
 // listColumns is merged per list instead of replaced — two tabs adjusting
 // two lists must not undo each other — and null resets that list.
 export const updateUserSettingsSchema = userSettingsSchema
-  .omit({ favoritesFromGroup: true })
+  .omit({ favoritesFromGroup: true, groupFavoritesCount: true })
   .partial()
   .extend({
     // null = drop the user's own list: the group's förvalda favoriter again.
