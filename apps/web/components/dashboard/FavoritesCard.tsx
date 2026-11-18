@@ -2,18 +2,20 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Star } from "lucide-react";
 import { Modal } from "../ui/Modal";
 import { FavoritesEditor } from "../FavoritesEditor";
 import { useFavorites } from "../FavoritesProvider";
 import { useCanOpen } from "../PermissionsProvider";
-import { hubIconFor } from "../../lib/hubIcons";
+import { favoriteIcon } from "../ui/Nav";
+import { groupFavorites } from "../../lib/favoriteGroups";
 import cardStyles from "./DashboardCard.module.css";
 import styles from "./FavoritesCard.module.css";
 
 // Översikten's Favoriter card: the same list as the sidebar's group (and
-// the only place it shows when the user turned the group off). A favourite
-// the user may no longer open is hidden, not removed — as in the sidebar.
+// the only place it shows when the user turned the group off), as compact
+// rows of links grouped by module (lib/favoriteGroups.ts).
+// A favourite the user may no longer open is hidden, not removed — as in the
+// sidebar.
 export function FavoritesCard() {
   const { favorites } = useFavorites();
   const canOpen = useCanOpen();
@@ -38,18 +40,22 @@ export function FavoritesCard() {
           toppremsan.
         </p>
       ) : (
-        <div className={styles.grid}>
-          {visible.map((favorite) => {
-            const Icon = hubIconFor(favorite.href) ?? Star;
-            return (
-              <Link key={favorite.href} href={favorite.href} className={styles.tile} title={favorite.title}>
-                <span className={styles.icon}>
-                  <Icon size={18} strokeWidth={1.7} aria-hidden="true" />
-                </span>
-                <span className={styles.label}>{favorite.title}</span>
-              </Link>
-            );
-          })}
+        <div className={styles.groups}>
+          {groupFavorites(visible).map((group) => (
+            <section key={group.title} className={styles.group}>
+              <h3 className={styles.groupTitle}>{group.title}</h3>
+              <ul className={styles.list}>
+                {group.favorites.map((favorite) => (
+                  <li key={favorite.href}>
+                    <Link href={favorite.href} className={styles.link} title={favorite.title}>
+                      <span className={styles.icon}>{favoriteIcon(favorite.href)}</span>
+                      <span className={styles.label}>{favorite.title}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
         </div>
       )}
       <Modal open={editing} onClose={() => setEditing(false)} title="Ändra favoriter">
