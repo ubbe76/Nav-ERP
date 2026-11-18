@@ -1487,7 +1487,8 @@ describe("sales service — order header fields", () => {
 
     const text = pdfText((await salesService.getSalesOrderPdf(order.id, "quote")).content);
     expect(text).not.toContain("Rabatt");
-    expect(text).not.toContain("%");
+    // No discount cell — the only "%" left is the totals' "Moms (25 %)".
+    expect(text.replace(/Moms \(\d+ %\)/g, "")).not.toContain("%");
     // The columns that must survive the narrower table.
     expect(text).toContain("Benämning");
     expect(text).toContain("Summa");

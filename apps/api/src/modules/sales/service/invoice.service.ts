@@ -27,6 +27,7 @@ import {
   round2,
   round4,
   salesRowIsGoods,
+  salesRowAmounts,
   salesVatCode,
   toUnitPrice,
   toUnitQuantity,
@@ -1109,8 +1110,9 @@ export function createInvoiceService(
     // (the web prefills it from listInvoiceableOrders). A free row defaults
     // to 0.
     const discountPercent = input.discountPercent ?? 0;
-    const lineAmount = round2(input.quantity * input.unitPrice * (1 - discountPercent / 100));
-    const vatAmount = round2(lineAmount * (vatRate / 100));
+    // salesRowAmounts (shared) is the one implementation — the quote's and
+    // the order's momssummering reads it too.
+    const { lineAmount, vatAmount } = salesRowAmounts({ quantity: input.quantity, unitPrice: input.unitPrice, discountPercent, vatRate });
 
     // Over-invoicing / over-credit guard — only for rows linked to a sales
     // order row; free rows are never guarded (nothing to reconcile against).

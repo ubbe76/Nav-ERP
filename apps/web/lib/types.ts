@@ -2034,6 +2034,17 @@ export interface SalesOrder extends DocumentTermsFields {
   generalMarkupPercent?: string | null;
   materialMarkupPercent?: string | null;
   customerMarkups?: { generalMarkupPercent: string | null; materialMarkupPercent: string | null };
+  // Moms på offert och kundorder (GET :id only): the rows' VAT as the invoice
+  // will carry it — one line per rate + momskod (highest rate first), in the
+  // order's currency. The same figures the quote/order confirmation prints.
+  vatSummary?: SalesOrderVatSummary | null;
+}
+
+export interface SalesOrderVatSummary {
+  lines: { code: string; name: string; rate: number; net: number; vatAmount: number }[];
+  totalExclVat: number;
+  vatAmount: number;
+  totalInclVat: number;
 }
 
 // POST /sales-orders/:id/markups/preview, the 409 markup-repricing-not-confirmed

@@ -117,6 +117,7 @@ type SalesAction = "confirm" | "cancel" | "start-production" | "reopen" | "creat
 export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, registers, freightEnabled }: SalesOrderDetailProps) {
   const router = useRouter();
   const canSell = useCan()(["forsaljning"]);
+  const canSeePrices = useCan()(["office"]);
   const [freightOpen, setFreightOpen] = useState(false);
   const dims = useDimensions();
   const [freight, setFreight] = useState<OrderFreight | null>(null);
@@ -226,6 +227,10 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     (sum, r) => sum + Number(r.quantityOrdered) * Number(r.unitPrice) * (1 - Number(r.discountPercent) / 100),
     0
   );
+  // Moms på offert och kundorder: the server's summary (rounded per row like
+  // the invoice) — also the table footer's Summa, so the two never differ by
+  // an öre. Office data, like every price on the card.
+  const vatSummary = canSeePrices ? (order.vatSummary ?? null) : null;
   // Täckningsbidrag for the order. Rows whose article has no saved
   // pre-calculation are counted separately rather than treated as costing
   // nothing — see lib/margin.ts.
@@ -835,7 +840,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
               : []),
           ]}
           rows={rows}
-          footer={{ unitPrice: "Summa", lineAmount: `${formatMoney(total)} ${order.currency}` }}
+          footer={{ unitPrice: "Summa", lineAmount: `${formatMoney(vatSummary?.totalExclVat ?? total)} ${order.currency}` }}
           renderCell={(row, key) => {
             switch (key) {
               case "articleNumber":
@@ -1044,6 +1049,37 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
       {/* Under the table, next to the rows' Spara and ⋯ → Ta bort — above it
           the error sat 40 rows away (webbgranskningen 2026-11-11). */}
       <FormError>{rowError}</FormError>
+
+      {/* Moms på offert och kundorder: the summary the quote/order
+          confirmation prints and the invoice will carry — per rate + momskod,
+          in the order's currency. A code without Swedish VAT (EU, export,
+          omvänd betalningsskyldighet, momsfritt) says why there is none. */}
+      {rows.length > 0 && vatSummary && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: "flex", gap: "4px 24px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <span>
+              Summa exkl. moms: {formatMoney(vatSummary.totalExclVat)} {order.currency}
+            </span>
+            {vatSummary.lines.map((line) => (
+              <span key={`${line.rate}|${line.code}`}>
+                Moms {line.rate.toLocaleString("sv-SE")} %: {formatMoney(line.vatAmount)} {order.currency}
+              </span>
+            ))}
+            <span>
+              <strong>
+                Summa inkl. moms: {formatMoney(vatSummary.totalInclVat)} {order.currency}
+              </strong>
+            </span>
+          </div>
+          {vatSummary.lines
+            .filter((line) => line.rate === 0)
+            .map((line) => (
+              <FormHint key={line.code} style={{ textAlign: "right" }}>
+                Momskod {line.code} · {line.name} — ingen svensk moms debiteras.
+              </FormHint>
+            ))}
+        </div>
+      )}
 
       {rows.length > 0 && foreign && (
         <FormHint>

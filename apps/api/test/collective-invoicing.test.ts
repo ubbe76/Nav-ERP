@@ -358,7 +358,7 @@ describe("privatperson — documents print prices including VAT", () => {
     expect(text).not.toContain("exkl. moms");
   });
 
-  it("quote PDF for an ordinary customer is unchanged (net prices, plain 'Summa')", async () => {
+  it("quote PDF for an ordinary customer keeps net prices — its totals are the VAT summary, not the gross block", async () => {
     const company = await makeCustomer({ name: "Bolag AB" });
     const article = await makeArticle(25);
     const user = await makeUser();
@@ -367,9 +367,12 @@ describe("privatperson — documents print prices including VAT", () => {
       user.id
     );
     const text = pdfText((await salesService.getSalesOrderPdf(order.id, "quote")).content);
-    expect(text).not.toContain("inkl. moms");
+    // Moms på offert (2026-11-18): Summa exkl. moms / Moms per sats / Summa
+    // inkl. moms — the cells stay net, and there is no "Varav moms".
+    expect(text).not.toContain("Priser inklusive moms");
     expect(text).not.toContain("Varav moms");
-    expect(text).toContain("200,00");
+    expect(text).toContain("Summa exkl. moms SEK200,00");
+    expect(text).toContain("Summa inkl. moms SEK250,00");
   });
 
   it("invoice PDF follows the snapshot: issued as private person → gross prices even after the flag is cleared", async () => {

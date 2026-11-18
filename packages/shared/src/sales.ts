@@ -6,7 +6,7 @@ import { configuratorSelectionSchema, orderRowConfigurationInputSchema } from ".
 
 import { blankSafe, numericMax, numericStep } from "./coerce.js";
 import { batchChoiceSchema, serialChoiceSchema, serialNumbersSchema, SERIAL_NUMBERS_MAX } from "./stock.js";
-import { round4 } from "./money.js";
+import { round2, round4 } from "./money.js";
 import { businessDateSchema } from "./business-date.js";
 import { partnerDeliveryFields } from "./delivery.js";
 import { palletCardCodeSchema } from "./system.js";
@@ -999,3 +999,19 @@ export const deliveryPalletCardQuerySchema = z.object({
   row: palletCardSelectionSchema(deliveryPalletCardRowParam),
 });
 export type DeliveryPalletCardQuery = z.infer<typeof deliveryPalletCardQuerySchema>;
+
+// The ONE rule for a sales row's net amount and VAT — the invoice row
+// (invoice.service resolveRow, stored as invoice_rows.line_amount/vat_amount)
+// and the quote's/order's momssummering (order-vat.ts: the PDF and the card)
+// both call it, so an order and the invoice issued for it can never differ by
+// a rounding öre. The discount is baked into the net with a single rounding,
+// and the VAT is rounded per row on the rounded net. Quantity and price in
+// the article's base unit, as stored.
+export function salesRowAmounts(input: { quantity: number; unitPrice: number; discountPercent: number; vatRate: number }): {
+  lineAmount: number;
+  vatAmount: number;
+} {
+  const lineAmount = round2(input.quantity * input.unitPrice * (1 - input.discountPercent / 100));
+  const vatAmount = round2(lineAmount * (input.vatRate / 100));
+  return { lineAmount, vatAmount };
+}
