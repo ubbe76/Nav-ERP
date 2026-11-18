@@ -113,6 +113,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   answered: "Besvarad",
   payment_reference_changed: "Betalningsreferens ändrad",
   supplier_changed: "Leverantör bytt",
+  customer_changed: "Kund bytt",
   exported: "Exporterad",
   items_added: "Poster tillagda",
   item_updated: "Post ändrad",

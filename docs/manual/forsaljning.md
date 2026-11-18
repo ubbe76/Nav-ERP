@@ -375,6 +375,31 @@ Har kunden en [Fakturakund](#fakturakund) står den i huvudet på offerten och k
 
 Ändringen syns i orderns historik som **Fakturakund ändrad**. En kund kan inte väljas om den är inaktiv eller själv har en fakturakund.
 
+### Byt kund
+
+En offert eller kundorder som lagts på fel kund — eller som ska tas över av ett annat bolag — behöver inte göras om. Knappen **Byt kund…** finns på offert- och kundorderkortet i statusarna **Offert**, **Bekräftad** och **Under tillverkning** (kräver behörigheten Försäljning).
+
+Välj **Ny kund** i dialogen **Byt kund**. Innan något sparas visar dialogen vad bytet gör:
+
+- **Valuta och kurs.** Har den nya kunden en annan valuta byter ordern till den, med dagens kurs. Saknas kurs för dagen visas fältet **Växelkurs (SEK per …)** — skriv kursen och välj **Förhandsvisa**. Samma valuta behåller orderns egen kurs.
+- **Från den nya kunden** hämtas kundens förvalda leveransadress, leveransvillkor, betalningsvillkor, speditör, referens (kundens huvudkontakt, annars kontaktpersonen på kortet) och [Fakturakund](#fakturakund). Har den nya kunden en fakturakund är det dess betalningsvillkor som gäller.
+- **Tas bort — gällde den gamla kunden:** **Kundens ordernummer** och **Kundens förfrågan**, fraktvalet från **Lägg till frakt** (adressen byts) och en leveransadress som skrivits in bara för den här ordern.
+- **Raderna** med gammalt och nytt pris. Rader som priskedjan prissatt får den nya kundens pris — kundpris, prislista, kundrabatt eller artikelns pris (*kundens pris*). Övriga rader behåller sitt pris, vid valutabyte omräknat så att värdet i kronor är detsamma (*omräknat*, annars *oförändrat*), och märks **Se över priset**: handskrivna priser, konfigurerade rader, fraktraden och artiklar som den nya kunden saknar pris för. En ställkostnadsrad följer sin artikelrad: den får den nya kundens ställpris när kundens prisregel har ett, annars behåller den sitt belopp och märks.
+
+**Byt kund** sparar exakt det som visades. Har något hunnit ändras — ett radpris, en ny rad, kursen eller den nya kundens priser — sparas ingenting, och dialogen visar den nya förhandsvisningen med texten *Förhandsvisningen gäller inte längre — granska ändringarna igen.*
+
+Ordern behåller sitt nummer och sin status, revisionen räknas upp ett steg, och påslag, kostnadsställe, projekt, leveransdatum och notering står kvar. Efter bytet påminner kortet om att skicka en ny orderbekräftelse — eller en ny offert — till den nya kunden, och räknar upp raderna vars pris bör ses över. Bytet syns i historiken som **Kund bytt** med gamla och nya priser.
+
+Bytet går inte att göra när något redan har hänt hos den gamla kunden. Dialogen säger varför:
+
+- *Kunden kan bara bytas på en offert eller på en kundorder som är Bekräftad eller Under tillverkning.* — en offert som redan gett en order (status **Order**), en förlorad eller makulerad offert och en levererad eller fakturerad order kan inte byta kund.
+- *Ordern har en leverans — ångra utleveransen innan kunden byts.* En ångrad utleverans hindrar inte.
+- *Ordern finns på faktura … — kunden kan inte bytas.* Även ett fakturautkast räknas; en makulerad faktura gör det inte.
+- *Ordern har försändelse … — makulera eller avboka den innan kunden byts.*
+- *Ordern hör till reklamation … hos den nuvarande kunden — kunden kan inte bytas.* En makulerad reklamation hindrar inte.
+
+Kopplade tillverkningsordrar påverkas inte av bytet. Ingen av kunderna får något besked automatiskt.
+
 ### Valuta och kurs på offert och order
 
 **Ny offert** och **Ny kundorder** har fälten **Valuta** och — för en annan valuta än SEK — **Kurs**, direkt under **Kund**. **Valuta** är förifylld med kundens valuta och kan ändras för just den här ordern (en order i SEK åt en kund i EUR, eller tvärtom). **Kurs** är kronor per 1 enhet av valutan och förifylls med dagens kurs — Riksbankens senaste dagskurs, eller en egen kurs från [Ekonomi → Valutakurser](/hjalp/ekonomi#valutakurser) — och under fältet står varifrån den kommer: *Riksbanken 2026-10-23. Källa: Sveriges Riksbank.*, *egen kurs i Valutakurser 2026-10-23* eller *manuell*. Skriver du i fältet gäller din kurs; **Använd dagens kurs** (visas då) tar tillbaka den uppslagna. Hittas ingen kurs visas *Ingen kurs för EUR 2026-10-24 — ange kursen själv*, och ordern går inte att skapa förrän kursen är ifylld. Byter du valuta eller kurs i formuläret räknas priserna om för alla rader du inte skrivit in själv; priser du skrivit för hand ändras inte (formuläret påminner om det). Kolumnen **Á-pris** heter då t.ex. **Á-pris (EUR/st)**.

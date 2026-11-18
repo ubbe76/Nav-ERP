@@ -1,0 +1,77 @@
+/* Byt kund: the preview's rows as a stacked list — the dialog body is
+   narrow (and a phone is 390 px), so no table with fixed tracks. */
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.summary dt {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.summary dd {
+  margin: 0 0 4px;
+  overflow-wrap: anywhere;
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--color-border);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border);
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+
+.article {
+  flex: 1 1 180px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.articleName {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.price {
+  flex: 0 1 auto;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.origin {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.review {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: var(--radius-control-sm);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--status-delayed-text);
+  background: var(--status-delayed-bg);
+}

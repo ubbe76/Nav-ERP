@@ -17,6 +17,7 @@ import { ArticleOverviewButton } from "../articles/ArticleOverviewButton";
 import { ArticleLink } from "../articles/ArticleLink";
 import { GatedLink } from "../ui/GatedLink";
 import { SearchPicker } from "../ui/SearchPicker";
+import { ChangeCustomerDialog, type CustomerChangePreview } from "./ChangeCustomerDialog";
 import type { CustomerRef } from "../../lib/types";
 import { StatusPill } from "../ui/StatusPill";
 import { SectionHeading } from "../ui/SectionHeading";
@@ -147,7 +148,10 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   // enforced by the API and mirrored in the UI below.
   const rowsEditable = order.status === "quote" || order.status === "ordered" || order.status === "confirmed" || order.status === "in_production";
 
-  const [modal, setModal] = useState<"header" | "addRow" | "deliver" | "createMo" | "lose" | null>(null);
+  const [modal, setModal] = useState<"header" | "addRow" | "deliver" | "createMo" | "lose" | "changeCustomer" | null>(null);
+  // Byt kund: what the last change did — the reminder to send the new
+  // customer its document and the rows to look over, until it is closed.
+  const [customerChange, setCustomerChange] = useState<CustomerChangePreview | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
   const [rowPending, setRowPending] = useState(false);
   // E3: the row "Skapa tillverkningsorder" was invoked for — read by the
@@ -692,6 +696,18 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           </Button>
         )}
 
+        {(order.status === "quote" || order.status === "confirmed" || order.status === "in_production") && canSell && (
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={actionPending !== null || rowEditOpen}
+            title={rowEditTitle}
+            onClick={() => setModal("changeCustomer")}
+          >
+            Byt kund…
+          </Button>
+        )}
+
         {order.status === "lost" && canSell && (
           <Button type="button" variant="primary" disabled={actionPending !== null} onClick={reopenQuote}>
             {actionPending === "reopen" ? "Arbetar…" : "Öppna igen"}
@@ -704,6 +720,23 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           </Button>
         )}
       </DocumentActionBar>
+
+      {customerChange && (
+        <FormNotice style={{ marginBottom: 12 }}>
+          Kunden är bytt till {customerChange.to.customerName}.{" "}
+          {customerChange.documentKind === "quote"
+            ? "Skicka en ny offert till kunden."
+            : "Skicka en ny orderbekräftelse till kunden."}
+          {customerChange.rows.some((r) => r.review) &&
+            ` Se över priset på ${customerChange.rows
+              .filter((r) => r.review)
+              .map((r) => r.articleNumber)
+              .join(", ")}.`}{" "}
+          <Button type="button" size="small" variant="ghost" onClick={() => setCustomerChange(null)}>
+            Stäng
+          </Button>
+        </FormNotice>
+      )}
 
       <DocumentHeaderCard
         pill={pill}
@@ -1192,6 +1225,19 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           onReload={() => router.refresh()}
           onCancel={() => setModal(null)}
         />
+      </Modal>
+
+      <Modal open={modal === "changeCustomer"} onClose={() => setModal(null)} title="Byt kund">
+        {modal === "changeCustomer" && (
+          <ChangeCustomerDialog
+            order={order}
+            onCancel={() => setModal(null)}
+            onDone={(change) => {
+              setCustomerChange(change);
+              refresh();
+            }}
+          />
+        )}
       </Modal>
 
       <Modal open={modal === "lose"} onClose={() => setModal(null)} title="Markera offerten som förlorad">

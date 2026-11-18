@@ -82,6 +82,20 @@ import {
 } from "@navet/shared";
 import type { CustomerDeliveryDateQuery, CustomerDeliveryDateSuggestion } from "@navet/shared";
 import {
+  roundToDecimals,
+  type ChangeSalesOrderCustomerInput,
+  type ChangeSalesOrderCustomerPreviewInput,
+  type CustomerChangePreview,
+} from "@navet/shared";
+import {
+  customerChangeBasis,
+  customerChangeChainRows,
+  customerChangeCurrencies,
+  matchesExpectedCustomerChange,
+  planCustomerChange,
+  type CustomerChangeChainAnswer,
+} from "./customer-change.js";
+import {
   addDays,
   deliveryDateWarning,
   deliveryHolidayWindow,
@@ -141,6 +155,13 @@ import {
   MarkupRepricingNotConfirmedError,
   SalesOrderMarkupsChangedError,
   SalesOrderRowsLockedError,
+  CustomerInactiveError,
+  SalesOrderCustomerChangeStaleError,
+  SalesOrderHasDeliveriesError,
+  SalesOrderHasDeviationsError,
+  SalesOrderHasInvoiceRowsError,
+  SalesOrderHasShipmentsError,
+  SalesOrderSameCustomerError,
 } from "./sales.errors.js";
 import { assertInvoiceCustomerSelectable } from "../repository/invoice-customer.js";
 import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
@@ -862,6 +883,58 @@ export function createSalesService(
       repricing.rows.push(repriced);
     }
     return { repricing, reprice };
+  }
+
+  // Byt kund: the facts read unlocked, the price chain's answers for the
+  // rows it priced and the plan — shared by the preview and the change
+  // (which re-reads the facts under its locks and compares them with these,
+  // customerChangeBasis). The rate: the same currency keeps the order's own;
+  // another currency gets today's (documentRate — SEK is 1, a typed rate
+  // wins, none ⇒ 409), rounded to the column's six decimals so the plan and
+  // the stored rate agree. The chain is asked with the NEW customer, in the
+  // new currency at that rate, with the order's own markups (they stay) —
+  // the same call as the markup repricing (planMarkupRepricing).
+  async function planCustomerChangeFor(orderId: string, input: { customerId: string; exchangeRate?: number }) {
+    const loaded = await repo.customerChangeFacts(orderId, input.customerId);
+    if (!loaded.ok) {
+      if (loaded.reason === "order_not_found") throw new SalesOrderNotFoundError(orderId);
+      throw new CustomerNotFoundError(input.customerId);
+    }
+    const { facts } = loaded;
+    if (facts.order.customerId === input.customerId) throw new SalesOrderSameCustomerError();
+    if (!loaded.customerActive) throw new CustomerInactiveError(facts.customer.customerNumber);
+    const currencies = customerChangeCurrencies(facts);
+    const newRate = currencies.changes
+      ? roundToDecimals(await documentRate(currencies.to, input.exchangeRate), 6)
+      : facts.order.exchangeRate;
+    const freightArticleId = await freight.freightArticleId();
+    const pricing: RowPricing = {
+      customerId: facts.customer.id,
+      currency: currencies.to,
+      exchangeRate: newRate,
+      orderMarkups: ownOrderMarkups(salesOrderMarkups(facts.order)),
+    };
+    const chain = new Map<string, CustomerChangeChainAnswer>();
+    for (const row of customerChangeChainRows(facts, freightArticleId)) {
+      const resolution = await resolvePrice({ customerId: facts.customer.id, articleId: row.articleId, quantity: row.quantity, ...chainQuery(pricing) });
+      chain.set(row.rowId, resolution?.price ?? null);
+    }
+    return { facts, plan: planCustomerChange(facts, { newRate, freightArticleId, chain }) };
+  }
+  function customerChangeBlockedError(blockers: CustomerChangePreview["blockers"]): Error {
+    const first = blockers[0]!;
+    switch (first.code) {
+      case "invalid-status-transition":
+        return new InvalidStatusTransitionError(first.message);
+      case "sales-order-has-deliveries":
+        return new SalesOrderHasDeliveriesError(first.message, blockers);
+      case "sales-order-has-invoice-rows":
+        return new SalesOrderHasInvoiceRowsError(first.message, blockers);
+      case "sales-order-has-shipments":
+        return new SalesOrderHasShipmentsError(first.message, blockers);
+      case "sales-order-has-deviations":
+        return new SalesOrderHasDeviationsError(first.message, blockers);
+    }
   }
 
   // Valuta: a document's rate — SEK is always 1 (another explicit rate is a
@@ -1736,6 +1809,70 @@ export function createSalesService(
       }
       // `repricing` only when a markup was sent: what the save did to the rows.
       return updated && repricing ? { ...updated, repricing } : updated;
+    },
+
+    // Byt kund — what the change would do, nothing written. Blockers
+    // (status, delivery, invoice, shipment, deviation) are part of the
+    // answer so the dialog can show them as text.
+    async previewCustomerChange(orderId: string, input: ChangeSalesOrderCustomerPreviewInput): Promise<CustomerChangePreview> {
+      return (await planCustomerChangeFor(orderId, input)).plan;
+    },
+
+    // Byt kund: quote/confirmed/in_production with nothing delivered,
+    // invoiced, shipped or under complaint. The rate is looked up and the
+    // chain asked before the transaction; the plan must be what the user
+    // confirmed (`expected`), and the facts it was made from must still
+    // hold under the row and order locks — otherwise 409 with the fresh
+    // preview and nothing written.
+    async changeCustomer(orderId: string, input: ChangeSalesOrderCustomerInput, userId?: string | null) {
+      const { facts, plan } = await planCustomerChangeFor(orderId, input);
+      if (plan.blockers.length > 0) throw customerChangeBlockedError(plan.blockers);
+      if (!matchesExpectedCustomerChange(plan, input.expected)) throw new SalesOrderCustomerChangeStaleError(plan);
+      const result = await repo.changeCustomer(orderId, input.customerId, plan, customerChangeBasis(facts));
+      if (!result.ok) {
+        switch (result.reason) {
+          case "order_not_found":
+            throw new SalesOrderNotFoundError(orderId);
+          case "customer_not_found":
+            throw new CustomerNotFoundError(input.customerId);
+          case "same_customer":
+            throw new SalesOrderSameCustomerError();
+          case "blocked":
+            throw customerChangeBlockedError(result.blockers);
+          case "stale":
+            throw new SalesOrderCustomerChangeStaleError((await planCustomerChangeFor(orderId, input)).plan);
+        }
+      }
+      await audit.log({
+        entityType: "sales_order",
+        entityId: plan.orderNumber,
+        action: "customer_changed",
+        detail: {
+          before: {
+            customer: `${plan.from.customerNumber} ${plan.from.customerName}`,
+            currency: plan.from.currency,
+            exchangeRate: plan.from.exchangeRate,
+            ...(plan.clears.customerOrderNumber !== null ? { customerOrderNumber: plan.clears.customerOrderNumber } : {}),
+            ...(plan.clears.customerInquiryNumber !== null ? { customerInquiryNumber: plan.clears.customerInquiryNumber } : {}),
+          },
+          after: {
+            customer: `${plan.to.customerNumber} ${plan.to.customerName}`,
+            currency: plan.to.currency,
+            exchangeRate: plan.to.exchangeRate,
+            ...(plan.header.invoiceCustomer !== null ? { invoiceCustomer: plan.header.invoiceCustomer } : {}),
+          },
+          rows: plan.rows
+            .filter((r) => r.before.unitPrice !== r.after.unitPrice || r.before.discountPercent !== r.after.discountPercent)
+            .map((r) => ({
+              articleNumber: r.articleNumber,
+              origin: r.origin,
+              before: { unitPrice: r.before.unitPrice, discountPercent: r.before.discountPercent },
+              after: { unitPrice: r.after.unitPrice, discountPercent: r.after.discountPercent },
+            })),
+        },
+        userId: userId ?? null,
+      });
+      return { order: await this.getSalesOrder(orderId), change: plan };
     },
 
     // Påslag på offert och order (#16 etapp 3): POST

@@ -1,5 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import {
+  changeSalesOrderCustomerPreviewSchema,
+  changeSalesOrderCustomerSchema,
   createContactSchema,
   createCustomerSchema,
   createDeliveryAddressSchema,
@@ -88,6 +90,13 @@ import {
   InvoiceCustomerInactiveError,
   InvoiceCustomerHasInvoiceCustomerError,
   CustomerIsInvoiceCustomerError,
+  CustomerInactiveError,
+  SalesOrderCustomerChangeStaleError,
+  SalesOrderHasDeliveriesError,
+  SalesOrderHasDeviationsError,
+  SalesOrderHasInvoiceRowsError,
+  SalesOrderHasShipmentsError,
+  SalesOrderSameCustomerError,
 } from "../service/sales.errors.js";
 import { ExchangeRateUnavailableError } from "../../system/service/exchange-rates.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
@@ -127,6 +136,29 @@ function invoiceCustomerError(err: unknown, reply: FastifyReply): FastifyReply |
     return reply.code(400).send(errorBody(err));
   }
   return null;
+}
+
+// Byt kund: the answers shared by the preview and the change.
+function customerChangeError(err: unknown, reply: FastifyReply) {
+  if (err instanceof SalesOrderNotFoundError || err instanceof CustomerNotFoundError) return reply.code(404).send(errorBody(err));
+  if (err instanceof SalesOrderSameCustomerError || err instanceof CustomerInactiveError || err instanceof SalesOrderExchangeRateError) {
+    return reply.code(400).send(errorBody(err));
+  }
+  if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
+  if (
+    err instanceof SalesOrderHasDeliveriesError ||
+    err instanceof SalesOrderHasInvoiceRowsError ||
+    err instanceof SalesOrderHasShipmentsError ||
+    err instanceof SalesOrderHasDeviationsError
+  ) {
+    return reply.code(409).send({ ...errorBody(err), blockers: err.blockers });
+  }
+  if (err instanceof SalesOrderCustomerChangeStaleError) return reply.code(409).send({ ...errorBody(err), preview: err.preview });
+  // Valuta: no rate today for the new customer's currency.
+  if (err instanceof ExchangeRateUnavailableError) {
+    return reply.code(409).send({ ...errorBody(err), currency: err.currency, date: err.date });
+  }
+  throw err;
 }
 
 export async function salesRoutes(app: FastifyInstance, opts: { service: SalesService }) {
@@ -696,6 +728,36 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       }
       if (err instanceof MailSendError) return reply.code(502).send(errorBody(err));
       throw err;
+    }
+  });
+
+  // Byt kund: what the change would do — computed and answered, nothing
+  // written (readOnlySafe). The module's write rule (Försäljning), like the
+  // change it previews. Blockers come back in the answer (200), not as
+  // errors. No OAuth route.
+  app.post<{ Params: { id: string } }>(
+    "/sales-orders/:id/change-customer/preview",
+    { config: { readOnlySafe: true } },
+    async (req, reply) => {
+      const input = changeSalesOrderCustomerPreviewSchema.parse(req.body ?? {});
+      try {
+        return await service.previewCustomerChange(req.params.id, input);
+      } catch (err) {
+        return customerChangeError(err, reply);
+      }
+    }
+  );
+
+  // Byt kund på en offert eller order (quote/confirmed/in_production).
+  // `expected` is what the preview showed; 409
+  // sales-order-customer-change-stale carries the new preview when it no
+  // longer holds.
+  app.post<{ Params: { id: string } }>("/sales-orders/:id/change-customer", async (req, reply) => {
+    const input = changeSalesOrderCustomerSchema.parse(req.body);
+    try {
+      return await service.changeCustomer(req.params.id, input, req.user!.id);
+    } catch (err) {
+      return customerChangeError(err, reply);
     }
   });
 

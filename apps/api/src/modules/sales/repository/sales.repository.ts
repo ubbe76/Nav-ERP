@@ -49,6 +49,7 @@ import {
   type ArticleCustomerPricesInput,
   type ArticlePriceListRowsInput,
   type CreateContactInput,
+  type CustomerChangePreview,
   type CreateCustomerInput,
   type CreateDeliveryAddressInput,
   type CreatePriceListInput,
@@ -78,6 +79,7 @@ import {
 } from "@navet/shared";
 import { salesOrderLate } from "../../planning/repository/late-orders.js";
 import { documentKindSql } from "./document-kind.js";
+import { changeOrderCustomer, loadCustomerChangeFacts } from "./customer-change.js";
 import {
   assertInvoiceCustomerForCustomer,
   billToCustomerIdSql,
@@ -1105,6 +1107,15 @@ export function createSalesRepository(db: Db) {
         }
         return { ok: true as const, order: updated!, repriced, kept };
       });
+    },
+
+    // Byt kund (customer-change.ts): the facts read unlocked for the
+    // preview, and the one transaction that changes the customer.
+    async customerChangeFacts(orderId: string, customerId: string) {
+      return loadCustomerChangeFacts(db, orderId, customerId);
+    },
+    async changeCustomer(orderId: string, customerId: string, plan: CustomerChangePreview, basis: string) {
+      return changeOrderCustomer(db, orderId, customerId, plan, basis);
     },
 
     // Påslag (#16 etapp 3): the plan's read of which rows sit on a live

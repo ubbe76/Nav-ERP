@@ -1059,6 +1059,14 @@ const MESSAGES: Record<string, MessageEntry> = {
   "sales-order-row-mismatch":
     "Orderraden som fakturaraden pekar på finns inte, tillhör en annan kund eller gäller en annan artikel — välj en annan orderrad.",
   "not-collective-customer": "Kunden är inte markerad för samlingsfaktura.",
+  // Byt kund på offert/kundorder: the server names the invoice/shipment/case.
+  "sales-order-same-customer": "Ordern har redan den kunden.",
+  "customer-inactive": serverMessage("Kunden är inaktiv."),
+  "sales-order-has-deliveries": "Ordern har en leverans — ångra utleveransen innan kunden byts.",
+  "sales-order-has-invoice-rows": serverMessage("Ordern finns på en faktura — kunden kan inte bytas."),
+  "sales-order-has-shipments": serverMessage("Ordern har en försändelse — makulera eller avboka den innan kunden byts."),
+  "sales-order-has-deviations": serverMessage("Ordern hör till en reklamation hos den nuvarande kunden — kunden kan inte bytas."),
+  "sales-order-customer-change-stale": "Förhandsvisningen gäller inte längre — granska ändringarna igen.",
   // Fakturakund: the server names the customers.
   "invoice-customer-not-found": "Fakturakunden finns inte längre — välj en annan kund.",
   "invoice-customer-inactive": serverMessage("Kunden är inaktiv och kan inte väljas som fakturakund."),

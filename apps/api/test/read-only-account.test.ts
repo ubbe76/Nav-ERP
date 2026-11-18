@@ -458,6 +458,9 @@ describe("Endast läsning — the allowlist", () => {
         // Byt leverantör på inköpsordern: the preview — the change is its
         // own route and is refused.
         "POST /api/v1/purchase-orders/:id/change-supplier/preview",
+        // Byt kund på offert/kundorder: the preview — the change is its own
+        // route and is refused.
+        "POST /api/v1/sales-orders/:id/change-customer/preview",
         // Påslag på offert och order (#16 etapp 3): the header's repricing
         // preview — the save is the header PATCH.
         "POST /api/v1/sales-orders/:id/markups/preview",
