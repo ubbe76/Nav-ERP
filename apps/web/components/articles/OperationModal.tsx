@@ -831,8 +831,8 @@ function OperationForm({
       </label>
       <FormHint attached>
         {moMode
-          ? "Kommentaren skrivs ut under operationsraden på utskriften Skriv ut TO (PDF). Utan kryss syns den bara här på tillverkningsordern."
-          : "Kommentaren skrivs ut under operationsraden på utskriften Skriv ut TO (PDF). Utan kryss syns den bara här på artikelkortet. Texten som gäller när tillverkningsordern frisläpps är den som hamnar på utskriften — senare ändringar i rutten påverkar inte en redan frisläppt order."}
+          ? "Kommentaren skrivs ut under operationsraden på utskriften Skriv ut TO. Utan kryss syns den bara här på tillverkningsordern."
+          : "Kommentaren skrivs ut under operationsraden på utskriften Skriv ut TO. Utan kryss syns den bara här på artikelkortet. Texten som gäller när tillverkningsordern frisläpps är den som hamnar på utskriften — senare ändringar i rutten påverkar inte en redan frisläppt order."}
       </FormHint>
 
       <Field label="Packinstruktion (valfritt)" htmlFor="packingInstructions">
@@ -848,7 +848,7 @@ function OperationForm({
       </Field>
       <FormHint attached>
         Hur artiklarna packas inför nästa operation/avsändning. Skrivs alltid ut under operationsraden på
-        utskriften Skriv ut TO (PDF) och visas i stämpelterminalen, oavsett Skriv ut på arbetskortet.
+        utskriften Skriv ut TO och visas i stämpelterminalen, oavsett Skriv ut på arbetskortet.
       </FormHint>
 
       {/* Again next to the button — the dialog scrolls, and the error at the

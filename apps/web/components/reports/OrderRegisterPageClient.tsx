@@ -1,5 +1,6 @@
 "use client";
 
+import { PrintButton } from "../documents/PrintButton";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { KpiRow, KpiTile } from "../dashboard/KpiTile";
@@ -22,7 +23,6 @@ import {
   type RegisterEntry,
   type Supplier,
 } from "../../lib/types";
-import buttonStyles from "../ui/Button.module.css";
 import { ReportCsvLink } from "./ReportCsvLink";
 import styles from "./OrderRegister.module.css";
 
@@ -335,14 +335,7 @@ export function OrderRegisterPageClient({
 
           <Card maxWidth="none" style={{ margin: "16px 0" }}>
             <div className={styles.actions}>
-              <a
-                href={`${API_URL}${side.endpoint}/pdf?${qsString}`}
-                target="_blank"
-                rel="noreferrer"
-                className={`${buttonStyles.button} ${buttonStyles.secondary}`}
-              >
-                Skriv ut
-              </a>
+              <PrintButton href={`${API_URL}${side.endpoint}/pdf?${qsString}`} variant="secondary" size="default" />
               <ReportCsvLink path={`${side.endpoint}/csv?${qsString}`} />
             </div>
 

@@ -10,7 +10,7 @@ import { apiFetch } from "../../lib/api";
 import type { DeliveryRowsResponse } from "../../lib/types";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { round4 } from "../../lib/format";
-import { openPostedPdf } from "../../lib/openPostedPdf";
+import { printPdf, printPostedPdf } from "../../lib/printPdf";
 import type { ReceiptPrintEntry } from "../../lib/receiptPrint";
 
 // GET /purchase-orders/:id/dispatches/:dispatchId/rows — the delivery's shape
@@ -231,23 +231,42 @@ export function PalletCardDialog({ target, onClose }: { target: PalletCardTarget
   );
 }
 
+// Skriv ut for the GET pallet cards: fetches the PDF and opens the print
+// dialog; the dialog closes once it has been handed over.
+function usePalletPrint(onClose: () => void) {
+  const [pending, setPending] = useState(false);
+  const [printError, setPrintError] = useState<string | null>(null);
+  function run(href: string) {
+    setPrintError(null);
+    setPending(true);
+    printPdf(href, "Kunde inte skapa pallkortet")
+      .then(onClose)
+      .catch((err) => {
+        setPrintError(apiErrorMessage(err, "Kunde inte skapa pallkortet"));
+        setPending(false);
+      });
+  }
+  return { pending, printError, run };
+}
+
 function SingleForm({ target, onClose }: { target: Extract<PalletCardTarget, { kind: "single" }>; onClose: () => void }) {
   const [state, setState] = useState<ParcelState>(() => initialParcels(target.quantity));
   const allowMismatch = useAllowMismatch();
+  const { pending, printError, run } = usePalletPrint(onClose);
 
   function print() {
     const params = new URLSearchParams();
     for (const p of state.parcels) params.append("quantity", String(num(p)));
-    window.open(`${target.url}?${params.toString()}`, "_blank", "noopener");
-    onClose();
+    run(`${target.url}?${params.toString()}`);
   }
 
   return (
     <>
       <ParcelEditor state={state} onChange={setState} idPrefix="palletCard" unit={target.unit} allowMismatch={allowMismatch} />
+      <FormError margin="above">{printError}</FormError>
       <FormActions>
-        <Button type="button" disabled={state.parcels.length === 0 || !parcelsValid(state) || (!allowMismatch && !matches(num(state.total), state.parcels))} onClick={print}>
-          Skriv ut
+        <Button type="button" disabled={pending || state.parcels.length === 0 || !parcelsValid(state) || (!allowMismatch && !matches(num(state.total), state.parcels))} onClick={print}>
+          {pending ? "Skapar…" : "Skriv ut"}
         </Button>
         <Button type="button" variant="secondary" onClick={onClose}>
           Avbryt
@@ -261,6 +280,7 @@ function DeliveryForm({ deliveryId, onClose }: { deliveryId: string; onClose: ()
   const [data, setData] = useState<DeliveryRowsResponse | null>(null);
   const [states, setStates] = useState<Record<string, ParcelState>>({});
   const [error, setError] = useState<string | null>(null);
+  const { pending, printError, run } = usePalletPrint(onClose);
   const allowMismatch = useAllowMismatch();
 
   useEffect(() => {
@@ -289,8 +309,7 @@ function DeliveryForm({ deliveryId, onClose }: { deliveryId: string; onClose: ()
   function print() {
     const params = new URLSearchParams();
     for (const row of active) params.append("row", `${row.id}:${(states[row.id]?.parcels ?? []).map((p) => num(p)).join(",")}`);
-    window.open(`/api/v1/deliveries/${deliveryId}/pallet-card?${params.toString()}`, "_blank", "noopener");
-    onClose();
+    run(`/api/v1/deliveries/${deliveryId}/pallet-card?${params.toString()}`);
   }
 
   return (
@@ -317,9 +336,10 @@ function DeliveryForm({ deliveryId, onClose }: { deliveryId: string; onClose: ()
           ))}
         </>
       )}
+      <FormError margin="above">{printError}</FormError>
       <FormActions>
-        <Button type="button" disabled={!data || !canPrint} onClick={print}>
-          Skriv ut
+        <Button type="button" disabled={pending || !data || !canPrint} onClick={print}>
+          {pending ? "Skapar…" : "Skriv ut"}
         </Button>
         <Button type="button" variant="secondary" onClick={onClose}>
           Avbryt
@@ -333,6 +353,7 @@ function DispatchForm({ orderId, dispatchId, onClose }: { orderId: string; dispa
   const [data, setData] = useState<DispatchRowsResponse | null>(null);
   const [states, setStates] = useState<Record<string, ParcelState>>({});
   const [error, setError] = useState<string | null>(null);
+  const { pending, printError, run } = usePalletPrint(onClose);
   const allowMismatch = useAllowMismatch();
   const base = `/api/v1/purchase-orders/${orderId}/dispatches/${dispatchId}`;
 
@@ -361,8 +382,7 @@ function DispatchForm({ orderId, dispatchId, onClose }: { orderId: string; dispa
   function print() {
     const params = new URLSearchParams();
     for (const row of active) params.append("row", `${row.id}:${(states[row.id]?.parcels ?? []).map((p) => num(p)).join(",")}`);
-    window.open(`${base}/pallet-card?${params.toString()}`, "_blank", "noopener");
-    onClose();
+    run(`${base}/pallet-card?${params.toString()}`);
   }
 
   return (
@@ -389,9 +409,10 @@ function DispatchForm({ orderId, dispatchId, onClose }: { orderId: string; dispa
           ))}
         </>
       )}
+      <FormError margin="above">{printError}</FormError>
       <FormActions>
-        <Button type="button" disabled={!data || !canPrint} onClick={print}>
-          Skriv ut
+        <Button type="button" disabled={pending || !data || !canPrint} onClick={print}>
+          {pending ? "Skapar…" : "Skriv ut"}
         </Button>
         <Button type="button" variant="secondary" onClick={onClose}>
           Avbryt
@@ -424,7 +445,7 @@ function ReceiptForm({ orderId, entries, onClose }: { orderId: string; entries: 
     setError(null);
     setPending(true);
     try {
-      await openPostedPdf(
+      await printPostedPdf(
         `/api/v1/purchase-orders/${orderId}/receipts/pallet-card`,
         { cards: active.map((e) => ({ receiptIds: e.receiptIds, quantities: (states[e.key]?.parcels ?? []).map((p) => num(p)) })) },
         "Kunde inte skapa pallkortet"

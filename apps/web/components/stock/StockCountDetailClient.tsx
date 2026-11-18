@@ -1,5 +1,6 @@
 "use client";
 
+import { PrintButton } from "../documents/PrintButton";
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -491,20 +492,12 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <StatusPill status={PILL_STATUS[session.status]} label={STOCK_COUNT_STATUS_LABELS[session.status]} />
-          <a
-            href={`${API_URL}/api/v1/stock-counts/${session.id}/pdf`}
-            download
-            className={`${buttonStyles.button} ${buttonStyles.ghost}`}
-          >
-            Skriv ut räknelista
-          </a>
-          <a
+          <PrintButton href={`${API_URL}/api/v1/stock-counts/${session.id}/pdf`} label="Skriv ut räknelista" size="default" />
+          <PrintButton
             href={`${API_URL}/api/v1/stock-counts/${session.id}/pdf?showBalances=true`}
-            download
-            className={`${buttonStyles.button} ${buttonStyles.ghost}`}
-          >
-            Räknelista med saldo
-          </a>
+            label="Räknelista med saldo"
+            size="default"
+          />
           <Link href="/lager/inventering" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
             Alla inventeringar
           </Link>

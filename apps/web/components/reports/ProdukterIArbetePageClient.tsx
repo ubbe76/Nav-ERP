@@ -1,5 +1,6 @@
 "use client";
 
+import { PrintButton } from "../documents/PrintButton";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
@@ -13,7 +14,6 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import { stockholmToday } from "../../lib/date";
 import { formatMoney, formatQuantity } from "../../lib/format";
 import { WIP_BASIS_LABELS, type WipBasis, type WorkInProgressReport, type WorkInProgressRow } from "../../lib/types";
-import buttonStyles from "../ui/Button.module.css";
 import styles from "./ProdukterIArbete.module.css";
 
 const BASES = Object.keys(WIP_BASIS_LABELS) as WipBasis[];
@@ -118,13 +118,10 @@ export function ProdukterIArbetePageClient({ defaultAsOf, defaultBasis, defaultD
             <Button type="button" onClick={show} disabled={!asOf || pending}>
               Visa
             </Button>
-            <a
+            <PrintButton
               href={`${API_URL}/api/v1/costing/work-in-progress/pdf?${new URLSearchParams({ asOf: applied.asOf, basis: applied.basis }).toString()}`}
-              download
-              className={`${buttonStyles.button} ${buttonStyles.ghost}`}
-            >
-              Skriv ut
-            </a>
+              size="default"
+            />
           </div>
         </FormStack>
       </Card>

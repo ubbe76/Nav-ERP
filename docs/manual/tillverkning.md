@@ -120,7 +120,7 @@ Leverantörens namn-/kontaktkolumner ("Namn (2)"/"Namn (3)") samt "Skapa inte fa
 
 ### Läsläge
 
-Den som bara har rättigheten **Tillverkningsorder (läsläge)** (verkstadsprofilen, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper)) ser tillverkningsorder i läsläge. Listan saknar då **+ Ny tillverkningsorder**, **Exportera**, markering och åtgärdskolumn. På kortet finns inga knappar, ingen redigering av **Planerat färdigdatum**, ingen kalkyl och ingen **Historik** (den är bara för administratörer). **Skriv ut TO (PDF)** och pallkorten finns kvar. Legooperationernas priser visas som **–**: priser är kontorsdata, och den som saknar menyrättigheter ser dem inte. Rättigheten **Tillverkning** ger fullt läge.
+Den som bara har rättigheten **Tillverkningsorder (läsläge)** (verkstadsprofilen, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper)) ser tillverkningsorder i läsläge. Listan saknar då **+ Ny tillverkningsorder**, **Exportera**, markering och åtgärdskolumn. På kortet finns inga knappar, ingen redigering av **Planerat färdigdatum**, ingen kalkyl och ingen **Historik** (den är bara för administratörer). **Skriv ut TO** och pallkorten finns kvar. Legooperationernas priser visas som **–**: priser är kontorsdata, och den som saknar menyrättigheter ser dem inte. Rättigheten **Tillverkning** ger fullt läge.
 
 ### Skapa och frisläppa
 
@@ -179,7 +179,7 @@ Den nya tillverkningsordern frisläpps direkt (status **Frisläppt**) precis som
 
 ### Under tillverkning
 
-- **Rapportera**: all manuell avrapportering görs i kortet **Rapportera** på TO-kortet (se [Avrapportera operation](#avrapportera-operation)): en rad per operation med dess kopplade material under, gruppen **Vid slutrapportering** för material utan operation, en rad **Rapportera tid** och — på en frisläppt eller pågående order — en rad **Slutför order**. **Makulera order**, **Efterkalkylera** och **Skriv ut TO (PDF)** ligger i verktygsraden överst på tillverkningsordern.
+- **Rapportera**: all manuell avrapportering görs i kortet **Rapportera** på TO-kortet (se [Avrapportera operation](#avrapportera-operation)): en rad per operation med dess kopplade material under, gruppen **Vid slutrapportering** för material utan operation, en rad **Rapportera tid** och — på en frisläppt eller pågående order — en rad **Slutför order**. **Makulera order**, **Efterkalkylera** och **Skriv ut TO** ligger i verktygsraden överst på tillverkningsordern.
 - **Serienummer**: färdiga styck av en serienummerstyrd artikel (nummer vid inleverans) får löpnummer ur artikelns serie när de inlevereras, även i terminalen; en tillverkad batch får utgångsdatum av artikelns **Hållbarhet (dagar)** — se [Serienummer](/hjalp/lager#serienummer).
 - **Batch**: färdiga varor av en batchstyrd artikel får tillverkningsordernumret som batch, och en batchstyrd komponent har ett val **Batch** vid **Förbruka** (förvalt **Automatiskt**, äldsta batch först) — se [Batchnummer och spårbarhet](/hjalp/lager#batchnummer-och-sparbarhet).
 - **Material**: klicka **Förbruka** på materialraden i kortet **Rapportera**. Välj lagerplats i **Lagerplats för materialuttag** högst upp i kortet (gäller både **Förbruka** och **Slutför**) och ange antal — ett materialuttag bokförs i lagret. **Antal** är förifyllt med det som återstår av radens planerade mängd (planerat − förbrukat); skriv över det om uttaget ska vara ett annat. Överuttag utöver planerat stoppas. Är strukturraden skriven i en alternativ enhet (se [Artiklar](/hjalp/artiklar)) visas och matas materialraden in i den enheten (kolumnen **Enhet**); uttaget bokförs alltid i komponentens grundenhet.
@@ -414,7 +414,7 @@ När ordern frisläpps sparas vilka revisioner den byggs efter: artikelns aktiva
 
 ### Skriv ut TO
 
-**Skriv ut TO (PDF)** överst på tillverkningsorderns detaljsida skapar underlaget som lämnas till operatören:
+**Skriv ut TO** överst på tillverkningsorderns detaljsida öppnar utskriftsdialogen för underlaget som lämnas till operatören (se [Utskrifter](/hjalp/komma-igang#utskrifter)); **Ladda ner PDF** bredvid sparar samma underlag som fil:
 
 - Företagsuppgifter och logotyp, ordernummer, status, artikel och antal att tillverka samt eventuell anteckning.
 - Är ordern skapad från en kundorderrad (se [Skapa från kundorder](#skapa-fran-kundorder) ovan) visas raden **Kundorder:** med kundorderns ordernummer och kundens namn.
@@ -517,7 +517,7 @@ Bredvid **Skapa ordrar** finns knappen **Skapa förfrågan** — den agerar bara
 
 Resultatet visas i kortet **Skapade förfrågningar**, med en rad per skapad förfrågan (FO-nummer, leverantör och antal rader), knapparna för att ladda ner/skriva ut PDF:en och **Maila** — precis som **Skapade ordrar** nedan, fast förfrågningarna skapas som **Utkast** och att mejla en sätter den till **Skickad**.
 
-Efter **Skapa ordrar** listas de skapade ordrarna i kortet **Skapade ordrar**. Varje rad har, förutom länken till ordern, knapparna **Ladda ner PDF** och **Skriv ut** (öppnar PDF:en i en ny flik där webbläsaren sköter utskriften). Inköpsorderrader har dessutom **Maila**, som öppnar samma e-postdialog som inköpsorderkortet med leverantörens e-postadress förifylld (leverantörens huvudkontakt, annars leverantörens egen adress) — skickad order märks **Skickad**. Ordrarna skapas som **Utkast**, och att mejla en inköpsorder skickar den och sätter den samtidigt till **Bekräftad** — kortet visar samma påminnelse. Tillverkningsordrar har bara **Ladda ner PDF** och **Skriv ut**; det finns ingen e-postfunktion för tillverkningsordrar.
+Efter **Skapa ordrar** listas de skapade ordrarna i kortet **Skapade ordrar**. Varje rad har, förutom länken till ordern, knapparna **Ladda ner PDF** och **Skriv ut** (öppnar utskriftsdialogen). Inköpsorderrader har dessutom **Maila**, som öppnar samma e-postdialog som inköpsorderkortet med leverantörens e-postadress förifylld (leverantörens huvudkontakt, annars leverantörens egen adress) — skickad order märks **Skickad**. Ordrarna skapas som **Utkast**, och att mejla en inköpsorder skickar den och sätter den samtidigt till **Bekräftad** — kortet visar samma påminnelse. Tillverkningsordrar har bara **Ladda ner PDF** och **Skriv ut**; det finns ingen e-postfunktion för tillverkningsordrar.
 
 Skapades fler än en order av samma sort visas dessutom raden **Alla inköpsorder (n st)** respektive **Alla tillverkningsorder (n st)** under listan, med egna **Ladda ner PDF** och **Skriv ut**. De ger ett enda dokument med alla ordrarna efter varandra i samma ordning som listan — tillverkningsordrarna med sina ritningar precis som vid enskild utskrift — så hela körningen kan skrivas ut på en gång.
 
@@ -639,7 +639,7 @@ Med rättigheten Tillverkning har varje **planerad** operation i en dagsgrupp kn
 
 ### Skriv ut
 
-**Skriv ut** öppnar körplanen som PDF i en ny flik, med samma resurs och samma **T.o.m.** som på sidan. Knappen visas när en resurs är vald.
+**Skriv ut** öppnar utskriftsdialogen för körplanen, med samma resurs och samma **T.o.m.** som på sidan. Knappen visas när en resurs är vald.
 
 Från [stämpelterminalen](/hjalp/terminal) finns en länk **Körplan** för den valda stationen.
 

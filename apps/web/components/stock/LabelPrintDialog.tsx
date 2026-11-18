@@ -6,7 +6,7 @@ import { Button } from "../ui/Button";
 import { Field, Input, Select } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { openPostedPdf } from "../../lib/openPostedPdf";
+import { printPostedPdf } from "../../lib/printPdf";
 
 type LabelFormat = "a4" | "single";
 
@@ -87,7 +87,7 @@ export function LabelPrintDialog({
     }
     setPending(true);
     try {
-      await openPostedPdf(
+      await printPostedPdf(
         endpoint,
         { [idsKey]: ids, copies: copiesNumber, format, ...(format === "a4" && { start: startNumber }) },
         "Kunde inte skapa etiketterna"

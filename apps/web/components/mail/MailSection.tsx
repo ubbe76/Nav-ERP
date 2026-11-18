@@ -18,6 +18,7 @@ import { formatStockholmDateTime } from "../../lib/date";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { hasUnsavedDrafts } from "../../lib/unsavedGuard";
 import type { MailTextRequest } from "../../lib/mailText";
+import { PrintButton } from "../documents/PrintButton";
 import { useMailText } from "./useMailText";
 import { MailSignatureNote } from "./MailSignatureNote";
 
@@ -117,9 +118,12 @@ export function MailSection({
             ? `${link.href}${link.href.includes("?") ? "&" : "?"}showConfigurationPrices=${showPrices}`
             : link.href;
           return (
-            <a key={link.href} href={href} className={`${buttonStyles.button} ${buttonStyles.ghost}`} download>
-              {link.label}
-            </a>
+            <span key={link.href} style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <a href={href} className={`${buttonStyles.button} ${buttonStyles.ghost}`} download>
+                {link.label}
+              </a>
+              <PrintButton href={href} size="default" />
+            </span>
           );
         })}
       </div>
