@@ -491,6 +491,13 @@ const MESSAGES: Record<string, MessageEntry> = {
   "lego-operation-article-mismatch": "Legooperationen tillhör en annan artikel än raden.",
   "not-lego-operation": "Operationen ligger inte på en legoresurs.",
   "lego-operation-closed": "Legooperationen är inte öppen — den är klar eller tillverkningsordern är inte frisläppt eller pågående.",
+  // Byt leverantör på inköpsordern: the server names the invoice/case.
+  "purchase-order-same-supplier": "Inköpsordern har redan den leverantören.",
+  "purchase-order-has-receipts": "Ordern har en inleverans — ångra inleveransen innan leverantören byts.",
+  "purchase-order-has-dispatches": "Ordern har en avsändning till legoleverantören — ångra avsändningen innan leverantören byts.",
+  "purchase-order-has-supplier-invoices": serverMessage("Ordern är kopplad till en leverantörsfaktura — leverantören kan inte bytas."),
+  "purchase-order-has-deviations": serverMessage("Ordern hör till en avvikelse hos den nuvarande leverantören — leverantören kan inte bytas."),
+  "purchase-order-supplier-change-stale": "Förhandsvisningen gäller inte längre — granska ändringarna igen.",
   "purchase-order-row-has-dispatches": "Raden har en avsändning till legoleverantören — ångra avsändningen först.",
   // A goods receipt carries the system setting Tillåten överleverans it broke
   // (allowedPercent > 0 ⇒ name it); a row edit below the received quantity

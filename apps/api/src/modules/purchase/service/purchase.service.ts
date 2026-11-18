@@ -48,6 +48,7 @@ import type {
   UpdatePurchaseOrderRowInput,
   UpdateSupplierInput,
 } from "@navet/shared";
+import type { ChangePurchaseOrderSupplierInput, ChangePurchaseOrderSupplierPreviewInput, SupplierChangePreview } from "@navet/shared";
 import type { Tx } from "@navet/db";
 import { InvalidStatusTransitionError as MoInvalidStatusTransitionError } from "../../manufacturing/service/manufacturing.service.js";
 import {
@@ -95,6 +96,7 @@ import {
 } from "../../system/service/delivery-days.js";
 import { backdatedDay } from "../../stock/service/backdating.js";
 import { resolveSupplierPrice } from "./supplier-price.js";
+import { planSupplierChange, supplierChangeCurrencies } from "./supplier-change.js";
 import { documentVatCode, supplierVatCode, vatCodeRef, type VatCodeBook } from "../../economy/service/document-vat-code.js";
 // G1: append-only audit trail — optional with a no-op default (see
 // sales.service.ts's identical comment) so the many pre-existing test call
@@ -209,6 +211,68 @@ export class PurchaseOrderExchangeRateError extends Error {
 }
 
 // Skicka inköpsorder without Mottagare, and the supplier has no address.
+// Byt leverantör: the order already has this supplier. 400.
+export class PurchaseOrderSameSupplierError extends Error {
+  constructor() {
+    super("Inköpsordern har redan den leverantören");
+    this.name = "PurchaseOrderSameSupplierError";
+  }
+}
+
+// Byt leverantör: something has already happened with the order at the
+// current supplier — one class (and code) per cause, all 409 with the full
+// list in `blockers`.
+export class PurchaseOrderHasReceiptsError extends Error {
+  constructor(message: string, readonly blockers: SupplierChangePreview["blockers"]) {
+    super(message);
+    this.name = "PurchaseOrderHasReceiptsError";
+  }
+}
+export class PurchaseOrderHasDispatchesError extends Error {
+  constructor(message: string, readonly blockers: SupplierChangePreview["blockers"]) {
+    super(message);
+    this.name = "PurchaseOrderHasDispatchesError";
+  }
+}
+export class PurchaseOrderHasSupplierInvoicesError extends Error {
+  constructor(message: string, readonly blockers: SupplierChangePreview["blockers"]) {
+    super(message);
+    this.name = "PurchaseOrderHasSupplierInvoicesError";
+  }
+}
+export class PurchaseOrderHasDeviationsError extends Error {
+  constructor(message: string, readonly blockers: SupplierChangePreview["blockers"]) {
+    super(message);
+    this.name = "PurchaseOrderHasDeviationsError";
+  }
+}
+
+// Byt leverantör: what the user confirmed is no longer what the change
+// would do (a price, the rate, a row or the supplier moved). 409 with the
+// fresh preview; nothing written.
+export class PurchaseOrderSupplierChangeStaleError extends Error {
+  constructor(readonly preview: SupplierChangePreview) {
+    super("Förhandsvisningen gäller inte längre — granska ändringarna igen");
+    this.name = "PurchaseOrderSupplierChangeStaleError";
+  }
+}
+
+function supplierChangeBlockedError(blockers: SupplierChangePreview["blockers"]): Error {
+  const first = blockers[0]!;
+  switch (first.code) {
+    case "invalid-status-transition":
+      return new InvalidStatusTransitionError(first.message);
+    case "purchase-order-has-receipts":
+      return new PurchaseOrderHasReceiptsError(first.message, blockers);
+    case "purchase-order-has-dispatches":
+      return new PurchaseOrderHasDispatchesError(first.message, blockers);
+    case "purchase-order-has-supplier-invoices":
+      return new PurchaseOrderHasSupplierInvoicesError(first.message, blockers);
+    case "purchase-order-has-deviations":
+      return new PurchaseOrderHasDeviationsError(first.message, blockers);
+  }
+}
+
 export class PurchaseOrderRecipientMissingError extends Error {
   constructor() {
     super("The supplier has no email address — give a recipient");
@@ -653,6 +717,26 @@ export function createPurchaseService(
     const today = stockholmToday();
     if (!rates) throw new ExchangeRateUnavailableError(currency, today);
     return (await rates.getRate(currency, today)).rate;
+  }
+  // Byt leverantör: the facts read unlocked + the plan, shared by the
+  // preview and the change (which plans again under the locks). The rate:
+  // the same currency keeps the order's own; another currency gets today's
+  // (orderRate — SEK is 1, a typed rate wins, none ⇒ 409), rounded to the
+  // column's six decimals so the plan and the stored rate agree.
+  async function planSupplierChangeFor(orderId: string, input: { supplierId: string; exchangeRate?: number }) {
+    const loaded = await repo.supplierChangeFacts(orderId, input.supplierId);
+    if (!loaded.ok) {
+      if (loaded.reason === "order_not_found") throw new PurchaseOrderNotFoundError(orderId);
+      throw new SupplierNotFoundError(input.supplierId);
+    }
+    const { facts } = loaded;
+    if (facts.order.supplierId === input.supplierId) throw new PurchaseOrderSameSupplierError();
+    if (!loaded.supplierActive) throw new SupplierInactiveError(input.supplierId);
+    const currencies = supplierChangeCurrencies(facts);
+    const rate = currencies.changes
+      ? roundToDecimals(await orderRate(currencies.to, input.exchangeRate), 6)
+      : facts.order.exchangeRate;
+    return { plan: planSupplierChange(facts, rate), currencies };
   }
   // Per-row revision line for document printing — null when the system
   // setting "show_revisions_on_documents" is off.
@@ -1211,6 +1295,74 @@ export function createPurchaseService(
       const { projectId } = await repo.resolveDimensions({ projectId: input.projectId }, { existing: { costCenterId: null, projectId: order.projectId } });
       await repo.updatePurchaseOrderHeader(orderId, { ...input, projectId });
       return repo.findPurchaseOrderById(orderId);
+    },
+
+    // Byt leverantör — what the change would do, nothing written. Blockers
+    // (status, receipt, dispatch, invoice, deviation) are part of the answer
+    // so the dialog can show them as text.
+    async previewSupplierChange(orderId: string, input: ChangePurchaseOrderSupplierPreviewInput): Promise<SupplierChangePreview> {
+      return (await planSupplierChangeFor(orderId, input)).plan;
+    },
+
+    // Byt leverantör: draft/confirmed with nothing received, dispatched or
+    // invoiced. The rate is looked up before the transaction; the plan is
+    // made again under the row and order locks and must be what the user
+    // confirmed (`expected`), otherwise 409 with the fresh preview.
+    async changeSupplier(orderId: string, input: ChangePurchaseOrderSupplierInput, userId?: string | null) {
+      const { plan: unlocked, currencies } = await planSupplierChangeFor(orderId, input);
+      const result = await repo.changeSupplier(orderId, input, {
+        from: currencies.from,
+        to: currencies.to,
+        rate: unlocked.to.exchangeRate,
+      });
+      if (!result.ok) {
+        switch (result.reason) {
+          case "order_not_found":
+            throw new PurchaseOrderNotFoundError(orderId);
+          case "supplier_not_found":
+            throw new SupplierNotFoundError(input.supplierId);
+          case "same_supplier":
+            throw new PurchaseOrderSameSupplierError();
+          case "blocked":
+            throw supplierChangeBlockedError(result.plan.blockers);
+          case "stale":
+            throw new PurchaseOrderSupplierChangeStaleError((await planSupplierChangeFor(orderId, input)).plan);
+        }
+      }
+      const { plan } = result;
+      await audit.log({
+        entityType: "purchase_order",
+        entityId: plan.orderNumber,
+        action: "supplier_changed",
+        detail: {
+          before: {
+            supplier: plan.from.supplierName,
+            currency: plan.from.currency,
+            exchangeRate: plan.from.exchangeRate,
+            status: result.statusBefore,
+            ...(plan.confirmedDeliveryDate !== null ? { confirmedDeliveryDate: plan.confirmedDeliveryDate } : {}),
+          },
+          after: { supplier: plan.to.supplierName, currency: plan.to.currency, exchangeRate: plan.to.exchangeRate, status: "draft" },
+          rows: plan.rows
+            .filter((r) => r.before.unitPrice !== r.after.unitPrice || r.before.setupPrice !== r.after.setupPrice)
+            .map((r) => ({
+              articleNumber: r.articleNumber,
+              origin: r.origin,
+              before: r.before.setupPrice === null ? { unitPrice: r.before.unitPrice } : r.before,
+              after: r.after.setupPrice === null ? { unitPrice: r.after.unitPrice } : r.after,
+            })),
+          // The rows' own Bekräftat leveransdatum that the change cleared.
+          ...(plan.rows.some((r) => r.confirmedDeliveryDate !== null)
+            ? {
+                clearedConfirmedDates: plan.rows
+                  .filter((r) => r.confirmedDeliveryDate !== null)
+                  .map((r) => ({ articleNumber: r.articleNumber, confirmedDeliveryDate: r.confirmedDeliveryDate })),
+              }
+            : {}),
+        },
+        userId: userId ?? null,
+      });
+      return { order: await this.getPurchaseOrder(orderId), change: plan };
     },
 
     // --- Inquiries (förfrågningar) — state machine:

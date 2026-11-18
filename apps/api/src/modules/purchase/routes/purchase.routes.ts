@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { deviationLinkForbidden } from "../../quality/service/deviation-link-access.js";
 import { DeviationLinkNotAllowedError } from "../../quality/service/deviation-errors.js";
 import { articleCardWrite, LABEL_PRINT } from "../../auth/middleware/access-rules.js";
@@ -11,6 +11,8 @@ import {
   createPurchaseDispatchSchema,
   createPurchaseOrderRowSchema,
   createPurchaseOrderSchema,
+  changePurchaseOrderSupplierPreviewSchema,
+  changePurchaseOrderSupplierSchema,
   dispatchPalletCardQuerySchema,
   receiptLabelsSchema,
   receiptPalletCardSchema,
@@ -67,6 +69,12 @@ import {
   PurchaseReceiptBackdateLegoError,
   RowHasReceiptsError,
   SupplierInactiveError,
+  PurchaseOrderSameSupplierError,
+  PurchaseOrderHasReceiptsError,
+  PurchaseOrderHasDispatchesError,
+  PurchaseOrderHasSupplierInvoicesError,
+  PurchaseOrderHasDeviationsError,
+  PurchaseOrderSupplierChangeStaleError,
   SupplierNotFoundError,
   LegoOperationNotFoundError,
   LegoOperationArticleMismatchError,
@@ -99,6 +107,29 @@ import { InvalidVatCodeError } from "../../economy/service/document-vat-code.js"
 
 // This module is registered inside app.ts's protected route scope, so
 // requireAuth has already run and req.user is guaranteed to be set.
+// Byt leverantör: the answers shared by the preview and the change.
+function supplierChangeError(err: unknown, reply: FastifyReply) {
+  if (err instanceof PurchaseOrderNotFoundError || err instanceof SupplierNotFoundError) return reply.code(404).send(errorBody(err));
+  if (err instanceof PurchaseOrderSameSupplierError || err instanceof SupplierInactiveError || err instanceof PurchaseOrderExchangeRateError) {
+    return reply.code(400).send(errorBody(err));
+  }
+  if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
+  if (
+    err instanceof PurchaseOrderHasReceiptsError ||
+    err instanceof PurchaseOrderHasDispatchesError ||
+    err instanceof PurchaseOrderHasSupplierInvoicesError ||
+    err instanceof PurchaseOrderHasDeviationsError
+  ) {
+    return reply.code(409).send({ ...errorBody(err), blockers: err.blockers });
+  }
+  if (err instanceof PurchaseOrderSupplierChangeStaleError) return reply.code(409).send({ ...errorBody(err), preview: err.preview });
+  // Valuta: no rate today for the new supplier's currency.
+  if (err instanceof ExchangeRateUnavailableError) {
+    return reply.code(409).send({ ...errorBody(err), currency: err.currency, date: err.date });
+  }
+  throw err;
+}
+
 export async function purchaseRoutes(app: FastifyInstance, opts: { service: PurchaseService }) {
   const { service } = opts;
 
@@ -479,6 +510,34 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
       if (err instanceof ProjectClosedError || err instanceof PurchaseOrderExchangeRateError) return reply.code(400).send(errorBody(err));
       if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
       throw err;
+    }
+  });
+
+  // Byt leverantör: what the change would do — computed and answered,
+  // nothing written (readOnlySafe). The module's write rule (Inköp), like the
+  // change it previews. Blockers come back in the answer (200), not as errors.
+  app.post<{ Params: { id: string } }>(
+    "/purchase-orders/:id/change-supplier/preview",
+    { config: { readOnlySafe: true } },
+    async (req, reply) => {
+      const input = changePurchaseOrderSupplierPreviewSchema.parse(req.body ?? {});
+      try {
+        return await service.previewSupplierChange(req.params.id, input);
+      } catch (err) {
+        return supplierChangeError(err, reply);
+      }
+    }
+  );
+
+  // Byt leverantör på en order i Utkast/Bekräftad. `expected` is what the
+  // preview showed; 409 purchase-order-supplier-change-stale carries the new
+  // preview when it no longer holds.
+  app.post<{ Params: { id: string } }>("/purchase-orders/:id/change-supplier", async (req, reply) => {
+    const input = changePurchaseOrderSupplierSchema.parse(req.body);
+    try {
+      return await service.changeSupplier(req.params.id, input, req.user!.id);
+    } catch (err) {
+      return supplierChangeError(err, reply);
     }
   });
 
