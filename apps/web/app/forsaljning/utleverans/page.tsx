@@ -2,7 +2,8 @@ import { headers } from "next/headers";
 import { AppShell } from "../../../components/AppShell";
 import { DeliveryPageClient } from "../../../components/sales/DeliveryPageClient";
 import { apiGet } from "../../../lib/api";
-import type { Paged, SalesOrder, SalesOrderRow, StockLocation } from "../../../lib/types";
+import { suggestsRest } from "../../../lib/restSuggestion";
+import type { Paged, SalesOrder, SalesOrderRow, StockLocation, SystemSettings } from "../../../lib/types";
 
 // Utleverans — pick an in-production sales order and report the whole
 // delivery at once. ?order=<id> preselects (linked from the order card).
@@ -27,9 +28,18 @@ export default async function DeliveryPage(props: { searchParams: Promise<{ orde
     : null;
   const rows = selected ? await apiGet<SalesOrderRow[]>(`/api/v1/sales-orders/${selected.id}/rows`, cookieHeader) : [];
 
+  // Rest som förslag i antalsfältet (a failed read keeps the default).
+  const settings = await apiGet<SystemSettings>("/api/v1/settings", cookieHeader).catch(() => null);
+
   return (
     <AppShell active="Försäljning">
-      <DeliveryPageClient locations={locations} selected={selected} rows={rows} openOrders={openOrders.rows} />
+      <DeliveryPageClient
+        locations={locations}
+        selected={selected}
+        rows={rows}
+        openOrders={openOrders.rows}
+        suggestRest={suggestsRest(settings, "delivery")}
+      />
     </AppShell>
   );
 }

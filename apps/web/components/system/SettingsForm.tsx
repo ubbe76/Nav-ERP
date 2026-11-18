@@ -15,6 +15,14 @@ import {
 import styles from "./SettingsForm.module.css";
 import { apiErrorMessage } from "../../lib/errorMessages";
 
+type RestSuggestKey = "restSuggestReceipt" | "restSuggestDelivery" | "restSuggestReport" | "restSuggestStamp";
+const REST_SUGGEST_FIELDS: [RestSuggestKey, string][] = [
+  ["restSuggestReceipt", "Inleverans"],
+  ["restSuggestDelivery", "Utleverans"],
+  ["restSuggestReport", "Rapportering"],
+  ["restSuggestStamp", "Stämpling"],
+];
+
 export function SettingsForm({
   settings,
   setupChargeArticle,
@@ -38,6 +46,13 @@ export function SettingsForm({
   const [overDeliveryPercent, setOverDeliveryPercent] = useState(formatPercent(settings.salesOverDeliveryPercent));
   const [overDeliverySaved, setOverDeliverySaved] = useState(false);
   const [overReceiptSaved, setOverReceiptSaved] = useState(false);
+  // Rest som förslag i antalsfältet: one box per routine.
+  const [restSuggest, setRestSuggest] = useState<Record<RestSuggestKey, boolean>>({
+    restSuggestReceipt: settings.restSuggestReceipt,
+    restSuggestDelivery: settings.restSuggestDelivery,
+    restSuggestReport: settings.restSuggestReport,
+    restSuggestStamp: settings.restSuggestStamp,
+  });
   const [materialShortage, setMaterialShortage] = useState(settings.manufacturingMaterialShortage);
   const [palletMismatch, setPalletMismatch] = useState(settings.palletCardAllowQuantityMismatch);
   const [batchTracking, setBatchTracking] = useState(settings.batchTrackingEnabled);
@@ -175,6 +190,12 @@ export function SettingsForm({
       setOverDeliveryPercent(formatPercent(updated.salesOverDeliveryPercent));
       setOverDeliverySaved(true);
     }
+  }
+
+  // The box follows the server's answer.
+  async function toggleRestSuggest(key: RestSuggestKey) {
+    const updated = await save({ [key]: !restSuggest[key] });
+    if (updated) setRestSuggest((current) => ({ ...current, [key]: updated[key] }));
   }
 
   async function changeMaterialShortage(next: SystemSettings["manufacturingMaterialShortage"]) {
@@ -533,6 +554,24 @@ export function SettingsForm({
                 onChange={() => toggleExtraDescriptionDocument(kind)}
               />
               {EXTRA_DESCRIPTION_DOCUMENT_LABELS[kind]}
+            </label>
+          ))}
+        </div>
+      </div>
+      <div className={styles.section}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Rest som förslag i antalsfältet</div>
+          <div className={styles.description}>
+            Markerad: antalsfältet fylls i med det som återstår på raden eller operationen. Omarkerad: fältet börjar
+            tomt och du skriver antalet själv. Vid Stämpling fylls Antal OK bara i när ingen annan har en pågående
+            stämpling på samma operation. Gäller även Pågående när du stämplar ut någon där.
+          </div>
+        </div>
+        <div className={styles.checkGrid}>
+          {REST_SUGGEST_FIELDS.map(([key, label]) => (
+            <label key={key} className={styles.check}>
+              <Checkbox checked={restSuggest[key]} disabled={pending} onChange={() => toggleRestSuggest(key)} />
+              {label}
             </label>
           ))}
         </div>

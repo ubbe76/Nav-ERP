@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCurrentUser, apiGet } from "../../../lib/api";
 import { canOpen } from "../../../lib/pageAccess";
+import { suggestsRest } from "../../../lib/restSuggestion";
 import { StampTerminal } from "../../../components/timereport/StampTerminal";
 import { ConfirmDialogHost } from "../../../components/ui/ConfirmDialogHost";
 import { PermissionsProvider } from "../../../components/PermissionsProvider";
@@ -28,7 +29,7 @@ export default async function StampTerminalPage() {
     apiGet<StampSession[]>("/api/v1/stamp-sessions?open=true", cookieHeader),
     apiGet<AttendanceSession[]>("/api/v1/attendance-sessions?open=true", cookieHeader),
     apiGet<TerminalStation[]>("/api/v1/terminal/stations", cookieHeader),
-    apiGet<{ allowMultipleStamps: boolean; timeKindSplit?: boolean }>("/api/v1/settings/terminal", cookieHeader),
+    apiGet<{ allowMultipleStamps: boolean; timeKindSplit?: boolean; restSuggestStamp?: boolean }>("/api/v1/settings/terminal", cookieHeader),
   ]);
 
   // The terminal has no AppShell, so it mounts the app's confirmation dialog
@@ -47,6 +48,7 @@ export default async function StampTerminalPage() {
         stations={stations}
         allowMultipleStamps={settings.allowMultipleStamps}
         timeKindSplit={settings.timeKindSplit === true}
+        restSuggestStamp={suggestsRest(settings, "stamp")}
       />
       <ConfirmDialogHost />
     </PermissionsProvider>

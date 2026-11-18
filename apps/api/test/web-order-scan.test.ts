@@ -80,20 +80,40 @@ describe("isScannableRow", () => {
 
 describe("countScan", () => {
   it("prefills the remaining amount until the first scan, then counts from zero — except rows it does not count", () => {
-    expect(rows.map((r) => enteredQuantity(r, fresh))).toEqual(["2", "10", "3", "1"]);
+    expect(rows.map((r) => enteredQuantity(r, fresh, true))).toEqual(["2", "10", "3", "1"]);
     const first = countScan(rows, fresh, "nut");
     if (!first.counted) throw new Error("not counted");
     expect(first.rowId).toBe("r2");
-    expect(rows.map((r) => enteredQuantity(r, first.state))).toEqual(["0", "1", "0", "1"]);
-    expect(hasCounted(fresh)).toBe(false);
-    expect(hasCounted(first.state)).toBe(true);
-    expect(rows.map((r) => leftToCount(r, first.state))).toEqual([2, 9, 3, null]);
+    expect(rows.map((r) => enteredQuantity(r, first.state, true))).toEqual(["0", "1", "0", "1"]);
+    expect(hasCounted(fresh, true)).toBe(false);
+    expect(hasCounted(first.state, true)).toBe(true);
+    expect(rows.map((r) => leftToCount(r, first.state, true))).toEqual([2, 9, 3, null]);
+  });
+
+  it("starts every field empty without a suggested rest, and a scan counts from nothing", () => {
+    // Also the tjänst and the ställkostnadsrad (r4): empty, not 0.
+    expect(rows.map((r) => enteredQuantity(r, fresh, false))).toEqual(["", "", "", ""]);
+    const first = countScan(rows, fresh, "nut");
+    if (!first.counted) throw new Error("not counted");
+    expect(first.rowId).toBe("r2");
+    expect(first.quantity).toBe(1);
+    expect(rows.map((r) => enteredQuantity(r, first.state, false))).toEqual(["", "1", "", ""]);
+    // Typed values stay; what is left counts from the full remainder.
+    expect(rows.map((r) => leftToCount(r, fresh, false))).toEqual([2, 10, 3, null]);
+    expect(rows.map((r) => leftToCount(r, first.state, false))).toEqual([2, 9, 3, null]);
+  });
+
+  it("counts a hand-typed number as something to lose only when the rest is not suggested", () => {
+    const typed: OrderCountState = { counting: false, quantities: { r1: "2" } };
+    expect(hasCounted(typed, true)).toBe(false);
+    expect(hasCounted(typed, false)).toBe(true);
+    expect(hasCounted({ counting: false, quantities: { r1: "" } }, false)).toBe(false);
   });
 
   it("keeps a typed quantity when counting starts", () => {
     const next = countScan(rows, { counting: false, quantities: { r2: "4" } }, "screw");
     if (!next.counted) throw new Error("not counted");
-    expect(rows.map((r) => enteredQuantity(r, next.state))).toEqual(["1", "4", "0", "1"]);
+    expect(rows.map((r) => enteredQuantity(r, next.state, true))).toEqual(["1", "4", "0", "1"]);
   });
 
   it("fills the article's rows in order; without a cap it flags what goes over", () => {
@@ -117,7 +137,7 @@ describe("countScan", () => {
       quantity: 2,
       remaining: 2,
     });
-    expect(rows.map((r) => leftToCount(r, full))).toEqual([0, 10, 0, null]);
+    expect(rows.map((r) => leftToCount(r, full, true))).toEqual([0, 10, 0, null]);
     const fraction: OrderScanRow[] = [{ id: "k", articleId: "plate", remaining: 2.5, scannable: true, max: 2.5 }];
     const next = countScan(fraction, { counting: true, quantities: { k: "2" } }, "plate");
     expect(next.counted && [next.quantity, next.over]).toEqual([2.5, false]);

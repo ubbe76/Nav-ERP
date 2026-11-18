@@ -171,6 +171,14 @@ const systemSettingsFieldsSchema = z.object({
     // antal: the dialog's rule (the server never checks the sum); false when
     // unset = Skriv ut is disabled while the kolli differ from the total.
     palletCardAllowQuantityMismatch: z.boolean().optional(),
+    // Rest som förslag i antalsfältet: whether the field starts with the
+    // remaining amount (true) or empty (false) in Inleverans, Utleverans,
+    // Rapportera on the TO card and Stämpla ut. Defaults when unset: on, on,
+    // on, off — the behaviour before the setting existed.
+    restSuggestReceipt: z.boolean().optional(),
+    restSuggestDelivery: z.boolean().optional(),
+    restSuggestReport: z.boolean().optional(),
+    restSuggestStamp: z.boolean().optional(),
     // Orimligt mycket tid: Planera and a new TO warn for an operation whose
     // remaining time alone fills its resource for more than this many normal
     // weeks. Decimals allowed; 0 = no warning; default 4 when unset.

@@ -75,6 +75,17 @@ import {
   PUBLIC_BASE_URL_KEY,
 } from "./alert-settings.js";
 import { decodeQuoteValidityDays, QUOTE_VALIDITY_DAYS_KEY } from "./quote-settings.js";
+import {
+  DEFAULT_REST_SUGGEST_DELIVERY,
+  DEFAULT_REST_SUGGEST_RECEIPT,
+  DEFAULT_REST_SUGGEST_REPORT,
+  DEFAULT_REST_SUGGEST_STAMP,
+  REST_SUGGEST_DELIVERY_KEY,
+  REST_SUGGEST_RECEIPT_KEY,
+  REST_SUGGEST_REPORT_KEY,
+  REST_SUGGEST_STAMP_KEY,
+  decodeRestSuggest,
+} from "./rest-suggestion-settings.js";
 import { decodePrecisionMargins, PRECISION_MARGIN_KEYS } from "./precision-settings.js";
 
 // Ställkostnadsartikel (sales): "" (cleared) and absent both read as off.
@@ -417,6 +428,12 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       purchaseOverReceiptPercent: decodeOverReceiptPercent(get(PURCHASE_OVER_RECEIPT_PERCENT_KEY)),
       salesOverDeliveryPercent: decodeOverReceiptPercent(get(SALES_OVER_DELIVERY_PERCENT_KEY)),
       manufacturingMaterialShortage: decodeMaterialShortage(get(MANUFACTURING_MATERIAL_SHORTAGE_KEY)),
+      // Rest som förslag i antalsfältet — rest-suggestion-settings.ts owns
+      // the keys and the defaults (on, on, on, off).
+      restSuggestReceipt: decodeRestSuggest(get(REST_SUGGEST_RECEIPT_KEY), DEFAULT_REST_SUGGEST_RECEIPT),
+      restSuggestDelivery: decodeRestSuggest(get(REST_SUGGEST_DELIVERY_KEY), DEFAULT_REST_SUGGEST_DELIVERY),
+      restSuggestReport: decodeRestSuggest(get(REST_SUGGEST_REPORT_KEY), DEFAULT_REST_SUGGEST_REPORT),
+      restSuggestStamp: decodeRestSuggest(get(REST_SUGGEST_STAMP_KEY), DEFAULT_REST_SUGGEST_STAMP),
       palletCardCode: decodePalletCardCode(get(PALLET_CARD_CODE_KEY)),
       // Missing ⇒ allowed: the dialog warns, printing is not blocked.
       palletCardAllowQuantityMismatch: get(PALLET_CARD_ALLOW_QUANTITY_MISMATCH_KEY) !== "false",
@@ -851,6 +868,10 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
         if (input.manufacturingMaterialShortage !== undefined) {
           await set(MANUFACTURING_MATERIAL_SHORTAGE_KEY, input.manufacturingMaterialShortage);
         }
+        if (input.restSuggestReceipt !== undefined) await set(REST_SUGGEST_RECEIPT_KEY, String(input.restSuggestReceipt));
+        if (input.restSuggestDelivery !== undefined) await set(REST_SUGGEST_DELIVERY_KEY, String(input.restSuggestDelivery));
+        if (input.restSuggestReport !== undefined) await set(REST_SUGGEST_REPORT_KEY, String(input.restSuggestReport));
+        if (input.restSuggestStamp !== undefined) await set(REST_SUGGEST_STAMP_KEY, String(input.restSuggestStamp));
         if (input.palletCardCode !== undefined) await set(PALLET_CARD_CODE_KEY, input.palletCardCode);
         if (input.palletCardAllowQuantityMismatch !== undefined) {
           await set(PALLET_CARD_ALLOW_QUANTITY_MISMATCH_KEY, String(input.palletCardAllowQuantityMismatch));

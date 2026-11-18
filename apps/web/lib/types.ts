@@ -3703,6 +3703,12 @@ export interface SystemSettings {
   palletCardCode: PalletCardCode;
   // Tillåt utskrift av pallkort även om kollina inte stämmer med totalt antal.
   palletCardAllowQuantityMismatch: boolean;
+  // Rest som förslag i antalsfältet (Inleverans, Utleverans, Rapportera,
+  // Stämpling); defaults on, on, on, off.
+  restSuggestReceipt: boolean;
+  restSuggestDelivery: boolean;
+  restSuggestReport: boolean;
+  restSuggestStamp: boolean;
   // Orimligt mycket tid (Planera, ny TO): weeks of a resource's capacity one
   // operation may fill before the planner warns; 0 = no warning.
   planningLongOperationWeeks: number;

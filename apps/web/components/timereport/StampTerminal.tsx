@@ -10,6 +10,7 @@ import { FileText } from "lucide-react";
 import { API_URL, ApiError, apiFetch } from "../../lib/api";
 import { formatStockholmDate, stockholmToday, toDateTimeLocalValue } from "../../lib/date";
 import { apiErrorMessage, shortageList } from "../../lib/errorMessages";
+import { othersStampingOnOperation, stampRestSuggestion } from "../../lib/restSuggestion";
 import type {
   AtfStatus,
   AttendanceInputRequiredBody,
@@ -119,6 +120,7 @@ export function StampTerminal({
   stations,
   allowMultipleStamps,
   timeKindSplit = false,
+  restSuggestStamp = false,
 }: {
   employees: EmployeeDirectoryEntry[];
   initialOpenSessions: StampSession[];
@@ -127,6 +129,9 @@ export function StampTerminal({
   allowMultipleStamps: boolean;
   // Dela tid i ställ och produktion: Starta ställ / Starta produktion, Ställ klart.
   timeKindSplit?: boolean;
+  // Rest som förslag i antalsfältet → Stämpling: Antal OK starts with Kvar —
+  // unless someone else has an open stamp on the same operation.
+  restSuggestStamp?: boolean;
 }) {
   const [step, setStep] = useState<Step>({ name: "keypad" });
   // The terminal stays open for days: a number not in the list loaded with
@@ -1023,8 +1028,33 @@ export function StampTerminal({
             busy={busy}
             timeKindSplit={timeKindSplit}
             onSetupDone={(session) => setupDone(step.employee, session)}
-            onStampOut={(session) => {
+            onStampOut={async (opened) => {
               clearStampOutFields();
+              let session = opened;
+              if (restSuggestStamp) {
+                // The rest is only worth suggesting when it is current: the
+                // other stamps (and what they reported) are read again, the
+                // cached list stays when the read fails.
+                let sessions = openSessions;
+                try {
+                  sessions = (await refresh()).sessions;
+                } catch {
+                  // keep the cached list
+                }
+                session = sessions.find((s) => s.id === opened.id) ?? opened;
+                const progress = operationProgress(
+                  session.orderQuantity,
+                  session.operationQuantityCompleted,
+                  session.operationQuantityScrapped
+                );
+                setQuantityOk(
+                  stampRestSuggestion({
+                    enabled: true,
+                    remaining: progress.remaining,
+                    othersStamping: othersStampingOnOperation(sessions, session),
+                  }).value
+                );
+              }
               setStep({ name: "stampOut", employee: step.employee, session });
             }}
             onNewStamp={() => openOperationList(step.employee)}
@@ -1228,6 +1258,9 @@ export function StampTerminal({
                 />
               </label>
             </div>
+            {restSuggestStamp && othersStampingOnOperation(openSessions, step.session) && (
+              <div className={styles.restNote}>Antal OK är tomt eftersom någon annan också stämplar på operationen.</div>
+            )}
             {Number(quantityScrapped) > 0 && scrapReasonRegister && (
               <>
                 <select

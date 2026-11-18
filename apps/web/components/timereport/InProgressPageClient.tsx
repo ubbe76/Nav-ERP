@@ -19,6 +19,7 @@ import { ScrapReasonFields } from "../quality/ScrapReasonFields";
 import { useScrapReasons } from "../../lib/useScrapReasons";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import { formatElapsed, formatQuantity, operationProgress } from "../../lib/stampSessions";
+import { othersStampingOnOperation, stampRestSuggestion } from "../../lib/restSuggestion";
 import { TIME_KIND_LABELS, type AttendanceSession, type StampSession } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
 import styles from "./InProgressPageClient.module.css";
@@ -42,9 +43,13 @@ function formatSince(iso: string, now: number) {
 export function InProgressPageClient({
   stamps,
   attendance,
+  suggestRest = false,
 }: {
   stamps: StampSession[];
   attendance: AttendanceSession[];
+  // Rest som förslag i antalsfältet → Stämpling: Stämpla ut starts Antal OK
+  // with Kvar, unless someone else stamps on the same operation.
+  suggestRest?: boolean;
 }) {
   const router = useRouter();
   const role = useRole();
@@ -187,6 +192,8 @@ export function InProgressPageClient({
         {target && (
           <StampOutForm
             session={target}
+            openSessions={stamps}
+            suggestRest={suggestRest}
             onDone={() => {
               setTarget(null);
               router.refresh();
@@ -201,10 +208,14 @@ export function InProgressPageClient({
 
 function StampOutForm({
   session,
+  openSessions,
+  suggestRest,
   onDone,
   onCancel,
 }: {
   session: StampSession;
+  openSessions: StampSession[];
+  suggestRest: boolean;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -217,7 +228,11 @@ function StampOutForm({
   // the automatic stamp-out's reserve) and any other session "now".
   const [stopTouched, setStopTouched] = useState(false);
   const stopMs = Date.parse(stopAt);
-  const [quantityOk, setQuantityOk] = useState("");
+  const p = operationProgress(session.orderQuantity, session.operationQuantityCompleted, session.operationQuantityScrapped);
+  const othersStamping = suggestRest && othersStampingOnOperation(openSessions, session);
+  const [quantityOk, setQuantityOk] = useState(
+    () => stampRestSuggestion({ enabled: suggestRest, remaining: p.remaining, othersStamping }).value
+  );
   const [quantityScrapped, setQuantityScrapped] = useState("");
   const [scrapReason, setScrapReason] = useState("");
   // Kassationsorsaker from Kvalitetsorsaker: Orsak is chosen, scrapReason holds the Kommentar.
@@ -228,7 +243,6 @@ function StampOutForm({
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const p = operationProgress(session.orderQuantity, session.operationQuantityCompleted, session.operationQuantityScrapped);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -298,6 +312,7 @@ function StampOutForm({
       <Field label="Antal OK" htmlFor="so-ok">
         <Input id="so-ok" type="number" min="0" step="any" value={quantityOk} onChange={(e) => setQuantityOk(e.target.value)} />
       </Field>
+      {othersStamping && <FormHint>Antal OK är tomt eftersom någon annan också stämplar på operationen.</FormHint>}
       <Field label="Kasserat" htmlFor="so-scrap">
         <Input
           id="so-scrap"

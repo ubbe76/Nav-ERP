@@ -91,6 +91,7 @@ export function DeliveryPageClient({
   selected,
   rows,
   openOrders,
+  suggestRest,
 }: {
   locations: StockLocation[];
   selected: SalesOrder | null;
@@ -100,6 +101,9 @@ export function DeliveryPageClient({
   // without knowing the order number (mirrors inleverans' "Mottagbara
   // ordrar").
   openOrders: SalesOrder[];
+  // System setting Rest som förslag i antalsfältet → Utleverans: the Leverera
+  // nu fields start with the remaining amount (true) or empty (false).
+  suggestRest: boolean;
 }) {
   const placeLabels = usePlaceLabels();
   const router = useRouter();
@@ -437,7 +441,7 @@ export function DeliveryPageClient({
           warn(`${m.orderNumber} kan inte levereras — ${SALES_ORDER_STATUS_PILL[m.status as SalesOrderStatus]?.label ?? m.status}`);
           return;
         }
-        if (hasCounted(countRef.current) && !(await confirmDialog(`Byta till ${m.orderNumber}? Det du har plockat på ${current?.orderNumber} levereras inte.`, { confirmLabel: "Byt order" }))) {
+        if (hasCounted(countRef.current, suggestRest) && !(await confirmDialog(`Byta till ${m.orderNumber}? Det du har plockat på ${current?.orderNumber} levereras inte.`, { confirmLabel: "Byt order" }))) {
           return;
         }
         ok(`${m.orderNumber} — ${m.partyName}`);
@@ -476,10 +480,16 @@ export function DeliveryPageClient({
   }
 
   async function resetToRemaining() {
-    if (hasCounted(count) && !(await confirmDialog("Det du har plockat ersätts med restantalen.", { confirmLabel: "Fyll i restantal" }))) {
+    if (hasCounted(count, suggestRest) && !(await confirmDialog("Det du har plockat ersätts med restantalen.", { confirmLabel: "Fyll i restantal" }))) {
       return;
     }
-    setCount(NO_COUNT);
+    // With the rest suggested, no typed values is the rest; without, the rest
+    // has to be written into the fields.
+    setCount(
+      suggestRest
+        ? NO_COUNT
+        : { counting: false, quantities: Object.fromEntries(scanRows.map((r) => [r.id, String(r.remaining)])) }
+    );
     setLastRowId(null);
     clearFeedback();
   }
@@ -490,9 +500,13 @@ export function DeliveryPageClient({
     setDone(null);
 
     const toDeliver = openRows
-      .map((row) => ({ row, quantity: Number(enteredQuantity(scanRowOf(row), count)) }))
+      .map((row) => ({ row, quantity: Number(enteredQuantity(scanRowOf(row), count, suggestRest)) }))
       .filter(({ quantity }) => quantity > 0);
-    if (toDeliver.length === 0 || !selectedId) return;
+    if (!selectedId) return;
+    if (toDeliver.length === 0) {
+      setFormError("Ingen rad har något antal att leverera. Fyll i Leverera nu.");
+      return;
+    }
     const deliveredOrderId = selectedId;
 
     // Vid utleverans: the numbers shown must be one per styck.
@@ -623,7 +637,7 @@ export function DeliveryPageClient({
         <DeliverySerialsField
           ariaLabel={`Serienummer — ${row.articleNumber}`}
           articleId={row.articleId}
-          count={serialCountOf(toBaseQuantity(Number(enteredQuantity(scanRowOf(row), count)), row.unitFactor))}
+          count={serialCountOf(toBaseQuantity(Number(enteredQuantity(scanRowOf(row), count, suggestRest)), row.unitFactor))}
           value={rowGivenSerials[row.id] ?? []}
           onChange={(next) => setRowGivenSerials((prev) => ({ ...prev, [row.id]: next }))}
         />
@@ -635,7 +649,7 @@ export function DeliveryPageClient({
 
   const pill = order ? SALES_ORDER_STATUS_PILL[order.status] : null;
   // Kvar att plocka, shown once counting has started.
-  const rowsLeft = count.counting ? scanRows.filter((r) => (leftToCount(r, count) ?? 0) > 0).length : 0;
+  const rowsLeft = count.counting ? scanRows.filter((r) => (leftToCount(r, count, suggestRest) ?? 0) > 0).length : 0;
 
   return (
     <>
@@ -844,7 +858,7 @@ export function DeliveryPageClient({
                     </strong>
                   );
                 case "left": {
-                  const left = leftToCount(scanRowOf(row), count);
+                  const left = leftToCount(scanRowOf(row), count, suggestRest);
                   return left === null ? "–" : left;
                 }
                 case "location": {
@@ -886,7 +900,7 @@ export function DeliveryPageClient({
                         step="any"
                         size="sm"
                         aria-label={`Leverera nu — ${row.articleNumber}`}
-                        value={enteredQuantity(scanRowOf(row), count)}
+                        value={enteredQuantity(scanRowOf(row), count, suggestRest)}
                         onChange={(e) =>
                           setCount({ ...countRef.current, quantities: { ...countRef.current.quantities, [row.id]: e.target.value } })
                         }
@@ -901,7 +915,7 @@ export function DeliveryPageClient({
                       {(() => {
                         const warning = configuredDeliveryWarning(
                           row,
-                          toBaseQuantity(Number(enteredQuantity(scanRowOf(row), count)), row.unitFactor)
+                          toBaseQuantity(Number(enteredQuantity(scanRowOf(row), count, suggestRest)), row.unitFactor)
                         );
                         return warning ? <FormNotice>{warning}</FormNotice> : null;
                       })()}

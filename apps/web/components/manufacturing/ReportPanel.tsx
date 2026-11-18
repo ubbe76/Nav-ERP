@@ -18,6 +18,7 @@ import { runWithShortageConfirm } from "../../lib/materialShortage";
 import { confirmDialog } from "../../lib/confirm";
 import { notify } from "../../lib/notice";
 import { formatQuantity, round4 } from "../../lib/format";
+import { restFieldValue } from "../../lib/restSuggestion";
 import { defaultReportKind, suggestedConsumeQuantity, suggestedReportHours } from "../../lib/moSuggestions";
 import { groupReportRows, moOperationLabel } from "../../lib/moReportRows";
 import { stockholmToday } from "../../lib/date";
@@ -49,6 +50,10 @@ interface ReportPanelProps {
   timeReports: TimeReport[];
   // Dela tid i ställ och produktion: Rapportera tid gets a Typ field.
   timeKindSplit?: boolean;
+  // Rest som förslag i antalsfältet → Rapportering: Antal klart on each
+  // operation row starts with the remaining amount (true) or empty (false).
+  // The material rows' prefilled draws are not part of it.
+  suggestRest?: boolean;
   // Ångra rapportering (admin/arbetsledare): the notice after Slutför
   // operation offers Ångra on exactly that report.
   canUndoReports?: boolean;
@@ -99,6 +104,7 @@ export function ReportPanel({
   employees,
   timeReports,
   timeKindSplit = false,
+  suggestRest = true,
   canUndoReports = false,
   onDone,
 }: ReportPanelProps) {
@@ -159,6 +165,7 @@ export function ReportPanel({
               orderId={orderId}
               orderQuantity={orderQuantity}
               operation={operation}
+              suggestRest={suggestRest}
               locationId={locationId}
               scrapReasonOptions={scrapReasonOptions}
               canUndo={canUndoReports}
@@ -211,6 +218,7 @@ function OperationRow({
   orderId,
   orderQuantity,
   operation: op,
+  suggestRest,
   locationId,
   scrapReasonOptions,
   canUndo,
@@ -219,6 +227,7 @@ function OperationRow({
   orderId: string;
   orderQuantity: string;
   operation: MOOperation;
+  suggestRest: boolean;
   locationId: string;
   scrapReasonOptions: ReturnType<typeof useScrapReasons>;
   canUndo: boolean;
@@ -237,6 +246,8 @@ function OperationRow({
   const reasonRegister = scrapReasonOptions !== null && scrapReasonOptions.length > 0;
   const isPending = op.status === "pending";
   const remaining = String(Math.max(Number(orderQuantity) - Number(op.quantityCompleted ?? 0), 0));
+  // What Antal klart shows until it is typed in: the rest, or nothing.
+  const prefill = restFieldValue(suggestRest, Number(remaining));
 
   async function complete() {
     const scrapQty = Number(scrapped) || 0;
@@ -248,10 +259,16 @@ function OperationRow({
       setError("Ange en kassationsorsak när kasserat antal är större än 0.");
       return;
     }
+    const quantityCompleted = quantity ?? prefill;
+    // The field starts empty when the rest is not suggested: an empty Antal
+    // klart with nothing scrapped is nothing to report (a typed 0 still is).
+    if (quantityCompleted.trim() === "" && scrapQty === 0) {
+      setError("Fyll i Antal klart innan du slutför operationen.");
+      return;
+    }
     setError(null);
     setPending(true);
     try {
-      const quantityCompleted = quantity ?? remaining;
       const completed = await runWithShortageConfirm((allowMaterialShortage) =>
         apiFetch(`/api/v1/manufacturing-orders/${orderId}/operations/${op.id}/complete`, {
           method: "POST",
@@ -345,7 +362,7 @@ function OperationRow({
                 min="0"
                 step="any"
                 size="sm"
-                value={quantity ?? remaining}
+                value={quantity ?? prefill}
                 onChange={(e) => setQuantity(e.target.value)}
               />
             </Cell>

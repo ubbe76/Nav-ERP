@@ -130,25 +130,35 @@ export function resolveOrderScan<M extends OrderScanMatch, K extends OrderKind>(
 // scan starts counting, and from then on a scannable row nobody scanned or
 // typed is 0 and is not booked. Typed values are kept either way, and rows
 // that are not scannable keep their remaining amount.
+//
+// `suggestRest` is the system setting Rest som förslag i antalsfältet for the
+// routine (lib/restSuggestion.ts). Off, the fields start empty — also on
+// tjänster and ställkostnadsrader — and a scan counts from nothing at once;
+// an empty field is not booked, like a 0.
 export interface OrderCountState {
   counting: boolean;
   quantities: Record<string, string>; // rowId → entered, in the row's unit
 }
 
-export function enteredQuantity(row: OrderScanRow, state: OrderCountState): string {
-  return state.quantities[row.id] ?? (state.counting && row.scannable ? "0" : String(row.remaining));
+export function enteredQuantity(row: OrderScanRow, state: OrderCountState, suggestRest: boolean): string {
+  const typed = state.quantities[row.id];
+  if (typed !== undefined) return typed;
+  if (!suggestRest) return "";
+  return state.counting && row.scannable ? "0" : String(row.remaining);
 }
 
-export function hasCounted(state: OrderCountState): boolean {
-  return state.counting && Object.values(state.quantities).some((q) => Number(q) > 0);
+// Something to lose on leaving: counted by scanning, or — with no suggested
+// rest — typed by hand (the fields start empty, so every number is the user's).
+export function hasCounted(state: OrderCountState, suggestRest: boolean): boolean {
+  return (state.counting || !suggestRest) && Object.values(state.quantities).some((q) => Number(q) > 0);
 }
 
 // What is left to count on a row once counting has started (Kvar att
 // plocka): remaining − entered, never below 0; null for a row that is not
 // counted.
-export function leftToCount(row: OrderScanRow, state: OrderCountState): number | null {
+export function leftToCount(row: OrderScanRow, state: OrderCountState, suggestRest: boolean): number | null {
   if (!row.scannable) return null;
-  const left = row.remaining - (Number(enteredQuantity(row, state)) || 0);
+  const left = row.remaining - (Number(enteredQuantity(row, state, suggestRest)) || 0);
   return Math.max(0, round4(left));
 }
 
